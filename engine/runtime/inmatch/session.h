@@ -1,5 +1,6 @@
 #pragma once
 
+#include <runtime/hud/hud_minimap.h> // HudMinimapRadar
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/player_input.h>
 #include <runtime/world/tick_accumulator.h>
@@ -204,6 +205,14 @@ public:
 	// role's replica runtime (the client quality window's frame-pressure term);
 	// a host also hands it to its server context.
 	virtual void observe_frame_rate(int32_t fps);
+	// The main loop's frame statistics after each frame (the frames drawn in
+	// the last 62 logic updates, the window's CPU share): a host hands them to
+	// its server context, where its status page reads them
+	// (Session::frame_statistics carries the witness).
+	virtual void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {
+		(void)frames_last_second;
+		(void)cpu_percent;
+	}
 	// The kernel boot's net bring-up (KernelBootOptions::bringup_net_session),
 	// run between the world wiring and the system registration [orig:
 	// SinglePlayer_StartMission @0x561af0]: the host stands its session up
@@ -224,9 +233,12 @@ public:
 	// the cooldown at zero sends through the role and stamps the cooldown.
 	bool request_medic();
 	// What the view arbiter reads from the session (death screen, end round,
-	// the death camera), as plain values off the role's replica runtime.
+	// the death camera), as plain values off the role's replica runtime, plus
+	// the retail is_in_session fact (the world's mp_session rule: single
+	// player, the in-process listen server included, is outside the session,
+	// whatever replica runtime it folds).
 	static world::LocalViewSessionInputs view_session_inputs_for(
-			const ClientRuntime *runtime, bool joiner, bool local_dead);
+			const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session);
 
 protected:
 	mission::MissionKernel *kernel_ = nullptr;
@@ -258,6 +270,46 @@ public:
 	void set_tick_observer(TickObserver *observer) { observer_ = observer; }
 	const SessionError &last_error() const { return last_error_; }
 	const FramePerf &last_perf() const { return last_perf_; }
+	// The main loop's frame statistics the authority's status page shows:
+	// the frames rendered during the last 62 logic ticks and the CPU share
+	// of the frame-rate window (world::TickAccumulator::cpu_percent).
+	// [orig: dword_24C193C — Game_ProcessMainFrame @0x5267ab..0x5267df counts
+	//  every logic update into dword_24D6130 and at 62 publishes
+	//  dword_24C1938, which GameLoop_RenderFrame @0x521cf9 increments once per
+	//  rendered frame; g_StatsCpuPercent]
+	struct FrameStatistics {
+		int32_t frames_last_second = 0;
+		int32_t cpu_percent = 0;
+	};
+	FrameStatistics frame_statistics() const {
+		return {frames_last_second_, accumulator_.cpu_percent()};
+	}
+
+	// THE FRAME'S RADAR STEP. Retail's HUD pass runs on every rendered
+	// frame, the in-game menu's included (the menu only stops the
+	// single-player ticks), and its radar update ages the local player's
+	// contacts and the retained minimap banks (the 0x6B designations, the
+	// transient slots, the linked markers' lapse) by the ticks since its last
+	// run. The session runs that step after each frame's tick drain, paused
+	// or not, so the aging never waits on the embedder's HUD
+	// (inmatch::step_hud_radar carries the legs). The embedder hands over the
+	// HUD pass's own gates whenever its HUD compiles
+	// (hud::HudFrameCompiler::radar_frame_gates: the hud_detail-3 early-out
+	// and the corner map's update site; the pass runs until told otherwise);
+	// the spawn-success early-out is read live off the role's replica
+	// runtime, and the in-game menu pause is the Paused state.
+	// [orig: Render_ProcessMainSceneFrame @0x5cad04 -> HUD_RenderAllOverlays
+	//  @0x5a8070 (skipped only under a cine fade or the CMAP screen,
+	//  @0x5ca17d..0x5ca190) -> Radar_UpdateContacts @0x5a817d ->
+	//  MapOverlay_UpdateTimers @0x59a9ce; the menu pause dword_A87050 is
+	//  raised only outside a session, UI_OptionsScreenInit @0x554dcf..0x554dd8]
+	void set_hud_radar_gates(uint32_t gates) { hud_radar_gates_ = gates; }
+	uint32_t hud_radar_gates() const { return hud_radar_gates_; }
+	// The last frame's radar snapshot, the HUD's bit-10 legs' input.
+	const hud::HudMinimapRadar &hud_radar() const { return hud_radar_; }
+	// The gate bits' default (hud::HudFrameCompiler::kRadarGatePass): the pass
+	// runs, the corner map's site does not.
+	static constexpr uint32_t kHudRadarGatesDefault = 1u;
 
 	TransitionResult configure_role(Role &role);
 	TransitionResult begin_connect();
@@ -287,6 +339,7 @@ private:
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
+	void step_hud_radar_frame();
 	static int64_t now_us();
 
 	Role *role_ = nullptr;
@@ -299,10 +352,20 @@ private:
 	static constexpr int32_t kStartRebaseFrames = 3;
 	int32_t start_rebase_frames_ = 0;
 	bool rebase_clock_ = false;
+	// [orig: dword_24D6130 (the 62-update countdown), dword_24C1938 (frames
+	//  rendered since), dword_24C193C (the published count) — process-lifetime
+	//  words nothing else resets]
+	int32_t second_update_count_ = 0;
+	int32_t frames_rendered_ = 0;
+	int32_t frames_last_second_ = 0;
 	InputPacket pending_input_;
 	CameraSample latest_camera_;
 	SessionError last_error_;
 	FramePerf last_perf_;
+	// The HUD pass's gates as the embedder last handed them, and the radar
+	// step's last snapshot.
+	uint32_t hud_radar_gates_ = kHudRadarGatesDefault;
+	hud::HudMinimapRadar hud_radar_;
 };
 
 } // namespace opennova::inmatch

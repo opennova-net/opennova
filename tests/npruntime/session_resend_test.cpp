@@ -257,9 +257,18 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty(),
 	            "joiner queues S2C sequence two without NACKing before the batch boundary"))
 		return false;
+	if (!expect(joiner.take_net_quality_link_errors() == 0,
+	            "a queued gap raises no link error before the request goes out"))
+		return false;
 	const std::vector<std::vector<uint8_t>> gap_nacks = joiner.pump(3);
 	if (!expect(gap_nacks.size() == 1 && joiner.pump(3).empty(),
 	            "joiner emits exactly one NACK after the persistent-gap receive batch"))
+		return false;
+	// The sent 0x44 named a sequence: the incoming link error (flag 2)
+	// [orig: SendMissingSeqList cb_client_2 @0x6237aa].
+	if (!expect(joiner.take_net_quality_link_errors() == inmatch::kNetQualityLinkErrorIncoming &&
+	                    joiner.take_net_quality_link_errors() == 0,
+	            "the joiner's 0x44 raises the incoming link error once"))
 		return false;
 	std::vector<uint32_t> requested;
 	if (!expect(decode_resend_datagram(
@@ -286,10 +295,18 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 
     if (!expect(!ctx.np_protocol.connection_list[0].link.nak_backoff_pending,
         "invalid resend lists do not back off replication")) return false;
+	if (!expect(ctx.net_quality_link_errors == 0,
+	            "invalid resend lists raise no link error"))
+		return false;
 	const inmatch::HandleResult resend = inmatch::handle_server_datagram(
 			ctx, kPeer, gap_nacks[0].data(), gap_nacks[0].size(), 5);
     if (!expect(ctx.np_protocol.connection_list[0].link.nak_backoff_pending,
         "valid NAK arms the recipient backoff")) return false;
+	// The same callback raises the host's outgoing link error (flag 1)
+	// [orig: sub_4C62A0 @0x4c62ce].
+	if (!expect(ctx.net_quality_link_errors == inmatch::kNetQualityLinkErrorOutgoing,
+	            "a joiner's valid 0x44 raises the host's outgoing link error"))
+		return false;
 	if (!expect(resend.outbound.size() == 1,
 	            "valid client 0x44 makes the host emit one reconstructed packet"))
 		return false;
@@ -370,6 +387,11 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	                    inmatch::flush_server_missing_requests(ctx).empty(),
 	            "host emits exactly one NACK after the persistent-gap receive batch"))
 		return false;
+	// The sent 0x84 named a sequence: the host's incoming link error (flag 2)
+	// [orig: SendMissingSeqList cb_server_5 @0x623788].
+	if (!expect(ctx.net_quality_link_errors == inmatch::kNetQualityLinkErrorIncoming,
+	            "the host's 0x84 raises its incoming link error"))
+		return false;
 	std::vector<uint32_t> requested;
 	if (!expect(decode_resend_datagram(
 			gap_nacks[0].outbound[0], SESSION_OPCODE_SERVER_RESEND_LIST, kClientKey, requested) &&
@@ -392,12 +414,20 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	            "joiner ignores a resend-list body shorter than its key"))
 		return false;
 
+	if (!expect(joiner.take_net_quality_link_errors() == 0,
+	            "invalid resend lists raise no joiner link error"))
+		return false;
 	const inmatch::JoinerConnection::PollResult resend =
 			joiner.handle_datagram(
 					gap_nacks[0].outbound[0].data(),
 					gap_nacks[0].outbound[0].size());
 	if (!expect(resend.outbound.size() == 1,
 	            "valid server 0x84 makes the joiner emit one reconstructed packet"))
+		return false;
+	// The honoured 0x84 named a sequence: the joiner's outgoing link error
+	// (flag 1) [orig: NapiNP_HandleResendList cb_client_3 @0x623a24].
+	if (!expect(joiner.take_net_quality_link_errors() == inmatch::kNetQualityLinkErrorOutgoing,
+	            "a valid 0x84 raises the joiner's outgoing link error"))
 		return false;
 	ProtocolPacketHeader resent_header;
 	std::vector<ProtocolMessage> resent_messages;
@@ -508,8 +538,8 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 	                    conn().seq.next_outbound_seq == next_before + 1,
 	            "a zero-only 0x44 mints the next fresh sequence"))
 		return false;
-	if (!expect(!conn().link.nak_backoff_pending,
-	            "a zero-only resend list does not arm the recipient backoff"))
+	if (!expect(!conn().link.nak_backoff_pending && ctx.net_quality_link_errors == 0,
+	            "a zero-only resend list arms neither the backoff nor the link error"))
 		return false;
 
 	std::vector<uint8_t> key_only;
@@ -524,6 +554,9 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 	                    !conn().link.nak_backoff_pending,
 	            "a key-only resend body sends nothing and does not arm the backoff"))
 		return false;
+	if (!expect(ctx.net_quality_link_errors == 0,
+	            "a key-only resend body raises no link error"))
+		return false;
 
 	const std::vector<uint8_t> real = make_resend_datagram(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {0, 2});
@@ -532,7 +565,8 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 	                    conn().link.nak_backoff_pending,
 	            "a list with one nonzero requested sequence arms the backoff"))
 		return false;
-	return true;
+	return expect(ctx.net_quality_link_errors == inmatch::kNetQualityLinkErrorOutgoing,
+	              "the nonzero list raises the outgoing link error");
 }
 
 // C2S uses the same connection-local FIRST/MID/FINAL assembly as S2C. A

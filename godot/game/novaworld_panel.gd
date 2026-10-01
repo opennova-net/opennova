@@ -710,6 +710,8 @@ func expansion_advisory_blocks_first_press(row: NovaWorldServerRow, rid: int) ->
 func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedByteArray) -> void:
 	_set_status("Entering %s:%d as %s..." % [host, port, _pending_player])
 	var target := JoinTarget.new()
+	# The NovaWorld connect type the menu picked (the squad talk row's gate).
+	target.network_type = JoinTarget.NETWORK_NOVAWORLD
 	target.host_ip = host
 	target.port = port
 	target.mission = _pending_mission

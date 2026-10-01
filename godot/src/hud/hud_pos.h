@@ -22,6 +22,7 @@ namespace godot {
 class ResourceRoot;
 class RtxtStringFile;
 class VehicleHudBlock;
+class WaypointHudView;
 
 // Thin GDExtension wrapper over engine/formats/def hudpos.def parsing (def_parse_hudpos).
 //
@@ -137,12 +138,15 @@ public:
 	// draws with.
 	static String loading_gametype_text_key(int p_game_type);
 	// The HUD's game-text compositions (hud/hud_game_text.h carries the
-	// witnesses) over the mission / gametext tables: the waypoint label's name
-	// with its "null" fallback, a resolved subgoal's WinConditions /
-	// LoseConditions announcement ("" = nothing posts), the mission's
-	// "Triggered Text" line ("" on a miss) and the WepDes weapon name.
-	static String waypoint_display_name(const Ref<RtxtStringFile> &p_mission,
-			const Ref<RtxtStringFile> &p_gametext, int p_name_id);
+	// witnesses) over the mission / gametext tables: the waypoint label (the
+	// current marker's resolved name composed with "m to", the CTF runs and
+	// the LFP override; the session facts pick the id remap and the CTF arm),
+	// a resolved subgoal's WinConditions / LoseConditions announcement ("" =
+	// nothing posts), the mission's "Triggered Text" line ("" on a miss) and
+	// the WepDes weapon name.
+	static String waypoint_label(const Ref<RtxtStringFile> &p_mission,
+			const Ref<RtxtStringFile> &p_gametext, const Ref<WaypointHudView> &p_view,
+			bool p_in_session, int64_t p_game_type);
 	static String subgoal_message(const Ref<RtxtStringFile> &p_mission, bool p_lost,
 			int p_header_id);
 	// A shown objective's two chat lines (hud_game_text.h objective_header /

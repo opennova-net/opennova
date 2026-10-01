@@ -709,16 +709,24 @@ func test_dev_tools_suspend_input_without_stopping_the_world() -> void:
 	assert_not_null(world.get_node_or_null("PickClickCatcher"))
 	dev_tools.set_game_playing(true)
 	assert_true(dev_tools.is_game_playing())
+	var insert := InputEventKey.new()
+	insert.keycode = KEY_INSERT
+	insert.physical_keycode = KEY_INSERT
+	insert.pressed = true
+	get_viewport().push_input(insert)
+	await get_tree().process_frame
+	assert_false(_shell.is_dev_tools_open())
+	assert_false(dev_tools.is_game_playing(), "Insert closes directly from Play and resets mode")
+	assert_null(world.get_node_or_null("PickClickCatcher"),
+			"Insert again removes the click picker through the same open edge")
+	# F3 is retail's viewwithgun default (catalog row 108), not the tools' key.
 	var f3 := InputEventKey.new()
 	f3.keycode = KEY_F3
 	f3.physical_keycode = KEY_F3
 	f3.pressed = true
 	get_viewport().push_input(f3)
 	await get_tree().process_frame
-	assert_false(_shell.is_dev_tools_open())
-	assert_false(dev_tools.is_game_playing(), "F3 closes directly from Play and resets mode")
-	assert_null(world.get_node_or_null("PickClickCatcher"),
-			"F3 again removes the click picker through the same open edge")
+	assert_false(_shell.is_dev_tools_open(), "F3 no longer opens the dev tools")
 
 	dev_tools.toggle()
 	dev_tools.set_game_playing(true)

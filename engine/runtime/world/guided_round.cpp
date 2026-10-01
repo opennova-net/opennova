@@ -1,4 +1,5 @@
 #include <runtime/world/round_sim.h>
+#include <runtime/world/radar_contacts.h>
 #include <runtime/world/world.h>
 #include <runtime/world/throwables.h>
 #include <base/io/fixed.h>
@@ -122,6 +123,10 @@ void RoundSim::tick_guided(World &world, LiveRound &r, const AmmoTableEntry &amm
     }
     if (guided_inputs_provider) guided_inputs_provider(r, in);
     const auto events = GuidedFlight::motor(s, r.guided_family, parameters(ammo), in);
+    // The Stinger's lock note, at the pose the motor read [orig:
+    // Entity_UpdateGuidedMissile_0 @0x4465db..0x446622 -> sub_59B200].
+    if (events.threat_note)
+        radar_note_guided_missile(world, r, static_cast<uint32_t>(&r - rounds.data()));
     if (events.detonate) r.det_at_expiry = true;
     if (authority && events.groups) guided_updates.push_back({r.shooter_handle, r.shot_seq, events.groups, s});
     copy_motion(r);

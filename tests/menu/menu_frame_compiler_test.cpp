@@ -27,10 +27,19 @@ using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
 using opennova::menu::MenuFrameState;
 using opennova::menu::MenuQuad;
+using opennova::menu::MenuTableRow;
 using opennova::menu::MenuWidgetState;
+using opennova::menu::kTableRowSelected;
 using opennova::menu::kMenuTexNone;
 
 namespace {
+
+// One table row of cell texts (values 0, state 0).
+MenuTableRow table_row(std::initializer_list<std::string> cells) {
+	MenuTableRow row;
+	row.cells.assign(cells.begin(), cells.end());
+	return row;
+}
 
 int failures = 0;
 
@@ -691,7 +700,7 @@ void test_table_scrollbar_separates_header_and_body_row_heights(
 	table_state.index = 1;
 	table_state.scroll_row = 2;
 	for (int i = 0; i < 10; ++i) {
-		table_state.table_rows.push_back({ std::to_string(i) });
+		table_state.table_rows.push_back(table_row({ std::to_string(i) }));
 	}
 	MenuFrameState state;
 	state.widgets.push_back(table_state);
@@ -751,7 +760,7 @@ void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
 	c.set_texture_size(up, 16, 16);
 	MenuWidgetState table_state;
 	table_state.index = 1;
-	table_state.table_rows.push_back({ "only" });
+	table_state.table_rows.push_back(table_row({ "only" }));
 	MenuFrameState state;
 	state.widgets.push_back(table_state);
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -793,10 +802,10 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 	table_state.index = 1;
 	table_state.hovered = true; // the widget-level visual must not tint cells
 	table_state.selected_item = -1;
-	table_state.selected_items.push_back(1);
 	for (int i = 0; i < 3; ++i) {
-		table_state.table_rows.push_back({ "r" + std::to_string(i) });
+		table_state.table_rows.push_back(table_row({ "r" + std::to_string(i) }));
 	}
+	table_state.table_rows[1].state = kTableRowSelected;
 	MenuFrameState state;
 	state.widgets.push_back(table_state);
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -1241,10 +1250,12 @@ void test_table_interior(const fnt_font_t *font) {
 	MenuFrameState state;
 	MenuWidgetState grid;
 	grid.index = 1;
-	grid.table_rows = {{"FIRE", "MOUSE1"}, {"JUMP", "SPACE"}};
+	grid.table_rows = {table_row({"FIRE", "MOUSE1"}), table_row({"JUMP", "SPACE"})};
 	state.widgets.push_back(grid);
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	CHECK(!dl.glyphs.empty(), "the table emits header + row glyph quads");
+	// The rule beside a header label is the sort indicator; nothing sorts
+	// here, so an unsorted column draws the two-space rule: nothing.
 	bool divider = false;
 	for (const auto &l : dl.lines) {
 		if (l.color == 0xFF7F7F7Fu && l.y0 == l.y1) {
@@ -2062,7 +2073,7 @@ void test_table_embedded_scrollbar_scrolls_rows(const fnt_font_t *font) {
 	MenuWidgetState table;
 	table.index = 1;
 	for (int i = 0; i < 10; ++i) {
-		table.table_rows.push_back({ "ROW" });
+		table.table_rows.push_back(table_row({ "ROW" }));
 	}
 	table.scroll_row = 0;
 	MenuFrameState state;

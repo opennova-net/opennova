@@ -2453,6 +2453,9 @@ bool run_retransmit_0x42_keeps_keys() {
 	if (!expect(sa2.scrk == sa1.scrk, "retransmit re-sends the SAME ServerAuth SCRK (no re-mint)")) return false;
 	if (!expect(sa2.mi == sa1.mi, "retransmit re-sends the SAME MI (connection_id)")) return false;
 	if (!expect(inmatch::connection_count(ctx) == 1, "retransmit does not create a second node")) return false;
+	// The connection coming up counted one login (the status page's total),
+	// the retransmit none [orig: NapiNPServer_HandleNewConnection @0x4c8203].
+	if (!expect(ctx.total_logins == 1, "the joined connection counts one login")) return false;
 	return true;
 }
 

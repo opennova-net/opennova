@@ -32,4 +32,18 @@ void fill_objective_rows(const World &world, const hud::GameTextLookup &mission_
 	}
 }
 
+hud::EndRoundStatisticsInput end_round_statistics_input(const World &world) {
+	const MissionKillStats &ks = world.kill_stats;
+	hud::EndRoundStatisticsInput in;
+	in.subgoals_won = ks.subgoals_won;                  // [orig: 0xC846D0]
+	in.subgoals_defined = count_defined_subgoals(world); // [orig: 0xC8468C]
+	// The six enemy buckets folded [orig: @0x5b771b / @0x576658].
+	in.enemy_kills = ks.enemy_kills_by_player() + ks.enemy_kills_by_others;
+	in.enemy_unit_total = ks.enemy_unit_total;           // [orig: 0xC84690]
+	in.team_unit_kills = ks.bluekills_by_player + ks.team_kills_by_others;         // @0x5b77bd
+	in.friendly_unit_kills = ks.greenkills_by_player + ks.friendly_kills_by_others; // @0x5b783c
+	in.raised = world.match.outcome().ended && world.match.outcome().winner_team == 1;
+	return in;
+}
+
 } // namespace opennova::world

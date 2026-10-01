@@ -775,6 +775,43 @@ static void test_subgoal_state() {
         CHECK(e.c == 1); // round still running -> announce
     }
     CHECK(saw_won);
+    // The score tally counts the first win of the slot once (the guarded
+    // refire adds nothing). [orig: the Score_TallySubGoalWon call @0x454532 ->
+    // the count @0x4fd117]
+    CHECK(w.kill_stats.subgoals_won == 1);
+}
+
+// The SubGoalWon tally rides the SP gate: inside a session the mask and the
+// announcement still land, the count does not; outside it every first win of
+// a slot counts once, raw slot bits included.
+// [orig: Score_TallySubGoalWon @0x4fd100 — is_authority && !is_in_session
+//  @0x4fd110, ++g_SubGoalsWonCount @0x4fd117]
+static void test_subgoal_tally_gate() {
+    World w;
+    w.cached.humans = 1;
+    w.registry.configure_pool(0, 4);
+    mission::BmsEventSystem sys;
+    sys.load({}, {}, {});
+    w.add_system(&sys);
+    w.load_systems();
+    bms::Action won{};
+    won.action_type = bms::ActionType::SubGoalWon;
+    won.param1 = 1;
+    w.rules.mp_session = true;
+    sys.dispatch_action_for_test(w, won);
+    CHECK(w.script.subgoals.won == (1u << 1));
+    CHECK(w.kill_stats.subgoals_won == 0); // a session never tallies
+    w.rules.mp_session = false;
+    sys.dispatch_action_for_test(w, won);
+    CHECK(w.kill_stats.subgoals_won == 0); // the already-won guard skips the tally
+    won.param1 = 3;
+    sys.dispatch_action_for_test(w, won);
+    won.param1 = 33; // the masked shift: bit 1 again, already won
+    sys.dispatch_action_for_test(w, won);
+    won.param1 = 4;
+    sys.dispatch_action_for_test(w, won);
+    CHECK(w.kill_stats.subgoals_won == 2);
+    CHECK(w.script.subgoals.won == ((1u << 1) | (1u << 3) | (1u << 4)));
 }
 
 // OutputText surfaces a "text" effect; ResetEvent clears the target's active latch
@@ -2455,6 +2492,7 @@ int main() {
     test_presentation_effects();
     test_waypoint_track_integration();
     test_subgoal_state();
+    test_subgoal_tally_gate();
     test_output_text_and_reset_event();
     test_event_trigger_reads_window();
     test_playpartanim_zero_time_wraps_like_retail();

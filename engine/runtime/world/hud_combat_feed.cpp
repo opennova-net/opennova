@@ -4,6 +4,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/geom.h>
 #include <runtime/world/hud_combat_feed.h>
 #include <runtime/world/hud_impact.h>
 #include <runtime/world/local_player.h>
@@ -18,8 +19,12 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 	auto &out = view.hud_combat;
 	auto &s = out.state;
 	const Entity *player = world.registry.get(world.cached.local_player);
+	out.local_valid = player != nullptr;
 	if (!player)
 		return;
+	out.local_position = { to_fixed(player->position.x), to_fixed(player->position.y),
+		to_fixed(player->position.z) };
+	out.local_team = player->team;
 	const AiEntity *body = world.ai.for_handle(player->handle);
 	const Entity *mount = world.registry.get(player->mount_target);
 	const int def_index = world.tables.weapons.index_of(weapon.def_name.c_str());
@@ -240,6 +245,44 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 			s.service_prompt = service.reload_seconds ? 3 : 4;
 			s.service_wait_seconds = service.reload_seconds;
 			s.service_above_declutter = true;
+		}
+	}
+	// The nearest FARP: the proximity list (every pool-1/2 entity whose def
+	// carries attrib2 0x2000) filtered to unnumbered or owned zones, the 2D
+	// distance clamped to flt_7C19E0 and truncated, the first strictly
+	// nearer than the running best (seeded 0x40000000) wins; the HUD info
+	// block is zeroed every frame, so no FARP clears it.
+	// [orig: HUD_BuildEntityInfo @0x4b891a..0x4b89e3 — hudInfo+0x10 = 1,
+	//  hudInfo+388..396 = the position (g_TrackedTargetPos); the list
+	//  Entity_BuildProximityListFromPools @0x43ED60; the memset @0x5a80b1]
+	s.farp_present = false;
+	{
+		int32_t best = 0x40000000;
+		const Entity *nearest = nullptr;
+		const int32_t px = to_fixed(player->position.x);
+		const int32_t py = to_fixed(player->position.y);
+		world.registry.for_each([&](const Entity &e) {
+			const int pool = e.handle.pool();
+			if (pool != 1 && pool != 2) return;
+			if (!e.has_item_def || (e.item_attrib2 & 0x2000u) == 0) return;
+			if (e.zone_number != 0 &&
+					((1u << (e.zone_number & 31u)) & service.owned_zone_mask) == 0)
+				return;
+			const double dx = static_cast<double>(static_cast<int32_t>(
+					static_cast<uint32_t>(to_fixed(e.position.x)) - static_cast<uint32_t>(px)));
+			const double dy = static_cast<double>(static_cast<int32_t>(
+					static_cast<uint32_t>(to_fixed(e.position.y)) - static_cast<uint32_t>(py)));
+			const int32_t dist = static_cast<int32_t>(
+					std::min(std::sqrt(dx * dx + dy * dy), 2147418112.0));
+			if (dist < best) {
+				best = dist;
+				nearest = &e;
+			}
+		});
+		if (nearest != nullptr) {
+			s.farp_present = true;
+			s.farp_x_q16 = to_fixed(nearest->position.x);
+			s.farp_y_q16 = to_fixed(nearest->position.y);
 		}
 	}
 	fill_hud_vehicle_sights(world, weapon, view);

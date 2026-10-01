@@ -11,7 +11,8 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
-#include <net/npwire/ingame_encode.h>     // encode_team_assign / encode_squad_join / encode_team_name
+#include <net/npwire/ingame_encode.h>     // encode_team_assign
+#include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 #include <net/npwire/ingame_message_id.h> // s2c::FORMATTED_GAME_TEXT (the 0x51 convert notice)
 
 #include <algorithm>
@@ -209,6 +210,9 @@ void Server_InitNewRoundState(NapiNPServerCtx &ctx) {
 	// The team-change list starts every round empty
 	// [orig: CBufferList_Free(g_TeamChangeEntityList) @0x51C911..0x51C92A].
 	ctx.team_change_entities.clear();
+	// The designation table clears on every round init, authority or not
+	// [orig: memset(g_ServerDesignations, 0, 0x1B74) @0x51cb95..0x51cba5].
+	ctx.designations.fill(ServerDesignation{});
 	if (!ctx.is_authority) return;
 	// Server_ResetRoundCounters copies the configured StartDelay seconds into the
 	// one live pre-round timer. Keep the timer on World: it is the authority
@@ -337,6 +341,7 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	world::apply_spawn_point_latches(*world.registry.get(h), sel);
 
 	conn.link.owned_entity = h; // the per-connection S2C anchor + C2S owner-verify subject
+	world.registry.get(h)->player_slot_id = conn.reply.player_slot; // entity+0x154 (Entity::player_slot_id)
 	conn.link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
 	conn.link.last_deploy_tick = world.logic_tick;
 	conn.link.last_deploy_tick_valid = true;
@@ -670,30 +675,11 @@ bool Server_SetPlayerSpectator(NapiNPServerCtx &ctx, NapiNPConnection &conn,
 
 namespace {
 
-// The changed player's squad break-up: its link cleared, S2C 0x71 [0xFF][slot]
-// (mask 0x180: the in-match slots on its new team), then 0x72 [0][""] and
-// [1][""] (mask 0xA0: its own slot). The member loop that re-links every slot
-// naming this player as its leader never matches here: squads are unported,
-// so every link keeps the 0xFF Server_PlayerAdd seeds (@0x51CF0A).
-// [orig: Server_SendPlayerStateAndSquad @0x518B40 — the link @0x518B48..0x518B4F,
-//  0x71 @0x518B56..0x518BA7, 0x72 @0x518BAC..0x518C2C, the member loop
-//  @0x518C31..0x518D65]
+// The changed player's squad break-up, after the new team is stored, so its
+// S2C 0x71 [0xFF][slot] reaches its NEW team (server_squad.h).
+// [orig: Server_SendPlayerStateAndSquad @0x518B40 from @0x518E92]
 void send_player_state_and_squad(NapiNPServerCtx &ctx, NapiNPConnection &player) {
-	SquadJoin link;
-	link.leader = 0xFF;
-	link.member = player.reply.player_slot;
-	const std::vector<uint8_t> join = encode_squad_join(link);
-	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-		if (!is_in_match(c) || c.link.transport == nullptr) continue;
-		if (!c.assigned_team_valid || c.assigned_team != player.assigned_team) continue;
-		c.link.transport->host_send(s2c::SQUAD_JOIN, join);
-	}
-	if (!is_in_match(player) || player.link.transport == nullptr) return;
-	for (uint8_t index = 0; index < 2; ++index) {
-		TeamName name;
-		name.index = index;
-		player.link.transport->host_send(s2c::TEAM_NAME, encode_team_name(name));
-	}
+	Server_DissolveSquadOf(ctx, player);
 }
 
 } // namespace
@@ -811,6 +797,7 @@ world::EntityHandle admit_synthetic_peer(NapiNPServerCtx &ctx, world::World &wor
 	conn->assigned_team_valid = true;
 	conn->link.owned_entity = h;
 	conn->link.owned_entity_spawn_id = world.registry.get(h)->registry_spawn_id;
+	world.registry.get(h)->player_slot_id = *player_slot; // entity+0x154 (Entity::player_slot_id)
 	// [orig: Server_PlayerAdd @0x51CBC0 binds the fresh player allocation]
 	conn->link.transport = transport;
 	conn->link.mode = replication::TransportMode::Client;
@@ -857,10 +844,10 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		// the death record.
 		(void)conn.reply.spectator_convert_killer;
 		// S2C 0x32 [u8 5][cstr name], mask 128 [orig: @0x519EDC..0x519F43].
-		std::vector<uint8_t> body;
-		body.push_back(5);
-		for (const char ch : conn.reply.player_name) body.push_back(static_cast<uint8_t>(ch));
-		body.push_back(0);
+		FormattedGameText text;
+		text.subtype = kGameTextPlayerSpectating;
+		text.text = conn.reply.player_name;
+		const std::vector<uint8_t> body = encode_formatted_game_text(text);
 		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
 			if (!is_in_match(c) || c.link.transport == nullptr) continue;
 			c.link.transport->host_send(s2c::FORMATTED_GAME_TEXT, body);

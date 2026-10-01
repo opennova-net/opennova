@@ -6,6 +6,8 @@
 #include <cstdint>
 
 #include <base/io/bam.h>
+#include <runtime/audio/sound_profile.h>
+#include <runtime/hud/tip_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
@@ -345,6 +347,48 @@ bool vehicle_can_enter(const World &world, const Entity *rider, const Entity &ca
 			std::abs(y - carrier.saved_live_pos[1]) <= 16;
 }
 
+int vehicle_boarding_tip_event(const World &world, const Entity &vehicle, SeatType seat) {
+	// [orig: Entity_ProcessVehicleAttach @0x435bfd..0x435c8d]
+	if (seat == SeatType::Gunner) return hud::kTipEventBoardEmplaced; // [orig: @0x435cc0]
+	// Only the control seats of a type-1 def raise a vehicle tip; a
+	// passenger seat raises none [orig: def->type == 1 @0x435c12, attach
+	// types 2 / 5 @0x435c18..0x435c20].
+	if (seat != SeatType::Controller && seat != SeatType::Driver) return 0;
+	if (!vehicle.has_item_def || vehicle.item_type != 1) return 0;
+	const uint32_t unit = static_cast<uint32_t>(vehicle.item_unit_type) & 0xFFu;
+	if (unit >= 5u && unit <= 8u) return hud::kTipEventBoardBoat; // [orig: @0x435c22..0x435c30]
+	if (unit == 3u) return hud::kTipEventBoardHelo;              // [orig: @0x435c6e..0x435c72]
+	// The horn tip: the def's sound-profile slot 24 (SSAudio1, the horn)
+	// resolved to a loaded sound set [orig: `mov ecx, [esi+864h]; cmp dword
+	// ptr [ecx+60h], 0` @0x435c76..0x435c7c — def+0x864 is the profile's
+	// resolved-id table, filled by SoundProfile_ResolveAllTriggers @0x528210
+	// (an empty name or a set no bank carries stays 0)]. A def with no
+	// sound_profile binds the "default" profile [orig: ItemDef_AllocateWithDefaults
+	// @0x49e3b0], and a miss falls back to the first one
+	// (audio::SoundProfileTable::find).
+	const ItemDeathTraits *traits = world.tables.item_death_traits.get(vehicle.item_id);
+	const std::string name = traits != nullptr && !traits->sound_profile.empty()
+			? traits->sound_profile : std::string("default");
+	const audio::SoundProfile *profile = world.tables.sound_profiles.find(name.c_str());
+	const std::string &horn = profile != nullptr
+			? profile->set_names[static_cast<size_t>(audio::kSlotAudio1)] : std::string();
+	const bool resolved = !horn.empty() && world.tables.sound_sets != nullptr &&
+			world.tables.sound_sets->has(horn);
+	return resolved ? hud::kTipEventBoardGroundHorn : hud::kTipEventBoardGround;
+}
+
+namespace {
+
+// The local player's boarding raises its tip [orig: Entity_ProcessVehicleAttach
+// @0x435bfd — `cmp edi, g_LocalPlayerEntity` then the attach result @0x435c07].
+void raise_boarding_tip(World &world, EntityHandle player, const Entity &vehicle, SeatType seat) {
+	if (player != world.cached.local_player) return;
+	const int event = vehicle_boarding_tip_event(world, vehicle, seat);
+	if (event != 0) world.out.tip_events.push_back(static_cast<uint8_t>(event));
+}
+
+} // namespace
+
 bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelection &selection) {
     World &world = world_;
     Entity *occ = world.registry.get(player);
@@ -367,6 +411,7 @@ bool VehicleSystem::attach_to_seat(EntityHandle player, const VehicleSeatSelecti
         world.vehicles.detach(player); // [orig: @0x435BCE]
     attach_apply(world, *occ, *veh, selection.seat_index, seat.bone_index);
     world.out.scars.clear_entity(player); // [orig: Scar_ClearEntriesByEntity @0x5CCEC0]
+    raise_boarding_tip(world, player, *veh, selection.type);
     return true;
 }
 
@@ -445,8 +490,12 @@ bool VehicleSystem::apply_confirmed_mount(
         seat.occupant = {};
     }
     if (occ->mounted) detach(player);
+    const SeatType seat_type = seat.type;
     attach_apply(world, *occ, *veh, seat_idx, bone);
     world.out.scars.clear_entity(player);
+    // The client's attach runs the same function [orig: Entity_TryAttachOrDetach
+    // @0x4366e8 -> Entity_ProcessVehicleAttach, the tip @0x435bfd].
+    raise_boarding_tip(world, player, *veh, seat_type);
     return true;
 }
 
@@ -475,6 +524,10 @@ bool VehicleSystem::detach(EntityHandle player) {
         }
     }
     vehicle_release_equipped_slot(*occ, veh);
+    // The local player's detach fades a showing tip [orig: @0x4356b0..0x4356bf
+    // — CTipSystem_HandleEvent(6) for g_LocalPlayerEntity].
+    if (player == world.cached.local_player)
+        world.out.tip_events.push_back(static_cast<uint8_t>(hud::kTipEventDetach));
     occ->flags &= ~kEntityFlagMounted;          // [orig: Flags &= ~0x40]
     occ->engine_flags &= ~kEntityFlagMounted;
     occ->mount_target = EntityHandle{}; // [orig: +0x16C = 0]

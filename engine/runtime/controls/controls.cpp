@@ -9,6 +9,9 @@ namespace opennova::controls {
 // name, category (Class), default primary/secondary keyboard VK codes. The default
 // keys are read from the catalog's binding slot (record-relative -15/-13), validated
 // against the canonical JO defaults (Forward=W/Up, Reload=R, Jump=Space, ...).
+// The class is the record's own +0x0C byte [orig: KeyBinding_CompareEntries
+// @0x4965f0 sorts on it]; rows 26/47/53/64/83/96-99/102/105/106/109 once
+// carried the NEXT record's byte (corrected 2026-09-29).
 static const ActionDef k_catalog[] = {
     {0, "turn_left_abs", "Absolute Turn Left", ActionClass::Movement, 0x00, 0x00, 0x0C100425, 0, 0x0, 0x0, 0, 0, 3},
     {1, "lookpitch", "Look Pitch", ActionClass::Movement, 0x00, 0x00, 0x0C200425, 0, 0x0, 0x0, 0, 0, 3},
@@ -36,7 +39,7 @@ static const ActionDef k_catalog[] = {
     {23, "seat7", "Seat7", ActionClass::Movement, 0x37, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
     {24, "seat8", "Seat8", ActionClass::Movement, 0x38, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
     {25, "seat9", "Seat9", ActionClass::Movement, 0x39, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
-    {26, "seat10", "Seat10", ActionClass::Weapons, 0x30, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
+    {26, "seat10", "Seat10", ActionClass::Movement, 0x30, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
     {27, "showhud", "Hide Gun", ActionClass::Weapons, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 1},
     {28, "Knife", "Knife", ActionClass::Weapons, 0x31, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
     {29, "Secondary", "Sidearm", ActionClass::Weapons, 0x32, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
@@ -57,13 +60,13 @@ static const ActionDef k_catalog[] = {
     {44, "useitem", "UseItem", ActionClass::Weapons, 0x10, 0x00, 0x0C000805, 0, 0x0, 0x0, 0, 0, 1},
     {45, "nvggainup", "Increase NVG Gain", ActionClass::Weapons, 0xBB, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 3},
     {46, "nvggaindown", "Decrease NVG Gain", ActionClass::Weapons, 0xBD, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 3},
-    {47, "magazine", "Reload", ActionClass::Map, 0x52, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
+    {47, "magazine", "Reload", ActionClass::Weapons, 0x52, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
     {48, "radarout", "Radar Zoom Out", ActionClass::Map, 0xBD, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
     {49, "radarin", "Radar Zoom In", ActionClass::Map, 0xBB, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
     {50, "huddetail", "Hud Detail", ActionClass::Map, 0x75, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
     {51, "NextWaypoint", "Next Waypoint", ActionClass::Map, 0x76, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3},
     {52, "nextflag", "Next Flag", ActionClass::Map, 0x77, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3},
-    {53, "commander_menu", "Commander Menu", ActionClass::Communications, 0x56, 0x00, 0x04000801, 0, 0x0, 0x0, 0, 0, 3},
+    {53, "commander_menu", "Commander Menu", ActionClass::Map, 0x56, 0x00, 0x04000801, 0, 0x0, 0x0, 0, 0, 3},
     {54, "Briefing", "Briefing", ActionClass::Communications, 0x49, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3},
     {55, "Goals", "Goals", ActionClass::Communications, 0x47, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3},
     {56, "OldMessages", "Recent Messages", ActionClass::Communications, 0x4A, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3},
@@ -74,7 +77,7 @@ static const ActionDef k_catalog[] = {
     {61, "sqtalk", "SQChat", ActionClass::Communications, 0x59, 0x00, 0x05000800, 0x11, 0x0, 0x0, 0, 0, 3},
     {62, "ctalk", "Crew Chat", ActionClass::Communications, 0x55, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 1},
     {63, "playerlist_alt", "PlayerList", ActionClass::Communications, 0x09, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
-    {64, "MedicReq", "MedicRequest", ActionClass::Null, 0x39, 0x00, 0x04000040, 0, 0x0, 0x0, 0, 0, 1},
+    {64, "MedicReq", "MedicRequest", ActionClass::Communications, 0x39, 0x00, 0x04000040, 0, 0x0, 0x0, 0, 0, 1},
     {65, "null", "Null", ActionClass::Null, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3},
     {67, "escape", "Escape", ActionClass::System, 0x1B, 0x00, 0x05000000, 0, 0x0, 0x0, 0, 0, 3},
     {68, "respawn", "Respawn", ActionClass::System, 0x52, 0x00, 0x0C000C01, 0x11, 0x0, 0x0, 0, 0, 1},
@@ -92,7 +95,7 @@ static const ActionDef k_catalog[] = {
     {80, "restart", "Restart Mission", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {81, "lights", "Lights", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {82, "mousescale", "Mouse Scale", ActionClass::System, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
-    {83, "ToggleServer", "Server Screen", ActionClass::Server, 0xDC, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
+    {83, "ToggleServer", "Server Screen", ActionClass::System, 0xDC, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {84, "lockgame", "Lock Game", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {85, "PuntCRC", "Punt CRC", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {86, "PuntLog", "Punt Log", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
@@ -105,20 +108,20 @@ static const ActionDef k_catalog[] = {
     {93, "Ban", "Ban", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {94, "LastGame", "Last Game", ActionClass::Server, 0x00, 0x00, 0x04000000, 0, 0x0, 0x0, 0, 0, 3},
     {95, "tod", "TimeOfDay", ActionClass::Server, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3},
-    {96, "todrate", "TimeOfDayRate", ActionClass::Camera, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3},
-    {97, "FreeLook", "FreeLook", ActionClass::Map, 0x00, 0x00, 0x2C000C05, 0, 0x2, 0x0, 0, 0, 1},
-    {98, "map_toggle", "Map", ActionClass::System, 0x4D, 0x00, 0x05000801, 0, 0x0, 0x0, 0, 0, 3},
-    {99, "ShowScore", "Show Score", ActionClass::Communications, 0x74, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
+    {96, "todrate", "TimeOfDayRate", ActionClass::Server, 0x00, 0x00, 0x00000000, 0, 0x0, 0x0, 0, 0, 3},
+    {97, "FreeLook", "FreeLook", ActionClass::Camera, 0x00, 0x00, 0x2C000C05, 0, 0x2, 0x0, 0, 0, 1},
+    {98, "map_toggle", "Map", ActionClass::Map, 0x4D, 0x00, 0x05000801, 0, 0x0, 0x0, 0, 0, 3},
+    {99, "ShowScore", "Show Score", ActionClass::System, 0x74, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 3},
     {100, "ShowFriendly", "Friendly Tags", ActionClass::Communications, 0x4B, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 3},
     {101, "AudioEmote", "AudioEmote", ActionClass::Communications, 0x78, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1},
-    {102, "RadioMacro", "RadioMacro", ActionClass::Weapons, 0x79, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1},
+    {102, "RadioMacro", "RadioMacro", ActionClass::Communications, 0x79, 0x00, 0x0C000C01, 0, 0x0, 0x0, 0, 0, 1},
     {103, "binoculars", "Binoculars", ActionClass::Weapons, 0x42, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3},
     {104, "NVG", "Night Vision", ActionClass::Weapons, 0x4E, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 3},
-    {105, "scope", "Toggle Scope", ActionClass::System, 0xBF, 0x00, 0x4C000C01, 0, 0x2, 0x0, 0, 0, 1},
-    {106, "help", "Help Screen", ActionClass::Camera, 0x70, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3},
+    {105, "scope", "Toggle Scope", ActionClass::Weapons, 0xBF, 0x00, 0x4C000C01, 0, 0x2, 0x0, 0, 0, 1},
+    {106, "help", "Help Screen", ActionClass::System, 0x70, 0x00, 0x05000800, 0, 0x0, 0x0, 0, 0, 3},
     {107, "view1st", "1st Person View", ActionClass::Camera, 0x71, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
     {108, "viewwithgun", "gun view", ActionClass::Camera, 0x72, 0x00, 0x0C000801, 0, 0x0, 0x0, 0, 0, 1},
-    {109, "viewchase", "Chase View", ActionClass::Spectator, 0x73, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 1},
+    {109, "viewchase", "Chase View", ActionClass::Camera, 0x73, 0x00, 0x04000800, 0, 0x0, 0x0, 0, 0, 1},
     {110, "CycleSpectatorMode", "Cycle Spectator Mode", ActionClass::Spectator, 0x20, 0x00, 0x04000800, 0, 0x10, 0x0, 0, 0, 2},
     {111, "IncSpectatorTarget", "Spectator Target +", ActionClass::Spectator, 0x00, 0x00, 0x04000800, 0, 0x1, 0x0, 0, 0, 2},
     // [orig: row 112 @0x8188E8 — code 502, mode 2 (death screen), class 13, no
@@ -307,6 +310,43 @@ std::string format_binding(int key, int key2, int modifier, int modifier2) {
 
 std::vector<ControlRow> build_rows(Device device) {
   return BindingSet{}.build_rows(device);
+}
+
+namespace {
+
+// The static rows' +0x00 action codes, row 0..118, byte-read from the
+// catalog [orig: word_8159A8 + 108 * row]. The port's catalog carries rows
+// 0..112 (row 66 and rows 113..118 are not modelled); the codes cover all 119.
+constexpr int16_t k_action_codes[119] = {
+    166, 164, 152, 151, 156, 157, 148, 147, 153, 170,
+    169, 172, 154, 155, 158, 159, 425, 182, 183, 184,
+    185, 186, 187, 188, 189, 190, 191, 14, 201, 202,
+    203, 204, 205, 206, 207, 208, 209, 220, 216, 212,
+    214, 223, 222, 149, 177, 56, 57, 211, 361, 360,
+    19, 23, 32, 221, 53, 31, 29, 112, 111, 101,
+    100, 110, 109, 102, 217, 0, 36, 18, 55, 2,
+    25, 1, 20, 234, 49, 37, 10, 3, 4, 9,
+    12, 16, 17, 11, 119, 47, 48, 34, 38, 103,
+    104, 105, 106, 107, 108, 438, 497, 176, 28, 422,
+    30, 33, 54, 26, 41, 6, 8, 400, 401, 402,
+    500, 501, 502, 120, 121, 122, 123, 40, 74,
+};
+
+}  // namespace
+
+int action_code(int row) {
+  return row >= 0 && row < 119 ? k_action_codes[row] : -1;
+}
+
+const ActionDef *action_for_code(int code) {
+  // [orig: KeyBinding_SortBySequentialId @0x498260 — record i ends up as the
+  //  row whose code is i; the codes are unique across the static rows]
+  if (code < 0 || code >= 768) return nullptr;
+  std::size_t count = 0;
+  const ActionDef *defs = catalog(&count);
+  for (std::size_t i = 0; i < count; ++i)
+    if (action_code(defs[i].id) == code) return &defs[i];
+  return nullptr;
 }
 
 const char *weapon_category_token(int index) {

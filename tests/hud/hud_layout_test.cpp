@@ -10,6 +10,7 @@
 
 #include <formats/def/def.h>
 
+#include <array>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -75,7 +76,16 @@ static void synthetic() {
 			"StaticFrame\tCompMark.tga  508,685\n"
 			"PARACHUTEICON\tchute.tga 400,401\n"
 			"ARMORICON\tarmor.tga 402,403\n"
-			"BREATHTIME\t\t512,70,center\n";
+			"BREATHTIME\t\t512,70,center\n"
+			"HUDTIMECLOCK\t1020,27,0,right\n"
+			"HUDPLAYERCOUNT\t1015,49,0,right\n"
+			"HUDTEAMXY\t1015,5,1,center\n"
+			"ZONEINFO\t1013,386,Right\n"
+			"HUDLS_SYSTEM\t1\n"
+			"HUDLS_BRACKET\tbrack.tga\n"
+			"HUDLS_KEYOFST\t3,18\n"
+			"HUDLS_MOREAV\tmore.tga 20 -5\n"
+			"HUDLS_SLOT\t6 300 700\n";
 	DefHudPosFile file;
 	if (!parse(text, file)) {
 		std::printf("FAIL: synthetic parse\n");
@@ -112,6 +122,21 @@ static void synthetic() {
 	CHECK(layout.breath_time.x == 512 && layout.breath_time.y == 70 &&
 			layout.breath_time.align == 2);
 	CHECK(layout.scope_range.x == 100 && layout.scope_zero.y == 103 && layout.scope_mag.x == 104);
+	// The session anchors: HUDTIMECLOCK keeps x, y only; ZONEINFO's third
+	// field is its alignment [orig: @0x59FDB8 / @0x5A0676].
+	CHECK(layout.time_clock.x == 1020 && layout.time_clock.y == 27 &&
+			layout.time_clock.hidden == 0 && layout.time_clock.align == 0);
+	CHECK(layout.player_count.x == 1015 && layout.player_count.y == 49 &&
+			layout.player_count.hidden == 0 && layout.player_count.align == 1);
+	CHECK(layout.team_xy.hidden == 1 && layout.team_xy.align == 2);
+	CHECK(layout.zone_info.x == 1013 && layout.zone_info.y == 386 &&
+			layout.zone_info.hidden == 0 && layout.zone_info.align == 1);
+	// The HUDLS block and its two texture names.
+	CHECK(layout.hudls.system == 1 && layout.hudls.key_ofst_x == 3 &&
+			layout.hudls.key_ofst_y == 18 && layout.hudls.moreav_dx == 20 &&
+			layout.hudls.moreav_dy == -5 && layout.hudls.slot_x[5] == 300 &&
+			layout.hudls.slot_y[5] == 700 && layout.hudls.slot_x[0] == 0);
+	CHECK(assets.hudls_bracket == "brack.tga" && assets.hudls_moreav == "more.tga");
 	// The combat anchors and the AGL colour.
 	CHECK(layout.combat.impact_x == 200 && layout.combat.impact_y == 201);
 	CHECK(layout.combat.icon_x == 202 && layout.combat.gear_y == 205 && layout.combat.cargo_x == 206);
@@ -200,6 +225,34 @@ static void synthetic() {
 	CHECK(layout.breath_time.x == 0 && layout.breath_time.y == 0 && layout.breath_time.align == 0);
 	// The device-owned fields are untouched by the fill.
 	CHECK(!layout.frame_texture_valid && layout.stance_frame0_w == 0 && !layout.box_texture_valid);
+	// No NETWORKINDICATOR line: the connection indicators keep the reset corners.
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
+	def_free_hudpos(&file);
+}
+
+// NETWORKINDICATOR authors the connection indicators' three corners; a file
+// without the line restores the reset's, as the mission-start reset runs
+// before every parse [orig: HUD_ParseHudposToken @0x59F981..0x59FA0C;
+// CNetQuality_Reset @0x4C5908..0x4C591E via Game_StartMission @0x5243B4].
+static void network_indicator() {
+	DefHudPosFile file;
+	if (!parse("NETWORKINDICATOR\t6,7 30,7 70,8\n", file)) {
+		std::printf("FAIL: NETWORKINDICATOR parse\n");
+		++failures;
+		return;
+	}
+	HudLayout layout;
+	HudLayoutAssets assets;
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK((layout.net_indicator_pos == std::array<int, 6>{6, 7, 30, 7, 70, 8}));
+	def_free_hudpos(&file);
+	if (!parse("PAUSEDPOS\t980 12\n", file)) {
+		std::printf("FAIL: second parse\n");
+		++failures;
+		return;
+	}
+	hud_layout_from_hudpos(file, layout, assets);
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
 }
 
@@ -235,12 +288,15 @@ static void retail_leg() {
 	CHECK(layout.chat_lines == 8);
 	CHECK(layout.veh_stance_pos.x == 0 && layout.veh_stance_pos.y == 272);
 	CHECK(layout.lfp_anchor_x == 1020 && layout.lfp_anchor_y == 27);
+	// The shipped file authors no NETWORKINDICATOR: the reset corners stand.
+	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
 }
 
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	synthetic();
+	network_indicator();
 	retail_leg();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

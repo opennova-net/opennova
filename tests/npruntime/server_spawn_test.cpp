@@ -184,6 +184,19 @@ int main() {
 	}
 	if (!expect(saw_host && saw_joiner,
 	            "build_pool0_organic_batch stamps owner_connection_id from owner_connection_id (host 2 + joiner 3)")) return 1;
+	// Each player's record carries its own roster slot id at entity+0x154,
+	// the byte a client's squad legs read as its own slot [orig:
+	// Server_PlayerAdd @0x51d087..0x51d08b; NetPacket_SerializeEntityStatesToBuffer
+	// @0x503316..0x503327].
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		const w::Entity *pe = world.registry.get(c.link.owned_entity);
+		if (pe == nullptr) continue;
+		bool matched = false;
+		for (const opennova::OrganicSpawnRecord &r : batch.records)
+			if (r.slot_id == c.link.owned_entity.packed)
+				matched = r.player_slot_id == c.reply.player_slot && pe->player_slot_id == c.reply.player_slot;
+		if (!expect(matched, "a player's 0x0C record carries its roster slot id (entity+0x154)")) return 1;
+	}
 
 	// [D-NET-112] Players carry no SSN (net_id 0); they are distinguished by their distinct
 	// ownerConnectionId (dcb), the faithful identity. (The old high-band net-id allocator is gone.)

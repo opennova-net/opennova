@@ -82,6 +82,112 @@ int main() {
 			hud::kHudColorCyan == 0xFF00EAE7u && hud::kHudColorOrange == 0xFFFF8020u &&
 			hud::kHudColorMagenta == 0xFFFF40FFu && hud::kHudColorYellow == 0xFFF0F000u);
 
+	// THE S2C 0x32 JOIN/LEAVE LANE: the handled subtypes fold verbatim (the
+	// signed team byte of the join/leave pair), in wire order; others drop
+	// [orig: NapiNPClientMsg_0x032 @0x428060].
+	view.apply(s2c::FORMATTED_GAME_TEXT, {1, 'R', 'o', 'c', 'k', 0, 2});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 'o', 'c', 'k', 0, 0xFF});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {5, 'S', 'p', 'e', 'c', 0});
+	view.apply(s2c::FORMATTED_GAME_TEXT, {9, 'x', 0});
+	const std::vector<ClientGameText> texts = view.drain_game_texts();
+	CHECK(texts.size() == 3);
+	CHECK(texts.size() == 3 && texts[0].subtype == 1 && texts[0].text == "Rock" &&
+			texts[0].team == 2);
+	CHECK(texts.size() == 3 && texts[1].subtype == 2 && texts[1].team == -1);
+	CHECK(texts.size() == 3 && texts[2].subtype == 5 && texts[2].text == "Spec");
+	CHECK(view.drain_game_texts().empty());
+	// The listen host's own loopback posts them too (no authority gate).
+	auto host_owned = std::make_unique<ClientReplicaPipeline>();
+	host_owned->set_authority_recipient(true);
+	host_owned->apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 0, 1});
+	CHECK(host_owned->drain_game_texts().size() == 1);
+
+	// The talk keys' reset hold: S2C 0x25 raises it on a client (never on the
+	// authority's loopback), the next S2C 0x0F lowers it
+	// [orig: NapiNPClientMsg_GameReset @0x42284e; NapiNPClientMsg_0x00F @0x42e396].
+	CHECK(!view.state().round_reset_hold);
+	view.apply(s2c::GAME_RESET, {});
+	CHECK(view.state().round_reset_hold);
+	view.apply(s2c::WORLD_STATE_LOAD, {});
+	CHECK(!view.state().round_reset_hold);
+	host_owned->apply(s2c::GAME_RESET, {});
+	CHECK(!host_owned->state().round_reset_hold);
+
+	// THE ROUND-OVER LATCH (g_SpawnSuccessGate): a client's 0x25 raises it,
+	// the authority's does not; a 0x1D header raises it even when its body
+	// does not parse; only a mission start lowers it [orig:
+	// NapiNPClientMsg_GameReset @0x422849; NapiNPClientMsg_0x01D @0x430858;
+	// Game_StartMission @0x524a1f].
+	CHECK(view.state().spawn_success_gate); // the 0x25 above
+	CHECK(!host_owned->state().spawn_success_gate);
+	view.begin_mission();
+	CHECK(!view.state().spawn_success_gate);
+	view.apply(s2c::END_ROUND_HEADER, {});
+	CHECK(view.state().spawn_success_gate);
+	view.begin_mission();
+	CHECK(!view.state().spawn_success_gate);
+
+	// THE SENDER GATE: an active slot whose chat is muted (+50 bit 1), or a
+	// spectator slot while the spawn gate is down, drops the line; an unbound
+	// slot never gates [orig: Chat_DispatchToChannel @0x42b91e..0x42b943].
+	{
+		auto gate_owned = std::make_unique<ClientReplicaPipeline>();
+		ClientReplicaPipeline &g = *gate_owned;
+		g.state().roster[4].bound = true;
+		g.state().roster[4].radio_mute_flags = 2;
+		g.state().roster[5].bound = true;
+		g.state().roster[5].spectator = true;
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 4, "muted"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 5, "spectating"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 6, "unbound"));
+		std::vector<ClientChatLine> gated = g.drain_chat_lines();
+		CHECK(gated.size() == 1 && gated[0].text == "unbound");
+		g.state().roster[4].radio_mute_flags = 1; // the voice bit does not gate chat
+		g.state().spawn_success_gate = true;      // the spawn gate up
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 4, "voice-muted"));
+		g.apply(s2c::CHAT_BROADCAST, chat_body(2, 5, "spectating"));
+		gated = g.drain_chat_lines();
+		CHECK(gated.size() == 2);
+	}
+
+	// THE WIRE ORDER ACROSS THE THREE RING LANES: each record takes the
+	// dispatch stamp of the message that carried it, so a 0x32 that arrives
+	// between two 0x1E events sorts between their lines, and a 0x14 after them
+	// [orig: each handler posts as it runs — NetPacket_HandleGameEvent
+	// @0x426270, NapiNPClientMsg_0x032 @0x428181..0x428195,
+	// Chat_DispatchToChannel @0x42b910].
+	{
+		auto order_owned = std::make_unique<ClientReplicaPipeline>();
+		ClientReplicaPipeline &o = *order_owned;
+		const std::vector<uint8_t> kill = {1, 2, 3, 0xFF, 0, 0, 0, 0};
+		o.apply(s2c::GAME_EVENT, kill);
+		o.apply(s2c::FORMATTED_GAME_TEXT, {2, 'R', 0, 1});
+		o.apply(s2c::GAME_EVENT, kill);
+		o.apply(s2c::CHAT_BROADCAST, chat_body(0, 7, "Server: hi"));
+		const std::vector<ClientGameEvent> events = o.drain_game_events();
+		const std::vector<ClientGameText> joins = o.drain_game_texts();
+		const std::vector<ClientChatLine> chats = o.drain_chat_lines();
+		CHECK(events.size() == 2 && joins.size() == 1 && chats.size() == 1);
+		if (events.size() == 2 && joins.size() == 1 && chats.size() == 1) {
+			CHECK(events[0].feed_order < joins[0].feed_order);
+			CHECK(joins[0].feed_order < events[1].feed_order);
+			CHECK(events[1].feed_order < chats[0].feed_order);
+			// The merge keeps that order, and a message's own lines keep
+			// theirs (stable) whatever lane order the embedder drains in.
+			std::vector<hud::FeedPost> posts = {
+				{chats[0].feed_order, hud::ChatSink::System, 0, "chat", false},
+				{joins[0].feed_order, hud::ChatSink::System, 0, "join", false},
+				{events[0].feed_order, hud::ChatSink::System, 0, "kill-a", false},
+				{events[0].feed_order, hud::ChatSink::System, 0, "kill-a2", false},
+				{events[1].feed_order, hud::ChatSink::System, 0, "kill-b", true},
+			};
+			hud::order_feed_posts(posts);
+			CHECK(posts[0].text == "kill-a" && posts[1].text == "kill-a2" &&
+					posts[2].text == "join" && posts[3].text == "kill-b" &&
+					posts[4].text == "chat");
+		}
+	}
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

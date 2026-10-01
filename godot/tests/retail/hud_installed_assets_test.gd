@@ -32,7 +32,10 @@ func test_installed_launcher_and_mortar_hud_transitions() -> void:
 				"these installed weapons do not author Scoped + Inset")
 		if name == "WPN_MORTAR":
 			assert_true(stats.big_map_visible, "deploying the mortar opens its impact map")
-			assert_gte(stats.big_map_lines, 96, "the live impact ring reaches the map renderer")
+			# The impact preview's rings are anti-aliased band sprites (nine for
+			# the 0xD0 special slot's three layers; the ctest hud_combat pins
+			# the exact bands) [orig: Render_DrawRingOverlay @0x5D4270].
+			assert_gte(stats.big_map_sprites, 9, "the live impact ring reaches the map renderer")
 			# LollyPop (0x8000) draws a world marker; UseDesignator (0x200000)
 			# adjusts the 2D ring. These are independent authored flags.
 			if (weapon.get_flags() & 0x8000) == 0:

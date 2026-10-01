@@ -219,7 +219,7 @@
     "core_methods": [
       "test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection",
       "test_aspect_mode_draws_through_a_target_of_the_selected_ratio",
-      "test_binoculars_nvg_and_gain_keys_route_retail_actions",
+      "test_binoculars_nvg_and_gain_rows_route_retail_actions",
       "test_camera_direction_keeps_precision_far_from_origin",
       "test_camera_keeps_its_heading_looking_straight_up_or_down",
       "test_camera_stamps_the_sim_composed_pose_and_policy_fov",

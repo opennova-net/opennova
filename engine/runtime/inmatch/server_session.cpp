@@ -36,6 +36,9 @@ void start_server(NapiNPServerCtx &ctx, const SessionStartup &startup) {
 	p.host_stop_tick = 0;                   // cleared until StopServer
 	p.host_run_duration_ms = 0;
 	p.host_running = 1;                      // StartServer succeeded
+	// The host start callback zeroes the total logins [orig: NapiNPProtocol_StartServer
+	// @0x62b640 -> CNapiServer_OnHostStarted @0x4c94f0].
+	ctx.total_logins = 0;
 }
 
 // [orig: CNapiGameSession_CreateSession @0x4c97c0] — see header.
@@ -118,6 +121,10 @@ void create_session(NapiNPServerCtx &ctx, const GameConfig &config,
 		self.link.transport = local_client;
 		self.link.mode = replication::TransportMode::Loopback; // socketless mode 1
 		ctx.np_protocol.connection_list.push_back(self);
+		// The host's own connection coming up counts a login like every
+		// other [orig: NapiNPServer_HandleNewConnection @0x4c8203 runs before
+		// its local-connection arm @0x4c8213].
+		++ctx.total_logins;
 	}
 }
 

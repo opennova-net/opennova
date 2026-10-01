@@ -54,6 +54,12 @@ struct LocalPlayerViewTracker {
     float binocular_yaw_offset_deg = 0.0f;
     float binocular_pitch_offset_deg = 0.0f;
     bool binocular_sway_latched = false; // dword_29D6BA8
+    // The binocular tip's edge detector: the raw toggle as the previous frame
+    // left it, seeded once on the first frame [orig: dword_B79438, seeded
+    // behind dword_B7943C bit 0 @0x4de3d0..0x4de3e3 — process statics, so a
+    // respawn does not reseed them].
+    bool binocular_tip_prev = false;
+    bool binocular_tip_seeded = false;
     // The FP viewmodel motion-lead tracker (per render frame) and the local
     // entity's per-62.5 Hz-tick movement delta it samples
     // [orig: the (position - entity+0x80) samples @0x437bb2/0x437b92/0x437ba2].

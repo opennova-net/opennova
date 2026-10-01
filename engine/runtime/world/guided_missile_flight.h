@@ -36,6 +36,10 @@ struct GuidedInputs {
 struct GuidedMotorEvents {
     uint8_t groups = 0; // bit N requests serializer group N
     bool proximity = false, detonate = false;
+    // The Stinger motor reached its lock-note site, after the pursuit and
+    // ahead of the turn; the round tick notes the missile for the local
+    // player's radar when the target is theirs (world/radar_contacts.h).
+    bool threat_note = false;
 };
 enum class GuidedStepResult : uint8_t {
     kNone, kCoincident, kOvershoot, kGuard, kProximityNotify,

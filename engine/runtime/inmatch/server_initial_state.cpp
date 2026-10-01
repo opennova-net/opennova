@@ -3,6 +3,7 @@
 #include <runtime/inmatch/batch_chunker.h> // inmatch::slice_batch_pages (the shared byte-budget pager, ADR 0013)
 #include <runtime/inmatch/server_flags.h> // the flag word's named bits
 #include <runtime/inmatch/server_tick.h> // Server_RerollPlayerTickSeed
+#include <runtime/inmatch/server_visible_players.h> // fan_spawn_slot_notice
 
 #include <algorithm>
 #include <array>
@@ -18,6 +19,7 @@
 #include <base/gameprofile/game_type.h>          // is_waypoint_family (the §5.32 selector)
 #include <net/npwire/ingame_encode.h>      // encode_organic_spawn_batch / encode_pool3_sync_batch
 #include <net/npwire/ingame_message_id.h>
+#include <net/npwire/visible_players.h>   // encode_spawn_slot_notice (0x4D)
 #include <runtime/world/angle.h>                  // world::spawn_angle_bam (0x0F spawn pose)
 #include <runtime/world/entity.h>                 // world::Entity (0x0F spawn pose)
 #include <runtime/world/geom.h>                   // world::to_fixed (0x0F spawn pose)
@@ -533,7 +535,15 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			step.messages.push_back(InitialStateMessage{
 					0x42, {0x00, 0x00}, /*reliable=*/false}); // [Server_OnPlayerJoin send @0x51A81F userParam=1]
 			step.messages.push_back(InitialStateMessage{0x0F, std::move(wsl)}); // world-state-load (§5.29)
-			step.messages.push_back(InitialStateMessage{0x4D, {static_cast<uint8_t>(conn.reply.player_slot)}}); // player-index [NapiNPClientMsg_HandleSpawnSlot @0x4317B0]
+			// The join notice: this slot's copy rides the bundle, every other
+			// in-game client gets the same byte now and re-requests its
+			// visible-players snapshot. [orig: Server_OnPlayerJoin
+			//  @0x51a93f..0x51a97a (send_mask 0x80) -> NapiNPClientMsg_HandleSpawnSlot
+			//  @0x4317B0]
+			SpawnSlotNotice notice;
+			notice.slot = static_cast<uint8_t>(conn.reply.player_slot);
+			step.messages.push_back(InitialStateMessage{0x4D, encode_spawn_slot_notice(notice)});
+			fan_spawn_slot_notice(ctx.np_protocol.connection_list, conn);
 			// The join tick seed is PER PLAYER, re-rolled per connection — the client
 			// anchors currentTick (and its fire freshness) to it, and the host stamps the
 			// same value as that player's freshness floor. Never the session constant.

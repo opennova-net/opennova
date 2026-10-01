@@ -8,6 +8,7 @@
 #include <runtime/world/world.h>
 
 #include <base/io/le.h>
+#include <base/io/tick_rate.h>
 
 #include <algorithm>
 #include <cstring>
@@ -120,6 +121,11 @@ const std::string &ClientRuntime::server_name() const {
 
 const std::string &ClientRuntime::mission_name() const {
 	return joiner_ ? joiner_->mission_name() : empty_runtime_string();
+}
+
+const SessionVars &ClientRuntime::session_vars() const {
+	static const SessionVars kNone;
+	return joiner_ ? joiner_->session_vars() : kNone;
 }
 
 const std::string &ClientRuntime::map_file() const {
@@ -349,9 +355,13 @@ void ClientRuntime::advance_zone_timers() {
 }
 
 void ClientRuntime::tick_roster_revive_countdown() {
-	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+	// The walk visits the S2C 0x4C pointer table's slots, in table order
+	// [orig: Client_ProcessNetworkFrame @0x42C27E..0x42C2DA — g_PlayerSlotPtrTable
+	//  entry+4 @0x42c29f..0x42c2cb].
 	if (++slot_refresh_frames_ <= 62) return;
-	for (replication::ClientRosterSlot &slot : view_.state().roster) {
+	replication::ClientState &cs = view_.state();
+	for (const replication::ClientVisiblePlayer &entry : cs.visible_players) {
+		replication::ClientRosterSlot &slot = cs.roster[entry.slot];
 		// slot+0x0D active, slot+0x24 entity, slot+0x10 > 0 (unsigned).
 		if (!slot.bound || slot.entity_slot < 0 || slot.downed_revive_seconds == 0)
 			continue;
@@ -361,6 +371,31 @@ void ClientRuntime::tick_roster_revive_countdown() {
 		view_.state().mark_changed();
 	}
 	slot_refresh_frames_ = 0;
+}
+
+void ClientRuntime::drain_visible_refreshes() {
+	// Each queued pair leaves as one reliable C2S 0x22 {slot, fields} then the
+	// empty C2S 0x23 [orig: CNapiNetwork_QueueReliableMessage(0x22, 1, 0, .., 3)
+	//  @0x43181d / @0x431ae4, then (0x23, 1, 0, .., 0) @0x43183e / @0x431b05];
+	// the listen client's pair rides its loopback.
+	std::vector<replication::ClientVisiblePlayersRefresh> &pending =
+			view_.state().pending_visible_refreshes;
+	for (const replication::ClientVisiblePlayersRefresh &r : pending) {
+		std::vector<uint8_t> sync{r.slot, static_cast<uint8_t>(r.fields & 0xFFu),
+				static_cast<uint8_t>(r.fields >> 8)};
+		if (role_ == Role::HostClient) {
+			if (loopback_ == nullptr) continue;
+			loopback_->client_send(c2s::PLAYER_SYNC_REQUEST, std::move(sync));
+			loopback_->client_send(c2s::VISIBLE_PLAYERS_REQUEST, {});
+			continue;
+		}
+		if (joiner_ == nullptr) continue;
+		std::vector<uint8_t> a = joiner_->frame_inner(c2s::PLAYER_SYNC_REQUEST, std::move(sync));
+		if (!a.empty()) framed_send_queue_.push_back(std::move(a));
+		std::vector<uint8_t> b = joiner_->frame_inner(c2s::VISIBLE_PLAYERS_REQUEST, {});
+		if (!b.empty()) framed_send_queue_.push_back(std::move(b));
+	}
+	pending.clear();
 }
 
 std::vector<uint8_t> ClientRuntime::start() {
@@ -395,11 +430,14 @@ std::vector<uint8_t> ClientRuntime::start() {
 	last_keepalive_tick_ = 0;
 	net_quality_timer_ = 0;
 	tag2c_send_cooldown_ = 0;
-	net_quality_ = 0;
 	send_holdoff_countdown_ = 0;
 	send_holdoff_ticks_ = 0;
 	replay_mode_ = false;
 	view_.state() = replication::ClientState{};
+	// The client connection start resets the quality object [orig:
+	// CNapiNetwork_StartClientConnection @0x4ca3f7 / @0x4ca401 ->
+	// CNetQuality_Reset @0x4c58c0], its cooldown at the fresh clock.
+	hud::net_quality_reset(net_indicators_, view_.state().local_clock_ms);
 	view_.drain_round_events();
 	view_.drain_game_events();
 	view_.drain_weapon_reloads();
@@ -485,54 +523,82 @@ bool ClientRuntime::queue_medic_request() {
 }
 
 // [orig: Chat_CheckFloodControl @0x498F60] The 16-entry table of recent lines
-// `[u32 time][char[64] text]`: a line longer than 59 characters is cut to 59
-// first (`message[59] = 0`); an unseen line shifts the table down and lands
-// in the newest slot; a seen line within 0x500 ms of its entry is refused; an
-// older repeat is moved to the newest slot (the entries after it shift down).
-bool ClientRuntime::chat_flood_control(std::string &text) {
+// `[u32 frame][char[64] text]`: a line longer than 59 characters is cut to 59
+// first (`message[59] = 0` @0x498f80); an unseen line shifts the table down
+// and lands in the newest slot (@0x498fe0..0x498fed); a seen line within
+// 0x500 main frames of its entry is refused (@0x499028); an older repeat is
+// moved to the newest slot, the entries after it shifting down (@0x49904a).
+bool ClientRuntime::chat_flood_control(std::string &text, uint32_t frame) {
 	if (text.size() > 0x3B) text.resize(59);
-	const uint32_t now_ms = joiner_->monotonic_milliseconds32();
 	size_t index = 0;
 	while (index < chat_flood_.size() && chat_flood_[index].text != text) ++index;
 	if (index >= chat_flood_.size()) {
 		for (size_t i = 0; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-		chat_flood_.back() = ChatFloodEntry{now_ms, text};
+		chat_flood_.back() = ChatFloodEntry{frame, text};
 		return true;
 	}
-	if (now_ms - chat_flood_[index].time_ms <= 0x500u) return false;
+	if (frame - chat_flood_[index].frame <= 0x500u) return false;
 	for (size_t i = index; i + 1 < chat_flood_.size(); ++i) chat_flood_[i] = chat_flood_[i + 1];
-	chat_flood_.back() = ChatFloodEntry{now_ms, text};
+	chat_flood_.back() = ChatFloodEntry{frame, text};
 	return true;
 }
 
-bool ClientRuntime::queue_chat_message(uint8_t channel, const std::string &text) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session() || text.empty())
-		return false;
-	// The `all` (4) and non-peer `team` (5) senders queue nothing on a session
-	// peer [orig: Chat_SendAllMessage @0x49AC70 / sub_49ABA0 @0x49ABA0 —
-	//  `if (!is_mp_session_peer)`]; a joiner is always the peer.
-	if (channel == 4 || channel == 5) return false;
-	// `(!g_DeathScreenActive || g_SpawnSuccessGate)`; the admin key tests
-	// `!g_DeathScreenActive` alone [orig: @0x49A6B0 / @0x49A780 first tests].
-	// authoritative_spawn_released_ models the spawn-success gate's clear.
+hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::string &text,
+		uint32_t frame) {
+	using Result = hud::ChatSendResult;
+	const bool joiner_path = role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session();
+	const bool host_path = role_ == Role::HostClient && loopback_ != nullptr;
+	if (!joiner_path && !host_path) return Result::Refused;
+	// The local (13) and crew (11) senders test `!g_DeathScreenActive` alone;
+	// the rest `(!g_DeathScreenActive || g_SpawnSuccessGate)`, the round-over
+	// latch the folded 0x1D header raises [orig: @0x49A868 / @0x49A7A8;
+	// @0x49A931 / @0x49A6E1 / @0x49AA81 / @0x49ACA1 / @0x49ABD1].
 	const bool death_screen = view_.state().death_screen_active;
-	if (channel == 11 ? death_screen : (death_screen && authoritative_spawn_released_))
-		return false;
-	std::string line = text;
-	if (!chat_flood_control(line)) return false;
-	const std::string stripped = chat_strip_tags(line);
-	// NetPacket_WriteByteAndString: [u8 channel][cstr].
+	const bool spawn_gate = view_.state().spawn_success_gate;
+	if ((channel == 13 || channel == 11) ? death_screen : (death_screen && !spawn_gate))
+		return Result::Refused;
+	if (text.empty()) return Result::Refused; // [orig: `message && *message`]
+	// A refused repeat: the sender echoes the line locally instead
+	// [orig: the Chat_AddMessageChannel1 else-arms].
+	if (!chat_flood_control(text, frame)) return Result::Flooded;
+	// The red/blue pair sends only from a non-peer, and a HUD-bearing
+	// process is always a session peer [orig: `if (!is_mp_session_peer)`
+	// @0x49ACE2 / @0x49AC12].
+	if (channel == 4 || channel == 5) return Result::Refused;
+	const std::string stripped = chat_strip_tags(text); // [orig: Chat_StripHtmlTags]
+	// NetPacket_WriteByteAndString: [u8 channel][cstr] [orig: @0x42A900].
 	std::vector<uint8_t> body;
 	body.reserve(stripped.size() + 2);
 	body.push_back(channel);
 	body.insert(body.end(), stripped.begin(), stripped.end());
 	body.push_back(0);
+	if (host_path) {
+		// The listen host's client half queues it on its loopback — retail's
+		// same QueueReliableMessage over transport mode 1 — to its own server.
+		loopback_->client_send(c2s::CHAT_MESSAGE, std::move(body));
+		return Result::Sent;
+	}
 	ProtocolMessage chat = make_protocol_message(c2s::CHAT_MESSAGE, std::move(body));
 	// QueueReliableMessage(0xD, 1, 310): the same 310-flush finite lifetime
 	// the 0x4C report and the medic call carry; the senders run outside the
 	// client net frame, so the line rides the held one-shot queue.
 	chat.retention_flushes = 310;
 	pre_send_queue_.push_back(std::move(chat));
+	return Result::Sent;
+}
+
+bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
+	if (tag != c2s::EMOTE_REQUEST && tag != c2s::RADIO_CALL_REQUEST) return false;
+	std::vector<uint8_t> body;
+	io::append_i16_le(body, value); // [orig: @0x42c137 / @0x42c167]
+	if (role_ == Role::HostClient && loopback_ != nullptr) {
+		loopback_->client_send(tag, std::move(body));
+		return true;
+	}
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
+	ProtocolMessage pick = make_protocol_message(tag, std::move(body));
+	pick.retention_flushes = 1; // the user param [orig: `push 1` @0x42c12c / @0x42c15c]
+	pre_send_queue_.push_back(std::move(pick));
 	return true;
 }
 
@@ -561,11 +627,33 @@ void ClientRuntime::update_net_quality() {
 				replication::net_quality_loss_metric(0.0));
 	}
 	const int32_t combined = std::max(0, client_quality_window_.quality);
-	net_quality_ = static_cast<uint8_t>(replication::net_quality_level(combined));
+	// CNetQuality_SetLevel(&g_NetQuality, level) [orig: @0x52659b]: the level
+	// the 0x4C report carries and the quality icon's channels ramp toward.
+	hud::net_quality_set_level(net_indicators_, replication::net_quality_level(combined));
 	replication::ClientNetQuality &net = view_.state().net;
-	net.level = net_quality_;
+	net.level = net_quality_level();
 	net.ping_ms = joiner_->client_ping_ms();
 	net.average_ping_ms = joiner_->client_average_ping_ms();
+}
+
+void ClientRuntime::set_net_quality_level(int32_t level) {
+	hud::net_quality_set_level(net_indicators_, level);
+}
+
+void ClientRuntime::raise_net_quality_link_errors(uint32_t mask) {
+	apply_net_quality_link_errors(mask);
+}
+
+// The link-error callbacks at the clock they fire on: bit 0 raises flag 1
+// (outgoing), bit 1 flag 2 (incoming) [orig: CNetQuality_SetLinkErrorFlag
+// @0x4c34f0, which Network_LogOutgoingPacketError @0x4c4943 / sub_4C62A0
+// @0x4c62ce and Network_LogIncomingPacketError @0x4c48b3 / @0x4c468f inline].
+void ClientRuntime::apply_net_quality_link_errors(uint32_t mask) {
+	const uint32_t now = view_.state().local_clock_ms;
+	if ((mask & kNetQualityLinkErrorOutgoing) != 0)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorOutgoing, now);
+	if ((mask & kNetQualityLinkErrorIncoming) != 0)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming, now);
 }
 
 bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
@@ -714,6 +802,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// The main frame's 62-frame quality fold runs ahead of the client net frame
 	// (the level it stores is what the 0x4C leg below reports).
 	if (role_ == Role::Joiner) update_net_quality();
+	// Then the connection indicators step once, in a session, still ahead of
+	// the client net frame whose callbacks raise their flags [orig:
+	// Game_ProcessMainFrame — `cmp is_in_session` @0x526680 ->
+	// CNetQuality_UpdateIndicators @0x52668d, Client_ProcessNetworkFrame
+	// @0x526692]. The session word is the view's: a joiner is always in one,
+	// the listen host's own client only on a networked host.
+	if (view_.mp_session()) hud::net_quality_update_indicators(net_indicators_, novaworld_link_);
 
 	// Per-frame tick bump — SKIPPED entirely while the clock is unseeded. The client's
 	// network-role tick is anchored by the host's S2C 0x61 seed, never free-run from zero:
@@ -721,6 +816,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// while it is 0. [orig: Client_ProcessNetworkFrame @0x42c193 cmp/jz -> loc_42C1F2;
 	// ++ @0x42c1ab, store @0x42c1b5]
 	if (current_tick_ != 0) ++current_tick_;
+	// The client's local millisecond clock the S2C 0x58 fold stamps and the
+	// RULES text's elapsed read compares (retail's GetTickCount): free-running
+	// one fixed tick per client net frame, independent of the seeded tick
+	// above [orig: SessionStatus_ParseFromBuffer @0x5310a5 stamps
+	// GetTickCount; SessionStatus_GetElapsedMS @0x52d5fc reads it].
+	view_.state().local_clock_ms += static_cast<uint32_t>(io::kTickMs);
 
 	// (0x34) keepalive — runs for EVERYONE (NOT authority-gated), emitted before the recv pump in the
 	// original [orig @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's
@@ -732,6 +833,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
 	}
+	// A joiner that has heard nothing for three whole seconds raises the
+	// incoming link error every frame, ahead of the receive pump [orig:
+	// Client_ProcessNetworkFrame @0x42c1f8..0x42c21e — `is_mp_session_peer &&
+	// !is_authority && CNapiNetwork_GetSessionUptime(ctx) > 2`; that getter
+	// @0x4c6ed0 is (GetTickCount() - napi_conn+0x5E8) / 1000, the connection's
+	// last-admitted-receive stamp, not a session uptime].
+	if (role_ == Role::Joiner && joiner_ != nullptr &&
+			joiner_->milliseconds_since_last_receive() / 1000u > 2u)
+		hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorIncoming,
+				view_.state().local_clock_ms);
 	lap.mark(devtools::Slot::SIM_CLIENT_SETUP);
 
 	// (1) RECV pump — fold S2C into ClientState, recv-before-send [orig: PumpClientProtocolRecv
@@ -743,7 +854,17 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			while (loopback_->client_recv(datagram)) {
 				if (!apply_zone_timer_body(datagram.tag, datagram.body))
 					view_.apply(datagram.tag, datagram.body);
+				// The world-state load's completion burst carries this
+				// client's first player-slot refresh: C2S 0x22 {0, 0x5CF7}
+				// then the 0x23 snapshot request. The burst's other members
+				// (0x28, 0x29, 0x2D, 0x32) are the host self-stream's own
+				// residual. [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab]
+				if (datagram.tag == s2c::WORLD_STATE_LOAD) {
+					loopback_->client_send(c2s::PLAYER_SYNC_REQUEST, {0x00, 0xF7, 0x5C});
+					loopback_->client_send(c2s::VISIBLE_PLAYERS_REQUEST, {});
+				}
 			}
+			drain_visible_refreshes();
 		}
 		// Host authority already spawned every accepted round/refill. Its decoded
 		// listen-client replica pipeline must not retain duplicate visual gameplay
@@ -759,6 +880,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
 			recv_fifo_.pop_front();
 			JoinerConnection::PollResult pr = joiner_->handle_datagram(dg.data(), dg.size());
+			// A 0x84 resend list that named a sequence is the outgoing link
+			// error, at its datagram's position [orig: NapiNP_HandleResendList
+			// @0x6239ef..0x623a37 -> cb_client_3 = Network_LogOutgoingPacketError
+			// @0x4c4920 -> flag 1].
+			apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 			if (joiner_->poll_session_loss()) {
 				// Host teardown sends its keyed goodbye burst synchronously, then
 				// destroys both pending and outgoing semantic queues. It does not
@@ -782,7 +908,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			view_.set_viewer_handle(joiner_->has_self_handle()
 					? joiner_->self_handle()
 					: 0xFFFFu);
+			// The spectate walk starts from and skips the local player
+			// [orig: Spectator_CycleTarget_0 @0x52ac56 / @0x52ad09].
+			view_.set_spectate_local_handle(joiner_->has_self_handle()
+					? joiner_->self_handle()
+					: 0xFFFFu);
 			view_.set_mp_attributes(joiner_->mp_attributes());
+			view_.set_local_player_slot(joiner_->local_player_slot());
 			// JoinerConnection has already allocated sequence numbers for exact
 			// admission packets and retained-session reconstruction. They still
 			// leave through PumpClientProtocolSend: queue their wire images so a
@@ -798,6 +930,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 						tb.first == s2c::PER_FRAME_UPDATE
 						? view_.state().health_updates_applied : 0;
 				view_.apply(tb.first, tb.second);
+				// Every 0x0F a joiner handles clears the link errors and holds
+				// new ones off for 10 s [orig: NapiNPClientMsg_0x00F — the
+				// `!is_authority` burst @0x42e5b7, CNetQuality_SetLinkErrorFlag
+				// (&g_NetQuality, 4) @0x42e660].
+				if (tb.first == s2c::WORLD_STATE_LOAD)
+					hud::net_quality_set_flag(net_indicators_, hud::kNetLinkErrorClear,
+							view_.state().local_clock_ms);
 				// Evaluate every 0x0A tail at its original position. A later
 				// positive sample cannot erase an earlier death edge.
 				if (tb.first == s2c::PER_FRAME_UPDATE &&
@@ -824,6 +963,21 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
 			}
 			sync_retries.clear();
+			// Each S2C 0x6A action-3 walk reply queues the next step of the
+			// clan-registry walk: one reliable C2S 0x4E {netId}
+			// [orig: NapiNPClientMsg_HandlePlayerJoinLeave ->
+			//  CNapiNetwork_QueueReliableMessage(ctx, 0x4E, 1, 0, {netId}, 4)
+			//  @0x43265c..0x43266c].
+			std::vector<uint32_t> &clan_walk = view_.state().pending_clan_walk_requests;
+			for (const uint32_t net_id : clan_walk) {
+				ClanRosterWalkRequest request;
+				request.after_account_id = net_id;
+				std::vector<uint8_t> datagram = joiner_->frame_inner(
+						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request));
+				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
+			}
+			clan_walk.clear();
+			drain_visible_refreshes();
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.
@@ -922,7 +1076,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42C2E1..0x42C2E6, then @0x42C2EB]
 	advance_zone_timers();
 	advance_tracked_window();
-	view_.tick_minimap_overlays();
+	view_.refresh_minimap_live_markers();
 	const bool preround_active = view_.state().preround_delay_seconds != 0;
 	// Client_ProcessNetworkFrame and its maintenance continue, but the later
 	// Entity_UpdateAllEntities body is skipped while the phase-0 mirror is
@@ -936,8 +1090,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: lean @0x4b5c97 and dip @0x4b5cab, both inside Entity_UpdateInfantryPlayerBody]
 	if (!preround_active) view_.tick_arms_dip();
 	// [orig: Entity_UpdateAllEntities @0x4C2221 -> sub_590950]
-	if (!preround_active && view_.state().radio_target.ticks_remaining)
-		--view_.state().radio_target.ticks_remaining;
+	if (!preround_active && view_.state().tracked_target.ticks_remaining)
+		--view_.state().tracked_target.ticks_remaining;
 
 	// The per-class between-update mover: one step per 62.5 Hz tick after the
 	// recv fold (retail order: net frame first, entity movers after). No-op on
@@ -957,7 +1111,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		if (++net_quality_timer_ > kNetQualityInterval) {
 			net_quality_timer_ = 0;
 			ProtocolMessage quality = make_protocol_message(
-					0x4C, std::vector<uint8_t>{net_quality_});
+					0x4C, std::vector<uint8_t>{net_quality_level()});
 			// This is neither indefinitely reliable nor one-send: retail passes
 			// userParam=310 and ages it in open logical send boundaries.
 			// [orig: QueueReliableMessage @0x42C279 -> user_param1 310]
@@ -1092,6 +1246,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// already carried it. Retail places this pump inside the same field-3 gate.
 		for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
 			outbound.push_back(std::move(d));
+		// A 0x44 missing-sequence request that named a sequence is the incoming
+		// link error [orig: CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
+		// -> cb_client_2 = Network_LogIncomingPacketError @0x4c4890 -> flag 2].
+		apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 		// Retail builds every packet at connection+0x64C, prunes message nodes
 		// against that same value, then increments it exactly once. MTU splits
 		// therefore remain one flush, and held frames never age finite records.
