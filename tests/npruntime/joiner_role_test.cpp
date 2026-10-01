@@ -19,6 +19,8 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/connection_fan.h>
+#include <formats/def/def.h>
+#include <formats/mission/mission.h>
 #include <runtime/mission/mission_kernel.h>
 
 #include <runtime/world/vehicle_motor.h>
@@ -208,6 +210,48 @@ bool run_in_match_spawn_edge() {
 	h.role.run_tick(h.input);
 	if (!expect(h.role.local_spawned(), "frame 2: still spawned")) return false;
 	return expect(h.kernel->world.cached.local_player == L, "frame 2: no re-spawn");
+}
+
+// L spawns on the in-match edge, after the boot's definition sweeps: the edge
+// binds its items.def row like the host's boot did, so L's body sounds resolve
+// through its own profile instead of the slotless "default" (silent footsteps
+// on every joiner). [orig: Entity_InitFromItemDef @0x49e550; the def+0x268
+// profile binding @0x49fb0f..0x49fb64]
+bool run_in_match_spawn_binds_local_player_definition() {
+	Harness h;
+	static const char kProfiles[] =
+			"begin \"default\"\n"
+			"end\n"
+			"begin \"SP_JoinerSelf\"\n"
+			"     SSLFootGND     T_DIRT_L\n"
+			"end\n";
+	if (!expect(h.kernel->world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1) == 2,
+			"profiles parsed")) return false;
+	std::vector<opennova::def::DefItemDef> rows(1);
+	rows[0].id = static_cast<int>(w::kPlayerInfantryTypeId) +
+			static_cast<int>(opennova::mission::kItemIdOffset);
+	rows[0].hp = 100;
+	std::snprintf(rows[0].sound_profile, sizeof(rows[0].sound_profile), "SP_JoinerSelf");
+	opennova::def::DefItemsFile items{};
+	items.entries = rows.data();
+	items.count = rows.size();
+	h.kernel->set_items_table(&items);
+
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	const w::EntityHandle L = h.kernel->world.cached.local_player;
+	if (!expect(h.role.local_spawned() && L.valid(), "L spawned on the edge")) return false;
+	const w::AiEntity *body = h.kernel->world.ai.for_handle(L);
+	const w::Entity *e = h.kernel->world.registry.get(L);
+	bool ok = expect(body != nullptr && e != nullptr, "L has its body");
+	if (!ok) return false;
+	ok &= expect(body->profile.sound_profile == 1,
+	             "L's sound profile is its items.def row's, not the slotless default");
+	ok &= expect(e->has_item_def, "L carries its items.def traits");
+	h.kernel->set_items_table(nullptr);
+	return ok;
 }
 
 // The runtime owns H across removal and repair; every weapon and presenter
@@ -1277,6 +1321,7 @@ int main() {
 	ok &= run_pre_match_frame();
 	ok &= run_preload_frame();
 	ok &= run_in_match_spawn_edge();
+	ok &= run_in_match_spawn_binds_local_player_definition();
 	ok &= run_self_handle_lifecycle();
 	ok &= run_spawn_stamps_equipped_adm_from_midframe_grant();
 	ok &= run_reset_for_join();
