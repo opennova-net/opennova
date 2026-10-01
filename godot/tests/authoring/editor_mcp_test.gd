@@ -385,17 +385,21 @@ func test_request_table_on_the_wire() -> void:
 	# beside it (kind's tokens its enum), the objects the writes carry.
 	assert_true(served.has("set_viewport") and served.has("edit_in_viewport") and named.has("viewport"))
 	var reads: Array = []
+	var viewport_kinds: Array = []
 	for row: Variant in catalog.get("queries", []):
 		if String((row as Dictionary).get("name", "")) == "viewport":
 			for param: Variant in (row as Dictionary).get("params", []):
 				if String((param as Dictionary).get("name", "")) == "op":
 					reads = (param as Dictionary).get("enum", [])
+				elif String((param as Dictionary).get("name", "")) == "kind":
+					viewport_kinds = (param as Dictionary).get("enum", [])
 	assert_eq(reads, ["state", "items", "hit", "notes", "render"], "the catalog lists the query's ops")
+	assert_true(viewport_kinds.has("menu") and viewport_kinds.has("model"), str(viewport_kinds))
 	var properties: Dictionary = viewport.get("inputSchema", {}).get("properties", {})
 	assert_eq(properties.get("op", {}).get("enum", []), reads + ["options", "camera", "seek", "drag", "command"])
 	for key in ["path", "kind", "x", "y", "row", "offset", "limit", "options", "camera", "clock", "device", "drag", "command"]:
 		assert_true(properties.has(key), "editor_viewport takes %s" % key)
-	assert_eq(properties.get("kind", {}).get("enum", []), ["menu", "model"], "the viewport kinds' tokens")
+	assert_eq(properties.get("kind", {}).get("enum", []), viewport_kinds, "the viewport kinds' tokens, the catalog's")
 	assert_eq(String(properties.get("x", {}).get("type", "")), "number", "a point is a number")
 	assert_eq(int(properties.get("limit", {}).get("maximum", 0)), int(catalog.get("page_max", -1)))
 	var description := String(viewport.get("description", ""))

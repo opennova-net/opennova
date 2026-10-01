@@ -26,6 +26,7 @@
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
@@ -578,8 +579,12 @@ static int test_pathless_clock() {
 	session.handle(request::open_document("menu_style.mns"));
 	TEST_EXPECT(done(wired.wire(R"({"kind": "set_viewport", "viewport": {"clock": {"playing": false, "time_ms": 120}}})")));
 	TEST_EXPECT(!session.viewports().clock().playing() && session.viewports().clock().ms() == 120);
+	// The types that show in one named from the kinds' table, so a kind added names its own: the first
+	// rows' as the menu's and the model's name them.
+	const std::string shown = viewport_shown_types();
+	TEST_EXPECT(shown.rfind("a menu, a model, an animation, an animation map", 0) == 0);
 	TEST_EXPECT(refused(wired.wire(R"({"kind": "set_viewport", "viewport": {"device": {"width": 640}, "clock": {"time_ms": 40}}})"),
-			"shows in no viewport (a menu, a model, an animation or an animation map does)"));
+			"shows in no viewport (" + shown + " does)"));
 	TEST_EXPECT(refused(wired.wire(R"({"kind": "set_viewport", "viewport": {"kind": "menu", "clock": {"time_ms": 40}}})"),
 			"does not show in a menu viewport"));
 	TEST_EXPECT(session.viewports().clock().ms() == 120);

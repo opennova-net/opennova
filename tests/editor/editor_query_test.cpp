@@ -40,6 +40,7 @@
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/view/viewport_kind.h>
 #include <editor/session/view_json.h>
 #include <formats/pff/pff.h>
 
@@ -1415,10 +1416,19 @@ static int test_viewport_query() {
 	NodeAddress title;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && title.child);
 
-	// The refusals by the op and its params: an op or a kind no choice of theirs, a param the op does
-	// not take, one it needs, a point no number a float holds.
+	// The refusals by the op and its params: an op or a kind no choice of theirs (the kinds the viewport
+	// kinds' tokens, in the table's order), a param the op does not take, one it needs, a point no
+	// number a float holds.
+	std::vector<std::string> kind_tokens;
+	std::string kinds_named;
+	for (size_t i = 0; i < kViewportKindCount; ++i) {
+		kind_tokens.push_back(viewport_kind_token(static_cast<ViewportKind>(i)));
+		kinds_named += (i ? ", " : "") + kind_tokens.back();
+	}
+	TEST_EXPECT(kind_tokens.size() >= 2 && kind_tokens[0] == "menu" && kind_tokens[1] == "model");
 	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, notes, render, not \"zoom\"."));
-	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})", "\"kind\" is one of menu, model, not \"map\"."));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})",
+			("\"kind\" is one of " + kinds_named + ", not \"map\".").c_str()));
 	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
 	TEST_EXPECT(says(R"({"op": "hit", "x": 1, "y": 2, "limit": 3})",
 			"op hit takes no \"limit\" (it takes path, kind, op, x, y)."));
@@ -1444,7 +1454,7 @@ static int test_viewport_query() {
 		}
 	}
 	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "notes", "render" }));
-	TEST_EXPECT(kinds == (std::vector<std::string>{ "menu", "model" }));
+	TEST_EXPECT(kinds == kind_tokens);
 	for (const std::string &op : ops) {
 		std::string args = R"({"op": ")" + op + "\"";
 		if (op == "hit") args += R"(, "x": 1, "y": 1)";
