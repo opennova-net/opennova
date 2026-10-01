@@ -17,6 +17,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <formats/wac/command.h>
 #include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/audio/oneshot_play.h>
 #include <runtime/wac/compiler.h>
 #include <runtime/wac/remote_command.h>
 #include <runtime/wac/vm.h>
@@ -178,11 +179,75 @@ void test_short_body_zero_fill_and_authority_gate() {
 	CHECK(view.malformed_bodies() == 1);
 }
 
+// D-WAC-5: a SoundSet operand travels as the host's trigger-set POINTER that
+// a retail receiver dereferences in its own process; only 0 is null-tested
+// first. The host's local handler still plays its catalog set, while the
+// record it queues for the wire carries 0, the unresolved value retail itself
+// sends, so a stock joiner never reads through a 1-based handle and every
+// receiver plays nothing for that operand.
+// [orig: WacScript_ResolveParameter @0x4f2fe2..0x4f2ff2; the dword arm
+//  @0x4f5d59; Sound_Play3DPositional @0x527cc6/@0x527cd1;
+//  WacCmd_SoundToTarget @0x4f7fa7; SoundBank_PlayTriggerEntries @0x75ccdd]
+void test_soundset_operand_travels_as_unresolved() {
+	lwf::File bank;
+	lwf::Multi set;
+	set.name = "boom";
+	bank.multis.push_back(set);
+	audio::SoundSetIndex sounds;
+	sounds.add_bank(0, bank);
+	CompileEnv env;
+	env.sounds = &sounds;
+	const Program program = compile_source("sound(SS_BOOM,5,7)\nsound2tgt(SS_BOOM,3)\n", env);
+	CHECK(program.ok());
+
+	Peer host;
+	host.world.cached.local_player = host.spawn(10, 0);
+	WacVm vm;
+	vm.load(program);
+	vm.execute(host.world);
+	// The host's own handler resolved its catalog handle.
+	CHECK(host.world.out.script_sounds.size() == 1);
+	if (host.world.out.script_sounds.size() != 1) return;
+	const ScriptSoundEvent played = host.world.out.script_sounds[0];
+	CHECK(played.name == "boom");
+	const std::vector<world::ScriptRemoteCommand> &queue = host.world.out.script_remote_commands;
+	CHECK(queue.size() == 2);
+	if (queue.size() != 2) return;
+	CHECK(queue[0].command_index == wac_command_index("sound"));
+	// The SoundSet operand alone is cleared; the rest travel as resolved.
+	CHECK(queue[0].args.size() == 3 && queue[0].args[0].value == 0 &&
+			queue[0].args[1].value == played.distance_q16 &&
+			queue[0].args[2].value == played.bearing);
+	CHECK(queue[1].command_index == wac_command_index("sound2tgt"));
+	CHECK(queue[1].args.size() == 2 && queue[1].args[0].value == 0 &&
+			queue[1].args[1].value == 3);
+
+	// On the wire the operand is four zero bytes behind the u16 index.
+	const std::vector<uint8_t> wire = to_wire(queue[0]);
+	CHECK(wire.size() == 14);
+	if (wire.size() == 14)
+		CHECK(wire[2] == 0 && wire[3] == 0 && wire[4] == 0 && wire[5] == 0);
+
+	// A joiner holding the same catalog plays nothing for the 0 operand.
+	Peer joiner;
+	replication::ClientReplicaPipeline view;
+	view.apply(s2c::SCRIPT_REMOTE_COMMAND, wire);
+	for (const opennova::ScriptRemoteCommand &command : view.drain_script_remote_commands()) {
+		std::vector<ScriptRemoteArg> args;
+		for (const ScriptRemoteCommandArg &arg : command.args)
+			args.push_back({static_cast<int32_t>(arg.value), arg.text});
+		run_remote_command(joiner.world, command.command_index, args,
+				{nullptr, &sounds.names()});
+	}
+	CHECK(joiner.world.out.script_sounds.empty());
+}
+
 } // namespace
 
 int main() {
 	test_host_records_reach_joiner_handlers();
 	test_short_body_zero_fill_and_authority_gate();
+	test_soundset_operand_travels_as_unresolved();
 	std::printf("script_remote_command: %d failures\n", failures);
 	return failures ? 1 : 0;
 }
