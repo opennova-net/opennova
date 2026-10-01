@@ -432,14 +432,17 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **Bundled assets**:
 The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
-authored from scratch. Today it is only the placeholder main menu that says the
-OpenNova game is coming and offers **PLAY RETAIL**. The game mounts it when no
-`--resource-dir` is given (ADR 0048).
+authored from scratch. Today it is the placeholder main menu that says the
+OpenNova game is coming and offers **PLAY RETAIL**, plus the first pieces of the
+game's own data (the `on_ar15` carbine and arms the Blender add-on exports from
+`art/`, not yet referenced). The game mounts it when no `--resource-dir` is given
+(ADR 0048); the web build stages it, minus that unreferenced art, into the page's
+filesystem before boot (ADR 0049).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
 `opennova.exe` hosting a match without being a player: the host screen's retail Serve Only
-server type (`SERVERTYPE` = 1), runnable windowed or `--headless`. A mode of the game product, never a separate binary,
+server type (`SERVERTYPE` = 1); retail has no command-line auto-host to port. A mode of the game product, never a separate binary,
 riding the one in-match seam (ADR 0015).
 _Avoid_: dedicated server product, server exe, opennova-server
 
@@ -819,7 +822,7 @@ The in-game heads-up display, laid out by `hudpos.def`. RE record:
 _Avoid_: overlay, UI (too broad)
 
 **Dev tools**:
-The engine-owned Dear ImGui tool windows behind F3 (`engine/runtime/devtools`,
+The engine-owned Dear ImGui tool windows behind Insert (`engine/runtime/devtools`,
 ADR 0039): the Stats window over the frame-stats board, and every inspection
 or control window added later. Debug builds only; the Godot side is one
 `DevTools` node plus the imgui-godot addon.

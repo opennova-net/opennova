@@ -181,8 +181,8 @@ bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
 }
 
 std::vector<uint8_t> serialize_session_status(
-		const GameConfig &config, uint32_t uptime_ms,
-		uint32_t active_players, world::World *match_world) {
+		const GameConfig &config, uint32_t uptime_ms, bool in_session,
+		world::World *match_world) {
 	std::vector<uint8_t> out;
 	// Napi_CopyString stores at most 31/63 characters in the 32/64-byte report
 	// fields before the serializer walks the resulting C strings.
@@ -203,9 +203,14 @@ std::vector<uint8_t> serialize_session_status(
 
 	std::vector<std::pair<uint8_t, uint32_t>> options;
 	const uint32_t game_type = config.game_type;
-	if (gtype::is_waypoint_family(game_type) && active_players > 0) {
-		options.emplace_back(
-				9, std::min<uint32_t>(active_players, 8));
+	// Co-op's key 9 is the mission's defined-subgoal count (the leading run of
+	// authored win conditions, at most 8), sent only when nonzero.
+	// [orig: Server_BuildStatusReport @0x530cb0..0x530ce1 — the scan of
+	//  g_MissionWinConditionIds @0xA7628C, the same run
+	//  Score_CountMissionSubgoalsAndUnits @0x509dc4 counts]
+	if (gtype::is_waypoint_family(game_type) && match_world != nullptr) {
+		const int32_t subgoals = world::count_defined_subgoals(*match_world);
+		if (subgoals > 0) options.emplace_back(9, static_cast<uint32_t>(subgoals));
 	}
 	if (game_type == gtype::kDeathmatch || game_type == gtype::kTeamDeathmatch) {
 		options.emplace_back(1, config.score_limit);
@@ -245,7 +250,9 @@ std::vector<uint8_t> serialize_session_status(
 	// Every live non-objective session with a nonzero respawn time appends key
 	// 8. Objective Co-op (0x30020) suppresses it; training Co-op (0x10020)
 	// therefore carries both key 9 and key 8 in the retail oracle.
-	if (!gtype::is_objective(game_type) && config.respawn_time != 0) {
+	// [orig: Server_BuildStatusReport @0x530e71..0x530eac — is_in_session,
+	//  !(type & 0x20000), g_RespawnTime != 0]
+	if (in_session && !gtype::is_objective(game_type) && config.respawn_time != 0) {
 		options.emplace_back(8, config.respawn_time);
 	}
 	if (options.size() > 8) options.resize(8);

@@ -1384,6 +1384,13 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
         }
         --tick_entity->spawn_phase;
     }
+    // The radio-request latch (0x6D call 6) ages on the body's raw 64-tick
+    // window: the seconds count down, and a spent count clears the latch.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b467a..0x4b469d]
+    if (tick_entity != nullptr && !npc_body && (logic_tick & 0x3Fu) == 0u) {
+        if (tick_entity->radio_request_seconds != 0) --tick_entity->radio_request_seconds;
+        else tick_entity->radio_request = 0;
+    }
 
     // A remote player's locomotion source is its C2S pose snapshot, so do not
     // run the NPC/local-input movement core over it. The authority still runs
@@ -2201,14 +2208,17 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
                     ? inf.vel[2] <= fall_threshold
                     : inf.airborne && (org1_body ? !org1_dead_now() : e.health > 0) &&
                       inf.vel[2] <= fall_threshold;
-            // org2's local-player damage feedback: red vignette + camera shake,
-            // between the threshold test and the authority/Indestructible tests
+            // org2's local-player damage feedback: red vignette + camera shake +
+            // the self radar blip (the source is the body itself, the point its
+            // own Position), between the threshold test and the
+            // authority/Indestructible tests
             // [orig: @0x4b7d23..0x4b7d2d -> Player_OnDamageReceived @0x4dd880].
-            // (org1's own arm @0x4b61e8 sits on ITS death leg instead -- that
-            // motor's health-adjust block, health <= 0 and not already dead --
-            // and this unified motor has no separate org1 death leg to hang it
-            // on, so it stays unported; world-wac-ai-re carries the note.)
-            if (inf.is_local_player && fall_charges) player_on_damage_received(world);
+            // (the other org2 arm @0x4b61e8 sits on the death leg of the
+            // health-adjust block @0x4b5f2c..0x4b622d -- the header rates, the
+            // POWER pool timers and the type-1/2 zones -- which is unported as
+            // a whole, D-INF-28; world-wac-ai-re carries the note.)
+            if (inf.is_local_player && fall_charges)
+                player_on_damage_received(world, radar_entity_source(world, e.handle), e.pos);
             if (fall_charges && is_authority &&
                 (tick_flags & kEntityFlagIndestructible) == 0) {
                 int32_t excess = fall_threshold - inf.vel[2];

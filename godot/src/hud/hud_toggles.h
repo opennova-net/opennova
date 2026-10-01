@@ -8,6 +8,7 @@
 
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
 #include <runtime/hud/hud_toggles.h>
@@ -32,19 +33,87 @@ public:
 		EVENT_SHOW_SCORE_TOGGLED = opennova::hud::hud_toggle_event::kShowScoreToggled,
 		EVENT_OVERLAY_WINDOWS_CLEARED = opennova::hud::hud_toggle_event::kOverlayWindowsCleared,
 		EVENT_GUN_VIEW_SELECTED = opennova::hud::hud_toggle_event::kGunViewSelected,
+		EVENT_FRIENDLY_TAGS_CYCLED = opennova::hud::hud_toggle_event::kFriendlyTagsCycled,
+		EVENT_HELP_TOGGLED = opennova::hud::hud_toggle_event::kHelpToggled,
+		EVENT_MAP_LEGEND_TOGGLED = opennova::hud::hud_toggle_event::kMapLegendToggled,
+		EVENT_BRIEFING_TOGGLED = opennova::hud::hud_toggle_event::kBriefingToggled,
+		EVENT_BRIEFING_PAGES_RESET = opennova::hud::hud_toggle_event::kBriefingPagesReset,
+		EVENT_VERBOSE_TOGGLED = opennova::hud::hud_toggle_event::kVerboseToggled,
+		EVENT_ESCAPE_CLOSED_WINDOW = opennova::hud::hud_toggle_event::kEscapeClosedWindow,
+		EVENT_ESCAPE_OPEN_MENU = opennova::hud::hud_toggle_event::kEscapeOpenMenu,
+		EVENT_COMMAND_MAP_OPENED = opennova::hud::hud_toggle_event::kCommandMapOpened,
+		EVENT_SCOREBOARD_PAGE_RESET = opennova::hud::hud_toggle_event::kScoreboardPageReset,
+		EVENT_PAUSE_TOGGLED = opennova::hud::hud_toggle_event::kPauseToggled,
+		EVENT_PAUSE_CLEARED = opennova::hud::hud_toggle_event::kPauseCleared,
+		EVENT_SERVER_STATUS_VIEW_TOGGLED = opennova::hud::hud_toggle_event::kServerStatusViewToggled,
+		EVENT_SERVER_STATUS_SCORE_LIST_TOGGLED =
+				opennova::hud::hud_toggle_event::kServerStatusScoreListToggled,
+		EVENT_QUIT_DIALOG_OPENED = opennova::hud::hud_toggle_event::kQuitDialogOpened,
+	};
+	// The special-key legs' result bits (engine hud_special_key).
+	enum SpecialKey {
+		SPECIAL_KEY_CONSUMED = opennova::hud::hud_special_key::kConsumed,
+		SPECIAL_KEY_CHAIN_TAKEN = opennova::hud::hud_special_key::kChainTaken,
+		SPECIAL_KEY_QUIT_CONFIRMED = opennova::hud::hud_special_key::kQuitConfirmed,
+		SPECIAL_KEY_RESTART_QUEUED = opennova::hud::hud_special_key::kRestartQueued,
+	};
+	// The polled catalog rows, one bit each (engine HudToggleRow).
+	enum Row {
+		ROW_HUD_DETAIL = opennova::hud::kRowHudDetail,
+		ROW_HUD_COLOR = opennova::hud::kRowHudColor,
+		ROW_SHOWHUD = opennova::hud::kRowShowHud,
+		ROW_DOTSIZE = opennova::hud::kRowDotsize,
+		ROW_GOALS = opennova::hud::kRowGoals,
+		ROW_VIEW1ST = opennova::hud::kRowView1st,
+		ROW_VIEW_WITH_GUN = opennova::hud::kRowViewWithGun,
+		ROW_VIEW_CHASE = opennova::hud::kRowViewChase,
+		ROW_PLAYER_LIST = opennova::hud::kRowPlayerList,
+		ROW_OLD_MESSAGES = opennova::hud::kRowOldMessages,
+		ROW_SHOW_SCORE = opennova::hud::kRowShowScore,
+		ROW_FRIENDLY_TAGS = opennova::hud::kRowFriendlyTags,
+		ROW_HELP = opennova::hud::kRowHelp,
+		ROW_HELP_MAP = opennova::hud::kRowHelpMap,
+		ROW_BRIEFING = opennova::hud::kRowBriefing,
+		ROW_VERBOSE = opennova::hud::kRowVerbose,
+		ROW_COMMANDER_MENU = opennova::hud::kRowCommanderMenu,
+		ROW_PAUSE = opennova::hud::kRowPause,
+		ROW_AUDIO_EMOTE = opennova::hud::kRowAudioEmote,
+		ROW_RADIO_MACRO = opennova::hud::kRowRadioMacro,
+		ROW_TOGGLE_SERVER = opennova::hud::kRowToggleServer,
+		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
-	// One frame's poll over the sampled key states; returns the Event bits.
-	int poll(bool p_huddetail, bool p_hudcolor, bool p_rows_share_key, bool p_showhud,
-			bool p_dotsize, bool p_goals, bool p_view1st, bool p_viewwithgun, bool p_viewchase,
-			bool p_playerlist, bool p_old_messages, bool p_show_score, bool p_chorded,
-			bool p_active, bool p_in_session);
-	// The respawn / mission init: the three overlay windows and the latches clear.
+	// One frame's poll over the sampled rows (a mask of 1 << Row); returns the
+	// Event bits.
+	// `local_alive` feeds the commander_menu row's dead-player gate;
+	// `authority` / `mp_session_peer` are the connection mode's two bits (the
+	// ToggleServer row, the map-legend gate and the playerlist reroute).
+	int poll(int p_rows_down, bool p_rows_share_key, bool p_chorded, bool p_active,
+			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
+			bool p_authority = false, bool p_mp_session_peer = false);
+	// The escape action's HUD-window close chain; returns the Event bits.
+	int escape(bool p_in_session, bool p_spawn_gate, bool p_authority = false);
+	// The session create / destroy's status-view rule (engine
+	// hud_toggles_session_init).
+	void session_init(bool p_in_session, bool p_mp_session_peer);
+	// The special-key handler's quit-dialog leg over one key-down VK; returns
+	// the SpecialKey bits (the yes / no / restart VKs are the gametext
+	// KeyPress letters).
+	int quit_dialog_key(int p_vk, bool p_in_session, int p_yes_vk, int p_no_vk, int p_restart_vk);
+	// The special-key handler's status-page leg: true = the key is consumed.
+	bool server_status_page_key(int p_vk, bool p_in_session, bool p_authority,
+			bool p_mp_session_peer) const;
+	// The catalog config token behind a Row.
+	static String row_token(int p_row);
+	// The respawn / mission init: the overlay windows and the latches clear.
 	void reset_mission();
 	// The death-screen force of the live declutter level.
 	void force_death_screen_hud_detail();
 	// The friendly-tags cycle; returns the gametext Misc toast key for the new mode.
 	String cycle_friendly_tags();
+	// The Misc toast key for the current friendly-tag mode / verbose flag.
+	String friendly_tag_toast_key() const;
+	String verbose_toast_key() const;
 	// The direct cycles (the action dispatch without a key: tests, the F3 seams).
 	void cycle_hud_color();
 	void cycle_hud_detail();
@@ -62,6 +131,34 @@ public:
 	bool is_scoreboard_open() const;
 	bool is_message_log_open() const;
 	bool is_end_round_stats_open() const;
+	bool is_help_open() const;
+	bool is_map_legend_open() const;
+	int get_briefing_mode() const;
+	bool is_mp_verbose() const;
+	bool is_emotes_menu_open() const;
+	bool is_radio_menu_open() const;
+	// A menu pick's close (engine hud_toggles_close_voice_menu): the player
+	// input router applies it with the pick it sends.
+	void close_voice_menu(bool p_radio);
+	// The single-player pause word (engine HudToggleState::paused): the shell's
+	// in-game menu sets it on open and clears it on resume out of a session.
+	bool is_paused() const;
+	void set_paused(bool p_paused);
+	// The authority's server-status view, its score list and the quit dialog
+	// (engine HudToggleState).
+	bool is_server_status_view() const;
+	bool is_server_status_score_list_open() const;
+	bool is_quit_dialog_open() const;
+	// The tip (engine hud/tip_system.h): the drained producer events, the
+	// HUD clock's main frames of countdown, the SP restart's full reset, the
+	// two options and the showing tip for the draw.
+	void apply_tip_events(const PackedByteArray &p_events);
+	void advance_tip_frames(int p_frames);
+	void restart_round();
+	void set_tip_options(bool p_keyboard_tips, bool p_gameplay_tips);
+	int get_tip() const;
+	int get_tip_countdown() const;
+	bool is_tip_showing() const;
 
 	const opennova::hud::HudToggleState &state() const { return state_; }
 
@@ -75,3 +172,5 @@ private:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::HudToggles::Event);
+VARIANT_ENUM_CAST(godot::HudToggles::Row);
+VARIANT_ENUM_CAST(godot::HudToggles::SpecialKey);

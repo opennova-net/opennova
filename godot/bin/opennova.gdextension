@@ -31,3 +31,7 @@ macos.debug.opennova_runtime = "res://bin/libopennova.macos.template_debug.arm64
 macos.release.opennova_runtime = "res://bin/libopennova.macos.template_release.universal.dylib"
 macos.debug.opennova_editor = "res://bin/libopennova_editor.macos.template_debug.arm64.dylib"
 macos.release.opennova_editor = "res://bin/libopennova_editor.macos.template_release.universal.dylib"
+; The Web export (ADR 0049) loads the runtime-only side module, the one web library:
+; the editor has no web build (godot/src/CMakeLists.txt), and a source run is never web.
+web.debug.threads.wasm32 = "res://bin/libopennova.web.template_debug.wasm32.wasm"
+web.release.threads.wasm32 = "res://bin/libopennova.web.template_release.wasm32.wasm"

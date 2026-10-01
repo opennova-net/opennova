@@ -8,6 +8,7 @@
 //  @0x562240; UI_UpdateDeathScreenContent @0x5536a0]
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/effect_pose_index.h>
+#include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/role_feeds.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/world/angle.h>
@@ -51,6 +52,34 @@ int main() {
 		std::vector<EntityLightingChange> changes;
 		sun.collect(bare, step, {}, {}, 5, changes);
 		CHECK(changes.empty() && sun.last_by_wire.size() == 1 && sun.layout_revision_seen == -1);
+	}
+
+	// The Tab board header's session variables: none on the bare role; the
+	// authority's serializer copies, re-parsed through the client caps on a
+	// session peer (a listen host); the stock Co-op selector names the map file.
+	// [orig: Game_SerializeMissionInfoToDataStream @0x523620;
+	//  SaveFile_SendAndWaitForServerAck @0x5204c4..0x5204f5;
+	//  Client_ParseServerSessionVariables @0x5203b5 / @0x5203e0]
+	{
+		CHECK(scoreboard_session_vars(RoleView{}).server_name.empty());
+		NapiNPServerCtx host;
+		host.config.server_name = std::string(40, 'S');
+		host.config.mission_name = "Dormant Volcano Isle";
+		host.config.mission_file = "ASH_I5A.BMS";
+		host.config.game_type = 0x10010;
+		RoleView view;
+		view.host = &host;
+		host.is_mp_session_peer = 0;
+		SessionVars vars = scoreboard_session_vars(view);
+		CHECK(vars.server_name.size() == 40 && vars.mission_name == "Dormant Volcano Isle");
+		host.is_mp_session_peer = 1;
+		vars = scoreboard_session_vars(view);
+		CHECK(vars.server_name == std::string(31, 'S') &&
+				vars.mission_name == "Dormant Volcano Isle" && vars.game_type == 0x10010);
+		host.config.game_type = 0x10020;
+		CHECK(scoreboard_session_vars(view).mission_name == "ASH_I5A.BMS");
+		host.config.game_type = 0x30020;
+		CHECK(scoreboard_session_vars(view).mission_name == "Dormant Volcano Isle");
 	}
 
 	// A joiner's view: the 0x1D header + 0x56 board folded into its replica state.
@@ -110,6 +139,7 @@ int main() {
 	{
 		cs.breath_samples = 40;
 		cs.breathtime = 25;
+		cs.spawn_success_gate = true; // the folded round-over latch
 		const BreathBarFacts j = breath_bar_facts(joiner);
 		CHECK(j.samples == 40 && j.breath_time == 25 && j.spawn_success_gate);
 		ClientRuntime host_runtime("host-breath");
@@ -123,6 +153,111 @@ int main() {
 		CHECK(h.samples == 12 && h.breath_time == 30 && !h.spawn_success_gate);
 		const BreathBarFacts none = breath_bar_facts(RoleView{});
 		CHECK(none.samples == 0 && none.breath_time == 20 && !none.spawn_success_gate);
+	}
+
+	// The HUD's role facts: the session lines' globals off the replica (a
+	// joiner's 0x08 time-limit copy, the 0x16 team rows read signed, the
+	// UNclamped round clock) and the kernel (the session bit, the local
+	// team, the A&D latch) [orig: HUD_DrawGameTimerOverlay @0x59cc80;
+	// HUD_DrawScoreOverlay @0x593e50; HUD_DrawTeamIdLine @0x59aa30].
+	{
+		ClientRuntime rt("hud-facts");
+		replication::ClientState &st = rt.state();
+		st.permanent_death = true;
+		st.session_time_limit_minutes = 15;
+		st.round_time_remaining_ticks = -1;
+		st.scoreboard.alive_player_count = 3;
+		st.scoreboard.spectator_count = 2;
+		st.scoreboard.rows.resize(6);
+		st.scoreboard.teams.resize(3);
+		st.scoreboard.teams[1].score1 = static_cast<uint16_t>(0xFFFEu); // -2 through movsx
+		st.scoreboard.teams[1].koth_hold = 4;
+		st.scoreboard.teams[2].score1 = 90;
+		mission::MissionKernel kernel;
+		kernel.world.rules.mp_session = true;
+		kernel.world.registry.configure_pool(0, 8);
+		world::Entity seed;
+		seed.kind = world::EntityKind::Organic;
+		seed.team = 2;
+		kernel.world.cached.local_player = kernel.world.registry.spawn(0, seed);
+		kernel.local.attack_defend_role = 1;
+		RoleView view;
+		view.runtime = &rt;
+		view.kernel = &kernel;
+		view.joiner = true;
+		const HudRoleFacts f = hud_role_facts(view);
+		CHECK(f.session.in_session && f.session.round_time_remaining == -1 &&
+				f.session.permanent_death && f.session.remaining_count == 3 &&
+				f.session.row_count == 6 && f.session.spectator_count == 2);
+		CHECK(f.session.time_limit_minutes == 15 && f.session.team_score1[0] == -2 &&
+				f.session.team_koth[0] == 4 && f.session.team_score1[1] == 90);
+		CHECK(f.session.team == 2 && f.session.attack_defend == 1 && f.session.zone_coverage == 0);
+		// No inventory: every slot-bar category empty.
+		CHECK(f.slot_bar[6].adm_index == -1 && f.slot_bar[0].count == 0);
+		// The F9 / F10 menus resolve only when asked: each row's voice-macro
+		// key (flags 0xC / 6) and, with no vmacros table, the key itself and
+		// the literal titles [orig: HUD_DrawEmotesMenu @0x5bff00 — the key
+		// @0x5bff9e, the fallbacks @0x5bffdf / @0x5bff57; HUD_DrawRadioTitleMenu
+		// @0x5bfb90 — @0x5bfc2e, @0x5bfc6f / @0x5bfbe7].
+		CHECK(!f.emotes_menu.shown && !f.radio_menu.shown);
+		const HudRoleFacts menus = hud_role_facts(view, kHudVoiceMenuEmotes | kHudVoiceMenuRadio);
+		CHECK(menus.emotes_menu.shown && menus.radio_menu.shown);
+		CHECK(menus.emotes_menu.title == "!EMOTES_Title" && menus.radio_menu.title == "!Radio_Title");
+		CHECK(menus.emotes_menu.texts[0] == "EMO_1" && menus.emotes_menu.texts[6] == "EMO_7");
+		CHECK(menus.emotes_menu.texts[7].rfind("EMO_", 0) == 0 && menus.emotes_menu.texts[7] != "EMO_8");
+		CHECK(menus.radio_menu.texts[0] == "RAD_1" && menus.radio_menu.texts[7] == "RAD_8");
+		CHECK(menus.radio_menu.texts[8].rfind("RAD_", 0) == 0 && menus.radio_menu.texts[8] != "RAD_9");
+		const HudRoleFacts none = hud_role_facts(RoleView{});
+		CHECK(!none.session.in_session && none.session.round_time_remaining == -1);
+		// The death screen's spectate arm: with a target and a sub-mode the
+		// info is rebuilt for the target (its team byte, name and health
+		// ratio, a negative Health reading back as full); a missing sub-mode
+		// or a missing row keeps the local build [orig: HUD_RenderOverlays
+		// @0x5a7bdb..0x5a7c25; HUD_BuildEntityInfo @0x4b87c7..0x4b87d3].
+		CHECK(!f.session.spectating);
+		kernel.world.tables.player.item_hp = 200;
+		replication::ClientEntityState &target = st.upsert(0x0005);
+		target.team = 1;
+		target.team_known = true;
+		target.display_name = "Bravo";
+		target.health_word = 50;
+		target.health_known = true;
+		st.death_screen_active = true;
+		st.spectate_target = 0x0005;
+		st.death_screen_submode = 0;
+		CHECK(!hud_role_facts(view).session.spectating); // the gate needs a sub-mode
+		st.death_screen_submode = 1;
+		const HudRoleFacts spec = hud_role_facts(view);
+		CHECK(spec.session.spectating && spec.session.team == 1 &&
+				spec.session.spectated_name == "Bravo" &&
+				spec.session.spectated_health_fraction == 0.25f);
+		target.health_word = static_cast<uint16_t>(-5);
+		CHECK(hud_role_facts(view).session.spectated_health_fraction == 1.0f);
+		st.spectate_target = 0x0009;
+		const HudRoleFacts gone = hud_role_facts(view);
+		CHECK(!gone.session.spectating && gone.session.team == 2);
+		st.death_screen_active = false;
+		st.spectate_target = 0xFFFF;
+		st.death_screen_submode = 0;
+		// The A&D side latch: the first TARGET-attrib def in pool 2 (then 1)
+		// against the local team — another team's target attacks (2), our own
+		// defends (1); any other game type clears it [orig: sub_524110 @0x524110].
+		kernel.world.registry.configure_pool(1, 4);
+		kernel.world.registry.configure_pool(2, 4);
+		world::Entity item;
+		item.has_item_def = true;
+		item.item_attrib = 0x8000u;
+		item.team = 2;
+		kernel.world.registry.spawn(1, item);
+		kernel.local.latch_attack_defend_role(0x10002u);
+		CHECK(kernel.local.attack_defend_role == 1);
+		world::Entity building = item;
+		building.team = 1;
+		kernel.world.registry.spawn(2, building); // pool 2 is walked first
+		kernel.local.latch_attack_defend_role(0x10002u);
+		CHECK(kernel.local.attack_defend_role == 2);
+		kernel.local.latch_attack_defend_role(0x10000u);
+		CHECK(kernel.local.attack_defend_role == 0);
 	}
 
 	// The DEATH screen facts: the sub-block-0 timers and the being-revived latch.
@@ -165,9 +300,12 @@ int main() {
 		CHECK(!joiner_in_match_ready(jv, false)); // no local player, not in match
 	}
 
-	// The DEATH screen's zone rows: a joiner's feed over the local BMS zone
-	// facts (team, control) with the 0x6E wave group's occupants named through
-	// the roster; every other role emits nothing.
+	// The DEATH screen's zone rows: a joiner's feed over the zones its minimap
+	// banks hold (transient, persistent, special in that order; a 0x40 slot
+	// skipped), each zone's local BMS facts (team, control) and SpawnZoneList
+	// index (-1 lists as '@' / STRWPNAME000), with the 0x6E wave group's
+	// occupants named through the roster; every other role emits nothing
+	// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e].
 	{
 		mission::MissionKernel kernel;
 		kernel.world.registry.configure_pool(2, 8);
@@ -184,8 +322,21 @@ int main() {
 		zone.team = 1;
 		zone.zone_control = 0x10000;
 		const world::EntityHandle theirs = kernel.world.registry.spawn(2, zone);
+		zone.team = 0;
+		const world::EntityHandle unlisted = kernel.world.registry.spawn(2, zone);
 		world::SpawnZoneRegistry reg;
 		reg.entries = { secured, contested, theirs };
+		auto bank = [](replication::ClientMinimapOverlaySlot &slot, world::EntityHandle h,
+							uint8_t flags) {
+			slot.active = true;
+			slot.handle = h.packed;
+			slot.flags = flags;
+		};
+		bank(cs.minimap.transient[0], unlisted, 0x00);
+		bank(cs.minimap.persistent[0], contested, 0x10);
+		bank(cs.minimap.persistent[1], secured, 0x10);
+		bank(cs.minimap.persistent[2], theirs, 0x10);
+		bank(cs.minimap.special[0], secured, 0x40); // a local-person/probe slot
 		SpawnWaveGroup group;
 		group.zone_handle = secured.packed;
 		group.wave_countdown = 42;
@@ -207,14 +358,21 @@ int main() {
 		jv.joiner = true;
 		std::vector<world::DeployZoneRow> rows;
 		CHECK(deploy_zone_rows(jv, reg, rows));
-		CHECK(rows.size() == 2); // the other team's zone is not a row
-		CHECK(rows.size() == 2 && rows[0].index == 0 && rows[0].letter == 'A' &&
-				rows[0].name_key == "STRWPNAME001" && rows[0].secured);
-		CHECK(rows.size() == 2 && rows[0].wave_countdown == 42 && rows[0].occupants.size() == 2);
-		CHECK(rows.size() == 2 && rows[0].occupants.size() == 2 && rows[0].occupants[0].name == "Ace" &&
-				rows[0].occupants[1].name == "Bravo" && !rows[0].occupants[0].self);
-		CHECK(rows.size() == 2 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
+		CHECK(rows.size() == 3); // the other team's zone is not a row, the 0x40 slot is skipped
+		CHECK(rows.size() == 3 && rows[0].index == -1 && rows[0].letter == '@' &&
+				rows[0].name_key == "STRWPNAME000" && rows[0].secured);
+		CHECK(rows.size() == 3 && rows[1].index == 1 && rows[1].letter == 'B' && !rows[1].secured &&
 				rows[1].occupants.empty());
+		CHECK(rows.size() == 3 && rows[2].index == 0 && rows[2].letter == 'A' &&
+				rows[2].name_key == "STRWPNAME001" && rows[2].secured);
+		CHECK(rows.size() == 3 && rows[2].wave_countdown == 42 && rows[2].occupants.size() == 2);
+		CHECK(rows.size() == 3 && rows[2].occupants.size() == 2 && rows[2].occupants[0].name == "Ace" &&
+				rows[2].occupants[1].name == "Bravo" && !rows[2].occupants[0].self);
+		// No bank slots, no rows (nothing is listed before the first 0x40 lands).
+		const replication::ClientMinimapState banks = cs.minimap;
+		cs.minimap = replication::ClientMinimapState();
+		CHECK(deploy_zone_rows(jv, reg, rows) && rows.empty());
+		cs.minimap = banks;
 		// The authority's view (the listen host) lists nothing through this feed.
 		RoleView hv;
 		hv.kernel = &kernel;
@@ -223,6 +381,7 @@ int main() {
 		cs.spawn_waves = replication::ClientSpawnWaveStatus();
 		cs.roster[0] = replication::ClientRosterSlot();
 		cs.entities.clear();
+		cs.minimap = replication::ClientMinimapState();
 	}
 
 	// The per-drawn-entity lighting feed's CONTAINED leg: an entity whose first

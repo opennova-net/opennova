@@ -1,5 +1,6 @@
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/key_strings.h>
+#include <base/io/strutil.h>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -110,6 +111,7 @@ BindingSet::BindingSet() {
 }
 
 void BindingSet::restore_defaults() {
+  ++revision_;
   std::size_t n = 0;
   const ActionDef *cat = catalog(&n);
   records_.assign(n, BindingRecord{});
@@ -149,6 +151,7 @@ bool BindingSet::assign_key(int index, int vk, bool ctrl_held, bool shift_held,
   // [orig: @ 0x55bb4f..0x55bb51; Input_QueueKeyEvent @ 0x760c10].
   const uint16_t mod =
       (ctrl_held && !shift_held && !extended && !repeat) ? 17 : 0;
+  ++revision_;
   uint16_t scan = static_cast<uint16_t>(vk & 0xFF);
   if (vk == kKeypadEnterScan) {
     scan = kKeypadEnterScan;
@@ -198,6 +201,7 @@ void BindingSet::assign_mouse(int index, uint16_t mask) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return;
   }
+  ++revision_;
   records_[static_cast<std::size_t>(index)].mouse_mask = mask;
 }
 
@@ -205,6 +209,7 @@ void BindingSet::clear(int index, Device device) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return;
   }
+  ++revision_;
   BindingRecord &r = records_[static_cast<std::size_t>(index)];
   switch (device) {
     case Device::Keyboard:
@@ -377,7 +382,7 @@ std::vector<int> BindingSet::keys_for_token(const std::string &token) const {
 int BindingSet::pressed_key(int index,
                             const std::function<bool(int)> &key_down) const {
   const BindingRecord *r = record(index);
-  if (r == nullptr) {
+  if (r == nullptr || keyboard_captured_) {
     return 0;
   }
   auto slot_down = [&](uint16_t vk) { return vk != 0 && key_down(vk); };
@@ -429,8 +434,21 @@ bool BindingSet::set_record(int index, const BindingRecord &rec) {
   if (index < 0 || index >= static_cast<int>(records_.size())) {
     return false;
   }
+  ++revision_;
   records_[static_cast<std::size_t>(index)] = rec;
   return true;
+}
+
+std::string display_string_for_token(const BindingSet &set, const std::string &token) {
+  std::size_t n = 0;
+  const ActionDef *cat = catalog(&n);
+  for (std::size_t i = 0; i < n; ++i) {
+    if (cat[i].token == nullptr || !strutil::iequals(cat[i].token, token)) continue;
+    const BindingRecord *rec = set.record(static_cast<int>(i));
+    if (rec == nullptr) break;
+    return format_display_string(*rec, (cat[i].flags & 0x200u) != 0u);
+  }
+  return "???";
 }
 
 int BindingSet::index_of_token(const std::string &token) const {

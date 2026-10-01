@@ -52,6 +52,26 @@ func test_defaults_and_current_snapshot_are_detached() -> void:
 	assert_eq(options.current().crosshair_style, 0)
 
 
+func test_tip_options_default_on_and_persist_as_cfg_words() -> void:
+	var options := PlayerOptions.new()
+	var state := options.current()
+	assert_true(state.keyboard_tips, "enable_keyboardtips defaults to 1")
+	assert_true(state.gameplay_tips, "enable_gameplaytips defaults to 1")
+	state.keyboard_tips = false
+	options.update(state)
+	var config := ConfigFile.new()
+	assert_eq(config.load(PlayerOptions.CONFIG_PATH), OK)
+	assert_eq(int(config.get_value("player", "enable_keyboardtips", -1)), 0,
+			"the keyboard-tips word persists as retail's integer")
+	assert_eq(int(config.get_value("player", "enable_gameplaytips", -1)), 1)
+	var reloaded := PlayerOptions.new().current()
+	assert_false(reloaded.keyboard_tips)
+	assert_true(reloaded.gameplay_tips)
+	var copy := reloaded.copy()
+	assert_false(copy.keyboard_tips, "the snapshot copy carries both words")
+	assert_true(copy.gameplay_tips)
+
+
 func test_update_clamps_persists_together_and_preserves_other_sections() -> void:
 	ConfigStore.write(PlayerOptions.CONFIG_PATH, "resources", "resource_dir",
 			"C:/Games/Joint Operations")

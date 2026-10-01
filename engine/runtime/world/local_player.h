@@ -16,6 +16,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/radar_contacts.h>
 #include <runtime/world/vehicle_attach.h>
 
 #include <cstdint>
@@ -40,6 +41,10 @@ public:
     WeaponInventory inventory;
     bool inventory_valid = false;
     PlayerViewState view;
+    // The radar contact table, edge timers, sector rings and missile list the
+    // damage/whiz/missile legs fill and the spinmap's bit-10 legs draw
+    // (world/radar_contacts.h) [orig: the HUD globals @0x2721EEC..0x2723EAC].
+    RadarContactState radar;
     hud::HudMapControl hud_map_control;
     uint64_t round_reset_revision = 0;
     LocalPlayerViewTracker view_tracker;
@@ -54,6 +59,19 @@ public:
     // local reload producer -> the S2C 0x49 broadcast); the bare kernel drops
     // it, having already applied it.
     LocalWeaponReloadWire last_reload;
+    // The Attack & Defend side word the TEAMID line reads — 1 defending, 2
+    // attacking, 0 outside game type 0x10002 or with no target — latched once
+    // per mission start [orig: dword_B78FE8, written only by sub_524110,
+    // called once from Game_StartMission @0x5260C1].
+    uint32_t attack_defend_role = 0;
+    // The latch [orig: sub_524110 @0x524110]: the first def-bearing entity
+    // whose items.def attrib carries the TARGET bit 0x8000 — pool 2 first,
+    // then pool 1 — against the local player's team: the same team defends
+    // (1), any other attacks (2) [orig: `test [eax+54h], 8000h` @0x524160 /
+    // @0x524190; `cmp al, [edx+162h]; setnz; add ecx, 1` @0x5241A3..0x5241AC].
+    // Retail dereferences g_LocalPlayerEntity unguarded; with no local player
+    // yet (a joiner's pre-spawn start) the word stays 0.
+    void latch_attack_defend_role(uint32_t game_type);
 
     bool has_local_player() const;
     Entity *player();

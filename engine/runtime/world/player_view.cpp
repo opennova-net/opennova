@@ -398,17 +398,17 @@ bool player_view_scope_up_blocked(const PlayerViewState &v, int32_t def_flags) {
 }
 
 // [orig: Player_OnDamageReceived @0x4DD880]
-void player_on_damage_received(World &world) {
+void player_on_damage_received(World &world, const RadarSource &source,
+                               const int32_t pos_q16[3]) {
     LocalPlayer *local = world.local_player_state;
     if (local == nullptr) return;
     screen_flash_add_red(local->view.flash, kScreenFlashRedArm); // [orig: @0x4dd88f..0x4dd896]
     camera_shake_arm(local->view.shake, kShakeArmDamageReceived); // [orig: @0x4dd8a6..0x4dd8ad]
-    // The radar damage blip [orig: Radar_AddBlip @0x59b280, called @0x4dd8c5
-    // (self damage -> all 12 sectors) / @0x4dd8ee (indicator type 2 when the
-    // attacker's ItemDef +0x294 reads 6, else 0)] and the per-player-slot
-    // words unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)] +11 = 6 / +12 = 10
-    // [orig: @0x4dd907..0x4dd916] stay unported: the radar blip system has no
-    // port (D-HUD-21) and the slot words have no witnessed consumer.
+    // The radar damage blip [orig: Radar_AddBlip @0x59b280, called @0x4dd8ee].
+    radar_add_blip(world, source.id, pos_q16, radar_damage_kind(source));
+    // The per-player-slot words unk_26C77A0[100 * (shadowSlot1 & 0x7FFF)]
+    // +11 = 6 / +12 = 10 [orig: @0x4dd907..0x4dd916] stay unported: they have
+    // no witnessed consumer.
 }
 
 bool player_view_toggle_binoculars(PlayerViewState &v) {

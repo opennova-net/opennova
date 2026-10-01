@@ -4,7 +4,8 @@ extends Control
 ## The SP end-of-mission screen, at the witnessed shapes [orig: the round-end SP tail
 ## Server_ProcessRoundEnd @0x5164f0 -> Cinematic_EpilogUpdate @0x577950]:
 ## - WIN (winner 1): the epilog score screen — jo_Epil.tga backdrop + letterbox +
-##   the Epilog/STREPILOG_* count lines fed by the kill-stat buckets
+##   the four Epilog/STREPILOG_* counter lines, label + value as the engine
+##   composes them (hud::epilog_score_lines over the SP score block)
 ##   [orig: Cine_EpilogStateMachineUpdate @0x576240 case 4].
 ## - LOSE (anything else): the MISSION FAILED screen — jo_Epil2.tga backdrop +
 ##   Overlays/STROVER_MISSION_FAILED + the WAC Lose banner line + the key hint
@@ -13,9 +14,9 @@ extends Control
 ## via Input_HandleSpecialKeys @0x49c8e2 (ESC 0x1B) / the state-machine timeout
 ## @0x57621d — the main loop then pushes the "Post Menu" scene @0x526867].
 ## Stand-ins (ledgered D-AI-10, docs/divergence-ledger.md): no flyaway cine /
-## .cne playback, no score count-up
-## animation, no end-music track switch; the screen alpha ramps over the cine
-## fade pair's tick span. Witness record: docs/world/world-wac-ai-re.md §20.6.
+## .cne playback and a stacked line layout in place of the counters' witnessed
+## columns; the screen alpha ramps over the cine fade pair's tick span. Witness
+## record: docs/world/world-wac-ai-re.md §20.6.
 
 signal exit_requested
 
@@ -32,7 +33,10 @@ var _age := 0.0
 var _built := false
 
 
-func setup(outcome: RoundOutcome, banner: String, root: ResourceRoot) -> void:
+## `score` is the SP score block's epilog lines (Simulation.get_epilog_score, or
+## EndRoundStatistics.make_epilog for a sim-less mount); only the WIN form reads it.
+func setup(outcome: RoundOutcome, score: EndRoundStatistics, banner: String,
+		root: ResourceRoot) -> void:
 	# Full-rect dark backdrop + letterbox bars [orig: CCineEventLetterbox].
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -61,16 +65,12 @@ func setup(outcome: RoundOutcome, banner: String, root: ResourceRoot) -> void:
 	add_child(column)
 
 	if won:
-		# The epilog score lines, in the witnessed order and count sources
-		# [orig: @0x576240 case 4 — TEAMUNITS = by-player + by-others, enemy =
-		# the summed buckets]. The objective-bonus counters are unmodeled (0).
-		_add_line(column, _epilog("STREPILOG_OBJECTIVEBONUS"), "0", 28)
-		var enemy := outcome.enemy_kills + outcome.enemy_kills_by_others
-		_add_line(column, _epilog("STREPILOG_ENEMYUNITS"), str(enemy), 28)
-		var team := outcome.bluekills + outcome.team_kills_by_others
-		_add_line(column, _epilog("STREPILOG_TEAMUNITS"), str(team), 28)
-		var friendly := outcome.greenkills + outcome.friendly_kills_by_others
-		_add_line(column, _epilog("STREPILOG_FRIENDLYUNITS"), str(friendly), 28)
+		# The four counter lines in the witnessed order, each label with its
+		# engine-formatted value (empty when retail draws none).
+		var keys := score.label_keys if score != null else PackedStringArray()
+		var values := score.values if score != null else PackedStringArray()
+		for i in keys.size():
+			_add_line(column, _epilog(keys[i]), values[i], 28)
 	else:
 		# MISSION FAILED + the WAC Lose cause [orig: Overlays/STROVER_MISSION_FAILED
 		# at y=120, the g_BannerText line at y=230].

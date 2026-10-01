@@ -117,8 +117,13 @@ public:
 	// [orig: @ 0x6752c0 (this[95] - this[93]) * 256].
 	float line_height(float scale_y) const;
 
-	// One glyph's v-extent in pixels [orig: GameFont_MeasureCharHeight
-	// @ 0x580a80 — the friendly-tag line metric is the '0' glyph's height].
+	// GameFont_MeasureCharHeight: the extent's height times the slot's
+	// scale_y, truncated. The extent's height is the SPACE glyph's v-extent
+	// whatever the byte, trunc((v1 - v0) * (800 / design_width) * 256); a
+	// control byte other than tab measures 0 [orig: GameFont_MeasureCharHeight
+	// @ 0x580a80; CGameFont_GetCharExtent @0x674dc0 -- the height
+	// @0x674e2c..0x674e44 off the first glyph record, the control-byte zeroing
+	// @0x674e57]. The friendly-tag line metric measures '0'.
 	float char_height(uint8_t byte, float scale_y) const;
 
 	// One glyph's pixel extent WITH the spacing pad, rounded — the

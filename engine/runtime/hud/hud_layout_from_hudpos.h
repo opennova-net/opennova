@@ -38,6 +38,10 @@ struct HudLayoutAssets {
 	std::array<std::string, 6> stance_textures{};
 	std::string parachute_icon;
 	std::string armor_icon;
+	// The HUDLS bar's two hudpos-named textures, loaded alpha mode 0 and only
+	// when named [orig: HUD_LoadAllTextures @0x59DEEE..0x59DF3E].
+	std::string hudls_bracket;
+	std::string hudls_moreav;
 };
 
 // A parsed hudpos colour as the packed 0xAARRGGBB the layout carries (each

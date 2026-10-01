@@ -73,6 +73,14 @@ Gotchas:
   it compiles only into the editor variant, so nothing the game ships can
   reach it (`link_graph_check.py`), and it reaches ImGui only through the
   `imgui_abi.h` pointer seam like `devtools/`.
+- The web build (ADR 0049) compiles this tree as a wasm32 threads side module
+  (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only; `ci.yml`'s
+  `build-gdextension-web` builds it on every PR) with `OPENNOVA_DEVTOOLS` off, as in
+  the release flavour, and `OPENNOVA_EDITOR` off: it is the runtime variant alone,
+  with no Dear ImGui and no `authoring/`. The templates abort on a throw, so no
+  exceptions as control flow, and a device that starts threads sizes them for the
+  page's fixed pthread pool under `OS::has_feature("web")`
+  (`terrain/terrain_tile_cache_device.cpp`).
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s

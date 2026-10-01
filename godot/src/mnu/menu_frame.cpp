@@ -71,8 +71,15 @@ Color sample_bilinear(const Ref<Image> &image, float u, float v) {
 MenuFrame::MenuFrame() = default;
 
 MenuFrame::~MenuFrame() {
+	RenderingServer *rs = RenderingServer::get_singleton();
 	if (overlay_canvas_item_.is_valid()) {
-		RenderingServer::get_singleton()->free_rid(overlay_canvas_item_);
+		rs->free_rid(overlay_canvas_item_);
+	}
+	if (slot_canvas_item_.is_valid()) {
+		rs->free_rid(slot_canvas_item_);
+	}
+	if (overlay_upper_canvas_item_.is_valid()) {
+		rs->free_rid(overlay_upper_canvas_item_);
 	}
 }
 
@@ -86,6 +93,26 @@ void MenuFrame::ensure_overlay_canvas_item_() {
 	// One z above the frame and every sibling child it draws in front of.
 	rs->canvas_item_set_z_as_relative_to_parent(overlay_canvas_item_, true);
 	rs->canvas_item_set_z_index(overlay_canvas_item_, 1);
+	slot_canvas_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(slot_canvas_item_, get_canvas_item());
+	rs->canvas_item_set_z_as_relative_to_parent(slot_canvas_item_, true);
+	rs->canvas_item_set_z_index(slot_canvas_item_, 2);
+	rs->canvas_item_set_visible(slot_canvas_item_, false);
+	overlay_upper_canvas_item_ = rs->canvas_item_create();
+	rs->canvas_item_set_parent(overlay_upper_canvas_item_, get_canvas_item());
+	rs->canvas_item_set_z_as_relative_to_parent(overlay_upper_canvas_item_, true);
+	rs->canvas_item_set_z_index(overlay_upper_canvas_item_, 3);
+}
+
+void MenuFrame::set_custom_slot_widget(int p_index) {
+	if (state_.custom_slot_index == p_index) return;
+	state_.custom_slot_index = p_index;
+	queue_redraw();
+}
+
+RID MenuFrame::get_custom_slot_canvas_item() {
+	ensure_overlay_canvas_item_();
+	return slot_canvas_item_;
 }
 
 // One menu texture file decoded by the format the engine's extension dispatch picked
@@ -467,6 +494,16 @@ void MenuFrame::set_widget_text(int p_index, const String &p_text) {
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_rect(int p_index, const Rect2i &p_rect) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_rect = true;
+	ws.rect.left = p_rect.position.x;
+	ws.rect.top = p_rect.position.y;
+	ws.rect.right = p_rect.position.x + p_rect.size.x;
+	ws.rect.bottom = p_rect.position.y + p_rect.size.y;
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_hover_item(int p_index, int p_row) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
 	if (ws.hover_item == p_row) {
@@ -539,25 +576,23 @@ void MenuFrame::set_widget_selected_set(int p_index,
 }
 
 void MenuFrame::set_widget_table_rows(int p_index,
-		const TypedArray<PackedStringArray> &p_rows) {
+		const std::vector<opennova::menu::MenuTableRow> &p_rows) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.table_rows.clear();
-	ws.table_rows.reserve(static_cast<size_t>(p_rows.size()));
-	for (int64_t r = 0; r < p_rows.size(); ++r) {
-		const PackedStringArray row = p_rows[r];
-		std::vector<std::string> cells;
-		cells.reserve(static_cast<size_t>(row.size()));
-		for (int64_t c = 0; c < row.size(); ++c) {
-			cells.push_back(opennova::to_std(row[c]));
-		}
-		ws.table_rows.push_back(std::move(cells));
-	}
+	ws.table_rows = p_rows;
 	queue_redraw();
 }
 
-void MenuFrame::set_widget_table_row_colors(int p_index,
-		const std::vector<opennova::menu::MenuTableRowColor> &p_colors) {
-	widget_(p_index).table_row_colors = p_colors;
+void MenuFrame::set_table_cell_painter(int p_index,
+		opennova::menu::MenuTableCellPainter p_painter) {
+	compiler_.set_table_cell_painter(p_index, std::move(p_painter));
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect) {
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_clip = p_enabled;
+	ws.clip = { p_rect.position.x, p_rect.position.y, p_rect.position.x + p_rect.size.x,
+		p_rect.position.y + p_rect.size.y };
 	queue_redraw();
 }
 
@@ -616,6 +651,19 @@ Rect2 MenuFrame::widget_rect(int p_index) const {
 	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
 			static_cast<float>(rect.right - rect.left),
 			static_cast<float>(rect.bottom - rect.top));
+}
+
+void MenuFrame::set_mount_widget(int p_index) {
+	if (state_.mount_index == p_index) return;
+	state_.mount_index = p_index;
+	queue_redraw();
+}
+
+Rect2 MenuFrame::widget_local_rect(int p_index) const {
+	opennova::mnu::RectEdges rect;
+	if (!compiler_.widget_local_rect(p_index, state_, &rect)) return Rect2();
+	return Rect2(static_cast<float>(rect.left), static_cast<float>(rect.top),
+			static_cast<float>(rect.right - rect.left), static_cast<float>(rect.bottom - rect.top));
 }
 
 int MenuFrame::item_count(int p_index) const {
@@ -696,16 +744,23 @@ int MenuFrame::spin_arrow_at(int p_index, const Vector2 &p_position) const {
 			scale.x, scale.y);
 }
 
-bool MenuFrame::table_hit(int p_index, const Vector2 &p_position, int &r_row,
-		int &r_column) const {
-	r_row = -1;
-	r_column = -1;
+std::string MenuFrame::item_display_text(int p_index, int p_row) const {
+	if (!configured_) {
+		return std::string();
+	}
+	return compiler_.item_display_text(p_index, state_, p_row);
+}
+
+bool MenuFrame::table_hit(int p_index, const Vector2 &p_position, int *r_row,
+		int *r_column) const {
+	*r_row = -1;
+	*r_column = -1;
 	if (!configured_) {
 		return false;
 	}
 	const Vector2 scale = design_scale_();
-	return compiler_.table_hit(p_index, state_, p_position.x, p_position.y,
-			scale.x, scale.y, &r_row, &r_column);
+	return compiler_.table_hit(p_index, state_, p_position.x, p_position.y, scale.x, scale.y,
+			r_row, r_column);
 }
 
 std::string MenuFrame::widget_mnemonic(int p_index) const {
@@ -917,7 +972,10 @@ void MenuFrame::_draw() {
 	ensure_overlay_canvas_item_();
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->canvas_item_clear(overlay_canvas_item_);
+	rs->canvas_item_clear(overlay_upper_canvas_item_);
 	if (!configured_) {
+		custom_slot_drawn_ = false;
+		rs->canvas_item_set_visible(slot_canvas_item_, false);
 		return;
 	}
 	const Vector2 scale = design_scale_();
@@ -1025,9 +1083,16 @@ void MenuFrame::_draw() {
 							opennova::color_from_argb(underline.color), 1.0f);
 				}
 			};
+	// The custom-draw slot: the companion's item shows only while the pass
+	// ran, and the ops from it on move to the item above it.
+	custom_slot_drawn_ = list.custom_slot_op >= 0;
+	rs->canvas_item_set_visible(slot_canvas_item_, custom_slot_drawn_);
 	for (size_t op_index = 0; op_index < list.draw_ops.size(); ++op_index) {
 		if (static_cast<int32_t>(op_index) == list.overlay_op_start) {
 			target = overlay_canvas_item_;
+		}
+		if (static_cast<int32_t>(op_index) == list.custom_slot_op) {
+			target = overlay_upper_canvas_item_;
 		}
 		const opennova::menu::MenuDrawList::DrawOp &op = list.draw_ops[op_index];
 		switch (op.kind) {
@@ -1159,6 +1224,16 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::is_widget_shown);
 	ClassDB::bind_method(D_METHOD("widget_rect", "index"),
 			&MenuFrame::widget_rect);
+	ClassDB::bind_method(D_METHOD("widget_local_rect", "index"),
+			&MenuFrame::widget_local_rect);
+	ClassDB::bind_method(D_METHOD("set_mount_widget", "index"), &MenuFrame::set_mount_widget);
+	ClassDB::bind_method(D_METHOD("get_mount_widget"), &MenuFrame::get_mount_widget);
+	ClassDB::bind_method(D_METHOD("set_custom_slot_widget", "index"),
+			&MenuFrame::set_custom_slot_widget);
+	ClassDB::bind_method(D_METHOD("get_custom_slot_widget"), &MenuFrame::get_custom_slot_widget);
+	ClassDB::bind_method(D_METHOD("get_custom_slot_canvas_item"),
+			&MenuFrame::get_custom_slot_canvas_item);
+	ClassDB::bind_method(D_METHOD("is_custom_slot_drawn"), &MenuFrame::is_custom_slot_drawn);
 	ClassDB::bind_method(D_METHOD("item_count", "index"),
 			&MenuFrame::item_count);
 	ClassDB::bind_method(D_METHOD("get_widget_text", "index"),

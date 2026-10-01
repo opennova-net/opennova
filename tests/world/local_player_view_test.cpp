@@ -16,6 +16,7 @@
 #include <formats/def/def.h>
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/player_actions.h>
+#include <runtime/hud/tip_system.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
@@ -651,6 +652,85 @@ void test_nvg_over_a_non_inset_scope_leaves_it_alone() {
     CHECK(toggles == 0);
     CHECK(v.scope_engaged);
     CHECK(!w.nvg_scope_restore);
+}
+
+// --- the tip producers: the scope toggle, NVG and the binocular edge -------
+
+// [orig: Player_ToggleWeaponScope — up 11/13/15 @0x4df39c..0x4df3de, down
+//  12/14/16 @0x4df241..0x4df282; case 41 — on 7 @0x4e06ec, off 8 @0x4e06a7;
+//  Player_UpdatePerFrame — the toggle edge 9/10 @0x4de3e9..0x4de41a]
+void test_tip_events_from_scope_nvg_and_binoculars() {
+    using opennova::hud::TipEvent;
+    const auto events = [](World &w) {
+        std::vector<uint8_t> out = w.out.tip_events;
+        w.out.tip_events.clear();
+        return out;
+    };
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED | DEF_WEAPON_FLAG_SHOWELEVATION);
+        PlayerViewState v;
+        WeaponSlotState slot;
+        CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventScopeElevationOn});
+        settle_ease(v);
+        CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventScopeElevationOff});
+        // A plain Scoped sight (no ShowElevation) raises nothing.
+        LocalPlayerWeapon plain = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+        settle_ease(v);
+        CHECK(local_player_scope_toggle(lw.w, plain, v, slot));
+        CHECK(events(lw.w).empty());
+    }
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SIGHTED | DEF_WEAPON_FLAG_USEDESIGNATOR);
+        w.def_name = "wpn_designator";
+        PlayerViewState v;
+        WeaponSlotState slot;
+        CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+        CHECK(events(lw.w) == (std::vector<uint8_t>{opennova::hud::kTipEventDesignatorWeaponOn,
+                opennova::hud::kTipEventDesignatorOn}));
+        settle_ease(v);
+        CHECK(local_player_scope_toggle(lw.w, w, v, slot));
+        CHECK(events(lw.w) == (std::vector<uint8_t>{opennova::hud::kTipEventDesignatorWeaponOff,
+                opennova::hud::kTipEventDesignatorOff}));
+    }
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(DEF_WEAPON_FLAG_SCOPED);
+        PlayerViewState v;
+        const auto no_scope = []() -> bool { return false; };
+        CHECK(local_player_nvg_toggle(lw.w, w, v, no_scope));
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventNvgOn});
+        CHECK(!local_player_nvg_toggle(lw.w, w, v, no_scope));
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventNvgOff});
+    }
+    {
+        LocalWorld lw;
+        LocalPlayerWeapon w = scoped_weapon(0);
+        PlayerViewState v;
+        LocalPlayerViewTracker t;
+        LocalViewSessionInputs s;
+        // The first tick seeds the previous toggle: nothing raised.
+        local_player_view_tick(&lw.w, v, t, s);
+        CHECK(events(lw.w).empty());
+        CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
+        local_player_view_tick(&lw.w, v, t, s);
+        CHECK(v.binoculars_view_active);
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOn});
+        local_player_view_tick(&lw.w, v, t, s); // no edge
+        CHECK(events(lw.w).empty());
+        CHECK(!local_player_binoculars_toggle(lw.w, w, v, t));
+        local_player_view_tick(&lw.w, v, t, s);
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
+        // Raised while the view cannot come up (the player moving): the fade.
+        v.move_held = true;
+        CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
+        local_player_view_tick(&lw.w, v, t, s);
+        CHECK(!v.binoculars_view_active);
+        CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
+    }
 }
 
 // --- the tick: arbiter feed, the death stamp edge, the mode-4 entry --------
@@ -2457,6 +2537,7 @@ int main() {
     test_binoculars_refused_scoped_in_gunner_seat();
     test_nvg_drops_a_settled_inset_scope_and_restores_it();
     test_nvg_over_a_non_inset_scope_leaves_it_alone();
+    test_tip_events_from_scope_nvg_and_binoculars();
     test_tick_stamps_the_death_camera_on_the_local_dead_edge();
     test_tick_without_a_player_resolves_first_person();
     test_frame_reads_the_state_and_the_card_selector();

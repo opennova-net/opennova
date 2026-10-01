@@ -29,6 +29,8 @@
 #include <runtime/inmatch/server_tick.h>
 
 #include "host_test_setup.h"
+#include "conn_fixture.h"
+#include <runtime/inmatch/server_message_dispatch.h>
 
 #include <runtime/replication/connection.h>
 #include <runtime/replication/client_replica_pipeline.h>
@@ -44,6 +46,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/npwire/session_vars.h>
 #include <net/novacrypto/crc32.h>
 
 #include <runtime/world/ai.h>
@@ -3016,7 +3019,7 @@ bool run_zone_presence_updates_only_a_tracked_window() {
 }
 
 // The client-side 1 Hz revive countdown: every 63rd client frame each active
-// roster slot with an entity and a nonzero window loses one second; the
+// S2C 0x4C table slot with an entity and a nonzero window loses one second; the
 // medic-request latch survives [orig: Client_ProcessNetworkFrame
 // @0x42C27E..0x42C2DA -> PlayerSlot_SetDownedState @0x4348D0]. Both the
 // S2C 0x54 seed and the 0x46 bit-0x0008 seed feed the same slot bytes.
@@ -3034,6 +3037,8 @@ bool run_roster_revive_countdown_ticks_once_per_63_frames() {
 	downed.revive_seconds = 120;
 	downed.medic_request_active = true;
 	host_loop.host_send(s2c::PLAYER_DOWNED_STATE, encode_player_downed_state(downed));
+	// The countdown walks the S2C 0x4C table: slot 3 is listed.
+	host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x07, 0x00});
 	host_view.Client_ProcessNetworkFrame();
 	const ns::ClientRosterSlot &slot = host_view.state().roster[3];
 	if (!expect(slot.bound && slot.entity_slot == 7 &&
@@ -3111,7 +3116,7 @@ bool run_medic_request_queues_one_reliable_0x2e() {
 }
 
 // The server-info VarList walk lands EXP_FANFARE as the u16 the 0x81 tone
-// ladder reads [orig: Client_ParseServerSessionVariables @0x520440 -> @0x520478].
+// ladder reads [orig: Client_ParseServerSessionVariables @0x5202f0 -> @0x520478].
 bool run_session_vars_exp_fanfare_walk() {
 	auto kv = [](std::vector<uint8_t> &out, const char *key, std::vector<uint8_t> value) {
 		for (const char *p = key; *p; ++p) out.push_back(uint8_t(*p));
@@ -3121,22 +3126,25 @@ bool run_session_vars_exp_fanfare_walk() {
 		out.push_back(uint8_t(n >> 16)); out.push_back(uint8_t(n >> 24));
 		out.insert(out.end(), value.begin(), value.end());
 	};
+	const auto fanfare = [](const std::vector<uint8_t> &stream) {
+		SessionVars vars;
+		decode_session_vars(stream.data(), stream.size(), vars);
+		return vars.exp_fanfare;
+	};
 	std::vector<uint8_t> body;
 	kv(body, "SERVERNAME", {'b', 'i', 'g', 'g', 'y', 0});
 	kv(body, "GAMETYPE", {0x20, 0x00, 0x03, 0x00});
 	kv(body, "EXP_FANFARE", {5, 20});
 	kv(body, "MISSIONFILENAME", {'x', 0});
-	if (!expect(inmatch::session_vars_exp_fanfare(body.data(), body.size()) == 0x1405,
+	if (!expect(fanfare(body) == 0x1405,
 	            "exp_fanfare: lo byte 5 / hi byte 20 land as the u16"))
 		return false;
 	std::vector<uint8_t> absent;
 	kv(absent, "SERVERNAME", {'b', 0});
-	if (!expect(inmatch::session_vars_exp_fanfare(absent.data(), absent.size()) == 0,
-	            "exp_fanfare: an absent key reads 0"))
+	if (!expect(fanfare(absent) == 0, "exp_fanfare: an absent key reads 0"))
 		return false;
 	std::vector<uint8_t> truncated(body.begin(), body.begin() + 20);
-	return expect(inmatch::session_vars_exp_fanfare(truncated.data(), truncated.size()) == 0,
-	              "exp_fanfare: a truncated stream fails closed");
+	return expect(fanfare(truncated) == 0, "exp_fanfare: a truncated stream fails closed");
 }
 
 bool run_zone_timer_uses_wrapping_dword_arithmetic_and_signed_clamps() {
@@ -4221,11 +4229,110 @@ bool run_world_state_load_bursts_on_every_0x0f() {
 	return expect(burst_count(r2) == 1, "a second 0x0F queues the burst again");
 }
 
+// The connection indicators on a joiner (D-HUD-38): the frame step under the
+// session, the three-second receive silence's incoming flag, a received 0x84
+// that named a sequence (outgoing), and the S2C 0x0F clear with its 10 s
+// hold-off [orig: Game_ProcessMainFrame @0x52668d; Client_ProcessNetworkFrame
+// @0x42c1f8..0x42c21e; NapiNP_HandleResendList cb_client_3 @0x623a24;
+// NapiNPClientMsg_0x00F @0x42e660; CNetQuality_SetLinkErrorFlag @0x4c34f0].
+bool run_connection_indicators_on_a_joiner() {
+	const std::string client_scrk = "CLIENT-NETQ-SCRK";
+	const std::string server_scrk = "SERVER-NETQ-SCRK";
+	uint64_t now_ms = 50000;
+	inmatch::ClientRuntime client("NetQ", [&now_ms] { return now_ms; });
+	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
+	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+	                    0, 0x00100000u, /*replay_mode=*/false);
+	const hud::NetQualityIndicators &q = client.net_quality_indicators();
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(q.link_error_bits == 0 && q.link_error_countdown == 0,
+			"a freshly seeded joiner holds no link error"))
+		return false;
+	// Two whole seconds (2999 ms) of silence raise nothing; the third does.
+	now_ms += 2999;
+	(void)client.Client_ProcessNetworkFrame(2);
+	if (!expect(q.link_error_bits == 0, "2999 ms of receive silence raise no flag"))
+		return false;
+	now_ms += 1;
+	(void)client.Client_ProcessNetworkFrame(3);
+	if (!expect(q.link_error_bits == hud::kNetLinkErrorIncoming &&
+					q.link_error_countdown == hud::kNetLinkErrorFrames && q.link_error_alpha == 0,
+			"three seconds of receive silence raise the incoming flag after the step"))
+		return false;
+	// The next frame steps first (alpha 64), then the silence re-raises.
+	(void)client.Client_ProcessNetworkFrame(4);
+	if (!expect(q.link_error_alpha == 64 && q.link_error_countdown == hud::kNetLinkErrorFrames,
+			"the step runs ahead of the re-raised flag"))
+		return false;
+	// A 0x84 naming a sequence is the outgoing flag, at its datagram.
+	std::vector<uint8_t> resend_body;
+	if (!expect(encode_session_resend_list(1u, {1}, resend_body), "encode a 0x84 body"))
+		return false;
+	const std::vector<uint8_t> resend =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(5);
+	if (!expect(q.link_error_bits == (hud::kNetLinkErrorIncoming | hud::kNetLinkErrorOutgoing),
+			"a 0x84 that names a sequence raises the outgoing flag"))
+		return false;
+	// Any S2C 0x0F clears both and holds new flags off for 10 s; its receive
+	// also ends the silence.
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> world_state(23 + kWorldStateAmmoPoolCount * 4 + 4, 0);
+	const std::vector<uint8_t> load = frame_server_session(
+			server_tx, server_scrk, 1u, {make_protocol_message(0x0F, world_state)});
+	client.receive(load.data(), load.size());
+	(void)client.Client_ProcessNetworkFrame(6);
+	const uint32_t cleared_at = client.state().local_clock_ms;
+	if (!expect(q.link_error_bits == 0 && q.link_error_countdown == 0 &&
+					q.link_error_alpha == 0 &&
+					q.flag_cooldown_until_ms == cleared_at + hud::kNetLinkErrorCooldownMs,
+			"a 0x0F clears the link errors and arms the 10 s hold-off"))
+		return false;
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(7);
+	if (!expect(q.link_error_bits == 0, "inside the hold-off a 0x84 raises nothing"))
+		return false;
+	uint32_t tick = 8;
+	while (client.state().local_clock_ms < q.flag_cooldown_until_ms)
+		(void)client.Client_ProcessNetworkFrame(tick++);
+	client.receive(resend.data(), resend.size());
+	(void)client.Client_ProcessNetworkFrame(tick++);
+	return expect(q.link_error_bits == hud::kNetLinkErrorOutgoing,
+			"past the hold-off the next 0x84 raises the outgoing flag again");
+}
+
+// The listen host's own client (D-HUD-38): the host role's level lands before
+// the step, its server protocol's link errors after it, and nothing steps off
+// a networked session [orig: CNetQuality_SetLevel @0x52659b ahead of
+// CNetQuality_UpdateIndicators @0x52668d under `is_in_session` @0x526686].
+bool run_connection_indicators_on_the_host_client() {
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host_view(host_loop);
+	const hud::NetQualityIndicators &q = host_view.net_quality_indicators();
+	host_view.set_net_quality_level(3);
+	(void)host_view.Client_ProcessNetworkFrame(1);
+	if (!expect(q.level == 3 && q.level3_alpha == 0,
+			"single player (no session) never steps the indicators"))
+		return false;
+	host_view.view().set_mp_session(true);
+	(void)host_view.Client_ProcessNetworkFrame(2);
+	if (!expect(q.level3_alpha == 4 && host_view.net_quality_level() == 3,
+			"a networked host's own client steps toward its level"))
+		return false;
+	host_view.raise_net_quality_link_errors(inmatch::kNetQualityLinkErrorOutgoing |
+			inmatch::kNetQualityLinkErrorIncoming);
+	return expect(q.link_error_bits == 3 && q.link_error_countdown == hud::kNetLinkErrorFrames,
+			"the server protocol's callbacks raise both flags");
+}
+
 // The C2S 0x0D chat producer: `[u8 channel][cstr]` with the `<...>` strip and
-// the 59-character cut, refused for a repeat inside the 1280 ms flood window,
-// and dropped for the non-peer channels 4/5 [orig: Chat_SendGlobalMessage
-// @0x49A6B0; Chat_CheckFloodControl @0x498F60; Chat_StripHtmlTags @0x4983F0].
+// the 59-character cut, `Flooded` for a repeat within 0x500 main frames of
+// its entry, and nothing for the non-peer channels 4/5 [orig:
+// Chat_SendGlobalMessage @0x49A6B0; Chat_CheckFloodControl @0x498F60 —
+// `dword_A8705C - entry <= 0x500` @0x499028; Chat_StripHtmlTags @0x4983F0].
 bool run_chat_uplink_api() {
+	using Result = hud::ChatSendResult;
 	const std::string client_scrk = "CLIENT-CHAT-SCRK";
 	const std::string server_scrk = "SERVER-CHAT-SCRK";
 	uint64_t now_ms = 10000;
@@ -4233,14 +4340,22 @@ bool run_chat_uplink_api() {
 	client.seed_session(0x10203040u, 1u, client_scrk, server_scrk,
 	                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
 	                    0, 0x00100000u, /*replay_mode=*/false);
-	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
-			"a global line is accepted"))
+	const auto send = [&client](uint8_t channel, std::string text, uint32_t frame) {
+		return client.queue_chat_message(channel, text, frame);
+	};
+	uint32_t frame = 1000;
+	if (!expect(send(2, "hi <b>there</b>", frame) == Result::Sent, "a team line is accepted"))
 		return false;
-	if (!expect(!client.queue_chat_message(2, "hi <b>there</b>"),
-			"the same line inside the flood window is refused"))
+	// The window counts main frames, not milliseconds: wall time alone never
+	// reopens it.
+	now_ms += 100000;
+	if (!expect(send(2, "hi <b>there</b>", frame + 0x500) == Result::Flooded,
+			"the same line inside the flood window is flooded"))
 		return false;
-	if (!expect(!client.queue_chat_message(4, "all"),
-			"the non-peer all channel sends nothing from a joiner"))
+	if (!expect(send(4, "all", frame) == Result::Refused,
+			"the non-peer red channel sends nothing from a joiner"))
+		return false;
+	if (!expect(send(2, "", frame) == Result::Refused, "an empty line sends nothing"))
 		return false;
 	const std::vector<std::vector<uint8_t>> outbound = client.Client_ProcessNetworkFrame(1);
 	std::vector<uint8_t> chat_body;
@@ -4255,12 +4370,14 @@ bool run_chat_uplink_api() {
 	if (!expect(chat_body == expected, "the line rides out as [channel][stripped cstr]"))
 		return false;
 	// Past the window the same line goes again; a long line is cut to 59 first.
-	now_ms += 0x501;
-	if (!expect(client.queue_chat_message(2, "hi <b>there</b>"),
+	frame += 0x501;
+	if (!expect(send(2, "hi <b>there</b>", frame) == Result::Sent,
 			"the same line past the flood window is accepted"))
 		return false;
-	const std::string long_line(70, 'x');
-	if (!expect(client.queue_chat_message(1, long_line), "a long team line is accepted"))
+	std::string long_line(70, 'x');
+	if (!expect(client.queue_chat_message(1, long_line, frame) == Result::Sent &&
+					long_line.size() == 59,
+			"a long global line is accepted, cut to 59 in place"))
 		return false;
 	const std::vector<std::vector<uint8_t>> again = client.Client_ProcessNetworkFrame(2);
 	std::size_t long_body = 0;
@@ -4273,6 +4390,25 @@ bool run_chat_uplink_api() {
 				long_body = m.payload.size();
 	}
 	return expect(long_body == 1 + 59 + 1, "a long line is cut to 59 characters");
+}
+
+// The listen host's own client is a session peer too: its talk line rides
+// its loopback to its own server as the same C2S 0x0D [orig: the senders'
+// QueueReliableMessage(0xD) over transport mode 1]; the local and crew keys
+// refuse on the death screen alone.
+bool run_host_chat_uplink() {
+	using Result = hud::ChatSendResult;
+	ns::LoopbackChannel host_loop;
+	inmatch::ClientRuntime host(host_loop);
+	std::string line = "hello <i>all</i>";
+	if (!expect(host.queue_chat_message(13, line, 50) == Result::Sent,
+			"the host's local line is sent"))
+		return false;
+	ns::Datagram dg;
+	if (!expect(host_loop.host_recv(dg) && dg.tag == c2s::CHAT_MESSAGE, "it lands on the loopback"))
+		return false;
+	const std::vector<uint8_t> want = {13, 'h', 'e', 'l', 'l', 'o', ' ', 'a', 'l', 'l', 0};
+	return expect(dg.body == want, "the host's body is [13][stripped cstr]");
 }
 
 // The client window of CNetQuality: a ring of 400 ms round trips scores the
@@ -5770,7 +5906,7 @@ bool run_medic_reviving_plays_both_receive_cues() {
 	world.cached.local_player = world.registry.spawn(0, person);
 	world.rules.mp_session = true;
 	std::vector<std::string> voices;
-	world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+	world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
 			-> std::optional<w::ScriptVoiceChannel::SetSelection> {
 		voices.push_back(name); return std::nullopt;
 	});
@@ -5814,7 +5950,7 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
     world.tables.voice_macros.sections.push_back({"macrotext", 1});
     world.tables.voice_macros.entries.push_back({"RAD_6", "Need a lift", {}, 0});
     std::vector<std::string> voices;
-    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
             -> std::optional<w::ScriptVoiceChannel::SetSelection> {
         voices.push_back(name); return std::nullopt;
     });
@@ -5829,8 +5965,9 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
             lines[0].channel == 2 && lines[0].sender_slot == remote.slot(),
             "radio chat resolves macrotext and the 0x0F location-name table")) return false;
     if (!expect(request() == 1 &&
-            runtime.state().radio_target.handle == remote.packed &&
-            runtime.state().radio_target.ticks_remaining == 1860,
+            runtime.state().tracked_target.handle == remote.packed &&
+            runtime.state().tracked_target.ticks_remaining == 1860 &&
+            runtime.state().tracked_target.color == 0xFF80A0FFu,
             "event six arms the ride request and 30-second tracking target")) return false;
     roster.radio_mute_flags = 1;
     runtime.view().apply(s2c::TRACKED_PLAYER_VOICE, {7, uint8_t(remote.slot()), 255, 255});
@@ -5843,6 +5980,288 @@ bool run_radio_events_preserve_order_chat_and_mute_state(bool replica_only) {
     runtime.apply_received_effects(world);
     return expect(voices.back() == "BM1_RAD_7" && runtime.view().drain_chat_lines().empty() &&
             request() == 0, "chat mute permits radio playback");
+}
+
+
+// S2C 0x2D and a channel-13 chat line set the map's tracked target through
+// HUD_SetTrackedEntityTarget: 496 ticks, white, the snapshot position; the
+// slot's voice-mute bit gates the emote leg, its chat-mute bit the chat leg.
+// [orig: NapiNPClientMsg_HandleEmote @0x427E90 (@0x427f39, @0x427f5b);
+//  Chat_DispatchToChannel @0x42B9CD..0x42BA09; HUD_SetTrackedEntityTarget
+//  @0x59D050]
+bool run_emote_and_local_chat_track_the_speaker(bool replica_only) {
+    inmatch::ClientRuntime runtime("EmoteTrack");
+    runtime.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    w::Entity person;
+    person.item_id = 11; person.has_item_def = true; person.item_type = 3; person.team = 1;
+    world.cached.local_player = world.registry.spawn(0, person);
+    person.position = {12.0f, 34.0f, 5.0f};
+    const auto remote = replica_only ? w::EntityHandle::make(0, 1) : world.registry.spawn(0, person);
+    if (replica_only)
+        runtime.view().apply(s2c::ENTITY_SPAWN_BATCH,
+                make_organic_spawn(remote.packed, "Mate", 12*65536, 34*65536, 5*65536, 0, 1, 1));
+    world.rules.mp_session = true;
+    auto &roster = runtime.view().state().roster[3];
+    roster.bound = true; roster.entity_slot = int16_t(remote.slot()); roster.name = "Mate";
+    auto &target = runtime.view().state().tracked_target;
+
+    runtime.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.handle == remote.packed && target.ticks_remaining == 496 &&
+            target.color == 0xFFFFFFFFu && target.friendly &&
+            target.position[0] == 12 * 65536 && target.serial == 1,
+            "an emote tracks its speaker for 496 ticks in white")) return false;
+    roster.radio_mute_flags = 1;
+    target = {};
+    runtime.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "the voice-mute bit gates the emote")) return false;
+    // The local player's own emote never tracks itself.
+    roster.radio_mute_flags = 0;
+    runtime.view().apply(s2c::EMOTE_BROADCAST,
+            {4, uint8_t(world.cached.local_player.slot()), 0, 0});
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "the local player is never tracked")) return false;
+
+    ChatBroadcast chat;
+    chat.channel = 13;
+    chat.sender_slot = 3;
+    chat.text = "Mate: here";
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    if (!expect(target.handle == remote.packed && target.ticks_remaining == 496,
+            "a local chat line tracks its sender's person")) return false;
+    target = {};
+    roster.radio_mute_flags = 2;
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    if (!expect(target.ticks_remaining == 0, "a chat-muted slot tracks nothing")) return false;
+    roster.radio_mute_flags = 0;
+    chat.channel = 1;
+    runtime.view().apply(s2c::CHAT_BROADCAST, encode_chat_broadcast(chat));
+    runtime.apply_received_effects(world);
+    return expect(target.ticks_remaining == 0, "only channel 13 tracks the sender");
+}
+
+// The listen client's visible-players refreshes ride its loopback: the 0x0F
+// burst member pair {0, 0x5CF7} + 0x23, another slot's 0x4D pair
+// {slot, 0x1CF7} + 0x23, nothing for its own slot; the 0x4C snapshot lands
+// in the table, and the 1 Hz revive countdown walks the table only.
+// [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab; NapiNPClientMsg_HandleSpawnSlot
+//  @0x4317B0; Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
+// The Emotes / Radio menu picks leave the listen client over its loopback as
+// C2S 0x14 / 0x13 [i16 value]; a joiner with no session queues nothing.
+// [orig: NetPacket_SendEmoteRequest @0x42C120; NetPacket_SendRadioCallRequest
+//  @0x42C150]
+bool run_voice_menu_picks_ride_the_session() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    if (!expect(host_view.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3) &&
+            host_view.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 10),
+            "the listen client queues both picks")) return false;
+    std::vector<ns::Datagram> out;
+    ns::Datagram dg;
+    while (host_loop.host_recv(dg)) out.push_back(dg);
+    if (!expect(out.size() == 2 && out[0].tag == c2s::EMOTE_REQUEST &&
+            out[0].body == std::vector<uint8_t>({3, 0}) &&
+            out[1].tag == c2s::RADIO_CALL_REQUEST &&
+            out[1].body == std::vector<uint8_t>({10, 0}),
+            "the picks ride the loopback as [i16 value]")) return false;
+    if (!expect(!host_view.queue_voice_menu_pick(c2s::CHAT_MESSAGE, 1),
+            "only the two menu tags are picks")) return false;
+    inmatch::ClientRuntime unjoined("Unjoined");
+    if (!expect(!unjoined.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3),
+            "a joiner outside a session queues nothing")) return false;
+    // A joiner in session frames the pick on its one-send held queue.
+    const std::string client_scrk = "CLIENT-PICK-SCRK";
+    inmatch::ClientRuntime joiner("Picker", [] { return uint64_t{0x10203040}; });
+    joiner.seed_session(0x55667799u, 1u, client_scrk, "SERVER-PICK-SCRK", 1, 0, 0x0007,
+            w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+    if (!expect(joiner.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 6),
+            "a joiner in session queues the pick")) return false;
+    std::vector<uint8_t> radio_body;
+    for (const std::vector<uint8_t> &datagram : joiner.Client_ProcessNetworkFrame(1)) {
+        ProtocolPacketHeader header;
+        std::vector<ProtocolMessage> messages;
+        if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+        for (const ProtocolMessage &m : messages)
+            if (m.tag == c2s::RADIO_CALL_REQUEST) radio_body = m.payload;
+    }
+    return expect(radio_body == std::vector<uint8_t>({6, 0}),
+            "the joiner's radio pick is C2S 0x13 [i16 6] on its session");
+}
+
+// The emote clip source: emote_1..emote_10 are 20-tick one-shots, emote_4 is
+// unauthored (its slot backfilled with RESET); every other state a 62-tick loop.
+struct EmoteSource final : w::IRootMotionSource {
+    bool has_clip(int, int state) const override { return state != 118; }
+    bool advance(int, int, int32_t &phase, w::RootMotionFrame &out) override {
+        ++phase;
+        out = {};
+        return true;
+    }
+    int32_t clip_length_ticks(int, int state, int) const override {
+        return state >= 115 && state <= 124 ? 20 : 62;
+    }
+    bool clip_loops(int, int state, int) const override { return state < 115 || state > 124; }
+};
+
+// S2C 0x2D on the listen host: the speaker's world body takes emote_N on its
+// secondary channel when its map authors it, and the EMO_ voice (flags 9, the
+// body prefix) asks the bank for its member at the speaker.
+// [orig: NapiNPClientMsg_HandleEmote @0x427efb..0x427f55]
+bool run_emote_stamps_the_speaker_body_and_voices_it() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    host_view.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    world.rules.mp_session = true;
+    EmoteSource source;
+    world.ai.root_motion = &source;
+    w::PlayerSpawn spawn;
+    spawn.team = 1;
+    world.cached.local_player = w::spawn_remote_player(world, spawn);
+    spawn.position = {5.0f, 0.0f, 0.0f};
+    const w::EntityHandle remote = w::spawn_remote_player(world, spawn);
+    w::AiEntity *body = world.ai.for_handle(remote);
+    if (!expect(body != nullptr, "the remote player has a world body")) return false;
+    std::vector<std::pair<std::string, bool>> voices;
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool bank)
+            -> std::optional<w::ScriptVoiceChannel::SetSelection> {
+        voices.emplace_back(name, bank);
+        return std::nullopt;
+    });
+    host_view.view().apply(s2c::EMOTE_BROADCAST, {3, uint8_t(remote.slot()), 0, 0});
+    host_view.apply_received_effects(world);
+    if (!expect(body->inf.wpn_state == 117 && body->inf.wpn_deferred == 0,
+            "emote 3 stamps emote_3 (state 117) with no deferred")) return false;
+    if (!expect(voices.size() == 1 && voices[0].first == "BM1_EMO_3" && voices[0].second,
+            "the voice asks the bank member of the body's EMO_ set")) return false;
+    body->inf.wpn_state = 43;
+    host_view.view().apply(s2c::EMOTE_BROADCAST, {4, uint8_t(remote.slot()), 0, 0});
+    host_view.apply_received_effects(world);
+    return expect(body->inf.wpn_state == 43 && voices.size() == 2,
+            "an unauthored emote leaves the channel and still voices");
+}
+
+// opennova <-> opennova: a joiner's Emotes / Radio picks leave framed on its
+// session as [i16 value], the host's handlers answer them (the sender hears
+// its own), and the joiner's fold plays the answer: the emote on its own
+// body, the radio line in its chat ring.
+// [orig: NetPacket_SendEmoteRequest @0x42C120 -> NapiNPServerMsg_HandleEmoteRequest
+//  @0x501E00 -> NapiNPClientMsg_HandleEmote @0x427E90; NetPacket_SendRadioCallRequest
+//  @0x42C150 -> NapiNPServerMsg_HandleRadioCall @0x514330 ->
+//  NapiNPClientMsg_HandleEntityDeath @0x430C50]
+bool run_voice_menu_picks_round_trip_through_a_host() {
+    inmatch::NapiNPServerCtx ctx;
+    inmatch::set_connection_mode(ctx, inmatch::ConnectionMode::HostOnly);
+    ctx.is_in_session = 1;
+    w::World host_world;
+    host_world.registry.configure_pool(0, 8);
+    host_world.rules.mp_session = true;
+    ctx.world = &host_world;
+    w::PlayerSpawn spawn;
+    spawn.team = 1;
+    const w::EntityHandle joined = w::spawn_remote_player(host_world, spawn);
+    ns::UdpSessionTransport transport(ns::UdpSessionTransport::Role::Host);
+    ctx.np_protocol.connection_list.push_back(conn_fixture::make_conn(
+            inmatch::kFirstJoinerDcb, 1, &transport, ns::TransportMode::Client, joined, true));
+
+    const std::string client_scrk = "CLIENT-VOICE-SCRK";
+    const std::string server_scrk = "SERVER-VOICE-SCRK";
+    inmatch::ClientRuntime joiner("Voice", [] { return uint64_t{0x10203040}; });
+    joiner.seed_session(0x55667799u, 1u, client_scrk, server_scrk, 1, 0, joined.packed,
+            w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+    joiner.view().set_mp_session(true);
+    w::World world;
+    world.registry.configure_pool(0, 8);
+    world.rules.mp_session = true;
+    EmoteSource source;
+    world.ai.root_motion = &source;
+    world.cached.local_player = w::spawn_remote_player(world, spawn);
+    auto &slot = joiner.view().state().roster[1];
+    slot.bound = true;
+    slot.entity_slot = int16_t(joined.slot());
+    slot.name = "Voice";
+
+    uint32_t frame = 1;
+    const auto round_trip = [&](uint8_t tag, int16_t value) {
+        std::vector<ProtocolMessage> sent;
+        if (!joiner.queue_voice_menu_pick(tag, value)) return sent;
+        for (const std::vector<uint8_t> &datagram : joiner.Client_ProcessNetworkFrame(frame++)) {
+            ProtocolPacketHeader header;
+            std::vector<ProtocolMessage> messages;
+            if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+            for (ProtocolMessage &m : messages)
+                if (m.tag == tag) sent.push_back(m);
+        }
+        inmatch::ServerDispatchInputs inputs;
+        inputs.server_ctx = &ctx;
+        for (const ProtocolMessage &reply : inmatch::dispatch_session_replies(ctx.config,
+                     ctx.np_protocol.connection_list[0], sent, 100,
+                     ctx.np_protocol.connection_list, &host_world, inputs))
+            joiner.view().apply(reply.tag, reply.payload);
+        joiner.apply_received_effects(world);
+        return sent;
+    };
+    std::vector<ProtocolMessage> sent = round_trip(c2s::EMOTE_REQUEST, 3);
+    if (!expect(sent.size() == 1 && sent[0].payload == std::vector<uint8_t>({3, 0}),
+            "the emote pick leaves as C2S 0x14 [i16 3]")) return false;
+    const w::AiEntity *own = world.ai.for_handle(world.cached.local_player);
+    if (!expect(own != nullptr && own->inf.wpn_state == 117,
+            "the host's own-copy 0x2D plays emote_3 on the joiner's body")) return false;
+    sent = round_trip(c2s::RADIO_CALL_REQUEST, 7);
+    if (!expect(sent.size() == 1 && sent[0].payload == std::vector<uint8_t>({7, 0}),
+            "the radio pick leaves as C2S 0x13 [i16 7]")) return false;
+    const std::vector<ns::ClientChatLine> lines = joiner.view().drain_chat_lines();
+    return expect(lines.size() == 1 && lines[0].channel == 2 && lines[0].text == "Voice: RAD_7",
+            "the host's own-copy 0x6D posts the joiner's radio line");
+}
+
+bool run_host_client_refreshes_visible_players() {
+    ns::LoopbackChannel host_loop;
+    inmatch::ClientRuntime host_view(host_loop);
+    auto pull = [&]() {
+        std::vector<ns::Datagram> out;
+        ns::Datagram dg;
+        while (host_loop.host_recv(dg)) out.push_back(dg);
+        return out;
+    };
+    host_loop.host_send(s2c::WORLD_STATE_LOAD, {});
+    host_view.Client_ProcessNetworkFrame();
+    std::vector<ns::Datagram> c2s_out = pull();
+    if (!expect(c2s_out.size() == 2 && c2s_out[0].tag == c2s::PLAYER_SYNC_REQUEST &&
+            c2s_out[0].body == std::vector<uint8_t>({0x00, 0xF7, 0x5C}) &&
+            c2s_out[1].tag == c2s::VISIBLE_PLAYERS_REQUEST && c2s_out[1].body.empty(),
+            "the world-state load queues the 0x22 {0, 0x5CF7} + 0x23 pair")) return false;
+    host_loop.host_send(s2c::SPAWN_SLOT_NOTICE, {3});
+    host_view.Client_ProcessNetworkFrame();
+    c2s_out = pull();
+    if (!expect(c2s_out.size() == 2 && c2s_out[0].tag == c2s::PLAYER_SYNC_REQUEST &&
+            c2s_out[0].body == std::vector<uint8_t>({0x03, 0xF7, 0x1C}) &&
+            c2s_out[1].tag == c2s::VISIBLE_PLAYERS_REQUEST,
+            "another slot's join notice queues its refresh pair")) return false;
+    host_loop.host_send(s2c::SPAWN_SLOT_NOTICE, {0});
+    host_view.Client_ProcessNetworkFrame();
+    if (!expect(pull().empty(), "the own slot's notice queues nothing")) return false;
+
+    auto &state = host_view.view().state();
+    state.roster[3].bound = true;
+    state.roster[3].entity_slot = 4;
+    state.roster[3].downed_revive_seconds = 30;
+    state.roster[5].bound = true;
+    state.roster[5].entity_slot = 6;
+    state.roster[5].downed_revive_seconds = 30;
+    host_loop.host_send(s2c::VISIBLE_PLAYERS, {0x01, 0x03, 0x04, 0x00});
+    for (int frame = 0; frame < 63; ++frame) host_view.Client_ProcessNetworkFrame();
+    if (!expect(state.visible_players.size() == 1 && state.visible_players[0].slot == 3,
+            "the snapshot lands in the pointer table")) return false;
+    return expect(state.roster[3].downed_revive_seconds == 29 &&
+            state.roster[5].downed_revive_seconds == 30,
+            "the 1 Hz revive countdown walks the table's slots only");
 }
 
 bool run_contextual_radio_keys_match_retail() {
@@ -5858,7 +6277,15 @@ bool run_contextual_radio_keys_match_retail() {
     const auto zone_handle = world.registry.spawn(3, zone);
     if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MP_TKTH1",
             "an interior neutral zone supplies the hill context")) return false;
+    // The probe's value itself (the HUD's "In the Zone" gate reads it too).
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 100,
+            "the hill centre covers 100 percent")) return false;
+    speaker.position.x = 50.0;
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 50,
+            "halfway out covers 50 percent")) return false;
     speaker.position.x = 99.5;
+    if (!expect(w::capture_zone_max_coverage(world, speaker) == 0,
+            "the outermost ring scores zero")) return false;
     if (!expect(w::radio_call_key(world, speaker, 9, 6, 0x10001, false) == "RAD_MEDIC1",
             "a sub-one-percent coverage ring falls back to the class context")) return false;
     speaker.position.x = 0;
@@ -6009,7 +6436,7 @@ bool run_radio_zone_context_uses_the_nearest_entry_coverage() {
     }
     runtime.Client_ProcessNetworkFrame();
     std::vector<std::string> voices;
-    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+    world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
             -> std::optional<w::ScriptVoiceChannel::SetSelection> {
         voices.push_back(name); return std::nullopt;
     });
@@ -6089,8 +6516,16 @@ bool run_guided_zero_steer_point_is_stored() {
 
 int main() {
 	const bool ok = run_guided_zero_steer_point_is_stored() &&
+	                run_connection_indicators_on_a_joiner() &&
+	                run_connection_indicators_on_the_host_client() &&
 	                run_radio_events_preserve_order_chat_and_mute_state(false) &&
                     run_radio_events_preserve_order_chat_and_mute_state(true) &&
+                    run_emote_and_local_chat_track_the_speaker(false) &&
+                    run_emote_and_local_chat_track_the_speaker(true) &&
+                    run_voice_menu_picks_ride_the_session() &&
+                    run_emote_stamps_the_speaker_body_and_voices_it() &&
+                    run_voice_menu_picks_round_trip_through_a_host() &&
+                    run_host_client_refreshes_visible_players() &&
                     run_contextual_radio_keys_match_retail() &&
                     run_charattr_challenge_table_matches_retail() &&
 	                run_spectator_clientauth_and_state_latch() &&
@@ -6158,7 +6593,7 @@ int main() {
 	                run_rtt_pong_fills_the_client_ring() &&
 	                run_server_ping_answers_and_measures() &&
 	                run_world_state_load_bursts_on_every_0x0f() &&
-	                run_chat_uplink_api() &&
+	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
 	                run_joiner_goodbye_tears_down_host();

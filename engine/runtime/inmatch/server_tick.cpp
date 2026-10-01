@@ -4,6 +4,7 @@
 #include <runtime/inmatch/server_idle_timers.h>      // the every-32 breath samples
 #include <runtime/inmatch/server_message_dispatch.h> // build_player_list_message
 #include <runtime/inmatch/server_net_quality.h>      // the host CNetQuality sample + the 0x46 quality resend
+#include <runtime/inmatch/server_overlay_state.h>     // the 14-tick minimap overlay visits
 #include <runtime/inmatch/server_medic.h>            // the medic revive and heal transactions
 #include <runtime/inmatch/server_entity_routes.h>    // the item events, crossings and guidance
 #include <runtime/inmatch/server_spawn.h>            // the admitted 0x51 spectator converts
@@ -46,15 +47,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Pool-0 index byte for the S2C 0x1E kill-feed actor fields (§5.26: u8 pool-0 index,
-// 0xFF = none).
-uint8_t pool0_index_byte(uint16_t handle) {
-	const world::EntityHandle h{handle};
-	if (!h.valid() || h.pool() != 0) return 0xFF;
-	const int slot = h.slot();
-	return slot <= 0xFE ? static_cast<uint8_t>(slot) : 0xFF;
-}
-
 uint8_t death_family_variant(world::World &world, uint8_t base) {
 	return static_cast<uint8_t>(
 			base + ((3u * uint32_t(world.next_prng16())) >> 16));
@@ -96,7 +88,7 @@ PlayerDeathFeed classify_player_death(
 		const world::Entity *killer_entity,
 		uint32_t underwater_breath_samples) {
 	PlayerDeathFeed out;
-	const uint8_t victim_index = pool0_index_byte(death.victim_handle);
+	const uint8_t victim_index = world::pool0_index_byte(world::EntityHandle{death.victim_handle});
 	const uint32_t cause =
 			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
 	auto clear_cause = [victim_entity](uint32_t bit) {
@@ -124,7 +116,7 @@ PlayerDeathFeed classify_player_death(
 		return out;
 	}
 
-	const uint8_t killer_index = pool0_index_byte(death.killer_handle);
+	const uint8_t killer_index = world::pool0_index_byte(world::EntityHandle{death.killer_handle});
 	// The see-all exemption: a same-team kill routes to the team-kill arm only
 	// when NEITHER side's AI record carries the targets-any-team flag
 	// (aiSlot[4] & 0x200); either flag set falls through to the enemy-kill
@@ -171,7 +163,7 @@ PlayerDeathFeed classify_player_death(
 	}
 	out.attacker = killer_index;
 	out.victim = victim_index;
-	out.aux = pool0_index_byte(killer_entity->primary_occupant.packed);
+	out.aux = world::pool0_index_byte(killer_entity->primary_occupant);
 	return out;
 }
 
@@ -227,116 +219,6 @@ bool stage_host_punt(NapiNPConnection &conn, uint32_t mismatch_type) {
 	return true;
 }
 
-void send_minimap_overlay_batches(NapiNPConnection &conn,
-		const std::vector<world::MinimapOverlayClassification> &entries) {
-	for (size_t first = 0; first < entries.size(); first += 16) {
-		const size_t count = std::min<size_t>(16, entries.size() - first);
-		std::vector<uint8_t> body;
-		body.reserve(1 + count * 6);
-		body.push_back(static_cast<uint8_t>(count));
-		for (size_t i = 0; i < count; ++i) {
-			const world::MinimapOverlayClassification &entry = entries[first + i];
-			put_u16le(body, entry.handle);
-			body.push_back(entry.icon);
-			body.push_back(entry.color);
-			body.push_back(entry.flags);
-			body.push_back(entry.source);
-		}
-		conn.link.transport->host_send(
-				s2c::CAPTURE_ZONE_STATE, std::move(body), /*reliable=*/false);
-	}
-}
-
-// Retail invokes Server_BuildOverlayStateForPlayer every 14 host ticks, then
-// advances a 0..127 phase. The dynamic pool-1 loop visits phase, phase+128, ...
-// rather than sweeping all actors every invocation. This produces 00TRg's five
-// one-entry EWEAP packets close together and repeats them every 1792 ticks.
-// [orig: Server_BuildOverlayStateForPlayer @0x517FC0 (the 14-tick cooldown, the
-//  0..127 phase and the +128 stride); Entity_ClassifyForMinimap @0x50FA70 (the
-//  item-type 1 / carrier-type 5 classification and the 0x10 persistent flag)]
-void emit_minimap_overlay_state(NapiNPServerCtx &ctx, world::World &world) {
-	if (!ctx.is_in_session) return;
-	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		if ((conn.type != NapiNPConnection::kTypeServerSide &&
-				conn.link.mode != replication::TransportMode::Loopback) ||
-				!is_in_match(conn) || conn.link.transport == nullptr)
-			continue;
-
-		SessionReplyState &reply = conn.reply;
-		if (reply.minimap_overlay_cooldown != 0) {
-			--reply.minimap_overlay_cooldown;
-			continue;
-		}
-
-		std::vector<world::MinimapOverlayClassification> entries;
-		auto append = [&](const world::Entity &e, bool persistent) {
-			world::MinimapOverlayClassification entry =
-					world::classify_minimap_overlay(e);
-			if (!entry.visible) return;
-			if (persistent) entry.flags |= 0x10;
-			entries.push_back(entry);
-		};
-
-		if (reply.minimap_initial_scan_pending) {
-			const size_t capacity = world.registry.pool_capacity(2);
-			for (size_t slot = 0; slot < capacity; ++slot) {
-				const world::Entity *e = world.registry.get(
-						world::EntityHandle::make(2, static_cast<int>(slot)));
-				if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
-						(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
-					continue;
-				append(*e, true);
-			}
-			reply.minimap_initial_scan_pending = false;
-		}
-
-		// SpawnPoint rows from both static and actor pools are persistent and
-		// refreshed on every producer invocation.
-		for (const int pool : {2, 1}) {
-			const size_t capacity = world.registry.pool_capacity(pool);
-			for (size_t slot = 0; slot < capacity; ++slot) {
-				const world::Entity *e = world.registry.get(
-						world::EntityHandle::make(pool, static_cast<int>(slot)));
-				if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
-						(e->item_attrib & world::kItemAttribSpawnPoint) == 0)
-					continue;
-				append(*e, true);
-			}
-		}
-
-		uint8_t recipient_team = 0;
-		if (const world::Entity *recipient =
-					world.registry.get(conn.link.owned_entity))
-			recipient_team = recipient->team;
-		const size_t pool1_capacity = world.registry.pool_capacity(1);
-		for (size_t slot = reply.minimap_pool1_phase;
-				slot < pool1_capacity; slot += 128) {
-			const world::Entity *e = world.registry.get(
-					world::EntityHandle::make(1, static_cast<int>(slot)));
-			if (e == nullptr || !world::minimap_overlay_entity_enabled(*e) ||
-					(e->item_attrib & world::kItemAttribSpawnPoint) != 0)
-				continue;
-			// In a live MP session retail suppresses occupied enemy vehicles.
-			if (e->item_type == 1 && e->team != 0 && e->team != recipient_team)
-				continue;
-			// A child EWEAP mounted under a non-Building parent is represented
-			// by that carrier rather than as an independent map blip.
-			if ((e->item_attrib & world::kItemAttribEweap) != 0) {
-				const world::EntityHandle parent = e->emplacement_parent.valid()
-						? e->emplacement_parent : e->mount_target;
-				if (const world::Entity *carrier = world.registry.get(parent);
-						carrier != nullptr && carrier->item_type != 5)
-					continue;
-			}
-			append(*e, false);
-		}
-
-		send_minimap_overlay_batches(conn, entries);
-		reply.minimap_pool1_phase =
-				static_cast<uint8_t>((reply.minimap_pool1_phase + 1u) & 0x7Fu);
-		reply.minimap_overlay_cooldown = 13;
-	}
-}
 
 // Route placed-device lifetimes created or retired by this authoritative tick.
 // Retail's filtered send excludes the host itself (mask 0x90): the listen
@@ -458,17 +340,17 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 		switch (event.kind) {
 		case world::MatchGameplayEventKind::FlagPickup:
 			feed_type = 0x14;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagSave:
 			feed_type = 0x15;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagCapture:
 			feed_type = 0x13;
-			feed_actor = pool0_index_byte(event.actor.packed);
+			feed_actor = world::pool0_index_byte(event.actor);
 			feed_position = event.position;
 			break;
 		case world::MatchGameplayEventKind::FlagReturn:
@@ -844,6 +726,16 @@ bool announce_round_end(NapiNPServerCtx &ctx, world::World &world) {
 						non_team_header));
 		conn.burst.game_state = 11;
 	}
+	// The round tallies: a Team Deathmatch, Team KOTH or CTF round counts,
+	// and the winning side 1..4 scores a win [orig: Server_ProcessRoundEnd
+	// @0x516883..0x5168d8 — `add g_TotalRoundsPlayed, 1` @0x5168a7, the
+	// winner switch @0x5168ad..0x5168d8].
+	if (result.game_type == 0x10000u || result.game_type == 0x10001u ||
+			result.game_type == 0x10004u) {
+		++ctx.rounds_played;
+		if (result.winner_team >= 1 && result.winner_team <= 4)
+			++ctx.round_wins[static_cast<size_t>(result.winner_team - 1)];
+	}
 	ctx.round_end_announced = true;
 	ctx.round_end_linger_ticks = 2790;
 	// A ServerCommand Cycle / EndMission / GameOver overrides the stored
@@ -900,6 +792,11 @@ void tick_respawn_holds(NapiNPServerCtx &ctx, const world::World &world) {
 			--conn.link.spawn_target_hold_seconds;
 		if (conn.link.downed_revive_seconds != 0)
 			--conn.link.downed_revive_seconds;
+		// The +376 emote and +380 radio-call cooldowns: a positive value counts
+		// down, a negative one clamps to zero [orig: @0x51e028..0x51e05c].
+		for (int32_t *cooldown : {&conn.link.emote_cooldown_seconds,
+				&conn.link.radio_call_cooldown_seconds})
+			*cooldown = *cooldown > 0 ? *cooldown - 1 : 0;
 	}
 }
 
@@ -2242,7 +2139,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (const auto *start =
 						std::get_if<world::ZoneCaptureEvents::TimedStart>(&event)) {
 				send_all(0x1E, event_body(start->team == 1 ? 41 : 42,
-				                            pool0_index_byte(start->capturer.packed),
+				                            world::pool0_index_byte(start->capturer),
 				                            0xFF));
 				continue;
 			}
@@ -2251,13 +2148,13 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				if (completion->announce)
 					send_all(0x1E, event_body(
 							completion->new_team == 1 ? 43 : 44,
-							pool0_index_byte(completion->capturer.packed), 0xFF));
+							world::pool0_index_byte(completion->capturer), 0xFF));
 				continue;
 			}
 			const auto *flip =
 					std::get_if<world::ZoneCaptureEvents::Flip>(&event);
 			if (flip == nullptr || !flip->announce) continue;
-			const uint8_t capturer_idx = pool0_index_byte(flip->capturer.packed);
+			const uint8_t capturer_idx = world::pool0_index_byte(flip->capturer);
 			if (!flip->numbered) {
 				// An unnumbered instant flip announces as a completion does.
 				// [orig: GameEvent_FlagCapture @0x50F936..0x50F94B, the send
@@ -2458,6 +2355,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 	Server_RouteGuidance(ctx, world);
 
 	emit_periodic_rtt(ctx, world);
+	// The tail ages the designation table [orig: Server_TickUpdate @0x51e496].
+	Server_TickDesignations(ctx.designations);
 	lap.mark(devtools::Slot::SIM_SERVER_REPLICATION);
 
 	// (4) The entity pass: Game_ProcessMainFrame runs the gated entity update

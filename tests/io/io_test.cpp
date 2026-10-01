@@ -3,6 +3,7 @@
 // FNV-1a hash with its hex spelling, and the checked cp1252 encoder.
 
 #include <atomic>
+#include <climits>
 #include <cstdint>
 #include <cstring>
 #include <string>
@@ -95,6 +96,28 @@ static int test_byte_reader_bounds()
     return 0;
 }
 
+// The protocol handlers' two string/skip forms: a NUL-terminated read that
+// clamps to the end, and a skip that does not move on a clipped field.
+static int test_byte_reader_cstr_and_skip_if_available()
+{
+    const uint8_t bytes[] = {'A', 'B', 0, 7, 'Z'};
+    io::ByteReader r(bytes, sizeof(bytes));
+    TEST_EXPECT(r.read_cstr() == "AB");
+    TEST_EXPECT(r.position() == 3 && r.ok());
+    TEST_EXPECT(r.read_u8() == 7);
+    TEST_EXPECT(r.read_cstr() == "Z"); // no terminator: the rest, clipped
+    TEST_EXPECT(r.position() == sizeof(bytes) && !r.ok());
+    TEST_EXPECT(r.read_cstr().empty());
+
+    io::ByteReader s(bytes, sizeof(bytes));
+    s.skip_if_available(4);
+    TEST_EXPECT(s.position() == 4 && s.ok());
+    s.skip_if_available(4); // one byte left: no move
+    TEST_EXPECT(s.position() == 4 && !s.ok());
+    TEST_EXPECT(s.read_u8() == 'Z');
+    return 0;
+}
+
 static int test_byte_writer_roundtrip()
 {
     io::ByteWriter w;
@@ -180,6 +203,39 @@ static int test_strutil()
     TEST_EXPECT(strutil::iless("ab", "abc"));
     TEST_EXPECT(strutil::ends_with_icase("terrain.TRN", ".trn"));
     TEST_EXPECT(!strutil::ends_with_icase(".trn", "terrain.trn"));
+    return 0;
+}
+
+// parse_int / parse_ulong / parse_float accept exactly what std::stoi /
+// stoul / stof accept and fail exactly where those throw.
+static int test_strutil_parse_numbers()
+{
+    TEST_EXPECT(strutil::parse_int("42") == 42);
+    TEST_EXPECT(strutil::parse_int("  -17") == -17);
+    TEST_EXPECT(strutil::parse_int("+8") == 8);
+    TEST_EXPECT(strutil::parse_int("12abc") == 12);
+    TEST_EXPECT(strutil::parse_int("2147483647") == 2147483647);
+    TEST_EXPECT(strutil::parse_int("-2147483648") == INT_MIN);
+    TEST_EXPECT(!strutil::parse_int(""));
+    TEST_EXPECT(!strutil::parse_int("   "));
+    TEST_EXPECT(!strutil::parse_int("abc"));
+    TEST_EXPECT(!strutil::parse_int("-"));
+    TEST_EXPECT(!strutil::parse_int("2147483648"));
+    TEST_EXPECT(!strutil::parse_int("-2147483649"));
+    TEST_EXPECT(!strutil::parse_int("99999999999999999999"));
+    TEST_EXPECT(strutil::parse_int("0x10") == 0);
+
+    TEST_EXPECT(strutil::parse_ulong("ff8000", 16) == 0xff8000ul);
+    TEST_EXPECT(strutil::parse_ulong("FFffFFzz", 16) == 0xfffffful);
+    TEST_EXPECT(!strutil::parse_ulong("zz", 16));
+    TEST_EXPECT(!strutil::parse_ulong("", 16));
+    TEST_EXPECT(!strutil::parse_ulong("fffffffffffffffffffff", 16));
+
+    TEST_EXPECT(strutil::parse_float("1.5") == 1.5f);
+    TEST_EXPECT(strutil::parse_float(" -0.25x") == -0.25f);
+    TEST_EXPECT(!strutil::parse_float("x1.5"));
+    TEST_EXPECT(!strutil::parse_float(""));
+    TEST_EXPECT(!strutil::parse_float("1e999"));
     return 0;
 }
 
@@ -484,8 +540,10 @@ int main()
     if (test_bit_stream_fields()) return 1;
     if (test_bit_stream_unaligned_golden()) return 1;
     if (test_strutil()) return 1;
+    if (test_strutil_parse_numbers()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
+    if (test_byte_reader_cstr_and_skip_if_available()) return 1;
     if (test_log_sink()) return 1;
     if (test_log_ring_cursor_drain_and_wrap()) return 1;
     if (test_log_ring_concurrent_record_and_drain()) return 1;

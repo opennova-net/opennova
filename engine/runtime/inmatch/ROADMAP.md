@@ -24,6 +24,10 @@ golden pcaps. **Server-first.**
 > `npruntime` and `netsim` directories named throughout this record are now
 > `engine/runtime/inmatch` and `engine/runtime/replication` (ADR 0043 d4); only the
 > `tests/npruntime` and `tests/netsim` directory and ctest names keep the old spelling.
+> The transports (`ISessionTransport`, `LoopbackChannel`, `UdpSessionTransport`) went to
+> `engine/runtime/inmatch`, not `replication`, and the wire codecs this record places in
+> `engine/net/novaworld` (the in-game codec, the session framing/hello/keys builders, the
+> capture decode) have lived in `engine/net/npwire` since ADR 0019.
 >
 > **Env-gate note (2026-08-28, superseded 2026-08-29):** the `NW_GOLDEN_*` /
 > `NW_PROFILE_SPH_DIR` environment variables the phase text below names were
@@ -156,6 +160,9 @@ suite unaffected.
 > the "[UNVERIFIED] onnet" note was stale). **0x82 is now faithful**; the residual golden byte-diff is
 > only host-specific seed values (CI host-node-index / MI host dcb / identity strings / live UT), not
 > builder logic. **Wave 3 (0x81 + 0x82 session builders) DONE.**
+> *(Since corrected 2026-09-10, D-NET-1: that CS template is the NOVAWORLDUDP service
+> block; a game host's 0x82 carries the JOINTOPERATIONS template, `jointoperations_cs_fields`,
+> which `make_server_auth_datagram` now feeds.)*
 
 > P2 follow-up fixes (grill 2026-06-26, docs/net §5.0a — D-NET-104/105/106): a code review of the
 > promotion found the join leg had only part of the witnessed `0x42` behavior. Now witnessed against
@@ -470,8 +477,9 @@ map + verdict (MATCHING). Net effect: the host's §5.2a player-sync burst is now
   events, partitioned host vs joiner by port. Env-gate on the golden path with a `DEFAULT_*_PCAP`
   fallback; skip if absent. New env vars at the time: `NW_GOLDEN_LAN_JOIN`,
   `NW_GOLDEN_LAN_JOIN_SESSION`, `NW_GOLDEN_GAMEPLAY` (wired in `tests/CMakeLists.txt`;
-  all three retired with the capture-gated ctests, and `docs/dev-env-vars.md` lists no
-  golden variables today).
+  all three, and the four `tests/npruntime/golden_*` tests that carried this loader,
+  retired with the capture-gated ctests, and `docs/dev-env-vars.md` lists no golden
+  variables today).
 - **Level 1 (unit, per tag):** decode golden payload → re-encode → assert byte-identical + fields.
 - **Level 2 (server e2e):** replay client-origin datagrams in → assert emitted S2C == server-origin.
 - **Level 3 (client e2e):** replay server-origin datagrams in → assert emitted C2S == client-origin
@@ -483,9 +491,9 @@ Goldens (local, gitignored): the 2026-06-26 trio `retail-lan-host-join.pcapng`
 (handshake + world-load), `retail-lan-host-join-session.pcapng` (session-only handshake),
 `retail-gameplay-session.pcapng` (~8 min in-match `0x0a`/`0x0c` loop) — re-banked 2026-08-05
 with the 01TR parity-round set (`retail-lan-01tr-join*`, `retail-gameplay-01tr`,
-`opennova-host-retail-client-01tr`) that the `NW_GOLDEN_*` env vars now point at; the current
-bank table lives in `scripts/net/README.md` "Reference captures". Decode best with
-`apps/nw_pp --items <ITEMS.DEF>`; each capture has a decode sidecar.
+`opennova-host-retail-client-01tr`) that the `NW_GOLDEN_*` env vars pointed at until they were
+retired (the bank table, `scripts/net/README.md` "Reference captures", was removed 2026-08-26).
+Decode best with `apps/nw_pp --items <ITEMS.DEF>`; each capture has a decode sidecar.
 
 ## Key references
 
@@ -498,6 +506,7 @@ bank table lives in `scripts/net/README.md` "Reference captures". Decode best wi
   frame-order owner; the former `.agents/network.md` redirect to it was removed 2026-09-28.)
 - Promote-from (both since deleted — `host_session_accept` retired at P8, `joiner_session`
   deleted at P8.1, recorded above): `engine/net/novaworld/{host_session_accept.h,joiner_session.h}`.
-- Seam: `engine/runtime/replication/{connection_fan.h,connection.h,session_transport.h,udp_session_transport.h}`.
+- Seam: `engine/runtime/replication/{connection_fan.h,connection.h}`,
+  `engine/runtime/inmatch/{session_transport.h,udp_session_transport.h}`.
 - Test pattern: `tests/novaworld/nw_pool_groundtruth_test.cpp` (since retired),
   `tests/netsim/*`, `tests/novaworld/nw_pcap_stream_test.cpp`.

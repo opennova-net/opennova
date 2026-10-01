@@ -15,7 +15,7 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | --- | --- |
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
-| `assets/` | OpenNova's own game data, shipped beside `opennova.exe`: today the placeholder main menu. |
+| `assets/` | OpenNova's own game data, shipped beside `opennova.exe`: today the placeholder main menu and a first-person carbine and arms exported from the Blender scene in `art/` (not used yet). |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
 | `fixtures/` | Test fixtures: synthetic files minted by `tests/fixtures/*_gen.cpp` (the 3DI model set under `fixtures/threedi/synth/`, terrain, fonts, sound banks) plus a small retail-interop keep set (`fixtures/README.md`). |
@@ -100,12 +100,17 @@ selects the game (default `jo`); `/exp <name>` selects an expansion. A
 usage and exits with code 2; an invalid or unmountable directory exits with
 code 1.
 
+The game also builds for the browser: single player only, on Godot's
+Compatibility (WebGL2) renderer. Its PLAY RETAIL reads the install you pick
+inside the browser tab; no retail file is uploaded. `deploy/game/Dockerfile`
+builds and serves the site; see [DEPLOY.md](DEPLOY.md).
+
 ## Downloads
 
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, the `assets/`
 placeholder data, and launch instructions. Retail game data is supplied
-separately. Debug builds include the game's F3 tools.
+separately. Debug builds include the game's dev tools (Insert).
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
 OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project

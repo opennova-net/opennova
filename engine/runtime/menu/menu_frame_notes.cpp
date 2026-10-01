@@ -431,7 +431,7 @@ std::vector<MenuFrameNote> MenuFrameCompiler::layout_notes(const MenuFrameState 
 		const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 		const mnu::Window &w = *node.window;
 		const MenuWidgetState *ws = state_for(state, index);
-		const mnu::RectEdges rect = solve_rect(node);
+		const mnu::RectEdges rect = node_rect_(node, ws);
 		const int width = rect.right - rect.left;
 		const int height = rect.bottom - rect.top;
 		bool fills = false;    // COLOR and IMAGE: stretched into the rect
@@ -612,9 +612,9 @@ std::vector<MenuFrameNote> MenuFrameCompiler::layout_notes(const MenuFrameState 
 		// A table's columns [orig: CUITable_Render @ 0x6411d0, the header loop @ 0x64137c..
 		// 0x641390: width 0 skipped, past the right edge neither drawn nor advanced].
 		if (w.type == mnu::WindowType::Table) {
-			const std::vector<MenuTableColumn> columns = table_columns_(node, ws);
+			const std::vector<TableColumnSetup> columns = table_columns_(node, ws);
 			bool any_width = false;
-			for (const MenuTableColumn &column : columns) {
+			for (const TableColumnSetup &column : columns) {
 				any_width = any_width || column.width != 0;
 			}
 			// A HEADER that leaves its column at width 0 (its WIDTH, or the one it carries
@@ -644,7 +644,7 @@ std::vector<MenuFrameNote> MenuFrameCompiler::layout_notes(const MenuFrameState 
 			} else if (any_width) {
 				const int gap = w.table_data.column.has_spacing ? w.table_data.column.spacing : 0;
 				int left = rect.left;
-				for (const MenuTableColumn &column : columns) {
+				for (const TableColumnSetup &column : columns) {
 					if (column.width == 0) {
 						continue;
 					}

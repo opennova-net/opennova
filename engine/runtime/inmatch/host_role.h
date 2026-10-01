@@ -105,6 +105,8 @@ public:
 	// The FR counter also reaches the server context: the send window's
 	// frame-pressure term and the 0x0A server-fps byte read it.
 	void observe_frame_rate(int32_t fps) override;
+	// ... and the frame statistics its status page shows.
+	void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) override;
 
 private:
 	void reset_state(const inmatch::GameConfig &config, bool serve_and_play);

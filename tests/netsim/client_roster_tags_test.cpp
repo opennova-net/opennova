@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <runtime/replication/client_roster_tags.h>
@@ -40,6 +41,7 @@ ClientEntityState &add_player(ClientState &s, uint16_t handle, uint8_t team,
 	return row;
 }
 
+// Binds a roster slot and lists it in the S2C 0x4C table the walk visits.
 void bind_slot(ClientState &s, int slot, const char *name, int16_t entity_slot,
 		uint8_t revive = 0, bool medic = false) {
 	ClientRosterSlot &r = s.roster[static_cast<size_t>(slot)];
@@ -48,6 +50,10 @@ void bind_slot(ClientState &s, int slot, const char *name, int16_t entity_slot,
 	r.entity_slot = entity_slot;
 	r.downed_revive_seconds = revive;
 	r.medic_request_active = medic;
+	ClientVisiblePlayer entry;
+	entry.slot = static_cast<uint8_t>(slot);
+	entry.entity_handle = static_cast<uint16_t>(entity_slot < 0 ? 0xFFFF : entity_slot);
+	s.visible_players.push_back(entry);
 }
 
 void test_walk_and_gates() {
@@ -169,11 +175,51 @@ void test_radio_request_fold() {
 	CHECK(!gather(&w)); // ... unless the floor itself rides the vehicle
 }
 
+// The walk visits the S2C 0x4C table, not the roster: a bound slot the
+// table does not list is never labelled, the table order is the draw order,
+// and the label wraps the slot's registry tag in <ch>..<co> within 64 bytes.
+// [orig: HUD_DrawFriendlyTagsPass @0x5a4507..0x5a4597; HUD_DrawEntityLabel
+//  @0x5a3f29..0x5a3f86]
+void test_table_walk_and_label() {
+	auto owned = std::make_unique<ClientState>();
+	ClientState &s = *owned;
+	add_player(s, 0x0001, 1, 0x00, 60); // self
+	add_player(s, 0x0002, 1, 0x00, 40);
+	add_player(s, 0x0003, 1, 0x00, 40);
+	bind_slot(s, 0, "Self", 1);
+	bind_slot(s, 2, "Bee", 3);
+	bind_slot(s, 1, "Ace", 2);
+	s.roster[1].registry_clan = "CLN";
+	s.roster[1].squad_color = 4; // slot+0x33, the CMAP click's byte
+	std::vector<world::FriendlyTagSource> tags;
+	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
+			[](uint16_t) { return 80; }, nullptr);
+	CHECK(tags.size() == 2);
+	if (tags.size() == 2) {
+		CHECK(tags[0].name == "Bee");
+		CHECK(tags[1].name == "Ace<ch>CLN<co>");
+		CHECK(tags[1].squad_color_index == 4 && tags[0].squad_color_index == 0);
+	}
+	// Bee's slot drops out of the table: still bound, no longer labelled.
+	s.visible_players.erase(s.visible_players.begin() + 1);
+	tags.clear();
+	collect_roster_tags(s, 0x0001, 1, false, 0x30020u, tags,
+			[](uint16_t) { return 80; }, nullptr);
+	CHECK(tags.size() == 1 && tags[0].name == "Ace<ch>CLN<co>");
+	// The 64-byte cap: after a 62-character name only one byte of the wrap
+	// fits [orig: String_AppendN @0x617E50].
+	ClientRosterSlot slot;
+	slot.name = std::string(62, 'n');
+	slot.registry_clan = "CLN";
+	CHECK(roster_tag_label(slot) == std::string(62, 'n') + "<");
+}
+
 } // namespace
 
 int main() {
 	test_walk_and_gates();
 	test_radio_request_fold();
+	test_table_walk_and_label();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

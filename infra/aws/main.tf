@@ -303,6 +303,20 @@ resource "cloudflare_record" "web_www" {
   comment = "Managed by Terraform - OpenNova web (www)"
 }
 
+# The web build (ADR 0049): the portal's nginx routes game.<domain> to the game
+# container. Proxied like the root, so it gets the same Cloudflare TLS.
+resource "cloudflare_record" "game" {
+  count   = local.dns_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = "game"
+  content = local.public_ip
+  type    = "A"
+  ttl     = var.cloudflare_web_proxied ? 1 : 300
+  proxied = var.cloudflare_web_proxied
+
+  comment = "Managed by Terraform - OpenNova web build"
+}
+
 # The launcher's resolution anchor: ALWAYS unproxied (game traffic is UDP and
 # hosts-file entries need the raw IP), short TTL so cutovers propagate fast.
 resource "cloudflare_record" "nw" {

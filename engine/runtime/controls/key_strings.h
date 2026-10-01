@@ -42,4 +42,10 @@ bool has_key_strings();
 // every label is the retail text ("Ctrl-", "Shift-", " or ", "Key 226", ...).
 std::string key_string(const char *key, const char *fallback);
 
+// The same lookup in any section of the table (the help screen's "Text"
+// rows: HELPTITLE, PAGE, CHANGE_SCREEN, the class names and each action's
+// help text). The literals there carry the "!" / "|" untranslated marker
+// ("!Help - %s"), stripped on the fallback like the "XX" one above.
+std::string key_help_string(const char *section, const char *key, const char *fallback);
+
 }  // namespace opennova::controls

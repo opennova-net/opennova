@@ -27,6 +27,14 @@ services:
     extra_hosts:
       - "host.docker.internal:127.0.0.1"
 
+  # The web build's site listens on :8090, which the security group keeps
+  # private; the web service above proxies game.<domain> to it.
+  game:
+    image: ${GAME_IMAGE:?set GAME_IMAGE to the ghcr.io/...:tag to deploy}
+    pull_policy: always
+    build: !reset null
+    network_mode: host
+
   # Nightly SQLite snapshot -> S3, plus the on-demand backup/list/restore the
   # deploy toolbox runs. AWS creds come from the instance IAM role (IMDSv2);
   # no keys in the container. Reads the DB from the shared nw_data volume.

@@ -21,6 +21,9 @@
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_catalog.h>
+#include <net/npwire/emote_wire.h>
+#include <net/npwire/visible_players.h>
+#include <net/npwire/squad_messages.h>
 #include <formats/wac/command.h>
 
 #include <cstdint>
@@ -669,6 +672,44 @@ int check_door_slot_action_pair() {
 	return 0;
 }
 
+// S2C 0x32 — formatted game text: [i8 subtype][cstr text], +[i8 team] for the
+// join/leave pair; subtypes outside 1..5 are the handler's no-op default.
+// [orig: NapiNPClientMsg_0x032 @0x428060; Server_PlayerAdd @0x51d21e]
+int check_S_32_formatted_game_text() {
+	FormattedGameText join;
+	join.subtype = kGameTextPlayerJoined;
+	join.text = "Sgt Rock";
+	join.team = 2;
+	const std::vector<uint8_t> wire = encode_formatted_game_text(join);
+	const std::vector<uint8_t> want = {1, 'S', 'g', 't', ' ', 'R', 'o', 'c', 'k', 0, 2};
+	EXPECT(wire == want);
+	FormattedGameText out;
+	bool clean = false;
+	EXPECT(decode_formatted_game_text(wire.data(), wire.size(), out, &clean));
+	EXPECT(clean && out.subtype == 1 && out.text == "Sgt Rock" && out.team == 2);
+	// The team byte is read signed [orig: movsx @0x4280d5].
+	const std::vector<uint8_t> neg = {2, 'x', 0, 0xFF};
+	EXPECT(decode_formatted_game_text(neg.data(), neg.size(), out, &clean));
+	EXPECT(clean && out.subtype == 2 && out.team == -1);
+	// Subtypes 3..5 carry the text alone.
+	FormattedGameText spec;
+	spec.subtype = kGameTextPlayerSpectating;
+	spec.text = "Watcher";
+	const std::vector<uint8_t> spec_wire = encode_formatted_game_text(spec);
+	EXPECT(spec_wire.size() == 1 + 8 && spec_wire.back() == 0);
+	EXPECT(decode_formatted_game_text(spec_wire.data(), spec_wire.size(), out, &clean));
+	EXPECT(clean && out.subtype == 5 && out.text == "Watcher");
+	// A missing team byte reads 0 and the body reports unclean.
+	const std::vector<uint8_t> short_join = {1, 'a', 0};
+	EXPECT(decode_formatted_game_text(short_join.data(), short_join.size(), out, &clean));
+	EXPECT(!clean && out.team == 0 && out.text == "a");
+	// Any other subtype is the default arm.
+	const std::vector<uint8_t> other = {6, 'a', 0};
+	EXPECT(!decode_formatted_game_text(other.data(), other.size(), out, &clean));
+	cover('S', 0x32);
+	return 0;
+}
+
 // S2C 0x6A — clan-roster update: actions 1/3 [u8][u32 id][cstr name][cstr tag] with the
 // 64 / 8 char caps, action 2 [u8 2][u32 id]; any other action is ignored (false).
 // [orig: NapiNPClientMsg_HandlePlayerJoinLeave @0x432510; NetPacket_SerializeMinimapSlot @0x5073B0]
@@ -904,6 +945,10 @@ int check_S_6B_minimap() {
 	EXPECT(out.entries[0].lifetime_s == 30);
 	EXPECT(out.entries[0].type == 3);
 	EXPECT(out.entries[0].height == 12);
+	// The host's designation batch writes the same record back byte-exactly
+	// [orig: NetPacket_SerializeDesignations @0x5116A0].
+	EXPECT(encode_minimap_overlay_batch(out) == w.b);
+	EXPECT(encode_minimap_overlay_batch(MinimapOverlayBatch{}).empty());
 	cover('S', 0x6B);
 	return 0;
 }
@@ -1796,6 +1841,16 @@ int check_S_6D_tracked_player_voice() {
     EXPECT(out.event == 6 && out.player_index == 31 && out.location == 0);
     EXPECT(decode_tracked_player_voice(nullptr, 0, out));
     EXPECT(out.event == 0 && out.player_index == 0 && out.location == 0);
+    // The host's radio-call dword [orig: NapiNPServerMsg_HandleRadioCall
+    // @0x5143a2..0x51448f]: the call, the pool-0 index, the location word.
+    TrackedPlayerVoice call;
+    call.event = 6;
+    call.player_index = 31;
+    call.location = -1;
+    EXPECT(encode_tracked_player_voice(call) == std::vector<uint8_t>(bytes, bytes + sizeof(bytes)));
+    call.location = 0x0102;
+    const std::vector<uint8_t> located = {6, 31, 0x02, 0x01};
+    EXPECT(encode_tracked_player_voice(call) == located);
     cover('S', 0x6D);
     return 0;
 }
@@ -1832,6 +1887,109 @@ int check_S_3A_medic_reviving() {
 	return 0;
 }
 
+// The command map's squad and waypoint legs (net/npwire/squad_messages.h):
+// each round-trips its retail layout, and a short body reads 0 (the retail
+// handlers' lenient cursors) instead of failing.
+int check_squad_and_waypoint_legs() {
+	WaypointShare share;
+	share.target = 0xFF;
+	share.name = "Alpha";
+	share.x = 0x10000;
+	share.y = -0x20000;
+	share.z = 7;
+	std::vector<uint8_t> wire = encode_waypoint_share(share);
+	EXPECT(wire.size() == 1 + 6 + 12);
+	const WaypointShare share_out = decode_waypoint_share(wire.data(), wire.size());
+	EXPECT(share_out.target == 0xFF && share_out.name == "Alpha" && share_out.x == 0x10000 &&
+			share_out.y == -0x20000 && share_out.z == 7);
+	cover('C', 0x17);
+	WaypointCreate create;
+	create.name = "WP";
+	create.x = 5;
+	create.y = 6;
+	create.z = 7;
+	create.owner_index = 3;
+	wire = encode_waypoint_create(create);
+	EXPECT(wire.size() == 3 + 12 + 1);
+	const WaypointCreate create_out = decode_waypoint_create(wire.data(), wire.size());
+	EXPECT(create_out.name == "WP" && create_out.x == 5 && create_out.y == 6 &&
+			create_out.owner_index == 3);
+	// A body cut inside the skipped z dword skips nothing: the owner byte is
+	// the next one [orig: `if (cursor + 4 <= end) cursor += 4` @0x425feb].
+	{
+		std::vector<uint8_t> cut = {'W', 0, 5, 0, 0, 0, 6, 0, 0, 0, 9};
+		const WaypointCreate short_out = decode_waypoint_create(cut.data(), cut.size());
+		EXPECT(short_out.x == 5 && short_out.y == 6 && short_out.owner_index == 9);
+	}
+	cover('S', 0x33);
+	wire = encode_entity_handle16(0x4003);
+	EXPECT(decode_entity_handle16(wire.data(), wire.size()) == 0x4003);
+	EXPECT(decode_entity_handle16(wire.data(), 1) == 0);
+	cover('C', 0x4F);
+	cover('S', 0x7C);
+	wire = encode_squad_join_request(4);
+	EXPECT(decode_squad_join_request(wire.data(), wire.size()) == 4);
+	cover('C', 0x43);
+	SquadJoin join;
+	join.leader = 2;
+	join.member = 5;
+	wire = encode_squad_join(join);
+	EXPECT(wire == std::vector<uint8_t>({2, 5}));
+	EXPECT(decode_squad_join(wire.data(), wire.size()).member == 5);
+	cover('S', 0x71);
+	SquadOrderRequest order;
+	order.kind = 1;
+	order.text = "A-Attack";
+	order.targets = {3, 4};
+	wire = encode_squad_order_request(order);
+	EXPECT(wire.size() == 2 + 9 + 2);
+	const SquadOrderRequest order_out = decode_squad_order_request(wire.data(), wire.size());
+	EXPECT(order_out.kind == 1 && order_out.text == "A-Attack" && order_out.targets.size() == 2 &&
+			order_out.targets[1] == 4);
+	cover('C', 0x44);
+	SquadOrder line;
+	line.kind = 1;
+	line.text = "A-Attack";
+	wire = encode_squad_order(line);
+	EXPECT(decode_squad_order(wire.data(), wire.size()).text == "A-Attack");
+	cover('S', 0x72);
+	FireteamAssign assign;
+	assign.fireteam = 2;
+	assign.members = {6};
+	wire = encode_fireteam_assign(assign);
+	EXPECT(wire == std::vector<uint8_t>({2, 1, 6}));
+	EXPECT(decode_fireteam_assign(wire.data(), wire.size()).members[0] == 6);
+	cover('C', 0x45);
+	FireteamSet set;
+	set.member = 6;
+	set.fireteam = 2;
+	wire = encode_fireteam_set(set);
+	EXPECT(decode_fireteam_set(wire.data(), wire.size()).fireteam == 2);
+	cover('S', 0x73);
+	SquadRecruit recruit;
+	recruit.recruiter = 1;
+	recruit.target = 2;
+	wire = encode_squad_recruit(recruit);
+	EXPECT(decode_squad_recruit(wire.data(), wire.size()).target == 2);
+	cover('C', 0x46);
+	wire = encode_squad_recruited(1);
+	EXPECT(decode_squad_recruited(wire.data(), wire.size()) == 1);
+	cover('S', 0x74);
+	GoCode code;
+	code.leader = 1;
+	code.code = 5;
+	wire = encode_go_code(code);
+	EXPECT(decode_go_code(wire.data(), wire.size()).code == 5);
+	EXPECT(decode_go_code(wire.data(), 1).code == 0);
+	cover('C', 0x4B);
+	cover('S', 0x78);
+	wire = encode_punt_vote(9);
+	EXPECT(decode_punt_vote(wire.data(), wire.size()) == 9);
+	EXPECT(decode_punt_vote(nullptr, 0) == 0);
+	cover('C', 0x3F);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -1850,6 +2008,101 @@ int test_decoded_drift_guard() {
 }
 
 } // namespace
+
+// S2C 0x4C — the visible-players snapshot: [u8 count] + count x {u8 slot, u16
+// handle}. A short body zero-fills and still yields `count` entries.
+// [orig: NapiNPClientMsg_0x04C @0x428570; NetPacket_SerializeVisiblePlayersSnapshot
+//  @0x506320]
+int check_S_4C_visible_players() {
+	VisiblePlayers v;
+	v.entries.push_back({1, 0x0001});
+	v.entries.push_back({7, 0x0068});
+	const std::vector<uint8_t> wire = encode_visible_players(v);
+	const std::vector<uint8_t> expect_bytes = {0x02, 0x01, 0x01, 0x00, 0x07, 0x68, 0x00};
+	EXPECT(wire == expect_bytes);
+	VisiblePlayers out;
+	bool clean = false;
+	decode_visible_players(wire.data(), wire.size(), out, &clean);
+	EXPECT(clean && out.entries.size() == 2);
+	EXPECT(out.entries[1].slot == 7 && out.entries[1].entity_handle == 0x0068);
+	const uint8_t short_body[] = {0x02, 0x03};
+	decode_visible_players(short_body, sizeof(short_body), out, &clean);
+	EXPECT(!clean && out.entries.size() == 2);
+	EXPECT(out.entries[0].slot == 3 && out.entries[0].entity_handle == 0);
+	EXPECT(out.entries[1].slot == 0 && out.entries[1].entity_handle == 0);
+	decode_visible_players(nullptr, 0, out, &clean);
+	EXPECT(!clean && out.entries.empty());
+	cover('S', 0x4C);
+	return 0;
+}
+
+// S2C 0x4D — the join notice [u8 slot]. [orig: NapiNPClientMsg_HandleSpawnSlot
+// @0x4317B0; Server_OnPlayerJoin @0x51a946]
+int check_S_4D_spawn_slot_notice() {
+	SpawnSlotNotice n;
+	n.slot = 5;
+	const std::vector<uint8_t> wire = encode_spawn_slot_notice(n);
+	EXPECT(wire.size() == 1 && wire[0] == 5);
+	SpawnSlotNotice out;
+	decode_spawn_slot_notice(wire.data(), wire.size(), out);
+	EXPECT(out.slot == 5);
+	decode_spawn_slot_notice(nullptr, 0, out);
+	EXPECT(out.slot == 0);
+	cover('S', 0x4D);
+	return 0;
+}
+
+// The emote pair: C2S 0x14 [i16 digit] and S2C 0x2D [u8 emote][u8 pool-0
+// index][u16 0]. [orig: NetPacket_SendEmoteRequest @0x42C120;
+// NapiNPServerMsg_HandleEmoteRequest @0x501E00; NapiNPClientMsg_HandleEmote @0x427E90]
+int check_emote_pair() {
+	EmoteRequest req;
+	req.value = 10;
+	const std::vector<uint8_t> up = encode_emote_request(req);
+	const std::vector<uint8_t> up_bytes = {0x0A, 0x00};
+	EXPECT(up == up_bytes);
+	EmoteRequest req_out;
+	decode_emote_request(up.data(), up.size(), req_out);
+	EXPECT(req_out.value == 10);
+	const uint8_t one[] = {0x03};
+	decode_emote_request(one, sizeof(one), req_out);
+	EXPECT(req_out.value == 3);
+	cover('C', 0x14);
+	EmoteBroadcast b;
+	b.emote = 4;
+	b.player_index = 9;
+	const std::vector<uint8_t> down = encode_emote_broadcast(b);
+	const std::vector<uint8_t> down_bytes = {0x04, 0x09, 0x00, 0x00};
+	EXPECT(down == down_bytes);
+	EmoteBroadcast b_out;
+	decode_emote_broadcast(down.data(), down.size(), b_out);
+	EXPECT(b_out.emote == 4 && b_out.player_index == 9);
+	decode_emote_broadcast(one, sizeof(one), b_out);
+	EXPECT(b_out.emote == 3 && b_out.player_index == 0);
+	cover('S', 0x2D);
+	return 0;
+}
+
+// The radio-call request: C2S 0x13 [i16 digit], the host reading its low
+// byte. [orig: NetPacket_SendRadioCallRequest @0x42C150;
+// NapiNPServerMsg_HandleRadioCall @0x5143aa..0x5143b0]
+int check_radio_call_request() {
+	RadioCallRequest req;
+	req.value = 10;
+	const std::vector<uint8_t> up = encode_radio_call_request(req);
+	const std::vector<uint8_t> up_bytes = {0x0A, 0x00};
+	EXPECT(up == up_bytes);
+	RadioCallRequest out;
+	decode_radio_call_request(up.data(), up.size(), out);
+	EXPECT(out.value == 10);
+	const uint8_t one[] = {0x06};
+	decode_radio_call_request(one, sizeof(one), out);
+	EXPECT(out.value == 6);
+	decode_radio_call_request(nullptr, 0, out);
+	EXPECT(out.value == 0);
+	cover('C', 0x13);
+	return 0;
+}
 
 int main() {
 	if (test_retail_dispatch_membership()) return 1;
@@ -1883,6 +2136,7 @@ int main() {
 	if (check_C_28_loadout_request()) return 1;
 	if (check_door_slot_action_pair()) return 1;
 	if (check_S_6A_clan_roster()) return 1;
+	if (check_S_32_formatted_game_text()) return 1;
 	if (check_C_4E_clan_roster_walk()) return 1;
 	if (check_S_70_vehicle_spawn_availability()) return 1;
 	if (check_C_42_vehicle_spawn_availability_request()) return 1;
@@ -1931,6 +2185,11 @@ int main() {
 	if (check_S_3F_objective_notification()) return 1;
     if (check_S_6D_tracked_player_voice()) return 1;
     if (check_S_21_explosion_effect()) return 1;
+	if (check_S_4C_visible_players()) return 1;
+	if (check_S_4D_spawn_slot_notice()) return 1;
+	if (check_emote_pair()) return 1;
+	if (check_squad_and_waypoint_legs()) return 1;
+	if (check_radio_call_request()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

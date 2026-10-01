@@ -45,6 +45,11 @@ struct PlayerReplicationState {
 	// latch. This is not the soldier class; class arrives through the entity/loadout
 	// streams. [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
 	uint8_t downed_state = 0;
+	// The command map's squad bytes, fields 0x0040 / 0x0080: the slot's
+	// leader (+100576; 0xFF none) and fireteam (+100577).
+	// [orig: NetPacket_SerializePlayerSync0x46 @0x505E80]
+	uint8_t squad_leader = 0xFF;
+	uint8_t fireteam = 0;
 	// The player slot's connection-quality LEVEL (slot+418, 0..4): the C2S 0x4C
 	// report the host clamps and stores, serialized by field bit 0x0400. A fresh
 	// slot advertises 1 (the witnessed join-broadcast value) until the client's

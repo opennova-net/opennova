@@ -206,12 +206,36 @@ void project_client_replica_present_row(
 				(entity.state_flags & world::kEntityFlagScopeRaised) != 0,
 				(entity.state_flags & world::kEntityFlagBinoculars) != 0,
 				/*reloading=*/false);
+		// An armed row's channel holds the +0x2C8 target the hand-frame
+		// selector reads (write_present_held_weapon).
+		if (entity.wpn_playing >= 0) weapon_hold_state = entity.wpn_state;
 		if (!collapse_right_hand &&
 				(world::infantry_anim_flags(entity.anim_state_id) &
 				 0x40u) != 0) {
-			row[world::PF_WPN_ANIM_STATE] =
-					static_cast<float>(weapon_hold_state);
-			row[world::PF_WPN_PHASE_TICKS] = -1.0f;
+			if (entity.wpn_playing >= 0) {
+				// The row's own secondary channel (armed with a root-motion
+				// source): its playing state, playhead and blend, as the
+				// authority presents a body's (present_rows.cpp).
+				row[world::PF_WPN_ANIM_STATE] = static_cast<float>(entity.wpn_playing);
+				row[world::PF_WPN_PHASE_TICKS] = static_cast<float>(entity.wpn_phase);
+				row[world::PF_WPN_PHASE_PARKED] =
+						entity.wpn_blend_weight >= 1.0f && entity.wpn_deferred != 0 &&
+								entity.wpn_deferred_boundary >= 0 &&
+								entity.wpn_deferred_boundary != world::kEndNotifyNeverLatches &&
+								entity.wpn_phase == entity.wpn_deferred_boundary
+						? 1.0f : 0.0f;
+				if (entity.wpn_blend_weight < 1.0f && entity.wpn_prev >= 0) {
+					row[world::PF_WPN_SOURCE_STATE] = static_cast<float>(entity.wpn_prev);
+					row[world::PF_WPN_SOURCE_PHASE_TICKS] =
+							static_cast<float>(entity.wpn_prev_phase);
+					row[world::PF_WPN_BLEND_WEIGHT] = entity.wpn_blend_weight;
+				}
+			} else {
+				// Unarmed (no root-motion source): the ladder's pose at frame 0.
+				row[world::PF_WPN_ANIM_STATE] =
+						static_cast<float>(weapon_hold_state);
+				row[world::PF_WPN_PHASE_TICKS] = -1.0f;
+			}
 		}
 	}
 

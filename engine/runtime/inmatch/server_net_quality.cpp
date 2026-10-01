@@ -1,5 +1,7 @@
 #include <runtime/inmatch/server_net_quality.h>
 
+#include <algorithm>
+
 #include <net/npwire/ingame_decode.h>   // kPlayerSyncHasQuality
 #include <net/npwire/ingame_encode.h>   // encode_player_sync
 #include <net/npwire/ingame_message_id.h>
@@ -130,6 +132,8 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	if (ctx.world != nullptr && ctx.world->preround_delay_seconds != 0) {
 		replication::net_quality_window_clear(ctx.host_quality_window);
 		ctx.host_network_quality = 0;
+		// The tail still buckets the cleared scalar [orig: @0x4c585a..0x4c58b0].
+		ctx.net_quality_level = replication::net_quality_level(0);
 		return;
 	}
 	// The send window's three inputs [orig: @0x4C531B..0x4C54C6].
@@ -161,6 +165,11 @@ void Server_SampleHostNetQuality(NapiNPServerCtx &ctx) {
 	// S2C 0x79 carries CNetQuality+0x0C, the send window's folded quality.
 	ctx.host_network_quality =
 			static_cast<uint8_t>(ctx.host_quality_window.quality & 0xFF);
+	// The tail: combined = max(send, receive), the receive window idle on the
+	// authority (its +0x10 stays 0), bucketed to the level the host's own
+	// connection indicators ramp toward [orig: @0x4c585a..0x4c58b0].
+	ctx.net_quality_level =
+			replication::net_quality_level(std::max(0, ctx.host_quality_window.quality));
 }
 
 } // namespace opennova::inmatch

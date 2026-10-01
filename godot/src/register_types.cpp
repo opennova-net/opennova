@@ -101,11 +101,14 @@
 #include "simulation/environment_snapshot.h"
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
-#include "hud/feed_row.h"
 #include "hud/player_hud_weapon_def.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
+#include "hud/map_view_state.h"
+#include "hud/map_view_window.h"
+#include "hud/command_map_screen.h"
 #include "hud/hud_toggles.h"
+#include "hud/hud_chat_entry.h"
 #include "hud/end_round_transition.h"
 #include "hud/hud_inset_scope.h"
 #include "devtools/dev_tools.h"
@@ -268,6 +271,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerWeaponView);
 	GDREGISTER_CLASS(WaypointHudView);
 	GDREGISTER_CLASS(HudMapGridOrigin);
+	GDREGISTER_CLASS(HudMapOverlays);
 	GDREGISTER_CLASS(VehiclePanelView);
 	GDREGISTER_CLASS(ScoreFeedback);
 	GDREGISTER_CLASS(ScoreboardHeader);
@@ -299,7 +303,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(SlotSoundRow);
 	GDREGISTER_CLASS(SoundEmitterRow);
 	GDREGISTER_CLASS(RoundImpactRow);
-	GDREGISTER_CLASS(ChatLineRow);
 	GDREGISTER_CLASS(MissionEffect);
 	GDREGISTER_CLASS(DeathPieceRow);
 	GDREGISTER_CLASS(DeathPieceDraw);
@@ -310,10 +313,13 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(VehicleHudBlock);
 	GDREGISTER_CLASS(HudDrawListStats);
 	GDREGISTER_CLASS(HudOverlay);
+	GDREGISTER_CLASS(MapViewState);
+	GDREGISTER_CLASS(MapViewWindow);
+	GDREGISTER_CLASS(CommandMapScreen);
 	GDREGISTER_CLASS(HudToggles);
+	GDREGISTER_CLASS(HudChatEntry);
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
-	GDREGISTER_CLASS(FeedRow);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);

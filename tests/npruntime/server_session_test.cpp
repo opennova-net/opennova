@@ -185,6 +185,67 @@ bool check_scoreboard_projects_every_retail_mode_shape() {
 	return true;
 }
 
+// The host's 0x16 rows, status words and trailer counts: no fallback row (an
+// empty pair list sends zero rows), every status word 0 (the recipient gate
+// slot+96481 is never set), the spectator bit and count off the latch, and
+// the in-game count as its own slot walk.
+// [orig: Server_BuildAndBroadcastScoreboard @0x50D960 -- the row loop
+//  @0x50da54..0x50db21, the in-game walk @0x50dd5b..0x50dda9;
+//  NetPacket_SerializeScoreboard0x16 @0x504bd6 / @0x504c30]
+bool check_host_scoreboard_status_and_counts() {
+	opennova::inmatch::GameConfig config;
+	opennova::PlayerList empty;
+	{
+		const opennova::ProtocolMessage message =
+				opennova::inmatch::build_player_list_message(config, {}, nullptr);
+		if (!expect(opennova::decode_player_list(
+		                    message.payload.data(), message.payload.size(), empty) &&
+		                    empty.players.empty() && empty.in_game_count == 0 &&
+		                    empty.spectator_count == 0,
+		            "no in-game player: zero rows and a zero trailer, no fallback row"))
+			return false;
+	}
+	opennova::world::World world;
+	world.registry.configure_pool(0, 4);
+	auto spawn_player = [&](uint8_t team) {
+		opennova::world::Entity entity;
+		entity.kind = opennova::world::EntityKind::Organic;
+		entity.team = team;
+		entity.alive = true;
+		return world.registry.spawn(0, entity);
+	};
+	std::vector<opennova::inmatch::NapiNPConnection> roster(3);
+	for (uint8_t slot = 0; slot < roster.size(); ++slot) {
+		roster[slot].phase = opennova::inmatch::ConnectionPhase::InMatch;
+		roster[slot].burst.spawned = true;
+		roster[slot].reply.player_slot = slot;
+	}
+	roster[0].link.owned_entity = spawn_player(1);
+	roster[1].link.owned_entity = spawn_player(0);
+	roster[1].link.spectator = true;
+	// roster[2] is in game but binds no entity: counted, not a row.
+	const opennova::ProtocolMessage message =
+			opennova::inmatch::build_player_list_message(config, roster, &world);
+	opennova::PlayerList list;
+	if (!expect(opennova::decode_player_list(
+	                    message.payload.data(), message.payload.size(), list),
+	            "host 0x16 decodes"))
+		return false;
+	if (!expect(list.players.size() == 2 && list.in_game_count == 3 &&
+	                    list.spectator_count == 1,
+	            "the in-game count walks the slots; the spectator count rides the rows"))
+		return false;
+	bool status_zero = true;
+	uint8_t spectator_flags = 0xFF;
+	for (const opennova::PlayerListRow &row : list.players) {
+		status_zero = status_zero && row.status_flags == 0;
+		if (row.slot_id == 1) spectator_flags = row.flags;
+	}
+	return expect(status_zero, "every host-sent status word is 0") &&
+	       expect(spectator_flags == 0x01,
+	              "the spectator row carries bit 0 over its zeroed team");
+}
+
 void add_retail_game_environment(opennova::ClientAuth &auth) {
 	for (const auto &field : {
 			std::pair{"BT", "0"},
@@ -3235,6 +3296,13 @@ bool check_session_status_reply_matches_retail_writer() {
 	roster[1].phase = opennova::inmatch::ConnectionPhase::InMatch;
 	roster[1].burst.spawned = true;
 
+	// Co-op's key 9 is the mission's defined-subgoal count: two authored win
+	// conditions ahead of the 0 terminator [orig: Server_BuildStatusReport
+	// @0x530cb0..0x530ce1].
+	opennova::world::World world;
+	world.script.subgoals.win_text_ids[1] = 3;
+	world.script.subgoals.win_text_ids[2] = 4;
+
 	opennova::inmatch::ServerDispatchInputs inputs;
 	inputs.session_uptime_ms = 111844u;
 	std::vector<opennova::ProtocolMessage> replies =
@@ -3242,7 +3310,7 @@ bool check_session_status_reply_matches_retail_writer() {
 					config, roster[1],
 					{opennova::make_protocol_message(
 							opennova::c2s::BURST_MEMBER_2D, {})},
-					17u, roster, nullptr, inputs);
+					17u, roster, &world, inputs);
 	if (!expect(replies.size() == 1 &&
 	                    replies.front().tag == opennova::s2c::SESSION_STATUS,
 	            "C2S 0x2D receives one requester-only S2C 0x58"))
@@ -3277,7 +3345,7 @@ bool check_session_status_reply_matches_retail_writer() {
 	                    decoded.kv[0].key == 9 && decoded.kv[0].value == 2 &&
 	                    decoded.kv[1].key == 8 && decoded.kv[1].value == 30 &&
 	                    decoded.trailing_bytes == 5,
-	            "session-status carries player-count/respawn pairs and writer sentinel"))
+	            "session-status carries subgoal-count/respawn pairs and writer sentinel"))
 		return false;
 	return expect(std::all_of(replies.front().payload.end() - 5,
 	                          replies.front().payload.end(),
@@ -3307,7 +3375,7 @@ bool check_objective_mode_session_status_options() {
 	world.match.configure(rules);
 	opennova::SessionStatusBlock decoded;
 	std::vector<uint8_t> body = opennova::inmatch::serialize_session_status(
-			config, 0, 0, &world);
+			config, 0, true, &world);
 	if (!expect(opennova::decode_session_status(
 				body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
 				decoded.kv[0].key == 7 && decoded.kv[0].value == 2 &&
@@ -3324,7 +3392,7 @@ bool check_objective_mode_session_status_options() {
 		config.game_type = game_type;
 		rules.game_type = game_type;
 		world.match.configure(rules);
-		body = opennova::inmatch::serialize_session_status(config, 0, 0, &world);
+		body = opennova::inmatch::serialize_session_status(config, 0, true, &world);
 		decoded = {};
 		if (!expect(opennova::decode_session_status(
 					body.data(), body.size(), decoded) && decoded.kv.size() == 2 &&
@@ -3341,7 +3409,7 @@ bool check_objective_mode_session_status_options() {
 		config.max_score = 0;
 		rules.game_type = game_type;
 		world.match.configure(rules);
-		body = opennova::inmatch::serialize_session_status(config, 0, 0, &world);
+		body = opennova::inmatch::serialize_session_status(config, 0, true, &world);
 		decoded = {};
 		if (!expect(opennova::decode_session_status(
 					body.data(), body.size(), decoded) && decoded.kv.size() == 1 &&
@@ -4254,6 +4322,95 @@ bool check_retail_minimap_overlay_stream_without_zone_chain() {
 	return true;
 }
 
+// A numbered SpawnPoint zone's S2C 0x40 source byte ORs the recipient's
+// capture bits: 0x80 when the recipient's team may take the zone, 0x40 when
+// the other side may (2 for team 1, else 1); a zone outside the chain takes
+// both, an unnumbered one neither. The zone panel, the map tethers and the
+// capture-point labels gate on these bits.
+// [orig: Server_BuildOverlayStateForPlayer @0x5181ff..0x518248 /
+//  @0x51834f..0x518398; ZoneSlotChain_IsZoneCapturableByTeam @0x4A2450]
+bool check_minimap_overlay_zone_capture_bits() {
+	opennova::inmatch::NapiNPServerCtx ctx;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = opennova::game_type::kAdvanceAndSecure;
+	opennova::world::World world;
+	world.rules.mp_session = true;
+	ctx.world = &world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 8);
+	world.registry.configure_pool(2, 4);
+	opennova::world::MatchRules rules;
+	rules.game_type = opennova::game_type::kAdvanceAndSecure;
+	world.match.configure(rules);
+
+	auto zone = [&](uint8_t number, uint8_t team, bool chained) {
+		opennova::world::Entity e;
+		e.kind = opennova::world::EntityKind::Item;
+		e.has_item_def = true;
+		e.item_attrib = opennova::world::kItemAttribSpawnPoint |
+				(chained ? opennova::world::kItemAttribChangeTeam : 0u);
+		e.is_spawn_point = true;
+		e.is_capture_trigger = chained;
+		e.zone_number = number;
+		e.team = team;
+		e.health = 1;
+		e.alive = true;
+		return world.registry.spawn(1, e);
+	};
+	// Team 1 holds 1, team 2 holds 3, the neutral 2 sits between them.
+	const auto z1 = zone(1, 1, true);
+	const auto z2 = zone(2, 0, true);
+	const auto z3 = zone(3, 2, true);
+	const auto loose = zone(5, 0, false);
+	const auto plain = zone(0, 1, false);
+	world.zones.build_chain_from_mission();
+
+	opennova::world::Entity player;
+	player.kind = opennova::world::EntityKind::Organic;
+	player.team = 1;
+	player.health = 100;
+	player.alive = true;
+	const auto player_h = world.registry.spawn(0, player);
+
+	opennova::replication::UdpSessionTransport transport(
+			opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.link.transport = &transport;
+	conn.link.owned_entity = player_h;
+	ctx.np_protocol.connection_list.push_back(std::move(conn));
+
+	opennova::inmatch::Server_TickUpdate(ctx);
+	std::vector<opennova::CaptureZoneOverlay> rows;
+	std::vector<uint8_t> raw;
+	while (transport.pop_outbound(raw)) {
+		if (raw.empty() || raw.front() != opennova::s2c::CAPTURE_ZONE_STATE) continue;
+		opennova::CaptureZoneOverlayBatch batch;
+		if (!opennova::decode_capture_zone_overlay(raw.data() + 1, raw.size() - 1, batch))
+			return expect(false, "the zone overlay batch decodes");
+		rows.insert(rows.end(), batch.entries.begin(), batch.entries.end());
+	}
+	auto source_of = [&](opennova::world::EntityHandle h) -> int {
+		for (const auto &row : rows)
+			if (row.handle == static_cast<uint16_t>(h.packed)) return row.source;
+		return -1;
+	};
+	bool ok = expect(source_of(z1) == 0x01,
+			"team 1's own zone 1: neither side may take it (no enemy neighbour)");
+	ok = expect(source_of(z2) == 0xC2,
+			"neutral zone 2 between both sides: capturable by the recipient and the enemy") && ok;
+	ok = expect(source_of(z3) == 0x03, "team 2's zone 3 has no team-1 neighbour") && ok;
+	ok = expect(source_of(loose) == 0xC5, "a numbered zone outside the chain takes both bits") &&
+			ok;
+	ok = expect(source_of(plain) == 0x00, "an unnumbered spawn point takes no capture bits") &&
+			ok;
+	return ok;
+}
+
 // StartDelay is a host-side seconds phase, not a second gameplay clock. The
 // ordinary 62 Hz clock and network maintenance continue, while the World
 // systems stay frozen through the boundary that changes 1 -> 0. Gameplay
@@ -4367,6 +4524,7 @@ int main() {
 	ok = check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() && ok;
 	ok = check_scoreboard_message_is_transient() && ok;
 	ok = check_scoreboard_projects_every_retail_mode_shape() && ok;
+	ok = check_host_scoreboard_status_and_counts() && ok;
 	ok = check_connection_mode_table() && ok;
 	ok = check_single_player_signature() && ok;
 	ok = check_script_change_reaches_the_same_frame() && ok;
@@ -4408,6 +4566,7 @@ int main() {
 	ok = check_frontier_hint_waits_for_the_play_ticks() && ok;
 	ok = check_refused_touch_arms_the_nag() && ok;
 	ok = check_retail_minimap_overlay_stream_without_zone_chain() && ok;
+	ok = check_minimap_overlay_zone_capture_bits() && ok;
 	ok = check_preround_delay_phase_boundary() && ok;
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;
