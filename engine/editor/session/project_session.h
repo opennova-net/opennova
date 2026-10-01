@@ -15,6 +15,7 @@ class Document;
 class DocumentBase;
 class PreferencesStore;
 class SessionOperation;
+class Viewports;
 struct PollBudget;
 struct SessionView;
 struct ValidationStats;
@@ -119,6 +120,13 @@ public:
 	size_t files_scanned() const;
 	// The directory the running game uses ("" when none): the build never prunes it.
 	std::string running_build_dir() const;
+
+	// The viewports (S13 V5, preview/viewports.h), as the Shell's devices drive them
+	// (ViewportDeviceCache: attached, followed, their actions taken, their reports given). The view
+	// shares them const (DocumentsView::viewports); their state changes only by SetViewport.
+	Viewports &viewports();
+	// `seconds` of the Shell's frames pass: the preview clock runs while it plays.
+	void advance(double seconds);
 
 private:
 	struct Impl;

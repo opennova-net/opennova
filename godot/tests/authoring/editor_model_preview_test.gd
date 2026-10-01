@@ -11,7 +11,9 @@ extends GutTest
 ## clock the two share; a click's hit names the marker's record. S10p5: a drag of the
 ## marker lands it on the pixel the drag let go at, one undo step. S10p6: a table plays on
 ## the model an item pairs with it; the selected row's clip poses the device's skeleton at
-## the clip clock's tick.
+## the clip clock's tick. S13 V5: the model viewport's envelope; each model its own viewport and
+## device; the Shell's device cache holds four, the least recently used given up, and a viewport
+## given a device again makes its picture again, its camera kept.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -127,10 +129,32 @@ func _write(path: String, text: String) -> void:
 
 func _overlays(preview: Dictionary, kind: String) -> Array:
 	var rows: Array = []
-	for row: Variant in preview.get("overlays", []):
+	for row: Variant in preview.get("items", []):
 		if row is Dictionary and String(row.get("kind", "")) == kind:
 			rows.append(row)
 	return rows
+
+
+## The model's viewport ready, a frame at a time (its device takes what it asks at each pump).
+func _await_ready() -> Dictionary:
+	var preview := _preview()
+	for _frame in 8:
+		if String(preview.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		preview = _preview()
+	return preview
+
+
+## A copy of `model` written into the open project's models/ as `name`, the files scanned again.
+func _add_model(model: String, name: String) -> void:
+	var root: String = _seam.get_project_root()
+	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(model))
+	var out := FileAccess.open(root.path_join("models").path_join(name), FileAccess.WRITE)
+	out.store_buffer(bytes)
+	out.close()
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 
 
 func _first_child(kind: String) -> int:
@@ -143,14 +167,14 @@ func test_preview_draws_the_open_model() -> void:
 	if _app == null:
 		return
 	assert_false(_app.is_available(), "headless: no ImGui context")
-	assert_eq(String(_preview().get("status", "")), "no_project")
+	assert_eq(String(_preview().get("reason", "")), "no_project")
 
 	assert_true(_new_project_with(ARMORY, "armory.3di"))
-	assert_eq(String(_preview().get("status", "")), "no_model")
+	assert_eq(String(_preview().get("reason", "")), "no_model")
 	assert_true(_seam.open_document("models/armory.3di"))
 
 	# The open model as it would save, at the level the portable half picks.
-	var preview := _preview()
+	var preview := await _await_ready()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
 	assert_true(bool(preview.get("current", false)))
 	assert_eq(int(preview.get("builds", 0)), 1)
@@ -159,7 +183,22 @@ func test_preview_draws_the_open_model() -> void:
 	assert_not_null(model)
 	assert_not_null(camera)
 	assert_not_null(model.get_object_data(), "the device holds the model")
-	assert_eq(model.get_active_lod(), int(preview.get("lod", {}).get("shown", -2)))
+	assert_eq(model.get_active_lod(), int(preview.get("body", {}).get("lod", {}).get("shown", -2)))
+	assert_eq(String(preview.get("kind", "")), "model")
+	assert_eq(String(preview.get("units", "")), "pixels")
+	assert_true(bool(preview.get("device", {}).get("attached", false)))
+	var size: Vector2i = (camera.get_viewport() as SubViewport).size
+	assert_eq(size.x, int(preview.get("device", {}).get("width", 0)), "the device at the viewport's size")
+	assert_eq(size.y, int(preview.get("device", {}).get("height", 0)))
+	assert_false(bool(preview.get("device", {}).get("canvas_sized", true)), "headless: no canvas sizes it")
+	# Headless, the device's size is the viewport's to set: a `device` object, never flat keys.
+	assert_true(_app.set_model_preview_camera({"device": {"width": 320, "height": 240}}))
+	assert_eq((camera.get_viewport() as SubViewport).size, Vector2i(320, 240))
+	assert_eq(int(_preview().get("device", {}).get("width", 0)), 320)
+	assert_false(_app.set_model_preview_camera({"width": 640}), "the device's size is the device's member")
+	assert_ne(String(_app.get_preview_error()), "", "the refusal says why")
+	assert_true(_app.set_model_preview_camera({"device": {"width": size.x, "height": size.y}}))
+	preview = _preview()
 
 	# A user point on the pixel the device's camera projects it to.
 	var points: Array = _overlays(preview, "user_point")
@@ -189,13 +228,13 @@ func test_preview_draws_the_open_model() -> void:
 	assert_ne(model.get_scene_build_serial(), serial, "a light's edit builds the scene again")
 
 	# The options: a level held and one of the model's registers (armory's FLICKER) on it.
-	var registers: Array = preview.get("registers", [])
+	var registers: Array = preview.get("body", {}).get("registers", [])
 	assert_gt(registers.size(), 0, "the fixture declares a CTRL register")
 	var register := String(registers[0].get("name", "")) if registers.size() > 0 else "FLICKER"
 	assert_true(_app.set_model_preview_options({"lod": 0, "ctrl": {register: 3}}))
 	preview = _preview()
 	assert_eq(int(preview.get("options", {}).get("lod", -1)), 0)
-	assert_eq(int(preview.get("registers", [{}])[0].get("value", 0)), 3)
+	assert_eq(int(preview.get("body", {}).get("registers", [{}])[0].get("value", 0)), 3)
 	assert_eq(model.get_active_lod(), 0)
 	assert_eq(int(model.get_ctrl_values().get(register, 0)), 3, str(model.get_ctrl_values()))
 	assert_true(_app.set_model_preview_options({"lod": "auto", "ctrl": {}}))
@@ -206,8 +245,9 @@ func test_preview_draws_the_open_model() -> void:
 	# The camera backs away: the device draws whatever Auto picks there.
 	assert_true(_app.set_model_preview_camera({"distance": 5000.0}))
 	preview = _preview()
-	assert_eq(model.get_active_lod(), int(preview.get("lod", {}).get("shown", -2)))
-	assert_eq(int(preview.get("lod", {}).get("shown", -2)), int(preview.get("lod", {}).get("auto", -3)))
+	var lod: Dictionary = preview.get("body", {}).get("lod", {})
+	assert_eq(model.get_active_lod(), int(lod.get("shown", -2)))
+	assert_eq(int(lod.get("shown", -2)), int(lod.get("auto", -3)))
 	assert_true(_app.set_model_preview_camera({"frame": true}))
 	assert_lt(float(_preview().get("camera", {}).get("distance", 5000.0)), 5000.0, "framed again")
 
@@ -222,11 +262,16 @@ func test_markers_ride_the_parts_the_device_draws() -> void:
 	assert_gt(point, 0)
 	assert_true(_seam.set_field(point, "position.x", 2.0))
 	# The clock held at a quarter second: the device's part node and the overlay pose alike.
-	assert_true(_app.set_model_preview_options({"playing": false, "time_ms": 250}))
+	assert_true(_app.set_model_preview_options({"clock": {"playing": false, "time_ms": 250}}))
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var preview := _preview()
 	assert_eq(int(preview.get("clock", {}).get("time_ms", -1)), 250)
+	# The clock's members are the clock's (its rate among them), never the options'.
+	assert_false(_app.set_model_preview_options({"time_ms": 250}))
+	assert_true(_app.set_model_preview_options({"clock": {"rate": 2.0}}))
+	assert_eq(float(_preview().get("clock", {}).get("rate", 0.0)), 2.0)
+	assert_true(_app.set_model_preview_options({"clock": {"rate": 1.0}}))
 	var marker: Dictionary = _overlays(preview, "user_point")[0]
 	var model: ObjectModel = _app.get_model_preview_model()
 	var parts: Dictionary = model.get_render_part_nodes()
@@ -280,10 +325,10 @@ func test_a_table_plays_on_its_rig() -> void:
 	var walk: int = _seam.find_record("anim_walk_forward")
 	assert_gt(walk, 0)
 	assert_true(_seam.select_record(walk))
-	assert_true(_app.set_model_preview_options({"playing": false, "clip_ticks": 0}))
-	var preview := _preview()
+	assert_true(_app.set_model_preview_options({"clock": {"playing": false, "ticks": 0}}))
+	var preview := await _await_ready()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
-	var animation: Dictionary = preview.get("animation", {})
+	var animation: Dictionary = preview.get("body", {}).get("animation", {})
 	assert_eq(String(animation.get("model", "")).to_lower(), "skinned.3di")
 	assert_true(bool(animation.get("rig", false)))
 	assert_eq(String(animation.get("key", "")), "anim_walk_forward")
@@ -295,8 +340,63 @@ func test_a_table_plays_on_its_rig() -> void:
 	var skeleton := model.get_skeleton()
 	var at_rest := skeleton.get_bone_pose_rotation(0)
 	# A quarter of the way in, the root has turned.
-	assert_true(_app.set_model_preview_options({"clip_ticks": 8}))
+	assert_true(_app.set_model_preview_options({"clock": {"ticks": 8}}))
 	await get_tree().process_frame
 	var turned := skeleton.get_bone_pose_rotation(0)
 	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")
-	assert_eq(int(_preview().get("animation", {}).get("ticks", -1)), 8)
+	assert_eq(int(_preview().get("body", {}).get("animation", {}).get("ticks", -1)), 8)
+	assert_eq(int(_preview().get("clock", {}).get("ticks", -1)), 8, "the preview clock's ticks")
+
+
+## S13 V5: each open model its own viewport and its own device: the first again keeps its device
+## and its picture (no build), its camera its own.
+func test_two_models_get_their_own_devices() -> void:
+	if _app == null:
+		return
+	assert_true(_new_project_with(ARMORY, "armory.3di"))
+	_add_model(ARMORY, "second.3di")
+	assert_true(_seam.open_document("models/armory.3di"))
+	var first := await _await_ready()
+	assert_eq(String(first.get("status", "")), "ready", str(first))
+	var first_model: ObjectModel = _app.get_model_preview_model()
+	assert_true(_app.set_model_preview_camera({"distance": 30.0}))
+	assert_true(_seam.open_document("models/second.3di"))
+	var second := await _await_ready()
+	assert_eq(String(second.get("path", "")), "models/second.3di", str(second))
+	var second_model: ObjectModel = _app.get_model_preview_model()
+	assert_not_null(second_model)
+	assert_ne(second_model, first_model, "the second model on a device of its own")
+	assert_ne(float(second.get("camera", {}).get("distance", 30.0)), 30.0, "its own camera, framed on it")
+	assert_true(_seam.open_document("models/armory.3di"))
+	var again := await _await_ready()
+	assert_eq(_app.get_model_preview_model(), first_model, "the first's device kept")
+	assert_eq(int(again.get("builds", 0)), int(first.get("builds", -1)), "its picture kept: no build")
+	assert_almost_eq(float(again.get("camera", {}).get("distance", 0.0)), 30.0, 0.001, "its camera kept")
+
+
+## S13 V5: the Shell's devices hold four: a fifth model previewed gives up the least recently used
+## (path, kind)'s device, its viewport detached with its state kept; previewed again, it is given a
+## device that makes its picture again (a build), at the camera it kept.
+func test_the_device_cache_holds_four() -> void:
+	if _app == null:
+		return
+	assert_true(_new_project_with(ARMORY, "m0.3di"))
+	for i in range(1, 5):
+		_add_model(ARMORY, "m%d.3di" % i)
+	assert_true(_seam.open_document("models/m0.3di"))
+	var first := await _await_ready()
+	assert_eq(int(first.get("builds", 0)), 1, str(first))
+	assert_true(_app.set_model_preview_camera({"yaw": 1.25, "distance": 12.0}))
+	var first_model: ObjectModel = _app.get_model_preview_model()
+	for i in range(1, 5):
+		assert_true(_seam.open_document("models/m%d.3di" % i))
+		assert_eq(String((await _await_ready()).get("status", "")), "ready")
+	await get_tree().process_frame
+	assert_false(is_instance_valid(first_model), "the least recently used device given up, its nodes freed")
+	assert_true(_seam.open_document("models/m0.3di"))
+	var again := await _await_ready()
+	assert_true(bool(again.get("device", {}).get("attached", false)), str(again))
+	assert_eq(int(again.get("builds", 0)), 2, "a device attached again makes the picture again")
+	assert_almost_eq(float(again.get("camera", {}).get("yaw", 0.0)), 1.25, 0.001, "the camera it kept")
+	assert_almost_eq(float(again.get("camera", {}).get("distance", 0.0)), 12.0, 0.001)
+	assert_not_null(_app.get_model_preview_model(), "a device of its own again")

@@ -61,6 +61,7 @@ enum class EditorRequestKind {
 	Reimport,
 	PreviewInstallImport,
 	ClearOutput,
+	SetViewport,
 	Quit,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
@@ -169,6 +170,10 @@ struct EditorRequest {
 	SelectMode mode = SelectMode::Replace;
 	UnsavedChoice choice = UnsavedChoice::Cancel;
 	ProjectSettingsChange settings;
+	// A viewport's change (SetViewport, S13 V5): the JSON text of an object {kind?, device?, clock?,
+	// options?, camera?}, as preview/viewports.h's set takes it (text: this header pulls no JSON
+	// reader).
+	std::string viewport;
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
@@ -195,7 +200,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
-			a.purpose == b.purpose && a.with_dependencies == b.with_dependencies &&
+			a.viewport == b.viewport && a.purpose == b.purpose &&
+			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash;
 }

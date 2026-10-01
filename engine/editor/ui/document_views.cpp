@@ -3,6 +3,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/model/document_base.h>
+#include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/styles_view.h>
@@ -74,8 +75,13 @@ const DocumentViewRow *document_view_row(DocumentTypeId type) {
 }
 
 std::unique_ptr<DocumentView> make_view(const DocumentBase &document) {
-	const DocumentViewRow *row = document_view_row(asset_kind_row(document.kind()).document);
+	const DocumentTypeId type = asset_kind_row(document.kind()).document;
+	const DocumentViewRow *row = document_view_row(type);
 	if (!row) return nullptr;
+	// The Main role: the outline beside the viewport of the Main-role kind that shows the type.
+	const ViewportKind main = main_viewport_kind(type);
+	if (row->role == DocumentViewRole::MainViewport && row->outline && main != ViewportKind::kCount)
+		return std::make_unique<MainViewportView>(*row->outline, main);
 	if (row->outline) return std::make_unique<OutlineView>(*row->outline);
 	return row->make();
 }

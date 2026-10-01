@@ -118,18 +118,6 @@ void draw_shape(ImDrawList &paint, CanvasPoint origin, const OverlayShape &shape
 	}
 }
 
-SelectMode select_mode(CanvasJoin join) {
-	switch (join) {
-		case CanvasJoin::Add:
-			return SelectMode::Add;
-		case CanvasJoin::Toggle:
-			return SelectMode::Toggle;
-		case CanvasJoin::Replace:
-			break;
-	}
-	return SelectMode::Replace;
-}
-
 ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 	switch (cursor) {
 		case CanvasCursor::ResizeEW:
@@ -149,19 +137,12 @@ ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 
 } // namespace
 
-void CanvasWindowRequests::select(
-		const std::string &path, const NodeAddress &record, CanvasJoin join) {
-	workspace_.request(request::select_record(path, record, select_mode(join)));
-}
-
-void CanvasWindowRequests::edits(const std::string &path, std::vector<Edit> batch) {
-	// Held back while an operation holds the documents (S13 A3), as the session would refuse it.
-	if (!workspace_.view().allows(EditorRequestKind::EditRecord)) return;
-	workspace_.request(request::edit_record(path, std::move(batch)));
-}
-
-void CanvasWindowRequests::end_edit(const std::string &path) {
-	workspace_.request(request::end_edit(path));
+void CanvasWindowRequests::request(EditorRequest request) {
+	// An edit held back while an operation holds the documents (S13 A3), as the session would refuse
+	// it.
+	if (request.kind == EditorRequestKind::EditRecord && !workspace_.view().allows(EditorRequestKind::EditRecord))
+		return;
+	workspace_.request(std::move(request));
 }
 
 ViewportCanvas::ViewportCanvas(int design_width, int design_height) :
@@ -316,7 +297,17 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	if (tip)
 		ui_kit::tooltip_lazy(tip);
 	ImGui::SetCursorScreenPos(ImVec2(origin_.x, origin_.y));
-	device(input_.width, input_.height);
+	ViewportPicture shown;
+	shown.x = origin_.x;
+	shown.y = origin_.y;
+	shown.width = input_.width;
+	shown.height = input_.height;
+	shown.clip_left = surface_min_.x;
+	shown.clip_top = surface_min_.y;
+	shown.clip_right = surface_max_.x;
+	shown.clip_bottom = surface_max_.y;
+	shown.canvas_sized = zoom_ != Zoom::Device;
+	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;
 	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),

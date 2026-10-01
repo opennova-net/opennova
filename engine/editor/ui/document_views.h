@@ -19,9 +19,9 @@ enum class DocumentViewRole {
 	// The view draws the document's records: an outline (a tree, a list of the rows, master and
 	// detail), or a view of its own (a stylesheet's lines, a menu's screens and windows).
 	Records,
-	// A Main-role viewport fills the tab, the records' outline and the Inspector beside it (the
-	// mission's 3D view): main_viewport is its hook, which S13 V5's viewport seam fills; no type
-	// has one yet.
+	// A Main-role viewport fills the tab, the records' outline (the row's OutlineSpec) and the
+	// Inspector beside it (the mission's 3D view; ui/main_viewport_view): main_viewport is its hook,
+	// drawing the viewport of the Main-role kind that shows the type (S13 V5); no type has one yet.
 	MainViewport,
 	// The view draws the document's text (S13 D9: its lines, read only, its findings in the
 	// gutter, ui/text_view), until S13 V10's script device (a Godot CodeEdit) fills the tab.
@@ -53,13 +53,20 @@ public:
 	// events it held went before (drop_events).
 	virtual void rebind(const DocumentBase &document) { (void)document; }
 	// The Main-role viewport that fills the tab where the view's row's role is MainViewport, drawn
-	// in the room the tab gives it: true when it drew one. The hook S13 V5's viewport seam fills (a
-	// mission's 3D view, with ImGui overlays); every view draws its records itself until then.
+	// in the room the tab gives it: true when it drew one (ui/main_viewport_view, S13 V5: the
+	// viewport's view, its canvas filling the room, with ImGui overlays); a view of records has none.
 	virtual bool main_viewport(Workspace &workspace, const DocumentBase &document) {
 		(void)workspace;
 		(void)document;
 		return false;
 	}
+	// After every frame's windows (the workspace's frame bracket): a view with a viewport whose canvas
+	// did not draw this frame (its tab hidden, the window closed) ends that canvas's gesture.
+	virtual void end_frame(Workspace &workspace) { (void)workspace; }
+	// Whether the view holds back its own controls while an operation holds the documents (S13 A3):
+	// a Main-role view does, its outline column held and its canvas live (its camera is no document,
+	// and its canvas holds back its own edits); the Document window holds back any other view whole.
+	virtual bool holds_back_itself() const { return false; }
 	// An outline's model (its row's OutlineSpec): its lines, its filter, its order and what is open,
 	// which its filter box, its sort and its arrows read and write; null for a view of its own.
 	virtual OutlineModel *outline() { return nullptr; }
@@ -81,8 +88,9 @@ private:
 
 // A document type's view (ADR 0046 S13 V3): one row per DocumentTypeId past None, in its order,
 // in ui/document_views.cpp, which does not build without it (static_asserts): its role, and the
-// view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view), or a view of its
-// own, which its make makes (one of the two).
+// view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view; for a MainViewport
+// row, the outline beside the viewport, ui/main_viewport_view), or a view of its own, which its
+// make makes (one of the two).
 struct DocumentViewRow {
 	DocumentTypeId type = DocumentTypeId::None;
 	DocumentViewRole role = DocumentViewRole::Records;

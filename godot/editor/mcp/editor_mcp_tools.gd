@@ -4,7 +4,8 @@ extends RefCounted
 ## The editor MCP's handlers over the editor's wire seam (EditorApp.request_json and query_json,
 ## ADR 0046 S13 A5): a request and a query cross as JSON text the portable session marshals, so
 ## this module forwards and waits; it never reaches into the session, and it pages nothing (the
-## queries page their lists). The two preview tools stay device tools until S13 V7.
+## queries page their lists). The two preview tools stay device tools until S13 V7, each answering
+## with its viewport's envelope (S13 V5, editor/preview/viewport_json.h).
 
 ## How long editor_play op=stop waits for the game to leave.
 const STOP_WAIT_MS := 10_000
@@ -168,14 +169,20 @@ func _tool_editor_menu_preview(args: Dictionary, _ctx: McpToolContext) -> Varian
 			if offset == null or int(offset) < 0 or limit == null or int(limit) < 1 or int(limit) > EditorMcpCatalog.PAGE_MAX:
 				return McpToolResult.error("editor_menu_preview op=%s takes offset >= 0 and limit from 1 to %d." % [op, EditorMcpCatalog.PAGE_MAX])
 			var preview := _menu_preview()
-			var key := "widgets" if op == "rects" else "notes"
+			var key := "items" if op == "rects" else "notes"
 			var items: Array = preview.get(key, [])
+			var end := int(offset) + int(limit)
+			var next: Variant = null
+			if end < items.size():
+				next = end
 			return {
 				"status": preview.get("status", ""),
+				"reason": preview.get("reason", ""),
 				"current": preview.get("current", false),
 				"count": items.size(),
 				"offset": int(offset),
-				key: items.slice(int(offset), int(offset) + int(limit)),
+				"next_offset": next,
+				key: items.slice(int(offset), end),
 			}
 		"hit":
 			var x: Variant = _finite_number(args.get("x"))
@@ -188,20 +195,21 @@ func _tool_editor_menu_preview(args: Dictionary, _ctx: McpToolContext) -> Varian
 			return hit
 		"options":
 			var options := {}
-			for key in ["width", "height", "force_id"]:
-				if args.has(key):
-					var number: Variant = _integer_number(args[key])
-					if number == null:
-						return McpToolResult.error("editor_menu_preview option %s must be an integer." % key)
-					options[key] = int(number)
+			if args.has("force_id"):
+				var number: Variant = _integer_number(args["force_id"])
+				if number == null:
+					return McpToolResult.error("editor_menu_preview option force_id must be an integer.")
+				options["force_id"] = int(number)
 			for key in ["show_hidden", "checked", "popup_open", "focus"]:
 				if args.has(key):
 					options[key] = bool(args[key])
 			if args.has("force_state"):
 				options["force_state"] = String(args["force_state"])
+			var shared: Variant = _viewport_members(args, "editor_menu_preview", options)
+			if shared != null:
+				return shared
 			if not bool(app.call("set_menu_preview_options", options)):
-				return McpToolResult.error("editor_menu_preview op=options: an option is out of range or unknown "
-						+ "(width and height 1..8192, force_state normal, mouseover, selected or disabled).")
+				return McpToolResult.error("editor_menu_preview op=options: %s" % String(app.call("get_preview_error")))
 			return _menu_preview_state()
 		"drag", "nudge":
 			var id: Variant = _integer_number(args.get("id"))
@@ -248,15 +256,27 @@ func _menu_preview() -> Dictionary:
 	return preview if preview is Dictionary else {}
 
 
-## The preview without its widgets and notes (op=rects and op=notes page them).
+## A preview tool's `device` {width, height} and `clock` {playing, rate, time_ms, ticks}, objects
+## passed as the SetViewport's own members (into `into`); an error naming the tool when one is not
+## an object, else null.
+func _viewport_members(args: Dictionary, tool: String, into: Dictionary) -> Variant:
+	for key in ["device", "clock"]:
+		if args.has(key):
+			if not (args[key] is Dictionary):
+				return McpToolResult.error("%s %s is an object (device {width, height}; clock {playing, rate, "
+						% [tool, key] + "time_ms, ticks}).")
+			into[key] = args[key]
+	return null
+
+
+## The menu's viewport envelope without its items (the widgets) and notes, which op=rects and
+## op=notes page: `count` the widgets', `note_count` the notes'.
 func _menu_preview_state() -> Dictionary:
 	var preview := _menu_preview()
-	var widgets: Array = preview.get("widgets", [])
-	var notes: Array = preview.get("notes", [])
-	preview.erase("widgets")
+	preview.erase("items")
 	preview.erase("notes")
-	preview["widget_count"] = widgets.size()
-	preview["note_count"] = notes.size()
+	preview.erase("offset")
+	preview.erase("next_offset")
 	return preview
 
 
@@ -267,23 +287,25 @@ func _tool_editor_model_preview(args: Dictionary, _ctx: McpToolContext) -> Varia
 			return _model_preview()
 		"options":
 			var options := {}
-			for key in ["lod", "ctrl", "playing", "overlays", "time_ms", "rig_model", "clip_ticks"]:
+			for key in ["lod", "ctrl", "overlays", "rig_model"]:
 				if args.has(key):
 					options[key] = args[key]
+			var shared: Variant = _viewport_members(args, "editor_model_preview", options)
+			if shared != null:
+				return shared
 			if not bool(app.call("set_model_preview_options", options)):
-				return McpToolResult.error("editor_model_preview op=options takes lod (a level >= 0 or "
-						+ "\"auto\"), ctrl (an object of register -> number), playing (a boolean), overlays "
-						+ "({user_points, lights, pivots} booleans), time_ms (>= 0), rig_model (a model's file "
-						+ "name, \"\" for the paired one) and clip_ticks (>= 0).")
+				return McpToolResult.error("editor_model_preview op=options: %s" % String(app.call("get_preview_error")))
 			return _model_preview()
 		"camera":
 			var camera := {}
-			for key in ["yaw", "pitch", "distance", "target", "frame", "width", "height"]:
+			for key in ["yaw", "pitch", "distance", "target", "frame"]:
 				if args.has(key):
 					camera[key] = args[key]
+			var shared: Variant = _viewport_members(args, "editor_model_preview", camera)
+			if shared != null:
+				return shared
 			if not bool(app.call("set_model_preview_camera", camera)):
-				return McpToolResult.error("editor_model_preview op=camera takes numbers yaw, pitch, "
-						+ "distance (> 0), target [x, y, z], frame (a boolean), width and height (1..8192).")
+				return McpToolResult.error("editor_model_preview op=camera: %s" % String(app.call("get_preview_error")))
 			return _model_preview()
 		"hit":
 			var x: Variant = args.get("x")

@@ -372,8 +372,10 @@ if(OPENNOVA_EDITOR)
         devtools/imgui_pass_node.cpp
         authoring/child_process.cpp
         authoring/editor_app.cpp
-        authoring/menu_preview.cpp
-        authoring/model_preview.cpp
+        authoring/menu_viewport_applier.cpp
+        authoring/model_viewport_applier.cpp
+        authoring/viewport_device.cpp
+        authoring/viewport_devices.cpp
     )
     target_include_directories(opennova_editor_gdext PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_link_libraries(opennova_editor_gdext PRIVATE opennova_bindings opennova_editor)

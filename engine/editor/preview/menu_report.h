@@ -1,15 +1,31 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <base/io/json.h>
 #include <editor/model/value.h>
 #include <editor/session/session_json.h>
+#include <runtime/menu/menu_frame.h>
 
 namespace opennova::editor {
 
 class MnuDocument;
+struct Node;
 struct SessionView;
+
+// A compiled screen's widgets (the menu viewport's items, the menu_render query's widgets): [{index,
+// id (the window's record), name, type, shown, disabled, rect [l,t,r,b] (absolute design units),
+// local [l,t,r,b] (in its parent), text, font, text_color}], in the compiled screen's pre-order.
+io::JsonValue menu_widgets_to_json(const MnuDocument &document, const Node &screen,
+		const menu::MenuFrameCompiler &compiler, const menu::MenuFrameState &state);
+// The compiler's notes on a screen: [{index (the window's pre-order index, -1 the screen),
+// window_id, id (the record the note sits on: the window, or the record of its list the note
+// names), name (the window's), code (the token), finding ("menu.render.<code>"), basis (witnessed,
+// port_policy, deferred), severity (warning or info as a Problems row, "preview" when only the
+// viewport shows it), subject, list, record, field, message}].
+io::JsonValue menu_notes_to_json(const MnuDocument &document, const Node &screen,
+		const menu::MenuFrameCompiler &compiler, const std::vector<menu::MenuFrameNote> &notes);
 
 // What the query seam reads of one menu (ADR 0046 S9m, S13 A5: the menu_tree, menu_findings and
 // menu_render queries, which editor_menu's reads became): its screens and windows in one answer,
@@ -50,12 +66,14 @@ io::JsonValue menu_tree_to_json(const SessionView &view, const std::string &path
 io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &path);
 
 // A screen (its row identity) of a menu (as menu_for finds it) as the render check compiled it
-// headless with the last validation (S9j2), in the menu preview's schema (menu_preview_json.h), a
-// page of its widgets (`count` their whole number, set_page's) and by the same page its compiler
-// notes (`note_count` theirs; `next_offset` runs to the end of the longer list): the parity read of
-// the preview. The open document when the menu is open (its current state), else the file as the
-// check read it; status no_project without a project, no_screen when the check has no such
-// screen. Null, with a project, when menu_for finds no menu.
+// headless with the last validation (S9j2): {status (menu_screen_status_token), message, detail,
+// path, screen {id, name}, revision, shown_revision, current, missing[] (the files the project
+// lacks), unreadable[] (the files it has that did not load), widgets (menu_widgets_to_json, a page:
+// `widget_count`, set_page's `count`, their whole number), notes (menu_notes_to_json, by the same
+// page: `note_count` theirs; `next_offset` runs to the end of the longer list)}, the widgets and the
+// notes only while the render shows the menu as it is now. The open document when the menu is open
+// (its current state), else the file as the check read it; status no_project without a project,
+// no_screen when the check has no such screen. Null, with a project, when menu_for finds no menu.
 io::JsonValue menu_render_to_json(
 		const SessionView &view, const std::string &path, NodeId screen, const JsonPage &page);
 

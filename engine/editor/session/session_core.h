@@ -27,6 +27,7 @@ class ProblemsService;
 class ProjectRefresh;
 class RenameController;
 class UnsavedGuard;
+class Viewports;
 
 // The project session's core (ADR 0046 S13 A2): what every part of the session shares. The open
 // project (its paths, its local settings, its document) and what opens, refreshes, sets up and
@@ -69,6 +70,9 @@ public:
 
 	SessionView &view() { return view_; }
 	const SessionView &view() const { return view_; }
+	// The viewports (S13 V5): shared const on the view (DocumentsView::viewports), kept with the
+	// view's previews' targets at every touch; the Shell's devices drive their follow.
+	Viewports &viewports() { return *viewports_; }
 	ProcessPlatform &platform() const { return platform_; }
 	EditorPreferences &preferences() const { return preferences_; }
 	const ProjectPaths &paths() const { return paths_; }
@@ -96,13 +100,10 @@ public:
 	const ActionOutcome &outcome() const { return outcome_; }
 	ActionOutcome &outcome() { return outcome_; }
 
-	// A change of `concern` in the view: its counter and `any` move (view_revisions.h), and the
-	// previews follow the active document and the selection. The only way the session moves a
-	// counter.
-	void touch(ViewConcern concern) {
-		view_.documents.update_previews();
-		view_.revisions.touch(concern);
-	}
+	// A change of `concern` in the view: its counter and `any` move (view_revisions.h), the
+	// previews follow the active document and the selection, and the viewports keep with them (a
+	// target's viewport made, a closed document's gone). The only way the session moves a counter.
+	void touch(ViewConcern concern);
 	// A line in Output.
 	void note(std::string line);
 	// A finding: a Problems row (ProblemsService::add_reported, which never validates), the
@@ -177,6 +178,10 @@ public:
 	void forget_recent(const std::string &root);
 	// Output's Clear: the output lines emptied.
 	void clear_output();
+	// SetViewport: the viewport over `path` ("" the Preview's of the kind the change names) changed
+	// as `change` (its JSON text) says (Viewports::set); refused, nothing changed, with why
+	// (viewport.refused).
+	void set_viewport(const std::string &path, const std::string &change);
 	// Quit: the running operation cancelled first (one that cannot be keeps the editor open,
 	// refused), then the view's quit_requested set, which the shell acts on.
 	void quit();
@@ -211,6 +216,7 @@ private:
 	OperationSlot operations_;
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
+	std::shared_ptr<Viewports> viewports_;
 	ActionOutcome outcome_;
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's

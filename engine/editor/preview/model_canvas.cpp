@@ -5,7 +5,8 @@
 
 #include <editor/documents/model_document.h>
 #include <editor/preview/model_preview_camera.h>
-#include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/session/request_factories.h>
 
 namespace opennova::editor {
 
@@ -27,10 +28,16 @@ bool is_selected(const ModelCanvasFrame &frame, const ModelOverlay &overlay) {
 			overlay.index == frame.selected;
 }
 
+// The viewport's camera set to `camera` (a SetViewport of its path).
+void set_camera(const ModelCanvasFrame &frame, const OrbitCamera &camera, CanvasRequests &out) {
+	if (frame.model)
+		out.request(request::set_viewport(frame.model->path(), model_camera_change(camera)));
+}
+
 } // namespace
 
 int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
-	if (!in.hovered)
+	if (!in.hovered || !frame.model)
 		return -1;
 	return pick_model_overlay(frame.overlays, frame.model->camera(), in.width, in.height,
 			in.mouse.x, in.mouse.y, kModelPickSlop);
@@ -40,7 +47,8 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 	ModelGrab grab;
 	grab.pan = in.middle || in.keys.shift;
 	grab.pick = under;
-	if (grab.pan || !frame.current || frame.selected < 0 || frame.document->blocked() || !frame.editable)
+	if (grab.pan || !frame.current || frame.selected < 0 || frame.document->blocked() ||
+			!frame.editable)
 		return grab;
 	const OrbitCamera &camera = frame.model->camera();
 	for (const ModelOverlay &overlay : frame.overlays) {
@@ -60,6 +68,8 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 			break;
 		grab.handle = true;
 		grab.marker = overlay;
+		if (grab.which == ModelHandle::Place)
+			grab.others = frame.others;
 		grab.offset = CanvasPoint{ hx - in.mouse.x, hy - in.mouse.y };
 		break;
 	}
@@ -67,6 +77,24 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 }
 
 // --- ModelCanvas -----------------------------------------------------------------------------
+
+void ModelCanvas::follow(
+		const ViewportModel &viewport, const ViewportContext &context, CanvasRequests &out) {
+	frame_ = static_cast<const ModelViewport &>(viewport).canvas_frame(context);
+	follow(frame_, out);
+}
+
+void ModelCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRequests &out) {
+	input(frame_, in, model_canvas_under(frame_, in), out);
+}
+
+OverlayList ModelCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
+	return shapes(frame_, in, model_canvas_under(frame_, in));
+}
+
+std::string ModelCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
+	return hover_tip(frame_, model_canvas_under(frame_, in));
+}
 
 void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
 	gesture_.frame(subject_of(frame), out);
@@ -76,8 +104,13 @@ void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
 
 void ModelCanvas::input(
 		const ModelCanvasFrame &frame, const CanvasInput &in, int under, CanvasRequests &out) {
-	ModelPreviewModel &model = *frame.model;
-	OrbitCamera &camera = model.camera();
+	if (!frame.model)
+		return;
+	const ModelViewport &model = *frame.model;
+	// The camera this frame moves to, an orbit or a pan then the wheel's dolly on it: one SetViewport
+	// (two would each start from the camera as the frame began, the second undoing the first).
+	OrbitCamera camera = model.camera();
+	bool camera_moved = false;
 	if (in.pressed) {
 		gesture_.press(subject_of(frame), in.screen, out);
 		grab_ = model_canvas_grab(frame, in, under);
@@ -89,35 +122,40 @@ void ModelCanvas::input(
 			const NodeAddress record = model_overlay_record(
 					*frame.document, frame.overlays[size_t(grab_.pick)], model.lod());
 			if (record.row)
-				out.select(frame.document->path(), record, CanvasJoin::Replace);
+				out.request(request::select_record(frame.document->path(), record));
 		}
 		gesture_.release(out);
 		grab_ = ModelGrab();
 	} else if (gesture_.pressed()) {
 		gesture_.move(in.screen);
-		if (gesture_.dragging() && grab_.handle) {
+		if (gesture_.dragging() && grab_.handle && frame.clock) {
 			// The handle follows the pointer (kept where the press took it) in the plane that faces
-			// the eye; each step is planned from the marker as it was pressed.
+			// the eye; each step is planned from the markers as they were pressed.
 			const float snap = in.keys.alt ? 0.0f : frame.snap;
 			std::vector<Edit> edits;
 			if (model.handle_edits(*frame.document, grab_.marker, grab_.which,
-						in.mouse.x + grab_.offset.x, in.mouse.y + grab_.offset.y, snap,
-						gesture_.token(), edits) &&
+						in.mouse.x + grab_.offset.x, in.mouse.y + grab_.offset.y, in.width,
+						in.height, snap, gesture_.token(), *frame.clock, edits, &grab_.others) &&
 					!edits.empty()) {
-				out.edits(gesture_.path(), std::move(edits));
+				out.request(request::edit_record(gesture_.path(), std::move(edits)));
 				gesture_.sent();
 			}
-		} else if (gesture_.dragging()) {
+		} else if (gesture_.dragging() && !grab_.handle && (in.delta.x != 0.0f || in.delta.y != 0.0f)) {
 			if (grab_.pan)
 				camera.pan(in.delta.x, in.delta.y, in.width);
 			else
 				camera.orbit(in.delta.x, in.delta.y);
+			camera_moved = true;
 		}
 	}
-	if (in.hovered && in.wheel != 0.0f)
+	if (in.hovered && in.wheel != 0.0f) {
 		camera.dolly(std::pow(kModelWheelDolly, in.wheel));
+		camera_moved = true;
+	}
+	if (camera_moved)
+		set_camera(frame, camera, out);
 	if (in.double_clicked || (in.keyboard.focused && in.keyboard.frame))
-		frame_selected(frame);
+		frame_selected(frame, in.width, in.height, out);
 }
 
 void ModelCanvas::end(CanvasRequests &out) {
@@ -131,28 +169,27 @@ void ModelCanvas::end_frame(CanvasRequests &out) {
 		grab_ = ModelGrab();
 }
 
-void ModelCanvas::frame_selected(const ModelCanvasFrame &frame) const {
-	ModelPreviewModel &model = *frame.model;
-	if (frame.selected >= 0 && model.model()) {
-		for (const ModelOverlay &overlay : model.overlays()) {
-			if (!is_selected(frame, overlay))
-				continue;
-			PreviewVec3 center;
-			float radius = 1.0f;
-			model_preview_sphere(*model.model(), center, radius);
-			const bool reach = overlay.kind == ModelOverlayKind::Light && overlay.radius > 0.0f;
-			const float around = reach ? overlay.radius : std::max(0.25f, radius * 0.15f);
-			model.camera().frame(overlay.at, around, model.device_width(), model.device_height());
-			return;
-		}
+void ModelCanvas::frame_selected(
+		const ModelCanvasFrame &frame, int width, int height, CanvasRequests &out) const {
+	if (!frame.model)
+		return;
+	const ModelViewport &model = *frame.model;
+	for (const ModelOverlay &overlay : frame.overlays) {
+		if (!is_selected(frame, overlay) || !model.model())
+			continue;
+		set_camera(frame, model.framed_on(overlay, width, height), out);
+		return;
 	}
-	model.frame();
+	if (model.model())
+		set_camera(frame, model.framed(width, height), out);
 }
 
 OverlayList ModelCanvas::shapes(
 		const ModelCanvasFrame &frame, const CanvasInput &in, int under) const {
 	OverlayList list;
-	const ModelPreviewModel &model = *frame.model;
+	if (!frame.model)
+		return list;
+	const ModelViewport &model = *frame.model;
 	const OrbitCamera &camera = model.camera();
 	const int width = in.width, height = in.height;
 	for (size_t i = 0; i < frame.overlays.size(); ++i) {
@@ -199,6 +236,11 @@ OverlayList ModelCanvas::shapes(
 			if (overlay.has_direction &&
 					camera.project(model.axis_tip(overlay), width, height, tx, ty))
 				list.disc(CanvasPoint{ tx, ty }, 4.0f, OverlayRole::Selected);
+		} else {
+			// Another selected record's marker, ringed thin: a drag of the primary's place moves it.
+			for (const ModelOverlay &other : frame.others)
+				if (other.kind == overlay.kind && other.index == overlay.index)
+					list.ring(at, 9.0f, OverlayRole::Selected, 1.0f);
 		}
 	}
 	return list;

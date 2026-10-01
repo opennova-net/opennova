@@ -22,6 +22,8 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
     python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
         "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
+    python scripts/mcp/editor_mcp.py request set_viewport --viewport '{"kind": "model", "camera": {"yaw": 1.2},
+        "clock": {"playing": false, "time_ms": 250}}'   # the Preview's model viewport (--path names another)
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
@@ -248,7 +250,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings"):
+    for field in ("address", "paste_at", "settings", "viewport"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -545,6 +547,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--settings", default=None,
                          help="apply_project_settings: the settings to set as a JSON object (title, mission, "
                               "multiplayer, game_install, runtime_executable, play_in_install; one left out stays)")
+    request.add_argument("--viewport", default=None,
+                         help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
+                              "(without --path: the Preview's viewport of the kind; device only where no canvas "
+                              "sizes the picture)")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
                          help="preview_import, plan_import, preview_install_import: with the files they need; "
