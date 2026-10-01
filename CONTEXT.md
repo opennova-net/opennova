@@ -591,8 +591,9 @@ _Avoid_: command (a request, a menu's COMMAND, a script's command), subcommand
 **Workspace**:
 The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar
 and the modals) and their seam to the session: the view every window reads, the typed
-requests it raises, and the devices its previews draw through. The Shell (`EditorApp`) drains
-the requests into the session and hands the devices in (`ui/workspace.h`).
+requests it raises, and the devices its viewports' canvases draw through (the Shell's, one per
+document and kind; none in a headless run or a test). The Shell (`EditorApp`) drains the requests
+into the session and hands the devices in (`ui/workspace.h`).
 _Avoid_: host, editor host (host is the game host alone), UI (too broad), project (the data)
 
 **Document**:
@@ -612,10 +613,36 @@ table, one view per open document, which keeps its filter, its order and what it
 long as the document is open. Most types show their records as an outline (a tree of the rows and
 what they hold, a list of the rows, or master and detail: the rows beside the selected row's
 records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
-menu's screens and windows), and the mission's will be a viewport filling the tab with the outline
-and the Inspector beside it. The selected record's fields are the Inspector's, whatever the type.
+menu's screens and windows), or a Main-role viewport filling the tab with the outline and the
+Inspector beside it (the mission's 3D view, to come). The selected record's fields are the
+Inspector's, whatever the type.
 _Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
 generic form beside it)
+
+**Viewport**:
+One document's picture as the game would draw it, of one kind (a menu's screen, a model, and the
+mission's 3D view to come), kept by the session while the document is open: one per document and
+kind. Its role is Preview (shown by the Preview window while its document is the last of its
+kind made active) or Main (the Document tab's view, with the outline and the Inspector beside it).
+Its state (the size it is drawn at, the kind's options and camera) changes only through a
+SetViewport request; it follows its document, the files its picture read and its state into what
+its device does next (make the picture again, apply the state again, drop it, or nothing), a
+picture the game could not read kept so until the document changes. Its device is the Shell's (an
+offscreen Godot viewport for one document and kind, four kept, the least recently used given up
+and its viewport keeping its state), drawn only by the viewport's canvas, which owns the pointer
+and the keys. Headless, it answers as its envelope (JSON).
+_Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
+it), preview (the Preview window, or the role)
+
+**Preview clock**:
+The one clock every viewport reads: a model's part animations, flipbooks and colour generators by
+its milliseconds, a clip by its game ticks, and later a particle effect, a menu's animations and an
+environment's time of day. It runs while it plays, at its rate, as the Shell's frames pass; a
+SetViewport plays, pauses, sets its rate or seeks it, and a viewport seeks it as it follows (a clip
+newly chosen starts at tick 0, a clip event selected holds the clock on the tick the clip first
+samples it).
+_Avoid_: clip clock (the model preview's own, which it replaced), game clock (a running match's),
+tick (the game's 62 Hz step, which it counts)
 
 **View event**:
 A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
@@ -639,27 +666,28 @@ file finds it again by; its path is every name from the row down
 _Avoid_: node (the core's type for a row), child (an identity field, not a relation)
 
 **Menu preview**:
-The Preview window's menu pane: the editor's render of the previewed screen (the last
+The menu's viewport in the Preview window: the editor's render of the previewed screen (the last
 menu screen selected) through the runtime's own menu frame, reading the project's files
 the way the game reads its mounted files, the open documents standing in, so it shows
 what the game would draw were the menu saved now; when it cannot, its status says why
 (no project, no menu, no screen, a menu the game could not read, a screen missing from
-it). Headless, it answers as JSON.
+it). Headless, it answers as its viewport's envelope.
 Its primary window carries eight drawn handles: a drag moves or resizes the window (one
 gesture), writing the fewest POSITION edges that make the game's own layout land it where
 it was dropped; a drag of any selected window moves every selected one.
 _Avoid_: play (a running game), render check (the headless validator's notes)
 
 **Model preview**:
-The Preview window's model pane: the editor's render of the previewed model (the last
+The model's viewport in the Preview window: the editor's render of the previewed model (the last
 model, clip or animation table document made active) through the runtime's own object
 renderer: a model document as it would save, a clip or a table played on its rig's model
-(the graphic an item pairs with the table, or one the author picks) at the preview's
-clip clock. It draws the level the
+(the graphic an item pairs with the table, or one the author picks) at the preview
+clock's ticks. It draws the level the
 game would pick at the camera's distance (Auto) or one held, holds CTRL registers at a
 value, and marks what the model's records place (user points, lights, part pivots) where
 the game puts them on the posed model; a click selects a marker's record and a drag of
-the selected one moves it or turns its axis. Headless, it answers as JSON.
+the selected one moves it or turns its axis (every selected marker moving as far). Headless, it
+answers as its viewport's envelope.
 _Avoid_: viewer (it edits), avatar preview (the game's player-info portrait)
 
 **Rig**:
@@ -744,8 +772,8 @@ Where the editor shows a device's picture and takes the pointer and the keys ove
 a click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the
 shapes its kind makes (outlines, handles, markers, the marquee's box) with the cursor they ask
 for. The kind (the menu's, the model's) says what a press takes, what a drag writes and what is
-drawn; the canvas is the same for every kind. A viewport is a canvas backed by a device; what
-the device renders is its picture.
+drawn; the canvas is the same for every kind. A viewport's canvas draws its device's picture:
+the canvas owns the input, the viewport its state, and what the device renders is the picture.
 _Avoid_: overlay (one shape drawn over the picture), view (a document's view in the Document
 window), picture (what the device renders, which the canvas shows)
 

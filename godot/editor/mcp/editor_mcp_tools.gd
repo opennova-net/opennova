@@ -139,13 +139,16 @@ func _tool_editor_menu_preview(args: Dictionary, _ctx: McpToolContext) -> Varian
 			var key := "items" if op == "rects" else "notes"
 			var items: Array = preview.get(key, [])
 			var end := int(offset) + int(limit)
+			var next: Variant = null
+			if end < items.size():
+				next = end
 			return {
 				"status": preview.get("status", ""),
 				"reason": preview.get("reason", ""),
 				"current": preview.get("current", false),
 				"count": items.size(),
 				"offset": int(offset),
-				"next_offset": end if end < items.size() else null,
+				"next_offset": next,
 				key: items.slice(int(offset), end),
 			}
 		"hit":
