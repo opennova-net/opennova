@@ -555,6 +555,11 @@ struct NapiNPConnection {
 	// Zero = not yet armed; the first open boundary arms it without sending.
 	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
 	uint32_t last_session_send_tick = 0;
+	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
+	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
+	// cleared by any packet built at a boundary (D-NET-233).
+	// [orig: ParseMessages @0x625dff; BuildOutgoingPackets clear @0x628629]
+	bool session_ack_owed = false;
 
 	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
 	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the

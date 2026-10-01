@@ -878,6 +878,15 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  @0x625BC0 stamp @0x625d54; seq 0 @0x626bcc / duplicate @0x626c03 / future @0x626c0c..0x626c3a
 	//  stamp nothing]
 	if (admission.admitted) conn.receive_inactive_ms = 0;
+	// An admitted packet that carried any message record owes the peer an ACK: retail's
+	// ParseMessages raises has_pending_out (+0x650) once its record region is non-empty, and
+	// the next open send boundary builds a packet even with nothing queued — a header-only one
+	// that carries the ACK (D-NET-233). A header-only C2S packet owes nothing.
+	// [orig: ParseMessages @0x625dff (and per record DispatchMessage @0x6225b5);
+	//  PumpEnumeratorAndSend `queued > 0 || has_pending_out` @0x6292a9 -> BuildOutgoingPackets]
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		if (!packet.messages.empty()) conn.session_ack_owed = true;
+	}
 
 	// The header's ack_count is the peer's "last of YOUR seqs I received" — the confirm side of the
 	// initial-state backlog throttle (retail clients carry it on every 0x43, including game-message-

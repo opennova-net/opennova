@@ -501,6 +501,56 @@ bool check_host_flush_counter_ages_finite_records_per_tick() {
 	              "the first build past the deadline prunes the finite record");
 }
 
+// D-NET-233: a C2S packet that carried message records owes the joiner an ACK. With nothing else
+// queued, the next open S2C boundary builds a header-only packet carrying it; a header-only C2S
+// packet owes nothing. [orig: ParseMessages has_pending_out @0x625dff; PumpEnumeratorAndSend
+// @0x6292a9 -> BuildOutgoingPackets @0x6292b4; the clear @0x628629]
+bool check_host_owes_an_ack_for_c2s_records() {
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	inmatch::arm_s2c_send_holdoff(conn, 12);
+	ScriptedDatagramSocket sock;
+	SessionSequencing client_tx{1, 0};
+
+	// A header-only C2S packet: admitted, owes nothing; the first boundary (pump 12) stays quiet.
+	std::vector<uint8_t> empty_c2s;
+	if (!expect(frame_test_session_datagram(client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+				SESSION_OPCODE_PROTOCOL_MESSAGE, {}, empty_c2s),
+			"frame a header-only C2S packet"))
+		return false;
+	sock.inbound.emplace_back(kPeer, std::move(empty_c2s));
+	for (int i = 0; i < 12; ++i) inmatch::host_session_pump(owner, sock);
+	if (!expect(sock.sent.empty() && conn.seq.last_inbound_seq == 1,
+			"a header-only C2S packet is admitted and owes no ACK"))
+		return false;
+
+	// A C2S packet with a record: the next open boundary (pump 24) sends one header-only ACK.
+	std::vector<uint8_t> keepalive_c2s;
+	if (!expect(frame_test_session_datagram(client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+				SESSION_OPCODE_PROTOCOL_MESSAGE,
+				{make_protocol_message(0x34, {0x01, 0x00, 0x00, 0x00})}, keepalive_c2s),
+			"frame a C2S packet with a record"))
+		return false;
+	sock.inbound.emplace_back(kPeer, std::move(keepalive_c2s));
+	for (int i = 0; i < 11; ++i) inmatch::host_session_pump(owner, sock);
+	if (!expect(sock.sent.empty(), "the owed ACK waits for the open boundary")) return false;
+	inmatch::host_session_pump(owner, sock);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(sock.sent.size() == 1 &&
+				decode_session_datagram(sock.sent[0].second,
+						SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk, header, messages) &&
+				messages.empty() && header.ack_count == 2,
+			"the open boundary sends one header-only packet ACKing the record"))
+		return false;
+	// Owed once: the next boundary has nothing to say.
+	sock.sent.clear();
+	for (int i = 0; i < 12; ++i) inmatch::host_session_pump(owner, sock);
+	return expect(sock.sent.empty(), "the ACK is owed once, not every boundary");
+}
+
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
@@ -791,6 +841,7 @@ int main() {
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
 	ok = check_host_receive_pump_sends_ignore_the_s2c_boundary() && ok;
 	ok = check_host_flush_counter_ages_finite_records_per_tick() && ok;
+	ok = check_host_owes_an_ack_for_c2s_records() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

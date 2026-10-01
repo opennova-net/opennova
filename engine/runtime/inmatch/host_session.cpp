@@ -476,6 +476,19 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 					send_session_batches(owner, sock, c, std::move(messages));
 			if (!retry.empty())
 				pending_session_messages[c.peer] = std::move(retry);
+			// The owed ACK (D-NET-233): a C2S packet with records arrived since the last
+			// build, and nothing above built a packet, so the boundary builds a header-only
+			// one carrying the current ACK.
+			// [orig: PumpEnumeratorAndSend `queued > 0 || has_pending_out` @0x6292a9 ->
+			//  BuildOutgoingPackets @0x6292b4 (one packet even with no records,
+			//  @0x62847e); the clear once the queue drained @0x628629]
+			if (c.session_ack_owed && !built && c.seq.next_outbound_seq == sequence_before) {
+				std::vector<uint8_t> ack;
+				if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, ack)) {
+					sock.send_to(c.peer, ack.data(), ack.size());
+					c.last_session_send_tick = now;
+				}
+			}
 			// The EMPTY send-interval leg (D-NET-173): retail's pump reads the
 			// per-connection last-send clock this boundary just updated, and with
 			// NOTHING queued and NOTHING retained still mints a header-only
@@ -502,8 +515,10 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 			// several MTU-split semantic packets, or no payload at all. Retail prunes
 			// the finite message nodes once, after all of them, at the counter they
 			// were built with. [orig: PrunePacketQueue @0x6292bb]
-			if (built || c.seq.next_outbound_seq != sequence_before)
+			if (built || c.seq.next_outbound_seq != sequence_before) {
 				prune_session_send_boundary(c.seq);
+				c.session_ack_owed = false;
+			}
 			if (c.s2c_send_holdoff_dictated) {
 				c.s2c_send_holdoff_countdown = c.s2c_send_holdoff_ticks;
 				c.s2c_send_boundary_open = c.s2c_send_holdoff_ticks == 0;
