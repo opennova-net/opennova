@@ -35,6 +35,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -800,6 +801,7 @@ public:
 	}
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override {
 		if (owner.child) return {};
+		++walks[row.id];
 		return {{{kRegister, "Registers", "name"}, row.collections[0]}, {{kUser, "Users", ""}, row.collections[1]}};
 	}
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
@@ -825,7 +827,8 @@ public:
 	}
 	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<IndexDocument>(*this); }
 
-	mutable size_t renumbered = 0; // renumber_references' calls
+	mutable size_t renumbered = 0;              // renumber_references' calls
+	mutable std::map<NodeId, size_t> walks; // a row's collections asked for (a walk of the row asks once)
 
 protected:
 	bool read(const Node &node, const NodeAddress &address, const std::string &field, Value &out) const override {
@@ -887,8 +890,8 @@ protected:
 			return edit_id_list(bank.registers, bank.collections[0], edit, std::string("NEW"), allocate, added, error);
 		return edit_id_list(bank.users, bank.collections[1], edit, int64_t(0), allocate, added, error);
 	}
-	// Every user naming a register the edit moved names it again; one naming a register it removed
-	// refuses the edit.
+	// Every user naming a register the edit moved names it again, and one naming none (past the
+	// registers) names none still; one naming a register it removed refuses the edit.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift, std::vector<Edit> &sites,
 	                         std::string &error) const override {
 		++renumbered;
@@ -896,7 +899,7 @@ protected:
 		for (const auto &node : rows.rows()) {
 			const auto &bank = static_cast<const IndexBank &>(*node);
 			for (size_t u = 0; u < bank.users.size(); ++u) {
-				if (!shift.found(bank.users[u])) continue;
+				if (bank.users[u] < 0) continue;
 				const size_t now = shift.now(bank.users[u]);
 				if (now == RecordShift::kRemoved) {
 					error = "A user reads this register.";
@@ -2053,13 +2056,31 @@ static int test_record_references() {
 	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}, 0, 0), error) &&
 	            document.serialize().text == "B one\nR NEW\nR r0\nR r1\nR r2\nR r3\nU 1\nU 3\nU 4\nU 3\n");
 	document.undo();
-	// An Add at the end moves no index: the type is not asked.
+	// An Add at the end moves no register, but the collection grows: the type is asked once (for an
+	// index past the registers, of which the bank has none), and no user changes. An edit of no
+	// register asks nothing.
 	const size_t asked = document.renumbered;
 	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kRegister, 0}), error) &&
-	            document.renumbered == asked &&
+	            document.renumbered == asked + 1 &&
 	            document.serialize().text == "B one\nR r0\nR r1\nR r2\nR r3\nR NEW\nU 0\nU 2\nU 3\nU 2\n");
 	document.undo();
+	TEST_EXPECT(document.apply(make(EditOperation::Add, {row(0).id, kUser, 0}), error) &&
+	            document.renumbered == asked + 1);
+	document.undo();
 	TEST_EXPECT(document.serialize().text == text && !document.can_undo());
+	// A user naming no register (9, past the four) names none still across an Add at the front and a
+	// Remove: it moves with the count, never onto the register that slides into its place.
+	const std::string dangling = "B one\nR r0\nR r1\nR r2\nR r3\nU 9\nU 4\n";
+	IndexDocument past;
+	TEST_EXPECT(past.load_bytes(bytes_of(dangling), "past.fake", AssetKind::Model, "jo", error));
+	const Node &past_bank = *past.rows()[0];
+	TEST_EXPECT(past.apply(make(EditOperation::Add, {past_bank.id, kRegister, 0}, 0, 0), error) &&
+	            past.serialize().text == "B one\nR NEW\nR r0\nR r1\nR r2\nR r3\nU 10\nU 5\n");
+	past.undo();
+	TEST_EXPECT(past.apply(make(EditOperation::Remove, {past_bank.id, kRegister, past_bank.collections[0][0]}), error) &&
+	            past.serialize().text == "B one\nR r1\nR r2\nR r3\nU 8\nU 3\n");
+	past.undo();
+	TEST_EXPECT(past.serialize().text == dangling && !past.can_undo());
 	// A batch: the Remove, then a Set naming register 2 as the Remove left them (r3); one step.
 	TEST_EXPECT(document.apply({make(EditOperation::Remove, reg(1)), set(user(0), "reg", int64_t(2))}, error) &&
 	            document.serialize().text == "B one\nR r0\nR r2\nR r3\nU 2\nU 1\nU 2\nU 1\n");
@@ -2079,9 +2100,20 @@ static int test_record_references() {
 	TEST_EXPECT(two.apply(make(EditOperation::Move, {second.id, kBank, 0}, 0, 0), error) &&
 	            two.serialize().text == "B b\nR b0\nR b1\nU 1\nU 0\nB a\nR a0\nR a1\nU 3\n");
 	two.undo();
+	// A structural edit reads each row's registers from the core's index of the row: a batch of ten
+	// registers added at the first bank's front (each renumbering the second bank's users) asks the
+	// second bank's collections at most once (its index made), never on each edit.
+	const NodeId first_id = two.rows()[0]->id, second_id = two.rows()[1]->id;
+	two.walks.clear();
+	std::vector<Edit> adds;
+	for (int i = 0; i < 10; ++i) adds.push_back(make(EditOperation::Add, {first_id, kRegister, 0}, 0, 0));
+	TEST_EXPECT(two.apply(adds, error) && two.walks[second_id] <= 1 &&
+	            two.serialize().text.find("U 13\nU 12\n") != std::string::npos);
+	two.undo();
 	TEST_EXPECT(two.serialize().text == two_banks && !two.can_undo());
 
-	// The base's renumber_references refuses what moves an index; an Add at the end is taken.
+	// The base's renumber_references refuses what moves an index, an Add at the end too (an index
+	// past the collection would move); an edit of no register is taken.
 	IndexDocument plain(false);
 	TEST_EXPECT(plain.load_bytes(bytes_of(text), "bank.fake", AssetKind::Model, "jo", error));
 	const Node &bank = *plain.rows()[0];
@@ -2090,7 +2122,9 @@ static int test_record_references() {
 	            error.message == "Other records name each CTRL register by its index, which this document does "
 	                             "not renumber." &&
 	            plain.serialize().text == text);
-	TEST_EXPECT(plain.apply(make(EditOperation::Add, {bank.id, kRegister, 0}), error));
+	TEST_EXPECT(!plain.apply(make(EditOperation::Add, {bank.id, kRegister, 0}), error) &&
+	            error.code() == "document.collection" && plain.serialize().text == text);
+	TEST_EXPECT(plain.apply(make(EditOperation::Add, {bank.id, kUser, 0}), error));
 	// A type whose schema names no Record kind has no collection to renumber.
 	Loaded fake;
 	TEST_EXPECT(fake.load() && fake.document.targeted_collections().empty());

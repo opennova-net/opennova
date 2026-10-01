@@ -122,8 +122,12 @@ Document::RecordPath Document::RowIndex::path(NodeId record) const {
 
 Document::RowIndex Document::make_index(const Node &row) const {
 	RowIndex index;
+	const std::vector<TargetedCollection> &targets = targeted_collections();
+	index.targeted.resize(targets.size());
 	// A walk meets an owner before what it holds: a record's path is its owner's, then its own step.
 	walk_records(row, [&](const NodeAddress &record, const Placement &at) {
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == record.kind) index.targeted[t].push_back(record.child);
 		RowIndex::Entry entry;
 		entry.at = at;
 		entry.path = uint32_t(index.steps.size());
@@ -267,8 +271,11 @@ FieldUse Document::field_on(const NodeAddress &address, const FieldSchema &field
 	use.schema = &field;
 	// A type never makes a read-only field writable.
 	use.read_only = use.read_only || field.read_only;
-	// A record of this file by its index resolves in this file (S13 D8): its scope is the file.
-	if (reference_row(use.reference).resolution == ReferenceResolution::Record) use.scope = path();
+	// A record of this file by its index, counted across the file, resolves in this file (S13 D8):
+	// its scope is the file.
+	const ReferenceKindRow &reference = reference_row(use.reference);
+	if (reference.resolution == ReferenceResolution::Record && reference.index_space == RecordIndexSpace::File)
+		use.scope = path();
 	return use;
 }
 
@@ -938,7 +945,8 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 	return true;
 }
 
-std::vector<Document::TargetedCollection> Document::targeted_collections() const {
+const std::vector<Document::TargetedCollection> &Document::targeted_collections() const {
+	if (targets_known_) return targets_;
 	// The Record kinds the type's schema names on a field of any of its kinds, each whose collection
 	// is one of its record kinds, in the reference kinds' order.
 	std::vector<bool> named(kReferenceKindCount, false);
@@ -948,14 +956,41 @@ std::vector<Document::TargetedCollection> Document::targeted_collections() const
 			if (k < named.size() && reference_row(field.reference).resolution == ReferenceResolution::Record)
 				named[k] = true;
 		}
-	std::vector<TargetedCollection> out;
+	targets_.clear();
 	for (size_t k = 0; k < named.size(); ++k) {
 		if (!named[k]) continue;
 		const ReferenceKindRow &row = reference_row(static_cast<ReferenceKind>(k));
 		const NodeKind held = kind_from_name(row.collection);
-		if (held >= 0) out.push_back({row.kind, held});
+		if (held >= 0) targets_.push_back({row.kind, held});
 	}
-	return out;
+	targets_known_ = true;
+	return targets_;
+}
+
+std::vector<std::vector<NodeAddress>> Document::record_sets() const {
+	const std::vector<TargetedCollection> &targets = targeted_collections();
+	std::vector<std::vector<NodeAddress>> sets(targets.size());
+	if (targets.empty()) return sets;
+	for (const auto &row : rows_) {
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == row->kind) sets[t].push_back({row->id, row->kind, 0});
+		const RowIndex &index = row_index_of(row);
+		for (size_t t = 0; t < targets.size(); ++t)
+			for (const NodeId id : index.targeted[t]) sets[t].push_back({row->id, targets[t].kind, id});
+	}
+	return sets;
+}
+
+std::string Document::own_name(const NodeAddress &address) const {
+	const Node *top = row(address.row);
+	if (!top) return std::string();
+	if (!address.child) return top->name();
+	Placement at;
+	if (!placement(address, at) || !*at.spec.name_field) return std::string();
+	Value name;
+	if (!get(address, at.spec.name_field, name)) return std::string();
+	const auto *text = std::get_if<std::string>(&name);
+	return text ? *text : std::string();
 }
 
 bool Document::renumber_references(const StagedRows &, const RecordShift &shift,
@@ -968,16 +1003,19 @@ bool Document::renumber_references(const StagedRows &, const RecordShift &shift,
 std::vector<std::vector<NodeId>> Document::collection_orders(
 		const std::vector<TargetedCollection> &targets, const StagedRows &staged) const {
 	std::vector<std::vector<NodeId>> orders(targets.size());
-	const auto take = [&](const NodeAddress &record) {
-		for (size_t t = 0; t < targets.size(); ++t)
-			if (targets[t].kind == record.kind) orders[t].push_back(record.child ? record.child : record.row);
-	};
 	for (const auto &row : staged.rows()) {
-		take({row->id, row->kind, 0});
-		walk_records(*row, [&](const NodeAddress &record, const Placement &) {
-			take(record);
-			return true;
-		});
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == row->kind) orders[t].push_back(row->id);
+		// The row's own index (index_for: the committed row's, or the batch's own once an edit
+		// reshaped it), each list copied before another row's index is asked for.
+		const RowIndex *index = index_for(*row);
+		RowIndex walked;
+		if (!index) {
+			walked = make_index(*row);
+			index = &walked;
+		}
+		for (size_t t = 0; t < targets.size() && t < index->targeted.size(); ++t)
+			orders[t].insert(orders[t].end(), index->targeted[t].begin(), index->targeted[t].end());
 	}
 	return orders;
 }
@@ -988,20 +1026,20 @@ bool Document::renumber(const std::vector<TargetedCollection> &targets,
 	const std::vector<std::vector<NodeId>> after = collection_orders(targets, staged);
 	for (size_t t = 0; t < targets.size(); ++t) {
 		if (after[t] == before[t]) continue;
-		// Where each record the edit found stands now; one added past the others moves none of them.
+		// Where each record the edit found stands now, and how many it left: one added past the
+		// others moves none of them, but an index past them moves with the count (RecordShift::now).
 		RecordShift shift;
 		shift.reference = targets[t].reference;
 		shift.kind = targets[t].kind;
+		shift.after = after[t].size();
 		std::unordered_map<NodeId, size_t> now;
 		for (size_t k = 0; k < after[t].size(); ++k) now.emplace(after[t][k], k);
-		bool moves = false;
 		shift.to.reserve(before[t].size());
 		for (size_t k = 0; k < before[t].size(); ++k) {
 			const auto found = now.find(before[t][k]);
 			shift.to.push_back(found == now.end() ? RecordShift::kRemoved : found->second);
-			moves = moves || shift.to.back() != k;
 		}
-		if (!moves) continue;
+		if (!shift.moves()) continue;
 		std::vector<Edit> sites;
 		std::string message;
 		if (!renumber_references(staged, shift, sites, message))

@@ -1103,6 +1103,7 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 		entry.set("kind", json_string(reference_row(choice.kind).token));
 		entry.set("file", json_string(choice.file));
 		if (!choice.record.empty()) entry.set("record", json_string(choice.record));
+		if (!choice.label.empty()) entry.set("label", json_string(choice.label));
 		entry.set("status", json_string(reference_status_token(choice.status)));
 		if (choice.inert) {
 			entry.set("inert", boolean(true));

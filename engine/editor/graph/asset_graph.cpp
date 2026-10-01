@@ -815,6 +815,7 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 			choice.kind = kind;
 			choice.file = symbol.file;
 			choice.record = symbol.record;
+			choice.label = symbol.value;
 			out.push_back(std::move(choice));
 		}
 		return out;

@@ -275,8 +275,19 @@ public:
 	// The collections of this document's records that other records name by index (the Record
 	// references the type's schema names on a field, FieldSchema::reference, refined per record by
 	// field_on, each whose collection token is one of its record kinds), each reference kind once:
-	// what the graph makes a record set of and what an edit renumbers the references to.
-	std::vector<TargetedCollection> targeted_collections() const;
+	// what the graph makes a record set of and what an edit renumbers the references to. The
+	// type's declarations alone decide it, so it is worked out once.
+	const std::vector<TargetedCollection> &targeted_collections() const;
+	// The record sets (S13 D8): for each of targeted_collections(), in its order, the records of
+	// the collection's kind in the file's order as committed (the rows in order, each row's records
+	// in the walk's pre-order, ReferenceKindRow's RecordIndexSpace::File), a Record reference's
+	// index naming the one at its place. Read from the core's index of each row, which keeps each
+	// row's records of those kinds in order: no row indexed already is walked again.
+	std::vector<std::vector<NodeAddress>> record_sets() const;
+	// A record's own name: a row's name, a nested record's name field as it holds it; "" for a kind
+	// with no name field, an empty one, and a record the document does not have (record_name falls
+	// back to the kind and the place).
+	std::string own_name(const NodeAddress &address) const;
 	// The records that hold `address`, the row first and its direct owner last (none for
 	// a row or an unknown record).
 	std::vector<NodeAddress> ancestors(const NodeAddress &address) const;
@@ -497,6 +508,9 @@ private:
 		};
 		std::unordered_map<NodeId, Entry> records;
 		std::vector<PathStep> steps;
+		// By targeted_collections()' order, the row's records of that collection's kind in the
+		// walk's order (record_sets, and what a structural edit compares: collection_orders).
+		std::vector<std::vector<NodeId>> targeted;
 		RecordPath path(NodeId record) const;
 	};
 	// The index of `row`, made by walking it.
@@ -514,11 +528,13 @@ private:
 	// changes included).
 	bool placement_in(const Node &row, NodeId child, Placement &out) const;
 	// The records of each of `targets` in the file's order, over the rows as the batch has left
-	// them: what an edit that may move them is compared by (renumber).
+	// them: what an edit that may move them is compared by (renumber). Each row's from its index
+	// (index_for): only a row an edit of the batch reshaped is walked, once for each such edit.
 	std::vector<std::vector<NodeId>> collection_orders(const std::vector<TargetedCollection> &targets,
 	                                                   const StagedRows &staged) const;
-	// After such an edit: each targeted collection whose records it left in another order
-	// (`before`, collection_orders') renumbered, the type's Sets (renumber_references) staged.
+	// After such an edit: each targeted collection whose indexes it moved (`before`,
+	// collection_orders': a record moved or removed, or the collection grown or shrunk) renumbered,
+	// the type's Sets (renumber_references) staged.
 	bool renumber(const std::vector<TargetedCollection> &targets,
 	              const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
 	              Diagnostic &error);
@@ -582,6 +598,9 @@ private:
 	mutable std::unordered_map<NodeId, RowIndex> staged_indexes_;
 	// path_in's last walk of a row the document does not hold.
 	mutable RowIndex walked_;
+	// targeted_collections', worked out once.
+	mutable bool targets_known_ = false;
+	mutable std::vector<TargetedCollection> targets_;
 	mutable std::unordered_map<NodeId, size_t> row_positions_; // row_index's
 	EditHistory history_{rows_, file_state_};
 	std::vector<std::shared_ptr<const Node>> saved_rows_;

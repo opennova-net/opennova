@@ -71,7 +71,38 @@ ThreediMatrix4x4 fresh_frame() {
 	return identity;
 }
 
+constexpr NodeKind kLight = node_kind(ModelKind::Light);
+
 } // namespace
+
+// A register byte the game reads through the model's CTRL table while it has one and as a global
+// register while it has none: a material generator's (the second's included) or a loaded track's
+// parameter above style 0x70, a flipbook's time on the register clock [orig: ThreediGp_LoadFromFile
+// @ 0x5B5C49, the swaps skipped with no table; ThreediGp_LoadCtrlRegisters @ 0x5B4640 keeps no table
+// for a count of 0]. A light's is swapped through the table either way (@ 0x5B5F4D..0x5B5F62). The
+// first one met, its record path and field in `where`, its byte in `named`.
+bool ModelDocument::reads_register_byte(const Node &node, std::string &where, int64_t &named) const {
+	bool found = false;
+	walk_records(node, [&](const NodeAddress &record, const Placement &) {
+		if (record.kind == kLight) return true;
+		const ThreediSchemaRecord native = record_of(*this, const_cast<Node &>(node), record);
+		if (!native) return true;
+		for (const FieldSchema &field : schema(record.kind)) {
+			if (field.reference != ReferenceKind::ModelRegister ||
+			    model_document_detail::named_by_index(native, field.id) != ReferenceKind::ModelRegister ||
+			    !threedi_schema_reads(native, field.id))
+				continue;
+			Value value;
+			if (!threedi_schema_get(native, field.id, value) || !std::holds_alternative<int64_t>(value)) continue;
+			where = record_path(record) + " " + field.id;
+			named = std::get<int64_t>(value);
+			found = true;
+			return false;
+		}
+		return true;
+	});
+	return found;
+}
 
 bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAllocator &allocate, NodeId &added,
                                     std::string &error) {
@@ -147,18 +178,34 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 	case ModelKind::UserPoint:
 		return edit_id_list(row.user_points, row.collections[kUserPoints], edit, fresh_user_point(row), allocate,
 		                    added, error);
-	case ModelKind::Register:
+	case ModelKind::Register: {
 		// Named by its index: what names a register the core has the type renumber after the edit
-		// (renumber_references).
-		return edit_id_list(row.registers, row.collections[kRegisters], edit, fresh_register(), allocate, added, error);
-	case ModelKind::Frame:
-		// MTRX row 0 is the identity every model's table starts with, which no part animation turns
-		// through (a frame byte names a row above 0, threedi_panm_frame_row): it stays row 0. Any
-		// other row moves as a register does.
-		if ((!adding && table == 0) || (edit.operation != EditOperation::Remove && edit.position == 0)) {
-			error = "Rotation frame 0 is the identity every model keeps first: no part animation turns through it.";
+		// (renumber_references). The first register gives the model a CTRL table and the last takes
+		// it away, which changes what every material's and track's register byte names (a global
+		// register with no table, an entry of the table with one: reads_register_byte), so either is
+		// refused while the game reads such a byte.
+		const bool first = adding && row.registers.empty();
+		const bool last = edit.operation == EditOperation::Remove && row.registers.size() == 1;
+		std::string where;
+		int64_t named = 0;
+		if ((first || last) && reads_register_byte(row, where, named)) {
+			error = first ? "A first CTRL register gives the model a table, which the load reads every material's "
+			                "and track's register through: " +
+			                        where + " reads global register " + std::to_string(named) +
+			                        " now. Point it at no register first."
+			              : "The last CTRL register removed, the load reads every material's and track's register "
+			                "as a global one: " +
+			                        where + " reads register " + std::to_string(named) +
+			                        " of the table now. Point it at no register first.";
 			return false;
 		}
+		return edit_id_list(row.registers, row.collections[kRegisters], edit, fresh_register(), allocate, added, error);
+	}
+	case ModelKind::Frame:
+		// Named by its row as a register is by its index. A frame byte of 0 names no row (the pose
+		// reads one only above 0 [orig: Model_TransformBoneMatrices @ 0x58E3FE]), so row 0 is never
+		// read: no pin keeps it first, since the renumbering refuses any edit that would leave a frame
+		// byte the game reads naming row 0 or a row past 127 (record_index's none).
 		return edit_id_list(row.frames, row.collections[kFrames], edit, fresh_frame(), allocate, added, error);
 	case ModelKind::PartAnimation: {
 		if (adding && (!owned || owner_table != kLods)) {
@@ -195,52 +242,62 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 bool ModelDocument::renumber_references(const StagedRows &rows, const RecordShift &shift,
                                         std::vector<Edit> &sites, std::string &error) const {
 	const bool registers = shift.reference == ReferenceKind::ModelRegister;
+	// A material's and a track's register byte is an entry of the CTRL table only while the model
+	// has one (reads_register_byte): an edit that gives or takes the table, which edit_collection
+	// allows only while the game reads none of them, leaves their bytes as they are.
+	const bool table = !registers || (shift.before() > 0 && shift.after > 0);
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
 		if (node->kind != kModel) continue;
 		const ModelRow &row = static_cast<const ModelRow &>(*node);
-		// The second RGB generator names a register above style 0x70 as the others do (the load
-		// swaps it, ThreediGp_LoadFromFile's material pass), but its words are shown only
-		// (rgbgen2.param, unwitnessed): no field renumbers it, so a register it names stays where
-		// it is.
-		if (registers)
+		// The second RGB generator names a register above style 0x70 as the others do, and the load
+		// swaps it through the table [orig: ThreediGp_LoadFromFile @ 0x5B5D0A..0x5B5D2A], but its
+		// words are shown only (rgbgen2.param, read-only): nothing renumbers it, so an edit that
+		// would change what it names is refused.
+		if (registers && table)
 			for (const ModelMaterial &material : row.materials) {
 				const ThreediRgbGen &second = material.material.rgb_gen2;
 				const int64_t index = static_cast<uint8_t>(second.reg);
-				if (!threedi_generator_names_register(second.style) || !shift.found(index) ||
-				    shift.now(index) == size_t(index))
-					continue;
+				if (!threedi_generator_names_register(second.style)) continue;
+				const bool moves = shift.found(index) ? shift.now(index) != size_t(index) : size_t(index) < shift.after;
+				if (!moves) continue;
 				error = "A material's second RGB generator names register " + std::to_string(index) +
 				        ", which the editor shows and never sets: that register stays where it is.";
 				return false;
 			}
 		bool ok = true;
 		walk_records(row, [&](const NodeAddress &record, const Placement &) {
+			if (registers && !table && record.kind != kLight) return true;
 			const ThreediSchemaRecord native = record_of(*this, const_cast<Node &>(*node), record);
 			if (!native) return true;
 			for (const FieldSchema &field : schema(record.kind)) {
-				// A field that names the collection here (refine_field's rule), read by the game or
-				// not: one it reads only later keeps naming its record.
-				if (field.reference != shift.reference || record_reference(native, field.id) != shift.reference)
+				// A field whose value names the collection by index on this record, read by the game
+				// there or not (model_document_detail::named_by_index: a track the load does not copy,
+				// a frame byte on a row that turns through none), so it keeps naming its record should
+				// the game read it later. The second RGB generator's, read-only, is above.
+				if (field.reference != shift.reference || field.read_only ||
+				    model_document_detail::named_by_index(native, field.id) != shift.reference)
 					continue;
 				Value value;
 				int64_t index = 0;
-				if (!threedi_schema_get(native, field.id, value) || !record_index(shift.reference, value, index) ||
-				    !shift.found(index))
+				if (!threedi_schema_get(native, field.id, value) || !record_index(shift.reference, value, index))
 					continue;
+				// Its record's place now, or one past the collection as far as before (RecordShift::now).
 				const size_t now = shift.now(index);
-				if (now == RecordShift::kRemoved) {
-					error = registers ? "Something reads this register: point it at another first."
-					                  : "A part animation turns through this frame: point it at another first.";
-					ok = false;
-					return false;
-				}
 				if (now == size_t(index)) continue;
 				int64_t named = 0;
-				if ((field.ranged && double(now) > field.max) ||
-				    !record_index(shift.reference, int64_t(now), named)) {
-					error = std::string(registers ? "Register " : "Rotation frame ") + std::to_string(index) +
-					        " would move to " + std::to_string(now) + ", which the field " + field.id +
-					        " naming it cannot hold.";
+				const bool holds = now != RecordShift::kRemoved && !(field.ranged && double(now) > field.max) &&
+				                   record_index(shift.reference, int64_t(now), named);
+				if (!holds) {
+					// One the game does not read keeps its value; one it reads refuses the edit.
+					if (!threedi_schema_reads(native, field.id)) continue;
+					const std::string where = record_path(record) + " " + field.id;
+					if (now == RecordShift::kRemoved)
+						error = registers ? where + " reads this register: point it at another first."
+						                  : where + " turns through this rotation frame: point it at another first.";
+					else
+						error = std::string(registers ? "Register " : "Rotation frame ") + std::to_string(index) +
+						        " would move to " + std::to_string(now) + ", which " + where +
+						        (registers ? " cannot hold." : " cannot name (a frame byte names rows 1 to 127).");
 					ok = false;
 					return false;
 				}

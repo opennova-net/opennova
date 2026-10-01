@@ -105,10 +105,14 @@ ReferenceKind record_reference(ThreediSchemaReference index) {
 	}
 }
 
-ReferenceKind record_reference(const ThreediSchemaRecord &record, const std::string &path) {
+ReferenceKind named_by_index(const ThreediSchemaRecord &record, const std::string &path) {
 	const ThreediSchemaField *field = threedi_schema_field(record.shape, path);
-	if (!field || field->reference == ThreediSchemaReference::None) return ReferenceKind::None;
-	return record_reference(index_reference(record, field, path, threedi_schema_reference(record, path)));
+	if (!field) return ReferenceKind::None;
+	if (field->reference == ThreediSchemaReference::Frame) return ReferenceKind::ModelFrame;
+	if (field->reference == ThreediSchemaReference::Register &&
+	    threedi_schema_reference(record, path) == ThreediSchemaReference::Register)
+		return ReferenceKind::ModelRegister;
+	return ReferenceKind::None;
 }
 
 bool shader_flags(const char *tag, uint32_t &flags) {

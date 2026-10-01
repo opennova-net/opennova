@@ -56,9 +56,14 @@ threedi::ThreediSchemaReference index_reference(const threedi::ThreediSchemaReco
                                                 threedi::ThreediSchemaReference ref);
 // The Record reference an index makes (index_reference's): a CTRL register (ModelRegister) or an
 // MTRX row (ModelFrame); None for a part (no record: LOD 0's geometry is the base's) and for any
-// other field. The second asks the table for the field on a record.
+// other field.
 ReferenceKind record_reference(threedi::ThreediSchemaReference index);
-ReferenceKind record_reference(const threedi::ThreediSchemaRecord &record, const std::string &path);
+// What a field's value names by index on this record whether the game reads it there or not, what
+// the renumbering keeps naming its record: a CTRL register where its style makes the byte one (a
+// generator's, a track's or a light's parameter above style 0x70, a flipbook's time on the register
+// clock: threedi_schema_reference), an MTRX row on any part animation (a frame byte is never
+// anything else). None for any other field.
+ReferenceKind named_by_index(const threedi::ThreediSchemaRecord &record, const std::string &path);
 
 // The engine's shader table: whether it knows a tag (and its capability flags), and
 // whether the tag draws in a blended pass.

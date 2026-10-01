@@ -643,10 +643,11 @@ A field naming a record of its own file by its index among the file's records of
 the file's order: a model's generator, track or light naming one of its CTRL registers, a part
 animation's frame byte naming a rotation frame (a mission's entity, waypoint or group index,
 later). Those records are the file's record set of that kind, each found by its index: the
-picker offers them and each shows what names it (Referenced by). An edit that adds, removes or
-moves one of them changes, in the same undo step, every index that named a record it moved, and
-is refused while something still names a record it removes. An index past the set is the file's
-own finding (what the game makes of it), never a missing reference.
+picker offers them by index and name, and each shows what names it (Referenced by). An edit that
+adds, removes or moves one of them changes, in the same undo step, every index that named a
+record it moved (an index past the set staying past it), and is refused while a field the game
+reads still names a record it removes. An index past the set is the file's own finding (what the
+game makes of it), never a missing reference.
 _Avoid_: id (an id stays with its record; an index is its place), link, pointer
 
 **Menu preview**:

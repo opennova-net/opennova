@@ -2852,8 +2852,8 @@ static int test_record_references() {
 	// The picker: the file's registers by index, each with its record.
 	const std::vector<ReferenceChoice> registers = graph.choices(ReferenceKind::ModelRegister, file);
 	TEST_EXPECT(registers.size() == 4 && registers[0].name == "0" && registers[3].name == "3" &&
-	            registers[3].record == "rig/FLICKER" && registers[3].file == file &&
-	            registers[3].status == ReferenceStatus::Present);
+	            registers[3].record == "rig/FLICKER" && registers[3].label == "FLICKER" &&
+	            registers[3].file == file && registers[3].status == ReferenceStatus::Present);
 	TEST_EXPECT(graph.choices(ReferenceKind::ModelRegister, "models/none.3di").empty());
 	// A file's own records by index are no use of it, nor a name to find.
 	for (const GraphEdge *edge : graph.usages_of(file))
@@ -2949,7 +2949,7 @@ static int test_retail_record_references() {
 	            models, graph.edge_count(), registers, frames, unresolved, graph.symbol_count(),
 	            graph.symbols_of_kind(ReferenceKind::ModelRegister).size(),
 	            graph.symbols_of_kind(ReferenceKind::ModelFrame).size(), seconds);
-	TEST_EXPECT(models > 900 && registers > 0 && !named.empty());
+	TEST_EXPECT(models > 900 && registers > 0 && frames > 0 && unresolved == 0 && !named.empty());
 	if (named.empty()) return 0;
 	auto model = std::make_shared<ModelDocument>();
 	Diagnostic error;
@@ -2957,14 +2957,33 @@ static int test_retail_record_references() {
 	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
 	graph.update(project.paths, project.document, project.scan, open);
 	Seen seen({"model"});
+	// Each register reference of the model (its record and field) and the register it resolves to,
+	// by the register's identity: what the renumbering keeps, whatever indexes the edits leave.
+	using Resolved = std::map<std::pair<NodeId, std::string>, NodeAddress>;
+	const auto resolved = [&] {
+		Resolved out;
+		for (const GraphEdge *edge : graph.references_of(named)) {
+			if (edge->kind != ReferenceKind::ModelRegister) continue;
+			const GraphSymbol *symbol = graph.resolve_symbol(edge->kind, edge->value, edge->scope);
+			out[{edge->address.child, edge->field}] = symbol ? symbol->address : NodeAddress();
+		}
+		return out;
+	};
+	const Resolved before = resolved();
+	bool all_found = !before.empty();
+	for (const auto &reference : before) all_found = all_found && reference.second.child != 0;
+	TEST_EXPECT(all_found);
 	const auto step = [&](const char *what) {
 		const GraphUpdate update = graph.update(project.paths, project.document, project.scan, open);
 		const std::string different =
 		        fresh_difference(graph, project.paths, project.document, project.scan, open, seen);
-		std::printf("  %s: %zu files patched, %zu edges resolved of %zu%s%s\n", what, graph.stats().files_patched,
-		            graph.stats().edges_resolved, graph.edge_count(),
+		const bool same = resolved() == before;
+		std::printf("  %s: %zu files patched, %zu edges resolved of %zu, %zu register references naming the "
+		            "registers they named%s%s%s\n",
+		            what, graph.stats().files_patched, graph.stats().edges_resolved, graph.edge_count(), before.size(),
+		            same ? "" : "; FAIL, a reference names another register",
 		            different.empty() ? "" : "; FAIL, differs from a fresh graph in ", different.c_str());
-		return different.empty() && update.changed && update.files == std::vector<std::string>{named};
+		return same && different.empty() && update.changed && update.files == std::vector<std::string>{named};
 	};
 	const NodeId row = model->model_row()->id;
 	Edit add;

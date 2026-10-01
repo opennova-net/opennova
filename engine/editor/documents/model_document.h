@@ -156,22 +156,32 @@ protected:
 	// material to another draw pass (both are geometry: re-export from Blender).
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
-	// Materials, texture rows, lights, user points and CTRL registers: add, duplicate, remove,
-	// move (a material a strip draws with is not removed), each list with its identities through
-	// edit_id_list. MTRX frames likewise, but row 0 (the identity, which no part animation turns
-	// through) stays row 0. What names a register or a frame by its index the core has the type
-	// renumber (renumber_references). Part animations: the next part's inert row added at the end,
-	// the last removed. LODs and the collision records are fixed.
+	// Materials, texture rows, lights, user points, CTRL registers and MTRX frames: add, duplicate,
+	// remove, move (a material a strip draws with is not removed), each list with its identities
+	// through edit_id_list. The first register and the last are refused while the game reads a
+	// material's or a track's register byte (reads_register_byte: the table they give or take
+	// changes what each names). A frame byte of 0 names no row (the pose reads one only above 0),
+	// so row 0 is never read; no pin keeps it first. What names a register or a frame by its index
+	// the core has the type renumber (renumber_references). Part animations: the next part's inert
+	// row added at the end, the last removed. LODs and the collision records are fixed.
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	// The registers or the frames moved: every field that names one by its index (as refine_field
-	// finds it on the record as the batch left it, read by the game there or not, so a field it does
-	// not read yet keeps naming its record) set to the index its register or frame stands at now.
-	// Refused while a field names one the edit removed ("point it at another first"), while the
-	// second RGB generator, which no field sets, names a register that moved, or where a field
-	// cannot hold the new index.
+	// The registers or the frames moved: every field whose value names one by its index
+	// (model_document_detail::named_by_index, on the record as the batch left it, read by the game
+	// there or not, so a field it does not read yet keeps naming its record) set to the index its
+	// register or frame stands at now, and an index past the collection moved with its count so it
+	// names none still (RecordShift::now). A field the game reads refuses the edit when its record
+	// was removed ("<record> <field> reads this register: point it at another first") or when it
+	// cannot hold the new index (a byte past 255; a frame byte other than 1 to 127); one it does not
+	// read keeps its value then. Refused too while the second RGB generator, which the editor never
+	// sets, names a register the edit moves.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
+	// A material's or a loaded track's register byte the game reads (a generator, the second one
+	// included, or a track above style 0x70, a flipbook on the register clock): the first one met in
+	// `row`, its record path and field in `where` and its byte in `named`. Such a byte reads the
+	// model's CTRL table while it has one and a global register while it has none.
+	bool reads_register_byte(const Node &row, std::string &where, int64_t &named) const;
 	// A model keeps its two rows: a step adding or removing a row is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows,
 	                 std::string &error) const override;

@@ -62,6 +62,17 @@ using ReferenceMissingMessage = std::string (*)(const AssetGraph &graph, const G
 // The values of a Record reference that name no record, whatever the collection holds (a frame
 // byte the pose reads none from).
 using RecordNone = bool (*)(int64_t value);
+// What a Record reference's index counts (S13 D8). File: every record of its collection's kind in
+// the file it is written in, in the file's order (the rows in order, each row's records in the
+// walk's pre-order), which must be the format's own table order; the reference resolves in its own
+// file (Document::field_on scopes it so) and the document core renumbers it. The one space the core
+// numbers: an index into one owner's list alone (a per-owner table) would be a value of its own,
+// which the core and the graph learn to number before a row names it (records_well_formed holds
+// every Record row to File until then).
+enum class RecordIndexSpace {
+	None, // no Record reference
+	File,
+};
 
 struct ReferenceKindRow {
 	ReferenceKind kind = ReferenceKind::None;
@@ -79,6 +90,8 @@ struct ReferenceKindRow {
 	// A Record reference's values that name no record (null: every whole number from 0 names one,
 	// the index past the collection's end naming one it lacks).
 	RecordNone none = nullptr;
+	// What a Record reference's index counts (None for any other resolution).
+	RecordIndexSpace index_space = RecordIndexSpace::None;
 	const char *const *extensions = nullptr; // what its loader appends to the name as written (null-ended)
 	ReferenceFileNames file_names = nullptr; // its loader's own rule, in place of the extensions
 	NameCase name_case = NameCase::FileName;

@@ -46,6 +46,9 @@ struct ReferenceChoice {
 	ReferenceKind kind = ReferenceKind::None; // what it names: the reference's kind, or one it also offers
 	std::string file;   // the defining file, or the file itself (a base layer's by its name)
 	std::string record; // the defining record ("" for a file)
+	// What the picker shows beside the name and filters by too: a record set's record by its own
+	// name (a CTRL register's NAME), "" for the rest.
+	std::string label;
 	// The reference set to it, in its scope: Present, or Missing where the lookup would not
 	// reach it there (a string id of another section, a menu texture whose loader reads
 	// another file of the name).

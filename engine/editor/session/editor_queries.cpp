@@ -479,6 +479,12 @@ JsonValue answer_users(
 			error = "no reference kind \"" + kind_token + "\".";
 			return JsonValue::make_null();
 		}
+		// A record of a record set goes by its index in its own file alone (a Record reference,
+		// ADR 0046 S13 D8): with no file to count in, the index names nothing.
+		if (reference_row(kind).resolution == ReferenceResolution::Record && args.text("scope").empty()) {
+			error = "a " + kind_token + " names a record of one file by its index: give that file as \"scope\".";
+			return JsonValue::make_null();
+		}
 		if (graph)
 			edges = graph->referrers_of(kind, args.text("name"), args.text("scope"));
 	} else {

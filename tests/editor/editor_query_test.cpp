@@ -404,6 +404,12 @@ static int test_refusals() {
 	TEST_EXPECT(says("operation", R"({"offset": 0})", "takes no \"offset\" (it takes nothing)"));
 	TEST_EXPECT(says("document", R"({"path": "nothing.mnu"})", "no open document nothing.mnu"));
 	TEST_EXPECT(says("document_search", R"({"text": ""})", "no document is open"));
+	// A record of a record set goes by its index in its own file (S13 D8): a lookup by a Record kind
+	// and a name with no file to count in is refused; with its file it answers.
+	TEST_EXPECT(says("referrers", R"({"kind": "model_register", "name": "0"})", "give that file as \"scope\""));
+	TEST_EXPECT(says("usages", R"({"kind": "model_frame", "name": "1"})", "give that file as \"scope\""));
+	TEST_EXPECT(ask(session, "referrers", R"({"kind": "model_register", "name": "0", "scope": "rig.3di"})")
+	                    .get("edges") != nullptr);
 	std::string error;
 	TEST_EXPECT(session.query("gizmos", JsonValue::make_null(), error).is_null() &&
 			error.find("Unknown query \"gizmos\"") == 0 &&

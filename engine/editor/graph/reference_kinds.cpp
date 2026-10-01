@@ -5,7 +5,6 @@
 #include <base/resource_index/texture_candidates.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
-#include <formats/threedi/threedi_panm.h>
 #include <runtime/anim/rig_files.h>
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_style.h>
@@ -130,15 +129,11 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
 
 // A part animation's frame byte (the field holds 0 to 255) names no MTRX row at 0 and at 128 to
-// 255: the load sign-extends it and the pose reads a row only above zero (threedi_panm_frame_row,
-// the pose's own rule, asked of a row that turns through one: whether this row does is its field's
-// use, ModelDocument's).
-bool frame_none(int64_t value) {
-	threedi::ThreediPartAnimation spinner{};
-	spinner.flags = threedi::threedi_panm_pack_flags(0, 1, 0, 0);
-	spinner.matrix_index = static_cast<uint8_t>(value);
-	return threedi::threedi_panm_frame_row(spinner) == 0;
-}
+// 255: the load sign-extends it [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx)] and the pose reads
+// a row only above zero [orig: Model_TransformBoneMatrices @ 0x58E3FE], so row 0 is never read
+// (threedi_panm_frame_row, the pose's rule; whether a row turns through a frame at all is its
+// field's use, ModelDocument's). Any value past the byte names none too.
+bool frame_none(int64_t value) { return value <= 0 || value > 127; }
 
 // --- the table -------------------------------------------------------------------------------
 
@@ -186,6 +181,7 @@ struct Row {
 		Row out = *this;
 		out.row.resolution = ReferenceResolution::Record;
 		out.row.collection = collection;
+		out.row.index_space = RecordIndexSpace::File;
 		out.row.none = none;
 		out.row.name_case = NameCase::Exact;
 		out.row.picker_scoped = true;
@@ -334,13 +330,15 @@ constexpr bool rows_well_formed() {
 }
 
 // A Record row names its collection, no file to load and no message of a missing one (the graph
-// finds none missing); no other row names a collection or what names none.
+// finds none missing), and counts its index across its file, the one space the core numbers; no
+// other row names a collection, what names none or an index space.
 constexpr bool records_well_formed() {
 	for (const ReferenceKindRow &row : kRows) {
 		const bool record = row.resolution == ReferenceResolution::Record;
 		if (record != (*row.collection != '\0')) return false;
 		if (record && (row.file != AssetKind::Unknown || row.missing_message)) return false;
-		if (!record && row.none) return false;
+		if (record != (row.index_space == RecordIndexSpace::File)) return false;
+		if (!record && (row.none || row.index_space != RecordIndexSpace::None)) return false;
 	}
 	return true;
 }
@@ -348,8 +346,8 @@ constexpr bool records_well_formed() {
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == kReferenceKindCount, "every ReferenceKind has exactly one row");
 static_assert(rows_well_formed(), "the rows follow ReferenceKind's order and their tokens are unique");
 static_assert(records_well_formed(),
-		"a Record row names its collection, no file and no missing message, and only a Record row "
-		"names a collection or the values naming none");
+		"a Record row names its collection, no file and no missing message and counts across its file, "
+		"and only a Record row names a collection, the values naming none or an index space");
 
 } // namespace
 

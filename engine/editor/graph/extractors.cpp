@@ -272,32 +272,30 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 }
 
 void extract_from_document(const Document &document, Extracted &out) {
-	// The record sets (S13 D8): each record of a collection another record names by index, a symbol
-	// of the Record kind named by its index in the file (in the file's order: the rows in order,
-	// each row's records in pre-order), scoped to the file and defined by no field.
-	const std::vector<Document::TargetedCollection> targets = document.targeted_collections();
-	std::vector<size_t> counts(targets.size(), 0);
-	const auto record_set = [&](const NodeAddress &address) {
-		for (size_t t = 0; t < targets.size(); ++t) {
-			if (targets[t].kind != address.kind) continue;
-			GraphSymbol symbol = symbol_of(targets[t].reference, std::to_string(counts[t]++), document.path(),
-			                               document.record_path(address), document.path());
-			symbol.locator = document.locator(address);
-			symbol.address = address;
-			out.symbols.push_back(std::move(symbol));
-		}
-	};
 	for (const auto &row : document.rows()) {
 		if (!row) continue;
-		const NodeAddress top{row->id, row->kind, 0};
-		extract_record(document, top, out);
-		record_set(top);
+		extract_record(document, {row->id, row->kind, 0}, out);
 		document.walk_records(*row, [&](const NodeAddress &nested, const Document::Placement &) {
 			extract_record(document, nested, out);
-			record_set(nested);
 			return true;
 		});
 	}
+	// The record sets (S13 D8): each record of a collection another record names by index, a symbol
+	// of the Record kind named by its index in the file (Document::record_sets, the file's order),
+	// scoped to the file and defined by no field, its value the record's own name (a register's
+	// NAME), which the picker shows and filters by beside the index.
+	const std::vector<Document::TargetedCollection> &targets = document.targeted_collections();
+	const std::vector<std::vector<NodeAddress>> sets = document.record_sets();
+	for (size_t t = 0; t < targets.size(); ++t)
+		for (size_t k = 0; k < sets[t].size(); ++k) {
+			const NodeAddress &address = sets[t][k];
+			GraphSymbol symbol = symbol_of(targets[t].reference, std::to_string(k), document.path(),
+			                               document.record_path(address), document.path());
+			symbol.locator = document.locator(address);
+			symbol.address = address;
+			symbol.value = document.own_name(address);
+			out.symbols.push_back(std::move(symbol));
+		}
 }
 
 bool graph_reads_kind(AssetKind kind) {
