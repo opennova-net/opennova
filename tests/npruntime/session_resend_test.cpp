@@ -4,11 +4,13 @@
 // reconstructed packet 1 back through the receiver so its queued packet 2 drains. The tests also
 // pin key validation, malformed-body rejection, current-ACK retransmit headers, and ACK retirement.
 
+#include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 
+#include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
@@ -16,6 +18,8 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
@@ -291,7 +295,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	const std::vector<uint8_t> wrong_key = make_resend_datagram(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey + 1, {1});
 	if (!expect(inmatch::handle_server_datagram(
-			ctx, kPeer, wrong_key.data(), wrong_key.size(), 3).outbound.empty() &&
+			ctx, kPeer, wrong_key.data(), wrong_key.size(), 3).immediate_outbound.empty() &&
 		            ctx.np_protocol.connection_list[0].seq.next_outbound_seq ==
 		                    next_before_bad,
 	            "host ignores 0x44 with a mismatched local key"))
@@ -299,7 +303,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	const std::vector<uint8_t> malformed =
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, {0x88, 0x77, 0x66});
 	if (!expect(inmatch::handle_server_datagram(
-			ctx, kPeer, malformed.data(), malformed.size(), 4).outbound.empty(),
+			ctx, kPeer, malformed.data(), malformed.size(), 4).immediate_outbound.empty(),
 	            "host ignores a resend-list body shorter than its key"))
 		return false;
 
@@ -317,13 +321,13 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	if (!expect(ctx.net_quality_link_errors == inmatch::kNetQualityLinkErrorOutgoing,
 	            "a joiner's valid 0x44 raises the host's outgoing link error"))
 		return false;
-	if (!expect(resend.outbound.size() == 1,
+	if (!expect(resend.immediate_outbound.size() == 1,
 	            "valid client 0x44 makes the host emit one reconstructed packet"))
 		return false;
 	ProtocolPacketHeader resent_header;
 	std::vector<ProtocolMessage> resent_messages;
 	if (!expect(decode_session_datagram(
-			resend.outbound[0], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk,
+			resend.immediate_outbound[0], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk,
 			resent_header, resent_messages) &&
 		            resent_header.seq_num == 1 && resent_header.ack_count == 2 &&
 		            resent_messages.size() == 1 && resent_messages[0].tag == 0x49 &&
@@ -332,7 +336,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 		return false;
 
 	const inmatch::JoinerConnection::PollResult recovered =
-			joiner.handle_datagram(resend.outbound[0].data(), resend.outbound[0].size());
+			joiner.handle_datagram(resend.immediate_outbound[0].data(), resend.immediate_outbound[0].size());
 	if (!expect(recovered.inbound_gameplay.size() == 2 &&
 	                    recovered.inbound_gameplay[0].second ==
 	                            std::vector<uint8_t>({0xC5}) &&
@@ -357,6 +361,91 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 	joiner.handle_datagram(final_server_ack.data(), final_server_ack.size());
 	return expect(joiner.connection().seq.retained_outbound.empty(),
 	              "host's admitted ACK retires the joiner's remaining C2S records");
+}
+
+// A scripted datagram socket for the host owner loop: datagrams queued in `inbound` drain through
+// recv_from in order, and every send_to lands in `sent`.
+class ScriptedDatagramSocket final : public IDatagramSocket {
+public:
+	std::deque<std::pair<PeerAddr, std::vector<uint8_t>>> inbound;
+	std::vector<std::pair<PeerAddr, std::vector<uint8_t>>> sent;
+
+	int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) override {
+		if (inbound.empty()) return 0;
+		const std::vector<uint8_t> datagram = std::move(inbound.front().second);
+		from = inbound.front().first;
+		inbound.pop_front();
+		if (datagram.size() > cap) return -1;
+		std::memcpy(buf, datagram.data(), datagram.size());
+		return static_cast<int>(datagram.size());
+	}
+	void send_to(const PeerAddr &to, const uint8_t *data, std::size_t len) override {
+		sent.emplace_back(to, std::vector<uint8_t>(data, data + len));
+	}
+};
+
+// D-NET-229: the host's receive pump runs every Server_TickUpdate, ungated, so the 0x83 packets a
+// joiner's 0x44 asks for and the host's own 0x84 for a C2S gap leave in the SAME owner pump, even
+// while the connection's S2C send boundary is closed (a NovaWorld host's 12-tick holdoff).
+// [orig: Server_TickUpdate -> PumpServerProtocolRecv @0x51d895; NapiNP_HandleResendList ->
+//  SendSessionPacket @0x6239b6; PumpRecvQueues tail -> SendMissingSeqList @0x6269ce]
+bool check_host_receive_pump_sends_ignore_the_s2c_boundary() {
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
+	inmatch::arm_s2c_send_holdoff(conn, 12);
+	ScriptedDatagramSocket sock;
+
+	std::vector<uint8_t> lost;
+	std::vector<uint8_t> delivered;
+	if (!expect(inmatch::frame_in_match_s2c(owner.ctx, kPeer, 0x49, {0xB1}, lost) &&
+	                    inmatch::frame_in_match_s2c(owner.ctx, kPeer, 0x49, {0xB2}, delivered),
+	            "host frames and retains two S2C packets"))
+		return false;
+
+	sock.inbound.emplace_back(kPeer, make_resend_datagram(
+			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {1}));
+	inmatch::host_session_pump(owner, sock);
+	if (!expect(!conn.s2c_send_boundary_open && conn.s2c_send_holdoff_countdown == 11,
+	            "the S2C send boundary stays closed through this pump"))
+		return false;
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(sock.sent.size() == 1 && sock.sent[0].first == kPeer &&
+	                    decode_session_datagram(sock.sent[0].second,
+	                            SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk,
+	                            header, messages) &&
+	                    header.seq_num == 1 && messages.size() == 1 &&
+	                    messages[0].payload == std::vector<uint8_t>({0xB1}),
+	            "the rebuilt S2C sequence one leaves in the pump that received the 0x44"))
+		return false;
+	if (!expect(owner.pending_session_datagrams.empty(),
+	            "no rebuilt packet waits for the send boundary"))
+		return false;
+
+	// C2S sequence two arrives ahead of the lost sequence one: the 0x84 for it goes out in the
+	// same pump, behind the closed S2C boundary.
+	sock.sent.clear();
+	SessionSequencing client_tx{2, 0};
+	std::vector<uint8_t> c2s2;
+	if (!expect(frame_test_session_datagram(
+			client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+			SESSION_OPCODE_PROTOCOL_MESSAGE,
+			{make_protocol_message(0x34, {0x02})}, c2s2),
+	            "frame C2S sequence two"))
+		return false;
+	sock.inbound.emplace_back(kPeer, std::move(c2s2));
+	inmatch::host_session_pump(owner, sock);
+	std::vector<uint32_t> requested;
+	if (!expect(!conn.s2c_send_boundary_open && sock.sent.size() == 1 &&
+	                    decode_resend_datagram(sock.sent[0].second,
+	                            SESSION_OPCODE_SERVER_RESEND_LIST, kClientKey, requested) &&
+	                    requested == std::vector<uint32_t>({1}) &&
+	                    !conn.seq.missing_request_pending,
+	            "the host's 0x84 for the C2S gap leaves in the receiving pump"))
+		return false;
+	return expect(owner.pending_session_datagrams.empty(),
+	              "the missing-sequence request never waits for the send boundary");
 }
 
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
@@ -503,14 +592,14 @@ bool check_multi_sequence_resend_request_reconstructs_each() {
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {1, 2, 3});
 	const inmatch::HandleResult resent = inmatch::handle_server_datagram(
 			ctx, kPeer, nack.data(), nack.size(), 3);
-	if (!expect(resent.outbound.size() == 3,
+	if (!expect(resent.immediate_outbound.size() == 3,
 	            "one 0x44 carrying three requested sequences reconstructs three packets"))
 		return false;
 	for (int i = 0; i < 3; ++i) {
 		ProtocolPacketHeader header;
 		std::vector<ProtocolMessage> messages;
 		if (!expect(decode_session_datagram(
-				resent.outbound[static_cast<size_t>(i)],
+				resent.immediate_outbound[static_cast<size_t>(i)],
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, kServerScrk,
 				header, messages) &&
 		                    header.seq_num == static_cast<uint32_t>(i + 1) &&
@@ -547,9 +636,9 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 			ctx, kPeer, zero_only.data(), zero_only.size(), 3);
 	ProtocolPacketHeader header;
 	std::vector<ProtocolMessage> messages;
-	if (!expect(minted.outbound.size() == 1 &&
+	if (!expect(minted.immediate_outbound.size() == 1 &&
 	                    decode_session_datagram(
-			minted.outbound[0], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+			minted.immediate_outbound[0], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
 			kServerScrk, header, messages) &&
 	                    header.seq_num == next_before && messages.empty() &&
 	                    conn().seq.next_outbound_seq == next_before + 1,
@@ -567,7 +656,7 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 			nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(key_only));
 	if (!expect(inmatch::handle_server_datagram(
 			ctx, kPeer, key_only_datagram.data(), key_only_datagram.size(), 4)
-			                    .outbound.empty() &&
+			                    .immediate_outbound.empty() &&
 	                    !conn().link.nak_backoff_pending,
 	            "a key-only resend body sends nothing and does not arm the backoff"))
 		return false;
@@ -578,7 +667,7 @@ bool check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() {
 	const std::vector<uint8_t> real = make_resend_datagram(
 			SESSION_OPCODE_CLIENT_RESEND_LIST, kServerKey, {0, 2});
 	if (!expect(inmatch::handle_server_datagram(
-			ctx, kPeer, real.data(), real.size(), 5).outbound.size() == 2 &&
+			ctx, kPeer, real.data(), real.size(), 5).immediate_outbound.size() == 2 &&
 	                    conn().link.nak_backoff_pending,
 	            "a list with one nonzero requested sequence arms the backoff"))
 		return false;
@@ -647,6 +736,7 @@ int main() {
 	ok = check_reordered_same_batch_closes_gap_without_nack() && ok;
 	ok = check_s2c_loss_requests_0x44_and_host_reconstructs() && ok;
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
+	ok = check_host_receive_pump_sends_ignore_the_s2c_boundary() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

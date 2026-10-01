@@ -1235,7 +1235,7 @@ bool run_inactive_peer_is_reaped() {
 	auto resend = craft(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(resend_body));
 	auto resend_result = inmatch::handle_server_datagram(
 			ctx, peer, resend.data(), resend.size(), 6);
-	if (!expect(!resend_result.outbound.empty() && live.receive_inactive_ms == 119999,
+	if (!expect(!resend_result.immediate_outbound.empty() && live.receive_inactive_ms == 119999,
 	            "a valid 0x44 resend list is answered but does not reset the inactivity clock"))
 		return false;
 	{

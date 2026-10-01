@@ -1011,8 +1011,11 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // 0x44 ClientResendList -> reconstructed 0x83 packets. The request body names this host
 // connection's local SK, followed by requested sequence dwords. Retail retains message records,
-// not encrypted datagrams, so each old sequence is reframed with the current inbound ACK.
-// [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0]
+// not encrypted datagrams, so each old sequence is reframed with the current inbound ACK. The
+// handler writes them to the socket itself, inside the receive pump (HandleResult::
+// immediate_outbound), and neither moves the send boundary nor the send-interval clock.
+// [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0, called @0x6239b6;
+//  SendSessionPacket stamps only conn->last_send_tick, not BuildOutgoingPackets' +0x638]
 void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		const std::vector<uint8_t> &body, HandleResult &out) {
 	NapiNPConnection *conn = find_connection(ctx, peer);
@@ -1050,7 +1053,7 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 				sequence, session_body)) {
 			continue;
 		}
-		out.outbound.push_back(nw_encode_outbound(
+		out.immediate_outbound.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
 }
@@ -1172,12 +1175,10 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return out;
 }
 
-std::vector<TickOut> flush_server_missing_requests(
-		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary) {
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || !conn.seq.missing_request_pending) continue;
-		if (respect_s2c_send_boundary && !conn.s2c_send_boundary_open) continue;
 		conn.seq.missing_request_pending = false;
 		if (conn.seq.queued_inbound.empty()) continue;
 

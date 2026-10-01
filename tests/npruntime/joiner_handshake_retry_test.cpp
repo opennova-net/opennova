@@ -365,13 +365,14 @@ bool run_server_active_probe_recovers_settings() {
 	}
 	const inmatch::HandleResult recovered = inmatch::handle_server_datagram(
 			host, peer, missing[0].data(), missing[0].size(), 0);
-	if (!expect(recovered.outbound.size() == 1 &&
-				recovered.outbound[0] == settings_datagram,
+	if (!expect(recovered.immediate_outbound.size() == 1 &&
+				recovered.immediate_outbound[0] == settings_datagram,
 			"client 0x44 reconstructs the retained settings at sequence 1")) {
 		return false;
 	}
 
-	client.receive(recovered.outbound[0].data(), recovered.outbound[0].size());
+	client.receive(recovered.immediate_outbound[0].data(),
+			recovered.immediate_outbound[0].size());
 	const std::vector<std::vector<uint8_t>> post_settings =
 			client.Client_ProcessNetworkFrame(0);
 	return expect(post_settings.size() == 2 &&

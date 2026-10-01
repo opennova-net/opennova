@@ -196,8 +196,7 @@ bool is_established_s2c_datagram(const std::vector<uint8_t> &datagram) {
 	if (!nw_decode_inbound(
 				datagram.data(), datagram.size(), opcode, body))
 		return false;
-	return opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE ||
-	       opcode == SESSION_OPCODE_SERVER_RESEND_LIST;
+	return opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE;
 }
 
 void send_or_stage_established_datagram(
@@ -324,6 +323,11 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 			if (event_observer != nullptr)
 				event_observer(event_observer_context, ev);
 		}
+		// A 0x44's rebuilt packets leave from inside the receive pump, at this datagram's
+		// position, whatever the connection's S2C send boundary says (D-NET-229).
+		// [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6 -> SendTo @0x61f039]
+		for (const std::vector<uint8_t> &dg : r.immediate_outbound)
+			sock.send_to(peer, dg.data(), dg.size());
 		for (const std::vector<uint8_t> &dg : r.outbound) {
 			// 0x81/0x82 remain immediate. The retained settings 0x83 and
 			// established retransmits use the connection's send boundary.
@@ -343,6 +347,18 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 				event_observer(event_observer_context, ev);
 		}
 	}
+	// The receive pump's per-connection tail: resolve the missing-sequence latch only after the
+	// receive FIFO is empty (a later datagram in this same drain may have closed the gap), and
+	// send the 0x84 at once — the server receive pump runs every Server_TickUpdate, outside the
+	// S2C send boundary, ahead of PumpFlags' 0x10 holdoff decrement below (D-NET-229).
+	// [orig: Server_TickUpdate -> CNapiNetwork_PumpServerProtocolRecv @0x51d895 (flags 0x19) ->
+	//  NapiNPProtocol_Pump @0x62a6ac -> PumpRecvQueues tail @0x6269bb..0x6269d6 ->
+	//  SendMissingSeqList(conn, 0) @0x6269ce; then CNapiNPConnection_PumpFlags @0x62a6f8, the
+	//  0x10 decrement @0x62979a..0x6297ac]
+	for (TickOut &t : flush_server_missing_requests(owner.ctx)) {
+		for (const std::vector<uint8_t> &dg : t.outbound)
+			sock.send_to(t.peer, dg.data(), dg.size());
+	}
 	// Advance each established remote's own send clock before any transport
 	// producer runs. Closed peers retain their semantic/burst state; open peers
 	// may build packets during the remainder of this pump.
@@ -356,13 +372,6 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 		if (c.s2c_send_holdoff_countdown > 0)
 			--c.s2c_send_holdoff_countdown;
 		c.s2c_send_boundary_open = c.s2c_send_holdoff_countdown == 0;
-	}
-	// Resolve the retail missing-sequence latch only after the receive FIFO is empty. A later
-	// datagram in this same drain may have closed the gap and emptied the ordered queue.
-	for (TickOut &t : flush_server_missing_requests(
-			owner.ctx, /*respect_s2c_send_boundary=*/true)) {
-		for (const std::vector<uint8_t> &dg : t.outbound)
-			send_or_stage_established_datagram(owner, sock, t.peer, dg);
 	}
 	lap.mark(devtools::Slot::SIM_HOST_RECEIVE);
 

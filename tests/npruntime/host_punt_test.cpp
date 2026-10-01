@@ -690,6 +690,7 @@ bool check_staged_host_disconnect_accepts_only_keyed_goodbye() {
 
 	auto ignored = [](const inmatch::HandleResult &result) {
 		return result.outbound.empty() &&
+				result.immediate_outbound.empty() &&
 				result.deferred_session_replies.empty() && result.events.empty();
 	};
 	auto &live = ctx.np_protocol.connection_list.front();
