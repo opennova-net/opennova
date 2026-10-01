@@ -95,9 +95,13 @@ struct ProblemLocation {
 	std::string path;
 	NodeAddress record;
 	std::string field;
+	// In a text document (ADR 0046 S13 D9), the finding's place: "line:column" (its column 1 where
+	// the finding names its line alone).
+	std::string locator;
 	bool in_files = false;
 	bool empty() const { return path.empty(); }
-	// The request that goes there: OpenDocument with the record and field, or ShowInFiles.
+	// The request that goes there: OpenDocument with the record and field (a text's place by its
+	// locator), or ShowInFiles.
 	EditorRequest request() const;
 };
 ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView &view);

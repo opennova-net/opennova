@@ -11,7 +11,8 @@ namespace opennova::editor {
 
 namespace {
 
-// A file of a type whose documents hold no records (S13 D6): no validator reads it yet.
+// A file of a type whose documents hold neither records nor a text (S13 D6, D9): no validator
+// reads it yet.
 Diagnostic no_records(const AssetEntry &asset) {
 	return make_finding(CoreFinding::DocumentNoRecords, DiagnosticSeverity::Error,
 	                    "This file's document holds no records: no validator reads it yet.",
@@ -55,9 +56,9 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry.filled = entry.asked = true;
 	++stats_.files_validated;
 	const DocumentType *type = document_type_for(asset.kind);
-	// A type whose documents hold no records (S13 D6): no validator reads them yet, the file
-	// unread.
-	const bool records = type && holds_records(*type);
+	// A type whose documents hold neither records nor a text (S13 D6, D9): no validator reads
+	// them yet, the file unread.
+	const bool records = type && document_content(*type) != DocumentContent::Other;
 	const auto validate = [&entry, type](const DocumentBase &document) {
 		if (type->validate_file)
 			entry.findings = type->validate_file(document);

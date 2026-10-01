@@ -377,12 +377,12 @@ static int test_plan_not_followed() {
 
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
-// file (graph_reads_file). Those are the kinds the hand-written list named (a terrain, a script,
-// the two sound banks, a dialog bank, the def tables beyond the catalogs and the avatar table)
-// and the ones S13 D5 added that name files (a face, a map project); a mission's .mis, which the
-// graph does not read, where its .bms is read.
+// file (graph_reads_file). Those are the kinds the hand-written list named (a terrain, the two
+// sound banks, a dialog bank, the def tables beyond the catalogs and the avatar table) and the ones
+// S13 D5 added that name files (a face, a map project); a mission's .mis, which the graph does not
+// read, where its .bms is read. A script is read since S13 D9 (its operands' names).
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
+	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::MusicBank,
 	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
 	        AssetKind::PowerupDefs, AssetKind::OtherDefs, AssetKind::FaceAnimation,

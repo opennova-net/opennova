@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/model/text_document.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
@@ -96,14 +97,15 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"files to import as the paths of preview_import.";
 	}
 	// The record document a request's edits are named in: the one its path names, else the active
-	// one (an open document of another kind holds no records to name, S13 D6). A kind that takes
-	// open_first, asking it with nothing open at its path (a fix's edit), is read once before the
-	// document opens, so one refused as it is read asks nothing of the session.
+	// one; over a text document they are its spans (S13 D9); an open document of another kind holds
+	// nothing to name (S13 D6). A kind that takes open_first, asking it with nothing open at its path
+	// (a fix's edit), is read once before the document opens, so one refused as it is read asks
+	// nothing of the session.
 	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
 		const std::string path = json.get_string("path", "");
 		const DocumentBase *open = document_base_for(path);
-		if (open && !records_of(*open)) {
+		if (open && !records_of(*open) && !text_of(*open)) {
 			ok = false;
 			error = open->path() + " holds no records (document.no_records): its edits name none.";
 		} else if (!open && !path.empty() && project_open() &&
@@ -117,6 +119,7 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				handle(request::open_document(path));
 		}
 		names.document = document_for(path);
+		names.text = open && text_of(*open);
 	}
 	ok = ok && editor_request_from_json(json, request, error, &names);
 	bool served = false;

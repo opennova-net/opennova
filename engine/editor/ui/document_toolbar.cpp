@@ -9,7 +9,7 @@
 namespace opennova::editor {
 
 // Each tool enabled while the busy gate takes its request too (SessionView::allows).
-void draw_document_toolbar(Workspace &workspace, const Document &document) {
+void draw_document_toolbar(Workspace &workspace, const DocumentBase &document) {
 	const SessionView &view = workspace.view();
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Reload", view.allows(EditorRequestKind::ReloadDocument),

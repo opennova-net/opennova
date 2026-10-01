@@ -53,10 +53,21 @@
 // everything it made listed, or refused by a rule of the type's own with nothing committed. S13
 // V9: where the type has a project check, over its file in a project of its own, a second update
 // with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
-// the same findings again.
+// the same findings again. S13 D9: a text type's make gives a DocumentBase whose text document
+// (as_text) is itself and that holds no records; over its file: it loads unblocked and serializes
+// the bytes it was read from, parse, serialize, parse again the same bytes and text; its
+// validate_file's findings on its file alone, a second load validating to the same; a change of a
+// kind the type did not make, or an edit naming a record, refused with nothing committed; a span
+// replaced a real change (the bytes another, its undo giving them back, its redo the change, what
+// changed since the load that span), two coalesced replacements one step, a gesture's two batches
+// one step whose change set holds both spans; and a snapshot sharing its identity, load and
+// revision, serializing its bytes and refusing an edit, a save and a load. Every text type but the
+// text one (whose files the game reads through readers the editor does not model) makes a finding
+// over its files.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <iterator>
 #include <map>
 #include <memory>
@@ -86,11 +97,15 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_document.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_write.h>
+#include <formats/cbin/binary_config.h>
 #include <formats/def/def_schema.h>
+#include <formats/mus/mus.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/scr/scr.h>
 
 #include "common/file_io.h"
 #include "common/test_paths.h"
@@ -181,6 +196,48 @@ struct Fixture {
 
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
+// The text types' files (S13 D9): a credits file in the CBIN form, laid out as the shipped one is,
+// minted through the form's writer; a shader in the shader loader's SCR form; a music script with a
+// message handler (which its MUS text has no form for), from the minted synth_gamemus.bin.
+std::vector<uint8_t> credits_in_cbin() {
+	using Config = opennova::cbin::BinaryConfig;
+	Config config;
+	config.strings = {"env", "text", "scroll_rate", "vertical_space", "~JC", "Opennova_Contract", "Serpen24", "<CR>"};
+	config.xor_key = 0x0C0FFEE1u;
+	const float rate = 0.5f;
+	uint32_t rate_bits = 0;
+	std::memcpy(&rate_bits, &rate, sizeof rate_bits);
+	Config::Label env{1, {{3, {{rate_bits, Config::kFloat}}}, {4, {{14, Config::kInteger}}}}};
+	Config::Label text{2, {{2, {{5, Config::kString}}}, {2, {{6, Config::kString}, {7, Config::kString}}},
+	                       {2, {{8, Config::kString}}}}};
+	config.labels = {env, text};
+	std::vector<uint8_t> out;
+	std::string error;
+	opennova::cbin::encode_binary_config(config, out, error);
+	return out;
+}
+
+std::vector<uint8_t> shader_in_scr(const std::string &text) {
+	std::string payload = text + std::string(1, '\0');
+	opennova::scr::scr_encrypt(reinterpret_cast<uint8_t *>(payload.data()), payload.size(),
+	                           opennova::scr::SCR_KEY_SHADERS);
+	return text_bytes(std::string("SCR\x01", 4) + payload);
+}
+
+std::vector<uint8_t> music_with_a_handler(const std::vector<uint8_t> &bin) {
+	opennova::mus::MusFile file{};
+	std::vector<uint8_t> out;
+	if (bin.empty() || opennova::mus::mus_open_memory(&file, bin.data(), bin.size()) != 0) return out;
+	file.scripts[0].has_message_handler = 1;
+	const opennova::mus::MusScript *scripts[] = {&file.scripts[0]};
+	uint8_t *buffer = nullptr;
+	size_t size = 0;
+	if (opennova::mus::mus_encode_file(scripts, 1, &buffer, &size) == 0) out.assign(buffer, buffer + size);
+	opennova::mus::mus_free(buffer);
+	opennova::mus::mus_close(&file);
+	return out;
+}
+
 // A menu screen whose root window holds an EXIT button: two of them give one window name in two
 // scopes (a lookup on screen B must reach B's EXIT, never A's).
 std::string exit_screen(const char *name, const char *action) {
@@ -218,6 +275,12 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Model, "armory.3di", file("threedi/synth/armory.3di")},
 	        {AssetKind::Animation, "walk.bad", file("anim/walk.bad")},
 	        {AssetKind::AnimationMap, "soldier.adm", file("anim/soldier.adm")},
+	        // The text types (S13 D9).
+	        {AssetKind::Script, "text_document.wac", file("wac/text_document.wac")},
+	        {AssetKind::MusicScript, "gamemus.bin", file("mus/synth_gamemus.bin")},
+	        {AssetKind::Credits, "nlist.kda", credits_in_cbin()},
+	        {AssetKind::Shader, "glass.fx", shader_in_scr("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
+	        {AssetKind::Config, "game.cfg", text_bytes("[Game]\r\nname = Contract\r\n")},
 	};
 }
 
@@ -260,6 +323,12 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Animation, "walk_25fps.bad", clip_at_25fps(file("anim/walk.bad"))},
 	        {AssetKind::AnimationMap, "slot_twice.adm",
 	         text_bytes("anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\nanim_idle\t\"walk.bad\"\r\n")},
+	        // The text types (S13 D9): a compile error, a message handler, credits lines holding spaces
+	        // (the minted synth_nlist.kda), a plain shader.
+	        {AssetKind::Script, "flawed.wac", text_bytes("fxrain FX_Buildup )\r\n")},
+	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
+	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
+	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
 	};
 }
 
@@ -845,14 +914,15 @@ void check_snapshot(const DocumentType &type, const Fixture &fixture, Document &
 // file and, where it names a record, on one the document holds; a second load of the file, which
 // gives its records the same identities, validates to the same findings.
 void check_validate_file(const DocumentType &type, const Fixture &fixture,
-		const Document &document, TypeCounts &counts) {
+		const DocumentBase &document, TypeCounts &counts) {
 	const std::vector<Diagnostic> findings = type.validate_file(document);
+	const Document *records = records_of(document);
 	for (const Diagnostic &d : findings) {
 		const std::string where = fixture.name + " " + d.code();
 		check(d.asset == document.path(), where,
 				"validate_file's findings are on the document's file");
 		if (d.row_id)
-			check(document.address_of(d.child_id ? d.child_id : d.row_id).row == d.row_id, where,
+			check(records && records->address_of(d.child_id ? d.child_id : d.row_id).row == d.row_id, where,
 					"a finding names a record the document holds");
 	}
 	std::unique_ptr<DocumentBase> twin = type.make();
@@ -1150,7 +1220,134 @@ void check_multi_row(const DocumentType &type, const Fixture &fixture, Document 
 	++counts.mixed;
 }
 
+// A text type over its file (S13 D9): the lifecycle's clauses and D7's change sets, by spans.
+size_t g_text_files = 0, g_text_changes = 0;
+
+void check_text_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
+	std::unique_ptr<DocumentBase> made = type.make();
+	check(made && made->as_text() == made.get() && text_of(*made) == made->as_text() && !records_of(*made),
+	      fixture.name, "make gives a DocumentBase whose text document (as_text) is itself, holding no records");
+	if (!made || !text_of(*made)) return;
+	DocumentBase &document = *made;
+	const TextDocument &text = *text_of(document);
+	Diagnostic error;
+	const bool loaded = document.load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
+	check(loaded && !document.blocked(), fixture.name + " (" + error.message + ")", "the file loads unblocked");
+	if (!loaded || document.blocked()) return;
+	++g_text_files;
+	const std::string stored(fixture.bytes.begin(), fixture.bytes.end());
+	const SerializeResult first = document.serialize();
+	check(first.ok() && first.text == stored && document.rewrite_need() == DocumentBase::RewriteNeed::None,
+	      fixture.name, "a text document serializes the bytes it was read from");
+	std::unique_ptr<DocumentBase> again = type.make();
+	check(again->load_bytes(text_bytes(first.text), fixture.name, fixture.kind, "jo", error) &&
+	              again->serialize().text == first.text && text_of(*again)->text() == text.text(),
+	      fixture.name, "parse, serialize, parse again serializes the same bytes and text");
+	check_validate_file(type, fixture, document, counts);
+	// Another's change, or an edit naming a record: refused, nothing committed.
+	Edit apply;
+	apply.operation = EditOperation::Apply;
+	apply.payload = std::make_shared<ForeignPayload>();
+	Diagnostic refused;
+	++g_foreign;
+	check(!document.apply(apply, refused) && refused.code() == "document.payload" && document.revision() == 0 &&
+	              !document.dirty(),
+	      fixture.name, "an Apply of a change the type did not make is refused (document.payload)");
+	Edit set;
+	set.address = {1, 0, 0};
+	set.field = "name";
+	refused = Diagnostic();
+	check(!document.apply(set, refused) && refused.code() == "document.payload" && document.revision() == 0, fixture.name,
+	      "an edit naming a record is refused (document.payload)");
+	// A real change: a span replaced whose bytes the type's writer writes otherwise (a digit made
+	// another, the first that does it; else the first character).
+	const uint64_t load = document.load_generation();
+	TextSpan first_line;
+	first_line.line = 1;
+	first_line.column = 1;
+	first_line.length = std::min<size_t>(text.line(1).size(), 1);
+	std::vector<size_t> candidates;
+	for (size_t i = 0; i < text.text().size() && candidates.size() < 64; ++i)
+		if (text.text()[i] >= '0' && text.text()[i] <= '9') candidates.push_back(i);
+	candidates.push_back(0);
+	TextSpan real;
+	SerializeResult changed;
+	for (const size_t at : candidates) {
+		const char held = at < text.text().size() ? text.text()[at] : ' ';
+		const std::string with(1, held >= '0' && held <= '8' ? char(held + 1) : held == '9' ? '0' : 'Z');
+		const TextSpan span = text.span_at(at, at < text.text().size() ? 1 : 0);
+		if (!document.apply(TextDocument::replace(span, with), error)) continue;
+		changed = document.serialize();
+		if (changed.ok() && changed.text != stored) {
+			real = span;
+			break;
+		}
+		document.undo();
+	}
+	check(real.line != 0 && document.dirty() && document.can_undo() && document.history_bytes() > 0, fixture.name,
+	      "a real change: a span replaced is a step whose bytes are other");
+	if (real.line == 0) return;
+	ChangeSet since;
+	const TextChanges *spans = nullptr;
+	check(document.changes_since(load, 0, since) && (spans = std::get_if<TextChanges>(&since)) &&
+	              spans->spans.size() == 1 && spans->spans[0].line == real.line &&
+	              spans->spans[0].column == real.column,
+	      fixture.name, "what changed since the load is the span");
+	document.undo();
+	check(!document.dirty() && document.serialize().text == stored, fixture.name, "its undo gives the bytes back");
+	document.redo();
+	check(document.serialize().text == changed.text, fixture.name, "its redo the change");
+	document.undo();
+	++g_changes;
+	++g_text_changes;
+	// Two coalesced replacements one step; a gesture's two batches one step.
+	const uint64_t before = document.revision();
+	check(document.apply(TextDocument::replace(first_line, "Y", true), error) &&
+	              document.apply(TextDocument::replace(first_line, "X", true), error),
+	      fixture.name, "two coalesced replacements apply");
+	document.undo();
+	check(document.revision() == before && document.serialize().text == stored, fixture.name,
+	      "two coalesced replacements are one step");
+	++g_coalesced;
+	document.end_edit_group();
+	const uint64_t gesture = next_edit_gesture();
+	const size_t last = text.line_count();
+	TextSpan end_line;
+	end_line.line = last;
+	end_line.column = text.line(last).size() + 1;
+	check(document.apply(TextDocument::replace(first_line, "W", false, gesture), error) &&
+	              document.apply(TextDocument::replace(end_line, "V", false, gesture), error),
+	      fixture.name, "a gesture's two batches apply");
+	check(document.changes_since(load, before, since) && (spans = std::get_if<TextChanges>(&since)) &&
+	              spans->spans.size() == (last == 1 ? 1u : 2u),
+	      fixture.name, "a gesture's change set holds its spans");
+	document.undo();
+	check(!document.can_undo() && document.serialize().text == stored, fixture.name, "a gesture's two batches are one step");
+	// A snapshot of a changed document.
+	check(document.apply(TextDocument::replace(first_line, "U"), error), fixture.name, "a change to snapshot");
+	const std::unique_ptr<DocumentBase> snapshot = document.snapshot();
+	check(snapshot && snapshot->is_snapshot() && snapshot->identity() == document.identity() &&
+	              snapshot->load_generation() == document.load_generation() &&
+	              snapshot->revision() == document.revision() &&
+	              snapshot->serialize().text == document.serialize().text,
+	      fixture.name, "a snapshot shares the document's identity, load generation and revision, and its bytes");
+	refused = Diagnostic();
+	check(!snapshot->apply(TextDocument::replace(first_line, "T"), refused) && refused.code() == "document.snapshot",
+	      fixture.name, "a snapshot refuses an edit (document.snapshot)");
+	refused = Diagnostic();
+	check(!snapshot->save(refused) && refused.code() == "document.snapshot", fixture.name,
+	      "a snapshot refuses a save (document.snapshot)");
+	refused = Diagnostic();
+	check(!snapshot->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", refused) &&
+	              refused.code() == "document.snapshot",
+	      fixture.name, "a snapshot refuses a load (document.snapshot)");
+	++g_snapshots;
+	document.undo();
+	check(document.serialize().text == stored, fixture.name, "the document's undo gives the bytes back");
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
+	if (document_content(type) == DocumentContent::Text) return check_text_fixture(type, fixture, counts);
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
 	      fixture.name, "make gives a DocumentBase whose record document (as_records) is itself");
@@ -1214,7 +1411,7 @@ int main() {
 		check(checked > 0, type->name, "the document type has a file here to check");
 		for (const Fixture &fixture : flawed) {
 			if (document_type_for(fixture.kind) != type) continue;
-			std::unique_ptr<Document> document = records_of(type->make());
+			std::unique_ptr<DocumentBase> document = type->make();
 			Diagnostic error;
 			const bool loaded = document && !fixture.bytes.empty() &&
 			                    document->load_bytes(fixture.bytes, fixture.name, fixture.kind, "jo", error);
@@ -1222,8 +1419,11 @@ int main() {
 			if (loaded) check_validate_file(*type, fixture, *document, counts);
 		}
 		// Per type: a validate_file that never took its own documents (its cast to another type)
-		// would make nothing over its files.
-		check(counts.findings > 0, type->name, "validate_file makes a finding over the type's files");
+		// would make nothing over its files. The text type makes none (S13 D9: its files are read
+		// through readers the editor does not model), its table empty.
+		const bool text_type = type->id == DocumentTypeId::Text;
+		check(counts.findings > 0 || (text_type && type->findings().count == 0), type->name,
+		      "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above
 		// over no findings.
 		check(!type->project_check || counts.check_findings > 0, type->name,
@@ -1233,7 +1433,8 @@ int main() {
 			if (std::string(pin.type) == type->name) pinned = pin;
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
-		check(fixed_text(*type) || counts.grown > 0, type->name, "a longer text grows a row of the type");
+		check(fixed_text(*type) || document_content(*type) == DocumentContent::Text || counts.grown > 0, type->name,
+		      "a longer text grows a row of the type");
 		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings; %zu files' two "
 		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule; %zu text fields' "
 		            "longer text grew their row",
@@ -1258,10 +1459,11 @@ int main() {
 		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, %zu files' "
 		            "two rows in one batch and one gesture, %zu batches of rows and records taken (%zu waiting for "
 		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row, "
-		            "%zu files a project check was brought to again)\n",
+		            "%zu files a project check was brought to again; %zu text documents' files, %zu spans "
+		            "replaced, undone and redone)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
 		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
 		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_multi_rows, g_mixed,
-		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again);
+		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again, g_text_files, g_text_changes);
 	return g_failures == 0 ? 0 : 1;
 }

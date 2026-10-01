@@ -12,7 +12,9 @@
 // first kind the type declares: a stylesheet's variable, not its comment). A RevealRecord it
 // is sent is held until it draws and taken as it does. Two open documents of a type get a view
 // each, whose filters are their own. A string table's cell being edited keeps the keyboard, and
-// ends its edit, scrolled out of sight.
+// ends its edit, scrolled out of sight. S13 D9: every text type's view draws its lines (its first
+// line that is not blank shows), has no main viewport, and a RevealText it is sent marks its line;
+// a text of many thousand lines draws only those in sight, the line a reveal names among them.
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -22,8 +24,10 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/strings_document.h>
+#include <editor/model/text_document.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
+#include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
 #include "editor_ui_test_support.h"
 
@@ -75,6 +79,14 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Model, "armory.3di", file("threedi/synth/armory.3di")},
 	        {AssetKind::Animation, "walk.bad", file("anim/walk.bad")},
 	        {AssetKind::AnimationMap, "soldier.adm", file("anim/soldier.adm")},
+	        // The text types (S13 D9): a script, a music script, a credits file (whose lines its text
+	        // form cannot carry: held read only, drawn all the same), a plain shader and a
+	        // configuration.
+	        {AssetKind::Script, "text_document.wac", file("wac/text_document.wac")},
+	        {AssetKind::MusicScript, "gamemus.bin", file("mus/synth_gamemus.bin")},
+	        {AssetKind::Credits, "nlist.kda", file("cbin/synth_nlist.kda")},
+	        {AssetKind::Shader, "glass.fx", text_bytes("// glass\r\nfloat4 main() : COLOR { return 0; }\r\n")},
+	        {AssetKind::Config, "game.cfg", text_bytes("\r\n[Game]\r\nname = Views\r\n")},
 	};
 }
 
@@ -123,8 +135,14 @@ void draw_frames(TestWorkspace &workspace, DocumentView &view, const DocumentBas
 }
 
 // The title of the document's first row of its first kind (the type's own records: a catalog's
-// items, a stylesheet's variables rather than its comments): what its view shows first.
+// items, a stylesheet's variables rather than its comments): what its view shows first; a text's
+// first line that is not blank.
 std::string first_title(const DocumentBase &document) {
+	if (const TextDocument *text = text_of(document)) {
+		for (size_t line = 1; line <= text->line_count(); ++line)
+			if (text->line(line).find_first_not_of(" \t") != std::string_view::npos) return std::string(text->line(line));
+		return std::string();
+	}
 	const Document *records = records_of(document);
 	if (!records || records->kinds().empty()) return std::string();
 	const NodeKind own = records->kinds().front().kind;
@@ -180,8 +198,9 @@ void test_every_view() {
 			const std::string shown = view_frame(workspace, *view, *document, 520.0f, true);
 			CHECK(!title.empty() && shown.find(title.substr(0, 8)) != std::string::npos,
 			      (where + ": the view draws its document (" + title + ")").c_str());
-			// A view that draws its records has no main viewport; the frame it is asked in draws nothing.
-			if (row->role == DocumentViewRole::Records) {
+			// A view that draws its records or its text has no main viewport; the frame it is asked in
+			// draws nothing.
+			if (row->role != DocumentViewRole::MainViewport) {
 				ImGui::NewFrame();
 				CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport").c_str());
 				ImGui::Render();
@@ -196,6 +215,19 @@ void test_every_view() {
 			draw_frames(workspace, *view, *document, 520.0f, 1);
 			CHECK(view->held_events() == 0 && workspace.requests.empty(),
 			      (where + ": taken as the view draws, nothing raised").c_str());
+			// A text's view: a RevealText marks its line as it is taken.
+			if (row->role == DocumentViewRole::Text) {
+				auto *text_view = dynamic_cast<TextView *>(view.get());
+				CHECK(text_view != nullptr, (where + ": a text type's view is the text view").c_str());
+				ViewEvent go;
+				go.kind = ViewEventKind::RevealText;
+				go.path = document->path();
+				go.locator = "2:1";
+				view->receive(go);
+				draw_frames(workspace, *view, *document, 520.0f, 1);
+				CHECK(text_view && text_view->marked_line() == 2 && view->held_events() == 0,
+				      (where + ": a RevealText marks its line").c_str());
+			}
 		}
 		CHECK(drawn > 0, (std::string(type->name) + ": the contract has a file of its type").c_str());
 		types += drawn > 0 ? 1 : 0;
@@ -334,12 +366,53 @@ void test_edit_scrolled_out() {
 	CHECK(ended && GImGui->ActiveId != key, "Enter ends its edit");
 }
 
+// A text of many lines is a list clipped to what shows (a log of a frame draws every line: Dear
+// ImGui's clipper draws all while it logs); a reveal scrolls the line it names into sight; its
+// markers are made once per change of the findings or the text, never for a frame.
+void test_long_text() {
+	std::string text;
+	for (int i = 1; i <= 5000; ++i) text += "line " + std::to_string(i) + "\r\n";
+	auto loaded = std::make_shared<TextDocument>();
+	Diagnostic error;
+	CHECK(loaded->load_bytes(text_bytes(text), "long.txt", AssetKind::Text, "jo", error), "the text loads");
+	const std::shared_ptr<const DocumentBase> document = loaded;
+	std::unique_ptr<DocumentView> view = make_view(*document);
+	auto *text_view = dynamic_cast<TextView *>(view.get());
+	CHECK(text_view != nullptr, "a text's view");
+	if (!text_view) return;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, document);
+	draw_frames(workspace, *view, *document, 520.0f, 3);
+	// The lines' child window, scrolled to the top.
+	ImGuiWindow *tab = ImGui::FindWindowByName("Tab");
+	CHECK(tab != nullptr, "the tab's window");
+	if (!tab) return;
+	char name[64];
+	std::snprintf(name, sizeof(name), "Tab/text_%08X", tab->GetID("text"));
+	const ImGuiWindow *lines = ImGui::FindWindowByName(name);
+	CHECK(lines != nullptr && lines->Scroll.y == 0.0f, "the lines' window, at the top");
+	if (!lines) return;
+	const float step = ImGui::GetFrameHeightWithSpacing();
+	ViewEvent go;
+	go.kind = ViewEventKind::RevealText;
+	go.path = document->path();
+	go.locator = "4000:3";
+	view->receive(go);
+	draw_frames(workspace, *view, *document, 520.0f, 3);
+	const float top = 3999.0f * step;
+	CHECK(text_view->marked_line() == 4000 && lines->Scroll.y <= top && lines->Scroll.y + lines->Size.y >= top + step,
+	      "the revealed line scrolled into sight");
+	CHECK(text_view->markers_made() == 1 && workspace.requests.empty(), "its markers made once, nothing raised");
+}
+
 } // namespace
 
 } // namespace editor_ui_test
 
 int main() {
 	editor_ui_test::test_every_view();
+	editor_ui_test::test_long_text();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
 	if (editor_ui_test::g_failures) {

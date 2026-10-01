@@ -50,6 +50,10 @@ std::vector<std::string> editor_request_kind_tokens();
 // (RecordBatch::labels), which the request's outcome pairs with what each edit made (`made`).
 struct RequestNames {
 	const Document *document = nullptr;
+	// The request acts on a text document (S13 D9): its edits are spans (RecordBatchForm::Spans),
+	// named in no record document. Set for one open at the path; a closed file of a text type is
+	// known by its path alone.
+	bool text = false;
 	std::vector<std::string> labels;
 	// A first read, before the document the request asks to open first opens (open_first): its
 	// edits' records are read as identities and not looked for, what only the document knows (a
@@ -62,7 +66,8 @@ struct RequestNames {
 // its row takes (request_kinds.h: params), each by its token and of its JSON type
 // (request_fields.h): "dir", "path", "edits" (the batch form, record_batch.h: [{op, id, parent,
 // kind, field, value, position, as, coalesce, gesture, list, records}], revert_to_saved's [{id,
-// field}]), "address" ({row, kind, child}), "paste_at" ({row, parent, position}), "imports"
+// field}], over a text document [{op: apply, payload: "text.span", line, column, length, text}]),
+// "address" ({row, kind, child}), "paste_at" ({row, parent, position}), "imports"
 // ([{path, entry, install, native}]) and the rest. An edit's value that is a whole JSON number
 // reads as an integer, any other number as a real, a bool as 0 / 1; a "new_name" that is a whole
 // number (an item id) reads as its digits. An edit names its records and kinds in

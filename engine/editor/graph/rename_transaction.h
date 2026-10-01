@@ -21,8 +21,11 @@ struct RenameSite {
 	std::string file;   // the referencing document, project-relative
 	AssetKind kind = AssetKind::Unknown;
 	std::string record;
-	std::string locator; // the record's place in the file (Document::locator), what the commit finds it by
-	std::string field;
+	// The record's place in the file (Document::locator), what the commit finds it by; in a text
+	// document the span's place ("line:column", TextDocument::locator).
+	std::string locator;
+	std::string field;  // "" in a text document, whose site is its span
+	TextSpan span;      // in a text document (S13 D9): where the name is written (line 0 for none)
 	std::string before;
 	std::string after;
 	std::string target; // the file the site names today, project-relative (the renamed file, or one of its outputs)
@@ -95,7 +98,8 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 // screen or window's NAME, a model's user point) and every use that reaches exactly that
 // definition (AssetGraph::users_of: never a use a same-named symbol of another scope answers),
 // in every file. The plan lists the sites (the definition first, each file, record, field, the
-// value before and after) and the refusals first, so a window can preview it and a test read it.
+// value before and after) and the refusals first, so a window can preview it and a test read it. A
+// use in a text document (S13 D9: a script's operand) is its span, which the rename replaces.
 struct SymbolRenamePlan {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string file;    // the file defining it, project-relative
@@ -131,7 +135,10 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 // open document that would not write as it stands (its unsaved edits could not be saved first), a
 // site its document refuses (a stylesheet's name the reader would not take) or would hold in
 // another form than planned (a stylesheet's name trimmed of its spaces), one no longer there, a
-// file that would not write.
+// file that would not write. A text document's sites are its spans, each found by its place and
+// the name it held, replaced in one batch from the last to the first, and read back from the text
+// as the new name at the same place (a name the text would read otherwise, cut or split, is
+// refused).
 bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
                          const std::vector<std::shared_ptr<const DocumentBase>> &open,

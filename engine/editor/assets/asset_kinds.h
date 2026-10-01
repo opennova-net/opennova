@@ -39,10 +39,24 @@ enum class DocumentTypeId {
 	Model,
 	Animation,
 	AnimationMap,
+	// The text documents (ADR 0046 S13 D9): one TextDocument class, a type per behaviour.
+	Script,      // a .wac: the WAC compiler's findings, its operands' names as references
+	MusicScript, // a music script's SCR0 bytecode, held as its MUS text
+	Credits,     // a .kda: a CBIN form held as its ConfigFile text
+	Shader,      // a .fx: the SCR form the shader loader takes, held as its text
+	Text,        // a configuration or a text, as the file stores it
 	kCount, // the number of values, None among them
 };
 
 inline constexpr size_t kDocumentTypeCount = static_cast<size_t>(DocumentTypeId::kCount) - 1;
+
+// How the game's loader of a kind takes a file in the SCR form (formats/scr): as the game's text
+// readers do, the form optional and unwrapped under the game's key [orig: File_ParseASCIIFile @
+// 0x53D860, its sniff for "SCR" and version 1], which a document's load undoes before its type reads
+// the file; or as the shader loader does, the form required and unwrapped under a key of its own
+// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060, the key at 0x5AE0C0], which the type reads itself
+// from the bytes as stored (a file not in the form is one the loader rejects).
+enum class ScrForm { Optional, Shader };
 
 struct AssetKindRow {
 	AssetKind kind = AssetKind::Unknown;
@@ -68,6 +82,8 @@ struct AssetKindRow {
 	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
 	// no New makes (its free-form blank factory's, blank_factory.cpp).
 	const char *new_name = "";
+	// How its loader takes the SCR form (ScrForm).
+	ScrForm scr = ScrForm::Optional;
 };
 
 // A kind's row (asset_kinds.cpp holds one per kind, in the enum's order; static_asserts there

@@ -69,6 +69,10 @@ enum class FindingGroup {
 	Models,
 	Animations,
 	AnimationMaps,
+	Scripts,
+	MusicScripts,
+	Credits,
+	Shaders,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -232,6 +236,7 @@ enum class CoreFinding {
 	DocumentRevertNothing,
 	DocumentSelection,
 	DocumentSnapshot,
+	DocumentSpan,
 	DocumentStale,
 	DocumentStructure,
 	DocumentUnserializable,

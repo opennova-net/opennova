@@ -16,6 +16,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
+#include <editor/model/text_document.h>
 #include <editor/model/value.h>
 #include <editor/project/project_document.h>
 
@@ -173,8 +174,12 @@ public:
 	ReferenceStatus resolve(ReferenceKind kind, const std::string &name, const std::string &scope = std::string(),
 	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
-	// texture's rule reads its case), in its scope, by its loader's argument.
+	// texture's rule reads its case), in its scope, by its loader's argument; for a symbol kind's
+	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing.
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
+	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
+	// fallback's; null for none.
+	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
 	// compares names, that `scope` matches (scope_matches: a string id in its table and
@@ -349,18 +354,24 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 // applies to its record (Document::field_on), and a symbol for every field field_on says
 // defines one, with what the type's lookup makes of it (Document::refine_symbol).
 void extract_from_document(const Document &document, Extracted &out);
+// What a text document references (ADR 0046 S13 D9): an edge of each name its type's references
+// read from its text (DocumentType::references, a script's operands), with its span, its locator
+// the span's "line:column"; nothing for a type whose text names nothing. It defines nothing.
+void extract_from_text(const TextDocument &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
-// loader decodes them): a record type's through its document (Document::load_bytes), a
-// native kind's through the engine's parser. `name` is what the edges and symbols name
-// the file by (the project-relative path in the graph). True with nothing for a file the
-// graph does not read (graph_reads_file), a type's whose documents hold no records included.
+// loader decodes them): a record type's or a text type's through its document
+// (DocumentBase::load_bytes), a native kind's through the engine's parser. `name` is what the edges
+// and symbols name the file by (the project-relative path in the graph). True with nothing for a
+// file the graph does not read (graph_reads_file), a type's whose documents hold neither records
+// nor a text that names anything included.
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,
                         Extracted &out, Diagnostic &error);
 // True when files of this kind carry references or symbols the graph reads: a record type's
-// (holds_records) or a native extractor's kind.
+// (document_content), a text type's whose text names references (DocumentType::references), or
+// a native extractor's kind.
 bool graph_reads_kind(AssetKind kind);
 // The same for one file, by its name: false for a mission's .mis, the mission editors' text
 // form, which the mission document will read (the graph reads the .bms the game loads), so

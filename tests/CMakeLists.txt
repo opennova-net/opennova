@@ -3687,6 +3687,16 @@ target_link_libraries(editor_non_record_document_test PRIVATE opennova_editor)
 target_include_directories(editor_non_record_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_non_record_document COMMAND editor_non_record_document_test)
 
+# The text documents and their types (S13 D9): the model's spans, history and change sets; the
+# script's compiler findings and operand references with spans; the graph's span edges, the
+# fallback name, Rename everywhere through a span, a Go to's RevealText; the wire's span edits and
+# pages of lines; the credits, music script and shader codecs byte for byte; and the install's
+# scripts, music scripts, credits and shaders (OPENNOVA_JO_DIR) as the retail leg.
+add_executable(editor_text_document_test editor/text_document_test.cpp)
+target_link_libraries(editor_text_document_test PRIVATE opennova_editor)
+target_include_directories(editor_text_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_text_document COMMAND editor_text_document_test)
+
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
 target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

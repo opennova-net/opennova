@@ -86,6 +86,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::DocumentRevertNothing, code("document.revert_nothing", G::Documents) },
 	{ C::DocumentSelection, code("document.selection", G::Documents) },
 	{ C::DocumentSnapshot, code("document.snapshot", G::Documents) },
+	{ C::DocumentSpan, code("document.span", G::Documents) },
 	{ C::DocumentStale, code("document.stale", G::Documents) },
 	{ C::DocumentStructure, code("document.structure", G::Documents) },
 	{ C::DocumentUnserializable, blocking(code("document.unserializable", G::Documents)) },

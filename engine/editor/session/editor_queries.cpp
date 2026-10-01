@@ -708,14 +708,15 @@ constexpr EditorQueryRow kRows[] = {
 			"The active document and a page of the open documents, each's lifecycle state: path, "
 			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
 			"issues; a record document's also file_state_changed, row_count, last_added and the "
-			"kinds of row its outline adds (top_kinds).")
+			"kinds of row its outline adds (top_kinds); a text document's its line_count.")
 			.pages("documents")
 			.row,
 	Query(K::Document, "document", answer_document, kDocumentParams, kDocumentReads,
 			"One open document's lifecycle state (as the documents query gives it) and, for a "
 			"record document, a page of its rows, each with its id, kind, name, change since the "
 			"save (unchanged, changed, added) and the collections it holds, their records at "
-			"every depth.")
+			"every depth; for a text document, by the same offset and limit, a page of its lines "
+			"(each its line, from 1, and its text).")
 			.pages("rows")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,

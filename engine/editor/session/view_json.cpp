@@ -572,6 +572,8 @@ JsonValue view_event_to_json(const ViewEvent &event) {
 		out.set("address", address_to_json(event.address));
 	if (!event.field.empty())
 		out.set("field", json_string(event.field));
+	if (!event.locator.empty())
+		out.set("locator", json_string(event.locator));
 	if (event.flag)
 		out.set("flag", boolean(true));
 	if (event.tag)

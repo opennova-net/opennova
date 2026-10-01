@@ -24,9 +24,10 @@ struct RecordBatch {
 	std::vector<std::string> labels;
 };
 
-// What a batch's edits are: changes of records (edit_record), or the fields whose saved value
-// comes back (revert_to_saved: each edit {id, field}).
-enum class RecordBatchForm { Edits, Fields };
+// What a batch's edits are: changes of records (edit_record), the fields whose saved value comes
+// back (revert_to_saved: each edit {id, field}), or a text document's spans replaced (edit_record
+// over one, S13 D9: each edit {op: apply, payload: "text.span", line, column, length, text}).
+enum class RecordBatchForm { Edits, Fields, Spans };
 
 // A batch from its wire form, `edits` a list of one edit or more, each refused by its place
 // ("edits[1]: ..."). Edits: {op, id, parent, kind, field, value, position, as, coalesce, gesture,
@@ -42,9 +43,14 @@ enum class RecordBatchForm { Edits, Fields };
 // (typing); `gesture` edits that fold into one undo step until end_edit (a drag); a replace_list's
 // `list` (a collection's kind token: "action", "sound", "items.item") of the record `id` replaced
 // by `records` ([{field: value, ...}], each added at the end with its fields set in the order
-// written). Fields: {id, field}. Strict: an unknown op, member, label, identity or kind is refused
-// with the reason, and nothing is read; so are an apply (its change is made in C++ by its document
-// type, Edit::payload, S13 D6), a `payload` and a paste. `names` is the record document the
+// written). Fields: {id, field}. Spans (a text document's, S13 D9): {op: "apply", payload:
+// "text.span", line, column, length, text, coalesce, gesture}: the `length` characters from `line`
+// and `column` (1-based; a line end counts its own) replaced by `text`, which is UTF-8 and stored in
+// the game's code page (Windows-1252: a character it has no byte for is refused); `length` 0 and
+// `text` "" by default; the spans of a batch each against the text as the ones before left it
+// (TextDocument::replace). Strict: an unknown op, member, label, identity or kind is refused with
+// the reason, and nothing is read; so are, over records, an apply (its change is made in C++ by its
+// document type, Edit::payload, S13 D6), a `payload` and a paste. `names` is the record document the
 // request acts on; with none, an edit naming a record or a kind is refused. `resolve` false: a
 // first read before the document opens (RequestNames::unresolved): a record's identity is read as
 // a whole number and not looked for in `names` (a blank of the type, which names kinds alone), a
@@ -58,7 +64,8 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 // straight into a row naming the row's identity as its `parent`. A Paste has no batch form (the
 // paste request carries the clipboard): written as op "paste", which the reader refuses; nor
 // has an Apply (S13 D6), written as op "apply" with its record and its payload's token, which
-// the reader refuses too.
+// the reader refuses too, but a text document's span replaced (TextSpanEdit, S13 D9), written as
+// the Spans form reads it.
 io::JsonValue record_batch_to_json(
 		const std::vector<Edit> &edits, const Document *names, RecordBatchForm form);
 

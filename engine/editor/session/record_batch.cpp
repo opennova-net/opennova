@@ -9,6 +9,8 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/cp1252.h>
+#include <editor/model/text_document.h>
 #include <editor/session/session_json.h>
 
 namespace opennova::editor {
@@ -307,6 +309,58 @@ bool read_edit(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	return true;
 }
 
+// {op: apply, payload: "text.span", line, column, length, text, coalesce, gesture}: a text
+// document's span replaced (S13 D9).
+bool read_span(const JsonValue &json, Reader &reader, RecordBatch &out) {
+	if (!json.is_object()) {
+		reader.error = "\"" + reader.place + "\" must be an object.";
+		return false;
+	}
+	const JsonValue *op = json.get("op");
+	if (!op || !op->is_string() || op->string != "apply")
+		return reader.refuse("a text document takes \"apply\" edits alone: a span of its text replaced "
+							 "(payload \"text.span\").");
+	if (!members_known(json, { "op", "payload", "line", "column", "length", "text", "coalesce", "gesture" },
+				reader.place, reader.error))
+		return false;
+	const JsonValue *payload = json.get("payload");
+	if (!payload || !payload->is_string() || payload->string != kTextSpanToken)
+		return reader.refuse(std::string("a text document's apply names its payload \"") +
+				kTextSpanToken + "\".");
+	uint64_t line = 0, column = 0, length = 0;
+	const JsonValue *line_json = json.get("line");
+	const JsonValue *column_json = json.get("column");
+	if (!line_json || !whole(*line_json, line) || line == 0)
+		return reader.refuse("\"line\" is the span's line, 1 or more.");
+	if (!column_json || !whole(*column_json, column) || column == 0)
+		return reader.refuse("\"column\" is the span's column, 1 or more.");
+	if (const JsonValue *length_json = json.get("length"); length_json && !whole(*length_json, length))
+		return reader.refuse("\"length\" is how many characters the span replaces, 0 or more.");
+	std::string stored;
+	if (const JsonValue *text = json.get("text")) {
+		std::u32string unstorable;
+		if (!text->is_string())
+			return reader.refuse("\"text\" is what takes the span's place, a string.");
+		if (!utf8_to_cp1252(text->string, stored, &unstorable))
+			return reader.refuse("\"text\" holds a character the game's text encoding (Windows-1252) has "
+								 "no byte for.");
+	}
+	bool coalesce = false;
+	if (const JsonValue *value = json.get("coalesce")) {
+		if (!value->is_bool()) return reader.refuse("\"coalesce\" is true or false.");
+		coalesce = value->boolean;
+	}
+	uint64_t gesture = 0;
+	if (const JsonValue *value = json.get("gesture"); value && !whole(*value, gesture))
+		return reader.refuse("\"gesture\" must be a whole number.");
+	TextSpan span;
+	span.line = size_t(line);
+	span.column = size_t(column);
+	span.length = size_t(length);
+	out.edits.push_back(TextDocument::replace(span, std::move(stored), coalesce, gesture));
+	return true;
+}
+
 // {id, field}: a field whose saved value comes back (revert_to_saved).
 bool read_field(const JsonValue &json, Reader &reader, RecordBatch &out) {
 	if (!json.is_object()) {
@@ -345,9 +399,9 @@ bool record_batch_from_json(const io::JsonValue &edits, const Document *names, R
 	reader.resolve = resolve;
 	for (size_t i = 0; i < edits.array.size(); ++i) {
 		reader.place = "edits[" + std::to_string(i) + "]";
-		const bool read = form == RecordBatchForm::Fields
-				? read_field(edits.array[i], reader, batch)
-				: read_edit(edits.array[i], reader, batch);
+		const bool read = form == RecordBatchForm::Fields ? read_field(edits.array[i], reader, batch)
+				: form == RecordBatchForm::Spans          ? read_span(edits.array[i], reader, batch)
+														  : read_edit(edits.array[i], reader, batch);
 		if (!read) {
 			error = reader.error;
 			return false;
@@ -398,8 +452,20 @@ io::JsonValue record_batch_to_json(
 			case EditOperation::SetFileValue:
 				break;
 			case EditOperation::Apply:
-				// Its change is made in C++ (Edit::payload, S13 D6): the record it applies to and
-				// the payload's token, which the reader refuses.
+				// A text document's span replaced (S13 D9), as the Spans form reads it.
+				if (const auto *span = dynamic_cast<const TextSpanEdit *>(edit.payload.get())) {
+					entry.set("payload", io::json_string(span->token()));
+					entry.set("line", io::json_number(double(span->span.line)));
+					entry.set("column", io::json_number(double(span->span.column)));
+					entry.set("length", io::json_number(double(span->span.length)));
+					entry.set("text", io::json_string(cp1252_to_utf8(span->text)));
+					if (edit.coalesce) entry.set("coalesce", JsonValue::make_bool(true));
+					if (edit.gesture) entry.set("gesture", io::json_number(double(edit.gesture)));
+					out.push(std::move(entry));
+					continue;
+				}
+				// Any other change is made in C++ (Edit::payload, S13 D6): the record it applies to
+				// and the payload's token, which the reader refuses.
 				if (const NodeId id = identity_of(edit.address))
 					entry.set("id", name(id));
 				if (edit.payload)
