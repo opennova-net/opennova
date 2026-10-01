@@ -24,12 +24,7 @@ std::string sidecar_text(const ImportSidecar &sidecar) {
 	// Written only when the import read other files: a record of one source alone reads as it did.
 	if (!sidecar.inputs.empty()) {
 		io::JsonValue inputs = io::JsonValue::make_array();
-		for (const ImportInput &input : sidecar.inputs) {
-			io::JsonValue item = io::JsonValue::make_object();
-			item.set("path", io::JsonValue::make_string(input.path));
-			item.set("hash", io::JsonValue::make_string(io::hex64(input.hash)));
-			inputs.push(std::move(item));
-		}
+		for (const std::string &input : sidecar.inputs) inputs.push(io::JsonValue::make_string(input));
 		json.set("inputs", std::move(inputs));
 	}
 	io::JsonValue outputs = io::JsonValue::make_array();
@@ -69,14 +64,8 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 	// An input that does not read (a hand edit) is kept as one no file matches, so the import runs
 	// again and writes the list afresh.
 	if (const io::JsonValue *inputs = json.get("inputs"); inputs && inputs->is_array())
-		for (const io::JsonValue &item : inputs->array) {
-			ImportInput input;
-			if (item.is_object()) {
-				input.path = item.get_string("path", "");
-				if (!io::parse_hex64(item.get_string("hash", ""), input.hash)) input.hash = 0;
-			}
-			sidecar.inputs.push_back(std::move(input));
-		}
+		for (const io::JsonValue &item : inputs->array)
+			sidecar.inputs.push_back(item.is_string() ? item.string : std::string());
 	if (const io::JsonValue *outputs = json.get("outputs"); outputs && outputs->is_array())
 		for (const io::JsonValue &output : outputs->array)
 			if (output.is_string()) sidecar.outputs.push_back(output.string);

@@ -56,9 +56,18 @@ public:
 	// `/NOHUD` — the HUD overlay master word's clear (boot_policy.h no_hud).
 	static bool no_hud();
 
-	// Tests substitute the launch token list; the real runtime parses its own
-	// command line (engine + user args).
+	// The directory the game was started in, '/'-separated: the process's working directory,
+	// where retail keeps the files it writes beside itself, its saves among them (weapon.sav:
+	// PlayerProfile_LoadAllFromDisk @ 0x54f4d0 builds the path relative to it), and which the
+	// editor's Play sets to the run directory it took (ADR 0046 S13 A8), so the build the game
+	// runs from is never written. A source run's Godot moves it to the project (`--path`).
+	static String working_dir();
+
+	// Tests substitute the launch token list, and the working directory a game started in; the
+	// real runtime parses its own command line (engine + user args) and asks the process.
+	// clear_args_override clears both.
 	static void set_args_override(const PackedStringArray &args);
+	static void set_working_dir_override(const String &dir);
 	static void clear_args_override();
 	static bool has_args_override();
 
@@ -72,6 +81,7 @@ private:
 	// constructed at DLL load, before godot-cpp's runtime is bound.
 	static std::vector<std::string> args_override_;
 	static bool args_override_set_;
+	static std::string working_dir_override_;
 };
 
 } // namespace godot

@@ -33,11 +33,14 @@ struct ImportInputStamp {
 // What an importer reads (ADR 0046 S13 A8): its source (the file its import record sits beside),
 // the options the record holds, and every other file it declares by reading it here, a sound
 // bank's waves beside its manifest, a font's atlas beside its metrics, a terrain's height and
-// colour images beside its set. Each file read is recorded (its path and the hash of its bytes),
-// so the record lists every input the outputs were made from and the import pass imports again
-// when any of them changes, and when none does reads none of them. A path is the source folder's:
-// it may name a subfolder, never a place outside the project or under a dot-folder (the cache).
-// Single-threaded, like the pass that makes it.
+// colour images beside its set. Each file read is recorded (its path and the hash of its bytes):
+// the record lists every input the outputs were made from by its path, the machine-local import
+// cache by its hash, and the import pass imports again when any of them changes, and when none does
+// reads none of them. A path is taken from the source's folder: a file of the folder, of a folder
+// under it, or one a `..` reaches elsewhere in the project (`../shared/palette.pal`), never a place
+// outside the project, under a dot-folder (the cache) or in the game install (a bank over the
+// install's own waves cannot read them: a feature that needs it records an install input by its
+// install-relative path, a decision of its own). Single-threaded, like the pass that makes it.
 class ImportContext {
 public:
 	// `folder` and `root`: the source's folder and the project's, on disk.

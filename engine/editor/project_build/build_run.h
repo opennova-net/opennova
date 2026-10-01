@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -15,21 +16,29 @@ namespace opennova::editor {
 
 // Runs a plan into an immutable build directory (ADR 0046 d8):
 //   <output_root>/<build-id>/   language.pff localres.pff resource.pff <loose files> build.json
-// The build id is content-addressed (a hash over every entry's name, size and content hash), so
-// an unchanged project is the same build and nothing is written; a changed project gets a
-// new directory in which unchanged archives are linked (copied where the file system cannot
-// link them) from the last good build and only changed archives are re-packed. A file's content
-// hash is read from the plan's hash cache while its size and last write are those it was hashed
-// at (S13 A8), so a build reads the bytes of the files that changed since and no others.
-// Everything lands in `<build-id>.tmp/` first, is re-mounted through the engine's own VFS to
-// prove every name resolves, and is renamed into place last, so a failure leaves the last good
-// build untouched. The directories the caller's ProtectedDirs names when the build publishes (a
-// running Play child's, those whose lease names a process that may still run:
+// The build id is content-addressed (a hash over every entry's name, size and content hash, an
+// archive's with the format and the writer's version, PFF_WRITER_VERSION), so an unchanged project
+// is the same build and nothing is written; a changed project gets a new directory in which
+// unchanged archives are linked (copied where the file system cannot link them) from the last good
+// build and only changed archives are re-packed. A file's content hash is read from the plan's
+// hash cache while its size and last write are those it was hashed at (S13 A8), so a build reads
+// the bytes of the files that changed since and no others; the cache keeps no hash of a file whose
+// last write lies within io::kFileStampSettle of the pass that read it (io::file_stamp_settled).
+// Everything lands in a staging directory first (`<build-id>.tmp/`, or `<build-id>.<n>.tmp/` when
+// one left before cannot be emptied: a game running on the last good build holds the archives a
+// cancelled build linked there), is re-mounted through the engine's own VFS to prove every name
+// resolves, and is renamed into place last (tried again while a scanner holds a file, a few
+// seconds at most), so a failure leaves the last good build untouched. No write goes through a
+// name already there: a copy makes its file new (create_new_file), so a link to the last good
+// build's archive is never written through, and an archive is reused only while its size is the
+// one its build recorded. The directories the caller's ProtectedDirs names when the build
+// publishes (a running Play child's, those whose lease names a process that may still run:
 // run/play_lease.h) are never pruned, and pruning only ever deletes a directory that proves it is
 // a build (its name is a build id and its record names the same id, or it is a marked staging
-// directory): the output root may be any folder the user chose, as deep as it is (every call to
-// the system takes a path through system_path, project/project_files.h).
-inline constexpr int kBuildRecordSchemaVersion = 1;
+// directory), its proof last: the output root may be any folder the user chose, as deep as it is
+// (every call to the system takes a path through system_path, project/project_files.h).
+// 2: each archive's record carries its size beside its hash (1 kept the hash alone).
+inline constexpr int kBuildRecordSchemaVersion = 2;
 inline constexpr int kBuildCacheSchemaVersion = 1;
 inline constexpr const char *kBuildRecordFileName = "build.json";
 inline constexpr const char *kLastGoodBuildFileName = "last_good.json";
@@ -71,7 +80,8 @@ struct BuildReport {
 // whose FNV-1a state carries across steps (or its hash taken from the hash cache, a file's stat
 // a step's small cost: S13 A8), then each archive written through the resumable PFF writer
 // (formats/pff/pff_stream_writer.h), each reused archive linked or copied in chunks and each loose
-// file copied in chunks, then the verification and the publish, one step each. The editor steps it within
+// file copied in chunks, then the verification and the publish, one step each (the publish some more
+// while a scanner holds a staged file, three seconds at most). The editor steps it within
 // each frame's budget so its window keeps drawing while a large project packs; the command
 // line and the tests run it to the end (run_build). No thread is involved, so a build never
 // races the project it reads: a file edited mid-build (its size or its last write no longer
@@ -129,6 +139,7 @@ private:
 	void hash(uint64_t budget);
 	// The file's name, size and content hash folded into its archive's (or the loose files') hash.
 	void fold(const BuildEntry &entry, uint64_t size, uint64_t content);
+	static uint64_t archive_hash_seed();
 	void load_cache();
 	void save_cache() const;
 	void settle();
@@ -173,9 +184,16 @@ private:
 	size_t items_done_ = 0;
 	std::map<std::string, std::string> hashes_;      // archive file name -> hex content hash
 	std::map<std::string, std::string> last_hashes_; // the last good build's
+	std::map<std::string, uint64_t> last_sizes_;     // its archives' sizes, as its record keeps them
 	std::string last_dir_;                           // "" when there is no last good build
 	std::string tmp_dir_;
 	std::string final_dir_;
+	int64_t pass_began_ = 0; // when the hash pass began (io::file_clock_now_ticks)
+	// The publish: its record (written into the staging directory, then the last good one), and
+	// when its rename was first refused while the refusal may pass.
+	bool publish_ready_ = false;
+	std::string record_;
+	std::chrono::steady_clock::time_point publish_refused_at_{};
 	BuildReport report_;
 };
 

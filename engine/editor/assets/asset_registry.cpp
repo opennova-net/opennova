@@ -70,7 +70,7 @@ void name_findings(const std::vector<AssetEntry> &entries, std::vector<Diagnosti
 		}
 		if (asset.kind == AssetKind::Unknown) {
 			out.push_back(make_finding(CoreFinding::AssetKindUnknown, DiagnosticSeverity::Warning,
-			                           "The game does not use files of this type: the build leaves it out.",
+			                           "The editor does not know this file type: the build leaves it out.",
 			                           asset.relative_path));
 		}
 	}

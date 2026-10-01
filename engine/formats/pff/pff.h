@@ -94,6 +94,12 @@ void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
 
 /* --- Write API --- */
 
+/* The writers' own version: bumped whenever pff_write_archive and PffStreamWriter would write other
+   bytes for the same entries (their order, the header, the directory), so a build that keys an
+   archive by its entries' content keys it by the writer too, and never takes an archive the older
+   writer packed for one this writer would pack (ADR 0046 S13 A8). */
+inline constexpr uint32_t PFF_WRITER_VERSION = 1;
+
 /* Container format selector for a written archive (legacy is read-only; not authored here). */
 typedef enum PffFormat {
     PFF_FORMAT_PFF3 = 0,   /* magic "PFF3" */

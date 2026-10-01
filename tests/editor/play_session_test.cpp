@@ -127,22 +127,30 @@ static int test_lifecycle() {
 	return 0;
 }
 
-// S13 A8: the game install's game in a run directory: every source checked before anything is
-// copied, then the build's files (its archives linked or copied, its loose ones copied, its record
-// left behind), the install's executable and Bink DLL and a game.cfg (the build's own over the
-// install's) put there, the build directory and the install read alone; a run directory that is no
-// folder fails with play.install_copy, nothing launched.
+// S13 A8: the game install's game in a run directory: every required source checked before
+// anything is copied, then the build's files (a file the game may write, a .cfg, .sav, .coo or
+// .txt, copied; every other, its archives and a video among them, linked, or copied where the file
+// system cannot link it; its record left behind), the install's executable and Bink DLL, a game.cfg
+// (the build's own over the install's) and the install's saves where the project has none of its
+// own put there, the build directory and the install read alone; a run directory that is no folder
+// fails with play.install_copy, nothing launched.
 static int test_install_staging() {
+	namespace fs = std::filesystem;
 	editor_test::TempProjectDir dir("opennova_editor_install_staging");
 	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef"),
 	                  run = dir.file("run/1");
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
-	            editor_test::write_text(install + "/game.cfg", "install settings"));
+	            editor_test::write_text(install + "/game.cfg", "install settings") &&
+	            editor_test::write_text(install + "/player.sav", "install player") &&
+	            editor_test::write_text(install + "/weapon.sav", "install weapon"));
 	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
 		TEST_EXPECT(editor_test::write_text(build + "/" + name, std::string("PFF3 ") + name));
 	TEST_EXPECT(editor_test::write_text(build + "/intro.bik", "video") && editor_test::write_text(build + "/build.json", "{}") &&
-	            editor_test::write_text(build + "/GAME.CFG", "project settings"));
-	std::filesystem::create_directories(run);
+	            editor_test::write_text(build + "/GAME.CFG", "project settings") &&
+	            editor_test::write_text(build + "/weapon.sav", "project weapon") &&
+	            editor_test::write_text(build + "/filter.txt", "filter") &&
+	            editor_test::write_text(build + "/menumus.sbf", "music"));
+	fs::create_directories(run);
 	const std::string tree = editor_test::tree_digest(build);
 	LaunchPlan plan;
 	Diagnostic error;
@@ -150,15 +158,25 @@ static int test_install_staging() {
 	TEST_EXPECT(plan.executable == run + "/Jointops.exe" && plan.working_dir == run && plan.build_dir == build &&
 	            plan.log_file == run + "/_filelog.txt");
 	std::string text, io_error;
-	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
-		TEST_EXPECT(read_file_text(run + "/" + name, text, io_error) && text == std::string("PFF3 ") + name);
+	std::error_code ec;
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff", "intro.bik", "menumus.sbf"}) {
+		TEST_EXPECT(read_file_text(run + "/" + name, text, io_error) && read_file_text(build + "/" + name, io_error, io_error));
+		TEST_EXPECT(fs::equivalent(run + "/" + name, build + "/" + name, ec)); // linked: the game only reads it
+	}
 	TEST_EXPECT(read_file_text(run + "/intro.bik", text, io_error) && text == "video");
+	for (const char *name : {"filter.txt", "weapon.sav"})
+		TEST_EXPECT(!fs::equivalent(run + "/" + name, build + "/" + name, ec)); // copied: the game may write it
 	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "project settings");
+	TEST_EXPECT(read_file_text(run + "/weapon.sav", text, io_error) && text == "project weapon"); // the project's own
+	TEST_EXPECT(read_file_text(run + "/player.sav", text, io_error) && text == "install player"); // the install's
 	TEST_EXPECT(read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink");
-	TEST_EXPECT(!std::filesystem::exists(run + "/build.json") && editor_test::tree_digest(build) == tree);
+	TEST_EXPECT(!fs::exists(run + "/build.json") && editor_test::tree_digest(build) == tree);
 	TEST_EXPECT(read_file_text(install + "/game.cfg", text, io_error) && text == "install settings");
-	// A loose file the game rewrites in its run directory leaves the build's as it was.
-	TEST_EXPECT(editor_test::write_text(run + "/intro.bik", "rewritten") && editor_test::tree_digest(build) == tree);
+	// The files the game writes in its run directory leave the build's and the install's as they were.
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "rewritten") && editor_test::write_text(run + "/weapon.sav", "saved") &&
+	            editor_test::write_text(run + "/player.sav", "saved") && editor_test::write_text(run + "/filter.txt", "edited") &&
+	            editor_test::tree_digest(build) == tree);
+	TEST_EXPECT(read_file_text(install + "/player.sav", text, io_error) && text == "install player");
 
 	const std::string squat = dir.file("not a folder");
 	TEST_EXPECT(editor_test::write_text(squat, "a file"));

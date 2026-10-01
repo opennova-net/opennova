@@ -7,8 +7,9 @@
 // archives byte-identical to the single-call writer's however small the steps. S13 D5: every
 // kind's slot, read from its row, as the switch it replaced answered it, and the kinds it added
 // planned where their rows say. S13 A8: a file of no kind the game knows left out, a material
-// chunk packed, the hash cache (one changed file read alone, the other archives linked), and an
-// output root past MAX_PATH.
+// chunk packed, the hash cache (one changed file read alone, the other archives linked; a file
+// written within the settle window read until it settles; a rehash reading every file), an output
+// root past MAX_PATH, and no write through a name the last good build's archive stands behind.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -16,6 +17,13 @@
 #include <fstream>
 #include <string>
 #include <vector>
+
+#ifdef _WIN32
+#include <fcntl.h>
+#include <io.h>
+#include <share.h>
+#include <sys/stat.h>
+#endif
 
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
@@ -115,6 +123,7 @@ const Route kRoutes[] = {
 	{AssetKind::PowerupDefs, ArchiveSlot::Localres},
 	{AssetKind::OtherDefs, ArchiveSlot::Localres},
 	{AssetKind::StringTableCoo, ArchiveSlot::Loose},
+	{AssetKind::NovaWorldScreen, ArchiveSlot::Loose}, // .mnx, no kind (and left out) before S13 A8
 	{AssetKind::Video, ArchiveSlot::Loose},
 	{AssetKind::PlayerSave, ArchiveSlot::Loose},
 	{AssetKind::Shader, ArchiveSlot::Resource},
@@ -630,6 +639,9 @@ static int test_hash_cache() {
 	TEST_EXPECT(p.fill());
 	TEST_EXPECT(write_filler(p.root + "/music/extra.sbf", 1000));
 	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "zero"));
+	// The project written a while ago: a file the cache keeps by its stamp (one written within the
+	// settle window is read by every build until it settles, below).
+	TEST_EXPECT(editor_test::backdate_tree(p.root, std::chrono::hours(1)));
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok && plan.hash_cache == p.paths.build_cache_file);
 	size_t files = 0;
@@ -647,7 +659,8 @@ static int test_hash_cache() {
 	const BuildReport again = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.files_hashed == 0 && again.bytes_hashed == 0);
 
-	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one"));
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one") &&
+	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(50)));
 	const BuildReport changed = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(changed.ok && !changed.reused_existing && changed.build_id != first.build_id);
 	TEST_EXPECT(changed.files_hashed == 1 && changed.bytes_hashed == fs::file_size(p.root + "/strings/menutxt.bin"));
@@ -667,9 +680,25 @@ static int test_hash_cache() {
 	std::vector<uint8_t> table;
 	std::string error;
 	TEST_EXPECT(read_file_bytes(p.root + "/strings/menutxt.bin", table, error) &&
-	            write_file_atomic(p.root + "/strings/menutxt.bin", table.data(), table.size(), error));
+	            write_file_atomic(p.root + "/strings/menutxt.bin", table.data(), table.size(), error) &&
+	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(40)));
 	const BuildReport touched = run_build(p.plan(), p.output_root());
 	TEST_EXPECT(touched.ok && touched.reused_existing && touched.files_hashed == 1 && touched.build_id == changed.build_id);
+
+	// Written within the settle window (its last write a minute ahead, as a clock that stood still
+	// would leave it): read by every build, never kept by the cache, so the same bytes swapped in
+	// under the same stamp are read too, the content they hold built.
+	const fs::file_time_type ahead = fs::file_time_type::clock::now() + std::chrono::minutes(1);
+	fs::last_write_time(p.root + "/strings/menutxt.bin", ahead);
+	const BuildReport unsettled = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(unsettled.ok && unsettled.files_hashed == 1 && unsettled.build_id == changed.build_id);
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "two"));
+	fs::last_write_time(p.root + "/strings/menutxt.bin", ahead);
+	const BuildReport swapped = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(swapped.ok && swapped.files_hashed == 1 && swapped.build_id != changed.build_id);
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one") &&
+	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(30)));
+	TEST_EXPECT(run_build(p.plan(), p.output_root()).build_id == changed.build_id);
 
 	// A file gone leaves the cache; the cache names the plan's files alone.
 	fs::remove(p.root + "/music/extra.sbf");
@@ -678,13 +707,159 @@ static int test_hash_cache() {
 	TEST_EXPECT(fewer.ok && fewer.files_hashed == 0 && read_file_text(p.paths.build_cache_file, text, error));
 	TEST_EXPECT(text.find("extra.sbf") == std::string::npos && text.find("menutxt.bin") != std::string::npos);
 
-	// No cache: every file read, the same build.
+	// No cache: every file read, the same build. A rehash reads every file as well, the cache set
+	// aside, and keeps it: the next build reads none.
 	BuildPlan uncached = p.plan();
 	uncached.hash_cache.clear();
 	size_t now = uncached.loose.size();
 	for (const BuildArchive &archive : uncached.archives) now += archive.entries.size();
 	const BuildReport all = run_build(uncached, p.output_root());
 	TEST_EXPECT(all.ok && all.reused_existing && all.files_hashed == now && all.build_id == fewer.build_id);
+	BuildPlan rehashed = p.plan();
+	rehashed.rehash = true;
+	const BuildReport again_all = run_build(rehashed, p.output_root());
+	TEST_EXPECT(again_all.ok && again_all.reused_existing && again_all.files_hashed == now);
+	const BuildReport after = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(after.ok && after.files_hashed == 0 && after.build_id == fewer.build_id);
+	return 0;
+}
+
+// The file at `path` held open as a running game holds an archive (S13 A8 review): read access,
+// shared for reading and writing but not for deletion (the CRT's _SH_DENYNO), so none of its names
+// can be removed while it is held. Elsewhere a plain read handle, which holds nothing back.
+struct HeldFile {
+#ifdef _WIN32
+	int fd = -1;
+	explicit HeldFile(const std::string &path) {
+		_wsopen_s(&fd, system_path(path).c_str(), _O_RDONLY | _O_BINARY, _SH_DENYNO, _S_IREAD);
+	}
+	~HeldFile() {
+		if (fd >= 0) _close(fd);
+	}
+	bool held() const { return fd >= 0; }
+	// What the holder reads through its own handle, whatever became of the file's names.
+	std::vector<uint8_t> bytes() {
+		std::vector<uint8_t> out;
+		if (fd < 0 || _lseeki64(fd, 0, SEEK_SET) != 0) return out;
+		uint8_t chunk[4096];
+		for (int n = 0; (n = _read(fd, chunk, sizeof(chunk))) > 0;) out.insert(out.end(), chunk, chunk + n);
+		return out;
+	}
+#else
+	std::ifstream in;
+	explicit HeldFile(const std::string &path) : in(path, std::ios::binary) {}
+	bool held() const { return static_cast<bool>(in); }
+	std::vector<uint8_t> bytes() {
+		std::vector<uint8_t> out;
+		in.clear();
+		in.seekg(0);
+		char chunk[4096];
+		while (in.read(chunk, sizeof(chunk)) || in.gcount() > 0)
+			out.insert(out.end(), chunk, chunk + in.gcount());
+		return out;
+	}
+#endif
+};
+
+// S13 A8 review: a publish refused while a file in the staging directory is held (a scanner, an
+// indexer: a rename of a folder whose file is open is refused on Windows) is tried again on the next
+// steps, a few seconds at most, and lands once the file is let go.
+static int test_publish_waits_for_a_held_file() {
+	Project p("opennova_editor_build_publish_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	BuildRun run(p.plan(), p.output_root());
+	size_t steps = 0;
+	while (!run.done() && run.items_done() < run.items_total() && ++steps < 100000) run.step(uint64_t(1) << 20);
+	TEST_EXPECT(!run.done() && run.items_done() == run.items_total() && staging_dirs(p.output_root()) == 1);
+	std::string staged;
+	std::error_code ec;
+	for (const fs::directory_entry &entry : fs::directory_iterator(p.output_root(), ec))
+		if (entry.path().extension() == kBuildStagingSuffix) staged = (entry.path() / "language.pff").generic_string();
+	{
+		const HeldFile scanner(staged);
+		TEST_EXPECT(scanner.held());
+		for (int i = 0; i < 3; ++i) run.step(uint64_t(1) << 20);
+#ifdef _WIN32
+		TEST_EXPECT(!run.done() && run.label() == "Publishing the build"); // refused, tried again
+#endif
+	}
+	while (!run.done() && ++steps < 100000) run.step(uint64_t(1) << 20);
+	for (const Diagnostic &d : run.report().diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(run.done() && run.report().ok && staging_dirs(p.output_root()) == 0);
+	TEST_EXPECT(last_good_build_dir(p.output_root()) == run.report().build_dir);
+	return 0;
+}
+
+// S13 A8 review: no build writes through a name another file stands behind. A game running on the
+// last good build holds its archives; a build that linked two of them into its staging directory
+// and was cancelled cannot take those links away; the same content built again stages under another
+// name (`<id>.1.tmp`), links the archive afresh, and the last good build keeps every byte (it was
+// written through before: its archive cut to nothing under the game). Its links go once the game
+// lets go. An archive whose size moved since its build recorded it is packed again, never linked.
+static int test_held_archives_are_never_written_through() {
+	Project p("opennova_editor_build_held_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(editor_test::backdate_tree(p.root, std::chrono::hours(1)));
+	const BuildReport first = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(first.ok && !first.build_dir.empty());
+	const std::string held_path = first.build_dir + "/localres.pff";
+	std::vector<uint8_t> before;
+	std::string error;
+	TEST_EXPECT(read_file_bytes(held_path, before, error) && !before.empty());
+	std::string record;
+	TEST_EXPECT(read_file_text(first.build_dir + "/" + kBuildRecordFileName, record, error));
+	TEST_EXPECT(record.find("\"size\"") != std::string::npos);
+	{
+		HeldFile game(held_path);
+		TEST_EXPECT(game.held() && game.bytes() == before);
+		// The string table changes: language.pff is packed, localres.pff and resource.pff link.
+		TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "held") &&
+		            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(50)));
+		const BuildPlan plan = p.plan();
+		{
+			BuildRun cancelled(plan, p.output_root());
+			size_t steps = 0;
+			while (!cancelled.done() && cancelled.report().archives_linked.size() < 2 && ++steps < 100000)
+				cancelled.step(4096);
+			TEST_EXPECT(!cancelled.done() && cancelled.report().archives_linked.size() == 2);
+			cancelled.cancel();
+		}
+		const BuildReport rebuilt = run_build(plan, p.output_root());
+		for (const Diagnostic &d : rebuilt.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(rebuilt.ok && rebuilt.build_dir != first.build_dir);
+		TEST_EXPECT(rebuilt.archives_written == std::vector<std::string>{"language.pff"});
+		TEST_EXPECT(rebuilt.archives_linked == std::vector<std::string>({"localres.pff", "resource.pff"}));
+		// The game's archive, read through the game's own handle: every byte kept.
+		TEST_EXPECT(game.bytes() == before);
+		std::vector<uint8_t> linked;
+		TEST_EXPECT(read_file_bytes(rebuilt.build_dir + "/localres.pff", linked, error) && linked == before);
+#ifdef _WIN32
+		// Held, the last good build is not pruned (a file that will not go keeps its directory, its
+		// record last): its archive reads as it did by its name too.
+		std::vector<uint8_t> after;
+		TEST_EXPECT(read_file_bytes(held_path, after, error) && after == before);
+#endif
+		TEST_EXPECT(last_good_build_dir(p.output_root()) == rebuilt.build_dir);
+	}
+	// The game gone, the next publish prunes what the cancel left.
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "free") &&
+	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(40)));
+	const BuildReport freed = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(freed.ok && staging_dirs(p.output_root()) == 0);
+
+	// localres.pff grown a byte since its build recorded it: packed again, not linked.
+	{
+		std::ofstream grow(freed.build_dir + "/localres.pff", std::ios::binary | std::ios::app);
+		grow.put('\0');
+	}
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "grown") &&
+	            editor_test::backdate(p.root + "/strings/menutxt.bin", std::chrono::minutes(30)));
+	const BuildReport repacked = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(repacked.ok && repacked.archives_linked == std::vector<std::string>{"resource.pff"});
+	TEST_EXPECT(std::find(repacked.archives_written.begin(), repacked.archives_written.end(), "localres.pff") !=
+	            repacked.archives_written.end());
 	return 0;
 }
 
@@ -710,6 +885,7 @@ static int test_deep_output_root() {
 	const std::string video = "a_long_intro_movie_name.bik";
 	TEST_EXPECT(editor_test::write_text(root + "/video/" + video, "BIKi"));
 	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "shallow"));
+	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::hours(1))); // written a while ago
 	const auto plan_of = [&]() {
 		const AssetScan scan = scan_project_assets(paths, doc);
 		AssetGraph graph;
@@ -733,7 +909,8 @@ static int test_deep_output_root() {
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff"), ec));
 	TEST_EXPECT(last_good_build_dir(output_root) == report.build_dir);
 
-	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "deep"));
+	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "deep") &&
+	            editor_test::backdate(root + "/strings/menutxt.bin", std::chrono::minutes(50)));
 	const BuildReport next = run_build(plan_of(), output_root);
 	for (const Diagnostic &d : next.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(next.ok && next.build_dir != report.build_dir && next.files_hashed == 1);
@@ -756,6 +933,8 @@ int main() {
 	failures += test_long_names_bind_packed_files_only();
 	failures += test_unknown_kinds_are_left_out();
 	failures += test_hash_cache();
+	failures += test_held_archives_are_never_written_through();
+	failures += test_publish_waits_for_a_held_file();
 	failures += test_deep_output_root();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;

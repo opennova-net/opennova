@@ -75,7 +75,9 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		}
 		const std::string output_dir = import_output_dir(paths, source_relative);
 		for (const std::string &output : sidecar.outputs) {
-			const fs::path output_path = root / output_dir / output;
+			// Under the cache, deeper than its source: asked and read through the system path, so a
+			// project whose own files fit MAX_PATH lists outputs that pass it (S13 A8).
+			const fs::path output_path = system_path((root / output_dir / output).generic_string());
 			if (!fs::is_regular_file(output_path, ec)) {
 				// Only the import pass makes outputs: one missing after it ran means the
 				// last import did not finish (its finding says why).

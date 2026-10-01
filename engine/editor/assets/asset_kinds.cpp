@@ -30,6 +30,7 @@ constexpr const char *kDialogBank[] = {".dbf", nullptr};
 constexpr const char *kScript[] = {".wac", nullptr};
 constexpr const char *kOtherDefs[] = {".def", nullptr};
 constexpr const char *kStringTableCoo[] = {".coo", nullptr};
+constexpr const char *kNovaWorldScreen[] = {".mnx", nullptr};
 constexpr const char *kVideo[] = {".bik", nullptr};
 constexpr const char *kPlayerSave[] = {".sav", nullptr};
 constexpr const char *kShader[] = {".fx", nullptr};
@@ -296,6 +297,13 @@ constexpr AssetKindRow kRows[] = {
 	     ArchiveSlot::Loose)
 	        .extensions(kStringTableCoo)
 	        .folder("strings")
+	        .row,
+	// The NovaWorld screens' markup the game reads loose from its folder, where retail ships them:
+	// the error page [orig: "nw_error.mnx" @ 0x558449] and the login's start page, whose STARTUPURL
+	// the gate substitutes (docs/net/novaworld-net-re.md D-NET-31) (S13 A8: no kind before, so the
+	// build left them out).
+	Kind(AssetKind::NovaWorldScreen, "novaworld_screen", "NovaWorld screen", ArchiveSlot::Loose)
+	        .extensions(kNovaWorldScreen)
 	        .row,
 	Kind(AssetKind::Video, "video", "Video", ArchiveSlot::Loose).extensions(kVideo).row,
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)

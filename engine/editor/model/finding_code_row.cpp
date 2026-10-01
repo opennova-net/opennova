@@ -122,7 +122,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportScene, code("import.scene", G::Imports) },
 	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
 	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
-	{ C::ImportSource, code("import.source", G::Imports) },
+	{ C::ImportNotFound, code("import.not_found", G::Imports) },
 	{ C::ImportTextureNotImported, code("import.texture_not_imported", G::Imports, F::UnimportedTexture) },
 	{ C::ImportUnreadable, code("import.unreadable", G::Imports) },
 	{ C::ImportWrite, code("import.write", G::Imports) },

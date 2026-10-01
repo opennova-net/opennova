@@ -462,6 +462,66 @@ func test_accept_emits_avatar_chosen() -> void:
 	assert_eq(int(profile.get("nationality", -1)), 0, "the committed profile carries the selection")
 
 
+## ADR 0046 S13 A8: an ACCEPT saves the profile where retail keeps it, weapon.sav in the directory
+## the game was started in [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, the path built
+## relative to it @0x54f68c-0x54f6b7] (LaunchFlags.working_dir, the run directory under the
+## editor's Play), never under the mounted resource root, which for the editor's Play is a build
+## no game may write: the root's tree is the same before and after, and the profile reads back.
+func test_accept_saves_beside_the_game_never_in_the_root() -> void:
+	var root := _staged_avatars_root()
+	assert_not_null(root, "the minted avatar table stages")
+	if root == null:
+		return
+	var run_dir := OS.get_cache_dir().path_join("opennova_player_info_run_%d" % Time.get_ticks_usec())
+	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
+	LaunchFlags.set_working_dir_override(run_dir)
+	var before := _tree_digest(String(root.get_root_dir()))
+	var companion := PlayerInfoMenuCompanion.new()
+	companion.set_database(_load_db())
+	watch_signals(companion)
+	var driver := _make_avatar_driver()
+	companion.on_menu_built(driver, "player.mnu", "PLAYER_INFO", null)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	assert_signal_emitted(companion, "avatar_chosen")
+	var profile: Dictionary = get_signal_parameters(companion, "avatar_chosen")[0]
+	# What MainGame does with an ACCEPT (main_game.gd _on_avatar_chosen).
+	assert_eq(PlayerProfile.save_character_profile(root, profile), OK)
+	assert_true(FileAccess.file_exists(run_dir.path_join("weapon.sav")), "the profile is saved beside the game")
+	assert_eq(_tree_digest(String(root.get_root_dir())), before, "the resource root is not written")
+	var loaded := PlayerProfile.load_character_profile(root)
+	var saved_sides: Array = profile.get("side_profiles", [])
+	var loaded_sides: Array = loaded.get("side_profiles", [])
+	assert_eq(loaded_sides.size(), 2)
+	if saved_sides.size() == 2 and loaded_sides.size() == 2:
+		assert_eq(int((loaded_sides[0] as Dictionary).get("avatar_packed", -1)),
+				int((saved_sides[0] as Dictionary).get("avatar_packed", -2)), "it reads back from there")
+	LaunchFlags.clear_args_override()
+	TestFs.remove_dir_recursive(run_dir)
+
+
+# What a directory tree holds, as one text: each file's path under `dir`, its size and the
+# SHA-256 of its bytes, sorted (a tree compared before and after a write that must not reach it).
+func _tree_digest(dir: String) -> String:
+	var lines := PackedStringArray()
+	var pending := PackedStringArray([""])
+	while not pending.is_empty():
+		var relative: String = pending[pending.size() - 1]
+		pending.remove_at(pending.size() - 1)
+		var path := dir if relative.is_empty() else dir.path_join(relative)
+		for sub in DirAccess.get_directories_at(path):
+			pending.append(sub if relative.is_empty() else relative.path_join(sub))
+		for file in DirAccess.get_files_at(path):
+			var bytes := FileAccess.get_file_as_bytes(path.path_join(file))
+			var hashing := HashingContext.new()
+			hashing.start(HashingContext.HASH_SHA256)
+			if not bytes.is_empty():
+				hashing.update(bytes)
+			lines.append("%s %d %s" % [file if relative.is_empty() else relative.path_join(file),
+					bytes.size(), hashing.finish().hex_encode()])
+	lines.sort()
+	return "\n".join(lines)
+
+
 # A synthetic PLAYER_INFO loadout screen: the three weapon combos, PLAYERCLASS
 # carrying the CHARTYPE values 5..9 as authored `value=` items (as the .mnu's
 # static items do), the ammo/type/grenade combos, STATIC_TOTAL_WEIGHT, and the

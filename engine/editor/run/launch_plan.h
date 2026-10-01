@@ -42,11 +42,13 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 // The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
 // archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
 // 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its
-// _filelog.txt), so the run directory gets the build's files (its archives linked, or copied where
-// the file system cannot link them; its loose files copied, the game may rewrite them), the
-// install's executable and Bink DLL, and a game.cfg, the build's own when the project has one,
-// else the install's. Every file is checked before any is copied, so a missing one launches
-// nothing. The game install and the build directory are only read.
+// saves, its _filelog.txt), so the run directory gets the build's files (a file the game may write,
+// a .cfg, .sav, .coo or .txt, copied; every other linked, copied where the file system cannot link
+// it), the install's executable and Bink DLL, a game.cfg, the build's own when the project has one,
+// else the install's, and the install's player.sav and weapon.sav where the project has none of its
+// own (the profile and bindings the player starts with). The required files are checked before any
+// is copied, so a missing one launches nothing. The game install and the build directory are only
+// read.
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
                                 const std::string &run_dir, LaunchPlan &out, Diagnostic &error);
 

@@ -53,6 +53,7 @@ enum class AssetKind {
 	PowerupDefs,    // powerup.def
 	OtherDefs,      // any other .def
 	StringTableCoo, // .coo (the NovaWorld UI string table)
+	NovaWorldScreen, // .mnx (a NovaWorld screen's markup, loose in the install)
 	Video,          // .bik
 	PlayerSave,     // .sav
 	Shader,         // .fx

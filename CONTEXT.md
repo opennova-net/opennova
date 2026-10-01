@@ -499,16 +499,19 @@ Bringing a non-native source (an image; later a sound bank's manifest, a font, a
 images) into the project the Godot way: a committed `<file>.import` sidecar records the
 importer, its version, options, output logical names, the source's content hash and the
 **inputs**, every other file the importer read through its **import context**
-(`ImportContext`: a path of the source's folder and its content hash), and nothing a checkout
-changes; the outputs are regenerated into `.opennova/imported/`, in a directory named by a hash
-of the source's path, and packed like native assets. One import is one source with as many
-inputs as its importer reads, and it runs again when the source or any input changes. The
-**import cache** (`.opennova/import_cache.json`, machine-local), keyed by project-relative
-path, keeps each source's and each input's size and last-write time and the record each
-source's outputs were made from, so only a real change imports again and an untouched file is
-not read. A file is an **import source** (its own kind, whatever its name: `import_source`)
-only while its record is there: importing it writes the record, and a `.png` with none is a
-texture the build packs as it is. The build never packs an import source, only its outputs.
+(`ImportContext`), by path (taken from the source's folder, never outside the project), and
+nothing a checkout or an edit of an input changes; the outputs are regenerated into
+`.opennova/imported/`, in a directory named by a hash of the source's path, and packed like
+native assets. One import is one source with as many inputs as its importer reads, and it runs
+again when the source or any input changes. The **import cache**
+(`.opennova/import_cache.json`, machine-local), keyed by project-relative path, keeps each
+source's and each input's size, last-write time and content hash (a file written within two
+seconds of the pass that read it is read again next time), and the record and the inputs'
+hashes each source's outputs were made from, so only a real change imports again and an
+untouched file is not read. A file is an **import source** (its own kind, whatever its name:
+`import_source`) only while its record is there: importing it writes the record, and a `.png`
+with none is a texture the build packs as it is. The build never packs an import source, only its
+outputs. The files the import dialog offers are **import choices** (`ImportChoice`).
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
 
@@ -828,11 +831,14 @@ The one operation behind Play and Export: validate the project, route every asse
 the canonical archives (`language.pff`, `localres.pff`, `resource.pff`) and the
 mandatory loose files, write through the streamed PFF writer, verify through the VFS,
 and publish an immutable `.opennova/build/play/<build-id>/` directory, which nothing writes
-once published (Play runs in a run directory). Incremental by per-archive input hash: each
-file's content hash comes from the **build cache** (`.opennova/build_cache.json`, machine-local)
-while its size and last write hold, so a build reads only the files that changed, and an archive
-whose content is unchanged is linked from the last good build (copied where the file system
-cannot link). An import source and a file of no kind the game knows are left out.
+once published (Play runs in a run directory). Incremental by per-archive input hash (with the
+archive writer's version): each file's content hash comes from the **build cache**
+(`.opennova/build_cache.json`, machine-local) while its size and last write hold (a file written
+within two seconds of the build is read by every build until it settles; a `rehash` build reads
+every file), so a build reads only the files that changed, and an archive whose content is
+unchanged is linked from the last good build (copied where the file system cannot link, never
+through a name already there). An import source and a file the editor does not know are left
+out.
 _Avoid_: pack (a step inside a build), export (a build copied to a chosen directory),
 stage (the retired retail-staging vocabulary)
 
@@ -866,13 +872,14 @@ _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running ga
 "see in game"
 
 **Run directory**:
-Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory and the
-log Play tails (`session.log`; the game install's own, `_filelog.txt`), so the build it runs from
-stays as the build wrote it. Play in the game install puts there what the install's game needs
-beside it: the build's archives (linked) and loose files (copied), the install's executable and
-Bink DLL, and a `game.cfg` (the project's own, else the install's). It records its game (pid and
-creation time) while the game may run; each Play takes the first free one, emptied, passing one
-whose game may still run.
+Where Play runs the game: `.opennova/run/<n>/` (n from 1), the game's working directory, the
+log Play tails (`session.log`; the game install's own, `_filelog.txt`) and the saves the game
+keeps beside itself (`weapon.sav`), so the build it runs from stays as the build wrote it. Play in
+the game install puts there what the install's game needs beside it: the build's files (linked;
+one the game may write, a `.cfg`, `.sav`, `.coo` or `.txt`, copied), the install's executable and
+Bink DLL, a `game.cfg` (the project's own, else the install's) and the install's `player.sav` and
+`weapon.sav` where the project has none. It records its game (pid and creation time) while the
+game may run; each Play takes the first free one, emptied, passing one whose game may still run.
 _Avoid_: build directory (what the build publishes, never written after), working copy, stage
 
 ## Runtime presentation

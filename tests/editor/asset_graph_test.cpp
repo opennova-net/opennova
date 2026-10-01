@@ -627,8 +627,13 @@ static int test_rename() {
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "a_name_far_too_long.tga").ok());
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "nope.tga", "x.tga").ok());
 	}
+	// S13 A8: the file under its new name is dated now, not when the file it was copied from was
+	// written, so no cache that keys a file by its size and last write takes it for the file that
+	// held the name before (two of a size swapping names through three renames).
+	TEST_EXPECT(editor_test::backdate(root + "/logo.tga", std::chrono::hours(1)));
 	editor_test::handle_to_end(session, request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(!fs::exists(root + "/logo.tga") && fs::exists(root + "/logo2.tga"));
+	TEST_EXPECT(fs::last_write_time(root + "/logo2.tga") > fs::file_time_type::clock::now() - std::chrono::minutes(5));
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	Value image;

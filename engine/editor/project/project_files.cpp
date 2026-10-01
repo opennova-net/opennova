@@ -1,9 +1,11 @@
 #include <editor/project/project_files.h>
 
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <system_error>
+#include <thread>
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
@@ -114,6 +116,43 @@ bool write_file_atomic(const std::string &path, const std::string &text, std::st
 	return write_file_atomic(path, text.data(), text.size(), error);
 }
 
+bool rename_refusal_passes(const std::error_code &ec) {
+#ifdef _WIN32
+	// ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION.
+	return ec.category() == std::system_category() && (ec.value() == 5 || ec.value() == 32 || ec.value() == 33);
+#else
+	return ec == std::errc::device_or_resource_busy || ec == std::errc::text_file_busy;
+#endif
+}
+
+bool rename_with_retry(const fs::path &from, const fs::path &to, std::error_code &ec) {
+	for (int attempt = 0;; ++attempt) {
+		ec.clear();
+		fs::rename(from, to, ec);
+		if (!ec) return true;
+		if (attempt == 4 || !rename_refusal_passes(ec)) return false;
+		std::this_thread::sleep_for(std::chrono::milliseconds(2 << attempt)); // 2, 4, 8, 16 ms
+	}
+}
+
+std::FILE *create_new_file(const std::string &path) {
+#ifdef _WIN32
+	return _wfopen(system_path(path).c_str(), L"wbx");
+#else
+	return std::fopen(path.c_str(), "wbx");
+#endif
+}
+
+bool refresh_last_write(const std::string &path, std::string &error) {
+	std::error_code ec;
+	fs::last_write_time(system_path(path), fs::file_time_type::clock::now(), ec);
+	if (ec) {
+		error = os_error("cannot date", path, ec);
+		return false;
+	}
+	return true;
+}
+
 bool replace_file(const std::string &from, const std::string &to, std::string &error) {
 	// The last write of the file it replaces, which the new one's must pass (below).
 	std::error_code ec;
@@ -122,9 +161,7 @@ bool replace_file(const std::string &from, const std::string &to, std::string &e
 	const bool replacing = !ec;
 	// std::filesystem::rename replaces an existing target on every platform (unlike C
 	// rename on Windows), so the swap is one call.
-	ec.clear();
-	fs::rename(system_path(from), target, ec);
-	if (ec) {
+	if (!rename_with_retry(system_path(from), target, ec)) {
 		error = os_error("cannot replace", to, ec);
 		return false;
 	}

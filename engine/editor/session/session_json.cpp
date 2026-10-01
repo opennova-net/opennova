@@ -295,7 +295,7 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 // defaults left out, so the view's sources pass back as they are.
 } // namespace
 
-JsonValue import_source_to_json(const ImportSource &source) {
+JsonValue import_choice_to_json(const ImportChoice &source) {
 	JsonValue out = JsonValue::make_object();
 	out.set("path", json_string(source.path));
 	if (!source.entry.empty()) out.set("entry", json_string(source.entry));
@@ -467,13 +467,13 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 constexpr const char *kImportsShape =
         "\"imports\" must be an array of {path, entry, install, native}.";
 
-bool import_source_from_json(const JsonValue &json, ImportSource &out, std::string &error) {
+bool import_choice_from_json(const JsonValue &json, ImportChoice &out, std::string &error) {
 	if (!json.is_object()) {
 		error = kImportsShape;
 		return false;
 	}
 	if (!members_known(json, {"path", "entry", "install", "native"}, "import", error)) return false;
-	ImportSource import;
+	ImportChoice import;
 	if (!read_string(json, "path", import.path, error) ||
 	    !read_string(json, "entry", import.entry, error) ||
 	    !read_bool(json, "install", import.install, error) ||
@@ -513,10 +513,10 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 			error = kImportsShape;
 			return false;
 		}
-		std::vector<ImportSource> imports;
+		std::vector<ImportChoice> imports;
 		for (const JsonValue &source : json.array) {
-			ImportSource import;
-			if (!import_source_from_json(source, import, error)) return false;
+			ImportChoice import;
+			if (!import_choice_from_json(source, import, error)) return false;
 			imports.push_back(std::move(import));
 		}
 		request.imports = std::move(imports);
@@ -567,6 +567,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::AskName: return flag_of(json, token, request.ask_name, error);
 	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
 	case F::ImportPass: return flag_of(json, token, request.import_pass, error);
+	case F::Rehash: return flag_of(json, token, request.rehash, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -595,7 +596,7 @@ bool field_to_json(
 	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
 	case F::Imports:
 		out = JsonValue::make_array();
-		for (const ImportSource &source : request.imports) out.push(import_source_to_json(source));
+		for (const ImportChoice &source : request.imports) out.push(import_choice_to_json(source));
 		return !request.imports.empty();
 	case F::Edits:
 		out = record_batch_to_json(request.edits, names, batch_form(request.kind, false));
@@ -631,6 +632,7 @@ bool field_to_json(
 	case F::OpenFirst: out = boolean(request.open_first); return request.open_first;
 	// Its default is true: the writer names it only when it is false.
 	case F::ImportPass: out = boolean(request.import_pass); return !request.import_pass;
+	case F::Rehash: out = boolean(request.rehash); return request.rehash;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

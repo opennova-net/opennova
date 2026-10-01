@@ -94,10 +94,15 @@ const Importer *importer_for(const std::string &source_name, const std::vector<I
 std::string renamed_import_output(const std::string &output, const std::string &old_source,
                                   const std::string &new_source) {
 	const std::filesystem::path path(output);
-	if (strutil::to_lower(path.stem().generic_string()) !=
-	    strutil::to_lower(std::filesystem::path(old_source).stem().generic_string()))
-		return output;
-	return std::filesystem::path(new_source).stem().generic_string() + path.extension().generic_string();
+	const std::string stem = path.stem().generic_string();
+	const std::string old_stem = std::filesystem::path(old_source).stem().generic_string();
+	const std::string new_stem = std::filesystem::path(new_source).stem().generic_string();
+	// The source's stem itself, or followed by an underscore and the rest (`<stem>_01`).
+	const bool named = strutil::to_lower(stem) == strutil::to_lower(old_stem) ||
+	                   (stem.size() > old_stem.size() + 1 && stem[old_stem.size()] == '_' &&
+	                    strutil::to_lower(stem.substr(0, old_stem.size())) == strutil::to_lower(old_stem));
+	if (!named) return output;
+	return new_stem + stem.substr(old_stem.size()) + path.extension().generic_string();
 }
 
 } // namespace opennova::editor

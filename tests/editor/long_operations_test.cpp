@@ -749,7 +749,7 @@ static int test_stale_import_refused() {
 	            v.dialogs.import_preview.open && v.dialogs.import_preview.plan->rows.empty());
 	s.session.run_operations();
 	TEST_EXPECT(v.dialogs.import_preview.plan->rows.size() == 2);
-	std::vector<ImportSource> shown;
+	std::vector<ImportChoice> shown;
 	for (const ImportPlanRow &row : v.dialogs.import_preview.plan->rows)
 		if (row.selected) shown.push_back(row.source);
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", menu("two.tga")));

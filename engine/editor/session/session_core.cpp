@@ -600,7 +600,7 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(bool then_play, const std::string &out_dir) {
+void SessionCore::start_build(bool then_play, const std::string &out_dir, bool rehash) {
 	if (then_play && play().refused()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
@@ -628,8 +628,9 @@ void SessionCore::start_build(bool then_play, const std::string &out_dir) {
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	const BuildPlan plan =
+	BuildPlan plan =
 			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
+	plan.rehash = rehash;
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot

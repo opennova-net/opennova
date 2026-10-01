@@ -421,8 +421,8 @@ constexpr bool sections_named() {
 static_assert(sections_named(),
 		"each view section has a token of its own, a writer, its concerns and a doc");
 
-JsonValue source_to_json(const ImportSource &source) {
-	return import_source_to_json(source);
+JsonValue source_to_json(const ImportChoice &source) {
+	return import_choice_to_json(source);
 }
 
 // One row of the import plan as the dialog shows it.
@@ -585,6 +585,7 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("archives_linked", json_number(double(report.archives_linked.size())));
 		build.set("loose_written", json_number(double(report.loose_written.size())));
 		build.set("files_hashed", json_number(double(report.files_hashed)));
+		build.set("bytes_hashed", json_number(double(report.bytes_hashed)));
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
 	}
 	out.set("build", std::move(build));
@@ -654,10 +655,10 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));
 	out.set("rows", std::move(planned));
-	const auto sources_page = [&page](const std::vector<ImportSource> &sources) {
+	const auto sources_page = [&page](const std::vector<ImportChoice> &sources) {
 		JsonValue list = JsonValue::make_array();
 		for (size_t i = page.first(sources.size()); i < page.last(sources.size()); ++i)
-			list.push(import_source_to_json(sources[i]));
+			list.push(import_choice_to_json(sources[i]));
 		return list;
 	};
 	out.set("choice_count", json_number(double(preview.choices.size())));

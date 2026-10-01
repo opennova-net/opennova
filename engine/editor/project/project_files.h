@@ -2,9 +2,11 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <functional>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <editor/assets/asset_kind.h>
@@ -28,11 +30,31 @@ bool read_file_text(const std::string &path, std::string &out, std::string &erro
 bool write_file_atomic(const std::string &path, const void *data, size_t size, std::string &error);
 bool write_file_atomic(const std::string &path, const std::string &text, std::string &error);
 
-// The written file at `from` put in the place of `to`, replacing it (one rename); false with the
-// OS reason when it is refused (a write-protected `to`), `from` then left where it is. The file
-// replaced, its last write moves past the one it had, however soon after it the new one was
-// written (the stamps that tell a file changed are its size and last write).
+// The written file at `from` put in the place of `to`, replacing it (one rename, rename_with_retry);
+// false with the OS reason when it is refused (a write-protected `to`), `from` then left where it
+// is. The file replaced, its last write moves past the one it had, however soon after it the new
+// one was written (the stamps that tell a file changed are its size and last write).
 bool replace_file(const std::string &from, const std::string &to, std::string &error);
+
+// Whether a refused rename may go through when tried again a moment later: Windows' access denied
+// and sharing violation, the refusals a scanner or an indexer holding one of the files open for a
+// moment gives (S13 A3 measured 3 of 400 replace_file refusals clearing on a 2 ms retry).
+bool rename_refusal_passes(const std::error_code &ec);
+// std::filesystem::rename of the system paths, tried again a few times within some 30 ms while
+// its refusal may pass (rename_refusal_passes); false with the last refusal in `ec`. Every
+// rename that puts a file or a build in place takes it: replace_file, the build's publish.
+bool rename_with_retry(const std::filesystem::path &from, const std::filesystem::path &to, std::error_code &ec);
+
+// A file made at `path` and opened for writing, only when no file of that name is there: null,
+// and nothing touched, when one is (or it cannot be made). A build's copies are made through it,
+// so a copy never writes through a name another file may stand behind (a hard link to the last
+// good build's archive: S13 A8).
+std::FILE *create_new_file(const std::string &path);
+
+// The file's last write set to now: a file put in place by a copy or a rename that kept the last
+// write of the file it came from (a rename's copy, an import's publish) reads as written now to
+// every cache that keys a file's content by its size and last write (S13 A8).
+bool refresh_last_write(const std::string &path, std::string &error);
 using FileReplace = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
 
 // Several files written as one (a rename everywhere): every file's bytes read and every text

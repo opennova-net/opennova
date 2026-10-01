@@ -1971,7 +1971,7 @@ static int test_import_fix_plans_dependencies() {
 			                  row.found_in == "the game install" && row.needed_by.file == "main.mnu");
 		TEST_EXPECT(found);
 	}
-	std::vector<ImportSource> kept;
+	std::vector<ImportChoice> kept;
 	for (const ImportPlanRow &row : shown.plan->rows) kept.push_back(row.source);
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = kept;
@@ -3183,7 +3183,7 @@ static int test_handle_entered_once() {
 	TEST_EXPECT(editor_test::write_text(loose, "notes"));
 	std::vector<Diagnostic> diagnostics;
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
-	import.imports = list_import_sources({loose}, diagnostics);
+	import.imports = list_import_choices({loose}, diagnostics);
 	before = session.handle_entries();
 	session.handle(import);
 	session.run_operations();
@@ -3421,7 +3421,7 @@ static int test_view_events() {
 	const std::string loose = dir.file("loose/notes.txt");
 	TEST_EXPECT(editor_test::write_text(loose, "notes"));
 	std::vector<Diagnostic> diagnostics;
-	session.handle(request::plan_import(list_import_sources({ loose }, diagnostics), false));
+	session.handle(request::plan_import(list_import_choices({ loose }, diagnostics), false));
 	session.run_operations();
 	events = posted();
 	TEST_EXPECT(events.size() == 1 && events[0].kind == ViewEventKind::ImportPlanned &&

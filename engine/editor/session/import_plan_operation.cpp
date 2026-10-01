@@ -17,7 +17,7 @@ constexpr uint64_t kPlanSteps = 3;
 
 ImportPlanOperation::ImportPlanOperation(ProblemsService &problems, const ProjectPaths &paths,
 		const ProjectDocument &document, const AssetGraph &graph,
-		const std::vector<std::shared_ptr<const DocumentBase>> &open, std::vector<ImportSource> roots,
+		const std::vector<std::shared_ptr<const DocumentBase>> &open, std::vector<ImportChoice> roots,
 		bool with_dependencies, std::string install) :
 		problems_(problems),
 		paths_(paths),

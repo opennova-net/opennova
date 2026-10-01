@@ -25,13 +25,13 @@ namespace fs = std::filesystem;
 
 namespace opennova::editor {
 
-std::vector<ImportSource> list_import_sources(const std::vector<std::string> &paths,
+std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &paths,
                                              std::vector<Diagnostic> &diagnostics) {
-	std::vector<ImportSource> sources;
+	std::vector<ImportChoice> sources;
 	for (const std::string &path : paths) {
 		std::error_code ec;
 		if (!fs::is_regular_file(path, ec)) {
-			diagnostics.push_back(make_finding(CoreFinding::ImportSource, DiagnosticSeverity::Error,
+			diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,
 			                                  "File not found: " + path));
 		} else if (strutil::ends_with_icase(path, ".pff")) {
 			Vfs archive;
@@ -59,9 +59,9 @@ bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> 
 	return game.read_file(name, out);
 }
 
-std::vector<ImportSource> list_retail_import_sources(const std::string &retail_root, const ProjectDocument &document,
+std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics) {
-	std::vector<ImportSource> sources;
+	std::vector<ImportChoice> sources;
 	if (retail_root.empty()) {
 		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
 		                                  "Choose the game install folder in File > Project settings... first."));
@@ -75,7 +75,7 @@ std::vector<ImportSource> list_retail_import_sources(const std::string &retail_r
 	}
 	for (const VfsFileLocation &file : game.list_files()) {
 		if (strutil::ends_with_icase(file.logical_name, ".pff")) continue; // the archives themselves
-		ImportSource source;
+		ImportChoice source;
 		source.path = retail_root;
 		source.entry = file.logical_name;
 		source.install = true;
@@ -183,7 +183,7 @@ void report_textures_left(const std::vector<Output> &outputs, const AssetScan &e
 
 } // namespace
 
-ImportResult import_assets(const std::vector<ImportSource> &sources, const ProjectPaths &paths,
+ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
                            const ProjectDocument &document, bool replace_existing) {
 	ImportResult result;
 	// A staging folder a crash left behind (under the cache: never scanned, never packed) goes
@@ -212,7 +212,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		}
 	};
 	// Every source read, and every file it makes checked, before anything is written.
-	for (const ImportSource &source : sources) {
+	for (const ImportChoice &source : sources) {
 		const std::string name = source.name();
 		FileNameProblem problem = FileNameProblem::None;
 		std::string message;
@@ -403,26 +403,22 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		}
 	}
 
-	// Published in order, each file after its import record, by renames. A failure stops it:
-	// the record of a file that did not publish goes with it (it was written for it), the rest
-	// is not published, each said.
+	// Published in order, each file after its import record, by replace_file (a rename tried again
+	// while a scanner holds the file, the last write moved past the one it replaces, so the caches
+	// that know a file by its size and last write never take it for the file it replaced: S13 A8).
+	// A failure stops it: the record of a file that did not publish goes with it (it was written for
+	// it), the rest is not published, each said.
 	for (size_t i = 0; i < outputs.size(); ++i) {
 		const Output &output = outputs[i];
 		const fs::path destination = fs::path(paths.root) / output.relative;
 		const fs::path record = fs::path(destination.generic_string() + kImportSidecarSuffix);
-		std::error_code ec;
-		std::string failed;
-		if (!records[i].empty()) {
-			fs::rename(records[i], record, ec);
-			if (ec) failed = output.relative + kImportSidecarSuffix;
-		}
-		if (failed.empty()) {
-			fs::rename(staged[i], destination, ec);
-			if (ec) {
-				failed = output.relative;
-				std::error_code ignored;
-				if (!records[i].empty()) fs::remove(record, ignored);
-			}
+		std::string failed, why;
+		if (!records[i].empty() && !replace_file(records[i], record.generic_string(), why))
+			failed = output.relative + kImportSidecarSuffix;
+		if (failed.empty() && !replace_file(staged[i], destination.generic_string(), why)) {
+			failed = output.relative;
+			std::error_code ignored;
+			if (!records[i].empty()) fs::remove(record, ignored);
 		}
 		if (failed.empty()) {
 			result.imported.push_back(output.relative);
@@ -431,7 +427,7 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 		remove_stage(stage, folders);
 		result.diagnostics.push_back(make_finding(
 		        CoreFinding::ImportPublish, DiagnosticSeverity::Error,
-		        "Could not write " + failed + ": " + ec.message() + ". The import stopped there: " + std::to_string(i) +
+		        "Could not write " + failed + ": " + why + ". The import stopped there: " + std::to_string(i) +
 		                " of " + std::to_string(outputs.size()) + " files were imported.",
 		        output.name));
 		for (size_t rest = i; rest < outputs.size(); ++rest) {

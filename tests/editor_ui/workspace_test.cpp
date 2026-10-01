@@ -1286,7 +1286,7 @@ void test_import_dialog() {
 	const ImGuiID dialog = ImHashStr("Import files");
 	const auto sources = [](const EditorRequest &request) {
 		std::vector<std::string> out;
-		for (const ImportSource &source : request.imports) out.push_back(source.path);
+		for (const ImportChoice &source : request.imports) out.push_back(source.path);
 		return out;
 	};
 	using Paths = std::vector<std::string>;

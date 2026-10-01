@@ -102,8 +102,8 @@ AssetKind ImportOrigin::file_kind(const std::string &name) const {
 	return kind;
 }
 
-ImportSource ImportOrigin::source(const std::string &name) const {
-	ImportSource out;
+ImportChoice ImportOrigin::source(const std::string &name) const {
+	ImportChoice out;
 	if (kind_ == Kind::Folder) {
 		out.path = (fs::path(path_) / name).generic_string();
 		out.native = true;
@@ -137,7 +137,7 @@ std::string first_candidate(const ImportNeed &need, const Exists &exists) {
 
 // Two sources of one file: the same member of the same archive or install, or the same
 // file of the same folder (names without case, as the folder's listing compares them).
-bool same_file(const ImportSource &a, const ImportSource &b) {
+bool same_file(const ImportChoice &a, const ImportChoice &b) {
 	if (a.install != b.install || a.entry.empty() != b.entry.empty()) return false;
 	if (!a.entry.empty()) return fs::path(a.path) == fs::path(b.path) && key(a.entry) == key(b.entry);
 	const fs::path x(a.path), y(b.path);
@@ -182,7 +182,7 @@ public:
 	// A selected source, read as import_assets reads it; what a converter makes of it, each
 	// output a row (the first file of a name only is walked). The cap stops it before it is
 	// read, and takes a converter's outputs whole or not at all.
-	void add_source(const ImportSource &source, bool walk) {
+	void add_source(const ImportChoice &source, bool walk) {
 		if (files_ >= cap_) {
 			plan_.truncated = true;
 			return;
@@ -369,7 +369,7 @@ private:
 			out = *made->second;
 			return true;
 		}
-		const ImportSource &source = plan_.rows[row].source;
+		const ImportChoice &source = plan_.rows[row].source;
 		std::string error;
 		if (!source.install && source.entry.empty()) return read_file_bytes(source.path, out, error);
 		const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
@@ -441,7 +441,7 @@ private:
 	// and never the planned file itself), with whether the bytes differ.
 	void add_rival(size_t row, const ImportOrigin *origin, const std::string &spelling) {
 		if (!origin || spelling.empty()) return;
-		const ImportSource source = origin->source(spelling);
+		const ImportChoice source = origin->source(spelling);
 		if (same_file(plan_.rows[row].source, source)) return;
 		for (const ImportRival &rival : plan_.rows[row].rivals)
 			if (same_file(rival.source, source)) return;
@@ -589,7 +589,7 @@ private:
 
 } // namespace
 
-ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_dependencies, const ProjectPaths &paths,
+ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
                        const std::string &retail_directory, size_t file_cap,
                        std::shared_ptr<const ImportOrigin> install_mounted) {
@@ -605,7 +605,7 @@ ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_depen
 			                                        error + " The files the import needs are not looked for there."));
 		planner.set_install(install);
 	}
-	for (const ImportSource &source : sources) {
+	for (const ImportChoice &source : sources) {
 		if (plan.truncated) break;
 		planner.add_source(source, with_dependencies);
 	}

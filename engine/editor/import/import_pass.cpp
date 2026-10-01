@@ -19,7 +19,8 @@ namespace opennova::editor {
 namespace {
 
 // 3: every file an import reads (a source, and since S13 A8 its inputs) by its path, and each
-// source's record apart; a cache of 2 kept a source's size, time, hash and record on one line.
+// source's record apart with the content hash of each input it lists; a cache of 2 kept a source's
+// size, time, hash and record on one line.
 constexpr int kImportCacheSchemaVersion = 3;
 
 } // namespace
@@ -60,21 +61,32 @@ ImportPass::Cache ImportPass::load_cache(const std::string &path, std::string &t
 		}
 	if (const io::JsonValue *records = json.get("records"); records && records->is_array())
 		for (const io::JsonValue &item : records->array) {
-			uint64_t record = 0;
+			Made made;
 			const std::string source = item.is_object() ? item.get_string("source", "") : std::string();
-			if (!source.empty() && io::parse_hex64(item.get_string("record", ""), record)) cache.records[source] = record;
+			if (source.empty() || !io::parse_hex64(item.get_string("record", ""), made.record)) continue;
+			bool read = true;
+			if (const io::JsonValue *inputs = item.get("inputs"); inputs && inputs->is_array())
+				for (const io::JsonValue &input : inputs->array) {
+					uint64_t hash = 0;
+					read = read && input.is_string() && io::parse_hex64(input.string, hash);
+					made.inputs.push_back(hash);
+				}
+			if (read) cache.records[source] = std::move(made);
 		}
 	return cache;
 }
 
 // Written only when it changed: a pass over an untouched project writes nothing, and a
-// project with no import sources and no cache yet (a clone opened for `status`) gets none.
+// project with no import sources and no cache yet (a clone opened for `status`) gets none. A file
+// whose last write lies too near the pass (io::file_stamp_settled) is left out, read again next
+// time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read.
 void ImportPass::save_cache() const {
 	if (seen_.files.empty() && seen_.records.empty() && cache_text_.empty()) return;
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kImportCacheSchemaVersion));
 	io::JsonValue files = io::JsonValue::make_array();
 	for (const auto &[file, seen] : seen_.files) {
+		if (!io::file_stamp_settled(seen.modified, pass_began_)) continue;
 		io::JsonValue item = io::JsonValue::make_object();
 		item.set("path", io::JsonValue::make_string(file));
 		item.set("size", io::JsonValue::make_number(double(seen.size)));
@@ -84,10 +96,15 @@ void ImportPass::save_cache() const {
 	}
 	json.set("files", std::move(files));
 	io::JsonValue records = io::JsonValue::make_array();
-	for (const auto &[source, record] : seen_.records) {
+	for (const auto &[source, made] : seen_.records) {
 		io::JsonValue item = io::JsonValue::make_object();
 		item.set("source", io::JsonValue::make_string(source));
-		item.set("record", io::JsonValue::make_string(io::hex64(record)));
+		item.set("record", io::JsonValue::make_string(io::hex64(made.record)));
+		if (!made.inputs.empty()) {
+			io::JsonValue inputs = io::JsonValue::make_array();
+			for (const uint64_t hash : made.inputs) inputs.push(io::JsonValue::make_string(io::hex64(hash)));
+			item.set("inputs", std::move(inputs));
+		}
 		records.push(std::move(item));
 	}
 	json.set("records", std::move(records));
@@ -102,6 +119,7 @@ bool ImportPass::step(uint64_t budget) {
 	do {
 		switch (phase_) {
 		case Phase::Start: {
+			pass_began_ = io::file_clock_now_ticks();
 			cache_ = load_cache(paths_.import_cache_file, cache_text_);
 			std::error_code ec;
 			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
@@ -246,27 +264,30 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		}
 		now.hash = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 	}
-	const auto made = cache_.records.find(source.source);
-	uint64_t record = made == cache_.records.end() ? 0 : made->second;
+	// What this machine made the outputs from (none on a clone: they are made again).
+	const auto known = cache_.records.find(source.source);
+	Made made = known == cache_.records.end() ? Made() : known->second;
 
-	// The other files the last import read, each as its line says (S13 A8): one gone, one outside
-	// the project, or one whose content moved makes the import stale. Every one is looked at, so the
-	// cache keeps them all.
-	bool inputs_current = true;
-	for (const ImportInput &input : sidecar.inputs) {
+	// The other files the last import read, each by the content hash it had when this machine made
+	// the outputs (S13 A8): one gone, one outside the project, or one whose content moved makes the
+	// import stale. Every one is looked at, so the cache keeps them all.
+	bool inputs_current = made.inputs.size() == sidecar.inputs.size();
+	for (size_t i = 0; i < sidecar.inputs.size(); ++i) {
 		std::string file, input_relative;
 		uint64_t hash = 0;
-		if (!ImportContext::resolve(folder, root, input.path, file, input_relative) ||
-		    !file_hash(file, input_relative, hash, spent) || hash != input.hash)
+		if (!ImportContext::resolve(folder, root, sidecar.inputs[i], file, input_relative) ||
+		    !file_hash(file, input_relative, hash, spent) || i >= made.inputs.size() || hash != made.inputs[i])
 			inputs_current = false;
 	}
 
+	// The outputs live under the cache, deeper than the source: their checks take the system path.
 	bool outputs_present = !sidecar.outputs.empty();
 	for (const std::string &output : sidecar.outputs)
-		if (!fs::is_regular_file(root_ / source.output_dir / output, ec)) outputs_present = false;
+		if (!fs::is_regular_file(system_path((root_ / source.output_dir / output).generic_string()), ec))
+			outputs_present = false;
 	const bool stale = sidecar.importer != importer->id || sidecar.version != importer->version ||
-	                   now.hash != sidecar.source_hash || !inputs_current || !outputs_present || record == 0 ||
-	                   record != import_sidecar_fingerprint(sidecar) ||
+	                   now.hash != sidecar.source_hash || !inputs_current || !outputs_present || made.record == 0 ||
+	                   made.record != import_sidecar_fingerprint(sidecar) ||
 	                   (force_ && import_source_named(only_, source.source));
 	if (stale && (have_bytes || read_source())) {
 		ImportContext context(filename, bytes, sidecar.options, folder, root);
@@ -297,7 +318,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 				for (const std::string &old : sidecar.outputs) {
 					bool kept = false;
 					for (const ImportOutput &output : product.outputs) if (output.name == old) kept = true;
-					if (!kept) fs::remove(out_dir / old, ec);
+					if (!kept) fs::remove(system_path((out_dir / old).generic_string()), ec);
 				}
 				sidecar.outputs.clear();
 				for (const ImportOutput &output : product.outputs) {
@@ -317,7 +338,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			sidecar.importer = importer->id;
 			sidecar.version = importer->version;
 			sidecar.source_hash = now.hash;
-			sidecar.inputs = context.inputs();
+			// The record lists the inputs' paths alone; their hashes are this machine's, the cache's.
+			sidecar.inputs.clear();
+			for (const ImportInput &input : context.inputs()) sidecar.inputs.push_back(input.path);
 			// The committed record changes only when what it says changed.
 			if (sidecar != recorded && !save_import_sidecar(sidecar_path, sidecar, error)) {
 				error.asset = source.sidecar;
@@ -326,7 +349,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			}
 		}
 		if (source.ok) {
-			record = import_sidecar_fingerprint(sidecar);
+			made.record = import_sidecar_fingerprint(sidecar);
+			made.inputs.clear();
+			for (const ImportInput &input : context.inputs()) made.inputs.push_back(input.hash);
 			source.reimported = true;
 			++result_.reimported;
 		}
@@ -334,10 +359,10 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		source.ok = false; // the read failed: its finding is listed
 	}
 	seen_.files[source.source] = now;
-	if (record != 0) seen_.records[source.source] = record;
-	for (const ImportInput &input : sidecar.inputs) {
+	if (made.record != 0) seen_.records[source.source] = made;
+	for (const std::string &input : sidecar.inputs) {
 		std::string file, input_relative;
-		if (ImportContext::resolve(folder, root, input.path, file, input_relative)) source.inputs.push_back(input_relative);
+		if (ImportContext::resolve(folder, root, input, file, input_relative)) source.inputs.push_back(input_relative);
 	}
 	for (const std::string &output : sidecar.outputs)
 		source.outputs.push_back((fs::path(source.output_dir) / output).generic_string());

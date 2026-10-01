@@ -34,9 +34,9 @@ struct Importer {
 	int version = 0; // bump it and every source imports again
 	std::vector<std::string> extensions; // lower-case, with the dot
 	ImportOptions default_options;
-	// The import of the context's source: its outputs, each named after the source's stem
-	// (renamed_import_output relies on it), from the source and the files it reads through the
-	// context.
+	// The import of the context's source: its outputs, each named after the source's stem, or
+	// the stem, an underscore and a suffix of its own where it makes several (renamed_import_output
+	// relies on it), from the source and the files it reads through the context.
 	bool (*run)(ImportContext &context, ImportProduct &out) = nullptr;
 };
 
@@ -47,9 +47,10 @@ const Importer *importer_for(const std::string &source_name);
 const Importer *importer_for(const std::string &source_name, const std::vector<Importer> &table);
 
 // What an output of a source is called once the source is renamed (ADR 0046 d6, S9c):
-// an importer names its outputs after the source's stem (logo.png makes logo.pcx), so
-// the output takes the new stem and keeps its extension; one whose stem is not the
-// source's keeps its name.
+// an importer names its outputs after the source's stem (logo.png makes logo.pcx), and an importer
+// of several outputs each `<stem>_<suffix>` (S13 A8: a particle layout `smoke` making smoke_01.tga
+// and smoke_02.tga, a terrain set its colour tiles), so the output takes the new stem, keeping its
+// suffix and its extension; one named otherwise keeps its name.
 std::string renamed_import_output(const std::string &output, const std::string &old_source,
                                   const std::string &new_source);
 

@@ -860,6 +860,16 @@ void RenameTransaction::commit_file_rename() {
 			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + ec.message(), plan.path));
 			return;
 		}
+		// A copy keeps the last write of the file it came from, so a cache that knows a file by its
+		// size and last write (the build's, the import's) would take it for the file that held the
+		// name before (two of a size swapping names): it is dated now (S13 A8).
+		std::string dated;
+		if (!refresh_last_write(new_path.generic_string(), dated)) {
+			findings_.push_back(refusal(CoreFinding::RenameCopy, "The file could not be copied to its new name: " + dated, plan.path));
+			std::error_code ignored;
+			fs::remove(new_path, ignored);
+			return;
+		}
 		// The import record travels with its source (a stray record already at the new
 		// name, whose source was never there, is replaced).
 		if (!plan.sidecar.empty()) {

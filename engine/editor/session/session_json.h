@@ -107,7 +107,7 @@ void set_page(io::JsonValue &out, const JsonPage &page, size_t total, size_t bes
 // A record's address, {row, kind, child}; an import source as a request's imports take it,
 // {path, entry?, install?, native?}.
 io::JsonValue address_to_json(const NodeAddress &address);
-io::JsonValue import_source_to_json(const ImportSource &source);
+io::JsonValue import_choice_to_json(const ImportChoice &source);
 
 // A Value both ways: integers and reals are JSON numbers, text a JSON string.
 io::JsonValue value_to_json(const Value &value);

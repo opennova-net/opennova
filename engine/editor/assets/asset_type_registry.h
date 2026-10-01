@@ -40,7 +40,7 @@ bool is_material_chunk_file(const std::string &path, uint64_t &read);
 // True when a file of that name is of `kind` by its name alone: what classify_asset makes
 // of it, for a `.bin` name (whose content decides) any of the table kinds it can be, an import
 // source for a name an importer converts (the scan's kind for one with its import record), and
-// for a name no extension types a texture too (a chunk container, by its content).
+// for a name no rule types a material chunk too (a chunk container, by its content).
 bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind);
 
 // The kind a required-resource row's file name implies without reading anything:

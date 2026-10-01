@@ -47,17 +47,24 @@ public:
 private:
 	// What this machine last saw of the project's files an import reads (ADR 0046 d6, S9c, S13 A8):
 	// each source's and each input's size and last-write time with the content hash they vouch
-	// for, and each source's fingerprint of the import record its outputs under the cache were made
-	// from (none: no outputs made on this machine yet). Machine-local and disposable, so the
-	// committed sidecar never carries a time a checkout changes.
+	// for (kept only for a file whose last write lies io::kFileStampSettle or more before the pass
+	// that read it: io::file_stamp_settled), and what each source's outputs under the cache were
+	// made from: the fingerprint of its import record and the content hash of each input the record
+	// lists, in its order (none: no outputs made on this machine yet). Machine-local and disposable,
+	// so the committed sidecar never carries a time a checkout changes, nor a hash an input's edit
+	// changes.
 	struct FileSeen {
 		uint64_t size = 0;
 		int64_t modified = 0; // the file system's own clock ticks: compared, never shown
 		uint64_t hash = 0;
 	};
+	struct Made {
+		uint64_t record = 0;          // import_sidecar_fingerprint of the record
+		std::vector<uint64_t> inputs; // each input's content hash, as the record lists them
+	};
 	struct Cache {
-		std::map<std::string, FileSeen> files;   // by project-relative path
-		std::map<std::string, uint64_t> records; // by the source's project-relative path
+		std::map<std::string, FileSeen> files; // by project-relative path
+		std::map<std::string, Made> records;   // by the source's project-relative path
 	};
 
 	enum class Phase : uint8_t { Start, Listing, Importing, Done };
@@ -84,6 +91,7 @@ private:
 	size_t next_ = 0;
 	std::string current_;
 	std::string cache_text_; // the cache as read, to write it only when it changed
+	int64_t pass_began_ = 0; // when the pass began (io::file_clock_now_ticks)
 	Cache cache_;
 	Cache seen_; // the files this pass looked at: a gone source or input leaves the cache
 	ImportRunResult result_;

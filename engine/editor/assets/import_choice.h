@@ -4,7 +4,9 @@
 
 namespace opennova::editor {
 
-// A native file: loose, a named member of one PFF, or (install) the effective file of
+// A file chosen to import (the import dialog's rows, a request's `imports`), named so since S13 A8
+// apart from an import source, the project file an importer converts (AssetKind::ImportSource):
+// a native file, loose, a named member of one PFF, or (install) the effective file of
 // a mounted game install, resolved the way a stock launch resolves it (the archive
 // table's precedence; a loose file beside the archives is not what it reads, as it is
 // only under /d). Importing makes an editable
@@ -15,7 +17,7 @@ namespace opennova::editor {
 // archive) is copied as it is, with no record: a PNG of the game stays a texture. A value
 // of its own (S13 V4), so a request and the view name one without the import machinery
 // (asset_import.h).
-struct ImportSource {
+struct ImportChoice {
 	std::string path;
 	std::string entry;    // empty for a loose file; the logical name of a member or an install's
 	bool install = false; // `path` is the game install to mount
@@ -26,9 +28,9 @@ struct ImportSource {
 	std::string name() const;
 };
 
-inline bool operator==(const ImportSource &a, const ImportSource &b) {
+inline bool operator==(const ImportChoice &a, const ImportChoice &b) {
 	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native;
 }
-inline bool operator!=(const ImportSource &a, const ImportSource &b) { return !(a == b); }
+inline bool operator!=(const ImportChoice &a, const ImportChoice &b) { return !(a == b); }
 
 } // namespace opennova::editor

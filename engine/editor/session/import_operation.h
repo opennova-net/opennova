@@ -25,7 +25,7 @@ namespace opennova::editor {
 class ImportOperation : public SessionOperation {
 public:
 	// `replan`: the dialog's plan made again (null with no dialog open); `shown`, the plan it showed.
-	ImportOperation(const ProjectPaths &paths, const ProjectDocument &document, std::vector<ImportSource> imports,
+	ImportOperation(const ProjectPaths &paths, const ProjectDocument &document, std::vector<ImportChoice> imports,
 			bool replace, std::unique_ptr<ImportPlanOperation> replan, std::shared_ptr<const ImportPlan> shown);
 
 	OperationKind kind() const override { return OperationKind::ImportApply; }
@@ -45,7 +45,7 @@ public:
 	const std::vector<Diagnostic> &refusals() const { return refusals_; }
 	// What it asked to import, what the import did, and the refresh after it (done when it imported a
 	// file).
-	const std::vector<ImportSource> &imports() const { return imports_; }
+	const std::vector<ImportChoice> &imports() const { return imports_; }
 	const ImportResult &result() const { return result_; }
 	bool refreshed() const { return refresh_ != nullptr; }
 	ProjectRefresh &refresh() { return *refresh_; }
@@ -55,7 +55,7 @@ private:
 
 	ProjectPaths paths_;
 	ProjectDocument document_;
-	std::vector<ImportSource> imports_;
+	std::vector<ImportChoice> imports_;
 	bool replace_ = false;
 	std::unique_ptr<ImportPlanOperation> replan_;
 	std::shared_ptr<const ImportPlan> shown_;

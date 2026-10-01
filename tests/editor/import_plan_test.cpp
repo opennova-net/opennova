@@ -151,7 +151,7 @@ static int test_plan_archive() {
 	                                {"tex.pcx", "pcx"},
 	                                {"other.txt", "text"}}));
 	const auto before = snapshot(project.dir.path);
-	ImportSource member;
+	ImportChoice member;
 	member.path = archive;
 	member.entry = "first.mnu";
 	const ImportPlan plan = project.plan({member});
@@ -222,7 +222,7 @@ static int test_plan_game_install() {
 	const ImportPlanRow *alone = row_named(folder_only, "logo.tga");
 	TEST_EXPECT(lost && lost->state == State::NotFound && lost->kind == AssetKind::Font && alone && alone->rivals.empty());
 	// A source of the install: what it names is looked for in the install, no competition.
-	ImportSource retail;
+	ImportChoice retail;
 	retail.path = install;
 	retail.entry = "retail.mnu";
 	retail.install = true;
@@ -296,7 +296,7 @@ static int test_plan_cycle_and_cap() {
 	TEST_EXPECT(capped.truncated && taken == 2 && capped.rows.size() == 2);
 	// The cap binds the selection too, followed or not: three fonts, room for two.
 	TEST_EXPECT(editor_test::write_text(art + "/fc.fnt", "fnt"));
-	const std::vector<ImportSource> fonts = {{art + "/fa.fnt", {}}, {art + "/fb.fnt", {}}, {art + "/fc.fnt", {}}};
+	const std::vector<ImportChoice> fonts = {{art + "/fa.fnt", {}}, {art + "/fb.fnt", {}}, {art + "/fc.fnt", {}}};
 	for (const bool follow : {true, false}) {
 		const ImportPlan roots = project.plan(fonts, follow, std::string(), 2);
 		TEST_EXPECT(roots.truncated && roots.rows.size() == 2 && roots.rows[1].name == "fb.fnt");

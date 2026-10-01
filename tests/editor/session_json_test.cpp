@@ -430,10 +430,10 @@ static int test_request_round_trip() {
 	EditorRequestKind gone = EditorRequestKind::Rescan;
 	TEST_EXPECT(!editor_request_kind_from_token("go_to_record", gone));
 
-	ImportSource native; // a loose file copied as the game's own (S11f)
+	ImportChoice native; // a loose file copied as the game's own (S11f)
 	native.path = "C:/data/logo.png";
 	native.native = true;
-	ImportSource install; // a file of the game install (S13 A4: install, was retail)
+	ImportChoice install; // a file of the game install (S13 A4: install, was retail)
 	install.path = "C:/games/JO";
 	install.entry = "main.mnu";
 	install.install = true;
@@ -549,8 +549,8 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
 			"Unknown request member \"text\" (new_project takes dir, title, game, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes out_dir).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir).");
+			"Unknown request member \"flagg\" (build takes out_dir, rehash).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir, rehash).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
 	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
@@ -671,11 +671,11 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
 		case F::Imports: {
-			ImportSource install;
+			ImportChoice install;
 			install.path = "C:/games/JO";
 			install.entry = "items.def";
 			install.install = true;
-			ImportSource native;
+			ImportChoice native;
 			native.path = "C:/art/logo.png";
 			native.native = true;
 			out.imports = {{"C:/data/localres.pff", "MAIN.MNU"}, install, native};
@@ -735,6 +735,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::AskName: out.ask_name = true; break;
 		case F::OpenFirst: out.open_first = true; break;
 		case F::ImportPass: out.import_pass = false; break; // its default is true
+		case F::Rehash: out.rehash = true; break;
 		case F::kCount: break;
 		}
 	}
@@ -1863,7 +1864,7 @@ static int test_import_pages() {
 	preview.open = true;
 	ImportPlan plan;
 	for (int i = 0; i < 250; ++i) {
-		const ImportSource source{"C:/art/f" + std::to_string(i) + ".txt", "", false, false};
+		const ImportChoice source{"C:/art/f" + std::to_string(i) + ".txt", "", false, false};
 		preview.choices.push_back(source);
 		preview.roots.push_back(source);
 		ImportPlanRow row;

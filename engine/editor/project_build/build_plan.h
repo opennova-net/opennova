@@ -39,6 +39,9 @@ struct BuildPlan {
 	// hashed at (the project's `.opennova/build_cache.json`, machine-local: S13 A8), so a build
 	// reads only the files that changed since; "" keeps none, every file then hashed.
 	std::string hash_cache;
+	// Every file read again, whatever the cache says, which it then keeps afresh (the build
+	// request's `rehash`, the command line's --rehash).
+	bool rehash = false;
 };
 
 // `document_findings` is the document validation over this scan

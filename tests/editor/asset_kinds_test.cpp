@@ -183,6 +183,13 @@ static int test_boot_files() {
 	}
 	TEST_EXPECT(expected_asset_kind_for_required_name("CC.BIN") == AssetKind::CountryCode);
 	TEST_EXPECT(expected_asset_kind_for_required_name("fgn2.bin") == AssetKind::RawBin);
+	// The NovaWorld screens retail ships loose in its folder and reads from there, the error page
+	// [orig: "nw_error.mnx" @ 0x558449] and the login's start page (D-NET-31): a kind of their own,
+	// loose (S13 A8: no kind before, so no build carried them).
+	for (const char *name : {"nw_error.mnx", "nw_startup.mnx", "JOP_2_MAIN.MNX"}) {
+		const AssetKind kind = classify_asset(name, nullptr);
+		TEST_EXPECT(kind == AssetKind::NovaWorldScreen && asset_kind_row(kind).archive_slot == ArchiveSlot::Loose);
+	}
 	return 0;
 }
 

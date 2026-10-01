@@ -272,7 +272,7 @@ enum class CoreFinding {
 	ImportScene,
 	ImportSceneNote,
 	ImportSidecar,
-	ImportSource,
+	ImportNotFound,
 	ImportTextureNotImported,
 	ImportUnreadable,
 	ImportWrite,

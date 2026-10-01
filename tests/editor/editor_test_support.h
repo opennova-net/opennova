@@ -7,6 +7,7 @@
 // operation it starts run to their end, an operation that holds the documents, and a finding made
 // by its code's token with what it is about.
 #include <algorithm>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -156,6 +157,33 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 
 inline bool write_text(const std::string &path, const std::string &text) {
 	return write_bytes(path, std::vector<uint8_t>(text.begin(), text.end()));
+}
+
+// The file's last write set `age` before now. A file a test writes is younger than the hash caches'
+// settle window (io::kFileStampSettle), so each pass would read it again (S13 A8); one back-dated
+// is a file written a while ago, which a cache keeps by its size and last write.
+inline bool backdate(const std::string &path, std::chrono::seconds age) {
+	std::error_code ec;
+	std::filesystem::last_write_time(opennova::editor::system_path(path),
+	                                 std::filesystem::file_time_type::clock::now() - age, ec);
+	return !ec;
+}
+
+// Every file under `dir` (its dot-folders' too) back-dated by `age`; false when one is not.
+inline bool backdate_tree(const std::string &dir, std::chrono::seconds age) {
+	namespace fs = std::filesystem;
+	std::error_code ec;
+	bool ok = true;
+	const fs::path root = opennova::editor::system_path(dir);
+	for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator();
+	     it.increment(ec)) {
+		std::error_code kind;
+		if (!it->is_regular_file(kind)) continue;
+		std::error_code dated;
+		fs::last_write_time(it->path(), fs::file_time_type::clock::now() - age, dated);
+		ok = ok && !dated;
+	}
+	return ok && !ec;
 }
 
 // What a directory tree holds, as one text: every entry's path under `dir` in their order, and
