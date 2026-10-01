@@ -113,6 +113,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp

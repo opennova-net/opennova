@@ -4031,6 +4031,28 @@ target_link_libraries(editor_viewport_wire_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_viewport_wire COMMAND editor_viewport_wire_test)
 
+# What a drag in a mission's viewport writes (editor/preview/mission_handle_edit, ADR 0046 S14) and the
+# mission camera (editor/preview/mission_camera), over a fake record document that carries the
+# mission's field tokens: a move on the plane and on a fake ground with and without stick, the snap,
+# the offsets kept, a sample within a 16.16 step, the lift, the turn's wrap and snap, an area's
+# edges; the camera's wire yaw and pitch against presentation_forward_from_angles, a look, a fly,
+# the ground point, top, the wire form.
+add_executable(editor_mission_handle_edit_test editor/mission_handle_edit_test.cpp)
+target_link_libraries(editor_mission_handle_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_handle_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_handle_edit COMMAND editor_mission_handle_edit_test)
+
+# The mission viewport's portable half that reads no document type (ADR 0046 S14): the scene over
+# a source a test holds (editor/preview/mission_scene: read, the patch reading the changed rows
+# alone, a reshape reading everything), its marks, picks and boxes, the options' wire form
+# (mission_options) and the overlays (mission_overlay: the glyphs, the rings, the primary's handles
+# with a yaw-90 entity's east, an area's box, a path's lines, the labels, the marquee, a line clipped
+# at the near plane).
+add_executable(editor_mission_scene_test editor/mission_scene_test.cpp)
+target_link_libraries(editor_mission_scene_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_scene_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
