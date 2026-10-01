@@ -39,9 +39,18 @@ int main() {
 	// A word with no choice dials at once.
 	facts.server_flags = 0x904 & ~0x4;
 	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	// TeamChoose alone opens no join choice: retail tests the discovered word
+	// against 0x6038 (server password, side passwords, spectators, spectator
+	// password) and dials a plain team game (0x904) at once.
+	// [orig: UI_EnumerateAndJoinSession @0x56a296 `test dword_25E5898, 6038h`]
+	facts.server_flags = 0x904;
+	CHECK(join_entry_step(facts, false) == JoinEntryStep::Dial);
+	facts.server_flags = static_cast<int32_t>(server_flag::kTeamChoice);
+	CHECK(join_entry_step(facts, true) == JoinEntryStep::Dial);
 	// Each choice bit prompts.
-	for (const uint32_t bit : { server_flag::kTeamChoice, server_flag::kServerPassword,
-				 server_flag::kSideAPassword, server_flag::kSideBPassword, server_flag::kSpectators }) {
+	for (const uint32_t bit : { server_flag::kServerPassword,
+				 server_flag::kSideAPassword, server_flag::kSideBPassword, server_flag::kSpectators,
+				 server_flag::kSpectators | server_flag::kSpectatorPassword }) {
 		facts.server_flags = static_cast<int32_t>(0x900u | bit);
 		CHECK(join_entry_step(facts, false) == JoinEntryStep::Prompt);
 		CHECK(join_entry_step(facts, true) == JoinEntryStep::Prompt);
