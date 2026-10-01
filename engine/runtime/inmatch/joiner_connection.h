@@ -95,7 +95,23 @@ public:
 			std::variant<ZoneTimerValue, ZoneTimerWindow, ZonePresenceCount>;
 
 	struct PollResult {
-		std::vector<std::vector<uint8_t>> outbound;   // datagrams to send back to the host
+		// Datagrams to send back to the host at the next send boundary: the admission packets
+		// whose sequences this receive allocated (ClientRuntime holds them behind the
+		// send-holdoff gate) and the handshake's ClientAuth (no holdoff exists before the
+		// host's CS update), or a terminal teardown's goodbye burst (shipped at once).
+		std::vector<std::vector<uint8_t>> outbound;
+		// Datagrams retail transmits from INSIDE the receive pump: the opcode handler
+		// calls CNapiNPManager_SendTo itself, so they never wait for the send-holdoff gate.
+		// They are the 0x84 resend answers (each requested sequence rebuilt from its
+		// retained records with the current ACK) and the 0x45 pong of a WR-flagged 0x85.
+		// The owner ships them at their datagram's receive position.
+		// [orig: NapiNPProtocol_PumpRecvQueues @0x6266a0 dispatches 0x84/0x85 off its
+		//  receive FIFO (the queue_mask & 2 leg @0x6267f2..0x6268d0, the client receive
+		//  pump's flags 26 from CNapiNetwork_PumpClientProtocolRecv @0x4c4fe0);
+		//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
+		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
+		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
+		std::vector<std::vector<uint8_t>> immediate_outbound;
 		// Receive handlers queue reliable semantic replies here. ClientRuntime folds all state
 		// from this receive boundary first, then places these behind the shared send-holdoff gate
 		// so they batch with same-frame housekeeping/gameplay at PumpClientProtocolSend.
@@ -180,9 +196,20 @@ public:
 
 	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram on retail's active
 	// send interval measured by the monotonic wall clock (independent of render/simulation cadence).
-	// Once Driving, flush deferred ACKs, loss-recovery probes, and the held C2S 0x0A after local
-	// world readiness. Semantic admission transitions are emitted reactively from handle_datagram().
+	// Once Driving, flush deferred ACKs, the active-interval header-only probes, and the held C2S
+	// 0x0A after local world readiness. Semantic admission transitions are emitted reactively from
+	// handle_datagram(); the 0x44 missing-sequence request belongs to finish_receive_pump().
 	std::vector<std::vector<uint8_t>> pump(uint32_t now_tick);
+
+	// The receive pump's per-connection tail, run once per client frame after every datagram
+	// of the batch went through handle_datagram. A future S2C packet in the batch latched the
+	// missing-sequence check; when the ordered queue still holds a packet (the gap outlived the
+	// batch) ONE C2S 0x44 naming the missing sequences goes out NOW, outside the send-holdoff
+	// gate, and the latch clears either way. Empty when nothing is owed or the session is lost.
+	// [orig: NapiNPProtocol_PumpRecvQueues @0x6266a0, the per-connection tail @0x6269bb..0x6269d6
+	//  -> CNapiNPConnection_SendMissingSeqList(conn, 0) @0x6269ce -> CNapiNPManager_SendTo
+	//  @0x62376d; the latch is set by NapiNPProtocol_HandleSessionPacket @0x626c3a]
+	std::vector<uint8_t> finish_receive_pump();
 
 	// Frame the retail leave: a burst of identical 0x46 ClientGoodBye datagrams for the owner to
 	// ship before dropping the socket (the host's only non-timeout teardown trigger). Empty until
@@ -202,12 +229,12 @@ public:
 	std::vector<uint8_t> frame_c2s_uplink(uint16_t handle_H, uint16_t type,
 	                                      const PlayerExtendedUplink &body);
 
-	// Wrap one inner {tag,body} as a single 0x43 SESSION datagram over this connection's live SCRK +
-	// seq (advances the outbound seq, stamps the ack). The framing path the per-frame housekeeping
-	// rides (0x34 keepalive / 0x4C net-quality / 0x2C RTT, P6 §5.44) so those messages share the SAME
-	// 0x43/SCRK envelope and seq stream as the 0x0C uplink — the witnessed PumpClientProtocolSend flush
-	// bundles them into 0x43s the same way. [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 ->
-	// CNapiNPConnection_QueueMessage @0x628640]
+	// Frame one inner {tag,body} as a complete send boundary of its own: one 0x43 SESSION datagram
+	// over this connection's live SCRK + seq (advances the outbound seq, stamps the ack), then the
+	// boundary's flush-counter advance. A test/replay seam only: every live C2S producer queues a
+	// ProtocolMessage for ClientRuntime's holdoff-gated boundary instead, as retail queues every
+	// message and frames only in PumpClientProtocolSend. [orig: CNapiNetwork_QueueReliableMessage
+	// @0x4c4fa0 -> CNapiNPConnection_QueueMessage @0x628640]
 	std::vector<uint8_t> frame_inner(uint8_t tag, std::vector<uint8_t> body) {
 		std::vector<uint8_t> datagram =
 				frame_session({make_protocol_message(tag, std::move(body))});
@@ -392,11 +419,6 @@ public:
 	// Semantic-message form for ClientRuntime's shared send boundary. This performs the same stage
 	// validation as frame_loadout_resubmit without allocating a separate sequenced datagram.
 	bool prepare_loadout_resubmit(ProtocolMessage &message_out) const;
-
-	// One C2S 0x1D stance-change ([i16 action id] 0xA9 crouch / 0xAA prone / 0xAC
-	// stand), sent immediately from the stance key SELECT. Empty before in-match.
-	// [orig: @0x4e0d77/@0x4e0df3/@0x4e0e3e -> NapiNPServerMsg_HandleStanceChange @0x501c60]
-	std::vector<uint8_t> frame_stance_change(uint16_t action_id);
 
 	// Anti-cheat challenge traffic counters. Every field is bookkeeping around
 	// the existing handlers (no wire effect): a live join that punts can be

@@ -48,6 +48,7 @@
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/npwire/session_ping.h>
 #include <net/npwire/session_vars.h>
 #include <net/novacrypto/crc32.h>
 
@@ -4175,12 +4176,15 @@ bool run_server_ping_answers_and_measures() {
 			nw_encode_outbound(0x85, ping_body(7u, 1, 0xAABBCCDDu));
 	inmatch::JoinerConnection::PollResult result =
 			joiner.handle_datagram(request.data(), request.size());
-	if (!expect(result.outbound.size() == 1, "a keyed WR ping draws one reply datagram"))
+	// SendPing writes the pong to the socket from inside the receive pump
+	// [orig: Nwu_HandlePing -> CNapiNPConnection_SendPing @0x623c6f].
+	if (!expect(result.immediate_outbound.size() == 1 && result.outbound.empty(),
+			"a keyed WR ping draws one reply datagram, sent at once"))
 		return false;
 	uint8_t opcode = 0;
 	std::vector<uint8_t> reply;
-	if (!expect(nw_decode_inbound(result.outbound[0].data(), result.outbound[0].size(),
-						opcode, reply) &&
+	if (!expect(nw_decode_inbound(result.immediate_outbound[0].data(),
+						result.immediate_outbound[0].size(), opcode, reply) &&
 					opcode == 0x45 && reply == ping_body(0x10203040u, 0, 0xAABBCCDDu),
 			"the reply is a 0x45 keyed by the server SK, WR clear, the same MS"))
 		return false;
@@ -4191,13 +4195,15 @@ bool run_server_ping_answers_and_measures() {
 	now_ms = 6000;
 	const std::vector<uint8_t> pong = nw_encode_outbound(0x85, ping_body(7u, 0, 5750u));
 	result = joiner.handle_datagram(pong.data(), pong.size());
-	if (!expect(result.outbound.empty() && joiner.session_ping_ms() == 250u,
+	if (!expect(result.outbound.empty() && result.immediate_outbound.empty() &&
+					joiner.session_ping_ms() == 250u,
 			"a WR-clear ping lands the outer round trip"))
 		return false;
 	// A foreign receiver key is dropped silently.
 	const std::vector<uint8_t> foreign = nw_encode_outbound(0x85, ping_body(9u, 1, 1u));
 	result = joiner.handle_datagram(foreign.data(), foreign.size());
-	return expect(result.outbound.empty() && joiner.session_ping_ms() == 250u,
+	return expect(result.outbound.empty() && result.immediate_outbound.empty() &&
+					joiner.session_ping_ms() == 250u,
 			"a ping keyed by another connection is ignored");
 }
 
@@ -5033,87 +5039,294 @@ bool run_same_packet_holdoff_keeps_first_admission_boundary_open() {
 			"the next boundary opens after exactly N-1 held frames");
 }
 
-bool run_holdoff_defers_transient_header_reconstruction() {
+// The host's CS update dictating send-holdoff field 3 (direction 1, mask 8).
+ProtocolMessage cs_send_holdoff_update(uint8_t period) {
+	return make_protocol_message(
+			0x00, {0x01, 0x08, 0x00, 0x00, 0x00, period, 0x00, 0x00, 0x00}, 0xA0);
+}
+
+bool decode_client_resend_list(const std::vector<uint8_t> &datagram, uint32_t server_key,
+		std::vector<uint32_t> &requested) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	return nw_decode_inbound(datagram.data(), datagram.size(), opcode, body) &&
+			opcode == SESSION_OPCODE_CLIENT_RESEND_LIST &&
+			decode_session_resend_list(body.data(), body.size(), server_key, requested);
+}
+
+// Under a NovaWorld host's twelve-tick send holdoff the C2S 0x44 still leaves
+// on the frame the gap is seen: retail sends it from the client receive pump,
+// which runs every frame, while the holdoff gates only PumpClientProtocolSend.
+// The latch clears at that pump, so a frame with no new future packet sends
+// nothing more; a later future packet behind the same gap asks again.
+// [orig: Client_ProcessNetworkFrame — CNapiNetwork_PumpClientProtocolRecv
+//  @0x42c228 ahead of the holdoff gate @0x42c3dd; NapiNPProtocol_PumpRecvQueues
+//  @0x6269bb..0x6269d6 -> CNapiNPConnection_SendMissingSeqList @0x6269ce;
+//  the latch NapiNPProtocol_HandleSessionPacket @0x626c3a]
+bool run_missing_sequence_request_leaves_from_the_receive_pump() {
+	constexpr uint32_t kServerKey = 0x4E41434Bu;
+	const std::string client_scrk = "CLIENT-NACK-HOLDOFF-SCRK";
+	const std::string server_scrk = "SERVER-NACK-HOLDOFF-SCRK";
+	inmatch::ClientRuntime client("NackHoldoff", [] { return uint64_t{0x55667788u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> settings =
+			frame_server_session(server_tx, server_scrk, 1u, {cs_send_holdoff_update(12)});
+	client.receive(settings.data(), settings.size());
+	if (!expect(!client.Client_ProcessNetworkFrame(1).empty() &&
+	                    client.send_holdoff_ticks() == 12 &&
+	                    client.send_holdoff_countdown() == 12,
+			"nack-holdoff: the first open boundary arms the NovaWorld twelve-tick period"))
+		return false;
+	const uint32_t flushes = client.send_flush_counter();
+	const uint32_t next_seq = client.outbound_seq();
+
+	// S2C seq 2 (the pong of our ping: flag 0, stamp 0x55667000) is lost on the
+	// wire; seq 3 arrives three ticks into the held period.
+	const std::vector<uint8_t> lost = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(0x57, {0x00, 0x70, 0x66, 0x55, 0x00})});
+	const std::vector<uint8_t> after_gap = frame_server_session(server_tx, server_scrk, 1u, {});
+	if (!expect(client.Client_ProcessNetworkFrame(2).empty() &&
+	                    client.Client_ProcessNetworkFrame(3).empty(),
+			"nack-holdoff: the held frames before the gap send nothing"))
+		return false;
+	client.receive(after_gap.data(), after_gap.size());
+	const std::vector<std::vector<uint8_t>> gap_frame = client.Client_ProcessNetworkFrame(4);
+	std::vector<uint32_t> requested;
+	if (!expect(gap_frame.size() == 1 &&
+	                    decode_client_resend_list(gap_frame[0], kServerKey, requested) &&
+	                    requested == std::vector<uint32_t>({2}),
+			"nack-holdoff: the frame that sees the gap sends one 0x44 naming the lost sequence"))
+		return false;
+	if (!expect(client.send_holdoff_countdown() == 9 &&
+	                    client.send_flush_counter() == flushes &&
+	                    client.outbound_seq() == next_seq,
+			"nack-holdoff: the 0x44 leaves mid-holdoff without opening the send boundary"))
+		return false;
+	if (!expect((client.net_quality_indicators().link_error_bits &
+	                    static_cast<uint32_t>(hud::kNetLinkErrorIncoming)) != 0,
+			"nack-holdoff: the sent request raises the incoming link error"))
+		return false;
+	if (!expect(client.Client_ProcessNetworkFrame(5).empty(),
+			"nack-holdoff: the receive pump cleared its latch; no repeat without a new packet"))
+		return false;
+
+	// A further future packet behind the same gap asks again on its own frame.
+	const std::vector<uint8_t> later = frame_server_session(server_tx, server_scrk, 1u, {});
+	client.receive(later.data(), later.size());
+	const std::vector<std::vector<uint8_t>> again = client.Client_ProcessNetworkFrame(6);
+	requested.clear();
+	if (!expect(again.size() == 1 &&
+	                    decode_client_resend_list(again[0], kServerKey, requested) &&
+	                    requested == std::vector<uint32_t>({2}) &&
+	                    client.inbound_gap_depth() == 2,
+			"nack-holdoff: a later future packet behind the gap re-requests it at once"))
+		return false;
+
+	// The host's retransmit of seq 2 closes the gap and drains 3 and 4; the ACK
+	// itself waits for the next open boundary.
+	client.receive(lost.data(), lost.size());
+	if (!expect(client.Client_ProcessNetworkFrame(7).empty() &&
+	                    client.inbound_frontier_seq() == 4 &&
+	                    client.inbound_gap_depth() == 0 &&
+	                    client.client_ping_ms() == 0x788u,
+			"nack-holdoff: the recovered sequence dispatches and drains the queue"))
+		return false;
+	for (uint32_t tick = 8; tick < 13; ++tick) {
+		if (!expect(client.Client_ProcessNetworkFrame(tick).empty(),
+				"nack-holdoff: the rest of the period stays held"))
+			return false;
+	}
+	const std::vector<std::vector<uint8_t>> boundary = client.Client_ProcessNetworkFrame(13);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	return expect(boundary.size() == 1 &&
+	                      decode_client_session(boundary[0], client_scrk, header, messages) &&
+	                      matches_client_header(header, kServerKey, next_seq, 4) &&
+	                      client.send_flush_counter() == flushes + 1,
+			"nack-holdoff: the next open boundary carries the recovered frontier's ACK");
+}
+
+// A host's 0x84 is answered from the receive pump too: NapiNP_HandleResendList
+// rebuilds each requested sequence from its retained records with the current
+// ACK and writes it to the socket itself, so the reconstruction leaves on the
+// frame the request arrives, mid-holdoff, without the transient records the
+// original carried and without touching the flush counter. A WR-flagged 0x85
+// is answered the same way by its pong.
+// [orig: NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket
+//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
+//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
+bool run_resend_answer_and_pong_leave_from_the_receive_pump() {
+	constexpr uint32_t kServerKey = 0x55667788u;
 	const std::string client_scrk = "CLIENT-HOLDOFF-RETAINED-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-RETAINED-SCRK";
-	uint64_t now_ms = 0x10203040u;
-	inmatch::ClientRuntime client(
-			"HoldoffRetained", [&now_ms] { return now_ms; });
-	client.seed_session(
-			0x55667788u, 1u, client_scrk, server_scrk,
-			1, 0, 0x0002, w::kPlayerInfantryTypeId,
-			0, 0x00100000u, /*replay_mode=*/false);
+	inmatch::ClientRuntime client("HoldoffRetained", [] { return uint64_t{0x10203040u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
 
-	const std::vector<std::vector<uint8_t>> original =
-			client.Client_ProcessNetworkFrame(0);
+	// Seq 1: a reliable stance change beside the transient RTT ping.
+	if (!expect(client.queue_stance_change(0xA9), "resend-holdoff: the stance change queues"))
+		return false;
+	const std::vector<std::vector<uint8_t>> original = client.Client_ProcessNetworkFrame(0);
 	ProtocolPacketHeader original_header;
 	std::vector<ProtocolMessage> original_messages;
 	if (!expect(original.size() == 1 &&
-	                    decode_client_session(
-			                    original[0], client_scrk,
-			                    original_header, original_messages) &&
-	                    original_header.seq_num == 1 &&
-	                    original_messages.size() == 1 &&
-	                    original_messages[0].tag == 0x2C,
-			"holdoff fixture sends one transient C2S RTT packet"))
-		return false;
-	if (!expect(client.retained_outbound_depth() == 0,
-			"C2S RTT is pruned after its first physical send"))
+	                    decode_client_session(original[0], client_scrk, original_header,
+	                            original_messages) &&
+	                    original_header.seq_num == 1 && original_messages.size() == 2 &&
+	                    original_messages[0].tag == c2s::STANCE_CHANGE &&
+	                    original_messages[1].tag == c2s::RTT_CONSUMED &&
+	                    client.retained_outbound_depth() == 1,
+			"resend-holdoff: seq 1 carries the retained 0x1D and the one-send 0x2C"))
 		return false;
 
 	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
-	const std::vector<uint8_t> hold = frame_server_session(
-			server_tx, server_scrk, 1u,
-			{make_protocol_message(
-					0x00,
-					{0x01, 0x08, 0x00, 0x00, 0x00,
-					 0x02, 0x00, 0x00, 0x00},
-					0xA0)});
-	client.receive(hold.data(), hold.size());
-	const std::vector<std::vector<uint8_t>> first_open =
-			client.Client_ProcessNetworkFrame(1);
-	if (!expect(!first_open.empty() &&
-	                    client.send_holdoff_ticks() == 2 &&
-	                    client.send_holdoff_countdown() == 2,
-			"initial field-3 update preserves the open boundary then rearms period two"))
+	const std::vector<uint8_t> settings =
+			frame_server_session(server_tx, server_scrk, 1u, {cs_send_holdoff_update(12)});
+	client.receive(settings.data(), settings.size());
+	if (!expect(!client.Client_ProcessNetworkFrame(1).empty() &&
+	                    client.send_holdoff_countdown() == 12,
+			"resend-holdoff: the initial CS update keeps the boundary open, then holds twelve"))
+		return false;
+	const uint32_t flushes = client.send_flush_counter();
+	const uint32_t next_seq = client.outbound_seq();
+	if (!expect(client.Client_ProcessNetworkFrame(2).empty(),
+			"resend-holdoff: the period holds"))
 		return false;
 
 	std::vector<uint8_t> resend_body;
-	if (!expect(encode_session_resend_list(
-				1u, {original_header.seq_num}, resend_body),
-			"holdoff fixture builds ServerResendList"))
+	if (!expect(encode_session_resend_list(1u, {original_header.seq_num}, resend_body),
+			"resend-holdoff: build the ServerResendList"))
 		return false;
-	const std::vector<uint8_t> resend = nw_encode_outbound(
-			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
+	const std::vector<uint8_t> resend =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
 	client.receive(resend.data(), resend.size());
-	if (!expect(client.Client_ProcessNetworkFrame(2).empty() &&
-	                    client.send_holdoff_countdown() == 1,
-			"period two holds the retained reconstruction for exactly one frame"))
-		return false;
-	// The next frame decrements 1 -> 0 and opens. Retail still reconstructs the
-	// requested sequence header, but the transient 0x2C node is already gone.
-	const std::vector<std::vector<uint8_t>> released =
-			client.Client_ProcessNetworkFrame(3);
+	const std::vector<std::vector<uint8_t>> answered = client.Client_ProcessNetworkFrame(3);
 	ProtocolPacketHeader resent_header;
 	std::vector<ProtocolMessage> resent_messages;
-	if (!expect(released.size() == 2 &&
-	                    decode_client_session(
-			                    released[0], client_scrk,
-			                    resent_header, resent_messages) &&
-	                    resent_header.seq_num == original_header.seq_num &&
-	                    resent_header.ack_count == 1 &&
-	                    resent_messages.empty(),
-			"NACK replay rebuilds the old sequence without transient RTT"))
+	if (!expect(answered.size() == 1 &&
+	                    decode_client_session(answered[0], client_scrk, resent_header,
+	                            resent_messages) &&
+	                    matches_client_header(resent_header, kServerKey, 1, 1) &&
+	                    resent_messages.size() == 1 &&
+	                    resent_messages[0].tag == c2s::STANCE_CHANGE &&
+	                    resent_messages[0].payload == std::vector<uint8_t>({0xA9, 0x00}),
+			"resend-holdoff: the 0x84 frame rebuilds seq 1 (retained 0x1D only, current ACK)"))
 		return false;
+	if (!expect(client.send_holdoff_countdown() == 10 &&
+	                    client.send_flush_counter() == flushes &&
+	                    client.outbound_seq() == next_seq,
+			"resend-holdoff: the reconstruction neither opens the boundary nor ages it"))
+		return false;
+
+	const std::vector<uint8_t> ping = nw_encode_outbound(
+			SESSION_OPCODE_SERVER_PING, build_session_ping_body(1u, true, 0xAABBCCDDu));
+	client.receive(ping.data(), ping.size());
+	const std::vector<std::vector<uint8_t>> pong = client.Client_ProcessNetworkFrame(4);
+	uint8_t opcode = 0;
+	std::vector<uint8_t> pong_body;
+	SessionPingBody parsed;
+	if (!expect(pong.size() == 1 &&
+	                    nw_decode_inbound(pong[0].data(), pong[0].size(), opcode, pong_body) &&
+	                    opcode == SESSION_OPCODE_CLIENT_PING &&
+	                    parse_session_ping_body(pong_body.data(), pong_body.size(), parsed) &&
+	                    parsed.receiver_local_key == kServerKey && !parsed.wants_reply &&
+	                    parsed.timestamp_ms == 0xAABBCCDDu &&
+	                    client.send_holdoff_countdown() == 9,
+			"resend-holdoff: a WR ping's 0x45 pong leaves on its own receive frame"))
+		return false;
+
+	for (uint32_t tick = 5; tick < 13; ++tick) {
+		if (!expect(client.Client_ProcessNetworkFrame(tick).empty(),
+				"resend-holdoff: the rest of the period stays held"))
+			return false;
+	}
+	const std::vector<std::vector<uint8_t>> live = client.Client_ProcessNetworkFrame(13);
 	ProtocolPacketHeader live_header;
 	std::vector<ProtocolMessage> live_messages;
-	return expect(decode_client_session(
-				released[1], client_scrk,
-				live_header, live_messages) &&
-	                      live_header.seq_num == 3 &&
-	                      live_messages.size() == 1 &&
-	                      live_messages[0].tag == 0x2C,
-			"header-only reconstruction stays ordered before the fresh live send");
+	return expect(live.size() == 1 &&
+	                      decode_client_session(live[0], client_scrk, live_header,
+	                              live_messages) &&
+	                      live_header.seq_num == next_seq && live_messages.size() == 1 &&
+	                      live_messages[0].tag == c2s::RTT_CONSUMED &&
+	                      client.send_flush_counter() == flushes + 1,
+			"resend-holdoff: the next open boundary sends only the fresh live packet");
+}
+
+// A stance change pressed between boundaries is QUEUED like every other
+// reliable C2S: it mints no sequence and ages nothing until the next open
+// boundary, which carries it in queue order ahead of what was queued after it
+// (here the receive pump's C2S 0x22 re-request of an unbound 0x16 row, also
+// queued at its receive) and the frame's live 0x2C. That boundary advances the
+// flush counter exactly once.
+// [orig: Input_HandleActionBinding_0 cases 169/170/172 ->
+//  CNapiNetwork_QueueReliableMessage(0x1D, 1, 0, .., 2) @0x4e0de7;
+//  NapiNPClientMsg_PlayerList -> QueueReliableMessage(0x22, ..) @0x42fc35;
+//  CNapiNPConnection_QueueMessage @0x628640 -> NapiNPMessage_Create @0x627fc0;
+//  CNapiNPConnection_PumpFlags 0x80 @0x6297d5, only in PumpClientProtocolSend]
+bool run_queued_stance_waits_for_the_send_boundary() {
+	constexpr uint32_t kServerKey = 0x53544E43u;
+	const std::string client_scrk = "CLIENT-STANCE-QUEUE-SCRK";
+	const std::string server_scrk = "SERVER-STANCE-QUEUE-SCRK";
+	inmatch::ClientRuntime client("StanceQueue", [] { return uint64_t{0x31323334u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> settings =
+			frame_server_session(server_tx, server_scrk, 1u, {cs_send_holdoff_update(12)});
+	client.receive(settings.data(), settings.size());
+	if (!expect(!client.Client_ProcessNetworkFrame(1).empty() &&
+	                    client.send_holdoff_countdown() == 12,
+			"stance-queue: the first open boundary arms the twelve-tick period"))
+		return false;
+	const uint32_t flushes = client.send_flush_counter();
+	const uint32_t next_seq = client.outbound_seq();
+	if (!expect(client.Client_ProcessNetworkFrame(2).empty(), "stance-queue: the period holds"))
+		return false;
+
+	if (!expect(client.queue_stance_change(0xAA), "stance-queue: prone queues between boundaries"))
+		return false;
+	if (!expect(client.Client_ProcessNetworkFrame(3).empty() &&
+	                    client.outbound_seq() == next_seq &&
+	                    client.send_flush_counter() == flushes,
+			"stance-queue: the queued 0x1D mints no sequence and ages no flush while held"))
+		return false;
+	const std::vector<uint8_t> roster = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(0x16, encode_test_player_list({{9, 2}}))});
+	client.receive(roster.data(), roster.size());
+	if (!expect(client.Client_ProcessNetworkFrame(4).empty() &&
+	                    client.outbound_seq() == next_seq &&
+	                    client.send_flush_counter() == flushes,
+			"stance-queue: the receive-side 0x22 re-request queues the same way"))
+		return false;
+	for (uint32_t tick = 5; tick < 13; ++tick) {
+		if (!expect(client.Client_ProcessNetworkFrame(tick).empty() &&
+		                    client.send_flush_counter() == flushes,
+				"stance-queue: held frames never age the flush counter"))
+			return false;
+	}
+
+	const std::vector<std::vector<uint8_t>> boundary = client.Client_ProcessNetworkFrame(13);
+	ProtocolPacketHeader header;
+	std::vector<ProtocolMessage> messages;
+	if (!expect(boundary.size() == 1 &&
+	                    decode_client_session(boundary[0], client_scrk, header, messages) &&
+	                    matches_client_header(header, kServerKey, next_seq, 2) &&
+	                    messages.size() == 3,
+			"stance-queue: the next open boundary frames one packet at the next sequence"))
+		return false;
+	if (!expect(messages[0].tag == c2s::STANCE_CHANGE &&
+	                    messages[0].payload == std::vector<uint8_t>({0xAA, 0x00}) &&
+	                    messages[1].tag == c2s::PLAYER_SYNC_REQUEST &&
+	                    messages[1].payload == std::vector<uint8_t>({9, 0xF7, 0x1C}) &&
+	                    messages[2].tag == c2s::RTT_CONSUMED,
+			"stance-queue: the boundary carries the 0x1D, then the 0x22, then the live 0x2C"))
+		return false;
+	return expect(client.send_flush_counter() == flushes + 1 &&
+	                      client.retained_outbound_depth() == 2 &&
+	                      client.send_holdoff_countdown() == 12,
+			"stance-queue: the boundary ages once and retains both reliable records");
 }
 
 bool run_settings_update_preserves_active_holdoff_countdown() {
@@ -6674,7 +6887,9 @@ int main() {
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
-	                run_holdoff_defers_transient_header_reconstruction() &&
+	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
+	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
+	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_settings_update_preserves_active_holdoff_countdown() &&
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&

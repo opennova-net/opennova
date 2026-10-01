@@ -84,13 +84,11 @@ public:
 	// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0]
 	std::vector<std::vector<uint8_t>> disconnect();
 
-	// One C2S 0x1D stance-change datagram (0xA9 crouch / 0xAA prone / 0xAC stand), sent
-	// immediately from the stance key SELECT. Empty for HostClient or pre-in-match.
-	// [orig: @0x4e0d77/@0x4e0df3/@0x4e0e3e]
-	std::vector<uint8_t> send_stance_change(uint16_t action_id) {
-		if (role_ != Role::Joiner || joiner_ == nullptr) return {};
-		return joiner_->frame_stance_change(action_id);
-	}
+	// Queue one reliable C2S 0x1D stance change (0xA9 crouch / 0xAA prone / 0xAC stand) from
+	// the stance key SELECT; it leaves inside the next open send boundary in queue order.
+	// False for HostClient or before in-match. [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
+	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7]
+	bool queue_stance_change(uint16_t action_id);
 
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
 	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
@@ -701,7 +699,7 @@ private:
 	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
 	// loopback view runs it too (retail's client frame is role-agnostic).
 	void tick_roster_revive_countdown();
-	// Frames the C2S 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queued.
+	// Queues the C2S 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds produced.
 	void drain_visible_refreshes();
 	// The once-per-62-frames CNetQuality update + level fold that precedes the
 	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
@@ -721,14 +719,15 @@ private:
 	replication::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
 	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
-	// Some receive handlers must allocate an exact wire packet immediately: handshake/admission
-	// packets preserve their retail grouping, and 0x84 reconstruction must reuse an old sequence.
-	// They still belong to PumpClientProtocolSend, so hold the already-framed datagrams behind the
-	// same field-3 gate and flush them before any later sequence allocated at the open boundary.
+	// The handshake/admission receive handlers allocate exact wire packets immediately to keep
+	// their retail grouping. They still belong to PumpClientProtocolSend, so hold the already-framed
+	// datagrams behind the same field-3 gate and flush them before any later sequence allocated at
+	// the open boundary. (A 0x84 reconstruction and a 0x45 pong are not held: retail transmits them
+	// from the receive pump, PollResult::immediate_outbound.)
 	std::deque<std::vector<uint8_t>> framed_send_queue_;
-	// 0x34/0x4C and semantic receive replies are produced before retail reaches the holdoff-gated
-	// send pump. Keep them across held frames, then batch them at the first open boundary beside
-	// one-shots/gameplay.
+	// 0x34/0x4C, semantic receive replies and the input-side one-shots (the 0x1D stance change, the
+	// medic call, chat, squad sends) are queued before retail reaches the holdoff-gated send pump.
+	// Keep them across held frames, then batch them at the first open boundary beside gameplay.
 	std::deque<ProtocolMessage> pre_send_queue_;
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person

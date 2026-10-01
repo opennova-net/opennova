@@ -367,9 +367,8 @@ bool JoinerRole::queue_numbered_seat(int index) {
 			carrier->seats[static_cast<size_t>(selected.seat_index)].bone_index);
 }
 
-void JoinerRole::send_stance_change(uint16_t action_id) {
-	if (!runtime) return;
-	send(runtime->send_stance_change(action_id));
+bool JoinerRole::queue_stance_change(uint16_t action_id) {
+	return runtime && runtime->queue_stance_change(action_id);
 }
 
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire

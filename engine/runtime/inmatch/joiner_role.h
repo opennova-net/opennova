@@ -105,9 +105,10 @@ public:
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello
 	// latch and the per-frame clock are shared with the in-mission frame.
 	void poll_preload();
-	// The witnessed key handlers emit one C2S 0x1D with the action id at once
-	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e].
-	void send_stance_change(uint16_t action_id);
+	// The witnessed key handlers queue one C2S 0x1D with the action id; it leaves
+	// inside the next open send boundary [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
+	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7].
+	bool queue_stance_change(uint16_t action_id);
 	// Choose the use-item seat request without mutating the local body.
 	// The caller applies the equipped weapon's busy gate before this action.
 	bool queue_mount_toggle();

@@ -2102,13 +2102,49 @@ void JoinerConnection::on_server_resend_list(
 			[](uint32_t sequence) { return sequence != 0; }))
 		net_quality_link_errors_ |= kNetQualityLinkErrorOutgoing;
 
+	// Each requested sequence is rebuilt and TRANSMITTED by the handler itself, inside the
+	// receive pump: retail's SendSessionPacket writes the packet straight to the socket, so a
+	// resend never waits for the send-holdoff gate and never touches the flush counter.
+	// [orig: NapiNP_HandleResendList @0x623980..0x6239da -> CNapiNPConnection_SendSessionPacket
+	//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039]
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
 				? conn_.seq.next_outbound_seq
 				: requested_sequence;
 		std::vector<uint8_t> datagram = frame_retained_session(sequence);
-		if (!datagram.empty()) out.outbound.push_back(std::move(datagram));
+		if (!datagram.empty()) out.immediate_outbound.push_back(std::move(datagram));
 	}
+}
+
+// Retail's client receive pump (flags 26: the 0x8 PumpRecvQueues leg, never the send pump's 738)
+// drains its datagram FIFO through the opcode handlers, then walks each client connection: it
+// parses every queued packet the closed frontier now admits, and when HandleSessionPacket latched
+// a future packet (conn+0x174) while the queue still holds one, it sends the missing-sequence
+// list at once and clears the latch. Every client frame runs this, so the request goes out on the
+// frame the gap is seen, whatever the send-holdoff countdown says. The send pump's own timed
+// missing-sequence leg (PumpSendIntervals' packet_queue_interval_ms) is off for a JO connection:
+// the JOINTOPERATIONS template stores -1 and a retail host's CS updates only carry fields 3 and 13.
+// [orig: CNapiNetwork_PumpClientProtocolRecv @0x4c4fe0 -> NapiNPProtocol_Pump @0x62a6ac ->
+//  NapiNPProtocol_PumpRecvQueues @0x6266a0 — the latch test @0x6269bb, the queue test @0x6269c8,
+//  CNapiNPConnection_SendMissingSeqList(conn, 0) @0x6269ce, the clear @0x6269d6; the template
+//  -1 CNapiNetwork_Init @0x4caad8/@0x4caba8; the timed leg CNapiNPConnection_PumpSendIntervals
+//  @0x629032; the CS senders NapiNPServer_UpdateHoldoffTicks @0x4c5f5e (mask 8) and
+//  NapiNPServer_HandleNewConnection @0x4c81bd (mask 0x2000)]
+std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
+	if (poll_session_loss() || phase_ == Phase::Error) return {};
+	if (!conn_.seq.missing_request_pending) return {};
+	conn_.seq.missing_request_pending = false;
+	if (conn_.seq.queued_inbound.empty()) return {};
+	const std::vector<uint32_t> missing = build_session_missing_sequence_list(conn_.seq, false);
+	std::vector<uint8_t> missing_body;
+	if (!encode_session_resend_list(conn_.server_sk, missing, missing_body)) return {};
+	// A sent request that named a sequence fires the incoming link-error callback
+	// [orig: CNapiNPConnection_SendMissingSeqList — has_missing_seqs @0x623690, after the send
+	//  @0x623775..0x6237bd cb_client_2 = Network_LogIncomingPacketError @0x4c4890].
+	if (std::any_of(missing.begin(), missing.end(),
+			[](uint32_t sequence) { return sequence != 0; }))
+		net_quality_link_errors_ |= kNetQualityLinkErrorIncoming;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(missing_body));
 }
 
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
@@ -2133,28 +2169,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 		}
 		return out;
 	}
-	// Pump is the receive-batch boundary used by ClientRuntime: every framed datagram has already
-	// been drained through handle_datagram before this call. Clear retail's future-packet latch
-	// once here; emit 0x44 only if the contiguous drain still left a gap.
-	if (conn_.seq.missing_request_pending) {
-		conn_.seq.missing_request_pending = false;
-		if (!conn_.seq.queued_inbound.empty()) {
-			const std::vector<uint32_t> missing =
-					build_session_missing_sequence_list(conn_.seq, false);
-			std::vector<uint8_t> missing_body;
-			if (encode_session_resend_list(conn_.server_sk, missing, missing_body)) {
-				out.push_back(nw_encode_outbound(
-						SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(missing_body)));
-				// A sent request that named a sequence fires the incoming
-				// link-error callback [orig: CNapiNPConnection_SendMissingSeqList
-				// — has_missing_seqs @0x623690, after the send @0x623775..0x6237bd
-				// cb_client_2 = Network_LogIncomingPacketError @0x4c4890].
-				if (std::any_of(missing.begin(), missing.end(),
-						[](uint32_t sequence) { return sequence != 0; }))
-					net_quality_link_errors_ |= kNetQualityLinkErrorIncoming;
-			}
-		}
-	}
+	// The send boundary never emits the 0x44 missing-sequence request: retail resolves that latch
+	// in the receive pump, every client frame, outside the holdoff gate (finish_receive_pump).
 	// Retail's reliable sender does not blindly resend an unanswered semantic packet. While retained
 	// records remain, the active-send interval mints a NEW header-only sequence. A peer missing the
 	// preceding semantic sequence observes the gap and requests it through 0x44/0x84; the existing
@@ -2310,11 +2326,6 @@ bool JoinerConnection::prepare_deployment_pick(
 	return true;
 }
 
-// C2S 0x1D stance-change: [i16 action id] 0xA9 crouch / 0xAA prone / 0xAC stand — sent
-// straight from the stance key SELECT (the local latch rides the same loopback in
-// retail); the server applies with mutual exclusion.
-// [orig: senders (cases 169/170/172) @0x4e0d77/@0x4e0df3/@0x4e0e3e;
-//  apply NapiNPServerMsg_HandleStanceChange @0x501c60]
 bool JoinerConnection::begin_redeployment() {
 	if (phase_ != Phase::InMatch || !has_self_handle_) return false;
 	// The authenticated connection and self entity survive death. Only the spawn-success gate and
@@ -2325,15 +2336,6 @@ bool JoinerConnection::begin_redeployment() {
 	deployment_pick_sequence_ = 0;
 	deployment_reply_seen_ = false;
 	return true;
-}
-
-std::vector<uint8_t> JoinerConnection::frame_stance_change(uint16_t action_id) {
-	if (phase_ != Phase::InMatch) return {};
-	std::vector<uint8_t> datagram = frame_session({make_protocol_message(
-			0x1D, {static_cast<uint8_t>(action_id & 0xFFu),
-		               static_cast<uint8_t>((action_id >> 8) & 0xFFu)})});
-	if (!datagram.empty()) complete_session_send_flush(conn_.seq);
-	return datagram;
 }
 
 std::vector<uint8_t> JoinerConnection::frame_c2s_uplink(uint16_t handle_H, uint16_t type,

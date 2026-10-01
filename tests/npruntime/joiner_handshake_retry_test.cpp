@@ -285,8 +285,11 @@ bool run_client_active_probe_recovers_join() {
 			SESSION_OPCODE_SERVER_RESEND_LIST, std::move(resend_body));
 	const inmatch::JoinerConnection::PollResult recovered = joiner.handle_datagram(
 			resend_datagram.data(), resend_datagram.size());
-	return expect(recovered.outbound.size() == 1 &&
-				recovered.outbound[0] == join_datagram,
+	// The handler transmits the rebuilt packet itself, inside the receive pump
+	// [orig: NapiNP_HandleResendList -> CNapiNPConnection_SendSessionPacket @0x6239b6].
+	return expect(recovered.immediate_outbound.size() == 1 &&
+				recovered.outbound.empty() &&
+				recovered.immediate_outbound[0] == join_datagram,
 			"server 0x84 reconstructs the retained JOIN at sequence 2");
 }
 
