@@ -61,10 +61,19 @@ const REQUEST_PROSE := (
 		+ "{id, list, records}: the list replaced by these records); revert_to_saved's edits are [{id, field}]. "
 		+ "The answer: ok (it read), served, and outcome: done (false when it was refused, did not finish, or "
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
-		+ "unsaved_prompt, operation (the one it started or joined, 0 for none; build and play return at once "
-		+ "and editor_query operation shows it stepping), findings, added (the records its edits made, in "
+		+ "unsaved_prompt, operation (the one it started or joined, 0 for none: open_project, new_project, rescan, "
+		+ "reimport, the import previews and import_files, the renames, build and play start one; the request "
+		+ "returns at once and editor_query operation shows it stepping, done of total, cancellable), findings, "
+		+ "added (the records its edits made, in "
 		+ "order) and, for an edit_record, made {label: id}; then status and view_revision (the view's clock "
-		+ "after it, which editor_state's since takes). A request that asks open_first is read once before its "
+		+ "after it, which editor_state's since takes). wait (this tool's, not the request's): true awaits the "
+		+ "operation the request started or joined and the validation after it (the polls step it: no request "
+		+ "runs it, an edit's included), then answers with operation (what it came to: id, kind, end done, "
+		+ "failed or cancelled, the findings a rename's commit, an import's write or a reimport made, and an "
+		+ "import's imported and not_imported files) and the status and view_revision as it left them; wait_ms "
+		+ "(300000 when left out) bounds it, past which the answer says timed_out: true, its operation the "
+		+ "running operation's state and its validation the validation's. A request that "
+		+ "asks open_first is read once before its "
 		+ "document opens: one refused as it is read opens nothing. While an operation runs, a request that conflicts "
 		+ "with what it reads or writes is refused (operation.busy); the pickers are refused, pass paths "
 		+ "instead. A problem's fixes (editor_query problems) are requests of these kinds, passed back as they "
@@ -212,7 +221,11 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 			takes.append(String(field) + ("" if needs.has(field) else "?"))
 		var fields := (" {%s}" % ", ".join(PackedStringArray(takes))) if not takes.is_empty() else ""
 		lines.append("%s%s: %s" % [kind, fields, String(row.get("doc", ""))])
-	var properties := {"kind": {"type": "string", "enum": served}}
+	var properties := {"kind": {"type": "string", "enum": served},
+			"wait": {"type": "boolean", "description": "Await the operation the request starts or joins, and the "
+					+ "validation after it, before answering (this tool's, not the request's)."},
+			"wait_ms": {"type": "integer", "minimum": 0, "description": "How long wait awaits (300000 when left "
+					+ "out); past it the answer says timed_out."}}
 	for field: Variant in catalog.get("fields", []):
 		var name := String(field.get("field", ""))
 		var schema: Dictionary = FIELD_SCHEMAS.get(name, _json_schema(String(field.get("type", "string")))).duplicate(true)

@@ -375,6 +375,7 @@ static int test_session() {
 	ProjectSession session(platform, preferences);
 	TEST_EXPECT(g_probe.made == 1);
 	session.handle(request::new_project(dir.file("project"), "Checks"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.project_checks &&
@@ -389,7 +390,8 @@ static int test_session() {
 	size_t passes = stats.passes;
 	size_t updates = g_probe.updates;
 	session.handle(request::rescan());
-	session.handle(request::open_document(items_path));
+	session.run_operations();
+	editor_test::handle_to_end(session, request::open_document(items_path));
 	Document *items = session.document_for(items_path);
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty())
@@ -398,9 +400,9 @@ static int test_session() {
 	edit.edits[0].address = { items->rows()[0]->id, items->rows()[0]->kind, 0 };
 	edit.edits[0].field = "hp";
 	edit.edits[0].value = int64_t(7);
-	session.handle(edit);
+	editor_test::handle_to_end(session, edit);
 	TEST_EXPECT(items->dirty());
-	session.handle(request::save(items_path));
+	editor_test::handle_to_end(session, request::save(items_path));
 	TEST_EXPECT(!items->dirty());
 	TEST_EXPECT(stats.passes - passes >= 3 && g_probe.updates - updates == stats.passes - passes);
 	const auto probe_rows = [&view] {
@@ -418,12 +420,14 @@ static int test_session() {
 	passes = stats.passes;
 	updates = g_probe.updates;
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(stats.passes == passes + 1 && g_probe.updates == updates + 1);
 	TEST_EXPECT(session.problems_compositions() == compositions && probe_rows() == 0 &&
 			view.revisions.of(ViewConcern::Findings) == findings);
 	// It says they moved: the rows composed again, its finding among them, after the use checks'.
 	g_probe.moves = true;
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.problems_compositions() == compositions + 1 && probe_rows() == 1 &&
 			view.revisions.of(ViewConcern::Findings) != findings);
 	TEST_EXPECT(first_of(view.findings.diagnostics, "style.unused") != SIZE_MAX &&
@@ -433,6 +437,7 @@ static int test_session() {
 	g_probe.moves = false;
 	compositions = session.problems_compositions();
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(session.problems_compositions() == compositions && probe_rows() == 1);
 	// An Error of a project check never blocks a build.
 	session.handle(request::build());

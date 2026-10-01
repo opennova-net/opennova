@@ -118,6 +118,7 @@ bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &
 	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()))
 		return false;
 	session.handle(request::rescan());
+	session.run_operations();
 	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") &&
 			fill_strings(session);
 }

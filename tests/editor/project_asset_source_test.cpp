@@ -72,6 +72,7 @@ static int test_names_decode_and_rescan() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Assets"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.findings.assets != nullptr);
@@ -94,6 +95,7 @@ static int test_names_decode_and_rescan() {
 	TEST_EXPECT(assets.stamp("secret.txt") == 0);
 	const uint64_t before = assets.generation();
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(assets.generation() != before && assets.stamp("secret.txt") != 0);
 	TEST_EXPECT(assets.read("SECRET.TXT", read) && std::string(read.begin(), read.end()) == plain);
 
@@ -110,6 +112,7 @@ static int test_names_decode_and_rescan() {
 	// A PNG with no .import record is a texture the build packs as it is.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/plain.png", editor_test::gradient_png(4, 4)));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(assets.path_of("logo.pcx").find(".opennova/imported/") == 0);
 	TEST_EXPECT(assets.read("LOGO.PCX", read) && !read.empty());
 	// The import source is not: the build never packs it, so the game never finds it.
@@ -122,6 +125,7 @@ static int test_names_decode_and_rescan() {
 	const uint64_t stamp = assets.stamp("secret.txt");
 	TEST_EXPECT(editor_test::write_text(root + "/notes/secret.txt", "a different, longer plain text file"));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(assets.stamp("secret.txt") != stamp);
 	std::printf("test_names_decode_and_rescan passed\n");
 	return 0;
@@ -133,6 +137,7 @@ static int test_open_document_stands_in() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Open"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const ProjectAssetSource &assets = *view.findings.assets;

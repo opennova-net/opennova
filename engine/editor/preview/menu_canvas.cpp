@@ -230,7 +230,7 @@ MenuPress menu_canvas_press(const MenuCanvasFrame &frame, const CanvasInput &in)
 	// The screen's background: no window, or a root window that is not selected.
 	const bool background = !picked ||
 			(compiler.widget_parent(press.pick) < 0 && !has(frame.windows, picked_window));
-	if (press.join != CanvasJoin::Replace) {
+	if (press.join != CanvasJoin::Replace || !frame.editable) {
 		press.marquee = background;
 		return press;
 	}
@@ -298,7 +298,7 @@ bool menu_canvas_escape(const MenuCanvasFrame &frame, CanvasRequests &out) {
 }
 
 void menu_canvas_arrange(const MenuCanvasFrame &frame, ArrangeOp op, CanvasRequests &out) {
-	if (!frame.current)
+	if (!frame.current || !frame.editable)
 		return;
 	std::vector<Edit> edits;
 	if (arrange_edits(*frame.document, frame.windows, frame.primary, op, *frame.compiler,
@@ -339,6 +339,9 @@ void MenuCanvas::keys_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 	if (!keyboard.focused || gesture_.pressed())
 		return;
 	if (keyboard.escape && menu_canvas_escape(frame, out))
+		return;
+	// The arrows move the selection: no edit while an operation holds the documents (S13 A3).
+	if (!frame.editable)
 		return;
 	const int step = in.keys.shift ? kLayoutGrid : 1;
 	nudge_by_(frame, keyboard.arrow_x * step, keyboard.arrow_y * step, out);

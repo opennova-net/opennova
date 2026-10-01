@@ -26,7 +26,8 @@ struct ImportRunResult {
 	size_t reimported = 0;
 };
 
-// The import pass (ADR 0046 d6/d10; S8, S9c, S9p2a). An import source is a file an
+// The import pass (ADR 0046 d6/d10; S8, S9c, S9p2a), run to its end (import/import_pass.h's
+// ImportPass steps the same pass by bytes; S13 A3). An import source is a file an
 // importer converts that has its record (the committed sidecar); importing a file
 // writes the record (import_assets), and the pass never makes one: a file with no
 // record is not an import source (a PNG without one is a texture the game loads as it
@@ -44,7 +45,8 @@ struct ImportRunResult {
 // is, and its source is not imported until it reads again. Outputs land under
 // `<cache>/imported/<hash of the source's path>/`, a stable place the scan lists as
 // project files. Whatever the pass writes under the cache comes with its self-ignore
-// file (ensure_project_cache_dir); a project with no import sources gets no cache.
+// file (ensure_project_cache_dir); a project with no import sources gets no cache. The sources
+// are taken in the order of their paths.
 ImportRunResult run_imports(const ProjectPaths &paths, const ProjectDocument &project, bool force = false,
                             const std::string &only = std::string());
 

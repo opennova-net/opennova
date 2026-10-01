@@ -550,6 +550,7 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(root));
+		session.run_operations();
 		TEST_EXPECT(session.project_open() && session.view().project.retail_directory.empty());
 		opennova::editor::EditorRequest apply =
 		        opennova::editor::request::of(opennova::editor::EditorRequestKind::ApplyProjectSettings);
@@ -577,6 +578,7 @@ static int test_one_game_install() {
 		opennova::editor::FilePreferencesStore preferences(dir.file("settings.json"));
 		opennova::editor::ProjectSession session(platform, preferences);
 		session.handle(opennova::editor::request::open_project(other));
+		session.run_operations();
 		TEST_EXPECT(session.project_open() && session.view().project.retail_directory == install);
 	}
 	TEST_EXPECT(run_capture(capture, {"status", other}, text) == 0 && has("game install: " + install + "\n"));
@@ -606,12 +608,15 @@ static int test_older_local_settings() {
 	NoProcess platform;
 	opennova::editor::MemoryPreferencesStore preferences;
 	opennova::editor::ProjectSession session(platform, preferences);
-	session.handle(opennova::editor::request::open_project(root));
+	// What the Open came to says what it set aside (S13 A3: the local settings are opened as it
+	// finishes).
+	const opennova::editor::ActionOutcome opened =
+			editor_test::handle_to_end(session, opennova::editor::request::open_project(root));
 	size_t warnings = 0;
-	for (const opennova::editor::Diagnostic &d : session.outcome().findings)
+	for (const opennova::editor::Diagnostic &d : opened.findings)
 		warnings += d.code() == "local_settings.schema_version.unsupported" &&
 				d.severity == opennova::editor::DiagnosticSeverity::Warning;
-	TEST_EXPECT(session.project_open() && session.outcome().done() && warnings == 1 &&
+	TEST_EXPECT(session.project_open() && opened.done() && warnings == 1 &&
 			session.view().project.retail_directory.empty());
 	opennova::editor::ProjectSettingsChange change;
 	change.game_install = install;

@@ -12,6 +12,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 
+#include "editor/editor_test_support.h"
 #include "editor/menu_test_support.h"
 
 namespace graph_test {
@@ -38,7 +39,7 @@ inline std::vector<editor::ReferenceTarget> targets_of(const editor::Document &d
 // A Go to served as the Inspector raises it (window_requests::go_to): the file opened at the
 // record by its locator, its field shown.
 inline void go_to(editor::ProjectSession &session, const editor::ReferenceTarget &target) {
-	session.handle(editor::request::open_document(target.file, target.locator, target.field));
+	editor_test::handle_to_end(session, editor::request::open_document(target.file, target.locator, target.field));
 }
 
 inline bool has_missing(const std::vector<editor::Diagnostic> &diagnostics,
@@ -64,13 +65,13 @@ inline void edit_window(editor::ProjectSession &session, const editor::Document 
 	edit.address = address;
 	edit.field = field;
 	edit.value = std::move(value);
-	session.handle(editor::request::edit_record(document.path(), std::move(edit)));
+	editor_test::handle_to_end(session, editor::request::edit_record(document.path(), std::move(edit)));
 }
 
 // A window's first APPEARANCE row made an image of `texture` (one batch).
 inline void set_image(editor::ProjectSession &session, const editor::Document &document,
                       const editor::NodeAddress &window, const std::string &texture) {
-	session.handle(editor::request::edit_record(
+	editor_test::handle_to_end(session, editor::request::edit_record(
 			document.path(), menu_test::image_edits(document, window, texture)));
 }
 
@@ -81,7 +82,7 @@ inline editor::NodeAddress add_record(editor::ProjectSession &session,
 	add.operation = editor::EditOperation::Add;
 	add.address = {owner.row, document.kind_from_name(token), 0};
 	add.parent = owner.child;
-	session.handle(editor::request::edit_record(document.path(), std::move(add)));
+	editor_test::handle_to_end(session, editor::request::edit_record(document.path(), std::move(add)));
 	return document.address_of(document.last_added());
 }
 

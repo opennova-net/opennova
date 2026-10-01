@@ -40,7 +40,7 @@ ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in
 	ModelGrab grab;
 	grab.pan = in.middle || in.keys.shift;
 	grab.pick = under;
-	if (grab.pan || !frame.current || frame.selected < 0 || frame.document->blocked())
+	if (grab.pan || !frame.current || frame.selected < 0 || frame.document->blocked() || !frame.editable)
 		return grab;
 	const OrbitCamera &camera = frame.model->camera();
 	for (const ModelOverlay &overlay : frame.overlays) {

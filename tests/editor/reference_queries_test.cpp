@@ -62,9 +62,9 @@ static int test_menu_references() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Menus"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Menus"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	const Document *document = session.document_for("main.mnu");
 	TEST_EXPECT(document);
 	if (!document) return 1;
@@ -177,9 +177,8 @@ static int test_menu_references() {
 			located = true;
 	TEST_EXPECT(located);
 	// A saved menu with a missing texture is blocked by the build (an error).
-	session.handle(request::save_all());
-	session.handle(request::build());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::save_all());
+	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(!view.activity.last_build->ok);
 	return 0;
 }
@@ -194,7 +193,7 @@ static int test_go_to_targets() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "GoTo"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "GoTo"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string go = "<ACTION TYPE=\"WINDOW\" STATE=\"SHOW\">TITLE</ACTION>\r\n";
@@ -208,8 +207,8 @@ static int test_go_to_targets() {
 	TEST_EXPECT(editor_test::write_text(
 	        root + "/other.mnu",
 	        screen("OTHER", window("BUTTON", "JUMP", "<ACTION TYPE=\"SCREEN\" FILE=\"flow.mnu\">AWAY</ACTION>\r\n"))));
-	session.handle(request::rescan());
-	session.handle(request::open_document("flow.mnu"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("flow.mnu"));
 	Document *menu = session.document_for("flow.mnu");
 	TEST_EXPECT(menu && menu->rows().size() == 2);
 	if (!menu || menu->rows().size() != 2) return 1;
@@ -288,7 +287,7 @@ static int test_find_definition() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Find"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Find"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
@@ -302,8 +301,8 @@ static int test_find_definition() {
 	TEST_EXPECT(editor_test::write_text(
 			style_file, text + "\r\nDEF_TEXT_FG FF00FF00\r\nTWICE 1\r\nTWICE 2\r\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "DEF_TEXT_FG FF102030\r\n"));
-	session.handle(request::rescan());
-	session.handle(request::open_document(style_path));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(style_path));
 	Document *sheet = session.document_for(style_path);
 	TEST_EXPECT(sheet != nullptr);
 	if (!sheet) return 1;
@@ -342,7 +341,7 @@ static int test_find_definition() {
 	TEST_EXPECT(find_definition(graph, *sheet, "DEF_TEXT_FG", again) && again == fg);
 	// A record found by its name where no field defines it: a menu's window by its NAME in the
 	// graph's slot, and a closed file never current.
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
 	TEST_EXPECT(

@@ -798,16 +798,25 @@ _Avoid_: pack (a step inside a build), export (a build copied to a chosen direct
 stage (the retired retail-staging vocabulary)
 
 **Operation**:
-A long job of the editor's session (a build; opening a project, a refresh, an import's plan and
-its write, a rename's rewrite to follow), run one at a time a step at a time, each step within
-the frame's budget, so the editor keeps drawing while it runs. Its progress shows while it runs;
-nothing it makes reaches the view until it finishes, and a Cancel stops it between two steps, its
-work discarded. It declares what it reads and writes (a build reads the project's files), as each
-request kind does, and a request that writes what it reads or writes, or reads what it writes,
-meets the busy gate, the two rows saying what happens: it is refused (a save while a build packs),
-joins the operation (a Build or a Play onto a build), takes its place (a new import plan over a
-running one) or cancels it as it commits (a project switch, Quit). A request that conflicts with
-nothing it holds (an edit, an open) goes on.
+A long job of the editor's session: opening a project (the game install's names, the import pass,
+the scan, the requirements), a refresh (a Rescan, a Reimport), an import's plan and its write, a
+rename's commit (a file at a time, then the one step that writes) and a build. One runs at a time,
+a step at a time, each step within the frame's budget, so the editor keeps drawing while it runs;
+the request that starts one returns at once, naming it. Its progress shows while it runs; nothing
+it makes reaches the view until it finishes (a project being opened is not the open one yet), and
+a Cancel stops it between two steps with nothing of it in the view (an import once it wrote, a
+rename once it committed, run to their end). On disk a cancel leaves only what an Open's or a
+refresh's import pass had written by then: the outputs of the sources it reached, and its cache
+once the pass had ended. It declares what it reads and writes (a build reads the project's
+files), as each request kind does, and a request that writes what it reads or writes, or reads
+what it writes, meets the busy gate, the two rows saying what happens: it is refused (a save while
+a build packs, an edit while a project opens), joins the operation (a Build or a Play onto a
+build), takes its place (a new import plan over a running one) or cancels it as it commits (a
+project switch, Quit). A request that starts an operation of its own waits for the one that runs;
+one that conflicts with nothing it holds (an edit beside a build, a selection, a query) goes on.
+The validation that follows one steps a file at a time too, but is no operation: it holds nothing,
+an edit starts it again, and an operation that reads the graph (an import's plan, a rename) runs
+its remaining steps first.
 _Avoid_: task, job, background work (nothing runs on another thread)
 
 **Play**:

@@ -46,6 +46,7 @@ struct Menus {
 	ProjectSession session;
 	explicit Menus(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Places"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		session.handle(request::open_document("main.mnu"));
 	}
@@ -169,6 +170,7 @@ static int test_remembered_selections() {
 		TEST_EXPECT(editor_test::write_text(path, bytes + "\r\n"));
 	}
 	menus.session.handle(request::rescan());
+	menus.session.run_operations();
 	menus.session.handle(request::open_document(menu));
 	TEST_EXPECT(v.documents.active == menu && v.documents.selection.records.size() == 1 && v.documents.selection.primary.row == menus.menu().rows().front()->id &&
 	            !v.documents.selection.primary.child);

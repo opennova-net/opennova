@@ -13,6 +13,19 @@ namespace opennova::editor {
 
 struct BuildReport;
 
+// The project's validation as the poll steps it (ProblemsService, ADR 0046 S13 A3): whether one is
+// due or under way, and the files it has asked for their own findings of those it asks (0 of 0
+// before its first step, the graph's update).
+struct ValidationStatus {
+	bool running = false;
+	uint64_t done = 0;
+	uint64_t total = 0;
+	bool operator==(const ValidationStatus &o) const {
+		return running == o.running && done == o.done && total == o.total;
+	}
+	bool operator!=(const ValidationStatus &o) const { return !(*this == o); }
+};
+
 // What the editor is doing and has said, as the view shows it (ADR 0046 S13 V4; the Operation,
 // Run and Output concerns): the running operation and what the last one came to, the last
 // build's report, the game Play started, the Output lines and the status line. The build's
@@ -26,6 +39,9 @@ struct ActivityView {
 	// before the first ends).
 	OperationStatus operation;
 	OperationOutcome last_operation;
+	// The validation the poll steps a file at a time while no request waits on it (the first one
+	// after a project opens, above all): the Problems rows are the last ones composed until it ends.
+	ValidationStatus validation;
 	bool has_build = false;
 	std::shared_ptr<const BuildReport> last_build;
 

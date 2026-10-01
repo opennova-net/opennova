@@ -41,6 +41,7 @@ struct Dirty {
 	std::string extra;
 	explicit Dirty(const char *name) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Guard"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 		Document *document = session.document_for("extra.mnu");
@@ -97,6 +98,7 @@ EditorRequest touching(EditorRequestKind kind, Dirty &dirty) {
 		std::error_code ec;
 		fs::remove(dirty.view().project.root + "/" + row->asset_path, ec);
 		dirty.session.handle(request::rescan());
+		dirty.session.run_operations();
 		request.role = role;
 		break;
 	}
@@ -151,7 +153,9 @@ static int test_guard_column_is_the_prompt() {
 }
 
 // A guarded request that touches no unsaved file goes ahead: a Close or a Reload of a clean
-// document, a rename of a clean file that names none of the unsaved one's references.
+// document, a rename of a clean file that names none of the unsaved one's references (planned
+// over a graph that holds every edit: with a validation due, a rename's prompt would list every
+// document with unsaved edits, S13 A3).
 static int test_untouched_goes_ahead() {
 	Dirty dirty("opennova_editor_unsaved_guard_clean");
 	TEST_EXPECT(dirty.ready());
@@ -161,7 +165,9 @@ static int test_untouched_goes_ahead() {
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done());
 	dirty.session.handle(request::close_document(main));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
+	dirty.session.run_operations();
 	dirty.session.handle(request::rename_asset("menu_style.mns", "renamed.mns"));
+	dirty.session.run_operations();
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open);
 	TEST_EXPECT(dirty.session.document_for(dirty.extra)->dirty());
 	return 0;

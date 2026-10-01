@@ -2,8 +2,9 @@
 // Shared plumbing for the editor core tests: a throwaway project directory under the
 // system temp directory (std::filesystem::temp_directory_path, so no env read of our
 // own) that is wiped on construction and destruction, a file writer, every missing
-// required file of a session's project created, the project settings applied, an operation
-// that holds the documents, and a finding made by its code's token with what it is about.
+// required file of a session's project created, the project settings applied, a request and the
+// operation it starts run to their end, an operation that holds the documents, and a finding made
+// by its code's token with what it is about.
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -59,18 +60,40 @@ inline std::vector<opennova::editor::ViewEvent> events_after(
 	return out;
 }
 
+// A request handled and what it came to with the operation it started (or joined) run to its end
+// (S13 A3: an Open, a Rescan, a Reimport, an import's plan and its write, a rename's commit, a
+// build): the request's outcome with the operation's findings after its own, done only when the
+// request was and the operation ended done (a rename's commit, an import's write or a Reimport's
+// pass may still refuse or fail once the request that started it is done).
+inline opennova::editor::ActionOutcome handle_to_end(opennova::editor::ProjectSession &session,
+		const opennova::editor::EditorRequest &request) {
+	session.handle(request);
+	opennova::editor::ActionOutcome outcome = session.outcome();
+	session.run_operations();
+	const opennova::editor::OperationOutcome &ended = session.view().activity.last_operation;
+	if (outcome.operation != 0 && ended.id == outcome.operation) {
+		outcome.findings.insert(outcome.findings.end(), ended.findings.begin(), ended.findings.end());
+		if (ended.end != opennova::editor::OperationEnd::Done) outcome.refused = true;
+	}
+	return outcome;
+}
+
 // Create all missing, as the editor asks for it: the roles of every Required row the
-// project does not meet (a CreateMissing naming none makes nothing).
+// project does not meet (a CreateMissing naming none makes nothing); then the validation it
+// left due, run to its end (S13 A3: the polls step it, and no request runs it).
 inline void create_missing_files(opennova::editor::ProjectSession &session) {
 	session.handle(opennova::editor::request::create_missing(
 	        opennova::editor::unmet_required_roles(*session.view().project.requirements)));
+	session.run_operations();
 }
 
 // The project settings dialog's Apply with only the settings `change` names, the others as
-// they are (what came of it is the view's settings_result, and its SettingsApplied event); and
-// two of them alone: the game install folder, the missions feature.
+// they are (what came of it is the view's settings_result, and its SettingsApplied event), the
+// validation it left due run to its end; and two of them alone: the game install folder, the
+// missions feature.
 inline void apply_settings(opennova::editor::ProjectSession &session, const opennova::editor::ProjectSettingsChange &change) {
 	session.handle(opennova::editor::request::apply_project_settings(change));
+	session.run_operations();
 }
 inline void set_game_install(opennova::editor::ProjectSession &session, const std::string &dir) {
 	opennova::editor::ProjectSettingsChange change;

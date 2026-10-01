@@ -472,6 +472,7 @@ struct ModelDevice : ModelPreviewViewport {
 // two, and armory.3di (user points).
 inline bool preview_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
 	if (!session.handle(request::new_project(dir.file("project"), "Preview"))) return false;
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
@@ -482,12 +483,14 @@ inline bool preview_project(ProjectSession &session, const editor_test::TempProj
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	if (!editor_test::write_text(v.project.root + "/defs/items.def",
 	                             "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n") ||
 	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")))
 		return false;
 	session.handle(request::rescan());
+	session.run_operations();
 	return v.project.scan->find("skinned.3di") && v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") && v.project.scan->find("armory.3di");
 }
 

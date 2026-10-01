@@ -221,11 +221,6 @@ struct ActionOutcome {
 	// (Document::last_made(): 0 for an edit that made nothing or whose record a later edit
 	// removed), which its labels name.
 	std::vector<NodeId> added, made;
-	// An import's files (S13 A7): those it wrote, project-relative, as published (a file the
-	// project held with the same bytes is neither), and, after a failure while publishing, those
-	// it did not reach, the one that failed first.
-	std::vector<std::string> imported;
-	std::vector<std::string> not_imported;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

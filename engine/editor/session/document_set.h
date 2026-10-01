@@ -105,6 +105,9 @@ public:
 	// EndEdit on every open document: the coalesced groups and the gestures end, and the validation
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();
+	// True while a gesture's edits wait for it to end (their validation with them): the poll steps
+	// no validation meanwhile.
+	bool gesture_open() const { return gesture_validation_due_; }
 
 	// The unsaved-changes prompt's Discard: the document at `path` dropped unsaved (a Close or a
 	// Reload waited on it), or every document (a project switch, Quit).

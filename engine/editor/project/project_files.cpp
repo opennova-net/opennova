@@ -82,13 +82,26 @@ bool write_file_atomic(const std::string &path, const std::string &text, std::st
 }
 
 bool replace_file(const std::string &from, const std::string &to, std::string &error) {
+	// The last write of the file it replaces, which the new one's must pass (below).
+	std::error_code ec;
+	const fs::file_time_type before = fs::last_write_time(to, ec);
+	const bool replacing = !ec;
 	// std::filesystem::rename replaces an existing target on every platform (unlike C
 	// rename on Windows), so the swap is one call.
-	std::error_code ec;
+	ec.clear();
 	fs::rename(from, to, ec);
 	if (ec) {
 		error = os_error("cannot replace", to, ec);
 		return false;
+	}
+	// The scan, the graph and the caches tell a file changed by its size and its last write
+	// (AssetEntry::modified_ticks), and a file system stamps a write with a clock that can stand
+	// still for milliseconds (Linux's file times step with the scheduler's tick, some 4 ms), so a
+	// rewrite of the same size that soon after the last would read as unchanged: its last write is
+	// set one tick past the one it replaced when the file system left it there (S13 A3).
+	if (replacing) {
+		const fs::file_time_type after = fs::last_write_time(to, ec);
+		if (!ec && after <= before) fs::last_write_time(to, before + fs::file_time_type::duration(1), ec);
 	}
 	return true;
 }

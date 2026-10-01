@@ -213,10 +213,11 @@ func test_strings_edit_round_trip() -> void:
 	_seam.close_project()
 
 
-## An edit through the seam returns validated (ADR 0046 S9e): the Problems rows move with
-## the edit before any frame runs, and the next pump, which validates only the edits its
-## own windows raised, leaves them as they are.
-func test_seam_edits_return_validated() -> void:
+## An edit leaves the validation due (S13 A3: no request runs it). Through the wire the view says
+## so at once and the Problems rows stand until the pumps have run it, then move with the edit, and
+## a pump after that leaves them as they are; the seam settles each request before it answers, so an
+## edit through it returns validated (ADR 0046 S9e's promise, kept by the seam).
+func test_edits_validate_on_the_pumps() -> void:
 	if _app == null:
 		return
 	var dir := OS.get_cache_dir().path_join("opennova validated %d" % Time.get_ticks_usec())
@@ -227,7 +228,16 @@ func test_seam_edits_return_validated() -> void:
 	var marker: int = _seam.get_row_id(0)
 	assert_gt(marker, 0)
 	var before: int = _seam.get_problem_count()
-	assert_true(_seam.set_field(marker, "type", 0), "the Null marker's type cleared")
+	var active := String(_seam.state(["documents"]).get("documents", {}).get("active", ""))
+	var answer: Variant = JSON.parse_string(_app.request_json(JSON.stringify({
+		"kind": "edit_record", "path": active,
+		"edits": [{"op": "set", "id": marker, "field": "type", "value": 0}],
+	})))
+	assert_true(answer is Dictionary and bool(answer.get("ok", false)), str(answer))
+	assert_true(bool(_seam.query("operation").get("validation", {}).get("running", false)),
+			"the Null marker's type cleared: the validation due")
+	assert_eq(_seam.get_problem_count(), before, "the rows stand until the pumps run it")
+	assert_true(_seam.settle())
 	assert_eq(_seam.get_problem_count(), before + 1, _seam.get_problems_json())
 	assert_string_contains(_seam.get_problems_json(), "catalog.item_type")
 	_app.pump()
