@@ -18,10 +18,11 @@
 //   opennova-project request <dir> <json>
 //   opennova-project query <dir> <name> [<json>]
 //
-// Every verb also takes --install <dir>, the project's game install, a folder that is there: a verb
-// that writes sets it as the editor's project settings set it (apply_project_settings: the
-// project's .opennova/local.json, replacing the install it names) before its own requests, and a
-// dry run opens the project on it for that run alone, writing nothing; and --json. A run is one
+// Every verb also takes --install <dir>, the project's game install, a folder that is there (taken
+// from where the command runs and lexically normal, as the settings keep it, before it is looked
+// for): a verb that writes sets it as the editor's project settings set it (apply_project_settings:
+// the project's .opennova/local.json, replacing the install it names) before its own requests, and
+// a dry run opens the project on it for that run alone, writing nothing; and --json. A run is one
 // session: what it holds (an open document, an unsaved edit, a selection) ends with it, so the
 // request verb takes an array of requests to handle in turn (an edit, then the save that writes
 // it).
