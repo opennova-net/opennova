@@ -132,9 +132,36 @@ int check_frame_rate() {
     return 0;
 }
 
+// The CPU share the same window publishes [orig: Game_MainLoop
+// @0x52b926..0x52b948]: the frames' work milliseconds * 100 over 16 ms per
+// logic update, a zero update count reading one; both restart with the window.
+int check_cpu_percent() {
+    TickAccumulator acc;
+    // 100 ms frames close the window on the 20th; 19 frames of 4 ms work over
+    // 6 updates each before it.
+    for (int i = 0; i < 19; ++i) {
+        acc.bank(0.1);
+        acc.record_frame_work(4, 6);
+    }
+    TEST_EXPECT(acc.cpu_percent() == 0);
+    acc.bank(0.1); // closes: 76 ms * 100 / (114 * 16) = 4
+    TEST_EXPECT(acc.cpu_percent() == 4);
+    // A window with work but no updates divides by one update's 16 ms.
+    for (int i = 0; i < 19; ++i) {
+        acc.bank(0.1);
+        acc.record_frame_work(1, 0);
+    }
+    acc.bank(0.1);
+    TEST_EXPECT(acc.cpu_percent() == 118); // 19 * 100 / 16
+    acc.reset();
+    TEST_EXPECT(acc.cpu_percent() == 0);
+    return 0;
+}
+
 } // namespace
 
 int main() {
     if (int rc = check_bank()) return rc;
+    if (int rc = check_cpu_percent()) return rc;
     return check_frame_rate();
 }

@@ -18,13 +18,15 @@ namespace opennova::inmatch {
 bool load_session_score_config(GameConfig &config, std::string_view score_ini);
 
 // Build the exact requester-only S2C 0x58 body. uptime_ms is the wrapping
-// GetTickCount delta from session start; active_players is the live roster
-// count used by Co-op's key-9 option. The retail serializer writes one extra
-// zero key/value sentinel after the advertised option count, which the client
-// deliberately does not parse. [orig: Server_BuildStatusReport @0x530A60 ->
-// SessionStatus_SerializeToBuffer @0x5310C0]
+// GetTickCount delta from session start; `in_session` gates the respawn-time
+// key 8 (is_in_session); match_world supplies the round-start target census
+// and Co-op's key 9, the mission's defined-subgoal count. The retail
+// serializer writes one extra zero key/value sentinel after the advertised
+// option count, which the client deliberately does not parse.
+// [orig: Server_BuildStatusReport @0x530A60 -> SessionStatus_SerializeToBuffer
+//  @0x5310C0]
 std::vector<uint8_t> serialize_session_status(
-		const GameConfig &config, uint32_t uptime_ms,
-		uint32_t active_players, world::World *match_world);
+		const GameConfig &config, uint32_t uptime_ms, bool in_session,
+		world::World *match_world);
 
 } // namespace opennova::inmatch

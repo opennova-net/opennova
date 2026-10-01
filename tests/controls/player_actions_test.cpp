@@ -36,6 +36,8 @@ struct Keys : PlayerActionSource {
 		return it == held.end() ? 0 : it->second;
 	}
 	bool digit_down(int digit) const override { return digits[digit]; }
+	bool shift = false;
+	bool shift_down() const override { return shift; }
 };
 
 bool requests_are(const PlayerActionFrame &frame, const std::vector<PlayerActionRequest> &expected) {
@@ -58,7 +60,8 @@ bool test_order_and_held_rows() {
 			"seat3", "seat4", "seat5", "seat6", "seat7", "seat8", "seat9", "seat10", "Knife",
 			"Secondary", "Primary", "Flashbang", "FragGrenade", "SmokeGrenade", "Accessory",
 			"Detonator", "medpack", "cycleweaponP", "cycleweaponN", "Stand", "Crouch", "Prone",
-			"ScopeZeroDec", "ScopeZeroInc", "radarout", "radarin", "map_toggle"}) keys.hold(token);
+			"ScopeZeroDec", "ScopeZeroInc", "radarout", "radarin", "map_toggle", "binoculars",
+			"NVG", "nvggainup", "nvggaindown", "NextWaypoint"}) keys.hold(token);
 	auto frame = actions.poll(keys, kLive);
 	CHECK(frame.fire_held && frame.fire_edge && frame.reload_edge && frame.medic_edge);
 	std::vector<PlayerActionRequest> expected{{Action::ToggleMount}, {Action::ToggleScope}};
@@ -67,7 +70,9 @@ bool test_order_and_held_rows() {
 		expected.push_back({Action::WeaponCategory, category});
 	for (const auto request : {PlayerActionRequest{Action::WeaponCycle, 1}, {Action::WeaponCycle, -1},
 			{Action::Stance, 0}, {Action::Stance, 1}, {Action::Stance, 2}, {Action::ScopeZero, -1},
-			{Action::ScopeZero, 1}, {Action::RadarZoom, 1}, {Action::RadarZoom, -1}, {Action::MapCycle}})
+			{Action::ScopeZero, 1}, {Action::RadarZoom, 1}, {Action::RadarZoom, -1}, {Action::MapCycle},
+			{Action::Binoculars}, {Action::NightVision}, {Action::NvgGain, 1}, {Action::NvgGain, -1},
+			{Action::WaypointCycle, 1}})
 		expected.push_back(request);
 	CHECK(requests_are(frame, expected));
 	frame = actions.poll(keys, kLive);
@@ -140,6 +145,23 @@ bool test_reset_preserves_switch_hud_medic_and_use_state() {
 	actions.reset();
 	keys.held.clear(); // consumed USE and the raw digit latch both survive reset
 	CHECK(actions.poll(keys, kLive).requests.empty());
+	return true;
+}
+
+// An open text line takes the digits: a (mouse-bound) USE hold selects no
+// seat while the keyboard is captured, so its release still mounts
+// [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with g_InputCaptureMode
+// clear].
+bool test_captured_keyboard_keeps_the_use_digits() {
+	constexpr PlayerActionPoll kTyping{true, true, true, true};
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("useitem");
+	CHECK(actions.poll(keys, kTyping).requests.empty());
+	keys.digits[3] = true;
+	CHECK(actions.poll(keys, kTyping).requests.empty());
+	keys.release("useitem");
+	CHECK(requests_are(actions.poll(keys, kTyping), {{Action::ToggleMount}}));
 	return true;
 }
 
@@ -238,6 +260,7 @@ struct BoundKeys : PlayerActionSource {
 				[this](int vk) { return down.count(vk) != 0; });
 	}
 	bool digit_down(int digit) const override { return down.count('0' + digit) != 0; }
+	bool shift_down() const override { return down.count(16) != 0; }
 };
 
 bool test_live_binding_modifier_remap_and_use_stream() {
@@ -258,6 +281,37 @@ bool test_live_binding_modifier_remap_and_use_stream() {
 	CHECK(actions.poll(keys, kLive).requests.empty());
 	keys.down = {'7'};
 	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WeaponCategory, 7}, {Action::RadarZoom, 1}}));
+	return true;
+}
+
+// The live table keeps a bare '=' on radarin alone: NVG gain needs its Ctrl
+// modifier (rows 45/46 carry VK_CONTROL), so Ctrl+'=' fires the gain row and
+// the modifier pass claims the key from radarin. Shift+F7 cycles the waypoint
+// backward. [orig: Input_ProcessKeyboardEvents @0x49d327..0x49d3ac (modifier
+// pass), @0x49d3ba..0x49d488 (fallback), @0x49d452 (the Shift direction bit)]
+bool test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint() {
+	PlayerActions actions;
+	BoundKeys keys;
+	keys.down = {0xBB};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::RadarZoom, -1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {17, 0xBB};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NvgGain, 1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {17, 0xBD};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NvgGain, -1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {0x76};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, 1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {16}; actions.poll(keys, kLive);
+	keys.down.insert(0x76);
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::WaypointCycle, -1}}));
+	keys.down.clear(); actions.poll(keys, kLive);
+	keys.down = {'B'};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::Binoculars}}));
+	keys.down = {'N'};
+	CHECK(requests_are(actions.poll(keys, kLive), {{Action::NightVision}}));
 	return true;
 }
 
@@ -301,14 +355,99 @@ bool test_wheel_remainder_dispatches_whole_notches() {
 	return true;
 }
 
+// The death screen's spectator rows: press edges while active, in catalog
+// order, carrying the dispatch codes 500..502; an inactive frame advances the
+// latch without firing [orig: rows 110..112 -> Input_HandleActionBinding
+// cases 500..502 @0x49bd58..0x49bd9e].
+bool test_spectator_rows_edge_to_their_codes() {
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("CycleSpectatorMode");
+	keys.hold("DecSpectatorTarget");
+	auto requests = actions.poll_spectator(keys, true);
+	CHECK(requests.size() == 2 && requests[0].action == Action::Spectate &&
+			requests[0].value == 500 && requests[1].value == 502);
+	CHECK(actions.poll_spectator(keys, true).empty()); // held: no new edge
+	keys.release("CycleSpectatorMode");
+	keys.release("DecSpectatorTarget");
+	keys.hold("IncSpectatorTarget");
+	CHECK(actions.poll_spectator(keys, false).empty()); // inactive: latched, silent
+	CHECK(actions.poll_spectator(keys, true).empty());  // still held since the latch
+	keys.release("IncSpectatorTarget");
+	CHECK(actions.poll_spectator(keys, true).empty());
+	keys.hold("IncSpectatorTarget");
+	requests = actions.poll_spectator(keys, true);
+	CHECK(requests.size() == 1 && requests[0].value == 501);
+	return true;
+}
+
+// While the Emotes or Radio menu is open a digit is the menu's pick (keys
+// 1..9, and 0 as 10) and never reaches a digit-bound row, the Emotes menu
+// first; the held-USE seat arm precedes both; inactive gameplay input and an
+// open text line pick nothing.
+// [orig: Input_HandleSpecialKeys @0x49c6d8 (seat), @0x49c731..0x49c77c
+//  (emotes), @0x49c783..0x49c7c8 (radio); the consumed key skips the binding
+//  scan, Input_ProcessKeyboardEvents @0x49d2fb]
+bool test_voice_menu_digits_pick_and_swallow_the_rows() {
+	PlayerActionPoll emotes = kLive;
+	emotes.emotes_menu_open = true;
+	PlayerActionPoll radio = kLive;
+	radio.radio_menu_open = true;
+	PlayerActionPoll both = emotes;
+	both.radio_menu_open = true;
+	PlayerActions actions;
+	Keys keys;
+	keys.hold("Knife", '1');
+	keys.digits[1] = true;
+	CHECK(requests_are(actions.poll(keys, emotes), {{Action::EmotePick, 1}}));
+	// The embedder closed the menu; the held digit fires no row afterwards.
+	CHECK(actions.poll(keys, kLive).requests.empty());
+	keys.release("Knife");
+	keys.digits[1] = false;
+	actions.poll(keys, kLive);
+	keys.digits[0] = true;
+	CHECK(requests_are(actions.poll(keys, radio), {{Action::RadioPick, 10}}));
+	keys.digits[0] = false;
+	actions.poll(keys, kLive);
+	keys.digits[5] = true;
+	CHECK(requests_are(actions.poll(keys, both), {{Action::EmotePick, 5}}));
+	keys.digits[5] = false;
+	actions.poll(keys, kLive);
+	// Inactive gameplay input: no pick, and the latched key cannot fire later.
+	PlayerActionPoll idle = emotes;
+	idle.active = false;
+	keys.digits[2] = true;
+	CHECK(actions.poll(keys, idle).requests.empty());
+	CHECK(actions.poll(keys, emotes).requests.empty());
+	keys.digits[2] = false;
+	actions.poll(keys, kLive);
+	// An open text line owns the digits.
+	PlayerActionPoll typing = emotes;
+	typing.keyboard_captured = true;
+	keys.digits[4] = true;
+	CHECK(actions.poll(keys, typing).requests.empty());
+	keys.digits[4] = false;
+	actions.poll(keys, kLive);
+	// The held-USE seat arm comes first.
+	keys.hold("useitem");
+	actions.poll(keys, emotes);
+	keys.digits[3] = true;
+	CHECK(requests_are(actions.poll(keys, emotes), {{Action::SelectSeat, 2}}));
+	return true;
+}
+
 int main() {
 	int failed = 0;
 	for (const auto test : {test_order_and_held_rows, test_capture_and_overlay_edges,
 			test_missing_simulation_freezes_only_scope_zero, test_reset_preserves_switch_hud_medic_and_use_state,
-			test_use_previous_frame_and_single_seat, test_use_release_digit_priority_and_no_sim_consumption,
+			test_use_previous_frame_and_single_seat, test_captured_keyboard_keeps_the_use_digits,
+			test_use_release_digit_priority_and_no_sim_consumption,
 			test_shell_consume_and_overlay_cancel, test_use_swallows_only_digit_event_rows,
-			test_live_binding_modifier_remap_and_use_stream, test_wheel_subset_and_repeated_events,
-			test_wheel_remainder_dispatches_whole_notches})
+			test_live_binding_modifier_remap_and_use_stream,
+			test_nvg_gain_needs_ctrl_and_shift_reverses_waypoint, test_wheel_subset_and_repeated_events,
+			test_wheel_remainder_dispatches_whole_notches,
+			test_spectator_rows_edge_to_their_codes,
+			test_voice_menu_digits_pick_and_swallow_the_rows})
 		if (!test()) ++failed;
 	std::cout << "player_actions: " << failed << " failed\n";
 	return failed ? EXIT_FAILURE : EXIT_SUCCESS;

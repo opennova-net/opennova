@@ -17,10 +17,14 @@ const char *vehicle_prefix(int type, const char *fallback) {
     default: return fallback;
     }
 }
-// The 6006 coverage probe has a strict interior test after integer percentage
-// quantization. The boundary and the outermost <1% ring both return zero.
-// [orig: CaptureZone_FindMaxProximityCoverage @0x5BF4D0]
-bool has_proximity_coverage(const World &world, const Entity &speaker) {
+}
+
+// The 6006 coverage probe: the best integer percentage over the neutral hills
+// whose box holds the entity, the boundary and the outermost <1% ring both
+// scoring zero. [orig: CaptureZone_FindMaxProximityCoverage @0x5BF4D0 — max
+// starts -1 and returns 0 when nothing qualified @0x5BF4E8 / the tail]
+int32_t capture_zone_max_coverage(const World &world, const Entity &entity) {
+    int32_t best = -1;
     for (size_t i = 0; i < world.registry.pool_capacity(3); ++i) {
         const Entity *e = world.registry.get(EntityHandle::make(3, static_cast<int>(i)));
         if (!e || !e->has_item_def || e->item_id != 6006 || e->team != 0) continue;
@@ -30,8 +34,8 @@ bool has_proximity_coverage(const World &world, const Entity &speaker) {
             const int32_t delta = static_cast<int32_t>(uint32_t(a) - uint32_t(b));
             return delta < 0 ? static_cast<int32_t>(0u - uint32_t(delta)) : delta;
         };
-        const int64_t x = abs_delta(to_fixed(e->position.x), to_fixed(speaker.position.x));
-        const int64_t y = abs_delta(to_fixed(e->position.y), to_fixed(speaker.position.y));
+        const int64_t x = abs_delta(to_fixed(e->position.x), to_fixed(entity.position.x));
+        const int64_t y = abs_delta(to_fixed(e->position.y), to_fixed(entity.position.y));
         if (x > radius || y > radius) continue;
         const int32_t squared = static_cast<int32_t>(((x*x + 0x8000) >> 16) + ((y*y + 0x8000) >> 16));
         // x87's invalid sqrt -> integer-indefinite -> SHL 8 is zero. Preserve
@@ -39,9 +43,14 @@ bool has_proximity_coverage(const World &world, const Entity &speaker) {
         // wraps before the signed division; widening it changes large zones.
         const int32_t distance = squared < 0 ? 0 : static_cast<int32_t>(std::sqrt(double(squared))) * 256;
         const int32_t numerator = static_cast<int32_t>(100u * (uint32_t(radius) - uint32_t(distance)));
-        if (distance <= radius && numerator / radius > 0) return true;
+        if (distance <= radius && numerator / radius > best) best = numerator / radius;
     }
-    return false;
+    return best != -1 ? best : 0;
+}
+
+namespace {
+bool has_proximity_coverage(const World &world, const Entity &speaker) {
+    return capture_zone_max_coverage(world, speaker) > 0;
 }
 }
 

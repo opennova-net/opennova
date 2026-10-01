@@ -23,6 +23,7 @@
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
 #include <runtime/world/player_view.h>
+#include <runtime/world/radar_contacts.h>
 #include <runtime/world/round_move_effect.h>
 #include <runtime/world/throwables.h>
 #include <runtime/world/weapon_table.h>
@@ -456,15 +457,6 @@ const std::array<int32_t, kDragTableSize> &projectile_drag_table() {
         return values;
     }();
     return table;
-}
-
-int32_t fixed_magnitude(const FixedVec3 &v) {
-    const double magnitude = std::sqrt(static_cast<double>(v.x) * v.x +
-                                       static_cast<double>(v.y) * v.y +
-                                       static_cast<double>(v.z) * v.z);
-    // Retail caps immediately below the signed ftol overflow boundary.
-    constexpr double kFtolLimit = 2147418112.0; // float bits 0x4EFFFE00
-    return static_cast<int32_t>(std::min(magnitude, kFtolLimit));
 }
 
 // Convert a modulo-2^32 result to the signed value represented by the same bits
@@ -1201,6 +1193,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.shot_seq = params.shot_seq;
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
+    r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
     r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed_per_tick);
     r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed_per_tick);
     r.vel.z = static_cast<float>(std::sin(pitch) * speed_per_tick);
@@ -1372,6 +1365,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.shot_seq = params.shot_seq;
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
+        r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
         r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
         r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
         r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
@@ -1492,14 +1486,18 @@ void RoundSim::process_damage_hit(World &world, LiveRound &r,
             // [orig: Entity_HandleDamageAndTriggerZones @0x40772f]
             const bool target_not_dead =
                 ((target->flags | target->engine_flags) & kEntityFlagDead) == 0;
-            // The local player's damage feedback (red vignette + camera shake) arms
-            // on every hit that beats the 5-point floor, after the class damage
-            // callback and ahead of the kill routing; retail tests the value it
-            // just computed, not the applied health delta
+            // The local player's damage feedback (red vignette + camera shake +
+            // radar blip) arms on every hit that beats the 5-point floor, after
+            // the class damage callback and ahead of the kill routing; retail
+            // tests the value it just computed, not the applied health delta.
+            // The source is the projectile, the point its Position
             // [orig: Projectile_ProcessDamageOnTarget @0x4e8213..0x4e822b ->
             //  Player_OnDamageReceived @0x4dd880].
-            if (target_not_dead && target->handle == world.cached.local_player && damage > 5)
-                player_on_damage_received(world);
+            if (target_not_dead && target->handle == world.cached.local_player && damage > 5) {
+                const int32_t at[3] = {to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
+                player_on_damage_received(world, radar_round_source(world, r,
+                        static_cast<uint32_t>(&r - rounds.data())), at);
+            }
             // The record every event-1 callback reads, on both peers: this
             // round, the damage, the struck section and the target.
             // [orig: Projectile_ProcessDamageOnTarget
@@ -1879,6 +1877,9 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
         trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
         const ProjectileHit collision = queries->trace_projectile(world, trace);
         if (!collision.hit()) {
+            // The tick's tail runs the tracer whiz on every path through the
+            // sweep [orig: Projectile_UpdatePhysics @0x4ea98e].
+            round_tracer_whiz(world, r, ammo, position_q16, end_q16, incoming_velocity_q16);
             r.pos = vec_from_fixed(end_q16);
             if (r.guided_family == GuidedFamily::None && (ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
             if (ammo != nullptr && r.guided_family == GuidedFamily::None)
@@ -2362,6 +2363,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.x, incoming_velocity_q16.x),
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos = vec_from_fixed(next_position);
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
@@ -2399,6 +2401,7 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
                 beyond(position_q16.x, incoming_velocity_q16.x),
                 beyond(position_q16.y, incoming_velocity_q16.y),
                 beyond(position_q16.z, incoming_velocity_q16.z)};
+            round_tracer_whiz(world, r, ammo, position_q16, next_position, incoming_velocity_q16);
             r.pos = vec_from_fixed(next_position);
             if (r.guided_family == GuidedFamily::None) {
                 if ((ammo_flags & kAmmoFlagNoGravity) == 0) velocity_q16.z -= kProjectileGravityQ16;
@@ -2410,6 +2413,8 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             continue;
         }
 
+        round_tracer_whiz(world, r, ammo, position_q16, collision.position_q16,
+                incoming_velocity_q16);
         if (r.trail_slot >= 0) {
             trails.append(r.trail_slot, r.pos);
             trails.request_kill(r.trail_slot);

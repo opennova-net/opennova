@@ -16,6 +16,10 @@
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_scoreboard.h>
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/hud/hud_map_view.h> // the DEATH window pass
+#include <runtime/hud/hud_overlay_windows.h>
+#include <runtime/hud/hud_server_status.h> // the server-status page
+#include <runtime/hud/net_quality_indicators.h> // the connection indicators' state
 #include <runtime/hud/sight_overlay.h> // the SIGHTS row modes + sight-scale default
 
 #include <array>
@@ -45,8 +49,12 @@ enum HudTexture : int32_t {
 	kHudTexMapWater,
 	kHudTexMapIcons,
 	kHudTexMapCompass,
-	kHudTexMapRadar,
+	kHudTexMapRadar,       // dmgslice.tga, the 12-ring marks
 	kHudTexMapWpIndicator, // WPIndctr.tga [orig: HUD_LoadAllTextures @0x59e079]
+	// dmgslc_n.tga, the 24-ring marks: map sprite texture offset 4
+	// (kHudMapSpriteRadarNarrow) [orig: rec @0x2723930 loaded
+	// @0x59de25..0x59de42].
+	kHudTexMapRadarNarrow,
 	// The Tab board's stdbox: the 4x4 border stencil atlas and the tiled
 	// interior brush [orig: the panel call @0x423a72 -> HUD_DrawLabelBox
 	// @0x51efd0 -> Render_HUDBoxOverlay @0x56b700, "stdbox" registered
@@ -56,7 +64,16 @@ enum HudTexture : int32_t {
 	kHudTexBoxTile,
 	// The 16x16 connection-quality icon, a 4-row vertical atlas
 	// [orig: the quad @0x4241fb; the atlas load CNetworkIcons_LoadTextures @0x4c2cf0].
+	// neticon2.tga, iconPtrs[1] = g_NetConnectionIcon @0xB5E03C; the HUD's
+	// top-left quality icon draws the same atlas.
 	kHudTexNetIcon,
+	// The other two connection indicators [orig: CNetworkIcons_LoadTextures
+	// @0x4c2cf0 — neticon1.tga, 4 rows (tga height / 4 @0x4c2d58) ->
+	// iconPtrs[0] = g_NetLatencyIcon @0xB5E038, the T/R link-error pair;
+	// neticon3.tga, 2 rows (tga height / 2 @0x4c2e46) -> iconPtrs[2] =
+	// g_NetNovaWorldIcon @0xB5E040, the NovaWorld N].
+	kHudTexNetLinkIcon,
+	kHudTexNetNovaWorldIcon,
 	// The mounted-vehicle panel silhouette (the block's `interface` texture).
 	kHudTexVehiclePanel,
 	// The AAS zone status panel's three team icons — 64x256 vertical 4-frame
@@ -69,10 +86,11 @@ enum HudTexture : int32_t {
 	// The marker's 36x36 team tile behind the letter: one texture for the
 	// viewer's own zones, another for everyone else's [orig: the pick
 	//  @0x5989b9..0x5989d1 — g_HUDZoneTileOwnTexture @0x27239D4 for team == local,
-	//  dword_27239C4 otherwise; the latter is lfp_alf.tga, HUD_LoadAllTextures
-	//  @0x59e10e]. WITNESS PENDING: the loader of g_HUDZoneTileOwnTexture @0x27239D4 (no
-	//  visible writer in HUD_LoadAllTextures' xrefs) — an unresolved slot
-	//  draws no tile, the same degradation as the silhouette.
+	//  g_HUDZoneTileOtherTexture @0x27239C4 otherwise; HUD_LoadAllTextures loads
+	//  lfp_alf.tga into the record @0x27239C0 @0x59e10e and lfp_dlf.tga into
+	//  @0x27239D0 @0x59e11f, alpha mode 0, the shader at +4 being what the
+	//  drawers bind]. The capture-point labels' marker types 9 / 8 bind the
+	//  same pair [orig: HUD_DrawEntityMarker @0x593704 / @0x593724].
 	kHudTexLfpTileOwn,
 	kHudTexLfpTileOther,
 	kHudTexTarget,
@@ -87,8 +105,34 @@ enum HudTexture : int32_t {
 	kHudTexDriverCrosshair,
 	kHudTexVehicleFixed,
 	kHudTexVehicleLag,
-	kHudTexSightsBase, // authored SIGHTS rows: kHudTexSightsBase + row index
+	// The vehicle-bay logos HUD_DrawEntityMarker types 5/6/7 bind
+	// [orig: dword_2723A84 / dword_2723A94 / dword_2723AA4 @0x593642 /
+	//  @0x593662 / @0x593686; loaded HUD_LoadAllTextures @0x59de7a..0x59deab].
+	kHudTexLogoHelo,
+	kHudTexLogoHumm,
+	kHudTexLogoBoat,
+	// The HUDLS weapon slot bar: the bracket and the more-available marker
+	// (hudpos-named, loaded alpha mode 0) and one icon per weapon category
+	// 0..9 — the category's first def's hud_loadout_select texture
+	// [orig: HUD_LoadAllTextures @0x59DF03 / @0x59DF2D -> dword_2723788 /
+	//  dword_2723798 (handle +4, w +8, h +12); the def's texture block
+	//  WeaponDefs_ParseLineCallback @0x544A44 -> def+0x1B8, read as
+	//  def+0x1BC/0x1C0/0x1C4 by HUD_DrawWeaponSlotBar @0x599E5A..0x599E73].
+	kHudTexSlotBarBracket,
+	kHudTexSlotBarMoreAv,
+	// The tip panel ("MrClippy"): its box atlas border3.tga (no second stage)
+	// and the two icons, keyboard k_tip.tga and gameplay g_tip.tga
+	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3
+	//  @0x5b698c, k_tip @0x5b69ae, g_tip @0x5b69b6].
+	kHudTexTipBox,
+	kHudTexTipKeyboard,
+	kHudTexTipGameplay,
+	kHudTexSlotBarIcon0, // + weapon category 0..9
+	kHudTexSightsBase = kHudTexSlotBarIcon0 + 10, // authored SIGHTS rows: + row index
 };
+static_assert(kHudTexMapIcons + kHudMapSpriteRadar == kHudTexMapRadar &&
+		kHudTexMapIcons + kHudMapSpriteRadarNarrow == kHudTexMapRadarNarrow,
+		"map sprite texture offsets index from the icon-strip slot");
 
 // THE STDBOX GEOMETRY, as raw retail numbers. The border pieces and the fill
 // inset scale with the surface by s = surface_w / 1600 [orig: the scale
@@ -131,6 +175,12 @@ inline int hud_static_frame_index(int authored_count) {
 	return authored_count > 0 ? authored_count - 1 : -1;
 }
 
+// The connection indicators' corners as the CNetQuality reset leaves them:
+// quality (4, 4), link error (20, 4), NovaWorld (52, 4) — also the corners the
+// server-status page always uses [orig: CNetQuality_Reset @0x4c5908..0x4c591e;
+// the forceDefaultPos arms @0x4c325d / @0x4c332e / @0x4c345c].
+inline constexpr std::array<int, 6> kNetIndicatorResetPos = {4, 4, 20, 4, 52, 4};
+
 struct HudQuad {
 	float x0 = 0.0f;
 	float y0 = 0.0f;
@@ -144,6 +194,22 @@ struct HudQuad {
 	int32_t texture = kHudTexNone;
 	bool filled = true;    // false = 1px wireframe rect
 	bool additive = false; // SIGHTS add-blend rows
+	// A second texture stage (kHudTexNone = none): the quad's colour is
+	// saturate(2 * stage0 * texture2) and its alpha stage0.a * texture2.a --
+	// MODULATE2X(CURRENT, TEXTURE) colour, MODULATE(CURRENT, TEXTURE) alpha --
+	// with texture2 sampled SCREEN-ANCHORED and wrap-addressed: UV1 =
+	// (screen_px + 0.5) / stage2 at each corner, i.e. surface pixel i shows
+	// texel i mod stage2 (the half pixel is D3D9's pixel-centre rule; a
+	// raster whose pixel centres sit at i + 0.5 samples the same texel at
+	// px / stage2). Only the stdbox border pieces carry one.
+	// [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 -- UV1 @0x56b560..0x56b5a7 over
+	//  the stage dims passed in; the 0x651 two-texture material's preferred
+	//  permutation RenderState_FindBestTextureFormatPermutation @0x6820c0 --
+	//  stage 1 colour RenderState_DecodeModeColorStage(0xF00) @0x682b5a,
+	//  alpha RenderState_DecodeModeAlphaStage(0xF0) @0x682b2b]
+	int32_t texture2 = kHudTexNone;
+	float stage2_w = 0.0f;
+	float stage2_h = 0.0f;
 };
 
 // One textured triangle (the crosshair's tapered arm strips)
@@ -205,6 +271,28 @@ struct HudSightsRow {
 	int32_t slide_frames = 0;
 };
 
+// The HUDLS weapon slot bar's layout globals (def.h DefHudPosDef carries the
+// parse witnesses). `system` 0 never draws — and neither shipped hudpos.def
+// authors HUDLS_SYSTEM, so on retail the bar never shows. The texture fields
+// are the device's (the two hudpos-named textures' pixel sizes).
+// [orig: dword_2723700 (system), dword_2723718/1C (key offset), the signed
+//  bytes byte_2723733/34 (MOREAV offset), dword_2723738 + 8(n-1) (slot n)]
+struct HudSlotBarLayout {
+	int system = 0;
+	int key_ofst_x = 0;
+	int key_ofst_y = 0;
+	int moreav_dx = 0;
+	int moreav_dy = 0;
+	std::array<int, 10> slot_x{};
+	std::array<int, 10> slot_y{};
+	bool bracket_texture_valid = false;
+	int bracket_tex_w = 0;
+	int bracket_tex_h = 0;
+	bool moreav_texture_valid = false;
+	int moreav_tex_w = 0;
+	int moreav_tex_h = 0;
+};
+
 // The layout globals parsed once from hudpos.def (the embedder resolves
 // texture names to the slots above and hands the parsed .fnt).
 // [orig: the dword_27237xx.. layout global block, HUD_ParseHudposToken @0x59f370 parse]
@@ -217,6 +305,19 @@ struct HudLayout {
 	HudPosRecord weapon_name;
 	HudPosRecord game_info;
 	HudPosRecord wpd_info;
+	// The session text anchors. HUDTIMECLOCK keeps two fields — an authored
+	// 3rd/4th are ignored [orig: HUD_ParseHudposToken @0x59FDB8 / @0x59FDD0 ->
+	// dword_2723638/3C]; HUDPLAYERCOUNT and HUDTEAMXY are the 4-field form
+	// [orig: @0x59FDFC..0x59FE35 -> dword_2723664..70; @0x5A1324..0x5A135D ->
+	// dword_272382C..g_HUDTeamIdAlign @0x2723838]; ZONEINFO is x, y and the
+	// alignment in .align, no hidden dword [orig: @0x5A0650..0x5A0676 ->
+	// g_HUDZoneInfoX @0x2723DA4, dword_2723DA8/AC]. Unauthored they keep the
+	// BSS zero record the drawers still read.
+	HudPosRecord time_clock;
+	HudPosRecord player_count;
+	HudPosRecord team_xy;
+	HudPosRecord zone_info;
+	HudSlotBarLayout hudls;
 	HudPosRecord chat_text;
 	// The chat box's x1/x2 columns — g_HUDChatBoxCoords rows 1 and 2, the
 	// source of the chat wrap width `x2 - (x1 - 4)` [orig: HUD_GetChatBoxCoord
@@ -239,6 +340,9 @@ struct HudLayout {
 	// HUDSYSTEXT — the SYSTEM feed anchor (kills, joins, system lines). The
 	// def parser already produces it (def_hudpos.cpp HUDSYSTEXT -> sys_text).
 	HudPosRecord sys_text;
+	// HUDORDERS — the right edge of the two squad order lines; -1 / -1 when
+	// unauthored [orig: dword_2723D84 / dword_2723D88].
+	HudPosRecord squad_orders{-1, -1};
 	// BREATHTIME — the breath bar's anchor: x, y and the alignment word, three
 	// fields with no hidden dword. Unauthored it keeps the BSS zero (0, 0,
 	// left): the bar has no presence gate [orig: HUD_ParseHudposToken
@@ -250,7 +354,21 @@ struct HudLayout {
 	// is a quarter of it), the same texture-derived rule the icon strips use.
 	bool box_texture_valid = false;
 	int box_tex_w = 0;
+	// The boxtile camo's own dims, the border pieces' second-stage UV
+	// divisors [orig: stored into the style as floats @0x56b357 / @0x56b361,
+	// passed to HUD_DrawTexturedQuad_0 for every piece @0x56b97a..0x56bcbb].
+	int box_tile_w = 0;
+	int box_tile_h = 0;
 	bool net_icon_texture_valid = false;
+	// The connection indicators' other two atlases (neticon1 / neticon3) and
+	// their three design-space corners, quality / link-error / NovaWorld, as
+	// x, y pairs. The hudpos NETWORKINDICATOR line authors all six; unauthored,
+	// they keep the reset's (4, 4), (20, 4), (52, 4) [orig: CNetQuality_Reset
+	// @0x4c5908..0x4c591e -> g_NetQuality +0x40..+0x54; HUD_ParseHudposToken
+	// @0x59f981..0x59fa0c overwrites them after the mission-start reset].
+	bool net_link_icon_texture_valid = false;
+	bool net_novaworld_icon_texture_valid = false;
+	std::array<int, 6> net_indicator_pos = kNetIndicatorResetPos;
 	// The AAS zone status panel: the LFP_FLAGS anchor (the panel's right edge
 	// and its row base) and the three team-icon atlases + the two tile slots
 	// [orig: the hudpos writes g_HUDZonePanelX/Y @0x5a0563/@0x5a057b; the
@@ -284,6 +402,23 @@ struct HudLayout {
 	float map_coords_x = 0.0f;
 	float map_coords_y = 0.0f;
 	int map_coords_off = 0;
+	// PAUSEDPOS: the SP pause text's anchor, BSS zero unauthored (the drawer
+	// then uses (1000, 4)) [orig: dword_272360C / dword_2723610, parse
+	// @0x59FCB0 / @0x59FCC8].
+	int paused_x = 0;
+	int paused_y = 0;
+	// MRCLIPPYNORMAL / MRCLIPPYALTERNATE: the tip panel's x, y and its two
+	// pads (the width and the height added past the measured text), BSS zero
+	// unauthored [orig: HUD_ParseHudposToken @0x59fa15..0x59fae0 ->
+	// g_TipSystem +0x40..+0x4C / +0x50..+0x5C (dword_28E1B10..28E1B2C)].
+	std::array<int, 4> tip_normal{};
+	std::array<int, 4> tip_alternate{};
+	// The tip panel's atlas (border3.tga, its piece size a quarter of its own
+	// width) and the two icons.
+	bool tip_box_texture_valid = false;
+	int tip_box_tex_w = 0;
+	bool tip_keyboard_texture_valid = false;
+	bool tip_gameplay_texture_valid = false;
 	// The six stance frames' authored per-frame offsets + frame-0 dims.
 	std::array<int, 6> stance_offset_x{};
 	std::array<int, 6> stance_offset_y{};
@@ -365,10 +500,12 @@ struct HudWeaponState {
 	int rounds_per_icon = 1;
 	int heat = 0; // 0..0xFFFF
 	std::string display_name;
-	// The clip-indicator flash key: the original stamps on the (ammo class,
-	// reserve, pool) triple; the single-pool port keys (round_type, reserve)
-	// [orig: HUD_DrawAmmoIndicator restamp; D-HUD-5].
-	std::string round_type;
+	// The clip-indicator flash key's two def halves (the third is `reserve`):
+	// the def's ammo bucket (def+0xDC, WeaponTableEntry::ammo_bucket) and the
+	// LOW BYTE of its ammo-class id (def+0xD8) [orig: HUD_DrawAmmoIndicator
+	// @0x599A90..0x599AB2 — `mov edi,[ecx+0DCh]`, `cmp dl,[ecx+0D8h]`; D-HUD-5].
+	int32_t ammo_bucket = 0;
+	uint8_t ammo_class_id = 0;
 	// The HUDCLIPGFX/HUDRNDGFX placement (per-weapon authored offsets/step)
 	// and the registered textures' dims.
 	int clipgfx_offset_x = 0;
@@ -388,6 +525,10 @@ struct HudWeaponState {
 
 struct HudWaypointState {
 	bool present = false;
+	// The COMPOSED label (hud_game_text.h waypoint_label_text: "m to" + the
+	// resolved name, the CTF colour runs, the LFP override); empty stands for
+	// retail's NULL name, which draws the distance alone [orig: the null test
+	// @0x5948bc].
 	std::string name;
 	int distance_m = 0;
 	int32_t world_x = 0;
@@ -443,7 +584,29 @@ struct HudFriendlyTag {
 	//  kFriendlyTagRadioRequestIcon cell only under
 	//  HudFrameState::radio_request_icon_viewer.
 	bool radio_request = false;
+	// The player slot's squad colour index (slot+0x33) into kHudSquadColors;
+	// 0 = no override. Client-local: its only writer is the CMAP entity
+	// click [orig: CMap_EntityWidgetHandler @0x5485E4 — (idx + 1) % 14], so
+	// the seam defaults 0 until that producer lands (D-HUD-20).
+	uint8_t squad_color_index = 0;
 };
+
+// THE SQUAD COLOUR TABLE [orig: g_SquadColors @0x83B450, 14 dwords]: entry 0
+// is never drawn (the drawer's `> 0` test), entry 1 the violet, then the
+// twelve pastels.
+inline constexpr std::array<uint32_t, 14> kHudSquadColors = {
+		0xFF000000u, 0xFFA000F0u, 0xFFFF9999u, 0xFFFFCC99u, 0xFFFFFF99u, 0xFFCCFF99u,
+		0xFF99FF99u, 0xFF99FFCCu, 0xFF99FFFFu, 0xFF99CCFFu, 0xFF9999FFu, 0xFFCC99FFu,
+		0xFFFF99FFu, 0xFFFF99CCu};
+
+// The friendly tag's tier colour after the squad override: the GOOD tier takes
+// the squad colour whole, the MIDDLE tier each RGB channel of it times 0.7
+// truncated (alpha kept), the BAD tier never overrides; a missing slot or
+// index 0 keeps `tier_rgb` [orig: HUD_DrawEntityLabel — good @0x5A3CBB..0x5A3CD5,
+// middle @0x5A3CE9..0x5A3DBC (dbl_7D9DE8 = 0.7 under the chop control word
+// 0xC00), bad falls to @0x5A3DC9 without a read].
+uint32_t friendly_tag_squad_color(int band, bool has_slot, uint8_t squad_index,
+		uint32_t tier_rgb);
 
 struct HudMessageLine {
 	std::string text;
@@ -489,8 +652,9 @@ struct HudEndRoundStatisticsState {
 struct HudScoreboardState {
 	bool shown = false;
 	uint32_t game_type = 0;
-	// (PgUp/PgDn paging is a recorded D-HUD-24 residual; the state grows a
-	// page cursor when that leg lands.)
+	// (The PgUp/PgDn page is the compiler's own cursor — HudFrameCompiler::
+	// scoreboard_page_step — because the drawer folds and writes it back
+	// every draw [orig: g_ScoreboardPanelPage @0xA823C0, the fold @0x423c0f].)
 	std::string title;         // Overlays/STROVER_KILLLIST ("Player List")
 	std::string server_name;
 	std::string mission_title;
@@ -507,6 +671,40 @@ struct HudScoreboardState {
 	// Game_TickHudFrameCounters @0x434c14].
 	int team_count = 0;
 	int frame_counter = 0;
+	// The row composer's session facts (hud_scoreboard.h ScoreboardRowContext):
+	// the SU gate, solo KOTH's timed flag, the countdown minutes and the local
+	// player's team byte (-1 without a local entity).
+	bool status_suffix = false;
+	bool timed = false;
+	int time_limit = 0;
+	int local_team = -1;
+	// The class names and the team-score block's labels the embedder resolved
+	// from gametext (hud_scoreboard.h scoreboard_class_name_key, the STRCLI
+	// team/"(of" rows).
+	ScoreboardClassNames class_names;
+	ScoreboardHeaderText header_text;
+	// The 0x16 team table, indexed by team 0..4 [orig: @0xA85AEC + 16t].
+	std::array<ScoreboardTeamScore, 5> teams{};
+	// The flag carrier line's facts: whether a carrier is latched
+	// [orig: dword_A860C4], its entity name and team byte, and the
+	// Overlays label.
+	bool flag_carrier = false;
+	std::string flag_carrier_name;
+	uint8_t flag_carrier_team = 0;
+	std::string flag_carrier_label;
+};
+
+// THE CHAT INPUT LINE (hud/hud_chat_entry.h owns the capture and its
+// editing): the open capture's prompt, typed text, the dispatch's color
+// (chat_input_line_color) and the per-main-frame counter the cursor blinks on
+// [orig: StdCtype_Destructor (IDB misnomer) @0x5b8f30, called from
+// HUD_DrawOverlayPanels @0x5c014e while g_InputCaptureMode is set and != 3].
+struct HudChatInputState {
+	bool shown = false;
+	std::string prompt;
+	std::string text;
+	uint32_t color = 0xFFFFFFFFu;
+	uint32_t frame = 0; // [orig: dword_A8705C]
 };
 
 // One seat box on the mounted-vehicle panel.
@@ -596,9 +794,96 @@ struct HudLfpPanelState {
 	std::vector<HudLfpZone> zones;
 };
 
+// The gametext strings the session lines draw, resolved once per frame by
+// hud_game_text.h hud_session_text (the keys and sections are retail's own).
+struct HudSessionText {
+	std::string timer;             // Overlays/STROVER50
+	std::string players_remaining; // Client/STRCLI25
+	std::string players;           // Client/STRCLI04
+	std::string spectators;        // Client/STRCLI23
+	std::string in_the_zone;       // Overlays/STROVER53
+	// The team names by team byte 0..4 then the unknown arm — STRCLI19, 05,
+	// 06, 17, 18, 01 (05/06 are also the TKOTH timer labels).
+	std::array<std::string, 6> team_names;
+	std::string attacking;         // client/strcli20
+	std::string defending;         // client/strcli21
+};
+
+// THE MP SESSION LINES' per-frame facts: the CLOCK timer and player count,
+// the GAMEINFO/ZONEINFO overlay, the TEAMID line. The role feed
+// (inmatch/role_feeds.h hud_role_facts) fills them from the replica and the
+// authority's own state; each field names the retail global it stands for.
+struct HudSessionState {
+	bool in_session = false;             // g_NapiNPCtx.is_in_session
+	uint32_t game_type = 0;              // g_GameType
+	int32_t round_time_remaining = -1;   // g_RoundTimeRemaining (-1 = untimed)
+	bool permanent_death = false;        // byte_A821EF
+	int remaining_count = 0;             // g_ScoreboardDeadRowCount (the live count)
+	int row_count = 0;                   // g_ScoreboardRowCount
+	int spectator_count = 0;             // g_ScoreboardSpectatorCount
+	// T: g_TimeLimitMinutes on the authority, the S2C 0x64 copy dword_A821C0
+	// on a joiner [orig: HUD_DrawGameTimerOverlay @0x59CCDB..0x59CCEB].
+	int32_t time_limit_minutes = 0;
+	// Teams 1 and 2 of the 0x16 team table: score1 (movsx) and the KOTH hold
+	// byte [orig: dword_A85AFC / dword_A85B08, dword_A85B0C / dword_A85B18].
+	std::array<int32_t, 2> team_score1{};
+	std::array<int32_t, 2> team_koth{};
+	// CaptureZone_FindMaxProximityCoverage(local) [orig: @0x5BF4D0].
+	int32_t zone_coverage = 0;
+	int team = 0;                        // byte_27234FE (hudInfo+0x176)
+	uint32_t attack_defend = 0;          // dword_B78FE8: 1 defending, 2 attacking
+	// The death screen's spectate arm (dword_A860F4 && dword_A860F0): the HUD
+	// info rebuilt for the target feeds the health bar and the TEAMID line —
+	// `team` above carries the target's team byte then — plus the target's
+	// name (+0xF4) and its health ratio (hudInfo+92, Health << 16 over the
+	// max, capped at 1). Producer: inmatch::hud_role_facts.
+	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25; HUD_BuildEntityInfo
+	//  @0x4b87a2..0x4b87d3]
+	bool spectating = false;
+	std::string spectated_name;
+	float spectated_health_fraction = 0.0f;
+	HudSessionText text;
+};
+
+// One weapon category's slot-bar scan result (world/hud_slot_bar_feed.h owns
+// the witnessed scan). The icon is the device's texture at
+// kHudTexSlotBarIcon0 + category.
+struct HudSlotBarSlot {
+	bool present = false; // the category holds a def-bearing slot
+	int count = 0;        // def-bearing slots counted (the MOREAV gate is > 1)
+	bool icon_valid = false;
+	int icon_w = 0;       // def+0x1C0
+	int icon_h = 0;       // def+0x1C4
+	// KeyBinding_FormatDisplayString of binding record 200 + the def's
+	// category (0x81AE08 + 108*def[0]): after the start-up re-lay that is the
+	// catalog row dispatching 200 + category (controls action_for_code), the
+	// zero record's "" where none does; the embedder resolves it from the live
+	// bindings [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f;
+	// KeyBinding_SortBySequentialId @0x498260].
+	std::string key_label;
+};
+
+// The /NOHUD overlay master word: the .data init 3, cleared to 0 by the
+// launch flag [orig: dword_840B18 (static 3); Game_ParseCommandLineAndInit
+// @0x4a7310 -> sub_58FF20(0) @0x4A7A09, its only writer].
+inline constexpr uint32_t kHudOverlayMasterDefault = 3;
+inline uint32_t hud_overlay_master(bool no_hud) {
+	return no_hud ? 0u : kHudOverlayMasterDefault;
+}
+
 struct HudFrameState {
 	HudCombatState combat;
 	int ticks = 0;
+	// The /NOHUD master word (hud_overlay_master): bit 1 gates the gameplay
+	// overlay pass after its palette/radar work [orig: HUD_RenderAllOverlays
+	// `test dword_840B18, 2` @0x5A81CE]; the whole word gates
+	// HUD_DrawGameplayOverlays [orig: `cmp dword_840B18, 0` @0x5BDE9B].
+	uint32_t overlay_master = kHudOverlayMasterDefault;
+	HudSessionState session;
+	// The two squad order lines S2C 0x72 wrote (replication ClientState
+	// squad_orders) [orig: byte_2721DB8, two 128-byte lines].
+	std::array<std::string, 2> squad_orders;
+	std::array<HudSlotBarSlot, 10> slot_bar;
 	// THE RECENT MESSAGES (J) WINDOW: the OldMessages toggle and its stdbox
 	// title (Overlays/STROVER43, resolved by the embedder like the scoreboard's)
 	// [orig: g_ShowMessageLog @0x24C18C0; the title @0x5b9e54].
@@ -622,10 +907,10 @@ struct HudFrameState {
 	float aim_screen_y = 0.0f;
 	bool windup_active = false;
 	int windup_held_ticks = 0;
-	std::string objective_text;
 	// The objectives-panel header line, resolved by the embedder from gametext
-	// (Overlays/STROVER_MISSIONOBJECTIVES); empty falls back to the literal
-	// [orig: header STROVER_MISSIONOBJECTIVES @ 0x5ba986].
+	// (Overlays/STROVER_MISSIONOBJECTIVES); a miss is GameText_GetString's ""
+	// and draws nothing [orig: header STROVER_MISSIONOBJECTIVES @ 0x5ba986;
+	// the miss @0x51ec00].
 	std::string objectives_header;
 	// The objectives-panel alpha byte, folded into every panel draw color's
 	// top byte [orig: dword_24C18CC — 0/255, flipped ^= 0xFF by the co-op
@@ -652,6 +937,47 @@ struct HudFrameState {
 	HudVehiclePanelState vehicle_panel;
 	// The Tab board (hud/hud_scoreboard.h owns its policy).
 	HudScoreboardState scoreboard;
+	// The open chat capture's input line.
+	HudChatInputState chat_input;
+	// The key-toggled windows HUD_DrawGameplayOverlays draws after the
+	// objectives (hud/hud_overlay_windows.h): the F1 key-binding help, the
+	// F12 map legend (it wins over the help list), the I briefing panel.
+	HudHelpScreenState help_screen;
+	HudMapLegendState map_legend;
+	HudBriefingState briefing;
+	// The overlay-panel pass's voice-macro menus (hud_overlay_windows.h).
+	HudVoiceMacroMenuState emotes_menu;
+	HudVoiceMacroMenuState radio_menu;
+	// THE SP PAUSE TEXT: while the pause word is set the overlay-panel pass
+	// draws gametext Overlays/STROVER7 (resolved by the embedder) right-aligned
+	// in the Impact38 slot at PAUSEDPOS, or (1000, 4) when either field is
+	// zero, in g_HUDColors.active [orig: HUD_DrawOverlayPanels @0x5c0120 ->
+	// HUD_DrawPausedText @0x59d650 (ex sub_59D650)].
+	bool paused = false;
+	std::string paused_text;
+	// THE QUIT DIALOG (hud_toggles.h HudToggleState::quit_dialog_open): a
+	// stdbox (280, 340)-(744, 428) with gametext Overlays/STROVER_QUITSERVER on
+	// an authority in a session, _QUITCLIENT for a joiner, STROVER5 out of a
+	// session (the embedder resolves it), centred at (512, 364) in the Impact38
+	// slot in g_HUDColors.active. The scene frame's gameplay overlays draw it
+	// below the blank declutter level; the status page draws it unconditionally.
+	// [orig: UI_DrawDisconnectReasonDialog @0x5b8eb0 — from
+	//  HUD_DrawGameplayOverlays @0x5be1ce (the level-3 skip @0x5be185) and
+	//  Server_DrawStatusScreen @0x50b270]
+	bool quit_dialog_open = false;
+	std::string quit_dialog_text;
+	// THE TIP ("MrClippy", tip_system.h): the showing tip and its countdown,
+	// the Tips header and the expanded body the embedder resolved, and the
+	// local player's dead bit. The scene frame draws it after the HUD pass:
+	// at MRCLIPPYNORMAL with the M-cycle map closed, else at MRCLIPPYALTERNATE
+	// right after the big map, and not at all on the frame a dead player's
+	// map mode is cleared [orig: Render_ProcessMainSceneFrame
+	// @0x5cac50..0x5cad28 -> CTipSystem_Draw @0x5b6d60].
+	int32_t tip = 0;
+	int32_t tip_countdown = 0;
+	std::string tip_header;
+	std::string tip_body;
+	bool local_dead = false;
 	// THE END-OF-ROUND OVERLAY (net-re §5.68): the resolved Impact38 text
 	// ladder the presenter built from hud/end_round_overlay.h, drawn inside
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
@@ -722,6 +1048,13 @@ struct HudFrameState {
 	// spinmap element lends them to the compile input by pointer — the
 	// per-frame input copy must never clone the triangle set.
 	std::vector<HudMinimapFootprint> map_footprints;
+	// The non-bank map legs' feed (zone labels, pool-3 rings, player slots,
+	// the tracked callout), lent to the compile input by pointer.
+	HudMinimapOverlays map_overlays;
+	// The connection indicators (net_quality_indicators.h): the session gate,
+	// the NovaWorld icon's gate and the g_NetQuality display state the role's
+	// replica runtime keeps.
+	HudNetQualityState net_quality;
 };
 
 struct HudDrawList {
@@ -743,6 +1076,24 @@ struct HudDrawList {
 	// map from the wrong item).
 	std::vector<GameFontQuad> map_glyphs;
 	std::vector<GameFontQuad> big_map_glyphs;
+	// The flat entries from these indices on belong to the gameplay-overlay
+	// windows HUD_DrawGameplayOverlays draws AFTER the big map (the device
+	// leg layers them above it) [orig: Render_ProcessMainSceneFrame — the big
+	// map @0x5cad15, HUD_DrawGameplayOverlays @0x5cae0b].
+	struct TopBegin {
+		size_t quads = 0;
+		size_t tris = 0;
+		size_t lines = 0;
+		size_t glyphs = 0;
+		size_t underlines = 0;
+	} top_begin;
+	// Kind-grouping restarts in the flat HUD below top_begin: the device leg
+	// submits each run between consecutive breaks as its own quads / tris /
+	// lines / glyphs group, so an element that must layer in the walk's
+	// order (the vehicle-bay logos over what came before and under what
+	// comes after) is not lifted above the later quads. Each break is the
+	// kind cursors at the point it was marked.
+	std::vector<TopBegin> order_breaks;
 	int64_t elements_drawn = 0;
 };
 
@@ -841,17 +1192,99 @@ public:
 	// HUD_DrawStanceIndicator @0x599f98 and HUD_DrawAmmoIndicator @0x599aca;
 	// their prev/cur bytes (byte_2723D3C/D3D @0x599f8c/@0x599f92,
 	// byte_2723D4C @0x599ac5) are retained as in retail. The rest of the
-	// routine has no compiler-side state: the damage-direction ring
-	// unk_2722B40 (memset @0x59dd4e), the radar blip table unk_2721F40 +
-	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a), the layer visibility call
-	// @0x59dd75, the sub_59A9E0 pair dword_2723EA8/EAC (@0x59dd7d/@0x59dd83)
-	// and the target-overlay stamp dword_2723D58 (@0x59dd95).
+	// routine has no compiler-side state: the missile list unk_2722B40
+	// (memset @0x59dd4e), the radar blip table unk_2721F40 + the edge timers
+	// dword_2721EEC/EF0 (@0x59dd5e..0x59dd6a) and the radar tick
+	// dword_2723EAC (@0x59dd83) are the local player's radar state, reset by
+	// the round init (world::radar_reset); the layer visibility call
+	// @0x59dd75, dword_2723EA8 (@0x59dd7d) and the target-overlay stamp
+	// dword_2723D58 (@0x59dd95) have none here.
 	void reset_overlay_buffers();
+
+	// The HUD-owned gates the radar legs ride, as bits the embedder hands the
+	// session's per-frame radar step (inmatch/session.h; world::radar_hud_frame):
+	// bit 0 the overlay pass runs past its hud_detail-3 early-out (the
+	// spawn-success early-out the session reads live), bit 1 the corner
+	// spinmap also draws with mask bits 9, 6 and 10, so its own update site
+	// runs [orig: HUD_RenderAllOverlays @0x5a80c4; the spinmap gates
+	// @0x5a8635 / @0x5a86e8; HUD_DrawMapOverlay @0x5a78ff..0x5a790f].
+	static constexpr uint32_t kRadarGatePass = 1u;
+	static constexpr uint32_t kRadarGateMapSite = 2u;
+	uint32_t radar_frame_gates(const HudFrameState &state) const;
+
+	// THE CONNECTION INDICATORS' DRAWER, shared by both of retail's callers
+	// [orig: CNetQuality_DrawIndicators @0x4c3200]: the HUD compile's last
+	// element (force_default_pos false: the hudpos corners) and the listen
+	// host's server-status page (force_default_pos true: the reset corners
+	// (4, 4) / (20, 4) / (52, 4)) [orig: Server_DrawStatusScreen
+	// @0x50b2a8..0x50b2af]. It appends to the list being built (after a
+	// compile, last_draw_list()): the server-status page's compile calls it
+	// with the frame's HudNetQualityState and its own /NOHUD word.
+	void emit_net_quality_indicators(const HudNetQualityState &net, uint32_t overlay_master,
+			bool force_default_pos, float w, float h);
 
 	const HudDrawList &compile(const HudFrameState &state, float surface_w,
 			float surface_h);
 
 	const HudDrawList &last_draw_list() const { return draw_list_; }
+
+	// The menu map windows (hud_map_view.h), compiled on the menu's
+	// custom-draw call rather than in the HUD walk, over this frame state's
+	// terrain / markers / footprints, their labels laid out in the label fonts
+	// like the other map passes. The glyphs ride their own list so the host's
+	// pass sandwich layers them.
+	struct MapWindowDraw {
+		HudMapWindowPass pass;
+		std::vector<GameFontQuad> glyphs;
+		// The zone walk's letters, laid out per segment: zone_glyph_ends[i] is
+		// the end of segment i's glyphs (hud_map_view.h HudMapWindowSegment).
+		std::vector<GameFontQuad> zone_glyphs;
+		std::vector<size_t> zone_glyph_ends;
+		// The CMAP's placed waypoints as this render projected them, each
+		// name measured in the bold label slot (hud_map_view.h
+		// command_map_waypoint_hover / command_map_close_button_position).
+		std::array<CommandMapWaypointAnchor, kCommandMapWaypointSlots> waypoint_anchors;
+	};
+	// The DEATH deploy screen's MAP window [orig: CMap_OverlayInputHandler
+	// event 1 @0x554310 -> MapOverlay_DrawView @0x5a58e0].
+	const MapWindowDraw &compile_death_map(const HudFrameState &state,
+			const DeathMapFrame &frame, const DeathMapFacts &facts, float surface_w,
+			float surface_h);
+	// THE SERVER-STATUS PAGE (hud_server_status.h), drawn INSTEAD of the scene
+	// frame while the authority's status view is up. The page's throttle
+	// decides whether it redraws: false leaves the previous page list in
+	// place (retail presents nothing that frame). `now_ms` is the wall clock
+	// in milliseconds, `window_active` the window's focus.
+	// [orig: Server_DrawStatusScreen @0x50a2d0]
+	bool compile_server_status_page(const HudFrameState &state, const ServerStatusPageState &page,
+			uint32_t now_ms, bool window_active, float surface_w, float surface_h);
+	const HudDrawList &server_status_page_list() const { return status_page_list_; }
+	// Whether compile_server_status_page would draw now (the stamp untouched).
+	bool server_status_page_due_now(uint32_t now_ms, bool window_active) const {
+		return server_status_page_due_at(status_last_draw_ms_, now_ms, window_active);
+	}
+	// The CMAP MAP / ORDERS_MAP window [orig: CMapWindow_HandleEvent event 1
+	// @0x5497f0 -> HUD_BuildMapOverlayView mode 4 @0x5a7e10].
+	const MapWindowDraw &compile_command_map(const HudFrameState &state,
+			CommandMapView &cmap, const MapViewRect &rect, int32_t scaled_800,
+			const DeathMapFacts &facts, float surface_w, float surface_h);
+	// The console messages alone (the chat and system rings at their HUD
+	// anchors, the HUD call's gates), for CMAP's CHAT_MSGS slot; their own
+	// list, so last_draw_list() is untouched [orig: CMap_OnChatMsgsCustomDraw
+	// @0x5482d0].
+	const HudDrawList &compile_console_messages(const HudFrameState &state, float surface_w,
+			float surface_h);
+	// The briefing panel's page state (the page keys walk it; the drawer
+	// writes each overflowing page's successor start).
+	HudBriefingPages &briefing_pages() { return briefing_pages_; }
+	// THE TAB BOARD'S PAGE [orig: g_ScoreboardPanelPage @0xA823C0]: the page
+	// keys step it (hud_scoreboard.h scoreboard_takes_page_keys gates them
+	// [orig: `sub/add g_ScoreboardPanelPage, 1` @0x49c917/@0x49c93e]), the
+	// open edge zeroes it [orig: Scoreboard_TogglePlayerList @0x4244e4], and
+	// the drawer folds it into range and writes it back [orig: @0x423c0f].
+	void scoreboard_page_step(int delta) { scoreboard_page_ += delta; }
+	void reset_scoreboard_page() { scoreboard_page_ = 0; }
+	int scoreboard_page() const { return scoreboard_page_; }
 
 private:
 	struct StanceFade {
@@ -866,6 +1299,10 @@ private:
 	// state's hud_color_index, with entry 2 sourced live from the hudpos
 	// hud_textcolor (see the table in hud_frame.cpp).
 	uint32_t active_color(const HudFrameState &state) const;
+	// One g_HUDColors.palette entry 0..5 as the per-frame refresh leaves it:
+	// entry 2 is the hudpos hud_textcolor [orig: HUD_RenderAllOverlays
+	// @0x5A810C / HUD_DrawGameTimerOverlay @0x59CCB8].
+	uint32_t hud_palette(int index) const;
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
 	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
@@ -878,7 +1315,11 @@ private:
 	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
 			uint32_t color, float title_gap_w);
 	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
-			int row, bool crop_bottom, uint32_t color);
+			int row, bool crop_bottom, uint32_t color, int32_t texture = kHudTexBoxBorder);
+	// The eight border pieces of a box style over its atlas `texture`, each
+	// piece cw x ch output pixels (title_gap_w as in emit_stdbox).
+	void emit_box_pieces(float x0, float y0, float x1, float y1, float cw, float ch,
+			uint32_t color, float title_gap_w, int32_t texture);
 	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	// The three-quad progress bar in surface pixels: the border rect, the
@@ -896,6 +1337,23 @@ private:
 	//  @0x580539; HUD_DrawTextCentered_HalfBright @0x580680]
 	void emit_slot_text(const GameFont &slot, float slot_scale, const char *text,
 			float surface_x, float surface_y, uint32_t argb, uint32_t flags);
+	// A draw through HUD_DrawTextAtVirtualPos: the design point scaled with
+	// the integer (x*W + 512)/1024, (y*H + 384)/768 rounding, then the
+	// half-bright drawer the mode picks — 0 left, 1 right, 2 centred, any
+	// other mode draws nothing [orig: HUD_DrawTextAtVirtualPos @0x5d3ec0 ->
+	// sub_5D2EA0 @0x5d2ea0].
+	void emit_text_at_virtual_pos(const GameFont &slot, float slot_scale, const char *text,
+			int design_x, int design_y, float w, float h, uint32_t argb, int mode);
+	// A draw through HUD_DrawTextAligned: the same integer scaling, then the
+	// half-bright drawer by mode with the caller's flag word (0x100 turns the
+	// inline tags off) [orig: HUD_DrawTextAligned @0x5d3f30 ->
+	// HUD_DrawTextAligned_HalfBright @0x5d2f20].
+	void emit_text_aligned(const GameFont &slot, float slot_scale, const char *text,
+			int design_x, int design_y, float w, float h, uint32_t argb, int mode,
+			uint32_t flags);
+	// The same half-bright drawer pick at a SCREEN point [orig: sub_5D2EA0].
+	void emit_half_bright_text(const GameFont &slot, float slot_scale, const char *text,
+			float screen_x, float screen_y, uint32_t argb, int mode);
 	float measure_text_w(const char *text) const;
 	float text_line_h() const;
 
@@ -909,14 +1367,54 @@ private:
 	void element_breath_bar(const HudFrameState &state, float w, float h);
 	void element_waypoint(const HudFrameState &state, float w, float h);
 	void element_spinmap(const HudFrameState &state, float w, float h);
+	// A map pass's labels through the CPU half-bright drawer and the
+	// fixed-function MODULATE2X fold, bold or large slot per label.
+	void layout_map_labels(const HudMapPass &pass, std::vector<GameFontQuad> &out) const;
+	// The same over pass.labels[begin, end) (the DEATH zone walk's segments).
+	void layout_map_labels(const HudMapPass &pass, size_t begin, size_t end,
+			std::vector<GameFontQuad> &out) const;
+	bool corner_spinmap_visible(const HudFrameState &state) const;
 	void element_objectives(const HudFrameState &state, float w, float h);
 	void element_attach_labels(const HudFrameState &state);
 	void element_friendly_tags(const HudFrameState &state);
-	void element_objective_line(const HudFrameState &state, float w, float h);
+	// The MP session lines (hud_frame_session_lines.cpp) and the HUDLS bar
+	// (hud_frame_slot_bar.cpp).
+	void element_game_info(const HudFrameState &state, float w, float h);
+	void element_clock(const HudFrameState &state, float w, float h);
+	void element_team_id_line(const HudFrameState &state, float w, float h);
+	void element_weapon_slot_bar(const HudFrameState &state, float w, float h);
 	void element_feed(const HudFrameState &state, float w, float h);
+	HudDrawList console_draw_;
+	void element_squad_orders(const HudFrameState &state, float w, float h);
 	void element_message_log(const HudFrameState &state, float w, float h);
+	// The overlay-panel pass's voice-macro menus and the pause text
+	// (hud_frame_overlay_windows.cpp).
+	void element_voice_macro_menu(const HudFrameState &state, const HudVoiceMacroMenuState &menu,
+			int context_row, float w, float h);
+	void element_paused_text(const HudFrameState &state, float w, float h);
+	// The tip panel (hud_frame_tip.cpp); `alternate` picks MRCLIPPYALTERNATE.
+	void element_tip(const HudFrameState &state, bool alternate, float w, float h);
+	void compile_overlay_panel_menus(const HudFrameState &state, float w, float h);
+	void element_briefing(const HudFrameState &state, float w, float h);
+	void element_help_screen(const HudFrameState &state, float w, float h);
+	void element_map_legend(const HudFrameState &state, float w, float h);
+	// HUD_DrawLabelBox over design corners: the stdbox, and a non-empty title
+	// just inside its corner in the bold slot, half-bright [orig:
+	// HUD_DrawLabelBox @0x51efd0 — the title gap @0x51f0ea..0x51f114, the
+	// title HUD_DrawTextLeft_HalfBright at (x + 15, y + 2)].
+	void emit_label_box(float x1, float y1, float x2, float y2, const std::string &title,
+			uint32_t title_color, float w, float h);
+	void mark_top_layer();
+	void compile_overlay_pass(const HudFrameState &state, float w, float h);
+	void compile_gameplay_overlay_windows(const HudFrameState &state, float w, float h);
 	void element_lfp_panel(const HudFrameState &state, float w, float h);
 	void element_scoreboard(const HudFrameState &state, float w, float h);
+	// The chat input line at design (50, y): the scene frame's panels pass
+	// y 608, the status page 480.
+	void element_chat_input(const HudFrameState &state, float w, float h, float y = 608.0f);
+	void element_quit_dialog(const HudFrameState &state, float w, float h);
+	void element_server_console_lines(bool mp_session_peer, float w, float h);
+	void element_player_score_list(const ServerStatusPageState &page, float w, float h);
 	void element_end_round_overlay(const HudFrameState &state, float w, float h);
 	void element_kill_announcement(const HudFrameState &state, float w, float h);
 	void element_end_round_statistics(const HudFrameState &state, float w,
@@ -926,6 +1424,25 @@ private:
 	void element_service_prompt(const HudFrameState &state, float w, float h);
 	void element_inset_cues(const HudFrameState &state, float w, float h);
 	void element_optical_cues(const HudFrameState &state, float w, float h);
+	// The in-world vehicle-bay logos (hud_bay_logos.h) through the marker
+	// drawer's types 5/6/7 [orig: HUD_DrawVehicleBayLogos @0x5a2c00 ->
+	// HUD_DrawEntityMarker @0x593140].
+	void element_vehicle_bay_logos(const HudFrameState &state, float w, float h);
+	// The capture-point labels (hud_capture_labels.h) through the marker
+	// drawer's types 8/9 [orig: Render_CapturePointLabels @0x5a2840 ->
+	// HUD_DrawEntityMarker @0x593140, HUD_DrawProgressBar @0x59B340].
+	void element_capture_point_labels(const HudFrameState &state, float w, float h);
+	// HUD_DrawTexturedQuadCentered over an alpha-mode-0 shader: design centre
+	// and extent, two textured triangles (hud_optical_cues.cpp carries the
+	// witness) [orig: HUD_DrawTexturedQuadCentered @0x5909E0].
+	void emit_textured_quad_centered(int32_t cx, int32_t cy, int32_t qw, int32_t qh,
+			int32_t texture, uint32_t diffuse, float w, float h);
+	// The connection indicators (hud_frame_net_quality.cpp): the HUD's call,
+	// last in the frame and only at hud_detail level 0 [orig:
+	// Render_ProcessMainSceneFrame @0x5cae4d..0x5cae5d]; the drawer is public
+	// (emit_net_quality_indicators).
+	void element_net_quality_indicators(const HudFrameState &state, float w, float h);
+	void mark_order_break();
 	void element_targeting(const HudFrameState &state, float w, float h);
 	void element_instruments(const HudFrameState &state, float w, float h);
 	void element_crosshair(const HudFrameState &state, float w, float h);
@@ -953,16 +1470,47 @@ private:
 	// state into it reuses the markers vector's capacity instead of
 	// heap-cloning it every frame.
 	HudMinimapInput minimap_input_;
+	// The menu map window passes (compile_death_map / compile_command_map)
+	// and their persistent scratch.
+	DeathMapCompiler death_map_compiler_;
+	CommandMapCompiler command_map_compiler_;
+	HudMinimapInput map_window_input_;
+	MapWindowDraw death_map_draw_;
+	MapWindowDraw command_map_draw_;
 	StanceFade stance_;
-	// The clip-indicator flash latch [orig: HUD_DrawAmmoIndicator flash
-	// @ 0x599af9]: the round count drop stamps the flash start.
-	int flash_prev_rounds_ = -1;
+	// The clip-indicator flash latch: the (bucket, reserve, class byte) key
+	// and the stamp, BSS-zero like retail's [orig: dword_2723D40 / dword_2723D44
+	// / byte_2723D4C, stamp dword_2723D48; HUD_DrawAmmoIndicator @0x599A96..0x599ACA].
+	int32_t flash_key_bucket_ = 0;
+	int32_t flash_key_reserve_ = 0;
+	uint8_t flash_key_class_ = 0;
 	int flash_stamp_ = 0;
+	// THE SNAPSHOT TWIN g_HUDColors.active @0x24C1868: seeded table[index] |
+	// 0xFF000000 at HUD init [orig: HUD_InitTeamColorTable @0x51F240], rewritten
+	// table[index] by the hudcolor cycle [orig: @0x49AFC7] and restamped
+	// palette[index] (no alpha OR) every frame by the GAMEINFO drawer
+	// [orig: HUD_DrawGameTimerOverlay @0x59CCD0] — so under /NOHUD or the
+	// blank level the last restamp persists.
+	uint32_t hud_colors_active_ = 0;
+	int hud_colors_active_index_ = -1; // -1 = not seeded yet
 	int silhouette_stamp_ = 0;
 	uint64_t silhouette_vehicle_ = 0;
 	std::string silhouette_weapon_;
 	std::vector<HudMessageLine> feed_lines_;   // the SYSTEM ring
 	std::vector<HudMessageLine> chat_lines_;   // the CHAT ring (S2C 0x14)
+	// The CHAT channel's RAW ring beside its display buffer: every posted
+	// line unwrapped and cut at 119 characters, newest last [orig:
+	// Chat_AddMessageChannel1 @0x4985d0 — the shift into byte_B3EA38's slots
+	// and the copy @0x498621]. Only a dedicated host's status page reads it
+	// (HUD_DrawServerConsoleLines).
+	std::vector<HudMessageLine> chat_raw_lines_;
+	HudBriefingPages briefing_pages_;
+	int scoreboard_page_ = 0;
+	// The status page's own state [orig: byte_24C10A0+0x2C, the last draw
+	// stamp; +0x24, the ticker counter 0..31] and its last compiled list.
+	uint32_t status_last_draw_ms_ = 0;
+	int status_ticker_ = 0;
+	HudDrawList status_page_list_;
 };
 
 // The chat word-wrap [orig: HUD_WordWrapText @0x580980]: the whole remaining text
@@ -976,5 +1524,21 @@ private:
 // the segments are the NUL-separated runs left in `text`.
 int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 		int max_width, int current_x);
+
+// The block wrapper's layout [orig: HUD_DrawWrappedText @0x580C00], in screen
+// pixels: the width budget is (x_end - x_start) / scale_x font units
+// @0x580c19..0x580c40, the line step the scaled height of 'I', truncated
+// @0x580c68..0x580c8f (an empty line steps half of it @0x580c93 /
+// @0x580d6a..0x580d76). Each character extends the measured run
+// @0x580cff..0x580d0e; past the budget the line breaks at the last space,
+// else at the overflowing character, which is dropped @0x580d2b..0x580d41;
+// a CR (and a following LF) ends a line @0x580d43..0x580d4f /
+// @0x580e62..0x580e6c. Lines before `skip_lines` count but neither draw nor
+// advance @0x580d59..0x580d64. Returns 0 at the text's end @0x580e44 /
+// @0x580e84, else the index of the first line that does not fit above
+// `y_limit` (unless y_start == y_limit) @0x580e4a..0x580e60 / @0x580e9c.
+int wrapped_text_layout(const GameFont &font, float scale_x, float scale_y,
+		const std::string &text, int x_start, int y_start, int x_end, int y_limit,
+		int skip_lines, std::vector<HudWrappedLine> &out);
 
 } // namespace opennova::hud

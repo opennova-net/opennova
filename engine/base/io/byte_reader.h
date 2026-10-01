@@ -18,6 +18,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <string>
 #include <vector>
 
 #include <base/io/fixed.h>
@@ -109,6 +110,35 @@ public:
         } else {
             pos_ += count;
         }
+    }
+
+    // A skip that, like the reads, does not move on a clipped field: the
+    // cursor advances only when `count` bytes remain (a retail handler's
+    // `if (p + n <= end) p += n`), so a later byte is still readable.
+    void skip_if_available(size_t count)
+    {
+        if (!has_bytes(count)) { ok_ = false; return; }
+        pos_ += count;
+    }
+
+    // A NUL-terminated string: the bytes up to the terminator, the cursor
+    // past it; with no terminator before the end, the rest of the buffer and
+    // the cursor at the end (a clipped read). [the retail handlers'
+    // `p += strlen(p) + 1`, clamped to the body end]
+    std::string read_cstr()
+    {
+        const uint8_t *s = data_ + pos_;
+        const uint8_t *end = data_ + size_;
+        const uint8_t *nul = s;
+        while (nul < end && *nul != 0) ++nul;
+        std::string out(reinterpret_cast<const char *>(s), static_cast<size_t>(nul - s));
+        if (nul < end) {
+            pos_ = static_cast<size_t>(nul - data_) + 1;
+        } else {
+            ok_ = false;
+            pos_ = size_;
+        }
+        return out;
     }
 
 private:

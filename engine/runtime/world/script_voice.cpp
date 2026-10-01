@@ -37,12 +37,52 @@ bool ScriptVoiceChannel::start(World &world, const std::string &filename,
 bool ScriptVoiceChannel::radio_set(World &world, const std::string &name, EntityHandle speaker) {
     if (!world.rules.mp_session || !ready() || !resolve_set_ ||
             !world.registry.get(world.cached.local_player)) return false;
-    const auto selected = resolve_set_(name, world.cached.sound_listener_view_flags);
+    const auto selected = resolve_set_(name, world.cached.sound_listener_view_flags, false);
     if (!selected) return false;
     if (!start(world, selected->filename, world.cached.local_player, speaker,
             selected->max_distance)) return false;
     state_.volume = selected->volume;
     return true;
+}
+
+ScriptVoiceChannel::EntityVoice ScriptVoiceChannel::entity_set(World &world,
+        const std::string &name, EntityHandle speaker, Vec3 position, bool row_anchor) {
+    if (!world.rules.mp_session_peer || !resolve_set_) return EntityVoice::None;
+    // The set by name [orig: SoundBank_FindSetByNameAnyBank @0x427f4e; the
+    // zero-id return @0x4ecda3]: the resolver answers no selection for an
+    // unknown set, and the busy leg's one-shot resolves the same name.
+    if (!ready()) {
+        // [orig: Entity_PlaySound3D_FullVolume(soundId, &entity->Position,
+        //  entity) @0x4ecdb8]
+        SoundSlotEvent oneshot;
+        oneshot.source_handle = speaker.packed;
+        oneshot.pos[0] = to_fixed(position.x);
+        oneshot.pos[1] = to_fixed(position.y);
+        oneshot.pos[2] = to_fixed(position.z);
+        if (name.size() >= sizeof(oneshot.set_name)) return EntityVoice::None;
+        name.copy(oneshot.set_name, name.size());
+        world.out.slot_sounds.push_back(oneshot);
+        return EntityVoice::Oneshot;
+    }
+    const auto selected = resolve_set_(name, world.cached.sound_listener_view_flags, true);
+    if (!selected) return EntityVoice::None;
+    // [orig: the anchor and the portrait are both the speaker @0x4ecdfe / @0x4ece03]
+    if (!start(world, selected->filename, speaker, speaker, selected->max_distance))
+        return EntityVoice::None;
+    state_.volume = selected->volume;       // g_SoundTriggerVolume
+    state_.pitch_q16 = selected->pitch_q16; // g_SoundTriggerPitch
+    state_.row_anchor = row_anchor;
+    state_.row_position = position;
+    return EntityVoice::Channel;
+}
+
+void ScriptVoiceChannel::track_row_anchor(EntityHandle anchor, bool present, Vec3 position) {
+    if (ready() || !state_.row_anchor || state_.anchor != anchor) return;
+    if (!present) {
+        stop();
+        return;
+    }
+    state_.row_position = position;
 }
 
 int ScriptVoiceChannel::wave(World &world, const std::string &filename) {
@@ -83,6 +123,8 @@ void ScriptVoiceChannel::refresh(World &world) {
     // its nonzero word observable until this playback validation pass.
     // [orig: AudioChannel_ResetByHandle @0x767160; WacCmd_WaveReady @0x4ED380]
     if (!state_.clip) { stop(); return; }
+    // A row anchor's liveness rides track_row_anchor.
+    if (state_.row_anchor) return;
     // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A]
     if (anchor == nullptr || !anchor->has_item_def || (anchor->flags & 2u) != 0) stop();
 }
@@ -93,17 +135,17 @@ ScriptVoiceChannel::Frame ScriptVoiceChannel::frame(World &world, Vec3 listener)
     out.serial = serial_;
     out.state = state_;
     const Entity *anchor = world.registry.get(state_.anchor);
-    if (ready() || anchor == nullptr) return out;
-    out.position = anchor->position;
+    if (ready() || (anchor == nullptr && !state_.row_anchor)) return out;
+    out.position = state_.row_anchor ? state_.row_position : anchor->position;
     out.local = state_.anchor == world.cached.local_player;
     int64_t distance = 0;
     if (!out.local) {
         // The listener/body delta is a wrapped Q16 dword on each axis.
-        const int32_t dx = static_cast<int32_t>(uint32_t(to_fixed(anchor->position.x)) -
+        const int32_t dx = static_cast<int32_t>(uint32_t(to_fixed(out.position.x)) -
                 uint32_t(to_fixed(listener.x)));
-        const int32_t dy = static_cast<int32_t>(uint32_t(to_fixed(anchor->position.y)) -
+        const int32_t dy = static_cast<int32_t>(uint32_t(to_fixed(out.position.y)) -
                 uint32_t(to_fixed(listener.y)));
-        const int32_t dz = static_cast<int32_t>(uint32_t(to_fixed(anchor->position.z)) -
+        const int32_t dz = static_cast<int32_t>(uint32_t(to_fixed(out.position.z)) -
                 uint32_t(to_fixed(listener.z)));
         const double length = std::sqrt(double(dx) * dx + double(dy) * dy + double(dz) * dz);
         // [orig: Audio_UpdateAmbientStream — fsqrt @0x4EDAB2, the flt_7C19E0

@@ -10,8 +10,8 @@ namespace opennova::inmatch {
 // first (the local-dead bit lives on the world even without a session).
 void LocalRole::run_tick(const TickInput &) {
 	mission::MissionKernel &kernel = *kernel_;
-	kernel.local.view_session_inputs = view_session_inputs_for(
-			nullptr, /*joiner=*/false, kernel.local.local_player_dead());
+	kernel.local.view_session_inputs = view_session_inputs_for(nullptr, /*joiner=*/false,
+			kernel.local.local_player_dead(), kernel.world.rules.mp_session);
 	kernel.local.apply_player_input_pre_tick();
 	// The single-player authority runs the server tick too, so its WAC 'humans'
 	// count is rebuilt ahead of the script pass as a host's is: the local player

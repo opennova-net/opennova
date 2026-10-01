@@ -5,6 +5,7 @@
 // the regular TSDicon submit @0x597F73]
 #include <cstdint>
 #include <cstdio>
+#include <unordered_map>
 #include <vector>
 
 #include <runtime/replication/client_state.h>
@@ -152,9 +153,84 @@ void test_no_session_and_no_world() {
     CHECK(rows[0].half_x_q16 == 0 && rows[0].half_y_q16 == 0);
 }
 
+// v6: a vehicle bay's row carries the attrib2 bay bit, its spawn families
+// (ItemDef+0xAD8) and the live altitude the logo walk lifts.
+// [orig: HUD_DrawVehicleBayLogos @0x5a2c00 -- def+0x58 bit 0 @0x5a2c9e,
+//  def+0xAD8 @0x5a2d6f, entity+0xC @0x5a2d56]
+void test_a_vehicle_bay_row_carries_the_logo_facts() {
+    LocalWorld lw;
+    world::Entity bay;
+    bay.kind = world::EntityKind::Item;
+    bay.item_id = 0x1500;
+    bay.net_id = 2;
+    bay.position = {30.0f, 40.0f, 5.5f};
+    bay.alive = true;
+    bay.team = 1;
+    bay.has_item_def = true;
+    bay.item_attrib2 = 1u;
+    bay.vehicle_bay_flags = 2u;
+    const world::EntityHandle bay_handle = lw.w.registry.spawn(0, bay);
+    world::Entity plain = bay;
+    plain.net_id = 3;
+    plain.item_attrib2 = 0u;
+    plain.vehicle_bay_flags = 0u;
+    const world::EntityHandle plain_handle = lw.w.registry.spawn(0, plain);
+    replication::ClientMinimapState map;
+    map.persistent[0] = slot(static_cast<uint16_t>(bay_handle.packed), 19, true);
+    map.persistent[1] = slot(static_cast<uint16_t>(plain_handle.packed), 10, true);
+    inmatch::MinimapMarkerInputs in;
+    in.map = &map;
+    in.world = &lw.w;
+    in.local_marker_handle = lw.wire_handle();
+    std::vector<hud::HudMinimapMarker> rows;
+    inmatch::build_minimap_markers(in, rows);
+    CHECK(rows.size() == 3);
+    CHECK((rows[0].entity_bits & hud::kMarkerEntityVehicleBay) != 0);
+    CHECK(rows[0].bay_groups == 2);
+    CHECK(rows[0].entity_z == static_cast<int32_t>(5.5 * 65536.0));
+    CHECK((rows[1].entity_bits & hud::kMarkerEntityVehicleBay) == 0);
+    CHECK(rows[1].bay_groups == 0);
+}
+
+// v7: a row whose handle carries a zone-timer entry (either S2C 0x6F or 0x53
+// landed) takes the entry's image; the others, and every row without a
+// session list, stay unknown.
+// [orig: Render_CapturePointLabels @0x5a2840 --
+//  CProximityList_FindEntryById(g_ZoneTimerList, entity) @0x5a292c]
+void test_a_zone_row_carries_its_timer_entry() {
+    LocalWorld lw;
+    replication::ClientMinimapState map;
+    map.transient[0] = slot(600, 12, true);
+    map.persistent[0] = slot(601, 12, true);
+    std::unordered_map<uint16_t, inmatch::ClientRuntime::ZoneState> timers;
+    inmatch::ClientRuntime::ZoneState::Entry &entry = timers[600].entry;
+    entry.mode_a = 1;
+    entry.mode_b = 2;
+    entry.value_current = 40;
+    entry.value_limit = 62;
+    entry.value_rate = -3;
+    entry.value_active = true;
+    inmatch::MinimapMarkerInputs in;
+    in.map = &map;
+    in.world = &lw.w;
+    in.zone_timers = &timers;
+    std::vector<hud::HudMinimapMarker> rows;
+    inmatch::build_minimap_markers(in, rows);
+    CHECK(rows.size() == 2);
+    CHECK(rows[0].handle == 600 && rows[0].timer_known == 1 && rows[0].timer_active == 1);
+    CHECK(rows[0].timer_team == 1 && rows[0].timer_bar_team == 2);
+    CHECK(rows[0].timer_value == 40 && rows[0].timer_limit == 62 && rows[0].timer_rate == -3);
+    CHECK(rows[1].handle == 601 && rows[1].timer_known == 0);
+    in.zone_timers = nullptr;
+    inmatch::build_minimap_markers(in, rows);
+    CHECK(rows[0].timer_known == 0);
+}
+
 } // namespace
 
 int main() {
+    test_a_zone_row_carries_its_timer_entry();
+    test_a_vehicle_bay_row_carries_the_logo_facts();
     test_banks_walk_in_order_and_the_local_row_is_restored();
     test_a_decoded_regular_row_for_the_local_handle_suppresses_the_restore();
     test_no_session_and_no_world();

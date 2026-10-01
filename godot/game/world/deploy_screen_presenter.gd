@@ -2,8 +2,12 @@ class_name DeployScreenPresenter
 extends Node
 
 ## The deploy-map screen (death.mnu's DEATH screen) handles the authority's
-## initial deployment hold and later death picks. Its shroud reveals immediately
-## when the deploy flag is up. SPAWNPOINTS_LIST carries the Default Spawn row
+## initial deployment hold and later death picks. The show hides DEATH_SHROUD
+## (the window holding the MAP, the list and the statics); it reveals at once
+## under the deploy overlay, else 240 ticks after the death, and the content
+## refreshes only while it is revealed, on each 16-tick boundary (the engine's
+## world/deploy_screen_feed.h death_shroud_revealed / deploy_refresh_due).
+## SPAWNPOINTS_LIST carries the Default Spawn row
 ## plus one lettered row per team-owned SECURED zone. Selection always queues a
 ## spawn request. Initial selection closes the dialog immediately; death re-picks
 ## remain available until the server releases its pending hold because invalid
@@ -22,18 +26,21 @@ extends Node
 ##  DeathScreen_UpdateUI @0x553150 (map zoom fit from the zone AABB,
 ##  SWAP_TEAMS/BUTTON_TEAMLIST only in the TDM family)]
 ##
-## The MAP window's terrain/zone/blip draw (the windowed map renderer
-## MapOverlay_DrawView @0x5a58e0, sibling of HUD_DrawMapOverlay @0x5a5f40) is the tracked
-## next map-phase witness (docs/interface/hud-re.md follow-ups); until it lands
-## the authored window chrome renders without the map image.
+## The MAP window hosts the windowed map view (MapViewWindow over the engine's
+## DeathMapView and the HUD compiler's DEATH pass, hud/hud_map_view.h): the
+## terrain, the marker walk, the zone blips and letters and the player
+## crosshair, with left-drag pan, right-drag / wheel zoom, the show-time zoom
+## fit against the DEATH_SHROUD window and the per-tick pan ease. The view
+## state is this presenter's MapViewState, which outlives the per-mission menu
+## rebuild like retail's globals. Witnesses: hud-re D-HUD-19.
 
 const MENU_FILE := "death.mnu"
 const MENU_SCREEN := "DEATH"
-# The content refresh cadence: engine truth 0.256 s, 16 ticks of the 62.5 Hz
-# loop (world/deploy_screen_feed.h kDeployRefreshTicks carries the witness;
-# the cadence rides the tick, not a round 250 ms).
-static var REFRESH_INTERVAL_S: float = Simulation.deploy_refresh_interval_seconds()
 const SPAWN_LIST := "SPAWNPOINTS_LIST"
+# The custom-draw MAP window and the shroud window whose authored size the
+# show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
+const MAP_WIDGET := "MAP"
+const SHROUD_WIDGET := "DEATH_SHROUD"
 
 signal opened
 signal closed
@@ -50,7 +57,9 @@ var _layout_control: Control = null
 var _frame: MenuFrame = null
 var _audio: MenuAudio = null
 var _driver: MenuDriver = null
-var _refresh_accum := 0.0
+# The logic tick the last frame sampled: the content refresh runs when the
+# ticks since reach a 16-tick boundary (Simulation.deploy_refresh_due).
+var _last_tick := 0
 # The spawn list's presenter-side row model, aligned with the compiled list's
 # visible rows: {label, param} per row, rebuilt by _populate_spawn_list. The
 # compiled list carries labels only, so the node parameter the pick serializes
@@ -66,6 +75,14 @@ class SpawnRow extends RefCounted:
 		param = p_param
 
 var _spawn_rows: Array[SpawnRow] = []
+# The MAP window host mounted over the MAP widget (null until the menu builds
+# on a screen that authors MAP), and the shell's HUD overlay getter: the map
+# pass compiles over the HUD's terrain / markers / fonts.
+var _map_window: MapViewWindow = null
+var _hud_source: Callable = Callable()
+# The DEATH map's pan/zoom state, held for the presenter's (the process's)
+# lifetime and handed to every MapViewWindow the menu rebuild mounts.
+var _map_view_state := MapViewState.new()
 
 
 func setup(view: WorldView, ui_parent: Node) -> void:
@@ -77,6 +94,18 @@ func setup(view: WorldView, ui_parent: Node) -> void:
 
 func is_open() -> bool:
 	return _frame != null and is_instance_valid(_frame) and _frame.visible
+
+
+## The HUD overlay getter the MAP window draws through (the shell hands the HUD
+## presenter's get_game_hud; the overlay builds lazily with the first HUD frame).
+func set_hud_source(source: Callable) -> void:
+	_hud_source = source
+
+
+## The MAP window host (ADR 0018 read seam; null before the menu builds or when
+## the screen authors no MAP widget).
+func get_map_window() -> MapViewWindow:
+	return _map_window if _map_window != null and is_instance_valid(_map_window) else null
 
 
 ## Build + wire the presenter under `parent` in one call (the shell's seam):
@@ -131,10 +160,13 @@ func open() -> bool:
 	if not _ensure_menu():
 		return false
 	_hide_team_service_buttons()
-	_populate_spawn_list(sim)
+	# The show hides the shroud; the per-frame reveal shows it and runs the
+	# content refresh (_process).
+	_set_shroud_shown(false)
 	_ui_parent.move_child(_frame, _ui_parent.get_child_count() - 1)
 	_frame.visible = true
-	_refresh_accum = 0.0
+	_show_map_window(sim)
+	_last_tick = sim.get_logic_tick()
 	set_process(true)
 	opened.emit()
 	return true
@@ -142,6 +174,9 @@ func open() -> bool:
 
 func close() -> void:
 	set_process(false)
+	var map_window := get_map_window()
+	if map_window != null:
+		map_window.screen_unload()
 	if MenuFrameSurface.hide_frame(_frame):
 		closed.emit()
 
@@ -174,10 +209,11 @@ func teardown() -> void:
 	_frame = null
 	_audio = null
 	_driver = null
+	_map_window = null
 	_spawn_rows = []
 
 
-func _process(delta: float) -> void:
+func _process(_delta: float) -> void:
 	if not is_open():
 		set_process(false)
 		return
@@ -209,12 +245,16 @@ func _process(delta: float) -> void:
 			and not bool(sim.is_join_deploy_overlay_active()):
 		close()
 		return
-	# Periodic content refresh: zone security/ownership can change while picking
-	# [orig: UI_UpdateDeathScreenContent every 16 ticks @0x55477d].
-	_refresh_accum += delta
-	if _refresh_accum >= REFRESH_INTERVAL_S:
-		_refresh_accum = 0.0
-		_populate_spawn_list(sim)
+	# The shroud reveal and, inside it, the content refresh on each 16-tick
+	# boundary [orig: UI_UpdateDeathScreenContent every 16 ticks @0x55477d].
+	var tick := sim.get_logic_tick()
+	if bool(sim.is_death_shroud_revealed()):
+		_set_shroud_shown(true)
+		if Simulation.deploy_refresh_due(_last_tick, tick):
+			_populate_spawn_list(sim)
+	_last_tick = tick
+	# The map window follows its widget, which the reveal just showed.
+	_place_map_window()
 
 
 # Selection commands arrive through the driver's aggregate relay. Every click on
@@ -297,6 +337,12 @@ func _populate_spawn_list(sim: Simulation) -> void:
 				break
 
 
+
+
+func _set_shroud_shown(shown: bool) -> void:
+	var id := _driver.widget_id(SHROUD_WIDGET) if _driver != null else -1
+	if id >= 0:
+		_driver.set_widget_shown(id, shown)
 
 
 # The team-change service is unmodeled: hide the swap/team buttons (retail
@@ -389,7 +435,62 @@ func _ensure_menu() -> bool:
 	_frame = surface.frame
 	_audio = surface.audio
 	_driver = surface.driver
+	_mount_map_window()
 	return true
+
+
+# Mount the MAP window host as a frame child over the authored MAP widget (the
+# credits/preview mount pattern; the frame's cursor overlay stays above it).
+func _mount_map_window() -> void:
+	var id := _driver.widget_id(MAP_WIDGET)
+	if id < 0:
+		return
+	_map_window = MapViewWindow.new()
+	_map_window.name = "DeployMapWindow"
+	_map_window.set_view_state(_map_view_state)
+	_frame.add_child(_map_window)
+	_place_map_window()
+
+
+# Follow the widget: its frame rect, its authored design rect, and its
+# effective visibility (the shroud hides with the CONFIRM_EXIT dialog).
+func _place_map_window() -> void:
+	var map_window := get_map_window()
+	if map_window == null or _driver == null:
+		return
+	var id := _driver.widget_id(MAP_WIDGET)
+	var index := _driver.frame_index(id)
+	if index < 0:
+		map_window.visible = false
+		return
+	var rect := _driver.widget_frame_rect(id)
+	map_window.position = rect.position
+	map_window.size = rect.size
+	var design := _frame.widget_rect(index)
+	map_window.set_widget_design_rect(Rect2i(design))
+	map_window.visible = _frame.is_widget_shown(index) and rect.size.x > 0.0 \
+			and rect.size.y > 0.0
+	# The widgets after MAP (CONFIRM_EXIT) paint above the mounted window.
+	_frame.set_mount_widget(index if map_window.visible else -1)
+
+
+# The screen's load + show events for the MAP window: the sources, then the
+# seed (first load) and the zoom fit against the shroud's authored size.
+func _show_map_window(sim: Simulation) -> void:
+	var map_window := get_map_window()
+	if map_window == null:
+		return
+	var hud: HudOverlay = _hud_source.call() if _hud_source.is_valid() else null
+	map_window.set_hud_overlay(hud)
+	map_window.set_simulation(sim)
+	_place_map_window()
+	var shroud_id := _driver.widget_id(SHROUD_WIDGET)
+	var shroud_index := _driver.frame_index(shroud_id) if shroud_id >= 0 else -1
+	var shroud_size := Vector2i.ZERO
+	if shroud_index >= 0:
+		shroud_size = Vector2i(_frame.widget_rect(shroud_index).size)
+	map_window.screen_load()
+	map_window.screen_show(shroud_index >= 0, shroud_size)
 
 
 # The compiled frame is a passive surface; MenuFrameSurface.forward_gui_input
@@ -420,3 +521,4 @@ func _game_text(section: String, key: String, fallback: String) -> String:
 func _recompute_fit() -> void:
 	# MenuFrameSurface.fit_frame (shared with the other presenters).
 	MenuFrameSurface.fit_frame(_frame, _layout_control, _ui_parent)
+	_place_map_window()

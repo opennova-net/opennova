@@ -57,13 +57,17 @@ func show_screen(sim: Simulation, banner: String, root: ResourceRoot, mount: Nod
 	if _screen != null:
 		return
 	var outcome: RoundOutcome = null
+	var score: EndRoundStatistics = null
 	if sim != null:
 		outcome = sim.get_round_outcome_debug()
+		score = sim.get_epilog_score()
 	if outcome == null:
 		outcome = RoundOutcome.make(true, _winner)
+	if score == null:
+		score = EndRoundStatistics.make_epilog(0, 0, 0, 0, 0, 0)
 	_screen = MissionEndScreen.new()
 	_screen.name = "MissionEndScreen"
-	_screen.setup(outcome, banner, root)
+	_screen.setup(outcome, score, banner, root)
 	mount.add_child(_screen)
 	_screen.exit_requested.connect(on_exit)
 	Input.set_mouse_mode(Input.MOUSE_MODE_VISIBLE)

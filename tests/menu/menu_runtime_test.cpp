@@ -42,8 +42,7 @@ struct FakeFrame : MenuFrameSeam {
 	std::map<int, std::string> texts;
 	std::map<int, int> carets;
 	std::map<int, int> counts;
-	std::map<int, std::vector<std::vector<std::string>>> table_rows;
-	std::map<int, std::vector<MenuTableRowColor>> table_colors;
+	std::map<int, std::vector<MenuTableRow>> table_rows;
 	std::map<int, std::string> mnemonics;
 	std::set<int> disabled;
 	int claim = -1;
@@ -111,17 +110,18 @@ struct FakeFrame : MenuFrameSeam {
 		for (int r : rows) s += " " + std::to_string(r);
 		note(s);
 	}
-	void set_widget_table_rows(int i, const std::vector<std::vector<std::string>> &rows) override {
+	void set_widget_table_rows(int i, const std::vector<MenuTableRow> &rows) override {
 		note("rows " + std::to_string(i) + " " + std::to_string(rows.size()));
 		table_rows[i] = rows;
-	}
-	void set_widget_table_row_colors(int i, const std::vector<MenuTableRowColor> &colors) override {
-		table_colors[i] = colors;
 	}
 	void set_widget_table_columns(int i, bool installed, const std::vector<MenuTableColumn> &columns,
 			int sort_column) override {
 		note("columns " + std::to_string(i) + (installed ? " 1 " : " 0 ") +
 				std::to_string(columns.size()) + " " + std::to_string(sort_column));
+	}
+	void set_widget_clip_rect(int i, bool enabled, int l, int t, int r, int b) override {
+		note("clip " + std::to_string(i) + (enabled ? " 1 " : " 0 ") + std::to_string(l) + " " +
+				std::to_string(t) + " " + std::to_string(r) + " " + std::to_string(b));
 	}
 	void set_widget_hover_item(int i, int row) override {
 		note("hover " + std::to_string(i) + " " + std::to_string(row));
@@ -131,6 +131,10 @@ struct FakeFrame : MenuFrameSeam {
 	}
 	void set_widget_focused(int i, bool f) override {
 		note("focused " + std::to_string(i) + (f ? " 1" : " 0"));
+	}
+	void set_widget_rect(int i, int l, int t, int r, int b) override {
+		note("rect " + std::to_string(i) + " " + std::to_string(l) + " " + std::to_string(t) +
+				" " + std::to_string(r) + " " + std::to_string(b));
 	}
 	void set_widget_caret(int i, int caret) override {
 		note("caret " + std::to_string(i) + " " + std::to_string(caret));
@@ -167,10 +171,13 @@ struct FakeFrame : MenuFrameSeam {
 	bool combo_popup_contains(int, float, float) const override { return popup_contains; }
 	int list_row_at(int, float, float) const override { return list_row; }
 	int spin_arrow_at(int, float, float) const override { return spin_arrow; }
-	bool table_hit(int, float, float, int &row, int &column) const override {
-		row = table_row;
-		column = table_column;
+	bool table_hit(int, float, float, int *row, int *column) const override {
+		*row = table_row;
+		*column = table_column;
 		return table_ok;
+	}
+	std::string item_display_text(int i, int row) const override {
+		return "display " + std::to_string(i) + " " + std::to_string(row);
 	}
 	std::string widget_mnemonic(int i) const override {
 		const auto it = mnemonics.find(i);
@@ -721,6 +728,49 @@ void test_radio_spin_tables_scroll() {
 	CHECK(!rt.get_widget_scroll_range(3, range));
 }
 
+// The CTableWnd row operations over the store: AddRow's landed index and its
+// column-0 value, the COLUMN COUNT bound on SetCellText / SetCellValue,
+// SetRowSelected's single-select clear and locked-row immunity, the colour
+// override, RemoveRow(-1).
+// [orig: CTableWnd_InsertRow @0x641c30; CTableWnd_SetCellText @0x63edf0;
+//  CTableWnd_SetRowSelected @0x63f5f0; sub_640110 @0x640110;
+//  CTableWnd_RemoveRow @0x641a40]
+void test_table_row_operations() {
+	std::vector<MenuTableRow> rows;
+	CHECK(table_insert_row(rows, "x", 5, 0, -1) == 0);
+	CHECK(table_insert_row(rows, "y", 6, 0x4u, 9) == 1); // past the end appends
+	CHECK(table_insert_row(rows, "z", 7, 0, 0) == 0);    // inserted at the front
+	CHECK(rows[0].cell(0) == "z" && rows[1].value(0) == 5 && rows[2].flags == 0x4u);
+	CHECK(!table_set_cell_text(rows, 0, 3, 3, "out")); // the column count bounds
+	CHECK(table_set_cell_text(rows, 0, 2, 3, "in") && rows[0].cell(2) == "in" &&
+			rows[0].cell(1).empty());
+	CHECK(!table_set_cell_value(rows, 5, 0, 3, 1) && table_set_cell_value(rows, 1, 1, 3, 9) &&
+			table_cell_value(rows, 1, 1) == 9 && table_cell_value(rows, 1, 0) == 5);
+	// Single select: the non-locked rows clear; a locked row keeps its state.
+	rows[2].state = kTableRowLocked;
+	CHECK(table_set_row_selected(rows, 0, true, false));
+	CHECK(table_set_row_selected(rows, 1, true, false));
+	CHECK(rows[0].state == kTableRowDefault && rows[1].state == kTableRowSelected &&
+			rows[2].state == kTableRowLocked);
+	CHECK(!table_click_select(rows, 2, false) && rows[2].state == kTableRowLocked);
+	// Multiselect: kept, toggled.
+	CHECK(table_set_row_selected(rows, 0, true, true) && rows[1].state == kTableRowSelected);
+	CHECK(table_click_select(rows, 0, true) && rows[0].state == kTableRowDefault);
+	// -1 writes every row, locked included.
+	table_set_row_selected(rows, -1, true, false);
+	CHECK(rows[2].state == kTableRowSelected);
+	table_set_row_color(rows, 1, true, 0xFF00FF00u);
+	CHECK((rows[1].flags & kTableRowFlagColor) != 0 && rows[1].color == 0xFF00FF00u);
+	table_set_row_color(rows, -1, false, 0);
+	CHECK((rows[1].flags & kTableRowFlagColor) == 0 && rows[1].color == 0xFF00FF00u);
+	rows[1].flags |= 0x2u;
+	CHECK(rows[1].hidden() && !rows[0].hidden());
+	table_remove_row(rows, 1);
+	CHECK(rows.size() == 2 && rows[1].cell(0) == "y");
+	table_remove_row(rows, -1);
+	CHECK(rows.empty());
+}
+
 // Press, then release over the claimed widget (the frame's click signal).
 void click(MenuRuntime &rt, FakeFrame &frame, int index, uint32_t now) {
 	frame.claim = index;
@@ -841,23 +891,39 @@ void test_mouse() {
 	click(rt, frame, 11, 45000);
 	CHECK(rt.selected_set(13).empty() && rt.selected_row(13) == -1 &&
 			frame.saw("selection 11 -1 -1 0") && rec.last(MenuEvent::Kind::ValueChanged)->value == -1);
-	// TABLE: the hit's row selects (MULTISELECT toggles), column -1 or not; the
-	// header strip (row -1) and a failed test pick nothing.
+	// TABLE: the hit's row selects (MULTISELECT toggles), column -1 or not, and
+	// the press raises the cell event with the row's new state and the column's
+	// cell value [orig: CTableWnd_HandleNamedEvent @0x642400]; the header strip
+	// (row -1) and a failed test pick nothing.
 	rt.table_add_row(14, { "a" });
 	rt.table_add_row(14, { "b" });
+	rt.table_set_cell_value(14, 1, 0, 77);
 	frame.table_row = 0;
 	frame.table_column = -1;
 	click(rt, frame, 12, 50000);
 	frame.table_row = 1;
+	frame.table_column = 0;
 	click(rt, frame, 12, 60000);
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0, 1 }));
+	{
+		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
+		CHECK(cell != nullptr && cell->id == 14 && cell->text == "TABLE" && cell->value == 1 &&
+				cell->column == 0 && cell->state == kTableRowSelected && cell->cell_value == 77 &&
+				!cell->flag);
+	}
+	click(rt, frame, 12, 60100); // the same row again: toggled off, a double click
+	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
+	{
+		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
+		CHECK(cell != nullptr && cell->value == 1 && cell->state == kTableRowDefault && cell->flag);
+	}
 	frame.table_row = -1;
 	frame.table_column = 0;
 	click(rt, frame, 12, 70000);
 	frame.table_ok = false;
 	frame.table_row = 0;
 	click(rt, frame, 12, 80000);
-	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0, 1 }));
+	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
 	frame.table_ok = true;
 
 	// SPINLIST: a press on the list activates it and steps to the next value; an
@@ -892,10 +958,16 @@ void test_mouse() {
 	rt.process_mouse(5, 5, true, 0);
 	rt.process_mouse(5, 5, false, 0);
 	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 2"));
-	// A screen round trip keeps the typed text (the focus drops into the store).
+	// A moved widget keeps its rect across a screen round trip [orig: CWnd_SetRect
+	// @0x646560], and the typed text survives it (the focus drops into the store).
+	frame.log.clear();
+	rt.set_widget_rect(10, 5, 6, 205, 56);
+	CHECK(frame.saw("rect 8 5 6 205 56"));
 	rt.show_screen("OPTIONS");
 	CHECK(rt.focused_widget() == -1 && rt.get_widget_text(10) == "h\xC3\xA9");
+	frame.log.clear();
 	rt.show_screen("MAIN");
+	CHECK(frame.saw("rect 8 5 6 205 56"));
 	// An unconfigured frame takes no input.
 	frame.configured = false;
 	CHECK(!rt.handle_key(vk(27)) && !rt.process_wheel(0, 0, 1));
@@ -1028,6 +1100,10 @@ void test_keys() {
 	CHECK(rec.last(MenuEvent::Kind::ValueChanged) != nullptr &&
 			rec.last(MenuEvent::Kind::ValueChanged)->text == "NEXT" &&
 			rec.count(MenuEvent::Kind::WidgetActivated) == 0);
+	// The commit reaches the edit's own callback (event 0x7000002).
+	CHECK(rec.last(MenuEvent::Kind::EditCommitted) != nullptr &&
+			rec.last(MenuEvent::Kind::EditCommitted)->id == 12 &&
+			rec.last(MenuEvent::Kind::EditCommitted)->text == "NEXT");
 	rt.set_widget_shown(13, true);
 	rt.dispatch_action(action("WINDOW", "MODAL_DLG", "SHOW"));
 	rt.focus_edit(12);
@@ -1041,8 +1117,9 @@ void test_keys() {
 	rec.events.clear();
 	CHECK(rt.handle_key(vk(13)) && activated() == "DLG_OK");
 	const int committed = rec.first_index(MenuEvent::Kind::ValueChanged);
+	const int commit_event = rec.first_index(MenuEvent::Kind::EditCommitted);
 	const int filtered = rec.first_index(MenuEvent::Kind::FilterRequested);
-	CHECK(committed >= 0 && filtered > committed &&
+	CHECK(committed >= 0 && commit_event > committed && filtered > commit_event &&
 			filtered < rec.first_index(MenuEvent::Kind::WidgetActivated) &&
 			rec.events[static_cast<size_t>(filtered)].id == rt.widget_id("LIST"));
 	frame.edit_key_result = 0;
@@ -1390,7 +1467,7 @@ void test_table_columns_and_sort() {
 	rt.table_add_row(table, { "bob", "-", "12" });
 	rt.table_add_row(table, { "cat", "-", "x" });
 	rt.table_add_row(table, { "dan", "-", "" });
-	rt.table_set_row_color(table, 1, 0xFF00BFFFu);
+	rt.table_set_row_color(table, 1, true, 0xFF00BFFFu);
 	rt.table_select_row(table, 0, false);
 	rt.table_set_column_ascending(table, 2, false);
 	rt.table_sort_by_column(table, 2);
@@ -1402,8 +1479,9 @@ void test_table_columns_and_sort() {
 	CHECK(rt.table_selected_rows(table) == std::vector<int>{ 2 });
 	CHECK(rt.table_sort_column(table) == 2);
 	CHECK(frame.saw("columns " + std::to_string(index) + " 1 3 2"));
-	const std::vector<MenuTableRowColor> &colors = frame.table_colors[index];
-	CHECK(colors.size() == 4 && colors[1].set && colors[1].argb == 0xFF00BFFFu && !colors[0].set);
+	const std::vector<MenuTableRow> &rows = frame.table_rows[index];
+	CHECK(rows.size() == 4 && (rows[1].flags & kTableRowFlagColor) != 0 &&
+			rows[1].color == 0xFF00BFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
 	// A text column sorts by stricmp, ascending.
 	rt.table_sort_by_column(table, 0);
 	CHECK(rt.table_cell_text(table, 0, 0) == "ann" && rt.table_cell_text(table, 3, 0) == "dan");
@@ -1423,6 +1501,7 @@ int main() {
 	test_rows();
 	test_bubble();
 	test_radio_spin_tables_scroll();
+	test_table_row_operations();
 	test_mouse();
 	test_keys();
 	test_two_root_keys();

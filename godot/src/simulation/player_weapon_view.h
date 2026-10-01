@@ -79,6 +79,9 @@ public:
 	/* the magazine, recoil kick, and the crosshair spread domains */       \
 	X(int, clip, INT)                                                       \
 	X(int, reserve, INT)                                                    \
+	/* the clip-flash key's def halves (D-HUD-5) */                         \
+	X(int, ammo_bucket, INT)                                                \
+	X(int, ammo_class_id, INT)                                              \
 	X(int, kick, INT)                                                       \
 	X(int, recoil_pitch_bam, INT)                                           \
 	X(int, weapon_weight_spread_bam, INT)                                   \

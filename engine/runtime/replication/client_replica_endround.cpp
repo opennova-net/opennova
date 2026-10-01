@@ -56,6 +56,7 @@ void ClientReplicaPipeline::apply_end_round_header(
 	// 0x10000)` [orig: NapiNPClientMsg_0x01D @0x43086c..0x430883]; the
 	// SP listen host's loopback replica stands in world.rules.mp_session for
 	// is_in_session (see mp_session_).
+	state_.spawn_success_gate = true; // before the parse [orig: @0x430858]
 	if (!decode_end_round_header(body.data(), body.size(),
 			mp_session_ && (game_type_ & 0x10000u) == 0, header))
 		return;

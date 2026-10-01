@@ -490,7 +490,7 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.ai_state == 0x34, "ai_state low byte")) return false;
 	if (!expect(rec.anim_slot == 6 && rec.net_id == 0x4242 && rec.player_class == 7,
 	            "anim/net/class raw fields")) return false;
-	if (!expect(rec.unused_byte == 0 && rec.alert_level == 0xAB && rec.sub_type == 0xCD,
+	if (!expect(rec.player_slot_id == 0 && rec.alert_level == 0xAB && rec.sub_type == 0xCD,
 	            "tail leaves only entity+340 zero")) return false;
 
 	const std::vector<uint8_t> wire = nw::encode_full_entity_spawn(rec);
@@ -518,7 +518,7 @@ bool run_full_entity_spawn_rich_fields() {
 	                    out.pitch_hi == rec.pitch_hi && out.ai_state == rec.ai_state &&
 	                    out.anim_slot == rec.anim_slot && out.net_id == rec.net_id &&
 	                    out.player_class == rec.player_class &&
-	                    out.unused_byte == rec.unused_byte &&
+	                    out.player_slot_id == rec.player_slot_id &&
 	                    out.alert_level == rec.alert_level && out.sub_type == rec.sub_type,
 	            "rich decoded pose and tail")) return false;
 	std::printf("PASS full_entity_spawn_rich_fields\n");

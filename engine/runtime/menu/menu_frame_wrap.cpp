@@ -205,7 +205,7 @@ bool MenuFrameCompiler::multiline_line_counts(int index,
 	}
 	hud::GameFont gf;
 	gf.set_font(font);
-	const mnu::RectEdges rect = solve_rect(node);
+	const mnu::RectEdges rect = node_rect_(node, ws);
 	int wrap_w = rect.right - rect.left;
 	if (wrap_w <= 0) {
 		wrap_w = 0x10000;

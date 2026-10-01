@@ -34,12 +34,16 @@ add_library(opennova_net STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/entity_class.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_encode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/visible_players.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/emote_wire.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/squad_messages.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/session_hello.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/nw_session_framing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session/protocol_message.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/wire_capture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/replay/serverlog_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/lan_discovery.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/session_vars.cpp # the session-variable list (0x60 server info)
     # novaworld session leg — NWU session establishment above the npwire
     # framing: the client session state machine, the session-protocol
     # classifier, join identity, the lobby CU var-list codec

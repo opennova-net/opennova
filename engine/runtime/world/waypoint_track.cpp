@@ -92,15 +92,43 @@ void WaypointTrack::on_event_fired(int32_t event_index) {
 
 // [orig: Spectator_CycleTarget @ 0x4dc1d0 forward leg — next index with wrap.
 //  The original skips entries whose itemDef cleared (despawned markers); track
-//  entries are immutable marker mirrors, so every entry stays cyclable.]
+//  entries are immutable marker mirrors, so every entry stays cyclable. A
+//  current not in the list scans from index 0 (@0x4dc246), so the step lands
+//  on index 1.]
 void WaypointTrack::cycle_forward() {
     const int32_t count = static_cast<int32_t>(entries.size());
+    if (count <= 1) return; // [orig: @0x4dc1d9]
+    const int32_t from = current >= 0 && current < count ? current : 0;
+    current = (from + 1) % count;
+}
+
+// [orig: Spectator_CycleTarget @ 0x4dc1d0 backward leg @0x4dc29a..0x4dc2d6 —
+//  the previous index, wrapping to the last entry.]
+void WaypointTrack::cycle_backward() {
+    const int32_t count = static_cast<int32_t>(entries.size());
     if (count <= 1) return;
-    if (current < 0 || current >= count) {
-        current = 0;
+    const int32_t from = current >= 0 && current < count ? current : 0;
+    current = from > 0 ? from - 1 : count - 1;
+}
+
+void WaypointTrack::manual_cycle(bool backward, bool in_session) {
+    if (in_session) { // [orig: @0x49b3de..0x49b3f3]
+        if (backward) cycle_backward();
+        else cycle_forward();
         return;
     }
-    current = (current + 1) % count;
+    // [orig: Game_GetShowWaypoints() && g_CurrentWaypoint @0x49b3f9..0x49b40a]
+    const WaypointEntry *cur = current_entry();
+    if (!show || cur == nullptr) return;
+    if (backward) {
+        if (current == 0) return; // [orig: current != g_WaypointList[0]]
+        const int32_t was = current;
+        cycle_backward();
+        const WaypointEntry *landed = current_entry();
+        if (landed == nullptr || !landed->chain_back) current = was; // [orig: +535 test]
+    } else if (cur->chain_back || cur->done) { // [orig: +535 / +536 tests]
+        cycle_forward();
+    }
 }
 
 // [orig: SpawnPoint_SkipBlocked @ 0x4de310 — cycle forward past done entries
@@ -118,13 +146,26 @@ void WaypointTrack::skip_done() {
 // The current-waypoint slice of the per-frame HUD info rebuild, plus the
 // mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
 // (hudInfo+373 number, +400/404/408 position) + g_ShowWaypoints @ 0x27238BC]
-WaypointHudView waypoint_hud_view(const WaypointTrack &track) {
+WaypointHudView waypoint_hud_view(const WaypointTrack &track, const EntityRegistry *registry) {
     WaypointHudView v;
     v.show = track.show;
     v.count = static_cast<int32_t>(track.entries.size());
     const WaypointEntry *cur = track.current_entry();
     v.current = cur ? track.current : -1;
-    if (cur != nullptr) v.entry = *cur;
+    if (cur != nullptr) {
+        v.entry = *cur;
+        // The pool-3 marker the entry mirrors [orig: g_CurrentWaypoint is the
+        // entity pointer itself; its def +32, def+80 / def+84, entity+538].
+        const Entity *marker = registry != nullptr
+                ? registry->get(EntityHandle::make(3, cur->node))
+                : nullptr;
+        if (marker != nullptr) {
+            v.has_def = marker->has_item_def;
+            v.def_type = marker->has_item_def ? marker->item_id : 0;
+            v.def_attrib = marker->has_item_def ? marker->item_attrib : 0u;
+            v.zone_number = marker->zone_number;
+        }
+    }
     return v;
 }
 

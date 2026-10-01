@@ -20,6 +20,7 @@
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/mount_controls.h>
 #include <runtime/world/player_spawn.h>
+#include <runtime/world/radar_contacts.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/spawn_select.h>
 #include <runtime/world/vehicle_attach.h>
@@ -481,6 +482,8 @@ bool MissionKernel::load_ammo_table(const BootFileSource &files,
 	if (def_parse_ammo_memory(bytes.data(), bytes.size(), &file) != 0) return false;
 	world.tables.ammo = w::build_ammo_table(file);
 	def_free_ammo(&file);
+	// The whiz radius rides the loaded sound sets (the boot mounts them first).
+	w::resolve_ammo_whiz_radii(world.tables.ammo, world.tables.sound_sets);
 	w::resolve_weapon_round_types(world.tables.weapons, world.tables.ammo);
 	w::local_loadout_sync_damage_classes(world, local.loadout);
 	ammo_ok = true;
@@ -731,6 +734,13 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	if (!options.joiner) {
 		step("premission");
 		world.run_logic_tick(/*is_authority=*/true, w::TickPhase::PreMission);
+		// Then the SP score block zeroes whole, so a PreMission SubGoalWon
+		// keeps its mask bit but not its tally; the WAC init and the census
+		// write after it.
+		// [orig: Game_StartMission — the Server_ResetRoundCounters call
+		//  @0x525B90 inside the same authority gate; its memset(0xC84688, 0,
+		//  0x84) @0x516C5E]
+		world.kill_stats = w::MissionKillStats{};
 	}
 	// Every peer then zeroes the frame tick, and each frame advances it ahead
 	// of its entity update, so the first frame runs at tick 1 on the host and
@@ -742,6 +752,11 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
 	// tick out of phase.
 	world.logic_tick = 1;
+	// The Attack & Defend side latch (world/local_player.h), taken here where
+	// the load still knows its game type; retail's call sits after the initial
+	// WAC execution and the weather settle (complete_mission_start's legs)
+	// [orig: Game_StartMission -> sub_524110 @0x5260C1].
+	local.latch_attack_defend_role(options.game_type);
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;

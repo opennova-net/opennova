@@ -220,27 +220,6 @@ public:
 	int get_light_ticks() const { return value_.light_ticks; }
 };
 
-// One folded S2C 0x14 player-chat line (Simulation::drain_chat_lines;
-// replication::ClientChatLine), routed by the witnessed channel table
-// (hud/feed_format.h): sink 0 = the SYSTEM ring, 1 = the CHAT ring, 2 = the
-// message queue, 3 = channel 3; `argb` is the channel's line color.
-class ChatLineRow : public RefCounted {
-	GDCLASS(ChatLineRow, RefCounted)
-
-	opennova::replication::ClientChatLine value_;
-
-protected:
-	static void _bind_methods();
-
-public:
-	void assign(const opennova::replication::ClientChatLine &p_value) { value_ = p_value; }
-
-	String get_text() const;
-	int64_t get_argb() const;
-	int get_sink() const;
-	int get_channel() const { return static_cast<int>(value_.channel); }
-};
-
 // One live death piece (world::DeathPieceRow; the trail effect is the debris
 // type's row in the ONE native table, death_piece_trail_effect).
 class DeathPieceRow : public RefCounted {

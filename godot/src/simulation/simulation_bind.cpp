@@ -12,7 +12,6 @@
 #include "simulation/hitbox_debug_report.h" // the hitbox oracle payload
 #include "simulation/entity_card.h" // the typed inspection records (ADR 0042 d5)
 #include "simulation/entity_row.h"
-#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h"
 #include "network/host_session_options.h" // the hosted-session request record
 #include "simulation/fp_viewmodel_spec.h" // the first-person submit spec record
@@ -117,6 +116,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_mission_name"), &Simulation::get_join_mission_name);
 	ClassDB::bind_method(D_METHOD("get_join_mission_file"), &Simulation::get_join_mission_file);
 	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
+	ClassDB::bind_method(D_METHOD("take_tip_events"), &Simulation::take_tip_events);
 	ClassDB::bind_method(D_METHOD("get_join_mission_header"), &Simulation::get_join_mission_header);
 	ClassDB::bind_method(D_METHOD("get_join_terrain_til_state"),
 	                     &Simulation::get_join_terrain_til_state);
@@ -161,6 +161,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);
+	ClassDB::bind_method(D_METHOD("is_round_over"), &Simulation::is_round_over);
 	ClassDB::bind_method(D_METHOD("get_end_round_overlay", "gametext"),
 	                     &Simulation::get_end_round_overlay);
 	ClassDB::bind_method(D_METHOD("get_end_round_columns", "table_width", "gametext"),
@@ -171,6 +172,7 @@ void Simulation::_bind_methods() {
 	                            &Simulation::strip_inline_tags);
 	ClassDB::bind_method(D_METHOD("get_end_round_statistics"),
 	                     &Simulation::get_end_round_statistics);
+	ClassDB::bind_method(D_METHOD("get_epilog_score"), &Simulation::get_epilog_score);
 	ClassDB::bind_method(D_METHOD("get_join_assigned_team"),
 	                     &Simulation::get_join_assigned_team);
 	ClassDB::bind_method(D_METHOD("get_class_allow_mask"),
@@ -193,6 +195,8 @@ void Simulation::_bind_methods() {
 	                     &Simulation::request_hud_radar_zoom);
 	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
 	                     &Simulation::request_hud_map_cycle);
+	ClassDB::bind_method(D_METHOD("request_waypoint_cycle", "direction"),
+	                     &Simulation::request_waypoint_cycle);
 	ClassDB::bind_method(D_METHOD("request_hud_map_close"),
 	                     &Simulation::request_hud_map_close);
 	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
@@ -206,10 +210,15 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_waypoint_hud_view"), &Simulation::get_waypoint_hud_view);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_snapshot"),
 	                     &Simulation::get_hud_minimap_snapshot);
+	ClassDB::bind_method(D_METHOD("set_hud_radar_gates", "gates"),
+	                     &Simulation::set_hud_radar_gates);
+	ClassDB::bind_method(D_METHOD("get_hud_radar"), &Simulation::get_hud_radar);
 	ClassDB::bind_method(D_METHOD("get_hud_minimap_footprints"),
 	                     &Simulation::get_hud_minimap_footprints);
 	ClassDB::bind_method(D_METHOD("get_hud_map_grid_origin"),
 	                     &Simulation::get_hud_map_grid_origin);
+	ClassDB::bind_method(D_METHOD("get_hud_minimap_overlays", "gametext"),
+	                     &Simulation::get_hud_minimap_overlays);
 	ClassDB::bind_method(D_METHOD("get_local_player_yaw_deg"), &Simulation::get_local_player_yaw_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_pitch_deg"), &Simulation::get_local_player_pitch_deg);
 	ClassDB::bind_method(D_METHOD("get_local_player_anim_key"), &Simulation::get_local_player_anim_key);
@@ -249,15 +258,15 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_local_player_weapon_state"), &Simulation::get_local_player_weapon_state);
 	ClassDB::bind_method(D_METHOD("drain_local_player_weapon_events"), &Simulation::drain_local_player_weapon_events);
 	ClassDB::bind_method(D_METHOD("drain_round_impacts"), &Simulation::drain_round_impacts);
-	ClassDB::bind_method(D_METHOD("drain_feed_events"), &Simulation::drain_feed_events);
 	ClassDB::bind_method(D_METHOD("retain_feed_announcement", "text", "tick"), &Simulation::retain_feed_announcement);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_text"), &Simulation::get_kill_announcement_text);
 	ClassDB::bind_method(D_METHOD("get_kill_announcement_tick", "now"), &Simulation::get_kill_announcement_tick);
-	ClassDB::bind_method(D_METHOD("drain_chat_lines"), &Simulation::drain_chat_lines);
 	ClassDB::bind_method(D_METHOD("get_vehicle_panel_view"),
 			&Simulation::get_vehicle_panel_view);
 	ClassDB::bind_method(D_METHOD("get_session_game_type"),
 			&Simulation::get_session_game_type);
+	ClassDB::bind_method(D_METHOD("get_command_map_rules_text", "gametext"),
+			&Simulation::get_command_map_rules_text);
 	ClassDB::bind_method(D_METHOD("get_scoreboard"), &Simulation::get_scoreboard);
 	ClassDB::bind_method(
 			D_METHOD("format_feed_line", "template", "attacker", "victim",
@@ -453,8 +462,11 @@ void Simulation::_bind_methods() {
 			D_METHOD("epilog_fade_in_seconds"),
 			&Simulation::epilog_fade_in_seconds);
 	ClassDB::bind_static_method("Simulation",
-			D_METHOD("deploy_refresh_interval_seconds"),
-			&Simulation::deploy_refresh_interval_seconds);
+			D_METHOD("deploy_refresh_due", "prev_tick", "tick"),
+			&Simulation::deploy_refresh_due);
+	ClassDB::bind_method(D_METHOD("is_death_shroud_revealed"),
+			&Simulation::is_death_shroud_revealed);
+	ClassDB::bind_method(D_METHOD("send_go_code", "code"), &Simulation::send_go_code);
 	ClassDB::bind_static_method("Simulation",
 			D_METHOD("spawn_origin_pack", "kind", "index"),
 			&Simulation::spawn_origin_pack);

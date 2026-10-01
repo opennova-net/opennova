@@ -190,6 +190,43 @@ void test_deploy_overlay_open_latch() {
 	CHECK(!view.state().deploy_overlay_open_latch);
 }
 
+// The count of spectator-tip commands the pass queued (replication::
+// TipEventCommand), draining the rest.
+int spectator_tips(ClientReplicaPipeline &view) {
+	int n = 0;
+	for (const ClientEffectCommand &c : view.drain_effect_commands())
+		if (const auto *tip = std::get_if<TipEventCommand>(&c)) n += tip->event == 22 ? 1 : 0;
+	return n;
+}
+
+// The death-screen rising edge raises the spectator tip (event 22) unless the
+// round is over; a held bit raises nothing more.
+// [orig: NapiNPClientMsg_0x00A @0x42ffd0..0x42ffdf — `cmp g_SpawnSuccessGate`
+//  then CTipSystem_HandleEvent(22)]
+void test_death_edge_raises_the_spectator_tip() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 0;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x01;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().death_screen_active);
+	CHECK(spectator_tips(view) == 1);
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(spectator_tips(view) == 0);
+	fu.flags1 = 0x00;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(spectator_tips(view) == 0);
+	// The round-over gate holds it.
+	view.state().spawn_success_gate = true;
+	fu.flags1 = 0x01;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().death_screen_active);
+	CHECK(spectator_tips(view) == 0);
+}
+
 // A KNOWN tag whose body fails its decoder counts as a malformed body, not
 // an unknown tag — the arm that once bumped the wrong counter.
 void test_truncated_known_body_counts_as_malformed() {
@@ -210,6 +247,7 @@ int main() {
 	test_self_wave_zone();
 	test_deploy_overlay_follows_the_host();
 	test_deploy_overlay_open_latch();
+	test_death_edge_raises_the_spectator_tip();
 	test_truncated_known_body_counts_as_malformed();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

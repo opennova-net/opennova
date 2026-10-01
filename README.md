@@ -110,7 +110,7 @@ builds and serves the site; see [DEPLOY.md](DEPLOY.md).
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, the `assets/`
 placeholder data, and launch instructions. Retail game data is supplied
-separately. Debug builds include the game's F3 tools.
+separately. Debug builds include the game's dev tools (Insert).
 
 They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
 OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project

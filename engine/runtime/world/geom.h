@@ -6,6 +6,8 @@
 // front-ends (WAC operand resolution, BMS param decode) share one definition.
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace opennova::world {
@@ -15,6 +17,16 @@ struct FixedVec3 {
 
     constexpr int32_t operator[](int i) const { return i == 0 ? x : (i == 1 ? y : z); }
 };
+
+// A 16.16 vector's length, as the projectile code takes it: the double sqrt,
+// capped immediately below the signed ftol overflow boundary.
+inline int32_t fixed_magnitude(const FixedVec3 &v) {
+    const double magnitude = std::sqrt(static_cast<double>(v.x) * v.x +
+                                       static_cast<double>(v.y) * v.y +
+                                       static_cast<double>(v.z) * v.z);
+    constexpr double kFtolLimit = 2147418112.0; // float bits 0x4EFFFE00
+    return static_cast<int32_t>(std::min(magnitude, kFtolLimit));
+}
 
 // 16.16 fixed-point <-> float/int. Matches WacScript_ResolveParameter scaling and
 // bms.h's 1/65536 convention.

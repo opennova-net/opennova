@@ -21,6 +21,11 @@ const CROSSHAIR_STYLE_KEY := "crosshair_style"
 const CROSSHAIR_COLOR_KEY := "crosshair_color"
 const CROSSHAIR_SPREAD_KEY := "crosshair_spread"
 const ASPECT_MODE_KEY := "display_16x9"
+# The two tip options persist as retail's game.cfg words (default 1), which
+# the Options rows MR_CLIPPY_KEYBOARD / MR_CLIPPY_HINTS edit (engine
+# hud/tip_system.h TipOptions carries the witness).
+const KEYBOARD_TIPS_KEY := "enable_keyboardtips"
+const GAMEPLAY_TIPS_KEY := "enable_gameplaytips"
 
 # The slider ranges are the engine's witnessed Options ranges
 # (options_policy.h kOptionsScrollRanges through MenuFrame), read by control
@@ -65,6 +70,8 @@ class State extends RefCounted:
 	var crosshair_color: int
 	var crosshair_spread: bool
 	var aspect_mode: int
+	var keyboard_tips: bool
+	var gameplay_tips: bool
 
 	func _init(p_sound_fx_volume := DEFAULT_VOLUME,
 			p_dialog_volume := DEFAULT_VOLUME,
@@ -74,7 +81,9 @@ class State extends RefCounted:
 			p_crosshair_style := DEFAULT_CROSSHAIR_STYLE,
 			p_crosshair_color := DEFAULT_CROSSHAIR_COLOR,
 			p_crosshair_spread := DEFAULT_CROSSHAIR_SPREAD,
-			p_aspect_mode := DEFAULT_ASPECT_MODE) -> void:
+			p_aspect_mode := DEFAULT_ASPECT_MODE,
+			p_keyboard_tips := true,
+			p_gameplay_tips := true) -> void:
 		sound_fx_volume = p_sound_fx_volume
 		dialog_volume = p_dialog_volume
 		music_volume = p_music_volume
@@ -84,11 +93,14 @@ class State extends RefCounted:
 		crosshair_color = p_crosshair_color
 		crosshair_spread = p_crosshair_spread
 		aspect_mode = p_aspect_mode
+		keyboard_tips = p_keyboard_tips
+		gameplay_tips = p_gameplay_tips
 
 	func copy() -> State:
 		return State.new(sound_fx_volume, dialog_volume, music_volume,
 				mouse_sensitivity, invert_mouse, crosshair_style,
-				crosshair_color, crosshair_spread, aspect_mode)
+				crosshair_color, crosshair_spread, aspect_mode,
+				keyboard_tips, gameplay_tips)
 
 
 signal changed(state: State)
@@ -132,6 +144,8 @@ func update(state: State) -> void:
 		config.set_value(PLAYER_SECTION, CROSSHAIR_SPREAD_KEY,
 				_state.crosshair_spread)
 		config.set_value(PLAYER_SECTION, ASPECT_MODE_KEY, _state.aspect_mode)
+		config.set_value(PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1 if _state.keyboard_tips else 0)
+		config.set_value(PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1 if _state.gameplay_tips else 0)
 	)
 	apply()
 	changed.emit(current())
@@ -188,7 +202,9 @@ func _load_state() -> State:
 					CROSSHAIR_COLOR_KEY, DEFAULT_CROSSHAIR_COLOR)),
 			bool(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION,
 					CROSSHAIR_SPREAD_KEY, DEFAULT_CROSSHAIR_SPREAD)),
-			_load_aspect_mode()))
+			_load_aspect_mode(),
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, KEYBOARD_TIPS_KEY, 1)) != 0,
+			int(ConfigStore.read(CONFIG_PATH, PLAYER_SECTION, GAMEPLAY_TIPS_KEY, 1)) != 0))
 
 
 # The persisted cfg word, or the one-time desktop seed a fresh profile writes
@@ -214,7 +230,8 @@ static func _normalized(state: State) -> State:
 			clampi(state.crosshair_style,
 					MIN_CROSSHAIR_STYLE, MAX_CROSSHAIR_STYLE),
 			state.crosshair_color & CROSSHAIR_COLOR_MASK,
-			state.crosshair_spread, state.aspect_mode)
+			state.crosshair_spread, state.aspect_mode,
+			state.keyboard_tips, state.gameplay_tips)
 
 
 # Clamp to the engine's witnessed range for an Options slider, by control

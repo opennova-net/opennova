@@ -79,14 +79,14 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 
 	Input.warp_mouse(Vector2(300, 300))
 	await ctx.wait_frames(2)
-	var f3 := InputEventKey.new()
-	f3.keycode = KEY_F3
-	f3.physical_keycode = KEY_F3
-	f3.pressed = true
-	Input.parse_input_event(f3)
+	var toggle := InputEventKey.new()
+	toggle.keycode = MainGame.DEV_TOOLS_KEY
+	toggle.physical_keycode = MainGame.DEV_TOOLS_KEY
+	toggle.pressed = true
+	Input.parse_input_event(toggle)
 	await ctx.wait_frames(2)
 	_check(not tools.is_open() and container.visibility_layer == 1,
-			"F3 forwarded through the interactive Game texture closes the workspace")
+			"Insert forwarded through the interactive Game texture closes the workspace")
 	return _verdict()
 
 

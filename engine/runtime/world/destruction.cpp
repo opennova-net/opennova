@@ -574,11 +574,14 @@ void entity_apply_weapon_damage(World &world, CollisionWorld *collision, Entity 
                 player_body_waypoint_visits(world, target);
             }
             // Right after that notify, a blast on the LOCAL player arms the red
-            // damage vignette + the camera shake, unless the record's kz type is
-            // 3 (the medic heal)
+            // damage vignette + the camera shake and the radar blip, unless the
+            // record's kz type is 3 (the medic heal); the source is the entry's
+            // entity (+0x20), the blip point the entry's position (+0x00)
             // [orig: @0x4e6b77..0x4e6b8a -> Player_OnDamageReceived @0x4dd880].
-            if (target.handle == world.cached.local_player && e.type != ammo_kz::kMedic)
-                player_on_damage_received(world);
+            if (target.handle == world.cached.local_player && e.type != ammo_kz::kMedic) {
+                const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y), to_fixed(e.pos.z)};
+                player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
+            }
             if (target.health <= 0 && before > 0) {
                 world.script.relations.group(target.group_id).alert = TriggerRelations::kAlertRed;
                 RoundDeath d;
@@ -929,14 +932,19 @@ void ExplosionSim::process(World &world, CollisionWorld *collision,
                 // victim's +0x124 word being zero, the victim being the local
                 // player, and the entry's kz type not being 3. The kill event
                 // the same leg calls next returns at its null attacker handle.
+                // The source and point are the entry's +0x20 entity and +0x00
+                // position, as in the damage callback's own arm.
                 // [orig: @0x4eb2b6..0x4eb2df -> Player_OnDamageReceived @0x4dd880;
                 //  Score_ProcessNetworkKillEvent @0x4eb2f2 -> @0x4fd49d]
                 if (((t->flags | t->engine_flags) & kEntityFlagPlayer) != 0 &&
                         (t->engine_flags & kEntityFlagDead) == 0 &&
                         t->damage_state == 0 &&
                         t->handle == world.cached.local_player &&
-                        e.type != ammo_kz::kMedic)
-                    player_on_damage_received(world);
+                        e.type != ammo_kz::kMedic) {
+                    const int32_t blast[3] = {to_fixed(e.pos.x), to_fixed(e.pos.y),
+                            to_fixed(e.pos.z)};
+                    player_on_damage_received(world, radar_entity_source(world, e.owner), blast);
+                }
                 // The damage-disabled word keeps the callback away entirely
                 // [orig: `cmp [edi+124h], ebx; jnz` @ 0x4eb2fa..0x4eb300].
                 if (t->damage_state != 0) continue;
