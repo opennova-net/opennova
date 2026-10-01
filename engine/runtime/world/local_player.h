@@ -80,9 +80,20 @@ public:
     Vec3 player_position() const; // mission space (Z-up)
     std::string player_anim_key() const; // "anim_<state>"
     int32_t player_health() const;
-    // The movement keys the pre-tick packs onto the body (look rides look()).
+    // This frame's held keys (look rides look()); the pre-tick folds them into
+    // `input_flags`.
     PlayerInput input;
-    // One frame of movement keys: packs the keys plus the sim-owned stance
+    // The input-flag word the held keys fold into every frame and the pack
+    // reads and clears [orig: g_InputFlags @0xB3B728 / g_InputFlagsPrev @0xB3B72C].
+    PlayerInputFlags input_flags;
+    // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
+    // it. It persists between packs: the motor, the keyboard look rotation and
+    // the wire mirror read it every tick, and only a pack rewrites it.
+    // [orig: Player_PackInputStateToEntity @0x4df68f..0x4df790 -- the sole
+    //  writer of the local player's movement bits; Entity_ApplyFreeLookRotation
+    //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick]
+    PlayerBodyInput move_order;
+    // One frame of movement keys: stores the keys plus the sim-owned stance
     // latch onto `input`, runs the witnessed movement-held unscope (while
     // SETTLED at scope on a Scoped weapon, any direction key routes through
     // the full unscope; the ForceScoped pin keeps pinned sights raised), and
@@ -167,9 +178,16 @@ public:
     void tick_medic_cooldown(bool local_dead);
 
     // --- the per-tick legs a session frame orders around its pump -----------
-    // Pack the frame input onto the local player's body before the logic tick
-    // (the view-flag stamps ride along); no local player = no-op.
-    void apply_player_input_pre_tick();
+    // The frame's input onto the local player's body before the logic tick
+    // (the view-flag stamps ride along); no local player = no-op. The held
+    // keys fold into `input_flags` every frame; `pack_input` runs the pack
+    // (the word into `move_order`, then the clear), which retail runs only
+    // inside the client network frame's send block -- every frame for the
+    // host and single player, every send-holdoff period for a joiner. The
+    // persisted `move_order` reaches the body every frame either way.
+    // [orig: Input_ProcessFrame @0x49d541; Client_ProcessNetworkFrame
+    //  @0x42c3dd gate -> Player_PackInputStateToEntity @0x42c3e9]
+    void apply_player_input_pre_tick(bool pack_input);
     // The body-pass scoped/binocular drift, after weight dispersion and before
     // upper-body decay. Writes persistent aim, including the next input fold.
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]

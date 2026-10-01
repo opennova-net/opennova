@@ -702,7 +702,7 @@ struct Entity {
     static constexpr uint32_t kMoveOrderDirMask = 0x7;    // 8-way dir F=0..FR=7 (§5.38)
     static constexpr uint32_t kMoveOrderMoving = 0x8;
     static constexpr uint32_t kMoveOrderFreeLook = 0x10;  // [orig: steer-source pick @0x48b4a8]
-    static constexpr uint32_t kMoveOrderJump = 0x20;      // held jump key [orig: g_InputFlags
+    static constexpr uint32_t kMoveOrderJump = 0x20;      // packed jump key [orig: g_InputFlags
                                                           //  0x1000 -> bit 5 @0x4df6fa; the
                                                           //  jump gate @0x4b7eaf]
     static constexpr uint32_t kMoveOrderLeanLeft = 0x40;  // [orig: lean ramp @0x4b7dbf]

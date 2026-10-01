@@ -692,17 +692,23 @@ void JoinerRole::pump() {
 	pump_proxy_rendezvous();
 	send_hello_once();
 	deposit_inbound();
-	// The frame input packs onto L's body BEFORE the client net frame builds
+	// The frame input reaches L's body BEFORE the client net frame builds
 	// this frame's C2S 0x0C from that body: retail's Player_PackInputStateToEntity
 	// immediately precedes Player_BuildTag0CInputBody in the send block, the
 	// same order the host frame keeps (host_role.cpp: pack, then pump). Packing
 	// after the net frame shipped the PREVIOUS frame's move byte, stance/scope
 	// flags, analog triplet and heading one tick late. The input latches stay
-	// live through the pre-round phase.
-	// [orig: Client_ProcessNetworkFrame @0x42C180 — Player_PackInputStateToEntity
-	//  @0x42C3E9, then Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
+	// live through the pre-round phase. The pack itself runs only when this
+	// frame's send block opens, so under a dictated holdoff the keys held on
+	// every frame of the window accumulate into the one boundary pack -- the
+	// MoveOrder the local motor drives from until the next pack and the byte
+	// the boundary 0x0C carries; a key tapped between boundaries still reaches
+	// the host.
+	// [orig: Client_ProcessNetworkFrame @0x42C180 — the send-holdoff gate
+	//  @0x42C3DD, Player_PackInputStateToEntity @0x42C3E9, then
+	//  Player_BuildTag0CInputBody @0x42C46F..0x42C4A3]
 	lap.restart();
-	lp.apply_player_input_pre_tick();
+	lp.apply_player_input_pre_tick(rt.send_block_opens_this_frame());
 	lap.mark(devtools::Slot::SIM_CLIENT_PLAYER);
 	const FrameSignals decoded = run_client_net_frame();
 	// Phase 0 of the authoritative 0x0A is the client's one pre-round

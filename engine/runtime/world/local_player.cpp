@@ -68,9 +68,10 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.back = back;
 	input.left = left;
 	input.right = right;
-	// Lean keys -> MoveOrder bits 6/7 [orig: g_InputFlags 0x2000/0x4000 packed
-	// @0x4df708-0x4df741]; jump is a per-frame edge the motor consumes once
-	// grounded.
+	// The held keys; the pre-tick folds them into the input-flag word (lean
+	// 0x2000/0x4000, jump 0x1000) and the pack maps that word onto MoveOrder
+	// bits 6/7 and 5 [orig: cases 148/147/153 @0x4e10f1/@0x4e10c8/@0x4e0d66;
+	// packer @0x4df6fa-0x4df741].
 	input.lean_left = lean_left;
 	input.lean_right = lean_right;
 	input.jump = jump;
@@ -84,6 +85,9 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	// and, while SETTLED at scope on a Scoped (flags 1) weapon, routes through
 	// Player_ToggleWeaponScope @0x4df4c9..0x4df4ec = the full unscope. The
 	// toggle's ForceScoped pin (@0x4df12d) keeps pinned sights raised].
+	// Retail runs these legs inside the pack from the accumulated word; here
+	// they still read this frame's held keys, which matches only while the
+	// pack runs every frame (host, single player, a holdoff-1 joiner).
 	const bool move_held = forward || back || left || right;
 	if (w::player_view_move_input(view, move_held,
 				weapon.active ? weapon.def.flags : 0) &&
@@ -449,7 +453,7 @@ void LocalPlayer::carry_scoped_aim_drift_from(const LocalPlayer &previous) {
 	scope_pitch_ = previous.scope_pitch_;
 }
 
-void LocalPlayer::apply_player_input_pre_tick() {
+void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	World &world = world_;
 	if (!world.cached.local_player.valid()) return;
 	// The per-tick shake decay, ahead of the entity update's arms and the
@@ -465,21 +469,48 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
 	w::local_player_view_refresh(&world, view);
-    // [orig: Entity_ApplyFreeLookRotation @0x4ae090, called by the local
-    // body before aim/camera updates]. Both pitch limits follow body slope.
+	// Look-up/down key bindings are refused while the AbsorbPitch seat
+	// flag answers (an OnlyScoped weapon only once promoted).
+	// [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
+	const bool absorb = w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+			DEF_WEAPON_FLAG_ABSORBPITCH);
+	// The frame's held keys fold into the input-flag word: the bits the last
+	// pack reported clear first, then each held key ORs its bit back in. A
+	// bit the last pack did not report stays set until the next pack.
+	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
+	//  Input_HandleActionBinding_0 @0x4e0420]
+	input_flags.fold(w::player_input_flags(input, absorb));
+	if (pack_input) {
+		// The pack: the accumulated word onto MoveOrder, then the word is
+		// saved as the previous pack's and cleared. The analog throttle is
+		// the pack's too [orig: Player_PackInputStateToEntity @0x4df450 --
+		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
+		// the clear @0x4df904/@0x4df909].
+		move_order = w::pack_player_body_input(input_flags.flags, input);
+		if (w::Entity *entity = world.registry.get(p->handle))
+			entity->analog_throttle = input.analog_throttle;
+		input_flags.clear_after_pack();
+	}
+    // The keyboard turn/look rotation reads the MoveOrder bits the last pack
+    // wrote; the prone halving reads its stance bit. Both pitch limits follow
+    // body slope. [orig: Entity_ApplyFreeLookRotation @0x4ae090 -- MoveOrder
+    // 0x1000/0x2000 @0x4ae0bc/@0x4ae0df, 0x4000/0x8000 @0x4ae0fe/@0x4ae109,
+    // 0x100 @0x4ae09e; called by the local body before aim/camera updates]
     if ((world.logic_tick & 1u) != 0) {
-        // Look-up/down key bindings are refused while the AbsorbPitch seat
-        // flag answers (an OnlyScoped weapon only once promoted).
-        // [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
-        const bool absorb = w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
-                DEF_WEAPON_FLAG_ABSORBPITCH);
         int32_t pitch = input.look_pitch;
-        player_look_keys(input.look_heading, pitch, input.turn_left,
-            input.turn_right, input.look_up && !absorb, input.look_down && !absorb,
-            input.prone, p->body_pitch);
+        player_look_keys(input.look_heading, pitch, move_order.turn_left,
+            move_order.turn_right, move_order.look_up, move_order.look_down,
+            move_order.stance == InfantryState::Stance::kProne, p->body_pitch);
         if (!absorb) input.look_pitch = pitch;
     }
-	w::apply_player_body_input(*p, w::pack_player_body_input(input));
+	// MoveOrder persists between packs, so the body sees the last pack's word
+	// every tick; the look heading/pitch are the handlers' direct per-frame
+	// entity writes, not the pack's [orig: Input_ProcessMouseAxisBindings
+	// @0x499680; Input_HandleActionBinding_0 cases 164..167 @0x4e0fa5..0x4e110f].
+	w::PlayerBodyInput body = move_order;
+	body.look_heading = input.look_heading;
+	body.look_pitch = input.look_pitch;
+	w::apply_player_body_input(*p, body);
 	// Input precedes the pool-1 vehicle callbacks. Publish current look and
 	// MoveOrder now, before the later pool-0 body pose; otherwise a driver's
 	// key press, release and mouse steering arrive one motor tick late.
@@ -489,8 +520,6 @@ void LocalPlayer::apply_player_input_pre_tick() {
 	p->heading = p->inf.target_heading;
 	p->pitch = p->inf.look_pitch;
 	world.ai.mirror_wire_anim(*p, world);
-	if (w::Entity *entity = world.registry.get(p->handle))
-		entity->analog_throttle = input.analog_throttle;
 	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
@@ -610,6 +639,10 @@ void LocalPlayer::reset_local_player_input_to_player_facing() {
 void LocalPlayer::reset_local_player_input(int32_t look_heading_bam) {
 	input = w::PlayerInput{};
 	stance_latch_ = 0;
+	// The spawn clears MoveOrder's stance bits with the latches; the
+	// movement bits persist until the next pack, as retail's do
+	// [orig: PlayerClass_InitEntity @0x4b1069 `MoveOrder &= ~0x300`].
+	move_order.stance = w::InfantryState::Stance::kStand;
 	look_accum_x_ = look_accum_y_ = 0.0f;
 	input.look_heading = look_heading_bam;
 }
