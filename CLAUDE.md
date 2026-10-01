@@ -22,7 +22,7 @@ easier to relay than to rediscover.
   `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
   `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
-  `project/` (`opennova-project`, the editor's project core on the command line, ADR 0046),
+  `project/` (`opennova-project`, the editor's session on the command line, ADR 0046 S13 A7),
   `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;

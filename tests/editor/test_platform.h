@@ -1,7 +1,8 @@
 #pragma once
 // The process seams the editor's tests run a ProjectSession or a PlaySession over (ADR 0046
-// d8), one home for every test: NoProcess starts nothing (a session a test drives never
-// plays; the tries are counted), and FakePlatform is a pretend OS: children numbered from
+// d8), one home for every test: NoProcess starts nothing (the command line's NullProcessPlatform,
+// run/null_process_platform.h, but that it says it can spawn, so a Play goes as far as trying; the
+// tries are counted), and FakePlatform is a pretend OS: children numbered from
 // `next_pid`, a clock only a wait moves, the code each child a test ends exited with, each
 // child's identity (the plan's executable, "created <pid>"), how process_liveness answers for a
 // game it does not hold (a Play lease's) and the creation time each such ask named, and a log of
@@ -13,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/run/null_process_platform.h>
 #include <editor/run/process_platform.h>
 
 namespace editor_test {
@@ -23,19 +25,14 @@ inline opennova::editor::PlayLauncherSource fixed_launcher(opennova::editor::Pla
 	return [launcher](bool) { return launcher; };
 }
 
-struct NoProcess : opennova::editor::ProcessPlatform {
+struct NoProcess : opennova::editor::NullProcessPlatform {
 	int spawns = 0; // the children Play tried to start
 
+	bool can_spawn() const override { return true; }
 	int64_t spawn(const opennova::editor::LaunchPlan &) override {
 		++spawns;
 		return -1;
 	}
-	bool is_running(int64_t) override { return false; }
-	bool terminate(int64_t) override { return true; }
-	bool kill(int64_t) override { return true; }
-	void release(int64_t) override {}
-	int64_t now_ms() override { return 0; }
-	void sleep_ms(int64_t) override {}
 };
 
 struct FakePlatform : opennova::editor::ProcessPlatform {
