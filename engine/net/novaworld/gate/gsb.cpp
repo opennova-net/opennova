@@ -279,7 +279,7 @@ bool magic_is(const GsbChunk &c, const char (&tag)[5]) {
 using opennova::strutil::to_lower;
 
 int parse_int_or_zero(const std::string &s) {
-	try { return std::stoi(s); } catch (...) { return 0; }
+	return opennova::strutil::parse_int(s).value_or(0);
 }
 
 // Assign one positional field value into the entry, keyed by the field name from

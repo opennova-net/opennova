@@ -1,6 +1,18 @@
 cmake_minimum_required(VERSION 3.20)
 
+# The web build (emcmake): Emscripten refuses SHARED libraries, and godot-cpp's
+# hack that re-enables them for the side module must run right after the
+# toolchain, i.e. before project(). It does nothing on any other platform.
+set(CMAKE_PROJECT_INCLUDE "${CMAKE_CURRENT_LIST_DIR}/../../third_party/godot-cpp/cmake/emsdkHack.cmake")
+
 project(opennova_godot LANGUAGES C CXX)
+
+if(EMSCRIPTEN)
+    # Every object in the side module shares the main module's threaded
+    # memory, so the engine and vendored libraries compile with -pthread too
+    # (godot-cpp applies -sUSE_PTHREADS only to itself and its consumers).
+    add_compile_options(-pthread)
+endif()
 
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
 # sqlite is only needed to DEFINE the novaworld service target inside engine/;
@@ -12,7 +24,9 @@ add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
-if(GODOTCPP_TARGET STREQUAL "template_release")
+# The imgui-godot addon ships no web binaries, so the web build has no host
+# for the dev-tool windows either.
+if(GODOTCPP_TARGET STREQUAL "template_release" OR EMSCRIPTEN)
     set(OPENNOVA_DEVTOOLS OFF)
 endif()
 # Two GDExtension variants from one source tree (ADR 0046 d4): the runtime-only
@@ -20,6 +34,13 @@ endif()
 # `libopennova_editor.*` the OpenNova Editor ships (and every source run loads, as
 # the superset). OFF builds the runtime variant alone.
 option(OPENNOVA_EDITOR "Build the editor-enabled GDExtension variant beside the runtime one" ON)
+# The web build (ADR 0049) is the game's runtime variant alone: the editor's windows
+# ride the same imgui-godot addon (no web binaries), its Play child spawns a desktop
+# process, and leaving the option on would turn OPENNOVA_IMGUI on below, compiling
+# Dear ImGui and the pass into the web side module.
+if(EMSCRIPTEN)
+    set(OPENNOVA_EDITOR OFF)
+endif()
 # Dear ImGui builds when either product wants its pass: the game's dev tools or
 # the editor's windows (OPENNOVA_IMGUI is read by engine/).
 if(OPENNOVA_DEVTOOLS OR OPENNOVA_EDITOR)
@@ -377,4 +398,14 @@ if(OPENNOVA_EDITOR)
             FOLDER "opennova"
     )
     # gersemi: on
+endif()
+
+# emsdkHack clears the shared-library suffix; Godot looks the web side module
+# up by the .wasm name opennova.gdextension lists. Every object is already
+# LLVM-optimized; binaryen's -O3 over the whole ~16 MB module ran past an hour,
+# so its link-time pass runs at -O1 (the last -O on the link line wins). The web
+# build is the runtime variant alone (OPENNOVA_EDITOR is off there, above).
+if(EMSCRIPTEN)
+    set_target_properties(opennova PROPERTIES SUFFIX ".wasm")
+    target_link_options(opennova PRIVATE -O1)
 endif()

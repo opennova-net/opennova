@@ -11,7 +11,8 @@
 #   infra output|list [args...]   terraform output / state list
 #   github import|plan|apply      terraform (expansion repos + Actions secrets)
 #   aws <args...>                 run the AWS CLI with vault credentials
-#   app deploy [--tag SHA]        pull GHCR images + compose up on the target
+#   app deploy [--tag SHA] [--game-tag SHA]
+#                                 pull GHCR images + compose up on the target
 #   app status|logs [svc]|restart|down
 #   app sql <statement>           run SQL against the live sqlite DB
 #   backup now|list               trigger / list the sqlite backups
@@ -190,7 +191,7 @@ SSHCFG
   # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
   # state file is on the mounted disk from `infra apply`.
   export BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
-  # The prod overlay requires SERVER_IMAGE/WEB_IMAGE to interpolate for EVERY
+  # The prod overlay requires SERVER_IMAGE/WEB_IMAGE/GAME_IMAGE to interpolate for EVERY
   # compose action (status/logs/down parse them too), but only `deploy` sets
   # them from --tag. Default the rest so those actions work; `ps`/`logs` match
   # by service name, not image, so the tag is immaterial there. `:-` keeps the
@@ -198,6 +199,7 @@ SSHCFG
   local owner; owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
   export SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/${owner}/novaworld-server:latest}"
   export WEB_IMAGE="${WEB_IMAGE:-ghcr.io/${owner}/novaworld-web:latest}"
+  export GAME_IMAGE="${GAME_IMAGE:-ghcr.io/${owner}/opennova-game:latest}"
   # compose files + env, evaluated against the remote engine.
   COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
                 -f "$COMPOSE_DIR/docker-compose.prod.yml"
@@ -210,21 +212,30 @@ cmd_app() {
   local action="${1:-status}"; shift || true
   case "$action" in
     deploy)
-      local tag="latest"
-      [ "${1:-}" = "--tag" ] && { tag="$2"; shift 2; }
+      # --tag moves the server + portal pair; the game image (the web build,
+      # ADR 0049) publishes on its own path filter, so it has its own tag.
+      local tag="latest" game_tag="latest"
+      while [ $# -gt 0 ]; do
+        case "$1" in
+          --tag) tag="$2"; shift 2 ;;
+          --game-tag) game_tag="$2"; shift 2 ;;
+          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA)" ;;
+        esac
+      done
       local owner
       owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
       export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
       export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
+      export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
       remote_compose
-      log "deploying $SERVER_IMAGE + $WEB_IMAGE to $(target_ip)…"
+      log "deploying $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE to $(target_ip)…"
       ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
         "ubuntu@$(target_ip)" "docker --version" >/dev/null \
         || die "cannot reach docker on the target over SSH"
       # Pull only the published images; the backup sidecar has no registry image
       # (it's built from deploy/backup/), so a blanket `pull` fails on it.
-      docker compose "${COMPOSE_ARGS[@]}" pull novaworld web
-      # `up --build` pulls server/web (pull_policy: always) and builds the backup
+      docker compose "${COMPOSE_ARGS[@]}" pull novaworld web game
+      # `up --build` pulls server/web/game (pull_policy: always) and builds the backup
       # sidecar on the remote in one shot.
       docker compose "${COMPOSE_ARGS[@]}" up -d --remove-orphans --build
       log "deploy complete."

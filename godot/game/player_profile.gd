@@ -114,7 +114,8 @@ static func save_character_profile(root: ResourceRoot, profile: Dictionary) -> i
 # "Player") cross-wired any two default-named clients in one session. The two-instance
 # same-machine demo still overrides via --callsign.
 static func _default_callsign() -> String:
-	var machine := OS.get_unique_id()
+	# The web platform has no machine ID and reports an error for asking.
+	var machine := "" if OS.has_feature("web") else OS.get_unique_id()
 	if machine.is_empty():
 		machine = str(Time.get_ticks_usec())
 	return "Player-%04X" % (machine.hash() & 0xFFFF)

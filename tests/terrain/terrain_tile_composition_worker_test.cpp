@@ -2,9 +2,12 @@
 // no sources = nothing enqueues; a queued job composes one complete 256x256
 // page off the installed snapshot; wait_idle() returns once every queued job
 // has completed; a completion a predicate rejects stays queued while an
-// allowed one behind it drains; an epoch bump drops everything queued.
+// allowed one behind it drains; an epoch bump drops everything queued; a
+// one-worker, no-lane-thread budget (the web build's shape) composes the same
+// bytes as the hardware sizing.
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
 #include <cstdint>
@@ -63,9 +66,41 @@ bool settle(const TerrainTileCompositionWorker &worker, std::size_t expected_com
 	return false;
 }
 
+std::shared_ptr<TerrainTileCompositionWorker::SourceSnapshot> solid_sources() {
+	auto snapshot = std::make_shared<TerrainTileCompositionWorker::SourceSnapshot>();
+	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid_image(2, 2, { 0, 0, 0, 255 }));
+	snapshot->heightfield_normal = opennova::terrain::build_terrain_tile_quadrant_source(
+			solid_image(2, 2, { 128, 128, 255, 128 }));
+	return snapshot;
+}
+
+// One page composed on a worker of its own with the given budget.
+Rgba8Image compose_one(TerrainTileCompositionWorker::Threads threads) {
+	TerrainTileCompositionWorker worker(threads);
+	opennova::TerrainTileCompositionCache cache;
+	cache.begin_frame(0);
+	cache.begin_frame(0);
+	worker.install_sources(solid_sources());
+	CHECK(worker.worker_count() == std::max<std::size_t>(threads.page_workers, 1));
+	const opennova::terrain::TerrainTileLightEpoch light{ 128, 128, 255 };
+	CHECK(worker.enqueue(job_for(cache, 10, 1), worker.sources(), {}, light, {}, 1, nullptr, 0,
+			false));
+	worker.wait_idle();
+	std::optional<TerrainTileCompositionWorker::Completion> done = worker.take_completion();
+	CHECK(done.has_value() && done->success);
+	return done.has_value() ? done->pixels : Rgba8Image{};
+}
+
 } // namespace
 
 int main() {
+	// Before any other worker, so the lane pool this one starts has no threads.
+	const Rgba8Image small_budget = compose_one(TerrainTileCompositionWorker::Threads{ 1, 0 });
+	CHECK(small_budget.is_valid());
+	CHECK(compose_one(TerrainTileCompositionWorker::Threads::for_hardware()).pixels ==
+			small_budget.pixels);
+
 	TerrainTileCompositionWorker worker;
 	opennova::TerrainTileCompositionCache cache;
 	// A record must be unused for more than one frame before it is claimed.
@@ -79,11 +114,7 @@ int main() {
 	CHECK(!worker.enqueue(job_for(cache, 0, 1), worker.sources(), tint, light, {}, 1, nullptr, 0, false));
 	CHECK(worker.pending_jobs() == 0);
 
-	auto snapshot = std::make_shared<TerrainTileCompositionWorker::SourceSnapshot>();
-	snapshot->colormap = opennova::terrain::build_terrain_tile_quadrant_source(
-			solid_image(2, 2, { 0, 0, 0, 255 }));
-	snapshot->heightfield_normal = opennova::terrain::build_terrain_tile_quadrant_source(
-			solid_image(2, 2, { 128, 128, 255, 128 }));
+	auto snapshot = solid_sources();
 	worker.install_sources(snapshot);
 	CHECK(worker.sources() == snapshot);
 

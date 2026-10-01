@@ -46,11 +46,21 @@ struct TerrainStaticShadowCompilationSnapshot {
 
 class TerrainTileCompositionWorker {
 public:
-	// Pages compose on this pool while the terrain frame waits for them
-	// (retail composes each missing visible page inside the frame that draws
-	// it), so a frame that claims several pages spends its wait on the
-	// slowest worker: half the hardware threads, 2..8.
-	static std::size_t worker_count() noexcept;
+	// The threads a worker starts. Pages compose on the page workers while
+	// the terrain frame waits for them (retail composes each missing visible
+	// page inside the frame that draws it), and each page's rows split over
+	// the shared lane pool (row_stripes.h; the bytes are the same for every
+	// count). for_hardware() is the desktop sizing; an embedder whose
+	// platform fixes its thread pool up front (the web build's pthread pool)
+	// passes a smaller budget.
+	struct Threads {
+		std::size_t page_workers = 1;
+		std::size_t lane_threads = 0;
+		// A frame that claims several pages spends its wait on the slowest
+		// worker: half the hardware threads, 2..8, over a lane pool of every
+		// hardware thread but the caller's.
+		static Threads for_hardware() noexcept;
+	};
 	static constexpr std::size_t kMaximumQueuedJobs = TerrainTileCompositionCache::kCapacity * 2;
 
 	// The immutable page sources one mission's cache composes from, already
@@ -99,7 +109,7 @@ public:
 		TerrainStaticShadowPlannerDiagnostics shadow_diagnostics;
 	};
 
-	TerrainTileCompositionWorker();
+	explicit TerrainTileCompositionWorker(Threads threads = Threads::for_hardware());
 	~TerrainTileCompositionWorker();
 	TerrainTileCompositionWorker(const TerrainTileCompositionWorker &) = delete;
 	TerrainTileCompositionWorker &operator=(const TerrainTileCompositionWorker &) = delete;
@@ -150,6 +160,8 @@ public:
 		return result;
 	}
 
+	// The page workers this worker started (at least one).
+	std::size_t worker_count() const noexcept { return workers_.size(); }
 	// Queued + completed + the current epoch's in-flight jobs.
 	std::size_t pending_jobs() const;
 	std::size_t current_epoch_active_jobs() const;
