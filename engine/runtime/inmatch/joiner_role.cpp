@@ -1074,6 +1074,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			interest.hud_target_wire_handle = interest.self_wire_handle;
 		else if (cursor.valid() && cursor.pool() >= 1 && cursor.pool() <= 3)
 			interest.hud_target_wire_handle = cursor.packed;
+		interest.avg_fps = uplink_avg_fps_;
+		interest.cpu_percent = uplink_cpu_percent_;
 		const PlayerExtendedUplink up =
 				replication::build_player_uplink(world, *e, *ae, interest);
 		outs = rt.Client_ProcessNetworkFrame(up, now);

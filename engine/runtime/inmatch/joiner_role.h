@@ -127,6 +127,14 @@ public:
 	void close() override;
 	ClientRuntime *client_runtime() override { return runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
+	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate
+	// also reaches the replica runtime's quality window through the base.
+	// [orig: NetPacket_SerializePlayerState case 3 @0x4C1BA2 / @0x4C1BBC]
+	void observe_frame_rate(int32_t fps) override {
+		Role::observe_frame_rate(fps);
+		uplink_avg_fps_ = fps;
+	}
+	void observe_cpu_share(int32_t cpu_percent) override { uplink_cpu_percent_ = cpu_percent; }
 
 	// The exact-handle materialized world twin of a decoded wire row (null when
 	// the handle has no truthful local carrier). Header-only joins read the
@@ -268,6 +276,9 @@ private:
 	PeerAddr proxy_node_addr_{};
 	uint64_t proxy_last_send_ms_ = 0;
 	int64_t last_net_us_ = 0;
+	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
+	int32_t uplink_avg_fps_ = 0;
+	int32_t uplink_cpu_percent_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships
 	// (before the decoded-state folds) so the stats board measures exactly the
 	// wire leg.

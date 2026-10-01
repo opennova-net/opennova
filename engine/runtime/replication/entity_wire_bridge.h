@@ -116,6 +116,14 @@ struct UplinkClientInputs {
 	const ClientState *replica = nullptr;
 	uint16_t self_wire_handle = 0xFFFF;
 	uint16_t hud_target_wire_handle = 0xFFFF;
+	// The main loop's frame statistics the two stat bytes carry, as their low
+	// bytes: the FR counter's average frame rate and its window's CPU share
+	// (a retail host logs them per player). [orig: g_StatsAvgFps /
+	// g_StatsCpuPercent, written @0x4C1BA2 / @0x4C1BBC; host store
+	// playerSlot+0x15F78 / +0x15F79 @0x4c1edd / @0x4c1efa, read by
+	// CServerLog_WritePositionRecord @0x4e1b6d]
+	int32_t avg_fps = 0;
+	int32_t cpu_percent = 0;
 };
 
 // The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended

@@ -1211,6 +1211,36 @@ bool run_uplink_carries_same_frame_input() {
 			"the forward key held THIS frame rides this frame's uplink");
 }
 
+// The session hands the main loop's frame statistics to the role ahead of the
+// drain; the next C2S 0x0C carries their low bytes. [orig: Game_MainLoop
+// @0x52B948 / @0x52B98F ahead of the drain @0x52BA08; NetPacket_SerializePlayerState
+// case 3 @0x4C1BA2 / @0x4C1BBC]
+bool run_uplink_carries_the_frame_statistics() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	if (!expect(h.role.local_spawned(), "frame statistics: L spawned")) return false;
+	h.role.observe_frame_rate(0x13A);
+	h.role.observe_cpu_share(37);
+	h.role.run_tick(h.input);
+	ProtocolMessage message;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink uplink;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, uplink, body_bytes),
+			"frame statistics: the frame shipped a decodable 0x0C"))
+		return false;
+	return expect(uplink.stat_byte_0 == 0x3A && uplink.stat_byte_1 == 37,
+			"the 0x0C stat bytes carry the frame rate and CPU share low bytes");
+}
+
 // Every C2S 0x0C body the role shipped from datagram `from` on, decoded.
 std::vector<PlayerExtendedUplink> uplinks_since(const CountingSocket &socket, std::size_t from) {
 	std::vector<PlayerExtendedUplink> out;
@@ -1469,6 +1499,7 @@ int main() {
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	ok &= run_uplink_carries_same_frame_input();
+	ok &= run_uplink_carries_the_frame_statistics();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

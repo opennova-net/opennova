@@ -123,6 +123,22 @@ bool run_field_mapping() {
 	return true;
 }
 
+// The two stat bytes are the low bytes of the main loop's FR-counter frame
+// rate and its window's CPU share. [orig: NetPacket_SerializePlayerState
+// case 3 `mov dl, byte ptr g_StatsAvgFps` @0x4C1BA2, `mov dl, byte ptr
+// g_StatsCpuPercent` @0x4C1BBC]
+bool run_stat_bytes() {
+	w::World world;
+	w::Entity self{};
+	w::AiEntity body{};
+	ns::UplinkClientInputs inputs;
+	inputs.avg_fps = 0x13A; // 314 fps: only the low byte crosses
+	inputs.cpu_percent = 37;
+	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, self, body, inputs);
+	return expect(up.stat_byte_0 == 0x3A && up.stat_byte_1 == 37,
+			"stat bytes = low bytes of g_StatsAvgFps / g_StatsCpuPercent");
+}
+
 // The client's own interest list: the decoded pool-0 then pool-1 entities,
 // scored against the uplinking player's pose and sorted descending; the top
 // four ride the 0x0C. Hand-derived from the witnessed integer pipeline
@@ -700,6 +716,7 @@ int main() {
 	bool ok = true;
 	ok = run_field_mapping() && ok;
 	ok = run_interest_pairs_top4() && ok;
+	ok = run_stat_bytes() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;

@@ -348,7 +348,10 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	const int32_t due = accumulator_.bank(elapsed);
 	// The FR counter is published before the drain runs this frame's ticks
 	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
-	if (role_ != nullptr) role_->observe_frame_rate(accumulator_.average_fps());
+	if (role_ != nullptr) {
+		role_->observe_frame_rate(accumulator_.average_fps());
+		role_->observe_cpu_share(accumulator_.cpu_percent());
+	}
 	out = run_ticks(due, input);
 	// The CPU share's inputs: this frame's work from its start stamp to the
 	// end of the drain, and the updates the drain ran [orig: @0x52ba4f;

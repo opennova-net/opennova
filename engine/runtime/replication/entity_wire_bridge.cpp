@@ -1168,6 +1168,11 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def.
 	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
 	up.equipped_adm_index = e.equipped_adm_index;
+	// The low bytes of the main loop's FR-counter frame rate and its window's
+	// CPU share [orig: case 3 `mov dl, byte ptr g_StatsAvgFps` @0x4C1BA2,
+	// `mov dl, byte ptr g_StatsCpuPercent` @0x4C1BBC].
+	up.stat_byte_0 = static_cast<uint8_t>(interest.avg_fps);
+	up.stat_byte_1 = static_cast<uint8_t>(interest.cpu_percent);
 	// The four interest pairs: the client's own top-4 list, handle then score
 	// per pair [orig: case 3 @0x4C1BC7..0x4C1C9B -- Server_BuildEntityPriorityListForPlayer
 	// (entity, handles, scores, 4) @0x4C1BE9].

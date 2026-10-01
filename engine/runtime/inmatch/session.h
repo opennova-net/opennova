@@ -205,6 +205,12 @@ public:
 	// role's replica runtime (the client quality window's frame-pressure term);
 	// a host also hands it to its server context.
 	virtual void observe_frame_rate(int32_t fps);
+	// The same window's CPU share (g_StatsCpuPercent, world::TickAccumulator::
+	// cpu_percent), handed over beside the frame rate, after the bank and before
+	// the drain, as retail publishes both ahead of its logic updates [orig:
+	// Game_MainLoop @0x52B948 / @0x52B98F, the drain @0x52BA08]. A joiner's
+	// C2S 0x0C carries both; the base keeps neither.
+	virtual void observe_cpu_share(int32_t cpu_percent) { (void)cpu_percent; }
 	// The main loop's frame statistics after each frame (the frames drawn in
 	// the last 62 logic updates, the window's CPU share): a host hands them to
 	// its server context, where its status page reads them
