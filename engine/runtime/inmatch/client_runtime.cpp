@@ -1234,11 +1234,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// deployed_ and authoritative_spawn_released_ model those two independent gates.
 		const bool deployed_joiner =
 				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();
-		if (!deployed_joiner) gameplay_send_queue_.clear();
 
 		// Weapon actions queue typed gameplay before Client_ProcessNetworkFrame;
 		// PumpClientProtocolSend flushes them through this same sequenced 0x43 path.
-		while (deployed_joiner && !gameplay_send_queue_.empty()) {
+		// Once queued they leave at this boundary whatever the deploy gate now says
+		// (D-NET-235): each producer gated itself when it queued, only the 0x2C and
+		// 0x0C builds below sit behind the gate, and nothing drains the list on death.
+		// [orig: Client_ProcessNetworkFrame tail @0x42c4b1 -> PumpClientProtocolSend
+		//  @0x42c4bc in every branch; DrainMessageQueues @0x625600 runs only at join
+		//  and destroy]
+		while (!gameplay_send_queue_.empty()) {
 			ProtocolMessage msg = std::move(gameplay_send_queue_.front());
 			gameplay_send_queue_.pop_front();
 			send_messages.push_back(std::move(msg));

@@ -4799,6 +4799,53 @@ bool run_unrelated_loadout_cannot_revive_dead_client() {
 			"the effective send predicate rejects dead gameplay after the unrelated grant");
 }
 
+// D-NET-235: a queued producer's message leaves at the next open send boundary even when the
+// player died in between. Retail's QueueReliableMessage puts it on the connection's list, and
+// PumpClientProtocolSend builds whatever is queued; only the 0x2C ping and the 0x0C uplink are
+// built behind the deploy gate, and nothing drains the list on death.
+// [orig: Client_ProcessNetworkFrame @0x42c3ee..0x42c4a3 (the 0x2C / 0x0C builds behind
+//  is_in_session && !is_authority && !dword_81474C && !g_SpawnSuccessGate), the tail
+//  @0x42c4b1 -> PumpClientProtocolSend @0x42c4bc in every branch;
+//  CNapiNPConnection_DrainMessageQueues @0x625600 runs only at join @0x629dfc / @0x62c26f
+//  and destroy @0x62a50a]
+bool run_queued_gameplay_survives_a_death_before_the_boundary() {
+	const std::string client_scrk = "CLIENT-QUEUED-DEATH-SCRK";
+	const std::string server_scrk = "SERVER-QUEUED-DEATH-SCRK";
+	inmatch::ClientRuntime client("QueuedDeath", [] { return uint64_t{4000}; });
+	client.seed_session(
+			0x41516171u, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId,
+			0, 0x00100000u, /*replay_mode=*/false);
+	if (!expect(client.queue_vehicle_detach(0x1007),
+			"a deployed joiner queues C2S 0x27 detach"))
+		return false;
+
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	FrameUpdate death;
+	death.mount_handle = 0xFFFF;
+	death.health = 0;
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	const std::vector<std::vector<uint8_t>> boundary = client.Client_ProcessNetworkFrame(1);
+	if (!expect(!client.is_deployed(), "the death closes the deploy gate this frame"))
+		return false;
+	bool saw_detach = false;
+	bool saw_ping_or_uplink = false;
+	for (const std::vector<uint8_t> &datagram : boundary) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) continue;
+		for (const ProtocolMessage &message : messages) {
+			saw_detach = saw_detach || message.tag == 0x27;
+			saw_ping_or_uplink = saw_ping_or_uplink || message.tag == 0x2C || message.tag == 0x0C;
+		}
+	}
+	return expect(saw_detach && !saw_ping_or_uplink,
+			"the queued 0x27 leaves at the boundary; only the 0x2C/0x0C builds sit behind the gate");
+}
+
 bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	const std::string client_scrk = "CLIENT-LIVE-BATCH-SCRK";
 	const std::string server_scrk = "SERVER-LIVE-BATCH-SCRK";
@@ -6924,6 +6971,7 @@ int main() {
 	                run_split_batch_keeps_deployment_pick_ack_causal() &&
 	                run_unrelated_loadout_cannot_revive_dead_client() &&
 	                run_live_frame_uses_wall_clock_and_batches_mount_requests() &&
+	                run_queued_gameplay_survives_a_death_before_the_boundary() &&
 	                run_mounted_slot_select_and_reload_producers() &&
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
