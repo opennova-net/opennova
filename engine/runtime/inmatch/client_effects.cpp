@@ -6,7 +6,10 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h>
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/audio/footstep_slot.h> // organic_slot_set (the org1 scream slot)
+#include <runtime/audio/sound_profile.h> // compose_entity_sound_set (the player scream)
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <variant>
@@ -154,6 +157,40 @@ const replication::ClientRosterSlot *slot_for_pool0(const replication::ClientSta
 } // namespace
 
 void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
+    // The scream leg of every remote body's death edge this tick, at the body
+    // origin: a player body composes "<prefix>_DEATH" ("_DEATH_K" on a night
+    // mission) from its anim-slot byte, an org1 body plays its profile slot 7
+    // (8, SSNightDead, at night). The edge runs on every machine, so a client
+    // screams for its remote rows itself; nothing rides the wire for it.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c4a..0x4b4c54 ->
+    //  SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
+    //  Entity_PlaySound3D_FullVolume; Entity_UpdateInfantryAI @0x4b9ca3..0x4b9cb5
+    //  -> Entity_GetProfileSlotSound(entity, 8/7)]
+    const bool night = (world.tables.mission_attrib_flags &
+            world::MissionTables::kMissionAttribEnableNVG) != 0;
+    for (const uint16_t handle : view_.drain_death_edges()) {
+        const replication::ClientEntityState *row = state().find(handle);
+        if (row == nullptr) continue;
+        world::SoundSlotEvent scream;
+        scream.source_handle = handle;
+        scream.pos[0] = row->x;
+        scream.pos[1] = row->y;
+        scream.pos[2] = row->z;
+        if (row->cls == EntityClass::Player) {
+            scream.slot = static_cast<uint8_t>(night ? audio::kSlotNightDeath : audio::kSlotDeath);
+            audio::compose_entity_sound_set(row->spawn_anim_slot,
+                    night ? audio::kEntitySoundDeathNight : audio::kEntitySoundDeath,
+                    scream.set_name, sizeof(scream.set_name));
+        } else {
+            const int slot = night ? audio::kSlotNightDeath : audio::kSlotDeath;
+            const std::string *set = audio::organic_slot_set(world.tables.sound_profiles,
+                    world.tables.organic_sound_profiles, row->type_id, false, slot);
+            if (set == nullptr) continue; // the resolved-id-0 silence
+            scream.slot = static_cast<uint8_t>(slot);
+            std::snprintf(scream.set_name, sizeof(scream.set_name), "%s", set->c_str());
+        }
+        world.out.slot_sounds.push_back(scream);
+    }
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
                 (has_self_handle() && row.handle == self_handle())) continue;

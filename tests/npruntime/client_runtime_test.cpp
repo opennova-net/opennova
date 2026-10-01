@@ -6695,6 +6695,44 @@ bool run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() {
                    "an authored 'none' tag-5 row overwrites the seeded default with silence");
 }
 
+// A remote player's death edge screams on the client itself: the body-model
+// composite "<prefix>_DEATH" from its anim slot, "_DEATH_K" on a night
+// mission, at the body origin; the self row's edge stays silent (the local
+// body screams through its own motor). [orig: Entity_UpdateInfantryPlayerBody
+// @0x4b4c4a..0x4b4c54 -> SoundProfile_FindByEntityAndType @0x528180]
+bool run_remote_death_edge_screams() {
+    const auto scream_of = [](bool night, uint16_t self) {
+        inmatch::ClientRuntime runtime("DeathScream");
+        w::World world;
+        if (night)
+            world.tables.mission_attrib_flags = w::MissionTables::kMissionAttribEnableNVG;
+        runtime.view().set_remote_motion_mode(true);
+        ns::ClientEntityState &row = runtime.state().upsert(0x0011u);
+        row.type_id = w::kPlayerInfantryTypeId;
+        row.cls = EntityClass::Player;
+        row.spawn_anim_slot = 4;
+        row.net_has_compact = true;
+        row.state_flags_known = true;
+        row.state_flags = 0x02;
+        row.net_health_zero = true;
+        row.x = 7 << 16;
+        row.net_smooth_target[0] = row.x; // the staged corpse pose: no chase step
+        runtime.view().tick_remote_motion(self);
+        runtime.tick_remote_stance_sounds(world);
+        const auto &sounds = world.out.slot_sounds;
+        return sounds.size() == 1 && sounds[0].source_handle == 0x0011u &&
+                        sounds[0].pos[0] == (7 << 16)
+                ? std::string(sounds[0].set_name)
+                : std::string("<none>");
+    };
+    return expect(scream_of(false, 0xFFFF) == "BM4_DEATH",
+                   "a remote player's death edge plays its body-model scream") &&
+           expect(scream_of(true, 0xFFFF) == "BM4_DEATH_K",
+                   "a night mission plays the _DEATH_K composite") &&
+           expect(scream_of(false, 0x0011) == "<none>",
+                   "the self row's edge stays silent");
+}
+
 // The remote stance latch's prone clear reads only a MOUNT parent's def: a
 // deck-standing remote (carrier = the ground link, mount_bone 0) keeps TO_PRONE.
 bool run_remote_stance_sound_parent_is_the_mount_only() {
@@ -6879,6 +6917,7 @@ int main() {
                     run_explosion_sound_reads_the_pool_twin_damage_ammo() &&
                     run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() &&
                     run_remote_stance_sound_parent_is_the_mount_only() &&
+                    run_remote_death_edge_screams() &&
                     run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&

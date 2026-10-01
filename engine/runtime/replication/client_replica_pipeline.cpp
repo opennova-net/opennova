@@ -1226,6 +1226,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				else es.radio_request = 0;
 			}
 			const int16_t death_state = row_death_edge(es);
+			if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
 			organic_chase_tail(es, is_self);
 			commit_death_state(es, death_state);
 			break;
@@ -1278,6 +1279,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 				es.heading_bam = io::bam_add(es.heading_bam, step);
 			}
 			const int16_t death_state = row_death_edge(es);
+			if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
 			organic_chase_tail(es, is_self);
 			commit_death_state(es, death_state);
 			break;
@@ -1382,6 +1384,12 @@ void ClientReplicaPipeline::queue_carrier_repair(uint16_t handle) {
 std::vector<uint16_t> ClientReplicaPipeline::drain_carrier_repair_requests() {
 	std::vector<uint16_t> out;
 	out.swap(carrier_repair_requests_);
+	return out;
+}
+
+std::vector<uint16_t> ClientReplicaPipeline::drain_death_edges() {
+	std::vector<uint16_t> out;
+	out.swap(death_edges_);
 	return out;
 }
 

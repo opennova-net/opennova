@@ -102,6 +102,10 @@ public:
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the
 	// embedding runtime drains and sends them once per frame.
 	std::vector<uint16_t> drain_carrier_repair_requests();
+	// Remote organic rows whose death edge fired in tick_remote_motion since
+	// the last drain (the self row excluded: the local body's own edge
+	// screams). The embedding runtime plays each one's scream.
+	std::vector<uint16_t> drain_death_edges();
 	void tick_recoil();
 	// Age the retained 0x40/0x6B banks by `elapsed` ticks. Persistent 0x10
 	// slots do not age; the transient bank clears on expiry while the special
@@ -429,6 +433,7 @@ private:
 	void apply_spectator_mode(const std::vector<uint8_t> &body); // 0x75
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
+	std::vector<uint16_t> death_edges_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
