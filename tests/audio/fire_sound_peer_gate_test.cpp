@@ -126,11 +126,37 @@ void test_immediate_rows_carry_the_source_key_and_delayed_rows_none() {
     }
 }
 
+// A joiner's decoded remote shooter has no local owner entity: its wire handle
+// keys the plays, so each refire retakes that shooter's own channel instead of
+// claiming a fresh one per shot (a firefight otherwise fills every one-shot
+// channel and starves footsteps and foley) [orig: the shooter entity rides
+// Sound_Play3DPositional @ 0x527E4A into the open @ 0x766F46 — D-SND-10].
+void test_wire_shooter_keys_its_own_channel() {
+    Rig r;
+    r.world.out.fire_sounds.set_listener({0.0f, 0.0f, 0.0f});
+    for (int shot = 0; shot < 2; ++shot) {
+        RoundSpawnParams p;
+        p.shooter_handle = 0x0123; // a replica row's wire handle
+        p.shooter_pos = {1.0f, 0.0f, 0.0f};
+        p.shooter_pos_valid = true;
+        p.origin = {1.0f, 0.0f, 0.9f};
+        p.ammo_index = 0;
+        p.adm_index = 1;
+        p.wire_round_flags = round_event_flag::kAdmIndexed;
+        CHECK(r.world.round_sim.spawn(r.world, p, RoundConsequenceMode::VisualOnly) >= 0);
+        const std::vector<ReadyFireSound> out = r.drain();
+        CHECK(out.size() == 3);
+        for (const ReadyFireSound &s : out)
+            CHECK(s.sound_id == opennova::audio::oneshot_sound_id(0x0123, 0));
+    }
+}
+
 } // namespace
 
 int main() {
     test_listener_less_host_readies_nothing_on_the_adm_arm();
     test_immediate_rows_carry_the_source_key_and_delayed_rows_none();
+    test_wire_shooter_keys_its_own_channel();
     if (failures) return 1;
     std::printf("fire_sound_peer_gate_test: OK\n");
     return 0;
