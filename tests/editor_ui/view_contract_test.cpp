@@ -22,7 +22,9 @@
 // raising nothing, and draws the lines instead while a popup lies over the tab. The MainViewport
 // role's outline view draws its outline beside the viewport, whose canvas fills the rest of the tab
 // through the workspace's device; in the Document window while an operation holds the documents,
-// its outline is held back and its canvas is not (a drag orbits its camera).
+// its outline is held back and its canvas is not (a drag orbits its camera). ADR 0046 S14: an outline
+// that filters its rows by kind and leaves out the rows its type says hold nothing, its chips, its
+// switch, and a Shift or Ctrl click on a line.
 #include <cfloat>
 #include <cstdio>
 #include <cstring>
@@ -42,9 +44,11 @@
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/main_viewport_view.h>
+#include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
+#include "../editor/pool_document.h"
 #include "editor_ui_test_support.h"
 
 #include <imgui.h>
@@ -390,6 +394,117 @@ void test_edit_scrolled_out() {
 	for (const EditorRequest &request : workspace.requests)
 		ended = ended || (request.kind == EditorRequestKind::EndEdit && request.path == document->path());
 	CHECK(ended && GImGui->ActiveId != key, "Enter ends its edit");
+}
+
+// ADR 0046 S14: an outline that filters its rows by kind and leaves out the rows its type says hold
+// nothing (OutlineSpec::by_kind, row_listed), over the pool document (crates, barrels and a note; a
+// crate that weighs nothing is left out): a chip per kind, a click on one leaving its kind's rows out
+// and another listing them again; the switch listing the rows left out; a Shift click selecting the
+// lines from the primary's to it in one selection, a Ctrl click toggling one; in the list and in the
+// tree alike.
+void test_outline_kinds_and_clicks() {
+	using editor_test::PoolDocument;
+	for (const OutlineMode mode : {OutlineMode::List, OutlineMode::Tree}) {
+		auto pool = std::make_shared<PoolDocument>();
+		Diagnostic error;
+		const std::string text = "C alpha 5\nB bravo 3\nC charlie 0\nN delta words\nB echo 7\n";
+		CHECK(pool->load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "pool.txt", AssetKind::Unknown, "jo", error),
+		      "the pool loads");
+		const std::shared_ptr<const DocumentBase> document = pool;
+		OutlineSpec spec;
+		spec.mode = mode;
+		spec.by_kind = true;
+		spec.row_listed = editor_test::pool_row_listed;
+		spec.unlisted = "Empty rows";
+		OutlineView view(spec);
+		NullBackend backend;
+		TestWorkspace workspace;
+		seed(workspace.seeded, document); // alpha selected
+		const auto row_at = [&](size_t i) { return NodeAddress{pool->rows()[i]->id, pool->rows()[i]->kind, 0}; };
+		const auto shown = [&] { return view_frame(workspace, view, *document, 520.0f, true); };
+		draw_frames(workspace, view, *document, 520.0f, 3);
+		std::string frame = shown();
+		CHECK(in_order(frame, {"Crate", "Barrel", "Note", "Empty rows", "alpha", "bravo", "delta", "echo"}) &&
+		              frame.find("charlie") == std::string::npos,
+		      "a chip per kind, the switch, the rows that hold something");
+		CHECK(workspace.requests.empty(), "drawing raises nothing");
+		// The Barrel chip: its rows left out, then listed again.
+		const ImGuiID tab = Ui::window_id("Tab");
+		// A tree's lines are in a child of their own; its chips and tools stand in the tab.
+		const ImGuiID chip = item_id(tab, {"kinds", "Barrel"});
+		ImGui::ActivateItemByID(chip);
+		draw_frames(workspace, view, *document, 520.0f, 2);
+		frame = shown();
+		CHECK(frame.find("bravo") == std::string::npos && frame.find("echo") == std::string::npos &&
+		              in_order(frame, {"alpha", "delta"}) && view.outline()->kinds() == ~uint64_t(2),
+		      "the Barrel chip pressed: the barrels left out");
+		ImGui::ActivateItemByID(chip);
+		draw_frames(workspace, view, *document, 520.0f, 2);
+		CHECK(in_order(shown(), {"alpha", "bravo", "delta", "echo"}) && view.outline()->kinds() == ~uint64_t(0),
+		      "pressed again: listed");
+		// The switch: the crate that weighs nothing listed too.
+		ImGui::ActivateItemByID(item_id(tab, {"Empty rows"}));
+		draw_frames(workspace, view, *document, 520.0f, 2);
+		CHECK(in_order(shown(), {"alpha", "bravo", "charlie", "delta", "echo"}) && view.outline()->all_rows(),
+		      "the switch lists the rows left out");
+		CHECK(workspace.requests.empty(), "the chips and the switch are the view's own: no request");
+
+		// A line by its record: where the mouse hovers it, found down the window.
+		const ImGuiWindow *window = ImGui::FindWindowByName("Tab");
+		const auto line_of = [&](size_t row, ImVec2 &at) {
+			for (float y = window->Pos.y + 30.0f; y < window->Pos.y + window->Size.y; y += 2.0f) {
+				ImGui::GetIO().AddMousePosEvent(window->Pos.x + 60.0f, y);
+				view_frame(workspace, view, *document, 520.0f);
+				workspace.requests.clear();
+				ImGui::GetIO().AddMouseButtonEvent(0, true);
+				view_frame(workspace, view, *document, 520.0f);
+				ImGui::GetIO().AddMouseButtonEvent(0, false);
+				view_frame(workspace, view, *document, 520.0f);
+				const bool hit = !workspace.requests.empty() &&
+				                 workspace.requests.back().kind == EditorRequestKind::SelectRecord &&
+				                 workspace.requests.back().address == row_at(row);
+				workspace.requests.clear();
+				if (hit) {
+					at = ImVec2(window->Pos.x + 60.0f, y);
+					return true;
+				}
+			}
+			return false;
+		};
+		ImVec2 delta, bravo;
+		CHECK(line_of(3, delta) && line_of(1, bravo), "a plain click on a line selects its record");
+		const auto click = [&](ImVec2 at, ImGuiKey modifier) {
+			workspace.requests.clear();
+			ImGui::GetIO().AddMousePosEvent(at.x, at.y);
+			view_frame(workspace, view, *document, 520.0f);
+			ImGui::GetIO().AddKeyEvent(modifier, true);
+			ImGui::GetIO().AddMouseButtonEvent(0, true);
+			view_frame(workspace, view, *document, 520.0f);
+			ImGui::GetIO().AddMouseButtonEvent(0, false);
+			view_frame(workspace, view, *document, 520.0f);
+			ImGui::GetIO().AddKeyEvent(modifier, false);
+			view_frame(workspace, view, *document, 520.0f);
+			return workspace.requests;
+		};
+		// Shift, the primary alpha: alpha, bravo and charlie named with delta, delta the record.
+		std::vector<EditorRequest> requests = click(delta, ImGuiMod_Shift);
+		CHECK(requests.size() == 1 && requests[0].kind == EditorRequestKind::SelectRecord &&
+		              requests[0].address == row_at(3) && requests[0].mode == SelectMode::Replace &&
+		              requests[0].records == (std::vector<NodeAddress>{row_at(0), row_at(1), row_at(2)}),
+		      "Shift+click: the lines from the primary's to it, one selection");
+		requests = click(bravo, ImGuiMod_Ctrl);
+		CHECK(requests.size() == 1 && requests[0].address == row_at(1) && requests[0].mode == SelectMode::Toggle &&
+		              requests[0].records.empty(),
+		      "Ctrl+click toggles the record");
+		// Several rows selected: drawn (each one's line marked), nothing raised.
+		workspace.requests.clear();
+		workspace.seeded.documents.selection.select(document->path(), row_at(3), {row_at(0), row_at(1)}, SelectMode::Replace);
+		workspace.seeded.revisions.touch(ViewConcern::Selection);
+		ImGui::GetIO().AddMousePosEvent(-1000.0f, -1000.0f);
+		draw_frames(workspace, view, *document, 520.0f, 3);
+		CHECK(workspace.seeded.documents.selection.holds(row_at(1)) && workspace.requests.empty(),
+		      "several rows selected: drawing them raises nothing");
+	}
 }
 
 // S13 V5: the MainViewport role's view (ui/main_viewport_view), which no type's row plays yet: the
@@ -752,6 +867,7 @@ int main() {
 	editor_ui_test::test_script_view_device();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
+	editor_ui_test::test_outline_kinds_and_clicks();
 	editor_ui_test::test_main_viewport_view();
 	editor_ui_test::test_main_viewport_held();
 	if (editor_ui_test::g_failures) {

@@ -1034,12 +1034,19 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const double since = ImGui::GetTime() - reveal_time_;
 	reveal.light = reveal_field_.empty() || since >= kFlashSeconds ? 0.0f : float(1.0 - since / kFlashSeconds) * 0.8f;
 	breadcrumb(workspace_, *document, selection);
-	// Several records of one kind: the fields they share, each change set on every one.
+	// Several records of one kind, or of kinds whose fields are alike (a mission's entities of
+	// several pools): the fields they share, each change set on every one.
 	Targets together{selection};
 	for (const NodeAddress &address : view.documents.selection.records)
 		if (address != selection) together.push_back(address);
-	const bool one_kind = std::all_of(together.begin(), together.end(),
-	                                  [&](const NodeAddress &address) { return address.kind == selection.kind; });
+	bool one_kind = true;
+	NodeKind last = selection.kind; // the kinds come in runs: each run's asked once
+	for (const NodeAddress &address : together) {
+		if (address.kind == last) continue;
+		last = address.kind;
+		one_kind = kinds_alike(*document, address.kind, selection.kind);
+		if (!one_kind) break;
+	}
 	// The form is its edits: held back while an operation holds the documents (a refresh, an
 	// import's write, a rename's commit: S13 A3), as the session would refuse them.
 	const bool editable = view.allows(EditorRequestKind::EditRecord);
@@ -1081,14 +1088,13 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	findings(view, findings_, *document, *row, selection);
 }
 
-// Several records of one kind (ADR 0046 S9k2): which they are (a click selects one alone),
+// Several records of one kind (ADR 0046 S9k2), or of kinds whose fields are alike (kinds_alike: a
+// marquee over a mission's pools): which they are (a click selects one alone),
 // then the fields they share (plan_shared_inspector), each showing the primary's value,
 // marked where they differ and where any of them changed since the last save; a change is
 // one batch over all of them, one undo step. Their lists stay with each record's own form.
 void InspectorWindow::draw_together(const Document &document, const std::vector<NodeAddress> &records) {
-	const std::string count = std::to_string(records.size()) + " " + document.kind_label(records.front().kind) +
-	                          " records selected: a change here sets every one of them.";
-	ui_kit::empty_state(count.c_str());
+	ui_kit::empty_state((selected_words(document, records) + ": a change here sets every one of them.").c_str());
 	const float line = ImGui::GetTextLineHeightWithSpacing();
 	if (ImGui::BeginChild("together", ImVec2(0.0f, line * float(std::min<size_t>(records.size(), 4)) + 4.0f),
 	                      ImGuiChildFlags_Borders)) {
