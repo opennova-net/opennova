@@ -84,6 +84,17 @@ const ActionRow kRows[] = {
 	// [orig: row 98 code 28 -> the @0x4e0662 arm -> HUD_CycleMapMode
 	//  @0x520bc0 (0->2->3->0)]
 	{"map_toggle", {Action::MapCycle}, Gate::Active},
+	// B / N / Ctrl+= / Ctrl+-: the sim owns the witnessed refusals (fire
+	// charge, the scoped seat-3 view) and the gain clamp 0..4.
+	// [orig: rows 103/104/45/46 = dispatch 26 / 41 / 56 / 57 ->
+	//  Input_HandleActionBinding_0 cases 0x1A, 0x29, 0x38, 0x39 @0x4e0420]
+	{"binoculars", {Action::Binoculars}, Gate::Active},
+	{"NVG", {Action::NightVision}, Gate::Active},
+	{"nvggainup", {Action::NvgGain, 1}, Gate::Active},
+	{"nvggaindown", {Action::NvgGain, -1}, Gate::Active},
+	// F7; the value is replaced by the Shift direction when the row fires.
+	// [orig: row 51 = dispatch 23 @0x49b3de]
+	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
 };
 
 } // namespace
@@ -94,11 +105,15 @@ PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
 // including a digit arriving on the release frame. A fresh press clears the
 // consumed flag; a shell chord applies after that clear. An inactive gameplay
 // frame cancels the chain, so closing an overlay cannot toggle a mount.
+// The special-key chain's digit arms, first open wins: the held-USE seat pick,
+// then the Emotes menu, then the Radio menu; a digit an arm takes never
+// reaches the binding rows (the swallow in poll()).
 // [orig: Input_ProcessFrame @0x49d520 -- the latch aging @0x49d57f..0x49d585,
 //  the release edge @0x49d6c1..0x49d6dc -> Entity_ToggleVehicleMount
 //  @0x436950; Input_HandleActionBinding_0 case 0xB1 @0x4e0a84, LABEL_121
 //  @0x4e0b65..0x4e0b71; Input_HandleSpecialKeys @0x49c5c0, the held-USE digit
-//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790]
+//  arm @0x49c6d8..0x49c730 -> Entity_FindAvailableSeat @0x436790, the Emotes
+//  arm @0x49c731..0x49c77c, the Radio arm @0x49c783..0x49c7c8]
 void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 		PlayerActionFrame &frame) {
 	use_held_prev_ = use_latched_;
@@ -112,9 +127,24 @@ void PlayerActions::sample_use(const PlayerActionSource &source, const PlayerAct
 		use_hold_consumed_ = true;
 		use_consume_pending_ = false;
 	}
+	menu_digits_ = gate.active && (gate.emotes_menu_open || gate.radio_menu_open);
 	for (int digit = 0; digit < 10; ++digit) {
-		if (!world::latched_key_edge(source.digit_down(digit), use_held_prev_,
+		// The digit arm is a key-press path, so an open text line takes the
+		// digits [orig: Input_HandleSpecialKeys @0x49c5c0 runs only with
+		// g_InputCaptureMode clear, Input_ProcessKeyboardEvents @0x49d2e3].
+		const bool digit_down = !gate.keyboard_captured && source.digit_down(digit);
+		if (!world::latched_key_edge(digit_down, use_held_prev_ || menu_digits_,
 				use_digit_was_down_[digit])) continue;
+		if (!use_held_prev_) {
+			// The menu arms: keys 1..9 pick 1..9 and key 0 picks 10, sent and
+			// the menu closed; the Emotes menu wins when both are open.
+			// [orig: @0x49c745..0x49c75c (emotes, C2S 0x14) and
+			//  @0x49c791..0x49c7a8 (radio, C2S 0x13)]
+			const int pick = digit == 0 ? 10 : digit;
+			frame.requests.push_back(
+					{gate.emotes_menu_open ? Action::EmotePick : Action::RadioPick, pick});
+			continue;
+		}
 		// Keys 1..9 select seats 0..8, key 0 seat 9 [orig: @0x49c6e6..0x49c6ed].
 		const int seat = digit == 0 ? 9 : digit - 1;
 		if (!use_hold_consumed_ && gate.simulation_available)
@@ -150,18 +180,44 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 		const bool capture_latch = (row.flags & CaptureLatch) != 0;
 		const bool down = (!capture_latch || active) && source.pressed(row.token);
 		bool swallowed = false;
-		if (!capture_latch && down && use_held_prev_) {
+		if (!capture_latch && down && (use_held_prev_ || menu_digits_)) {
 			// VK digits only: a rebound digit is swallowed, a mouse/joystick
-			// match (VK 0) is not [orig: the (key - 48) <= 9 test @0x49c6e0].
+			// match (VK 0) is not [orig: the (key - 48) <= 9 tests @0x49c6e0 /
+			// @0x49c73f / @0x49c78b].
 			const int vk = source.pressed_key(row.token);
 			swallowed = vk >= 0x30 && vk <= 0x39;
 		}
 		// Raw event-row latches advance behind overlays, without capture,
 		// during a USE hold and without a sim. Only scope-zero freezes above.
 		if (world::latched_key_edge(down, active && !swallowed, rows_[i].down) &&
-				gate.simulation_available) frame.requests.push_back(row.request);
+				gate.simulation_available) {
+			PlayerActionRequest request = row.request;
+			if (request.action == Action::WaypointCycle && source.shift_down()) request.value = -1;
+			frame.requests.push_back(request);
+		}
 	}
 	return frame;
+}
+
+std::vector<PlayerActionRequest> PlayerActions::poll_spectator(const PlayerActionSource &source,
+		bool active) {
+	// [orig: rows 110 / 111 / 112 -> Input_HandleActionBinding cases 500
+	//  @0x49bd58, 501 @0x49bd67, 502 @0x49bd89]
+	static constexpr struct {
+		const char *token;
+		int code;
+	} kSpectatorRows[3] = {
+		{"CycleSpectatorMode", 500},
+		{"IncSpectatorTarget", 501},
+		{"DecSpectatorTarget", 502},
+	};
+	std::vector<PlayerActionRequest> out;
+	for (std::size_t i = 0; i < std::size(kSpectatorRows); ++i) {
+		const bool down = source.pressed(kSpectatorRows[i].token);
+		if (world::latched_key_edge(down, active, spectator_was_down_[i]))
+			out.push_back({Action::Spectate, kSpectatorRows[i].code});
+	}
+	return out;
 }
 
 void PlayerActions::reset() {

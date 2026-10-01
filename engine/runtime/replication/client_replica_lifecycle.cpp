@@ -76,7 +76,7 @@ void ClientReplicaPipeline::apply_full_entity_spawn(const std::vector<uint8_t> &
     row.spawn_player_class = rec.player_class;
     row.spawn_ai_state = rec.ai_state;
     row.spawn_anim_slot = rec.anim_slot;
-    row.spawn_byte_154 = rec.unused_byte;
+    row.spawn_byte_154 = rec.player_slot_id;
     row.spawn_mount_mask = rec.seat_mask;
     for (std::size_t i = 0; i < 8; ++i)
         row.spawn_mount_handles[i] = resolved_spawn_handle(rec.mount_handles[i]);
@@ -114,6 +114,9 @@ uint32_t ClientReplicaPipeline::begin_entity_lifetime(uint16_t handle) {
 }
 
 void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
+	// Entity_Destroy's first leg, ahead of its teardown: a destroyed spectate
+	// target re-picks while its row still stands [orig: @0x43e820..0x43e838].
+	spectate_on_entity_removed(root_handle);
 	discard_entity_notifications(root_handle);
 	// The client runs the shared Entity_Destroy, refNum walk included. The row
 	// leaves its refNum group first (the streamed refNum byte stands in for the

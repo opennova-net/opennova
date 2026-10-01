@@ -27,6 +27,7 @@
 
 #include <formats/mnu/mnu.h>
 #include <runtime/menu/menu_table.h>
+#include <runtime/menu/menu_table_row.h>
 
 #include <cstdint>
 #include <functional>
@@ -112,22 +113,26 @@ public:
 	virtual void set_widget_scroll_range(int index, int minimum, int maximum, int page,
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
-	virtual void set_widget_table_rows(int index,
-			const std::vector<std::vector<std::string>> &rows) = 0;
-	// The rows' colour overrides (parallel to the rows), the columns code
-	// installed (none: the XML ones) and the sorted column (-1 none).
-	virtual void set_widget_table_row_colors(int index,
-			const std::vector<MenuTableRowColor> &colors) = 0;
+	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
+	// The columns code installed (none: the XML ones) and the sorted column
+	// (-1 none).
 	virtual void set_widget_table_columns(int index, bool installed,
 			const std::vector<MenuTableColumn> &columns, int sort_column) = 0;
+	// CWnd_SetClipRect: the widget's own passes clipped to an absolute design
+	// rect (`enabled` false removes the clip).
+	virtual void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
+			int bottom) = 0;
 	virtual void set_widget_hover_item(int index, int row) = 0;
 	virtual void set_widget_popup_open(int index, bool open) = 0;
 	virtual void set_widget_focused(int index, bool focused) = 0;
+	// CWnd_SetRect: the widget's own (parent-relative) design rect replaced.
+	virtual void set_widget_rect(int index, int left, int top, int right, int bottom) = 0;
 	virtual void set_widget_caret(int index, int caret) = 0;
 
 	virtual int get_widget_caret(int index) const = 0;
 	virtual std::string get_widget_text(int index) const = 0;
 	virtual int item_count(int index) const = 0;
+	virtual std::string item_display_text(int index, int row) const = 0;
 	virtual bool is_widget_disabled(int index) const = 0;
 	virtual MenuRectF widget_rect(int index) const = 0; // design space
 	// Surface pixels per design unit (1,1 before the surface has a size).
@@ -148,9 +153,10 @@ public:
 	virtual bool combo_popup_contains(int index, float x, float y) const = 0;
 	virtual int list_row_at(int index, float x, float y) const = 0;
 	virtual int spin_arrow_at(int index, float x, float y) const = 0; // 0 / 1 up / 2 down
-	// The table hit test (MenuFrameCompiler::table_hit): false where retail
-	// fails; row -1 on the header strip, column -1 over no column.
-	virtual bool table_hit(int index, float x, float y, int &row, int &column) const = 0;
+	// The table hit test (MenuFrameCompiler::table_hit, CTableWnd_HitTest): the
+	// data row (-1 the header strip) and column (-1 none) under the point;
+	// false where retail fails.
+	virtual bool table_hit(int index, float x, float y, int *row, int *column) const = 0;
 	// The parse-time {hot} mnemonic of a widget (MenuFrameCompiler::
 	// widget_mnemonic), empty when none.
 	virtual std::string widget_mnemonic(int index) const = 0;
@@ -182,10 +188,19 @@ struct MenuEvent {
 		ListActivated,   // id, value = row
 		HoverChanged,    // id, flag = hovered
 		ShownChanged,    // id, flag = shown
+		EditCommitted,   // id, text = widget name: an edit's Enter (event 0x7000002)
+		// A press on a table's data row (the 0x8000001 cell event after the
+		// table's own selection write): id, text = widget name, value = row,
+		// column (-1 none), state = the row's state after the write,
+		// cell_value = that column's cell value, flag = the double-click form.
+		TableCellClicked,
 	};
 	Kind kind = Kind::ScreenChanged;
 	int id = -1;
 	int value = 0;
+	int column = -1;
+	int32_t state = 0;
+	int32_t cell_value = 0;
 	bool flag = false;
 	std::string text, text2, text3;
 };
@@ -234,9 +249,7 @@ struct MenuWidgetRuntimeState {
 	bool has_selected_set = false;
 	std::vector<int> selected_set;
 	bool has_table_rows = false;
-	std::vector<std::vector<std::string>> table_rows;
-	std::vector<MenuTableRowColor> table_row_colors; // parallel to table_rows
-	std::vector<int> table_selected;
+	std::vector<MenuTableRow> table_rows;
 	// The columns code installed [orig: init_table_row @ 0x63f9c0 from the shell],
 	// the sort-key stack and the sorted column [orig: CTableWnd_SortByColumn
 	// @ 0x640900].
@@ -244,12 +257,19 @@ struct MenuWidgetRuntimeState {
 	std::vector<MenuTableColumn> table_columns;
 	std::vector<int> table_sort_keys;
 	int table_sort_column = -1;
+	// A runtime rect (CWnd_SetRect), parent-relative design units.
+	bool has_rect = false;
+	int rect_left = 0, rect_top = 0, rect_right = 0, rect_bottom = 0;
+	// A clip rect (CWnd_SetClipRect), absolute design units.
+	bool has_clip = false;
+	bool clip_enabled = false;
+	int clip_left = 0, clip_top = 0, clip_right = 0, clip_bottom = 0;
 
 	// True while no override has been written (a replay skips the widget).
 	bool empty() const {
 		return !(has_shown || has_disabled || has_checked || has_text || has_items ||
 				has_selected_item || has_scroll_row || has_scroll_range || has_selected_set ||
-				has_table_rows || has_table_columns);
+				has_table_rows || has_table_columns || has_rect || has_clip);
 	}
 };
 
@@ -324,12 +344,23 @@ public:
 	bool is_widget_checked(int id) const;
 	void set_widget_text(int id, const std::string &text);
 	std::string get_widget_text(int id) const;
+	// Move a widget: its own rect (relative to its parent's origin, design
+	// units) replaced until the document reopens [orig: CWnd_SetRect @0x646560,
+	// sub_646580 @0x646580 (the same at the widget's own square size)].
+	void set_widget_rect(int id, int left, int top, int right, int bottom);
+	// Clip a widget's own passes to an absolute design rect until the
+	// document reopens; `enabled` false removes it [orig: CWnd_SetClipRect
+	// @0x646210].
+	void set_widget_clip_rect(int id, bool enabled, int left, int top, int right, int bottom);
 	// Persist an edit widget's text for cross-screen reads.
 	void remember_widget_text(int id, const std::string &text);
 	void set_widget_items(int id, const std::vector<std::string> &items);
 	std::vector<std::string> get_widget_items(int id) const;
 	int item_count(int id) const;
 	std::string item_text(int id, int row) const;
+	// The row's displayed text (an authored `type="id"` row resolved through
+	// the screen's string table); "" off-screen or out of range.
+	std::string item_display_text(int id, int row) const;
 	// The authored item `value=` attribute of a row.
 	std::string item_value(int id, int row) const;
 	// Retail's select-by-value seed [orig: SpinList_SelectItemByValue
@@ -348,15 +379,37 @@ public:
 	// frame): mirror it into the store and relay the value change.
 	void on_frame_scroll_value(int index, int value);
 
+	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
+	// Append a row whose cells are `cells` (column order), cell values 0.
 	void table_add_row(int id, const std::vector<std::string> &cells);
+	// CTableWnd_AddRow: the landed row index (-1 for a widget that is not a
+	// table).
+	int table_insert_row(int id, const std::string &text0, int32_t value0, uint32_t flags,
+			int insert_index);
+	void table_set_cell_text(int id, int row, int col, const std::string &text);
+	void table_set_cell_value(int id, int row, int col, int32_t value);
+	int32_t table_cell_value(int id, int row, int col) const;
+	// CTableWnd_GetRowValue: column 0's cell value.
+	int32_t table_row_value(int id, int row) const { return table_cell_value(id, row, 0); }
+	// -1 clears the table [orig: CTableWnd_RemoveRow @0x641a40].
 	void table_remove_row(int id, int row);
-	void table_clear_rows(int id);
+	void table_clear_rows(int id) { table_remove_row(id, -1); }
 	int table_row_count(int id) const;
 	std::string table_cell_text(int id, int row, int col) const;
+	int32_t table_row_state(int id, int row) const;
+	// CTableWnd_SetRowSelected with the table's MULTISELECT; -1 = every row.
+	void table_set_row_selected(int id, int row, bool selected);
+	bool table_row_selected(int id, int row) const {
+		return table_row_state(id, row) == kTableRowSelected;
+	}
+	// A row's colour override; `enable` false drops it, row -1 is every row
+	// [orig: sub_640110 — the row's +28 bit 4 and +32].
+	void table_set_row_color(int id, int row, bool enable, uint32_t color);
+	// The rows in state 3, ascending.
 	std::vector<int> table_selected_rows(int id) const;
+	// Select `row` alone (every other non-locked row cleared), or toggle it
+	// with `additive`.
 	void table_select_row(int id, int row, bool additive);
-	// A row's colour override [orig: sub_640110 — the row's +28 bit 4 and +32].
-	void table_set_row_color(int id, int row, uint32_t argb);
 	// Code-installed columns: they replace the XML ones (the table is resized
 	// and every column set up [orig: StatScreen_PopulateStatResultsList @ 0x562240 ->
 	// resize_column_count, init_table_row]); the sort-key stack starts over.
@@ -446,7 +499,8 @@ private:
 	void replay_state_();
 	void on_screen_shown_();
 	void push_table_rows_(int id);
-	void push_table_selection_(int id);
+	bool table_multiselect_(int id) const;
+	int table_column_count_(int id) const;
 	void emit_value_changed_for_(int id, int row);
 	void on_claim_changed_(int previous, int current);
 	// The parent window's id, -1 for a root (or an unknown id).
@@ -477,7 +531,7 @@ private:
 	// The press (WM_LBUTTONDOWN) of the widget at `index`.
 	void press_(int index, float x, float y, uint32_t now_ms);
 	void list_press_(int id, int row, uint32_t now_ms);
-	void table_press_(int id, int row, uint32_t now_ms);
+	void table_press_(int id, int row, int column, uint32_t now_ms);
 	bool register_click_(int id, int row, uint32_t now_ms);
 	// A spin arrow's click: its own SELECTED sound and ACTION rows, then the spin
 	// list's step [orig: CSpinListWnd_HandleEvent @ 0x64c370 on

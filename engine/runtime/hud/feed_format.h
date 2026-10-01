@@ -158,10 +158,10 @@ inline bool feed_event_is_camp(uint8_t event_type) {
 std::string feed_camp_wpname_key(uint8_t level_index);
 
 // The MP verbose toggle: a line the local player took no part in posts only
-// while it is on. Retail seeds it on from the session settings; the keybind
-// that flips it (STRMISC_VERBOSE_ON/OFF) is unported, so the seed stands
-// [orig: g_MpVerbose2 @0x24D2154, seeded verbose-on from the session settings
-//  @0x551D0F; the flip keybind @0x49B78F].
+// while it is on. Retail seeds it on from the session settings; the Verbose
+// row flips it (hud_toggles.h HudToggleState::mp_verbose, with the
+// STRMISC_VERBOSE_ON/OFF toast) [orig: g_MpVerbose2 @0x24D2154, seeded
+// verbose-on from the session settings @0x551D0F; the flip keybind @0x49B78F].
 inline constexpr bool kMpVerboseDefault = true;
 
 // One folded 0x1E game event as the feed reads it: the wire slots plus the
@@ -174,6 +174,7 @@ struct FeedEventInput {
 	uint8_t aux_index = 0xFF;
 	uint8_t kind = 0;
 	int16_t pos_x = 0; // 46/47 carry the signed bonus count here.
+	uint32_t order = 0; // the event's dispatch stamp, carried onto its row
 };
 
 // One feed row — everything the presenter needs to post the line: the compose
@@ -195,6 +196,7 @@ struct FeedRow {
 	std::string extra;       // the aux actor's name, only when it is the local player
 	std::string wpname_key;  // camp rows only
 	uint32_t color = kFeedColorWhite;
+	uint32_t order = 0;      // FeedEventInput::order
 };
 
 // The roster lookup a row resolves actor names through: a wire index (a pool-0
@@ -243,6 +245,49 @@ struct KillAnnouncement {
 	bool visible(uint32_t now) const;
 	void expire(uint32_t now);
 };
+
+// THE PLAYER-TOKEN FORMATTER — the $A/$B/$C substitution the join/leave lines
+// (and the other system posts) run through [orig: Chat_FormatPlayerTokens
+// @0x4a5190]: an empty format yields ""; `$A`/`$B`/`$C` insert their token
+// (every occurrence, case-SENSITIVE, no rescan); a NULL token inserts nothing
+// and still skips the two characters; any other `$x` — and a trailing `$` —
+// copies the `$` and moves on one character. Distinct from the kill feed's
+// case-insensitive String_ReplaceAllCaseInsensitive (feed_format_line).
+std::string chat_format_player_tokens(const std::string &format, const char *token_a,
+		const char *token_b = nullptr, const char *token_c = nullptr);
+
+// THE S2C 0x32 JOIN/LEAVE LINE: the Client template per subtype (the wire's
+// signed subtype and team bytes — npwire FormattedGameText) with the text as
+// `$A`; "" when the subtype posts nothing or the template is empty/missing
+// [orig: NapiNPClientMsg_0x032 @0x428060 — subtype 1: team 0 STRCLI22
+// @0x4280e6, `g_GameType < 2 || == 8` STRCLI11 @0x428131, teams 1..4
+// STRCLI12..15 @0x428106..0x42812a, any other team returns @0x428123;
+// 2 STRCLI16 @0x42813d; 3 the literal @0x428144; 4 nothing; 5 STRCLI24
+// @0x428155; the `*line` test @0x428179]. The line posts to the SYSTEM ring
+// in kGameTextLineColor for the 930-tick life [orig: Chat_AddMessageChannel2
+// (line, 0xFFAFAFAF, 930) @0x428181..0x428195].
+std::string formatted_game_text_line(int subtype, const std::string &text, int team,
+		uint32_t game_type, const GameTextLookup &gametext);
+inline constexpr uint32_t kGameTextLineColor = 0xFFAFAFAFu;
+
+// ONE RING-BOUND LINE with its message's dispatch stamp. Retail posts every
+// feed line inside the handler of the message that carried it, so a frame's
+// S2C 0x1E, 0x14 and 0x32 lines reach the rings in wire order, not lane by
+// lane [orig: NetPacket_HandleGameEvent @0x426270, NapiNPClientMsg_0x032
+// @0x428060 (the post @0x428181..0x428195) and NapiNPClientMsg_ChatMessage
+// @0x42f240 -> Chat_DispatchToChannel @0x42b910 each post as they run]. The
+// embedder drains the three lanes into posts and orders them here; the post
+// lands in `sink`'s ring (Queue / Channel3 have none), and `announce` marks
+// the involved 0x1E line the kill banner retains.
+struct FeedPost {
+	uint32_t order = 0;
+	ChatSink sink = ChatSink::System;
+	uint32_t argb = 0;
+	std::string text;
+	bool announce = false;
+};
+// Order the posts by dispatch stamp; a message's own lines keep their order.
+void order_feed_posts(std::vector<FeedPost> &posts);
 
 // Strip retail's inline text markup (`<cRRGGBB>` colour, `<b>` bold — every
 // `<...>` run) from a string: the byte walk that drops each '<'..'>' span and

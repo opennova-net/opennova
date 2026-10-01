@@ -883,32 +883,6 @@ void JoinerConnection::retain_terrain_load_page(
 	}
 }
 
-// The VarList walk retail runs over the reassembled server-info stream
-// [orig: Client_ParseServerSessionVariables @0x520440 — per entry a NUL-terminated
-// key, a u32 length, the value bytes; EXP_FANFARE lands as the u16 at
-// g_SessionVarExpFanfare @0x520478].
-uint16_t session_vars_exp_fanfare(const uint8_t *data, size_t len) {
-	size_t pos = 0;
-	while (pos < len) {
-		const uint8_t *key = data + pos;
-		size_t key_len = 0;
-		while (pos + key_len < len && key[key_len] != 0) ++key_len;
-		if (pos + key_len >= len) break; // no terminator
-		pos += key_len + 1;
-		if (pos + 4 > len) break;
-		const uint32_t value_len = static_cast<uint32_t>(data[pos]) |
-				(static_cast<uint32_t>(data[pos + 1]) << 8) |
-				(static_cast<uint32_t>(data[pos + 2]) << 16) |
-				(static_cast<uint32_t>(data[pos + 3]) << 24);
-		pos += 4;
-		if (value_len > len - pos) break;
-		if (key_len == 11 && std::memcmp(key, "EXP_FANFARE", 11) == 0 && value_len >= 2)
-			return static_cast<uint16_t>(data[pos] | (data[pos + 1] << 8));
-		pos += value_len;
-	}
-	return 0;
-}
-
 void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) {
 	const uint64_t chunk_end = uint64_t(chunk.chunk_offset) + chunk.chunk_size;
 	if (chunk.chunk_offset > chunk.total_size || chunk_end > chunk.total_size ||
@@ -921,9 +895,11 @@ void JoinerConnection::retain_server_info_chunk(const FileTransferChunk &chunk) 
 	if (server_info_bytes_.size() != chunk.total_size) return;
 	std::memcpy(server_info_bytes_.data() + chunk.chunk_offset, chunk.chunk_data,
 			chunk.chunk_size);
+	// The completed stream parses into the session variables
+	// [orig: SaveFile_SendAndWaitForServerAck @0x5205d0 ->
+	//  Client_ParseServerSessionVariables @0x5202f0].
 	if (chunk.is_final())
-		exp_fanfare_ = session_vars_exp_fanfare(server_info_bytes_.data(),
-				server_info_bytes_.size());
+		decode_session_vars(server_info_bytes_.data(), server_info_bytes_.size(), session_vars_);
 }
 
 void JoinerConnection::retain_mission_metadata_chunk(
@@ -1517,10 +1493,11 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					// profile side block, that block's own class byte is the wire
 					// class, and the page that class indexes is the kit — so a
 					// joiner pushed across the line submits a kit the new side's
-					// class can legally hold. Still deferred with witnesses in
-					// D-NET-168: the C2S 0x22/0x23 acks (@0x431acb..0x431b05),
-					// Player_InitPlayer(1) @0x431b14 and the minimap NetId
-					// maintenance @0x431b3a..0x431b91.
+					// class can legally hold. The C2S 0x22/0x23 pair that
+					// follows (@0x431acb..0x431b05) is the replica fold's
+					// (ClientReplicaPipeline, S2C 0x50). Still deferred with
+					// witnesses in D-NET-168: Player_InitPlayer(1) @0x431b14
+					// and the minimap NetId maintenance @0x431b3a..0x431b91.
 					if (post_auth_stage_ == PostAuthStage::AwaitDeployment ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployPick ||
 					    post_auth_stage_ == PostAuthStage::AwaitDeployRelease ||
@@ -2117,6 +2094,13 @@ void JoinerConnection::on_server_resend_list(
 			body.data(), body.size(), client_key_, requested)) {
 		return;
 	}
+	// A list that named a sequence fires the outgoing link-error callback
+	// after the resends [orig: NapiNP_HandleResendList @0x6239aa latches it on
+	// a nonzero dword, @0x6239ef..0x623a37 calls cb_client_3 =
+	// Network_LogOutgoingPacketError @0x4c4920].
+	if (std::any_of(requested.begin(), requested.end(),
+			[](uint32_t sequence) { return sequence != 0; }))
+		net_quality_link_errors_ |= kNetQualityLinkErrorOutgoing;
 
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
@@ -2161,6 +2145,13 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 			if (encode_session_resend_list(conn_.server_sk, missing, missing_body)) {
 				out.push_back(nw_encode_outbound(
 						SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(missing_body)));
+				// A sent request that named a sequence fires the incoming
+				// link-error callback [orig: CNapiNPConnection_SendMissingSeqList
+				// — has_missing_seqs @0x623690, after the send @0x623775..0x6237bd
+				// cb_client_2 = Network_LogIncomingPacketError @0x4c4890].
+				if (std::any_of(missing.begin(), missing.end(),
+						[](uint32_t sequence) { return sequence != 0; }))
+					net_quality_link_errors_ |= kNetQualityLinkErrorIncoming;
 			}
 		}
 	}

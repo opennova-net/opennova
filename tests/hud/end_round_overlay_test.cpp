@@ -210,6 +210,43 @@ void test_statistics_panel() {
 	CHECK(kEndRoundStatsLabelX == 200 && kEndRoundStatsValueX == 620);
 }
 
+// The SP win epilog's four counter lines: the Show Score values, each
+// counter drawing its value only when >= 0, alone when its max is -1, else
+// value/max; team and friendly carry no max.
+// [orig: Cine_EpilogStateMachineUpdate @0x576240 state 4 ->
+//  CineEventEpilogCounter_Draw @0x573440 — @0x5734ee, @0x5734f8]
+void test_epilog_score_lines() {
+	EndRoundStatisticsInput in;
+	in.subgoals_won = 2;
+	in.subgoals_defined = 3;
+	in.enemy_kills = 9;
+	in.enemy_unit_total = 6;
+	in.team_unit_kills = 1;
+	in.friendly_unit_kills = 0;
+	auto lines = epilog_score_lines(in);
+	CHECK(std::string(lines[0].label_key) == "STREPILOG_OBJECTIVEBONUS" &&
+			lines[0].value == "2/3");
+	CHECK(std::string(lines[1].label_key) == "STREPILOG_ENEMYUNITS" &&
+			lines[1].value == "6/6"); // clamped to the census
+	CHECK(std::string(lines[2].label_key) == "STREPILOG_TEAMUNITS" &&
+			lines[2].value == "1");
+	CHECK(std::string(lines[3].label_key) == "STREPILOG_FRIENDLYUNITS" &&
+			lines[3].value == "0");
+	// The same counters on the Show Score panel.
+	auto rows = end_round_statistics_rows(in);
+	for (size_t i = 0; i < 4; ++i) CHECK(rows[i].value == lines[i].value);
+	// A negative value draws nothing (a WAC write can drive bluekills
+	// below zero); the panel still prints it.
+	in.team_unit_kills = -2;
+	CHECK(epilog_score_lines(in)[2].value.empty());
+	CHECK(end_round_statistics_rows(in)[2].value == "-2");
+	in.enemy_kills = -4;
+	CHECK(epilog_score_lines(in)[1].value == "0/6");
+	CHECK(epilog_counter_value_text(5, -1) == "5");
+	CHECK(epilog_counter_value_text(5, 0) == "5/0");
+	CHECK(epilog_counter_value_text(-1, 7).empty());
+}
+
 // The resolver: keys through the Overlays table, the "!..." fallbacks, the
 // present-but-empty folds (headline -> STROVER1, second line -> collapse and
 // the 32 px shift) and retail's sprintf forms.
@@ -345,6 +382,7 @@ int main() {
 	test_resolve();
 	test_team_mode_ladder();
 	test_statistics_panel();
+	test_epilog_score_lines();
 	test_objective_and_non_team();
 	test_column_layout();
 	if (failures != 0) {

@@ -129,9 +129,12 @@ public:
 	// serialized dialog queue (the engine plays one dialog audio channel at a time:
 	// Dialog_UpdatePlayback @ 0x44e470 only advances when the active channel frees).
 	// Returns null if the set is unknown or no member resolves to audio.
-	// Typed native bank service used by the mission's shared voice channel.
+	// Typed native bank service used by the mission's shared voice channel:
+	// the radio line's member file, or (bank_member) the entity voice's bank
+	// member with its pitch jitter (engine audio select_entity_voice).
 	std::optional<opennova::world::ScriptVoiceChannel::SetSelection>
-			select_radio_set(const std::string &name, uint8_t listener_view_flags);
+			select_radio_set(const std::string &name, uint8_t listener_view_flags,
+					bool p_bank_member = false);
 
 	bool play_interface_oneshot(Node *p_parent, const String &p_name, const StringName &p_bus);
 	AudioStreamPlayer *spawn_oneshot_2d(Node *p_parent, const String &p_name, const StringName &p_bus);

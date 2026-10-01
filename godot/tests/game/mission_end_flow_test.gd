@@ -39,3 +39,26 @@ func test_show_screen_mounts_once_and_routes_exit() -> void:
 	await get_tree().process_frame
 	assert_null(mount.get_node_or_null("MissionEndScreen"), "reset frees the screen")
 	assert_false(flow.tick(10.0), "a reset flow is idle again")
+
+
+func test_show_screen_reads_the_worlds_epilog_score() -> void:
+	# A booted world feeds the win form through Simulation.get_epilog_score:
+	# the engine's four counter lines over the SP score block (a fresh
+	# mission: nothing won, nothing killed) [orig: Cine_EpilogStateMachineUpdate
+	# @0x576240 state 4].
+	var world := WorldFixture.boot_minimal(self)
+	var sim := world.get_sim()
+	var score := sim.get_epilog_score()
+	assert_not_null(score, "a host world serves the epilog lines")
+	assert_eq(score.label_keys, PackedStringArray(["STREPILOG_OBJECTIVEBONUS",
+			"STREPILOG_ENEMYUNITS", "STREPILOG_TEAMUNITS", "STREPILOG_FRIENDLYUNITS"]))
+	assert_eq(score.values[2], "0", "the team line has no max")
+	assert_true(score.values[0].begins_with("0/"), "no subgoal won yet")
+	var flow := MissionEndFlow.new()
+	var mount := Node.new()
+	add_child_autofree(mount)
+	flow.begin(1, null)
+	flow.show_screen(sim, "", null, mount, func() -> void: pass)
+	var screen := mount.get_node_or_null("MissionEndScreen") as MissionEndScreen
+	assert_not_null(screen)
+	flow.reset()

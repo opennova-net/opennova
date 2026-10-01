@@ -1,6 +1,8 @@
 #include <runtime/world/minimap_overlay.h>
 
 #include <runtime/world/entity.h>
+#include <runtime/world/world.h>
+#include <runtime/world/powerup.h>
 
 #include <algorithm>
 
@@ -30,7 +32,8 @@ uint8_t minimap_team_color(uint8_t team) {
 	return team == 2 ? 0x09 : 0x0C;
 }
 
-MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
+MinimapOverlayClassification classify_minimap_overlay(const Entity &entity,
+		const World *world) {
 	MinimapOverlayClassification out;
 	out.handle = entity.handle.packed;
 	out.flags = ((entity.flags | entity.engine_flags) & kEntityFlagDead) != 0
@@ -45,10 +48,57 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 		out.visible = true;
 		return out;
 	}
-	// ItemDefAttrib2 FARP. VehicleBay's groupFlags-dependent 19..22 selector
-	// remains definition-data-gated and is deliberately not approximated.
+	// The vehicle bay (attrib2 bit 0) BEFORE the FARP: its spawn groups'
+	// flags pick cell 19 (bit0), 20 (bit1) or 21 (bit2) — the 22 the
+	// both-bits test writes is always overwritten — and no flag leaves it
+	// iconless. [orig: Entity_ClassifyForMinimap @0x50FAEB..0x50FB2C over
+	//  ItemDef+0xAD8]
+	if ((entity.item_attrib2 & 1u) != 0) {
+		if ((entity.vehicle_bay_flags & 1u) != 0) out.icon = 19;
+		else if ((entity.vehicle_bay_flags & 2u) != 0) out.icon = 20;
+		else if ((entity.vehicle_bay_flags & 4u) != 0) out.icon = 21;
+		else return out;
+		out.visible = true;
+		return out;
+	}
 	if ((entity.item_attrib2 & 0x00002000u) != 0) {
 		out.icon = 5;
+		out.visible = true;
+		return out;
+	}
+	// The powerup class (attrib bit 1) ends the walk. A row with its model
+	// pointer set (a picked-up respawning row has it withdrawn) reads its
+	// powerup.def row at entity+0x2C0: an `hp` grant draws cell 16, else
+	// `allammo` cell 17, else a zero `mana` draws cell 29 when `weapon` is -1
+	// (all) or its low byte names a live weapon.def row, each in colour 15
+	// (the zero-mana arm sets the colour even with no icon); a nonzero mana
+	// leaves the class iconless.
+	// [orig: @0x50FB43..0x50FB9C — the model test @0x50fb45, entity+0x2C0
+	//  @0x50fb49, hp row+0x2C @0x50fb55, allammo row+0x38 == 1 @0x50fb66,
+	//  mana row+0x30 @0x50fb77, weapon row+0x34 == -1 @0x50fb81 else
+	//  AdmDef_GetEntryByIndex(low byte) @0x50fb87..0x50fb96, colour 15
+	//  @0x50fb5f / @0x50fb70 / @0x50fb9c; the model withdrawal
+	//  PowerupAction_Pickup +0x30 = 0 @0x442AE7]
+	if ((entity.item_attrib & kItemAttribPowerup) != 0) {
+		if (world == nullptr || !entity.has_graphic_model || entity.hidden) return out;
+		const PowerupDef *def = world->tables.powerups.by_index(entity.powerup_def_index);
+		if (def == nullptr) return out;
+		if (def->hp != 0) {
+			out.icon = 16;
+		} else if (def->allammo) {
+			out.icon = 17;
+		} else if (def->mana == 0) {
+			const uint8_t weapon = static_cast<uint8_t>(def->weapon & 0xFF);
+			if (def->weapon == -1 ||
+					(weapon != 0xFF && world->tables.weapons.by_index(weapon) != nullptr))
+				out.icon = 29;
+			out.color = 15;
+			out.visible = out.icon == 29;
+			return out;
+		} else {
+			return out;
+		}
+		out.color = 15;
 		out.visible = true;
 		return out;
 	}
@@ -65,6 +115,22 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 	if (entity.item_type == 5) { // Building
 		if (!entity.has_minimap_model_marker) return out;
 		if (entity.team != 1 && entity.team != 2) out.color = 0;
+		out.visible = true;
+		return out;
+	}
+	// The flag ids draw cell 2 and the bay ids cell 6, each in its id's
+	// fixed team colour (4091 / 4098 blue, 4093 / 4100 / 4101 red, the rest
+	// neutral). [orig: @0x50FC11..0x50FDFA]
+	const int32_t id = entity.item_id;
+	if (id == 4091 || id == 4093 || id == 4095 || id == 4096 || id == 4097) {
+		out.icon = 2;
+		out.color = id == 4091 ? 0x0A : (id == 4093 ? 0x09 : 0x0C);
+		out.visible = true;
+		return out;
+	}
+	if (id == 4098 || id == 4100 || id == 4101 || id == 4102 || id == 4103) {
+		out.icon = 6;
+		out.color = id == 4098 ? 0x0A : ((id == 4100 || id == 4101) ? 0x09 : 0x0C);
 		out.visible = true;
 		return out;
 	}
@@ -85,13 +151,31 @@ MinimapOverlayClassification classify_minimap_overlay(const Entity &entity) {
 		out.visible = true;
 		return out;
 	}
-	if ((entity.item_attrib & kItemAttribEweap) != 0 && !dead) {
+	if ((entity.item_attrib & kItemAttribEweap) != 0) {
+		// A live emplacement draws unless its groundEntity parent is a
+		// vehicle — or a def-less parent. [orig: @0x50FCF3..0x50FD4F]
+		if (dead) return out;
+		if (world != nullptr) {
+			const Entity *parent = world->registry.get(entity.ground_target);
+			if (parent != nullptr && (!parent->has_item_def || parent->item_type == 1))
+				return out;
+		}
 		out.icon = (entity.item_id == 1869 || entity.item_id == 1886) ? 12 : 4;
 		out.color = 8;
 		out.visible = true;
 		return out;
 	}
 	if (entity.item_type == 3) { // Person
+		// A dead person draws cell 14 when Entity_ValidatePtr finds its player
+		// slot with an open revive window, else cell 8. The one caller never
+		// classifies a player: the pool-0 walk runs only outside a session and
+		// skips the Flags 0x100 player bit, and players live in pool 0 alone,
+		// so the slot lookup always fails and the cell-14 arm is dead code
+		// (the MP revive mark is the map's bit-5 loop 1).
+		// [orig: @0x50FD5F..0x50FD9C — Entity_ValidatePtr @0x500910;
+		//  Server_BuildOverlayStateForPlayer @0x5185DF (is_in_session) /
+		//  @0x518655 (Flags & 0x100); Entity_SpawnFromAnimSlotProperty
+		//  Pool_AllocEntry(0, 1) @0x43c3e3, Flags |= 0x101 @0x43c433]
 		out.icon = dead ? 8 : 3;
 		out.visible = true;
 		return out;

@@ -62,6 +62,14 @@ struct VehicleSeatSelection {
     SeatType type = SeatType::None;
 };
 
+// The tip event (hud/tip_system.h TipEvent, 0 = none) the local player's
+// boarding of `vehicle` at a `seat` raises: the UseGun seat the emplaced tip;
+// a control seat of a type-1 def the boat tip (unit_type 5..8), the helicopter
+// tip (3), else the ground tip, with the horn line when the def's sound
+// profile slot 24 resolves to a loaded set; a passenger seat none.
+// [orig: Entity_ProcessVehicleAttach @0x435bfd..0x435cc0]
+int vehicle_boarding_tip_event(const World &world, const Entity &vehicle, SeatType seat);
+
 // Seat-position action index 0..9 (keys 1..9,0), in the same list order as
 // the mounted panel. A player may request an AI-held slot; the authority
 // still adjudicates occupancy when processing the request.

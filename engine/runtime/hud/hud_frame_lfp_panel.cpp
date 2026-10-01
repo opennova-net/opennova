@@ -157,8 +157,9 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 			}
 		}
 		// 3. The letter, centred [orig: sprintf("%c", 'A' + idx) @0x5989fe;
-		//  HUD_DrawTextCenteredScaled (ex sub_580B80)(&dword_2723C74, x+32, y+44) @0x598a1b]. WITNESS PENDING:
-		//  the font object at dword_2723C74 — drawn with the HUD font here.
+		//  HUD_DrawTextCenteredScaled (ex sub_580B80)(&dword_2723C74, x+32, y+44) @0x598a1b]. The
+		//  font object at dword_2723C74 is the hudpos HUD slot [orig: HUD_SelectHudposFont
+		//  @0x591890], the HUD font here.
 		std::snprintf(text, sizeof(text), "%c", 'A' + z.letter_index);
 		emit_text(text, static_cast<float>(mx + kLfpLetterOffX),
 				static_cast<float>(my + kLfpLetterOffY), w, h, 0xFFFFFFFFu,

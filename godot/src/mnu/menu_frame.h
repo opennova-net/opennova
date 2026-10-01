@@ -158,6 +158,8 @@ public:
 	void set_widget_focused(int p_index, bool p_focused);
 	void set_widget_caret(int p_index, int p_caret);
 	void set_widget_text(int p_index, const String &p_text);
+	// CWnd_SetRect: the widget's own rect (parent-relative design units).
+	void set_widget_rect(int p_index, const Rect2i &p_rect);
 	void set_widget_selection(int p_index, int p_selected_item, int p_hover_item,
 			int p_scroll_row);
 	// Standalone type=scroll range/page/value. Page is the original inclusive
@@ -169,11 +171,15 @@ public:
 	// add_row_values / marquee content, now engine state).
 	void set_widget_items(int p_index, const PackedStringArray &p_items);
 	void set_widget_selected_set(int p_index, const PackedInt32Array &p_rows);
-	void set_widget_table_rows(int p_index, const TypedArray<PackedStringArray> &p_rows);
-	// The runtime's table extras and a marquee's credits (C++ only: the menu
-	// driver's frame seam).
-	void set_widget_table_row_colors(int p_index,
-			const std::vector<opennova::menu::MenuTableRowColor> &p_colors);
+	// TABLE rows (menu_table_row.h) and the table's custom-draw handler (the
+	// CUSTOM_DRAW cells' control callback), C++ only.
+	void set_widget_table_rows(int p_index,
+			const std::vector<opennova::menu::MenuTableRow> &p_rows);
+	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
+	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
+	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
+	// The runtime's installed table columns and a marquee's credits (C++ only: the
+	// menu driver's frame seam).
 	void set_widget_table_columns(int p_index, bool p_installed,
 			const std::vector<opennova::menu::MenuTableColumn> &p_columns, int p_sort_column);
 	void set_widget_marquee(int p_index, const opennova::menu::MarqueeCredits &p_credits);
@@ -194,6 +200,20 @@ public:
 	// shell overlays mounted over a widget must follow it.
 	bool is_widget_shown(int p_index) const;
 	Rect2 widget_rect(int p_index) const;
+	// The widget's own rect relative to its parent's origin (CWnd_GetRect).
+	Rect2 widget_local_rect(int p_index) const;
+	// The widget a companion mounts a Control over (-1 none): the widgets
+	// after it paint on the menu-top overlay, above the mount.
+	void set_mount_widget(int p_index);
+	int get_mount_widget() const { return state_.mount_index; }
+	// The widget whose CUSTOM appearance pass a companion draws (-1 none):
+	// its canvas item sits between the ops before and after that pass, and
+	// is visible only while the pass ran this frame (engine
+	// MenuDrawList::custom_slot_op).
+	void set_custom_slot_widget(int p_index);
+	int get_custom_slot_widget() const { return state_.custom_slot_index; }
+	RID get_custom_slot_canvas_item();
+	bool is_custom_slot_drawn() const { return custom_slot_drawn_; }
 	int item_count(int p_index) const;
 	String get_widget_text(int p_index) const; // effective: runtime else authored; cp1252 as authored
 	int get_widget_caret(int p_index) const;
@@ -205,9 +225,11 @@ public:
 	bool combo_popup_contains(int p_index, const Vector2 &p_position) const;
 	int combo_popup_row_at(int p_index, const Vector2 &p_position) const;
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
-	// The table hit test (MenuFrameCompiler::table_hit): false where retail
-	// fails; row -1 on the header strip, column -1 over no column.
-	bool table_hit(int p_index, const Vector2 &p_position, int &r_row, int &r_column) const;
+	// A list-like widget's displayed row text (C++ only).
+	std::string item_display_text(int p_index, int p_row) const;
+	// The table hit test (MenuFrameCompiler::table_hit, CTableWnd_HitTest): the
+	// data row (-1 the header strip) and column (-1 none); false where retail fails.
+	bool table_hit(int p_index, const Vector2 &p_position, int *r_row, int *r_column) const;
 	// A widget's parse-time {hot} mnemonic (MenuFrameCompiler::widget_mnemonic).
 	std::string widget_mnemonic(int p_index) const;
 	// The open popup (a shown MODAL window's index, -1 none): the pump serves
@@ -338,6 +360,11 @@ private:
 	// @ 0x63bf60; D-MNU-12 in docs/mnu/menu-re.md).
 	RID overlay_canvas_item_;
 	void ensure_overlay_canvas_item_();
+	// The custom-draw slot's item (z 2: a companion draws into it) and the
+	// overlay ops after the slot (z 3).
+	RID slot_canvas_item_;
+	RID overlay_upper_canvas_item_;
+	bool custom_slot_drawn_ = false;
 };
 
 } // namespace godot

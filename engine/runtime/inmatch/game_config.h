@@ -143,6 +143,14 @@ struct GameConfig {
 	//  NetPacket_SerializeWeaponOverlaySlots_0 @0x5105F5,
 	//  NapiNPServerMsg_HandleVehicleSpawnRequest @0x51C5E2]
 	bool unlimited_vehicles = true;
+	// The PLAYERS tab's punt vote: game.cfg voting off by default, at least 6
+	// active slots, a 0.66 share of them. [orig: g_GameConfigState.votingEnabled_4E0
+	//  / votingMinPlayers_4E4 / votingPercent_4E8 (Config_SetDefaults) ->
+	//  g_VoteKickEnabled / g_VoteKickMinPlayers / g_VoteKickPercent
+	//  (Game_ApplySessionSettingsToGlobals @0x551dc3 / @0x551dcf / @0x551d43)]
+	bool voting_enabled = false;
+	int32_t voting_min_players = 6;
+	float voting_percent = 0.66f;
 
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire

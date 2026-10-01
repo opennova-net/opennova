@@ -165,9 +165,24 @@ void ClientReplicaPipeline::apply_objective_entity_state(
 		return;
 	}
 	ClientEntityState *row = state_.find(state.entity_handle);
-	if (row == nullptr || (row->type_id != 4091 && row->type_id != 4093 &&
-			row->type_id != 4095))
-		return;
+	const bool flag_row = row != nullptr && (row->type_id == 4091 || row->type_id == 4093 ||
+			row->type_id == 4095);
+	// The FlagBall / type-8 carrier latch rides both arms — the authority
+	// takes the attach handle without touching the entity [orig: `attachHandle
+	// = attachRef` @0x4310f6], a client after its writes — so the listen
+	// host's own replica latches too. Its view carries no pool-1 rows; the
+	// item-id gate is its server's own (the 0x2F senders walk only the three
+	// flag ids).
+	// [orig: `g_GameType == 65544 || g_GameType == 8` @0x4310fa..0x431109;
+	//  dword_A860C4 = the attach handle's entity, or 0 for 0xFFFF / an
+	//  out-of-range pool @0x431139..0x43115a]
+	if ((flag_row || (row == nullptr && authority_recipient_)) &&
+			(game_type_ == 0x10008u || game_type_ == 8u)) {
+		const uint16_t carrier = state.attach_handle;
+		state_.flag_carrier_handle =
+				(carrier != 0xFFFFu && (carrier & 0xF000u) < 0x5000u) ? carrier : uint16_t{0xFFFF};
+	}
+	if (!flag_row) return;
 
 	row->x = state.pos_x;
 	row->y = state.pos_y;

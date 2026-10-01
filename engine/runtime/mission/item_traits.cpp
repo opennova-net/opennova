@@ -138,6 +138,14 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
     const int player_def_id =
             static_cast<int>(world::kPlayerInfantryTypeId) + mission::kItemIdOffset;
     const DefItemDef *player_def = find_item(by_id, player_def_id);
+    // The user-waypoint row Waypoint_CreateForPlayer seeds pool 4 from
+    // (world/user_waypoints.h) [orig: ItemList_FindIndexByTypeId(6089) @0x4dfcf0].
+    const DefItemDef *waypoint_def = find_item(by_id,
+            static_cast<int>(world::kUserWaypointTypeId) + mission::kItemIdOffset);
+    world.tables.user_waypoint_type_index =
+            waypoint_def != nullptr ? static_cast<int32_t>(waypoint_def - items.entries) : 0;
+    world.tables.user_waypoint_item_type =
+            static_cast<uint8_t>(waypoint_def != nullptr ? waypoint_def->type : 0);
     world.tables.player.has_item_def = player_def != nullptr;
     world.tables.player.item_type_index =
             player_def != nullptr ? static_cast<int32_t>(player_def - items.entries) : 0;
@@ -183,14 +191,33 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             body->profile.clip_size = def != nullptr ? def->clipsize : 0;
 		e->vehicle_spawn_ids.clear();
 		e->vehicle_spawn_groups.clear();
+		e->vehicle_bay_flags = 0;
 		if (def != nullptr) {
 			for (int group = 0; group < items.vehicle_spawn_id_count; ++group)
 				if ((def->vehicle_spawn_mask & (uint32_t(1) << group)) != 0) {
 					e->vehicle_spawn_ids.push_back(items.vehicle_spawn_ids[group]);
 					e->vehicle_spawn_groups.push_back(static_cast<uint8_t>(group));
+					// A bay ORs each spawn group's flags, taken from the
+					// group item's unitType (an unresolved id reads the
+					// Null row, whose unitType sets none).
+					// [orig: ItemDefs_LoadAndValidate @0x4a1fa7..0x4a1fcf,
+					//  @0x4a2010..0x4a2058]
+					if ((def->attrib2 & 1u) == 0) continue;
+					const DefItemDef *member =
+							find_item(by_id, items.vehicle_spawn_ids[group]);
+					const int unit = member != nullptr ? member->unit_type : 0;
+					if (unit == 1 || unit == 2 || unit == 12) e->vehicle_bay_flags |= 1u;
+					else if (unit == 3 || unit == 4) e->vehicle_bay_flags |= 2u;
+					else if (unit >= 5 && unit <= 8) e->vehicle_bay_flags |= 4u;
 				}
 		}
 		e->item_type = static_cast<uint8_t>(def != nullptr ? def->type : 0);
+		// entity+0x30: the def's named graphic (the model Entity_InitFromModel
+		// attaches); a marker never carries one.
+		// [orig: Entity_InitFromModel @0x40df06; the persistent-bank gate
+		//  MapOverlay_RenderAllByLayer @0x5BE6C4]
+		e->has_graphic_model = def != nullptr && def->graphic[0] != '\0' &&
+				e->kind != world::EntityKind::Marker;
 		// The physics callback table's ewep row selects the gun update.
 		// [orig: g_EntityClassPhysicsTable row @0x82ABE0 -> Entity_UpdateTransformAndTurret @0x440CA0]
 		e->emplaced_update = def != nullptr && strutil::iequals(def->move_function, "ewep");

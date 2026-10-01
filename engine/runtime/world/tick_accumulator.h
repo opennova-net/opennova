@@ -74,6 +74,9 @@ public:
 		average_fps_ = 0;
 		frame_count_ = 0;
 		frame_time_sum_ = 0;
+		cpu_percent_ = 0;
+		update_ms_ = 0;
+		update_count_ = 0;
 	}
 
 	// The banked residual in seconds.
@@ -82,6 +85,22 @@ public:
 	// The FR counter's average frame rate (g_StatsAvgFps): the frame-pressure
 	// input of both CNetQuality windows and the host's 0x0A server-fps byte.
 	int32_t average_fps() const { return average_fps_; }
+
+	// The CPU share the FR window publishes beside the frame rate: every frame
+	// adds the wall milliseconds from its start stamp to the end of its logic
+	// drain and counts the logic updates that drain ran; when the window
+	// closes (in bank) the share becomes ms * 100 / (max(updates, 1) * 16)
+	// and both counters restart. It reads 0 until the first full window.
+	// [orig: Game_MainLoop — the update count `add g_StatsUpdateCount, 1`
+	//  @0x52ba4f, `g_StatsUpdateMs += GetTickCount() - frame start`
+	//  @0x52ba9b..0x52baa1, the publish @0x52b926..0x52b948 (a zero count reads
+	//  1 @0x52b930), the restarts @0x52b96f / @0x52b975; the mode-init reset
+	//  @0x52b72d / @0x52b733 / @0x52b74b]
+	void record_frame_work(uint32_t elapsed_ms, int updates) {
+		update_ms_ += elapsed_ms;
+		update_count_ += static_cast<uint32_t>(updates > 0 ? updates : 0);
+	}
+	int32_t cpu_percent() const { return cpu_percent_; }
 
 private:
 	// Game_MainLoop seeds the bank with one millisecond (`esi = 16` @0x52B63C).
@@ -94,6 +113,9 @@ private:
 	int32_t average_fps_ = 0;            // g_StatsAvgFps
 	uint32_t frame_count_ = 0;           // g_StatsFrameCount
 	uint32_t frame_time_sum_ = 0;        // g_StatsFrameTimeSumFp4
+	int32_t cpu_percent_ = 0;            // g_StatsCpuPercent
+	uint32_t update_ms_ = 0;             // g_StatsUpdateMs
+	uint32_t update_count_ = 0;          // g_StatsUpdateCount
 };
 
 } // namespace opennova::world

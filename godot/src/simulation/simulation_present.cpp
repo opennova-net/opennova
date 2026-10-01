@@ -17,7 +17,11 @@
 
 #include <runtime/inmatch/client_replica_card.h> // the joiner's decoded replica section
 #include <runtime/inmatch/minimap_markers.h> // the retained marker rows (bank walk + local restore)
+#include <runtime/inmatch/minimap_overlays.h> // the non-bank map legs' feed
+#include <runtime/inmatch/napi_np_server_ctx.h> // the authority's location table
+#include <runtime/hud/hud_frame.h>  // HudObjectiveRow
 #include <runtime/hud/hud_minimap_feed.h>  // the feed layout the snapshot carries
+#include <runtime/inmatch/role_feeds.h>
 #include <runtime/inmatch/present_rows.h> // the PF_* row collectors, both roles (ADR 0043 G3)
 
 #include <cmath>
@@ -97,7 +101,8 @@ Ref<WaypointHudView> Simulation::get_waypoint_hud_view() const {
 	// default view.
 	Ref<WaypointHudView> out;
 	out.instantiate();
-	out->assign(kernel_ ? opennova::world::waypoint_hud_view(kernel_->world.script.waypoints)
+	out->assign(kernel_ ? opennova::world::waypoint_hud_view(kernel_->world.script.waypoints,
+								  &kernel_->world.registry)
 					   : opennova::world::WaypointHudView{});
 	return out;
 }
@@ -138,6 +143,9 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	in.world = &kernel_->world;
 	in.local_marker_handle = local_marker_handle;
 	in.local_heading_bam = static_cast<int32_t>(get_local_player_heading_bam());
+	// The zone-timer list the rows' v7 entry reads (the joiner's own, the
+	// authority's HostClient loopback; none on the bare local role).
+	in.zone_timers = runtime_ ? &runtime_->zone_states() : nullptr;
 	std::vector<opennova::hud::HudMinimapMarker> markers;
 	opennova::inmatch::build_minimap_markers(in, markers);
 	std::vector<int32_t> feed;
@@ -150,6 +158,61 @@ PackedInt32Array Simulation::get_hud_minimap_snapshot() const {
 	present_.minimap_snapshot_tick = tick;
 	present_.minimap_snapshot_local_handle = local_marker_handle;
 	present_.minimap_snapshot_valid = true;
+	return out;
+}
+
+Ref<HudMapOverlays> Simulation::get_hud_minimap_overlays(
+		const Ref<RtxtStringFile> &p_gametext) const {
+	// The feed's gather and selection rules are the engine's
+	// (inmatch/minimap_overlays.h); this leg only binds the role's state.
+	// Between logic ticks every input is unchanged, so display frames reuse
+	// the gathered record.
+	const uint64_t revision = runtime_ ? runtime_->state().minimap.revision : 0;
+	const uint64_t tick = kernel_ ? static_cast<uint64_t>(kernel_->world.logic_tick) : 0;
+	const uint64_t gametext_id = p_gametext.is_valid() ? p_gametext->get_instance_id() : 0;
+	if (present_.minimap_overlays_valid && present_.minimap_overlays_cache.is_valid() &&
+			revision == present_.minimap_overlays_revision &&
+			tick == present_.minimap_overlays_tick &&
+			gametext_id == present_.minimap_overlays_gametext)
+		return present_.minimap_overlays_cache;
+	Ref<HudMapOverlays> out;
+	out.instantiate();
+	if (!kernel_) return out;
+	const opennova::inmatch::RoleView view = role_view();
+	opennova::inmatch::MinimapOverlayInputs in;
+	in.client = runtime_ ? &runtime_->state() : nullptr;
+	in.world = &kernel_->world;
+	in.game_type = runtime_ ? static_cast<int32_t>(runtime_->game_type()) : 0;
+	in.rules_word = (view.joiner && runtime_) ? runtime_->view().mp_attributes()
+			: view.staged_mp_attributes;
+	in.authority_location_names =
+			view.host != nullptr ? &view.host->mission_location_names : nullptr;
+	in.gametext = game_text_lookup(p_gametext);
+	if (runtime_ && runtime_->has_self_handle()) in.self_handle = runtime_->self_handle();
+	opennova::hud::HudMinimapOverlays value;
+	opennova::inmatch::build_minimap_overlays(in, value);
+	out->assign(std::move(value));
+	present_.minimap_overlays_cache = out;
+	present_.minimap_overlays_revision = revision;
+	present_.minimap_overlays_tick = tick;
+	present_.minimap_overlays_gametext = gametext_id;
+	present_.minimap_overlays_valid = true;
+	return out;
+}
+
+void Simulation::set_hud_radar_gates(int p_gates) {
+	session_.set_hud_radar_gates(static_cast<uint32_t>(p_gates));
+}
+
+PackedInt32Array Simulation::get_hud_radar() const {
+	// The frame's contact update, lock tone, snapshot, missile-count clear and
+	// the map banks' aging ran on the session's frame (inmatch/session.h, the
+	// radar step); this leg only packs its snapshot.
+	std::vector<int32_t> feed;
+	opennova::hud::radar_feed_encode(session_.hud_radar(), feed);
+	PackedInt32Array out;
+	out.resize(static_cast<int64_t>(feed.size()));
+	std::copy(feed.begin(), feed.end(), out.ptrw());
 	return out;
 }
 
@@ -168,7 +231,7 @@ PackedInt32Array Simulation::get_hud_minimap_footprints() const {
 	kernel_->world.registry.for_each([&](const opennova::world::Entity &entity) {
 		if (!opennova::world::minimap_overlay_entity_enabled(entity)) return;
 		const opennova::world::MinimapOverlayClassification row =
-				opennova::world::classify_minimap_overlay(entity);
+				opennova::world::classify_minimap_overlay(entity, &kernel_->world);
 		if (!row.visible) return;
 		const opennova::world::MinimapBlipDrawPolicy policy =
 				opennova::world::minimap_blip_draw_policy(entity, row.icon);

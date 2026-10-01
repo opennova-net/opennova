@@ -3,7 +3,10 @@
 // A TABLE's columns and its row sort [orig: init_table_row @ 0x63f9c0 (a column's
 // setup); CTableWnd_SortByColumn @ 0x640900 -> CTableWnd_CompareRows @ 0x63e9c0 (the
 // sort)]. The frame compiler draws the columns; the runtime keeps the rows and
-// sorts them. Witness record: docs/mnu/menu-re.md ("Table render").
+// sorts them, as menu_table_row.h's records (a row's colour override and selection
+// travel with it). Witness record: docs/mnu/menu-re.md ("Table render").
+
+#include <runtime/menu/menu_table_row.h>
 
 #include <cstdint>
 #include <string>
@@ -32,14 +35,6 @@ struct MenuTableColumn {
 	bool ascending = true;
 };
 
-// A table row's colour override [orig: sub_640110 sets the row's +28 bit 4 and its
-// +32 colour; CUITable_Render @ 0x6411d0 swaps it into the row state's colour slot
-// for the row's draw].
-struct MenuTableRowColor {
-	bool set = false;
-	uint32_t argb = 0;
-};
-
 // The sort-key stack after a sort on `column` [orig: CTableWnd_SortByColumn
 // @ 0x640900 — a column other than the first key pushes onto the front (the
 // stack is min(columns, 20) deep), then the entry at min(columns, 19) ends it].
@@ -52,7 +47,7 @@ void table_push_sort_key(std::vector<int> &keys, int column, int column_count);
 // by stricmp; a cell a row does not have sorts as described there]. Returns the
 // permutation (new row r is old row order[r]); a stable sort keeps rows that
 // compare equal in order (retail's Utility_QuickSortDualArray is not ported).
-std::vector<int> table_sort_order(const std::vector<std::vector<std::string>> &rows,
+std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 		const std::vector<MenuTableColumn> &columns, const std::vector<int> &keys);
 
 } // namespace opennova::menu

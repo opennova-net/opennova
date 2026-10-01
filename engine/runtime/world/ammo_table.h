@@ -192,6 +192,12 @@ struct AmmoTableEntry {
     // 2 = glass-only [orig: word +0x76 -> Impact_SpawnGlassEffectsOrScar
     // @0x5cf1b0's kind argument; world/impact_scar.h].
     int32_t scar_type = 0;            // word +0x76
+    // The tracer-whiz radius, 16.16: the `move` row's (tag 1) then the `zip`
+    // row's (tag 3) sound set cull range << 16, capped at 50 units, the later
+    // row winning [orig: +0x8C from set+72 by AmmoDef_InitEffectsTable
+    // @0x40a04b..0x40a07f]. Resolved against the loaded banks by
+    // resolve_ammo_whiz_radii (world/radar_contacts.h); 0 = no whiz.
+    int32_t whiz_radius_q16 = 0;      // +0x8C
     bool valid = false;
 };
 
