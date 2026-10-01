@@ -167,6 +167,21 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::DOOR_SLOT_ACTION: {
+		// One door row from the host: every field zero-fills on a short body
+		// and still dispatches (a zero number then lands nowhere); the row
+		// write is the effect pass's, which owns the door records.
+		// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250]
+		DoorSlotAction action;
+		size_t consumed = 0;
+		decode_door_slot_action(body.data(), body.size(), action, consumed);
+		DoorRowUpdate update;
+		update.entity_handle = action.entity_handle;
+		update.state = action.state;
+		update.number = action.number;
+		pending_effect_commands_.push_back(update);
+		break;
+	}
 	case s2c::KILL_BY_SLOT: // one join-window kill-list page (0x4E)
 		apply_batch_kill(body);
 		break;

@@ -34,6 +34,10 @@ public:
     uint64_t passable_sections(const Entity &) const;
     // Shared ordinal CTRL writer; caller supplies storage beginning at DOOR_00.
     int write_phases(const Entity &, int32_t *out, int capacity) const;
+    // The S2C 0x37 receive leg: row (first + number - 1) takes the host's
+    // state; a closed row snaps to phase 0 and an open one to 65536.
+    // [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250]
+    void apply_wire_row(const Entity &, int number, int32_t state);
     size_t allocated() const { return slots_.size(); }
 private:
     std::vector<Slot> slots_;

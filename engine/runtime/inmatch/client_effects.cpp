@@ -231,6 +231,14 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->last_attacker = world::EntityHandle{};
                 world::destruction_notify_item_damage(world, *victim, 4);
             }
+        } else if (const auto *door = std::get_if<replication::DoorRowUpdate>(&request)) {
+            // The pool row the handle names; an entity this peer never
+            // materialized has no door records to write.
+            // [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x4312bf..0x431326]
+            const world::EntityHandle handle{door->entity_handle};
+            if (!handle.valid() || handle.pool() >= world::kEntityPoolCount) continue;
+            if (const world::Entity *entity = world.registry.get(handle))
+                world.doors.apply_wire_row(*entity, door->number, door->state);
         } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
             // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
             //  @0x429ef5 -> g_EnvLightningTimerA]

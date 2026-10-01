@@ -56,6 +56,14 @@ struct EntityDeathEvent {
 struct LightningTimerCommand {
     int32_t timer_a = 16;
 };
+// S2C 0x37: one door row's state from the host, applied by the effect pass to
+// the world's door records. [orig: NapiNPClientMsg_HandleWeaponSlotAction
+// @0x431250]
+struct DoorRowUpdate {
+    uint16_t entity_handle = 0;
+    int32_t state = 0;  // the i16 wire word, sign-extended [orig: @0x43127e]
+    uint8_t number = 0; // the row number; 0 never lands
+};
 struct LocalChatSpeaker {
     uint8_t slot = 0;
 };
@@ -70,7 +78,7 @@ struct TipEventCommand {
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
         EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
-        LightningTimerCommand>;
+        LightningTimerCommand, DoorRowUpdate>;
 
 class ClientReplicaPipeline {
 public:

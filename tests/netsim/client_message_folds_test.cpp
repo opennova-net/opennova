@@ -7,7 +7,9 @@
 //   * S2C 0x4E kills a join-window kill-list page silently and walks the list
 //     with C2S 0x28 [orig: NapiNPClientMsg_HandleBatchKill @0x431870];
 //   * S2C 0x24 splits with the retail quote-aware tokenizer and SETFLASH1 arms
-//     the lightning timer [orig: NapiNPClientMsg_HandleTextCommand @0x429E70].
+//     the lightning timer [orig: NapiNPClientMsg_HandleTextCommand @0x429E70];
+//   * S2C 0x37 lands the host's door row state [orig:
+//     NapiNPClientMsg_HandleWeaponSlotAction @0x431250].
 #include <cstdio>
 #include <cstdint>
 #include <memory>
@@ -330,6 +332,54 @@ void test_text_command_setflash_and_tokenizer() {
 	CHECK(world->weather.core.lightning.timer_a == 9);
 }
 
+// A two-door building in pool 2 with its door records allocated.
+world::EntityHandle spawn_door(world::World &w) {
+	world::Entity e;
+	e.kind = world::EntityKind::Building;
+	e.item_type = 5;
+	e.item_id = 1998;
+	e.has_item_def = true;
+	e.door_count = 2;
+	e.door_first_bone = 1;
+	e.door_event = e.door_motion = true;
+	const world::EntityHandle h = w.registry.spawn(2, e);
+	w.doors.initialize(*w.registry.get(h), 529, 0);
+	return h;
+}
+
+// S2C 0x37: row (first + number - 1) takes the state; closed snaps phase 0,
+// open 65536, opening keeps its phase; number 0 and number past the count land
+// nowhere. [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250 — the gates
+//  @0x4312d4..0x4312f8, the store @0x431307, phases @0x431316 / @0x43131f]
+void test_door_row_update_lands_on_the_record() {
+	auto w = std::make_unique<world::World>();
+	w->registry.configure_pool(2, 8);
+	const world::EntityHandle h = spawn_door(*w);
+	const world::Entity &door = *w->registry.get(h);
+	inmatch::ClientRuntime runtime("LaneDDoors");
+	const auto deliver = [&](int16_t state, uint8_t number) {
+		DoorSlotAction action;
+		action.entity_handle = h.packed;
+		action.state = state;
+		action.number = number;
+		runtime.view().apply(s2c::DOOR_SLOT_ACTION, encode_door_slot_action(action));
+		runtime.apply_received_effects(*w);
+	};
+	deliver(2, 2); // the second row completes open
+	CHECK(w->doors.slot(door, 1) != nullptr && w->doors.slot(door, 1)->state == 2 &&
+			w->doors.slot(door, 1)->phase == 65536);
+	CHECK(w->doors.slot(door, 0)->state == 0);
+	deliver(1, 1); // the first row starts opening; its phase stays
+	CHECK(w->doors.slot(door, 0)->state == 1 && w->doors.slot(door, 0)->phase == 0);
+	deliver(2, 0); // a zero number (the command path's section 0) is dropped
+	deliver(2, 3); // past the door count
+	CHECK(w->doors.slot(door, 0)->state == 1 && w->doors.slot(door, 1)->state == 2);
+	deliver(0, 2); // closed snaps the phase back
+	CHECK(w->doors.slot(door, 1)->state == 0 && w->doors.slot(door, 1)->phase == 0);
+	deliver(-1, 1); // the state word is signed and stored raw
+	CHECK(w->doors.slot(door, 0)->state == -1);
+}
+
 } // namespace
 
 int main() {
@@ -339,6 +389,7 @@ int main() {
 	test_batch_kill_page_kills_silently();
 	test_batch_kill_walks_the_list();
 	test_text_command_setflash_and_tokenizer();
+	test_door_row_update_lands_on_the_record();
 	std::printf("client_message_folds: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

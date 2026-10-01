@@ -105,6 +105,29 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
     entity.class_think_ticks = 1920;
 }
 
+// A door row's state from the host. The row is the entity's first record plus
+// number - 1, gated on a def, a non-negative index, a non-zero number and
+// number <= the def's door count; the state is stored raw (sign-extended),
+// then a closed row's phase is 0 and an open row's 65536, while an opening or
+// closing row keeps its phase for the local tick to carry on. No authority
+// gate. Retail indexes the global record table; a row past this pool (never
+// allocated) is left alone.
+// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250 — the reads
+//  @0x431263..0x43128c, the def/index/number gates @0x4312d4..0x4312f8, the
+//  store @0x431307, phase 0 @0x43131f, phase 0x10000 @0x431316]
+void DoorSystem::apply_wire_row(const Entity &entity, int number, int32_t state) {
+    if (!entity.has_item_def || entity.door_slot < 0) return;
+    const int index = int(entity.door_slot) + number - 1;
+    if (index <= -1 || number == 0 || number > entity.door_count) return;
+    if (size_t(index) >= slots_.size()) return;
+    Slot &row = slots_[size_t(index)];
+    row.state = state;
+    if (state == 0)
+        row.phase = 0;
+    else if (state == 2)
+        row.phase = 65536;
+}
+
 // [orig: WacCmd_DoorOpen @0x4F70A0 -> @0x43F340]
 bool DoorSystem::group_open(const World &world, int32_t group) const {
     bool found = false;
