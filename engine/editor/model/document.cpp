@@ -104,8 +104,10 @@ void Document::walk_records(const Node &row, const RecordVisitor &visit) const {
 		for (size_t c = 0; c < held.size(); ++c) {
 			const Collection &collection = held[c];
 			for (size_t i = 0; i < collection.ids.size(); ++i) {
-				const NodeAddress record{row.id, collection.spec.kind, collection.ids[i]};
-				if (!visit(record, Placement{owner, collection.spec, i, c})) return false;
+				const NodeAddress record{row.id, collection.kind_at(i), collection.ids[i]};
+				CollectionSpec spec = collection.spec;
+				spec.kind = record.kind; // a list of several kinds places each record as the kind it is
+				if (!visit(record, Placement{owner, spec, i, c})) return false;
 				if (!descend(record)) return false;
 			}
 		}
@@ -405,9 +407,11 @@ NodeAddress Document::address_in(const std::vector<std::shared_ptr<const Node>> 
 		const std::string token = parts[i].substr(0, colon);
 		bool found = false;
 		for (const Collection &collection : collections(top, current)) {
-			if (locator_token(*this, collection.spec.kind) != token) continue;
 			if (position >= collection.ids.size()) continue;
-			current = {top.id, collection.spec.kind, collection.ids[position]};
+			// A step names its record's own kind (a list of several kinds: the one at the position).
+			const NodeKind kind = collection.kind_at(position);
+			if (locator_token(*this, kind) != token) continue;
+			current = {top.id, kind, collection.ids[position]};
 			found = true;
 			break;
 		}
@@ -771,7 +775,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		};
 		auto find_collection = [&](const NodeAddress &owner, NodeKind kind, Collection &out) {
 			for (const Collection &collection : collections(*updated, owner))
-				if (collection.spec.kind == kind) {
+				if (collection.spec.holds(kind)) {
 					out = collection;
 					return true;
 				}
@@ -1094,7 +1098,9 @@ bool Document::holds(const std::shared_ptr<const Node> &row, const NodeAddress &
 	return found != index.records.end() && found->second.at.spec.kind == address.kind;
 }
 
-const FieldSchema *Document::field_schema(NodeKind kind, const std::string &id) const {
+const FieldSchema *Document::field_schema(NodeKind kind, const std::string &id) const { return find_field(kind, id); }
+
+const FieldSchema *Document::find_field(NodeKind kind, const std::string &id) const {
 	for (const FieldSchema &field : fields(kind))
 		if (field.id == id) return &field;
 	return nullptr;
@@ -1168,7 +1174,8 @@ Document::RecordChange Document::compare_record(const NodeAddress &address,
 	const std::vector<Collection> after = collections(*now, owner), before = collections(*saved, owner);
 	if (after.size() != before.size()) return RecordChange::Changed;
 	for (size_t i = 0; i < after.size(); ++i)
-		if (after[i].spec.kind != before[i].spec.kind || after[i].ids != before[i].ids) return RecordChange::Changed;
+		if (after[i].spec.kind != before[i].spec.kind || after[i].ids != before[i].ids || after[i].kinds != before[i].kinds)
+			return RecordChange::Changed;
 	return RecordChange::Unchanged;
 }
 

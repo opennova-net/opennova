@@ -314,6 +314,20 @@ constexpr ReferenceKindRow kRows[] = {
 	        .scoped(true)
 	        .tolerated(user_point_missing)
 	        .row,
+	// A powerup row by name, the first row of the name [orig: PowerUpDef_FindByName @0x442660, stricmp
+	// over the rows in order]; an item whose powerupdef names none is destroyed as the mission starts
+	// [orig: PowerupEntity_InitFromDef @0x442D10, Entity_Destroy @0x442E26].
+	Row(ReferenceKind::Powerup, "powerup", "the powerup", "powerup")
+	        .symbol(NameCase::NoCase, AssetKind::PowerupDefs)
+	        .row,
+	// A waypoint path's stop names a marker of its mission by its index in the markers, which the
+	// runtime reads unbounded: past them it reads the pool's zeroed entry [orig: Pool_GetEntryUnchecked
+	// @0x441FC0, Pool_Clear @0x442060].
+	Row(ReferenceKind::MissionMarker, "mission_marker", "the marker", "marker").record("marker").row,
+	// An event's run of triggers (of actions) starts at the record of its mission's table at that index,
+	// which the loader fixes up into a pointer [orig: EventTrigger_LoadAllData @0x453eb0].
+	Row(ReferenceKind::MissionTrigger, "mission_trigger", "the trigger", "trigger").record("trigger").row,
+	Row(ReferenceKind::MissionAction, "mission_action", "the action", "action").record("action").row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

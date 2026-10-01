@@ -151,45 +151,61 @@ int pick_model_overlay(const std::vector<ModelOverlay> &overlays, const OrbitCam
 	return best;
 }
 
+namespace {
+
+// The identity of the record at `index` of a list of identities (0 past its end).
+NodeId identity_at(const std::vector<RecordIds> &ids, int index) {
+	return index >= 0 && size_t(index) < ids.size() ? ids[size_t(index)].id : 0;
+}
+
+// The place of an identity in a list of identities (-1 when it is not there).
+int place_of(const std::vector<RecordIds> &ids, NodeId id) {
+	for (size_t i = 0; i < ids.size(); ++i)
+		if (ids[i].id == id) return int(i);
+	return -1;
+}
+
+} // namespace
+
 NodeAddress model_overlay_record(const ModelDocument &document, const ModelOverlay &overlay, int lod) {
 	const ModelRow *row = document.model_row();
 	if (!row) return NodeAddress();
-	const auto at = [&](size_t collection, NodeKind kind) {
-		const std::vector<NodeId> &ids = row->collections[collection];
-		return overlay.index >= 0 && size_t(overlay.index) < ids.size() ? NodeAddress{row->id, kind, ids[size_t(overlay.index)]}
-		                                                                  : NodeAddress();
+	const auto at = [&](size_t list, NodeKind kind) {
+		const NodeId id = list < row->ids.lists.size() ? identity_at(row->ids.lists[list], overlay.index) : 0;
+		return id ? NodeAddress{row->id, kind, id} : NodeAddress();
 	};
 	switch (overlay.kind) {
-	case ModelOverlayKind::UserPoint: return at(3, node_kind(ModelKind::UserPoint));
-	case ModelOverlayKind::Light: return at(2, node_kind(ModelKind::Light));
-	case ModelOverlayKind::Pivot:
-		if (lod >= 0 && size_t(lod) < row->lods.size() && overlay.index >= 0 &&
-		    size_t(overlay.index) < row->lods[size_t(lod)].panm_ids.size())
-			return NodeAddress{row->id, node_kind(ModelKind::PartAnimation), row->lods[size_t(lod)].panm_ids[size_t(overlay.index)]};
-		return NodeAddress();
+	case ModelOverlayKind::UserPoint: return at(kModelUserPoints, node_kind(ModelKind::UserPoint));
+	case ModelOverlayKind::Light: return at(kModelLights, node_kind(ModelKind::Light));
+	case ModelOverlayKind::Pivot: {
+		// A LOD's one list is its part animations.
+		if (lod < 0 || row->ids.lists.size() <= kModelLods || size_t(lod) >= row->ids.lists[kModelLods].size())
+			return NodeAddress();
+		const NodeId id = identity_at(row->ids.lists[kModelLods][size_t(lod)].lists[kModelOwnList], overlay.index);
+		return id ? NodeAddress{row->id, node_kind(ModelKind::PartAnimation), id} : NodeAddress();
+	}
 	}
 	return NodeAddress();
 }
 
 bool model_overlay_of(const ModelDocument &document, const NodeAddress &record, ModelOverlayKind &kind, int &index) {
 	const ModelRow *row = document.model_row();
-	if (!row || record.row != row->id || !record.child) return false;
-	const auto find = [&](size_t collection, ModelOverlayKind as) {
-		const std::vector<NodeId> &ids = row->collections[collection];
-		const auto found = std::find(ids.begin(), ids.end(), record.child);
-		if (found == ids.end()) return false;
+	if (!row || record.row != row->id || !record.child || row->ids.lists.size() <= kModelFrames) return false;
+	const auto find = [&](size_t list, ModelOverlayKind as) {
+		const int found = place_of(row->ids.lists[list], record.child);
+		if (found < 0) return false;
 		kind = as;
-		index = int(found - ids.begin());
+		index = found;
 		return true;
 	};
-	if (record.kind == node_kind(ModelKind::UserPoint)) return find(3, ModelOverlayKind::UserPoint);
-	if (record.kind == node_kind(ModelKind::Light)) return find(2, ModelOverlayKind::Light);
+	if (record.kind == node_kind(ModelKind::UserPoint)) return find(kModelUserPoints, ModelOverlayKind::UserPoint);
+	if (record.kind == node_kind(ModelKind::Light)) return find(kModelLights, ModelOverlayKind::Light);
 	if (record.kind == node_kind(ModelKind::PartAnimation)) {
-		for (const ModelLod &level : row->lods) {
-			const auto found = std::find(level.panm_ids.begin(), level.panm_ids.end(), record.child);
-			if (found == level.panm_ids.end()) continue;
+		for (const RecordIds &level : row->ids.lists[kModelLods]) {
+			const int found = place_of(level.lists[kModelOwnList], record.child);
+			if (found < 0) continue;
 			kind = ModelOverlayKind::Pivot;
-			index = int(found - level.panm_ids.begin());
+			index = found;
 			return true;
 		}
 	}

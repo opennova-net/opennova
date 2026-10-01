@@ -554,11 +554,12 @@ std::string strip_hotkey_marker(const std::string &text,
 struct WriteIssue {
   std::string screen;   // the screen's name
   std::string window;   // the nearest window's name ("" for the screen itself)
-  // The record that holds the value, by the property table's list paths
-  // (formats/mnu/mnu_schema.h): the screen's index, then each list's path and index,
-  // "0/window:0/window:2/action:1".
+  // The record that holds the value, by its lists' element paths (the element names
+  // down from the owner, lowercase, joined by '.'; the editor's menu table,
+  // editor/documents/mnu_table, names each list and field so): the screen's index,
+  // then each list's path and index, "0/window:0/window:2/action:1".
   std::string locator;
-  std::string field;    // the property table's field path on that record ("" = the record itself)
+  std::string field;    // the field's element path on that record ("" = the record itself)
   std::string message;
 };
 

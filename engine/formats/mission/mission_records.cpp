@@ -6,6 +6,8 @@
 #include "mission_detail.h"
 #include "mission_names.h"
 
+#include <formats/mission/mission_field.h>
+
 #include <algorithm>
 #include <cstring>
 #include <string>
@@ -104,22 +106,14 @@ MissionActionRecord to_action_record(const bms::Action &action, size_t index) {
 }
 
 
-// reset_after / delay are stored in the upper 10 bits of their u32 slot (see write_event), so the
-// representable value range is 0..1023.
-constexpr int kMaxEventDelayTicks = 1023;
-
-
+// The event's three authored fields through their rows (mission_field.cpp: the internal flag bits the
+// event holds kept, reset_after and delay clamped to the ten bits they are packed in, so an
+// out-of-range value cannot wrap on serialize); the runtime latch and the pad written zero.
 void apply_event_record(bms::Event &event, const MissionEventRecord &record) {
-	const uint32_t preserved_internal = static_cast<uint32_t>(event.flags) & bms::kEventInternalFlagMask;
-	const uint32_t requested_known = static_cast<uint32_t>(record.flags) & bms::kEventKnownFlagMask;
-	event.flags = static_cast<bms::EventFlags>(preserved_internal | requested_known);
-	// reset_after / delay occupy only the upper 10 bits on disk (write_event packs them << 22, parse
-	// reads >> 22), so the value range is 0..1023. Clamp here at the library boundary the way the other
-	// apply_* setters bound their fields: an out-of-range value would otherwise wrap on serialize
-	// (e.g. 2000 -> (uint32)2000 << 22 truncates, reparses as 976) with no error. The editor SpinBox
-	// already caps at 1023, but a direct caller of set_event/add_event does not.
-	event.reset_after = std::clamp(record.reset_after, 0, kMaxEventDelayTicks);
-	event.delay = std::clamp(record.delay, 0, kMaxEventDelayTicks);
+	std::string unused;
+	find_mission_field(MissionRecord::Event, "flags")->set(&event, int64_t(record.flags), unused);
+	find_mission_field(MissionRecord::Event, "reset_after")->set(&event, int64_t(record.reset_after), unused);
+	find_mission_field(MissionRecord::Event, "delay")->set(&event, int64_t(record.delay), unused);
 	event.unknown5 = 0;
 	event.unknown6 = 0;
 }

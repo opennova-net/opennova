@@ -36,9 +36,9 @@ static int history_and_save() {
 	TEST_EXPECT(document.dirty());
 	document.undo();
 	TEST_EXPECT(!document.dirty());
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 10);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 10);
 	document.redo();
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 25);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 25);
 	TEST_EXPECT(document.save(error));
 	TEST_EXPECT(!document.dirty());
 	document.undo(); TEST_EXPECT(document.dirty());
@@ -73,7 +73,7 @@ static int history_and_save() {
 
 	DefCatalogDocument reloaded;
 	TEST_EXPECT(reloaded.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(reloaded, 0).data).hp == 99);
+	TEST_EXPECT(row_at(reloaded, 0).native.as<DefItemDef>().hp == 99);
 	TEST_EXPECT(reloaded.apply(field(row, "hp", int64_t(7)), error));
 	std::filesystem::create_directory(dir.file("items.def.tmp"));
 	TEST_EXPECT(!reloaded.save(error) && error.code() == "document.write" && reloaded.dirty());
@@ -89,8 +89,8 @@ static int two_new_items() {
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	Edit add; add.operation = EditOperation::Add; add.address = {0, node_kind(DefRecordKind::Item), 0};
 	TEST_EXPECT(document.apply(std::vector<Edit>{add, add}, error) && document.rows().size() == 3);
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 1).data).id == 100000 &&
-	            std::get<DefItemDef>(row_at(document, 2).data).id == 100002);
+	TEST_EXPECT(row_at(document, 1).native.as<DefItemDef>().id == 100000 &&
+	            row_at(document, 2).native.as<DefItemDef>().id == 100002);
 	document.undo(); TEST_EXPECT(document.rows().size() == 1 && !document.dirty());
 	return 0;
 }
@@ -122,7 +122,7 @@ static int collections() {
 	TEST_EXPECT(document.apply(field(action, "ctrl_increment", int64_t(1)), error));
 	TEST_EXPECT(document.apply(field(action, "duplicate_sound_delay", int64_t(3)), error));
 	TEST_EXPECT(document.apply(field({parent, node_kind(DefRecordKind::Weapon), 0}, "weaponweight", 1.25), error));
-	TEST_EXPECT(std::get<DefWeaponDef>(row_at(document, 0).data).weaponweight_fp16 == 81920);
+	TEST_EXPECT(row_at(document, 0).native.as<DefWeaponDef>().weaponweight_fp16 == 81920);
     TEST_EXPECT(!document.apply(field(action, "function_args_count", int64_t(5)), error));
     TEST_EXPECT(document.apply(field(action, "function_args_count", int64_t(1)), error));
     TEST_EXPECT(static_cast<const DefWeaponAction *>(document.record(action))->function_args[1] == 0);
@@ -219,7 +219,7 @@ static int ignored_input() {
 	TEST_EXPECT(saved.find("nodie") != std::string::npos && saved.find("hp 20") != std::string::npos);
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.ignored_lines() == 0 && document.issues().empty());
-	TEST_EXPECT((std::get<DefItemDef>(row_at(document, 0).data).attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
+	TEST_EXPECT((row_at(document, 0).native.as<DefItemDef>().attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
 	return 0;
 }
 // A later action block of a name replaces the earlier one wholesale, as the game
@@ -257,7 +257,7 @@ static int go_to_record() {
 	session.handle(request::open_document("items.def"));
 	auto *items = session.document_for("items.def"); TEST_EXPECT(items && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
-	const int id = std::get<DefItemDef>(row_at(*items, 0).data).id;
+	const int id = row_at(*items, 0).native.as<DefItemDef>().id;
 	session.handle(request::close_document(items->path()));
 	const GraphSymbol *item =
 			view.findings.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
@@ -305,9 +305,9 @@ static int changes_since_save() {
 	const std::vector<Edit> back = document.revert_edits(row, "hp");
 	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Set && std::get<int64_t>(back[0].value) == 10);
 	TEST_EXPECT(document.apply(back, error) && !document.field_changed(row, "hp"));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 10 && document.record_change(row) == Document::RecordChange::Unchanged);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 10 && document.record_change(row) == Document::RecordChange::Unchanged);
 	document.undo();
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 20 && document.field_changed(row, "hp"));
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 20 && document.field_changed(row, "hp"));
 	Edit spawn; spawn.operation = EditOperation::SetFileValue; spawn.position = 0; spawn.value = int64_t(9);
 	TEST_EXPECT(!document.file_state_changed() && document.apply(spawn, error) && document.file_state_changed());
 	spawn.value = int64_t(8);
@@ -347,7 +347,7 @@ static int written_units() {
 	const FieldSchema transfer = schema(items, buggy, "light_transfer");
 	TEST_EXPECT(transfer.ranged && transfer.min == 0.0 && transfer.max == 100.0 && transfer.unit == "%");
 	TEST_EXPECT(items.apply(field(buggy, "player_speed", int64_t(45)), error));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(items, 0).data).player_speed == 45 * 293);
+	TEST_EXPECT(row_at(items, 0).native.as<DefItemDef>().player_speed == 45 * 293);
 	TEST_EXPECT(items.serialize().text.find("\tplayer_speed 45\r\n") != std::string::npos);
 	// A Set of the number the line writes already is no edit (S12 Z2): no step.
 	const uint64_t at_45 = items.revision();
@@ -505,8 +505,49 @@ static int witnessed_enums() {
 	return 0;
 }
 
+// A powerup row's weapon (S13 D10): `weapon all` and `weapon <name>` fill one word of the row, the later
+// line's kept [orig: PowerUpDef_ParseProperty @0x4431A7..0x443216], so every weapon clears the name and
+// a name clears every weapon; a weapon named all, in any case, would be read back as every weapon:
+// refused. A row of a name an earlier row has is one no item binds.
+static int powerup_weapon() {
+	editor_test::TempProjectDir dir("opennova_catalog_powerup_test");
+	TEST_EXPECT(editor_test::write_text(dir.file("powerup.def"),
+	                                    "powerup \"PU_GUN\"\r\nweapon WPN_A\r\nend\r\n"
+	                                    "powerup \"PU_TWICE\"\r\nweapon WPN_A\r\nweapon all\r\nend\r\n"));
+	DefCatalogDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("powerup.def"), "powerup.def", AssetKind::PowerupDefs, "jo", error));
+	const NodeAddress gun{document.rows()[0]->id, node_kind(DefRecordKind::Powerup), 0};
+	const NodeAddress twice{document.rows()[1]->id, node_kind(DefRecordKind::Powerup), 0};
+	Value value;
+	// The parse keeps the later line: `weapon all` after a name leaves no name behind it.
+	TEST_EXPECT(document.get(twice, "weapon", value) && std::get<std::string>(value).empty() &&
+	            document.get(twice, "weapon_all", value) && std::get<int64_t>(value) == 1);
+	TEST_EXPECT(document.apply(field(gun, "weapon_all", int64_t(1)), error));
+	TEST_EXPECT(document.get(gun, "weapon", value) && std::get<std::string>(value).empty());
+	TEST_EXPECT(document.serialize().text.find("WPN_A") == std::string::npos);
+	TEST_EXPECT(document.apply(field(gun, "weapon", std::string("WPN_B")), error));
+	TEST_EXPECT(document.get(gun, "weapon_all", value) && std::get<int64_t>(value) == 0);
+	const std::string text = document.serialize().text;
+	TEST_EXPECT(text.find("weapon WPN_B") != std::string::npos && text.find("PU_GUN\"\r\n\tweapon all") == std::string::npos);
+	for (const char *all : {"all", "ALL", "All"}) {
+		TEST_EXPECT(!document.apply(field(gun, "weapon", std::string(all)), error) &&
+		            error.message.find("every weapon") != std::string::npos);
+	}
+	TEST_EXPECT(document.get(gun, "weapon", value) && std::get<std::string>(value) == "WPN_B");
+	// A second row of a name: the lookup by the name finds the first [orig: PowerUpDef_FindByName
+	// @0x442660], so no item binds it.
+	TEST_EXPECT(document.apply(field(twice, "name", std::string("pu_gun")), error));
+	size_t repeated = 0;
+	for (const Diagnostic &d : validate_catalog_file(document))
+		repeated += d.code() == "catalog.name_duplicate" && d.message.find("no item binds this one") != std::string::npos &&
+		            d.row_id == twice.row;
+	TEST_EXPECT(repeated == 1);
+	return 0;
+}
+
 int main() {
 	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
-	       witnessed_enums();
+	       witnessed_enums() || powerup_weapon();
 }

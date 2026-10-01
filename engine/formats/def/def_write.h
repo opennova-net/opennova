@@ -14,5 +14,8 @@ struct DefWriteResult {
 DefWriteResult def_write_items(const DefItemsFile &file);
 DefWriteResult def_write_weapons(const DefWeaponsFile &file);
 DefWriteResult def_write_ammo(const DefAmmoFile &file);
+// powerup.def: each row's `powerup "<name>"` block, its lines, its ammo rows and its written action
+// blocks, read back through the family's parser and compared as the others are.
+DefWriteResult def_write_powerup(const DefPowerupFile &file);
 
 } // namespace opennova::def

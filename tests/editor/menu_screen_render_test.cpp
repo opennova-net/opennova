@@ -40,7 +40,6 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
-#include <formats/mnu/mnu_schema.h>
 #include <runtime/menu/menu_screen_inputs.h>
 
 #include "common/file_io.h"
@@ -68,12 +67,7 @@ void edit(ProjectSession &session, const Document &document, const NodeAddress &
 	editor_test::handle_to_end(session, request);
 }
 
-size_t list_index(const char *path) {
-	const std::vector<opennova::mnu::SchemaList> &lists = opennova::mnu::schema_lists(opennova::mnu::SchemaShape::Window);
-	for (size_t i = 0; i < lists.size(); ++i)
-		if (std::string(lists[i].path) == path) return i;
-	return SIZE_MAX;
-}
+size_t list_index(const char *path) { return opennova::editor::menu_window_list(path); }
 
 std::vector<const Diagnostic *> render_findings(const SessionView &view, const std::string &code = std::string()) {
 	std::vector<const Diagnostic *> out;

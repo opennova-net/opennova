@@ -14,6 +14,8 @@
 namespace opennova::def {
 namespace {
 
+thread_local DefAuthoredParses g_parses;
+
 // The authored number's type of the member at `index` of `property`, by its encoding.
 DefAuthored authored_type(DefRecordKind kind, const DefProperty &property, size_t index) {
 	const DefField *field = def_field(kind, property.fields[index]);
@@ -44,10 +46,10 @@ size_t argument_of(const DefProperty &property, size_t index, const std::vector<
 	}
 }
 
-bool member_values(DefRecordKind kind, const DefProperty &property, const void *record, std::vector<DefValue> &out) {
+// The line's members as the record holds them, by the member's line (DefMember::line).
+bool member_values(const DefMember &member, const void *record, std::vector<DefValue> &out) {
 	out.clear();
-	for (const std::string &id : property.fields) {
-		const DefField *field = def_field(kind, id);
+	for (const DefField *field : member.line) {
 		if (!field) return false;
 		out.push_back(def_get(record, *field));
 	}
@@ -115,6 +117,7 @@ bool read_back(DefRecordKind kind, const void *record, const DefProperty *replac
                const std::vector<std::string> &args, std::vector<uint64_t> &out) {
 	const char *header = record_header(kind);
 	if (!header) return false;
+	++g_parses.records;
 	DefRecordWriter writer;
 	writer.replaced = replaced;
 	writer.replaced_key = key;
@@ -132,6 +135,7 @@ bool line_keeps(DefRecordKind kind, const void *record, const DefField &field, c
                 const std::vector<std::string> &args) {
 	const char *header = record_header(kind);
 	if (!header) return false;
+	++g_parses.lines;
 	DefRecordWriter writer;
 	writer.result.text = header;
 	writer.line(key, args);
@@ -148,6 +152,8 @@ std::string shortest(double number) {
 
 } // namespace
 
+DefAuthoredParses def_authored_parses() { return g_parses; }
+
 const DefProperty *def_member_property(DefRecordKind kind, const std::string &id, size_t *index) {
 	for (const DefProperty &property : def_properties(kind))
 		for (size_t i = 0; i < property.fields.size(); ++i)
@@ -158,36 +164,40 @@ const DefProperty *def_member_property(DefRecordKind kind, const std::string &id
 	return nullptr;
 }
 
-DefAuthored def_authored(DefRecordKind kind, const std::string &id) {
-	size_t index = 0;
-	const DefProperty *property = def_member_property(kind, id, &index);
-	return property ? authored_type(kind, *property, index) : DefAuthored::None;
+DefMember def_member(DefRecordKind kind, const std::string &id) {
+	DefMember out;
+	out.kind = kind;
+	out.field = def_field(kind, id);
+	if (!out.field) return out;
+	out.property = def_member_property(kind, id, &out.index);
+	if (!out.property) return out;
+	for (const std::string &member : out.property->fields) out.line.push_back(def_field(kind, member));
+	out.authored = authored_type(kind, *out.property, out.index);
+	if (!out.property->present_field.empty()) out.present = def_field(kind, out.property->present_field);
+	return out;
 }
 
-bool def_authored_get(DefRecordKind kind, const void *record, const std::string &id, DefValue &out) {
-	size_t index = 0;
-	const DefProperty *property = def_member_property(kind, id, &index);
-	const DefAuthored type = property ? authored_type(kind, *property, index) : DefAuthored::None;
+bool def_authored_get(const DefMember &member, const void *record, DefValue &out) {
 	std::vector<DefValue> values;
-	if (type == DefAuthored::None || !member_values(kind, *property, record, values)) return false;
+	if (member.authored == DefAuthored::None || !member.property || !member_values(member, record, values))
+		return false;
 	// The line's numbers as the writer puts them down, whether it writes the line or not (a
 	// failure, such as a nameless timing outside region 0, still puts its numbers down).
 	DefRecordWriter writer;
 	std::string key;
 	std::vector<std::string> args;
-	writer.property_args(kind, *property, record, values, "", key, args);
-	const size_t at = argument_of(*property, index, values);
-	return at < args.size() && parse_number(args[at], type, out) &&
-	       line_keeps(kind, record, *def_field(kind, id), key, args);
+	writer.property_args(member.kind, *member.property, record, values, "", key, args);
+	const size_t at = argument_of(*member.property, member.index, values);
+	return at < args.size() && parse_number(args[at], member.authored, out) &&
+	       line_keeps(member.kind, record, *member.field, key, args);
 }
 
-bool def_authored_set(DefRecordKind kind, void *record, const std::string &id, const DefValue &value,
-                      std::string &error) {
-	size_t index = 0;
-	const DefProperty *property = def_member_property(kind, id, &index);
-	const DefAuthored type = property ? authored_type(kind, *property, index) : DefAuthored::None;
+bool def_authored_set(const DefMember &member, void *record, const DefValue &value, std::string &error) {
+	const DefRecordKind kind = member.kind;
+	const DefProperty *property = member.property;
+	const DefAuthored type = member.authored;
 	std::vector<DefValue> values;
-	if (type == DefAuthored::None || !member_values(kind, *property, record, values)) {
+	if (type == DefAuthored::None || !property || !member_values(member, record, values)) {
 		error = "This field is not a number of its own on its line.";
 		return false;
 	}
@@ -220,12 +230,12 @@ bool def_authored_set(DefRecordKind kind, void *record, const std::string &id, c
 		text = shortest(number);
 	}
 	DefValue current, wanted;
-	if (def_authored_get(kind, record, id, current)) {
+	if (def_authored_get(member, record, current)) {
 		if (parse_number(text, type, wanted) && current == wanted) return true; // the number the member already writes
 	} else {
 		// A member its line cannot write in the file's units shows as stored: a Set of that
 		// stored number changes nothing either.
-		const DefValue stored = def_get(record, *def_field(kind, id));
+		const DefValue stored = def_get(record, *member.field);
 		const auto *whole = std::get_if<int64_t>(&stored);
 		const auto *real = std::get_if<double>(&stored);
 		const double number = std::holds_alternative<double>(value) ? std::get<double>(value)
@@ -237,7 +247,7 @@ bool def_authored_set(DefRecordKind kind, void *record, const std::string &id, c
 	std::string key;
 	std::vector<std::string> args;
 	writer.property_args(kind, *property, record, values, "", key, args);
-	const size_t at = argument_of(*property, index, values);
+	const size_t at = argument_of(*property, member.index, values);
 	if (!writer.result.ok() || at >= args.size()) {
 		// A line the file has no form for (a timing with no flag name outside region 0).
 		error = writer.result.ok() ? "This line has no place for the number." : writer.result.diagnostics.front().message;
@@ -253,33 +263,27 @@ bool def_authored_set(DefRecordKind kind, void *record, const std::string &id, c
 	// the writer writes them back as they are.
 	std::vector<uint64_t> trial((def_record_size(kind) + 7) / 8);
 	std::memcpy(trial.data(), record, def_record_size(kind));
-	for (const std::string &member : property->fields) {
-		const DefField &field = *def_field(kind, member);
-		std::memcpy(reinterpret_cast<uint8_t *>(trial.data()) + field.offset,
-		            reinterpret_cast<const uint8_t *>(parsed.data()) + field.offset, field.width);
-	}
+	for (const DefField *field : member.line)
+		std::memcpy(reinterpret_cast<uint8_t *>(trial.data()) + field->offset,
+		            reinterpret_cast<const uint8_t *>(parsed.data()) + field->offset, field->width);
 	// A text of the line read otherwise (a name the tokenizer drops, so the number is read as
 	// the name) is a line the file cannot hold: the numbers alone may move, as the parser moves
 	// them (an unset fade read as 10 ticks [orig: AmmoDef_ParseProperty @ 0x40b005]).
 	bool kept = true;
-	for (size_t i = 0; i < property->fields.size(); ++i)
+	for (size_t i = 0; i < member.line.size(); ++i)
 		if (std::holds_alternative<std::string>(values[i]))
-			kept = kept && def_get(trial.data(), *def_field(kind, property->fields[i])) == values[i];
+			kept = kept && def_get(trial.data(), *member.line[i]) == values[i];
 	std::vector<uint64_t> again;
 	kept = kept && read_back(kind, trial.data(), nullptr, std::string(), {}, again);
-	for (const std::string &member : property->fields) {
-		const DefField &field = *def_field(kind, member);
-		kept = kept && def_get(trial.data(), field) == def_get(again.data(), field);
-	}
+	for (const DefField *field : member.line)
+		kept = kept && def_get(trial.data(), *field) == def_get(again.data(), *field);
 	if (!kept) {
 		error = "The file cannot write this number back as the game reads it.";
 		return false;
 	}
-	for (const std::string &member : property->fields) {
-		const DefField &field = *def_field(kind, member);
-		std::memcpy(static_cast<uint8_t *>(record) + field.offset,
-		            reinterpret_cast<const uint8_t *>(trial.data()) + field.offset, field.width);
-	}
+	for (const DefField *field : member.line)
+		std::memcpy(static_cast<uint8_t *>(record) + field->offset,
+		            reinterpret_cast<const uint8_t *>(trial.data()) + field->offset, field->width);
 	return true;
 }
 
