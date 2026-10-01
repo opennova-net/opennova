@@ -31,6 +31,8 @@ void sync_counts(bms::File &file);
 MissionInfo mission_info(const bms::File &file);
 
 // --- the header ---------------------------------------------------------------
+// By the key of one of the header's field rows (formats/mission/mission_field.h),
+// of the setter's type; any other key is refused by name.
 bool set_header_string(bms::File &file, const std::string &field, const std::string &value, std::string &error);
 bool set_header_int(bms::File &file, const std::string &field, int value, std::string &error);
 void set_header_flag(bms::File &file, int bit, bool on); // one attrib_flags bit
@@ -47,11 +49,13 @@ EntityTransform entity_transform(const bms::Entity &entity);
 // The fixed 8-byte AI class / AI script slots as strings.
 std::string entity_name1(const bms::Entity &entity);
 std::string entity_name2(const bms::Entity &entity);
-// The editable int properties by editor key (the kEntityIntFields table in
-// bms_edit.cpp: group, waypoint_id, wp_number, team, ai_flags, perception,
-// accuracy, alert_state, min/max_engagement_distance, max_attack_distance,
-// spawn_count, max_simultaneous, no_less_than, map_symbol); the uint8-backed
-// fields clamp, ai_flags rejects bits outside the known attribute mask.
+// The editable int properties by editor key (the entity's field rows,
+// formats/mission/mission_field.cpp: group, waypoint_id, wp_number, team,
+// lfp_group, ai_flags, perception, accuracy, alert_state,
+// min/max_engagement_distance, max_attack_distance, spawn_count,
+// max_simultaneous, no_less_than, map_symbol, and the eulers pitch, yaw and
+// roll); the uint8-backed fields clamp, ai_flags rejects bits outside the
+// known attribute mask.
 bool set_entity_property_int(bms::File &file, EntityKind kind, size_t index,
 		const std::string &name, int value, std::string &error);
 // name1 / name2: the fixed 8-byte slots (copied at full width).
