@@ -167,6 +167,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::KILL_BY_SLOT: // one join-window kill-list page (0x4E)
+		apply_batch_kill(body);
+		break;
 	case s2c::TEAM_CHANGE_CONFIRM: // one team-change list entry (0x51)
 		apply_team_change_confirm(body);
 		break;

@@ -185,7 +185,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             world::Entity *victim = world.registry.get(handle);
             if (!victim) continue;
             if (death->item_state) {
-                world::apply_item_state_event(world, *victim, death->hit_section);
+                world::apply_item_state_event(world, *victim, death->hit_section,
+                        death->kill_flags);
             } else {
                 victim->health = 0;
                 victim->alive = false;

@@ -40,6 +40,10 @@ struct EntityDeathEvent {
     int16_t death_anim_state_id = 0;
     int16_t hit_section = 0;
     bool item_state = false;
+    // Entity_KillBySlotId's flags, the class callback's third argument: 0 for
+    // the 0x26 kill, 1 (the silent death) for the 0x4E join-window kill
+    // [orig: @0x42EC78 (0x26) / @0x4318b5 (0x4E)].
+    int32_t kill_flags = 0;
 };
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
@@ -421,7 +425,12 @@ private:
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
-	void apply_entity_death(uint16_t handle_packed, int16_t value, bool item_state = false);
+	void apply_entity_death(uint16_t handle_packed, int16_t value, bool item_state = false,
+			int32_t kill_flags = 0);
+	// S2C 0x4E: one page of the host's join-window kill list (the C2S 0x28
+	// continuation is the connection's).
+	// [orig: NapiNPClientMsg_HandleBatchKill @0x431870]
+	void apply_batch_kill(const std::vector<uint8_t> &body);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	// The death-screen folds live together in client_replica_death.cpp;

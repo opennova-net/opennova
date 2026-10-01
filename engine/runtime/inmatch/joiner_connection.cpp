@@ -309,6 +309,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	session_ack_pending_ = false;
 	pending_spawn_menu_request_ = false;
 	spawn_ack_timestamp_ = 0;
+	game_start_ack_timestamp_ = 0;
 	rtt_ring_.fill(0);
 	rtt_ring_index_ = 0;
 	rtt_current_ms_ = 0;

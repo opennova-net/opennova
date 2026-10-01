@@ -3,10 +3,13 @@
 //   * S2C 0x50 rebinds a player's identity pair (NetId + animSlot), the avatar
 //     the presentation keys on [orig: NapiNPClientMsg_TeamAssign @0x431910];
 //   * S2C 0x51 folds one team-change list entry and walks the list with C2S
-//     0x29 {index + 1} [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0].
+//     0x29 {index + 1} [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0];
+//   * S2C 0x4E kills a join-window kill-list page silently and walks the list
+//     with C2S 0x28 [orig: NapiNPClientMsg_HandleBatchKill @0x431870].
 #include <cstdio>
 #include <cstdint>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <net/npwire/entity_class.h>
@@ -185,12 +188,107 @@ void test_team_change_confirm_walks_the_list() {
 	CHECK(acks.empty());
 }
 
+// Collect the joiner's C2S messages of one tag after one framed S2C delivery.
+struct FramedJoiner {
+	const std::string client_scrk = "CLIENT-LANE-D-SCRK";
+	const std::string server_scrk = "SERVER-LANE-D-SCRK";
+	inmatch::ClientRuntime client{"LaneDRuntime"};
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	uint32_t frame = 1;
+	FramedJoiner() {
+		client.seed_session(0x4E280001u, 1u, client_scrk, server_scrk,
+				1, 0, 0x0002, world::kPlayerInfantryTypeId);
+	}
+	std::vector<std::vector<uint8_t>> deliver(const std::vector<ProtocolMessage> &messages,
+			uint8_t tag) {
+		std::vector<uint8_t> body;
+		std::vector<std::vector<uint8_t>> out;
+		if (!frame_session_packet(server_tx, SessionCrypto{server_scrk, {}, 1u}, messages, body))
+			return out;
+		const std::vector<uint8_t> datagram =
+				nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+		client.receive(datagram.data(), datagram.size());
+		for (const std::vector<uint8_t> &sent : client.Client_ProcessNetworkFrame(frame++)) {
+			uint8_t opcode = 0;
+			std::vector<uint8_t> plain;
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> c2s_messages;
+			if (!nw_decode_inbound(sent.data(), sent.size(), opcode, plain) ||
+					opcode != SESSION_OPCODE_PROTOCOL_MESSAGE ||
+					!decode_protocol_packet_plaintext(
+							plain.data(), plain.size(), client_scrk, header, c2s_messages))
+				continue;
+			for (const ProtocolMessage &m : c2s_messages)
+				if (m.tag == tag) out.push_back(m.payload);
+		}
+		return out;
+	}
+};
+
+std::vector<uint8_t> le32(uint32_t v) {
+	return {uint8_t(v), uint8_t(v >> 8), uint8_t(v >> 16), uint8_t(v >> 24)};
+}
+
+// S2C 0x4E: every complete word after the leading resume word dies through the
+// 0x26 route's kill with flags 1 (the silent death); a trailing odd byte is
+// never read and a bare page kills nothing.
+// [orig: NapiNPClientMsg_HandleBatchKill @0x431870 — @0x43188a, @0x431893,
+//  Entity_KillBySlotId(slot, 0, 1) @0x4318b5]
+void test_batch_kill_page_kills_silently() {
+	ClientReplicaPipeline view;
+	BatchKillBatch page;
+	page.count = 0x1007;
+	page.slots = {0x1003, 0x2005};
+	std::vector<uint8_t> wire = encode_batch_kill(page);
+	wire.push_back(0x09); // a stray odd byte
+	view.apply(s2c::KILL_BY_SLOT, wire);
+	std::vector<EntityDeathEvent> deaths;
+	for (const ClientEffectCommand &c : view.drain_effect_commands())
+		if (const auto *d = std::get_if<EntityDeathEvent>(&c)) deaths.push_back(*d);
+	CHECK(deaths.size() == 2);
+	if (deaths.size() == 2) {
+		CHECK(deaths[0].entity_handle == 0x1003 && deaths[1].entity_handle == 0x2005);
+		CHECK(deaths[0].item_state && deaths[0].kill_flags == 1 && deaths[0].hit_section == 0);
+		CHECK(deaths[1].kill_flags == 1);
+	}
+	CHECK(view.unknown_tags() == 0);
+	view.apply(s2c::KILL_BY_SLOT, {0xFF, 0xFF});
+	view.apply(s2c::KILL_BY_SLOT, {0xFF, 0xFF, 0x03});
+	CHECK(view.drain_effect_commands().empty());
+}
+
+// The wire leg: a page with at least one slot queues ONE C2S 0x28 {the S2C
+// 0x19 value, the S2C 0x1A value, the page's resume word}; a bare page ends
+// the walk. [orig: NapiNPClientMsg_HandleBatchKill @0x4318db..0x4318ff;
+//  NapiNPClientMsg_0x01A @0x425ecb]
+void test_batch_kill_walks_the_list() {
+	FramedJoiner joiner;
+	CHECK(joiner.deliver({make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP, le32(0x11223344u)),
+			make_protocol_message(s2c::WAIT_FOR_GAME_START_ACK, le32(0x55667788u))},
+			c2s::LOADOUT_REQUEST).empty());
+	BatchKillBatch page;
+	page.count = 0x0021;
+	page.slots = {0x1003};
+	std::vector<std::vector<uint8_t>> sent = joiner.deliver(
+			{make_protocol_message(s2c::KILL_BY_SLOT, encode_batch_kill(page))},
+			c2s::LOADOUT_REQUEST);
+	CHECK(sent.size() == 1);
+	if (sent.size() == 1)
+		CHECK(sent[0] == std::vector<uint8_t>({0x44, 0x33, 0x22, 0x11,
+				0x88, 0x77, 0x66, 0x55, 0x21, 0x00}));
+	sent = joiner.deliver({make_protocol_message(s2c::KILL_BY_SLOT, {0xFF, 0xFF})},
+			c2s::LOADOUT_REQUEST);
+	CHECK(sent.empty());
+}
+
 } // namespace
 
 int main() {
 	test_team_assign_rebinds_player_identity();
 	test_team_change_confirm_folds_the_entry();
 	test_team_change_confirm_walks_the_list();
+	test_batch_kill_page_kills_silently();
+	test_batch_kill_walks_the_list();
 	std::printf("client_message_folds: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

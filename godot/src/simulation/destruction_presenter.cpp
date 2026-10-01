@@ -667,7 +667,8 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 			// (world/destruction death_piece_trail_effect, S12b)
 			// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
 			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
-			if (fx_world != nullptr && !trail.is_empty()) {
+			// A silent death's piece never submits its trail [orig: @0x493811].
+			if (fx_world != nullptr && !trail.is_empty() && piece.trail) {
 				const String key = piece_owner_key(slot);
 				// Untagged: every death-piece submit carries tag 0 (the engine
 				// table death_piece_trail_effect carries the witness).

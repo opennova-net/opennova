@@ -3236,6 +3236,48 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 	CHECK(w.out.destruction.items_destroyed == 1);
 }
 
+// The S2C 0x4E join-window kill reaches the class callback with flags 1 and
+// the gnrc client leg forwards it to Entity_UpdateDeathTransforms: the husk
+// and pieces land, but no death sound, effect bank or kz blast, and no piece
+// trail. A vehicle def (ItemDef+0x5C type 1) clears the bit and dies loud.
+// [orig: Entity_KillBySlotId @0x42BD5B..0x42BD6A; sub_407020 @0x40703f..
+//  0x407045; Entity_InitDeathSounds @0x4939cd/@0x493a40;
+//  Entity_SpawnDeathPieces @0x493811]
+void test_gnrc_silent_kill_flags() {
+	auto w_heap = std::make_unique<World>();
+	World &w = *w_heap;
+	seed_ammo(w);
+	w.registry.configure_pool(2, 8);
+	w.rules.logic_authority = false;
+	w.logic_tick = 11;
+	const EntityHandle h = spawn_prop(w, 2, 500, 200);
+	w.tables.item_death_traits.set(500, class_traits(ItemDeathClass::kGnrc));
+	Entity *b = w.registry.get(h);
+	b->item_type_index = 7;
+	apply_item_state_event(w, *b, 0, 1);
+	CHECK((b->engine_flags & (kEntityFlagDead | kEntityFlagHusk)) ==
+			(kEntityFlagDead | kEntityFlagHusk));
+	CHECK(w.out.destruction.husk_swaps.size() == 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 0);
+	CHECK(w.out.destruction.effects.empty());
+	CHECK(w.explosions.queue.empty());
+	CHECK(count_active_pieces(w) == 3);
+	for (const DeathPiece &p : w.death_pieces.pieces)
+		if (p.active) CHECK(!p.trail);
+
+	const EntityHandle v = spawn_prop(w, 2, 500, 200);
+	Entity *veh = w.registry.get(v);
+	veh->item_type_index = 7;
+	veh->item_type = 1; // a vehicle def
+	apply_item_state_event(w, *veh, 0, 1);
+	CHECK(count_sound(w, "EXPLO_BARREL") == 1);
+	CHECK(w.explosions.queue.size() == 1);
+	int trails = 0;
+	for (const DeathPiece &p : w.death_pieces.pieces)
+		if (p.active && p.trail) ++trails;
+	CHECK(trails == 3);
+}
+
 // ewep (a standalone B50cal / minigun, a tank's turret child): the authority
 // kill leg dismounts the seated gunner BEFORE the husk flags land — only the
 // occupant whose mount target IS this emplacement — then scar clear, Flags |=
@@ -4163,6 +4205,7 @@ int main() {
 	test_gnrl_client_kill_leg();
 	test_gnrc_death_lands_husk_on_pool2_cohort();
 	test_gnrc_client_kill_runs_death_transforms_at_once();
+	test_gnrc_silent_kill_flags();
 	test_ewep_death_dismounts_gunner_before_husk();
 	test_ewep_client_kill_keeps_gunner_mounted();
 	test_null_class_never_dies();

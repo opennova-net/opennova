@@ -704,7 +704,9 @@ private:
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
 	// The paged host lists a client walks with its own C2S reply
 	// (joiner_connection_walks.cpp): the team-change list's S2C 0x51 -> C2S 0x29
-	// {index + 1}. The pages' entity folds are the replica pipeline's.
+	// {index + 1} and the join-window kill list's S2C 0x4E -> C2S 0x28
+	// {0x19 value, 0x1A value, resume}. The pages' entity folds are the
+	// replica pipeline's.
 	void on_list_walk_page(const ProtocolMessage &m, std::vector<ProtocolMessage> &replies);
 	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
 	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.
@@ -813,6 +815,10 @@ private:
 	// this scalar on a malformed body and retains the latest valid value.
 	// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]
 	uint32_t spawn_ack_timestamp_ = 0;
+	// S2C 0x1A's dword, the window max of the 0x4E continuation's C2S 0x28;
+	// a body under four bytes stores 0. [orig: NapiNPClientMsg_0x01A @0x425eb0
+	// -> dword_A82364 @0x425ec3/@0x425ecb; read @0x4318e8]
+	uint32_t game_start_ack_timestamp_ = 0;
 	// The client's own round-trip measurement: every S2C 0x57 with the echo
 	// flag CLEAR is the pong of our C2S 0x2C ping, and its `now - timestamp`
 	// lands in a ten-entry ring (the index wraps at 10) plus the current-ping

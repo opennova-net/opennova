@@ -7,6 +7,7 @@
 #include <runtime/inmatch/joiner_connection.h>
 
 #include <net/npwire/ingame_decode.h>
+#include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
 #include <runtime/world/entity.h> // retail_pool_capacity
 
@@ -18,7 +19,34 @@ namespace opennova::inmatch {
 
 void JoinerConnection::on_list_walk_page(const ProtocolMessage &m,
 		std::vector<ProtocolMessage> &replies) {
-	if (m.tag == s2c::TEAM_CHANGE_CONFIRM) {
+	if (m.tag == s2c::WAIT_FOR_GAME_START_ACK) {
+		// Every 0x1A stores its dword, 0 for a short body; only the kill-list
+		// continuation reads it [orig: NapiNPClientMsg_0x01A @0x425eb0 ->
+		// dword_A82364 @0x425ec3/@0x425ecb].
+		game_start_ack_timestamp_ = 0;
+		if (m.payload.size() >= 4)
+			game_start_ack_timestamp_ = uint32_t(m.payload[0]) | (uint32_t(m.payload[1]) << 8) |
+					(uint32_t(m.payload[2]) << 16) | (uint32_t(m.payload[3]) << 24);
+	} else if (m.tag == s2c::KILL_BY_SLOT) {
+		// The join-window kill-list walk: a page that carried at least one slot
+		// after its leading resume word queues ONE reliable C2S 0x28 {the 0x19
+		// window min, the 0x1A value, the resume word}, so the host serves the
+		// next page from there; a bare page (FF FF from a walk that found
+		// nothing, or any body under four bytes) ends the walk unanswered.
+		// The window max is the 0x1A value, NOT the 0x0F tick the burst's
+		// first 0x28 carried. [orig: NapiNPClientMsg_HandleBatchKill @0x431870 —
+		// the resume word @0x43188a, the slot count @0x431893..0x43189a, the
+		// reply {dword_A82360 @0x4318db, dword_A82364 @0x4318e8, resume
+		// @0x4318ee} queued (0x28, 1, 0, .., 10) @0x4318ff, the bare-page
+		// return @0x431904]
+		if (m.payload.size() < 4) return;
+		BurstLoadoutRequest next;
+		next.loadout_filter = spawn_ack_timestamp_;
+		next.flags = game_start_ack_timestamp_;
+		next.extra = static_cast<uint16_t>(m.payload[0] | (m.payload[1] << 8));
+		replies.push_back(make_protocol_message(c2s::LOADOUT_REQUEST,
+				encode_burst_loadout_request(next)));
+	} else if (m.tag == s2c::TEAM_CHANGE_CONFIRM) {
 		// The team-change list walk: an entry whose handle resolves to a pool
 		// slot queues ONE reliable C2S 0x29 {index + 1}, authority or not, so
 		// the host answers with the next entry until its list runs out (an

@@ -246,6 +246,7 @@ void fill_death_pieces(const World &world, std::vector<DeathPieceRow> &r_pieces)
 		d.pitch = p.pitch;
 		d.roll = p.roll;
 		d.settled = p.settled;
+		d.trail = p.trail;
 		r_pieces.push_back(std::move(d));
 	}
 }
