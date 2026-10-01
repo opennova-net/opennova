@@ -10,21 +10,21 @@
 
 namespace menu_test {
 
-// The native window (or part) a nested address names, followed down the screen's places
-// as the document locates it (null for anything else): what a test reads a window's
-// native members through.
+// The native window (or part) a nested address names, followed down its path in the screen as
+// the document locates it (Document::path_in: the root's index, then each list and index; null
+// for anything else): what a test reads a window's native members through.
 inline const opennova::mnu::Window *window_of(const opennova::editor::Document &document,
                                               const opennova::editor::NodeAddress &address) {
 	namespace mnu = opennova::mnu;
 	const auto *screen = dynamic_cast<const opennova::editor::MenuScreen *>(document.row(address.row));
 	if (!screen || !address.child) return nullptr;
-	const auto found = screen->places().find(address.child);
-	if (found == screen->places().end() || found->second.empty()) return nullptr;
-	const auto &steps = found->second;
+	const opennova::editor::Document::RecordPath steps = document.path_in(*screen, address.child);
+	if (steps.empty()) return nullptr;
 	std::vector<mnu::Window> &roots = const_cast<opennova::editor::MenuScreen *>(screen)->screen.roots;
 	if (steps[0].index >= roots.size()) return nullptr;
 	mnu::SchemaRecord record = mnu::schema_window(roots[steps[0].index]);
-	for (size_t i = 1; i < steps.size() && record; ++i) record = mnu::schema_list_at(record, steps[i].list, steps[i].index);
+	for (size_t i = 1; i < steps.size() && record; ++i)
+		record = mnu::schema_list_at(record, steps[i].collection, steps[i].index);
 	if (!record || (record.shape != mnu::SchemaShape::Window && record.shape != mnu::SchemaShape::Part)) return nullptr;
 	return static_cast<const mnu::Window *>(record.data);
 }

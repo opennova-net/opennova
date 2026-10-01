@@ -1,14 +1,14 @@
 #pragma once
 
 // Thread confinement (ADR 0046 S13 D2). A document belongs to the thread that made it: its
-// memos (a record document's: the rows' record indexes, the answers to what changed since the
-// save, the records by identity) fill lazily inside its const queries. Another thread reads a
-// snapshot() instead (DocumentBase::snapshot), a new instance over the same committed rows and
-// file-wide state. That is safe because nothing a committed row holds ever changes: a Node
-// carries no memo filled inside a const query (what a row derives, a model's or a menu screen's
-// places of its identities, is built when the row is made, at parse and by the edit that makes
-// it, before it commits), and the process-wide counters (a document's identity and load
-// generation, a gesture's token) are atomic.
+// memos (a record document's: the rows' record indexes, each record's placement and path in its row
+// among them, the answers to what changed since the save, the records by identity) fill lazily
+// inside its const queries. Another thread reads a snapshot() instead (DocumentBase::snapshot), a
+// new instance over the same committed rows and file-wide state. That is safe because nothing a
+// committed row holds ever changes: a Node carries no memo filled inside a const query (what a row
+// derives is built when the row is made, at parse and by the edit that makes it, before it commits;
+// where its records sit is the document's index of it, S13 D8, never the row's), and the
+// process-wide counters (a document's identity and load generation, a gesture's token) are atomic.
 
 #include <cstdint>
 #include <functional>
@@ -25,6 +25,7 @@
 #include <editor/model/edit_history.h>
 #include <editor/model/field_use.h>
 #include <editor/model/node.h>
+#include <editor/model/record_shift.h>
 #include <editor/model/value.h>
 
 namespace opennova::editor {
@@ -65,8 +66,12 @@ struct RecordKindRow {
 // Records nest at any depth (ADR 0046 S9g): a row owns collections, and so may each
 // record in them; the type declares, per owner, the collections it holds
 // (`collections(row, owner)`), and the base derives the walk, a record's placement
-// (its owner and its index there), its ancestors, its name, its path and a locator a
-// reload finds it again by.
+// (its owner and its index there), its path in its row (the collection and the index at each
+// depth, which a type finds its native record by: path_in, S13 D8), its ancestors, its name, its
+// record path and a locator a reload finds it again by. Where another record of the file names
+// one by its index (a Record reference, graph/reference_kinds), an edit that moves the
+// collection's records has the type renumber what names them in the same step
+// (renumber_references).
 //
 // The document keeps the rows and the file-wide state as the last successful load or
 // save left them (the saved baseline; committed rows are immutable and keep their
@@ -151,14 +156,48 @@ public:
 		std::vector<NodeId> ids; // index = position
 	};
 	// Where a nested record sits: its owner (owner.child == 0: the row itself), the
-	// collection and its index there.
+	// collection and its index there, and the collection's place among what the owner holds (the
+	// order collections() gives them).
 	struct Placement {
 		NodeAddress owner;
 		CollectionSpec spec;
 		size_t index = 0;
+		size_t collection = 0;
 	};
 	// A record met by a walk, with its placement. Returning false stops the walk.
 	using RecordVisitor = std::function<bool(const NodeAddress &record, const Placement &at)>;
+	// One step of a nested record's path in its row (path_in): the place of the collection it
+	// lies in among what its owner holds, and its index there.
+	struct PathStep {
+		uint32_t collection = 0;
+		uint32_t index = 0;
+	};
+	// A nested record's path from its row down to it, a step per collection it lies in, the row's
+	// own first: a view of the steps the document keeps of the row (path_in), good while the row is
+	// one the document holds as it is (a batch's clone: until an edit of the batch changes what it
+	// holds; a row it does not hold: until the next such walk). Empty for a record the row does not
+	// hold.
+	class RecordPath {
+	public:
+		RecordPath() = default;
+		RecordPath(const PathStep *steps, size_t size) : steps_(steps), size_(size) {}
+		bool empty() const { return size_ == 0; }
+		size_t size() const { return size_; }
+		const PathStep &operator[](size_t depth) const { return steps_[depth]; }
+		const PathStep *begin() const { return steps_; }
+		const PathStep *end() const { return steps_ + size_; }
+
+	private:
+		const PathStep *steps_ = nullptr;
+		size_t size_ = 0;
+	};
+	// A collection of this document's records that other records name by their index (a Record
+	// reference the type's schema names on a field, whose `collection` is one of its record kinds'
+	// tokens): the reference kind, and its records' kind.
+	struct TargetedCollection {
+		ReferenceKind reference = ReferenceKind::None;
+		NodeKind kind = 0;
+	};
 	// Every kind of record the type holds, one row each (RecordKindRow), in storage that outlives
 	// the document (a static table of the type): a kind's label, its token, whether it is a row of
 	// the file and whether the outline adds one. A collection's records are of a kind listed here.
@@ -183,12 +222,14 @@ public:
 	// reads it there, the reference it makes given the record's other fields, the scope it
 	// resolves in, the symbol it defines and where a lookup finds that (its scope), what its
 	// loader picks the file by, its colour's form, and whether the record offers choices of its
-	// own. Seeded from the schema, refined by the type (refine_field); read_only never widens.
+	// own. Seeded from the schema, refined by the type (refine_field); read_only never widens, and a
+	// Record reference resolves in this document's own file (its scope, the base's: path()).
 	FieldUse field_on(const NodeAddress &address, const FieldSchema &field) const;
 	// The choices a record offers of its own for a field whose use says so (FieldUse::
-	// own_choices: a model's registers by index), made into out; false for none (the default).
-	// The widgets, the JSON and the find ask (a value by its choice's name, as shown); the
-	// graph's extraction never does.
+	// own_choices: a model's LOD 0 parts by index, a clip's bones), made into out; false for none
+	// (the default). The widgets, the JSON and the find ask (a value by its choice's name, as
+	// shown); the graph's extraction never does. An index naming a record of the file is a Record
+	// reference instead (S13 D8), which the picker offers the collection's records for.
 	virtual bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const;
 	// The choices a field offers on its record: the record's own where it has them
@@ -223,6 +264,30 @@ public:
 	std::vector<Collection> collections_of(const NodeAddress &owner) const;
 	// A nested record's placement; false for a row or a record the document does not have.
 	bool placement(const NodeAddress &address, Placement &out) const;
+	// Where a nested record sits in `row` (S13 D8): its path, which a type finds its native record
+	// by, from the document's index of the row: a committed row's (kept while it is current), the
+	// saved baseline's, or, inside a batch, the row as the batch has left it (its clone: the
+	// committed row's index until an edit of the batch changes what it holds, then one of its own,
+	// made again after each such edit; a structural hook finds what it needs before it changes the
+	// row, a place after being its own to work out). Any other row is walked. Empty for a record
+	// the row does not hold.
+	RecordPath path_in(const Node &row, NodeId record) const;
+	// The collections of this document's records that other records name by index (the Record
+	// references the type's schema names on a field, FieldSchema::reference, refined per record by
+	// field_on, each whose collection token is one of its record kinds), each reference kind once:
+	// what the graph makes a record set of and what an edit renumbers the references to. The
+	// type's declarations alone decide it, so it is worked out once.
+	const std::vector<TargetedCollection> &targeted_collections() const;
+	// The record sets (S13 D8): for each of targeted_collections(), in its order, the records of
+	// the collection's kind in the file's order as committed (the rows in order, each row's records
+	// in the walk's pre-order, ReferenceKindRow's RecordIndexSpace::File), a Record reference's
+	// index naming the one at its place. Read from the core's index of each row, which keeps each
+	// row's records of those kinds in order: no row indexed already is walked again.
+	std::vector<std::vector<NodeAddress>> record_sets() const;
+	// A record's own name: a row's name, a nested record's name field as it holds it; "" for a kind
+	// with no name field, an empty one, and a record the document does not have (record_name falls
+	// back to the kind and the place).
+	std::string own_name(const NodeAddress &address) const;
 	// The records that hold `address`, the row first and its direct owner last (none for
 	// a row or an unknown record).
 	std::vector<NodeAddress> ancestors(const NodeAddress &address) const;
@@ -350,8 +415,9 @@ protected:
 	// the addresses: edit.address.row is the row, edit.parent the owner (Add, Duplicate,
 	// Remove) or the destination owner (Move), 0 meaning the row itself; the collection is
 	// not fixed, a Move's destination holds the kind and is not inside the record, and a
-	// Move that would leave the record where it is never arrives. The default refuses (a type
-	// whose records are fixed, or that holds none).
+	// Move that would leave the record where it is never arrives. A list of native records and
+	// their identities changes through edit_id_list (model/id_list.h), the one such list edit.
+	// The default refuses (a type whose records are fixed, or that holds none).
 	virtual bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                             std::string &error);
 	// Paste (Edit Paste): the payload `copy` made (edit.value) into the owner edit.parent
@@ -415,24 +481,63 @@ protected:
 		(void)error;
 		return true;
 	}
+	// A collection other records name by their index (targeted_collections: a Record reference,
+	// S13 D8) came out of an edit of the batch in another order: a record of it added, duplicated,
+	// removed or moved, or a row holding such records. `shift` says where each of its records the
+	// edit found stands now; `rows` are the rows as the edit left them. The type adds to `sites`
+	// the Sets that make every reference to the collection name the record it named, which the base
+	// applies in the same step right after the edit (D7's mixed batch), so one undo takes back both.
+	// False, with `error`, refuses the edit (document.collection), as a type refuses what it cannot
+	// renumber (a reference to a record the edit removed, one its field cannot hold). The default
+	// refuses: a type whose records a Record reference names renumbers them.
+	virtual bool renumber_references(const StagedRows &rows, const RecordShift &shift,
+	                                 std::vector<Edit> &sites, std::string &error) const;
 
 	NodeId allocate_id() { return next_id_++; }
 
 private:
-	// Every nested record of one committed row by identity, built by one walk and kept
-	// while that row is current (a committed row never changes).
+	// Every nested record of one row by identity, with its placement and its path (its steps in
+	// `steps`), built by one walk (S13 D8: the index stores each record's path, which the types kept
+	// of their own before): a committed row's kept while that row is current (a committed row
+	// never changes), a batch's own version's while no edit of the batch changes what it holds.
 	struct RowIndex {
-		std::shared_ptr<const Node> row;
-		std::unordered_map<NodeId, Placement> placements;
+		std::shared_ptr<const Node> row; // the committed row, kept alive (null for a batch's own)
+		struct Entry {
+			Placement at;
+			uint32_t path = 0, depth = 0; // its steps: steps[path, path + depth)
+		};
+		std::unordered_map<NodeId, Entry> records;
+		std::vector<PathStep> steps;
+		// By targeted_collections()' order, the row's records of that collection's kind in the
+		// walk's order (record_sets, and what a structural edit compares: collection_orders).
+		std::vector<std::vector<NodeId>> targeted;
+		RecordPath path(NodeId record) const;
 	};
+	// The index of `row`, made by walking it.
+	RowIndex make_index(const Node &row) const;
 	const RowIndex &row_index_of(const std::shared_ptr<const Node> &row) const;
+	// The index path_in reads for `row`: a committed row's, the baseline's, or the batch's own
+	// version's (path_in); null for a row the document does not hold.
+	const RowIndex *index_for(const Node &row) const;
 	// Brings the index of every record's row (address_of's) to the revision one row at a time:
 	// a row whose committed version is not the one indexed has that version's records taken out
 	// (those still indexed under it) and its own put in; a row no longer among the rows has its
 	// records taken out. An edit of one row indexes that row again, not every record.
 	void index_records() const;
-	// A nested record's placement inside `row` by walking it (a clone a batch changes).
+	// A nested record's placement inside `row` from the index path_in reads (a clone a batch
+	// changes included).
 	bool placement_in(const Node &row, NodeId child, Placement &out) const;
+	// The records of each of `targets` in the file's order, over the rows as the batch has left
+	// them: what an edit that may move them is compared by (renumber). Each row's from its index
+	// (index_for): only a row an edit of the batch reshaped is walked, once for each such edit.
+	std::vector<std::vector<NodeId>> collection_orders(const std::vector<TargetedCollection> &targets,
+	                                                   const StagedRows &staged) const;
+	// After such an edit: each targeted collection whose indexes it moved (`before`,
+	// collection_orders': a record moved or removed, or the collection grown or shrunk) renumbered,
+	// the type's Sets (renumber_references) staged.
+	bool renumber(const std::vector<TargetedCollection> &targets,
+	              const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
+	              Diagnostic &error);
 	// The rows and the file-wide state as they stand become the saved baseline.
 	void set_baseline();
 	// The committed row, or the baseline's, of identity `id` (null when that side has none).
@@ -486,6 +591,16 @@ private:
 	NodeId next_id_ = 1, last_added_ = 0;
 	std::vector<NodeId> added_, made_;
 	mutable std::unordered_map<const Node *, RowIndex> indexes_;
+	// While a batch stages its edits (apply_edits): its rows, and the index of each row an edit of
+	// it changed the shape of, by the row's identity (a row's version the batch holds; forgotten by
+	// the next edit that changes it, and all of them when the batch ends).
+	const StagedRows *staged_ = nullptr;
+	mutable std::unordered_map<NodeId, RowIndex> staged_indexes_;
+	// path_in's last walk of a row the document does not hold.
+	mutable RowIndex walked_;
+	// targeted_collections', worked out once.
+	mutable bool targets_known_ = false;
+	mutable std::vector<TargetedCollection> targets_;
 	mutable std::unordered_map<NodeId, size_t> row_positions_; // row_index's
 	EditHistory history_{rows_, file_state_};
 	std::vector<std::shared_ptr<const Node>> saved_rows_;

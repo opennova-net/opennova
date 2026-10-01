@@ -83,7 +83,7 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 	std::unordered_map<std::string, Definitions> by_key;
 	const auto definitions = [&by_key](const GraphSymbol &symbol) -> Definitions * {
 		if (!reference_row(symbol.kind).names_symbol()) return nullptr;
-		Definitions &found = by_key[GraphIndex::key_of(symbol.kind, symbol.name)];
+		Definitions &found = by_key[GraphIndex::key_of(symbol.kind, symbol.name, symbol.scope)];
 		found.kind = symbol.kind;
 		return &found;
 	};
@@ -325,8 +325,8 @@ void AssetGraph::resolve_patch(Patch &patch, GraphUpdate &out) {
 		for (const uint32_t id : patch.slots) derive_slot(id);
 	if (!patch.base)
 		for (const std::string &name : out.bindings)
-			for (const Ref ref :
-					index_.symbols_named(GraphIndex::key_of(ReferenceKind::StyleVar, name))) {
+			for (const Ref ref : index_.symbols_named(
+					     GraphIndex::key_of(ReferenceKind::StyleVar, name, std::string()))) {
 				if (read_again.count(ref.slot) || !derive(ref.slot, ref.index)) continue;
 				const GraphSlot &slot = index_.slot(ref.slot);
 				const auto at = slot.edges_at.find(slot.symbols[ref.index].locator);
@@ -343,7 +343,7 @@ void AssetGraph::resolve_patch(Patch &patch, GraphUpdate &out) {
 				continue;
 			for (const GraphSymbol &symbol : base_->index().slot(id).symbols)
 				(symbol.kind == ReferenceKind::StyleVar ? patch.style_keys : patch.symbol_keys)
-						.insert(GraphIndex::key_of(symbol.kind, symbol.name));
+						.insert(GraphIndex::key_of(symbol.kind, symbol.name, symbol.scope));
 		}
 	// What resolves again: every edge of a file read again; with another file set every edge its
 	// lookup reads the files for; every edge at all when the base layer changed; the edges into a
@@ -514,9 +514,9 @@ bool AssetGraph::resolve_edge(Ref ref) {
 	// Each entry of the index moves only when it changed.
 	const bool was = resolution.resolved;
 	if (!was || target != edge.target) {
-		if (was) index_.remove_target(GraphIndex::key_of(edge.kind, edge.target), ref);
+		if (was) index_.remove_target(GraphIndex::key_of(edge.kind, edge.target, edge.scope), ref);
 		edge.target = target;
-		index_.add_target(GraphIndex::key_of(edge.kind, edge.target), ref);
+		index_.add_target(GraphIndex::key_of(edge.kind, edge.target, edge.scope), ref);
 	}
 	if (!was || file != resolution.file) {
 		if (was && !resolution.file.empty()) index_.remove_user(resolution.file, ref);
@@ -554,6 +554,9 @@ bool AssetGraph::reword(Ref ref) {
 bool AssetGraph::counts_missing(const GraphSlot &slot, const GraphEdge &edge,
 		const std::string &target, ReferenceStatus status) const {
 	if (target.empty() || status != ReferenceStatus::Missing) return false;
+	// A kind the graph never finds missing (no message for it: a Record reference, an index past
+	// its collection, which its file's own validation reports with what the game makes of it).
+	if (!reference_row(edge.kind).missing_message) return false;
 	const bool file = reference_row(edge.kind).resolution == ReferenceResolution::File;
 	// A file named through a variable no stylesheet the game reads defines: the variable's own
 	// edge reports it.
@@ -664,6 +667,8 @@ std::string AssetGraph::resolved_target(const GraphEdge &edge) const {
 	switch (reference_row(edge.kind).resolution) {
 	case ReferenceResolution::StyleVariable: return is_style_reference(edge.value) ? style_variable(edge.value) : std::string();
 	case ReferenceResolution::Symbol: return symbol_name(edge.kind, edge.value);
+	// A record's index, in the file the edge's scope names (the key holds it).
+	case ReferenceResolution::Record: return edge.value;
 	case ReferenceResolution::File:
 	case ReferenceResolution::Unchecked: break;
 	}
@@ -694,6 +699,14 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 		const GraphSymbol *binding = style_binding(name);
 		if (!binding) return ReferenceStatus::Missing;
 		if (file_out) *file_out = binding->file;
+		return ReferenceStatus::Present;
+	}
+	if (resolution == ReferenceResolution::Record) {
+		// A record of the file the scope names, by its index: Missing past the collection (its
+		// file's validation says what the game makes of that; the graph finds none missing).
+		const GraphSymbol *record = resolve_symbol(kind, name, scope);
+		if (!record) return ReferenceStatus::Missing;
+		if (file_out) *file_out = record->file;
 		return ReferenceStatus::Present;
 	}
 	if (resolution == ReferenceResolution::Symbol) {
@@ -739,8 +752,15 @@ ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name,
 const GraphSymbol *AssetGraph::resolve_symbol(ReferenceKind kind, const std::string &name, const std::string &scope) const {
 	const ReferenceResolution resolution = reference_row(kind).resolution;
 	if (resolution == ReferenceResolution::StyleVariable) return style_binding(name);
+	// A record of the project's file the scope names, by its index (a base layer keeps no record
+	// sets: a Record reference resolves in its own file).
+	if (resolution == ReferenceResolution::Record) {
+		const std::vector<Ref> &named =
+				index_.symbols_named(GraphIndex::key_of(kind, symbol_name(kind, name), scope));
+		return named.empty() ? nullptr : &index_.symbol(named.front());
+	}
 	if (resolution != ReferenceResolution::Symbol) return nullptr;
-	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name));
+	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name), scope);
 	for (const Ref ref : index_.symbols_named(name_key)) {
 		const GraphSymbol &symbol = index_.symbol(ref);
 		if (!symbol.inert && scope_matches(symbol.scope, scope)) return &symbol;
@@ -781,6 +801,23 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 		};
 		offer_files(index_, false);
 		if (base_) offer_files(base_->index(), true);
+		return out;
+	}
+	if (row.resolution == ReferenceResolution::Record) {
+		// The records the collection holds in the file the scope names (its record set), in their
+		// order, each by its index.
+		const uint32_t id = index_.find(scope);
+		if (id == GraphIndex::kNone) return out;
+		for (const GraphSymbol &symbol : index_.slot(id).symbols) {
+			if (symbol.kind != kind) continue;
+			ReferenceChoice choice;
+			choice.name = symbol.display;
+			choice.kind = kind;
+			choice.file = symbol.file;
+			choice.record = symbol.record;
+			choice.label = symbol.value;
+			out.push_back(std::move(choice));
+		}
 		return out;
 	}
 	if (!row.names_symbol()) return out;
@@ -836,10 +873,12 @@ std::vector<const GraphEdge *> AssetGraph::referrers_of_file(const std::string &
 std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, const std::string &name,
                                                         const std::string &scope) const {
 	std::vector<const GraphEdge *> out;
+	// A record's index names it in its own file alone, which its key holds.
+	const bool record = reference_row(kind).resolution == ReferenceResolution::Record;
 	for (const Ref ref :
-			index_.edges_targeting(GraphIndex::key_of(kind, symbol_name(kind, name)))) {
+			index_.edges_targeting(GraphIndex::key_of(kind, symbol_name(kind, name), scope))) {
 		const GraphEdge &edge = index_.edge(ref);
-		if (!scope.empty() && !scope_matches(scope, edge.scope)) continue;
+		if (!record && !scope.empty() && !scope_matches(scope, edge.scope)) continue;
 		out.push_back(&edge);
 	}
 	return out;
@@ -850,10 +889,11 @@ std::vector<const GraphEdge *> AssetGraph::usages_of(const std::string &file) co
 	const GraphSlot *slot = named_file(file);
 	if (!slot) return out;
 	// An edge using two of its symbols (a string id of no scope, a key two sections define) is
-	// listed once, where it is met first.
+	// listed once, where it is met first. A record of the file's record sets is used by the file's
+	// own edges alone: no use of the file.
 	std::set<const GraphEdge *> listed(out.begin(), out.end());
 	for (const GraphSymbol &symbol : slot->symbols) {
-		if (unread(symbol)) continue;
+		if (unread(symbol) || reference_row(symbol.kind).resolution == ReferenceResolution::Record) continue;
 		for (const GraphEdge *edge : referrers_of(symbol.kind, symbol.name, symbol.scope))
 			if (listed.insert(edge).second) out.push_back(edge);
 	}
@@ -863,7 +903,9 @@ std::vector<const GraphEdge *> AssetGraph::usages_of(const std::string &file) co
 std::vector<const GraphEdge *> AssetGraph::users_of(const GraphSymbol &symbol) const {
 	std::vector<const GraphEdge *> out;
 	if (symbol.inert) return out;
-	for (const GraphEdge *edge : referrers_of(symbol.kind, symbol.name))
+	// A record of a record set is named in its own file alone, which its key holds.
+	const bool record = reference_row(symbol.kind).resolution == ReferenceResolution::Record;
+	for (const GraphEdge *edge : referrers_of(symbol.kind, symbol.name, record ? symbol.scope : std::string()))
 		if (resolve_symbol(edge->kind, edge->value, edge->scope) == &symbol) out.push_back(edge);
 	return out;
 }
@@ -921,7 +963,9 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 		hits.push_back(std::move(hit));
 	});
 	for_each_symbol([&](const GraphSymbol &symbol) {
-		if (!holds(symbol.display)) return;
+		// A record set's records go by their index, no name.
+		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record || !holds(symbol.display))
+			return;
 		GraphSearchHit hit;
 		hit.symbol = &symbol;
 		hit.name = symbol.display;
@@ -940,9 +984,10 @@ std::vector<const GraphSymbol *> AssetGraph::symbols_of_kind(ReferenceKind kind)
 	return out;
 }
 
-std::vector<const GraphSymbol *> AssetGraph::symbols_named(ReferenceKind kind, const std::string &name) const {
+std::vector<const GraphSymbol *> AssetGraph::symbols_named(ReferenceKind kind, const std::string &name,
+                                                           const std::string &scope) const {
 	std::vector<const GraphSymbol *> out;
-	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name));
+	const std::string name_key = GraphIndex::key_of(kind, symbol_name(kind, name), scope);
 	for (const Ref ref : index_.symbols_named(name_key)) out.push_back(&index_.symbol(ref));
 	if (!base_) return out;
 	const GraphIndex &base = base_->index();

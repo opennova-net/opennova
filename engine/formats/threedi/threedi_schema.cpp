@@ -478,11 +478,21 @@ std::vector<Entry> material_entries() {
 	// generator, reflection colour, emissive and glass bytes.
 	out.push_back({unwitnessed(integer("rgbgen2.style", 0, 255, "Style", styles)),
 			[](const void *d, int) -> Value { return int64_t(as<ThreediMaterial>(d).rgb_gen2.style); }});
-	out.push_back({unwitnessed(integer("rgbgen2.param", 0, 255, "Phase (1/256) or register")),
+	// Its parameter names a register above style 0x70 as the first generator's does: the load swaps
+	// it through the model's CTRL table [orig: ThreediGp_LoadFromFile @ 0x5B5D0A..0x5B5D2A]. Shown,
+	// never set, as the generator's other words are.
+	ThreediSchemaField second_param =
+			unwitnessed(integer("rgbgen2.param", 0, 255, "Phase (1/256) or register", {}, false, Ref::Register));
+	second_param.note = "The load swaps it through the model's CTRL table above style 0x70, as it does the first "
+	                    "generator's; what the game draws with the second generator is not witnessed: shown as "
+	                    "the file holds it.";
+	out.push_back({second_param,
 			[](const void *d, int) -> Value {
 				ThreediMaterial &m = const_cast<ThreediMaterial &>(as<ThreediMaterial>(d));
 				return generator_param({&m.rgb_gen2.style, &m.rgb_gen2.phase, &m.rgb_gen2.reg, &m.rgb_gen2.rate});
-			}});
+			},
+			nullptr, nullptr,
+			[](const void *d, int) { return threedi_generator_names_register(as<ThreediMaterial>(d).rgb_gen2.style); }});
 	out.push_back({unwitnessed(realf("rgbgen2.rate", "Rate")),
 			[](const void *d, int) -> Value { return double(as<ThreediMaterial>(d).rgb_gen2.rate); }});
 	static const char *const kRgb2[6] = {"rgbgen2.start.r", "rgbgen2.start.g", "rgbgen2.start.b", "rgbgen2.end.r",

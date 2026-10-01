@@ -1,5 +1,8 @@
 #include <editor/graph/reference_queries.h>
 
+#include <algorithm>
+#include <optional>
+
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
@@ -54,6 +57,8 @@ bool find_definition(const AssetGraph &graph, const Document &document, const st
 	};
 	std::vector<Named> named;
 	const auto consider = [&](const GraphSymbol &defined, bool inert) {
+		// A record of a record set goes by its index in its own file, which no other names.
+		if (reference_row(defined.kind).resolution == ReferenceResolution::Record) return;
 		// A style variable is found by its NAME or by the %NAME% a menu writes it as.
 		const std::string name =
 		        reference_row(defined.kind).spell == NameSpelling::StyleVariable ? mns::variable_name(symbol) : symbol;
@@ -108,11 +113,27 @@ ReferenceStatus reference_status(const AssetGraph &graph, const FieldUse &field,
 std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const FieldUse &field) {
 	if (field.reference == ReferenceKind::None) return {};
 	std::vector<ReferenceChoice> out = graph.choices(field.reference, field.scope, field.loader_arg);
+	const ReferenceKindRow &row = reference_row(field.reference);
+	// A record by its index: only an index the field can hold (a byte-sized parameter takes the
+	// registers 0 to 255) and one that names a record (a frame byte of 128 names none).
+	if (row.resolution == ReferenceResolution::Record) {
+		const FieldSchema &schema = *field.schema;
+		out.erase(std::remove_if(out.begin(), out.end(),
+		                         [&](const ReferenceChoice &choice) {
+			                         const std::optional<int> index = strutil::parse_int(choice.name);
+			                         int64_t named = 0;
+			                         if (!index) return true;
+			                         const double at = double(*index);
+			                         return (schema.ranged && (at < schema.min || at > schema.max)) ||
+			                                !record_index(field.reference, Value(int64_t(*index)), named);
+		                         }),
+		          out.end());
+		return out;
+	}
 	// What the value may name instead: a stylesheet variable for a menu's font or texture (the
 	// %NAME% stays in the menu and the stylesheet's value is the file, ADR 0005), a string id
 	// for a text key the editor does not resolve yet; each as this field would reference it, a
 	// kind the editor cannot check keeping the offered kind's own answer.
-	const ReferenceKindRow &row = reference_row(field.reference);
 	if (row.also_offers == ReferenceKind::None) return out;
 	const bool checked = row.resolution != ReferenceResolution::Unchecked;
 	for (ReferenceChoice &choice : graph.choices(row.also_offers)) {
@@ -127,6 +148,8 @@ bool missing_finding(const AssetGraph &graph, const Document &document, const No
 	ReferenceKind kind;
 	std::string name, scope;
 	if (!reference_target(field, value, kind, name, scope)) return false;
+	// A kind the graph finds none of missing (a Record reference) makes none here either.
+	if (!reference_row(kind).missing_message) return false;
 	if (graph.resolve(kind, name, scope, nullptr, field.loader_arg) != ReferenceStatus::Missing) return false;
 	GraphEdge edge;
 	edge.source = document.path();

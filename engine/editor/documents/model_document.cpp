@@ -16,77 +16,103 @@ namespace opennova::editor {
 using namespace threedi;
 using model_document_detail::KindRow;
 using model_document_detail::kKinds;
-using model_document_detail::place_of;
-using Place = ModelPlace;
 
 namespace model_document_detail {
 
-// Every identity of a row by where it sits: made when the row is given its identities
-// (for_each_identity) and by each structural edit of a clone (index_places), never inside a
-// const query, so a committed row's places are there and never change.
-const ModelPlaces &places_of(const Node &node) {
-	static const ModelPlaces none;
-	const std::shared_ptr<const ModelPlaces> &places = node.kind == node_kind(ModelKind::Model)
-			? static_cast<const ModelRow &>(node).places
-			: static_cast<const CollisionRow &>(node).places;
-	return places ? *places : none;
-}
-
-void index_places(Node &node) {
-	auto made = std::make_shared<ModelPlaces>();
-	for (uint8_t c = 0; c < node.collections.size(); ++c)
-		for (uint32_t i = 0; i < node.collections[c].size(); ++i)
-			(*made)[node.collections[c][i]] = {c, 0, i};
-	if (node.kind != node_kind(ModelKind::Model)) {
-		static_cast<CollisionRow &>(node).places = made;
-		return;
-	}
-	ModelRow &row = static_cast<ModelRow &>(node);
-	for (uint32_t l = 0; l < row.lods.size(); ++l)
-		for (uint32_t i = 0; i < row.lods[l].panm_ids.size(); ++i)
-			(*made)[row.lods[l].panm_ids[i]] = {kPanmSlot, l, i};
-	for (uint32_t m = 0; m < row.materials.size(); ++m)
-		for (uint32_t i = 0; i < row.materials[m].texture_ids.size(); ++i)
-			(*made)[row.materials[m].texture_ids[i]] = {kTextureSlot, m, i};
-	row.places = made;
-}
-
-bool place_of(const Node &row, NodeId id, ModelPlace &out) {
-	const ModelPlaces &places = places_of(row);
-	const auto found = places.find(id);
-	if (found == places.end()) return false;
-	out = found->second;
-	return true;
-}
-
-ThreediSchemaRecord record_of(Node &node, const NodeAddress &address) {
+ThreediSchemaRecord record_of(const ModelDocument &document, Node &node, const NodeAddress &address) {
+	if (address.child == 0)
+		return node.kind == node_kind(ModelKind::Model)
+		               ? ThreediSchemaRecord{ThreediSchemaShape::Model, &static_cast<ModelRow &>(node).header}
+		               : ThreediSchemaRecord{};
+	const Document::RecordPath path = document.path_in(node, address.child);
+	if (path.empty()) return {};
+	const uint32_t i = path[0].index;
 	if (node.kind == node_kind(ModelKind::Model)) {
 		ModelRow &row = static_cast<ModelRow &>(node);
-		if (address.child == 0) return {ThreediSchemaShape::Model, &row.header};
-		Place p;
-		if (!place_of(row, address.child, p)) return {};
-		switch (p.collection) {
-		case 0: return {ThreediSchemaShape::Lod, &row.lods[p.index].lod};
-		case 1: return {ThreediSchemaShape::Material, &row.materials[p.index].material};
-		case 2: return {ThreediSchemaShape::Light, &row.lights[p.index]};
-		case 3: return {ThreediSchemaShape::UserPoint, &row.user_points[p.index]};
-		case 4: return {ThreediSchemaShape::Register, &row.registers[p.index]};
-		case 5: return {ThreediSchemaShape::Frame, &row.frames[p.index]};
-		case kPanmSlot: return {ThreediSchemaShape::PartAnimation, &row.lods[p.owner].panm[p.index]};
-		case kTextureSlot: return {ThreediSchemaShape::Texture, &row.materials[p.owner].material.textures[p.index]};
-		default: return {};
+		// A LOD's part animation and a material's texture row lie one step further.
+		if (path.size() == 2) {
+			const uint32_t k = path[1].index;
+			if (path[0].collection == kLods && i < row.lods.size() && k < row.lods[i].panm.size())
+				return {ThreediSchemaShape::PartAnimation, &row.lods[i].panm[k]};
+			if (path[0].collection == kMaterials && i < row.materials.size() &&
+			    k < row.materials[i].texture_ids.size())
+				return {ThreediSchemaShape::Texture, &row.materials[i].material.textures[k]};
+			return {};
 		}
+		switch (path[0].collection) {
+		case kLods:
+			if (i < row.lods.size()) return {ThreediSchemaShape::Lod, &row.lods[i].lod};
+			break;
+		case kMaterials:
+			if (i < row.materials.size()) return {ThreediSchemaShape::Material, &row.materials[i].material};
+			break;
+		case kLights:
+			if (i < row.lights.size()) return {ThreediSchemaShape::Light, &row.lights[i]};
+			break;
+		case kUserPoints:
+			if (i < row.user_points.size()) return {ThreediSchemaShape::UserPoint, &row.user_points[i]};
+			break;
+		case kRegisters:
+			if (i < row.registers.size()) return {ThreediSchemaShape::Register, &row.registers[i]};
+			break;
+		case kFrames:
+			if (i < row.frames.size()) return {ThreediSchemaShape::Frame, &row.frames[i]};
+			break;
+		default: break;
+		}
+		return {};
 	}
 	CollisionRow &row = static_cast<CollisionRow &>(node);
-	Place p;
-	if (address.child == 0 || !place_of(row, address.child, p)) return {};
-	switch (p.collection) {
-	case 0: return {ThreediSchemaShape::Section, &row.sections[p.index]};
-	case 1: return {ThreediSchemaShape::Volume, &row.volumes[p.index]};
-	case 2: return {ThreediSchemaShape::Face, &row.faces[p.index]};
-	case 3: return {ThreediSchemaShape::Occlusion, &row.occlusion[p.index]};
-	default: return {};
+	switch (path[0].collection) {
+	case 0:
+		if (i < row.sections.size()) return {ThreediSchemaShape::Section, &row.sections[i]};
+		break;
+	case 1:
+		if (i < row.volumes.size()) return {ThreediSchemaShape::Volume, &row.volumes[i]};
+		break;
+	case 2:
+		if (i < row.faces.size()) return {ThreediSchemaShape::Face, &row.faces[i]};
+		break;
+	case 3:
+		if (i < row.occlusion.size()) return {ThreediSchemaShape::Occlusion, &row.occlusion[i]};
+		break;
+	default: break;
 	}
+	return {};
+}
+
+ThreediSchemaReference index_reference(const ThreediSchemaRecord &record, const ThreediSchemaField *field,
+                                       const std::string &path, ThreediSchemaReference ref) {
+	// A field the table declares no index of names none (`ref` is the declared reference or none):
+	// no lookup more for the fields of most records.
+	if (!field) return ThreediSchemaReference::None;
+	const ThreediSchemaReference declared = field->reference;
+	if (declared != ThreediSchemaReference::Register && declared != ThreediSchemaReference::Part &&
+	    declared != ThreediSchemaReference::Frame)
+		return ThreediSchemaReference::None;
+	if (declared == ThreediSchemaReference::Frame && threedi_schema_reads(record, path))
+		ref = ThreediSchemaReference::Frame;
+	const bool index = ref == ThreediSchemaReference::Register ||
+			ref == ThreediSchemaReference::Part || ref == ThreediSchemaReference::Frame;
+	return index ? ref : ThreediSchemaReference::None;
+}
+
+ReferenceKind record_reference(ThreediSchemaReference index) {
+	switch (index) {
+	case ThreediSchemaReference::Register: return ReferenceKind::ModelRegister;
+	case ThreediSchemaReference::Frame: return ReferenceKind::ModelFrame;
+	default: return ReferenceKind::None;
+	}
+}
+
+ReferenceKind named_by_index(const ThreediSchemaRecord &record, const std::string &path) {
+	const ThreediSchemaField *field = threedi_schema_field(record.shape, path);
+	if (!field) return ReferenceKind::None;
+	if (field->reference == ThreediSchemaReference::Frame) return ReferenceKind::ModelFrame;
+	if (field->reference == ThreediSchemaReference::Register &&
+	    threedi_schema_reference(record, path) == ThreediSchemaReference::Register)
+		return ReferenceKind::ModelRegister;
+	return ReferenceKind::None;
 }
 
 bool shader_flags(const char *tag, uint32_t &flags) {
@@ -112,9 +138,15 @@ bool material_is_drawn(const ModelRow &row, int source) {
 
 } // namespace model_document_detail
 
-using model_document_detail::kPanmSlot;
-using model_document_detail::kTextureSlot;
+using model_document_detail::index_reference;
+using model_document_detail::kFrames;
+using model_document_detail::kLights;
+using model_document_detail::kLods;
+using model_document_detail::kMaterials;
+using model_document_detail::kRegisters;
+using model_document_detail::kUserPoints;
 using model_document_detail::record_of;
+using model_document_detail::record_reference;
 
 namespace {
 
@@ -148,7 +180,13 @@ FieldSchema field_of(const ThreediSchemaField &f) {
 	           : f.type == ThreediSchemaType::Real  ? FieldType::Real
 	                                                 : FieldType::Text;
 	out.width = f.width;
-	out.reference = f.reference == ThreediSchemaReference::Texture ? ReferenceKind::Texture : ReferenceKind::None;
+	// What it may name outside its record: a texture's file; a CTRL register or an MTRX row of the
+	// model by its index, a Record reference (S13 D8), which refine_field keeps where the record's
+	// other fields make it one. A part of LOD 0 names no record (LOD 0's parts are the base's).
+	out.reference = f.reference == ThreediSchemaReference::Texture    ? ReferenceKind::Texture
+	                : f.reference == ThreediSchemaReference::Register ? ReferenceKind::ModelRegister
+	                : f.reference == ThreediSchemaReference::Frame    ? ReferenceKind::ModelFrame
+	                                                                  : ReferenceKind::None;
 	for (const ThreediSchemaChoice &c : f.choices) out.choices.push_back({c.name, c.value, c.label});
 	out.flags = f.flags;
 	out.read_only = f.read_only;
@@ -157,12 +195,9 @@ FieldSchema field_of(const ThreediSchemaField &f) {
 	out.description = f.note;
 	if (f.channel) out.color = FieldColor::Channel;
 	if (f.unverified) out.applies = Applicability::Unverified;
-	// An index (a CTRL register, a part of LOD 0, an MTRX row) takes any other index typed
-	// beside the ones a record offers of its own (ModelDocument::record_choices).
-	const ThreediSchemaReference named = f.reference;
-	if (named == ThreediSchemaReference::Register || named == ThreediSchemaReference::Part ||
-			named == ThreediSchemaReference::Frame)
-		out.open_choices = true;
+	// A part of LOD 0 takes any other index typed beside the parts a record offers of its own
+	// (ModelDocument::record_choices).
+	if (f.reference == ThreediSchemaReference::Part) out.open_choices = true;
 	// An integer keeps to the range its record's word holds (threedi_schema_set refuses past it).
 	if (f.type == ThreediSchemaType::Integer && f.min < f.max) {
 		out.ranged = true;
@@ -182,54 +217,23 @@ std::vector<FieldChoice> shader_choices() {
 	return out;
 }
 
-// What an index field names on this record (threedi_schema_reference, `ref`): a CTRL
-// register, a part of LOD 0 or an MTRX row; a frame byte names the MTRX rows wherever its row
-// turns through one (a spinner or Euler row: threedi_schema_reads), whatever it names now, so
-// "none" is no dead end. None for any other field.
-ThreediSchemaReference index_reference(const ThreediSchemaRecord &record, const std::string &path,
-                                       ThreediSchemaReference ref) {
-	const ThreediSchemaField *schema = threedi_schema_field(record.shape, path);
-	if (schema && schema->reference == ThreediSchemaReference::Frame &&
-			threedi_schema_reads(record, path))
-		ref = ThreediSchemaReference::Frame;
-	const bool index = ref == ThreediSchemaReference::Register ||
-			ref == ThreediSchemaReference::Part || ref == ThreediSchemaReference::Frame;
-	return index ? ref : ThreediSchemaReference::None;
-}
-
-// What an index field names on this record (index_reference), as its choices (any other index
-// typed too): a CTRL register by its name, a part of LOD 0, an MTRX row; with the value the
-// table calls none (a part animation's parent 255, a user point's part -1, a frame byte 0).
-// Only an index the field can hold is offered (a byte-sized parameter takes registers 0..255).
-void index_choices(const ModelRow &row, const ThreediSchemaRecord &record,
-		ThreediSchemaReference ref, const FieldSchema &field, std::vector<FieldChoice> &out) {
+// A part index's choices (any other index typed too): the parts of LOD 0, after the value the
+// table calls none (a part animation's parent 255, a user point's part -1). Only an index the
+// field can hold is offered.
+void part_choices(const ModelRow &row, const ThreediSchemaRecord &record, const FieldSchema &field,
+                  std::vector<FieldChoice> &out) {
 	const auto offer = [&](int64_t value, std::string name, std::string label) {
 		if (field.ranged && (double(value) < field.min || double(value) > field.max)) return;
 		out.push_back({std::move(name), value, std::move(label)});
 	};
-	switch (ref) {
-	case ThreediSchemaReference::Register:
-		for (size_t i = 0; i < row.registers.size(); ++i) offer(int64_t(i), std::to_string(i), row.registers[i].name);
-		break;
-	case ThreediSchemaReference::Part: {
-		if (record.shape == ThreediSchemaShape::PartAnimation) offer(255, "255", "None");
-		if (record.shape == ThreediSchemaShape::UserPoint) offer(-1, "-1", "None");
-		const size_t parts = row.base && row.base->lod_count ? row.base->lods[0].render_object_count : 0;
-		for (size_t i = 0; i < parts; ++i) offer(int64_t(i), std::to_string(i), "Part " + std::to_string(i));
-		break;
-	}
-	case ThreediSchemaReference::Frame:
-		// A row above zero as a signed byte (threedi_panm_frame_row).
-		offer(0, "0", "None");
-		for (size_t i = 1; i < row.frames.size() && i < 128; ++i)
-			offer(int64_t(i), std::to_string(i), "MTRX row " + std::to_string(i));
-		break;
-	default: return;
-	}
+	if (record.shape == ThreediSchemaShape::PartAnimation) offer(255, "255", "None");
+	if (record.shape == ThreediSchemaShape::UserPoint) offer(-1, "-1", "None");
+	const size_t parts = row.base && row.base->lod_count ? row.base->lods[0].render_object_count : 0;
+	for (size_t i = 0; i < parts; ++i) offer(int64_t(i), std::to_string(i), "Part " + std::to_string(i));
 }
 
-const Document::CollectionSpec spec(ModelKind kind, const char *label, const char *name_field, bool fixed,
-                                    size_t max = 0) {
+Document::CollectionSpec spec(ModelKind kind, const char *label, const char *name_field, bool fixed,
+                              size_t max = 0) {
 	Document::CollectionSpec s;
 	s.kind = node_kind(kind);
 	s.label = label;
@@ -239,11 +243,38 @@ const Document::CollectionSpec spec(ModelKind kind, const char *label, const cha
 	return s;
 }
 
+// The model row's collections in their order (model_document_detail::kLods...), a LOD's part
+// animations and a material's texture rows, and the collision row's collections, as collections()
+// and walk_records give them.
+Document::CollectionSpec model_spec(uint32_t collection) {
+	switch (collection) {
+	case kLods: return spec(ModelKind::Lod, "LODs", "", true);
+	case kMaterials: return spec(ModelKind::Material, "Materials", "shader", false);
+	case kLights: return spec(ModelKind::Light, "Lights", "", false);
+	case kUserPoints: return spec(ModelKind::UserPoint, "User points", "name", false);
+	case kRegisters: return spec(ModelKind::Register, "CTRL registers", "name", false);
+	default: return spec(ModelKind::Frame, "Rotation frames", "", false);
+	}
+}
+Document::CollectionSpec part_animations_spec() {
+	return spec(ModelKind::PartAnimation, "Part animations", "", false);
+}
+Document::CollectionSpec textures_spec() { return spec(ModelKind::Texture, "Textures", "name", false, 24); }
+Document::CollectionSpec collision_spec(uint32_t collection) {
+	switch (collection) {
+	case 0: return spec(ModelKind::Section, "Sections", "", true);
+	case 1: return spec(ModelKind::Volume, "Volumes", "", true);
+	case 2: return spec(ModelKind::Face, "Bullet faces", "", true);
+	default: return spec(ModelKind::Occlusion, "Occlusion records", "", true);
+	}
+}
+constexpr uint32_t kModelCollections = 6, kCollisionCollections = 4;
+
 } // namespace
 
 ModelRow::ModelRow() {
 	kind = kModel;
-	collections.resize(6);
+	collections.resize(kModelCollections);
 }
 
 std::shared_ptr<Node> ModelRow::clone() const { return std::make_shared<ModelRow>(*this); }
@@ -254,14 +285,12 @@ size_t ModelRow::footprint() const {
 	               footprint_of(registers) + footprint_of(frames);
 	for (const ModelLod &lod : lods) bytes += footprint_of(lod.panm) + footprint_of(lod.panm_ids);
 	for (const ModelMaterial &material : materials) bytes += footprint_of(material.texture_ids);
-	if (places) bytes += footprint_of(*places);
 	return bytes;
 }
 
 size_t CollisionRow::footprint() const {
 	return sizeof(CollisionRow) + collections_footprint() + footprint_of(sections) +
-	       footprint_of(volumes) + footprint_of(faces) + footprint_of(occlusion) +
-	       (places ? footprint_of(*places) : 0);
+	       footprint_of(volumes) + footprint_of(faces) + footprint_of(occlusion);
 }
 
 void ModelRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
@@ -271,19 +300,11 @@ void ModelRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
 		for (NodeId &id : lod.panm_ids) fn(id);
 	for (ModelMaterial &material : materials)
 		for (NodeId &id : material.texture_ids) fn(id);
-	// The identities may be new (a load's, a duplicate's): their places made again.
-	model_document_detail::index_places(*this);
 }
 
 CollisionRow::CollisionRow() {
 	kind = kCollision;
-	collections.resize(4);
-}
-
-void CollisionRow::for_each_identity(const std::function<void(NodeId &)> &fn) {
-	for (auto &collection : collections)
-		for (NodeId &id : collection) fn(id);
-	model_document_detail::index_places(*this);
+	collections.resize(kCollisionCollections);
 }
 
 bool is_model_kind(AssetKind kind) {
@@ -305,27 +326,55 @@ const std::vector<RecordKindRow> &ModelDocument::kinds() const {
 std::vector<Document::Collection> ModelDocument::collections(const Node &node, const NodeAddress &owner) const {
 	if (node.kind == kModel) {
 		const ModelRow &row = static_cast<const ModelRow &>(node);
-		if (owner.child == 0)
-			return {{spec(ModelKind::Lod, "LODs", "", true), row.collections[0]},
-			        {spec(ModelKind::Material, "Materials", "shader", false), row.collections[1]},
-			        {spec(ModelKind::Light, "Lights", "", false), row.collections[2]},
-			        {spec(ModelKind::UserPoint, "User points", "name", false), row.collections[3]},
-			        {spec(ModelKind::Register, "CTRL registers", "name", false), row.collections[4]},
-			        {spec(ModelKind::Frame, "Rotation frames", "", false), row.collections[5]}};
-		Place p;
-		if (!place_of(row, owner.child, p)) return {};
-		if (p.collection == 0)
-			return {{spec(ModelKind::PartAnimation, "Part animations", "", false), row.lods[p.index].panm_ids}};
-		if (p.collection == 1)
-			return {{spec(ModelKind::Texture, "Textures", "name", false, 24), row.materials[p.index].texture_ids}};
+		if (owner.child == 0) {
+			std::vector<Collection> out;
+			for (uint32_t c = 0; c < kModelCollections; ++c) out.push_back({model_spec(c), row.collections[c]});
+			return out;
+		}
+		// A LOD holds its part animations, a material its texture rows (found by the owner's path).
+		const RecordPath path = path_in(row, owner.child);
+		if (path.size() != 1) return {};
+		const uint32_t i = path[0].index;
+		if (path[0].collection == kLods && i < row.lods.size())
+			return {{part_animations_spec(), row.lods[i].panm_ids}};
+		if (path[0].collection == kMaterials && i < row.materials.size())
+			return {{textures_spec(), row.materials[i].texture_ids}};
 		return {};
 	}
 	if (node.kind != kCollision || owner.child != 0) return {};
-	const CollisionRow &row = static_cast<const CollisionRow &>(node);
-	return {{spec(ModelKind::Section, "Sections", "", true), row.collections[0]},
-	        {spec(ModelKind::Volume, "Volumes", "", true), row.collections[1]},
-	        {spec(ModelKind::Face, "Bullet faces", "", true), row.collections[2]},
-	        {spec(ModelKind::Occlusion, "Occlusion records", "", true), row.collections[3]}};
+	std::vector<Collection> out;
+	for (uint32_t c = 0; c < kCollisionCollections; ++c) out.push_back({collision_spec(c), node.collections[c]});
+	return out;
+}
+
+void ModelDocument::walk_records(const Node &node, const RecordVisitor &visit) const {
+	const NodeAddress top{node.id, node.kind, 0};
+	if (node.kind == kCollision) {
+		for (uint32_t c = 0; c < kCollisionCollections && c < node.collections.size(); ++c) {
+			const CollectionSpec held = collision_spec(c);
+			for (size_t i = 0; i < node.collections[c].size(); ++i)
+				if (!visit({node.id, held.kind, node.collections[c][i]}, Placement{top, held, i, c})) return;
+		}
+		return;
+	}
+	if (node.kind != kModel) return;
+	const ModelRow &row = static_cast<const ModelRow &>(node);
+	for (uint32_t c = 0; c < kModelCollections && c < row.collections.size(); ++c) {
+		const CollectionSpec held = model_spec(c);
+		for (size_t i = 0; i < row.collections[c].size(); ++i) {
+			const NodeAddress record{node.id, held.kind, row.collections[c][i]};
+			if (!visit(record, Placement{top, held, i, c})) return;
+			// What it holds: a LOD's part animations, a material's texture rows.
+			const std::vector<NodeId> *inner = c == kLods && i < row.lods.size() ? &row.lods[i].panm_ids
+			                                   : c == kMaterials && i < row.materials.size()
+			                                           ? &row.materials[i].texture_ids
+			                                           : nullptr;
+			if (!inner) continue;
+			const CollectionSpec inner_spec = c == kLods ? part_animations_spec() : textures_spec();
+			for (size_t k = 0; k < inner->size(); ++k)
+				if (!visit({node.id, inner_spec.kind, (*inner)[k]}, Placement{record, inner_spec, k, 0})) return;
+		}
+	}
 }
 
 const std::vector<FieldSchema> &ModelDocument::schema(NodeKind kind) {
@@ -354,7 +403,7 @@ const std::vector<FieldSchema> &ModelDocument::schema(NodeKind kind) {
 void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	const Node *node = row(address.row);
 	if (!node) return;
-	const ThreediSchemaRecord record = record_of(const_cast<Node &>(*node), address);
+	const ThreediSchemaRecord record = record_of(*this, const_cast<Node &>(*node), address);
 	if (!record) return;
 	const std::string &id = use.schema->id;
 	const ThreediSchemaField *schema = threedi_schema_field(record.shape, id);
@@ -364,14 +413,20 @@ void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 	const ThreediSchemaReference ref = threedi_schema_reference(record, id);
 	use.reference =
 			ref == ThreediSchemaReference::Texture ? ReferenceKind::Texture : ReferenceKind::None;
-	// An index names what the model row holds (record_choices): its registers and frames are
-	// its records, LOD 0's parts are not.
+	// An index names what the model row holds: its registers and frames are its records, named
+	// by their index (a Record reference, S13 D8: the picker offers them, the core renumbers it);
+	// LOD 0's parts are not records (record_choices offers them). A model with no CTRL table skips
+	// the material and part-animation swaps, so their bytes stay the global registers they number
+	// [orig: ThreediGp_LoadFromFile @ 0x5B5C49], no record of the model; a light's pass runs either
+	// way [orig: ThreediGp_LoadFromFile @ 0x5B5F4D..0x5B5F62] (with no table it faults the load,
+	// the validator's error).
 	if (node->kind == kModel) {
-		const ThreediSchemaReference named = index_reference(record, id, ref);
-		if (named != ThreediSchemaReference::None) {
-			use.own_choices = true;
-			if (named != ThreediSchemaReference::Part) use.record_owner = {node->id, kModel, 0};
-		}
+		const ThreediSchemaReference named = index_reference(record, schema, id, ref);
+		const bool swapped = !static_cast<const ModelRow &>(*node).registers.empty() ||
+		                     record.shape == ThreediSchemaShape::Light;
+		if (named == ThreediSchemaReference::Part) use.own_choices = true;
+		else if (named == ThreediSchemaReference::Frame || (named == ThreediSchemaReference::Register && swapped))
+			use.reference = record_reference(named);
 	}
 	// A texture row's name loads the file its type's loader picks (reference_file_candidates).
 	if (use.reference == ReferenceKind::Texture && record.shape == ThreediSchemaShape::Texture)
@@ -385,13 +440,13 @@ bool ModelDocument::record_choices(const NodeAddress &address, const FieldUse &u
 		std::vector<FieldChoice> &out) const {
 	const Node *node = row(address.row);
 	if (!node || node->kind != kModel) return false;
-	const ThreediSchemaRecord record = record_of(const_cast<Node &>(*node), address);
+	const ThreediSchemaRecord record = record_of(*this, const_cast<Node &>(*node), address);
 	if (!record) return false;
 	const std::string &id = use.schema->id;
-	const ThreediSchemaReference named =
-			index_reference(record, id, threedi_schema_reference(record, id));
-	if (named == ThreediSchemaReference::None) return false;
-	index_choices(static_cast<const ModelRow &>(*node), record, named, *use.schema, out);
+	if (index_reference(record, threedi_schema_field(record.shape, id), id, threedi_schema_reference(record, id)) !=
+	    ThreediSchemaReference::Part)
+		return false;
+	part_choices(static_cast<const ModelRow &>(*node), record, *use.schema, out);
 	return true;
 }
 
@@ -409,7 +464,7 @@ void ModelDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts
 }
 
 bool ModelDocument::read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const {
-	const ThreediSchemaRecord record = record_of(const_cast<Node &>(row), address);
+	const ThreediSchemaRecord record = record_of(*this, const_cast<Node &>(row), address);
 	return record && threedi_schema_get(record, field, out);
 }
 
@@ -591,7 +646,7 @@ std::shared_ptr<Node> ModelDocument::make_node(NodeKind, NodeId,
 
 bool ModelDocument::set_field(Node &node, const NodeAddress &address, const std::string &field, const Value &value,
                               std::string &error) {
-	const ThreediSchemaRecord record = record_of(node, address);
+	const ThreediSchemaRecord record = record_of(*this, node, address);
 	if (!record) {
 		error = "The record no longer exists.";
 		return false;
@@ -608,8 +663,9 @@ bool ModelDocument::set_field(Node &node, const NodeAddress &address, const std:
 		return false;
 	}
 	const ModelRow &row = static_cast<const ModelRow &>(node);
-	Place p;
-	const bool drawn = place_of(row, address.child, p) && model_document_detail::material_is_drawn(row, row.materials[p.index].source);
+	const RecordPath at = path_in(row, address.child);
+	const bool drawn = at.size() == 1 && at[0].collection == kMaterials && at[0].index < row.materials.size() &&
+	                   model_document_detail::material_is_drawn(row, row.materials[at[0].index].source);
 	uint32_t flags = 0;
 	const bool known = model_document_detail::shader_flags(tag->c_str(), flags);
 	if (drawn && known) {

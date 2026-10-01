@@ -1,5 +1,6 @@
 #include <editor/graph/graph_layer.h>
 
+#include <algorithm>
 #include <utility>
 
 #include <editor/graph/graph_names.h>
@@ -32,6 +33,14 @@ std::shared_ptr<const GraphLayer> GraphLayer::build(
 			continue;
 		}
 		slot.symbols = std::move(content.symbols);
+		// A record set names what its own file's references resolve to (a Record reference, S13 D8):
+		// no project file's, so the layer keeps none.
+		slot.symbols.erase(std::remove_if(slot.symbols.begin(), slot.symbols.end(),
+		                                  [](const GraphSymbol &symbol) {
+			                                  return reference_row(symbol.kind).resolution ==
+			                                         ReferenceResolution::Record;
+		                                  }),
+		                   slot.symbols.end());
 		layer->index_.insert_content(id);
 	}
 	if (stats) *stats = counted;

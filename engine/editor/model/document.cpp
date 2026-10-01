@@ -5,6 +5,7 @@
 #include <cctype>
 #include <cstdlib>
 
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/staged_rows.h>
 
 namespace opennova::editor {
@@ -99,16 +100,54 @@ const Node *Document::row(NodeId id) const {
 
 void Document::walk_records(const Node &row, const RecordVisitor &visit) const {
 	std::function<bool(const NodeAddress &)> descend = [&](const NodeAddress &owner) {
-		for (const Collection &collection : collections(row, owner)) {
+		const std::vector<Collection> held = collections(row, owner);
+		for (size_t c = 0; c < held.size(); ++c) {
+			const Collection &collection = held[c];
 			for (size_t i = 0; i < collection.ids.size(); ++i) {
 				const NodeAddress record{row.id, collection.spec.kind, collection.ids[i]};
-				if (!visit(record, Placement{owner, collection.spec, i})) return false;
+				if (!visit(record, Placement{owner, collection.spec, i, c})) return false;
 				if (!descend(record)) return false;
 			}
 		}
 		return true;
 	};
 	descend({row.id, row.kind, 0});
+}
+
+Document::RecordPath Document::RowIndex::path(NodeId record) const {
+	const auto found = records.find(record);
+	if (found == records.end()) return {};
+	return {steps.data() + found->second.path, found->second.depth};
+}
+
+Document::RowIndex Document::make_index(const Node &row) const {
+	RowIndex index;
+	const std::vector<TargetedCollection> &targets = targeted_collections();
+	index.targeted.resize(targets.size());
+	// A walk meets an owner before what it holds: a record's path is its owner's, then its own step.
+	walk_records(row, [&](const NodeAddress &record, const Placement &at) {
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == record.kind) index.targeted[t].push_back(record.child);
+		RowIndex::Entry entry;
+		entry.at = at;
+		entry.path = uint32_t(index.steps.size());
+		if (at.owner.child) {
+			const auto owner = index.records.find(at.owner.child);
+			if (owner != index.records.end()) {
+				const RowIndex::Entry held = owner->second;
+				for (uint32_t s = 0; s < held.depth; ++s) {
+					const PathStep step = index.steps[held.path + s];
+					index.steps.push_back(step);
+				}
+				entry.depth = held.depth;
+			}
+		}
+		index.steps.push_back({uint32_t(at.collection), uint32_t(at.index)});
+		++entry.depth;
+		index.records.emplace(record.child, entry);
+		return true;
+	});
+	return index;
 }
 
 const Document::RowIndex &Document::row_index_of(const std::shared_ptr<const Node> &row) const {
@@ -126,24 +165,50 @@ const Document::RowIndex &Document::row_index_of(const std::shared_ptr<const Nod
 			}
 		indexes_.swap(kept);
 	}
-	RowIndex index;
+	RowIndex index = make_index(*row);
 	index.row = row;
-	walk_records(*row, [&](const NodeAddress &record, const Placement &at) {
-		index.placements.emplace(record.child, at);
-		return true;
-	});
 	return indexes_.emplace(row.get(), std::move(index)).first->second;
 }
 
+const Document::RowIndex *Document::index_for(const Node &row) const {
+	// A row indexed before: an entry keeps its row alive, so its address names that row.
+	const auto indexed = indexes_.find(&row);
+	if (indexed != indexes_.end()) return &indexed->second;
+	// The batch's own version of a row: one an edit of the batch changed the shape of (or made) has
+	// an index of its own, made by walking it as it is; any other has its committed row's shape.
+	if (staged_ && staged_->find(row.id) == &row) {
+		if (staged_->reshaped(row.id)) {
+			auto own = staged_indexes_.find(row.id);
+			if (own == staged_indexes_.end()) own = staged_indexes_.emplace(row.id, make_index(row)).first;
+			return &own->second;
+		}
+		const std::shared_ptr<const Node> committed = current_row(row.id);
+		return committed ? &row_index_of(committed) : nullptr;
+	}
+	if (const std::shared_ptr<const Node> now = current_row(row.id); now.get() == &row)
+		return &row_index_of(now);
+	if (const std::shared_ptr<const Node> saved = saved_row(row.id); saved.get() == &row)
+		return &row_index_of(saved);
+	return nullptr;
+}
+
+Document::RecordPath Document::path_in(const Node &row, NodeId record) const {
+	if (!record) return {};
+	if (const RowIndex *index = index_for(row)) return index->path(record);
+	walked_ = make_index(row);
+	return walked_.path(record);
+}
+
 bool Document::placement_in(const Node &row, NodeId child, Placement &out) const {
-	bool found = false;
-	walk_records(row, [&](const NodeAddress &record, const Placement &at) {
-		if (record.child != child) return true;
-		out = at;
-		found = true;
-		return false;
-	});
-	return found;
+	const RowIndex *index = index_for(row);
+	if (!index) {
+		walked_ = make_index(row);
+		index = &walked_;
+	}
+	const auto found = index->records.find(child);
+	if (found == index->records.end()) return false;
+	out = found->second.at;
+	return true;
 }
 
 void Document::index_records() const {
@@ -151,7 +216,7 @@ void Document::index_records() const {
 	// A version's records out of the index, those still indexed under its row (one another row
 	// has taken since keeps that row).
 	const auto take_out = [&](NodeId row, const std::shared_ptr<const Node> &version) {
-		for (const auto &record : row_index_of(version).placements) {
+		for (const auto &record : row_index_of(version).records) {
 			const auto entry = record_rows_.find(record.first);
 			if (entry != record_rows_.end() && entry->second == row) record_rows_.erase(entry);
 		}
@@ -161,7 +226,7 @@ void Document::index_records() const {
 		if (indexed == row) continue;
 		if (indexed) take_out(row->id, indexed);
 		record_rows_[row->id] = row->id;
-		for (const auto &record : row_index_of(row).placements)
+		for (const auto &record : row_index_of(row).records)
 			record_rows_[record.first] = row->id;
 		indexed = row;
 	}
@@ -194,10 +259,10 @@ NodeAddress Document::address_of(NodeId id) const {
 	if (index >= rows_.size()) return {};
 	const std::shared_ptr<const Node> &row = rows_[index];
 	if (row->id == id) return {row->id, row->kind, 0};
-	const RowIndex &records = row_index_of(row);
-	const auto placed = records.placements.find(id);
-	if (placed == records.placements.end()) return {};
-	return {row->id, placed->second.spec.kind, id};
+	const RowIndex &indexed = row_index_of(row);
+	const auto placed = indexed.records.find(id);
+	if (placed == indexed.records.end()) return {};
+	return {row->id, placed->second.at.spec.kind, id};
 }
 
 FieldUse Document::field_on(const NodeAddress &address, const FieldSchema &field) const {
@@ -206,6 +271,11 @@ FieldUse Document::field_on(const NodeAddress &address, const FieldSchema &field
 	use.schema = &field;
 	// A type never makes a read-only field writable.
 	use.read_only = use.read_only || field.read_only;
+	// A record of this file by its index, counted across the file, resolves in this file (S13 D8):
+	// its scope is the file.
+	const ReferenceKindRow &reference = reference_row(use.reference);
+	if (reference.resolution == ReferenceResolution::Record && reference.index_space == RecordIndexSpace::File)
+		use.scope = path();
 	return use;
 }
 
@@ -241,10 +311,10 @@ bool Document::placement(const NodeAddress &address, Placement &out) const {
 	if (!address.child) return false;
 	const size_t index = row_index(address.row);
 	if (index == rows_.size()) return false;
-	const RowIndex &records = row_index_of(rows_[index]);
-	const auto found = records.placements.find(address.child);
-	if (found == records.placements.end()) return false;
-	out = found->second;
+	const RowIndex &indexed = row_index_of(rows_[index]);
+	const auto found = indexed.records.find(address.child);
+	if (found == indexed.records.end()) return false;
+	out = found->second.at;
 	return true;
 }
 
@@ -438,6 +508,16 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 		return false;
 	};
 	StagedRows staged(rows_, file_state_, [this](NodeId id) { return row_index(id); });
+	// While the batch stages, path_in answers for the rows as it leaves them (its own index of each
+	// row an edit changes the shape of); its indexes go with it.
+	struct Staging {
+		Document &document;
+		~Staging() {
+			document.staged_ = nullptr;
+			document.staged_indexes_.clear();
+		}
+	} staging{*this};
+	staged_ = &staged;
 	std::vector<NodeId> made, added;
 	if (!stage_edits(edits, staged, made, added, error)) return refused();
 	staged.for_each_changed([this](Node &row) { after_edit(row); });
@@ -515,7 +595,13 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		NodeId id = 0, row = 0;
 	};
 	std::vector<Made> made(edits.size());
-	for (size_t i = 0; i < edits.size(); ++i) {
+	// The collections other records name by their index (S13 D8), whose order an edit that may move
+	// their records is compared by (renumber): none for a document of a kind no Record reference
+	// names, which pays nothing for them.
+	const std::vector<TargetedCollection> targets = targeted_collections();
+	// One edit staged against the rows as the edits before it left them; false, with `error`, when
+	// it is refused.
+	const auto stage_one = [&](size_t i) -> bool {
 		Edit edit = edits[i];
 		std::string message;
 		// The hook's own words where it gave some, else `words`.
@@ -559,7 +645,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 		// The file-wide state alone: a value, or a change the type made naming no row.
 		if (edit.operation == EditOperation::SetFileValue) {
 			if (!set_file_value(staged.state(), edit, error)) return false;
-			continue;
+			return true;
 		}
 		if (edit.operation == EditOperation::Apply && !edit.address.row && !edit.address.child) {
 			if (!edit.payload)
@@ -571,7 +657,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			if (!apply_file_payload(state, *edit.payload, changes, message))
 				return refuse(C::DocumentPayload, said("This document does not take that change."));
 			if (changes) staged.state() = std::move(state);
-			continue;
+			return true;
 		}
 
 		// The row the edit is about: the one it names, else the one its record or its owner is in.
@@ -606,7 +692,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				staged.insert(std::move(row), edit.position);
 				made[i] = {id, id};
 				added.push_back(id);
-				continue;
+				return true;
 			}
 			std::vector<std::shared_ptr<Node>> pasted;
 			if (!paste_rows(edit, staged.rows(), pasted, message))
@@ -620,7 +706,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				added.push_back(id);
 				staged.insert(std::move(row), at++);
 			}
-			continue;
+			return true;
 		}
 		const NodeId row_id = edit.address.row;
 		if (staged.removed(row_id))
@@ -639,6 +725,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				return refuse(C::DocumentCollection, "A row moves among the rows only.");
 			if (edit.operation == EditOperation::Remove) {
 				staged.state() = state_after_remove(staged.state(), staged.size() - 1);
+				staged_indexes_.erase(row_id);
 				staged.remove(row_id);
 			} else if (edit.operation == EditOperation::Duplicate) {
 				std::shared_ptr<Node> copy = current->clone();
@@ -656,16 +743,20 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				// A Move that leaves the row where it is changes nothing.
 				staged.move(row_id, edit.position);
 			}
-			continue;
+			return true;
 		}
 
 		// A record inside the row: the row's clone changed (the row cloned on its first touch).
 		Node *updated = staged.touch(row_id);
 		// A nested record's placement: the committed row's index until an edit of this batch
-		// changes the row's shape (or the batch made the row), then a walk of the clone.
-		auto place = [&](NodeId child, Placement &at) {
-			return staged.reshaped(row_id) ? placement_in(*updated, child, at)
-			                               : placement({row_id, 0, child}, at);
+		// changes the row's shape (or the batch made the row), then the batch's own index of the
+		// clone, made by one walk (placement_in, as path_in reads it).
+		auto place = [&](NodeId child, Placement &at) { return placement_in(*updated, child, at); };
+		// A structural hook changed what the row holds: from here its index is the batch's own, made
+		// again when next asked (the new record's field an Add sets reads it, so does a later edit).
+		const auto reshaped = [&] {
+			staged.mark_reshaped(row_id);
+			staged_indexes_.erase(row_id);
 		};
 		// The owner a record goes into: a record of this row, or the row itself (0).
 		auto owner_of = [&](NodeId parent, NodeAddress &owner) {
@@ -721,7 +812,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				return refuse(C::DocumentValue, said("Unknown field."), edit.field);
 			if (read_before && read(*updated, address, edit.field, after) && after == before &&
 			    read_present(*updated, address, edit.field) == written_before)
-				continue;
+				return true;
 			break;
 		}
 		case EditOperation::Apply: {
@@ -733,7 +824,8 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			bool changes = true;
 			if (!apply_payload(*updated, address, *edit.payload, state, allocate, changes, message))
 				return refuse(C::DocumentPayload, said("This document does not take that change."));
-			if (!changes) continue;
+			reshaped();
+			if (!changes) return true;
 			staged.state() = std::move(state);
 			break;
 		}
@@ -745,7 +837,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				return refuse(C::DocumentValue, "This field is always written.", edit.field);
 			const bool written = edit.operation == EditOperation::Write;
 			// A field already left out (Clear) or already written (Write) changes nothing.
-			if (read_present(*updated, address, edit.field) == written) continue;
+			if (read_present(*updated, address, edit.field) == written) return true;
 			if (!set_present(*updated, address, edit.field, written, message))
 				return refuse(C::DocumentValue, said("This field is always written."), edit.field);
 			break;
@@ -760,6 +852,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				std::vector<NodeId> pasted;
 				if (!paste_records(*updated, hook, allocate, pasted, message))
 					return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
+				reshaped();
 				added.insert(added.end(), pasted.begin(), pasted.end());
 				if (!pasted.empty()) made[i] = {pasted.front(), row_id};
 				break;
@@ -773,6 +866,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			if (!edit_collection(*updated, hook, allocate, one, message))
 				return refuse(C::DocumentCollection,
 				              said("This collection cannot accept that edit."));
+			reshaped();
 			if (one) {
 				added.push_back(one);
 				made[i] = {one, row_id};
@@ -819,13 +913,14 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				// A Move that leaves the record where it is changes nothing (B5).
 				if (destination == at.owner && !collection.ids.empty() &&
 				    std::min(edit.position, collection.ids.size() - 1) == at.index)
-					continue;
+					return true;
 				hook.parent = destination.child;
 			}
 			NodeId one = 0;
 			if (!edit_collection(*updated, hook, allocate, one, message))
 				return refuse(C::DocumentCollection,
 				              said("This collection cannot accept that edit."));
+			reshaped();
 			if (one) {
 				added.push_back(one);
 				made[i] = {one, row_id};
@@ -836,10 +931,124 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			return refuse(C::DocumentBatch, "This edit names no record.");
 		}
 		staged.mark_changed(row_id);
-		if (structural(edit.operation)) staged.mark_reshaped(row_id);
+		return true;
+	};
+	for (size_t i = 0; i < edits.size(); ++i) {
+		const bool reorders = !targets.empty() && structural(edits[i].operation);
+		const std::vector<std::vector<NodeId>> before =
+		        reorders ? collection_orders(targets, staged) : std::vector<std::vector<NodeId>>();
+		if (!stage_one(i)) return false;
+		if (reorders && !renumber(targets, before, staged, error)) return false;
 	}
 	made_by_edit.assign(edits.size(), 0);
 	for (size_t i = 0; i < edits.size(); ++i) made_by_edit[i] = made[i].id;
+	return true;
+}
+
+const std::vector<Document::TargetedCollection> &Document::targeted_collections() const {
+	if (targets_known_) return targets_;
+	// The Record kinds the type's schema names on a field of any of its kinds, each whose collection
+	// is one of its record kinds, in the reference kinds' order.
+	std::vector<bool> named(kReferenceKindCount, false);
+	for (const RecordKindRow &row : kinds())
+		for (const FieldSchema &field : fields(row.kind)) {
+			const size_t k = static_cast<size_t>(field.reference);
+			if (k < named.size() && reference_row(field.reference).resolution == ReferenceResolution::Record)
+				named[k] = true;
+		}
+	targets_.clear();
+	for (size_t k = 0; k < named.size(); ++k) {
+		if (!named[k]) continue;
+		const ReferenceKindRow &row = reference_row(static_cast<ReferenceKind>(k));
+		const NodeKind held = kind_from_name(row.collection);
+		if (held >= 0) targets_.push_back({row.kind, held});
+	}
+	targets_known_ = true;
+	return targets_;
+}
+
+std::vector<std::vector<NodeAddress>> Document::record_sets() const {
+	const std::vector<TargetedCollection> &targets = targeted_collections();
+	std::vector<std::vector<NodeAddress>> sets(targets.size());
+	if (targets.empty()) return sets;
+	for (const auto &row : rows_) {
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == row->kind) sets[t].push_back({row->id, row->kind, 0});
+		const RowIndex &index = row_index_of(row);
+		for (size_t t = 0; t < targets.size(); ++t)
+			for (const NodeId id : index.targeted[t]) sets[t].push_back({row->id, targets[t].kind, id});
+	}
+	return sets;
+}
+
+std::string Document::own_name(const NodeAddress &address) const {
+	const Node *top = row(address.row);
+	if (!top) return std::string();
+	if (!address.child) return top->name();
+	Placement at;
+	if (!placement(address, at) || !*at.spec.name_field) return std::string();
+	Value name;
+	if (!get(address, at.spec.name_field, name)) return std::string();
+	const auto *text = std::get_if<std::string>(&name);
+	return text ? *text : std::string();
+}
+
+bool Document::renumber_references(const StagedRows &, const RecordShift &shift,
+                                   std::vector<Edit> &, std::string &error) const {
+	error = std::string("Other records name each ") + reference_row(shift.reference).label +
+	        " by its index, which this document does not renumber.";
+	return false;
+}
+
+std::vector<std::vector<NodeId>> Document::collection_orders(
+		const std::vector<TargetedCollection> &targets, const StagedRows &staged) const {
+	std::vector<std::vector<NodeId>> orders(targets.size());
+	for (const auto &row : staged.rows()) {
+		for (size_t t = 0; t < targets.size(); ++t)
+			if (targets[t].kind == row->kind) orders[t].push_back(row->id);
+		// The row's own index (index_for: the committed row's, or the batch's own once an edit
+		// reshaped it), each list copied before another row's index is asked for.
+		const RowIndex *index = index_for(*row);
+		RowIndex walked;
+		if (!index) {
+			walked = make_index(*row);
+			index = &walked;
+		}
+		for (size_t t = 0; t < targets.size() && t < index->targeted.size(); ++t)
+			orders[t].insert(orders[t].end(), index->targeted[t].begin(), index->targeted[t].end());
+	}
+	return orders;
+}
+
+bool Document::renumber(const std::vector<TargetedCollection> &targets,
+                        const std::vector<std::vector<NodeId>> &before, StagedRows &staged,
+                        Diagnostic &error) {
+	const std::vector<std::vector<NodeId>> after = collection_orders(targets, staged);
+	for (size_t t = 0; t < targets.size(); ++t) {
+		if (after[t] == before[t]) continue;
+		// Where each record the edit found stands now, and how many it left: one added past the
+		// others moves none of them, but an index past them moves with the count (RecordShift::now).
+		RecordShift shift;
+		shift.reference = targets[t].reference;
+		shift.kind = targets[t].kind;
+		shift.after = after[t].size();
+		std::unordered_map<NodeId, size_t> now;
+		for (size_t k = 0; k < after[t].size(); ++k) now.emplace(after[t][k], k);
+		shift.to.reserve(before[t].size());
+		for (size_t k = 0; k < before[t].size(); ++k) {
+			const auto found = now.find(before[t][k]);
+			shift.to.push_back(found == now.end() ? RecordShift::kRemoved : found->second);
+		}
+		if (!shift.moves()) continue;
+		std::vector<Edit> sites;
+		std::string message;
+		if (!renumber_references(staged, shift, sites, message))
+			return fail(error, path(), CoreFinding::DocumentCollection,
+			            message.empty() ? "This collection cannot accept that edit." : message);
+		// The type's Sets, in the same step, against the rows as the edit left them.
+		std::vector<NodeId> made, added;
+		if (!sites.empty() && !stage_edits(sites, staged, made, added, error)) return false;
+	}
 	return true;
 }
 
@@ -881,8 +1090,8 @@ bool Document::holds(const std::shared_ptr<const Node> &row, const NodeAddress &
 	if (!row) return false;
 	if (!address.child) return row->kind == address.kind;
 	const RowIndex &index = row_index_of(row);
-	const auto found = index.placements.find(address.child);
-	return found != index.placements.end() && found->second.spec.kind == address.kind;
+	const auto found = index.records.find(address.child);
+	return found != index.records.end() && found->second.at.spec.kind == address.kind;
 }
 
 const FieldSchema *Document::field_schema(NodeKind kind, const std::string &id) const {

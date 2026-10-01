@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/id_list.h>
 #include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/anim_slot_names.h>
 
@@ -263,44 +264,12 @@ bool AnimationMapDocument::set_field(Node &node, const NodeAddress &address, con
 bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const IdAllocator &allocate, NodeId &added,
                                            std::string &error) {
 	AnimationMapRow &r = row_of(node);
-	auto &ids = r.collections[0];
-	const size_t index = clip_index(r, edit.address.child);
-	if (edit.operation != EditOperation::Add && index == SIZE_MAX) {
-		error = "The clip no longer exists.";
+	const bool grows = edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate;
+	if (grows && r.clips.size() >= size_t(adm::ADM_MAX_VARIANTS)) {
+		error = "A row names at most 8 clips.";
 		return false;
 	}
-	switch (edit.operation) {
-	case EditOperation::Add:
-	case EditOperation::Duplicate: {
-		if (r.clips.size() >= size_t(adm::ADM_MAX_VARIANTS)) {
-			error = "A row names at most 8 clips.";
-			return false;
-		}
-		const std::string clip = edit.operation == EditOperation::Duplicate ? r.clips[index] : std::string();
-		const size_t at = std::min(edit.position, r.clips.size());
-		r.clips.insert(r.clips.begin() + static_cast<std::ptrdiff_t>(at), clip);
-		added = allocate();
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(at), added);
-		return true;
-	}
-	case EditOperation::Remove:
-		r.clips.erase(r.clips.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-		return true;
-	case EditOperation::Move: {
-		const size_t to = std::min(edit.position, r.clips.size() - 1);
-		const std::string clip = r.clips[index];
-		const NodeId id = ids[index];
-		r.clips.erase(r.clips.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-		r.clips.insert(r.clips.begin() + static_cast<std::ptrdiff_t>(to), clip);
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(to), id);
-		return true;
-	}
-	default:
-		error = "A row's clips cannot take that edit.";
-		return false;
-	}
+	return edit_id_list(r.clips, r.collections[0], edit, std::string(), allocate, added, error);
 }
 
 namespace {
