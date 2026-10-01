@@ -74,6 +74,24 @@ constexpr uint32_t SESSION_GATE_PROBE_TIMEOUT_MS = 30000u;
 // lobby session sits in state 4 (verified), the session checks its GLSVSS deadline at most once
 // per 1000 ms. [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4d4400 @0x4d44e3]
 constexpr uint32_t SESSION_GLSVSS_POLL_MS = 1000u;
+// The NWU connection's reconnect: a client connection torn down while the session's
+// hosting/playing word is nonzero (the conn+0x710 mirror) re-probes its UDPNOVAWORLD target
+// with the same-CI 0x41 every SESSION_CONNECT_RETRANSMIT_MS for a 10000 ms window, then waits a
+// gap that starts at 1000 ms and grows by 1000 ms per window up to 60000 ms; a ServerHello
+// re-joins with a fresh CK/SCRK, the 0x42 re-sent every SESSION_CONNECT_RETRANSMIT_MS for at
+// most 20000 ms before probing resumes. It never gives up on its own.
+// [orig: CNapiNPConnection_Create @0x62ae10..0x62ae3c (+0x718 = 10000);
+//  CNapiGameSession_InitNPConnection @0x4d4098..0x4d40bc (+0x714/+0x71C/+0x720/+0x724 = 1000,
+//  +0x728 = 60000); CNapiGameSession_InitPlayerConnection @0x4d4318..0x4d4321 (+0x5B0 = 3000,
+//  +0x5B4 = 20000); CNapiNPConnection_PumpStateMachine @0x6292e0 (case 3 @0x629508, the
+//  reconnect tail @0x629487..0x6296cb)]
+constexpr uint32_t SESSION_RECONNECT_FIRST_DELAY_MS = 1000u;   // conn+0x714
+constexpr uint32_t SESSION_RECONNECT_PROBE_WINDOW_MS = 10000u; // conn+0x718
+constexpr uint32_t SESSION_RECONNECT_GAP_INITIAL_MS = 1000u;   // conn+0x71C
+constexpr uint32_t SESSION_RECONNECT_GAP_STEP_MS = 1000u;      // conn+0x720
+constexpr int32_t SESSION_RECONNECT_GAP_MIN_MS = 1000;         // conn+0x724
+constexpr int32_t SESSION_RECONNECT_GAP_MAX_MS = 60000;        // conn+0x728
+constexpr uint32_t SESSION_JOIN_TIMEOUT_MS = 20000u;           // conn+0x5B4
 // The host's server-info refresh: Server_TickUpdate reloads g_ServerInfoUpdateTimer to 0x744
 // logic ticks, advances the PCID cookie-key ring and republishes the Host list.
 // [orig: Server_TickUpdate @0x51d7e0 @0x51d91d..0x51d948]

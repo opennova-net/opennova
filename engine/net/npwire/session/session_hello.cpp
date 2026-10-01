@@ -250,7 +250,10 @@ bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out) {
 		else if (strutil::iequals(name, "SPN"))  out.spn  = read_u32_le(value, size);
 		else if (strutil::iequals(name, "SCRK")) out.scrk = strip_nul(value, size);
 		else if (strutil::iequals(name, "CU"))   out.cu.emplace_back(value, value + size);
-		// Unknown tags (DE/PV3/NF/DCNT/RCNT/etc.) intentionally ignored.
+		else if (strutil::iequals(name, "NF"))   out.nf   = read_u32_le(value, size);
+		else if (strutil::iequals(name, "DCNT")) out.dcnt = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RCNT")) out.rcnt = read_u32_le(value, size);
+		// Unknown tags (DE/PV3/etc.) intentionally ignored.
 		pos = next;
 	}
 	// Minimum sanity: CK should be nonzero for a valid ClientAuth.
@@ -288,6 +291,10 @@ std::vector<uint8_t> client_auth_to_bytes(const ClientAuth &msg) {
 		append_bytes_field(buf, "CU", blob.data(), blob.size());
 	}
 	if (!msg.scrk.empty()) append_string_field(buf, "SCRK", msg.scrk);
+	// The reconnect trailer, each tag only when nonzero [orig: @0x620309..0x62037f].
+	if (msg.nf) append_u32_field(buf, "NF", msg.nf);
+	if (msg.dcnt) append_u32_field(buf, "DCNT", msg.dcnt);
+	if (msg.rcnt) append_u32_field(buf, "RCNT", msg.rcnt);
 	return buf;
 }
 
@@ -569,6 +576,8 @@ std::vector<uint8_t> server_auth_to_bytes(const ServerAuth &msg) {
 	// [orig: CNapiNPConnection_SendSessionInit @ 0x620ef0 (@ 0x62121e / 0x621242)]
 	if (msg.rip) append_u32_field(buf, "RIP", msg.rip);
 	if (msg.rpn) append_u32_field(buf, "RPN", msg.rpn);
+	// [orig: SendSessionInit @0x62125d — RCNT only when nonzero]
+	if (msg.rcnt) append_u32_field(buf, "RCNT", msg.rcnt);
 	return buf;
 }
 
@@ -639,6 +648,7 @@ bool parse_server_auth(const uint8_t *data, size_t len, ServerAuth &out) {
 		else if (strutil::iequals(name, "NA"))   out.na   = strip_nul(value, size);
 		else if (strutil::iequals(name, "RIP"))  out.rip  = read_u32_le(value, size);
 		else if (strutil::iequals(name, "RPN"))  out.rpn  = read_u32_le(value, size);
+		else if (strutil::iequals(name, "RCNT")) out.rcnt = read_u32_le(value, size);
 		// Unknown tags intentionally ignored.
 		pos = next;
 	}

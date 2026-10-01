@@ -6,7 +6,7 @@
 // NwUdpListener — the UDP socket, the NWU/CRC envelope decode, the HELLO->AUTH->
 // SESSION opcode dispatch, and the PN routing into the lobby path. This closes
 // that gap: it stands up a real NwUdpListener on a loopback UDP port and drives
-// a real ClientSession (the same one NovaWorldHost runs) through the full
+// a real ClientSession (the same one NovaWorldClient runs when it hosts) through the full
 // handshake to Verified, then sends a ClientHostRequest and asserts the host
 // shows up in the listener's hosted snapshot — the source /api/hosts + the GSB
 // browser read from. This is the F1 "browsable host" claim, verified against the
@@ -31,7 +31,9 @@
 #include <cstdint>
 #include <cstdio>
 #include <optional>
+#include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -92,7 +94,7 @@ int main() {
 	std::this_thread::sleep_for(50ms);
 
 	// The client: a real ClientSession over a real UDP socket — exactly what
-	// NovaWorldHost::begin_session sets up (minus the gate-probe leg, which only
+	// NwuLobbySession::begin_session sets up (minus the gate-probe leg, which only
 	// resolves this endpoint; we know it directly).
 	opennova::ClientSession::Config cfg;
 	cfg.cookie_vars = []() {
@@ -281,7 +283,7 @@ int main() {
 
 	if (verified) {
 		using opennova::ClientVar;
-		// Register a host the same way NovaWorldHost does on the wire.
+		// Register a host the same way NovaWorldClient's hosting half does on the wire.
 		auto host_req = opennova::make_client_host_request(
 		    /*CurrentlyHosting*/ 1,
 		    /*Cookie*/    {{0, "NWUID", session.server_nwuid()}},
@@ -383,6 +385,117 @@ int main() {
 		}
 		expect(players == 7,
 		       "permanent lobby packet loss cannot stall later semantic traffic");
+	}
+
+	// The NWU reconnect against the real listener: a registered host's connection drops (its own
+	// reap: the 0x46 burst reaches the listener, which drops the connection and parks its lobby
+	// identity), the session re-probes with the same CI, re-joins with a fresh CK counting the
+	// disconnect (the 0x82 echoes RCNT 1), re-verifies and re-hosts with CurrentlyHosting=1,
+	// keeping its RID and GSID. [orig: PumpStateMachine @0x629487..0x6296cb;
+	//  HandleClientJoin @0x62c28d..0x62c2a3; HandleConnectVerifyResponse @0x4d5961..0x4d5978]
+	{
+		uint16_t recon_port = 0;
+		auto recon_client = opennova::net::udp_bind(0, &recon_port);
+		expect(recon_client.is_valid(), "reconnect UDP socket bound");
+		auto send_recon = [&](const std::vector<uint8_t> &dg) {
+			if (!dg.empty() && recon_client.is_valid())
+				opennova::net::udp_send_to(recon_client, server_ep, dg.data(), dg.size());
+		};
+		opennova::ClientSession::Config rcfg;
+		rcfg.client_index = 0x5245434Eu;
+		rcfg.client_key = 0x52454331u;
+		rcfg.na = "reconnect:host";
+		rcfg.cookie_vars = []() {
+			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+		};
+		rcfg.next_client_key = []() { return 0x52454332u; };
+		opennova::ClientSession recon(rcfg);
+		// Receive, dispatch and answer until `done` holds (the session clock stays put).
+		auto drive = [&](auto done, int rounds) {
+			for (int i = 0; i < rounds && !done(); ++i) {
+				uint8_t buf[4096];
+				opennova::net::Endpoint from;
+				const int n = recon_client.is_valid()
+						? opennova::net::udp_recv_from(recon_client, buf, sizeof buf, from, 50)
+						: -1;
+				std::vector<std::vector<uint8_t>> out;
+				if (n > 0) recon.handle_datagram(buf, static_cast<size_t>(n), out);
+				recon.process_periodic_update(out);
+				for (const auto &dg : out) send_recon(dg);
+			}
+			return done();
+		};
+		auto hosted_row = [&](uint32_t &rid) {
+			for (const auto &row : listener.snapshot_hosted()) {
+				if (row.lobby.server_name == "Reconnect Host" && row.lobby.hosting) {
+					rid = row.lobby.rid;
+					return true;
+				}
+			}
+			return false;
+		};
+		send_recon(recon.start());
+		const bool up = drive([&] { return recon.is_verified(); }, 80);
+		expect(up, "reconnect: the first connect verifies");
+		opennova::HostRegistration reg;
+		reg.server_name = "Reconnect Host";
+		reg.app_id = 1357;
+		if (up) send_recon(recon.build_host_request(reg, 0));
+		const bool hosting = up && drive([&] {
+			return recon.host_state() == opennova::ClientSession::HostState::Established;
+		}, 80);
+		expect(hosting, "reconnect: the host registers");
+		const std::string gsid = recon.host_gsid();
+		uint32_t rid_before = 0;
+		for (int i = 0; i < 50 && !hosted_row(rid_before); ++i) std::this_thread::sleep_for(20ms);
+		expect(hosting && rid_before != 0 && !gsid.empty(), "reconnect: the host row is listed");
+
+		// The session's own reap: its 0x46 burst drops the listener's connection.
+		recon.set_clock_ms(240001);
+		std::vector<std::vector<uint8_t>> burst;
+		recon.pump_send_intervals(burst);
+		expect(recon.reconnecting() && burst.size() == 4, "reconnect: the reap sends the 0x46 burst");
+		for (const auto &dg : burst) send_recon(dg);
+		uint32_t rid_dropped = 0;
+		bool listed = true;
+		for (int i = 0; i < 100 && listed; ++i) {
+			std::this_thread::sleep_for(20ms);
+			listed = hosted_row(rid_dropped);
+		}
+		expect(!listed, "reconnect: the listener drops the host row on the burst");
+
+		// The re-probe: past the 1000 ms first delay the window opens and the 0x41 goes out.
+		bool probed = false;
+		for (uint32_t t = 240002; t < 250000 && !probed; ++t) {
+			recon.set_clock_ms(t);
+			std::vector<std::vector<uint8_t>> pumped;
+			recon.pump_send_intervals(pumped);
+			for (const auto &dg : pumped) send_recon(dg);
+			probed = !pumped.empty();
+		}
+		expect(probed, "reconnect: the session re-probes");
+		const bool rehosted = probed && drive([&] {
+			return recon.host_state() == opennova::ClientSession::HostState::Established;
+		}, 120);
+		expect(rehosted, "reconnect: the session re-joins, re-verifies and re-hosts");
+		expect(recon.client_key() == 0x52454332u && recon.disconnect_count() == 1 &&
+		               recon.reconnect_count() == 1,
+		       "reconnect: a fresh CK, DCNT 1, and the listener's 0x82 echoed RCNT 1");
+		expect(recon.host_reconnect_counter() == 1, "reconnect: the re-host counted ReconnectCounter 1");
+		expect(recon.host_gsid() == gsid, "reconnect: the re-host keeps its GSID");
+		uint32_t rid_after = 0;
+		for (int i = 0; i < 50 && !hosted_row(rid_after); ++i) std::this_thread::sleep_for(20ms);
+		expect(rid_after == rid_before, "reconnect: the re-host keeps its RID");
+		// Leave cleanly so the later checks see only the first host.
+		send_recon(recon.build_goodbye());
+		uint32_t rid_left = 0;
+		bool still = true;
+		for (int i = 0; i < 100 && still; ++i) {
+			std::this_thread::sleep_for(20ms);
+			still = hosted_row(rid_left);
+		}
+		expect(!still, "reconnect: the goodbye drops the re-hosted row");
+		if (recon_client.is_valid()) opennova::net::close_socket(recon_client);
 	}
 
 	// Both retail processes report CI=1. The second endpoint therefore gets a

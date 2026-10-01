@@ -86,12 +86,18 @@ int main() {
 	text.no_time_limit = "None";
 	text.region = {"North America", "Europe", "Asia"};
 
-	// 1. HostSetup: the eleven BuildHostVarLists vars in insertion order.
+	// 1. HostSetup: the eleven BuildHostVarLists vars in insertion order, then the
+	//    ReconnectCounter InitHeapsAndSerializeCounter appends (0 on a fresh host).
 	{
 		const auto setup = nw::make_host_setup_var_list(cfg);
 		expect(names_are(setup, {"LobbyName", "ServerName", "Msg", "MaxPlayers", "Password", "Dedicated",
-		                         "AppId", "AccessCodeList", "PLoad", "Exp", "LAN"}),
-		       "HostSetup carries the eleven retail vars in order");
+		                         "AppId", "AccessCodeList", "PLoad", "Exp", "LAN", "ReconnectCounter"}),
+		       "HostSetup carries the eleven retail vars and ReconnectCounter, in order");
+		expect(value_of(setup, "ReconnectCounter") == "0", "a fresh host's ReconnectCounter is 0");
+		nw::HostRegistration rehost = cfg;
+		rehost.reconnect_counter = 2;
+		expect(value_of(nw::make_host_setup_var_list(rehost), "ReconnectCounter") == "2",
+		       "ReconnectCounter prints the counter with %ld");
 		expect(value_of(setup, "Password") == "1", "HostSetup Password is 1/0");
 		expect(value_of(setup, "Dedicated") == "0", "HostSetup Dedicated is 0 for a listen host");
 		expect(value_of(setup, "AppId") == "4321", "HostSetup AppId is the session random");
@@ -264,8 +270,8 @@ int main() {
 		expect(req.children.size() == 4, "four var-lists");
 		expect(field_str(req.children[0], "VarList") == "Cookie" && req.children[0].children.size() == 2,
 		       "Cookie carries the cookie jar");
-		expect(field_str(req.children[1], "VarList") == "HostSetup" && req.children[1].children.size() == 11,
-		       "HostSetup carries eleven vars");
+		expect(field_str(req.children[1], "VarList") == "HostSetup" && req.children[1].children.size() == 12,
+		       "HostSetup carries twelve vars (ReconnectCounter last)");
 		expect(field_str(req.children[2], "VarList") == "Host" && req.children[2].children.size() == 8,
 		       "the request's Host list is the initial eight");
 		expect(field_str(req.children[3], "VarList") == "PlayerList" && req.children[3].children.empty(),

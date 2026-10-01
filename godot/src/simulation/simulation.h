@@ -1035,10 +1035,11 @@ public:
 	int get_host_peer_count() const;   // joiners in handshake or admitted
 	// The gate registration's GSID (0x81 SUS1) and AppId (the status page's key); LAN: empty / 0.
 	void set_novaworld_registration(const String &p_gsid, int p_app_id);
-	// The admitted remote joiners as the NovaWorld host's PlayerList sees them
-	// (Server_PlayerAdd's five per-slot vars): one entry per server-side
-	// connection past player admission, keyed by its roster slot. The host's own
-	// slot is not listed (the gate binding adds itself at registration).
+	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
+	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
+	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
+	// The admitted remote joiners as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's
+	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
 	struct HostPeerSlot {
 		int slot = 0;
 		String player_name;
@@ -1047,13 +1048,10 @@ public:
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
 	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the NovaWorldHost `server_command` signal's verb,
-	// target selector and argument tokens) run against the in-match host through
-	// inmatch::Server_ExecuteServerCommand. The caller owns the two shell legs:
-	// `stop_hosting` (drop the gate registration) and `config_changed` (republish
-	// the name / message columns below on the gate registration). A config change
-	// is also kept on the sim's host session record, so a later session rebuild
-	// retains it. Unhandled without a host role.
+	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args)
+	// run against the in-match host through inmatch::Server_ExecuteServerCommand. The caller
+	// owns `stop_hosting` (leave the hosting) and `config_changed` (republish the name/message
+	// columns); a config change also stays on the host session record. Unhandled without a host.
 	struct ServerCommandResult {
 		bool handled = false;
 		bool stop_hosting = false;
@@ -1192,8 +1190,7 @@ public:
 	// CK; a NovaWorld host validates it (reject code 9). Empty/"0" is the LAN
 	// default. Retained across runtime rebuilds like the character/integrity data.
 	void set_app_id(const String &p_token);
-	// The joiner's network type (JoinTarget::NetworkType): what retail stores
-	// as g_NapiNPCtx.transport_mode from the menu's connect type on the join.
+	// The joiner's network type (JoinTarget::NetworkType; retail's g_NapiNPCtx.transport_mode).
 	void set_join_network_type(int p_type);
 	// The CD identity cookie (packed PUB* blob) for the C2S 0x00 JOIN — the
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
@@ -1259,6 +1256,8 @@ public:
 	// The same edge as a state test rather than a presentation string: in-world surfaces
 	// (the deploy screen) need to know the session is gone, not what to tell the player.
 	bool is_session_lost() const;
+	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record.
+	int get_mission_exit_reason() const;
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;

@@ -352,6 +352,7 @@ func _load_root_assets() -> void:
 	# the previous root's (null clears) instead of keeping its strings alive.
 	Strings.register_table(Strings.TABLE_MENUTXT, _text)
 	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
+	Strings.register_table(Strings.TABLE_GAMEERR, _load_text("gameerr.bin"))
 	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
 	# The shell's stylesheets by their fixed names, usually PFF-archived:
 	# menu_style.mns, then brand.mns onto it, as the game loads them (the port
