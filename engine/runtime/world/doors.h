@@ -56,6 +56,11 @@ public:
     // @0x50f9c0..0x50f9d7 — dword_A8A400[6 * (number + first)], the record
     // before the one at A8A418 + 24 * (number + first)]
     int32_t wire_row_state(const Entity &, int number) const;
+    // The authority's C2S 0x1A leg: record (first + number - 1) of `entity`
+    // under the request's gates and switch; false when a gate refuses (no
+    // reply), else the record's resulting state in `out_state`.
+    // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+    bool apply_request(const Entity &, int number, int32_t value, int32_t &out_state);
 private:
     std::vector<Slot> slots_;
 };

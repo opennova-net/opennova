@@ -787,6 +787,11 @@ void JoinerRole::pump() {
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
+	// The door callback's C2S 0x1A requests this tick raised, queued in raise
+	// order for the next send boundary (world/doors.cpp carries the witness).
+	for (const world::DoorRowEvent &request : world.out.door_requests)
+		rt.queue_door_request(request.handle, request.state, request.number);
+	world.out.door_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);

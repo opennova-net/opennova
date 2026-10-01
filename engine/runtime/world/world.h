@@ -709,6 +709,10 @@ struct WorldOutbox {
     using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent,
             DoorRowEvent>;
     std::vector<EntityNetworkEvent> entity_events;
+    // A client's door section requests (C2S 0x1A, doors.cpp carries the
+    // witness); the joiner role drains them into its send queue. The authority
+    // never fills it.
+    std::vector<DoorRowEvent> door_requests;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);

@@ -65,6 +65,22 @@ static void queue_door_row(World &world, const Entity &entity, int number) {
             static_cast<uint8_t>(number)});
 }
 
+// A client's door section request, C2S 0x1A [u16 handle][i16 record state]
+// [u8 section], queued for the joiner to send at its next boundary: the
+// record is (first + section - 1), gated index > -1, section != 0 and section
+// <= count, so section 0 never asks. [orig: NetPacket_SendWeaponSwitch
+// @0x42D0C0 — the gates @0x42d0d8..0x42d0f9, the record word @0x42d101, the
+// body NetPacket_WriteShortShortByte @0x42d138, queued (0x1A, 1, 0, ..)
+// @0x42d169]
+static void queue_door_request(World &world, const Entity &entity, int section) {
+    if (!world.rules.mp_session) return;
+    const int index = int(entity.door_slot) + section - 1;
+    if (entity.door_slot < 0 || index <= -1 || section == 0 || section > entity.door_count) return;
+    world.out.door_requests.push_back(DoorRowEvent{entity.handle.packed,
+            static_cast<int16_t>(world.doors.wire_row_state(entity, section)),
+            static_cast<uint8_t>(section)});
+}
+
 // [orig: FadeEffect_UpdateAll @0x44E920]
 void DoorSystem::tick(World &world) {
     for (Slot &value : slots_) {
@@ -112,8 +128,13 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
             // ahead of its sound: the authority's packet numbers it 0-based,
             // so the record it carries is the one BEFORE this section's
             // [orig: @0x43f460 is_authority -> Server_SendWeaponSlotActionPacket
-            //  (entity, section) @0x43f462].
-            queue_door_row(world, entity, i);
+            //  (entity, section) @0x43f462]; a client's request does the same
+            //  read and skips section 0 [orig: @0x43f482 ->
+            //  NetPacket_SendWeaponSwitch @0x42D0C0].
+            if (world.rules.logic_authority)
+                queue_door_row(world, entity, i);
+            else
+                queue_door_request(world, entity, i);
             if (sound != nullptr && sound[0] != '\0') {
                 SoundSlotEvent output;
                 output.source_handle = entity.handle.packed;
@@ -152,6 +173,33 @@ void DoorSystem::apply_wire_row(const Entity &entity, int number, int32_t state)
         row.phase = 0;
     else if (state == 2)
         row.phase = 65536;
+}
+
+// [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20 — the def gate @0x514be5,
+//  index = first + number - 1 @0x514bf2, the gates `index > -1 && number <=
+//  count && number` @0x514c08, the switch @0x514c20: 0/3 -> 1 iff value == 1
+//  @0x514c33, 1/2 -> value iff number == 3 @0x514c2a, the read-back @0x514c37]
+bool DoorSystem::apply_request(const Entity &entity, int number, int32_t value,
+        int32_t &out_state) {
+    if (!entity.has_item_def || entity.door_slot < 0) return false;
+    const int index = int(entity.door_slot) + number - 1;
+    if (index <= -1 || number > entity.door_count || number == 0) return false;
+    if (size_t(index) >= slots_.size()) return false;
+    Slot &row = slots_[size_t(index)];
+    switch (row.state) {
+    case 0:
+    case 3:
+        if (value == 1) row.state = 1;
+        break;
+    case 1:
+    case 2:
+        if (number == 3) row.state = value;
+        break;
+    default:
+        break;
+    }
+    out_state = row.state;
+    return true;
 }
 
 // [orig: WacCmd_DoorOpen @0x4F70A0 -> @0x43F340]

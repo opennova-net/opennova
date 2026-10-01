@@ -89,6 +89,12 @@ public:
 	// False for HostClient or before in-match. [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7]
 	bool queue_stance_change(uint16_t action_id);
+	// Queue one reliable C2S 0x1A door section request {handle, record state,
+	// section} the joiner world's door callback raised; it leaves inside the
+	// next open send boundary in queue order. False for HostClient or before
+	// in-match. [orig: NetPacket_SendWeaponSwitch @0x42D0C0 ->
+	// CNapiNetwork_QueueReliableMessage @0x42d169]
+	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
 	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open

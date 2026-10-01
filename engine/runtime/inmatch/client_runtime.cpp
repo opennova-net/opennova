@@ -544,6 +544,17 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 	return true;
 }
 
+bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t section) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()) return false;
+	DoorSlotAction request;
+	request.entity_handle = handle;
+	request.state = state;
+	request.number = section;
+	pre_send_queue_.push_back(make_protocol_message(c2s::DOOR_SLOT_REQUEST,
+			encode_door_slot_action(request)));
+	return true;
+}
+
 // [orig: Chat_CheckFloodControl @0x498F60] The 16-entry table of recent lines
 // `[u32 frame][char[64] text]`: a line longer than 59 characters is cut to 59
 // first (`message[59] = 0` @0x498f80); an unseen line shifts the table down

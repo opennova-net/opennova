@@ -1,6 +1,7 @@
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
+#include <runtime/inmatch/server_doors.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
@@ -1198,6 +1199,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			}
+			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+				if (world == nullptr || inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
+				for (ProtocolMessage &m : Server_HandleDoorRowRequest(conn, msg.payload, *world))
+					replies.push_back(std::move(m));
+				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
 				RadioCallRequest request;
