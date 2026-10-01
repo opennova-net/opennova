@@ -6,7 +6,7 @@ namespace opennova::editor {
 
 ProjectRefresh::ProjectRefresh(const ProjectPaths &paths, const ProjectDocument &doc, bool force_import,
 		const std::string &only, bool import_pass) :
-		doc_(doc), import_pass_(import_pass), pass_(paths, doc, force_import, only), walk_(paths, doc) {}
+		import_pass_(import_pass), pass_(paths, doc, force_import, only), walk_(paths, doc) {}
 
 bool ProjectRefresh::step(uint64_t budget) {
 	if (done_) return true;
@@ -19,7 +19,6 @@ bool ProjectRefresh::step(uint64_t budget) {
 	if (!walk_.step(budget)) return false;
 	scan_ = walk_.take();
 	scan_.set_import_findings(imports_.diagnostics);
-	requirements_ = evaluate_requirements(doc_, scan_);
 	done_ = true;
 	return true;
 }

@@ -30,10 +30,10 @@ struct ValidationStats;
 // it to its end: run_operations). A request that conflicts with what an operation reads or
 // writes is refused, joins it, supersedes it or cancels it as it commits, as its row says
 // (request_kinds.h), in handle(). An edit (a Set, an Add, an Undo) leaves the project's
-// validation due rather than running it: a request from outside returns validated, and a pump
-// that holds validation (hold_validation) leaves it to its poll, which steps it a file at a time
-// within its budget however many edits its requests made (the first validation of a large project
-// spreads over polls).
+// validation due rather than running it, and no request runs it (S13 A3): the polls step it a
+// file at a time within their budget however many edits the requests made (the first validation of
+// a large project spreads over polls), an operation that reads the graph joins it, and a caller
+// that waits runs it to its end with the operations (run_operations).
 //
 // A facade (S13 A2): the session is its parts (session_core.h, document_set.h,
 // problems_service.h, play_controller.h, import_controller.h, rename_controller.h,
@@ -74,10 +74,6 @@ public:
 	// member it does not take, one it needs left out, a wrongly typed one, an offset or a limit out
 	// of range), or a question it cannot answer (no such document or record).
 	io::JsonValue query(std::string_view name, const io::JsonValue &args, std::string &error);
-	// A pump starts (the shell: the requests its windows raised this frame): the requests
-	// handled until the next poll() leave their validation to that poll, so a burst of
-	// edits (typing, a drag) validates once.
-	void hold_validation();
 	// What the last request handled from outside came to (reset by the next one).
 	const ActionOutcome &outcome() const;
 	// True when the last request, an EditRecord, Copy, Cut, Paste or Duplicate, went through: its
@@ -89,13 +85,13 @@ public:
 	// rename's close and reload, the unsaved prompt's answer) never enter it.
 	uint64_t handle_entries() const;
 
-	// Once per frame: the validation left due, stepped a file at a time within the poll's budget,
-	// the running operation's steps within it, the child's state and the game's log tail, then the
-	// operation that is done finished (a project opens, a build lands, and the Play waiting on it
-	// starts).
+	// Once per frame, within one budget: the validation left due, stepped a file at a time first,
+	// the running operation's steps within what is left (at least one), the child's state and the
+	// game's log tail, then the operation that is done finished (a project opens, a build lands,
+	// and the Play waiting on it starts).
 	void poll();
-	// How much a poll steps the validation and the running operation (kDefaultPollBudget; a test's
-	// ms 0 is one step of each per poll).
+	// How much a poll steps (kDefaultPollBudget; a test's ms 0 is one step of the validation and one
+	// of the running operation per poll).
 	void set_poll_budget(const PollBudget &budget);
 	// The running operation, and those its finish starts, run to their end and finished, then the
 	// validation they left due run to its end (a test, a command line).

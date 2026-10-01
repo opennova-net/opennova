@@ -273,34 +273,59 @@ void MenuRenderCheck::clear() {
 	vars_.clear();
 	diagnostics_.clear();
 	rendered_ = 0;
+	cursor_ = Cursor();
+	changed_.clear();
+	moved_ = false;
 }
 
 bool MenuRenderCheck::update(const ProjectCheckInput &input) {
+	begin();
+	bool moved = false;
+	while (!step(input, UINT64_MAX, moved)) {
+	}
+	return moved;
+}
+
+void MenuRenderCheck::begin() {
+	cursor_ = Cursor();
+}
+
+bool MenuRenderCheck::step(const ProjectCheckInput &input, uint64_t budget, bool &moved) {
 	const ValidationInput &validation = input.validation;
 	const FileSource &files = input.files;
-	rendered_ = 0;
-	bool moved = false; // a menu's notes may have changed
-	// The shell's %VAR% list, read again when a stylesheet's stamp moved: the variables that came,
-	// went or took another value, which the menus naming one render again.
-	const std::map<std::string, std::string> &vars = style_.vars(files);
-	std::vector<menu::MenuDependency> stamps;
-	style_.dependencies(stamps);
-	std::vector<std::string> changed;
-	if (!same_stamps(stamps, style_stamps_)) {
-		style_stamps_ = std::move(stamps);
-		changed = changed_variables(vars_, vars);
-		vars_ = vars;
+	if (!cursor_.started) {
+		cursor_.started = true;
+		rendered_ = 0;
+		// The shell's %VAR% list, read again when a stylesheet's stamp moved: the variables that came,
+		// went or took another value, which the menus naming one render again.
+		cursor_.vars = style_.vars(files);
+		std::vector<menu::MenuDependency> stamps;
+		style_.dependencies(stamps);
+		if (!same_stamps(stamps, style_stamps_)) {
+			style_stamps_ = std::move(stamps);
+			for (const std::string &name : changed_variables(vars_, cursor_.vars)) changed_.push_back(name);
+			std::sort(changed_.begin(), changed_.end());
+			changed_.erase(std::unique(changed_.begin(), changed_.end()), changed_.end());
+			vars_ = cursor_.vars;
+		}
+		for (auto &entry : menus_) entry.second.seen = false;
 	}
-	const auto names_changed = [&changed](const std::vector<std::string> &names) {
-		for (const std::string &name : changed)
+	const std::map<std::string, std::string> &vars = cursor_.vars;
+	const auto names_changed = [this](const std::vector<std::string> &names) {
+		for (const std::string &name : changed_)
 			if (std::binary_search(names.begin(), names.end(), name))
 				return true;
 		return false;
 	};
-	for (auto &entry : menus_) entry.second.seen = false;
-	for (const AssetEntry &asset : validation.scan.entries) {
+	uint64_t spent = 0;
+	const std::vector<AssetEntry> &entries = validation.scan.entries;
+	while (cursor_.next < entries.size()) {
+		if (spent >= budget)
+			return false;
+		const AssetEntry &asset = entries[cursor_.next++];
 		if (!is_menu_kind(asset.kind))
 			continue;
+		spent += kMenuStepCost;
 		Menu &kept = menus_[asset.relative_path];
 		kept.seen = true;
 		const auto open = validation.open_document(asset);
@@ -328,7 +353,7 @@ bool MenuRenderCheck::update(const ProjectCheckInput &input) {
 		const MnuDocument *menu = document.get();
 		// A menu that does not load or is blocked has its own findings (validate_menu_file).
 		if (!menu || menu->blocked()) {
-			moved = moved || !kept.findings.empty();
+			moved_ = moved_ || !kept.findings.empty();
 			kept.document.reset();
 			kept.screens.clear();
 			kept.dependencies.clear();
@@ -348,18 +373,23 @@ bool MenuRenderCheck::update(const ProjectCheckInput &input) {
 		kept.revision = menu->revision();
 		render_menu_(kept, *menu, files, vars);
 		++rendered_;
-		moved = true;
+		moved_ = true;
+		return false; // a menu a step
 	}
 	for (auto it = menus_.begin(); it != menus_.end();) {
 		if (it->second.seen) {
 			++it;
 			continue;
 		}
-		moved = moved || !it->second.findings.empty();
+		moved_ = moved_ || !it->second.findings.empty();
 		it = menus_.erase(it);
 	}
+	moved = moved_;
+	moved_ = false;
+	changed_.clear();
+	cursor_ = Cursor();
 	if (!moved)
-		return false;
+		return true;
 	diagnostics_.clear();
 	for (const auto &entry : menus_)
 		diagnostics_.insert(diagnostics_.end(), entry.second.findings.begin(), entry.second.findings.end());

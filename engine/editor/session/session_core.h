@@ -88,8 +88,6 @@ public:
 		~RequestScope();
 		RequestScope(const RequestScope &) = delete;
 		RequestScope &operator=(const RequestScope &) = delete;
-		// True for the request from outside, false for one served inside it.
-		bool outermost() const { return outermost_; }
 
 	private:
 		SessionCore &core_;
@@ -124,8 +122,9 @@ public:
 	const PollBudget &poll_budget() const { return poll_budget_; }
 	// `operation` started in the slot: its id, 0 while another runs.
 	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
-	// The running operation's steps within the poll's budget (the poll's).
-	void step_operation();
+	// The running operation's steps within `budget` (the poll's: what its validation steps left of
+	// its budget, at least one step).
+	void step_operation(const PollBudget &budget);
 	// True when what reads `reads` and writes `writes` conflicts with the running operation.
 	bool busy_for(Holds reads, Holds writes) const;
 	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
@@ -169,8 +168,8 @@ public:
 	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a
 	// rename's commit), the requirements evaluated again over the scan, the validation left due.
 	void update_files(const std::vector<std::string> &paths);
-	// How many files the last scan read: every file of the project by a refresh or a create's check,
-	// those it named by an update.
+	// How many files the last scan the view took read: every file of the project by a refresh (an
+	// Open's, a Rescan's, an import's), those it named by an update (update_files).
 	size_t files_scanned() const { return files_scanned_; }
 	void apply_project_settings(const ProjectSettingsChange &change);
 	void create_missing(const std::vector<std::string> &roles);

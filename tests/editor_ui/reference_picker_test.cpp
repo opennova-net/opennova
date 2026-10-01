@@ -302,6 +302,7 @@ void test_list_kept() {
 	rename.edits[0].field = "name";
 	rename.edits[0].value = std::string("HEADING");
 	project.session.handle(rename);
+	project.session.run_operations(); // the validation the edit left due (S13 A3: the polls run it)
 	const ViewRevisions &after = project.session.view().revisions;
 	CHECK(after.of(ViewConcern::Graph) != before.of(ViewConcern::Graph), "the graph moved");
 	CHECK(after.of(ViewConcern::Files) == before.of(ViewConcern::Files) &&

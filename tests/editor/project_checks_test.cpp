@@ -391,7 +391,7 @@ static int test_session() {
 	size_t updates = g_probe.updates;
 	session.handle(request::rescan());
 	session.run_operations();
-	session.handle(request::open_document(items_path));
+	editor_test::handle_to_end(session, request::open_document(items_path));
 	Document *items = session.document_for(items_path);
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty())
@@ -400,9 +400,9 @@ static int test_session() {
 	edit.edits[0].address = { items->rows()[0]->id, items->rows()[0]->kind, 0 };
 	edit.edits[0].field = "hp";
 	edit.edits[0].value = int64_t(7);
-	session.handle(edit);
+	editor_test::handle_to_end(session, edit);
 	TEST_EXPECT(items->dirty());
-	session.handle(request::save(items_path));
+	editor_test::handle_to_end(session, request::save(items_path));
 	TEST_EXPECT(!items->dirty());
 	TEST_EXPECT(stats.passes - passes >= 3 && g_probe.updates - updates == stats.passes - passes);
 	const auto probe_rows = [&view] {

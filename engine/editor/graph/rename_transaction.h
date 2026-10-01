@@ -157,8 +157,12 @@ bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &proje
 // staged, the commit is one step, the only one that writes (a file's rename: the file copied under
 // its new name, the rewritten documents saved, the old file removed; a name's: every file written
 // together). A plan that is not ok commits at once, refused. It reads `scan` and `graph` as they
-// are at each step: its caller keeps them as they were planned over (the session's operation
-// holds the files and the documents, so nothing moves them while it runs).
+// are at each step: a site is found again in the file staged (the same record place, field and
+// value) and must still resolve where the plan said, and the commit writes the bytes staged. Its
+// caller keeps `scan` as it was planned over; the graph may move between two steps (the session's
+// validation steps before its operation every poll), but nothing writes the project's files or
+// the open documents while the session's operation holds them, so a validation brings the graph
+// to the same files and resolves each staged site where it did.
 class RenameTransaction {
 public:
 	RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,

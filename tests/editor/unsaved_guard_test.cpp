@@ -153,7 +153,9 @@ static int test_guard_column_is_the_prompt() {
 }
 
 // A guarded request that touches no unsaved file goes ahead: a Close or a Reload of a clean
-// document, a rename of a clean file that names none of the unsaved one's references.
+// document, a rename of a clean file that names none of the unsaved one's references (planned
+// over a graph that holds every edit: with a validation due, a rename's prompt would list every
+// document with unsaved edits, S13 A3).
 static int test_untouched_goes_ahead() {
 	Dirty dirty("opennova_editor_unsaved_guard_clean");
 	TEST_EXPECT(dirty.ready());
@@ -163,6 +165,7 @@ static int test_untouched_goes_ahead() {
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done());
 	dirty.session.handle(request::close_document(main));
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open && dirty.session.outcome().done() && !dirty.session.document_for(main));
+	dirty.session.run_operations();
 	dirty.session.handle(request::rename_asset("menu_style.mns", "renamed.mns"));
 	dirty.session.run_operations();
 	TEST_EXPECT(!dirty.view().dialogs.unsaved_prompt.open);

@@ -64,11 +64,13 @@ inline constexpr uint64_t kValidationFileCost = 4096;
 // session's poll runs a step of before the running operation's, so an editor validating a large
 // project for the first time keeps drawing. `input` is the same from the first step to the last
 // (its scan, the open documents and their revisions): a caller whose input moved starts another,
-// which reuses what the graph and the cache kept. The graph and the cache are its caller's and move
-// as it steps (the graph at its update's step, the readings ahead of it not).
+// which reuses what the graph and the cache kept, and the readings ahead the one before made (the
+// caller's `readings`, kept from one validation to the next: a file still as the scan lists it is
+// not read again). The graph, the cache and the readings are its caller's and move as it steps (the
+// graph at its update's step, which takes the readings, the readings ahead of it).
 class ProjectValidation {
 public:
-	ProjectValidation(AssetGraph &graph, ValidationCache &cache);
+	ProjectValidation(AssetGraph &graph, ValidationCache &cache, GraphReadings &readings);
 
 	// One step within `budget` bytes (at least one file read or asked, or the graph's update); true
 	// once the validation is done (moved() then says whether a row project_rows gives may have moved:
@@ -78,11 +80,11 @@ public:
 	bool moved() const { return moved_; }
 	// Whether the graph's update changed it.
 	bool graph_moved() const;
-	// Where it stands, in files: those read for the graph and asked for their own findings, of those
-	// to read and to ask (known once the reading starts and once the graph's update ran), and the file
-	// last read or asked.
-	size_t files_done() const { return read_next_ + next_; }
-	size_t files_total() const { return to_read_.size() + files_.size(); }
+	// Where it stands, in files: those read for the graph (a reading kept from a validation before
+	// counted read) and asked for their own findings, of those to read and to ask (known once the
+	// reading starts and once the graph's update ran), and the file last read or asked.
+	size_t files_done() const { return kept_ + read_next_ + next_; }
+	size_t files_total() const { return kept_ + to_read_.size() + files_.size(); }
 	const std::string &current() const { return current_; }
 
 private:
@@ -90,10 +92,11 @@ private:
 
 	AssetGraph &graph_;
 	ValidationCache &cache_;
+	GraphReadings &readings_;
 	uint64_t generation_ = 0; // the graph's before its update
-	std::vector<const AssetEntry *> to_read_; // the closed files the graph's update would read
+	size_t kept_ = 0; // the files the update reads whose readings were kept from before
+	std::vector<const AssetEntry *> to_read_; // the closed files the graph's update would read, not read yet
 	size_t read_next_ = 0;
-	GraphReadings readings_;
 	std::vector<const AssetEntry *> files_;
 	size_t next_ = 0;
 	std::string current_;

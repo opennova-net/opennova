@@ -1,5 +1,7 @@
 #include <editor/session/project_session.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -65,15 +67,8 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
-	bool served = false, outermost = false;
-	{
-		const SessionCore::RequestScope scope(impl_->core);
-		outermost = scope.outermost();
-		served = serve_request(impl_->core, request);
-	}
-	// A request from outside returns validated, unless a pump holds validation for its poll.
-	if (outermost && !impl_->problems.held()) impl_->problems.validate_pending();
-	return served;
+	const SessionCore::RequestScope scope(impl_->core);
+	return serve_request(impl_->core, request);
 }
 
 io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorRequest *shell) {
@@ -153,9 +148,6 @@ io::JsonValue ProjectSession::query(
 	return run_query(impl_->core, name, args, error);
 }
 
-void ProjectSession::hold_validation() {
-	impl_->problems.hold();
-}
 
 const ActionOutcome &ProjectSession::outcome() const {
 	return impl_->core.outcome();
@@ -173,16 +165,19 @@ uint64_t ProjectSession::handle_entries() const {
 
 // --- the poll and the operation slot -------------------------------------------------------------
 
-// The poll's order (S13 A3): the validation left due, a file at a time within the budget; the
-// running operation's steps within it; the child's state and the game's log tail; last, the
-// operation found done finishes: the view learns what it came to (a project opens, a build lands
-// and the game a Play waits on starts on it), and what it read leaves the validation due, which
-// the next poll steps.
+// The poll's order (S13 A3), one budget a poll: the validation left due first, a step at a time
+// within the budget; the running operation's steps within what is left of it, at least one; the
+// child's state and the game's log tail; last, the operation found done finishes: the view learns
+// what it came to (a project opens, a build lands and the game a Play waits on starts on it), and
+// what it read leaves the validation due, which the next poll steps.
 void ProjectSession::poll() {
 	Impl &session = *impl_;
-	session.problems.release();
-	session.problems.step_validation(session.core.poll_budget(), steady_clock_ms);
-	session.core.step_operation();
+	const PollBudget budget = session.core.poll_budget();
+	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
+	session.problems.step_validation(budget, steady_clock_ms);
+	PollBudget rest = budget;
+	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
+	session.core.step_operation(rest);
 	session.play.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
 }

@@ -51,8 +51,7 @@ struct Project {
 	MemoryPreferencesStore preferences;
 	ProjectSession session;
 	explicit Project(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(request::new_project(dir.file("project"), "Rename"));
-		session.run_operations();
+		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Rename"));
 		editor_test::create_missing_files(session);
 	}
 	const SessionView &view() const { return session.view(); }
@@ -72,8 +71,7 @@ struct Project {
 	}
 	// A Rescan, run to its end (an operation, S13 A3).
 	void rescan() {
-		session.handle(request::rescan());
-		session.run_operations();
+		editor_test::handle_to_end(session, request::rescan());
 	}
 	// The definition of a name of `kind` in `file` (by its path).
 	const GraphSymbol *defined(ReferenceKind kind, const std::string &name, const std::string &file) const {
@@ -88,7 +86,7 @@ struct Project {
 	}
 	// The plan of renaming `symbol` to `name`, as the view carries it.
 	const DialogsView::RenamePreview &preview(const GraphSymbol &symbol, const std::string &name) {
-		session.handle(request(EditorRequestKind::PreviewRename, symbol, name));
+		editor_test::handle_to_end(session, request(EditorRequestKind::PreviewRename, symbol, name));
 		return view().dialogs.rename_preview;
 	}
 	// The rename committed (its operation run to its end): whether it went through.
@@ -259,7 +257,7 @@ static int test_string_key() {
 	                                                                 "<STRING TYPE=\"ID\">SHARED_KEY</STRING>\r\n"))));
 	project.rescan();
 	const std::string table_path = project.path("gametext.bin");
-	project.session.handle(request::open_document(table_path));
+	editor_test::handle_to_end(project.session, request::open_document(table_path));
 	Document *table = project.session.document_for(table_path);
 	TEST_EXPECT(table != nullptr);
 	if (!table) return 1;
@@ -267,12 +265,12 @@ static int test_string_key() {
 		EditorRequest add = request::edit_record(table->path(), Edit());
 		add.edits[0].operation = EditOperation::Add;
 		add.edits[0].address = {section, table->kind_from_name("string"), 0};
-		project.session.handle(add);
+		editor_test::handle_to_end(project.session, add);
 		EditorRequest set = request::edit_record(table->path(), Edit());
 		set.edits[0].address = {section, table->kind_from_name("string"), table->last_added()};
 		set.edits[0].field = "key";
 		set.edits[0].value = std::string(key);
-		project.session.handle(set);
+		editor_test::handle_to_end(project.session, set);
 	};
 	NodeId wepdes = 0;
 	for (const auto &row : table->rows())
@@ -283,13 +281,13 @@ static int test_string_key() {
 		EditorRequest add = request::edit_record(table->path(), Edit());
 		add.edits[0].operation = EditOperation::Add;
 		add.edits[0].address = {0, table->kind_from_name("section"), 0};
-		project.session.handle(add);
+		editor_test::handle_to_end(project.session, add);
 		const NodeId section = table->last_added();
 		EditorRequest name = request::edit_record(table->path(), Edit());
 		name.edits[0].address = {section, table->kind_from_name("section"), 0};
 		name.edits[0].field = "name";
 		name.edits[0].value = std::string("menu");
-		project.session.handle(name);
+		editor_test::handle_to_end(project.session, name);
 		add_key(section, "SHARED_KEY");
 	}
 	const GraphSymbol *weapon_key = nullptr, *menu_key = nullptr;
@@ -302,7 +300,7 @@ static int test_string_key() {
 	            sites_in(plan, "menus/d.mnu") == 0);
 	// The table has unsaved edits: the rename waits on the prompt, whose Save writes them first.
 	const EditorRequest weapon_rename = project.request(EditorRequestKind::RenameSymbol, *weapon_key, "WEP_RENAMED");
-	project.session.handle(weapon_rename);
+	editor_test::handle_to_end(project.session, weapon_rename);
 	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
 			project.view().dialogs.unsaved_prompt.open &&
 			project.view().dialogs.unsaved_prompt.action == EditorRequestKind::RenameSymbol &&
@@ -395,8 +393,10 @@ static int test_item_id_refused() {
 	const std::string before = project.read(items);
 	TEST_EXPECT(!project.rename(*item, "100301"));
 	TEST_EXPECT(project.read(items) == before);
+	// What the rename's operation came to: its plan, made once the validation it joined had
+	// ended, refused (S13 A3).
 	bool reported = false;
-	for (const Diagnostic &d : project.session.outcome().findings)
+	for (const Diagnostic &d : project.session.view().activity.last_operation.findings)
 		reported = reported || (d.code() == "rename.site" && d.asset == "missions/place.bms");
 	TEST_EXPECT(reported);
 	return 0;
@@ -446,7 +446,7 @@ static int test_saved_use_behind_an_edit() {
 	TEST_EXPECT(project.write(weapons, "weapon \"GUN_A\"\nend\nweapon \"GUN_C\"\nend\n"));
 	TEST_EXPECT(project.write(items, "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"));
 	project.rescan();
-	project.session.handle(request::open_document(items));
+	editor_test::handle_to_end(project.session, request::open_document(items));
 	Document *table = project.session.document_for(items);
 	NodeAddress carrier;
 	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "100300", carrier));
@@ -455,11 +455,11 @@ static int test_saved_use_behind_an_edit() {
 	edit.edits[0].address = carrier;
 	edit.edits[0].field = "primary_weapon";
 	edit.edits[0].value = std::string("GUN_C");
-	project.session.handle(edit);
+	editor_test::handle_to_end(project.session, edit);
 	const GraphSymbol *gun = project.defined(ReferenceKind::Weapon, "GUN_A", weapons);
 	TEST_EXPECT(gun && project.graph().users_of(*gun).empty());
 	if (!gun) return 1;
-	project.session.handle(project.request(EditorRequestKind::RenameSymbol, *gun, "GUN_B"));
+	editor_test::handle_to_end(project.session, project.request(EditorRequestKind::RenameSymbol, *gun, "GUN_B"));
 	TEST_EXPECT(project.session.outcome().unsaved_prompt &&
 	            project.view().dialogs.unsaved_prompt.files == std::vector<std::string>{items});
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
@@ -631,7 +631,7 @@ static int test_open_menu_that_does_not_write() {
 	                                                                 "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%SHADOWED%"
 	                                                                 "</APPEARANCE>\r\n"))));
 	project.rescan();
-	project.session.handle(request::open_document("menus/c.mnu"));
+	editor_test::handle_to_end(project.session, request::open_document("menus/c.mnu"));
 	Document *menu = project.session.document_for("menus/c.mnu");
 	NodeAddress w;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "W", w));
@@ -640,7 +640,7 @@ static int test_open_menu_that_does_not_write() {
 	edit.edits[0].address = w;
 	edit.edits[0].field = "name";
 	edit.edits[0].value = std::string("W\"Q");
-	project.session.handle(edit);
+	editor_test::handle_to_end(project.session, edit);
 	TEST_EXPECT(menu->dirty() && !menu->serialize().ok());
 	const GraphSymbol *brand = project.defined(ReferenceKind::StyleVar, "SHADOWED", "menus/brand.mns");
 	const GraphSymbol *plain = project.defined(ReferenceKind::StyleVar, "SHADOWED", sheet);

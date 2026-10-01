@@ -22,8 +22,8 @@ struct ProjectFindingsInput;
 struct SessionView;
 
 // The Problems rows of the project session (ADR 0046 S13 A2): when the project validates (an edit
-// leaves it due rather than running it; a request from outside returns validated, and a pump that
-// holds validation validates once, at its poll) and what the one findings composer reads
+// leaves it due rather than running it, and the polls step it, S13 A3) and what the one findings
+// composer reads
 // (compose_project_findings, project/project_findings: the asset graph, the validation cache, the
 // document types' project checks (S13 V9: the state each keeps between validations lives here,
 // one per type by its DocumentTypeId) and the project's files as the open documents stand in for
@@ -35,14 +35,17 @@ struct SessionView;
 // and a finding reported twice is two rows. It keeps the Problems query and the fixes the query
 // seam's problems row asks for (answer, fixes), each until what it reads moves.
 //
-// A validation is stepped (S13 A3): the graph's update, then each file's own findings, a file at a
-// time (graph/project_validation.h's ProjectValidation), then the project checks, a check a step
-// (documents/project_check.h), then the rows. The poll steps the one left due within its budget
-// (step_validation), so the first validation of a large project spreads over frames while the
-// editor draws; what cannot wait (a request from outside returning validated, a flow that reads
-// the graph, the build's gate) runs it to its end. What it reads is held as it was when it started
-// (the scan, the project, the open documents and their states), and it starts again when that
-// moved; a gesture's edits hold it until they end.
+// A validation is stepped (S13 A3): the graph's files read ahead and its update, then each file's
+// own findings, a file at a time (graph/project_validation.h's ProjectValidation), then the project
+// checks, each a step at a time (documents/project_check.h: the render check a menu a step), then
+// the rows. The poll steps the one left due first within its budget (step_validation), so the first
+// validation of a large project spreads over frames while the editor draws, and an operation that
+// reads the graph (an import's plan, a rename) joins it: its first steps are the validation's
+// remaining ones (advance). No request runs it: a test, the command line and the build's gate run
+// it to its end (validate_pending). What it reads is held as it was when it started (the scan, the
+// project, the open documents and their states), and it starts again when that moved, keeping the
+// files it read ahead that are still as the scan lists them; a gesture's edits hold it until they
+// end.
 class ProblemsService {
 public:
 	explicit ProblemsService(SessionCore &core);
@@ -50,32 +53,33 @@ public:
 	ProblemsService(const ProblemsService &) = delete;
 	ProblemsService &operator=(const ProblemsService &) = delete;
 
-	// The project's findings now, composed; they replace the Problems rows (Findings moves only
-	// when they differ, and Graph only when the graph's update changed it).
-	void validate_documents();
-	// An edit's validation, left for validate_pending: the request's return from outside, a pump's
-	// poll, or a flow that reads the graph. Nothing in the view moves until it runs.
+	// An edit's validation, left for the polls to step (an operation that reads the graph joins
+	// it; a caller that waits runs it, validate_pending). The rows stand until it ends; the view's
+	// validation status says at once that one is due (a client waits on it).
 	void validate_later() {
 		validation_due_ = true;
 		for (Reported &reported : reported_) reported.kept = false; // a change after them
+		show_validation();
 	}
-	// The validation left due, or the one under way, run to its end and the rows composed.
+	// The validation left due, or the one under way, run to its end and the rows composed (a test's,
+	// the command line's, the build's gate's, a query's that reads the gate).
 	void validate_pending() {
 		if (validating()) validate_pending_now();
 	}
-	// The poll's validation step (S13 A3): the validation left due, or the one under way, stepped
+	// The poll's validation steps (S13 A3): the validation left due, or the one under way, stepped
 	// within `budget` (at least one step, none while a gesture's edits wait for it to end), its rows
 	// composed on the step that ends it.
 	void step_validation(const PollBudget &budget, const OperationClock &clock);
+	// One step of the validation due or under way within `bytes` (an operation that joins it: its
+	// first steps are the validation's remaining ones), its rows composed on the step that ends it;
+	// none while a gesture's edits are open. True when none is due or under way.
+	bool advance(uint64_t bytes);
 	// True while a validation is due or under way: the Problems rows are the last composed.
 	bool validating() const { return validation_due_ || pass_ != nullptr; }
 	// The view's validation status (ActivityView::validation) as it stands: running while one is
-	// due or under way, the files asked of those it asks; Operation moves when it changed.
+	// due or under way, the files asked of those it asks (a validation started again showing where
+	// the one before stood until it passes it); Operation moves when it changed.
 	void show_validation();
-	// A pump holds validation until its poll (hold), which releases it (release).
-	void hold() { validation_held_ = true; }
-	void release() { validation_held_ = false; }
-	bool held() const { return validation_held_; }
 
 	// A finding a request or a poll reported: a Problems row now, and after the composed rows until
 	// the validation for a change made after it (one due or under way when it was reported keeps it).
@@ -147,7 +151,8 @@ private:
 	bool step_pass(uint64_t bytes);
 	// Whether what the pass under way reads is the view's still.
 	bool pass_current() const;
-	// The rows, from the pass that ended (its files' findings moved or not) and the render check.
+	// The rows, from the pass that ended (its files' findings moved or not, a pass it took the place
+	// of having moved them, and the project checks') and, with `keep_reported`, what was reported.
 	void compose_rows(bool keep_reported);
 
 	SessionCore &core_;
@@ -173,7 +178,12 @@ private:
 	std::vector<Reported> reported_;        // reported since the last validation
 	bool validation_due_ = false;           // an edit since the last validation
 	std::unique_ptr<Pass> pass_;            // the validation under way, stepped by the polls
-	bool validation_held_ = false;          // a pump holds validation until its poll
+	// A pass was started again before it ended: what it had brought to the graph, the cache and the
+	// project checks may have moved the rows, which its successor's own counts cannot say (S13 A3).
+	bool moved_since_composed_ = false;
+	// The files the graph's update reads, read ahead a file a step and kept from one pass to the next
+	// (ProjectValidation): a pass started again takes those still as the scan lists them.
+	GraphReadings readings_;
 	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands
 };

@@ -7,7 +7,8 @@
 // TITLE's label or makes a colour transparent shows on TITLE and on the APPEARANCE row; a
 // texture the project lacks is the graph's finding, the preview's note only; the build
 // still packs. A menu renders again only when it or a file it read moves, or a variable it
-// names changes (S13 D4: a stylesheet edit that changes no variable renders nothing).
+// names changes (S13 D4: a stylesheet edit that changes no variable renders nothing). The check
+// renders a menu a step (S13 A3), its rows those of one run to its end.
 // The retail legs (each a SKIP-LEG without its root): every screen of the shipped menus
 // loose at OPENNOVA_JO_ASSETS' root (read with the files beside them) and of every .mnu
 // OPENNOVA_JO_DIR's packed install serves (read with that mount's files) renders, in the
@@ -64,7 +65,7 @@ void edit(ProjectSession &session, const Document &document, const NodeAddress &
 	request.edits[0].address = address;
 	request.edits[0].field = field;
 	request.edits[0].value = std::move(value);
-	session.handle(request);
+	editor_test::handle_to_end(session, request);
 }
 
 size_t list_index(const char *path) {
@@ -108,8 +109,7 @@ static int test_blank_startup() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Render Test"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Render Test"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
@@ -120,7 +120,7 @@ static int test_blank_startup() {
 	for (const Diagnostic *d : render_findings(view)) std::printf("  unexpected: %s %s\n", d->code().c_str(), d->message.c_str());
 	TEST_EXPECT(render_findings(view).empty());
 
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(menu);
 	const Node *startup = menu->rows().front().get();
@@ -175,11 +175,10 @@ static int test_blank_startup() {
 	// A note never blocks a build (the missing texture, the graph's error, would).
 	edit(session, *menu, row, "type", std::string("COLOR"));
 	edit(session, *menu, row, "value", std::string("FF0000"));
-	session.handle(request::save(menu->path()));
+	editor_test::handle_to_end(session, request::save(menu->path()));
 	TEST_EXPECT(render_findings(view, "menu.render.text_truncated").size() == 1 &&
 	            render_findings(view, "menu.render.color_transparent").size() == 1);
-	session.handle(request::build());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::build());
 	for (const Diagnostic &d : view.activity.last_build->diagnostics)
 		if (d.severity == DiagnosticSeverity::Error) std::printf("  build: %s %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(view.activity.has_build && view.activity.last_build->ok);
@@ -194,8 +193,7 @@ static int test_render_again_only_when_moved() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Again"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Again"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
@@ -206,13 +204,12 @@ static int test_render_again_only_when_moved() {
 	const size_t menus = check.rendered();
 	TEST_EXPECT(menus >= 1);
 	// Opened, the menu's document stands in for its file (a new document state): it renders.
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	TEST_EXPECT(check.rendered() == 1);
 	// A rescan with nothing changed on disk keeps the open document: nothing renders.
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(check.rendered() == 0 && session.document_for("main.mnu") == menu);
 	// A validation where nothing a menu reads moved (the project's features refresh the
 	// scan): nothing renders.
@@ -247,19 +244,17 @@ static int test_render_again_only_when_moved() {
 			"</POSITION>\r\n"
 			"<STRING>%SEMIOPAQUE_BLACK%</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
 	size_t passes = stats.passes;
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 2 &&
 			check.document("menus/trim.mnu") != nullptr &&
 			check.document("menus/label.mnu") != nullptr);
 	TEST_EXPECT(!unused("SEMIOPAQUE_BLACK"));
 	passes = stats.passes;
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(stats.passes == passes + 1 && check.rendered() == 0);
 	// A stylesheet edit that changes no variable's value (its comment) renders nothing; a
 	// variable changed renders again the menus naming it, and those alone.
-	session.handle(request::open_document("menu_style.mns"));
+	editor_test::handle_to_end(session, request::open_document("menu_style.mns"));
 	Document *style = session.document_for("menu_style.mns");
 	NodeAddress fg, trim, black;
 	TEST_EXPECT(style && find_definition(AssetGraph(), *style, "DEF_TEXT_FG", fg) &&
@@ -285,9 +280,9 @@ static int test_render_again_only_when_moved() {
 	TEST_EXPECT(check.rendered() == 1);
 	// Closed with the project (its edits discarded): nothing kept.
 	TEST_EXPECT(check.render("menus/main.mnu", title.row));
-	session.handle(request::close_project());
+	editor_test::handle_to_end(session, request::close_project());
 	EditorRequest discard = request::resolve_unsaved(UnsavedChoice::Discard);
-	session.handle(discard);
+	editor_test::handle_to_end(session, discard);
 	TEST_EXPECT(!view.project.open && !check.render("menus/main.mnu", title.row));
 	return 0;
 }
@@ -500,8 +495,7 @@ static int test_notes_alone_recompose() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Notes"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
@@ -529,8 +523,7 @@ static int test_notes_alone_recompose() {
 			"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM>"
 			"</POSITION>\r\n<FONT><NAME>broken.fnt</NAME></FONT>\r\n<STRING>Hello</STRING>\r\n"
 			"</WINDOW>\r\n</SCREEN>\r\n"));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	const auto unreadable = [&view] {
 		size_t found = 0;
 		for (const Diagnostic &d : view.findings.diagnostics)
@@ -543,13 +536,57 @@ static int test_notes_alone_recompose() {
 	const uint64_t findings = view.revisions.of(ViewConcern::Findings);
 	const uint64_t graph = view.findings.graph->generation();
 	TEST_EXPECT(editor_test::write_bytes(broken, readable));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(
 			session.validation_stats().files_validated == 0 && view.findings.graph->generation() == graph);
 	TEST_EXPECT(check.rendered() == 1 && unreadable() == 0);
 	TEST_EXPECT(session.problems_compositions() == compositions + 1 &&
 			view.revisions.of(ViewConcern::Findings) != findings);
+	return 0;
+}
+
+// The render check a menu a step (S13 A3 review): a project of three menus opened in a session that
+// polls a step a poll, the check renders one menu a poll at most and every menu once, and the
+// Problems rows come to the rows of a session that ran the validation to its end.
+static int test_render_check_steps() {
+	editor_test::TempProjectDir dir("opennova_menu_render_steps");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession whole(platform, preferences);
+	editor_test::handle_to_end(whole, request::new_project(dir.file("project"), "Steps"));
+	editor_test::create_missing_files(whole);
+	const std::string root = whole.view().project.root;
+	for (const char *name : {"FIRST", "SECOND"})
+		TEST_EXPECT(editor_test::write_text(root + "/menus/" + name + ".mnu",
+				std::string("<SCREEN>\r\n<NAME>") + name + "</NAME>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"WORDS\">\r\n"
+				"<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
+				"<STRING>Hello</STRING>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
+	editor_test::handle_to_end(whole, request::rescan());
+	size_t menus = 0;
+	for (const AssetEntry &asset : whole.view().project.scan->entries) menus += asset.kind == AssetKind::Menu ? 1 : 0;
+	TEST_EXPECT(menus >= 3);
+	MemoryPreferencesStore other;
+	ProjectSession stepped(platform, other);
+	const SessionView &view = stepped.view();
+	const MenuRenderCheck *check = menu_render_check(view.findings.project_checks.get());
+	TEST_EXPECT(check != nullptr);
+	if (!check) return 1;
+	stepped.set_poll_budget({0, 1});
+	stepped.handle(request::open_project(root));
+	size_t polls = 0, most = 0, rendered = 0;
+	while ((view.activity.operation.running() || view.activity.validation.running) && polls < 100000) {
+		stepped.poll();
+		++polls;
+		if (check->rendered() > rendered) most = std::max(most, check->rendered() - rendered);
+		rendered = check->rendered();
+	}
+	TEST_EXPECT(view.project.open && !view.activity.validation.running && most == 1 && rendered == menus);
+	const auto rows = [](const SessionView &v) {
+		std::vector<std::string> out;
+		for (const Diagnostic &d : v.findings.diagnostics) out.push_back(d.code() + "|" + d.asset + "|" + d.message);
+		return out;
+	};
+	TEST_EXPECT(rows(view) == rows(whole.view()));
 	return 0;
 }
 
@@ -559,6 +596,7 @@ int main(int argc, char **argv) {
 		{ "blank_startup", test_blank_startup },
 		{ "render_again_only_when_moved", test_render_again_only_when_moved },
 		{ "notes_alone_recompose", test_notes_alone_recompose },
+		{ "render_check_steps", test_render_check_steps },
 		{ "retail_assets_leg", test_retail_assets_leg },
 		{ "retail_install_leg", test_retail_install_leg },
 	};

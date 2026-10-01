@@ -49,6 +49,7 @@ private:
 	SymbolRenamePlan plan_symbol(const EditorRequest &request);
 	bool saved_file_uses(const std::string &path, const SymbolRenamePlan &plan) const;
 	void rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files);
+	bool unsaved_while_due(std::vector<std::string> &files);
 
 	SessionCore &core_;
 	SessionView &view_;

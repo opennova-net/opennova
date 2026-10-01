@@ -12,6 +12,8 @@
 #include <editor/session/import_operation.h>
 #include <editor/session/import_plan_operation.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
@@ -101,8 +103,9 @@ void ImportController::start_plan() {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	preview.plan = std::make_shared<const ImportPlan>();
 	preview.changed = false;
-	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(paths_, *view_.project.document,
-			core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies, core_.game_install()));
+	const uint64_t id = core_.start_operation(std::make_unique<ImportPlanOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), view_.documents.open, preview.roots,
+			preview.with_dependencies, core_.game_install()));
 	if (id == 0) return core_.refuse_busy(std::string()); // the gate let no operation run beside it
 	core_.outcome().operation = id;
 	view_.activity.status = "Planning the import...";
@@ -144,8 +147,11 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 }
 
 // The import dialog's "Include the files these need": the editor's preference, written from a
-// copy (a preference that could not be written stays the one in effect, its failure a finding);
-// an open preview is planned again with the setting asked for.
+// copy (a preference that could not be written stays the one in effect, its failure a finding).
+// An open preview is planned again with the setting asked for, whatever the setting was (S13 A3:
+// a plan it takes the place of is never left half made), as a plan_import plans it, through the
+// busy gate: a running plan gives way to it, and another operation refuses the plan (the setting
+// stays written, the dialog on the plan it shows).
 void ImportController::set_dependencies(bool with_dependencies) {
 	EditorPreferences &preferences = core_.preferences();
 	if (with_dependencies != preferences.values().import_dependencies) {
@@ -157,13 +163,15 @@ void ImportController::set_dependencies(bool with_dependencies) {
 	view_.project.import_dependencies = preferences.values().import_dependencies;
 	view_.activity.status = with_dependencies ? "Imports bring the files the chosen ones need."
 	                                          : "Imports take the chosen files alone.";
-	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
-	if (preview.open && preview.with_dependencies != with_dependencies) {
-		preview.with_dependencies = with_dependencies;
-		start_plan();
-	}
 	core_.touch(ViewConcern::Preferences);
 	core_.touch(ViewConcern::Output);
+	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
+	if (preview.open) {
+		EditorRequest replan = request::of(EditorRequestKind::PlanImport);
+		replan.imports = preview.roots;
+		replan.with_dependencies = with_dependencies;
+		serve_request(core_, replan);
+	}
 }
 
 // The rows kept, written the whole selection or none of it as far as the disk allows
@@ -181,8 +189,9 @@ void ImportController::import_files(const EditorRequest &request) {
 	std::shared_ptr<const ImportPlan> shown;
 	if (preview.open) {
 		shown = preview.plan;
-		replan = std::make_unique<ImportPlanOperation>(paths_, *view_.project.document, core_.problems().graph(),
-				view_.documents.open, preview.roots, preview.with_dependencies, core_.game_install());
+		replan = std::make_unique<ImportPlanOperation>(core_.problems(), paths_, *view_.project.document,
+				core_.problems().graph(), view_.documents.open, preview.roots, preview.with_dependencies,
+				core_.game_install());
 	} else if (request.imports.empty()) {
 		view_.activity.status = "Nothing to import.";
 		core_.touch(ViewConcern::Output);
@@ -266,16 +275,15 @@ void ImportController::set_install_files(std::vector<std::string> names) {
 // refused, or kept when it holds the same bytes): the files its sources make land where the
 // plan puts them. With the import dialog open that is the plan it shows (the ImportPlan
 // operation's, S13 A3), reused: the import plans again before it writes and writes nothing when
-// the plan is not that one. With none open, the files asked for are planned here, over the view's
-// scan and graph, with no cap: import_assets writes every file of the request, so every
-// destination is looked at.
+// the plan is not that one. With none open, the files asked for are planned here, with no cap
+// (import_assets writes every file of the request, so every destination is looked at) and none of
+// what they need: that plan reads the scan alone, never the graph, so no validation runs first.
 void ImportController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
 	if (!view_.project.open || !request.replace || !documents.documents_dirty()) return;
 	const DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	std::shared_ptr<const ImportPlan> plan = preview.open ? preview.plan : nullptr;
 	if (!plan) {
-		core_.problems().validate_pending();
 		plan = std::make_shared<const ImportPlan>(plan_import(request.imports, false, paths_, *view_.project.document,
 				*view_.project.scan, core_.problems().graph(), core_.game_install(), SIZE_MAX));
 	}

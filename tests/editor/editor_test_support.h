@@ -79,17 +79,21 @@ inline opennova::editor::ActionOutcome handle_to_end(opennova::editor::ProjectSe
 }
 
 // Create all missing, as the editor asks for it: the roles of every Required row the
-// project does not meet (a CreateMissing naming none makes nothing).
+// project does not meet (a CreateMissing naming none makes nothing); then the validation it
+// left due, run to its end (S13 A3: the polls step it, and no request runs it).
 inline void create_missing_files(opennova::editor::ProjectSession &session) {
 	session.handle(opennova::editor::request::create_missing(
 	        opennova::editor::unmet_required_roles(*session.view().project.requirements)));
+	session.run_operations();
 }
 
 // The project settings dialog's Apply with only the settings `change` names, the others as
-// they are (what came of it is the view's settings_result, and its SettingsApplied event); and
-// two of them alone: the game install folder, the missions feature.
+// they are (what came of it is the view's settings_result, and its SettingsApplied event), the
+// validation it left due run to its end; and two of them alone: the game install folder, the
+// missions feature.
 inline void apply_settings(opennova::editor::ProjectSession &session, const opennova::editor::ProjectSettingsChange &change) {
 	session.handle(opennova::editor::request::apply_project_settings(change));
+	session.run_operations();
 }
 inline void set_game_install(opennova::editor::ProjectSession &session, const std::string &dir) {
 	opennova::editor::ProjectSettingsChange change;

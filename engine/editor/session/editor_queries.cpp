@@ -645,6 +645,9 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 		error = "no project is open.";
 		return JsonValue::make_null();
 	}
+	// The gate is the Problems rows a validation makes: the one left due or under way runs to its
+	// end first (S13 A3: the polls step it, and no request runs it).
+	core.problems().validate_pending();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
 			core.problems().gate_findings());
 	std::vector<const Diagnostic *> blocking;
@@ -867,8 +870,10 @@ constexpr EditorQueryRow kRows[] = {
 			"among the Problems rows the build gates on, the scan's and the requirements', and the "
 			"build's own checks of the files (an archive in the project, a name no archive can "
 			"store). A Problems row the build does not gate on (a project check's: the render "
-			"check's) blocks nothing. A build request reads changed files again first, joins a "
-			"build that runs and waits on unsaved edits, which the gate does not weigh.")
+			"check's) blocks nothing. The query runs the validation left due to its end first, so "
+			"the rows it reads are the files' as they stand. A build request reads changed files "
+			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
+			"not weigh.")
 			.pages("blocking")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).

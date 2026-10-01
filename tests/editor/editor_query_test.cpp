@@ -76,8 +76,12 @@ std::string refusal(ProjectSession &session, const char *name, const std::string
 }
 
 // A request in its wire form.
+// A request on the wire, then the operation it starts and the validation it leaves due run to
+// their end (S13 A3: no request runs the validation): its answer.
 JsonValue send(ProjectSession &session, const std::string &json) {
-	return session.handle_json(parse(json));
+	JsonValue answer = session.handle_json(parse(json));
+	session.run_operations();
+	return answer;
 }
 
 bool done(const JsonValue &answer) {
@@ -434,6 +438,7 @@ static int test_problems_params() {
 	// the stylesheet's variables no menu names (notes about its file, open and active).
 	session.handle(request::create_missing({ "menu_style" }));
 	session.handle(request::open_document("menu_style.mns"));
+	session.run_operations(); // the validation they left due (S13 A3: no request runs it)
 	const SessionView &view = session.view();
 	const Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style && view.documents.active == style->path());

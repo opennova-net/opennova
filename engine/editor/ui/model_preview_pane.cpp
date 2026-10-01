@@ -126,6 +126,7 @@ void ModelPreviewPane::Impl::draw() {
 	frame.document = previewed(view, model.shown_path());
 	frame.model = &model;
 	frame.current = frame.document && model.shown_revision() == frame.document->revision();
+	frame.editable = view.allows(EditorRequestKind::EditRecord);
 	if (frame.current && view.documents.active == frame.document->path())
 		model_overlay_of(*frame.document, view.documents.selection.primary, frame.selected_kind,
 				frame.selected);

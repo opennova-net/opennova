@@ -21,7 +21,12 @@ namespace opennova::editor {
 // (SessionCore::absorb_open), whose validation the poll then steps.
 class OpenOperation : public SessionOperation {
 public:
-	OpenOperation(ProjectPaths paths, LocalSettings local, ProjectDocument document, bool import_pass = true);
+	// `local`: the project's settings as the request read them, the install whose names the Open
+	// lists among them; `seed`, the install last chosen in the editor (written into a local.json that
+	// names none when the Open finishes, "" for none); `run_install`, the run's own (S13 A7: for the
+	// session alone, written nowhere).
+	OpenOperation(ProjectPaths paths, LocalSettings local, ProjectDocument document, bool import_pass,
+			std::string seed, std::string run_install);
 
 	OperationKind kind() const override { return OperationKind::Open; }
 	bool step(const StepBudget &budget) override;
@@ -30,7 +35,8 @@ public:
 	OperationOutcome finish(SessionCore &core) override;
 
 	const ProjectPaths &paths() const { return paths_; }
-	const LocalSettings &local() const { return local_; }
+	const std::string &seed() const { return seed_; }
+	const std::string &run_install() const { return run_install_; }
 	const ProjectDocument &document() const { return document_; }
 	std::vector<std::string> &install_files() { return install_files_; }
 	ProjectRefresh &refresh() { return refresh_; }
@@ -39,6 +45,8 @@ private:
 	ProjectPaths paths_;
 	LocalSettings local_;
 	ProjectDocument document_;
+	std::string seed_;
+	std::string run_install_;
 	std::vector<std::string> install_files_;
 	bool listed_ = false; // the game install's names read
 	ProjectRefresh refresh_;

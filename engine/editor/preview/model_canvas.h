@@ -41,6 +41,9 @@ struct ModelCanvasFrame {
 	ModelOverlayKind selected_kind = ModelOverlayKind::UserPoint;
 	int selected = -1;
 	float snap = 0.0f; // a dragged place snaps to this grid, metres (Alt: free)
+	// Edits may be raised (S13 A3: false while an operation holds the documents, as
+	// SessionView::allows(EditRecord) says): else no handle is taken, a press selects or orbits.
+	bool editable = true;
 };
 
 // What a press on the canvas took: on the selected marker (or its axis tip) its handle, whose

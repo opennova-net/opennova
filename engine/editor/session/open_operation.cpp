@@ -7,10 +7,13 @@
 
 namespace opennova::editor {
 
-OpenOperation::OpenOperation(ProjectPaths paths, LocalSettings local, ProjectDocument document, bool import_pass) :
+OpenOperation::OpenOperation(ProjectPaths paths, LocalSettings local, ProjectDocument document, bool import_pass,
+		std::string seed, std::string run_install) :
 		paths_(std::move(paths)),
 		local_(std::move(local)),
 		document_(std::move(document)),
+		seed_(std::move(seed)),
+		run_install_(std::move(run_install)),
 		refresh_(paths_, document_, false, std::string(), import_pass) {}
 
 bool OpenOperation::step(const StepBudget &budget) {

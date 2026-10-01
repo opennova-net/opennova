@@ -31,14 +31,25 @@ std::vector<Diagnostic> validate_project(
 }
 
 bool refresh_project(const ValidationInput &input, AssetGraph &graph, ValidationCache &cache) {
-	ProjectValidation validation(graph, cache);
+	GraphReadings readings;
+	ProjectValidation validation(graph, cache, readings);
 	while (!validation.step(input, UINT64_MAX)) {
 	}
 	return validation.moved();
 }
 
-ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache) :
-		graph_(graph), cache_(cache), generation_(graph.generation()) {}
+namespace {
+
+// Whether a reading made ahead is of the file as the scan lists it now (AssetGraph::update's rule).
+bool reads_as_listed(const GraphReading &reading, const AssetEntry &asset) {
+	return reading.logical_name == asset.logical_name && reading.kind == asset.kind &&
+	       reading.size == asset.size_bytes && reading.modified == asset.modified_ticks;
+}
+
+} // namespace
+
+ProjectValidation::ProjectValidation(AssetGraph &graph, ValidationCache &cache, GraphReadings &readings) :
+		graph_(graph), cache_(cache), readings_(readings), generation_(graph.generation()) {}
 
 bool ProjectValidation::graph_moved() const {
 	return (phase_ == Phase::Files || phase_ == Phase::Done) && graph_.generation() != generation_;
@@ -48,11 +59,24 @@ bool ProjectValidation::step(const ValidationInput &input, uint64_t budget) {
 	uint64_t spent = 0;
 	do {
 		switch (phase_) {
-		case Phase::Start:
+		case Phase::Start: {
 			generation_ = graph_.generation();
-			to_read_ = graph_.files_to_read(input.scan, input.open);
+			// The readings a validation before this one made of files still as the scan lists them are
+			// taken as they are (a validation started again does not read them again); the others go.
+			GraphReadings kept;
+			for (const AssetEntry *asset : graph_.files_to_read(input.scan, input.open)) {
+				const auto found = readings_.find(asset->relative_path);
+				if (found != readings_.end() && reads_as_listed(found->second, *asset)) {
+					kept.emplace(found->first, std::move(found->second));
+					++kept_;
+				} else {
+					to_read_.push_back(asset);
+				}
+			}
+			readings_ = std::move(kept);
 			phase_ = Phase::Read;
 			break;
+		}
 		case Phase::Read: {
 			// The graph first (the use checks read what the files define and who uses it): the files
 			// its update would read, read ahead a file at a time.

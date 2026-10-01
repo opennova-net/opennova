@@ -221,11 +221,6 @@ struct Request {
 		out.row.ends_edit_groups = true;
 		return out;
 	}
-	constexpr Request validates() const {
-		Request out = *this;
-		out.row.validates = true;
-		return out;
-	}
 };
 
 // What each request reads and writes: the files when it reads or writes them on disk (the import
@@ -243,6 +238,7 @@ constexpr RequestKindRow kRows[] = {
 			"names no game.")
 			.takes(request_params({ F::Dir }, { F::Title, F::Game, F::ImportPass }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
+			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Create a new project", "Save all")
 			.can_discard()
 			.acts_on_saved()
@@ -255,6 +251,7 @@ constexpr RequestKindRow kRows[] = {
 			"that does not open leaves the open project open.")
 			.takes(request_params({ F::Dir }, { F::GameInstall, F::ImportPass }))
 			.holds(kNone, kHoldsAll | kSlot, OnBusy::CancelRunning)
+			.ends_edit_groups()
 			.guarded(GuardScope::AllDirty, "Open another project", "Save all")
 			.can_discard()
 			.acts_on_saved()
@@ -278,6 +275,7 @@ constexpr RequestKindRow kRows[] = {
 			"reads stays open, document.stale), then the import pass, the scan and the "
 			"requirements, an operation (the outcome names it).")
 			.holds(kFiles, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.acts_on_saved()
 			.row,
 	// The settings dialog waits on its answer, so a settings change is never refused whole: each
@@ -303,7 +301,7 @@ constexpr RequestKindRow kRows[] = {
 			"which a new plan takes the place of.")
 			.takes(request_params({ F::Paths }, { F::WithDependencies }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
-			.validates()
+			.ends_edit_groups()
 			.row,
 	Request(K::PlanImport, "plan_import", serve_plan_import,
 			"The import dialog planned again over the files chosen, imports, with the files they "
@@ -311,14 +309,15 @@ constexpr RequestKindRow kRows[] = {
 			"when with_dependencies (a preview opens when none is), an operation.")
 			.takes(request_params({ F::Imports }, { F::WithDependencies }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
-			.validates()
+			.ends_edit_groups()
 			.row,
+	// A preference alone: it holds nothing of the session's. With the import dialog open it plans the
+	// dialog again as a plan_import does, through the gate (a running plan gives way to it).
 	Request(K::SetImportDependencies, "set_import_dependencies", serve_set_import_dependencies,
 			"The editor's setting of whether an import brings the files the chosen ones need "
-			"(with_dependencies), remembered; an open import dialog is planned again with it.")
+			"(with_dependencies), remembered; an open import dialog is planned again with it, as "
+			"plan_import plans it (whatever the setting was).")
 			.takes(request_params({ F::WithDependencies }))
-			.holds(kFiles, kSlot, OnBusy::Supersede)
-			.validates()
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
 			"The import dialog's rows kept, imports, copied into the project, every file checked "
@@ -329,9 +328,9 @@ constexpr RequestKindRow kRows[] = {
 			"written when that is not the plan shown (import.changed).")
 			.takes(request_params({ F::Imports }, { F::Replace }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
 			.acts_on_saved()
-			.validates()
 			.row,
 	// It stops the import's plan or write that runs (Supersede: ImportPlan and ImportApply give way to
 	// it; an import that wrote cannot be cancelled, and refuses it until it ends).
@@ -445,11 +444,13 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({}, { F::Path }))
 			.names_active()
 			.row,
+	// It reads the documents as they stand, which an operation writes only as it finishes (in one
+	// poll): it waits for none.
 	Request(K::Copy, "copy", serve_copy,
 			"The selected records of the document at path onto the session's clipboard, as the "
 			"document type's own payload.")
 			.takes(request_params({}, { F::Path }))
-			.holds(kDocuments, kNone)
+			.holds(kNone, kNone)
 			.names_active()
 			.row,
 	Request(K::Cut, "cut", serve_copy,
@@ -514,9 +515,9 @@ constexpr RequestKindRow kRows[] = {
 			"file at a time, then the one step that writes).")
 			.takes(request_params({ F::Path, F::NewName }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::AssignRequirement, "assign_requirement", serve_assign_requirement,
 			"The requirement role met by renaming the project file path, of the kind it expects, "
@@ -524,9 +525,9 @@ constexpr RequestKindRow kRows[] = {
 			"the name the engine demands (as rename_asset renames).")
 			.takes(request_params({ F::Role, F::Path }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename %s", "Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::PreviewRename, "preview_rename", serve_preview_rename,
 			"What a rename would do, planned into the view's rename_preview, nothing written: the "
@@ -536,7 +537,6 @@ constexpr RequestKindRow kRows[] = {
 			"dialog opens (an AskRename view event).")
 			.takes(request_params({ F::Path }, { F::Locator, F::Field, F::NewName, F::AskName }))
 			.holds(kFiles, kNone)
-			.validates()
 			.row,
 	Request(K::RenameSymbol, "rename_symbol", serve_rename_symbol,
 			"The name the record at locator of path defines in field renamed everywhere to "
@@ -545,10 +545,10 @@ constexpr RequestKindRow kRows[] = {
 			"undoable. Committed as an operation (the outcome names it).")
 			.takes(request_params({ F::Path, F::Locator, F::Field, F::NewName }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
+			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Rename everywhere (defined in %s)",
 					"Save all and rename")
 			.acts_on_saved()
-			.validates()
 			.row,
 	Request(K::Reimport, "reimport", serve_reimport,
 			"A refresh whose import pass takes the source path (left out: every source) even when "
@@ -557,6 +557,7 @@ constexpr RequestKindRow kRows[] = {
 			"the source are what the operation came to (last_operation).")
 			.takes(request_params({}, { F::Path, F::Force }))
 			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
 			.row,
 	Request(K::PreviewInstallImport, "preview_install_import", serve_preview_install_import,
 			"The import dialog on the game install's files: the names alone, chosen, or with none "
@@ -565,7 +566,7 @@ constexpr RequestKindRow kRows[] = {
 			"sources carry install: true); planned as preview_import plans.")
 			.takes(request_params({}, { F::Names, F::WithDependencies }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
-			.validates()
+			.ends_edit_groups()
 			.row,
 	Request(K::ClearOutput, "clear_output", serve_clear_output,
 			"The output lines emptied, as Output's Clear does.")
@@ -628,8 +629,8 @@ constexpr bool rows_named() {
 }
 static_assert(rows_named(), "each request kind has a token of its own and a doc");
 
-// The session serves a row by its handler; a shell row has none, and holds, guards, ends and
-// validates nothing of the session's.
+// The session serves a row by its handler; a shell row has none, and holds, guards and ends
+// nothing of the session's.
 constexpr bool handlers_where_served() {
 	for (const RequestKindRow &row : kRows) {
 		const bool session = row.served_by == ServedBy::Session;
@@ -637,7 +638,7 @@ constexpr bool handlers_where_served() {
 			return false;
 		if (!session &&
 				(row.guard != GuardScope::None || row.acts_on_saved || row.names_active ||
-						row.ends_edit_groups || row.validates || row.reads != kNone ||
+						row.ends_edit_groups || row.reads != kNone ||
 						row.writes != kNone))
 			return false;
 	}
@@ -806,9 +807,6 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 		core.documents().end_edit_groups();
 	if (gate_busy(core, request))
 		return true;
-	// Its plan reads the graph: the validation an edit left due (a held pump's) runs first.
-	if (row.validates)
-		core.problems().validate_pending();
 	if (core.guard().holds(request))
 		return true;
 	row.handler(core, request);

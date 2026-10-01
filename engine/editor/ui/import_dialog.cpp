@@ -289,7 +289,10 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const std::string include = "Include the files these need" + (with ? " (" + std::to_string(found) + " found)" : std::string());
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
-	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies);
+	// The setting plans the open dialog again (a plan_import through the gate): held back while
+	// that would be refused.
+	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies) &&
+	                   workspace.view().allows(EditorRequestKind::PlanImport);
 	ImGui::BeginDisabled(!plans);
 	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans)
 		workspace.request(request::set_import_dependencies(with));

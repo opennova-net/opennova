@@ -114,10 +114,10 @@ uint64_t SessionCore::start_operation(std::unique_ptr<SessionOperation> operatio
 	return id;
 }
 
-// The running operation's steps, within the poll's budget: its progress moves Operation alone.
-void SessionCore::step_operation() {
+// The running operation's steps, within `budget`: its progress moves Operation alone.
+void SessionCore::step_operation(const PollBudget &budget) {
 	if (operations_.running() && !operations_.done()) {
-		operations_.poll(poll_budget_, steady_clock_ms);
+		operations_.poll(budget, steady_clock_ms);
 		view_.activity.operation = operations_.status();
 		touch(ViewConcern::Operation);
 	}
@@ -224,18 +224,20 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 	}
 	if (!close_project()) return false;
 	const ProjectPaths paths = ProjectPaths::for_root(dir);
-	// The project's game install is its own (local.json); one that names none starts from the
-	// install last chosen in the editor. A local.json of another schema is set aside, a warning:
-	// the project opens as one with none.
+	// The install whose names the Open lists: the run's own (game_install, for this session alone),
+	// else the project's (its local.json, read here and written nowhere), else the one last chosen
+	// in the editor, which the Open's finish writes into a local.json that names none (absorb_open,
+	// open_local_settings), saying then what it set aside: a cancelled Open leaves the file as it
+	// was and reports nothing.
 	LocalSettings local;
-	Diagnostic local_finding;
-	if (!open_local_settings(paths, preferences_.values().game_install, local, local_finding) ||
-			!local_finding.code().empty())
-		report(local_finding);
+	Diagnostic unread;
+	if (!load_local_settings(paths, local, unread)) local = LocalSettings();
+	const std::string seed = game_install.empty() ? preferences_.values().game_install : std::string();
 	if (!game_install.empty()) local.game_install = absolute_install_path(game_install);
+	else if (local.game_install.empty()) local.game_install = absolute_install_path(seed);
 	const std::string title = doc.title;
-	const uint64_t id =
-			start_operation(std::make_unique<OpenOperation>(paths, std::move(local), std::move(doc), import_pass));
+	const uint64_t id = start_operation(
+			std::make_unique<OpenOperation>(paths, std::move(local), std::move(doc), import_pass, seed, game_install));
 	if (id == 0) {
 		refuse_busy(dir); // the close cancelled what ran: nothing does
 		return false;
@@ -247,12 +249,20 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 }
 
 // The project an Open read made the open one, as the Open read it: its paths, its local settings
-// and its document, the recent projects and the runtime, the game install's names, then its files
+// (opened now: the install last chosen written into a local.json that names none, a file of another
+// schema set aside, either said; the run's own install over them, written nowhere) and its
+// document, the recent projects and the runtime, the game install's names, then its files
 // (absorb_refresh). Output names the project; the menu bar's tooltip on what was said names its
 // folder.
 OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
+	OperationOutcome outcome;
 	paths_ = open.paths();
-	local_ = open.local();
+	Diagnostic local_finding;
+	if (!open_local_settings(paths_, open.seed(), local_, local_finding) || !local_finding.code().empty()) {
+		report(local_finding);
+		outcome.findings.push_back(local_finding); // what the Open came to says it too
+	}
+	if (!open.run_install().empty()) local_.game_install = absolute_install_path(open.run_install());
 	view_.project.open = true;
 	view_.project.root = paths_.root;
 	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
@@ -269,7 +279,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	touch(ViewConcern::Project);
 	touch(ViewConcern::Operation); // no build yet
 	touch(ViewConcern::Output);
-	return OperationOutcome();
+	return outcome;
 }
 
 bool SessionCore::close_project() {
@@ -339,7 +349,10 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	files_scanned_ = refresh.files_scanned();
 	view_.project.scan = std::make_shared<const AssetScan>(std::move(refresh.scan()));
 	problems().set_scan(paths_.root, *view_.project.scan, view_.project.document->target_game);
-	view_.project.requirements = std::make_shared<const RequirementReport>(std::move(refresh.requirements()));
+	// The requirements over that scan, with the project's document as it is now: a features change
+	// made while the refresh ran (S13 A3: it waits for none) is the one they follow.
+	view_.project.requirements = std::make_shared<const RequirementReport>(
+			evaluate_requirements(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
 	problems().validate_later();
 	return imports;
@@ -374,9 +387,9 @@ void SessionCore::update_files(const std::vector<std::string> &paths) {
 // refused whole (the settings dialog waits on its result): each part is weighed against the
 // running operation as what it reads and writes, and a part that conflicts is a failure the
 // result carries, its setting unchanged. The name writes the project; the features write it
-// too and, through the refresh the requirements follow them by (the import pass, the scan),
-// read and write the files; the game install writes the project's local settings. The
-// editor's own preferences hold nothing an operation holds.
+// too and evaluate the requirements again over the scan the view holds (no file is read: S13
+// A3); the game install writes the project's local settings. The editor's own preferences hold
+// nothing an operation holds.
 void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	std::vector<Diagnostic> failures;
 	const auto refuse_part = [this, &failures](const std::string &until) {
@@ -396,7 +409,9 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 	}
 	const bool mission = change.mission && *change.mission != project.features.mission;
 	const bool multiplayer = change.multiplayer && *change.multiplayer != project.features.multiplayer;
-	if ((mission || multiplayer) && busy_for(HoldsFiles, HoldsFiles | HoldsProject)) {
+	// The features write the project and evaluate the requirements again over the scan the view
+	// holds (no file read): they wait only for what writes the project.
+	if ((mission || multiplayer) && busy_for(HoldsNothing, HoldsProject)) {
 		refuse_part("before changing the project's features");
 	} else {
 		if (mission) project.features.mission = *change.mission;

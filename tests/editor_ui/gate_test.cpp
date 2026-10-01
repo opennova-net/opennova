@@ -376,7 +376,9 @@ void test_windows_show_the_gate() {
 	};
 	const std::vector<Probe> import_probes = {
 	        {"the import dialog's Import", K::ImportFiles, in_dialog(item_id(dialog, {"###import"}), K::ImportFiles), nullptr},
-	        {"the import dialog's check box", K::SetImportDependencies,
+	        // The setting alone holds nothing (S13 A3), but with the dialog open it plans the dialog
+	        // again as a plan_import does: the check box is held back exactly when that is refused.
+	        {"the import dialog's check box", K::PlanImport,
 	         in_dialog(item_id(import_body_id(), {"###needs"}), K::SetImportDependencies), nullptr},
 	        {"the import dialog's Cancel", K::CancelImport, in_dialog(item_id(dialog, {"Cancel"}), K::CancelImport), nullptr},
 	};

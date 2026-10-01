@@ -145,11 +145,17 @@ def cmd_launch(args: argparse.Namespace) -> int:
             f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
     if args.open:
         # --open's project opens as an operation (S13 A3), then validates across frames: waited on,
-        # so the first query after the launch reads the project.
-        while time.monotonic() < deadline:
+        # so the first query after the launch reads the project; a launch whose Open did not end in
+        # time is not one that succeeded.
+        while True:
             state = client.structured("editor_query", {"query": "operation"})
             if not (state.get("operation") or {}).get("running") and not (state.get("validation") or {}).get("running"):
                 break
+            if time.monotonic() >= deadline:
+                raise GameMcpError(
+                    EXIT_LAUNCH_FAILED,
+                    f"the project did not open and validate within {args.timeout:.0f} s (pid {child.pid} still "
+                    f"running; stop it with `stop --pid {child.pid}`)")
             time.sleep(0.2)
     print(f"url={client.url} pid={child.pid} log={stdout_log}"
           + (f" godot_log={log_file}" if log_file else ""))
@@ -252,8 +258,10 @@ def cmd_request(args: argparse.Namespace) -> int:
     request = request_of(args)
     if args.wait:
         # The tool awaits the operation the request starts (an open, a refresh, an import, a rename, a
-        # build) and the validation after it (S13 A3); its answer carries what it came to.
+        # build) and the validation after it (S13 A3); its answer carries what it came to. Its own
+        # deadline falls before this call's, so a wait that runs out answers timed_out.
         request["wait"] = True
+        request["wait_ms"] = int(max(args.timeout - 5.0, 1.0) * 1000)
     payload = client_of(args).call("editor_request", request, timeout=args.timeout)
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
@@ -261,8 +269,13 @@ def cmd_request(args: argparse.Namespace) -> int:
     answer = payload.get("structuredContent", {})
     print_json(answer)
     # `ok` only says the request read; the outcome says whether it happened, and what the
-    # operation it started came to (when waited on) whether that ended done.
+    # operation it started came to (when waited on) whether that ended done. A wait that ran out
+    # (timed_out) is not done either.
     outcome = answer.get("outcome", {})
+    if answer.get("timed_out"):
+        print(f"the wait ran out before the operation and the validation ended (--timeout {args.timeout:.0f} s)",
+              file=sys.stderr)
+        return EXIT_NOT_DONE
     ended = answer.get("operation") or {}
     done = not outcome or outcome.get("done", False)
     return EXIT_OK if done and ended.get("end", "done") == "done" else EXIT_NOT_DONE

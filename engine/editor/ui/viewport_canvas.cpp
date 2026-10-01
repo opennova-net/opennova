@@ -155,6 +155,8 @@ void CanvasWindowRequests::select(
 }
 
 void CanvasWindowRequests::edits(const std::string &path, std::vector<Edit> batch) {
+	// Held back while an operation holds the documents (S13 A3), as the session would refuse it.
+	if (!workspace_.view().allows(EditorRequestKind::EditRecord)) return;
 	workspace_.request(request::edit_record(path, std::move(batch)));
 }
 

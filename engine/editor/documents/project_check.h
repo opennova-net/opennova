@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <vector>
 
 #include <base/vfs/file_source.h>
@@ -47,18 +48,28 @@ struct ProjectCheckInput {
 // session's ProblemsService keeps its checks from one validation to the next and lets go of what
 // they held when the project closes; the command line makes them for its one validation).
 //
-// A validation stepped over several polls (S13 A3) runs the checks after the last file's own
-// findings (a check reads which files' records their own checks read), each check's update one
-// step, in the registry's order: update is the run-to-end form, and a check whose work is large
-// (the render check's menus) takes a cursor of its own then. The scan and the open documents stay
-// as the first step saw them until the last check ran: an edit between two steps starts the
-// validation again.
+// A validation stepped over several polls (S13 A3) brings the checks up after the last file's own
+// findings (a check reads which files' records their own checks read), in the registry's order,
+// each a step at a time within the poll's budget: begin() starts a check's update, step() goes on
+// until it is up, and update() is the two run to their end. A check whose work is small does it
+// whole in its one step (the default); the render check renders a menu a step, keeping what an
+// update started again has not made yet (a stylesheet's variables that changed, a menu rendered
+// before it ended). The scan and the open documents stay as the first step saw them until the last
+// check is up: an edit between two steps starts the validation again.
 class ProjectCheck {
 public:
 	virtual ~ProjectCheck() = default;
 	// Brought to the project as `input` has it: true when its findings may have moved since its
 	// last update (the rows are composed again only then).
 	virtual bool update(const ProjectCheckInput &input) = 0;
+	// The update started over, then gone on with a step at a time within `budget` bytes: true once
+	// the check is up, `moved` then saying what update says.
+	virtual void begin() {}
+	virtual bool step(const ProjectCheckInput &input, uint64_t budget, bool &moved) {
+		(void)budget;
+		moved = update(input);
+		return true;
+	}
 	// Its findings as its last update left them, on the records and fields that cause them.
 	virtual const std::vector<Diagnostic> &findings() const = 0;
 	// The project closed: what it held of it goes, and the next update starts over.

@@ -253,8 +253,7 @@ static int test_fixes() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Fixes"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Fixes"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	blank.logical_name = "spare.bin";
@@ -263,8 +262,7 @@ static int test_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/menus/a.mnu", kMenuA) && editor_test::write_text(root + "/menus/b.mnu", kMenuB));
 	TEST_EXPECT(editor_test::write_text(root + "/art/splash.tga", "tga") && editor_test::write_text(root + "/art/splash.pcx", "pcx"));
 	TEST_EXPECT(editor_test::write_text(root + "/foo.bin", "raw bytes")); // a .bin that is no string table
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 
 	// A required file with a factory, and no game data: Create it (placeholder content, with
 	// the others in a Fix all), or Use a string table of the project as it (never in bulk),
@@ -328,7 +326,7 @@ static int test_fixes() {
 	gameerr = requirement_finding(v, "requirement.missing", "gameerr");
 	TEST_EXPECT(gameerr && labels_of(fixes_for(boot, v)) == labels_of(fixes_for(*gameerr, v)));
 	EditorRequest create = request::create_missing({"gameerr"});
-	session.handle(create);
+	editor_test::handle_to_end(session, create);
 	TEST_EXPECT(session.outcome().done() && fixes_for(boot, v).empty() && !has_fixes(boot, v));
 	Diagnostic unknown = boot;
 	editor_test::own_requirement(unknown).role.clear();
@@ -432,7 +430,7 @@ static int test_fixes() {
 		}
 	}
 	// Open with unsaved edits, the rewrite saves them too, and says so.
-	session.handle(request::open_document("menus/a.mnu"));
+	editor_test::handle_to_end(session, request::open_document("menus/a.mnu"));
 	Document *menu = session.document_for("menus/a.mnu");
 	NodeAddress go;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "GO", go));
@@ -441,7 +439,7 @@ static int test_fixes() {
 	edit.edits[0].address = go;
 	edit.edits[0].field = "position.left";
 	edit.edits[0].value = int64_t(20);
-	session.handle(edit);
+	editor_test::handle_to_end(session, edit);
 	TEST_EXPECT(menu->dirty());
 	const Diagnostic ending = editor_test::finding_of(DiagnosticSeverity::Error, "style.line_ending", "Line 3 ends LF.", "menus/a.mnu");
 	TEST_EXPECT(fixes_for(ending, v).front().detail.find("unsaved edits") != std::string::npos);
@@ -462,8 +460,8 @@ static int test_fixes() {
 	}
 	TEST_EXPECT(bulk_seen > 0);
 	// No project, no fixes.
-	session.handle(request::undo(menu->path()));
-	session.handle(request::close_project());
+	editor_test::handle_to_end(session, request::undo(menu->path()));
+	editor_test::handle_to_end(session, request::close_project());
 	TEST_EXPECT(fixes_for(font, v).empty() && fixes_for(boot, v).empty());
 	return 0;
 }
@@ -700,8 +698,7 @@ static int test_placeholders() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Placeholders"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Placeholders"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
 	// armory.3di names armry.tga on a diffuse row (type 0); c.mnu an image, fx.ptl a graphic.
@@ -717,8 +714,7 @@ static int test_placeholders() {
 	                                    "\t</WINDOW>\r\n</SCREEN>\r\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n"
 	                                                      "\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	const auto missing = [&v](ReferenceKind kind, const char *target) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code() == "reference.missing" && editor_test::reference_of(d).kind == kind && subject_target(d) == target) return &d;
@@ -799,7 +795,7 @@ static int test_placeholders() {
 	skin = missing(ReferenceKind::Texture, "armry.tga");
 	TEST_EXPECT(skin != nullptr);
 	if (!skin) return 1;
-	session.handle(fixes_for(*skin, v).front().request);
+	editor_test::handle_to_end(session, fixes_for(*skin, v).front().request);
 	TEST_EXPECT(session.outcome().done());
 	const AssetEntry *made = v.project.scan->find("armry.tga");
 	TEST_EXPECT(made && made->kind == AssetKind::Texture && made->relative_path == "armry.tga");
@@ -872,8 +868,7 @@ static int test_locations_and_fixes() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Places"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Places"));
 	editor_test::create_missing_files(session);
 	editor_test::set_game_install(session, install);
 	const SessionView &v = session.view();
@@ -920,8 +915,7 @@ static int test_locations_and_fixes() {
 	TEST_EXPECT(editor_test::write_text(root + "/art/a_name_too_long_for_archives.tga", "tga"));
 	TEST_EXPECT(editor_test::write_text(root + "/art/twin.tga", "tga") && editor_test::write_text(root + "/other/twin.tga", "tga"));
 	TEST_EXPECT(editor_test::write_text(root + "/" + gameerr_path, "raw bytes")); // no string table: the wrong kind
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	const auto finding_in = [&v](const char *code, const std::string &asset) -> const Diagnostic * {
 		for (const Diagnostic &d : v.findings.diagnostics)
 			if (d.code() == code && d.asset == asset) return &d;
@@ -933,7 +927,7 @@ static int test_locations_and_fixes() {
 	const Diagnostic *ignored = finding_in("menu.ignored_input", "menus/a.mnu");
 	TEST_EXPECT(ignored && ignored->row_id && ignored->record == "A/MAIN/GO");
 	if (!ignored) return 1;
-	session.handle(problem_location(*ignored, v).request());
+	editor_test::handle_to_end(session, problem_location(*ignored, v).request());
 	const Document *menu = session.document_for("menus/a.mnu");
 	NodeAddress main_window, second_go;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "MAIN", main_window));
@@ -947,7 +941,7 @@ static int test_locations_and_fixes() {
 	const Diagnostic *regrouped = finding_in("strings.regrouped", "strings/ungrouped.bin");
 	TEST_EXPECT(regrouped && regrouped->row_id && regrouped->record == "Menu");
 	if (!regrouped) return 1;
-	session.handle(problem_location(*regrouped, v).request());
+	editor_test::handle_to_end(session, problem_location(*regrouped, v).request());
 	const Document *strings = session.document_for("strings/ungrouped.bin");
 	TEST_EXPECT(strings && v.documents.active == strings->path() && strings->record_name(v.documents.selection.primary) == "MM_Cafe");
 
@@ -961,12 +955,12 @@ static int test_locations_and_fixes() {
 	if (fixes.size() != 1) return 1;
 	TEST_EXPECT(!fixes[0].bulk && fixes[0].detail.find(kNotUndoable) == std::string::npos);
 	TEST_EXPECT(session.document_for("anims/noreset.adm") == nullptr);
-	session.handle(fixes[0].request);
+	editor_test::handle_to_end(session, fixes[0].request);
 	Document *adm = session.document_for("anims/noreset.adm");
 	TEST_EXPECT(session.outcome().done() && adm && adm->dirty() && adm->rows().size() == 2);
 	if (!adm) return 1;
 	TEST_EXPECT(adm->record_name(v.documents.selection.primary) == "anim_reset" && !finding_in("animation_map.no_reset", adm->path()));
-	session.handle(request::undo(adm->path()));
+	editor_test::handle_to_end(session, request::undo(adm->path()));
 	TEST_EXPECT(!adm->dirty() && finding_in("animation_map.no_reset", adm->path()));
 
 	// A catalog's name finding: on the field that names the later item (the name compared
@@ -997,15 +991,15 @@ static int test_locations_and_fixes() {
 	            fixes[0].request.path == long_path && !fixes[0].bulk);
 	// Each ask one RevealFile event, the same file asked again another: Files shows it again.
 	const uint64_t before = v.events.next_seq() - 1;
-	session.handle(fixes[0].request);
+	editor_test::handle_to_end(session, fixes[0].request);
 	std::vector<ViewEvent> shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
 	TEST_EXPECT(session.outcome().done() && shown.size() == 1 && shown[0].path == long_path &&
 			shown[0].flag && !shown[0].address.row && shown[0].field.empty() && shown[0].tag == 0);
-	session.handle(request::show_in_files("a_name_too_long_for_archives.tga"));
+	editor_test::handle_to_end(session, request::show_in_files("a_name_too_long_for_archives.tga"));
 	shown = editor_test::events_after(v, before, ViewEventKind::RevealFile);
 	TEST_EXPECT(shown.size() == 2 && shown[1].path == long_path && !shown[1].flag &&
 			shown[1].seq == shown[0].seq + 1);
-	session.handle(request::show_in_files("nowhere.tga"));
+	editor_test::handle_to_end(session, request::show_in_files("nowhere.tga"));
 	TEST_EXPECT(!session.outcome().done() &&
 			editor_test::events_after(v, before, ViewEventKind::RevealFile).size() == 2);
 	const Diagnostic unstorable =
@@ -1029,8 +1023,7 @@ static int test_locations_and_fixes() {
 	const RenamePlan second_plan =
 			plan_rename(paths, *v.project.scan, *v.findings.graph, twin, "twin2.tga");
 	TEST_EXPECT(second_plan.ok() && second_plan.path == twin && second_plan.sites.empty());
-	session.handle(request::rename_asset(twin, "twin2.tga"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rename_asset(twin, "twin2.tga"));
 	const std::string moved = (fs::path(twin).parent_path() / "twin2.tga").generic_string();
 	TEST_EXPECT(session.outcome().done() && fs::exists(root + "/" + moved) && !fs::exists(root + "/" + twin));
 	TEST_EXPECT(fs::exists(root + "/art/twin.tga") &&
@@ -1077,8 +1070,7 @@ static int test_locations_and_fixes() {
 	if (!weapons) return 1;
 	const std::string weapons_path = weapons->relative_path, style_path = stylesheet->relative_path;
 	TEST_EXPECT(editor_test::write_text(root + "/" + weapons_path, "") && editor_test::write_text(root + "/" + style_path, ""));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	bool any = false;
 	v.findings.graph->for_each_symbol([&any](const GraphSymbol &symbol) {
 		any = any ||

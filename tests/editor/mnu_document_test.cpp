@@ -126,13 +126,12 @@ int structure_and_save() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "John Smith"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "John Smith"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.project.requirements->required_missing == 0);
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document && !document->blocked() && document->rows().size() == 1 && document->identities_match());
 	// An edit swaps the row, so the screen is re-read after every edit.
@@ -219,7 +218,7 @@ int structure_and_save() {
 			menu_window_scope(document->path(), document->rows()[0]->name())));
 	TEST_EXPECT(!find_definition(AssetGraph(), *document, "EXIT", elsewhere,
 			menu_window_scope(document->path(), document->rows()[1]->name())));
-	session.handle(request::open_document("main.mnu", document->locator(exit)));
+	editor_test::handle_to_end(session, request::open_document("main.mnu", document->locator(exit)));
 	TEST_EXPECT(view.documents.selection.primary == exit &&
 			window_of(*document, view.documents.selection.primary)->name == "EXIT");
 	return 0;
@@ -230,10 +229,9 @@ int validation() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Menus"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Menus"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	const SessionView &view = session.view();
@@ -243,7 +241,7 @@ int validation() {
 	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto edit = [&](const std::vector<Edit> &edits) {
 		EditorRequest request = request::edit_record(document->path(), edits);
-		session.handle(request);
+		editor_test::handle_to_end(session, request);
 		return session.last_edit_ok();
 	};
 	// The badge and the validator agree: a font through an undefined variable, a missing
@@ -290,15 +288,14 @@ int validation() {
 	TEST_EXPECT(!reference_choices(*view.findings.graph, font_use).empty()); // the project's fonts
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds, blocked by the missing texture.
-	session.handle(request::build());
+	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(view.dialogs.unsaved_prompt.open && !view.dialogs.unsaved_prompt.can_discard && !session.view().activity.operation.running() &&
 	            view.dialogs.unsaved_prompt.files == std::vector<std::string>{document->path()});
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
-	session.handle(save);
-	session.run_operations();
+	editor_test::handle_to_end(session, save);
 	TEST_EXPECT(!document->dirty() && !view.dialogs.unsaved_prompt.open && view.activity.has_build && !view.activity.last_build->ok);
 	// A new menu by name and kind.
-	session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
+	editor_test::handle_to_end(session, request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	auto *extra = session.document_for("extra.mnu");
 	TEST_EXPECT(extra && !extra->rows().empty());
 	return 0;
@@ -311,10 +308,9 @@ int windows_at_depth() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Depth"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Depth"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document && !document->dirty());
 	auto screen = [&]() -> const Node & { return *document->rows()[0]; };
@@ -435,22 +431,22 @@ int windows_at_depth() {
 	TEST_EXPECT(!document->apply(write, error) && error.message == "This field is always written.");
 	// The session repairs the selection: a removed window gives way to its owner.
 	EditorRequest select = request::select_record(document->path(), exit);
-	session.handle(select);
+	editor_test::handle_to_end(session, select);
 	EditorRequest remove = request::edit_record(document->path(), op(EditOperation::Remove, exit));
-	session.handle(remove);
+	editor_test::handle_to_end(session, remove);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.documents.selection.primary == root &&
 			view.documents.selection.records == std::vector<NodeAddress>{ root });
-	session.handle(request::undo(document->path()));
+	editor_test::handle_to_end(session, request::undo(document->path()));
 	TEST_EXPECT(view.documents.selection.primary == root && window_of(*document, exit));
 	// A window added inside TITLE is selected.
 	EditorRequest add = request::edit_record(
 			document->path(), op(EditOperation::Add, { 0, kWindow, 0 }, title.child));
-	session.handle(add);
+	editor_test::handle_to_end(session, add);
 	TEST_EXPECT(session.last_edit_ok() &&
 			view.documents.selection.primary.child == document->last_added() &&
 			document->ancestors(view.documents.selection.primary).back() == title);
-	session.handle(request::undo(document->path()));
+	editor_test::handle_to_end(session, request::undo(document->path()));
 	// A drag: edits sharing a gesture are one undo step, and the session validates once,
 	// when the gesture ends, however many samples it took.
 	const size_t passes = session.validation_stats().passes;
@@ -460,13 +456,13 @@ int windows_at_depth() {
 				std::vector<Edit>{ set(title, "position.left", left),
 						set(title, "position.right", left + 200) });
 		for (Edit &edit : drag.edits) edit.gesture = gesture;
-		session.handle(drag);
+		editor_test::handle_to_end(session, drag);
 		TEST_EXPECT(session.last_edit_ok());
 	}
 	TEST_EXPECT(session.validation_stats().passes == passes && text_of(*document, title, "position.left") == "150");
-	session.handle(request::end_edit(document->path()));
+	editor_test::handle_to_end(session, request::end_edit(document->path()));
 	TEST_EXPECT(session.validation_stats().passes == passes + 1);
-	session.handle(request::undo(document->path()));
+	editor_test::handle_to_end(session, request::undo(document->path()));
 	TEST_EXPECT(document->serialize().text == original && !document->dirty());
 	return 0;
 }
@@ -692,10 +688,9 @@ int copy_and_paste() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Clip"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Clip"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	const SessionView &view = session.view();
@@ -703,20 +698,20 @@ int copy_and_paste() {
 	TEST_EXPECT(find_definition(AssetGraph(), *document, "TITLE", title) &&
 			find_definition(AssetGraph(), *document, "EXIT", exit));
 	auto select = [&](const NodeAddress &address, SelectMode mode) {
-		session.handle(request::select_record(document->path(), address, mode));
+		editor_test::handle_to_end(session, request::select_record(document->path(), address, mode));
 	};
 	auto paste_into = [&](Document &target, NodeId parent, size_t position) {
-		session.handle(request::paste(target.path(), PasteAt{target.rows()[0]->id, parent, position}));
+		editor_test::handle_to_end(session, request::paste(target.path(), PasteAt{target.rows()[0]->id, parent, position}));
 		return session.last_edit_ok();
 	};
 	// A row cannot be copied as windows.
 	select(child_of(*document, exit, "appearance"), SelectMode::Replace);
-	session.handle(request::copy(document->path()));
+	editor_test::handle_to_end(session, request::copy(document->path()));
 	TEST_EXPECT(!session.last_edit_ok() && view.documents.clipboard.empty());
 	// TITLE and EXIT, in document order whatever the selection order.
 	select(exit, SelectMode::Replace);
 	select(title, SelectMode::Add);
-	session.handle(request::copy(document->path()));
+	editor_test::handle_to_end(session, request::copy(document->path()));
 	TEST_EXPECT(
 			session.last_edit_ok() && view.documents.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
 	// Into a second screen's root: the names are free there.
@@ -724,7 +719,7 @@ int copy_and_paste() {
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
 	const Node *second = document->rows()[1].get();
 	const NodeId second_root = document->window_at(*second, 0);
-	session.handle(request::paste(document->path(), PasteAt{second->id, second_root, 0}));
+	editor_test::handle_to_end(session, request::paste(document->path(), PasteAt{second->id, second_root, 0}));
 	TEST_EXPECT(session.last_edit_ok() && document->identities_match());
 	second = document->rows()[1].get();
 	TEST_EXPECT(window_names(*document, *second) == std::vector<std::string>({"MAIN", "TITLE", "EXIT"}));
@@ -735,9 +730,9 @@ int copy_and_paste() {
 	            std::vector<std::string>({"MAIN", "TITLE", "EXIT", "TITLE2", "EXIT2"}));
 	TEST_EXPECT(document->collections_of({document->rows()[0]->id, kScreen, 0})[0].ids.size() == 3);
 	TEST_EXPECT(window_of(*document, view.documents.selection.primary)->name == "TITLE2" && depth_of(*document, view.documents.selection.primary) == 0);
-	session.handle(request::undo(document->path()));
+	editor_test::handle_to_end(session, request::undo(document->path()));
 	// Into another menu file.
-	session.handle(request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
+	editor_test::handle_to_end(session, request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	auto *extra = dynamic_cast<MnuDocument *>(session.document_for("extra.mnu"));
 	TEST_EXPECT(extra);
 	const NodeId extra_root = extra->window_at(*extra->rows()[0], 0);
@@ -748,9 +743,9 @@ int copy_and_paste() {
 			text_of(*extra, pasted, "string.value") == "Exit" && extra->identities_match());
 	// Cut: a copy, then one Remove of the selection.
 	select(title, SelectMode::Replace);
-	session.handle(request::cut(document->path()));
+	editor_test::handle_to_end(session, request::cut(document->path()));
 	TEST_EXPECT(session.last_edit_ok() && !window_of(*document, title));
-	session.handle(request::undo(document->path()));
+	editor_test::handle_to_end(session, request::undo(document->path()));
 	TEST_EXPECT(window_of(*document, title) != nullptr);
 	// A paste that is not a menu's clipboard is refused.
 	Edit foreign = op(EditOperation::Paste, {document->rows()[0]->id, kWindow, 0}, document->window_at(*document->rows()[0], 0));
@@ -767,10 +762,9 @@ int duplicate_selection() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Dup"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Dup"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	const SessionView &view = session.view();
@@ -782,14 +776,14 @@ int duplicate_selection() {
 	auto select = [&](const NodeAddress &address, SelectMode mode) {
 		EditorRequest request = request::select_record(document->path(), address);
 		request.mode = mode;
-		session.handle(request);
+		editor_test::handle_to_end(session, request);
 	};
 	auto duplicate = [&] {
-		session.handle(request::duplicate(document->path()));
+		editor_test::handle_to_end(session, request::duplicate(document->path()));
 		return session.last_edit_ok() && document->identities_match();
 	};
 	auto undo = [&] {
-		session.handle(request::undo(document->path()));
+		editor_test::handle_to_end(session, request::undo(document->path()));
 		return document->serialize().text == original && !document->dirty();
 	};
 	select(NodeAddress(), SelectMode::Replace);
@@ -1243,8 +1237,7 @@ int parse_notes() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Notes"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Notes"));
 	editor_test::create_missing_files(session);
 	const std::string window = "<WINDOW type=\"button\" name=\"B\" SCREENX=\"1\"><POSITION><LEFT>0</LEFT></POSITION>";
 	TEST_EXPECT(editor_test::write_text(dir.file("project/menus/ignored.mnu"),
@@ -1261,8 +1254,7 @@ int parse_notes() {
 	                                    "<SCREEN><NAME>M</NAME><WINDOW type=\"window\" name=\"MAIN\"><WINDOW type=\"button\" "
 	                                    "name=\"A\"><POSITION><LEFT>0</LEFT></POSITION></WINDOW>" +
 	                                            window + "</WINDOW></WINDOW></SCREEN>"));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	auto finding = [&](const char *asset, const char *code) -> const Diagnostic * {
 		for (const Diagnostic &d : view.findings.diagnostics)
@@ -1279,11 +1271,11 @@ int parse_notes() {
 	const Diagnostic *variable = finding("variable.mnu", "menu.invalid_input");
 	TEST_EXPECT(variable && variable->severity == DiagnosticSeverity::Error &&
 	            variable->field.find("/POSITION/LEFT") != std::string::npos);
-	session.handle(request::open_document("variable.mnu"));
+	editor_test::handle_to_end(session, request::open_document("variable.mnu"));
 	const Document *held = session.document_for("variable.mnu");
 	TEST_EXPECT(held && held->blocked() && !held->serialize().ok());
-	session.handle(request::open_document("ignored.mnu"));
-	session.handle(request::open_document("crash.mnu"));
+	editor_test::handle_to_end(session, request::open_document("ignored.mnu"));
+	editor_test::handle_to_end(session, request::open_document("crash.mnu"));
 	const Document *editable = session.document_for("ignored.mnu");
 	const Document *blocked = session.document_for("crash.mnu");
 	TEST_EXPECT(editable && !editable->blocked() && editable->ignored_lines() == 1 && editable->serialize().ok());
@@ -1294,7 +1286,7 @@ int parse_notes() {
 	TEST_EXPECT(blocked->rewrite_need() == Document::RewriteNeed::Unserializable);
 	// S12 review: a source finding stays on its window while the window moves (its locator
 	// names the file as loaded, Document::source_address), and goes to the file once removed.
-	session.handle(request::open_document("moved.mnu"));
+	editor_test::handle_to_end(session, request::open_document("moved.mnu"));
 	Document *moved = session.document_for("moved.mnu");
 	NodeAddress b;
 	TEST_EXPECT(moved && find_definition(AssetGraph(), *moved, "B", b) && b.child != 0);
@@ -1308,13 +1300,13 @@ int parse_notes() {
 	move.edits[0].operation = EditOperation::Move;
 	move.edits[0].address = b;
 	move.edits[0].position = 0;
-	session.handle(move);
+	editor_test::handle_to_end(session, move);
 	Document::Placement at;
 	TEST_EXPECT(moved->placement(b, at) && at.index == 0 && on_b() == b.child);
 	EditorRequest remove = request::edit_record(moved->path(), Edit());
 	remove.edits[0].operation = EditOperation::Remove;
 	remove.edits[0].address = b;
-	session.handle(remove);
+	editor_test::handle_to_end(session, remove);
 	TEST_EXPECT(on_b() == 0);
 	return 0;
 }
@@ -1326,11 +1318,10 @@ int blank_menu_edits() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Edits"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Edits"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document && !document->dirty());
 	const Node &row = *document->rows()[0];
@@ -1366,19 +1357,18 @@ int blank_menu_edits() {
 
 	// B3 through the rename transaction: the menu names a string table; renaming the table
 	// rewrites the menu's saved TEXT_RSRC, so nothing is left dangling.
-	session.handle(request::create_file("mytext.bin", asset_kind_token(AssetKind::Strings)));
+	editor_test::handle_to_end(session, request::create_file("mytext.bin", asset_kind_token(AssetKind::Strings)));
 	TEST_EXPECT(session.document_for("mytext.bin"));
 	document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	EditorRequest edit = request::edit_record(document->path(), Edit());
 	const NodeAddress main_window{document->rows()[0]->id, kWindow, document->window_at(*document->rows()[0], 0)};
 	edit.edits = {set(main_window, "text_rsrc", std::string("mytext.bin"))};
-	session.handle(edit);
-	session.handle(request::save_all());
+	editor_test::handle_to_end(session, edit);
+	editor_test::handle_to_end(session, request::save_all());
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
 	const std::string menu_path = view.project.root + "/" + document->path();
-	session.handle(request::rename_asset("mytext.bin", "newtext.bin"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rename_asset("mytext.bin", "newtext.bin"));
 	TEST_EXPECT(session.outcome().done());
 	mnu::Document reparsed;
 	std::string message;
@@ -1400,8 +1390,7 @@ int name_is_its_own_edit() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Names"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Names"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const std::string place = "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT>"
@@ -1419,9 +1408,8 @@ int name_is_its_own_edit() {
 	                                    "<SCREEN>\r\n<NAME>HOME</NAME>\r\n" + panel +
 	                                            "</SCREEN>\r\n<SCREEN>\r\n<NAME>AWAY</NAME>\r\n" +
 	                                            window("BUTTON", "BACK", back) + "</SCREEN>\r\n"));
-	session.handle(request::rescan());
-	session.run_operations();
-	session.handle(request::open_document("flow.mnu"));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("flow.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
 	TEST_EXPECT(menu && menu->rows().size() == 2);
 	if (!menu || menu->rows().size() != 2) return 1;
@@ -1435,7 +1423,7 @@ int name_is_its_own_edit() {
 	const auto rename = [&](const NodeAddress &record, const char *name) {
 		EditorRequest request = request::edit_record(
 				menu->path(), typed(record, "name", name)); // as the Inspector sets it
-		session.handle(request);
+		editor_test::handle_to_end(session, request);
 		return session.outcome().done();
 	};
 	const auto missing = [&](const char *record) {
@@ -1448,17 +1436,16 @@ int name_is_its_own_edit() {
 	TEST_EXPECT(rename(title, "HEADLINE") && text_of(*menu, title, "name") == "HEADLINE");
 	TEST_EXPECT(text_of(*menu, show_title, "target") == "TITLE");
 	TEST_EXPECT(missing("HOME/PANEL/GO/Action 2"));
-	session.handle(request::undo(menu->path()));
+	editor_test::handle_to_end(session, request::undo(menu->path()));
 	TEST_EXPECT(text_of(*menu, title, "name") == "TITLE" && !menu->can_undo());
 	TEST_EXPECT(!missing("HOME/PANEL/GO/Action 2"));
 	// The screen: BACK's SCREEN target keeps HOME.
 	TEST_EXPECT(rename(home, "START") && text_of(*menu, home, "name") == "START");
 	TEST_EXPECT(text_of(*menu, go_home, "target") == "HOME" && missing("AWAY/BACK/Action 1"));
-	session.handle(request::undo(menu->path()));
+	editor_test::handle_to_end(session, request::undo(menu->path()));
 	TEST_EXPECT(text_of(*menu, home, "name") == "HOME" && !menu->can_undo());
 	// Rename everywhere: the window and the ACTION reaching it, on disk.
-	session.handle(request::rename_symbol(menu->path(), menu->locator(title), "name", "HEADLINE"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rename_symbol(menu->path(), menu->locator(title), "name", "HEADLINE"));
 	TEST_EXPECT(session.outcome().done());
 	menu = dynamic_cast<MnuDocument *>(session.document_for("flow.mnu"));
 	NodeAddress headline, go_again;
@@ -1918,10 +1905,9 @@ int changes_since_save() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Changes"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Changes"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	if (!document) return 1;
@@ -1980,10 +1966,9 @@ int colours_and_flags() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Colours"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Colours"));
 	editor_test::create_missing_files(session);
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	auto *document = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
 	TEST_EXPECT(document);
 	if (!document) return 1;

@@ -104,10 +104,9 @@ struct OpenMenu {
 	NodeAddress main, title;
 
 	explicit OpenMenu(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(request::new_project(dir.file("project"), "Names"));
-		session.run_operations();
+		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Names"));
 		editor_test::create_missing_files(session);
-		session.handle(request::open_document("main.mnu"));
+		editor_test::handle_to_end(session, request::open_document("main.mnu"));
 		menu = session.document_for("main.mnu");
 		if (!menu) return;
 		find_definition(AssetGraph(), *menu, "MAIN", main);
@@ -196,8 +195,7 @@ static int test_asset_kind_tokens() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Kinds"));
-	session.run_operations();
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Kinds"));
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(!root.empty());
 	const std::pair<const char *, const char *> files[] = {
@@ -212,8 +210,7 @@ static int test_asset_kind_tokens() {
 	};
 	for (const auto &file : files)
 		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
-	session.handle(request::rescan());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::rescan());
 	JsonValue args = JsonValue::make_object();
 	args.set("limit", JsonValue::make_number(200.0));
 	std::string error;
@@ -363,10 +360,10 @@ static int test_request_round_trip() {
 	            row_edits->array[2].get_string("parent", "") == "edit0");
 	TEST_EXPECT(editor_request_from_json(rows_json, back, error, &names) && back.edits.size() == 3);
 	const size_t screens = menu.rows().size();
-	open.session.handle(back);
+	editor_test::handle_to_end(open.session, back);
 	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 &&
 	            menu.rows().back()->name() == "EXTRA" && menu.last_added_records().size() == 2);
-	open.session.handle(request::undo(path));
+	editor_test::handle_to_end(open.session, request::undo(path));
 	TEST_EXPECT(menu.rows().size() == screens);
 	// A row's copy named by its label (S13 D7's second review): the copy is a row of its own, so a
 	// Set naming the label, written and read back as it was, applies to the copy; a duplicate naming
@@ -384,9 +381,9 @@ static int test_request_round_trip() {
 	            copy_edits->array[0].get_string("as", "") == "edit0" && copy_edits->array[1].get_string("id", "") == "edit0");
 	TEST_EXPECT(editor_request_from_json(copy_json, back, error, &names) && back == copy_request &&
 	            names.labels == std::vector<std::string>({"edit0", ""}));
-	open.session.handle(back);
+	editor_test::handle_to_end(open.session, back);
 	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 && menu.rows()[1]->name() == "COPIED");
-	open.session.handle(request::undo(path));
+	editor_test::handle_to_end(open.session, request::undo(path));
 	TEST_EXPECT(menu.rows().size() == screens);
 	// A Paste has no batch form (the paste request carries the clipboard): written by its op, which
 	// the reader refuses.
@@ -920,7 +917,7 @@ static int test_settings_json() {
 	                          "\"runtime_executable\":\"C:/tools/opennova.exe\"}}",
 	                          back)
 	                    .empty());
-	session.handle(back);
+	editor_test::handle_to_end(session, back);
 	JsonValue dialogs = view_section_to_json(view, ViewSection::Dialogs);
 	const JsonValue *result = dialogs.get("settings_result");
 	TEST_EXPECT(result && result->get("serial") == nullptr && result->get("failures") &&
@@ -934,7 +931,7 @@ static int test_settings_json() {
 	// A name the project cannot take: the failure is the result's, its event the next serial's,
 	// flagged.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":5,\"title\":\"\"}}", back).empty());
-	session.handle(back);
+	editor_test::handle_to_end(session, back);
 	dialogs = view_section_to_json(view, ViewSection::Dialogs);
 	result = dialogs.get("settings_result");
 	TEST_EXPECT(result && result->get("failures") && result->get("failures")->array.size() == 1 &&
@@ -1075,6 +1072,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(create_fix.get("request") && editor_request_from_json(*create_fix.get("request"), request, parse_error));
 	TEST_EXPECT(request.kind == EditorRequestKind::CreateMissing && request.roles == std::vector<std::string>{"gameerr"});
 	TEST_EXPECT(session.handle(request) && session.outcome().done() && view.project.scan->find("gameerr.bin") != nullptr);
+	session.run_operations(); // the validation the file made left due (S13 A3: no request runs it)
 	// A page, and the rows grouped by kind: one group, its title in plain words.
 	const JsonValue page = problems_to_json(view, answer_problems(errors_only, view), JsonPage{1, 2}, fix_cache);
 	const JsonValue all = problems_to_json(view, answer_problems(errors_only, view), JsonPage{}, fix_cache);
@@ -1127,6 +1125,7 @@ static int test_over_a_session() {
 		}
 	TEST_EXPECT(menu_editable && some_not_editable);
 	TEST_EXPECT(request_error("{\"kind\":\"open_document\",\"path\":\"main.mnu\"}", request).empty() && session.handle(request));
+	session.run_operations(); // the validation the files made and the open left due (S13 A3)
 	const Document *document = session.document_for();
 	TEST_EXPECT(document != nullptr);
 	if (!document) return 1;
@@ -1421,9 +1420,10 @@ static int test_over_a_session() {
 	outcome = action_outcome_to_json(session.outcome());
 	TEST_EXPECT(outcome.get_bool("done", false) && !outcome.get_bool("unsaved_prompt", true));
 	TEST_EXPECT(outcome.get("findings")->is_array() && outcome.get("findings")->array.empty());
-	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"new_name\":\"../x.mnu\"}", request).empty() &&
-	            session.handle(request));
-	outcome = action_outcome_to_json(session.outcome());
+	// A rename's plan is its operation's (S13 A3): what the request came to with what its
+	// operation came to folded in, as a caller that runs it to its end reads it (handle_to_end).
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"new_name\":\"../x.mnu\"}", request).empty());
+	outcome = action_outcome_to_json(editor_test::handle_to_end(session, request));
 	TEST_EXPECT(!outcome.get_bool("done", true) && !outcome.get_bool("unsaved_prompt", true));
 	TEST_EXPECT(outcome.get("findings")->array.size() == 1);
 	if (outcome.get("findings")->array.size() == 1) {

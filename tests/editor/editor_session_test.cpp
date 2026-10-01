@@ -245,6 +245,7 @@ static int test_lifecycle() {
 	                                            "main.mnu - retail: again\r\n"));
 	session.poll();
 	TEST_EXPECT(v.activity.boot_missing.size() == 1 && v.activity.boot_missing[0] == "MAIN.MNU");
+	session.run_operations(); // the validation the report left due (S13 A3: the polls step it)
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 1);
 	const Diagnostic *boot = finding_about(v.findings.diagnostics, "play.boot_missing", "main.mnu");
 	TEST_EXPECT(boot && boot->asset.empty() && editor_test::requirement_of(*boot).role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
@@ -282,6 +283,7 @@ static int test_lifecycle() {
 	platform.codes[501] = 0xC0000005u;
 	platform.exit_child(501);
 	session.poll();
+	session.run_operations(); // the validation the exit left due (S13 A3: the polls step it)
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && v.activity.play_exited_on_its_own && v.activity.play_exit_code == 0xC0000005LL);
 	TEST_EXPECT(output_has(v, "The game exited with code 3221225477 (0xC0000005)."));
 	const Diagnostic *crashed = finding_about(v.findings.diagnostics, "play.crashed", "");
@@ -684,9 +686,9 @@ static int test_outcomes_and_refusals() {
 	TEST_EXPECT(editor_test::write_text(root + "/notes/readme.docx", "notes"));
 	session.handle(request::rescan());
 	session.run_operations();
-	session.handle(
-			request::rename_asset("notes/readme.docx", "readme_notes.docx"));
-	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "rename.name"));
+	const ActionOutcome long_name =
+			editor_test::handle_to_end(session, request::rename_asset("notes/readme.docx", "readme_notes.docx"));
+	TEST_EXPECT(!long_name.done() && has_code(long_name.findings, "rename.name"));
 	TEST_EXPECT(fs::exists(root + "/notes/readme.docx") &&
 			!fs::exists(root + "/notes/readme_notes.docx"));
 	// The name the rename refuses is the one the scan refuses.
@@ -1033,12 +1035,13 @@ static const Diagnostic *finding_on(const std::vector<Diagnostic> &diagnostics, 
 // What a validation costs (ADR 0046 S9e, S13 D4): each file's own findings are made once and
 // kept while what they were made from holds (a closed file's size and modified time as the
 // scan says them, an open document's instance and revision), so an edit to an open document
-// validates that document alone, extracts it alone and reads no file; the edits a pump holds
-// validate once, at its poll, and a finding reported inside the burst survives it; the build
-// gates on the session's own findings, so an error an unsaved edit made still blocks it; a
-// closed file changed on disk is read again at the next refresh, alone; an open one changed on
-// disk is read again (or kept as it was, its error blocking) before the build's gate; a rename
-// inside a held pump plans over the burst's edits.
+// validates that document alone, extracts it alone and reads no file; no request runs the
+// validation (S13 A3): the edits between two polls validate once, at the poll, and a finding
+// reported between them survives it; the build gates on the session's own findings, so an error
+// an unsaved edit made still blocks it; a closed file changed on disk is read again at the next
+// refresh, alone; an open one changed on disk is read again (or kept as it was, its error
+// blocking) before the build's gate; a rename asked while a validation is due lists every
+// document with unsaved edits on its prompt (it plans again once the validation it joins ends).
 static int test_validation_cost() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validation");
 	FakePlatform platform;
@@ -1047,10 +1050,10 @@ static int test_validation_cost() {
 	session.handle(request::new_project(dir.file("project"), "Validation"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	// A poll steps the validation within its budget (S13 A3): one no validation of this project
-	// outlasts, however loaded the machine, so each poll below runs the validation left due to its
-	// end, once.
-	session.set_poll_budget({int64_t(1) << 40, uint64_t(1) << 20});
+	// A poll steps the validation within its budget (S13 A3): a few seconds, which no validation
+	// of this project outlasts however loaded the machine, so each poll below runs the validation
+	// left due to its end, once (and one that started again every poll would show).
+	session.set_poll_budget({5000, uint64_t(1) << 20});
 	const SessionView &v = session.view();
 	const ValidationStats &stats = session.validation_stats();
 	const std::string root = v.project.root;
@@ -1062,9 +1065,10 @@ static int test_validation_cost() {
 	TEST_EXPECT(stats.files_validated == editable && stats.files_loaded == editable &&
 			stats.files_reused == 0 && stats.files_failed == 0);
 
-	// Opening a document validates at once, from the document, reading nothing: the other files'
-	// findings are kept.
+	// Opening a document leaves the validation due; the poll validates it from the document,
+	// reading nothing: the other files' findings are kept.
 	session.handle(request::open_document("items.def"));
+	session.poll();
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
@@ -1079,20 +1083,23 @@ static int test_validation_cost() {
 		session.handle(request);
 	};
 
-	// One Set on the open document: one validation of that document alone, no file read, the
-	// graph extracting that document alone, the edit's finding listed.
+	// One Set on the open document, then the poll: one validation of that document alone, no file
+	// read, the graph extracting that document alone, the edit's finding listed.
 	size_t passes = stats.passes;
 	set("type", int64_t(0));
+	TEST_EXPECT(stats.passes == passes && !has_code(v.findings.diagnostics, "catalog.item_type"));
+	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1 && stats.files_validated == 1 &&
 			stats.files_loaded == 0 && stats.files_reused == editable - 1);
 	TEST_EXPECT(v.findings.graph->stats().files_extracted == 1);
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
+	session.poll();
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
 
-	// A pump holds validation: its three edits validate once, at its poll, on the last value.
+	// The edits between two polls (a frame's burst: typing, a drag) validate once, at the poll, on
+	// the last value.
 	passes = stats.passes;
-	session.hold_validation();
 	set("type", int64_t(0));
 	set("type", int64_t(4));
 	set("type", int64_t(0));
@@ -1100,11 +1107,11 @@ static int test_validation_cost() {
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1 && stats.files_loaded == 0);
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
-	// A finding reported inside the burst lands after the validation the burst left due: reporting
-	// it validates nothing (S13 A2), the poll runs that validation once and keeps the finding after
-	// the rows it composes, as often as it was reported (the same edit refused twice, two rows).
+	// A finding reported between two polls lands after the validation the edits left due:
+	// reporting it validates nothing (S13 A2), the poll runs that validation once and keeps the
+	// finding after the rows it composes, as often as it was reported (the same edit refused
+	// twice, two rows).
 	passes = stats.passes;
-	session.hold_validation();
 	set("type", int64_t(4));
 	set("no_such_field", int64_t(1));
 	set("no_such_field", int64_t(1));
@@ -1136,10 +1143,9 @@ static int test_validation_cost() {
 	TEST_EXPECT(session.last_edit_ok() && stats.passes == passes && items->revision() == revision_now &&
 	            items->dirty() == dirty_now);
 
-	// An unsaved edit that errs: Build waits on the unsaved prompt (inside a burst too, the
-	// edit's finding listed at the poll); the prompt's Save writes the file and builds, and
-	// the plan gates on the session's own findings.
-	session.hold_validation();
+	// An unsaved edit that errs: Build waits on the unsaved prompt (the edit's finding listed at
+	// the poll); the prompt's Save writes the file and builds, and the plan gates on the session's
+	// own findings.
 	set("type", int64_t(0));
 	session.handle(request::build());
 	TEST_EXPECT(!session.view().activity.operation.running() && v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
@@ -1252,9 +1258,10 @@ static int test_validation_cost() {
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && session.document_for(menu) == kept && !has_code(v.findings.diagnostics, "document.stale"));
 
-	// A request that reads the graph inside a held pump sees the burst's edits first: a
-	// reference an unsaved edit added makes the rename of its target wait on the unsaved
-	// prompt, which lists the menu.
+	// A rename asked while the validation an unsaved edit left is due cannot read that edit in the
+	// graph yet: its prompt lists every document with unsaved edits, the menu whose new reference
+	// the rename would rewrite among them (S13 A3: the rename plans again once the validation it
+	// joins has ended).
 	TEST_EXPECT(editor_test::write_text(root + "/logo.tga", "tga"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -1264,7 +1271,6 @@ static int test_validation_cost() {
 	TEST_EXPECT(menu_document != nullptr &&
 			find_definition(AssetGraph(), *menu_document, "EXIT", exit));
 	if (!menu_document) return 1;
-	session.hold_validation();
 	EditorRequest image = request::edit_record(
 			menu_document->path(), menu_test::image_edits(*menu_document, exit, "logo.tga"));
 	session.handle(image);
@@ -1369,6 +1375,7 @@ static int test_save_contract() {
 	// Save naming nothing: the active item table, rewritten without the ignored line.
 	session.handle(request::save());
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + project.items_path) && v.activity.status == "Saved 1 file(s).");
+	session.run_operations(); // the validation the save left due
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") && project.items->issues().empty());
 	std::string text, error;
 	TEST_EXPECT(read_file_text(project.root + "/" + project.items_path, text, error));
@@ -1427,6 +1434,7 @@ static int test_rewrite_closed_file() {
 			!session.document_for(items));
 	session.handle(request::save(items));
 	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + items) && v.activity.status == "Saved 1 file(s).");
+	session.run_operations(); // the validation the save left due
 	std::string text, error;
 	TEST_EXPECT(read_file_text(file, text, error) && text.find("subtype") == std::string::npos &&
 	            text.find("hp 10") != std::string::npos);
@@ -1720,6 +1728,7 @@ static int test_boot_findings() {
 	std::string lines = boot_line("gametext.bin", "- retail: exits") + boot_line("mystery.dat", "- unknown");
 	TEST_EXPECT(editor_test::write_text(log, lines));
 	session.poll();
+	session.run_operations(); // the validation the report left due (S13 A3: the polls step it)
 	TEST_EXPECT(v.activity.boot_missing.size() == 2 &&
 			count_code(v.findings.diagnostics, "play.boot_missing") == 2);
 	const Diagnostic *table =
@@ -1780,6 +1789,7 @@ static int test_boot_findings() {
 	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file,
 	                                    boot_line("menutxt.bin", "- optional")));
 	session.poll();
+	session.run_operations(); // the validation the report left due
 	TEST_EXPECT(v.activity.boot_missing.size() == 1 && finding_about(v.findings.diagnostics, "play.boot_missing", "menutxt.bin") != nullptr);
 	session.handle(request::stop_play());
 	session.poll();
@@ -1816,6 +1826,7 @@ static int test_optional_rows() {
 	EditorRequest brand = request::create_missing({"brand_style"});
 	session.handle(brand);
 	TEST_EXPECT(session.outcome().done() && v.project.scan->find("brand.mns") != nullptr);
+	session.run_operations(); // the validation the files made left due
 	TEST_EXPECT(count_code(v.findings.diagnostics, "requirement.optional_missing") == lacking - 1 &&
 			!finding_about(v.findings.diagnostics, "requirement.optional_missing", "brand.mns"));
 	return 0;
@@ -1854,6 +1865,7 @@ static int test_create_missing_roles() {
 	EditorRequest keyhelp = request::create_missing({"keyhelp"});
 	session.handle(keyhelp);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.exists"));
+	session.run_operations(); // the validation the scan it read left due
 	std::string io_error, text;
 	TEST_EXPECT(read_file_bytes(root + "/strings/keyhelp.bin", after, io_error) && after == table);
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin")); // the refresh after it sees the file
@@ -2040,6 +2052,7 @@ static int test_fixes_apply() {
 	font.edits[0].field = "font.name";
 	font.edits[0].value = std::string("Custom.fnt");
 	session.handle(font);
+	session.run_operations(); // the validation the edit left due
 	TEST_EXPECT(has_code(v.findings.diagnostics, "reference.missing"));
 	TEST_EXPECT(find_fix(v, "reference.missing", "Create Custom.fnt", fix));
 	session.handle(fix.request);
@@ -2056,6 +2069,7 @@ static int test_fixes_apply() {
 			request::edit_record(menu->path(), menu_test::image_edits(*menu, exit, "splash.png"));
 	session.handle(image);
 	session.handle(request::save_all()); // an import waits for the edits to be saved
+	session.run_operations();            // the validation they left due
 	TEST_EXPECT(find_fix(v, "reference.missing", "Import splash.png from the game data...", fix));
 	session.handle(fix.request);
 	session.run_operations();
@@ -2373,6 +2387,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	// not its address, which the new one may take.
 	const uint64_t discarded = items->identity();
 	session.handle(discard);
+	session.run_operations(); // the validation the reload left due
 	const Document *fresh = session.document_for(project.items_path);
 	TEST_EXPECT(fresh != nullptr && fresh->identity() != discarded && !fresh->dirty() && fresh->matches_file());
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "document.conflict"));
@@ -2433,15 +2448,19 @@ static int test_build_findings_stay() {
 	};
 	set_type(0);
 	session.handle(request::save(items->path()));
+	session.run_operations(); // the validation the save left due
 	TEST_EXPECT(!items->dirty() && count_code(v.findings.diagnostics, "catalog.item_type") == 1);
 	session.handle(request::build());
 	TEST_EXPECT(session.view().activity.operation.running());
 	set_type(4);
+	// The polls validate the edit while the build packs (S13 A3: no request runs it).
+	while (v.activity.validation.running) session.poll();
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
 	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && !has_code(v.findings.diagnostics, "catalog.item_type"));
 	set_type(0);
+	while (v.activity.validation.running) session.poll();
 	TEST_EXPECT(count_code(v.findings.diagnostics, "catalog.item_type") == 1 && count_code(v.findings.diagnostics, "build.blocked") == 1);
 	session.handle(request::undo(items->path()));
 	session.handle(request::undo(items->path()));
@@ -2536,15 +2555,20 @@ static int test_view_revisions() {
 		TEST_EXPECT(output_has(v, "game: Godot Engine v4.6.1"));
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Output}));
 		TEST_EXPECT(stats.passes == passes);
-		// The game's boot report names a file it did not find: Run, the row it makes, its line.
+		// The game's boot report names a file it did not find: Run and its line, and the validation
+		// it leaves due (Operation: the view shows it due, S13 A3); the next poll makes its row.
 		before = v.revisions;
 		const std::string boot = "Godot Engine v4.6.1\r\n" + boot_line("main.mnu", "- gone");
 		TEST_EXPECT(editor_test::write_text(log, boot));
 		session.poll();
-		TEST_EXPECT(v.activity.boot_missing.size() == 1 &&
-				has_code(v.findings.diagnostics, "play.boot_missing"));
+		TEST_EXPECT(v.activity.boot_missing.size() == 1 && v.activity.validation.running &&
+				!has_code(v.findings.diagnostics, "play.boot_missing"));
 		TEST_EXPECT(moved_since(v, before) ==
-				Concerns({ViewConcern::Findings, ViewConcern::Output, ViewConcern::Run}));
+				Concerns({ViewConcern::Output, ViewConcern::Operation, ViewConcern::Run}));
+		before = v.revisions;
+		while (v.activity.validation.running) session.poll();
+		TEST_EXPECT(has_code(v.findings.diagnostics, "play.boot_missing"));
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Findings, ViewConcern::Operation}));
 	}
 	// The game quits, and the next Play drops its boot report: the row goes (Findings) as the
 	// game starts, no validation making it go.
@@ -2597,7 +2621,9 @@ static int test_view_revisions() {
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Selection}));
 	}
 
-	// Edits: Documents and the status line; Findings and Graph only when they changed.
+	// Edits: Documents and the status line, and the validation they leave due, which the polls
+	// run (Operation: the view shows it due, then ended, S13 A3); Findings and Graph only when the
+	// validation changed them.
 	const auto set = [&](const char *field, Value value) {
 		EditorRequest request = request::edit_record(items->path(), Edit());
 		request.edits[0].address = crate;
@@ -2605,28 +2631,30 @@ static int test_view_revisions() {
 		request.edits[0].value = std::move(value);
 		const ViewRevisions before = v.revisions;
 		session.handle(request);
+		while (v.activity.validation.running) session.poll();
 		return moved_since(v, before);
 	};
 	const uint64_t graph = v.findings.graph->generation();
 	// A number no finding and no reference reads: the rows and the graph as they were; the
 	// document, saved until now, has unsaved edits (DocumentSet).
-	TEST_EXPECT(set("hp", int64_t(20)) ==
-			Concerns({ViewConcern::Documents, ViewConcern::Output, ViewConcern::DocumentSet}));
+	TEST_EXPECT(set("hp", int64_t(20)) == Concerns({ViewConcern::Documents, ViewConcern::Output,
+			ViewConcern::Operation, ViewConcern::DocumentSet}));
 	TEST_EXPECT(v.findings.graph->generation() == graph);
 	// The name the item defines: the graph moves, the rows stay, the document as unsaved as it
 	// was (no DocumentSet, no ActiveDocument).
-	TEST_EXPECT(set("id", int64_t(100302)) ==
-			Concerns({ViewConcern::Graph, ViewConcern::Documents, ViewConcern::Output}));
+	TEST_EXPECT(set("id", int64_t(100302)) == Concerns({ViewConcern::Graph, ViewConcern::Documents,
+			ViewConcern::Output, ViewConcern::Operation}));
 	TEST_EXPECT(v.findings.graph->generation() != graph);
 	// The model it names, missing either way: the graph and the row both move.
 	TEST_EXPECT(set("graphic", std::string("barrel")) == Concerns({ViewConcern::Findings,
-			ViewConcern::Graph, ViewConcern::Documents, ViewConcern::Output}));
+			ViewConcern::Graph, ViewConcern::Documents, ViewConcern::Output, ViewConcern::Operation}));
 	TEST_EXPECT(finding_about(v.findings.diagnostics, "reference.missing", "barrel") != nullptr);
 	{
 		const ViewRevisions before = v.revisions;
 		session.handle(request::undo(items->path()));
-		TEST_EXPECT(moved_since(v, before) ==
-				Concerns({ViewConcern::Findings, ViewConcern::Graph, ViewConcern::Documents}));
+		while (v.activity.validation.running) session.poll();
+		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Findings, ViewConcern::Graph,
+				ViewConcern::Documents, ViewConcern::Operation}));
 		TEST_EXPECT(finding_about(v.findings.diagnostics, "reference.missing", "crate") != nullptr);
 	}
 
@@ -3391,14 +3419,14 @@ static int test_prompt_words_from_the_table() {
 	return 0;
 }
 
-// A request whose row validates (request_kinds.cpp, S13 A4) runs the validation an edit inside a
-// held pump left due once the busy gate lets it through, before the unsaved guard and its plan,
-// whatever its handler then does; one whose row does not leaves it due for the poll. Exercised
-// where the dispatch now validates and the planners it replaced ran none: set_import_dependencies
-// with no preview open, and with one open whose setting it leaves as it is; import_files with no
-// preview open; assign_requirement refused before its rename. And where they ran it: a file's
-// preview_rename, a preview_import.
-static int test_rows_validate_first() {
+// No request runs the validation (S13 A3): an edit leaves it due, and a request after it leaves it
+// due too, whatever it is: a selection, a file rename's preview, set_import_dependencies with no
+// preview open and with one, import_files with none, assign_requirement refused before its
+// rename, an import's preview; the polls run it (an operation that reads the graph joins it: the
+// import's plan steps it first), once. Every request that starts an operation ends the edit
+// groups first, so no gesture holds the validation it joins; set_import_dependencies with a
+// preview open plans it again whatever the setting was.
+static int test_no_request_validates() {
 	editor_test::TempProjectDir dir("opennova_editor_session_validates");
 	FakePlatform platform;
 	MemoryPreferencesStore preferences;
@@ -3407,62 +3435,66 @@ static int test_rows_validate_first() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("items.def"));
+	session.run_operations();
 	Document *items = session.document_for("items.def");
 	TEST_EXPECT(items != nullptr && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
 	const ValidationStats &stats = session.validation_stats();
 	const SessionView &v = session.view();
 	const NodeAddress marker{items->rows()[0]->id, items->rows()[0]->kind, 0};
-	// An edit inside a held pump leaves the validation due (each one sets the type the last did
-	// not); the request runs it or leaves it; the poll runs what is left, and nothing more.
+	// An edit leaves the validation due (each one sets the type the last did not); the request
+	// leaves it due; the operations and the polls run it, once.
 	int64_t type = 4;
-	const auto after_an_edit = [&](const EditorRequest &request, size_t passes_by_it) {
+	const auto after_an_edit = [&](const EditorRequest &request) {
 		type = type == 4 ? 0 : 4;
 		Edit set;
 		set.address = marker;
 		set.field = "type";
 		set.value = type;
-		session.hold_validation();
 		session.handle(request::edit_record(items->path(), set));
 		const size_t passes = stats.passes;
 		session.handle(request);
-		const bool by_it = stats.passes == passes + passes_by_it;
-		session.poll();
-		return by_it && stats.passes == passes + 1;
+		const bool left = stats.passes == passes && v.activity.validation.running; // shown due at once
+		session.run_operations();
+		return left && stats.passes == passes + 1 && !v.activity.validation.running;
 	};
-	TEST_EXPECT(!request_kind_row(EditorRequestKind::SelectRecord).validates);
-	TEST_EXPECT(after_an_edit(request::select_record(items->path(), marker), 0));
-	TEST_EXPECT(after_an_edit(request::preview_file_rename(items->path(), "things.def"), 1));
+	TEST_EXPECT(after_an_edit(request::select_record(items->path(), marker)));
+	TEST_EXPECT(after_an_edit(request::preview_file_rename(items->path(), "things.def")));
 	TEST_EXPECT(v.dialogs.rename_preview.serial != 0);
-	// No preview open: the setting written, and the validation run first all the same.
+	// No preview open: the setting written, nothing planned.
 	TEST_EXPECT(!v.dialogs.import_preview.open);
-	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false), 1));
+	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
 	TEST_EXPECT(!v.project.import_dependencies && !v.dialogs.import_preview.open);
-	TEST_EXPECT(after_an_edit(request::import_files({}), 1));
+	TEST_EXPECT(after_an_edit(request::import_files({})));
 	TEST_EXPECT(v.activity.status == "Nothing to import." && !v.dialogs.import_preview.open);
 	// Refused before its rename (no requirement has the role).
-	TEST_EXPECT(after_an_edit(request::assign_requirement("no_such_role", items->path()), 1));
+	TEST_EXPECT(after_an_edit(request::assign_requirement("no_such_role", items->path())));
 	TEST_EXPECT(has_code(session.outcome().findings, "requirement.unknown"));
-	// A preview open, then its setting left as it is: nothing planned again, the validation run.
+	// A preview open, then its setting set to what it was: planned again all the same.
 	const std::string loose = dir.file("loose.txt");
 	TEST_EXPECT(editor_test::write_text(loose, "loose"));
-	TEST_EXPECT(after_an_edit(request::preview_import({ loose }, false), 1));
+	TEST_EXPECT(after_an_edit(request::preview_import({ loose }, false)));
 	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies);
-	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false), 1));
-	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies);
-	// Every row whose plan reads the graph validates first: the imports' and the renames'.
+	const uint64_t planned = v.activity.last_operation.id;
+	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
+	TEST_EXPECT(v.dialogs.import_preview.open && !v.dialogs.import_preview.with_dependencies &&
+	            v.activity.last_operation.id > planned &&
+	            v.activity.last_operation.kind == OperationKind::ImportPlan && !v.dialogs.import_preview.plan->rows.empty());
+	// Every request that starts an operation ends the edit groups first.
 	for (const EditorRequestKind kind :
-	     {EditorRequestKind::PreviewImport, EditorRequestKind::PlanImport, EditorRequestKind::SetImportDependencies,
-	      EditorRequestKind::ImportFiles, EditorRequestKind::PreviewInstallImport, EditorRequestKind::RenameAsset,
-	      EditorRequestKind::AssignRequirement, EditorRequestKind::PreviewRename, EditorRequestKind::RenameSymbol})
-		TEST_EXPECT(request_kind_row(kind).validates);
+	     {EditorRequestKind::NewProject, EditorRequestKind::OpenProject, EditorRequestKind::Rescan,
+	      EditorRequestKind::Reimport, EditorRequestKind::PreviewImport, EditorRequestKind::PlanImport,
+	      EditorRequestKind::PreviewInstallImport, EditorRequestKind::ImportFiles, EditorRequestKind::RenameAsset,
+	      EditorRequestKind::AssignRequirement, EditorRequestKind::RenameSymbol, EditorRequestKind::Build,
+	      EditorRequestKind::Play})
+		TEST_EXPECT(request_kind_row(kind).ends_edit_groups);
 	return 0;
 }
 
 int main() {
 	int failures = 0;
 	failures += test_prompt_words_from_the_table();
-	failures += test_rows_validate_first();
+	failures += test_no_request_validates();
 	failures += test_play_launches_one_answer();
 #ifdef NDEBUG
 	failures += test_reentry_keeps_the_outer_outcome();

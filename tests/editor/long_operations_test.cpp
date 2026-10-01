@@ -1,14 +1,17 @@
 // S13 A3: long operations everywhere (ADR 0046). The walks the session steps (the scan,
 // ProjectScan; the import pass, ImportPass; a scan's targeted update, AssetScan::update), the
 // validation a file at a time (ProjectValidation) and a rename's commit a file at a time
-// (RenameTransaction), each stepped at any budget coming to what it comes to in one call; and the
+// (RenameTransaction), each stepped at any budget coming to what it comes to in one call; a
+// validation dropped and started again reading only the files the one before had not; and the
 // session's operations over them: D4's four fixture projects opened under a 64 KB budget a step at
 // a time, the progress only rising, finished once, and coming to the view an Open run to its end
-// makes; an Open cancelled between two steps leaving nothing; an edit refused and a query answered
-// while one runs; a Save scanning and validating its one file; an import that finds its plan stale
-// refusing without writing, stepped; a Rescan, an import and a rename stepped coming to the view
-// they come to run to their end. Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files
-// opened a step at a time at the editor's budget (its polls, its steps, its longest poll and its
+// makes; an Open cancelled between two steps leaving nothing in the view or on disk; an edit
+// refused and a query answered while one runs; a Save scanning and validating its one file; an
+// import that finds its plan stale refusing without writing, stepped; a Rescan, an import and a
+// rename stepped coming to the view they come to run to their end; a validation started again
+// mid-way composing what the one it replaced had moved; a rename keeping the selection the modder
+// made while it ran. Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
+// step at a time at the editor's budget (its polls, its steps, its longest poll, bounded, and its
 // wall time), and the base layer a dependency mount of the install would build.
 #include <algorithm>
 #include <chrono>
@@ -29,7 +32,6 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/assets/project_scan.h>
 #include <editor/documents/document_types.h>
-#include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
@@ -421,7 +423,8 @@ static int test_validation_steps() {
 		AssetGraph whole_graph, stepped_graph;
 		ValidationCache whole_cache, stepped_cache;
 		TEST_EXPECT(refresh_project(input, whole_graph, whole_cache));
-		ProjectValidation validation(stepped_graph, stepped_cache);
+		GraphReadings readings;
+		ProjectValidation validation(stepped_graph, stepped_cache, readings);
 		size_t steps = 1;
 		while (!validation.step(input, 1)) ++steps;
 		// Each file the graph reads read ahead, the update, each file's own findings, the end.
@@ -437,11 +440,50 @@ static int test_validation_steps() {
 		TEST_EXPECT(stepped_cache.stats().files_validated == whole_cache.stats().files_validated &&
 		            stepped_cache.stats().files_loaded == whole_cache.stats().files_loaded);
 		// Again with nothing changed: nothing made again, the graph unmoved.
-		ProjectValidation again(stepped_graph, stepped_cache);
+		ProjectValidation again(stepped_graph, stepped_cache, readings);
 		while (!again.step(input, k64K)) {
 		}
 		TEST_EXPECT(!again.moved() && !again.graph_moved() && stepped_cache.stats().files_validated == 0);
 	}
+	return 0;
+}
+
+// The readings ahead outlive the validation that made them (S13 A3 review): a validation dropped
+// after reading three of the files the graph's update reads, the next one over the same readings
+// takes those three from its start (counted done) and reads the others alone, a step for each, and
+// comes to the rows and the graph's stats one validation in one call makes.
+static int test_validation_keeps_its_readings() {
+	editor_test::TempProjectDir dir("opennova_long_ops_readings");
+	const std::string root = make_project(dir.file("fixtures"), "fixtures", fixture_projects::fixture_files());
+	TEST_EXPECT(!root.empty());
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const ProjectDocument document = document_of(root);
+	const AssetScan scan = scan_project_assets(paths, document);
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const ValidationInput input{paths, document, scan, open};
+	AssetGraph whole_graph, graph;
+	ValidationCache whole_cache, cache;
+	TEST_EXPECT(refresh_project(input, whole_graph, whole_cache));
+	const size_t reads = whole_graph.stats().files_extracted;
+	TEST_EXPECT(reads > 4);
+	GraphReadings readings;
+	{
+		ProjectValidation dropped(graph, cache, readings);
+		for (int i = 0; i < 3; ++i) TEST_EXPECT(!dropped.step(input, 1));
+		TEST_EXPECT(dropped.files_done() == 3 && readings.size() == 3);
+	}
+	ProjectValidation again(graph, cache, readings);
+	// Its first step takes the three and reads a fourth.
+	TEST_EXPECT(!again.step(input, 1) && again.files_done() == 4);
+	size_t steps = 1;
+	while (!again.step(input, 1)) ++steps;
+	++steps;
+	TEST_EXPECT(steps == again.files_total() - 3 + 2 && again.files_done() == again.files_total());
+	TEST_EXPECT(graph.stats().files_extracted == reads && readings.empty());
+	std::vector<std::string> a, b;
+	for (const Diagnostic &d : project_rows(input, whole_graph, whole_cache)) a.push_back(row_of(d));
+	for (const Diagnostic &d : project_rows(input, graph, cache)) b.push_back(row_of(d));
+	TEST_EXPECT(same_lines("readings kept", b, a) && !a.empty());
 	return 0;
 }
 
@@ -533,56 +575,78 @@ static int test_open_stepped() {
 
 // An Open cancelled at a step boundary: the session is left with no project open and nothing of it
 // in the view (no files, no requirements, no Problems rows, no recent project), the operation's
-// outcome cancelled; while it runs an edit and a save are refused (operation.busy), a selection and a
-// query go on, and a Close cancels it as a cancel does.
+// outcome cancelled, and nothing of it on disk: the game install last chosen in the editor, which
+// the Open's finish writes into a project's local.json that names none, is neither written nor
+// said (S13 A3 review), and the project's files are byte for byte as they were (a project with no
+// import source: one with some could have imported them, as a refresh stopped there would have).
+// While it runs an edit and a save are refused (operation.busy), a selection and a query go on, and
+// a Close cancels it as a cancel does. Opened to its end, the project's local.json names the install.
 static int test_open_cancelled() {
 	editor_test::TempProjectDir dir("opennova_long_ops_cancel");
 	const std::string root = make_project(dir.file("project"), "Cancel", fixture_projects::fixture_files());
 	TEST_EXPECT(!root.empty());
-	Session s;
-	const SessionView &v = s.view();
-	s.session.set_poll_budget({0, k64K});
-	s.session.handle(request::open_project(root));
-	const uint64_t id = s.session.outcome().operation;
-	TEST_EXPECT(s.session.outcome().done() && id != 0 && v.activity.operation.kind == OperationKind::Open &&
+	const std::string install = dir.file("install");
+	std::error_code made;
+	fs::create_directories(install, made);
+	Preferences chosen;
+	chosen.game_install = install; // the install last chosen in the editor
+	NoProcess platform;
+	MemoryPreferencesStore preferences(chosen);
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const auto on_disk = snapshot(root);
+	TEST_EXPECT(!fs::exists(paths.local_settings_file));
+	session.set_poll_budget({0, k64K});
+	session.handle(request::open_project(root));
+	const uint64_t id = session.outcome().operation;
+	TEST_EXPECT(session.outcome().done() && id != 0 && v.activity.operation.kind == OperationKind::Open &&
 	            v.activity.operation.cancellable && v.activity.operation.writes == (kHoldsAll | HoldsSlot));
+	TEST_EXPECT(snapshot(root) == on_disk); // the request read the project, wrote nothing
 	// Polled into its scan: a step boundary with files visited.
-	for (int i = 0; i < 1000 && v.activity.operation.running() && v.activity.operation.done == 0; ++i) s.session.poll();
-	s.session.poll();
+	for (int i = 0; i < 1000 && v.activity.operation.running() && v.activity.operation.done == 0; ++i) session.poll();
+	session.poll();
 	TEST_EXPECT(v.activity.operation.running() && v.activity.operation.done > 0 &&
 	            v.activity.operation.done < v.activity.operation.total && !v.project.open);
 	// While it runs: an edit and a save wait, a selection and a query go on.
-	s.session.handle(request::edit_record("defs/items.def", Edit()));
-	TEST_EXPECT(!s.session.outcome().done() && s.session.outcome().findings.size() == 1 &&
-	            s.session.outcome().findings[0].code() == "operation.busy");
-	s.session.handle(request::save_all());
-	TEST_EXPECT(!s.session.outcome().done() && s.session.outcome().findings[0].code() == "operation.busy");
-	s.session.handle(request::select_record(std::string(), NodeAddress()));
-	TEST_EXPECT(s.session.outcome().done());
+	session.handle(request::edit_record("defs/items.def", Edit()));
+	TEST_EXPECT(!session.outcome().done() && session.outcome().findings.size() == 1 &&
+	            session.outcome().findings[0].code() == "operation.busy");
+	session.handle(request::save_all());
+	TEST_EXPECT(!session.outcome().done() && session.outcome().findings[0].code() == "operation.busy");
+	session.handle(request::select_record(std::string(), NodeAddress()));
+	TEST_EXPECT(session.outcome().done());
 	std::string error;
-	const opennova::io::JsonValue state = s.session.query("operation", opennova::io::JsonValue::make_null(), error);
+	const opennova::io::JsonValue state = session.query("operation", opennova::io::JsonValue::make_null(), error);
 	TEST_EXPECT(error.empty() && state.get("operation")->get_string("kind", "") == "open" &&
 	            state.get("operation")->get_bool("running", false));
-	s.session.handle(request::of(EditorRequestKind::CancelOperation));
-	TEST_EXPECT(s.session.outcome().done() && !v.activity.operation.running() && v.activity.last_operation.id == id &&
-	            v.activity.last_operation.end == OperationEnd::Cancelled);
+	session.handle(request::of(EditorRequestKind::CancelOperation));
+	TEST_EXPECT(session.outcome().done() && !v.activity.operation.running() && v.activity.last_operation.id == id &&
+	            v.activity.last_operation.end == OperationEnd::Cancelled && v.activity.last_operation.findings.empty());
 	TEST_EXPECT(!v.project.open && v.project.root.empty() && v.project.scan->entries.empty() &&
 	            v.project.requirements->rows.empty() && v.documents.open.empty() && !v.activity.validation.running);
 	for (const Diagnostic &d : v.findings.diagnostics) TEST_EXPECT(d.code() == "operation.busy");
 	TEST_EXPECT(v.project.recent_projects.empty());
-	for (int i = 0; i < 3; ++i) s.session.poll(); // nothing finishes later
+	TEST_EXPECT(snapshot(root) == on_disk && !fs::exists(paths.local_settings_file));
+	for (int i = 0; i < 3; ++i) session.poll(); // nothing finishes later
 	TEST_EXPECT(!v.project.open && !v.activity.operation.running() && v.activity.last_operation.id == id);
+	TEST_EXPECT(snapshot(root) == on_disk);
 	// A Close during an Open cancels it as its commit does: the session stays closed.
-	s.session.handle(request::open_project(root));
-	s.session.poll();
-	s.session.handle(request::close_project());
-	TEST_EXPECT(s.session.outcome().done() && !v.project.open && !v.activity.operation.running() &&
+	session.handle(request::open_project(root));
+	session.poll();
+	session.handle(request::close_project());
+	TEST_EXPECT(session.outcome().done() && !v.project.open && !v.activity.operation.running() &&
 	            v.activity.last_operation.end == OperationEnd::Cancelled);
-	// Opened to its end, it is the open project and a recent one.
-	s.session.handle(request::open_project(root));
-	s.session.run_operations();
-	TEST_EXPECT(v.project.open && v.project.root == ProjectPaths::for_root(root).root && !v.project.scan->entries.empty() &&
+	TEST_EXPECT(!fs::exists(paths.local_settings_file));
+	// Opened to its end, it is the open project and a recent one, and its local.json names the
+	// install the editor last chose.
+	session.handle(request::open_project(root));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.project.root == paths.root && !v.project.scan->entries.empty() &&
 	            v.project.recent_projects.size() == 1);
+	LocalSettings local;
+	Diagnostic unread;
+	TEST_EXPECT(load_local_settings(paths, local, unread) && local.game_install == absolute_install_path(install));
 	return 0;
 }
 
@@ -617,6 +681,7 @@ static int test_save_scans_one_file() {
 	TEST_EXPECT(edit_row("defs/items.def", 0, "hp", int64_t(77)));
 	s.session.handle(request::save("defs/items.def"));
 	TEST_EXPECT(s.session.outcome().done() && s.session.files_scanned() == 1);
+	s.session.run_operations(); // the validation the open, the edit and the save left due, once
 	TEST_EXPECT(s.session.validation_stats().files_validated == 1 && s.session.validation_stats().files_loaded == 0);
 	TEST_EXPECT(fresh_equal("a Save"));
 	// Two saved together: two read, two validated.
@@ -624,6 +689,7 @@ static int test_save_scans_one_file() {
 	// The stylesheet's DEF_TEXT_FG (its fourth row: two comment lines come first).
 	TEST_EXPECT(edit_row("menus/menu_style.mns", 3, "value", std::string("FF00FF00")));
 	s.session.handle(request::save_all());
+	s.session.run_operations();
 	TEST_EXPECT(s.session.outcome().done() && s.session.files_scanned() == 2 &&
 	            s.session.validation_stats().files_validated == 2);
 	TEST_EXPECT(fresh_equal("a SaveAll"));
@@ -752,13 +818,125 @@ static int test_stepped_equals_whole() {
 	return 0;
 }
 
+// A validation started again before it ended composes the rows whatever the one taking its place
+// finds moved (S13 A3 review). An item given a model the project lacks: the validation stepped a
+// step a poll past the graph's update (the graph holding the name) and the item's own findings,
+// then the project renamed, which starts it again over the project as it is now; the pass after it
+// finds the graph and the cache as the first left them, nothing of its own moved, and the missing
+// model's row is made all the same. The progress shown never falls back while it runs.
+static int test_validation_started_again() {
+	editor_test::TempProjectDir dir("opennova_long_ops_again");
+	const std::string root = make_project(dir.file("project"), "Again",
+	                                      {{"defs/items.def", "begin \"Crate\"\nid 100300\ntype building\nhp 10\nend\n"}});
+	TEST_EXPECT(!root.empty());
+	Session s;
+	const SessionView &v = s.view();
+	s.session.handle(request::open_project(root));
+	s.session.run_operations();
+	editor_test::handle_to_end(s.session, request::open_document("defs/items.def"));
+	Document *items = s.session.document_for("defs/items.def");
+	TEST_EXPECT(items != nullptr && !items->rows().empty());
+	if (!items || items->rows().empty()) return 1;
+	const auto barrel = [&v]() {
+		return std::any_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(), [](const Diagnostic &d) {
+			return d.code() == "reference.missing" && subject_target(d) == "barrel";
+		});
+	};
+	TEST_EXPECT(!barrel() && !v.activity.validation.running);
+	s.session.set_poll_budget({0, 1});
+	EditorRequest edit = request::edit_record(items->path(), Edit());
+	edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
+	edit.edits[0].field = "graphic";
+	edit.edits[0].value = std::string("barrel");
+	s.session.handle(edit);
+	TEST_EXPECT(v.activity.validation.running && !barrel());
+	// A step a poll: the graph's update (the item's file is open: nothing to read ahead), then the
+	// item's own findings.
+	const uint64_t before = v.findings.graph->generation();
+	s.session.poll();
+	TEST_EXPECT(v.findings.graph->generation() != before && v.activity.validation.running);
+	s.session.poll();
+	const ValidationStatus shown = v.activity.validation;
+	TEST_EXPECT(shown.running && shown.done == shown.total && shown.total > 0 && !barrel());
+	const uint64_t moved = v.findings.graph->generation();
+	// The project renamed: a project document of its own, which the validation reads.
+	EditorRequest rename = request::of(EditorRequestKind::ApplyProjectSettings);
+	rename.settings.title = std::string("Again and again");
+	s.session.handle(rename);
+	TEST_EXPECT(v.project.settings_result.failures.empty() && v.project.document->title == "Again and again");
+	size_t polls = 0;
+	bool stood = true;
+	while (v.activity.validation.running && polls < 1000) {
+		s.session.poll();
+		++polls;
+		stood = stood && (!v.activity.validation.running || v.activity.validation.done >= shown.done);
+	}
+	TEST_EXPECT(!v.activity.validation.running && stood);
+	// The pass that ended moved nothing of its own: no file's findings made again, the graph as the
+	// first pass left it.
+	TEST_EXPECT(s.session.validation_stats().files_validated == 0 && v.findings.graph->generation() == moved);
+	TEST_EXPECT(barrel());
+	return 0;
+}
+
+// A rename's finish keeps what the modder was in (S13 A3 review): the active document, which the
+// rename does not touch, and its selection as it was when the rename started, through the reload of
+// the open document the rename rewrote; a selection the modder made while the rename ran is theirs
+// (the selection's serial moved since the start) and stays.
+static int test_rename_keeps_the_selection() {
+	editor_test::TempProjectDir dir("opennova_long_ops_selection");
+	const std::string root = make_project(
+			dir.file("project"), "Selection",
+			{{"defs/weapon.def", "weapon \"GUN_A\"\nend\nweapon \"GUN_C\"\nend\n"},
+	         {"defs/items.def", "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"
+	                            "begin \"Truck\"\nid 100301\ntype vehicle\nend\n"}});
+	TEST_EXPECT(!root.empty());
+	Session s;
+	const SessionView &v = s.view();
+	s.session.handle(request::open_project(root));
+	s.session.run_operations();
+	editor_test::handle_to_end(s.session, request::open_document("defs/weapon.def"));
+	editor_test::handle_to_end(s.session, request::open_document("defs/items.def"));
+	Document *items = s.session.document_for("defs/items.def");
+	TEST_EXPECT(items != nullptr && items->rows().size() == 2 && v.documents.active == "defs/items.def");
+	if (!items || items->rows().size() != 2) return 1;
+	const NodeAddress carrier{items->rows()[0]->id, items->rows()[0]->kind, 0};
+	const NodeAddress truck{items->rows()[1]->id, items->rows()[1]->kind, 0};
+	// The weapon `from` renamed to `to` (no item uses it: weapon.def alone is rewritten), a step a
+	// poll, `meanwhile` selected after the first poll when given: whether it was done.
+	const auto rename = [&](const char *from, const char *to, const NodeAddress *meanwhile) {
+		const std::vector<const GraphSymbol *> gun = v.findings.graph->symbols_named(ReferenceKind::Weapon, from);
+		if (gun.size() != 1) return false;
+		const std::string file = gun.front()->file, locator = gun.front()->locator, field = gun.front()->field;
+		s.session.set_poll_budget({0, 1});
+		s.session.handle(request::rename_symbol(file, locator, field, to));
+		s.session.poll();
+		const bool running = v.activity.operation.running() && v.activity.operation.kind == OperationKind::RenameApply;
+		if (meanwhile) s.session.handle(request::select_record(items->path(), *meanwhile));
+		s.session.run_operations();
+		s.session.set_poll_budget(kDefaultPollBudget);
+		return running && v.activity.last_operation.kind == OperationKind::RenameApply &&
+		       v.activity.last_operation.end == OperationEnd::Done;
+	};
+	s.session.handle(request::select_record(items->path(), carrier));
+	TEST_EXPECT(rename("GUN_C", "GUN_D", nullptr));
+	TEST_EXPECT(v.documents.active == "defs/items.def" && v.documents.selection.document == "defs/items.def" &&
+	            v.documents.selection.primary == carrier && v.documents.selection.records.size() == 1);
+	TEST_EXPECT(rename("GUN_D", "GUN_E", &truck));
+	TEST_EXPECT(v.documents.active == "defs/items.def" && v.documents.selection.document == "defs/items.def" &&
+	            v.documents.selection.primary == truck && v.documents.selection.records.size() == 1);
+	TEST_EXPECT(!v.findings.graph->symbols_named(ReferenceKind::Weapon, "GUN_E").empty());
+	return 0;
+}
+
 // Retail leg (OPENNOVA_JO_DIR): the JO install's files a document type opens, and the textures and
 // fonts they name, exported into a project whose game install is the JO one (its local.json, as a
 // modder's project names it), opened a poll at a time at the editor's own budget
-// (kDefaultPollBudget: 10 ms of 1 MiB steps): the polls the Open takes and its wall time, its first
-// poll (the install's names listed, one step), then the validation's, and the longest poll of each
-// (the frame the editor would stall for); and the base layer a read-only dependency mount of the
-// install builds (GraphLayer::build), timed.
+// (kDefaultPollBudget: 10 ms of 64 KiB steps), each loop bounded: the polls the Open takes and its
+// wall time, its first poll (the install's names listed, one step), then the validation's, and the
+// longest poll of each (the frame the editor would stall for), bounded by the budget and the
+// longest single step (one file's or one menu's work, timed afresh); and the base layer a read-only
+// dependency mount of the install builds (GraphLayer::build), timed.
 static int test_retail_open() {
 	const std::string install = retail::install();
 	if (install.empty()) {
@@ -810,20 +988,24 @@ static int test_retail_open() {
 	const auto started = clock::now();
 	s.session.handle(request::open_project(root));
 	const double request_ms = ms_since(started);
+	// Each loop bounded (an Open or a validation that never ends fails, not hangs): far more polls
+	// than either takes at this budget.
+	constexpr size_t kPollCap = 100000;
 	size_t open_polls = 0, validation_polls = 0;
 	double longest_open = 0, longest_validation = 0, first_open = 0;
-	while (v.activity.operation.running()) {
+	while (v.activity.operation.running() && open_polls < kPollCap) {
 		const auto poll = clock::now();
 		s.session.poll();
 		longest_open = std::max(longest_open, ms_since(poll));
 		if (open_polls++ == 0) first_open = ms_since(poll);
 	}
+	TEST_EXPECT(!v.activity.operation.running());
 	const double open_ms = ms_since(started);
 	const auto validating = clock::now();
 	// Where the validation stood before its longest poll: the files it had asked of its total (all
 	// of them: the project checks and the rows).
 	ValidationStatus before_longest;
-	while (v.activity.validation.running) {
+	while (v.activity.validation.running && validation_polls < kPollCap) {
 		const ValidationStatus before = v.activity.validation;
 		const auto poll = clock::now();
 		s.session.poll();
@@ -834,6 +1016,7 @@ static int test_retail_open() {
 		++validation_polls;
 	}
 	const double validation_ms = ms_since(validating);
+	TEST_EXPECT(!v.activity.validation.running && open_polls > 1 && validation_polls > 1);
 	TEST_EXPECT(v.project.open && v.activity.last_operation.end == OperationEnd::Done && !v.findings.diagnostics.empty());
 	TEST_EXPECT(v.project.retail_files.size() > 1000);
 	std::printf("retail: %zu files exported (%.1f MB); opened in %zu polls, %.0f ms (the request %.1f ms, the first "
@@ -844,56 +1027,81 @@ static int test_retail_open() {
 	            v.project.retail_files.size(), longest_open, validation_polls, validation_ms, longest_validation,
 	            static_cast<unsigned long long>(before_longest.done), static_cast<unsigned long long>(before_longest.total),
 	            s.session.files_scanned(), v.findings.diagnostics.size(), v.findings.graph->edge_count());
-	TEST_EXPECT(open_polls > 1 && validation_polls > 1);
-	// The validation's parts, each timed over the same files afresh: the graph's update (its first
-	// step, one whatever it reads), the files' own findings (a file a step), the render check (the
-	// step that ends it, with the rows).
+	// The validation's parts, each timed over the same files afresh, with the longest single step of
+	// each (one file's or one menu's work, which no step splits): the graph's files read ahead (a
+	// file a step), its update over those readings (a step of its own), the files' own findings (a
+	// file a step), the render check (a menu a step).
+	double step_floor = 0;
 	{
 		const ProjectPaths paths = ProjectPaths::for_root(root);
 		const std::vector<std::shared_ptr<const DocumentBase>> open;
 		const ValidationInput input{paths, *v.project.document, *v.project.scan, open};
+		const auto slowest = [&ms_since](clock::time_point start, double &longest, std::string &name,
+		                                 const std::string &what) {
+			const double ms = ms_since(start);
+			if (ms > longest) {
+				longest = ms;
+				name = what;
+			}
+		};
 		AssetGraph graph;
 		ValidationCache cache;
+		GraphReadings readings;
+		double slowest_read = 0;
+		std::string slowest_read_name;
 		auto part = clock::now();
-		size_t read = 0;
-		for (const AssetEntry &asset : v.project.scan->entries) {
-			if (!graph_reads_file(asset.kind, asset.logical_name)) continue;
-			Extracted content;
-			Diagnostic failure;
-			extract_from_asset(paths, *v.project.document, asset, content, failure);
-			++read;
+		for (const AssetEntry *asset : graph.files_to_read(*v.project.scan, open)) {
+			const auto file = clock::now();
+			readings[asset->relative_path] = AssetGraph::read_file(paths, *v.project.document, *asset);
+			slowest(file, slowest_read, slowest_read_name, asset->relative_path);
 		}
 		const double read_ms = ms_since(part);
+		const size_t read = readings.size();
 		part = clock::now();
-		graph.update(paths, *v.project.document, *v.project.scan, open);
-		const double graph_ms = ms_since(part);
-		std::printf("retail: the graph's files read alone: %zu in %.0f ms\n", read, read_ms);
+		graph.update(paths, *v.project.document, *v.project.scan, open, &readings);
+		const double update_ms = ms_since(part);
 		part = clock::now();
 		cache.begin();
-		double longest_file = 0;
-		std::string longest_name;
+		double slowest_file = 0;
+		std::string slowest_file_name;
 		for (const AssetEntry *asset : validation_files(*v.project.scan)) {
 			const auto file = clock::now();
 			cache.file_findings(input, *asset);
-			if (ms_since(file) > longest_file) {
-				longest_file = ms_since(file);
-				longest_name = asset->relative_path;
-			}
+			slowest(file, slowest_file, slowest_file_name, asset->relative_path);
 		}
 		cache.end();
 		const double files_ms = ms_since(part);
 		ProjectAssetSource assets;
 		assets.set_scan(paths.root, *v.project.scan, v.project.document->target_game);
-		ProjectChecks checks;
+		MenuRenderCheck check;
+		check.begin();
+		double slowest_render = 0;
+		std::string no_name;
+		bool moved = false, checked = false;
 		part = clock::now();
-		checks.update({input, cache, assets});
+		while (!checked) {
+			const auto step = clock::now();
+			checked = check.step({input, cache, assets}, 1, moved);
+			slowest(step, slowest_render, no_name, std::string());
+		}
 		const double render_ms = ms_since(part);
-		const MenuRenderCheck *check = menu_render_check(&checks);
-		std::printf("retail: the validation's parts afresh: the graph's update %.0f ms (%zu files read), the files' own "
-		            "findings %.0f ms (%zu files, the longest %.1f ms, %s), the render check %.0f ms (%zu menus rendered)\n",
-		            graph_ms, graph.stats().files_extracted, files_ms, validation_files(*v.project.scan).size(),
-		            longest_file, longest_name.c_str(), render_ms, check ? check->rendered() : size_t(0));
+		std::printf("retail: the validation's parts afresh: the graph's files read %.0f ms (%zu files, the longest %.1f "
+		            "ms, %s), its update over them %.0f ms, the files' own findings %.0f ms (%zu files, the longest "
+		            "%.1f ms, %s), the render check %.0f ms (%zu menus rendered, the longest step %.1f ms)\n",
+		            read_ms, read, slowest_read, slowest_read_name.c_str(), update_ms, files_ms,
+		            validation_files(*v.project.scan).size(), slowest_file, slowest_file_name.c_str(), render_ms,
+		            check.rendered(), slowest_render);
+		step_floor = std::max({first_open, slowest_read, update_ms, slowest_file, slowest_render});
 	}
+	// No poll stalls the editor much past its budget (S13 A3 review): a poll steps until its 10 ms
+	// have passed, so it ends at most a step past them, and a step is at most one file's or one
+	// menu's work, which no step splits, or the Open's first (the install's names): the longest of
+	// those, measured above (on the JO install a menu the graph reads and ITEMS.DEF's own findings,
+	// some 50 to 60 ms on an idle machine). Twice that and 50 ms: room for a machine other builds
+	// share, and far short of a walk, the graph's reading or the files' findings run in one poll
+	// (the render check a menu a step is editor_menu_render's to pin, its whole run near the bound).
+	TEST_EXPECT(longest_open <= kDefaultPollBudget.ms + 2 * step_floor + 50);
+	TEST_EXPECT(longest_validation <= kDefaultPollBudget.ms + 2 * step_floor + 50);
 	// The dependency mount's base layer over the whole install, which an expansion project's Open
 	// would build (ADR 0046 d12's later list): one call today, timed.
 	const auto layered = clock::now();
@@ -911,12 +1119,15 @@ int main(int argc, char **argv) {
 	failures += test_import_pass_steps();
 	failures += test_scan_update();
 	failures += test_validation_steps();
+	failures += test_validation_keeps_its_readings();
 	failures += test_rename_transaction_steps();
 	failures += test_open_stepped();
 	failures += test_open_cancelled();
 	failures += test_save_scans_one_file();
 	failures += test_stale_import_refused();
 	failures += test_stepped_equals_whole();
+	failures += test_validation_started_again();
+	failures += test_rename_keeps_the_selection();
 	failures += test_retail_open();
 	return failures == 0 ? 0 : 1;
 }

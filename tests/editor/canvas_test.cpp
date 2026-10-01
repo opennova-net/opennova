@@ -17,8 +17,11 @@
 // listed window holding the part). The shapes the canvas draws. The model's canvas
 // (preview/model_canvas) over a real session: F frames the selected marker, a click selects a
 // marker's record, a drag of it is one gesture ended once when its canvas is not drawn, a drag
-// elsewhere orbits and the wheel dollies, and a press ends when the model's document goes. The
-// panes' wiring of all this is tests/editor_ui's (the preview and workspace groups).
+// elsewhere orbits and the wheel dollies, and a press ends when the model's document goes. Held
+// while an operation holds the documents (S13 A3), neither canvas raises an edit: a drag, a
+// resize, the arrows and an Arrange of the menu's, a marker's drag of the model's (it orbits),
+// while a click and Esc still select. The panes' wiring of all this is tests/editor_ui's (the
+// preview and workspace groups).
 
 #include <algorithm>
 #include <cmath>
@@ -921,6 +924,45 @@ ModelCanvasFrame model_frame(
 	return frame;
 }
 
+// Held (S13 A3: `editable` false while an operation holds the documents, as the pane sets it from
+// SessionView::allows): a drag of the selected BOX, a resize at its corner, the arrows and an
+// Arrange raise no edit; a click still selects, and Esc too. Editable again, the drag moves BOX.
+int test_menu_canvas_held() {
+	MenuRig rig;
+	TEST_EXPECT(rig.load(kLayoutMenu, "layout.mnu"));
+	if (!rig.frame.current)
+		return 1;
+	const MnuDocument &document = rig.document;
+	const NodeAddress main = named(document, "MAIN"), box = named(document, "BOX"),
+					  other = named(document, "OTHER");
+	rig.select(box, { box, other });
+	rig.frame.editable = false;
+	std::vector<Request> requests = rig.drag(200.0f, 150.0f, 40.0f, 21.0f);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	requests = rig.drag(300.0f, 200.0f, 13.0f, 7.0f);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	requests = rig.nudge(1, 0);
+	TEST_EXPECT(count_of(requests, Request::Kind::Edits) == 0);
+	menu_canvas_arrange(rig.frame, ArrangeOp::AlignLeft, rig.out);
+	TEST_EXPECT(rig.out.take().empty());
+	requests = rig.click(500.0f, 350.0f);
+	TEST_EXPECT((selections(requests) ==
+			std::vector<std::pair<NodeAddress, CanvasJoin>>{ { other, CanvasJoin::Replace } }) &&
+			count_of(requests, Request::Kind::Edits) == 0);
+	rig.select(box);
+	requests = rig.escape();
+	TEST_EXPECT((selections(requests) ==
+			std::vector<std::pair<NodeAddress, CanvasJoin>>{ { main, CanvasJoin::Replace } }));
+	rig.select(box);
+	rig.frame.editable = true;
+	requests = rig.drag(200.0f, 150.0f, 40.0f, 21.0f);
+	uint64_t gesture = 0;
+	size_t count = 0;
+	const std::vector<Edit> last = batches(requests, gesture, count);
+	TEST_EXPECT(count >= 1 && gesture != 0 && set_value(last, "position.left") == 144);
+	return 0;
+}
+
 int test_model_canvas() {
 	editor_test::TempProjectDir dir("opennova_editor_canvas_model");
 	NoProcess platform;
@@ -1040,6 +1082,33 @@ int test_model_canvas() {
 	canvas.end_frame(out);
 	TEST_EXPECT(out.take().empty());
 
+	// Held (S13 A3: `editable` false while an operation holds the documents, as the pane sets it
+	// from SessionView::allows): the same drag of the selected marker takes no handle and edits
+	// nothing; it orbits the camera.
+	{
+		ModelCanvasFrame held = frame;
+		held.editable = false;
+		const float before = model.camera().yaw;
+		const auto held_step = [&](const CanvasInput &input) {
+			canvas.follow(held, out);
+			canvas.input(held, input, model_canvas_under(held, input), out);
+		};
+		CanvasInput press = at(x, y);
+		press.keys.alt = true;
+		press.pressed = press.down = true;
+		held_step(press);
+		CanvasInput moved = at(x + 30.0f, y + 10.0f);
+		moved.keys.alt = true;
+		moved.down = true;
+		moved.delta = CanvasPoint{ 30.0f, 10.0f };
+		held_step(moved);
+		moved.down = false;
+		moved.delta = CanvasPoint();
+		held_step(moved);
+		canvas.end_frame(out);
+		TEST_EXPECT(count_of(out.take(), Request::Kind::Edits) == 0 && model.camera().yaw != before);
+	}
+
 	// A drag away from the markers orbits the camera and raises nothing; the wheel dollies.
 	const float yaw = model.camera().yaw, distance = model.camera().distance;
 	in = at(20.0f, 20.0f);
@@ -1080,6 +1149,8 @@ int main() {
 	if (test_gesture_machine() != 0)
 		return 1;
 	if (test_menu_canvas() != 0)
+		return 1;
+	if (test_menu_canvas_held() != 0)
 		return 1;
 	if (test_menu_gestures_end() != 0)
 		return 1;

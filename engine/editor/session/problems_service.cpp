@@ -32,12 +32,14 @@ DocumentState state_of(const DocumentBase &document) {
 
 // The validation under way: the project's paths, its document and scan and the open documents as
 // they were when it started (held, so a scan the session replaced meanwhile is still the one it
-// reads), their states, the cursor over the session's graph and cache, then the project checks
-// it has run (ProjectChecks' slots, one a step) and whether one said its findings moved.
+// reads), their states, the cursor over the session's graph, cache and readings ahead, then the
+// project checks it has brought up (ProjectChecks' slots, each stepped) and whether one said its
+// findings moved.
 struct ProblemsService::Pass {
 	Pass(const ProjectPaths &p, std::shared_ptr<const ProjectDocument> d, std::shared_ptr<const AssetScan> s,
-			std::vector<std::shared_ptr<const DocumentBase>> o, AssetGraph &graph, ValidationCache &cache) :
-			paths(p), project(std::move(d)), scan(std::move(s)), open(std::move(o)), validation(graph, cache) {
+			std::vector<std::shared_ptr<const DocumentBase>> o, AssetGraph &graph, ValidationCache &cache,
+			GraphReadings &readings) :
+			paths(p), project(std::move(d)), scan(std::move(s)), open(std::move(o)), validation(graph, cache, readings) {
 		for (const auto &document : open) states.push_back(document ? state_of(*document) : DocumentState());
 	}
 	ValidationInput input() const { return {paths, *project, *scan, open}; }
@@ -48,7 +50,8 @@ struct ProblemsService::Pass {
 	std::vector<std::shared_ptr<const DocumentBase>> open;
 	std::vector<DocumentState> states;
 	ProjectValidation validation;
-	size_t checks_run = 0; // the project checks' slots updated (ProjectChecks::slot_count)
+	size_t checks_run = 0;    // the project checks' slots brought up (ProjectChecks::slot_count)
+	bool check_begun = false; // the slot at checks_run started (ProjectChecks::begin_slot)
 	bool checks_moved = false;
 	bool graph_shown = false; // Graph moved for its update
 };
@@ -62,22 +65,17 @@ ProblemsService::ProblemsService(SessionCore &core) :
 
 ProblemsService::~ProblemsService() = default;
 
-// The project's findings now, composed as `opennova-project validate` composes them
-// (project/project_findings): the scan's, the requirements', the files the last Play's game
-// reported missing and its nonzero exit, each file's own (the open documents standing in for
-// theirs, every file's kept in the cache until it changes) with the use checks', the graph's and
-// the open documents' own (a file changed outside the editor that was not read again), the
-// document types' project checks' findings (the menu render check's notes) and the last build's
-// own findings (after the gate the build reads: a project check's finding never blocks a build,
-// nor does the last Play's report, which only the next Play can clear, nor the last build's,
-// which the next build replaces). They replace the Problems rows: Findings moves only when they
-// differ, and Graph only when the graph's update changed it.
-void ProblemsService::validate_documents() {
-	compose(false);
-}
-
-// The validation an edit left due: the findings reported while it was due, and nothing changed
-// since, stay after the composed rows (reporting one ran this validation first, before S13 A2).
+// The validation an edit left due, run to its end: the project's findings now, composed as
+// `opennova-project validate` composes them (project/project_findings): the scan's, the
+// requirements', the files the last Play's game reported missing and its nonzero exit, each file's
+// own (the open documents standing in for theirs, every file's kept in the cache until it changes)
+// with the use checks', the graph's and the open documents' own (a file changed outside the editor
+// that was not read again), the document types' project checks' findings (the menu render check's
+// notes) and the last build's own findings (after the gate the build reads: a project check's
+// finding never blocks a build, nor does the last Play's report, which only the next Play can
+// clear, nor the last build's, which the next build replaces). They replace the Problems rows:
+// Findings moves only when they differ, and Graph only when the graph's update changed it. The
+// findings reported while it was due, and nothing changed since, stay after the composed rows.
 void ProblemsService::validate_pending_now() {
 	compose(true);
 }
@@ -101,12 +99,15 @@ bool ProblemsService::pass_current() const {
 
 bool ProblemsService::step_pass(uint64_t bytes) {
 	// A new one when one is due (a change since the one under way started, or none is), or when
-	// what the one under way reads moved without one being asked (a gesture's edits): the graph
-	// and the cache keep what still holds, so starting again costs what changed.
+	// what the one under way reads moved without one being asked (a gesture's edits): the graph,
+	// the cache and the readings ahead keep what still holds, so starting again costs what changed.
+	// One taking the place of a pass that had not ended composes the rows whatever its own counts
+	// say: what that pass brought up before it stopped is no longer counted.
 	if (validation_due_ || !pass_ || !pass_current()) {
+		if (pass_) moved_since_composed_ = true;
 		validation_due_ = false;
 		pass_ = std::make_unique<Pass>(core_.paths(), view_.project.document, view_.project.scan, view_.documents.open,
-				*graph_, validation_cache_);
+				*graph_, validation_cache_, readings_);
 	}
 	Pass &pass = *pass_;
 	if (!pass.validation.done()) {
@@ -117,26 +118,43 @@ bool ProblemsService::step_pass(uint64_t bytes) {
 		}
 		return false;
 	}
-	// After the last file's own findings, the project checks a check a step (a check reads which
-	// files' records their own checks read): the slots with no check pass by in the same step.
+	// After the last file's own findings, the project checks in the registry's order (a check reads
+	// which files' records their own checks read), each stepped within the budget (the render check
+	// renders a menu a step): the step that ends a check ends there, and the slots with no check
+	// pass by in the same step.
 	const ValidationInput input = pass.input();
 	while (pass.checks_run < checks_->slot_count()) {
-		const bool ran = checks_->has_check(pass.checks_run);
-		if (checks_->update_slot(pass.checks_run++, {input, validation_cache_, *assets_})) pass.checks_moved = true;
-		if (ran) return false;
+		const size_t slot = pass.checks_run;
+		if (!pass.check_begun) {
+			checks_->begin_slot(slot);
+			pass.check_begun = true;
+		}
+		bool moved = false;
+		if (!checks_->step_slot(slot, {input, validation_cache_, *assets_}, bytes, moved)) return false;
+		pass.checks_moved = pass.checks_moved || moved;
+		pass.check_begun = false;
+		++pass.checks_run;
+		if (checks_->has_check(slot)) return false;
 	}
 	return true;
+}
+
+bool ProblemsService::advance(uint64_t bytes) {
+	if (!validating()) return true;
+	if (core_.documents().gesture_open()) return false;
+	if (step_pass(bytes)) {
+		compose_rows(true);
+		return true;
+	}
+	show_validation();
+	return false;
 }
 
 void ProblemsService::step_validation(const PollBudget &budget, const OperationClock &clock) {
 	if (!validating() || core_.documents().gesture_open()) return;
 	const int64_t start = budget.ms > 0 ? clock() : 0;
-	bool done = false;
-	do {
-		done = step_pass(budget.step_bytes);
-	} while (!done && budget.ms > 0 && clock() - start < budget.ms);
-	if (done) compose_rows(true);
-	else show_validation();
+	while (!advance(budget.step_bytes) && budget.ms > 0 && clock() - start < budget.ms) {
+	}
 }
 
 void ProblemsService::show_validation() {
@@ -146,13 +164,21 @@ void ProblemsService::show_validation() {
 		status.done = pass_->validation.files_done();
 		status.total = pass_->validation.files_total();
 	}
+	// A validation started again shows where the one before stood until it passes it: the progress
+	// shown never falls back while one runs.
+	const ValidationStatus &shown = view_.activity.validation;
+	if (status.running && shown.running && status.done < shown.done) {
+		status.done = shown.done;
+		status.total = shown.total;
+	}
 	if (status == view_.activity.validation) return;
 	view_.activity.validation = status;
 	core_.touch(ViewConcern::Operation);
 }
 
 void ProblemsService::compose_rows(bool keep_reported) {
-	const bool moved = pass_->validation.moved() || pass_->checks_moved;
+	const bool moved = pass_->validation.moved() || pass_->checks_moved || moved_since_composed_;
+	moved_since_composed_ = false;
 	pass_.reset();
 	const std::vector<Diagnostic> open = core_.documents().findings();
 	const ProjectFindingsInput input{core_.paths(),        *view_.project.document,    *view_.project.scan,
@@ -234,6 +260,8 @@ void ProblemsService::clear() {
 	reported_.clear();
 	validation_due_ = false;
 	pass_.reset();
+	moved_since_composed_ = false;
+	readings_.clear();
 	show_validation();
 }
 

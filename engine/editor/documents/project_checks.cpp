@@ -35,17 +35,27 @@ bool ProjectChecks::follow_registry() {
 
 bool ProjectChecks::update(const ProjectCheckInput &input) {
 	bool moved = false;
-	for (size_t slot = 0; slot < slots_.size(); ++slot)
-		if (update_slot(slot, input))
-			moved = true;
+	for (size_t slot = 0; slot < slots_.size(); ++slot) {
+		begin_slot(slot);
+		bool slot_moved = false;
+		while (!step_slot(slot, input, UINT64_MAX, slot_moved)) {
+		}
+		moved = moved || slot_moved;
+	}
 	return moved;
 }
 
-bool ProjectChecks::update_slot(size_t slot, const ProjectCheckInput &input) {
-	bool moved = slot == 0 && follow_registry();
-	if (slot < slots_.size() && slots_[slot].check && slots_[slot].check->update(input))
-		moved = true;
-	return moved;
+void ProjectChecks::begin_slot(size_t slot) {
+	if (slot == 0) registry_moved_ = follow_registry();
+	if (slot < slots_.size() && slots_[slot].check) slots_[slot].check->begin();
+}
+
+bool ProjectChecks::step_slot(size_t slot, const ProjectCheckInput &input, uint64_t budget, bool &moved) {
+	bool check_moved = false;
+	if (slot < slots_.size() && slots_[slot].check && !slots_[slot].check->step(input, budget, check_moved))
+		return false;
+	moved = check_moved || (slot == 0 && registry_moved_);
+	return true;
 }
 
 void ProjectChecks::append_findings(std::vector<Diagnostic> &out) const {

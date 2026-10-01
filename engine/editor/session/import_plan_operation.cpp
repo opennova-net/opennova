@@ -3,6 +3,7 @@
 #include <utility>
 
 #include <editor/session/import_controller.h>
+#include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
@@ -14,9 +15,11 @@ constexpr uint64_t kPlanSteps = 3;
 
 } // namespace
 
-ImportPlanOperation::ImportPlanOperation(const ProjectPaths &paths, const ProjectDocument &document,
-		const AssetGraph &graph, const std::vector<std::shared_ptr<const DocumentBase>> &open,
-		std::vector<ImportSource> roots, bool with_dependencies, std::string install) :
+ImportPlanOperation::ImportPlanOperation(ProblemsService &problems, const ProjectPaths &paths,
+		const ProjectDocument &document, const AssetGraph &graph,
+		const std::vector<std::shared_ptr<const DocumentBase>> &open, std::vector<ImportSource> roots,
+		bool with_dependencies, std::string install) :
+		problems_(problems),
 		paths_(paths),
 		document_(document),
 		graph_(graph),
@@ -28,6 +31,10 @@ ImportPlanOperation::ImportPlanOperation(const ProjectPaths &paths, const Projec
 
 bool ImportPlanOperation::step(const StepBudget &budget) {
 	switch (phase_) {
+	case Phase::Validation:
+		// The validation left due, joined: the plan copies the graph, which then holds every edit.
+		if (problems_.advance(budget.bytes)) phase_ = Phase::Scan;
+		return false;
 	case Phase::Scan:
 		// The project read again (a scan writes nothing, unlike a refresh, which runs the import
 		// pass): the view's scan may be older than a change made outside the editor.
@@ -71,6 +78,7 @@ OperationProgress ImportPlanOperation::progress() const {
 	progress.total = walk_.listing() ? 0 : listed + kPlanSteps;
 	progress.done = walk_.listing() ? 0 : walk_.files_visited() + (phase_ == Phase::Scan ? 0 : after);
 	switch (phase_) {
+	case Phase::Validation: progress.label = "Validating the project first"; break;
 	case Phase::Scan: progress.label = walk_.listing() ? "Listing the project's files" : "Scanning " + walk_.current(); break;
 	case Phase::Graph: progress.label = "Reading what the project's files name"; break;
 	case Phase::Mount: progress.label = "Mounting the game install"; break;

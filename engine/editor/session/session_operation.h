@@ -100,8 +100,11 @@ struct PollBudget {
 	uint64_t step_bytes = 0;
 };
 
-// The editor's: a slice of a frame at 60 Hz.
-inline constexpr PollBudget kDefaultPollBudget{10, uint64_t(1) << 20};
+// The editor's: a slice of a frame at 60 Hz, in steps small enough that the clock is read often
+// (a poll ends on the step that passes its milliseconds): 64 KiB of the walks' costs is 16 of a
+// scan's directory entries or a few small files validated, a few milliseconds, where a step of
+// 1 MiB ran a poll on the JO install to 50 to 200 ms (S13 A3 review).
+inline constexpr PollBudget kDefaultPollBudget{10, uint64_t(64) << 10};
 
 enum class OperationUnit : uint8_t { Bytes, Files, Steps };
 const char *operation_unit_token(OperationUnit unit);

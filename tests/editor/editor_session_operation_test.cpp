@@ -13,6 +13,8 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/session/editor_preferences.h>
@@ -210,15 +212,23 @@ static int test_request_table() {
 		            request_kind_row(kind).writes == (kHoldsAll | HoldsSlot));
 	for (const K kind : {K::CloseProject, K::Quit})
 		TEST_EXPECT(request_kind_row(kind).on_busy == OnBusy::CancelRunning && request_kind_row(kind).writes == kHoldsAll);
-	for (const K kind : {K::Rescan, K::Reimport, K::PreviewImport, K::PlanImport, K::SetImportDependencies,
-	                     K::PreviewInstallImport, K::ImportFiles, K::RenameAsset, K::AssignRequirement, K::RenameSymbol,
-	                     K::Build, K::Play})
+	for (const K kind : {K::Rescan, K::Reimport, K::PreviewImport, K::PlanImport, K::PreviewInstallImport,
+	                     K::ImportFiles, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::Build, K::Play})
 		TEST_EXPECT(holds_any(request_kind_row(kind).writes, HoldsSlot));
+	// A preference alone (its plan of an open dialog is a plan_import through the gate) and a Copy
+	// (it reads the documents as they stand, which an operation writes only as it finishes) hold
+	// nothing of the session's: they wait for no operation (S13 A3).
+	for (const K kind : {K::SetImportDependencies, K::Copy})
+		TEST_EXPECT(request_kind_row(kind).reads == HoldsNothing && request_kind_row(kind).writes == HoldsNothing);
+	for (size_t k = 0; k < kOperationKindCount; ++k)
+		for (const bool cancellable : {true, false})
+			for (const K kind : {K::SetImportDependencies, K::Copy})
+				TEST_EXPECT(gate_answer(kind, status_of(static_cast<OperationKind>(k), cancellable)) == GateAnswer::Proceed);
 	TEST_EXPECT(request_kind_row(K::Build).on_busy == OnBusy::Join && request_kind_row(K::Play).on_busy == OnBusy::Join);
 	TEST_EXPECT(operation_kind_row(OperationKind::Build).joined_by.has(K::Build) &&
 	            operation_kind_row(OperationKind::Build).joined_by.has(K::Play) &&
 	            !operation_kind_row(OperationKind::Build).joined_by.has(K::Save));
-	for (const K kind : {K::PreviewImport, K::PlanImport, K::PreviewInstallImport, K::SetImportDependencies, K::CancelImport})
+	for (const K kind : {K::PreviewImport, K::PlanImport, K::PreviewInstallImport, K::CancelImport})
 		TEST_EXPECT(request_kind_row(kind).on_busy == OnBusy::Supersede &&
 		            operation_kind_row(OperationKind::ImportPlan).superseded_by.has(kind));
 	for (size_t k = 0; k < kOperationKindCount; ++k)
@@ -228,21 +238,22 @@ static int test_request_table() {
 	TEST_EXPECT(build.reads == HoldsFiles && build.writes == HoldsSlot);
 	for (const K kind : {K::Save, K::SaveAll, K::CreateFile, K::RenameAsset, K::AssignRequirement, K::RenameSymbol,
 	                     K::ImportFiles, K::Rescan, K::CreateMissing, K::Reimport, K::PreviewImport, K::PlanImport,
-	                     K::SetImportDependencies, K::PreviewInstallImport})
+	                     K::PreviewInstallImport})
 		TEST_EXPECT(gate_answer(kind, build) == GateAnswer::Refuse && busy_refuses(kind, build));
 	for (const K kind : {K::EditRecord, K::Undo, K::Redo, K::Cut, K::Paste, K::Copy, K::OpenDocument, K::ReloadDocument,
 	                     K::CloseDocument, K::SelectRecord, K::PreviewRename, K::StopPlay, K::ApplyProjectSettings,
-	                     K::CancelImport})
+	                     K::CancelImport, K::SetImportDependencies})
 		TEST_EXPECT(gate_answer(kind, build) == GateAnswer::Proceed && !busy_refuses(kind, build));
 
 	const OperationStatus opening = status_of(OperationKind::Open, true);
 	for (const K kind : {K::EditRecord, K::OpenDocument, K::Save, K::SaveAll, K::Rescan, K::CreateFile, K::CreateMissing,
 	                     K::PreviewImport, K::ImportFiles, K::RenameAsset, K::RenameSymbol, K::PreviewRename, K::Build,
-	                     K::Play, K::Undo, K::Copy})
+	                     K::Play, K::Undo})
 		TEST_EXPECT(gate_answer(kind, opening) == GateAnswer::Refuse);
 	for (const K kind : {K::NewProject, K::OpenProject, K::CloseProject, K::Quit})
 		TEST_EXPECT(gate_answer(kind, opening) == GateAnswer::CancelRunning);
-	for (const K kind : {K::SelectRecord, K::EndEdit, K::ClearOutput, K::CancelOperation, K::StopPlay, K::ForgetRecent})
+	for (const K kind : {K::SelectRecord, K::EndEdit, K::ClearOutput, K::CancelOperation, K::StopPlay, K::ForgetRecent,
+	                     K::Copy, K::SetImportDependencies})
 		TEST_EXPECT(gate_answer(kind, opening) == GateAnswer::Proceed);
 	const OperationStatus planning = status_of(OperationKind::ImportPlan, true);
 	for (const K kind : {K::EditRecord, K::Undo, K::OpenDocument, K::SelectRecord})
@@ -267,12 +278,13 @@ static int test_request_table() {
 
 	TEST_EXPECT(gate_answer(K::PreviewImport, status_of(OperationKind::ImportPlan, true)) == GateAnswer::Supersede);
 	TEST_EXPECT(gate_answer(K::PreviewImport, status_of(OperationKind::ImportPlan, false)) == GateAnswer::Refuse);
-	// A rename writing the files and the documents refuses an edit, an open and a copy, not a
-	// selection; nor does it take a Build.
+	// A rename writing the files and the documents refuses an edit and an open, not a selection or a
+	// copy (it reads the documents as they stand: S13 A3); nor does it take a Build.
 	const OperationStatus rename = status_of(OperationKind::RenameApply, true);
-	for (const K kind : {K::EditRecord, K::OpenDocument, K::Copy, K::PreviewImport, K::Build})
+	for (const K kind : {K::EditRecord, K::OpenDocument, K::PreviewImport, K::Build})
 		TEST_EXPECT(busy_refuses(kind, rename));
-	TEST_EXPECT(!busy_refuses(K::SelectRecord, rename) && !busy_refuses(K::ApplyProjectSettings, rename));
+	TEST_EXPECT(!busy_refuses(K::SelectRecord, rename) && !busy_refuses(K::ApplyProjectSettings, rename) &&
+	            !busy_refuses(K::Copy, rename));
 	TEST_EXPECT(gate_answer(K::Save, OperationStatus()) == GateAnswer::Proceed && !busy_refuses(K::Save, OperationStatus()));
 	return 0;
 }
@@ -697,10 +709,10 @@ static int test_import_plan_superseded() {
 
 // The settings' Apply is never refused whole (the settings dialog waits on its result): each part
 // is weighed against the running operation inside, and a refused part is a failure the result
-// carries under the request's serial, the rest written. A build reads the files: the features
-// (whose refresh reads and writes them) wait, the name does not. An operation that writes the
-// project (opening one) refuses the name and the game install too, never the editor's own
-// settings.
+// carries under the request's serial, the rest written. A build reads the files: the name and the
+// features (which evaluate the requirements again over the scan the view holds, no file read: S13
+// A3) go on beside it. An operation that writes the project (opening one) refuses the name and the
+// game install too, never the editor's own settings.
 static int test_settings_parts_weighed() {
 	editor_test::TempProjectDir dir("opennova_editor_operation_settings");
 	FakePlatform platform;
@@ -724,12 +736,13 @@ static int test_settings_parts_weighed() {
 	apply.settings.serial = 9;
 	apply.settings.title = std::string("Renamed");
 	apply.settings.mission = true;
+	const size_t rows_before = v.project.requirements->rows.size();
 	session.handle(apply);
-	TEST_EXPECT(applied() == 9 && v.project.settings_result.failures.size() == 1 &&
-	            v.project.settings_result.failures[0].code() == "operation.busy");
-	TEST_EXPECT(v.project.settings_result.failures[0].message ==
-	            "Wait for the build to finish, or cancel it, before changing the project's features.");
-	TEST_EXPECT(v.project.document->title == "Renamed" && !v.project.document->features.mission && v.activity.operation.running());
+	TEST_EXPECT(applied() == 9 && v.project.settings_result.failures.empty());
+	TEST_EXPECT(v.project.document->title == "Renamed" && v.project.document->features.mission &&
+	            v.activity.operation.running());
+	// The requirements followed the features at once (the missions' rows), the build packing on.
+	TEST_EXPECT(v.project.requirements->rows.size() > rows_before);
 	session.run_operations();
 	session.handle(apply);
 	TEST_EXPECT(applied() == 9 && v.project.settings_result.failures.empty() && v.project.document->features.mission);
@@ -751,6 +764,71 @@ static int test_settings_parts_weighed() {
 	TEST_EXPECT(v.project.document->title == "Renamed" && v.project.retail_directory == install &&
 	            v.project.runtime_setting == dir.file("runtime/opennova.exe"));
 	TEST_EXPECT(v.activity.operation.id == id && !tally.cancelled);
+	return 0;
+}
+
+// What a request holds is what the gate weighs it by (S13 A3 review), over a real session under a
+// fake of each operation: a Copy reads the documents as they stand, which an operation writes only
+// as it finishes, so it goes on while a refresh, an import's write or a rename's commit runs; the
+// import dependencies setting with no import dialog open is the editor's preference alone, written
+// under every operation, which runs on; a features change writes the project and evaluates the
+// requirements over the scan the view holds, so it goes on beside a refresh and an import's write
+// (they hold the files) and waits for an Open, which writes the project.
+static int test_weighed_by_what_they_hold() {
+	editor_test::TempProjectDir dir("opennova_editor_operation_holds");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(request::new_project(dir.file("project"), "Holds"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	session.run_operations();
+	Document *menu = session.document_for("main.mnu");
+	NodeAddress title;
+	TEST_EXPECT(menu != nullptr && find_definition(AssetGraph(), *menu, "TITLE", title));
+	if (!menu) return 1;
+	session.handle(request::select_record(menu->path(), title));
+	for (const OperationKind kind : {OperationKind::Refresh, OperationKind::ImportApply, OperationKind::RenameApply}) {
+		Tally tally; // outlives the operation, which run_operations drops
+		TEST_EXPECT(session.start_operation(std::make_unique<FakeOperation>(tally, 1000, kind)) != 0);
+		session.handle(request::copy(menu->path()));
+		TEST_EXPECT(!refused_busy(session) && session.last_edit_ok() && !v.documents.clipboard.empty() &&
+		            v.activity.operation.running() && !tally.cancelled);
+		session.run_operations();
+	}
+	for (size_t k = 0; k < kOperationKindCount; ++k) {
+		Tally tally;
+		TEST_EXPECT(session.start_operation(std::make_unique<FakeOperation>(tally, 1000, static_cast<OperationKind>(k))) != 0);
+		const bool with = !v.project.import_dependencies;
+		session.handle(request::set_import_dependencies(with));
+		TEST_EXPECT(!refused_busy(session) && session.outcome().done() && v.project.import_dependencies == with &&
+		            preferences.preferences().import_dependencies == with && !v.dialogs.import_preview.open);
+		TEST_EXPECT(v.activity.operation.running() && !tally.cancelled);
+		session.run_operations();
+	}
+	bool mission = v.project.document->features.mission;
+	for (const OperationKind kind : {OperationKind::Refresh, OperationKind::ImportApply, OperationKind::Open}) {
+		Tally tally;
+		TEST_EXPECT(session.start_operation(std::make_unique<FakeOperation>(tally, 1000, kind)) != 0);
+		const size_t rows = v.project.requirements->rows.size();
+		EditorRequest features = request::of(EditorRequestKind::ApplyProjectSettings);
+		features.settings.mission = !mission;
+		session.handle(features);
+		const bool written = kind != OperationKind::Open;
+		TEST_EXPECT(v.project.settings_result.failures.size() == (written ? 0u : 1u));
+		if (written) {
+			// The requirements follow at once: the missions' rows come and go with the feature.
+			TEST_EXPECT(v.project.document->features.mission == !mission && v.project.requirements->rows.size() != rows);
+			mission = !mission;
+		} else {
+			TEST_EXPECT(v.project.settings_result.failures[0].code() == "operation.busy" &&
+			            v.project.document->features.mission == mission && v.project.requirements->rows.size() == rows);
+		}
+		TEST_EXPECT(v.activity.operation.running() && !tally.cancelled);
+		session.run_operations();
+	}
 	return 0;
 }
 
@@ -798,6 +876,7 @@ int main() {
 	failures += test_uncancellable_operation();
 	failures += test_import_plan_superseded();
 	failures += test_settings_parts_weighed();
+	failures += test_weighed_by_what_they_hold();
 	failures += test_refused_edit_is_no_edit();
 	if (failures == 0) std::printf("editor_session_operation: all tests passed\n");
 	return failures == 0 ? 0 : 1;

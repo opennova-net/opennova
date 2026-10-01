@@ -3,13 +3,18 @@ extends RefCounted
 ## The editor's typed seam as the GUT tests knew it, over the one wire seam (ADR 0046 S13 A5):
 ## EditorApp keeps request_json and query_json, and each method here is a request or a query
 ## through them, answering as the typed method it replaces answered (a record by its identity, a
-## field as a Variant of its type, a request's success from its outcome). Test-only: nothing the
-## editor ships calls it. Preloaded by path (`preload("res://tests/authoring/editor_seam.gd")`),
-## so no class cache stands between a fresh worktree and its tests.
+## field as a Variant of its type, a request's success from its outcome). A request is settled
+## before its method answers (S13 A3: the pumps run the operation it started and the validation
+## it left due, which no request runs), as the C++ tests' handle_to_end runs them, so a method
+## answers validated. Test-only: nothing the editor ships calls it. Preloaded by path
+## (`preload("res://tests/authoring/editor_seam.gd")`), so no class cache stands between a fresh
+## worktree and its tests.
 
 const PAGE_MAX := 200
 
 var app: Node
+## Whether the last request settled (settle) before the time ran out.
+var settled := true
 
 
 func _init(editor_app: Node) -> void:
@@ -18,10 +23,11 @@ func _init(editor_app: Node) -> void:
 
 # --- the wire -------------------------------------------------------------------------------------
 
-## A request by its wire form: the answer {ok, served, error?, outcome, status, view_revision}, whole
-## numbers as integers.
+## A request by its wire form, then settled (settled says whether it did): the answer {ok, served,
+## error?, outcome, status, view_revision} as the request left it, whole numbers as integers.
 func request(fields: Dictionary) -> Dictionary:
 	var answer: Variant = parsed(String(app.call("request_json", JSON.stringify(fields, "", false))))
+	settled = settle()
 	return answer if answer is Dictionary else {}
 
 
@@ -91,31 +97,35 @@ static func whole_numbers(value: Variant) -> Variant:
 # --- the project ----------------------------------------------------------------------------------
 
 ## The session pumped until no operation runs and the validation after one has ended (S13 A3: an
-## Open, a Rescan, an import or a rename steps across pumps), `timeout_ms` at most.
-func settle(timeout_ms := 120000) -> void:
+## Open, a Rescan, an import or a rename steps across pumps, and so does the validation an edit
+## leaves due), `timeout_ms` at most: true when it settled, false (a failure to its caller) when the
+## time ran out first.
+func settle(timeout_ms := 120000) -> bool:
 	var deadline := Time.get_ticks_msec() + timeout_ms
-	while Time.get_ticks_msec() < deadline:
+	while true:
 		var operation := query("operation")
 		if not bool(operation.get("operation", {}).get("running", false)) \
 				and not bool(operation.get("validation", {}).get("running", false)):
-			return
+			return true
+		if Time.get_ticks_msec() >= deadline:
+			push_error("the editor did not settle within %d ms" % timeout_ms)
+			return false
 		app.call("pump")
+	return false
 
 
 ## Made and opened: the request went through and the project it made is the one open once its
 ## Open has run (S13 A3: an operation the pumps step).
 func new_project(dir: String, title: String) -> bool:
 	var made := done({"kind": "new_project", "dir": dir, "title": title})
-	settle()
-	return made and _open_at(dir)
+	return settled and made and _open_at(dir)
 
 
 ## Whether the project at `dir` is the one open afterwards (a switch that failed, or that an
 ## operation refused, leaves the project open before it open), once its Open has run.
 func open_project(dir: String) -> bool:
 	request({"kind": "open_project", "dir": dir})
-	settle()
-	return _open_at(dir)
+	return settled and _open_at(dir)
 
 
 func close_project() -> void:
