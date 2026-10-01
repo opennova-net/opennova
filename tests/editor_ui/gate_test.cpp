@@ -143,7 +143,7 @@ void test_windows_show_the_gate() {
 	v.project.root = "C:/mods/Gate";
 	v.documents.open = {a, b};
 	editor_test::own(v.project.scan).entries = {file_entry("a.mnu", a->path(), AssetKind::Menu), file_entry("b.mnu", b->path(), AssetKind::Menu),
-	                  file_entry("logo.png", "art/logo.png", AssetKind::ImageSource)};
+	                  file_entry("logo.png", "art/logo.png", AssetKind::ImportSource)};
 	editor_test::own(v.project.scan).index();
 	ImportedSource logo;
 	logo.source = "art/logo.png";

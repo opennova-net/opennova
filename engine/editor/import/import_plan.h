@@ -16,7 +16,7 @@
 // has it; the game install has it; else it is not found. Every place with a file for the
 // reference other than the one taken is reported beside the file taken, with whether the two
 // differ, the file a later reference meets included. A dependency found is copied as the
-// game's own (ImportSource::native: a PNG stays the texture the reference names). A %NAME%
+// game's own (ImportChoice::native: a PNG stays the texture the reference names). A %NAME%
 // resolves through the stylesheets the project reads once the import is in, as the shell
 // loads them (menu::load_shell_style: menu_style.mns, then brand.mns over it, each the
 // selection's copy where it brings one, else the project's); one they do not define is not
@@ -70,7 +70,7 @@ public:
 	AssetKind file_kind(const std::string &name) const;
 	// The source import_assets takes for the origin's file `name`: a folder's file copied as
 	// the game's own (native).
-	ImportSource source(const std::string &name) const;
+	ImportChoice source(const std::string &name) const;
 	// Where it is, in words: "the folder C:/art", "the archive C:/mod/menus.pff", "the game
 	// install".
 	std::string words() const;
@@ -101,7 +101,7 @@ struct ImportNeed {
 struct ImportRival {
 	std::string name;     // its spelling there
 	std::string found_in; // the place, in words
-	ImportSource source;
+	ImportChoice source;
 	bool differs = false; // its bytes differ from those of the file planned
 };
 
@@ -110,7 +110,7 @@ struct ImportPlanRow {
 	// or one looked for and found nowhere.
 	enum class State { Selected, Found, NotFound };
 	State state = State::Selected;
-	ImportSource source;     // what import_assets takes (the outputs of one converter source share it; none when not found)
+	ImportChoice source;     // what import_assets takes (the outputs of one converter source share it; none when not found)
 	std::string name;        // the logical name the project gets; not found: the name as the reference gives it
 	AssetKind kind = AssetKind::Unknown; // what the file is to the engine once imported (not found: the kind wanted)
 	std::string destination; // project-relative, where import_assets writes it
@@ -168,7 +168,7 @@ inline constexpr size_t kImportPlanFileCap = 1000;
 // `retail_directory` too ("" for none), `file_cap` files at most. `install_mounted`: the game
 // install at `retail_directory` opened already (ImportOrigin::Kind::GameInstall), which a caller
 // stepping the plan mounts in a step of its own (S13 A3); null, the plan mounts it when it needs it.
-ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_dependencies, const ProjectPaths &paths,
+ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
                        const std::string &retail_directory, size_t file_cap = kImportPlanFileCap,
                        std::shared_ptr<const ImportOrigin> install_mounted = nullptr);

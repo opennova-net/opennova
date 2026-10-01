@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <iterator>
 #include <limits>
 #include <memory>
@@ -255,7 +256,10 @@ bool fits(const MissionField &field, const Value &value, std::string &error) {
 			return false;
 		}
 		if (field.type == MissionFieldType::Fixed && (number < bms::kFixed16Min || number > bms::kFixed16Max)) {
-			error = "A 16.16 number in mission units is -32768 to 32767.99998.";
+			// The word's range named by its constants (bms.h), never spelled again here.
+			char range[64];
+			std::snprintf(range, sizeof(range), "%.10g to %.10g", bms::kFixed16Min, bms::kFixed16Max);
+			error = std::string("A 16.16 number in mission units is ") + range + ".";
 			return false;
 		}
 		if (field.type == MissionFieldType::Real && std::abs(number) > double(std::numeric_limits<float>::max())) {

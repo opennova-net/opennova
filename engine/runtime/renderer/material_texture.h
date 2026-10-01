@@ -157,6 +157,13 @@ MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t w
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 // [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590]
 MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type);
+// The bytes of a chunk container at [position, position + size) into `out`; false past its end.
+using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, size_t size)>;
+// Whether load_material_chunk would load a chunk of `type` from the `size` bytes `read` serves:
+// the same walk over the chunk headers and the same checks of the found chunk's first 28 bytes,
+// its pixels left unread, so a file's few header bytes answer for the whole of it (the editor's
+// scan types a file no name types by this).
+bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_t type);
 
 inline constexpr uint32_t kMissingMaterialTextureSide = 128;
 // Opaque gray 0x30 / 0x50 squares, four pixels wide.

@@ -159,9 +159,10 @@ bool file_serves_reference(AssetKind file, ReferenceKind kind, int32_t loader_ar
 	const ReferenceKindRow &row = reference_row(kind);
 	if (row.resolution != ReferenceResolution::File) return false;
 	if (file == row.file) return true;
-	if (file != AssetKind::Unknown || kind != ReferenceKind::Texture || loader_arg < 0) return false;
+	if (file != AssetKind::MaterialChunk || kind != ReferenceKind::Texture || loader_arg < 0) return false;
 	// A chunk row reads its name as a chunk container whatever the name (a chunk reader for
-	// any name, renderer::material_texture_source).
+	// any name, renderer::material_texture_source): a file no rule types by its name serves one
+	// when its bytes hold a chunk (the scan's MaterialChunk), and no other texture row.
 	const uint8_t type = renderer::material_texture_runtime_type(static_cast<uint8_t>(loader_arg));
 	return renderer::material_texture_source(std::string(), type, {}).reader == renderer::MaterialTextureReader::Chunk;
 }

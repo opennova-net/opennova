@@ -17,9 +17,10 @@ struct SessionView;
 // over the embedder's process seam), what it launches, asked of the embedder's launcher source
 // when the game is spawned (after its build lands, so the port of the game's MCP endpoint is
 // allocated then, not when Play was asked for), the game's log tailed into Output, its boot
-// report (the files it did not find), how it ended (its exit code: a crash told from a quit), and
-// its lease on the build it runs from (run/play_lease.h), which keeps a build from pruning that
-// directory while the game may still run.
+// report (the files it did not find), how it ended (its exit code: a crash told from a quit), its
+// lease on the build it runs from (run/play_lease.h), which keeps a build from pruning that
+// directory while the game may still run, and the run directory it runs in (run/run_directory.h,
+// S13 A8: its working directory and its log, the build directory left as the build wrote it).
 class PlayController {
 public:
 	explicit PlayController(SessionCore &core);
@@ -63,6 +64,7 @@ private:
 	SessionView &view_;
 	PlaySession play_;
 	PlayLease play_lease_; // the running game's lease, as written (pid -1: none)
+	std::string run_dir_;  // the running game's run directory, its record written ("" for none)
 	PlayLauncherSource source_;
 	PlayLauncher launcher_; // what the source said without a port: the view's runtime
 	std::string game_log_file_;

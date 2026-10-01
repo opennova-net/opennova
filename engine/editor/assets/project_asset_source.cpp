@@ -37,7 +37,8 @@ void ProjectAssetSource::set_scan(const std::string &root, const AssetScan &scan
 	files_.clear();
 	for (const AssetEntry &asset : scan.entries) {
 		// What the build packs, and nothing else: an import source stays out (its outputs
-		// are in the scan), and so does an archive (the build refuses one), as in plan_build.
+		// are in the scan), and so do an archive (the build refuses one) and a file of no kind the
+		// game knows (S13 A8), as in plan_build.
 		if (!asset_kind_packed(asset.kind)) continue;
 		files_.emplace(normalized_logical_name(asset.logical_name), Entry{asset.relative_path, asset.size_bytes, asset.modified_ticks});
 	}

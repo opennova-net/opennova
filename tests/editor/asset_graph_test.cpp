@@ -627,8 +627,13 @@ static int test_rename() {
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "logo.tga", "a_name_far_too_long.tga").ok());
 		TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "nope.tga", "x.tga").ok());
 	}
+	// S13 A8: the file under its new name is dated now, not when the file it was copied from was
+	// written, so no cache that keys a file by its size and last write takes it for the file that
+	// held the name before (two of a size swapping names through three renames).
+	TEST_EXPECT(editor_test::backdate(root + "/logo.tga", std::chrono::hours(1)));
 	editor_test::handle_to_end(session, request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(!fs::exists(root + "/logo.tga") && fs::exists(root + "/logo2.tga"));
+	TEST_EXPECT(fs::last_write_time(root + "/logo2.tga") > fs::file_time_type::clock::now() - std::chrono::minutes(5));
 	menu = session.document_for("main.mnu"); // reloaded after the rewrite
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "EXIT", exit));
 	Value image;
@@ -1621,11 +1626,20 @@ static int test_model_texture_references() {
 	TEST_EXPECT(imported.imported == std::vector<std::string>({"models/typed.3di"}));
 	TEST_EXPECT(editor_test::write_text(root + "/fx.ptl",
 	                                    "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"));
-	// The project's textures now exactly `files`.
+	// The project's textures now exactly `files` (a .nq8 a material chunk container: an 8-byte
+	// header, then an NQ8B chunk of a 2 x 2 image).
+	std::vector<uint8_t> chunk(8 + 8 + 28 + 2 * 2 * 4, 0);
+	chunk[8] = 'N', chunk[9] = 'Q', chunk[10] = '8', chunk[11] = 'B';
+	chunk[12] = uint8_t(chunk.size() - 16);
+	chunk[28] = 2, chunk[32] = 2;
 	const auto textures = [&](std::initializer_list<const char *> files) {
 		std::error_code ec;
 		fs::remove_all(fs::path(root) / "textures", ec);
-		for (const char *file : files) editor_test::write_text(root + "/textures/" + file, "x");
+		for (const char *file : files)
+			if (fs::path(file).extension() == ".nq8")
+				editor_test::write_bytes(root + "/textures/" + file, chunk);
+			else
+				editor_test::write_text(root + "/textures/" + file, "x");
 		editor_test::handle_to_end(session, request::rescan());
 	};
 	const std::string model = "models/typed.3di";
@@ -1673,17 +1687,25 @@ static int test_model_texture_references() {
 	TEST_EXPECT(resolved("bump.tga", &file) == ReferenceStatus::Present && file == "textures/bump.dds");
 	// An .mdt normal map is a texture the TGA reader decodes (the scan says so, no finding of
 	// an unused file); a chunk row reads its file by its name as written, whatever the name,
-	// so a file the scan types by no extension serves it. Neither is a finding once there.
+	// so a file no rule types by its name serves it when its chunk headers make it a material
+	// chunk (S13 A8: the scan reads them; a file of no kind the game knows the build leaves out,
+	// and serves nothing). Neither is a finding once there.
 	TEST_EXPECT(resolved("ready.mdt") == ReferenceStatus::Missing && resolved("field.nq8") == ReferenceStatus::Missing);
 	textures({"wall.tga", "wall.dds", "plain.tga", "plain.dds", "bump.tga", "bump.dds", "ready.mdt", "field.nq8"});
 	TEST_EXPECT(view.project.scan->find("ready.mdt") && view.project.scan->find("ready.mdt")->kind == AssetKind::Texture);
-	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
+	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::MaterialChunk);
 	TEST_EXPECT(resolved("ready.mdt", &file) == ReferenceStatus::Present && file == "textures/ready.mdt");
 	TEST_EXPECT(resolved("field.nq8", &file) == ReferenceStatus::Present && file == "textures/field.nq8");
 	TEST_EXPECT(!finding_for("ready.mdt") && !finding_for("field.nq8"));
 	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code() == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
-	// No other texture takes a file the scan cannot type: a particle naming field.nq8 misses it.
+	// No other texture takes a material chunk: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
+	// A file of the name that holds no chunk is of no kind the game knows: it serves no row.
+	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
+	TEST_EXPECT(resolved("field.nq8") == ReferenceStatus::Missing && finding_for("field.nq8"));
+	textures({"wall.tga", "wall.dds", "plain.tga", "plain.dds", "bump.tga", "bump.dds", "ready.mdt", "field.nq8"});
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.
 	editor_test::handle_to_end(session, request::open_document(model));
 	const Document *document = session.document_for(model);

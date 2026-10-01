@@ -23,9 +23,9 @@ ImportController::ImportController(SessionCore &core) : core_(core), view_(core.
 void ImportController::preview_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	std::vector<Diagnostic> diagnostics;
-	std::vector<ImportSource> choices, roots;
+	std::vector<ImportChoice> choices, roots;
 	// A loose file picked is chosen; an archive's members are listed to choose from.
-	for (ImportSource &source : list_import_sources(request.paths, diagnostics))
+	for (ImportChoice &source : list_import_choices(request.paths, diagnostics))
 		(source.entry.empty() ? roots : choices).push_back(std::move(source));
 	for (const auto &d : diagnostics) core_.report(d);
 	preview(std::move(choices), std::move(roots), request.with_dependencies);
@@ -33,25 +33,25 @@ void ImportController::preview_files(const EditorRequest &request) {
 
 void ImportController::plan(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	preview(view_.dialogs.import_preview.open ? view_.dialogs.import_preview.choices : std::vector<ImportSource>(), request.imports,
+	preview(view_.dialogs.import_preview.open ? view_.dialogs.import_preview.choices : std::vector<ImportChoice>(), request.imports,
 	        request.with_dependencies);
 }
 
 void ImportController::preview_install(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	std::vector<Diagnostic> diagnostics;
-	std::vector<ImportSource> sources = list_retail_import_sources(core_.game_install(), *view_.project.document, diagnostics);
+	std::vector<ImportChoice> sources = list_retail_import_choices(core_.game_install(), *view_.project.document, diagnostics);
 	// With names (an Import fix): those files alone, chosen; a name the game data does
 	// not have is a finding (unless the install itself is the finding). Without, every
 	// file is listed to choose from.
-	std::vector<ImportSource> named;
+	std::vector<ImportChoice> named;
 	for (const std::string &name : request.names) {
-		const auto found = std::find_if(sources.begin(), sources.end(), [&name](const ImportSource &source) {
+		const auto found = std::find_if(sources.begin(), sources.end(), [&name](const ImportChoice &source) {
 			return normalized_logical_name(source.entry) == normalized_logical_name(name);
 		});
 		if (found == sources.end()) {
 			if (diagnostics.empty())
-				diagnostics.push_back(make_finding(CoreFinding::ImportSource, DiagnosticSeverity::Error,
+				diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,
 				                                   "The game data has no file named " + name + "."));
 			continue;
 		}
@@ -80,12 +80,12 @@ void ImportController::reimport(const std::string &source, bool force) {
 // The import dialog on `roots` chosen among `choices` (each file once), planned with the
 // files they need when `with_dependencies`: open while it has something to show, a list to
 // choose from or a file chosen.
-void ImportController::preview(std::vector<ImportSource> choices, std::vector<ImportSource> roots,
+void ImportController::preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots,
                                bool with_dependencies) {
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	preview.choices = std::move(choices);
 	preview.roots.clear();
-	for (ImportSource &root : roots)
+	for (ImportChoice &root : roots)
 		if (std::find(preview.roots.begin(), preview.roots.end(), root) == preview.roots.end())
 			preview.roots.push_back(std::move(root));
 	preview.with_dependencies = with_dependencies;

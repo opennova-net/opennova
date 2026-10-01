@@ -7,6 +7,7 @@
 #include <base/io/hash.h>
 #include <base/io/json.h>
 #include <editor/assets/project_scan.h>
+#include <editor/import/import_context.h>
 #include <editor/import/importer.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -17,17 +18,20 @@ namespace opennova::editor {
 
 namespace {
 
-// 2: the content hashes are FNV-1a over its true offset basis (S12 A5); a cache of 1 holds
-// digests made with the old constant, which a size and time that still match would keep.
-constexpr int kImportCacheSchemaVersion = 2;
+// 3: every file an import reads (a source, and since S13 A8 its inputs) by its path, and each
+// source's record apart with the content hash of each input it lists; a cache of 2 kept a source's
+// size, time, hash and record on one line.
+constexpr int kImportCacheSchemaVersion = 3;
 
 } // namespace
 
-ImportPass::ImportPass(const ProjectPaths &paths, const ProjectDocument &project, bool force, std::string only) :
+ImportPass::ImportPass(const ProjectPaths &paths, const ProjectDocument &project, bool force, std::string only,
+		const std::vector<Importer> &table) :
 		paths_(paths),
 		project_(project),
 		force_(force),
 		only_(std::move(only)),
+		table_(&table),
 		root_(paths.root),
 		export_dir_(paths.export_dir(project)) {}
 
@@ -37,45 +41,73 @@ ImportPass::Cache ImportPass::load_cache(const std::string &path, std::string &t
 	Cache cache;
 	std::string message;
 	std::error_code ec;
-	if (!fs::is_regular_file(path, ec) || !read_file_text(path, text, message)) return cache;
+	if (!fs::is_regular_file(system_path(path), ec) || !read_file_text(path, text, message)) return cache;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, message) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kImportCacheSchemaVersion)
 		return cache;
-	const io::JsonValue *sources = json.get("sources");
-	if (!sources || !sources->is_array()) return cache;
-	for (const io::JsonValue &item : sources->array) {
-		if (!item.is_object()) continue;
-		const std::string source = item.get_string("source", "");
-		CacheEntry entry;
-		uint64_t modified = 0;
-		entry.size = uint64_t(item.get_number("size", 0));
-		if (source.empty() || !io::parse_hex64(item.get_string("modified", ""), modified) ||
-		    !io::parse_hex64(item.get_string("hash", ""), entry.hash) || !io::parse_hex64(item.get_string("record", ""), entry.record))
-			continue;
-		entry.modified = int64_t(modified);
-		cache[source] = entry;
-	}
+	if (const io::JsonValue *files = json.get("files"); files && files->is_array())
+		for (const io::JsonValue &item : files->array) {
+			if (!item.is_object()) continue;
+			const std::string file = item.get_string("path", "");
+			FileSeen seen;
+			uint64_t modified = 0;
+			seen.size = uint64_t(item.get_number("size", 0));
+			if (file.empty() || !io::parse_hex64(item.get_string("modified", ""), modified) ||
+			    !io::parse_hex64(item.get_string("hash", ""), seen.hash))
+				continue;
+			seen.modified = int64_t(modified);
+			cache.files[file] = seen;
+		}
+	if (const io::JsonValue *records = json.get("records"); records && records->is_array())
+		for (const io::JsonValue &item : records->array) {
+			Made made;
+			const std::string source = item.is_object() ? item.get_string("source", "") : std::string();
+			if (source.empty() || !io::parse_hex64(item.get_string("record", ""), made.record)) continue;
+			bool read = true;
+			if (const io::JsonValue *inputs = item.get("inputs"); inputs && inputs->is_array())
+				for (const io::JsonValue &input : inputs->array) {
+					uint64_t hash = 0;
+					read = read && input.is_string() && io::parse_hex64(input.string, hash);
+					made.inputs.push_back(hash);
+				}
+			if (read) cache.records[source] = std::move(made);
+		}
 	return cache;
 }
 
 // Written only when it changed: a pass over an untouched project writes nothing, and a
-// project with no import sources and no cache yet (a clone opened for `status`) gets none.
+// project with no import sources and no cache yet (a clone opened for `status`) gets none. A file
+// whose last write lies too near the pass (io::file_stamp_settled) is left out, read again next
+// time: a rewrite of the same size inside its timestamp tick is never taken for the bytes read.
 void ImportPass::save_cache() const {
-	if (seen_.empty() && cache_text_.empty()) return;
+	if (seen_.files.empty() && seen_.records.empty() && cache_text_.empty()) return;
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kImportCacheSchemaVersion));
-	io::JsonValue sources = io::JsonValue::make_array();
-	for (const auto &[source, entry] : seen_) {
+	io::JsonValue files = io::JsonValue::make_array();
+	for (const auto &[file, seen] : seen_.files) {
+		if (!io::file_stamp_settled(seen.modified, pass_began_)) continue;
+		io::JsonValue item = io::JsonValue::make_object();
+		item.set("path", io::JsonValue::make_string(file));
+		item.set("size", io::JsonValue::make_number(double(seen.size)));
+		item.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(seen.modified))));
+		item.set("hash", io::JsonValue::make_string(io::hex64(seen.hash)));
+		files.push(std::move(item));
+	}
+	json.set("files", std::move(files));
+	io::JsonValue records = io::JsonValue::make_array();
+	for (const auto &[source, made] : seen_.records) {
 		io::JsonValue item = io::JsonValue::make_object();
 		item.set("source", io::JsonValue::make_string(source));
-		item.set("size", io::JsonValue::make_number(double(entry.size)));
-		item.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(entry.modified))));
-		item.set("hash", io::JsonValue::make_string(io::hex64(entry.hash)));
-		item.set("record", io::JsonValue::make_string(io::hex64(entry.record)));
-		sources.push(std::move(item));
+		item.set("record", io::JsonValue::make_string(io::hex64(made.record)));
+		if (!made.inputs.empty()) {
+			io::JsonValue inputs = io::JsonValue::make_array();
+			for (const uint64_t hash : made.inputs) inputs.push(io::JsonValue::make_string(io::hex64(hash)));
+			item.set("inputs", std::move(inputs));
+		}
+		records.push(std::move(item));
 	}
-	json.set("sources", std::move(sources));
+	json.set("records", std::move(records));
 	const std::string text = io::json_write(json);
 	if (text == cache_text_) return;
 	std::string message;
@@ -87,6 +119,7 @@ bool ImportPass::step(uint64_t budget) {
 	do {
 		switch (phase_) {
 		case Phase::Start: {
+			pass_began_ = io::file_clock_now_ticks();
 			cache_ = load_cache(paths_.import_cache_file, cache_text_);
 			std::error_code ec;
 			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
@@ -111,7 +144,7 @@ bool ImportPass::step(uint64_t budget) {
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
 				if (is_dot_directory(path) || fs::equivalent(path, export_dir_, ec)) walk_.disable_recursion_pending();
-			} else if (entry.is_regular_file(ec) && importer_for(path.filename().string())) {
+			} else if (entry.is_regular_file(ec) && importer_for(path.filename().string(), *table_)) {
 				std::string relative = fs::relative(path, root_, ec).generic_string();
 				if (ec) relative = path.filename().string();
 				listed_.emplace_back(std::move(relative), path);
@@ -138,10 +171,38 @@ bool ImportPass::step(uint64_t budget) {
 	return done();
 }
 
+bool ImportPass::file_hash(const std::string &file, const std::string &relative, uint64_t &hash, uint64_t &spent) {
+	std::error_code ec;
+	const fs::path on_disk = system_path(file);
+	if (!fs::is_regular_file(on_disk, ec)) return false;
+	FileSeen now;
+	now.size = uint64_t(fs::file_size(on_disk, ec));
+	now.modified = io::file_modified_ticks(on_disk);
+	// What this pass saw of it already (an input two sources read), else what the cache knew.
+	const auto vouched = [&](const std::map<std::string, FileSeen> &files) {
+		const auto known = files.find(relative);
+		if (known == files.end() || now.modified == 0 || known->second.size != now.size ||
+		    known->second.modified != now.modified)
+			return false;
+		now.hash = known->second.hash;
+		return true;
+	};
+	if (!vouched(seen_.files) && !vouched(cache_.files)) {
+		std::vector<uint8_t> bytes;
+		std::string message;
+		if (!read_file_bytes(file, bytes, message)) return false;
+		spent += bytes.size();
+		now.hash = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+	}
+	seen_.files[relative] = now;
+	hash = now.hash;
+	return true;
+}
+
 void ImportPass::take_source(const fs::path &path, const std::string &relative, uint64_t &spent) {
 	std::error_code ec;
 	const std::string filename = path.filename().string();
-	const Importer *importer = importer_for(filename);
+	const Importer *importer = importer_for(filename, *table_);
 	if (!importer || !fs::is_regular_file(path, ec)) return; // gone since it was listed
 	ImportedSource source;
 	source.source = relative;
@@ -149,6 +210,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	source.importer = importer->id;
 	source.output_dir = import_output_dir(paths_, source.source);
 	const std::string sidecar_path = (root_ / source.sidecar).generic_string();
+	// Where the files an import reads are named from: the source's folder.
+	const std::string folder = path.parent_path().generic_string();
+	const std::string root = root_.generic_string();
 	ImportSidecar sidecar;
 	Diagnostic error;
 	if (!load_import_sidecar(sidecar_path, sidecar, error)) {
@@ -162,7 +226,10 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		// source stays cached, so a record fixed back to what it was imports nothing.
 		error.asset = source.sidecar;
 		result_.diagnostics.push_back(error);
-		if (const auto known = cache_.find(source.source); known != cache_.end()) seen_[source.source] = known->second;
+		if (const auto known = cache_.files.find(source.source); known != cache_.files.end())
+			seen_.files[source.source] = known->second;
+		if (const auto known = cache_.records.find(source.source); known != cache_.records.end())
+			seen_.records[source.source] = known->second;
 		source.ok = false;
 		result_.sources.push_back(std::move(source));
 		return;
@@ -170,10 +237,10 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	const ImportSidecar recorded = sidecar;
 
 	// The content hash: the cache vouches for it while the size and the time hold.
-	CacheEntry now;
+	FileSeen now;
 	now.size = uint64_t(fs::file_size(path, ec));
 	now.modified = io::file_modified_ticks(path);
-	const auto cached = cache_.find(source.source);
+	const auto cached = cache_.files.find(source.source);
 	std::vector<uint8_t> bytes;
 	bool have_bytes = false;
 	const auto read_source = [&]() {
@@ -186,7 +253,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		have_bytes = true;
 		return true;
 	};
-	if (cached != cache_.end() && now.modified != 0 && cached->second.size == now.size &&
+	if (cached != cache_.files.end() && now.modified != 0 && cached->second.size == now.size &&
 	    cached->second.modified == now.modified) {
 		now.hash = cached->second.hash;
 	} else {
@@ -197,19 +264,44 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 		}
 		now.hash = io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
 	}
-	now.record = cached == cache_.end() ? 0 : cached->second.record;
+	// What this machine made the outputs from (none on a clone: they are made again).
+	const auto known = cache_.records.find(source.source);
+	Made made = known == cache_.records.end() ? Made() : known->second;
 
+	// The other files the last import read, each by the content hash it had when this machine made
+	// the outputs (S13 A8): one gone, one outside the project, or one whose content moved makes the
+	// import stale. Every one is looked at, so the cache keeps them all.
+	bool inputs_current = made.inputs.size() == sidecar.inputs.size();
+	for (size_t i = 0; i < sidecar.inputs.size(); ++i) {
+		std::string file, input_relative;
+		uint64_t hash = 0;
+		if (!ImportContext::resolve(folder, root, sidecar.inputs[i], file, input_relative) ||
+		    !file_hash(file, input_relative, hash, spent) || i >= made.inputs.size() || hash != made.inputs[i])
+			inputs_current = false;
+	}
+
+	// The outputs live under the cache, deeper than the source: their checks take the system path.
 	bool outputs_present = !sidecar.outputs.empty();
 	for (const std::string &output : sidecar.outputs)
-		if (!fs::is_regular_file(root_ / source.output_dir / output, ec)) outputs_present = false;
+		if (!fs::is_regular_file(system_path((root_ / source.output_dir / output).generic_string()), ec))
+			outputs_present = false;
 	const bool stale = sidecar.importer != importer->id || sidecar.version != importer->version ||
-	                   now.hash != sidecar.source_hash || !outputs_present || now.record == 0 ||
-	                   now.record != import_sidecar_fingerprint(sidecar) ||
+	                   now.hash != sidecar.source_hash || !inputs_current || !outputs_present || made.record == 0 ||
+	                   made.record != import_sidecar_fingerprint(sidecar) ||
 	                   (force_ && import_source_named(only_, source.source));
 	if (stale && (have_bytes || read_source())) {
+		ImportContext context(filename, bytes, sidecar.options, folder, root);
 		ImportProduct product;
-		const bool ok = importer->run(filename, bytes, sidecar.options, product);
-		for (Diagnostic &d : product.diagnostics) {
+		const bool ok = importer->run(context, product);
+		spent += context.bytes_read();
+		// What the importer read is known whatever it came to: the cache keeps each input.
+		for (size_t i = 0; i < context.inputs().size(); ++i) {
+			const ImportInputStamp &stamp = context.stamps()[i];
+			seen_.files[stamp.relative] = FileSeen{stamp.size, stamp.modified, context.inputs()[i].hash};
+		}
+		std::vector<Diagnostic> findings = context.findings();
+		findings.insert(findings.end(), product.diagnostics.begin(), product.diagnostics.end());
+		for (Diagnostic &d : findings) {
 			if (d.asset.empty() || d.asset == filename) d.asset = source.source;
 			result_.diagnostics.push_back(d);
 		}
@@ -226,7 +318,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 				for (const std::string &old : sidecar.outputs) {
 					bool kept = false;
 					for (const ImportOutput &output : product.outputs) if (output.name == old) kept = true;
-					if (!kept) fs::remove(out_dir / old, ec);
+					if (!kept) fs::remove(system_path((out_dir / old).generic_string()), ec);
 				}
 				sidecar.outputs.clear();
 				for (const ImportOutput &output : product.outputs) {
@@ -246,6 +338,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			sidecar.importer = importer->id;
 			sidecar.version = importer->version;
 			sidecar.source_hash = now.hash;
+			// The record lists the inputs' paths alone; their hashes are this machine's, the cache's.
+			sidecar.inputs.clear();
+			for (const ImportInput &input : context.inputs()) sidecar.inputs.push_back(input.path);
 			// The committed record changes only when what it says changed.
 			if (sidecar != recorded && !save_import_sidecar(sidecar_path, sidecar, error)) {
 				error.asset = source.sidecar;
@@ -254,14 +349,21 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			}
 		}
 		if (source.ok) {
-			now.record = import_sidecar_fingerprint(sidecar);
+			made.record = import_sidecar_fingerprint(sidecar);
+			made.inputs.clear();
+			for (const ImportInput &input : context.inputs()) made.inputs.push_back(input.hash);
 			source.reimported = true;
 			++result_.reimported;
 		}
 	} else if (stale) {
 		source.ok = false; // the read failed: its finding is listed
 	}
-	seen_[source.source] = now;
+	seen_.files[source.source] = now;
+	if (made.record != 0) seen_.records[source.source] = made;
+	for (const std::string &input : sidecar.inputs) {
+		std::string file, input_relative;
+		if (ImportContext::resolve(folder, root, input, file, input_relative)) source.inputs.push_back(input_relative);
+	}
 	for (const std::string &output : sidecar.outputs)
 		source.outputs.push_back((fs::path(source.output_dir) / output).generic_string());
 	result_.sources.push_back(std::move(source));

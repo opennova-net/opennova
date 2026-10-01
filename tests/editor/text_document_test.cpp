@@ -1035,7 +1035,7 @@ static int test_import_shader() {
 	const opennova::pff::PffWriteEntry entries[] = {{"glass.fx", stored.data(), uint32_t(stored.size()), 0, 0, 0}};
 	TEST_EXPECT(opennova::pff::pff_write_archive(archive.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
 	            opennova::pff::PFF_WRITE_OK);
-	ImportSource source;
+	ImportChoice source;
 	source.path = archive;
 	source.entry = "glass.fx";
 	const ImportResult result = import_assets({source}, ProjectPaths::for_root(root), project, false);

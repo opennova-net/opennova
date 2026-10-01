@@ -8,6 +8,7 @@
 #include <system_error>
 #include <utility>
 
+#include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/json.h>
 #include <base/resource_index/boot_policy.h>
@@ -31,23 +32,58 @@ constexpr pff::PffFormat kBuildArchiveFormat = pff::PFF_FORMAT_PFF3;
 
 // The largest single read, write or copy inside a step: a budget spans several.
 constexpr uint64_t kChunkBytes = uint64_t(1) << 20;
-// What opening a file costs a step, so one over many small files stays short.
+// What opening a file costs a step (or asking its size and last write, where the hash cache
+// vouches for its content), so one over many small files stays short.
 constexpr uint64_t kOpenCost = 4096;
 // run_build's step: a whole build in few steps, its archives reported as they land.
 constexpr uint64_t kRunBuildStepBytes = uint64_t(4) << 20;
+// The staging directories a build tries, `<id>.tmp` then `<id>.1.tmp` and on, while the one
+// before cannot be emptied.
+constexpr int kStagingAttempts = 8;
+// How long the publish keeps trying a rename refused while its refusal may pass (a scanner or an
+// indexer holding a staged file), a step at a time.
+constexpr std::chrono::seconds kPublishPatience{3};
 
-// A file's last write, as a number two reads of the same file compare equal by.
-int64_t last_write_of(const fs::path &path) {
+// A file's last write, as a number two reads of the same file compare equal by (0 when it cannot
+// be read).
+int64_t last_write_of(const std::string &path) {
+	return io::file_modified_ticks(system_path(path));
+}
+
+// The staging directory's name for a build's `attempt`-th try: <id>.tmp, <id>.1.tmp, ...
+std::string staging_name(const std::string &build_id, int attempt) {
+	return attempt == 0 ? build_id + kBuildStagingSuffix
+	                    : build_id + "." + std::to_string(attempt) + kBuildStagingSuffix;
+}
+
+// The build id a staging directory's name stages ("" for a name that is none).
+std::string staged_build_id(const std::string &name) {
+	const std::string suffix = kBuildStagingSuffix;
+	if (name.size() <= suffix.size() || name.compare(name.size() - suffix.size(), suffix.size(), suffix) != 0)
+		return std::string();
+	std::string stem = name.substr(0, name.size() - suffix.size());
+	if (const size_t dot = stem.find('.'); dot != std::string::npos) {
+		const std::string attempt = stem.substr(dot + 1);
+		if (attempt.empty() || attempt.size() > 3 ||
+		    !std::all_of(attempt.begin(), attempt.end(), [](char c) { return c >= '0' && c <= '9'; }))
+			return std::string();
+		stem.resize(dot);
+	}
+	return is_build_id(stem) ? stem : std::string();
+}
+
+// The archive's size on disk (0 when it cannot be read).
+uint64_t size_of(const std::string &path) {
 	std::error_code ec;
-	const fs::file_time_type time = fs::last_write_time(path, ec);
-	return ec ? 0 : static_cast<int64_t>(time.time_since_epoch().count());
+	const uintmax_t size = fs::file_size(system_path(path), ec);
+	return ec ? 0 : uint64_t(size);
 }
 
 // True when `path` still has the size and the last write a read of it started from: a file
 // rewritten in place under a read of several steps, even to the same size, is not.
-bool still_as_read(const fs::path &path, uint64_t size, int64_t written) {
+bool still_as_read(const std::string &path, uint64_t size, int64_t written) {
 	std::error_code ec;
-	return fs::file_size(path, ec) == size && !ec && last_write_of(path) == written;
+	return fs::file_size(system_path(path), ec) == size && !ec && last_write_of(path) == written;
 }
 
 Diagnostic changed_while_packing(const std::string &name) {
@@ -69,6 +105,7 @@ std::string archive_write_error(int rc) {
 struct LastGood {
 	std::string build_id;
 	std::map<std::string, std::string> archive_hashes; // file name -> hex hash
+	std::map<std::string, uint64_t> archive_sizes;     // file name -> bytes
 };
 
 bool read_last_good(const std::string &output_root, LastGood &out) {
@@ -83,19 +120,32 @@ bool read_last_good(const std::string &output_root, LastGood &out) {
 	out.build_id = json.get_string("build_id", "");
 	if (const io::JsonValue *archives = json.get("archives"); archives && archives->is_object()) {
 		for (const io::JsonMember &m : archives->object) {
-			if (m.value.is_string()) out.archive_hashes[m.key] = m.value.string;
+			if (!m.value.is_object()) continue;
+			const std::string hash = m.value.get_string("hash", "");
+			const double size = m.value.get_number("size", -1.0);
+			if (hash.empty() || size < 0.0) continue;
+			out.archive_hashes[m.key] = hash;
+			out.archive_sizes[m.key] = uint64_t(size);
 		}
 	}
 	return !out.build_id.empty();
 }
 
+// Each archive by its content hash and its size, which a later build checks the archive against
+// before it links or copies it (one whose size moved is packed again, never reused).
 io::JsonValue build_record(const std::string &build_id, const std::map<std::string, std::string> &hashes,
-                           const std::vector<std::string> &loose) {
+                           const std::map<std::string, uint64_t> &sizes, const std::vector<std::string> &loose) {
 	io::JsonValue json = io::JsonValue::make_object();
 	json.set("schema_version", io::JsonValue::make_number(kBuildRecordSchemaVersion));
 	json.set("build_id", io::JsonValue::make_string(build_id));
 	io::JsonValue archives = io::JsonValue::make_object();
-	for (const auto &[name, hash] : hashes) archives.set(name, io::JsonValue::make_string(hash));
+	for (const auto &[name, hash] : hashes) {
+		io::JsonValue archive = io::JsonValue::make_object();
+		archive.set("hash", io::JsonValue::make_string(hash));
+		const auto size = sizes.find(name);
+		archive.set("size", io::JsonValue::make_number(double(size == sizes.end() ? 0 : size->second)));
+		archives.set(name, std::move(archive));
+	}
 	json.set("archives", std::move(archives));
 	io::JsonValue loose_names = io::JsonValue::make_array();
 	for (const std::string &name : loose) loose_names.push(io::JsonValue::make_string(name));
@@ -105,10 +155,10 @@ io::JsonValue build_record(const std::string &build_id, const std::map<std::stri
 
 // Every planned name must resolve through the engine's own mount of the staged
 // directory: the one a stock launch boots with (mount_install: the fixed boot table,
-// archive-only).
+// archive-only), handed the directory's system path, so a deep one mounts as well.
 bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
 	Vfs vfs;
-	if (!mount_install(vfs, dir, LaunchFlags())) {
+	if (!mount_install(vfs, system_path(dir).string(), LaunchFlags())) {
 		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 		                     "The built archives do not mount: " + vfs.last_error());
 		return false;
@@ -125,7 +175,7 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 	}
 	std::error_code ec;
 	for (const BuildEntry &entry : plan.loose) {
-		if (!fs::is_regular_file(fs::path(dir) / entry.logical_name, ec)) {
+		if (!fs::is_regular_file(system_path((fs::path(dir) / entry.logical_name).generic_string()), ec)) {
 			error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 			                     entry.logical_name + " is missing from the build directory", entry.logical_name);
 			return false;
@@ -136,48 +186,57 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 
 // A directory is ours to delete only when it proves it: a published build is named by
 // its id and carries a build record naming the same id; an abandoned staging directory
-// is `<id>.tmp` and carries the staging marker. `--out` may point anywhere, so anything
-// else under the output root (a user's own folders) is never touched.
+// is `<id>.tmp` (or `<id>.<n>.tmp`) and carries the staging marker. `--out` may point anywhere,
+// so anything else under the output root (a user's own folders) is never touched. `dir` is the
+// directory's system path.
 bool is_prunable_build_dir(const fs::path &dir) {
 	const std::string name = dir.filename().string();
 	std::error_code ec;
 	const std::string tmp_suffix = kBuildStagingSuffix;
-	if (name.size() > tmp_suffix.size() && name.compare(name.size() - tmp_suffix.size(), tmp_suffix.size(), tmp_suffix) == 0) {
-		return is_build_id(name.substr(0, name.size() - tmp_suffix.size())) &&
-		       fs::is_regular_file(dir / kBuildStagingMarkerFileName, ec);
-	}
+	if (name.size() > tmp_suffix.size() && name.compare(name.size() - tmp_suffix.size(), tmp_suffix.size(), tmp_suffix) == 0)
+		return !staged_build_id(name).empty() && fs::is_regular_file(dir / kBuildStagingMarkerFileName, ec);
 	if (!is_build_id(name)) return false;
 	std::string text;
 	std::string io_error;
-	if (!read_file_text((dir / kBuildRecordFileName).generic_string(), text, io_error)) return false;
+	if (!read_file_text((dir / kBuildRecordFileName).string(), text, io_error)) return false;
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) return false;
 	return json.get_string("build_id", "") == name;
 }
 
-// Removes a staging directory, its marker last: one a file held open (an indexer, a scanner)
-// keeps is still marked, so the next build of the same content prunes it instead of refusing its
-// build id as "not a build directory".
-void remove_staging(const std::string &dir) {
+// Removes a build or staging directory (`dir`, its system path), the file that proves it one last
+// (a staging directory's marker, a build's record): one a file held open keeps (an indexer, a
+// scanner, a game running on the last good build, which holds the archives a cancelled build linked
+// into its staging) still proves itself, so a later build prunes it instead of refusing its name as
+// "not a build directory". False when anything stayed.
+bool remove_build_dir(const fs::path &dir) {
+	const fs::path proof = dir / (staged_build_id(dir.filename().string()).empty() ? kBuildRecordFileName
+	                                                                             : kBuildStagingMarkerFileName);
 	std::error_code ec;
 	bool kept = false;
 	for (const fs::directory_entry &entry : fs::directory_iterator(dir, ec)) {
-		if (entry.path().filename() == kBuildStagingMarkerFileName) continue;
+		if (entry.path().filename() == proof.filename()) continue;
 		std::error_code removed;
 		fs::remove_all(entry.path(), removed);
-		kept = kept || removed;
+		kept = kept || removed || fs::exists(entry.path(), removed);
 	}
-	if (kept) return;
+	if (kept) return false;
 	std::error_code removed;
-	fs::remove(fs::path(dir) / kBuildStagingMarkerFileName, removed);
+	fs::remove(proof, removed);
 	fs::remove(dir, removed);
+	return !fs::exists(dir, removed);
+}
+
+void remove_staging(const std::string &dir) {
+	remove_build_dir(system_path(dir));
 }
 
 void prune_old_builds(const std::string &output_root, const std::string &keep_id,
                       const std::vector<std::string> &protected_dirs) {
 	std::error_code ec;
-	for (const fs::directory_entry &entry : fs::directory_iterator(output_root, fs::directory_options::skip_permission_denied, ec)) {
+	for (const fs::directory_entry &entry :
+			fs::directory_iterator(system_path(output_root), fs::directory_options::skip_permission_denied, ec)) {
 		if (ec) break;
 		if (!entry.is_directory(ec)) continue;
 		const std::string name = entry.path().filename().string();
@@ -185,22 +244,22 @@ void prune_old_builds(const std::string &output_root, const std::string &keep_id
 		bool keep = false;
 		for (const std::string &p : protected_dirs) {
 			std::error_code cmp;
-			if (fs::equivalent(entry.path(), fs::path(p), cmp)) keep = true;
+			if (fs::equivalent(entry.path(), system_path(p), cmp)) keep = true;
 		}
 		if (keep) continue;
-		std::error_code remove_ec;
-		fs::remove_all(entry.path(), remove_ec);
+		remove_build_dir(entry.path());
 	}
 }
 
 } // namespace
 
-// The files a step has open: the one being hashed, packed or copied, a copy's target, and the
-// archive writer, whose reads of the entries come back through read_chunk.
+// The files a step has open: the one being hashed, packed or copied, a copy's target (made new:
+// create_new_file), and the archive writer, whose reads of the entries come back through
+// read_chunk.
 struct BuildRun::Streams {
 	BuildRun *run = nullptr;
 	std::ifstream in;
-	std::ofstream out;
+	std::FILE *out = nullptr;
 	uint64_t in_size = 0;
 	uint64_t in_done = 0;
 	pff::PffStreamWriter writer;
@@ -208,14 +267,39 @@ struct BuildRun::Streams {
 	std::string failed_entry;  // the entry whose file changed while packing ("" for none)
 	std::vector<char> buffer;
 
+	~Streams() { drop_out(); }
+
+	// A copy's target made at `path`, which no file may hold yet (false when one does).
+	bool open_out(const std::string &path) {
+		drop_out();
+		out = create_new_file(path);
+		return out != nullptr;
+	}
+	// `size` bytes of the buffer written to the copy's target.
+	bool write_out(uint64_t size) {
+		return std::fwrite(buffer.data(), 1, static_cast<size_t>(size), out) == size;
+	}
+	// The copy's target closed, all of it written.
+	bool close_out() {
+		if (!out) return false;
+		const bool written = std::fflush(out) == 0 && !std::ferror(out);
+		const bool closed = std::fclose(out) == 0;
+		out = nullptr;
+		return written && closed;
+	}
+	void drop_out() {
+		if (out) std::fclose(out);
+		out = nullptr;
+	}
+
 	// Opens `path` for reading when it holds what the hash read (its size and last write).
 	bool open_unchanged(const std::string &path, const Stamp &stamp) {
 		in.close();
 		in.clear();
-		const fs::path file(path);
+		const fs::path file = system_path(path);
 		std::error_code ec;
 		const uint64_t size = fs::file_size(file, ec);
-		if (ec || size != stamp.size || last_write_of(file) != stamp.written) return false;
+		if (ec || size != stamp.size || last_write_of(path) != stamp.written) return false;
 		in.open(file, std::ios::binary);
 		in_size = size;
 		in_done = 0;
@@ -274,7 +358,7 @@ std::string last_good_build_dir(const std::string &output_root) {
 	if (!read_last_good(output_root, last)) return std::string();
 	const fs::path dir = fs::path(output_root) / last.build_id;
 	std::error_code ec;
-	return fs::is_directory(dir, ec) ? dir.generic_string() : std::string();
+	return fs::is_directory(system_path(dir.generic_string()), ec) ? dir.generic_string() : std::string();
 }
 
 BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs) :
@@ -292,10 +376,18 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 	base += plan_.loose.size();
 	for (const BuildEntry &entry : plan_.loose) bytes += entry.size_bytes;
 	stamps_.resize(base);
-	// Every byte hashed once, then written or copied once.
+	// Every byte hashed once (or vouched for by the hash cache), then written or copied once.
 	bytes_total_ = plan_.ok ? bytes * 2 : 0;
-	group_hash_ = io::kFnv1a64Offset;
+	group_hash_ = archive_hash_seed();
 	build_hash_ = io::kFnv1a64Offset;
+}
+
+// Where each archive's hash starts: the format it is written in and the writer's version, so a
+// writer that would pack the same entries otherwise never finds the archive the old one packed
+// unchanged (and a link to it): a writer change rebuilds every archive once.
+uint64_t BuildRun::archive_hash_seed() {
+	uint64_t seed = io::fnv1a64_value(io::kFnv1a64Offset, static_cast<int>(kBuildArchiveFormat));
+	return io::fnv1a64_value(seed, pff::PFF_WRITER_VERSION);
 }
 
 BuildRun::~BuildRun() {
@@ -318,8 +410,7 @@ void BuildRun::advance(uint64_t bytes) {
 void BuildRun::close_streams() {
 	streams_->in.close();
 	streams_->in.clear();
-	streams_->out.close();
-	streams_->out.clear();
+	streams_->drop_out();
 	streams_->writer.abort();
 }
 
@@ -360,7 +451,7 @@ bool BuildRun::step(uint64_t budget_bytes) {
 	return done();
 }
 
-// The gate: a plan with a blocking finding never packs.
+// The gate: a plan with a blocking finding never packs. Then the hash cache, read once.
 void BuildRun::prepare() {
 	if (!plan_.ok) {
 		report_.diagnostics = plan_.diagnostics;
@@ -370,15 +461,80 @@ void BuildRun::prepare() {
 		phase_ = Phase::Done;
 		return;
 	}
+	pass_began_ = io::file_clock_now_ticks();
+	load_cache();
 	label_ = "Hashing the project's files";
 	phase_ = Phase::Hash;
 }
 
+// A cache that is missing, broken or of another schema reads as empty: every file is then hashed,
+// which is all a lost cache costs.
+void BuildRun::load_cache() {
+	if (plan_.hash_cache.empty()) return;
+	std::string message;
+	std::error_code ec;
+	if (!fs::is_regular_file(system_path(plan_.hash_cache), ec) || !read_file_text(plan_.hash_cache, cache_text_, message))
+		return;
+	io::JsonValue json;
+	if (!io::json_parse(cache_text_, json, message) || !json.is_object() ||
+	    json.get_int("schema_version", -1) != kBuildCacheSchemaVersion)
+		return;
+	const io::JsonValue *files = json.get("files");
+	if (!files || !files->is_array()) return;
+	for (const io::JsonValue &item : files->array) {
+		if (!item.is_object()) continue;
+		const std::string path = item.get_string("path", "");
+		Hashed hashed;
+		uint64_t written = 0;
+		hashed.size = uint64_t(item.get_number("size", 0));
+		if (path.empty() || !io::parse_hex64(item.get_string("modified", ""), written) ||
+		    !io::parse_hex64(item.get_string("hash", ""), hashed.hash))
+			continue;
+		hashed.written = int64_t(written);
+		cache_[path] = hashed;
+	}
+}
+
+// Written when the hash pass ends, and only when it changed: the plan's files alone, each by what
+// this build read or took from the cache, so a file gone from the project leaves it; and of those
+// only a file whose last write lies far enough before the pass (io::file_stamp_settled), so a
+// rewrite of the same size inside the same timestamp tick is never taken for the bytes read
+// (a file written just before a build is read by the next one too).
+void BuildRun::save_cache() const {
+	if (plan_.hash_cache.empty()) return;
+	io::JsonValue json = io::JsonValue::make_object();
+	json.set("schema_version", io::JsonValue::make_number(kBuildCacheSchemaVersion));
+	io::JsonValue files = io::JsonValue::make_array();
+	for (const auto &[path, hashed] : seen_) {
+		if (!io::file_stamp_settled(hashed.written, pass_began_)) continue;
+		io::JsonValue item = io::JsonValue::make_object();
+		item.set("path", io::JsonValue::make_string(path));
+		item.set("size", io::JsonValue::make_number(double(hashed.size)));
+		item.set("modified", io::JsonValue::make_string(io::hex64(uint64_t(hashed.written))));
+		item.set("hash", io::JsonValue::make_string(io::hex64(hashed.hash)));
+		files.push(std::move(item));
+	}
+	json.set("files", std::move(files));
+	const std::string text = io::json_write(json);
+	if (text == cache_text_) return;
+	std::string message;
+	write_file_atomic(plan_.hash_cache, text, message); // a cache that cannot be written is only slower
+}
+
+void BuildRun::fold(const BuildEntry &entry, uint64_t size, uint64_t content) {
+	const std::string key = normalized_logical_name(entry.logical_name);
+	group_hash_ = io::fnv1a64_bytes(group_hash_, key.data(), key.size());
+	group_hash_ = io::fnv1a64_byte(group_hash_, 0);
+	group_hash_ = io::fnv1a64_value(group_hash_, size);
+	group_hash_ = io::fnv1a64_value(group_hash_, content);
+}
+
 // Every archive's content and the loose files hashed, the build id covering all of it: each
-// entry's normalized name, a 0, its size and its bytes, in the archive's order. Reading the
-// bytes (not only size and time) is what makes an edit inside the same second still a change;
-// each file's size and last write are kept, and the pass that packs it reads it only while it
-// still holds them.
+// entry's normalized name, a 0, its size and its content hash, in the archive's order. Reading the
+// bytes (not only size and time) is what makes an edit inside the same second still a change, so a
+// file's content hash comes from the cache only while its size and last write are the ones it was
+// read at (S13 A8, the import cache's rule); each file's size and last write are kept, and the pass
+// that packs it reads it only while it still holds them.
 void BuildRun::hash(uint64_t budget) {
 	Streams &s = *streams_;
 	uint64_t left = budget;
@@ -391,18 +547,20 @@ void BuildRun::hash(uint64_t budget) {
 				hashes_[plan_.archives[hash_group_].file_name] = io::hex64(group_hash_);
 				++hash_group_;
 				hash_entry_ = 0;
-				group_hash_ = io::kFnv1a64Offset;
+				// The next archive's from its seed; the loose files, copied as they are, from none.
+				group_hash_ = hash_group_ < plan_.archives.size() ? archive_hash_seed() : io::kFnv1a64Offset;
 				continue;
 			}
 			build_hash_ = io::fnv1a64_value(build_hash_, static_cast<int>(kBuildArchiveFormat));
 			report_.build_id = io::hex64(build_hash_);
+			save_cache();
 			phase_ = Phase::Settle;
 			return;
 		}
 		const BuildEntry &entry = group[hash_entry_];
 		Stamp &stamp = stamps_[stamp_index(hash_group_, hash_entry_)];
 		if (!s.in.is_open()) {
-			const fs::path path(entry.source_path);
+			const fs::path path = system_path(entry.source_path);
 			std::error_code ec;
 			const uint64_t size = fs::file_size(path, ec);
 			if (ec) {
@@ -411,7 +569,18 @@ void BuildRun::hash(uint64_t budget) {
 				                         entry.logical_name));
 			}
 			if (size != entry.size_bytes) return fail(changed_while_packing(entry.logical_name));
-			stamp = {size, last_write_of(path)};
+			stamp = {size, last_write_of(entry.source_path)};
+			label_ = "Hashing " + entry.logical_name;
+			left -= std::min(left, kOpenCost);
+			const auto cached = plan_.rehash ? cache_.end() : cache_.find(entry.source_path);
+			if (stamp.written != 0 && cached != cache_.end() && cached->second.size == size &&
+			    cached->second.written == stamp.written) {
+				fold(entry, size, cached->second.hash);
+				seen_[entry.source_path] = cached->second;
+				advance(size);
+				++hash_entry_;
+				continue;
+			}
 			s.in.open(path, std::ios::binary);
 			if (!s.in) {
 				return fail(make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
@@ -419,23 +588,22 @@ void BuildRun::hash(uint64_t budget) {
 			}
 			s.in_size = size;
 			s.in_done = 0;
-			const std::string key = normalized_logical_name(entry.logical_name);
-			group_hash_ = io::fnv1a64_bytes(group_hash_, key.data(), key.size());
-			group_hash_ = io::fnv1a64_byte(group_hash_, 0);
-			group_hash_ = io::fnv1a64_value(group_hash_, size);
-			label_ = "Hashing " + entry.logical_name;
-			left -= std::min(left, kOpenCost);
+			file_hash_ = io::kFnv1a64Offset;
+			++report_.files_hashed;
 		}
 		const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
 		if (want > 0) {
 			if (!s.read(want)) return fail(changed_while_packing(entry.logical_name));
-			group_hash_ = io::fnv1a64_bytes(group_hash_, s.buffer.data(), static_cast<size_t>(want));
+			file_hash_ = io::fnv1a64_bytes(file_hash_, s.buffer.data(), static_cast<size_t>(want));
 			left -= want;
 			advance(want);
+			report_.bytes_hashed += want;
 		}
 		if (s.in_done == s.in_size) {
 			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
 				return fail(changed_while_packing(entry.logical_name));
+			fold(entry, stamp.size, file_hash_);
+			if (stamp.written != 0) seen_[entry.source_path] = {stamp.size, stamp.written, file_hash_};
 			++hash_entry_;
 		}
 	}
@@ -450,7 +618,7 @@ void BuildRun::settle() {
 	const fs::path final_dir = fs::path(output_root_) / report_.build_id;
 	final_dir_ = final_dir.generic_string();
 	std::error_code ec;
-	if (fs::is_directory(final_dir, ec)) {
+	if (fs::is_directory(system_path(final_dir_), ec)) {
 		// Same content, same build: prove it still mounts and hand it back.
 		Diagnostic error;
 		if (verify_staged(plan_, final_dir_, error)) {
@@ -462,39 +630,60 @@ void BuildRun::settle() {
 			phase_ = Phase::Done;
 			return;
 		}
-		if (!is_prunable_build_dir(final_dir)) {
+		if (!is_prunable_build_dir(system_path(final_dir_))) {
 			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
 			                         "cannot publish the build: " + final_dir_ +
 			                                 " exists and is not a build directory"));
 		}
-		fs::remove_all(final_dir, ec); // a damaged build is rebuilt
+		// A damaged build is rebuilt, once it is gone.
+		if (!remove_build_dir(system_path(final_dir_))) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+			                         "cannot build again over " + final_dir_ + ", which does not mount: a file in it is in use"));
+		}
 	}
 
 	LastGood last;
 	if (read_last_good(output_root_, last)) {
 		last_dir_ = (fs::path(output_root_) / last.build_id).generic_string();
 		last_hashes_ = last.archive_hashes;
+		last_sizes_ = last.archive_sizes;
 	}
 
-	const fs::path tmp_dir = fs::path(output_root_) / (report_.build_id + kBuildStagingSuffix);
-	if (fs::exists(tmp_dir, ec) && !is_prunable_build_dir(tmp_dir)) {
-		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
-		                         "cannot stage the build: " + tmp_dir.generic_string() +
-		                                 " exists and is not a build directory"));
+	// The staging directory, empty: one a build of this content left (a cancel, a failure) is
+	// emptied first; when a file in it will not go (a game running on the last good build holds the
+	// archives a cancelled build linked there), the next name is taken, so nothing is ever staged
+	// over a name already there.
+	std::string tmp_dir;
+	for (int attempt = 0; attempt < kStagingAttempts && tmp_dir.empty(); ++attempt) {
+		const std::string candidate = (fs::path(output_root_) / staging_name(report_.build_id, attempt)).generic_string();
+		const fs::path staging = system_path(candidate);
+		if (fs::exists(staging, ec)) {
+			if (!is_prunable_build_dir(staging)) {
+				return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+				                         "cannot stage the build: " + candidate + " exists and is not a build directory"));
+			}
+			if (!remove_build_dir(staging)) continue;
+		}
+		tmp_dir = candidate;
 	}
-	fs::remove_all(tmp_dir, ec);
-	if (!ensure_directory(tmp_dir.generic_string(), io_error)) {
+	if (tmp_dir.empty()) {
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+		                         "cannot stage the build: its staging directories could not be emptied (a file in "
+		                         "them is in use)"));
+	}
+	if (!ensure_directory(tmp_dir, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
-	tmp_dir_ = tmp_dir.generic_string(); // from here a failure or a cancel removes it
-	if (!write_file_atomic((tmp_dir / kBuildStagingMarkerFileName).generic_string(), report_.build_id, io_error)) {
+	tmp_dir_ = tmp_dir; // from here a failure or a cancel removes it
+	if (!write_file_atomic((fs::path(tmp_dir) / kBuildStagingMarkerFileName).generic_string(), report_.build_id, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	phase_ = Phase::Archives;
 }
 
-// Each archive written through the stream writer, or copied from the last good build when its
-// content hashes the same, a budget of bytes at a time.
+// Each archive written through the stream writer, or, when its content hashes the same, the last
+// good build's linked (one file under two names: a build never writes an archive again) or copied
+// where the file system cannot link it, a budget of bytes at a time.
 void BuildRun::pack(uint64_t budget) {
 	Streams &s = *streams_;
 	uint64_t left = budget;
@@ -504,25 +693,42 @@ void BuildRun::pack(uint64_t budget) {
 			return;
 		}
 		const BuildArchive &archive = plan_.archives[archive_index_];
-		const fs::path target = fs::path(tmp_dir_) / archive.file_name;
+		const std::string target = (fs::path(tmp_dir_) / archive.file_name).generic_string();
 		if (!item_started_) {
 			item_started_ = true;
 			item_share_ = 0;
 			item_share_done_ = 0;
 			for (size_t i = 0; i < archive.entries.size(); ++i) item_share_ += stamps_[stamp_index(archive_index_, i)].size;
-			const fs::path previous = fs::path(last_dir_) / archive.file_name;
+			const std::string previous = (fs::path(last_dir_) / archive.file_name).generic_string();
 			const auto found = last_hashes_.find(archive.file_name);
+			const auto recorded = last_sizes_.find(archive.file_name);
 			std::error_code ec;
+			// The last good build's archive, its content unchanged and its file still the size its
+			// build recorded (one cut short under a game is packed again, never passed on).
 			item_reused_ = !last_dir_.empty() && found != last_hashes_.end() &&
-			               found->second == hashes_[archive.file_name] && fs::is_regular_file(previous, ec);
+			               found->second == hashes_[archive.file_name] && recorded != last_sizes_.end() &&
+			               fs::is_regular_file(system_path(previous), ec) && size_of(previous) == recorded->second;
+			left -= std::min(left, kOpenCost);
 			if (item_reused_) {
+				std::string link_error;
+				if (link_file(previous, target, link_error)) {
+					report_.archives_reused.push_back(archive.file_name);
+					report_.archives_linked.push_back(archive.file_name);
+					label_ = "Linking " + archive.file_name + " from the last build";
+					advance(item_share_);
+					item_started_ = false;
+					++archive_index_;
+					++items_done_;
+					continue;
+				}
+				// Copied where it cannot be linked, into a file made new: a name already in the staging
+				// directory is never written through (it may be a link to the very archive copied).
 				s.in.close();
 				s.in.clear();
-				s.in.open(previous, std::ios::binary);
-				s.out.open(target, std::ios::binary | std::ios::trunc);
-				s.in_size = fs::file_size(previous, ec);
+				s.in.open(system_path(previous), std::ios::binary);
+				s.in_size = fs::file_size(system_path(previous), ec);
 				s.in_done = 0;
-				if (!s.in || !s.out || ec) {
+				if (!s.in || ec || !s.open_out(target)) {
 					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 					                         "cannot copy " + archive.file_name + " from the last build",
 					                         archive.file_name));
@@ -542,7 +748,7 @@ void BuildRun::pack(uint64_t budget) {
 				}
 				s.archive = archive_index_;
 				s.failed_entry.clear();
-				const int rc = s.writer.open(target.generic_string().c_str(), kBuildArchiveFormat, entries.data(),
+				const int rc = s.writer.open(system_path(target).string().c_str(), kBuildArchiveFormat, entries.data(),
 				                             static_cast<uint32_t>(entries.size()), &Streams::read_chunk, &s);
 				if (rc != pff::PFF_WRITE_OK) {
 					return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
@@ -550,7 +756,6 @@ void BuildRun::pack(uint64_t budget) {
 				}
 				label_ = "Packing " + archive.file_name;
 			}
-			left -= std::min(left, kOpenCost);
 			continue;
 		}
 		uint64_t moved = 0;
@@ -558,7 +763,7 @@ void BuildRun::pack(uint64_t budget) {
 		if (item_reused_) {
 			const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
 			if (want > 0) {
-				if (!s.read(want) || !s.out.write(s.buffer.data(), static_cast<std::streamsize>(want))) {
+				if (!s.read(want) || !s.write_out(want)) {
 					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 					                         "cannot copy " + archive.file_name + " from the last build",
 					                         archive.file_name));
@@ -568,13 +773,11 @@ void BuildRun::pack(uint64_t budget) {
 			if (s.in_done == s.in_size) {
 				s.in.close();
 				s.in.clear();
-				s.out.close();
-				if (!s.out) {
+				if (!s.close_out()) {
 					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 					                         "cannot copy " + archive.file_name + " from the last build",
 					                         archive.file_name));
 				}
-				s.out.clear();
 				report_.archives_reused.push_back(archive.file_name);
 				finished = true;
 			}
@@ -623,8 +826,7 @@ void BuildRun::copy_loose(uint64_t budget) {
 		if (!item_started_) {
 			item_started_ = true;
 			if (!s.open_unchanged(entry.source_path, stamp)) return fail(changed_while_packing(entry.logical_name));
-			s.out.open(fs::path(tmp_dir_) / entry.logical_name, std::ios::binary | std::ios::trunc);
-			if (!s.out) {
+			if (!s.open_out((fs::path(tmp_dir_) / entry.logical_name).generic_string())) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
@@ -634,7 +836,7 @@ void BuildRun::copy_loose(uint64_t budget) {
 		const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
 		if (want > 0) {
 			if (!s.read(want)) return fail(changed_while_packing(entry.logical_name));
-			if (!s.out.write(s.buffer.data(), static_cast<std::streamsize>(want))) {
+			if (!s.write_out(want)) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
@@ -644,12 +846,10 @@ void BuildRun::copy_loose(uint64_t budget) {
 		if (s.in_done == s.in_size) {
 			if (!s.at_end() || !still_as_read(entry.source_path, stamp.size, stamp.written))
 				return fail(changed_while_packing(entry.logical_name));
-			s.out.close();
-			if (!s.out) {
+			if (!s.close_out()) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
-			s.out.clear();
 			report_.loose_written.push_back(entry.logical_name);
 			item_started_ = false;
 			++loose_index_;
@@ -658,27 +858,37 @@ void BuildRun::copy_loose(uint64_t budget) {
 	}
 }
 
-// Prove the staged directory mounts, record it, rename it into place, prune.
+// Prove the staged directory mounts, record it, rename it into place, prune. A rename refused while
+// its refusal may pass (a scanner or an indexer holding a staged file: rename_refusal_passes) is
+// tried again on the next steps, for kPublishPatience at most.
 void BuildRun::publish() {
 	label_ = "Publishing the build";
-	Diagnostic verify_error;
-	if (!verify_staged(plan_, tmp_dir_, verify_error)) return fail(std::move(verify_error));
-	const io::JsonValue record = build_record(report_.build_id, hashes_, report_.loose_written);
 	std::string io_error;
-	if (!write_file_atomic((fs::path(tmp_dir_) / kBuildRecordFileName).generic_string(),
-	                       io::json_write(record), io_error)) {
-		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+	if (!publish_ready_) {
+		Diagnostic verify_error;
+		if (!verify_staged(plan_, tmp_dir_, verify_error)) return fail(std::move(verify_error));
+		std::map<std::string, uint64_t> sizes;
+		for (const BuildArchive &archive : plan_.archives)
+			sizes[archive.file_name] = size_of((fs::path(tmp_dir_) / archive.file_name).generic_string());
+		record_ = io::json_write(build_record(report_.build_id, hashes_, sizes, report_.loose_written));
+		if (!write_file_atomic((fs::path(tmp_dir_) / kBuildRecordFileName).generic_string(), record_, io_error)) {
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
+		}
+		publish_ready_ = true;
 	}
 	std::error_code ec;
-	fs::rename(tmp_dir_, final_dir_, ec);
-	if (ec) {
+	if (!rename_with_retry(system_path(tmp_dir_), system_path(final_dir_), ec)) {
+		const auto now = std::chrono::steady_clock::now();
+		if (rename_refusal_passes(ec)) {
+			if (publish_refused_at_ == std::chrono::steady_clock::time_point{}) publish_refused_at_ = now;
+			if (now - publish_refused_at_ < kPublishPatience) return; // the next step tries again
+		}
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
 		                         "cannot publish the build: " + ec.message()));
 	}
 	tmp_dir_.clear(); // published: nothing left to clean up
-	fs::remove(fs::path(final_dir_) / kBuildStagingMarkerFileName, ec); // the record is its proof now
-	if (!write_file_atomic((fs::path(output_root_) / kLastGoodBuildFileName).generic_string(),
-	                       io::json_write(record), io_error)) {
+	fs::remove(system_path((fs::path(final_dir_) / kBuildStagingMarkerFileName).generic_string()), ec); // the record is its proof now
+	if (!write_file_atomic((fs::path(output_root_) / kLastGoodBuildFileName).generic_string(), record_, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	// The directories games run from, asked now: a game started (or found alive) since the build

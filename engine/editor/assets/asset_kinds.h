@@ -24,8 +24,9 @@ namespace opennova::editor {
 // AudioVM_InitMenuMusicStreaming @ 0x56aa60], and `earlyerr.txt` is the pre-archive error text
 // read before any mount [orig: Game_ShowEarlyError @ 0x4a68a0]; retail's own loose files
 // (videos, configs, saves, the machine-keyed NovaWorld cache) stay loose with them. None: an
-// archive (a build output, which the build refuses in a project) and an import source (its
-// outputs, named after it, pack by their own kinds).
+// archive (a build output, which the build refuses in a project), an import source (its
+// outputs, named after it, pack by their own kinds) and a file of no kind the game knows, which
+// the game never asks for (S13 A8: the build leaves it out).
 enum class ArchiveSlot { Language, Localres, Resource, Loose, None };
 
 // The document types the editor opens a kind with (ADR 0046 d9): documents/document_types holds
@@ -72,7 +73,6 @@ struct AssetKindRow {
 	const char *const *extensions = nullptr;
 	ArchiveSlot archive_slot = ArchiveSlot::Resource;
 	DocumentTypeId document = DocumentTypeId::None; // the type that edits it; None: packed as it is
-	bool import_source = false; // an importer's source: never packed itself, its outputs are
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
@@ -99,12 +99,12 @@ AssetKind asset_kind_for_runtime(const std::string &runtime_kind);
 // extension; Unknown for none. The runtime's classifier is asked first (classify_asset).
 AssetKind asset_kind_for_name(const std::string &logical_name);
 // Whether a build puts a file of the kind in the build (in an archive, or loose): false for an
-// archive and an import source.
+// archive, an import source and a file of no kind the game knows.
 bool asset_kind_packed(AssetKind kind);
-// Whether the archives' name limit binds a file of the kind: every kind but a loose one (a
-// video, a music bank, a config), which the build copies beside the archives under any name. An
-// import source is held to it (its importer names its outputs after it), and so is a file of no
-// kind the game knows, which the build packs all the same (route_asset).
+// Whether the archives' name limit binds a file of the kind: a kind the build packs into an
+// archive, and an import source (its importer names its outputs after it). Not a loose one (a
+// video, a music bank, a config), which the build copies beside the archives under any name, nor
+// one the build leaves out (an archive, a file of no kind the game knows).
 bool archive_name_limit_binds(AssetKind kind);
 
 } // namespace opennova::editor

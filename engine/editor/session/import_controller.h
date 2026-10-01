@@ -61,7 +61,7 @@ public:
 	OperationOutcome absorb_import(ImportOperation &operation);
 
 private:
-	void preview(std::vector<ImportSource> choices, std::vector<ImportSource> roots, bool with_dependencies);
+	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots, bool with_dependencies);
 	// The open preview planned again as an operation (ImportPlanOperation): the dialog shows its
 	// files at once and the plan once it is made; a plan that runs gives way to the new one (the
 	// rows' Supersede).

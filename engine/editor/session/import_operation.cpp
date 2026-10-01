@@ -10,7 +10,7 @@
 namespace opennova::editor {
 
 ImportOperation::ImportOperation(const ProjectPaths &paths, const ProjectDocument &document,
-		std::vector<ImportSource> imports, bool replace, std::unique_ptr<ImportPlanOperation> replan,
+		std::vector<ImportChoice> imports, bool replace, std::unique_ptr<ImportPlanOperation> replan,
 		std::shared_ptr<const ImportPlan> shown) :
 		paths_(paths),
 		document_(document),
@@ -34,7 +34,7 @@ bool ImportOperation::step(const StepBudget &budget) {
 			phase_ = Phase::Done;
 			return true;
 		}
-		for (const ImportSource &import : imports_) {
+		for (const ImportChoice &import : imports_) {
 			const bool planned = std::any_of(new_plan_->rows.begin(), new_plan_->rows.end(), [&import](const ImportPlanRow &row) {
 				return row.state != ImportPlanRow::State::NotFound && row.source == import;
 			});

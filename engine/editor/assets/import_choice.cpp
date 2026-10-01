@@ -1,10 +1,10 @@
-#include <editor/assets/import_source.h>
+#include <editor/assets/import_choice.h>
 
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
-std::string ImportSource::name() const {
+std::string ImportChoice::name() const {
 	return entry.empty() ? basename_of(path) : entry;
 }
 

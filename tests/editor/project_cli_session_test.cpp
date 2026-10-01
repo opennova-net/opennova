@@ -519,7 +519,7 @@ static int test_request_and_query_verbs() {
 	ran = run(scratch, { "request", root, "{\"kind\": \"build\", \"path\": \"x\"}" });
 	JsonValue answer = parsed(ran.out);
 	TEST_EXPECT(ran.code == 2 && !answer.get_bool("ok", true) &&
-	            answer.get_string("error", "") == "build takes no \"path\" (it takes out_dir).");
+	            answer.get_string("error", "") == "build takes no \"path\" (it takes out_dir, rehash).");
 	// A kind the editor's shell serves does nothing headless; what a request sets of the editor's
 	// own preferences ends with the run. Each is said.
 	ran = run(scratch, { "request", root, "{\"kind\": \"reveal_path\", \"path\": \"menus\"}" });

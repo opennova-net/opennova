@@ -622,8 +622,8 @@ func _enter_menu(dir: String) -> bool:
 		if root == null:
 			return false
 		_root = root
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
+	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
 	if profile_root_key != _profile_root_key:
 		_chosen_avatar = PlayerProfile.load_character_profile(_root)
 		_profile_root_key = profile_root_key
