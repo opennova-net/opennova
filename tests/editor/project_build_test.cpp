@@ -604,6 +604,8 @@ static int test_unknown_kinds_are_left_out() {
 	uint64_t read = 0;
 	TEST_EXPECT(scan_project_file(p.paths, p.doc, "art/sketch.blend", key, visit, &read));
 	TEST_EXPECT(read > 0 && read <= 3 * (kChunkHeaderReads * 8 + 28));
+	std::printf("editor_project_build: a 4 MB file no rule names: %llu bytes read to tell it holds no material chunk\n",
+	            static_cast<unsigned long long>(read));
 	const BuildPlan plan = p.plan();
 	TEST_EXPECT(plan.ok && !in_build(plan, notes) && !in_build(plan, "sketch.blend") && in_build(plan, "field.nq8"));
 	const BuildReport report = run_build(plan, p.output_root());
@@ -637,6 +639,8 @@ static int test_hash_cache() {
 	TEST_EXPECT(!fs::exists(p.paths.build_cache_file));
 	const BuildReport first = run_build(plan, p.output_root());
 	TEST_EXPECT(first.ok && first.files_hashed == files && first.bytes_hashed == bytes && files > 4);
+	std::printf("editor_project_build: a project of %zu files (%llu bytes) built, every file read; ", files,
+	            static_cast<unsigned long long>(bytes));
 	TEST_EXPECT(fs::is_regular_file(p.paths.build_cache_file));
 
 	const BuildReport again = run_build(p.plan(), p.output_root());
@@ -649,6 +653,9 @@ static int test_hash_cache() {
 	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
 	TEST_EXPECT(changed.archives_reused == std::vector<std::string>({"localres.pff", "resource.pff"}));
 	TEST_EXPECT(changed.archives_linked == changed.archives_reused);
+	std::printf("one string table changed: %zu file read (%llu bytes), %zu archive written, %zu linked\n",
+	            changed.files_hashed, static_cast<unsigned long long>(changed.bytes_hashed),
+	            changed.archives_written.size(), changed.archives_linked.size());
 	for (const BuildArchive &archive : plan.archives) {
 		std::vector<uint8_t> built;
 		std::string error;
@@ -718,6 +725,8 @@ static int test_deep_output_root() {
 	TEST_EXPECT(report.ok && !report.build_dir.empty());
 	const std::string copied = report.build_dir + "/" + video;
 	TEST_EXPECT(copied.size() > 260); // past MAX_PATH, where the build failed before S13 A8
+	std::printf("editor_project_build: a project folder %zu characters long built, its loose copy's path %zu\n",
+	            root.size(), copied.size());
 	std::error_code ec;
 	TEST_EXPECT(fs::is_regular_file(system_path(copied), ec));
 	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff"), ec));
