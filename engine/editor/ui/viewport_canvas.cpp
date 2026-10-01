@@ -119,6 +119,18 @@ void draw_shape(ImDrawList &paint, CanvasPoint origin, const OverlayShape &shape
 			}
 			break;
 		}
+		case OverlayKind::Text: {
+			const ImVec2 p = at(0);
+			const char *begin = shape.text.c_str();
+			const char *end = begin + shape.text.size();
+			if (shape.filled) {
+				const ImVec2 size = ImGui::CalcTextSize(begin, end);
+				paint.AddRectFilled(ImVec2(p.x - kBadgePad, p.y - kBadgePad),
+						ImVec2(p.x + size.x + kBadgePad, p.y + size.y + kBadgePad), kBadgeFill);
+			}
+			paint.AddText(p, color, begin, end);
+			break;
+		}
 	}
 }
 
@@ -182,7 +194,21 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 				ImGui::IsKeyDown(ImGuiKey_DownArrow);
 		keyboard.escape = ImGui::IsKeyPressed(ImGuiKey_Escape, false);
 		keyboard.frame = ImGui::IsKeyPressed(ImGuiKey_F, false);
+		// The keys a camera flies by, held; no chord's letter is one (Ctrl+S saves, Ctrl+D duplicates).
+		if (!io.KeyCtrl) {
+			const auto held = [](ImGuiKey positive, ImGuiKey negative) {
+				return (ImGui::IsKeyDown(positive) ? 1 : 0) - (ImGui::IsKeyDown(negative) ? 1 : 0);
+			};
+			keyboard.move_x = held(ImGuiKey_D, ImGuiKey_A);
+			keyboard.move_y = held(ImGuiKey_E, ImGuiKey_Q);
+			keyboard.move_z = held(ImGuiKey_W, ImGuiKey_S);
+		}
+		keyboard.fast = io.KeyShift;
+		keyboard.remove = ImGui::IsKeyPressed(ImGuiKey_Delete, false);
+		keyboard.page = (ImGui::IsKeyPressed(ImGuiKey_PageUp) ? 1 : 0) -
+				(ImGui::IsKeyPressed(ImGuiKey_PageDown) ? 1 : 0);
 	}
+	input_.dt = io.DeltaTime;
 	const bool design = zoom_ != Zoom::Fill;
 	const ImVec2 region(ImGui::GetContentRegionAvail().x, height);
 	// The picture's device size, and where it sits on the canvas.
@@ -235,8 +261,10 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	// Every press on the canvas, the picture and its margin, is the canvas's: the surface is the
 	// first item, so the device's own item under it never takes the mouse.
 	const ImVec2 base = ImGui::GetCursorScreenPos();
+	// A picture that fills the canvas takes the right button too (its kind's camera looks with it).
 	ImGui::InvisibleButton("##surface", content,
-			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle);
+			ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonMiddle |
+					(design ? 0 : ImGuiButtonFlags_MouseButtonRight));
 	const bool hovered = ImGui::IsItemHovered();
 	const bool active = ImGui::IsItemActive();
 	const bool activated = ImGui::IsItemActivated();
@@ -253,7 +281,9 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 	// A left press on a design picture lasts until the button comes up (the canvas may lose the
 	// active item before: a popup, the focus taken); a picture's camera drag while the surface
 	// holds it.
-	input_.down = design ? ImGui::IsMouseDown(ImGuiMouseButton_Left) : active;
+	const bool left_or_middle = ImGui::IsMouseDown(ImGuiMouseButton_Left) ||
+			ImGui::IsMouseDown(ImGuiMouseButton_Middle);
+	input_.down = design ? ImGui::IsMouseDown(ImGuiMouseButton_Left) : active && left_or_middle;
 	input_.double_clicked = hovered && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left);
 	input_.keys = CanvasKeys{ io.KeyShift, io.KeyCtrl, io.KeyAlt };
 	if (design) {
@@ -287,12 +317,26 @@ bool ViewportCanvas::begin(float height, int device_width, int device_height) {
 		}
 		input_.panning = panning_;
 	} else {
-		// The kind's camera zooms and pans: every press and the wheel are its.
-		input_.pressed = activated;
+		// The kind's camera zooms and pans: every press and the wheel are its. A press is the left
+		// button's or the middle one's; the right one's is apart (a look).
+		input_.pressed = activated && (ImGui::IsMouseClicked(ImGuiMouseButton_Left) ||
+											  ImGui::IsMouseClicked(ImGuiMouseButton_Middle));
 		input_.middle = activated && ImGui::IsMouseClicked(ImGuiMouseButton_Middle);
 		input_.wheel = hovered ? io.MouseWheel : 0.0f;
+		input_.right_pressed = activated && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+		if (input_.right_pressed)
+			right_held_ = true;
+		input_.right_down = right_held_ && ImGui::IsMouseDown(ImGuiMouseButton_Right);
 	}
-	right_clicked_ = hovered && !panning_ && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+	if (design) {
+		right_clicked_ = hovered && !panning_ && ImGui::IsMouseClicked(ImGuiMouseButton_Right);
+	} else if (right_held_ && !ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+		// A picture that fills the canvas: the right button is a click once it comes up having
+		// travelled less than a drag does (else it was a look).
+		right_held_ = false;
+		right_clicked_ = hovered &&
+				io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] < kDragThreshold * kDragThreshold;
+	}
 	return true;
 }
 
@@ -351,8 +395,10 @@ void ViewportCanvas::end() {
 }
 
 void ViewportCanvas::end_frame() {
-	if (!drawn_)
+	if (!drawn_) {
 		panning_ = false;
+		right_held_ = false;
+	}
 	drawn_ = false;
 }
 

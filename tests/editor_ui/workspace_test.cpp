@@ -12,7 +12,8 @@
 // partial failure retried against the settings in effect, the dialog closing with its
 // project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
 // right end (what the session said, the unsaved files, the counts, the build or the game,
-// the buttons; never over the menus); Files (its folders, the file count, the kind hidden
+// the buttons; never over the menus); a canvas whose picture fills it read through ImGui (the
+// right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
 // until the header's menu shows it, a filter's flat list, a click and a double click, New
 // and its name prompt, Rename...); the import dialog; the OS window's title; and the view
 // events' mailboxes (each event held until its window draws, taken once).
@@ -48,6 +49,7 @@
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/files_window.h>
 #include <editor/ui/preview_window.h>
+#include <editor/ui/viewport_canvas.h>
 #include <editor/ui/view_event_mailbox.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
@@ -1775,6 +1777,123 @@ void test_preview_model_pane_input() {
 			"the camera's gestures raise SetViewports of it, nothing else");
 }
 
+// A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
+// button is apart from a press (right_pressed, right_down; never pressed or down), a click of it
+// only when it comes up having travelled less than a drag; the left button is a press; the keys a
+// camera flies by held (W forward, D right, E up; none with Ctrl, a chord's letter), Shift fast,
+// Delete, PgUp; the frame's time; and a line of text among the shapes is drawn.
+void test_canvas_fill_input() {
+	NullBackend backend;
+	ViewportCanvas canvas;
+	CanvasInput in;
+	bool right_clicked = false;
+	int text_vertices = 0;
+	const auto frame = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f));
+		ImGui::Begin("canvas", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
+		in = CanvasInput();
+		right_clicked = false;
+		if (canvas.begin(200.0f, 0, 0)) {
+			canvas.picture(
+					[](const ViewportPicture &picture) {
+						ImGui::Dummy(ImVec2(float(picture.width), float(picture.height)));
+					},
+					nullptr);
+			in = canvas.input();
+			right_clicked = canvas.right_clicked();
+			OverlayList shapes;
+			const int before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+			shapes.text(CanvasPoint{ 4.0f, 4.0f }, "label");
+			canvas.draw(shapes, CanvasCursor::Default);
+			text_vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size - before;
+		}
+		canvas.end();
+		ImGui::End();
+		ImGui::Render();
+		canvas.end_frame();
+	};
+	ImGuiIO &io = ImGui::GetIO();
+	const auto mouse = [&](float x, float y) {
+		io.AddMousePosEvent(x, y);
+		frame();
+	};
+	const auto button = [&](int which, bool down) {
+		io.AddMouseButtonEvent(which, down);
+		frame();
+	};
+	const auto key = [&](ImGuiKey which, bool down) {
+		io.AddKeyEvent(which, down);
+		frame();
+	};
+	frame();
+	frame();
+	CHECK(in.width > 0 && in.height == 200 && text_vertices > 0, "the canvas draws, its text too");
+	CHECK(in.dt == io.DeltaTime && in.dt > 0.0f, "the frame's time");
+
+	// The right button: a look, never a press.
+	mouse(100.0f, 100.0f);
+	button(1, true);
+	CHECK(in.hovered && in.right_pressed && in.right_down && !in.pressed && !in.down && !in.middle,
+			"the right button down: apart from a press");
+	mouse(140.0f, 110.0f);
+	CHECK(!in.right_pressed && in.right_down && !in.down && in.delta.x == 40.0f && in.delta.y == 10.0f,
+			"held and moved");
+	button(1, false);
+	CHECK(!in.right_down && !right_clicked, "let go after a drag: no click");
+	button(1, true);
+	CHECK(in.right_pressed && !right_clicked, "pressed again");
+	button(1, false);
+	CHECK(!in.right_down && right_clicked, "let go where it went down: a click");
+	frame();
+	CHECK(!right_clicked, "a click once");
+
+	// The left button: a press, as before.
+	button(0, true);
+	CHECK(in.pressed && in.down && !in.right_pressed && !in.right_down, "the left button: a press");
+	button(0, false);
+	CHECK(!in.pressed && !in.down, "let go");
+
+	// The keys, while the canvas's window has the keyboard.
+	CHECK(in.keyboard.focused, "the canvas's window has the keyboard");
+	key(ImGuiKey_W, true);
+	key(ImGuiKey_D, true);
+	key(ImGuiKey_E, true);
+	CHECK(in.keyboard.move_z == 1 && in.keyboard.move_x == 1 && in.keyboard.move_y == 1 &&
+					!in.keyboard.fast,
+			"W, D and E held: forward, right, up");
+	key(ImGuiMod_Shift, true);
+	CHECK(in.keyboard.fast && in.keyboard.move_z == 1, "Shift: fast");
+	key(ImGuiMod_Shift, false);
+	key(ImGuiMod_Ctrl, true);
+	CHECK(in.keyboard.move_z == 0 && in.keyboard.move_x == 0 && in.keyboard.move_y == 0,
+			"with Ctrl a letter is a chord's, not the camera's");
+	key(ImGuiMod_Ctrl, false);
+	key(ImGuiKey_W, false);
+	key(ImGuiKey_D, false);
+	key(ImGuiKey_E, false);
+	key(ImGuiKey_S, true);
+	key(ImGuiKey_A, true);
+	key(ImGuiKey_Q, true);
+	CHECK(in.keyboard.move_z == -1 && in.keyboard.move_x == -1 && in.keyboard.move_y == -1,
+			"S, A and Q held: back, left, down");
+	key(ImGuiKey_S, false);
+	key(ImGuiKey_A, false);
+	key(ImGuiKey_Q, false);
+	CHECK(in.keyboard.move_z == 0 && in.keyboard.move_x == 0 && in.keyboard.move_y == 0, "let go");
+	key(ImGuiKey_Delete, true);
+	CHECK(in.keyboard.remove, "Delete pressed");
+	key(ImGuiKey_Delete, false);
+	CHECK(!in.keyboard.remove, "once");
+	key(ImGuiKey_PageUp, true);
+	CHECK(in.keyboard.page == 1, "PgUp");
+	key(ImGuiKey_PageUp, false);
+	key(ImGuiKey_PageDown, true);
+	CHECK(in.keyboard.page == -1, "PgDn");
+	key(ImGuiKey_PageDown, false);
+}
+
 // The OS window's title: the product, the project's name before it, a bullet while a file has
 // unsaved changes.
 void test_window_title() {
@@ -2071,6 +2190,7 @@ void run_workspace_tests() {
 	test_preview_follows();
 	test_preview_model_gestures();
 	test_preview_model_pane_input();
+	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();

@@ -19,7 +19,9 @@
 // (preview/model_canvas) over a real session's model viewport: F frames the selected marker, a
 // click selects a marker's record, a drag of it is one gesture ended once when its canvas is not
 // drawn, a drag elsewhere orbits and the wheel dollies (each a SetViewport of the viewport's camera,
-// which the session applies), and a press ends when the model's document goes. Held while an
+// which the session applies), the right button and the keys a camera flies by are not its, and a
+// press ends when the model's document goes. The camera's ray through a pixel, and a line of text
+// among the shapes. Held while an
 // operation holds the documents (S13 A3), neither canvas raises an edit: a drag, a resize, the
 // arrows and an Arrange of the menu's, a marker's drag of the model's (it orbits), while a click
 // and Esc still select. The views' wiring of all this is tests/editor_ui's (the preview and
@@ -1193,6 +1195,26 @@ int test_model_canvas() {
 	TEST_EXPECT(out.take().empty());
 	TEST_EXPECT(!out.unexpected);
 
+	// The right button is not the model's (a picture that fills the canvas hands it over apart
+	// from a press, for a kind whose camera looks with it): pressed, dragged and let go, the keys
+	// a camera flies by held meanwhile, it raises nothing and begins no gesture.
+	frame = frame_of();
+	in = at(20.0f, 20.0f);
+	in.right_pressed = in.right_down = true;
+	in.keyboard.focused = true;
+	in.keyboard.move_z = 1;
+	in.keyboard.fast = true;
+	in.dt = 1.0f / 60.0f;
+	step(in);
+	in.mouse = in.screen = CanvasPoint{ 70.0f, 40.0f };
+	in.right_pressed = false;
+	in.delta = CanvasPoint{ 50.0f, 20.0f };
+	step(in);
+	in.right_down = false;
+	in.delta = CanvasPoint();
+	step(in);
+	TEST_EXPECT(out.take().empty() && !canvas.gesture().pressed());
+
 	// A press ends when the model's document goes from the canvas (an animation's rig model
 	// shown, which no document holds): an orbit stops there, raising nothing.
 	frame = frame_of();
@@ -1209,9 +1231,52 @@ int test_model_canvas() {
 	return 0;
 }
 
+// The camera's ray through a pixel (what a ground pick follows), and a line of text among the
+// shapes: the ray through the pixel a point projects to passes through the point, a unit of its
+// direction a unit ahead of the eye; the picture's middle looks at the target; the point on the
+// plane facing the eye is the ray's; a device with no size has no ray.
+int test_camera_ray_and_text() {
+	OrbitCamera camera;
+	camera.target = PreviewVec3{ 3.0f, 1.0f, -2.0f };
+	camera.yaw = 0.7f;
+	camera.pitch = 0.4f;
+	camera.distance = 25.0f;
+	const int width = 640, height = 480;
+	const auto close = [](const PreviewVec3 &a, const PreviewVec3 &b) {
+		return std::fabs(a.x - b.x) < 1e-3f && std::fabs(a.y - b.y) < 1e-3f &&
+				std::fabs(a.z - b.z) < 1e-3f;
+	};
+	const auto along = [](const PreviewVec3 &from, const PreviewVec3 &direction, float t) {
+		return PreviewVec3{ from.x + direction.x * t, from.y + direction.y * t,
+			from.z + direction.z * t };
+	};
+	const PreviewVec3 point{ 5.0f, -1.0f, -6.0f };
+	float x = 0.0f, y = 0.0f, depth = 0.0f;
+	TEST_EXPECT(camera.project(point, width, height, x, y, &depth) && depth > 0.0f);
+	PreviewVec3 from, direction;
+	TEST_EXPECT(camera.ray(x, y, width, height, from, direction));
+	TEST_EXPECT(close(from, camera.eye()) && close(along(from, direction, depth), point));
+	TEST_EXPECT(camera.ray(width * 0.5f, height * 0.5f, width, height, from, direction) &&
+			close(along(from, direction, camera.distance), camera.target));
+	PreviewVec3 on_plane;
+	TEST_EXPECT(camera.on_view_plane(x, y, width, height, point, on_plane) && close(on_plane, point));
+	TEST_EXPECT(!camera.ray(x, y, 0, height, from, direction) &&
+			!camera.ray(x, y, width, 0, from, direction));
+
+	OverlayList list;
+	list.text(CanvasPoint{ 12.0f, 34.0f }, "Barrel (13)", 0xC0FFEE);
+	TEST_EXPECT(list.shapes.size() == 1 && list.shapes[0].kind == OverlayKind::Text &&
+			list.shapes[0].text == "Barrel (13)" && list.shapes[0].points[0].x == 12.0f &&
+			list.shapes[0].points[0].y == 34.0f && list.shapes[0].rgb == 0xC0FFEE &&
+			list.shapes[0].filled && list.shapes[0].role == OverlayRole::Normal);
+	return 0;
+}
+
 } // namespace
 
 int main() {
+	if (test_camera_ray_and_text() != 0)
+		return 1;
 	if (test_gesture_machine() != 0)
 		return 1;
 	if (test_menu_canvas() != 0)
