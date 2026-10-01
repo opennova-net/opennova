@@ -11,19 +11,26 @@
 
 namespace opennova::editor {
 
-// A text document in its Document tab (ADR 0046 S13 D9; the view every text type's row makes until
-// S13 V10's script device, a Godot CodeEdit, takes the tab): Reload, Undo and Redo, what holds the
-// document read only, then its lines as the game reads them (its code page shown as UTF-8), read
-// only, an edit being a span a request sends (the editor MCP's edit_record): a gutter of line
-// numbers, each line holding a finding marked with the worst one's severity (its message the
-// marker's tooltip), and the line's text, scrolled sideways when it is wider than the tab. Clipped:
-// a text of many thousand lines draws those in sight. A RevealText event (a Go to's span, a Problems
-// row's line) is taken as it draws: the line is marked and scrolled to. The findings by line are
-// made once per change of the findings or of the document.
+class TextDocument;
+
+// A text document's lines, read only (ADR 0046 S13 D9): what a text type's tab shows where no script
+// device draws it (S13 V10: a headless workspace, the null backend's tests, a frame before the
+// Shell's device is made, or one where a popup or another window lies over the tab: ui/script_view
+// draws it then). Reload, Undo and Redo, what holds the document read only, then its lines as the
+// game reads them (its code page shown as UTF-8): a gutter of line numbers, each line holding a
+// finding marked with the worst one's severity (its message the marker's tooltip), and the line's
+// text, scrolled sideways when it is wider than the tab. Clipped: a text of many thousand lines
+// draws those in sight. A RevealText event (a Go to's span, a Problems row's line) is taken as the
+// lines draw: the line is marked and scrolled to. The findings by line are made once per change of
+// the findings or of the document.
 class TextView final : public DocumentView {
 public:
 	void draw(Workspace &workspace, const DocumentBase &document) override;
 	void rebind(const DocumentBase &document) override;
+	// Its parts, as draw draws them: the toolbar (Reload, Undo, Redo) with what holds the document read
+	// only, then the lines (the RevealText events it holds taken first).
+	void draw_toolbar(Workspace &workspace, const TextDocument &document);
+	void draw_lines(Workspace &workspace, const TextDocument &document);
 
 	// The line the last RevealText marked (0 for none), and how many times the lines' markers were
 	// made (once per change of the findings or the document, never for a frame).

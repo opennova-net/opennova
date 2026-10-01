@@ -149,14 +149,17 @@ void EditorApp::_ready() {
 	ImGuiPassNode::_ready();
 	// The session pumps whether or not the workspace draws (headless tests, the smoke).
 	set_process(true);
-	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel
-	// (authoring/viewport_devices), drawn only by a viewport's canvas; headless runs keep them too
-	// (the MCP, the tests read what they placed), each Preview-role kind's target given one, where the
-	// workspace gives one only to the kind the Preview window shows (its views ask for the rest as they
-	// draw). A device given up retires its SubViewport here, freed at the next frame.
+	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel, or are a
+	// Control placed over the canvas's rect (the script device's CodeEdit, S13 V10)
+	// (authoring/viewport_devices), drawn only by a viewport's view; headless runs keep them too (the
+	// MCP, the tests read what they placed), each Preview-role kind's target and the active document's
+	// Main view given one, where the workspace gives one only to the kind the Preview window shows (its
+	// views ask for the rest as they draw). A device given up retires its SubViewport here, freed at the
+	// next frame; a Control device's requests (the script device's edits) are served at once.
 	devices_ = std::make_unique<opennova::editor::ViewportDeviceCache>([this](ViewportKind p_kind) {
 		return make_viewport_device(*this, p_kind,
-				[this](SubViewport *p_viewport) { retired_.push_back(p_viewport->get_instance_id()); });
+				[this](SubViewport *p_viewport) { retired_.push_back(p_viewport->get_instance_id()); },
+				[this](const EditorRequest &p_request) { serve_device_request_(p_request); });
 	});
 	devices_->set_pin_all_targets(!is_available());
 	if (is_available()) {
@@ -302,6 +305,13 @@ void EditorApp::drain_requests() {
 		}
 	}
 #endif
+}
+
+// A device's request (the script device's span edits and its keystroke burst's end, S13 V10), served
+// at once: the device raises it from the control's deferred signals, outside the pump and its sync.
+void EditorApp::serve_device_request_(const EditorRequest &p_request) {
+	if (!session_) return;
+	if (!session_->handle(p_request)) serve(p_request);
 }
 
 // The requests only an OS can serve.

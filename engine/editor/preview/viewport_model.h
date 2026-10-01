@@ -18,6 +18,7 @@ class CanvasHalf;
 class DocumentBase;
 class ViewportDevice;
 struct SessionView;
+struct ViewEvent;
 struct ViewportDeviceReport;
 
 // What a viewport shows (ADR 0046 S13 V5): a picture of its document (Ready); nothing, there being
@@ -227,6 +228,11 @@ public:
 	// What the device read as it made its picture (its textures), where it placed what it drew, and
 	// the size its picture is now.
 	void device_report(const ViewportDeviceReport &report);
+	// A view event about its document, as the session posted it (S13 V10: the session's viewports
+	// hand each new one to the viewports of its path, Viewports::track and follow), held for the
+	// next follow: a RevealText's place, which a script viewport's device shows and selects. Nothing
+	// for a kind that takes none (the menu's and the model's: their windows take theirs).
+	virtual void receive(const ViewEvent &event) { (void)event; }
 
 protected:
 	ViewportModel(ViewportKind kind, std::string path, ViewportState state);

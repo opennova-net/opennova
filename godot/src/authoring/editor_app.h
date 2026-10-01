@@ -166,6 +166,8 @@ private:
 	void ensure_session();
 	void drain_requests();
 	void serve(const opennova::editor::EditorRequest &p_request);
+	// A device's request (a Control device's: the script device's edits), served at once.
+	void serve_device_request_(const opennova::editor::EditorRequest &p_request);
 	void show_picker(opennova::editor::PickPurpose p_purpose, bool p_directory);
 	void _on_dir_selected(const String &p_dir);
 	void _on_file_selected(const String &p_file);

@@ -49,9 +49,10 @@ constexpr DocumentType kTypes[] = {
 			validate_animation_map_file, AnimationMapDocument::schema,
 			animation_map_finding_codes },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
-	// (text_fields) or a project check; the script's text names references.
+	// (text_fields) or a project check; the script's text names references, and its compiler's
+	// words are its highlights (S13 V10).
 	{ DocumentTypeId::Script, "script", make_script_document, validate_script_file, text_fields,
-			script_finding_codes, nullptr, script_references },
+			script_finding_codes, nullptr, script_references, script_highlights },
 	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
 			validate_music_script_file, text_fields, music_script_finding_codes },
 	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,

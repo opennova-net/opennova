@@ -19,13 +19,12 @@ enum class DocumentViewRole {
 	// The view draws the document's records: an outline (a tree, a list of the rows, master and
 	// detail), or a view of its own (a stylesheet's lines, a menu's screens and windows).
 	Records,
-	// A Main-role viewport fills the tab, the records' outline (the row's OutlineSpec) and the
-	// Inspector beside it (the mission's 3D view; ui/main_viewport_view): main_viewport is its hook,
-	// drawing the viewport of the Main-role kind that shows the type (S13 V5); no type has one yet.
+	// A Main-role viewport fills the tab: main_viewport is its hook, drawing the viewport of the
+	// Main-role kind that shows the type (S13 V5). Its row names the records' outline (its
+	// OutlineSpec), which ui/main_viewport_view draws beside the viewport with the Inspector (the
+	// mission's 3D view, to come), or a view of its own, which draws the viewport its way (every text
+	// type's script view, S13 V10: its toolbar above the script device, ui/script_view).
 	MainViewport,
-	// The view draws the document's text (S13 D9: its lines, read only, its findings in the
-	// gutter, ui/text_view), until S13 V10's script device (a Godot CodeEdit) fills the tab.
-	Text,
 };
 
 // A document's view in its Document tab (ADR 0046 S13 V3; CONTEXT.md "Document view"): made from
@@ -54,7 +53,8 @@ public:
 	virtual void rebind(const DocumentBase &document) { (void)document; }
 	// The Main-role viewport that fills the tab where the view's row's role is MainViewport, drawn
 	// in the room the tab gives it: true when it drew one (ui/main_viewport_view, S13 V5: the
-	// viewport's view, its canvas filling the room, with ImGui overlays); a view of records has none.
+	// viewport's view, its canvas filling the room, with ImGui overlays; ui/script_view, S13 V10: the
+	// script device, false where no device draws); a view of records has none.
 	virtual bool main_viewport(Workspace &workspace, const DocumentBase &document) {
 		(void)workspace;
 		(void)document;
@@ -90,7 +90,8 @@ private:
 // in ui/document_views.cpp, which does not build without it (static_asserts): its role, and the
 // view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view; for a MainViewport
 // row, the outline beside the viewport, ui/main_viewport_view), or a view of its own, which its
-// make makes (one of the two).
+// make makes (one of the two; a MainViewport row's draws the viewport itself, the text types'
+// script view, S13 V10).
 struct DocumentViewRow {
 	DocumentTypeId type = DocumentTypeId::None;
 	DocumentViewRole role = DocumentViewRole::Records;

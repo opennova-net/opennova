@@ -101,7 +101,9 @@ add_library(opennova_editor STATIC
     # tree, its findings and a screen as the render check compiled it, as the menu_tree,
     # menu_findings and menu_render queries read them; the canvas's one gesture machine, and the
     # kinds' halves of it: what a press on the menu's or the model's picture takes, what its drag
-    # writes and what is drawn over the picture
+    # writes and what is drawn over the picture; the script device's viewport (S13 V10: a text
+    # document's text as its Godot control shows it, the span edit a control's text plans, the
+    # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -116,6 +118,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_rig.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/script_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/shown_text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
@@ -220,6 +225,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/script_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp

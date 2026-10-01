@@ -13,10 +13,14 @@
 // is sent is held until it draws and taken as it does; a MainViewport row's type is one a Main-role
 // viewport kind shows (S13 V5). Two open documents of a type get a view each, whose filters are their
 // own. A string table's cell being edited keeps the keyboard, and ends its edit, scrolled out of
-// sight. S13 D9: every text type's view draws its lines (its first line that is not blank shows),
-// has no main viewport, and a RevealText it is sent marks its line; a text of many thousand lines
-// draws only those in sight, the line a reveal names among them. The MainViewport role's view (no
-// type plays it yet) draws its outline beside the viewport, whose canvas fills the rest of the tab
+// sight. S13 D9, V10: every text type's row plays the MainViewport role with a view of its own (the
+// script view), whose Main view is the script device (ViewportKind::Script); where no device draws
+// (no devices here) it draws the lines (its first line that is not blank shows), and a RevealText
+// it is sent marks its line; a text of many thousand lines draws only those in sight, the line a
+// reveal names among them. With the workspace's devices, the script view places its device in the
+// rest of the tab below its toolbar (the rect it reserves, the picture where its cursor stands),
+// raising nothing, and draws the lines instead while a popup lies over the tab. The MainViewport
+// role's outline view draws its outline beside the viewport, whose canvas fills the rest of the tab
 // through the workspace's device; in the Document window while an operation holds the documents,
 // its outline is held back and its canvas is not (a drag orbits its camera).
 #include <cstdio>
@@ -33,9 +37,11 @@
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/session/session_operation.h>
+#include <editor/preview/script_viewport.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/main_viewport_view.h>
+#include <editor/ui/script_view.h>
 #include <editor/ui/text_view.h>
 #include <formats/rtxt/rtxt.h>
 #include "editor_ui_test_support.h"
@@ -162,7 +168,7 @@ std::string first_title(const DocumentBase &document) {
 void test_every_view() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::vector<Fixture> files = fixtures(repo);
-	size_t types = 0, views = 0, frames = 0;
+	size_t types = 0, views = 0, frames = 0, main_rows = 0, scripts = 0;
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id) {
 		const DocumentTypeId type_id = static_cast<DocumentTypeId>(id);
 		const DocumentType *type = document_type(type_id);
@@ -171,11 +177,12 @@ void test_every_view() {
 		      "every document type has its view's row, an outline or a make");
 		if (!type || !row) continue;
 		// A MainViewport row's type is one a Main-role viewport kind shows, the tab's viewport, with
-		// the outline beside it.
+		// the outline beside it or in a view of its own (a text's script view).
 		if (row->role == DocumentViewRole::MainViewport) {
 			const ViewportKind main = main_viewport_kind(type_id);
-			CHECK(main != ViewportKind::kCount && viewport_kind_row(main).role == ViewportRole::Main && row->outline,
-			      (std::string(type->name) + ": its MainViewport row's Main-role kind and outline").c_str());
+			CHECK(main != ViewportKind::kCount && viewport_kind_row(main).role == ViewportRole::Main,
+			      (std::string(type->name) + ": its MainViewport row's Main-role kind").c_str());
+			++main_rows;
 		}
 		size_t drawn = 0;
 		for (const Fixture &fixture : files) {
@@ -213,13 +220,11 @@ void test_every_view() {
 			const std::string shown = view_frame(workspace, *view, *document, 520.0f, true);
 			CHECK(!title.empty() && shown.find(title.substr(0, 8)) != std::string::npos,
 			      (where + ": the view draws its document (" + title + ")").c_str());
-			// A view that draws its records or its text has no main viewport; the frame it is asked in
-			// draws nothing.
-			if (row->role != DocumentViewRole::MainViewport) {
-				ImGui::NewFrame();
-				CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport").c_str());
-				ImGui::Render();
-			}
+			// A view that draws its records has no main viewport, nor does a text's where no device draws
+			// it (the workspace here has none); the frame it is asked in draws nothing.
+			ImGui::NewFrame();
+			CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport drawn").c_str());
+			ImGui::Render();
 			// A RevealRecord held until the view draws, taken as it draws.
 			ViewEvent reveal;
 			reveal.kind = ViewEventKind::RevealRecord;
@@ -230,25 +235,30 @@ void test_every_view() {
 			draw_frames(workspace, *view, *document, 520.0f, 1);
 			CHECK(view->held_events() == 0 && workspace.requests.empty(),
 			      (where + ": taken as the view draws, nothing raised").c_str());
-			// A text's view: a RevealText marks its line as it is taken.
-			if (row->role == DocumentViewRole::Text) {
-				auto *text_view = dynamic_cast<TextView *>(view.get());
-				CHECK(text_view != nullptr, (where + ": a text type's view is the text view").c_str());
+			// A text's view: the script view, its lines drawn where no device draws, a RevealText marking
+			// its line as it is taken.
+			if (text_of(*document)) {
+				auto *script = dynamic_cast<ScriptView *>(view.get());
+				CHECK(script != nullptr && row->role == DocumentViewRole::MainViewport && row->make,
+				      (where + ": a text type's view is the script view").c_str());
 				ViewEvent go;
 				go.kind = ViewEventKind::RevealText;
 				go.path = document->path();
 				go.locator = "2:1";
 				view->receive(go);
 				draw_frames(workspace, *view, *document, 520.0f, 1);
-				CHECK(text_view && text_view->marked_line() == 2 && view->held_events() == 0,
+				CHECK(script && script->lines().marked_line() == 2 && view->held_events() == 0 && !script->device_drawn(),
 				      (where + ": a RevealText marks its line").c_str());
+				scripts += script ? 1 : 0;
 			}
 		}
 		CHECK(drawn > 0, (std::string(type->name) + ": the contract has a file of its type").c_str());
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	std::printf("%zu document types, %zu views over their files, %zu frames drawn\n", types, views, frames);
+	CHECK(main_rows == 5 && scripts == 5, "every text type's row the Main role's, its view the script view");
+	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
+	            frames, scripts);
 }
 
 // Two open catalogs in the Document window: a view each, whose filter (its model's) is its own (the
@@ -534,9 +544,10 @@ void test_long_text() {
 	CHECK(loaded->load_bytes(text_bytes(text), "long.txt", AssetKind::Text, "jo", error), "the text loads");
 	const std::shared_ptr<const DocumentBase> document = loaded;
 	std::unique_ptr<DocumentView> view = make_view(*document);
-	auto *text_view = dynamic_cast<TextView *>(view.get());
-	CHECK(text_view != nullptr, "a text's view");
-	if (!text_view) return;
+	auto *script = dynamic_cast<ScriptView *>(view.get());
+	CHECK(script != nullptr, "a text's view");
+	if (!script) return;
+	TextView *text_view = &script->lines();
 	NullBackend backend;
 	TestWorkspace workspace;
 	seed(workspace.seeded, document);

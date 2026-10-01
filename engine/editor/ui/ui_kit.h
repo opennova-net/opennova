@@ -133,4 +133,11 @@ ImVec4 reference_color(ReferenceStatus status);
 // a second saying what to do.
 void empty_state(const char *text, const char *hint = nullptr);
 
+// Whether Dear ImGui draws anything over the rect (left, top, right, bottom, in the pass's pixels)
+// of the current window: a popup or a modal open anywhere (a menu, a dialog), or a window of the
+// same OS window drawn over the current one (one floating over a tab), a tooltip aside. What a Godot
+// Control placed over the rect would hide (the script device, ADR 0046 S13 V10), which is not placed
+// while it is so.
+bool covered(float left, float top, float right, float bottom);
+
 } // namespace opennova::editor::ui_kit

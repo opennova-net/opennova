@@ -3966,6 +3966,19 @@ target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_viewport COMMAND editor_viewport_test)
 
+# The script device's portable half (S13 V10, editor/preview/script_viewport, shown_text,
+# text_burst): ViewportKind::Script in the kinds' table, the Main role of every text type; the span
+# diff from a control's text, minimal and byte-exact against the TextDocument (an insert, a delete,
+# a replace across lines, CR LF kept, a paste of several lines, a lone CR and a NUL kept, a code
+# page's character stored, one it has none for refused); the keystroke burst; the gutter marks
+# from the findings; the compiler's words highlighted; through a real session, a burst served as one
+# undo step, the follow's actions, a Go to's span selected, a document held read only and the busy
+# gate, the envelope and a SetViewport.
+add_executable(editor_script_viewport_test editor/script_viewport_test.cpp)
+target_link_libraries(editor_script_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_script_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_script_viewport COMMAND editor_script_viewport_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)

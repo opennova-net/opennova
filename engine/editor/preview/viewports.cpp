@@ -76,6 +76,16 @@ void Viewports::track(const SessionView &view) {
 		const ViewportKind main = document ? main_viewport_kind(type_of(*document)) : ViewportKind::kCount;
 		if (main != ViewportKind::kCount) ensure(document->path(), main);
 	}
+	dispatch_(view);
+}
+
+void Viewports::dispatch_(const SessionView &view) {
+	for (const ViewEvent &event : view.events.held()) {
+		if (event.seq < next_event_) continue;
+		next_event_ = event.seq + 1;
+		for (Slot &slot : slots_)
+			if (slot.model->path() == event.path) slot.model->receive(event);
+	}
 }
 
 void Viewports::follow_(const SessionView &view, Slot &slot) {
@@ -106,12 +116,14 @@ void Viewports::follow_(const SessionView &view, Slot &slot) {
 }
 
 void Viewports::follow(const SessionView &view) {
+	dispatch_(view);
 	for (Slot &slot : slots_)
 		if (slot.model->attached()) follow_(view, slot);
 }
 
 ViewportModel *Viewports::follow_one(
 		const SessionView &view, const std::string &path, ViewportKind kind) {
+	dispatch_(view);
 	Slot *slot = slot_(path, kind);
 	if (!slot) return nullptr;
 	follow_(view, *slot);
@@ -145,7 +157,10 @@ bool Viewports::set(const SessionView &view, const std::string &path, const io::
 	ViewportKind kind = ViewportKind::kCount;
 	if (const io::JsonValue *named = json.get("kind")) {
 		if (!named->is_string() || !viewport_kind_from_token(named->string, kind)) {
-			error = "\"kind\" names a viewport kind (menu, model).";
+			error = "\"kind\" names a viewport kind (";
+			for (size_t i = 0; i < kViewportKindCount; ++i)
+				error += std::string(i ? ", " : "") + viewport_kind_token(static_cast<ViewportKind>(i));
+			error += ").";
 			return false;
 		}
 	}

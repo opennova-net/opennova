@@ -65,14 +65,20 @@ void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
 							 return !model || !model->attached();
 						 }),
 			slots_.end());
-	// What the Preview window shows (every kind's target where nothing draws to ask), then what a
-	// view asked for.
+	// What the Preview window shows (every kind's target where nothing draws to ask, and the active
+	// document's Main view, which its tab would draw: S13 V10), then what a view asked for.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
 		if (!pin_all_ && kind != view.documents.preview_shown) continue;
 		const std::string &target = view.documents.previews[kind].path;
 		if (!target.empty() && viewports.find(target, kind)) use_(viewports, target, kind);
 	}
+	if (pin_all_ && !view.documents.active.empty())
+		for (size_t i = 0; i < kViewportKindCount; ++i) {
+			const auto kind = static_cast<ViewportKind>(i);
+			if (viewport_kind_row(kind).role == ViewportRole::Main && viewports.find(view.documents.active, kind))
+				use_(viewports, view.documents.active, kind);
+		}
 	for (const Want &want : wanted_)
 		if (viewports.find(want.path, want.kind)) use_(viewports, want.path, want.kind);
 	wanted_.clear();

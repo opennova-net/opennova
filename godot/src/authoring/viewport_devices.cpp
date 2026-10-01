@@ -4,6 +4,7 @@
 
 #include "authoring/menu_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
+#include "authoring/script_device.h"
 #include "authoring/viewport_device.h"
 
 namespace godot {
@@ -18,20 +19,26 @@ std::unique_ptr<ViewportApplier> make_menu_applier(SubViewport &viewport) {
 std::unique_ptr<ViewportApplier> make_model_applier(SubViewport &viewport) {
 	return std::make_unique<ModelViewportApplier>(viewport);
 }
+std::unique_ptr<opennova::editor::ViewportDevice> make_script_device(Node &owner, ViewportDeviceRequests requests) {
+	return std::make_unique<ScriptDevice>(owner, std::move(requests));
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
-	{ ViewportKind::Menu, make_menu_applier },
-	{ ViewportKind::Model, make_model_applier },
+	{ ViewportKind::Menu, make_menu_applier, nullptr },
+	{ ViewportKind::Model, make_model_applier, nullptr },
+	{ ViewportKind::Script, nullptr, make_script_device },
 };
 
 constexpr bool devices_in_order() {
 	for (size_t i = 0; i < opennova::editor::kViewportKindCount; ++i)
-		if (kDevices[i].kind != static_cast<ViewportKind>(i) || !kDevices[i].make) return false;
+		if (kDevices[i].kind != static_cast<ViewportKind>(i) || (kDevices[i].make != nullptr) == (kDevices[i].make_control != nullptr))
+			return false;
 	return true;
 }
 
 static_assert(std::size(kDevices) == opennova::editor::kViewportKindCount, "every ViewportKind has exactly one device");
-static_assert(devices_in_order(), "the viewport devices follow ViewportKind's order, each with its make");
+static_assert(devices_in_order(),
+		"the viewport devices follow ViewportKind's order, each a SubViewport applier's or a Control device's make");
 
 } // namespace
 
@@ -41,9 +48,10 @@ const ViewportDeviceRow *viewport_device_row(ViewportKind kind) {
 }
 
 std::unique_ptr<opennova::editor::ViewportDevice> make_viewport_device(Node &owner, ViewportKind kind,
-		std::function<void(SubViewport *)> retire) {
+		std::function<void(SubViewport *)> retire, ViewportDeviceRequests requests) {
 	const ViewportDeviceRow *row = viewport_device_row(kind);
 	if (!row) return nullptr;
+	if (row->make_control) return row->make_control(owner, std::move(requests));
 	return std::make_unique<ViewportDevice>(owner, String("Viewport ") + opennova::editor::viewport_kind_token(kind),
 			[row](SubViewport &viewport) { return row->make(viewport); }, std::move(retire));
 }

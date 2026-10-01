@@ -4,6 +4,7 @@
 
 #include <editor/ui/menu_viewport_view.h>
 #include <editor/ui/model_viewport_view.h>
+#include <editor/ui/script_viewport_view.h>
 
 namespace opennova::editor {
 
@@ -11,10 +12,12 @@ namespace {
 
 std::unique_ptr<ViewportView> make_menu_view() { return std::make_unique<MenuViewportView>(); }
 std::unique_ptr<ViewportView> make_model_view() { return std::make_unique<ModelViewportView>(); }
+std::unique_ptr<ViewportView> make_script_view() { return std::make_unique<ScriptViewportView>(); }
 
 constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Menu, make_menu_view },
 	{ ViewportKind::Model, make_model_view },
+	{ ViewportKind::Script, make_script_view },
 };
 
 constexpr bool views_in_order() {

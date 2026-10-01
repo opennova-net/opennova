@@ -277,4 +277,28 @@ void empty_state(const char *text, const char *hint) {
 	ImGui::PopStyleColor();
 }
 
+bool covered(float left, float top, float right, float bottom) {
+	if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) return true;
+	const ImGuiContext &g = *GImGui;
+	const ImGuiWindow *own = ImGui::GetCurrentWindowRead()->RootWindow;
+	const ImRect rect(left, top, right, bottom);
+	// The windows are in display order, back to front: those after the current one's root are over it.
+	// A tooltip is left aside, and so are the dock space's own windows: its host stays behind
+	// everything, and the windows docked in it tile its room, never over one another.
+	bool above = false;
+	for (const ImGuiWindow *window : g.Windows) {
+		if (window == own) {
+			above = true;
+			continue;
+		}
+		if (!above || !window->Active || window->Hidden || window->RootWindow == own) continue;
+		if (window->Flags & (ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_DockNodeHost | ImGuiWindowFlags_NoBringToFrontOnFocus))
+			continue;
+		if (window->DockIsActive && window->RootWindowDockTree == own->RootWindowDockTree) continue;
+		if (window->Viewport != own->Viewport) continue;
+		if (window->Rect().Overlaps(rect)) return true;
+	}
+	return false;
+}
+
 } // namespace opennova::editor::ui_kit
