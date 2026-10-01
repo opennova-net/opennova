@@ -104,13 +104,13 @@ bool Simulation::request_local_player_stance(Stance p_stance) {
 	// The SELECT gates and the mutual-exclusion latch are the kernel's
 	// [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60].
 	if (!kernel_->local.request_stance(p_stance)) return false;
-	// A joiner also SENDS the select — the witnessed key handlers emit one C2S
-	// 0x1D with the action id immediately; without it a retail host (and every
-	// other client) never sees this player crouch or go prone.
+	// A joiner also SENDS the select — the witnessed key handlers queue one C2S
+	// 0x1D with the action id for the next send boundary; without it a retail host
+	// (and every other client) never sees this player crouch or go prone.
 	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e]
 	if (joiner_role_ != nullptr && runtime_) {
 		static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
-		joiner_role_->send_stance_change(
+		(void)joiner_role_->queue_stance_change(
 				kStanceActionIds[static_cast<size_t>(p_stance)]);
 	}
 	return true;

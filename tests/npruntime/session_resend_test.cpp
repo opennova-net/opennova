@@ -136,7 +136,8 @@ bool check_session_header_key_validation() {
 
 bool check_reordered_same_batch_closes_gap_without_nack() {
 	// Joiner receive batch: frontier=1, then S2C seq3 arrives before seq2. Both datagrams are
-	// consumed before pump(), so seq2 admits and drains seq3 before the missing latch is resolved.
+	// consumed before the receive pump's tail, so seq2 admits and drains seq3 before the missing
+	// latch is resolved. [orig: NapiNPProtocol_PumpRecvQueues @0x6269bb..0x6269d6]
 	inmatch::JoinerConnection joiner("SameBatch");
 	joiner.seed_in_match(kServerKey, kClientKey, kClientScrk, kServerScrk,
 	                    1, 1, 0x0001, 0x14B9);
@@ -162,6 +163,10 @@ bool check_reordered_same_batch_closes_gap_without_nack() {
 	if (!expect(joiner_close.inbound_gameplay.size() == 2 &&
 	                    joiner.connection().seq.queued_inbound.empty(),
 	            "later S2C packet in the batch closes and drains the gap"))
+		return false;
+	if (!expect(joiner.finish_receive_pump().empty() &&
+	                    !joiner.connection().seq.missing_request_pending,
+	            "the receive pump's tail clears the latch without a NACK once the gap closed"))
 		return false;
 	const std::vector<std::vector<uint8_t>> joiner_boundary = joiner.pump(1);
 	ProtocolPacketHeader joiner_ack_header;
@@ -254,16 +259,21 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
 
 	const inmatch::JoinerConnection::PollResult gap =
 			joiner.handle_datagram(second.data(), second.size());
-	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty(),
+	if (!expect(gap.inbound_gameplay.empty() && gap.outbound.empty() &&
+	                    gap.immediate_outbound.empty(),
 	            "joiner queues S2C sequence two without NACKing before the batch boundary"))
 		return false;
 	if (!expect(joiner.take_net_quality_link_errors() == 0,
 	            "a queued gap raises no link error before the request goes out"))
 		return false;
-	const std::vector<std::vector<uint8_t>> gap_nacks = joiner.pump(3);
-	if (!expect(gap_nacks.size() == 1 && joiner.pump(3).empty(),
+	if (!expect(joiner.pump(3).empty(),
+	            "the send boundary never carries the missing-sequence request"))
+		return false;
+	const std::vector<uint8_t> gap_nack = joiner.finish_receive_pump();
+	if (!expect(!gap_nack.empty() && joiner.finish_receive_pump().empty(),
 	            "joiner emits exactly one NACK after the persistent-gap receive batch"))
 		return false;
+	const std::vector<std::vector<uint8_t>> gap_nacks{gap_nack};
 	// The sent 0x44 named a sequence: the incoming link error (flag 2)
 	// [orig: SendMissingSeqList cb_client_2 @0x6237aa].
 	if (!expect(joiner.take_net_quality_link_errors() == inmatch::kNetQualityLinkErrorIncoming &&
@@ -402,15 +412,19 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	const uint32_t next_before_bad = joiner.connection().seq.next_outbound_seq;
 	const std::vector<uint8_t> wrong_key = make_resend_datagram(
 			SESSION_OPCODE_SERVER_RESEND_LIST, kClientKey + 1, {1});
-	if (!expect(joiner.handle_datagram(
-			wrong_key.data(), wrong_key.size()).outbound.empty() &&
+	const inmatch::JoinerConnection::PollResult wrong_key_result =
+			joiner.handle_datagram(wrong_key.data(), wrong_key.size());
+	if (!expect(wrong_key_result.outbound.empty() &&
+		            wrong_key_result.immediate_outbound.empty() &&
 		            joiner.connection().seq.next_outbound_seq == next_before_bad,
 	            "joiner ignores 0x84 with a mismatched local key"))
 		return false;
 	const std::vector<uint8_t> malformed =
 			nw_encode_outbound(SESSION_OPCODE_SERVER_RESEND_LIST, {0x01, 0x00, 0x00});
-	if (!expect(joiner.handle_datagram(
-			malformed.data(), malformed.size()).outbound.empty(),
+	const inmatch::JoinerConnection::PollResult malformed_result =
+			joiner.handle_datagram(malformed.data(), malformed.size());
+	if (!expect(malformed_result.outbound.empty() &&
+		            malformed_result.immediate_outbound.empty(),
 	            "joiner ignores a resend-list body shorter than its key"))
 		return false;
 
@@ -421,8 +435,10 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 			joiner.handle_datagram(
 					gap_nacks[0].outbound[0].data(),
 					gap_nacks[0].outbound[0].size());
-	if (!expect(resend.outbound.size() == 1,
-	            "valid server 0x84 makes the joiner emit one reconstructed packet"))
+	// The rebuilt packet is transmitted by the resend handler itself, not held for the
+	// send boundary [orig: NapiNP_HandleResendList -> SendSessionPacket @0x6239b6].
+	if (!expect(resend.immediate_outbound.size() == 1 && resend.outbound.empty(),
+	            "valid server 0x84 makes the joiner transmit one reconstructed packet at once"))
 		return false;
 	// The honoured 0x84 named a sequence: the joiner's outgoing link error
 	// (flag 1) [orig: NapiNP_HandleResendList cb_client_3 @0x623a24].
@@ -432,7 +448,7 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	ProtocolPacketHeader resent_header;
 	std::vector<ProtocolMessage> resent_messages;
 	if (!expect(decode_session_datagram(
-			resend.outbound[0], SESSION_OPCODE_PROTOCOL_MESSAGE, kClientScrk,
+			resend.immediate_outbound[0], SESSION_OPCODE_PROTOCOL_MESSAGE, kClientScrk,
 			resent_header, resent_messages) &&
 		            resent_header.seq_num == 1 && resent_header.ack_count == 1 &&
 		            resent_messages.size() == 1 && resent_messages[0].tag == 0x34 &&
@@ -441,7 +457,8 @@ bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 		return false;
 
 	inmatch::handle_server_datagram(
-			ctx, kPeer, resend.outbound[0].data(), resend.outbound[0].size(), 11);
+			ctx, kPeer, resend.immediate_outbound[0].data(),
+			resend.immediate_outbound[0].size(), 11);
 	if (!expect(ctx.np_protocol.connection_list[0].seq.last_inbound_seq == 2 &&
 	                    ctx.np_protocol.connection_list[0].seq.queued_inbound.empty(),
 	            "recovered C2S sequence one admits and drains queued sequence two"))

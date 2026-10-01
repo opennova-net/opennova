@@ -862,8 +862,12 @@ int main() {
 			               requested == std::vector<uint32_t>({1}),
 			       "real listener 0x84 requests the missing first C2S sequence");
 
+			// The resend handler transmits the rebuilt packet itself, from the
+			// receive pump [orig: NapiNP_HandleResendList ->
+			// CNapiNPConnection_SendSessionPacket @0x6239b6].
 			auto resend = joiner.handle_datagram(inbound.data(), inbound.size());
-			const bool has_reconstructed = resend.outbound.size() == 1;
+			const bool has_reconstructed =
+					resend.immediate_outbound.size() == 1 && resend.outbound.empty();
 			expect(has_reconstructed,
 			       "joiner reconstructs one packet for the listener's 0x84");
 			if (has_reconstructed) {
@@ -872,7 +876,8 @@ int main() {
 				opennova::ProtocolPacketHeader resend_header;
 				std::vector<opennova::ProtocolMessage> resend_messages;
 				expect(opennova::nw_decode_inbound(
-				               resend.outbound[0].data(), resend.outbound[0].size(),
+				               resend.immediate_outbound[0].data(),
+				               resend.immediate_outbound[0].size(),
 				               resend_opcode, resend_body) &&
 				               resend_opcode == opennova::SESSION_OPCODE_PROTOCOL_MESSAGE &&
 				               opennova::decode_protocol_packet_plaintext(
@@ -881,7 +886,7 @@ int main() {
 				                       resend_header, resend_messages) &&
 				               resend_header.seq_num == 1,
 				       "listener NACK reconstructs C2S sequence one under its old number");
-				send_jo(resend.outbound[0]);
+				send_jo(resend.immediate_outbound[0]);
 			}
 		}
 		opennova::net::close_socket(jo_client);

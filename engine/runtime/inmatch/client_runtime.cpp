@@ -375,10 +375,13 @@ void ClientRuntime::tick_roster_revive_countdown() {
 }
 
 void ClientRuntime::drain_visible_refreshes() {
-	// Each queued pair leaves as one reliable C2S 0x22 {slot, fields} then the
-	// empty C2S 0x23 [orig: CNapiNetwork_QueueReliableMessage(0x22, 1, 0, .., 3)
-	//  @0x43181d / @0x431ae4, then (0x23, 1, 0, .., 0) @0x43183e / @0x431b05];
-	// the listen client's pair rides its loopback.
+	// Each pair is QUEUED as one reliable C2S 0x22 {slot, fields} then the empty
+	// C2S 0x23, retained until ACK (user param 0); a joiner's pair leaves inside
+	// the next open send boundary with the rest of the queue, never framed (or
+	// aging the flush counter) at receive time [orig:
+	// CNapiNetwork_QueueReliableMessage(0x22, 1, 0, .., 3) @0x43181d / @0x431ae4,
+	// then (0x23, 1, 0, .., 0) @0x43183e / @0x431b05]; the listen client's pair
+	// rides its loopback.
 	std::vector<replication::ClientVisiblePlayersRefresh> &pending =
 			view_.state().pending_visible_refreshes;
 	for (const replication::ClientVisiblePlayersRefresh &r : pending) {
@@ -391,10 +394,8 @@ void ClientRuntime::drain_visible_refreshes() {
 			continue;
 		}
 		if (joiner_ == nullptr) continue;
-		std::vector<uint8_t> a = joiner_->frame_inner(c2s::PLAYER_SYNC_REQUEST, std::move(sync));
-		if (!a.empty()) framed_send_queue_.push_back(std::move(a));
-		std::vector<uint8_t> b = joiner_->frame_inner(c2s::VISIBLE_PLAYERS_REQUEST, {});
-		if (!b.empty()) framed_send_queue_.push_back(std::move(b));
+		pre_send_queue_.push_back(make_protocol_message(c2s::PLAYER_SYNC_REQUEST, std::move(sync)));
+		pre_send_queue_.push_back(make_protocol_message(c2s::VISIBLE_PLAYERS_REQUEST, {}));
 	}
 	pending.clear();
 }
@@ -520,6 +521,26 @@ bool ClientRuntime::queue_medic_request() {
 	// [orig: CNapiNetwork_QueueReliableMessage(ctx, 0x2E, 310, ...)].
 	medic.retention_flushes = 310;
 	pre_send_queue_.push_back(std::move(medic));
+	return true;
+}
+
+// The stance key SELECT QUEUES the change like every other input-side producer:
+// [i16 action id] (0xA9 crouch / 0xAA prone / 0xAC stand) as one reliable C2S
+// 0x1D, user param 0 = retained until ACK. It is framed only inside the next open
+// send boundary, in queue order behind what was queued before it, so it neither
+// mints a sequence between boundaries nor ages the flush counter. The server
+// applies it with mutual exclusion.
+// [orig: Input_HandleActionBinding_0 @0x4e0420, cases 169/170/172 @0x4e0d77/
+//  @0x4e0df3/@0x4e0e3e -> NetPacket_WriteInt16C @0x4e0dca ->
+//  CNapiNetwork_QueueReliableMessage(0x1D, 1, 0, .., 2) @0x4e0de7 ->
+//  CNapiNPConnection_QueueMessage @0x628640 -> NapiNPMessage_Create @0x627fc0
+//  (the connection's outgoing list only); applied by
+//  NapiNPServerMsg_HandleStanceChange @0x501c60]
+bool ClientRuntime::queue_stance_change(uint16_t action_id) {
+	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()) return false;
+	std::vector<uint8_t> body;
+	io::append_u16_le(body, action_id);
+	pre_send_queue_.push_back(make_protocol_message(c2s::STANCE_CHANGE, std::move(body)));
 	return true;
 }
 
@@ -894,6 +915,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			std::vector<uint8_t> dg = std::move(recv_fifo_.front());
 			recv_fifo_.pop_front();
 			JoinerConnection::PollResult pr = joiner_->handle_datagram(dg.data(), dg.size());
+			// A 0x84's rebuilt packets and a 0x85's pong are written to the socket by
+			// their opcode handlers, inside this receive pump: they leave at this
+			// datagram's position, ahead of (and regardless of) the field-3 gate below
+			// [orig: NapiNP_HandleResendList -> CNapiNPConnection_SendSessionPacket
+			//  @0x6239b6; Nwu_HandlePing -> CNapiNPConnection_SendPing @0x623c6f].
+			for (std::vector<uint8_t> &sent_now : pr.immediate_outbound)
+				outbound.push_back(std::move(sent_now));
 			// A 0x84 resend list that named a sequence is the outgoing link
 			// error, at its datagram's position [orig: NapiNP_HandleResendList
 			// @0x6239ef..0x623a37 -> cb_client_3 = Network_LogOutgoingPacketError
@@ -903,7 +931,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				// Host teardown sends its keyed goodbye burst synchronously, then
 				// destroys both pending and outgoing semantic queues. It does not
 				// wait for the normal field-3 send boundary, and nothing queued
-				// before or after the terminal record may follow the goodbyes.
+				// before or after the terminal record may follow the goodbyes
+				// (what earlier datagrams of this pump already wrote stays sent).
 				// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 ->
 				//  NapiNPDSPQueue_ClearPendingList @0x62556B;
 				//  NapiNPDSPQueue_ClearOutgoing @0x625574]
@@ -914,7 +943,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				pending_reload_notifications_.clear();
 				pending_loadout_resubmit_ = false;
 				pending_deployment_pick_set_ = false;
-				return std::move(pr.outbound);
+				for (std::vector<uint8_t> &goodbye : pr.outbound)
+					outbound.push_back(std::move(goodbye));
+				return outbound;
 			}
 			// 0x08/0x7B update the reducer's layout at their wire position.
 			// The connection's final game type may belong to a later message
@@ -929,11 +960,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					: 0xFFFFu);
 			view_.set_mp_attributes(joiner_->mp_attributes());
 			view_.set_local_player_slot(joiner_->local_player_slot());
-			// JoinerConnection has already allocated sequence numbers for exact
-			// admission packets and retained-session reconstruction. They still
-			// leave through PumpClientProtocolSend: queue their wire images so a
-			// field-3 update decoded later in this same receive result can close
-			// the whole frame's send boundary without reframing them.
+			// JoinerConnection has already allocated sequence numbers for the exact
+			// handshake/admission packets. They still leave through
+			// PumpClientProtocolSend: queue their wire images so a field-3 update
+			// decoded later in this same receive result can close the whole frame's
+			// send boundary without reframing them.
 			for (std::vector<uint8_t> &reply : pr.outbound)
 				framed_send_queue_.push_back(std::move(reply));
 			// World, live-frame, map, and gameplay bodies cross one reducer stream
@@ -963,22 +994,21 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			}
 			// Every 0x16 row whose connection slot the roster has not bound yet
 			// is dropped by the reducer and re-requested here: one reliable C2S
-			// 0x22 {slot, 0x1CF7} per dropped row, through the same session
-			// framing the housekeeping rides, released at the next send boundary
+			// 0x22 {slot, 0x1CF7} per dropped row, queued with the housekeeping
+			// and released inside the next open send boundary
 			// [orig: NapiNPClientMsg_PlayerList @0x42fc05..0x42fc3a ->
 			//  CNapiNetwork_QueueReliableMessage(ctx, 0x22, 1, 0,
 			//  {slot, 0xF7, 0x1C}, 3) @0x42fc35].
 			std::vector<uint8_t> &sync_retries =
 					view_.state().scoreboard.pending_sync_requests;
 			for (const uint8_t slot : sync_retries) {
-				std::vector<uint8_t> datagram = joiner_->frame_inner(
-						c2s::PLAYER_SYNC_REQUEST,
-						std::vector<uint8_t>{slot, 0xF7, 0x1C});
-				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
+				pre_send_queue_.push_back(make_protocol_message(
+						c2s::PLAYER_SYNC_REQUEST, std::vector<uint8_t>{slot, 0xF7, 0x1C}));
 			}
 			sync_retries.clear();
 			// Each S2C 0x6A action-3 walk reply queues the next step of the
-			// clan-registry walk: one reliable C2S 0x4E {netId}
+			// clan-registry walk: one reliable C2S 0x4E {netId}, released
+			// inside the next open send boundary
 			// [orig: NapiNPClientMsg_HandlePlayerJoinLeave ->
 			//  CNapiNetwork_QueueReliableMessage(ctx, 0x4E, 1, 0, {netId}, 4)
 			//  @0x43265c..0x43266c].
@@ -986,9 +1016,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			for (const uint32_t net_id : clan_walk) {
 				ClanRosterWalkRequest request;
 				request.after_account_id = net_id;
-				std::vector<uint8_t> datagram = joiner_->frame_inner(
-						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request));
-				if (!datagram.empty()) framed_send_queue_.push_back(std::move(datagram));
+				pre_send_queue_.push_back(make_protocol_message(
+						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request)));
 			}
 			clan_walk.clear();
 			drain_visible_refreshes();
@@ -1069,6 +1098,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				pre_send_queue_.push_back(std::move(reply));
 			}
 		}
+		// The receive pump ends with the connection's missing-sequence check: a future S2C
+		// packet seen in this batch whose gap the batch did not close sends ONE C2S 0x44 now,
+		// every client frame, outside the field-3 gate (finish_receive_pump carries the
+		// witness). A request that named a sequence raises the incoming link error at that
+		// send [orig: NapiNPProtocol_PumpRecvQueues @0x6269bb..0x6269d6 ->
+		//  CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd -> cb_client_2 =
+		//  Network_LogIncomingPacketError @0x4c4890 -> flag 2].
+		std::vector<uint8_t> missing_request = joiner_->finish_receive_pump();
+		if (!missing_request.empty()) outbound.push_back(std::move(missing_request));
+		apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 		// The recipient-specific 0x0A tail is the authoritative local health channel. Close the
 		// deployed gate on a fresh death frame before this same client frame reaches its send block.
 		// Positive health deliberately does not reopen it: respawn remains owned by the deploy flow.
@@ -1257,13 +1296,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		}
 		// Connection send boundary: advance the pre-spawn drive, emit retained-message
 		// active probes, and flush an ACK only if no substantive C2S producer above
-		// already carried it. Retail places this pump inside the same field-3 gate.
+		// already carried it. Retail places this pump inside the same field-3 gate
+		// (the 0x44 request is not here: the receive pump above sends it).
 		for (std::vector<uint8_t> &d : joiner_->pump(now_tick))
 			outbound.push_back(std::move(d));
-		// A 0x44 missing-sequence request that named a sequence is the incoming
-		// link error [orig: CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
-		// -> cb_client_2 = Network_LogIncomingPacketError @0x4c4890 -> flag 2].
-		apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
 		// Retail builds every packet at connection+0x64C, prunes message nodes
 		// against that same value, then increments it exactly once. MTU splits
 		// therefore remain one flush, and held frames never age finite records.

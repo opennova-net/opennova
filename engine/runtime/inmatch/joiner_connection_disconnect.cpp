@@ -26,7 +26,9 @@ namespace opennova::inmatch {
 // connection's reap clock is stamped @0x623C56, and either a 0x45 pong with WR
 // clear and the same MS goes back @0x623C5C (CNapiNPConnection_SendPing
 // @0x61F080: opcode 0x45 for a client, `[u32 remote key][WR][MS]`) or the rtt
-// lands in session_keys.rtt_ms @0x623C9B.
+// lands in session_keys.rtt_ms @0x623C9B. The pong leaves from inside the
+// receive pump: SendPing writes it straight to the socket (CNapiNPManager_SendTo
+// @0x61F261), so the host's round trip never includes our send-holdoff wait.
 void JoinerConnection::on_server_ping(const std::vector<uint8_t> &body, PollResult &out) {
 	SessionPingBody ping;
 	if (!parse_session_ping_body(body.data(), body.size(), ping)) return;
@@ -34,7 +36,7 @@ void JoinerConnection::on_server_ping(const std::vector<uint8_t> &body, PollResu
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
 	if (ping.wants_reply) {
-		out.outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
+		out.immediate_outbound.push_back(nw_encode_outbound(SESSION_OPCODE_CLIENT_PING,
 				build_session_ping_body(conn_.server_sk, /*wants_reply=*/false,
 						ping.timestamp_ms)));
 		return;
