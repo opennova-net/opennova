@@ -9,38 +9,46 @@
 namespace opennova::editor {
 
 // The argument vector Play spawns (ADR 0046 d8): the game runtime on a build directory,
-// packed data only (no `/d`, no `--loose-root`), its log to a file in the build so the
-// editor can tail it before the runtime MCP answers, and the MCP endpoint on the port
+// packed data only (no `/d`, no `--loose-root`), its working directory and its log in the run
+// directory Play took for it (run/run_directory.h, S13 A8) so the editor can tail the log before
+// the runtime MCP answers and nothing is written into the build, and the MCP endpoint on the port
 // the caller allocated. A source run drives the Godot binary at the project instead of a
 // packaged executable; the game flags ride after `--` in both forms because the runtime
 // reads Godot's own arguments and its user arguments in one pass.
 struct LaunchPlan {
 	std::string executable;
 	std::vector<std::string> args; // without argv[0]
-	std::string working_dir;       // the build directory
-	std::string log_file;          // <build>/session.log
+	std::string working_dir;       // the run directory
+	std::string log_file;          // <run>/session.log (the game install's own: <run>/_filelog.txt)
 	int mcp_port = 0;              // 0 = no endpoint
-	std::string build_dir;
+	std::string build_dir;         // the build it runs, which stays as the build wrote it
 };
 
-// The packaged runtime (opennova.exe) on `build_dir`. `engine_args` are Godot's own
+// The packaged runtime (opennova.exe) on `build_dir`, in `run_dir`. `engine_args` are Godot's own
 // options for the child (`--headless`, `--windowed`, `--quit-after N`), placed before
 // the `--` that starts the game flags.
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
-                                 const std::string &game_code, int mcp_port,
+                                 const std::string &run_dir, const std::string &game_code, int mcp_port,
                                  const std::string &mission = std::string(),
                                  const std::vector<std::string> &engine_args = {});
 
 // The same run from source: `godot --path <project> res://game/game_runtime_root.tscn -- ...`.
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
-                                   const std::string &build_dir, const std::string &game_code, int mcp_port,
+                                   const std::string &build_dir, const std::string &run_dir,
+                                   const std::string &game_code, int mcp_port,
                                    const std::string &mission = std::string(),
                                    const std::vector<std::string> &engine_args = {});
 
-// Copy the three retail runtime files beside the built data, then prepare the
-// historical Jointops.exe /w /d /FRISK launch. The game install is only read.
+// The historical Jointops.exe /w /d /FRISK launch in `run_dir`: the game install's game opens its
+// archives and, under /d, its loose files from its working directory [orig: PFF_OpenAllArchives @
+// 0x4a4310, CWD-relative _lopen; docs/vfs/vfs-pff-mount-re.md] and writes there (game.cfg, its
+// _filelog.txt), so the run directory gets the build's files (its archives linked, or copied where
+// the file system cannot link them; its loose files copied, the game may rewrite them), the
+// install's executable and Bink DLL, and a game.cfg, the build's own when the project has one,
+// else the install's. Every file is checked before any is copied, so a missing one launches
+// nothing. The game install and the build directory are only read.
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
-                                LaunchPlan &out, Diagnostic &error);
+                                const std::string &run_dir, LaunchPlan &out, Diagnostic &error);
 
 // The plan as one line for a log or the Output window (arguments quoted when needed).
 std::string launch_plan_command_line(const LaunchPlan &plan);

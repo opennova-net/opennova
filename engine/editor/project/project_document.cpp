@@ -37,6 +37,8 @@ ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	p.import_cache_file = (fs::path(p.cache_dir) / kImportCacheFileName).generic_string();
 	p.index_dir = (fs::path(p.cache_dir) / "index").generic_string();
 	p.build_dir = (fs::path(p.cache_dir) / "build").generic_string();
+	p.build_cache_file = (fs::path(p.cache_dir) / kBuildCacheFileName).generic_string();
+	p.run_dir = (fs::path(p.cache_dir) / "run").generic_string();
 	p.staging_dir = (fs::path(p.cache_dir) / "staging").generic_string();
 	return p;
 }

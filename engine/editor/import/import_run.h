@@ -15,6 +15,7 @@ struct ImportedSource {
 	std::string sidecar;  // project-relative
 	std::string importer;
 	std::string output_dir; // project-relative, under .opennova/imported/
+	std::vector<std::string> inputs;  // project-relative: the other files its import read (S13 A8)
 	std::vector<std::string> outputs; // project-relative
 	bool reimported = false;
 	bool ok = true; // false when the last import failed (the findings say why)
@@ -32,13 +33,14 @@ struct ImportRunResult {
 // writes the record (import_assets), and the pass never makes one: a file with no
 // record is not an import source (a PNG without one is a texture the game loads as it
 // is). A source is imported again when its record names another importer or version,
-// the source's content no longer hashes to the record's, an output is missing, or the
-// record changed since this machine made the outputs (an option edited by hand, a
-// sidecar pulled with a new source); `force` imports again the sources `only` names
-// (every one when it is empty) even when nothing changed. The machine-local import
-// cache (`paths.import_cache_file`) keeps each source's size and last-write time with
-// the content hash they vouch for, so an untouched source is not read again, and the
-// fingerprint of the record its outputs were made from; a source the cache does not
+// the source's content no longer hashes to the record's, an input the record lists (S13 A8:
+// a file the importer read through its ImportContext) is gone or no longer hashes to its
+// line, an output is missing, or the record changed since this machine made the outputs (an
+// option edited by hand, a sidecar pulled with a new source); `force` imports again the sources
+// `only` names (every one when it is empty) even when nothing changed. The machine-local import
+// cache (`paths.import_cache_file`) keeps each source's and each input's size and last-write
+// time with the content hash they vouch for, so an untouched file is not read again, and the
+// fingerprint of the record each source's outputs were made from; a source the cache does not
 // know is imported again (a fresh clone has no outputs either). A sidecar is written
 // only when one of its fields changes, so a checkout that only touches file times
 // rewrites nothing; a sidecar that is there but does not read is a finding, left as it

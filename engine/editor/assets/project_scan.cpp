@@ -8,6 +8,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/import/import_run.h>
+#include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -119,13 +120,17 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		}
 	} else {
 		asset.kind = classify_asset(filename, nullptr);
+		// A name no rule types is a material chunk when the file holds one (a model's chunk row
+		// reads a file of any name as one), asked of its chunk headers alone: the build packs a
+		// material chunk and leaves a file of no kind the game knows out (S13 A8).
+		if (asset.kind == AssetKind::Unknown && is_material_chunk_file(path.string(), read))
+			asset.kind = AssetKind::MaterialChunk;
 	}
-	// A PNG is an import source only when its `.import` record says so; one
-	// without is a texture the game loads as it is (retail's menu loader
-	// decodes .png [orig: CTextureManager_LoadOrFindTexture @ 0x654980 ->
-	// load_png_from_file @ 0x6654d0]).
-	if (asset.kind == AssetKind::ImageSource && !fs::is_regular_file(fs::path(path.generic_string() + sidecar_suffix), ec))
-		asset.kind = AssetKind::Texture;
+	// A file an importer converts is an import source while its `.import` record is there,
+	// whatever its name makes it otherwise (S13 A8): the build packs its outputs, never it. One
+	// without is the kind its name gives (a PNG a texture the game loads as it is).
+	if (importer_for(filename) && fs::is_regular_file(fs::path(path.generic_string() + sidecar_suffix), ec))
+		asset.kind = AssetKind::ImportSource;
 	out.entries.push_back(std::move(asset));
 }
 

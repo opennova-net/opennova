@@ -13,7 +13,16 @@ namespace opennova::editor {
 
 // The editor's plain file plumbing: whole-file reads and the atomic write every
 // editor save uses (write `<path>.tmp`, then rename over `path`, so a crash leaves
-// either the old file or the new one). `error` carries the OS reason on failure.
+// either the old file or the new one). `error` carries the OS reason on failure. Every
+// one of them calls the system through system_path, so none is bound by MAX_PATH.
+
+// The path the system's own file calls take for `path` (ADR 0046 S13 A8): on Windows an absolute
+// path in its extended-length form (`\\?\C:\...`, a share's `\\?\UNC\server\share\...`), which
+// MAX_PATH does not bound, so a build under a deep folder writes as one under a short one does;
+// elsewhere the path as it is. For the call alone: a path the editor keeps, compares or shows
+// stays as it was given.
+std::filesystem::path system_path(const std::string &path);
+
 bool read_file_bytes(const std::string &path, std::vector<uint8_t> &out, std::string &error);
 bool read_file_text(const std::string &path, std::string &out, std::string &error);
 bool write_file_atomic(const std::string &path, const void *data, size_t size, std::string &error);
@@ -41,6 +50,12 @@ bool write_files_together(const std::vector<FileText> &files, std::vector<std::s
 
 // mkdir -p; true when the directory exists afterwards.
 bool ensure_directory(const std::string &path, std::string &error);
+
+// The file at `from` given a second name, `to`: a hard link, one file under two names with no
+// byte copied (a build's archive its content left as the last build packed it, a run directory's
+// archives: S13 A8). False, with the OS reason, where the file system will not (another volume, a
+// file system without links, `to` taken): the caller copies the file instead.
+bool link_file(const std::string &from, const std::string &to, std::string &error);
 
 // A directory whose name starts with '.' (.opennova/, .git/): the walks over the
 // project tree (the scan, the import pass) never enter one.

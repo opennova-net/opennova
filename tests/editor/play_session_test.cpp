@@ -1,16 +1,20 @@
 // Pins the Play launch plan and the one managed child (ADR 0046 d8/d10) over a fake
-// platform: the argument vector, where a packaged editor finds its runtime, one child at a
+// platform: the argument vector, where a packaged editor finds its runtime, the run directory the
+// game works in and what the game install's game finds there (S13 A8), one child at a
 // time, the stop request, the deadline kill, exit on its own with the code it exited with,
 // and the build directory the session protects while alive.
 #include <cstdio>
+#include <filesystem>
 #include <map>
 #include <string>
 #include <vector>
 
+#include <editor/project/project_files.h>
 #include <editor/run/launch_plan.h>
 #include <editor/run/play_session.h>
 
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -18,26 +22,29 @@ using namespace opennova::editor;
 using editor_test::FakePlatform;
 
 static int test_launch_plans() {
-	const LaunchPlan play = make_play_launch_plan("C:/tools/opennova.exe", "C:/p/.opennova/build/play/abc", "jo", 8975, "m.bms");
+	// S13 A8: the game runs on the build directory and works in the run directory, its log there.
+	const LaunchPlan play = make_play_launch_plan("C:/tools/opennova.exe", "C:/p/.opennova/build/play/abc",
+	                                              "C:/p/.opennova/run/1", "jo", 8975, "m.bms");
 	TEST_EXPECT(play.executable == "C:/tools/opennova.exe");
-	TEST_EXPECT(play.working_dir == "C:/p/.opennova/build/play/abc");
-	TEST_EXPECT(play.log_file == "C:/p/.opennova/build/play/abc/session.log");
-	const std::vector<std::string> expected = {"--log-file", "C:/p/.opennova/build/play/abc/session.log", "--",
+	TEST_EXPECT(play.build_dir == "C:/p/.opennova/build/play/abc" && play.working_dir == "C:/p/.opennova/run/1");
+	TEST_EXPECT(play.log_file == "C:/p/.opennova/run/1/session.log");
+	const std::vector<std::string> expected = {"--log-file", "C:/p/.opennova/run/1/session.log", "--",
 	                                           "--resource-dir", "C:/p/.opennova/build/play/abc", "/game", "jo",
 	                                           "--mcp-port", "8975", "--mission", "m.bms"};
 	TEST_EXPECT(play.args == expected);
 	TEST_EXPECT(launch_plan_command_line(play).find("--resource-dir C:/p/.opennova/build/play/abc") != std::string::npos);
 
-	const LaunchPlan quiet = make_play_launch_plan("opennova", "/b", "", 0);
-	TEST_EXPECT(quiet.args == std::vector<std::string>({"--log-file", "/b/session.log", "--", "--resource-dir", "/b"}));
-	const LaunchPlan headless = make_play_launch_plan("opennova", "/b", "", 0, "", {"--headless", "--quit-after", "3"});
+	const LaunchPlan quiet = make_play_launch_plan("opennova", "/b", "/r", "", 0);
+	TEST_EXPECT(quiet.args == std::vector<std::string>({"--log-file", "/r/session.log", "--", "--resource-dir", "/b"}));
+	const LaunchPlan headless = make_play_launch_plan("opennova", "/b", "/r", "", 0, "", {"--headless", "--quit-after", "3"});
 	TEST_EXPECT(headless.args[0] == "--headless" && headless.args[2] == "3" && headless.args[3] == "--log-file");
 
-	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "jo", 0);
+	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "C:/p/run/2", "jo", 0);
 	TEST_EXPECT(source.args[0] == "--path" && source.args[1] == "C:/repo/godot");
 	TEST_EXPECT(source.args[2] == "res://game/game_runtime_root.tscn");
-	TEST_EXPECT(source.args[3] == "--log-file");
-	TEST_EXPECT(launch_plan_command_line(make_play_launch_plan("C:/a b/opennova.exe", "/x y", "", 0))
+	TEST_EXPECT(source.args[3] == "--log-file" && source.args[4] == "C:/p/run/2/session.log");
+	TEST_EXPECT(source.working_dir == "C:/p/run/2" && source.build_dir == "C:/p/build");
+	TEST_EXPECT(launch_plan_command_line(make_play_launch_plan("C:/a b/opennova.exe", "/x y", "/r", "", 0))
 	                    .find("\"C:/a b/opennova.exe\"") == 0);
 
 	// A packaged editor runs the runtime the release layout puts beside it; a source run
@@ -63,12 +70,12 @@ static int test_lifecycle() {
 	Diagnostic error;
 	TEST_EXPECT(session.state() == PlayState::Stopped);
 	TEST_EXPECT(session.running_build_dir().empty());
-	const LaunchPlan plan = make_play_launch_plan("opennova.exe", "/build/1", "jo", 9000);
+	const LaunchPlan plan = make_play_launch_plan("opennova.exe", "/build/1", "/run/1", "jo", 9000);
 
 	TEST_EXPECT(session.start(plan, error));
 	TEST_EXPECT(session.state() == PlayState::Running && session.pid() == 100);
 	TEST_EXPECT(session.running_build_dir() == "/build/1");
-	TEST_EXPECT(platform.last_plan.working_dir == "/build/1");
+	TEST_EXPECT(platform.last_plan.working_dir == "/run/1");
 	TEST_EXPECT(!session.start(plan, error)); // one child at a time
 	TEST_EXPECT(error.code() == "play.already_running");
 	TEST_EXPECT(session.poll() == PlayState::Running);
@@ -120,9 +127,52 @@ static int test_lifecycle() {
 	return 0;
 }
 
+// S13 A8: the game install's game in a run directory: every source checked before anything is
+// copied, then the build's files (its archives linked or copied, its loose ones copied, its record
+// left behind), the install's executable and Bink DLL and a game.cfg (the build's own over the
+// install's) put there, the build directory and the install read alone; a run directory that is no
+// folder fails with play.install_copy, nothing launched.
+static int test_install_staging() {
+	editor_test::TempProjectDir dir("opennova_editor_install_staging");
+	const std::string install = dir.file("install"), build = dir.file("build/0123456789abcdef"),
+	                  run = dir.file("run/1");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "install settings"));
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(editor_test::write_text(build + "/" + name, std::string("PFF3 ") + name));
+	TEST_EXPECT(editor_test::write_text(build + "/intro.bik", "video") && editor_test::write_text(build + "/build.json", "{}") &&
+	            editor_test::write_text(build + "/GAME.CFG", "project settings"));
+	std::filesystem::create_directories(run);
+	const std::string tree = editor_test::tree_digest(build);
+	LaunchPlan plan;
+	Diagnostic error;
+	TEST_EXPECT(prepare_retail_launch_plan(install, build, run, plan, error));
+	TEST_EXPECT(plan.executable == run + "/Jointops.exe" && plan.working_dir == run && plan.build_dir == build &&
+	            plan.log_file == run + "/_filelog.txt");
+	std::string text, io_error;
+	for (const char *name : {"language.pff", "localres.pff", "resource.pff"})
+		TEST_EXPECT(read_file_text(run + "/" + name, text, io_error) && text == std::string("PFF3 ") + name);
+	TEST_EXPECT(read_file_text(run + "/intro.bik", text, io_error) && text == "video");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", text, io_error) && text == "project settings");
+	TEST_EXPECT(read_file_text(run + "/binkw32.dll", text, io_error) && text == "bink");
+	TEST_EXPECT(!std::filesystem::exists(run + "/build.json") && editor_test::tree_digest(build) == tree);
+	TEST_EXPECT(read_file_text(install + "/game.cfg", text, io_error) && text == "install settings");
+	// A loose file the game rewrites in its run directory leaves the build's as it was.
+	TEST_EXPECT(editor_test::write_text(run + "/intro.bik", "rewritten") && editor_test::tree_digest(build) == tree);
+
+	const std::string squat = dir.file("not a folder");
+	TEST_EXPECT(editor_test::write_text(squat, "a file"));
+	TEST_EXPECT(!prepare_retail_launch_plan(install, build, squat, plan, error) && error.code() == "play.install_copy");
+	std::filesystem::remove(install + "/Jointops.exe");
+	TEST_EXPECT(!prepare_retail_launch_plan(install, build, dir.file("run/2"), plan, error) &&
+	            error.code() == "play.install_missing" && !std::filesystem::exists(dir.file("run/2/game.cfg")));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_launch_plans();
+	failures += test_install_staging();
 	failures += test_lifecycle();
 	if (failures == 0) std::printf("editor_play_session: all tests passed\n");
 	return failures == 0 ? 0 : 1;

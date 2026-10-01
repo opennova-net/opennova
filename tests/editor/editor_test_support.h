@@ -1,10 +1,12 @@
 #pragma once
 // Shared plumbing for the editor core tests: a throwaway project directory under the
 // system temp directory (std::filesystem::temp_directory_path, so no env read of our
-// own) that is wiped on construction and destruction, a file writer, every missing
+// own) that is wiped on construction and destruction (through the system's paths, so a tree past
+// MAX_PATH goes too), a file writer, a tree's digest, every missing
 // required file of a session's project created, the project settings applied, a request and the
 // operation it starts run to their end, an operation that holds the documents, and a finding made
 // by its code's token with what it is about.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -17,6 +19,8 @@
 #include <variant>
 #include <vector>
 
+#include <base/io/hash.h>
+#include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/project_session.h>
@@ -128,12 +132,12 @@ struct TempProjectDir {
 	explicit TempProjectDir(const char *name) {
 		path = std::filesystem::temp_directory_path() / name;
 		std::error_code ec;
-		std::filesystem::remove_all(path, ec);
+		std::filesystem::remove_all(opennova::editor::system_path(path.generic_string()), ec);
 		std::filesystem::create_directories(path, ec);
 	}
 	~TempProjectDir() {
 		std::error_code ec;
-		std::filesystem::remove_all(path, ec);
+		std::filesystem::remove_all(opennova::editor::system_path(path.generic_string()), ec);
 	}
 	std::string root() const { return path.generic_string(); }
 	std::string file(const char *relative) const {
@@ -152,6 +156,36 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 
 inline bool write_text(const std::string &path, const std::string &text) {
 	return write_bytes(path, std::vector<uint8_t>(text.begin(), text.end()));
+}
+
+// What a directory tree holds, as one text: every entry's path under `dir` in their order, and
+// each file's size and FNV-1a of its bytes (S13 A8: a build directory compared before and after a
+// Play). Read through the system's paths, so a tree past MAX_PATH reads as well; "" when `dir` is
+// no directory.
+inline std::string tree_digest(const std::string &dir) {
+	namespace fs = std::filesystem;
+	const fs::path root = opennova::editor::system_path(dir);
+	std::error_code ec;
+	if (!fs::is_directory(root, ec)) return std::string();
+	std::vector<std::pair<std::string, fs::path>> entries;
+	for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator();
+	     it.increment(ec))
+		entries.emplace_back(it->path().lexically_relative(root).generic_string(), it->path());
+	std::sort(entries.begin(), entries.end());
+	std::string digest;
+	for (const auto &[relative, path] : entries) {
+		digest += relative;
+		std::error_code kind;
+		if (fs::is_regular_file(path, kind)) {
+			std::vector<uint8_t> bytes;
+			std::string error;
+			opennova::editor::read_file_bytes(path.string(), bytes, error);
+			digest += " " + std::to_string(bytes.size()) + " " +
+			          opennova::io::hex64(opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, bytes.data(), bytes.size()));
+		}
+		digest += "\n";
+	}
+	return digest;
 }
 
 // A finding of a code a table declares, by its token (session/finding_codes.h: finding_row), as a

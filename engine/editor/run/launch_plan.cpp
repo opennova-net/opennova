@@ -1,10 +1,15 @@
 #include <editor/run/launch_plan.h>
 
 #include <filesystem>
+#include <system_error>
 #include <utility>
 
+#include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
+#include <editor/project_build/build_run.h>
+#include <editor/run/run_directory.h>
 
 namespace fs = std::filesystem;
 
@@ -41,17 +46,32 @@ std::string quote(const std::string &arg) {
 	return out;
 }
 
+// The runtime on `build_dir`, working in `run_dir`, its log there.
+LaunchPlan runtime_plan(const std::string &build_dir, const std::string &run_dir, int mcp_port) {
+	LaunchPlan plan;
+	plan.build_dir = fs::path(build_dir).generic_string();
+	plan.working_dir = fs::path(run_dir).generic_string();
+	plan.log_file = (fs::path(run_dir) / kRunLogFileName).generic_string();
+	plan.mcp_port = mcp_port;
+	return plan;
+}
+
+// The file at `from` copied over `to`; false with the OS reason.
+bool copy_over(const fs::path &from, const fs::path &to, std::string &reason) {
+	std::error_code ec;
+	fs::copy_file(system_path(from.generic_string()), system_path(to.generic_string()),
+	              fs::copy_options::overwrite_existing, ec);
+	if (ec) reason = ec.message();
+	return !ec;
+}
+
 } // namespace
 
 LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const std::string &build_dir,
-                                 const std::string &game_code, int mcp_port, const std::string &mission,
-                                 const std::vector<std::string> &engine_args) {
-	LaunchPlan plan;
+                                 const std::string &run_dir, const std::string &game_code, int mcp_port,
+                                 const std::string &mission, const std::vector<std::string> &engine_args) {
+	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port);
 	plan.executable = runtime_executable;
-	plan.build_dir = fs::path(build_dir).generic_string();
-	plan.working_dir = plan.build_dir;
-	plan.log_file = (fs::path(build_dir) / "session.log").generic_string();
-	plan.mcp_port = mcp_port;
 	plan.args = engine_args;
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
@@ -60,14 +80,11 @@ LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const st
 }
 
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
-                                   const std::string &build_dir, const std::string &game_code, int mcp_port,
-                                   const std::string &mission, const std::vector<std::string> &engine_args) {
-	LaunchPlan plan;
+                                   const std::string &build_dir, const std::string &run_dir,
+                                   const std::string &game_code, int mcp_port, const std::string &mission,
+                                   const std::vector<std::string> &engine_args) {
+	LaunchPlan plan = runtime_plan(build_dir, run_dir, mcp_port);
 	plan.executable = godot_executable;
-	plan.build_dir = fs::path(build_dir).generic_string();
-	plan.working_dir = plan.build_dir;
-	plan.log_file = (fs::path(build_dir) / "session.log").generic_string();
-	plan.mcp_port = mcp_port;
 	plan.args.push_back("--path");
 	plan.args.push_back(godot_project_dir);
 	plan.args.push_back("res://game/game_runtime_root.tscn");
@@ -79,7 +96,7 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 }
 
 bool prepare_retail_launch_plan(const std::string &retail_directory, const std::string &build_dir,
-                                LaunchPlan &out, Diagnostic &error) {
+                                const std::string &run_dir, LaunchPlan &out, Diagnostic &error) {
 	out = LaunchPlan();
 	std::error_code ec;
 	if (retail_directory.empty() || !fs::is_directory(retail_directory, ec)) {
@@ -89,37 +106,59 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	}
 	const fs::path retail(retail_directory);
 	const fs::path build(build_dir);
-	fs::path sources[] = {retail / "Jointops.exe", retail / "binkw32_.dll", retail / "game.cfg"};
-	const char *names[] = {"Jointops.exe", "binkw32.dll", "game.cfg"};
-	const bool has_config = fs::is_regular_file(build / "game.cfg", ec);
-	// Same three-file staging as the former GamePacker.stage_retail (4521b859e^).
-	// JOTAC's underscored DLL is the real Bink; its plain DLL can be a hook shim.
-	if (!fs::is_regular_file(sources[1], ec)) sources[1] = retail / "binkw32.dll";
-	for (const fs::path &source : sources) {
-		if (source.filename() == "game.cfg" && has_config) continue;
-		if (!fs::is_regular_file(source, ec)) {
-			std::string message = "The game install has no " + source.generic_string();
-			if (source.filename() == "game.cfg")
-				message += ". Run the game once from its install folder to create game.cfg.";
-			error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error, message);
-			return false;
-		}
+	const fs::path run(run_dir);
+	// The build's files, but its record: a game.cfg among them is the project's own.
+	std::vector<std::string> built;
+	fs::path config = retail / "game.cfg";
+	for (const fs::directory_entry &entry : fs::directory_iterator(system_path(build_dir), ec)) {
+		std::error_code kind;
+		if (!entry.is_regular_file(kind)) continue;
+		const std::string name = entry.path().filename().string();
+		if (name == kBuildRecordFileName) continue;
+		if (strutil::to_lower(name) == "game.cfg") config = build / name;
+		else built.push_back(name);
 	}
-	// Check every required source before copying, so a missing file cannot launch
-	// a stale executable left by an earlier run. Built game data is not rewritten.
-	for (size_t i = 0; i < 3; ++i) {
-		if (i == 2 && has_config) continue; // keep authored or previously adjusted video settings
-		fs::copy_file(sources[i], build / names[i], fs::copy_options::overwrite_existing, ec);
-		if (ec) {
-			error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-			                     "Could not stage " + sources[i].generic_string() + ": " + ec.message());
-			return false;
-		}
+	if (ec) {
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not read the build " + build.generic_string() + ": " + ec.message());
+		return false;
 	}
-	out.executable = (build / "Jointops.exe").generic_string();
+	// Same three-file staging as the former GamePacker.stage_retail (4521b859e^), into the run
+	// directory. JOTAC's underscored DLL is the real Bink; its plain DLL can be a hook shim.
+	fs::path bink = retail / "binkw32_.dll";
+	if (!fs::is_regular_file(bink, ec)) bink = retail / "binkw32.dll";
+	const std::pair<fs::path, const char *> staged[] = {
+		{retail / "Jointops.exe", "Jointops.exe"}, {bink, "binkw32.dll"}, {config, "game.cfg"}};
+	// Every source checked before anything is copied, so a missing file launches nothing.
+	for (const auto &[source, name] : staged) {
+		if (fs::is_regular_file(system_path(source.generic_string()), ec)) continue;
+		std::string message = "The game install has no " + source.generic_string();
+		if (source == retail / "game.cfg") message += ". Run the game once from its install folder to create game.cfg.";
+		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error, message);
+		return false;
+	}
+	// The build's files beside the game: an archive linked (the game only reads one), copied where
+	// the file system will not link it; a loose file copied (the game may rewrite one).
+	for (const std::string &name : built) {
+		std::string reason;
+		const bool linked = strutil::ends_with_icase(name, ".pff") &&
+		                    link_file((build / name).generic_string(), (run / name).generic_string(), reason);
+		if (linked || copy_over(build / name, run / name, reason)) continue;
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not stage " + (build / name).generic_string() + " in " + run.generic_string() + ": " + reason);
+		return false;
+	}
+	for (const auto &[source, name] : staged) {
+		std::string reason;
+		if (copy_over(source, run / name, reason)) continue;
+		error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                     "Could not stage " + source.generic_string() + ": " + reason);
+		return false;
+	}
+	out.executable = (run / "Jointops.exe").generic_string();
 	out.build_dir = build.generic_string();
-	out.working_dir = out.build_dir;
-	out.log_file = (build / "_filelog.txt").generic_string();
+	out.working_dir = run.generic_string();
+	out.log_file = (run / "_filelog.txt").generic_string();
 	out.args = {"/w", "/d", "/FRISK"};
 	return true;
 }

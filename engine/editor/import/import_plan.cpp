@@ -15,6 +15,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
+#include <editor/import/importer.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/mns/mns.h>
@@ -97,7 +98,6 @@ AssetKind ImportOrigin::file_kind(const std::string &name) const {
 		std::vector<uint8_t> bytes;
 		if (read(spelling, bytes)) kind = classify_asset(spelling, &bytes);
 	}
-	if (kind == AssetKind::ImageSource) kind = AssetKind::Texture;
 	kinds_.emplace(normalized, kind);
 	return kind;
 }
@@ -258,11 +258,13 @@ public:
 			row.selected = true;
 			row.source = source;
 			row.name = output.name;
-			row.kind = classify_asset(output.name, &output.bytes);
-			// The game's own file (an archive's, the install's, one copied native) gets no import
-			// record: a PNG of it is the texture the game loads.
-			if (row.kind == AssetKind::ImageSource && (source.install || !source.entry.empty() || source.native))
-				row.kind = AssetKind::Texture;
+			// An author's file an importer converts becomes an import source, its record written with
+			// it (import_assets); the game's own file (an archive's, the install's, one copied native)
+			// gets no record and is the kind its name and bytes give: a PNG of it the texture the game
+			// loads.
+			const bool authored = !source.install && source.entry.empty() && !source.native;
+			row.kind = authored && importer_for(output.name) ? AssetKind::ImportSource
+			                                                 : classify_asset(output.name, &output.bytes);
 			row.made_from = converter ? name : std::string();
 			row.found_in = found_in;
 			const bool first = !provided_.count(key(output.name));
@@ -411,26 +413,26 @@ private:
 	}
 
 	// The planned file a reference loads: the first name its loader reads that the plan takes
-	// as a file of the kind it loads; null for none.
+	// as a file of a kind that serves it (file_serves_reference: the kind it loads, or for a chunk
+	// row a material chunk); null for none.
 	const Provided *provided_for(const ImportNeed &need) const {
-		const AssetKind wanted = reference_row(need.reference).file;
-		const std::string file = first_candidate(need, [this, wanted](const std::string &name) {
+		const std::string file = first_candidate(need, [this, &need](const std::string &name) {
 			const auto found = provided_.find(key(name));
-			return found != provided_.end() && found->second.kind == wanted;
+			return found != provided_.end() && file_serves_reference(found->second.kind, need.reference, need.loader_arg);
 		});
 		return file.empty() ? nullptr : &provided_.at(key(file));
 	}
 
 	// The origin's spelling of the file a reference loads from it: the first name its loader
-	// reads that the origin has as a file of the kind it loads, a name the plan takes as
+	// reads that the origin has as a file of a kind that serves it, a name the plan takes as
 	// another kind passed over (the project holds one file of a name); "" for none.
 	std::string look(const ImportOrigin *origin, const ImportNeed &need) const {
 		if (!origin) return std::string();
-		const AssetKind wanted = reference_row(need.reference).file;
-		const std::string file = first_candidate(need, [this, origin, wanted](const std::string &name) {
-			if (origin->file_kind(name) != wanted) return false;
+		const std::string file = first_candidate(need, [this, origin, &need](const std::string &name) {
+			if (!file_serves_reference(origin->file_kind(name), need.reference, need.loader_arg)) return false;
 			const auto taken = provided_.find(key(name));
-			return taken == provided_.end() || taken->second.kind == wanted;
+			return taken == provided_.end() ||
+			       file_serves_reference(taken->second.kind, need.reference, need.loader_arg);
 		});
 		return file.empty() ? std::string() : origin->find(file);
 	}

@@ -13,7 +13,6 @@
 
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
-#include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
@@ -156,15 +155,6 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		                         : problem == FileNameProblem::Path ? CoreFinding::RenamePath
 		                                                            : CoreFinding::RenameName;
 		plan.refusals.push_back(refusal(code, message, asset->relative_path));
-	} else if (archive_name_limit_binds(asset->kind) &&
-			!logical_name_fits_archive(new_name)) {
-		// check_project_file_name takes Unknown for a kind not decided yet (an import before its
-		// bytes are read); this file's is decided, none the game knows, and the build packs it all
-		// the same (route_asset), so the archives' name limit binds it as any packed kind's.
-		plan.refusals.push_back(refusal(CoreFinding::RenameName,
-				"'" + new_name +
-						"' does not fit the game's archives: names are up to 16 characters.",
-				asset->relative_path));
 	} else if (extension_of(new_name) != extension_of(asset->logical_name)) {
 		plan.refusals.push_back(refusal(CoreFinding::RenameKind, "Keep the extension: a file's kind comes from it.", asset->relative_path));
 	} else if (const AssetEntry *taken = scan.find(new_name); taken && taken != asset) {

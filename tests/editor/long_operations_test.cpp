@@ -300,7 +300,7 @@ static int test_project_scan_steps() {
 	}
 	const AssetScan imports = scan_project_assets(ProjectPaths::for_root(roots.back()), document_of(roots.back()));
 	const AssetEntry *logo = imports.find("logo.png"), *pcx = imports.find("logo.pcx"), *plain = imports.find("plain.png");
-	TEST_EXPECT(logo && logo->kind == AssetKind::ImageSource && pcx && pcx->imported_from == "art/logo.png" && plain &&
+	TEST_EXPECT(logo && logo->kind == AssetKind::ImportSource && pcx && pcx->imported_from == "art/logo.png" && plain &&
 	            plain->kind == AssetKind::Texture);
 	TEST_EXPECT(std::any_of(imports.diagnostics.begin(), imports.diagnostics.end(),
 	                        [](const Diagnostic &d) { return d.code() == "import.orphan_record"; }));

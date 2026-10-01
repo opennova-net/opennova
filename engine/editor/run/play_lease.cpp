@@ -48,7 +48,7 @@ bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid)
 // the creation time it records.
 bool read_lease(const fs::path &path, const std::string &build_id, int64_t pid, std::string &created) {
 	std::string text, error;
-	if (!read_file_text(path.generic_string(), text, error)) return false;
+	if (!read_file_text(path.string(), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object()) return false;
 	if (json.get_int("schema_version", -1) != kPlayLeaseSchemaVersion) return false;
@@ -81,14 +81,14 @@ bool write_play_lease(const PlayLease &lease, std::string &error) {
 void remove_play_lease(const std::string &build_dir, int64_t pid) {
 	if (!is_build_id(normalized_dir(build_dir).filename().string()) || pid < 0) return;
 	std::error_code ec;
-	fs::remove(lease_path_of(build_dir, pid), ec);
+	fs::remove(system_path(lease_path_of(build_dir, pid).generic_string()), ec);
 }
 
 std::vector<std::string> leased_build_dirs(const std::string &output_root, const LeaseLiveness &liveness) {
 	std::vector<std::string> dirs;
 	std::error_code ec;
 	for (const fs::directory_entry &entry :
-			fs::directory_iterator(output_root, fs::directory_options::skip_permission_denied, ec)) {
+			fs::directory_iterator(system_path(output_root), fs::directory_options::skip_permission_denied, ec)) {
 		if (ec) break;
 		const fs::path &path = entry.path();
 		std::string build_id, created;

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include <editor/import/import_run.h>
+#include <editor/import/importer.h>
 #include <editor/project/project_document.h>
 
 namespace opennova::editor {
@@ -23,10 +24,12 @@ namespace opennova::editor {
 // one run in a call comes to. Dropped before it is done, it has imported the sources it reached
 // (their outputs and records written, as a pass that stopped there would) and left the cache as it
 // was, so the next pass looks at those again. Single-threaded, like the session that steps it.
+// `table` is the importer table a source's importer is found in by its extension: the compiled-in
+// importers(), or a test's own rows.
 class ImportPass {
 public:
 	ImportPass(const ProjectPaths &paths, const ProjectDocument &project, bool force = false,
-			std::string only = std::string());
+			std::string only = std::string(), const std::vector<Importer> &table = importers());
 
 	// One step: files listed or sources taken until `budget` bytes are spent (at least one,
 	// whatever the budget); true once the pass is done (take() then hands its result over).
@@ -42,23 +45,30 @@ public:
 	ImportRunResult take();
 
 private:
-	// What this machine last saw of one source (ADR 0046 d6, S9c): its size and last-write
-	// time with the content hash they vouch for, and the fingerprint of the import record
-	// the outputs under the cache were made from. Machine-local and disposable, so the
+	// What this machine last saw of the project's files an import reads (ADR 0046 d6, S9c, S13 A8):
+	// each source's and each input's size and last-write time with the content hash they vouch
+	// for, and each source's fingerprint of the import record its outputs under the cache were made
+	// from (none: no outputs made on this machine yet). Machine-local and disposable, so the
 	// committed sidecar never carries a time a checkout changes.
-	struct CacheEntry {
+	struct FileSeen {
 		uint64_t size = 0;
 		int64_t modified = 0; // the file system's own clock ticks: compared, never shown
 		uint64_t hash = 0;
-		uint64_t record = 0; // 0 = no outputs made on this machine yet
 	};
-	using Cache = std::map<std::string, CacheEntry>; // by project-relative source path
+	struct Cache {
+		std::map<std::string, FileSeen> files;   // by project-relative path
+		std::map<std::string, uint64_t> records; // by the source's project-relative path
+	};
 
 	enum class Phase : uint8_t { Start, Listing, Importing, Done };
 
 	// The source at `path` (project-relative `relative`) taken: imported again when stale; the
 	// bytes it read and wrote added to `spent`.
 	void take_source(const std::filesystem::path &path, const std::string &relative, uint64_t &spent);
+	// The content hash of the project file at `file` (`relative`), the cache's while its size and
+	// last write hold, else read (its bytes added to `spent`); false when it is not there or cannot
+	// be read. What it saw is kept for the cache.
+	bool file_hash(const std::string &file, const std::string &relative, uint64_t &hash, uint64_t &spent);
 	static Cache load_cache(const std::string &path, std::string &text);
 	void save_cache() const;
 
@@ -66,6 +76,7 @@ private:
 	ProjectDocument project_;
 	bool force_ = false;
 	std::string only_;
+	const std::vector<Importer> *table_ = nullptr;
 	std::filesystem::path root_;
 	std::filesystem::path export_dir_;
 	std::filesystem::recursive_directory_iterator walk_;
@@ -74,7 +85,7 @@ private:
 	std::string current_;
 	std::string cache_text_; // the cache as read, to write it only when it changed
 	Cache cache_;
-	Cache seen_; // the sources this pass found: a gone source leaves the cache
+	Cache seen_; // the files this pass looked at: a gone source or input leaves the cache
 	ImportRunResult result_;
 	Phase phase_ = Phase::Start;
 };

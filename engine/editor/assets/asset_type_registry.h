@@ -14,24 +14,33 @@ namespace opennova::editor {
 // name-keyed .def family and score.ini by their whole names, then the extensions (scripts,
 // textures with a model's .mdt normal map, waves, banks, videos, plain text). `bytes` is
 // the file's content when the caller has it (null otherwise): it decides a `.bin` name (RTXT
-// vs SCR0 vs raw), and a name no extension types is a texture when it holds a material chunk
-// container.
+// vs SCR0 vs raw), and a name no extension types is a material chunk when it holds a material
+// chunk container.
 AssetKind classify_asset(const std::string &logical_name, const std::vector<uint8_t> *bytes);
 
-// True when classify_asset needs the content to decide (a `.bin` name). A name no extension
-// types is left unknown without its content: the scan does not read such a file (every save
-// scans again), an import and the import plan, which have the bytes, pass them.
+// True when classify_asset needs the whole content to decide (a `.bin` name). A name no
+// extension types is left unknown without its content: the scan asks such a file's chunk
+// headers alone (is_material_chunk_file), an import and the import plan, which have the bytes,
+// pass them.
 bool asset_classification_needs_bytes(const std::string &logical_name);
 
 // Bytes a model's chunk row reads (runtime types 16 to 18): the runtime's own chunk
 // loader takes them as one of its three chunks [orig: NQ8B @ 0x58F350; HRZ8 @ 0x58F470;
 // AOC8 @ 0x58F590] (renderer::load_material_chunk), whatever the file is named.
 bool is_material_chunk_container(const std::vector<uint8_t> &bytes);
+// The same answer for the file at `path`, read by its chunk headers alone
+// (renderer::material_chunk_loads: the 8-byte header, each chunk's tag and size, the found chunk's
+// first 28 bytes), so a large file of another kind costs a few small reads, kChunkHeaderReads at
+// most for each of the three chunks (a file whose bytes read as more empty chunks than that is not
+// taken for a container); `read` grows by the bytes read. The scan types a file no rule names by it
+// (S13 A8: the build packs a material chunk and leaves a file of no kind out).
+inline constexpr size_t kChunkHeaderReads = 1024;
+bool is_material_chunk_file(const std::string &path, uint64_t &read);
 
 // True when a file of that name is of `kind` by its name alone: what classify_asset makes
-// of it, for a `.bin` name (whose content decides) any of the table kinds it can be, for
-// a `.png` a texture too (the scan's kind for one no import record makes a source), and for
-// a name no extension types a texture too (a chunk container, by its content).
+// of it, for a `.bin` name (whose content decides) any of the table kinds it can be, an import
+// source for a name an importer converts (the scan's kind for one with its import record), and
+// for a name no extension types a texture too (a chunk container, by its content).
 bool asset_name_fits_kind(const std::string &logical_name, AssetKind kind);
 
 // The kind a required-resource row's file name implies without reading anything:

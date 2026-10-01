@@ -210,12 +210,23 @@ static int test_lifecycle() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1);
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_pid == 500);
-	TEST_EXPECT(platform.last_plan.working_dir == v.activity.last_build->build_dir);
+	// S13 A8: the game works in a run directory of its own, its log there, the build read alone.
+	const std::string built = v.activity.last_build->build_dir;
+	const std::string run_dir = root + "/.opennova/run/1";
+	TEST_EXPECT(platform.last_plan.working_dir == run_dir && platform.last_plan.build_dir == built);
+	TEST_EXPECT(platform.last_plan.log_file == run_dir + "/session.log");
 	TEST_EXPECT(platform.last_plan.args[0] == "--headless");
 	TEST_EXPECT(platform.last_plan.mcp_port == 8999);
 	TEST_EXPECT(v.activity.play_mcp_port == 8999 && view_section_to_json(v, ViewSection::Run).get_int("mcp_port", 0) == 8999);
-	TEST_EXPECT(session.running_build_dir() == v.activity.last_build->build_dir);
+	{
+		const opennova::io::JsonValue run = view_section_to_json(v, ViewSection::Run);
+		TEST_EXPECT(run.get_string("run_dir", "") == run_dir && run.get_string("log_file", "") == run_dir + "/session.log");
+	}
+	TEST_EXPECT(fs::is_regular_file(run_dir + "/run.json") && !fs::exists(built + "/session.log"));
+	TEST_EXPECT(session.running_build_dir() == built);
 	TEST_EXPECT(output_has(v, "Running: "));
+	const std::string build_tree = editor_test::tree_digest(built);
+	TEST_EXPECT(!build_tree.empty());
 
 	// A second Play while running is refused; the game's log is tailed line by line.
 	session.handle(request::play());
@@ -270,6 +281,10 @@ static int test_lifecycle() {
 	TEST_EXPECT(
 			output_has(v, "The game exited.") && !has_code(v.findings.diagnostics, "play.crashed"));
 	TEST_EXPECT(session.running_build_dir().empty());
+	// The game wrote its log in its run directory, which keeps it (the record of its game gone);
+	// the build directory is byte for byte what the build wrote.
+	TEST_EXPECT(!fs::exists(run_dir + "/run.json") && fs::is_regular_file(run_dir + "/session.log"));
+	TEST_EXPECT(editor_test::tree_digest(built) == build_tree);
 
 	// A new Play clears the previous boot report, its row with it. A game that ends with
 	// another code crashed or stopped on an error: Output says the code, and a Problems row
@@ -278,6 +293,8 @@ static int test_lifecycle() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_exit_code == -1);
+	// Its game gone, the run directory is taken again, emptied: the last game's log goes with it.
+	TEST_EXPECT(platform.last_plan.working_dir == run_dir && !fs::exists(run_dir + "/session.log"));
 	TEST_EXPECT(v.activity.boot_missing.empty() &&
 			!has_code(v.findings.diagnostics, "play.boot_missing"));
 	platform.codes[501] = 0xC0000005u;
@@ -517,10 +534,12 @@ static int test_retail_play() {
 	TEST_EXPECT(session.view().findings.diagnostics.back().message.find("game.cfg") !=
 			std::string::npos);
 	const std::string built = session.view().activity.last_build->build_dir;
-	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe")); // missing source: no partial stage
-	std::vector<uint8_t> archive_before, archive_after;
+	const std::string project = session.view().project.root;
+	const std::string run = project + "/.opennova/run/1";
+	TEST_EXPECT(!fs::exists(fs::path(run) / "Jointops.exe")); // missing source: nothing staged
+	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe"));
+	const std::string build_tree = editor_test::tree_digest(built);
 	std::string io_error;
-	TEST_EXPECT(read_file_bytes(built + "/localres.pff", archive_before, io_error));
 
 	TEST_EXPECT(editor_test::write_text(install + "/game.cfg", "video settings"));
 	TEST_EXPECT(editor_test::write_text(install + "/binkw32_.dll", "real JOTAC Bink"));
@@ -536,13 +555,28 @@ static int test_retail_play() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1 && session.view().activity.play_state == PlayState::Running);
-	TEST_EXPECT(platform.last_plan.executable == built + "/Jointops.exe");
-	TEST_EXPECT(platform.last_plan.working_dir == built && session.running_build_dir() == built);
+	// S13 A8: the install's game runs in the run directory, with what it needs beside it: its
+	// binaries, a game.cfg, and the build's files (its archives the build's own bytes); the build
+	// directory gets none of them, and holds what the build wrote whatever the game writes.
+	TEST_EXPECT(platform.last_plan.executable == run + "/Jointops.exe");
+	TEST_EXPECT(platform.last_plan.working_dir == run && platform.last_plan.build_dir == built &&
+	            session.running_build_dir() == built);
 	TEST_EXPECT(platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}));
-	TEST_EXPECT(platform.last_plan.mcp_port == 0 && platform.last_plan.log_file == built + "/_filelog.txt");
+	TEST_EXPECT(platform.last_plan.mcp_port == 0 && platform.last_plan.log_file == run + "/_filelog.txt");
 	std::string copied;
-	TEST_EXPECT(read_file_text(built + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
-	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "video settings");
+	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "real JOTAC Bink");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
+	for (const char *archive : {"language.pff", "localres.pff", "resource.pff"}) {
+		std::vector<uint8_t> in_build, in_run;
+		TEST_EXPECT(read_file_bytes(built + "/" + archive, in_build, io_error) &&
+		            read_file_bytes(run + "/" + archive, in_run, io_error) && in_build == in_run);
+	}
+	TEST_EXPECT(fs::is_regular_file(run + "/nw_cdata.coo") && !fs::exists(run + "/build.json"));
+	TEST_EXPECT(!fs::exists(fs::path(built) / "Jointops.exe") && !fs::exists(fs::path(built) / "binkw32.dll") &&
+	            !fs::exists(fs::path(built) / "game.cfg"));
+	TEST_EXPECT(editor_test::write_text(run + "/game.cfg", "adjusted in the game") &&
+	            editor_test::write_text(run + "/_filelog.txt", "LOADED FILE: resource.pff\r\n"));
+	TEST_EXPECT(editor_test::tree_digest(built) == build_tree);
 	{
 		FakePlatform other;
 		FilePreferencesStore reopened_preferences(dir.file("settings.json"));
@@ -557,29 +591,39 @@ static int test_retail_play() {
 	session.poll();
 	TEST_EXPECT(session.view().activity.play_state == PlayState::Stopped);
 
-	// Ordinary installs use the plain Bink DLL. A missing source cannot launch the
-	// staged executable left from the successful run.
+	// Ordinary installs use the plain Bink DLL, and the project's own game.cfg (a file the build
+	// copies loose) is the one the game reads. The run directory, its game gone, is taken again
+	// and emptied: what the last game wrote there goes. A missing source cannot launch the
+	// executable a run staged before.
 	fs::remove(fs::path(install) / "binkw32_.dll");
-	TEST_EXPECT(editor_test::write_text(built + "/game.cfg", "project video settings"));
+	TEST_EXPECT(editor_test::write_text(project + "/game.cfg", "project video settings"));
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 2);
-	TEST_EXPECT(read_file_text(built + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
-	TEST_EXPECT(read_file_text(built + "/game.cfg", copied, io_error) && copied == "project video settings");
+	TEST_EXPECT(platform.spawns == 2 && platform.last_plan.working_dir == run);
+	const std::string rebuilt = session.view().activity.last_build->build_dir;
+	TEST_EXPECT(rebuilt != built && read_file_text(rebuilt + "/game.cfg", copied, io_error) &&
+	            copied == "project video settings");
+	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "project video settings");
+	TEST_EXPECT(!fs::exists(run + "/_filelog.txt"));
+	const std::string rebuilt_tree = editor_test::tree_digest(rebuilt);
 	session.handle(request::stop_play());
 	session.poll();
 	fs::remove(fs::path(install) / "Jointops.exe");
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && session.view().activity.play_state == PlayState::Stopped);
+	TEST_EXPECT(session.view().findings.diagnostics.back().code() == "play.install_missing");
 
-	// A copy failure is also reported before any child starts.
+	// A run directory that cannot be made is reported before any child starts.
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
-	fs::remove(fs::path(built) / "binkw32.dll");
-	fs::create_directory(fs::path(built) / "binkw32.dll");
+	fs::remove_all(project + "/.opennova/run");
+	TEST_EXPECT(editor_test::write_text(project + "/.opennova/run", "a file where the runs go"));
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 2 && session.view().findings.diagnostics.back().code() == "play.install_copy");
+	TEST_EXPECT(platform.spawns == 2 && session.view().findings.diagnostics.back().code() == "play.run_directory");
+	fs::remove(project + "/.opennova/run");
+	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
 
 	retail.play_in_install = false;
 	editor_test::apply_settings(session, retail);
@@ -587,7 +631,9 @@ static int test_retail_play() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.executable == launcher.executable);
 	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
-	TEST_EXPECT(read_file_bytes(built + "/localres.pff", archive_after, io_error) && archive_after == archive_before);
+	TEST_EXPECT(platform.last_plan.working_dir == run && platform.last_plan.build_dir == rebuilt);
+	TEST_EXPECT(!fs::exists(run + "/Jointops.exe") && !fs::exists(run + "/localres.pff"));
+	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
 	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings");
 	return 0;
 }
@@ -680,22 +726,17 @@ static int test_outcomes_and_refusals() {
 	std::string text, error;
 	TEST_EXPECT(read_file_text(root + "/logo2.tga", text, error) && text == "late");
 
-	// A file of no kind the game knows is packed all the same (route_asset): a new name past
-	// the archives' 16 characters is refused as for any packed kind, nothing moved, where the
-	// rename once passed and the scan then held asset.name.too_long against the build.
+	// A file of no kind the game knows is left out of the build (S13 A8; it packed all the same
+	// before, its long name refused): a new name past the archives' 16 characters is taken, and
+	// the scan holds no name finding against it, only the warning that the build leaves it out.
 	TEST_EXPECT(editor_test::write_text(root + "/notes/readme.docx", "notes"));
 	session.handle(request::rescan());
 	session.run_operations();
 	const ActionOutcome long_name =
 			editor_test::handle_to_end(session, request::rename_asset("notes/readme.docx", "readme_notes.docx"));
-	TEST_EXPECT(!long_name.done() && has_code(long_name.findings, "rename.name"));
-	TEST_EXPECT(fs::exists(root + "/notes/readme.docx") &&
-			!fs::exists(root + "/notes/readme_notes.docx"));
-	// The name the rename refuses is the one the scan refuses.
-	TEST_EXPECT(editor_test::write_text(root + "/notes/readme_notes.docx", "notes"));
-	session.handle(request::rescan());
-	session.run_operations();
-	TEST_EXPECT(has_code(v.findings.diagnostics, "asset.name.too_long"));
+	TEST_EXPECT(long_name.done() && !has_code(long_name.findings, "rename.name"));
+	TEST_EXPECT(!fs::exists(root + "/notes/readme.docx") && fs::exists(root + "/notes/readme_notes.docx"));
+	TEST_EXPECT(!has_code(v.findings.diagnostics, "asset.name.too_long") && has_code(v.findings.diagnostics, "asset.kind.unknown"));
 	fs::remove_all(root + "/notes");
 	session.handle(request::rescan());
 	session.run_operations();
@@ -2866,6 +2907,11 @@ static int test_play_leases() {
 		TEST_EXPECT(record.get_int("schema_version", -1) == kPlayLeaseSchemaVersion && record.get_int("pid", -1) == 500 &&
 		            record.get_string("image", "") == executable && record.get_string("created", "") == "created 500" &&
 		            record.get_string("build_id", "") == fs::path(played).filename().string());
+		// S13 A8: its run directory records it the same way.
+		TEST_EXPECT(platform.last_plan.working_dir == v.project.root + "/.opennova/run/1");
+		TEST_EXPECT(read_file_text(platform.last_plan.working_dir + "/run.json", text, error) &&
+		            opennova::io::json_parse(text, record, error) && record.get_int("pid", -1) == 500 &&
+		            record.get_string("created", "") == "created 500");
 		// The editor quits; the game runs on (its handle released, never the process).
 	}
 	// A second game runs from the same build (another editor's), and files that only look like
@@ -2919,6 +2965,9 @@ static int test_play_leases() {
 	session.run_operations();
 	TEST_EXPECT(v.activity.play_state == PlayState::Running && v.activity.play_pid == 900 && v.activity.last_build->build_dir == second);
 	TEST_EXPECT(fs::exists(lease_of(second, 900)) && fs::exists(lease_of(second, 901)));
+	// The first game may still run in run/1, so this one takes run/2, run/1 as its game left it.
+	const std::string runs = v.project.root + "/.opennova/run";
+	TEST_EXPECT(platform.last_plan.working_dir == runs + "/2" && fs::is_regular_file(runs + "/1/run.json"));
 	session.handle(request::stop_play());
 	session.poll();
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
@@ -2937,6 +2986,13 @@ static int test_play_leases() {
 	const std::string fourth = rebuild("40");
 	TEST_EXPECT(!fourth.empty() && !fs::exists(played) && !fs::exists(lease_of(played, 600)) && !fs::exists(third));
 	for (const std::string &decoy : decoys) TEST_EXPECT(fs::is_regular_file(decoy));
+	// Every game gone, a Play takes run/1 again and removes run/2; a directory under the run root
+	// that no run's number names is left alone.
+	TEST_EXPECT(editor_test::write_text(runs + "/notes/keep.txt", "mine"));
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(v.activity.play_state == PlayState::Running && platform.last_plan.working_dir == runs + "/1");
+	TEST_EXPECT(!fs::exists(runs + "/2") && fs::is_regular_file(runs + "/notes/keep.txt"));
 	return 0;
 }
 

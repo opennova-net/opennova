@@ -1057,7 +1057,7 @@ void test_files_window() {
 														 AssetKind::ItemDefs),
 		file_entry("main.mnu", "menus/main.mnu", AssetKind::Menu),
 		file_entry("options.mnu", "menus/sub/options.mnu", AssetKind::Menu),
-		file_entry("logo.png", "art/logo.png", AssetKind::ImageSource),
+		file_entry("logo.png", "art/logo.png", AssetKind::ImportSource),
 		file_entry("logo.pcx", ".opennova/imported/0a1b/logo.pcx", AssetKind::Texture),
 		file_entry("readme.txt", "readme.txt", AssetKind::Text) };
 	editor_test::own(v.project.scan).entries[4].imported_from = "art/logo.png";

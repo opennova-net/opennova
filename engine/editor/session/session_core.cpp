@@ -637,11 +637,11 @@ void SessionCore::start_build(bool then_play, const std::string &out_dir) {
 	// lives in the session's slot, so the session outlives every call.
 	ProtectedDirs protected_dirs = play().protected_dirs(output_root);
 	// The build lands under the cache by default, which keeps itself out of the modder's
-	// repository; a cache that cannot be made fails the build's own first step, which says why.
-	if (out_dir.empty()) {
-		std::string cache_error;
-		ensure_project_cache_dir(paths_, cache_error);
-	}
+	// repository, and keeps its hash cache there wherever it lands (BuildPlan::hash_cache); a cache
+	// that cannot be made fails the build's own first step when it lands there, which says why, and
+	// otherwise only leaves every file to be hashed.
+	std::string cache_error;
+	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
 	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, then_play));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
@@ -672,7 +672,8 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		} else {
 			note("Built " + shown_path(result.build_dir, paths_.root) + " (" + std::to_string(result.archives_written.size()) +
 			     " archive(s) written, " + std::to_string(result.archives_reused.size()) + " reused, " +
-			     std::to_string(result.loose_written.size()) + " loose file(s))");
+			     std::to_string(result.loose_written.size()) + " loose file(s); " + std::to_string(result.files_hashed) +
+			     " file(s) hashed)");
 			view_.activity.status = "Build finished.";
 		}
 	} else {

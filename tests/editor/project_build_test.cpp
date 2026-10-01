@@ -6,7 +6,9 @@
 // steps leaving nothing, a file rewritten under a read of several steps failing the build, and
 // archives byte-identical to the single-call writer's however small the steps. S13 D5: every
 // kind's slot, read from its row, as the switch it replaced answered it, and the kinds it added
-// planned where their rows say.
+// planned where their rows say. S13 A8: a file of no kind the game knows left out, a material
+// chunk packed, the hash cache (one changed file read alone, the other archives linked), and an
+// output root past MAX_PATH.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -18,6 +20,8 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/asset_type_registry.h>
+#include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -63,13 +67,15 @@ static AssetEntry entry_of(const char *name, AssetKind kind) {
 // (asset_kinds). Every kind the build packs routes as it did. The two it never packs answered
 // Resource only because the switch had to answer and route to None: an archive, which the build
 // refuses, and an import source, whose outputs pack. The kinds S13 D5 added: a face with the art,
-// a wave and a map project in localres, the score table loose where retail ships it.
+// a wave and a map project in localres, the score table loose where retail ships it. S13 A8: a
+// file of no kind the game knows packs nowhere, and a material chunk (a texture by its bytes
+// before) with the art.
 struct Route {
 	AssetKind kind;
 	ArchiveSlot slot;
 };
 const Route kRoutes[] = {
-	{AssetKind::Unknown, ArchiveSlot::Resource}, // packed all the same until S13 A8
+	{AssetKind::Unknown, ArchiveSlot::None}, // resource.pff before S13 A8
 	{AssetKind::Archive, ArchiveSlot::None},
 	{AssetKind::Model, ArchiveSlot::Resource},
 	{AssetKind::Animation, ArchiveSlot::Resource},
@@ -77,6 +83,7 @@ const Route kRoutes[] = {
 	{AssetKind::FaceAnimation, ArchiveSlot::Resource},
 	{AssetKind::AiProfile, ArchiveSlot::Resource},
 	{AssetKind::Texture, ArchiveSlot::Resource},
+	{AssetKind::MaterialChunk, ArchiveSlot::Resource},
 	{AssetKind::Font, ArchiveSlot::Localres},
 	{AssetKind::Strings, ArchiveSlot::Language},
 	{AssetKind::MusicScript, ArchiveSlot::Localres},
@@ -114,7 +121,7 @@ const Route kRoutes[] = {
 	{AssetKind::Config, ArchiveSlot::Loose},
 	{AssetKind::Score, ArchiveSlot::Loose}, // a Config before S13 D5
 	{AssetKind::Text, ArchiveSlot::Loose},
-	{AssetKind::ImageSource, ArchiveSlot::None},
+	{AssetKind::ImportSource, ArchiveSlot::None}, // ImageSource, a .png's, before S13 A8
 };
 
 static int test_routing() {
@@ -469,13 +476,13 @@ static int test_file_rewritten_mid_read_fails() {
 		TEST_EXPECT(p.fill());
 		constexpr uint64_t kSize = 256 * 1024;
 		TEST_EXPECT(write_filler(p.root + "/music/big.sbf", kSize));  // a loose file
-		TEST_EXPECT(write_filler(p.root + "/extra/torn.xyz", kSize)); // packed: resource.pff
+		TEST_EXPECT(write_filler(p.root + "/extra/torn.aip", kSize)); // packed: resource.pff
 		const BuildPlan plan = p.plan();
 		TEST_EXPECT(plan.ok);
 		// Where the file's bytes lie in the run's progress: the hash pass reads every archive's
 		// entries in the plan's order, then the loose files; the packing and the copies follow in
 		// the same order.
-		const std::string name = pass == Pass::Archive ? "torn.xyz" : "big.sbf";
+		const std::string name = pass == Pass::Archive ? "torn.aip" : "big.sbf";
 		std::string source;
 		uint64_t total = 0, offset = UINT64_MAX;
 		const auto walk = [&](const BuildEntry &entry) {
@@ -488,7 +495,7 @@ static int test_file_rewritten_mid_read_fails() {
 		bool packed = false;
 		for (const BuildArchive &archive : plan.archives)
 			for (const BuildEntry &entry : archive.entries) {
-				packed = packed || entry.logical_name == "torn.xyz";
+				packed = packed || entry.logical_name == "torn.aip";
 				walk(entry);
 			}
 		for (const BuildEntry &entry : plan.loose) walk(entry);
@@ -546,6 +553,185 @@ static int test_archives_match_the_single_call_writer() {
 	return 0;
 }
 
+// A material chunk container under a name no rule types (renderer::load_material_chunk): an 8-byte
+// header, then an NQ8B chunk of a 2 x 2 image, its size at +12, its width and height at +28 and +32.
+static std::vector<uint8_t> chunk_file() {
+	std::vector<uint8_t> chunk(8 + 8 + 28 + 2 * 2 * 4, 0);
+	chunk[8] = 'N', chunk[9] = 'Q', chunk[10] = '8', chunk[11] = 'B';
+	chunk[12] = uint8_t(chunk.size() - 16);
+	chunk[28] = 2, chunk[32] = 2;
+	return chunk;
+}
+
+static bool in_build(const BuildPlan &plan, const std::string &name) {
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries)
+			if (entry.logical_name == name) return true;
+	for (const BuildEntry &entry : plan.loose)
+		if (entry.logical_name == name) return true;
+	return false;
+}
+
+// S13 A8: a file of no kind the game knows is left out of the build, in no archive and not copied
+// loose, whatever its name (the archives' limit binds it no more), the scan's warning saying so;
+// asking whether such a file is a material chunk reads its chunk headers, never the whole of it.
+// A material chunk under a name no rule types (a texture by its bytes before) packs with the art.
+static int test_unknown_kinds_are_left_out() {
+	Project p("opennova_editor_build_unknown_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	const std::string notes = "a_long_design_notes_file.xyz";
+	TEST_EXPECT(editor_test::write_text(p.root + "/notes/" + notes, "design notes"));
+	TEST_EXPECT(editor_test::write_bytes(p.root + "/art/field.nq8", chunk_file()));
+	TEST_EXPECT(write_filler(p.root + "/art/sketch.blend", 4 * 1024 * 1024));
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	const AssetEntry *unknown = scan.find(notes);
+	const AssetEntry *chunk = scan.find("field.nq8");
+	const AssetEntry *sketch = scan.find("sketch.blend");
+	TEST_EXPECT(unknown && unknown->kind == AssetKind::Unknown && sketch && sketch->kind == AssetKind::Unknown);
+	TEST_EXPECT(chunk && chunk->kind == AssetKind::MaterialChunk);
+	size_t warned = 0;
+	for (const Diagnostic &d : scan.diagnostics) {
+		TEST_EXPECT(d.code() != "asset.name.too_long");
+		if (d.code() == "asset.kind.unknown" && d.asset == "notes/" + notes) {
+			++warned;
+			TEST_EXPECT(d.message.find("the build leaves it out") != std::string::npos);
+		}
+	}
+	TEST_EXPECT(warned == 1);
+	std::string key;
+	AssetScan::Visit visit;
+	uint64_t read = 0;
+	TEST_EXPECT(scan_project_file(p.paths, p.doc, "art/sketch.blend", key, visit, &read));
+	TEST_EXPECT(read > 0 && read <= 3 * (kChunkHeaderReads * 8 + 28));
+	const BuildPlan plan = p.plan();
+	TEST_EXPECT(plan.ok && !in_build(plan, notes) && !in_build(plan, "sketch.blend") && in_build(plan, "field.nq8"));
+	const BuildReport report = run_build(plan, p.output_root());
+	TEST_EXPECT(report.ok && !fs::exists(fs::path(report.build_dir) / notes));
+	opennova::Vfs vfs;
+	TEST_EXPECT(vfs.mount_game(report.build_dir, std::string(), opennova::VfsMountMode::Packed,
+	                           opennova::VfsArchiveDiscovery::RetailTable));
+	TEST_EXPECT(!vfs.has_file(notes) && !vfs.has_file("sketch.blend") && vfs.has_file("field.nq8"));
+	return 0;
+}
+
+// S13 A8: the build keeps each file's content hash by the size and last write it was read at (the
+// plan's hash cache, the import cache's rule), so it reads only the files that changed: the first
+// build every file, an unchanged one none (the same build), one with a file changed that file
+// alone, writing its archive and linking the two others from the last build (no byte of them
+// copied); a file written again with the same bytes is read again (its last write moved) and
+// makes the same build; a file gone leaves the cache; a plan with no cache reads every file.
+static int test_hash_cache() {
+	Project p("opennova_editor_build_hash_cache_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(write_filler(p.root + "/music/extra.sbf", 1000));
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "zero"));
+	const BuildPlan plan = p.plan();
+	TEST_EXPECT(plan.ok && plan.hash_cache == p.paths.build_cache_file);
+	size_t files = 0;
+	uint64_t bytes = 0;
+	for (const BuildArchive &archive : plan.archives)
+		for (const BuildEntry &entry : archive.entries) ++files, bytes += entry.size_bytes;
+	for (const BuildEntry &entry : plan.loose) ++files, bytes += entry.size_bytes;
+	TEST_EXPECT(!fs::exists(p.paths.build_cache_file));
+	const BuildReport first = run_build(plan, p.output_root());
+	TEST_EXPECT(first.ok && first.files_hashed == files && first.bytes_hashed == bytes && files > 4);
+	TEST_EXPECT(fs::is_regular_file(p.paths.build_cache_file));
+
+	const BuildReport again = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(again.ok && again.reused_existing && again.files_hashed == 0 && again.bytes_hashed == 0);
+
+	TEST_EXPECT(write_table(p.root + "/strings/menutxt.bin", "one"));
+	const BuildReport changed = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(changed.ok && !changed.reused_existing && changed.build_id != first.build_id);
+	TEST_EXPECT(changed.files_hashed == 1 && changed.bytes_hashed == fs::file_size(p.root + "/strings/menutxt.bin"));
+	TEST_EXPECT(changed.archives_written == std::vector<std::string>{"language.pff"});
+	TEST_EXPECT(changed.archives_reused == std::vector<std::string>({"localres.pff", "resource.pff"}));
+	TEST_EXPECT(changed.archives_linked == changed.archives_reused);
+	for (const BuildArchive &archive : plan.archives) {
+		std::vector<uint8_t> built;
+		std::string error;
+		TEST_EXPECT(read_file_bytes(changed.build_dir + "/" + archive.file_name, built, error) && !built.empty());
+	}
+
+	// The same bytes written again: read again, the same build.
+	std::vector<uint8_t> table;
+	std::string error;
+	TEST_EXPECT(read_file_bytes(p.root + "/strings/menutxt.bin", table, error) &&
+	            write_file_atomic(p.root + "/strings/menutxt.bin", table.data(), table.size(), error));
+	const BuildReport touched = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(touched.ok && touched.reused_existing && touched.files_hashed == 1 && touched.build_id == changed.build_id);
+
+	// A file gone leaves the cache; the cache names the plan's files alone.
+	fs::remove(p.root + "/music/extra.sbf");
+	const BuildReport fewer = run_build(p.plan(), p.output_root());
+	std::string text;
+	TEST_EXPECT(fewer.ok && fewer.files_hashed == 0 && read_file_text(p.paths.build_cache_file, text, error));
+	TEST_EXPECT(text.find("extra.sbf") == std::string::npos && text.find("menutxt.bin") != std::string::npos);
+
+	// No cache: every file read, the same build.
+	BuildPlan uncached = p.plan();
+	uncached.hash_cache.clear();
+	size_t now = uncached.loose.size();
+	for (const BuildArchive &archive : uncached.archives) now += archive.entries.size();
+	const BuildReport all = run_build(uncached, p.output_root());
+	TEST_EXPECT(all.ok && all.reused_existing && all.files_hashed == now && all.build_id == fewer.build_id);
+	return 0;
+}
+
+// S13 A8: an output root deep enough that the build's staging and its files pass Windows' MAX_PATH
+// (260 characters) builds, mounts and publishes as a short one does (every call to the system takes
+// the path in its extended form, system_path), and the next build prunes it; a project folder
+// some 205 characters long whatever the temp folder, its own files short of the limit.
+static int test_deep_output_root() {
+	editor_test::TempProjectDir dir("opennova_editor_build_deep_test");
+	std::string root = dir.root();
+	while (root.size() < 200) root += "/" + std::string(std::min<size_t>(48, std::max<size_t>(1, 199 - root.size())), 'd');
+	root += "/Game";
+	ProjectDocument doc;
+	Diagnostic created;
+	TEST_EXPECT(create_project(root, "Deep", "jo", doc, created));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	{
+		const AssetScan scan = scan_project_assets(paths, doc);
+		const RequirementReport report = evaluate_requirements(doc, scan);
+		const CreateMissingResult made = create_missing_requirements(paths, doc, report, unmet_required_roles(report));
+		TEST_EXPECT(made.unavailable.empty() && made.diagnostics.empty());
+	}
+	const std::string video = "a_long_intro_movie_name.bik";
+	TEST_EXPECT(editor_test::write_text(root + "/video/" + video, "BIKi"));
+	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "shallow"));
+	const auto plan_of = [&]() {
+		const AssetScan scan = scan_project_assets(paths, doc);
+		AssetGraph graph;
+		ValidationCache cache;
+		const std::vector<std::shared_ptr<const DocumentBase>> open;
+		return plan_build(paths, scan, evaluate_requirements(doc, scan),
+		                  validate_project({ paths, doc, scan, open }, graph, cache));
+	};
+	const std::string output_root = paths.build_dir + "/play";
+	const BuildPlan plan = plan_of();
+	TEST_EXPECT(plan.ok);
+	const BuildReport report = run_build(plan, output_root);
+	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(report.ok && !report.build_dir.empty());
+	const std::string copied = report.build_dir + "/" + video;
+	TEST_EXPECT(copied.size() > 260); // past MAX_PATH, where the build failed before S13 A8
+	std::error_code ec;
+	TEST_EXPECT(fs::is_regular_file(system_path(copied), ec));
+	TEST_EXPECT(fs::is_regular_file(system_path(report.build_dir + "/localres.pff"), ec));
+	TEST_EXPECT(last_good_build_dir(output_root) == report.build_dir);
+
+	TEST_EXPECT(write_table(root + "/strings/menutxt.bin", "deep"));
+	const BuildReport next = run_build(plan_of(), output_root);
+	for (const Diagnostic &d : next.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(next.ok && next.build_dir != report.build_dir && next.files_hashed == 1);
+	TEST_EXPECT(!fs::exists(system_path(report.build_dir), ec)); // the deep build before it pruned
+	TEST_EXPECT(fs::is_regular_file(system_path(next.build_dir + "/" + video), ec));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_steps_are_bounded();
@@ -558,6 +744,9 @@ int main() {
 	failures += test_filled_project_builds_and_mounts();
 	failures += test_protected_build_survives_and_archives_are_refused();
 	failures += test_long_names_bind_packed_files_only();
+	failures += test_unknown_kinds_are_left_out();
+	failures += test_hash_cache();
+	failures += test_deep_output_root();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

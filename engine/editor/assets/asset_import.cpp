@@ -299,7 +299,11 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 					continue;
 				}
 			}
-			const AssetKind kind = classify_asset(output.name, &output.bytes);
+			// Importing an author's file an importer converts makes it an import source (its record is
+			// written with it, below), whatever its name makes it otherwise; any other file is the kind
+			// its name and bytes give (the game's own PNG the texture it loads as it is).
+			const Importer *importer = authored ? importer_for(output.name) : nullptr;
+			const AssetKind kind = importer ? AssetKind::ImportSource : classify_asset(output.name, &output.bytes);
 			if (kind == AssetKind::Unknown || kind == AssetKind::Archive) {
 				refuse(CoreFinding::ImportKind, "Unsupported asset type: " + output.name, output.name);
 				continue;
@@ -324,15 +328,13 @@ ImportResult import_assets(const std::vector<ImportSource> &sources, const Proje
 			}
 			Output planned;
 			planned.name = output.name;
-			// The game's own PNG gets no record: it is the texture the game loads as it is.
-			planned.kind = kind == AssetKind::ImageSource && !authored ? AssetKind::Texture : kind;
+			planned.kind = kind;
 			planned.relative = relative;
 			planned.bytes = std::move(output.bytes);
 			planned.made_from = converter ? name : std::string();
-			// Importing an author's file an importer converts makes it an import source: its
-			// record, from the importer's defaults, is written with it (a record there stays).
-			// Where the record goes must take a file.
-			if (const Importer *importer = authored ? importer_for(output.name) : nullptr) {
+			// An import source's record, from the importer's defaults, is written with it (a record
+			// there stays). Where the record goes must take a file.
+			if (importer) {
 				const fs::path record = fs::path(paths.root) / (relative + kImportSidecarSuffix);
 				std::error_code ec;
 				if (fs::exists(record, ec) && !fs::is_regular_file(record, ec)) {

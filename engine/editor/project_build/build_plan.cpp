@@ -12,6 +12,7 @@ namespace opennova::editor {
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings) {
 	BuildPlan plan;
+	plan.hash_cache = paths.build_cache_file;
 	// The three boot-table archives always exist in a build, even empty: the boot gate
 	// counts archives opened, not entries [orig: fatal check @ 0x4a6f44], and retail
 	// ships all three.
@@ -34,7 +35,6 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		if (d.severity == DiagnosticSeverity::Error) plan.diagnostics.push_back(d);
 
 	for (const AssetEntry &asset : scan.entries) {
-		if (asset_kind_row(asset.kind).import_source) continue; // its outputs are in the scan
 		if (!asset_is_packable(asset)) {
 			plan.diagnostics.push_back(make_finding(
 			        CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
@@ -43,6 +43,9 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			        asset.relative_path));
 			continue;
 		}
+		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
+		// game knows, which the game never asks for (S13 A8), are left out.
+		if (!asset_kind_packed(asset.kind)) continue;
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
 		entry.source_path = (fs::path(paths.root) / asset.relative_path).generic_string();
