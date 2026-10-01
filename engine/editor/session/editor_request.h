@@ -134,9 +134,12 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 // carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
-	// A project's directory; a new project's title.
+	// A project's directory; a new project's title and game (a gameprofile code, "" the default);
+	// a game install a project opens with for the session alone ("" its own).
 	std::string dir;
 	std::string title;
+	std::string game;
+	std::string game_install;
 	// A file: a project file or open document ("" the active one where the kind names it), a
 	// source to import again, a path to reveal.
 	std::string path;
@@ -148,6 +151,8 @@ struct EditorRequest {
 	std::string new_name;
 	std::string role;
 	std::string file_kind;
+	// Where a build lands ("" the project's own place under its cache).
+	std::string out_dir;
 	// Requirements' roles; the game install's files by logical name; files on disk to import.
 	std::vector<std::string> roles;
 	std::vector<std::string> names;
@@ -167,25 +172,30 @@ struct EditorRequest {
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
-	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit).
+	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit); a
+	// project opens with its import pass (false: on its files as they are, scanned and checked, no
+	// source imported).
 	bool with_dependencies = false;
 	bool replace = false;
 	bool force = false;
 	bool ask_name = false;
 	bool open_first = false;
+	bool import_pass = true;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
-	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.path == b.path &&
-			a.locator == b.locator && a.field == b.field && a.new_name == b.new_name &&
-			a.role == b.role && a.file_kind == b.file_kind && a.roles == b.roles &&
+	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.game == b.game &&
+			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
+			a.field == b.field &&
+			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
+			a.out_dir == b.out_dir && a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
 			a.purpose == b.purpose && a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
-			a.open_first == b.open_first;
+			a.open_first == b.open_first && a.import_pass == b.import_pass;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

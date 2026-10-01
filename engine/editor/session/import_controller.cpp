@@ -222,6 +222,10 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 		return outcome;
 	}
 	const ImportResult &imported = operation.result();
+	// What it wrote and what it did not reach are what the import came to (S13 A7's lists, the
+	// operation's since the write is one, S13 A3), besides Output.
+	outcome.imported = imported.imported;
+	outcome.not_imported = imported.not_imported;
 	if (operation.refreshed()) {
 		// A Rescan: the open documents whose files it replaced read again, then the refresh.
 		core_.documents().reload_changed();

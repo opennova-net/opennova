@@ -1,10 +1,11 @@
-// Drives the real opennova-project commands (ADR 0046 d4) end to end on a temporary
+// Drives the real opennova-project verbs (ADR 0046 d4) end to end on a temporary
 // project: new, status, validate, create-missing, build, import and reimport, their
-// exit codes, and the one refresh they share with the editor (S9c: every command
+// exit codes, and the one refresh they share with the editor (S9c: every verb
 // imports the changed sources first), an import with the files it needs (S11g: the plan,
 // a dry run that writes nothing, an .o3d's textures, the cap), validate listing what the
 // editor's Problems lists (S12), and the one game install the editor and the command line
-// share (S12).
+// share (S12). Since S13 A7 each verb is the editor's session, headless
+// (project_cli_session_test.cpp holds its table, its JSON and the request and query verbs).
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -14,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/json.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/project/project_document.h>
@@ -26,7 +28,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/pff/pff.h>
 
-#include "commands.h"
+#include "cli_verbs.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -97,9 +99,22 @@ static int test_usage_errors() {
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--install", "--entry", "items.def"}, text) == 2);
 	TEST_EXPECT(text.find("--install needs the game install folder") != std::string::npos);
 	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", "p", "--install", "game", "--entry"}, text) == 2);
-	TEST_EXPECT(text.find("incomplete import option --entry") != std::string::npos);
+	TEST_EXPECT(text.find("--entry needs a file name") != std::string::npos);
 	TEST_EXPECT(run_usage(dir.file("err.txt"), { "import", "p", "--retail", "game" }, text) == 2);
-	TEST_EXPECT(text.find("unknown or incomplete import option game") != std::string::npos);
+	TEST_EXPECT(text.find("unknown option --retail") != std::string::npos);
+	// An argument that starts with a dash is an option, the verb's or unknown: a mistyped one never
+	// becomes a folder (new -x makes no ./-x).
+	std::error_code ec;
+	const fs::path stray = fs::current_path(ec) / "-x";
+	TEST_EXPECT(!ec && !fs::exists(stray));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", "-x" }, text) == 2);
+	TEST_EXPECT(text.find("unknown option -x for new") != std::string::npos);
+	TEST_EXPECT(!fs::exists(stray));
+	// An option is given once (but --entry), and its value is never another option.
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", dir.file("twice"), "--title", "A", "--title", "B" }, text) == 2);
+	TEST_EXPECT(text.find("--title is given twice") != std::string::npos && !fs::exists(dir.file("twice")));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), { "new", dir.file("twice"), "--title", "--game", "jo" }, text) == 2);
+	TEST_EXPECT(text.find("--title needs a text") != std::string::npos && !fs::exists(dir.file("twice")));
 	return 0;
 }
 
@@ -117,6 +132,11 @@ static int test_new_status_validate() {
 	opennova::editor::Diagnostic error;
 	TEST_EXPECT(opennova::editor::open_project(root, doc, error));
 	TEST_EXPECT(doc.title == "CLI Game");
+	// Without --title the project is named after its folder, as on every path that leaves the title
+	// empty (the editor's form, a new_project request).
+	const std::string untitled = dir.file("Folder Named");
+	TEST_EXPECT(run({"new", untitled}) == 0);
+	TEST_EXPECT(opennova::editor::open_project(untitled, doc, error) && doc.title == "Folder Named");
 
 	// Create all missing: the project then validates clean, and a second run is a no-op
 	// (nothing is unmet, so nothing is named). A role asked for by name whose file is there
@@ -183,6 +203,16 @@ static int test_imports() {
 	const std::string capture = dir.file("capture.txt");
 	std::string text;
 	std::error_code ec;
+	// A project made in a folder that holds a source imports none of it: new opens it without the
+	// import pass, and the first verb that reads it imports.
+	const std::string holder = dir.file("Holder");
+	TEST_EXPECT(editor_test::write_bytes(holder + "/art/logo.png", editor_test::gradient_png(8, 8)));
+	TEST_EXPECT(mark_for_import(holder + "/art/logo.png"));
+	TEST_EXPECT(run({"new", holder}) == 0);
+	TEST_EXPECT(!fs::exists(holder + "/.opennova/imported"));
+	TEST_EXPECT(run_capture(capture, {"status", holder}, text) == 0);
+	TEST_EXPECT(text.find("imports: 1 source(s), 1 imported now, 0 failed") != std::string::npos);
+	TEST_EXPECT(fs::exists(holder + "/.opennova/imported"));
 	TEST_EXPECT(run({"new", root}) == 0);
 	TEST_EXPECT(run({"create-missing", root}) == 0);
 	// A PNG with no record is a texture the build packs as it is.
@@ -196,6 +226,7 @@ static int test_imports() {
 	TEST_EXPECT(editor_test::write_bytes(dir.file("splash.png"), editor_test::gradient_png(4, 4, 5)));
 	TEST_EXPECT(run_capture(capture, {"import", root, dir.file("splash.png")}, text) == 0);
 	TEST_EXPECT(text.find("-> 1 output(s)") != std::string::npos);
+	TEST_EXPECT(text.find("imported splash.png\n") != std::string::npos);
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0);
 	TEST_EXPECT(text.find("imports: 2 source(s), 0 imported now, 0 failed") != std::string::npos);
 	// reimport: nothing changed, nothing imports; --force with a source imports that one.
@@ -232,6 +263,11 @@ static int test_imports() {
 	fs::remove(root + "/art/logo.png", ec);
 	TEST_EXPECT(run_capture(capture, {"validate", root}, text) == 0);
 	TEST_EXPECT(text.find("import.orphan_record") != std::string::npos && text.find("import.decode") == std::string::npos);
+	// A PNG brought in that does not decode: it is written, the pass fails on it, and the Problems
+	// row on it is said on the error stream (exit 1).
+	TEST_EXPECT(editor_test::write_text(dir.file("broken.png"), "not a png"));
+	TEST_EXPECT(run_usage(capture, {"import", root, dir.file("broken.png")}, text) == 1);
+	TEST_EXPECT(text.find("error import.decode") != std::string::npos && text.find("broken.png") != std::string::npos);
 	return 0;
 }
 
@@ -257,10 +293,10 @@ static int test_import_with_dependencies() {
 	std::string text;
 	const auto has = [&text](const std::string &line) { return text.find(line) != std::string::npos; };
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
-	TEST_EXPECT(has("take a.mnu (Menu) -> menus/a.mnu, chosen, from the folder " + art + "\n"));
-	TEST_EXPECT(has("take arial99.fnt (Font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the folder " + art + "\n"));
-	TEST_EXPECT(has("take b.mnu (Menu) -> menus/b.mnu, needed by a.mnu: A/GO"));
-	TEST_EXPECT(has("not found gone.tga (Texture), needed by a.mnu: A/GO/Appearance 1"));
+	TEST_EXPECT(has("take a.mnu (menu) -> menus/a.mnu, chosen, from the folder " + art + "\n"));
+	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the folder " + art + "\n"));
+	TEST_EXPECT(has("take b.mnu (menu) -> menus/b.mnu, needed by a.mnu: A/GO"));
+	TEST_EXPECT(has("not found gone.tga (texture), needed by a.mnu: A/GO/Appearance 1"));
 	TEST_EXPECT(has("not followed: menu_screen references, which name no file (1, the first in a.mnu)"));
 	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found"));
 	TEST_EXPECT(!fs::exists(root + "/menus") && !fs::exists(root + "/fonts")); // written nowhere
@@ -270,7 +306,7 @@ static int test_import_with_dependencies() {
 	// The import: the closure copied, the file found nowhere named.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies"}, text) == 0);
 	TEST_EXPECT(has("imported menus/a.mnu") && has("imported fonts/arial99.fnt") && has("imported menus/b.mnu"));
-	TEST_EXPECT(has("not found gone.tga (Texture)"));
+	TEST_EXPECT(has("not found gone.tga (texture)"));
 	TEST_EXPECT(fs::is_regular_file(root + "/menus/a.mnu") && fs::is_regular_file(root + "/fonts/arial99.fnt") &&
 	            fs::is_regular_file(root + "/menus/b.mnu") && !fs::exists(root + "/gone.tga"));
 	return 0;
@@ -322,6 +358,14 @@ static int test_dry_run_writes_nothing() {
 	                        text) == 0);
 	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && text.find("imported ") == std::string::npos);
 	TEST_EXPECT(snapshot(root) == before);
+	// --install too: a dry run opens the project on it for that run alone, so no
+	// .opennova/local.json is made or changed.
+	std::error_code ec;
+	fs::create_directories(dir.file("install"), ec);
+	TEST_EXPECT(run_capture(dir.file("out.txt"),
+	                        {"import", root, dir.file("notes.txt"), "--dry-run", "--install", dir.file("install")}, text) == 0);
+	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && snapshot(root) == before);
+	TEST_EXPECT(!fs::exists(root + "/.opennova/local.json"));
 	// The import itself: the pass first (the changed source's record written again), then the file.
 	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt")}, text) == 0);
 	TEST_EXPECT(text.find("imported notes.txt") != std::string::npos && opennova::editor::read_file_text(record, now, error) &&
@@ -352,6 +396,13 @@ static int test_scene_textures() {
 	                      text) == 1);
 	TEST_EXPECT(fs::is_regular_file(root + "/SPINNER.TGA"));
 	TEST_EXPECT(text.find("glow.tga") != std::string::npos && text.find("names the texture spinner.tga") == std::string::npos);
+	// The same model again: the .3di the project holds with the same bytes is left as it is, so the
+	// import names nothing it wrote (the outcome's imported list is import_assets' own); with
+	// --replace it is written and named again.
+	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, scene + "/spinner.o3d"}, text) == 0);
+	TEST_EXPECT(text.find("imported models/spinner.3di") == std::string::npos);
+	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, scene + "/spinner.o3d", "--replace"}, text) == 1);
+	TEST_EXPECT(text.find("imported models/spinner.3di\n") != std::string::npos);
 	return 0;
 }
 
@@ -390,22 +441,30 @@ namespace {
 
 using editor_test::NoProcess;
 
-// A finding as `validate` prints it.
-std::string printed(const opennova::editor::Diagnostic &d) {
-	std::string line = std::string(opennova::editor::diagnostic_severity_label(d.severity)) + " " + d.code() + ": " + d.message;
-	if (!d.asset.empty()) line += " [" + d.asset + "]";
-	if (d.line) line += " line " + std::to_string(d.line);
-	if (!d.record.empty()) line += " record " + d.record;
-	if (!d.field.empty()) line += " field " + d.field;
-	return line;
+// What a run printed, line by line.
+std::vector<std::string> lines_of(const std::string &text) {
+	std::vector<std::string> lines;
+	for (size_t start = 0; start < text.size();) {
+		size_t end = text.find('\n', start);
+		if (end == std::string::npos) end = text.size();
+		lines.push_back(text.substr(start, end - start));
+		start = end + 1;
+	}
+	return lines;
 }
 
 } // namespace
 
-// S12 C2: `validate` lists what the editor's Problems lists for the same project, in the same
-// order, from the one composer: the scan's, the requirements', the documents' and the graph's,
-// and the menu render check's notes (a menu whose colour the game draws transparent).
-static int test_validate_matches_the_editor() {
+// S12 C2, pinned (S13 A7): `validate` lists the editor's Problems rows, each as it prints a
+// finding, in the Problems window's order (errors, then warnings, then notes), and fails exactly
+// when a build would be refused (the build_gate query), which it says. Since the command line is
+// the session, the rows are pinned here, not compared with a session: for a project with a
+// texture whose name no archive can store and a menu whose colour the game draws transparent,
+// the name's error (the scan's), the render check's warning, then only notes (the optional files
+// the project lacks, the stylesheet's variables no menu names); the build's own check of the name,
+// which no row shows, before the verdict; and exit 1, as the build is refused. The name gone, the
+// same warning and notes and exit 0: a warning never refuses a build.
+static int test_validate_pins_the_rows() {
 	editor_test::TempProjectDir dir("opennova_editor_project_cli_problems");
 	const std::string root = dir.file("Problems");
 	TEST_EXPECT(run({"new", root, "--title", "Problems"}) == 0);
@@ -415,31 +474,44 @@ static int test_validate_matches_the_editor() {
 	                                    "<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>90</RIGHT><BOTTOM>90</BOTTOM></POSITION>\r\n"
 	                                    "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">FF0000</APPEARANCE>\r\n"
 	                                    "</WINDOW>\r\n</SCREEN>\r\n"));
-	TEST_EXPECT(editor_test::write_text(root + "/a_name_too_long_for_archives.txt", "x"));
+	TEST_EXPECT(editor_test::write_text(root + "/art/a_texture_name_too_long.pcx", "pcx"));
+	const std::string name_row =
+	        "error asset.name.too_long: The file name a_texture_name_too_long.pcx is longer than 16 characters; the "
+	        "game cannot store it in an archive. [art/a_texture_name_too_long.pcx]";
+	const std::string render_row =
+	        "warning menu.render.color_transparent: The game reads \"FF0000\" as AARRGGBB, so with fewer than eight "
+	        "digits its alpha is 0 (the preview draws it transparent); write eight digits (FF, then RRGGBB) for an "
+	        "opaque one. [menus/extra.mnu] record EXTRA/TITLE/Appearance 1 field value";
+	const std::string gate_row =
+	        "blocks a build: error build.name_unstorable: The game cannot store a_texture_name_too_long.pcx in an "
+	        "archive (the name is too long). [art/a_texture_name_too_long.pcx]";
+	// Only notes after the rows pinned above them, of the two kinds the project makes, then the
+	// build gate's lines.
+	const auto notes_only = [](const std::vector<std::string> &lines, size_t from, size_t to, size_t &notes) {
+		notes = 0;
+		for (size_t i = from; i < to; ++i) {
+			if (lines[i].rfind("info requirement.optional_missing: ", 0) != 0 && lines[i].rfind("info style.unused: ", 0) != 0)
+				return false;
+			++notes;
+		}
+		return true;
+	};
 	std::string text;
-	run_capture(dir.file("validate.txt"), {"validate", root}, text);
-	std::vector<std::string> listed;
-	for (size_t start = 0; start < text.size();) {
-		size_t end = text.find('\n', start);
-		if (end == std::string::npos) end = text.size();
-		const std::string line = text.substr(start, end - start);
-		for (const char *label : {"error ", "warning ", "info "})
-			if (line.rfind(label, 0) == 0) listed.push_back(line);
-		start = end + 1;
-	}
-	NoProcess platform;
-	opennova::editor::MemoryPreferencesStore preferences;
-	opennova::editor::ProjectSession session(platform, preferences);
-	session.handle(opennova::editor::request::open_project(root));
-	session.run_operations();
-	std::vector<std::string> shown;
-	bool render_note = false;
-	for (const opennova::editor::Diagnostic &d : session.view().findings.diagnostics) {
-		shown.push_back(printed(d));
-		render_note = render_note || d.code().rfind("menu.render.", 0) == 0;
-	}
-	TEST_EXPECT(session.project_open() && render_note && !shown.empty());
-	TEST_EXPECT(listed == shown);
+	TEST_EXPECT(run_capture(dir.file("validate.txt"), {"validate", root}, text) == 1);
+	std::vector<std::string> lines = lines_of(text);
+	size_t notes = 0;
+	TEST_EXPECT(lines.size() > 4 && lines[0] == name_row && lines[1] == render_row);
+	TEST_EXPECT(notes_only(lines, 2, lines.size() - 2, notes) && notes > 0);
+	TEST_EXPECT(lines[lines.size() - 2] == gate_row && lines.back() == "not ok: 2 finding(s) block a build");
+	TEST_EXPECT(run({"build", root}) == 1);
+	std::error_code ec;
+	fs::remove(root + "/art/a_texture_name_too_long.pcx", ec);
+	TEST_EXPECT(run_capture(dir.file("validate.txt"), {"validate", root}, text) == 0);
+	lines = lines_of(text);
+	size_t notes_now = 0;
+	TEST_EXPECT(lines.size() > 2 && lines[0] == render_row && notes_only(lines, 1, lines.size() - 1, notes_now));
+	TEST_EXPECT(notes_now == notes && lines.back() == "ok: 0 error(s)");
+	TEST_EXPECT(run({"build", root}) == 0);
 	return 0;
 }
 
@@ -496,7 +568,7 @@ static int test_one_game_install() {
 	const auto has = [&text](const std::string &line) { return text.find(line) != std::string::npos; };
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0 && has("game install: " + install + "\n"));
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
-	TEST_EXPECT(has("take arial99.fnt (Font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the game install"));
+	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the game install"));
 
 	// Another project names none: the editor opens it on the install it last chose.
 	const std::string other = dir.file("Other");
@@ -561,7 +633,7 @@ int main() {
 	int failures = 0;
 	failures += test_usage_errors();
 	failures += test_new_status_validate();
-	failures += test_validate_matches_the_editor();
+	failures += test_validate_pins_the_rows();
 	failures += test_one_game_install();
 	failures += test_older_local_settings();
 	failures += test_imports();

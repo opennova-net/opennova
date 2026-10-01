@@ -3921,6 +3921,15 @@ target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
 target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME project_cli COMMAND project_cli_test)
 
+# opennova-project as the editor's session, headless (S13 A7): the verb table against the request
+# and query tables, each verb's --json the session's answer to the same requests, the request and
+# query verbs, --install; its retail leg a project imported from the game install whose Problems
+# the query verb reads as the session does.
+add_executable(project_cli_session_test editor/project_cli_session_test.cpp)
+target_link_libraries(project_cli_session_test PRIVATE opennova_project_cli)
+target_include_directories(project_cli_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(project_cli_session COMMAND project_cli_session_test)
+
 add_executable(def_write_test def/def_write_test.cpp)
 target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
 target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

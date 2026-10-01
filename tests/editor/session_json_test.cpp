@@ -549,13 +549,35 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes nothing).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes nothing).");
+			"Unknown request member \"flagg\" (build takes out_dir).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
-	            "open_project takes no \"path\" (it takes dir).");
-	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) == "open_project needs \"dir\" (it takes dir).");
+	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
+	            "open_project needs \"dir\" (it takes dir, game_install, import_pass).");
+	// S13 A7's fields: a new project's game, a build's out_dir, an open without its import pass or on
+	// a game install of the session's own; import_pass is true when left out and written only when
+	// false, game_install written only when set.
+	EditorRequest read;
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\"}", read).empty() && read.import_pass);
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"import_pass\":false}", read).empty() &&
+	            !read.import_pass && editor_request_to_json(read).get_bool("import_pass", true) == false);
+	TEST_EXPECT(!editor_request_to_json(request::open_project("C:/x")).get("import_pass"));
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"import_pass\":0}", read)
+	                    .find("import_pass") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/games/JO\"}", read)
+	                    .empty() &&
+	            read.game_install == "C:/games/JO" &&
+	            editor_request_to_json(read).get_string("game_install", "") == "C:/games/JO");
+	TEST_EXPECT(!editor_request_to_json(request::open_project("C:/x")).get("game_install"));
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"import_pass\":false}", read).empty() &&
+	            !read.import_pass && read.title.empty());
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/g\"}", read)
+	                    .find("game_install") != std::string::npos);
+	TEST_EXPECT(editor_request_to_json(request::new_project("C:/x", "T", "dfx")).get_string("game", "") == "dfx" &&
+	            editor_request_to_json(request::build("C:/out")).get_string("out_dir", "") == "C:/out");
 	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\"}", back).find("needs \"new_name\"") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"save\",\"path\":3}", back).find("path") != std::string::npos);
@@ -638,12 +660,15 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		switch (id) {
 		case F::Dir: out.dir = "C:/mods/Sample"; break;
 		case F::Title: out.title = "Sample"; break;
+		case F::Game: out.game = "dfx"; break;
+		case F::GameInstall: out.game_install = "C:/games/JO2"; break;
 		case F::Path: out.path = "menus/main.mnu"; break;
 		case F::Locator: out.locator = "0/window:1"; break;
 		case F::Field: out.field = "name"; break;
 		case F::NewName: out.new_name = "RENAMED"; break;
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
+		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
@@ -711,6 +736,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Force: out.force = true; break;
 		case F::AskName: out.ask_name = true; break;
 		case F::OpenFirst: out.open_first = true; break;
+		case F::ImportPass: out.import_pass = false; break; // its default is true
 		case F::kCount: break;
 		}
 	}

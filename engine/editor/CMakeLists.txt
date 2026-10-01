@@ -115,7 +115,6 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_state.cpp
     # project_build — routing into the boot-table archives, the plan, the immutable build
     # (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
@@ -143,6 +142,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problem_fixes.cpp

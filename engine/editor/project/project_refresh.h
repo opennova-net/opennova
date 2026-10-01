@@ -19,14 +19,16 @@ namespace opennova::editor {
 // findings riding it (AssetScan::set_import_findings), so whatever reads the scan (the Problems
 // rows, `validate`, the build's gate) sees them; then the requirements over that scan. `force` and
 // `only` are the import pass's (import_run.h): a Reimport is this refresh with the sources it
-// names forced. Each walk steps by a budget of bytes, so the session runs a refresh as an
-// operation's steps (Open, Refresh, and the refresh an import's write or an import source's
-// rename ends with) and a caller that waits runs it to its end in one call; either way it comes to
-// the same scan.
+// names forced. Without the pass (`import_pass` false, S13 A7: an Open on the files as they are, a
+// dry run's, or one whose request runs its own pass after) the scan lists the files as they are
+// and no import source is read: none is listed. Each walk steps by a budget of bytes, so the
+// session runs a refresh as an operation's steps (Open, Refresh, and the refresh an import's write
+// or an import source's rename ends with) and a caller that waits runs it to its end in one call;
+// either way it comes to the same scan.
 class ProjectRefresh {
 public:
 	ProjectRefresh(const ProjectPaths &paths, const ProjectDocument &doc, bool force_import = false,
-			const std::string &only = std::string());
+			const std::string &only = std::string(), bool import_pass = true);
 
 	// One step within `budget` bytes (at least one file listed, taken or visited); true once the
 	// refresh is done, its imports, scan and requirements made.
@@ -48,6 +50,7 @@ public:
 
 private:
 	ProjectDocument doc_;
+	bool import_pass_ = true;
 	ImportPass pass_;
 	ProjectScan walk_;
 	ImportRunResult imports_;

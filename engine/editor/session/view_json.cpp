@@ -540,6 +540,9 @@ JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
 	out.set("kind", json_string(operation_kind_row(outcome.kind).token));
 	out.set("end", json_string(operation_end_token(outcome.end)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
+	// An import's write: the files it wrote and those it did not reach, each only when it has any.
+	if (!outcome.imported.empty()) out.set("imported", strings_to_json(outcome.imported));
+	if (!outcome.not_imported.empty()) out.set("not_imported", strings_to_json(outcome.not_imported));
 	return out;
 }
 

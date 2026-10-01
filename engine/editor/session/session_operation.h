@@ -121,12 +121,17 @@ enum class OperationEnd : uint8_t { Done, Failed, Cancelled };
 const char *operation_end_token(OperationEnd end);
 
 // What an operation came to (the view's last_operation): which one, how it ended and the findings
-// it reported.
+// it reported; an import's write also the files it wrote, project-relative, as published (a file
+// the project held with the same bytes is neither), and, after a failure while publishing, those
+// it did not reach, the one that failed first (S13 A7's lists, an import's write being an
+// operation since S13 A3).
 struct OperationOutcome {
 	uint64_t id = 0;
 	OperationKind kind = OperationKind::Build;
 	OperationEnd end = OperationEnd::Done;
 	std::vector<Diagnostic> findings;
+	std::vector<std::string> imported;
+	std::vector<std::string> not_imported;
 };
 
 // The operation that runs, as the view shows it (id 0: none), with what the busy gate weighs a

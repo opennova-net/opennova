@@ -39,6 +39,7 @@ enum class EditorQueryKind : uint8_t {
 	ImportPreview,
 	Output,
 	Operation,
+	BuildGate,
 	Events,
 	Catalog,
 	kCount,
