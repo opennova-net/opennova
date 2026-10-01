@@ -97,10 +97,12 @@
     changed by a SetViewport request and the three changes its follow derives; what follows from
     its document, the files its picture
     read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
-    Clear), its envelope on the wire (`viewport_json`), what a drag or a command plans as requests,
-    and the device seam (`viewport_device`; S13 V6: a device may build its picture over the
-    Shell's frames, a unit a step within the Shell's budget, the viewport loading meanwhile and a
-    newer build generation cancelling one in flight) with its least-recently-used cache of four
+    Clear), its envelope on the wire (`viewport_json`), what a drag or a command plans as requests
+    (S13 V7: the session's `viewport` query reads a viewport by op, and its `edit_in_viewport`
+    request serves a drag or a command the viewport plans), and the device seam (`viewport_device`;
+    S13 V6: a device may build its picture over the Shell's frames, a unit a step within the
+    Shell's budget, the viewport loading meanwhile and a newer build generation cancelling one in
+    flight) with its least-recently-used cache of four
     (`viewport_device_cache`); the Shell's devices are `godot/src/authoring`'s over the runtime's
     `MenuFrame` and `ObjectModel`. The menu's viewport (`menu_viewport`): its screen compiled
     headless, the options it holds, what a drag of a window's handles or of several windows

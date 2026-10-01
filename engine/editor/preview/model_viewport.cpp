@@ -654,34 +654,67 @@ ViewportHit ModelViewport::hit(const ViewportContext &context, float x, float y)
 	return out;
 }
 
-bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
-		std::string &error) const {
-	ModelHandle handle = ModelHandle::Place;
-	if (!model_handle_from_token(drag.handle.c_str(), handle)) {
-		error = "Unknown handle \"" + drag.handle + "\" (place, axis).";
+bool ModelViewport::dragged_marker_(const ViewportContext &context, NodeId id, const std::string &token,
+		ModelHandle &handle, ModelOverlay &marker, std::string &error) const {
+	if (!model_handle_from_token(token.c_str(), handle)) {
+		error = "Unknown handle \"" + token + "\" (place, axis).";
 		return false;
 	}
 	const auto *document = dynamic_cast<const ModelDocument *>(
 			context.input.document ? records_of(*context.input.document) : nullptr);
 	if (!document || !current(context.input)) {
-		error = "The viewport does not show the model as it is now.";
+		const std::string why = message();
+		error = "The viewport shows no picture of the model as it is now" + (why.empty() ? std::string(".") : ": " + why);
 		return false;
 	}
+	ModelOverlayKind kind;
+	int index = -1;
+	if (model_overlay_of(*document, document->address_of(id), kind, index))
+		for (const ModelOverlay &overlay : overlays(context.input.clock))
+			if (overlay.kind == kind && overlay.index == index) {
+				marker = overlay;
+				return true;
+			}
+	error = "Record " + std::to_string(id) + " is no marker the viewport shows.";
+	return false;
+}
+
+bool ModelViewport::handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
+		float &y, std::string &error) const {
+	ModelHandle held = ModelHandle::Place;
+	ModelOverlay marker;
+	if (!dragged_marker_(context, id, handle, held, marker, error)) return false;
+	const PreviewVec3 through = held == ModelHandle::Axis ? axis_tip(marker) : marker.at;
+	if (!camera_.project(through, context.width, context.height, x, y)) {
+		error = "The marker's handle is not on the picture: drag it to a point of the picture (to).";
+		return false;
+	}
+	return true;
+}
+
+bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+		std::string &error) const {
+	ModelHandle handle = ModelHandle::Place;
+	ModelOverlay marker;
+	if (!dragged_marker_(context, drag.id, drag.handle, handle, marker, error)) return false;
 	if (!context.editable()) {
-		error = "The session takes no edit now (the model is blocked, or an operation holds the documents).";
+		error = context.not_editable();
 		return false;
 	}
 	if (!(drag.snap >= 0.0f)) {
 		error = "The snap is 0 or more.";
 		return false;
 	}
-	ModelOverlayKind kind;
-	int index = -1;
-	const NodeAddress dragged = document->address_of(drag.id);
-	if (!model_overlay_of(*document, dragged, kind, index)) {
-		error = "Record " + std::to_string(drag.id) + " is no marker the viewport shows.";
-		return false;
+	const auto *document = static_cast<const ModelDocument *>(records_of(*context.input.document));
+	// A step that moves nothing plans no batch (the picture's point and back would move the marker
+	// by what the round trip loses); the gesture its sample names ends with it all the same.
+	if (drag.by && drag.x == 0.0f && drag.y == 0.0f) {
+		if (drag.end && drag.gesture) out.request(request::end_edit(document->path()));
+		return true;
 	}
+	const NodeAddress dragged = document->address_of(drag.id);
+	ModelOverlayKind kind = marker.kind;
+	const int index = marker.index;
 	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
 	// A place's drag of a selected marker moves the other selected markers as far, as the canvas's
 	// drag of the primary's does (canvas_frame's others).
@@ -698,14 +731,28 @@ bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &dra
 	}
 	for (const ModelOverlay &overlay : marks) {
 		if (overlay.kind != kind || overlay.index != index) continue;
+		// By (dx, dy) pixels: to the pixel the picture shows the handle on now, moved as far.
+		float x = drag.x, y = drag.y;
+		if (drag.by) {
+			const PreviewVec3 through = handle == ModelHandle::Axis ? axis_tip(overlay) : overlay.at;
+			float px = 0.0f, py = 0.0f;
+			if (!camera_.project(through, context.width, context.height, px, py)) {
+				error = "The marker's handle is not on the picture: drag it to a point of the picture (to).";
+				return false;
+			}
+			x = px + drag.x;
+			y = py + drag.y;
+		}
 		std::vector<Edit> edits;
-		if (!handle_edits(*document, overlay, handle, drag.x, drag.y, context.width, context.height, drag.snap,
-					next_edit_gesture(), context.input.clock, edits, &others)) {
+		if (!handle_edits(*document, overlay, handle, x, y, context.width, context.height, drag.snap,
+					drag.gesture ? drag.gesture : next_edit_gesture(), context.input.clock, edits, &others)) {
 			error = "The marker has no such handle (a pivot is geometry; an omni light has no axis).";
 			return false;
 		}
-		out.request(request::edit_record(document->path(), std::move(edits)));
-		out.request(request::end_edit(document->path()));
+		// The batch, then the gesture's end where there is one to end (as the menu's drag).
+		const bool planned = !edits.empty();
+		if (planned) out.request(request::edit_record(document->path(), std::move(edits)));
+		if (drag.end && (planned || drag.gesture)) out.request(request::end_edit(document->path()));
 		return true;
 	}
 	error = "Record " + std::to_string(drag.id) + " is no marker the viewport shows.";
@@ -722,20 +769,25 @@ bool ModelViewport::command(const ViewportContext &context, const std::string &n
 		error = "The viewport shows no model.";
 		return false;
 	}
-	// The marker of the first record named, else the whole model.
+	// The marker of the first record named (one that is no marker refused, as a menu's command refuses
+	// a record that is no window), else the whole model.
+	if (ids.empty()) {
+		out.request(request::set_viewport(path(), model_camera_change(framed(context.width, context.height))));
+		return true;
+	}
 	const auto *document = dynamic_cast<const ModelDocument *>(
 			context.input.document ? records_of(*context.input.document) : nullptr);
 	ModelOverlayKind kind;
 	int index = -1;
-	if (document && !ids.empty() && model_overlay_of(*document, document->address_of(ids.front()), kind, index))
+	if (document && model_overlay_of(*document, document->address_of(ids.front()), kind, index))
 		for (const ModelOverlay &overlay : overlays(context.input.clock))
 			if (overlay.kind == kind && overlay.index == index) {
 				out.request(request::set_viewport(path(),
 						model_camera_change(framed_on(overlay, context.width, context.height))));
 				return true;
 			}
-	out.request(request::set_viewport(path(), model_camera_change(framed(context.width, context.height))));
-	return true;
+	error = "Record " + std::to_string(ids.front()) + " is no marker the viewport shows.";
+	return false;
 }
 
 io::JsonValue ModelViewport::options_json() const {

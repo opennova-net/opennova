@@ -57,6 +57,9 @@ struct SimulationNetState {
 	// HostConfig.serve_and_play / start_host_session's gating (engine:
 	// runtime/inmatch/host_role.cpp).
 	bool host_serve_and_play = true;
+	// The host's network type (HostSessionOptions::network_type): NovaWorld only
+	// for a host registered with the NovaWorld gate; HostConfig::network_type.
+	opennova::inmatch::NetworkType host_network_type = opennova::inmatch::NetworkType::Lan;
 	// A LAN host requested by enable_host_listen while a mission was LIVE: the
 	// session cannot switch roles mid-mission, so the pump is bound at once and
 	// the LAN HostRole is installed by ensure_session_role at the next load

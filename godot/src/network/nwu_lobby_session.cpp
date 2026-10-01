@@ -116,10 +116,13 @@ void NwuLobbySession::process(double delta) {
 		}
 	}
 
-	// The connect legs: the ClientHello / ClientAuth stage datagram is re-sent every
-	// SESSION_CONNECT_RETRANSMIT_MS (ClientSession::retransmit_stage_datagram), and
-	// the whole connect gives up at SESSION_CONNECT_TIMEOUT_MS.
-	const bool connecting = session_ &&
+	// The first connect's legs: the ClientHello / ClientAuth stage datagram is re-sent
+	// every SESSION_CONNECT_RETRANSMIT_MS (ClientSession::retransmit_stage_datagram), and
+	// the whole connect gives up at SESSION_CONNECT_TIMEOUT_MS. Once verified they stand
+	// down for good: a reconnect's re-probe and re-join are the session's own
+	// (ClientSession::reconnecting).
+	if (session_ && session_->state() == S::Verified) connect_reported_ = true;
+	const bool connecting = session_ && !session_->reconnecting() &&
 			(session_->state() == S::Hello || session_->state() == S::Auth ||
 			 session_->state() == S::Verifying);
 	if (connecting && !connect_reported_) {
@@ -217,6 +220,8 @@ void NwuLobbySession::begin_session() {
 	// statement re-serializes: the verify reply, the host request, the play
 	// request and the GLSVSS request.
 	cfg.cookie_vars = hooks_.cookie_vars;
+	// A reconnect's re-join mints a fresh client key (the client index stays).
+	cfg.next_client_key = []() { return pick_random_uint32(); };
 
 	session_ = std::make_unique<opennova::ClientSession>(cfg);
 	session_->set_clock_ms(clock_ms_);

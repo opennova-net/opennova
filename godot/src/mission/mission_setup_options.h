@@ -122,18 +122,6 @@ public:
 	void set_max_players(int p_value) { max_players_ = p_value; }
 	String get_channel() const { return channel_; }
 	void set_channel(const String &p_value) { channel_ = p_value; }
-	// NovaWorld gate registration (HostSessionConfig.CHANNEL_NOVAWORLD): an
-	// empty gate host means pure LAN — nothing is registered.
-	String get_nw_gate_host() const { return nw_gate_host_; }
-	void set_nw_gate_host(const String &p_value) { nw_gate_host_ = p_value; }
-	int get_nw_gate_port() const { return nw_gate_port_; }
-	void set_nw_gate_port(int p_value) { nw_gate_port_ = p_value; }
-	// The gate row's Region column selector (0/1/2 -> STRNOVA07/08/09).
-	int get_region_index() const { return region_index_; }
-	void set_region_index(int p_value) { region_index_ = p_value; }
-	// Explicit advertised-IP override for the gate row; empty keeps the socket's.
-	String get_advertise() const { return advertise_; }
-	void set_advertise(const String &p_value) { advertise_ = p_value; }
 
 protected:
 	static void _bind_methods();
@@ -168,10 +156,6 @@ private:
 	// HostSessionConfig.CHANNEL_LAN: the LAN channel never reads or
 	// manufactures NovaWorld service configuration.
 	String channel_ = "LAN";
-	String nw_gate_host_;
-	int nw_gate_port_ = opennova::kNovaWorldGatePort;
-	int region_index_ = 0;
-	String advertise_;
 };
 
 } // namespace godot

@@ -22,6 +22,8 @@
 
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h>
+#include <runtime/inmatch/novaworld_link.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
@@ -4473,6 +4475,108 @@ bool run_client_quality_frame_pressure_follows_the_frame_rate() {
 	return expect(fold(0, false) == 3, "an unmeasured rate samples the ceiling 255 -> level 3");
 }
 
+// The NovaWorld exit leads the joiner's 62-frame block (D-NET-220): a NovaWorld
+// network type with its NWU session in use exits the mission with reason 12 once
+// the session's hosting/playing word holds neither 2 nor 3; a playing or hosting
+// word, a LAN join and an unused session never do, and the session's own exit
+// store (a stop-playing or a punt) lands as is. JoinerRole reports it as a lost
+// session [orig: Game_ProcessMainFrame @0x52655d..0x52657c].
+bool run_novaworld_exit_on_a_joiner() {
+	const auto run = [](const hud::NovaWorldLinkFacts &nw, uint32_t frames) {
+		inmatch::ClientRuntime client("NovaWorldExit", [] { return uint64_t{100000}; });
+		client.seed_session(0x10203040u, 1u, "CLIENT-NWU-EXIT-SCRK", "SERVER-NWU-EXIT-SCRK",
+		                    1, 0, 0x0002, w::kPlayerInfantryTypeId,
+		                    0, 0x00100000u, /*replay_mode=*/false);
+		client.set_novaworld_link(nw);
+		for (uint32_t tick = 1; tick <= frames; ++tick) (void)client.Client_ProcessNetworkFrame(tick);
+		return client.mission_exit_reason();
+	};
+	hud::NovaWorldLinkFacts verified;
+	verified.novaworld = true;
+	verified.nwu_in_use = true;
+	verified.nwu_session_flags = 0x1A;
+	verified.nwu_session_role = 1;
+	if (!expect(run(verified, 61) == 0, "the exit waits for the 62-frame block"))
+		return false;
+	if (!expect(run(verified, 62) == inmatch::kMissionExitNovaWorld,
+			"a verified-only word exits with 12 on the block"))
+		return false;
+	hud::NovaWorldLinkFacts playing = verified;
+	playing.nwu_session_flags = 0x0A;
+	playing.nwu_session_role = 3;
+	if (!expect(run(playing, 62 * 3) == 0, "a playing word holds the match"))
+		return false;
+	hud::NovaWorldLinkFacts hosting = verified;
+	hosting.nwu_session_role = 2;
+	if (!expect(run(hosting, 62 * 3) == 0, "a hosting word holds the match"))
+		return false;
+	hud::NovaWorldLinkFacts lan = verified;
+	lan.novaworld = false;
+	if (!expect(run(lan, 62 * 3) == 0, "a LAN join never takes the NovaWorld exit"))
+		return false;
+	hud::NovaWorldLinkFacts unused = verified;
+	unused.nwu_in_use = false;
+	if (!expect(run(unused, 62 * 3) == 0, "an unused NWU session never takes it"))
+		return false;
+	inmatch::ClientRuntime stored("NovaWorldExitStore", [] { return uint64_t{100000}; });
+	stored.set_mission_exit_reason(inmatch::kMissionExitNovaWorld);
+	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNovaWorld,
+			"the NWU session's own exit store lands as is");
+}
+
+// The exit reason an in-match disconnect stores and the post-mission router's verdict on it
+// [orig: CNapiNetwork_OnDisconnectedFromServer @0x4c63d0 (the dc == 2 DPC switch);
+//  PostMenu_RouteMissionExit @0x568460]: class-2 records map their DPC (1 / 33 / an unlisted
+// code quit, 34 -> 5, 35 -> 7, 36..45 -> 9..18, 46 / 49 -> 19), any other class or a zero DPC
+// stores nothing; reasons 2, 5..7, 9..20 drop the NovaWorld session (5..7 / 20 with a gameerr
+// text, 9..19 with the disconnect text), every other reason keeps it on a NovaWorld session.
+bool run_mission_exit_routes() {
+	const auto dpc = [](uint32_t dc, uint32_t code) {
+		DisconnectEvent event;
+		event.dc = dc;
+		event.dpc = code;
+		return inmatch::mission_exit_reason_for_disconnect(event);
+	};
+	if (!expect(dpc(2, 0) == inmatch::kMissionExitNone, "a zero DPC stores nothing") ||
+			!expect(dpc(3, 40) == inmatch::kMissionExitNone, "a non-description class stores nothing") ||
+			!expect(dpc(2, 1) == inmatch::kMissionExitQuit, "DPC 1 queues the quit") ||
+			!expect(dpc(2, 33) == inmatch::kMissionExitQuit, "DPC 33 (a punt) queues the quit") ||
+			!expect(dpc(2, 50) == inmatch::kMissionExitQuit, "an unlisted DPC queues the quit") ||
+			!expect(dpc(2, 34) == inmatch::kMissionExitCdTrouble, "DPC 34 -> 5") ||
+			!expect(dpc(2, 35) == inmatch::kMissionExitPirate, "DPC 35 -> 7") ||
+			!expect(dpc(2, 36) == 9 && dpc(2, 39) == inmatch::kMissionExitNovaWorld &&
+							dpc(2, 45) == 18,
+					"DPC 36..45 -> 9..18") ||
+			!expect(dpc(2, 46) == 19 && dpc(2, 49) == 19, "DPC 46 / 49 -> 19"))
+		return false;
+	const auto route = [](int32_t reason, bool novaworld) {
+		return inmatch::route_mission_exit(reason, novaworld);
+	};
+	using E = inmatch::PostMissionError;
+	if (!expect(route(1, true).keep_session && route(1, true).error == E::None,
+			"a quit keeps the NovaWorld session for the NovaWorld menu") ||
+			!expect(route(3, true).keep_session && route(4, true).keep_session,
+					"a map cycle and a round-over keep it too") ||
+			!expect(!route(1, false).keep_session, "a LAN session has nothing to keep") ||
+			!expect(!route(2, true).keep_session && route(2, true).error == E::None,
+					"a reset drops it without a text") ||
+			!expect(route(5, true).error == E::CdTrouble && route(6, true).error == E::System &&
+							route(7, true).error == E::Pirate &&
+							route(20, true).error == E::BadMission && !route(20, true).keep_session,
+					"5 / 6 / 7 / 20 store their gameerr text and drop the session") ||
+			!expect(std::string(inmatch::post_mission_error_key(E::Pirate)) == "STRE_PIRATE",
+					"the gameerr key") ||
+			!expect(route(12, true).error == E::DisconnectReason && !route(12, true).keep_session &&
+							route(9, false).error == E::DisconnectReason &&
+							route(19, true).error == E::DisconnectReason,
+					"9..19 show the disconnect text and drop the session"))
+		return false;
+	// A joiner's latched class-2 record reads as its mapped reason.
+	inmatch::ClientRuntime stored("MissionExitStore", [] { return uint64_t{100000}; });
+	return expect(stored.mission_exit_reason() == inmatch::kMissionExitNone,
+			"a healthy joiner has stored nothing");
+}
+
 bool run_direct_uplink_framing_is_transient() {
 	const std::string client_scrk = "CLIENT-DIRECT-UPLINK-SCRK";
 	inmatch::JoinerConnection joiner("DirectUplink");
@@ -6596,6 +6700,8 @@ int main() {
 	                run_chat_uplink_api() && run_host_chat_uplink() &&
 	                run_client_quality_level_folds_the_ping_ring() &&
 	                run_client_quality_frame_pressure_follows_the_frame_rate() &&
+	                run_novaworld_exit_on_a_joiner() &&
+	                run_mission_exit_routes() &&
 	                run_joiner_goodbye_tears_down_host();
 	std::fprintf(stderr, ok ? "OK\n" : "FAIL\n");
 	return ok ? 0 : 1;

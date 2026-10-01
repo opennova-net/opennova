@@ -70,6 +70,9 @@ struct NovaWorldLinkFacts {
 	bool novaworld = false;         // transport_mode == NovaWorld
 	bool nwu_in_use = false;        // dword_B5FD2C
 	uint8_t nwu_session_flags = 0;  // byte_B60100
+	// The session's hosting/playing word (session+0x128, dword_B60108): the
+	// main frame's NovaWorld exit reads it (inmatch/novaworld_link.h).
+	int32_t nwu_session_role = 0;
 };
 
 // Both bits 2 and 8 of the NWU session flags: the session is in state 4..8

@@ -233,7 +233,11 @@ jobs:
   # 4.6's web templates (scripts/build_godot_web.sh pins it). A compile check:
   # an engine change that breaks wasm32 (ILP32, -pthread) fails here, while the
   # site image itself is game-web.yml's.
+  # Paused: the web build is on hold (the Compatibility renderer's 4096-value
+  # instance-uniform buffer cannot hold a mission's terrain and objects), so
+  # no PR waits on it. Drop the `if` to turn it back on.
   build-gdextension-web:
+    if: false
     runs-on: ubuntu-latest
     container: emscripten/emsdk:4.0.20
     env:

@@ -221,10 +221,11 @@ _Avoid_: editor MCP (the editor's own server, below)
 The `opennova-editor` Model Context Protocol server the OpenNova Editor embeds
 (`--mcp-port`, 8977 in `.mcp.json`; `scripts/mcp/editor_mcp.py`), through which an
 agent drives the editor's session by its two seams: the state by section, a request by
-kind (`editor_request`), a query by name (`editor_query`), Build and Play, and the two
-preview devices (ADR 0046 S6d, S13 A5, `docs/mcp.md`). Its tools and their schemas are
-made from the `catalog` query when it starts. The game a Play starts is then driven
-through its own runtime MCP.
+kind (`editor_request`), a query by name (`editor_query`), Build and Play, and a document's
+viewport (`editor_viewport`: the `viewport` query's reads, and `set_viewport` and
+`edit_in_viewport` for its writes) (ADR 0046 S6d, S13 A5, S13 V7, `docs/mcp.md`). Its tools and
+their schemas are made from the `catalog` query when it starts. The game a Play starts is then
+driven through its own runtime MCP.
 _Avoid_: runtime MCP (the game's), game MCP (when the editor is meant)
 
 **In-match / Matchmaking**:
@@ -656,7 +657,9 @@ make a picture over several of the Shell's frames, a little each frame (a model:
 meshes, then its scene and its pose; a menu's screen shown the first time: its textures, then the
 screen); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
 never a half-made one, and a change that asks for the picture again begins it anew. Headless, it
-answers as its envelope (JSON).
+answers as its envelope (JSON, the `viewport` query), and a client drags and commands through it as
+its canvas would (`edit_in_viewport`: a drag one batch under one gesture over the selected records
+it moves, a command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
 

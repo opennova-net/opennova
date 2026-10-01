@@ -9,10 +9,12 @@
 // again. The envelope and its pages. A SetViewport, a drag and a command through a real session, the
 // refused answering false. One undo step per gesture through a real session: a menu drag of four
 // samples, a drag of three selected windows moving all three, a gesture its canvas ends by not
-// drawing, a model marker's drag (two selected markers moving as one). S13 V6: devices that build
-// their pictures over frames (loading, then ready; a newer Rebuild cancelling one by generation; an
-// Update folded into a build; a Clear and a failure mid-build; the frame's budget), and the follow's
-// comparison of a file a build read between two follows.
+// drawing, a model marker's drag (two selected markers moving as one). S13 V7: a SetViewport with no
+// path the active document's; a hit naming its viewport. An edit in a viewport over the wire
+// (edit_in_viewport) is viewport_wire_test.cpp's. S13 V6: devices that build their pictures over
+// frames (loading, then ready; a newer Rebuild cancelling one by generation; an Update folded into a
+// build; a Clear and a failure mid-build; the frame's budget, shared by the builds in flight), and the
+// follow's comparison of a file a build read between two follows.
 
 #include <climits>
 #include <cmath>
@@ -36,6 +38,7 @@
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
+#include <editor/session/editor_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -184,7 +187,7 @@ struct CanvasRig {
 		const ViewportModel *model = viewport();
 		if (!model) return;
 		if (!half) half = model->make_canvas();
-		ViewportContext context = editor_test::viewport_context(session, *model, snap);
+		ViewportContext context = viewport_context(session.view(), *model, snap);
 		context.width = in.width;
 		context.height = in.height;
 		half->follow(*model, context, out);
@@ -418,8 +421,10 @@ static int test_clock() {
 			R"({"clock": {"playing": false, "time_ms": 40}})"));
 	TEST_EXPECT(session.outcome().done());
 	session.advance(1.0);
-	const JsonValue timing = *viewport_to_json(view, session.viewports().find("models/armory.3di", ViewportKind::Model),
-			ViewportKind::Model, JsonPage()).get("clock");
+	const ViewportModel *armory = session.viewports().find("models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(armory != nullptr);
+	if (!armory) return 1;
+	const JsonValue timing = *viewport_to_json(view, *armory, JsonPage()).get("clock");
 	TEST_EXPECT(!timing.get_bool("playing", true) && timing.get_number("time_ms", 0) == 40.0);
 	std::printf("test_clock passed\n");
 	return 0;
@@ -459,15 +464,11 @@ static int test_two_menus() {
 	TEST_EXPECT(main && extra && main != extra);
 	TEST_EXPECT(main->options().show_hidden && !extra->options().show_hidden);
 	TEST_EXPECT(main->state().width == 800 && extra->state().width == 1024 && extra->state().height == 768);
-	TEST_EXPECT(viewport_to_json(view, extra, ViewportKind::Menu, JsonPage()).get("options")->get_bool("show_hidden", true) ==
-			false);
+	TEST_EXPECT(viewport_to_json(view, *extra, JsonPage()).get("options")->get_bool("show_hidden", true) == false);
 	session.handle(request::open_document("main.mnu"));
 	devices.sync(session);
 	TEST_EXPECT(view.documents.previews[ViewportKind::Menu].path == main_path && devices.made.size() == 2);
-	TEST_EXPECT(viewport_to_json(view, session.viewports().find(main_path, ViewportKind::Menu), ViewportKind::Menu,
-						JsonPage())
-						.get("options")
-						->get_bool("show_hidden", false));
+	TEST_EXPECT(viewport_to_json(view, *main, JsonPage()).get("options")->get_bool("show_hidden", false));
 	std::printf("test_two_menus passed\n");
 	return 0;
 }
@@ -743,17 +744,17 @@ static int test_envelope() {
 	session.handle(request::new_project(dir.file("project"), "Envelope"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(viewport_to_json(view, nullptr, ViewportKind::Menu, JsonPage()).get_string("reason", "") == "no_menu");
+	TEST_EXPECT(editor_test::empty_viewport_json(view, ViewportKind::Menu).get_string("reason", "") == "no_menu");
 	session.handle(request::open_document("main.mnu"));
 	devices.sync(session);
 	const std::string path = session.document_for("main.mnu")->path();
 	const ViewportModel *menu = session.viewports().find(path, ViewportKind::Menu);
 	TEST_EXPECT(menu != nullptr);
 	if (!menu) return 1;
-	const JsonValue whole = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
+	const JsonValue whole = viewport_to_json(view, *menu, JsonPage());
 	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "progress",
 				 "revision", "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock",
-				 "body", "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
+				 "body", "items", "notes", "count", "offset", "next_offset", "note_count" })
 		TEST_EXPECT(whole.get(key) != nullptr);
 	// Its device's build (S13 V6): a device that makes its picture whole as it takes it reports none,
 	// and no progress shows.
@@ -762,13 +763,20 @@ static int test_envelope() {
 	for (const char *key :
 			{ "generation", "loading", "failed", "done", "total", "frames", "frame_us", "unit_us", "total_us" })
 		TEST_EXPECT(whole.get("device")->get("build")->get(key) != nullptr);
-	// Stamped with the view's clock at which what it reads last moved: a SetViewport moves it.
-	TEST_EXPECT(whole.get_number("view_revision", -1) == double(view.revisions.stamp_of(kViewportConcerns)) &&
-			whole.get_number("view_revision", 0) > 0.0);
+	// The viewport query stamps it (S13 V7) with the view's clock at which what its row reads last
+	// moved: a SetViewport moves it.
+	TEST_EXPECT(!whole.get("view_revision"));
+	const auto stamp_of = [&session]() {
+		std::string error;
+		JsonValue args = JsonValue::make_object();
+		args.set("op", JsonValue::make_string("state"));
+		return session.query("viewport", args, error).get_number("view_revision", -1);
+	};
+	const ConcernSet reads = editor_query_row(EditorQueryKind::Viewport).reads;
+	const double before = stamp_of();
+	TEST_EXPECT(before == double(view.revisions.stamp_of(reads)) && before > 0.0);
 	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": true}})"));
-	const JsonValue stamped = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
-	TEST_EXPECT(stamped.get_number("view_revision", 0) > whole.get_number("view_revision", 0) &&
-			stamped.get_number("view_revision", 0) == double(view.revisions.stamp(ViewConcern::Viewports)));
+	TEST_EXPECT(stamp_of() > before && stamp_of() == double(view.revisions.stamp(ViewConcern::Viewports)));
 	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": false}})"));
 	devices.sync(session);
 	TEST_EXPECT(whole.get_string("kind", "") == "menu" && whole.get_string("path", "") == path &&
@@ -792,7 +800,7 @@ static int test_envelope() {
 	JsonPage page;
 	page.offset = 1;
 	page.limit = 2;
-	const JsonValue paged = viewport_to_json(view, menu, ViewportKind::Menu, page);
+	const JsonValue paged = viewport_to_json(view, *menu, page);
 	TEST_EXPECT(paged.get("items")->array.size() == 2 && paged.get_number("count", 0) == double(total) &&
 			paged.get_number("offset", -1) == 1.0);
 	TEST_EXPECT(total > 3 ? paged.get_number("next_offset", 0) == 3.0 : paged.get("next_offset")->is_null());
@@ -803,11 +811,13 @@ static int test_envelope() {
 	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
-	TEST_EXPECT(viewport_to_json(view, nullptr, ViewportKind::Model, JsonPage()).get_string("reason", "") == "no_model");
+	TEST_EXPECT(editor_test::empty_viewport_json(view, ViewportKind::Model).get_string("reason", "") == "no_model");
 	session.handle(request::open_document("models/armory.3di"));
 	devices.sync(session);
-	const JsonValue model = viewport_to_json(view, session.viewports().find("models/armory.3di", ViewportKind::Model),
-			ViewportKind::Model, JsonPage());
+	const ViewportModel *armory = session.viewports().find("models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(armory != nullptr);
+	if (!armory) return 1;
+	const JsonValue model = viewport_to_json(view, *armory, JsonPage());
 	TEST_EXPECT(model.get_string("kind", "") == "model" && model.get_string("units", "") == "pixels" &&
 			model.get_string("status", "") == "ready");
 	const JsonValue *camera = model.get("camera");
@@ -816,32 +826,36 @@ static int test_envelope() {
 	TEST_EXPECT(model.get("body")->get("lod")->get("count") && model.get("body")->get("registers") &&
 			model.get("body")->get("animation")->is_null());
 	TEST_EXPECT(model.get("options")->get_string("lod", "") == "auto");
-	// No viewport kept for a kind: its empty one (a model's, the Preview on no model's document).
-	session.handle(request::close_document("models/armory.3di"));
-	const JsonValue none = viewport_to_json(view, nullptr, ViewportKind::Model, JsonPage());
-	TEST_EXPECT(none.get_string("status", "") == "empty" && none.get_string("reason", "") == "no_model" &&
-			none.get_string("path", "x").empty() && !none.get("device")->get_bool("attached", true) &&
-			none.get("items")->array.empty());
-
-	// A hit: what lies under a point, in the viewport's units.
+	// A hit: what lies under a point of a viewport, in its units, naming the viewport (its kind and its
+	// document) beside the item.
 	ViewportHit hit;
 	hit.index = 2;
 	hit.id = 7;
 	hit.name = "TITLE";
 	hit.kind = "static";
 	hit.current = true;
-	const JsonValue hit_json = viewport_hit_to_json(hit);
-	TEST_EXPECT(hit_json.get_number("index", 0) == 2.0 && hit_json.get_number("id", 0) == 7.0 &&
+	const JsonValue hit_json = viewport_hit_to_json(*menu, hit);
+	TEST_EXPECT(hit_json.get_string("viewport", "") == "menu" && hit_json.get_string("path", "") == path &&
+			hit_json.get_number("index", 0) == 2.0 && hit_json.get_number("id", 0) == 7.0 &&
 			hit_json.get_string("name", "") == "TITLE" && hit_json.get_string("kind", "") == "static" &&
 			hit_json.get_bool("current", false));
+	// No viewport kept once the model closes: the kind's follow over no document says so (the wire's
+	// reads are of a document's, so none answers this).
+	session.handle(request::close_document("models/armory.3di"));
+	TEST_EXPECT(!session.viewports().find("models/armory.3di", ViewportKind::Model));
+	const JsonValue none = editor_test::empty_viewport_json(view, ViewportKind::Model);
+	TEST_EXPECT(none.get_string("status", "") == "empty" && none.get_string("reason", "") == "no_model" &&
+			none.get_string("path", "x").empty() && !none.get("device")->get_bool("attached", true) &&
+			none.get("items")->array.empty());
 	std::printf("test_envelope passed\n");
 	return 0;
 }
 
-// A SetViewport over the wire (the session's JSON requests): read, served, done; refused whole
-// (a Problems row, viewport.refused, the request's outcome), the viewport as it was. A drag and a
-// command planned by the viewport (the MCP's) and served: one undo step each; a drag the session
-// refuses as it is served answers false, the menu as it was.
+// A SetViewport over the wire (the session's JSON requests): read, served, done; with no path the
+// active document's (S13 V7), refused when it shows in no viewport (a stylesheet), a document by its
+// logical name; refused whole (a Problems row, viewport.refused, the request's outcome), the viewport
+// as it was. A drag and a command planned by the viewport (the MCP's) and served: one undo step
+// each; a drag the session refuses as it is served answers false, the menu as it was.
 static int test_requests() {
 	editor_test::TempProjectDir dir("opennova_editor_viewport_requests");
 	NoProcess platform;
@@ -868,13 +882,13 @@ static int test_requests() {
 			R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"kind": "menu", "options": {"show_hidden": true}}})");
 	TEST_EXPECT(answer.get_bool("ok", false) && answer.get_bool("served", false) &&
 			answer.get("outcome")->get_bool("done", false) && shown->options().show_hidden);
-	// No path: the kind's Preview target.
-	answer = wire(R"({"kind": "set_viewport", "viewport": {"kind": "menu", "options": {"show_hidden": false}}})");
+	// No path: the active document's (S13 V7, A5's pathless rule), its kind the one it shows in.
+	answer = wire(R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": false}}})");
 	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && !shown->options().show_hidden);
 	for (const char *refused : {
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"options": {"bogus": 1}}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"kind": "model", "options": {"lod": 0}}})",
-				 R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": true}}})",
+				 R"({"kind": "set_viewport", "viewport": {"kind": "model", "options": {"lod": 0}}})",
 				 R"({"kind": "set_viewport", "path": "nosuch.mnu", "viewport": {"kind": "menu"}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"device": {"width": 0}}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"options": {"show_hidden": true}, "zoom": 2}})" }) {
@@ -889,6 +903,18 @@ static int test_requests() {
 	// A change that is no object is not read at all.
 	answer = wire(R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": 3})");
 	TEST_EXPECT(!answer.get_bool("ok", true));
+	// A stylesheet active (it feeds the menu's viewport, and shows in none): a pathless change refused,
+	// naming why; the menu named by its logical name, changed.
+	session.handle(request::open_document("menu_style.mns"));
+	answer = wire(R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": true}}})");
+	TEST_EXPECT(!answer.get("outcome")->get_bool("done", true) &&
+			answer.get("outcome")->get("findings")->array[0].get_string("message", "").find("shows in no viewport") !=
+					std::string::npos);
+	answer = wire(R"({"kind": "set_viewport", "path": "MAIN.MNU", "viewport": {"options": {"show_hidden": true}}})");
+	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && shown->options().show_hidden);
+	answer = wire(R"({"kind": "set_viewport", "path": "MAIN.MNU", "viewport": {"options": {"show_hidden": false}}})");
+	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && !shown->options().show_hidden);
+	session.handle(request::open_document("main.mnu"));
 	// A viewport the change is for is made only once the change applies: a refused one makes none.
 	{
 		Viewports fresh;
@@ -911,7 +937,7 @@ static int test_requests() {
 	drag.snap = 1;
 	editor_test::Gathered planned;
 	std::string error;
-	TEST_EXPECT(shown->drag(editor_test::viewport_context(session, *shown), drag, planned, error));
+	TEST_EXPECT(shown->drag(viewport_context(session.view(), *shown), drag, planned, error));
 	TEST_EXPECT(editor_test::serve(session, planned.requests) && menu->dirty());
 	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(!menu->dirty() && !menu->can_undo());
@@ -919,7 +945,7 @@ static int test_requests() {
 	// nothing written.
 	devices.sync(session);
 	planned.requests.clear();
-	TEST_EXPECT(shown->drag(editor_test::viewport_context(session, *shown), drag, planned, error));
+	TEST_EXPECT(shown->drag(viewport_context(session.view(), *shown), drag, planned, error));
 	const uint64_t revision = menu->revision();
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
 	TEST_EXPECT(!editor_test::serve(session, planned.requests));
@@ -929,7 +955,7 @@ static int test_requests() {
 	// The command (an arrange): EXIT's left edge to TITLE's, one batch, one undo step.
 	devices.sync(session);
 	editor_test::Gathered arranged;
-	TEST_EXPECT(shown->command(editor_test::viewport_context(session, *shown), "align_left", { title.child, exit.child },
+	TEST_EXPECT(shown->command(viewport_context(session.view(), *shown), "align_left", { title.child, exit.child },
 			arranged, error));
 	TEST_EXPECT(arranged.requests.size() == 1 && editor_test::serve(session, arranged.requests));
 	TEST_EXPECT(field_of(*menu, exit, "position.left") == field_of(*menu, title, "position.left") || menu->dirty());
@@ -1081,7 +1107,7 @@ static int test_gestures() {
 		drag.y = y - 12.0f;
 		editor_test::Gathered planned;
 		std::string error;
-		TEST_EXPECT(model->drag(editor_test::viewport_context(session, *model), drag, planned, error));
+		TEST_EXPECT(model->drag(viewport_context(session.view(), *model), drag, planned, error));
 		TEST_EXPECT(editor_test::serve(session, planned.requests));
 		TEST_EXPECT(place(point) != was && (selected ? place(second) != second_was : place(second) == second_was));
 		if (selected) {
@@ -1130,7 +1156,7 @@ static int test_builds() {
 	TEST_EXPECT(!row.ids.lists[kModelLights].empty());
 	if (row.ids.lists[kModelLights].empty()) return 1;
 	const NodeAddress light{ row.id, node_kind(ModelKind::Light), row.ids.lists[kModelLights][0].id };
-	const auto envelope = [&] { return viewport_to_json(view, model, ViewportKind::Model, JsonPage()); };
+	const auto envelope = [&] { return viewport_to_json(view, *model, JsonPage()); };
 	const auto moves = [&] { return view.revisions.of(ViewConcern::Viewports); };
 	const auto count = [](const std::vector<ViewportAction> &actions, ViewportAction action) {
 		size_t n = 0;
