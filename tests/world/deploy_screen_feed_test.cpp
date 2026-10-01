@@ -261,9 +261,27 @@ void test_instruction_branches() {
             std::string(254, 'X') + "<!");
 }
 
+// The DEATH_SHROUD reveal: at once under the deploy overlay, else only past
+// 240 ticks since the death stamp (a signed difference); the refresh runs on
+// each tick whose low four bits are zero.
+void test_shroud_reveal_and_refresh() {
+	CHECK(death_shroud_revealed(true, 0));
+	CHECK(!death_shroud_revealed(false, 240));
+	CHECK(death_shroud_revealed(false, 241));
+	CHECK(!death_shroud_revealed(false, -5));
+	CHECK(deploy_refresh_due(15, 16));
+	CHECK(!deploy_refresh_due(16, 16));
+	CHECK(!deploy_refresh_due(16, 31));
+	CHECK(deploy_refresh_due(16, 32));
+	CHECK(deploy_refresh_due(-1, 0));
+	CHECK(deploy_refresh_due(3, 40));
+	CHECK(!deploy_refresh_due(40, 3));
+}
+
 } // namespace
 
 int main() {
+	test_shroud_reveal_and_refresh();
 	test_instruction_branches();
 	test_status_text();
 	test_rows_sort_and_occupants();

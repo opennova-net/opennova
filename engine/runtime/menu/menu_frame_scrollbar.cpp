@@ -305,7 +305,9 @@ bool MenuFrameCompiler::scroll_row_span_(int index, const MenuFrameState &state,
 			if (row_h <= 0) {
 				return false;
 			}
-			*rows = ws != nullptr ? static_cast<int>(ws->table_rows.size()) : 0;
+			// The rows not hidden against the pitch-based visible count
+			// [orig: CTableWnd_RecalcLayout @ 0x63f1a0].
+			*rows = table_live_rows_(ws);
 			*visible = table_visible_rows_(node, rect, table_columns_(node, ws));
 			return true;
 		}
@@ -762,6 +764,28 @@ std::string MenuFrameCompiler::combo_face_text(const WidgetNode &node,
 		return std::string();
 	}
 	return rows[static_cast<size_t>(selected)].text;
+}
+
+// A list-like widget's row as it displays: the runtime rows when seeded, else
+// the authored row after the string-table lookup (a combo's LIST_BOX rows
+// when authored) — the text the list row carries [orig: sub_6447C0 @0x6447c0
+// reads the row's text, resolved at the ITEM parse].
+std::string MenuFrameCompiler::item_display_text(int index, const MenuFrameState &state,
+		int row) const {
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) return std::string();
+	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	if (node.window == nullptr) return std::string();
+	const MenuWidgetState *ws = state_for(state, index);
+	if (ws != nullptr && ws->has_items) {
+		return row >= 0 && row < static_cast<int>(ws->items.size())
+				? ws->items[static_cast<size_t>(row)]
+				: std::string();
+	}
+	const mnu::Window &w = *node.window;
+	const std::vector<WidgetNode::ItemVisual> &rows =
+			(w.list_box && w.list_box->items.present) ? node.popup_items : node.items;
+	return row >= 0 && row < static_cast<int>(rows.size()) ? rows[static_cast<size_t>(row)].text
+															  : std::string();
 }
 
 // The combo LIST_BOX popup at its authored combo-relative rect. Keeping this

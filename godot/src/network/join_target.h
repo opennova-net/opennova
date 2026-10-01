@@ -7,6 +7,7 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <net/npwire/net_ports.h>
+#include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
 #include <runtime/inmatch/server_flags.h>
 
 namespace godot {
@@ -38,6 +39,13 @@ public:
 		FLAG_BLUE_PASSWORD = opennova::inmatch::server_flag::kSideAPassword,
 		FLAG_ALLOW_SPECTATORS = opennova::inmatch::server_flag::kSpectators,
 		FLAG_SPECTATOR_PASSWORD = opennova::inmatch::server_flag::kSpectatorPassword,
+	};
+	// The network type the join rides: the menu's connect type, retail's
+	// transport_mode on the client (inmatch::NetworkType carries the witness);
+	// the squad talk row gates on it.
+	enum NetworkType {
+		NETWORK_NOVAWORLD = static_cast<int>(opennova::inmatch::NetworkType::NovaWorld),
+		NETWORK_LAN = static_cast<int>(opennova::inmatch::NetworkType::Lan),
 	};
 	// The join entry's next step (inmatch::join_entry_step).
 	enum EntryStep {
@@ -88,6 +96,10 @@ public:
 	// ServerHello P2; -1 = not discovered yet.
 	int get_server_flags() const { return server_flags_; }
 	void set_server_flags(int p_value) { server_flags_ = p_value; }
+	int get_network_type() const { return network_type_; }
+	void set_network_type(int p_value) {
+		network_type_ = p_value == NETWORK_NOVAWORLD ? NETWORK_NOVAWORLD : NETWORK_LAN;
+	}
 	int get_join_role() const { return join_role_; }
 	void set_join_role(int p_value) { join_role_ = p_value; }
 	bool get_role_explicit() const { return role_explicit_; }
@@ -159,6 +171,7 @@ private:
 	String server_name_;
 	int game_type_ = -1;
 	int server_flags_ = -1;
+	int network_type_ = NETWORK_LAN;
 	int join_role_ = ROLE_PLAYER;
 	String spectator_password_;
 	String server_password_;
@@ -176,3 +189,4 @@ private:
 VARIANT_ENUM_CAST(godot::JoinTarget::Role);
 VARIANT_ENUM_CAST(godot::JoinTarget::ServerFlag);
 VARIANT_ENUM_CAST(godot::JoinTarget::EntryStep);
+VARIANT_ENUM_CAST(godot::JoinTarget::NetworkType);

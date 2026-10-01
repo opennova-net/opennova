@@ -591,7 +591,7 @@ int main(int argc, char **argv) {
 	const auto player_tally = [&](int team) -> int32_t {
 		const w::MissionKillStats &ks = rig.world.kill_stats;
 		return team == 0 ? ks.greenkills_by_player
-				: team == 1 ? ks.bluekills_by_player : ks.enemy_kills_by_player;
+				: team == 1 ? ks.bluekills_by_player : ks.enemy_kills_by_player();
 	};
 	while (run.seconds() < kMaxMissionSeconds && !killed) {
 		const Victim npc = pick_victim(rig, blacklist, victim_team);

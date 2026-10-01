@@ -25,6 +25,31 @@ namespace opennova::world {
 // [orig: every 16 ticks @0x55477d]
 inline constexpr int32_t kDeployRefreshTicks = 16;
 
+// THE DEATH_SHROUD REVEAL. The screen's show event hides DEATH_SHROUD (the
+// window that holds the MAP, the spawn list and every static); then, every
+// main frame while the screen is loaded, the shroud shows once the deploy
+// overlay is up or more than 240 ticks have passed since the local death
+// stamp (a signed difference), and only inside that branch does the content
+// refresh run, on each tick whose low four bits are zero.
+// [orig: DeathScreen_UpdateUI @0x553150 — CWnd_SetShown(DEATH_SHROUD, 0)
+//  @0x55325f; DeathScreen_UpdateShroudReveal @0x554730 — `dword_25A39BC &&
+//  (g_DeployScreenActive || (int)(g_CurrentTick - g_CameraLerpStartTick) >
+//  240)` @0x554737..0x554752, CWnd_SetShown(DEATH_SHROUD, 1) @0x554771,
+//  `(g_CurrentTick & 0xF) == 0` -> UI_UpdateDeathScreenContent @0x55477d;
+//  run from UI_TeardownScene @0x54e67c]
+inline constexpr int32_t kDeathShroudRevealTicks = 240;
+inline bool death_shroud_revealed(bool deploy_screen_active, int32_t ticks_since_death) {
+	return deploy_screen_active || ticks_since_death > kDeathShroudRevealTicks;
+}
+// Whether a refresh tick (low four bits zero) lies in (prev_tick, tick]: the
+// device samples once per display frame, so it asks whether the main frames
+// since its last sample reached one.
+inline bool deploy_refresh_due(int64_t prev_tick, int64_t tick) {
+	if (tick <= prev_tick) return false;
+	const int64_t first = (prev_tick + kDeployRefreshTicks) & ~int64_t{kDeployRefreshTicks - 1};
+	return first <= tick;
+}
+
 // One player queued on a zone's wave [orig: the member handles at
 // unk_A85CC4[zoneIdx*8+i], named through entity->Name @0x553d5a..0x553d7f].
 struct DeployOccupant {
@@ -38,8 +63,8 @@ struct DeployOccupant {
 // EntryById[9] >= [10]) with attrib 0x40000; text "<team color>'<letter>' <name>",
 // row value = index + 1].
 struct DeployZoneRow {
-    int index = 0;        // SpawnZoneList index (0-based)
-    char letter = 'A';    // 'A' + index
+    int index = 0;        // SpawnZoneList index (0-based; -1 for a banked zone outside it)
+    char letter = 'A';    // 'A' + index ('@' for -1)
     std::string name_key; // WPNames/STRWPNAME%03d (index + 1)
     bool secured = false; // the first loop's listing gate
     uint16_t wave_countdown = 0; // entity+548 from the 0x6E fold

@@ -61,6 +61,7 @@
 #include <runtime/world/powerup.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/waypoint_track.h>
+#include <runtime/world/user_waypoints.h>
 #include <runtime/world/weapon_table.h>
 #include <runtime/world/zone_capture.h>
 #include <formats/rtxt/rtxt.h>
@@ -253,31 +254,70 @@ inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
 // [orig: the 48+48-tick cine fade pair @0x574512]
 inline constexpr int32_t kEpilogFadeInTicks = 48 + 48;
 
-// SP mission kill tallies — the 0xC846xx stat-bucket family the epilog score
-// screen counts from and the WAC bluekills/greenkills builtins read. By-player
-// = kills by the local/host player; by-others = every other killer. Only
-// person-class victims (itemdef class 3) tally the blue/green buckets; the
-// original's per-type enemy split (infantry/vehicle/aircraft) and the point
-// values (def+404, difficulty-scaled) fold into plain counts here — the WAC
-// predicates and the epilog count columns read counts. [orig:
-// Score_TallyKillByLocalPlayer @0x4fd160 / Score_TallyKillByOthers @0x4fd300,
-// dispatched per kill by Score_ProcessKillEvent @0x4fd400 (SP only).]
+// The def+0x196 unit-class split the SP score block keys on: 3 and 4 are
+// vehicles, 9 aircraft, anything else (0 included) infantry. The census and
+// the by-player kill tally read the same byte.
+// [orig: Score_ClassifyEntityForCounts @0x4fd0c7; Score_TallyKillByLocalPlayer
+//  @0x4fd242]
+enum class ScoreUnitClass : uint8_t { Infantry, Vehicle, Aircraft };
+
+inline ScoreUnitClass score_unit_class(int32_t item_unit_type) {
+    switch (static_cast<uint8_t>(item_unit_type)) {
+        case 3:
+        case 4: return ScoreUnitClass::Vehicle;
+        case 9: return ScoreUnitClass::Aircraft;
+        default: return ScoreUnitClass::Infantry;
+    }
+}
+
+// The SP score block — the 0xC84688..0xC8470B statistics the Show Score panel
+// and the SP win epilog draw and the WAC bluekills/greenkills builtins read.
+// By-player = kills by the local/host player; by-others = every other killer.
+// Only person-class victims (itemdef class 3) tally the blue/green buckets.
+// The block's point sums (def+404, difficulty-scaled, the +4 word of every
+// kill bucket), the human-victim bucket, the subgoal bonus @0xC846D4 and
+// g_SPElapsedUpdateCount @0xC84700 are not modeled: no live code draws them —
+// their readers are the dead Cine_ProcessEpilogSequence_Retail @0x575a90,
+// Score_ComputeSpTimeWeightedAverage @0x40da30 (called only from it) and
+// sub_40D960 @0x40d960, the Show Score panel's dead-store sprintfs and the
+// save block. The by-others enemy split folds (only its sum is read); the
+// by-player split stays, because its census overflow is visible.
+// Zeroed whole by the authority after the PreMission pass and carried by the
+// play-start baseline. [orig: Score_TallyKillByLocalPlayer @0x4fd160 /
+// Score_TallyKillByOthers @0x4fd300, dispatched per kill by
+// Score_ProcessKillEvent @0x4fd400 (SP only); Score_TallySubGoalWon @0x4fd100;
+// Server_ResetRoundCounters @0x516c50 — memset(0xC84688, 0, 0x84) @0x516c5e]
 struct MissionKillStats {
     int32_t bluekills_by_player = 0;      // team-1 persons [orig: 0xC846F0 — WAC 'bluekills']
     int32_t greenkills_by_player = 0;     // team-0 persons [orig: 0xC846F8 — WAC 'greenkills']
-    int32_t enemy_kills_by_player = 0;    // team >= 2, any kind [orig: 0xC846D8/E0/E8 folded]
+    // team >= 2, any kind, per unit class [orig: 0xC846D8 / 0xC846E0 / 0xC846E8]
+    int32_t enemy_infantry_kills_by_player = 0;
+    int32_t enemy_vehicle_kills_by_player = 0;
+    int32_t enemy_aircraft_kills_by_player = 0;
     int32_t team_kills_by_others = 0;     // [orig: 0xC846C0]
     int32_t friendly_kills_by_others = 0; // [orig: 0xC846C8]
     int32_t enemy_kills_by_others = 0;    // [orig: 0xC846A8/B0/B8 folded]
-    // The mission's enemy-unit total, counted ONCE at mission start over the
-    // entity pools: non-player entities with team >= 2 and a non-zero
-    // items.def unit-class byte (def+0x196). The original also splits the
-    // count per class (vehicle 3/4, aircraft 9, else infantry @0xC84694/9C/98)
-    // — the Show Score panel consumes only the total, so the split folds like
-    // the kill buckets above. [orig: 0xC84690 — Score_ClassifyEntityForCounts
-    // @0x4fd070 over both pools from Score_CountMissionSubgoalsAndUnits @0x509dc0, called at
-    // Game_StartMission @0x525d5d]
+    // The mission's enemy-unit census, counted at mission start over pools 0
+    // and 1: non-player entities with team >= 2 and a non-zero items.def
+    // unit-class byte (def+0x196), with its per-class split. A by-player kill
+    // that takes a class past its census grows that class and the total by
+    // the overflow (Match::process_kill_event). [orig: 0xC84690 total,
+    // @0xC84694 vehicle / @0xC84698 infantry / @0xC8469C aircraft —
+    // Score_ClassifyEntityForCounts @0x4fd070 from
+    // Score_CountMissionSubgoalsAndUnits @0x509dc0, called at Game_StartMission
+    // @0x525d5d]
     int32_t enemy_unit_total = 0;
+    int32_t enemy_vehicle_total = 0;
+    int32_t enemy_infantry_total = 0;
+    int32_t enemy_aircraft_total = 0;
+    // One per first SubGoalWon of a slot, outside a session.
+    // [orig: g_SubGoalsWonCount 0xC846D0 — Score_TallySubGoalWon @0x4fd117]
+    int32_t subgoals_won = 0;
+
+    int32_t enemy_kills_by_player() const {
+        return enemy_infantry_kills_by_player + enemy_vehicle_kills_by_player +
+                enemy_aircraft_kills_by_player;
+    }
 };
 
 
@@ -537,6 +577,13 @@ struct MissionTables {
     bool map_grid_origin_present = false;
     int32_t map_grid_origin_x = 0;
     int32_t map_grid_origin_y = 0;
+    // The items.def "user waypoint" row (type id 6089, items.def 106089)
+    // Waypoint_CreateForPlayer seeds its pool-4 rows from: the row's ordinal
+    // (0 when the row is missing — ItemList_FindIndexByTypeId's miss) and its
+    // type. Stamped by the item-traits sweep.
+    // [orig: Waypoint_CreateForPlayer @0x4dfcb0 — ItemList_FindIndexByTypeId(6089)]
+    int32_t user_waypoint_type_index = 0;
+    uint8_t user_waypoint_item_type = 0;
 };
 
 // The session/game-option bits the host stamps at bring-up; the SP defaults
@@ -674,6 +721,13 @@ struct WorldOutbox {
 	// Water-surface crossings recorded this tick; the host fan drains them
 	// into S2C 0x34 and clears. Presentation only - nothing in the sim reads it.
 	WaterCrossQueue water_crossings;
+	// The local player's tip events (hud/tip_system.h TipEvent) in the order
+	// they were raised — boarding and leaving a seat, the scope and NVG
+	// toggles, the binocular edge, and a client's spectator begin (the
+	// replica's S2C 0x0A / 0x4D legs land through the client effects). The
+	// HUD owner drains them into its tip [orig: the CTipSystem_HandleEvent
+	// call sites; docs/interface/hud-re.md "The tip"].
+	std::vector<uint8_t> tip_events;
     // The destruction presentation events (world/destruction.h) the host drains.
     DestructionEvents destruction;
 	std::vector<VehicleEffectEvent> vehicle_effects; // fixed-tick movement particles
@@ -780,6 +834,8 @@ public:
     VehicleSystem vehicles;
 	RotorWashSystem rotor_wash;
 	ZoneSystem zones;
+	// The command map's placed-waypoint table (world/user_waypoints.h).
+	UserWaypointTable user_waypoints;
 	// Game_StartMission seeds the one process-global PRNG_Next16 stream after
     // writing it twice; 0x1A10101A is the final retail dword_31BFBB0 value
     // [orig: push 1A10101Ah @ 0x5245F7 -> seed setter PRNG_SetSeed (ex sub_613130) in
@@ -980,6 +1036,12 @@ public:
     // [orig: Game_ProcessMainFrame @0x5263f0]
     void run_logic_tick(bool is_authority = true,
                         TickPhase phase = TickPhase::Gameplay);
+    // The frame's pending-sound pass, ahead of the script and entity halves:
+    // the fire-sound countdown, then the incoming-lock tone drain.
+    // [orig: Sound_TickPendingSlots @0x529310 (the slot walk, then the
+    //  dword_B764C0 drain @0x5293a5..0x5293af), from Game_ProcessMainFrame
+    //  @0x526697]
+    void tick_pending_sound_slots();
     TickContext begin_tick(bool is_authority, TickPhase phase);
     void run_script_pass(const TickContext &ctx);
     void run_entity_pass(const TickContext &ctx);
@@ -1077,6 +1139,15 @@ public:
         TeammateOperations teammates;
         int32_t vehicle_ai_spawn_phase = 0;
         Match match;
+        // The SP score block and the subgoal masks at play start: a restart
+        // lands on the post-census, post-memset block and the post-PreMission
+        // masks retail's re-run of Game_StartMission rebuilds (the masks
+        // zeroed by EventSystem_FreeAll, then the PreMission pass).
+        // [orig: Game_RestartRoundSP @0x5263a0 -> Game_DestroyAllEntitiesAndReset
+        //  -> Mission_ResetBmsState -> EventSystem_FreeAll @0x453356..0x453368,
+        //  then Game_StartMission @0x5263db]
+        MissionKillStats kill_stats;
+        SubgoalState subgoals;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;
         uint32_t spawn_cycle_counter = 0;
@@ -1096,12 +1167,13 @@ private:
     std::vector<ISystem *> systems_;
 };
 
-// The mission-start unit scan feeding MissionKillStats::enemy_unit_total —
-// the Show Score panel's enemy-units denominator. Runs once at the
-// Game_StartMission-equivalent moment, after entity placement and the
-// item-traits sweep stamped Entity::item_unit_type.
+// The mission-start unit scan feeding MissionKillStats's census (the total
+// and its per-class split) — the Show Score panel's and the win epilog's
+// enemy-units max. Runs once at the Game_StartMission-equivalent moment, after
+// entity placement and the item-traits sweep stamped Entity::item_unit_type,
+// over pools 0 and 1 only.
 // [orig: Score_CountMissionSubgoalsAndUnits (ex sub_509DC0) @0x509dc0 -> Score_ClassifyEntityForCounts @0x4fd070,
-//  called at Game_StartMission @0x525d5d]
+//  the pool walks @0x509e13..0x509e4a, called at Game_StartMission @0x525d5d]
 void count_mission_units(World &world);
 
 // The mission's defined-subgoal count: the leading run of authored win

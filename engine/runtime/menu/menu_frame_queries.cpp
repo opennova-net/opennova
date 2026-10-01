@@ -150,17 +150,23 @@ bool MenuFrameCompiler::widget_rect(int index, const MenuFrameState &state,
 			index >= static_cast<int>(nodes_.size())) {
 		return false;
 	}
-	// absolute = own solved rect + every ancestor's solved origin (the same
-	// accumulation the draw walk threads through origin_x/origin_y).
-	(void)state;
-	mnu::RectEdges rect = solve_rect(nodes_[static_cast<size_t>(index)]);
+	// absolute = own rect + every ancestor's origin (the same accumulation the
+	// draw walk threads through origin_x/origin_y; a moved widget's runtime rect).
+	mnu::RectEdges rect = node_rect_(nodes_[static_cast<size_t>(index)], state_for(state, index));
 	int p = nodes_[static_cast<size_t>(index)].parent;
 	while (p >= 0) {
-		const mnu::RectEdges pr = solve_rect(nodes_[static_cast<size_t>(p)]);
+		const mnu::RectEdges pr = node_rect_(nodes_[static_cast<size_t>(p)], state_for(state, p));
 		rect = offset_rect(rect, pr.left, pr.top);
 		p = nodes_[static_cast<size_t>(p)].parent;
 	}
 	*out = rect;
+	return true;
+}
+
+bool MenuFrameCompiler::widget_local_rect(int index, const MenuFrameState &state,
+		mnu::RectEdges *out) const {
+	if (out == nullptr || index < 0 || index >= static_cast<int>(nodes_.size())) return false;
+	*out = node_rect_(nodes_[static_cast<size_t>(index)], state_for(state, index));
 	return true;
 }
 

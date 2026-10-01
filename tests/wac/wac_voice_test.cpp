@@ -183,7 +183,7 @@ static void test_radio_sets_share_channel_zero_and_keep_unity_pitch() {
     Fixture f;
     f.world.rules.mp_session = true;
     int selections = 0;
-    f.world.script.voice.set_set_resolver([&](const std::string &name, uint8_t)
+    f.world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool)
             -> std::optional<ScriptVoiceChannel::SetSelection> {
         ++selections;
         if (name != "MEDIC_VOICE") return std::nullopt;
@@ -204,8 +204,73 @@ static void test_radio_sets_share_channel_zero_and_keep_unity_pitch() {
     CHECK(selections == 2);
 }
 
+// The entity voice (S2C 0x2D's EMO_ line): the bank member with its pitch on
+// channel zero anchored at the speaker; a busy channel plays the set as a
+// full-volume 3D one-shot at the speaker instead, without a member pick; an
+// unknown set or a non-peer does nothing; a decoded-row anchor rides its
+// tracked position and stops when the row goes.
+// [orig: Audio_StartEntityPlayback @0x4ECD90]
+static void test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot() {
+    Fixture f;
+    std::vector<std::pair<std::string, bool>> picks;
+    f.world.script.voice.set_set_resolver([&](const std::string &name, uint8_t, bool bank)
+            -> std::optional<ScriptVoiceChannel::SetSelection> {
+        picks.emplace_back(name, bank);
+        if (name != "BM1_EMO_3") return std::nullopt;
+        ScriptVoiceChannel::SetSelection pick{"tone.wav", 190, 50 * 65536};
+        pick.pitch_q16 = 0x14000u;
+        return pick;
+    });
+    const Vec3 at{5.0f, 0.0f, 0.0f};
+    CHECK(f.world.script.voice.entity_set(f.world, "BM1_EMO_3", f.speaker, at, false) ==
+            ScriptVoiceChannel::EntityVoice::Channel);
+    CHECK(picks.size() == 1 && picks[0].second);
+    auto frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.state.anchor == f.speaker && frame.state.portrait == f.speaker);
+    CHECK(!frame.local && frame.position.x == 5.0f);
+    CHECK(frame.state.pitch_q16 == 0x14000u && frame.state.volume == 190);
+    CHECK(frame.state.max_distance == 50 * 65536);
+    // Busy: the one-shot at the speaker, before any member pick.
+    CHECK(f.world.script.voice.entity_set(f.world, "BM1_EMO_3", f.speaker, at, false) ==
+            ScriptVoiceChannel::EntityVoice::Oneshot);
+    CHECK(picks.size() == 1);
+    CHECK(f.world.out.slot_sounds.size() == 1);
+    const SoundSlotEvent &oneshot = f.world.out.slot_sounds.front();
+    CHECK(std::string(oneshot.set_name) == "BM1_EMO_3" && oneshot.pos[0] == 5 * 65536 &&
+            oneshot.source_handle == f.speaker.packed);
+    f.world.script.voice.finish(frame.serial, frame.state.clip.get());
+    // The local speaker takes the 100-unit radius.
+    CHECK(f.world.script.voice.entity_set(f.world, "BM1_EMO_3", f.local, {}, false) ==
+            ScriptVoiceChannel::EntityVoice::Channel);
+    frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.local && frame.state.max_distance == 100 * 65536);
+    f.world.script.voice.finish(frame.serial, frame.state.clip.get());
+    // An unknown set, and a non-peer, leave the channel alone.
+    CHECK(f.world.script.voice.entity_set(f.world, "NOPE", f.speaker, at, false) ==
+            ScriptVoiceChannel::EntityVoice::None);
+    CHECK(f.world.script.voice.ready());
+    f.world.rules.mp_session_peer = false;
+    CHECK(f.world.script.voice.entity_set(f.world, "BM1_EMO_3", f.speaker, at, false) ==
+            ScriptVoiceChannel::EntityVoice::None);
+    f.world.rules.mp_session_peer = true;
+    // A decoded row the world has no entity for.
+    const EntityHandle row = EntityHandle::make(0, 7);
+    CHECK(f.world.script.voice.entity_set(f.world, "BM1_EMO_3", row, {3.0f, 4.0f, 5.0f}, true) ==
+            ScriptVoiceChannel::EntityVoice::Channel);
+    frame = f.world.script.voice.frame(f.world, {});
+    CHECK(!f.world.script.voice.ready() && frame.position.y == 4.0f);
+    f.world.script.voice.track_row_anchor(row, true, {6.0f, 7.0f, 8.0f});
+    frame = f.world.script.voice.frame(f.world, {});
+    CHECK(frame.position.x == 6.0f && frame.position.z == 8.0f);
+    f.world.script.voice.track_row_anchor(f.speaker, false, {});
+    CHECK(!f.world.script.voice.ready()); // another anchor's state is ignored
+    f.world.script.voice.track_row_anchor(row, false, {});
+    CHECK(f.world.script.voice.ready());
+}
+
 int main() {
     test_wave_ready_and_physical_completion();
+    test_entity_voice_anchors_at_the_speaker_or_falls_back_to_a_oneshot();
     test_radio_sets_share_channel_zero_and_keep_unity_pitch();
     test_failed_replacement_invalidates_before_loading();
     test_spatial_speaker_and_radio_anchor();

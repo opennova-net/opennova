@@ -272,6 +272,15 @@ void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind) {
     inf.wpn_deferred = 0;
 }
 
+bool infantry_weapon_emote_stamp(InfantryState &inf, const IRootMotionSource *source, int emote) {
+    const int state = kEmoteAnimStateBase + emote; // [orig: `lea ecx, [edi+72h]` @0x427f0d]
+    // The authored-slot test on the body map [orig: entity+0x188 -> +0x48 @0x427efb..0x427f0b]
+    if (source == nullptr || !source->has_clip(inf.adm_id, state)) return false;
+    inf.request_weapon_animation(state); // entity+0x2C8 [orig: @0x427f12]
+    inf.wpn_deferred = 0;                // entity+0x2C4 [orig: @0x427f18]
+    return true;
+}
+
 void infantry_weapon_switch_stamp(InfantryState &inf, uint64_t category_serial) {
     if (category_serial == 0 || inf.wpn_category_serial == category_serial) return;
     inf.wpn_category_serial = category_serial;

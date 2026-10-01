@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <net/npwire/protocol_message.h>
+#include <net/npwire/session_vars.h>
 
 #include <runtime/inmatch/game_config.h> // inmatch::GameConfig — the reactive reply handlers read it
 #include <runtime/inmatch/napi_np_connection.h>
@@ -130,6 +131,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                                                       world::World *world,
                                                       const ServerDispatchInputs &inputs = {});
 
+// The authority's session variables, the S2C 0x60 server-info stream's content
+// (npwire/session_vars.h) and, re-parsed, a listen host's own g_SessionVar*
+// copies. [orig: Game_SerializeMissionInfoToDataStream @0x523620]
+SessionVars host_session_vars(const GameConfig &cfg);
+
 // Build the S2C 0x16 PLAYER-LIST for the current roster (every IN-MATCH connection: host loopback
 // slot 0 + joiners 1+; a still-loading joiner is excluded until its burst completes). Public so the
 // per-tick host loop can RE-PUSH it when a joiner spawns (the golden re-sends 0x16 with the grown
@@ -142,8 +148,7 @@ ProtocolMessage build_player_list_message(const GameConfig &config,
 // Broadcast one just-spawned player's 0x46 slot-state (fieldFlags 0x1CF7) to every OTHER in-match
 // connection — the join-time roster push that lets existing clients ACCEPT the new player's 0x16
 // row without the unknown-slot 0x22 retry churn. [orig: Server_PlayerAdd @0x51CBC0 broadcasts 0x46
-// fieldFlags 0x1CF7 to all in-game @0x51D296 (`push 7415` @0x51d2bf); the 0x32 name broadcast
-// stays deferred with D-NET-149]
+// fieldFlags 0x1CF7 to all in-game @0x51D296 (`push 7415` @0x51d2bf)]
 void broadcast_player_sync_on_join(const GameConfig &config,
                                    std::vector<NapiNPConnection> &roster,
                                    const NapiNPConnection &joined, const world::World *world);

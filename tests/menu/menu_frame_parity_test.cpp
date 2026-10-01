@@ -35,6 +35,7 @@ using namespace opennova::fnt;
 using opennova::menu::MarqueeCredits;
 using opennova::menu::MenuDrawList;
 using opennova::menu::MenuFrameCompiler;
+using opennova::menu::MenuTableRow;
 using opennova::menu::MenuFrameState;
 using opennova::menu::MenuQuad;
 using opennova::menu::MenuTextTables;
@@ -552,7 +553,7 @@ void test_table_columns(const fnt_font_t *font) {
 	MenuWidgetState sorted;
 	sorted.index = 1;
 	sorted.table_sort_column = 0;
-	sorted.table_rows = { { "r0a", "r0b" } };
+	sorted.table_rows = { MenuTableRow{ { "r0a", "r0b" } } };
 	st.widgets.push_back(sorted);
 	const MenuDrawList &dl2 = c.compile(st, 1.0f, 1.0f);
 	int taper = 0;
@@ -575,7 +576,7 @@ void test_table_columns(const fnt_font_t *font) {
 	MenuFrameState rs;
 	MenuWidgetState rows;
 	rows.index = 1;
-	rows.table_rows = { { "ann", "7" } };
+	rows.table_rows = { MenuTableRow{ { "ann", "7" } } };
 	rs.widgets.push_back(rows);
 	CHECK(r.compile(rs, 1.0f, 1.0f).glyphs.empty(), "a table with no HEADER draws no cells");
 	opennova::menu::MenuTableColumn name;
@@ -586,7 +587,8 @@ void test_table_columns(const fnt_font_t *font) {
 	kills.width = 100;
 	rs.widgets[0].has_table_columns = true;
 	rs.widgets[0].table_columns = { name, kills };
-	rs.widgets[0].table_row_colors = { { true, 0xFF00BFFFu } };
+	rs.widgets[0].table_rows[0].flags |= opennova::menu::kTableRowFlagColor;
+	rs.widgets[0].table_rows[0].color = 0xFF00BFFFu;
 	const MenuDrawList &rl = r.compile(rs, 1.0f, 1.0f);
 	CHECK(rl.glyphs.size() == 4 + 1 + 3 + 1, "the installed columns draw their labels and cells");
 	bool team = false;
@@ -722,7 +724,8 @@ void test_table_hit(const fnt_font_t *font) {
 	MenuFrameState st;
 	MenuWidgetState rows;
 	rows.index = 1;
-	rows.table_rows = { { "a" }, { "b" }, { "c" }, { "d" }, { "e" }, { "f" } };
+	rows.table_rows = { MenuTableRow{ { "a" } }, MenuTableRow{ { "b" } }, MenuTableRow{ { "c" } },
+		MenuTableRow{ { "d" } }, MenuTableRow{ { "e" } }, MenuTableRow{ { "f" } } };
 	st.widgets.push_back(rows);
 	int row = -9;
 	int column = -9;
@@ -757,7 +760,7 @@ void test_table_hit(const fnt_font_t *font) {
 	MenuFrameState ts;
 	MenuWidgetState trows;
 	trows.index = 1;
-	trows.table_rows = { { "a", "", "b" } };
+	trows.table_rows = { MenuTableRow{ { "a", "", "b" } } };
 	ts.widgets.push_back(trows);
 	CHECK(t.table_hit(1, ts, 50.0f, 5.0f, 1.0f, 1.0f, &row, &column) && row == -1 && column == 0,
 			"the header strip's column");

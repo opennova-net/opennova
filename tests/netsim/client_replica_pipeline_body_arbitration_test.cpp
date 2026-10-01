@@ -90,6 +90,23 @@ struct BodySource final : public opennova::world::IRootMotionSource {
 	}
 };
 
+// emote_1..emote_10 are 20-tick one-shots, emote_4 unauthored; the rest
+// 62-tick loops.
+struct EmoteSource final : public opennova::world::IRootMotionSource {
+	bool has_clip(int, int state) const override { return state != 118; }
+	bool advance(int, int, int32_t &phase, opennova::world::RootMotionFrame &out) override {
+		++phase;
+		out = {};
+		out.capsule_bottom = 1 << 16;
+		out.capsule_top = 2 << 16;
+		return true;
+	}
+	int32_t clip_length_ticks(int, int state, int) const override {
+		return state >= 115 && state <= 124 ? 20 : 62;
+	}
+	bool clip_loops(int, int state, int) const override { return state < 115 || state > 124; }
+};
+
 void arm_row(ns::ClientReplicaPipeline &view) {
 	view.state().find(kPlayerHandle)->rm_adm_id = 0;
 }
@@ -220,11 +237,62 @@ void test_dead_park_and_respawn_edges() {
 
 } // namespace
 
+// A decoded player row runs its own secondary channel: armed on the hold
+// ladder (the rifle default mirrors the primary), an S2C 0x2D stamp plays
+// emote_N, the next 16-tick selection defers the hold to the emote's end, and
+// the hold returns after it. An unauthored emote does not stamp.
+// [orig: NapiNPClientMsg_HandleEmote @0x427efb..0x427f18;
+//  Entity_UpdateInfantryPlayerBody @0x4b5d71 / @0x4b5e72..0x4b5ea3;
+//  AnimMap_UpdateDualChannels @0x40b8c0]
+void test_row_weapon_channel_plays_an_emote_then_returns() {
+	ns::ClientReplicaPipeline view;
+	view.set_item_class_resolver(&classify);
+	view.set_remote_motion_mode(true);
+	EmoteSource src;
+	view.set_root_motion_source(&src);
+	seed_row(view);
+	view.apply(0x0A, player_frame(as::kIdle, 0));
+	arm_row(view);
+	const ns::ClientEntityState *es = view.state().find(kPlayerHandle);
+	view.tick_remote_motion(0xFFFF);
+	expect(es->wpn_playing == as::kIdle, "the channel arms on the ladder's mirror of the primary");
+	expect(!view.stamp_row_emote(kPlayerHandle, 4), "an unauthored emote does not stamp");
+	expect(view.stamp_row_emote(kPlayerHandle, 3) && es->wpn_state == 117,
+			"emote 3 targets emote_3");
+	view.tick_remote_motion(0xFFFF);
+	expect(es->wpn_playing == 117 && es->wpn_blend_weight < 1.0f && es->wpn_prev == as::kIdle,
+			"the channel re-inits onto the emote, blending from the hold");
+	int ticks = 2;
+	while (es->wpn_deferred == 0 && ticks < 40) {
+		view.tick_remote_motion(0xFFFF);
+		++ticks;
+	}
+	expect(ticks == 16 && es->wpn_deferred == as::kIdle && es->wpn_playing == 117,
+			"the 16-tick selection defers the hold behind the emote (flag 0x20)");
+	while (es->wpn_playing == 117 && ticks < 60) {
+		view.tick_remote_motion(0xFFFF);
+		++ticks;
+	}
+	expect(es->wpn_playing == as::kIdle && es->wpn_deferred == 0 && ticks > 20,
+			"the hold returns once the emote clip ends");
+	// The row's radio-request latch ages on the 64-tick window, a spent count
+	// clearing it [orig: Entity_UpdateInfantryPlayerBody @0x4b467a..0x4b469d].
+	ns::ClientEntityState *row = view.state().find(kPlayerHandle);
+	row->radio_request = 1;
+	row->radio_request_seconds = 1;
+	for (int i = 0; i < 64; ++i) view.tick_remote_motion(0xFFFF);
+	expect(row->radio_request == 1 && row->radio_request_seconds == 0,
+			"one window takes the last second");
+	for (int i = 0; i < 64; ++i) view.tick_remote_motion(0xFFFF);
+	expect(row->radio_request == 0, "the next window clears the latch");
+}
+
 int main() {
 	test_tapped_roll_locks_and_queues();
 	test_pending_promotes_at_clip_end();
 	test_gait_transition_insert();
 	test_dead_park_and_respawn_edges();
+	test_row_weapon_channel_plays_an_emote_then_returns();
 	if (failures) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

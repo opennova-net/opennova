@@ -4,7 +4,7 @@ extends GutTest
 # Messages + the chat drain, AAS zone status), exercised over a REAL HudOverlay
 # with the sim absent: the toggle edge machine, the hide-once bookkeeping, and
 # the null paths. The native row feeds (Simulation.fill_vehicle_panel /
-# fill_lfp_zones / drain_chat_lines) need a live mission and are pinned by the
+# fill_lfp_zones / drain_feed_posts) need a live mission and are pinned by the
 # engine ctests (vehicle_panel_feed, lfp_feed, client_replica_chat).
 
 const VehiclePanelPresenter := preload("res://game/world/vehicle_panel_presenter.gd")
@@ -52,8 +52,8 @@ func _font_overlay() -> HudOverlay:
 func test_message_log_toggle_edge() -> void:
 	var toggles := HudToggles.new()
 	var poll := func(down: bool, chorded: bool, active: bool) -> int:
-		return toggles.poll(false, false, false, false, false, false, false, false,
-				false, false, down, false, chorded, active, false)
+		return toggles.poll((1 << HudToggles.ROW_OLD_MESSAGES) if down else 0, false,
+				chorded, active, false, false)
 	assert_eq(poll.call(true, false, true),
 			HudToggles.EVENT_MESSAGE_LOG_TOGGLED | HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED)
 	assert_true(toggles.is_message_log_open(), "The first down-edge opens the window.")
@@ -84,11 +84,11 @@ func test_message_log_lane_shows_history() -> void:
 	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
-	lane.update(hud, null, true)
+	lane.update(hud, true)
 	assert_gt(hud.get_draw_list_stats().glyphs, 0,
 			"Opening the window through the lane lists the expired line.")
 	await get_tree().process_frame
-	lane.update(hud, null, false)
+	lane.update(hud, false)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"Closing through the lane hides the history.")
 
@@ -111,3 +111,31 @@ func test_vehicle_and_zone_lanes_null_paths() -> void:
 	vehicle.reset()
 	zones.reset()
 	assert_true(is_instance_valid(hud))
+
+
+# The Tab board takes PgUp/PgDn only in a session with the board up (the
+# engine's special-key arm); out of a session no talk row opens a chat line,
+# a closed line draws nothing and takes no key (engine hud_chat_entry).
+func test_board_page_keys_and_chat_line_gates() -> void:
+	var hud := _font_overlay()
+	assert_false(hud.scoreboard_page_key(true, false, true),
+			"Out of a session the board leaves PgDn to the other windows.")
+	assert_false(hud.scoreboard_page_key(true, true, false),
+			"A closed board leaves PgDn to the other windows.")
+	assert_true(hud.scoreboard_page_key(false, true, true),
+			"An open in-session board takes PgUp.")
+	hud.reset_scoreboard_page()
+	var chat := HudChatEntry.new()
+	var every_row := (1 << HudChatEntry.ROW_COUNT) - 1
+	chat.poll_rows(0, true, false, null, null, 100)
+	chat.poll_rows(every_row, true, false, null, null, 101)
+	assert_false(chat.is_capturing(), "No session, no chat line.")
+	var before := hud.get_draw_list_stats().glyphs
+	hud.set_chat_input(chat, 101, false)
+	assert_eq(hud.get_draw_list_stats().glyphs, before, "A closed chat line draws nothing.")
+	var key := InputEventKey.new()
+	key.keycode = KEY_A
+	key.unicode = 97
+	key.pressed = true
+	assert_false(chat.key_event(key, null, null, 102), "A closed chat line takes no key.")
+	assert_eq(HudChatEntry.row_token(1), "ltalk", "The talk rows ride the catalog tokens.")

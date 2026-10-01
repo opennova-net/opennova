@@ -95,6 +95,7 @@ bool JoinerRole::bring_up() {
 		reset_for_runtime_rebuild();
 	}
 	runtime->set_world_ready(true);
+	runtime->view().begin_mission();
 	reset_for_load(runtime->deployment_release_revision());
 	kernel_->local.loadout.pending_player_class = -1; // the embedder re-applies the kit after each load
 	return rebuild;
@@ -385,6 +386,8 @@ void JoinerRole::resolve_row_adm_ids() {
 			es.rm_adm_id = -2;
 			es.rm_state = -1;
 			es.rm_leg_seeded = false;
+			es.wpn_state = es.wpn_playing = -1;
+			es.wpn_deferred = 0;
 		}
 		if (es.rm_adm_id != -2) continue;
 		if (es.cls != EntityClass::Player && es.cls != EntityClass::Infantry) continue;
@@ -396,6 +399,8 @@ void JoinerRole::resolve_row_adm_ids() {
 	infantry_adm_revision_seen_ = kernel.infantry_adm_revision();
 	// The first decoded row may have registered the first usable model map.
 	runtime->view().set_root_motion_source(kernel.root_motion.empty() ? nullptr : &kernel.root_motion);
+	// The rows' secondary selection reads the held record's hold kind.
+	runtime->view().set_weapon_table(&kernel.world.tables.weapons);
 }
 
 // A streamed topology/world change landed in the registry: retire the
@@ -615,7 +620,8 @@ void JoinerRole::run_tick(const TickInput &) {
 		return;
 	}
 	kernel.local.view_session_inputs = view_session_inputs_for(
-			runtime.get(), /*joiner=*/true, runtime->local_player_dead());
+			runtime.get(), /*joiner=*/true, runtime->local_player_dead(),
+			kernel.world.rules.mp_session);
 	wire_leg_start_us_ = static_cast<int64_t>(io::perf_now_us());
 	pump();
 	sync_class_attribute_flags();
@@ -732,15 +738,14 @@ void JoinerRole::pump() {
 	sync_replica_weapon_slots(rt.state(), world, self_wire_handle());
 	apply_gameplay_events();
 	apply_weather_sample();
-	// A folded S2C 0x1D raises this client's round-over gate before the
-	// frame's entity update, which the gate then holds; a fresh runtime (a
-	// reset counter) latches nothing.
-	// [orig: NapiNPClientMsg_0x01D @0x430840 -- `mov g_SpawnSuccessGate,1`
-	//  @0x430858; Game_ProcessMainFrame -- the is_in_session /
-	//  g_SpawnSuccessGate tests @0x526734..0x526742]
-	const uint32_t end_round_headers = rt.state().end_round.header_updates;
-	if (end_round_headers > end_round_headers_seen_) world.match.latch_round_over();
-	end_round_headers_seen_ = end_round_headers;
+	// The client's folded round-over latch (a 0x1D header or a 0x25) raises
+	// the world's gate before the frame's entity update, which the gate then
+	// holds; a mission start lowers both (ClientReplicaPipeline::begin_mission
+	// beside the load's fresh Match).
+	// [orig: g_SpawnSuccessGate — NapiNPClientMsg_0x01D @0x430858,
+	//  NapiNPClientMsg_GameReset @0x422849; Game_ProcessMainFrame -- the
+	//  is_in_session / g_SpawnSuccessGate tests @0x526734..0x526742]
+	if (rt.state().spawn_success_gate) world.match.latch_round_over();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
 
 	const bool preround_active = world.preround_delay_seconds != 0;
@@ -796,8 +801,8 @@ void JoinerRole::pump() {
 	// What the view arbiter reads from the session (death screen, end round,
 	// the death camera): the joiner samples it AFTER this frame's recv fold,
 	// exactly the value its view tick consumed at this point in the frame.
-	lp.view_session_inputs = view_session_inputs_for(
-			runtime.get(), /*joiner=*/true, rt.local_player_dead());
+	lp.view_session_inputs = view_session_inputs_for(runtime.get(), /*joiner=*/true,
+			rt.local_player_dead(), world.rules.mp_session);
 	lp.tick_view();   // retail promotes the per-frame view before weapon actions
 	// The equipped-slot FSM pump, after the view promoter. Gated on L: retail
 	// pumps weapon actions per-entity, so a joiner whose player has not spawned
@@ -871,6 +876,29 @@ void JoinerRole::wire_frame_providers() {
             in.target_alive = (target->state_flags & dead_bit) == 0;
             in.target_origin[0] = target->x; in.target_origin[1] = target->y; in.target_origin[2] = target->z;
         }
+    };
+    // The rounds' wire actors: a remote player is a decoded replica row here,
+    // where retail's client resolves the wire handle to its own pool slot,
+    // whose team (the 0x0C spawn @0x42e979), playerClass (the spawn
+    // @0x42e9d5, then the player compact's difficulty byte & 0xF @0x4ad5a2),
+    // equipped adm (+0x2B0, the compact @0x4c11f2) and chased Position the
+    // whiz blip reads; the local player's own wire handle is the missile
+    // note's target-is-local arm. [orig: NetPacket_DeserializeRoundEvent
+    //  @0x42f491; Entity_SerializeGuidedMissileState @0x447ece]
+    world.round_sim.wire_actor_provider = [this](uint16_t handle, world::RoundSim::WireActor &out) {
+        out = world::RoundSim::WireActor{};
+        out.is_local = runtime->has_self_handle() && handle == runtime->self_handle();
+        const auto *row = runtime->state().find(handle);
+        if (row == nullptr) return out.is_local;
+        out.team = row->team_known ? row->team : 0;
+        out.player_class = row->net_has_compact
+                ? static_cast<int32_t>(row->health_class_byte & 0x0Fu)
+                : static_cast<int32_t>(row->spawn_player_class);
+        out.equipped_adm_index = row->equipped_adm_index;
+        out.pos[0] = row->x;
+        out.pos[1] = row->y;
+        out.pos[2] = row->z;
+        return true;
     };
 	rt.view().set_remote_motion_terrain(world.tables.terrain);
 	// The replica water/float channel reads the mission water plane
@@ -2204,7 +2232,10 @@ bool JoinerRole::reset_to_baseline(SessionError &error) {
 
 // Leaving: the disconnect datagrams ride the shell's send leg.
 void JoinerRole::close() {
-	if (kernel_) kernel_->world.round_sim.guided_inputs_provider = {};
+	if (kernel_) {
+		kernel_->world.round_sim.guided_inputs_provider = {};
+		kernel_->world.round_sim.wire_actor_provider = {};
+	}
 	if (!runtime) return;
 	for (const std::vector<uint8_t> &dg : runtime->disconnect()) send(dg);
 }

@@ -1,7 +1,9 @@
 #include <runtime/inmatch/session.h>
 
 #include <base/io/perf_clock.h>
+#include <runtime/hud/hud_frame.h> // HudFrameCompiler::kRadarGate*
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/role_feeds.h> // step_hud_radar
 #include <runtime/mission/mission_kernel.h>
 
 #include <utility>
@@ -65,11 +67,19 @@ bool Role::request_medic() {
 }
 
 world::LocalViewSessionInputs Role::view_session_inputs_for(
-		const ClientRuntime *runtime, bool joiner, bool local_dead) {
+		const ClientRuntime *runtime, bool joiner, bool local_dead, bool in_session) {
 	// What the arbiter reads from the session: the net layer sits above the
 	// world group, so its client state crosses as plain values.
 	world::LocalViewSessionInputs s;
-	s.in_session = runtime != nullptr;
+	// The session word is the launch's network type, not the replica fold:
+	// the SP launch sets type 0, so is_in_session reads 0 for the whole SP
+	// mission although its in-process listen server folds a loopback client.
+	// [orig: CNapiNetwork_SetNetworkType @0x4c4a50 stores +0x58 = (type in
+	//  1..3) @0x4c4a85; SinglePlayer_StartMission passes 0 @0x561bce
+	//  (`xor ebx, ebx` @0x561b30); the readers here: Render_ProcessMainSceneFrame
+	//  @0x5ca22d (the forced first person) and @0x5ca8f6 (the dead-in-session
+	//  distortion skip)]
+	s.in_session = in_session;
 	s.joiner = joiner;
 	// The client-local death-screen latch: the 0x0A flags1 bit-0 edges every
 	// role's view folds (the listen host's own loopback included)
@@ -297,15 +307,38 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	return out;
 }
 
+void Session::step_hud_radar_frame() {
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
+			"the default gates run the pass");
+	ClientRuntime *runtime = role_->client_runtime();
+	// The pass's spawn-success early-out [orig: g_SpawnSuccessGate
+	// @0x5a8084], live; the hud_detail-3 early-out and the map site are the
+	// embedder's HUD's.
+	const bool spawn_gate = runtime != nullptr && runtime->state().spawn_success_gate;
+	const bool pass_runs =
+			(hud_radar_gates_ & hud::HudFrameCompiler::kRadarGatePass) != 0u && !spawn_gate;
+	const bool map_site = (hud_radar_gates_ & hud::HudFrameCompiler::kRadarGateMapSite) != 0u;
+	step_hud_radar(*role_->kernel(), runtime, pass_runs, map_site, state_ == State::Paused,
+			hud_radar_);
+}
+
 FrameOutcome Session::advance(const FrameInput &input) {
 	FrameOutcome out;
 	out.state = state_;
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
+		// The paused frame still runs its HUD pass: no tick ran, so nothing
+		// ages, and the menu pause holds the lock tone.
+		if (state_ == State::Paused) step_hud_radar_frame();
 		return out;
 	}
 	latch_input(input);
+	// The frame's start stamp, in whole milliseconds like GetTickCount
+	// [orig: Game_MainLoop @0x52b798 / @0x52b7ae (after the frame lock
+	//  @0x52b8d7)].
+	const int64_t frame_start_ms = now_us() / 1000;
 	// A mission-start frame re-based the clock once it had rendered, so this
 	// frame banks only the time since that render [orig: Game_MainLoop
 	// @0x52bac8..0x52bad2].
@@ -317,6 +350,25 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	// [orig: Game_MainLoop g_StatsAvgFps store @0x52B98F, drain @0x52BA08].
 	if (role_ != nullptr) role_->observe_frame_rate(accumulator_.average_fps());
 	out = run_ticks(due, input);
+	// The CPU share's inputs: this frame's work from its start stamp to the
+	// end of the drain, and the updates the drain ran [orig: @0x52ba4f;
+	// @0x52ba9b..0x52baa1].
+	accumulator_.record_frame_work(
+			static_cast<uint32_t>(now_us() / 1000 - frame_start_ms), out.ticks_run());
+	// Every logic update counts toward the 62-update second; each second
+	// publishes the frames rendered since [orig: Game_ProcessMainFrame
+	// @0x5267ab..0x5267df], and this frame's render then counts
+	// [orig: GameLoop_RenderFrame @0x521cf9].
+	for (int32_t i = 0; i < out.ticks_run(); ++i) {
+		if (++second_update_count_ >= io::kTicksPerSecondInt) {
+			second_update_count_ -= io::kTicksPerSecondInt;
+			frames_last_second_ = frames_rendered_;
+			frames_rendered_ = 0;
+		}
+	}
+	++frames_rendered_;
+	if (role_ != nullptr)
+		role_->observe_frame_statistics(frames_last_second_, accumulator_.cpu_percent());
 	// Each of the first frames drawn after the mission start counts down and
 	// raises the re-base flag [orig: Render_ProcessMainSceneFrame
 	// @0x5caeff..0x5caf0e].
@@ -325,6 +377,9 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
+	// The frame's HUD pass follows the drain [orig: Game_MainLoop's
+	// Game_ProcessMainFrame drain, then the render's HUD_RenderAllOverlays].
+	if (!out.terminal()) step_hud_radar_frame();
 	return out;
 }
 
@@ -424,6 +479,8 @@ TransitionResult Session::close() {
 	start_rebase_frames_ = 0;
 	rebase_clock_ = false;
 	last_error_ = {};
+	hud_radar_gates_ = kHudRadarGatesDefault;
+	hud_radar_ = {};
 	state_ = State::Unloaded;
 	return {TransitionCode::Applied, from, state_, {}};
 }

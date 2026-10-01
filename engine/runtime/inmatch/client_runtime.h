@@ -2,6 +2,9 @@
 
 #include <runtime/inmatch/joiner_connection.h>
 #include <runtime/devtools/tick_profile.h>
+#include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
+#include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
+#include <runtime/hud/squad_feed.h>     // SquadFeedLine (the squad folds' HUD lines)
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
 #include <runtime/replication/net_quality.h>             // the CNetQuality window (the client half)
@@ -201,12 +204,14 @@ public:
 	// The frame's phases (SIM_CLIENT_SETUP/RECEIVE/MAINTENANCE/SEND) lap onto
 	// this profile (the embedder's, normally the world's; null = no clocks).
 	void set_profile(devtools::TickProfile *profile) { profile_ = profile; }
-	// The chat flood table's 16 recent lines `[u32 time][char[64]]`: a repeat
-	// of a line sent within 1280 ms is refused, an older repeat is moved to the
-	// newest slot [orig: Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte
-	//  table @0xB3B788, the `<= 0x500` window, the shift-down + append].
+	// The chat flood table's 16 recent lines `[u32 frame][char[64]]`: a repeat
+	// of a line within 0x500 main frames of its entry is refused, an older
+	// repeat is moved to the newest slot. The clock is the per-main-frame
+	// counter the talk debounce reads too, not wall time [orig:
+	// Chat_CheckFloodControl @0x498F60 — the 16 x 68-byte table @0xB3B788,
+	// `dword_A8705C - entry <= 0x500` @0x499028, the shift-down + append].
 	struct ChatFloodEntry {
-		uint32_t time_ms = 0;
+		uint32_t frame = 0;
 		std::string text;
 	};
 
@@ -224,18 +229,33 @@ public:
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
 	// One C2S 0x0D chat line `[u8 channel][cstr text]` on the wire channel the
-	// caller's sender picked (retail's per-key senders: 2 global, 1 team on a
-	// peer, 12 squad on a peer, 11 admin, 13 the squad-alt key; 4 all / 5 team
-	// exist only for a non-peer, so a joiner drops them). The retail sender
-	// gates: in session, non-empty, `!g_DeathScreenActive || g_spawn_success_
-	// gate` (the admin key: `!g_DeathScreenActive` alone), the 1280 ms
-	// per-identical-line flood table, then the `<...>` strip; queued reliable
-	// with the 310-flush finite lifetime. False = gated/flooded, nothing sent.
-	// [orig: Chat_SendGlobalMessage @0x49A6B0, Chat_SendAdminMessage
-	//  @0x49A780, sub_49A840 @0x49A840, Chat_SendTeamMessage @0x49A900,
-	//  Chat_SendSquadMessage @0x49AA50, sub_49ABA0 @0x49ABA0,
-	//  Chat_SendAllMessage @0x49AC70 -> CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
-	bool queue_chat_message(uint8_t channel, const std::string &text);
+	// caller's sender picked (hud::chat_dispatch_channel: 13 local, 1 global,
+	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,
+	// and every process with a HUD is a session peer, so they queue nothing).
+	// The retail sender gates: non-empty; `!g_DeathScreenActive ||
+	// g_SpawnSuccessGate` — the local and crew keys test `!g_DeathScreenActive`
+	// alone; the flood table (a refusal is `Flooded`: the caller echoes the
+	// line); then the `<...>` strip. A joiner queues it reliable with the
+	// 310-flush lifetime; the listen host's own client (a peer too) sends it
+	// over its loopback to its own server, which fans it like any peer's.
+	// `text` is cut to 59 characters in place by the flood check; `frame` is
+	// the per-main-frame counter.
+	// [orig: sub_49A840 @0x49A840 (13), Chat_SendTeamMessage @0x49A900 (IDB
+	//  misnomer; 1), Chat_SendGlobalMessage @0x49A6B0 (IDB misnomer; 2),
+	//  Chat_SendSquadMessage @0x49AA50 (12), Chat_SendAdminMessage @0x49A780
+	//  (11), Chat_SendAllMessage @0x49AC70 (4), sub_49ABA0 @0x49ABA0 (5) ->
+	//  CNapiNetwork_QueueReliableMessage(0xD, 1, 310)]
+	hud::ChatSendResult queue_chat_message(uint8_t channel, std::string &text, uint32_t frame);
+	// An Emotes / Radio menu pick (1..10): C2S 0x14 / C2S 0x13 [i16 value].
+	// The sender carries no gate of its own: CNapiNetwork_QueueReliableMessage
+	// queues on any live connection. A joiner queues it with the one-send
+	// lifetime (user param 1) on the held one-shot queue (the pick runs
+	// outside the client net frame); the listen host's own client sends it
+	// over its loopback to its own server. False when no connection carries it.
+	// [orig: NetPacket_SendEmoteRequest @0x42C120 /
+	//  NetPacket_SendRadioCallRequest @0x42C150 ->
+	//  CNapiNetwork_QueueReliableMessage(tag, 0, 1, payload, 2) @0x4c4fa0]
+	bool queue_voice_menu_pick(uint8_t tag, int16_t value);
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
@@ -245,7 +265,34 @@ public:
 	void set_observed_frame_rate(int32_t fps) { observed_frame_rate_ = fps; }
 	// The bucketed 0..4 quality level the C2S 0x4C report carries and the
 	// client's own ping readings (0 before the first completed round trip).
-	uint8_t net_quality_level() const { return net_quality_; }
+	// The level is g_NetQuality's first dword [orig: `mov eax, g_NetQuality`
+	// @0x42c256], the connection indicators' own.
+	uint8_t net_quality_level() const { return static_cast<uint8_t>(net_indicators_.level); }
+	// THE CONNECTION INDICATORS (hud/net_quality_indicators.h): the g_NetQuality
+	// display state this client keeps, stepped once per client frame while in
+	// a session, read by the HUD role facts.
+	const hud::NetQualityIndicators &net_quality_indicators() const { return net_indicators_; }
+	// The authority's level: the host's server tick samples its send window
+	// and the host role stores the bucketed level here ahead of this client
+	// frame [orig: CNetQuality_UpdateMetrics @0x4c52c0 -> CNetQuality_SetLevel
+	// (&g_NetQuality, level) @0x52659b, both before CNetQuality_UpdateIndicators
+	// @0x52668d]. The joiner's own fold stores its level itself.
+	void set_net_quality_level(int32_t level);
+	// The host protocol's link-error callbacks of one server tick, bit 0 a
+	// joiner's resend request (flag 1), bit 1 our own missing-sequence
+	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = sub_4C62A0
+	// @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
+	// the g_NetQuality flag stores]. The host role hands them over after
+	// this client frame, as retail's server tick runs after the indicators'
+	// update.
+	void raise_net_quality_link_errors(uint32_t mask);
+	// What the NovaWorld N icon reads (hud::NovaWorldLinkFacts): the network
+	// type, the NWU session in use and its state flags. Nothing feeds it yet:
+	// the NovaWorld joiner closes its NWU session at the in-match handoff and
+	// the NovaWorld listen host keeps the Lan network type (D-NET-220), so the
+	// icon stays hidden.
+	void set_novaworld_link(const hud::NovaWorldLinkFacts &facts) { novaworld_link_ = facts; }
+	const hud::NovaWorldLinkFacts &novaworld_link() const { return novaworld_link_; }
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;
@@ -268,6 +315,47 @@ public:
 	// clients retain the authority's already-applied gameplay state.
 	// [orig: NapiNPClientMsg_EntityDeath @0x42EB50 — cb(entity, 4, 0) @0x42ebf5]
 	void apply_received_effects(world::World &world);
+
+	// THE COMMAND MAP'S SQUAD AND WAYPOINT SENDS (client_squad.cpp): each
+	// queues its one reliable C2S (a joiner on its held one-shot queue, the
+	// listen host's client on its loopback to its own server); false when no
+	// session carries it. [orig: NetPacket_SendChatMessage @0x42ddc0 (0x17),
+	//  NetPacket_SendEntityUpdate @0x42de00 (0x4F), NetPacket_SendWeaponSlotSwitch
+	//  @0x42dc10 (0x43), NetPacket_SendCommandType44 @0x42dc70 (0x44),
+	//  NetPacket_SendWeaponAction @0x42dcc0 (0x45), NetPacket_SendTeamChange
+	//  @0x42dd00 (0x46), NetPacket_SendVoteKick @0x42dd50 (0x4B), the punt vote
+	//  @0x5488ae (0x3F) — every IDB name a misnomer; all
+	//  CNapiNetwork_QueueReliableMessage(tag, 1, 0)]
+	bool queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body);
+	// The local player's roster slot (entity+0x154; the pipeline's
+	// set_local_player_slot).
+	int local_roster_slot() const { return view_.local_roster_slot(); }
+	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
+	std::vector<hud::SquadFeedLine> drain_squad_lines();
+	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
+	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
+	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F
+	// [orig: @0x5479e6; @0x548137]. A go-code button: C2S 0x4B [local
+	// slot][code], then the leader's own sound set and line with no mute
+	// [orig: sub_548290 @0x548290].
+	bool place_user_waypoint(world::World &world, int32_t x, int32_t y, const std::string &name);
+	bool delete_hovered_user_waypoint(world::World &world);
+	void clear_user_waypoints(world::World &world);
+	void send_go_code(world::World &world, uint8_t code);
+	// THE CMAP TABLES' SENDS (menu/command_map_screen.h asks for them): the
+	// recruit [local slot][target] (C2S 0x46), the join [leader] (0x43), the
+	// fireteam assignment [fireteam][count][members] (0x45), the order
+	// [kind][count][text][targets] (0x44) and the punt vote [target] (0x3F).
+	// [orig: CMap_EntityWidgetHandler @0x54865c / @0x548616;
+	//  CCommandMap_SendWeaponActionToTeammates @0x548d67;
+	//  CMap_BuildAndSendOrderCommand @0x547839; CCommandMap_HandleOrderAction
+	//  @0x548c25; CMap_HandlePlayerListCallback @0x54889b..0x5488b9]
+	void send_squad_recruit(uint8_t target);
+	void send_squad_join(uint8_t leader);
+	void send_fireteam_assign(uint8_t fireteam, const std::vector<uint8_t> &members);
+	void send_squad_order(uint8_t kind, const std::string &text,
+			const std::vector<uint8_t> &targets);
+	void send_punt_vote(uint8_t target);
 	void tick_remote_stance_sounds(world::World &world);
 	// S2C 0x23 WAC remote commands the recv fold surfaced this frame; the
 	// joiner role runs each registry row's handler against its world.
@@ -439,6 +527,7 @@ public:
 
 	// Joiner state passthrough (HostClient: never InMatch, no self handle).
 	bool in_match() const { return joiner_ && joiner_->in_match(); }
+	bool in_session() const { return joiner_ && joiner_->in_session(); }
 	bool awaiting_deploy_pick() const { return joiner_ && joiner_->awaiting_deploy_pick(); }
 	bool has_self_handle() const { return joiner_ && joiner_->has_self_handle(); }
 	uint16_t self_handle() const { return joiner_ ? joiner_->self_handle() : 0; }
@@ -470,6 +559,11 @@ public:
 	uint32_t session_max_players() const { return joiner_ ? joiner_->session_max_players() : 0; }
 	const std::string &server_name() const;
 	const std::string &mission_name() const;
+	// The joined session's variable list off the S2C 0x60 server-info transfer
+	// (JoinerConnection::session_vars); empty on the host's own view, whose
+	// copies come from its own serializer (role_feeds.h
+	// scoreboard_session_vars).
+	const SessionVars &session_vars() const;
 	const std::string &map_file() const;
 	const std::string &expansion() const;
 	const std::string &last_error() const;
@@ -601,14 +695,19 @@ private:
 	// slot+0x2C) per slot, then the timer resets to 0]. The host's own
 	// loopback view runs it too (retail's client frame is role-agnostic).
 	void tick_roster_revive_countdown();
+	// Frames the C2S 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queued.
+	void drain_visible_refreshes();
 	// The once-per-62-frames CNetQuality update + level fold that precedes the
 	// client net frame in the main frame [orig: Game_ProcessMainFrame — the
 	// dword_24D1DDC countdown (reload 62) gated is_in_session ->
 	// CNetQuality_UpdateMetrics @0x4C52C0 + CNetQuality_SetLevel @0x4C3060].
 	void update_net_quality();
+	// The link-error callbacks a mask carries (kNetQualityLinkError*), onto
+	// the indicators at this frame's clock.
+	void apply_net_quality_link_errors(uint32_t mask);
 	// Chat_CheckFloodControl @0x498F60: truncates `text` to 59 characters in
 	// place first, then the table walk; true = the line may go out.
-	bool chat_flood_control(std::string &text);
+	bool chat_flood_control(std::string &text, uint32_t frame);
 
 	Role role_;
 	std::unique_ptr<JoinerConnection> joiner_;        // Joiner only
@@ -629,6 +728,9 @@ private:
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.
 	std::vector<WeaponReload> pending_reload_notifications_;
+	// The squad folds' consequences once applied (client_squad.cpp).
+	void apply_squad_event(world::World &world, const replication::ClientSquadEvent &event);
+	std::vector<hud::SquadFeedLine> pending_squad_lines_;
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
@@ -654,8 +756,10 @@ private:
 	uint32_t tag2c_send_cooldown_ = 0;   // [orig: g_Tag2CSendCooldown @0xA860D8] set 62 on a 0x2C send
 	                                     // and decremented, but never compared in @0x42C180;
 	                                     // vestigial/telemetry state, not a send throttle.
-	uint8_t  net_quality_ = 0;           // [orig: g_NetQuality byte @0x82BF88] the 0..4 level
-	                                     // CNetQuality_SetLevel folds every 62 frames; 0 = best
+	// [orig: g_NetQuality @0x82BF88] the 0..4 level CNetQuality_SetLevel folds
+	// every 62 frames (0 = no measurement) and the connection indicators.
+	hud::NetQualityIndicators net_indicators_;
+	hud::NovaWorldLinkFacts novaworld_link_;
 	// The client (RECEIVE) window of the CNetQuality object and its inputs
 	// [orig: CNetQuality_UpdateMetrics @0x4C52C0, the `is_mp_session_peer &&
 	//  !is_authority` half]. The host (SEND) window lives with the host's tick.
@@ -675,5 +779,14 @@ private:
 	// determinism contract of the replay path — seed_session is "for replay/parity only").
 	bool replay_mode_ = false;
 };
+
+// The voice-macro key's A&S context: the speaker stands inside the nearest
+// active, map-visible capture entry with a nonzero Q16 coverage
+// (client_effects.cpp carries the witness). The contextual radio calls and
+// the F9/F10 menus share it.
+// [orig: Entity_FindNearestProximityEntity @0x5380C0, consumed by
+//  VMacros_BuildShaderPassName @0x5BF5D0's 0x10010 arm @0x5BF9D4..0x5BF9DE]
+bool in_active_radio_zone(const world::World &world, const world::Entity &speaker,
+		const ClientRuntime &runtime);
 
 } // namespace opennova::inmatch

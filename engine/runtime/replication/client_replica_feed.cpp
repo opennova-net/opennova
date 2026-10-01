@@ -24,6 +24,7 @@
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_id.h>
+#include <runtime/world/entity.h> // retail_pool_capacity (the SPECTATORTARGET gate)
 
 #include <base/io/strutil.h>
 #include <base/io/byte_reader.h>
@@ -46,6 +47,21 @@ void ClientReplicaPipeline::apply_text_command(const std::vector<uint8_t> &body)
     if (strutil::iequals(command, "SETCEASEFIRE")) {
         state_.cease_fire = std::strtol(value.c_str(), nullptr, 10) != 0;
         state_.mark_changed();
+    } else if (strutil::iequals(command, "SU")) {
+        // The scoreboard status-suffix gate, the byte of atol(n)
+        // [orig: `mov g_ScoreboardStatusSuffixEnabled, al` @0x429f71].
+        state_.scoreboard_status_suffix =
+                static_cast<uint8_t>(std::strtol(value.c_str(), nullptr, 10));
+        state_.mark_changed();
+    } else if (strutil::iequals(command, "SPECTATORTARGET")) {
+        // atol(n) as a packed handle, bounded to pools 0..4 and the pool's
+        // capacity, then the track [orig: @0x429fe8..0x42a04e ->
+        // Entity_TrySetMinimapTrackTarget @0x52abc0].
+        const long handle = std::strtol(value.c_str(), nullptr, 10);
+        const uint16_t packed = static_cast<uint16_t>(handle);
+        if ((packed & 0xF000u) < 0x5000u &&
+                static_cast<std::size_t>(packed & 0xFFFu) < world::retail_pool_capacity(packed >> 12))
+            spectate_track(packed);
     }
 }
 
@@ -94,6 +110,7 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 
 	if (rec.event_type >= 19 && rec.event_type <= 21)
 		pending_effect_commands_.push_back(rec);
+	ev.feed_order = next_feed_order_++;
 	pending_game_events_.push_back(ev);
 }
 
@@ -108,11 +125,45 @@ void ClientReplicaPipeline::apply_chat_broadcast(const std::vector<uint8_t> &bod
 		++malformed_bodies_;
 		return;
 	}
+	// The sender gate runs first: an active slot whose chat is muted, or a
+	// spectator slot while the spawn gate is down, drops the line and its
+	// channel-13 tracking [orig: Chat_DispatchToChannel @0x42b91e..0x42b943 —
+	// PlayerSlotTable_GetActiveSlot, slot+0x32 & 2, slot+0x2E &&
+	// !g_SpawnSuccessGate].
+	const ClientRosterSlot &sender = state_.roster[rec.sender_slot];
+	if (sender.bound && ((sender.radio_mute_flags & 2u) != 0 ||
+			(sender.spectator && !state_.spawn_success_gate)))
+		return;
 	ClientChatLine line;
 	line.channel = rec.channel;
 	line.sender_slot = rec.sender_slot;
 	line.text = rec.text;
-	pending_chat_lines_.push_back(std::move(line));
+	post_chat_line(std::move(line));
+	// Channel 13 (local) also tracks its sender's person on the map
+	// [orig: Chat_DispatchToChannel @0x42b9d0 (channel 13), @0x42b9e6..0x42ba09].
+	if (rec.channel == 13) {
+		LocalChatSpeaker speaker;
+		speaker.slot = rec.sender_slot;
+		pending_effect_commands_.push_back(speaker);
+	}
+}
+
+// THE JOIN/LEAVE LANE (S2C 0x32): the record rides to the HUD, which picks
+// the Client template and substitutes $A. No authority gate — the listen
+// host's own client posts the lines its server fans too
+// [orig: NapiNPClientMsg_0x032 @0x428060 has no is_authority test]. Only the
+// handled subtypes 1..5 surface [orig: the default arm @0x428099].
+void ClientReplicaPipeline::apply_formatted_game_text(const std::vector<uint8_t> &body) {
+	FormattedGameText rec;
+	bool clean = false;
+	if (!decode_formatted_game_text(body.data(), body.size(), rec, &clean)) return;
+	if (!clean) ++malformed_bodies_;
+	ClientGameText text;
+	text.subtype = rec.subtype;
+	text.text = std::move(rec.text);
+	text.team = rec.team;
+	text.feed_order = next_feed_order_++;
+	pending_game_texts_.push_back(std::move(text));
 }
 
 std::vector<ClientEffectCommand> ClientReplicaPipeline::drain_effect_commands() {

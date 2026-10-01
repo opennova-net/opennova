@@ -82,3 +82,46 @@ func test_persist_stamps_the_file() -> void:
 	assert_eq(seat1[2], 17, "the persisted seat1 carries the Ctrl modifier")
 	var fresh := ControlsModel.new()
 	assert_true(ControlsBindings.load_saved_records(fresh), "the stamped file round-trips")
+
+
+# The by-code binding read (the HUDLS key label's record 200 + category): the
+# row the start-up re-lay puts at record `code` formats exactly like its token,
+# and a code no row carries is the zero record's empty string (engine controls
+# action_for_code carries the witness).
+func test_display_text_by_action_code() -> void:
+	var model := ControlsModel.new()
+	assert_eq(model.display_text_for_action_code(201), model.display_text_for_token("Knife"),
+			"record 201 is the Knife row's binding")
+	assert_eq(model.display_text_for_action_code(211), model.display_text_for_token("magazine"),
+			"record 211 is the magazine row's binding")
+	assert_ne(model.display_text_for_action_code(201), "", "the Knife row is bound by default")
+	assert_eq(model.display_text_for_action_code(200), "", "no row dispatches 200")
+
+
+# The live records' revision moves on every binding write and never on a read:
+# the HUD formats the HUDLS key labels again only when it moved (engine
+# controls BindingSet::revision).
+func test_binding_revision_moves_on_writes_only() -> void:
+	var model := ControlsModel.new()
+	var r := model.get_binding_revision()
+	model.display_text_for_action_code(201)
+	model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	assert_eq(model.get_binding_revision(), r, "reads leave the revision")
+	var bound := -1
+	for i in model.get_rows(ControlsModel.DEVICE_KEYBOARD).size():
+		var action := model.action_index_for_row(i)
+		if action >= 0 and model.control_text(action, ControlsModel.DEVICE_KEYBOARD) != "":
+			bound = action
+			break
+	assert_gte(bound, 0, "a bound row exists")
+	model.clear_binding(bound, ControlsModel.DEVICE_KEYBOARD)
+	assert_ne(model.get_binding_revision(), r, "a clear moves it")
+	r = model.get_binding_revision()
+	assert_true(model.assign_godot_key(bound, KEY_K))
+	assert_ne(model.get_binding_revision(), r, "an assignment moves it")
+	r = model.get_binding_revision()
+	model.load_blob(model.save_blob())
+	assert_ne(model.get_binding_revision(), r, "a persistence load moves it")
+	r = model.get_binding_revision()
+	model.restore_defaults()
+	assert_ne(model.get_binding_revision(), r, "the defaults move it")

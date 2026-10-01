@@ -19,13 +19,13 @@ namespace godot {
 	X(int64_t, quads_wire, 0)                      \
 	X(int64_t, quads_textured, 0)                  \
 	X(int64_t, quads_additive, 0)                  \
+	X(int64_t, quads_stage2, 0)                    \
 	X(int64_t, tris, 0)                            \
 	X(int64_t, lines, 0)                           \
 	X(int64_t, glyphs, 0)                          \
 	X(int64_t, underlines, 0)                      \
 	X(int64_t, elements_drawn, 0)                  \
 	X(bool, map_visible, false)                    \
-	X(int64_t, map_backing_tris, 0)                \
 	X(int64_t, map_terrain_tris, 0)                \
 	X(int64_t, map_footprint_tris, 0)              \
 	X(int64_t, map_sprites, 0)                     \
@@ -33,7 +33,6 @@ namespace godot {
 	X(int64_t, map_lines, 0)                       \
 	X(int64_t, map_labels, 0)                      \
 	X(bool, big_map_visible, false)                \
-	X(int64_t, big_map_backing_tris, 0)            \
 	X(int64_t, big_map_terrain_tris, 0)            \
 	X(int64_t, big_map_footprint_tris, 0)          \
 	X(int64_t, big_map_sprites, 0)                 \

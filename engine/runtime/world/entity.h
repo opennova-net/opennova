@@ -92,6 +92,16 @@ struct EntityHandle {
     bool operator!=(const EntityHandle &o) const { return packed != o.packed; }
 };
 
+// Pool_GetIndexFromPtr(0, entity) as the wire's byte: the pool-0 index (a
+// pool-0 slot is below the pool's 256 capacity), the -1 (0xFF) of an entity
+// outside pool 0 or of none. [orig: Pool_GetIndexFromPtr @0x441f90 — the
+// base and capacity tests return -1; its callers store the low byte, e.g.
+// Server_HandleEmoteRequest @0x501e87, the radio call @0x5143c5, the
+// waypoint share's owner @0x514897]
+constexpr uint8_t pool0_index_byte(EntityHandle h) {
+    return h.valid() && h.pool() == 0 ? static_cast<uint8_t>(h.slot()) : uint8_t{0xFF};
+}
+
 // Spawn-origin provenance word: (kind << 24) | (record index & 0xFFFFFF);
 // kSpawnOriginNone = none.
 inline constexpr uint32_t kSpawnOriginNone = 0xFFFFFFFFu;
@@ -388,6 +398,10 @@ struct Entity {
     // a resolved entity trait because engine/runtime/world deliberately does not own .3di
     // assets. Armory/zone/etc. classifiers do not require it.
     bool has_minimap_model_marker = false;
+    // Whether the entity's def graphic loaded (retail entity+0x30 non-null):
+    // the persistent map bank draws only model-bearing slots.
+    // [orig: MapOverlay_RenderAllByLayer @0x5BE6C4..0x5BE6C9]
+    bool has_graphic_model = false;
     // The graphic model's XY half-extents (mission axes, 16.16), stamped by
     // the same model-resolve seam. The minimap blip drawer sizes footprint-
     // class blips from these; 0 = unstamped (the 10-wu class fallback).
@@ -497,6 +511,16 @@ struct Entity {
     // [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a; read
     //  HUD_DrawEntityLabel @0x5a4021]
     std::string display_name;
+    // A user waypoint's exact 16.16 x / y (entity+4 / +8): the dwords
+    // Waypoint_CreateForPlayer stores from its arguments, compares in its
+    // duplicate wipe and the share writes back out. `position` mirrors them
+    // as floats, which drop the low bits past 256 units. Zero on every other
+    // entity (world/user_waypoints.h).
+    // [orig: Waypoint_CreateForPlayer @0x4dfd19 / @0x4dfd1d (the stores),
+    //  @0x4dfdba / @0x4dfdc6 (the wipe's compares);
+    //  NetPacket_WriteTypeNameAndPosition @0x42b1bc / @0x42b1cd (the share)]
+    int32_t waypoint_x_q16 = 0;
+    int32_t waypoint_y_q16 = 0;
     // The AI slot's +156 name: the BMS record's raw 8-byte ai_textfile (name2),
     // copied as two dwords for an AIData def and never rewritten; the 0x0D
     // record's AI trailer streams it. The port's .aip resolver reads its own
@@ -656,6 +680,14 @@ struct Entity {
     // @0x43c390 (+0x374 write @0x43c522); Server_PlayerAdd @0x51cbc0 (@0x51d0b1);
     // Server_InitAllPlayerEntitiesForRound @0x516aa0 (@0x516b8e); net-re §5.23 D-NET-146]
     uint8_t anim_slot = 0;
+    // A player entity's own roster slot id (entity+0x154): the host stamps it
+    // from the slot's +0x14 id at the add and at every round's re-init, and
+    // both spawn records carry it, so a client's squad legs read their own
+    // slot off it (0 on every other entity, the row memset).
+    // [orig: Server_PlayerAdd @0x51d087..0x51d08b; Server_InitAllPlayerEntitiesForRound
+    //  @0x516b97..0x516b9a; NetPacket_SerializeEntityStatesToBuffer @0x503316..0x503327;
+    //  the 0x18 record @0x5051f0..0x5051fd]
+    uint8_t player_slot_id = 0;
     uint8_t radio_request = 0; // entity+885 [orig: @0x430C50]
     uint8_t radio_request_seconds = 0; // entity+886
     // Players only: the wire NetId (entity+0x15C) = the minimap/character-slot id, picked per
@@ -884,6 +916,12 @@ struct Entity {
 	// group by that bit [orig: NapiNPServerMsg_HandleVehicleSpawnRequest
 	// @0x51C5C0 `(1 << typeIndex) & def+2772`, then g_ItemGroups[typeIndex]].
 	std::vector<uint8_t> vehicle_spawn_groups;
+	// ItemDef+0xAD8 on a vehicle bay (attrib2 bit 0): the OR of its spawn
+	// groups' flags — bit0 a unitType 1/2/12 member, bit1 3/4, bit2 5..8 —
+	// the minimap classifier's cell 19/20/21 selector.
+	// [orig: ItemDefs_LoadAndValidate @0x4a1fa7..0x4a1fcf (group flags),
+	//  @0x4a2010..0x4a2058 (the bay OR); Entity_ClassifyForMinimap @0x50FAF0]
+	uint8_t vehicle_bay_flags = 0;
 
 	// --- Advance & Secure zone fields (net-re §5.61) ---
 	// entity+538 <- BMS record byte 155 (.mis "lfp_group") — the authored AS zone number;

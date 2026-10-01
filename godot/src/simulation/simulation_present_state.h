@@ -8,6 +8,7 @@
 
 #include <runtime/inmatch/effect_pose_index.h> // EffectPoseIndex (+ the BmsHandleIndex it resolves through)
 #include <runtime/inmatch/role_feeds.h> // EntityLightingFeed
+#include "simulation/hud_view_records.h" // HudMapOverlays (the overlays gather cache)
 
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
@@ -117,6 +118,13 @@ struct SimulationPresentState {
 	mutable uint64_t minimap_snapshot_tick = 0;
 	mutable uint16_t minimap_snapshot_local_handle = 0xFFFF;
 	mutable bool minimap_snapshot_valid = false;
+	// get_hud_minimap_overlays cache: the gather advances only with the logic
+	// tick (and the retained banks' revision), like the marker snapshot.
+	mutable Ref<HudMapOverlays> minimap_overlays_cache;
+	mutable uint64_t minimap_overlays_revision = 0;
+	mutable uint64_t minimap_overlays_tick = 0;
+	mutable uint64_t minimap_overlays_gametext = 0;
+	mutable bool minimap_overlays_valid = false;
 
 	// --- the occlusion frame ----------------------------------------------------
 	// Per-frame entity render-gate verdicts (bms_id -> culled), rebuilt by

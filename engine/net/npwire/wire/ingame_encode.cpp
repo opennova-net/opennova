@@ -305,7 +305,7 @@ std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) 
 		w.u8(rec.player_class);
 		w.u8(rec.ai_action);
 		w.u8(rec.skip_byte);
-		w.u8(rec.unused_byte);
+		w.u8(rec.player_slot_id);
 		w.u8(rec.alert_level);
 		w.u8(rec.sub_type);
 		w.u8(rec.weapon_type);
@@ -349,7 +349,7 @@ std::vector<uint8_t> encode_full_entity_spawn(const FullEntitySpawnRecord &rec) 
 	w.u16(rec.net_id);             // entity+348 [0x5051c6]
 	w.u8(rec.player_class);        // entity+660 [0x5051db]
 	w.u8(0);                       // hard 0 in the original [0x5051e8]
-	w.u8(rec.unused_byte);         // entity+340 [0x5051fd]
+	w.u8(rec.player_slot_id);         // entity+340 [0x5051fd]
 	w.u8(rec.alert_level);         // entity+533 [0x505211]
 	w.u8(rec.sub_type);            // entity+532 [0x50522c]
 	return out;
@@ -742,9 +742,9 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
 		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
 	if (field_flags & kPlayerSyncHasSquad)
-		w.u8(0xFF);     // squad [orig: slot+100576, init -1 at Server_PlayerAdd @0x51d4e0]
+		w.u8(ctx.squad_leader); // the squad leader [orig: slot+100576, seeded 0xFF by Server_PlayerAdd @0x51cf0a]
 	if (field_flags & kPlayerSyncHasSide)
-		w.u8(0);        // side [orig: slot+100577]
+		w.u8(ctx.fireteam);     // the fireteam [orig: slot+100577]
 	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(ctx.quality); // quality [orig: slot+418 @0x506213; client clamps <=4 @0x431370]
 	if (field_flags & kPlayerSyncHasAccountId)
@@ -993,6 +993,18 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
 	return out;
 }
 
+std::vector<uint8_t> encode_formatted_game_text(const FormattedGameText &text) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(static_cast<uint8_t>(text.subtype)); // [orig: @0x51d21e / @0x505a81]
+	w.cstr(text.text);                        // [orig: @0x51d250 / @0x505b72]
+	// The team byte rides only the player join/leave pair
+	// [orig: `mov [esi], cl` @0x51d277; @0x505b95 for types 1/2].
+	if (text.subtype == kGameTextPlayerJoined || text.subtype == kGameTextPlayerLeaving)
+		w.u8(static_cast<uint8_t>(text.team));
+	return out;
+}
+
 // [orig: WacScript_ExecuteBytecode @0x4F58B0 — payload build @0x4f5cd0..0x4f5dc2]
 std::vector<uint8_t> encode_script_remote_command(const ScriptRemoteCommand &command) {
 	std::vector<uint8_t> out;
@@ -1128,6 +1140,37 @@ std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd) {
 	return out;
 }
 
+std::vector<uint8_t> encode_tracked_player_voice(const TrackedPlayerVoice &voice) {
+	// [orig: NapiNPServerMsg_HandleRadioCall — the dword payload
+	//  @0x5143a2..0x51448f]
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.u8(voice.event);
+	w.u8(voice.player_index);
+	w.u16(static_cast<uint16_t>(voice.location));
+	return out;
+}
+
+std::vector<uint8_t> encode_minimap_overlay_batch(const MinimapOverlayBatch &batch) {
+	// [orig: NetPacket_SerializeDesignations @0x5116A0 — handle @0x51171b, x/y/z
+	//  @0x51175a / @0x51176d / @0x511786, seconds @0x511732, type @0x51178a,
+	//  height @0x511744, the count @0x5117cf]
+	std::vector<uint8_t> out;
+	if (batch.entries.empty()) return out;
+	Writer w{out};
+	w.u8(static_cast<uint8_t>(batch.entries.size()));
+	for (const MinimapOverlayBatch::Entry &e : batch.entries) {
+		w.u16(e.handle);
+		w.u16(static_cast<uint16_t>(e.x));
+		w.u16(static_cast<uint16_t>(e.y));
+		w.u16(static_cast<uint16_t>(e.z));
+		w.u16(e.lifetime_s);
+		w.u8(e.type);
+		w.u8(e.height);
+	}
+	return out;
+}
+
 std::vector<uint8_t> encode_team_assign(const TeamAssign &assign) {
 	std::vector<uint8_t> out;
 	Writer w{out};
@@ -1148,26 +1191,6 @@ std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign
 	w.u16(index);
 	const std::vector<uint8_t> record = encode_team_assign(assign);
 	out.insert(out.end(), record.begin(), record.end());
-	return out;
-}
-
-// [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the link byte @0x510797, the member
-//  slot @0x5107A4]
-std::vector<uint8_t> encode_squad_join(const SquadJoin &join) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u8(join.leader);
-	w.u8(join.member);
-	return out;
-}
-
-// [orig: NetPacket_WriteByteAndCString @0x5107B0 — the byte @0x5107CD, then the
-//  string with its terminator]
-std::vector<uint8_t> encode_team_name(const TeamName &name) {
-	std::vector<uint8_t> out;
-	Writer w{out};
-	w.u8(name.index);
-	w.cstr(name.name);
 	return out;
 }
 

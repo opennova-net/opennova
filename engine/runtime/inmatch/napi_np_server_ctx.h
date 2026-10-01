@@ -12,6 +12,7 @@
 
 #include <runtime/inmatch/game_config.h>       // inmatch::GameConfig — the ONE consolidated server-state config
 #include <runtime/inmatch/napi_np_connection.h>
+#include <runtime/inmatch/server_designations.h> // the designation table (S2C 0x6B)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
 
@@ -29,6 +30,8 @@ struct File;
 
 namespace opennova::inmatch {
 
+class ClientRuntime;
+
 // [orig +0x5C] The host/client connection mode written by [orig: CGameSession_SetConnectionMode
 // @0x4c49f0] (§5.0 / §6.3). It decomposes into the two booleans is_authority (is_host) and
 // is_mp_session_peer (is_client). Single player / co-op listen server = HostClient.
@@ -42,7 +45,13 @@ enum class ConnectionMode : uint32_t {
 // [orig +0x50] transport_mode — the NETWORK TYPE (NovaWorld vs LAN) (§6.3). Distinct from
 // socket_state below: the UI maps NovaWorld -> SetTransportMode(4) and LAN -> SetTransportMode(2),
 // while a single-player host calls SetTransportMode(1) directly (§5.0 step 2). NovaWorld-only
-// AppId/JoinTicket gates branch on this == NovaWorld.
+// AppId/JoinTicket gates branch on this == NovaWorld. The session setter stores it from its
+// argument, the menu's connect type on a host or a join, 0 on SP and every reset; a joiner
+// carries it on its join record (the Godot JoinTarget.network_type), where the squad talk
+// row reads it [orig: CNapiNetwork_SetNetworkType @0x4c4a50: +0x50 = state @0x4c4a82 (and +0x58
+// is_in_session = state in 1..3 @0x4c4a85); the join leg passes
+// g_GameConfigState.networkConnectType_480 @0x558314..0x55831f, SinglePlayer_StartMission 0
+// @0x561bd4; the squad gate @0x49ba13].
 enum class NetworkType : uint32_t {
 	NovaWorld = 1,
 	Lan = 2,
@@ -182,6 +191,16 @@ struct NapiNPServerCtx {
 	//  the dword_24D1DDC 62-frame countdown; CNetQuality_UpdateMetrics @0x4C52C0].
 	replication::NetQualityWindow host_quality_window;
 	uint32_t net_quality_sample_countdown = 0;
+	// The authority's bucketed 0..4 level off that window (the receive window
+	// never runs here, so the combined scalar is the send window's), stored
+	// with each sample; the host role hands it to its own client's connection
+	// indicators [orig: CNetQuality_UpdateMetrics's tail @0x4c585a..0x4c58b0 ->
+	// CNetQuality_SetLevel(&g_NetQuality, level) @0x52659b].
+	int32_t net_quality_level = 0;
+	// The server protocol's link-error callbacks since the host role last
+	// drained them (kNetQualityLinkError* bits): a joiner's 0x44 resend list
+	// that named a sequence, our 0x84 missing-sequence request that named one.
+	uint32_t net_quality_link_errors = 0;
 	// The main loop's FR counter (world::TickAccumulator::average_fps), handed
 	// over by the session once per banked frame (HostRole::observe_frame_rate):
 	// the send window's frame-pressure input and, copied at the head of every
@@ -189,6 +208,13 @@ struct NapiNPServerCtx {
 	// mode-init value, until the first 2 s window closes.
 	// [orig: g_StatsAvgFps; Server_TickUpdate @0x51D7E0..0x51D7E5 -> g_ServerFps]
 	int32_t stats_avg_fps = 0;
+	// The main loop's frames drawn in the last 62 logic updates and the frame
+	// window's CPU share (Session::frame_statistics), handed over after every
+	// frame (HostRole::observe_frame_statistics): the status page's bottom row.
+	// [orig: dword_24C193C; g_StatsCpuPercent — Server_DrawStatusScreen
+	//  @0x50afaf / @0x50b024]
+	int32_t stats_frames_last_second = 0;
+	int32_t stats_cpu_percent = 0;
 	// The persistent slot cursor of the 1 Hz S2C 0x46 quality resend walk.
 	// [orig: g_WeaponBroadcastSlotCursor, Server_TickUpdate @0x51DE79]
 	int32_t quality_broadcast_slot_cursor = 0;
@@ -206,6 +232,12 @@ struct NapiNPServerCtx {
 	//  @0x518EEC; the clear in Server_InitNewRoundState @0x51C911; the read
 	//  NapiNPServerMsg_0x029 @0x514F7C]
 	std::vector<world::EntityHandle> team_change_entities;
+
+	// The designation table the radio calls fill and the per-player S2C 0x6B
+	// batch reads, cleared at the new-round init
+	// (inmatch/server_designations.h). [orig: g_ServerDesignations @0xC84810;
+	//  the memset in Server_InitNewRoundState @0x51cb9b]
+	ServerDesignationTable designations{};
 
 	// The authoritative end-round transaction. The domain Match freezes the
 	// result; these are only the once-only wire announcement and retail MP linger
@@ -232,6 +264,12 @@ struct NapiNPServerCtx {
 	// C2S drain / S2C fan) is owned by Server_TickUpdate over connection_list — there is no separate
 	// NetSystem (retired P8): the drain/emit primitives live in runtime/replication/connection_fan.h.
 	world::World *world = nullptr;
+	// The host process's own client half (the listen host's loopback
+	// ClientRuntime; null on a dedicated host): the client-side state a host
+	// handler reads through the process globals retail shares, here the
+	// active-zone overlay the radio key builder tests (the A&S context).
+	// Non-owning; the role re-points it whenever it rebuilds that runtime.
+	const ClientRuntime *host_client = nullptr;
 
 	// Last-sent S2C 0x6F body per zone handle — the golden shows 0x6F is NOT a steady
 	// per-second stream (268 across a whole session): unchanged bodies are withheld and
@@ -300,6 +338,34 @@ struct NapiNPServerCtx {
 		std::string novaworld_web_url = "127.0.0.1:8080";
 	};
 	ServerKeyMint server_key_mint;
+
+	// The per-registration NovaWorld AppId (CNapiNetwork_RandomizeTimeout's
+	// value, net/napi/session.h make_session_app_id), installed by the
+	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
+	// authority's status page shows it on its NovaWorld server line.
+	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
+	//  by sub_4C4DB0 @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
+	uint32_t novaworld_app_id = 0;
+	// Every connection the host's NapiNP layer brought up since the server
+	// started, the host's own local connection included: the status page's
+	// total logins.
+	// [orig: ctx+0x11A8 — `add` in NapiNPServer_HandleNewConnection
+	//  @0x4c8203, the new-connection callback CNapiNPConnection_OnStateChange
+	//  @0x6261c6 runs when a connection enters state 1; zeroed by the host
+	//  start callback CNapiServer_OnHostStarted (ex
+	//  CNapiServer_OnPlayerDisconnected) @0x4c94f0 that
+	//  NapiNPProtocol_StartServer @0x62b640 runs; read @0x50b0e4]
+	uint32_t total_logins = 0;
+	// The round tallies the status page's team block shows: every round end
+	// of Team Deathmatch, Team KOTH or CTF counts one round and one win for
+	// the winning side 1..4. Only the Reset Game action clears them
+	// (Server_ForceRoundEndAndClearState, catalog row 92 `resetgames`, code
+	// 106, which the port does not dispatch).
+	// [orig: g_TotalRoundsPlayed @0xC8FF1C, g_RoundWinsTeam1..4
+	//  @0xC8FF0C..0xC8FF18 — Server_ProcessRoundEnd @0x516883..0x5168d8; the
+	//  reset @0x5175aa..0x5175be]
+	std::array<int32_t, 4> round_wins{};
+	int32_t rounds_played = 0;
 
 	// The GSID the NovaWorld service returned in ServerHostResult HostCommands,
 	// installed by the shell's NovaWorld host binding once registration

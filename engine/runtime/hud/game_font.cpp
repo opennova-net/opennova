@@ -47,15 +47,21 @@ const fnt_glyph_t *GameFont::glyph_for_byte(uint8_t byte) const {
 }
 
 float GameFont::char_height(uint8_t byte, float scale_y) const {
-	// One glyph's v-extent in pixels [orig: GameFont_MeasureCharHeight
-	// @ 0x580a80 — CGameFont_GetCharMetrics scaled by the fontDesc scale;
-	// the friendly-tag drawer measures '0' @ 0x5a3a36].
-	const fnt_glyph_t *glyph = glyph_for_byte(byte);
-	if (glyph == nullptr) {
+	// [orig: GameFont_MeasureCharHeight @ 0x580a80 — (int)((double)extent_h *
+	// fontDesc->scale_y) @0x580aa0; CGameFont_GetCharExtent @0x674dc0 — every
+	// byte from 0x20 up, and the tab, takes the SPACE record's v-extent:
+	// fld [this+17Ch]; fsub [this+174h]; fmul design scale [this+12ECh]; fmul
+	// 256.0; _ftol2_sse @0x674e2c..0x674e44; other control bytes zero both
+	// extents @0x674e57]. The friendly-tag drawer measures '0' @ 0x5a3a36.
+	if (font_ == nullptr || (byte < FNT_FIRST_CHAR && byte != 0x09)) {
 		return 0.0f;
 	}
-	return (glyph->uv.v1 - glyph->uv.v0) * 256.0f *
-			fnt_design_scale(font_->design_width) * scale_y;
+	const fnt_glyph_t &space = font_->glyphs[0];
+	const int32_t extent = static_cast<int32_t>(
+			(static_cast<double>(space.uv.v1) - static_cast<double>(space.uv.v0)) *
+			static_cast<double>(fnt_design_scale(font_->design_width)) * 256.0);
+	return static_cast<float>(
+			static_cast<int32_t>(static_cast<double>(extent) * static_cast<double>(scale_y)));
 }
 
 int GameFont::char_width(uint8_t byte, float scale_x, int tab_width) const {

@@ -10,13 +10,32 @@
 
 namespace opennova::replication {
 
+void string_append_n(std::string &dst, const std::string &src, size_t max_len) {
+	for (char ch : src) {
+		if (dst.size() + 1 >= max_len) break;
+		dst.push_back(ch);
+	}
+}
+
+std::string roster_tag_label(const ClientRosterSlot &slot) {
+	std::string out;
+	string_append_n(out, slot.name, 64); // Napi_CopyString(.., 64) @0x5a3f43
+	if (!slot.registry_clan.empty()) {  // @0x5a3f4e..0x5a3f55
+		string_append_n(out, "<ch>", 64);
+		string_append_n(out, slot.registry_clan, 64);
+		string_append_n(out, "<co>", 64);
+	}
+	return out;
+}
+
 void collect_roster_tags(const ClientState &state, uint16_t self_handle,
                          uint8_t local_team, bool death_screen,
                          uint32_t game_type,
                          std::vector<world::FriendlyTagSource> &out,
                          const RosterTagMaxHealth &max_health,
                          const world::World *carrier_world) {
-	for (const ClientRosterSlot &slot : state.roster) {
+	for (const ClientVisiblePlayer &entry : state.visible_players) {
+		const ClientRosterSlot &slot = state.roster[entry.slot];
 		// slot+0x0D active, slot+0x24 entity [orig: @0x5a453b/@0x5a454e].
 		if (!slot.bound || slot.entity_slot < 0) continue;
 		const world::EntityHandle handle{
@@ -52,9 +71,10 @@ void collect_roster_tags(const ClientState &state, uint16_t self_handle,
 		// body updater retail runs on every player; the decoded row carries no
 		// eye sample, so the anchor rides the origin + 0x4000 (record residue).
 		src.eye_offset_z = 0;
-		// The slot callsign is the label [orig: Napi_CopyString(name, slot+20)
-		// @0x5a3f43]; the slot+32 `<ch>..<co>` wrap is the record's residue.
-		src.name = slot.name;
+		// The slot callsign with its registry tag is the label
+		// [orig: @0x5a3f29..0x5a3f86].
+		src.name = roster_tag_label(slot);
+		src.squad_color_index = slot.squad_color; // slot+0x33
 		src.player = true;
 		// health<<16 / max — the def hp (or 1 with no def) [orig: @0x5a3b91..
 		// 0x5a3bb8], clamped like the pool-0 gather.

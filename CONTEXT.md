@@ -825,7 +825,7 @@ The in-game heads-up display, laid out by `hudpos.def`. RE record:
 _Avoid_: overlay, UI (too broad)
 
 **Dev tools**:
-The engine-owned Dear ImGui tool windows behind F3 (`engine/runtime/devtools`,
+The engine-owned Dear ImGui tool windows behind Insert (`engine/runtime/devtools`,
 ADR 0039): the Stats window over the frame-stats board, and every inspection
 or control window added later. Debug builds only; the Godot side is one
 `DevTools` node plus the imgui-godot addon.

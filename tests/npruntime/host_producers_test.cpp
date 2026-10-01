@@ -26,6 +26,10 @@
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/server_vehicle_spawn.h>
+#include <runtime/inmatch/server_visible_players.h>
+#include <runtime/inmatch/server_emote.h>
+#include <runtime/inmatch/server_designations.h>
+#include <runtime/inmatch/server_radio_call.h>
 
 #include <runtime/inmatch/session_transport.h>
 #include <runtime/inmatch/udp_session_transport.h>
@@ -37,12 +41,15 @@
 #include <net/npwire/peer_addr.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_ping.h>
+#include <net/npwire/visible_players.h>
+#include <net/npwire/emote_wire.h>
 
 #include <runtime/world/entity.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -456,6 +463,38 @@ bool check_spectator_respawn_request() {
 	for (const ns::Datagram &d : to_p2)
 		if (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == want) saw = true;
 	return expect(saw, "S2C 0x32 [5][name] reaches the other player");
+}
+
+// The S2C 0x32 join and leave lines: [1][name][team] from the player add,
+// [2][name][team] from the disconnect, each to every OTHER in-match
+// connection [orig: Server_PlayerAdd @0x51d21e..0x51d291;
+// Server_HandlePlayerDisconnect @0x51b69b..0x51b6d3].
+bool check_join_leave_lines() {
+	HostFixture f(3);
+	for (auto &t : f.transports) (void)drain(t);
+	inmatch::broadcast_player_joined_text(f.ctx.np_protocol.connection_list,
+			f.conn(0), &f.world);
+	const std::vector<uint8_t> joined = {1, 'P', '1', 0, 1};
+	const auto count = [](std::vector<ns::Datagram> dgs, const std::vector<uint8_t> &want) {
+		int n = 0;
+		for (const ns::Datagram &d : dgs)
+			if (d.tag == s2c::FORMATTED_GAME_TEXT && d.body == want) ++n;
+		return n;
+	};
+	if (!expect(count(drain(f.transports[0]), joined) == 0, "the joiner gets no join line"))
+		return false;
+	if (!expect(count(drain(f.transports[1]), joined) == 1 &&
+					count(drain(f.transports[2]), joined) == 1,
+			"every other in-match player gets [1][name][team]"))
+		return false;
+	inmatch::broadcast_player_leaving_text(f.ctx.np_protocol.connection_list, f.conn(1),
+			&f.world);
+	const std::vector<uint8_t> leaving = {2, 'P', '2', 0, 2};
+	if (!expect(count(drain(f.transports[1]), leaving) == 0, "the leaver gets no line"))
+		return false;
+	return expect(count(drain(f.transports[0]), leaving) == 1 &&
+					count(drain(f.transports[2]), leaving) == 1,
+			"every other in-match player gets [2][name][team]");
 }
 
 // --------------------------------------------------------------------------
@@ -917,7 +956,7 @@ bool check_change_team() {
 	const std::vector<ns::Datagram> to_p1 = drain(f.transports[0]);
 	std::vector<uint8_t> tags;
 	for (const ns::Datagram &d : to_p1) tags.push_back(d.tag);
-	ok = expect(tags == std::vector<uint8_t>({s2c::SQUAD_JOIN, s2c::TEAM_NAME, s2c::TEAM_NAME,
+	ok = expect(tags == std::vector<uint8_t>({s2c::SQUAD_JOIN, s2c::SQUAD_ORDER, s2c::SQUAD_ORDER,
 					s2c::TEAM_ASSIGN, s2c::CHAT_BROADCAST}),
 			"the changed player gets 0x71, the 0x72 pair, 0x50, then the chat") && ok;
 	if (tags.size() == 5) {
@@ -1051,6 +1090,296 @@ bool check_player_enter_hook() {
 	return expect(conn_by_id(23).host_disconnect_sent, "the unarmed validation deadline reaps");
 }
 
+// --------------------------------------------------------------------------
+// The visible-players table: C2S 0x23 -> S2C 0x4C, and the S2C 0x4D fan.
+// --------------------------------------------------------------------------
+
+std::vector<VisiblePlayers::Entry> snapshot_of(const std::vector<ProtocolMessage> &replies) {
+	for (const ProtocolMessage &m : replies) {
+		if (m.tag != s2c::VISIBLE_PLAYERS) continue;
+		VisiblePlayers v;
+		decode_visible_players(m.payload.data(), m.payload.size(), v);
+		return v.entries;
+	}
+	return {};
+}
+
+bool check_visible_players_snapshot() {
+	// Teams alternate 1, 2, 1, 2 over slots 1..4.
+	HostFixture f(4);
+	f.ctx.config.game_type = 0x10000; // team deathmatch
+	std::vector<ProtocolMessage> replies = f.dispatch(0, c2s::VISIBLE_PLAYERS_REQUEST, {});
+	std::vector<VisiblePlayers::Entry> entries = snapshot_of(replies);
+	bool ok = expect(entries.size() == 2, "a team game lists the requester's team");
+	ok = expect(entries.size() == 2 && entries[0].slot == 1 && entries[1].slot == 3 &&
+			entries[0].entity_handle == f.players[0].packed &&
+			entries[1].entity_handle == f.players[2].packed,
+			"entries in slot order, each {slot id, packed handle}") && ok;
+	// Slot order, not list order [orig: the g_PlayerSlots walk @0x5063c0].
+	std::swap(f.ctx.np_protocol.connection_list[0], f.ctx.np_protocol.connection_list[2]);
+	entries = snapshot_of(f.dispatch(2, c2s::VISIBLE_PLAYERS_REQUEST, {}));
+	ok = expect(entries.size() == 2 && entries[0].slot == 1 && entries[1].slot == 3,
+			"the snapshot walks slot order whatever the connection order") && ok;
+	std::swap(f.ctx.np_protocol.connection_list[0], f.ctx.np_protocol.connection_list[2]);
+	// A spectator slot drops out [orig: +100567 @0x506410].
+	f.conn(2).link.spectator = true;
+	entries = snapshot_of(f.dispatch(0, c2s::VISIBLE_PLAYERS_REQUEST, {}));
+	ok = expect(entries.size() == 1 && entries[0].slot == 1,
+			"a spectator is never listed") && ok;
+	f.conn(2).link.spectator = false;
+	// Outside the team types the requester reads as team 255: itself alone
+	// [orig: @0x50637c..0x50638c; the spawn-time bit @0x43c546..0x43c54f].
+	f.ctx.config.game_type = 0x00000;
+	entries = snapshot_of(f.dispatch(1, c2s::VISIBLE_PLAYERS_REQUEST, {}));
+	ok = expect(entries.size() == 1 && entries[0].slot == 2,
+			"a free-for-all snapshot holds the requester alone") && ok;
+	// The listen host's own slot is listed only when the host plays.
+	f.ctx.config.game_type = 0x10000;
+	f.conn(2).link.mode = ns::TransportMode::Loopback;
+	f.ctx.is_mp_session_peer = 0;
+	entries = snapshot_of(f.dispatch(0, c2s::VISIBLE_PLAYERS_REQUEST, {}));
+	ok = expect(entries.size() == 1, "a serve-only host's own slot is skipped") && ok;
+	f.ctx.is_mp_session_peer = 1;
+	entries = snapshot_of(f.dispatch(0, c2s::VISIBLE_PLAYERS_REQUEST, {}));
+	ok = expect(entries.size() == 2, "a playing host's own slot is listed") && ok;
+	// An unbound requester gets count 0 [orig: @0x50635a..0x5063ac].
+	f.conn(0).link.owned_entity = w::EntityHandle{};
+	replies = f.dispatch(0, c2s::VISIBLE_PLAYERS_REQUEST, {});
+	ok = expect(replies.size() == 1 && replies[0].tag == s2c::VISIBLE_PLAYERS &&
+			replies[0].payload.size() == 1 && replies[0].payload[0] == 0,
+			"an inactive requester is answered with count 0") && ok;
+	return ok;
+}
+
+bool check_spawn_slot_notice_fan() {
+	HostFixture f(3);
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	inmatch::fan_spawn_slot_notice(f.ctx.np_protocol.connection_list, f.conn(1));
+	bool ok = true;
+	for (size_t i = 0; i < 3; ++i) {
+		const std::vector<ns::Datagram> out = drain(f.transports[i]);
+		const size_t n = count_tag(out, s2c::SPAWN_SLOT_NOTICE);
+		if (i == 1) {
+			ok = expect(n == 0, "the joined slot's copy rides its bundle, not the fan") && ok;
+		} else {
+			ok = expect(n == 1 && out[0].body.size() == 1 && out[0].body[0] == 2,
+					"every other in-game slot hears the joined slot id") && ok;
+		}
+	}
+	return ok;
+}
+
+// --------------------------------------------------------------------------
+// The emote: C2S 0x14 -> S2C 0x2D near the sender, the 2 s cooldown.
+// --------------------------------------------------------------------------
+
+bool check_emote_request() {
+	HostFixture f(3);
+	// Players at x = 0, 10, 20; the third moves out of range.
+	f.world.registry.get(f.players[2])->position.x = 150.0f;
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	EmoteRequest req;
+	req.value = 3;
+	std::vector<ProtocolMessage> replies =
+			f.dispatch(0, c2s::EMOTE_REQUEST, encode_emote_request(req));
+	bool ok = expect(replies.size() == 1 && replies[0].tag == s2c::EMOTE_BROADCAST &&
+			!replies[0].reliable,
+			"the sender hears its own emote, unreliable");
+	if (!replies.empty()) {
+		const std::vector<uint8_t> body = {3, static_cast<uint8_t>(f.players[0].slot()), 0, 0};
+		ok = expect(replies[0].payload == body, "the body is {emote, pool-0 index, 0, 0}") && ok;
+	}
+	ok = expect(count_tag(drain(f.transports[1]), s2c::EMOTE_BROADCAST) == 1,
+			"a player within 100 units hears it") && ok;
+	ok = expect(count_tag(drain(f.transports[2]), s2c::EMOTE_BROADCAST) == 0,
+			"a player past 100 units on an axis does not") && ok;
+	ok = expect(f.conn(0).link.emote_cooldown_seconds == 2, "the cooldown re-arms to 2") && ok;
+	replies = f.dispatch(0, c2s::EMOTE_REQUEST, encode_emote_request(req));
+	ok = expect(replies.empty() && count_tag(drain(f.transports[1]), s2c::EMOTE_BROADCAST) == 0,
+			"a cooling sender sends nothing") && ok;
+	// The 1 Hz maintenance counts the cooldown down [orig: @0x51e028].
+	for (int second = 0; second < 2; ++second) {
+		do {
+			inmatch::Server_TickUpdate(f.ctx);
+		} while (!f.world.match.periodic_second());
+	}
+	ok = expect(f.conn(0).link.emote_cooldown_seconds == 0,
+			"two periodic seconds clear the cooldown") && ok;
+	// A dead sender, and a spectator, send nothing [orig: @0x501e33 / @0x501e55].
+	f.world.registry.get(f.players[0])->engine_flags |= w::kEntityFlagDead;
+	ok = expect(f.dispatch(0, c2s::EMOTE_REQUEST, encode_emote_request(req)).empty(),
+			"a dead sender is silent") && ok;
+	f.world.registry.get(f.players[0])->engine_flags &= ~w::kEntityFlagDead;
+	f.conn(0).link.spectator = true;
+	ok = expect(f.dispatch(0, c2s::EMOTE_REQUEST, encode_emote_request(req)).empty(),
+			"a spectator is silent") && ok;
+	return ok;
+}
+
+// --------------------------------------------------------------------------
+// The radio call: C2S 0x13 -> S2C 0x6D by the rule table, the latch, the
+// designation and its S2C 0x6B, the 4 s cooldown.
+// --------------------------------------------------------------------------
+
+size_t count_radio(ns::UdpSessionTransport &t) {
+	return count_tag(drain(t), s2c::TRACKED_PLAYER_VOICE);
+}
+
+bool check_radio_call_rules() {
+	// [orig: g_RadioCallRules @0x840C20; RadioCall_FindRuleByKey @0x5BFE50]
+	const inmatch::RadioCallRule *medic = inmatch::radio_call_find_rule("rad_medic2");
+	bool ok = expect(medic != nullptr && medic->type == 2 && medic->range_units == 8000,
+			"the lookup ignores case");
+	const inmatch::RadioCallRule *rifle = inmatch::radio_call_find_rule("RAD_RIFLE2");
+	ok = expect(rifle != nullptr && rifle->type == -1 && rifle->designation_seconds == 30 &&
+			rifle->designation_mode == 3, "the last searched row marks for 30 s") && ok;
+	ok = expect(inmatch::radio_call_find_rule("RAD_1") == nullptr,
+			"the type-0 row ends the walk uncompared") && ok;
+	ok = expect(inmatch::radio_call_find_rule("RAD_SNIPER1") == nullptr &&
+			inmatch::radio_call_find_rule("RAD_MP_TDM1") == nullptr,
+			"rows past the terminator are never reached") && ok;
+	// The table ages every tick; the life that reaches 0 frees its owner, a
+	// zero-life row keeps its owner [orig: @0x51e4a0..0x51e4af].
+	inmatch::ServerDesignationTable table{};
+	const int32_t point[3] = {1, 2, 3};
+	inmatch::Server_RegisterDesignation(table, w::EntityHandle::make(0, 4), point, 2, 0, 3);
+	inmatch::Server_RegisterDesignation(table, w::EntityHandle::make(0, 5), point, 0, 0, 3);
+	inmatch::Server_RegisterDesignation(table, w::EntityHandle::make(0, 4), point, 5, 0, 3);
+	ok = expect(table[0].remaining_ticks == 5 && table[1].owner == w::EntityHandle::make(0, 5),
+			"an owner refreshes its own row; another takes the next free one") && ok;
+	for (int i = 0; i < 5; ++i) inmatch::Server_TickDesignations(table);
+	ok = expect(!table[0].owner.valid() && table[0].remaining_ticks == 0,
+			"the aged-out row frees its owner") && ok;
+	ok = expect(table[1].owner.valid(), "a zero-life row keeps its owner") && ok;
+	return ok;
+}
+
+bool check_radio_call_request() {
+	HostFixture f(4); // teams 1, 2, 1, 2 at x = 0, 10, 20, 30
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	w::Entity *sender = f.world.registry.get(f.players[0]);
+	w::Entity *mate = f.world.registry.get(f.players[2]);
+	RadioCallRequest req;
+
+	// Call 1 builds RAD_1, which no rule reaches: the sender's team.
+	req.value = 1;
+	std::vector<ProtocolMessage> replies =
+			f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	bool ok = expect(replies.size() == 1 && replies[0].tag == s2c::TRACKED_PLAYER_VOICE &&
+			!replies[0].reliable, "the sender hears its own call, unreliable");
+	if (!replies.empty()) {
+		const std::vector<uint8_t> body = {1, uint8_t(f.players[0].slot()), 0xFF, 0xFF};
+		ok = expect(replies[0].payload == body,
+				"the body is {call, pool-0 index, no location}") && ok;
+	}
+	ok = expect(count_radio(f.transports[2]) == 1, "a teammate hears it") && ok;
+	ok = expect(count_radio(f.transports[1]) == 0 && count_radio(f.transports[3]) == 0,
+			"the other team does not") && ok;
+	ok = expect(f.conn(0).link.radio_call_cooldown_seconds == 4, "the cooldown re-arms to 4") && ok;
+	ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).empty() &&
+			count_radio(f.transports[2]) == 0, "a cooling sender sends nothing") && ok;
+	// The 1 Hz maintenance counts it down [orig: @0x51e045].
+	for (int second = 0; second < 4; ++second) {
+		do {
+			inmatch::Server_TickUpdate(f.ctx);
+		} while (!f.world.match.periodic_second());
+	}
+	ok = expect(f.conn(0).link.radio_call_cooldown_seconds == 0,
+			"four periodic seconds clear the cooldown") && ok;
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+
+	// Call 6 is RAD_6: type 1, a control seat within 500 units (2-D), and the
+	// sender's ride-request latch.
+	req.value = 6;
+	replies = f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(replies.size() == 1 && count_radio(f.transports[2]) == 0,
+			"a teammate on foot is not a driver") && ok;
+	ok = expect(sender->radio_request == 1 && sender->radio_request_seconds == 30,
+			"call 6 raises the sender's latch for 30 seconds") && ok;
+	// The body's 64-tick window ages the latch [orig: @0x4b467a..0x4b469d].
+	for (int tick = 0; tick < 64; ++tick) inmatch::Server_TickUpdate(f.ctx);
+	ok = expect(sender->radio_request == 1 && sender->radio_request_seconds == 29,
+			"one 64-tick window takes one second off the latch") && ok;
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	mate->mount_type = w::SeatType::Driver;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	(void)f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(count_radio(f.transports[2]) == 1, "a driving teammate in range hears it") && ok;
+	mate->position.x = 600.0f;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	(void)f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(count_radio(f.transports[2]) == 0, "past 500 units it does not") && ok;
+	mate->position.x = 20.0f;
+	mate->mount_type = w::SeatType::None;
+
+	// Call 9 of a medic outside a zone game is RAD_MEDIC1: the dead in range.
+	f.ctx.config.game_type = 0x10001;
+	sender->player_class = 5;
+	req.value = 9;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	(void)f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(sender->radio_request == 0, "any other call clears the latch") && ok;
+	ok = expect(count_radio(f.transports[2]) == 0, "a living teammate needs no medic") && ok;
+	mate->engine_flags |= w::kEntityFlagDead;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	(void)f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(count_radio(f.transports[2]) == 1, "a downed teammate hears the medic") && ok;
+	mate->engine_flags &= ~w::kEntityFlagDead;
+
+	// Call 7 is RAD_7: every teammate, and a 30 s mark 1000 units down the
+	// sender's view (no collision world: the far point) [orig: @0x514668..0x51470c].
+	req.value = 7;
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	(void)f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req));
+	ok = expect(count_radio(f.transports[2]) == 1, "RAD_7 reaches the whole team") && ok;
+	const inmatch::ServerDesignation &mark = f.ctx.designations[0];
+	ok = expect(mark.owner == f.players[0] && mark.remaining_ticks == 62 * 30 && mark.mode == 3 &&
+			mark.radius_q16 == 0, "the call marks its point for 30 s, mode 3") && ok;
+	const double dx = double(mark.point[0]) - double(w::to_fixed(sender->position.x));
+	const double dy = double(mark.point[1]) - double(w::to_fixed(sender->position.y));
+	ok = expect(std::abs(std::sqrt(dx * dx + dy * dy) - 1000.0 * 65536.0) < 2.0 * 65536.0,
+			"the mark lies 1000 units down the view") && ok;
+	// The next overlay visit, at the head of the tick, sends the team's marks
+	// as S2C 0x6B before the tail ages them [orig: @0x5188d6 before @0x51e496].
+	const int32_t life_at_send = mark.remaining_ticks;
+	for (ns::UdpSessionTransport &t : f.transports) (void)drain(t);
+	for (inmatch::NapiNPConnection &conn : f.ctx.np_protocol.connection_list)
+		conn.reply.minimap_overlay_cooldown = 0;
+	inmatch::Server_TickUpdate(f.ctx);
+	const auto overlays = [&](size_t i) {
+		std::vector<MinimapOverlayBatch> out;
+		for (const ns::Datagram &d : drain(f.transports[i])) {
+			if (d.tag != s2c::MINIMAP_OVERLAY) continue;
+			MinimapOverlayBatch batch;
+			if (decode_minimap_overlay_batch(d.body.data(), d.body.size(), batch))
+				out.push_back(batch);
+		}
+		return out;
+	};
+	const std::vector<MinimapOverlayBatch> own = overlays(2);
+	ok = expect(own.size() == 1 && own[0].entries.size() == 1 &&
+			own[0].entries[0].handle == f.players[0].packed && own[0].entries[0].type == 3 &&
+			own[0].entries[0].lifetime_s == life_at_send / 62 && own[0].entries[0].height == 0,
+			"the mark's team sees it: {owner, point, seconds, mode 3, 0}") && ok;
+	ok = expect(overlays(1).empty() && overlays(3).empty(), "the other team sees nothing") && ok;
+	ok = expect(mark.remaining_ticks == life_at_send - 1, "the tick's tail aged the mark") && ok;
+	// A round init clears the table [orig: @0x51cb95..0x51cba5].
+	inmatch::Server_InitNewRoundState(f.ctx);
+	ok = expect(!f.ctx.designations[0].owner.valid() && f.ctx.designations[0].remaining_ticks == 0,
+			"the new-round init clears the marks") && ok;
+
+	// A dead sender, and a spectator, are silent [orig: @0x514365 / @0x51437c].
+	f.conn(0).link.radio_call_cooldown_seconds = 0;
+	sender->engine_flags |= w::kEntityFlagDead;
+	ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).empty(),
+			"a dead sender is silent") && ok;
+	sender->engine_flags &= ~w::kEntityFlagDead;
+	f.conn(0).link.spectator = true;
+	ok = expect(f.dispatch(0, c2s::RADIO_CALL_REQUEST, encode_radio_call_request(req)).empty(),
+			"a spectator is silent") && ok;
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -1063,6 +1392,7 @@ int main() {
 	ok = check_loaded_model_reply_stamp() && ok;
 	ok = check_vehicle_spawn_availability() && ok;
 	ok = check_spectator_respawn_request() && ok;
+	ok = check_join_leave_lines() && ok;
 	ok = check_medic_revive_transaction() && ok;
 	ok = check_medic_revive_gates() && ok;
 	ok = check_medic_heal_transaction() && ok;
@@ -1070,6 +1400,11 @@ int main() {
 	ok = check_server_commands() && ok;
 	ok = check_change_team() && ok;
 	ok = check_player_enter_hook() && ok;
+	ok = check_visible_players_snapshot() && ok;
+	ok = check_spawn_slot_notice_fan() && ok;
+	ok = check_emote_request() && ok;
+	ok = check_radio_call_rules() && ok;
+	ok = check_radio_call_request() && ok;
 	if (ok) std::printf("OK\n");
 	return ok ? 0 : 1;
 }

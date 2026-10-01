@@ -1,8 +1,8 @@
 #pragma once
 
 // The joiner's PLAYER walk of the friendly-tags pass (D-HUD-20 residue a).
-// Retail's second walk visits the connection-slot table and labels each
-// slot's entity [orig: HUD_DrawFriendlyTagsPass @0x5a4507..0x5a4597]; on a
+// Retail's second walk visits the player-slot table S2C 0x4C fills and labels
+// each slot's entity [orig: HUD_DrawFriendlyTagsPass @0x5a4507..0x5a4597]; on a
 // joiner the pool-0 players are decoded ClientEntityState rows, not World
 // twins (ClientWorldMaterializer excludes pool 0), so this gather is the only
 // way a remote player reaches the drawer there. The HostClient role reaches
@@ -13,8 +13,10 @@
 
 #include <runtime/world/friendly_tags.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <string>
 #include <vector>
 
 namespace opennova::replication {
@@ -26,12 +28,24 @@ namespace opennova::replication {
 // `if (!max) max = 1` fold @0x5a3b95).
 using RosterTagMaxHealth = std::function<int32_t(uint16_t type_id)>;
 
-// Walk the bound roster slots with an entity (slot+0x0D active, slot+0x24
-// entity) and emit one tag source per player that passes the pass gates and
-// the drawer's entry bails (world/friendly_tag_gates.h, shared with the
-// authority walk): not self [orig: @0x5a39df], not CARRIED (state_flags & 1
-// @0x5a39eb), a resolved def [orig: @0x5a39fb], team 0 / local team / death
-// screen [orig: @0x5a4552..0x5a456b], `g_GameType || death screen`
+// String_AppendN: append `src` while the total stays under `max_len` bytes
+// with its terminator [orig: String_AppendN @0x617E50].
+void string_append_n(std::string &dst, const std::string &src, size_t max_len);
+
+// A player's tag label: the slot callsign, then "<ch>" registry tag "<co>"
+// for a non-empty tag, within 64 bytes [orig: HUD_DrawEntityLabel
+// @0x5a3f29..0x5a3f86 — Napi_CopyString(.., slot+0x14, 64), String_AppendN
+// (.., 64) x3 over slot+0x20].
+std::string roster_tag_label(const ClientRosterSlot &slot);
+
+// Walk the S2C 0x4C slot table in table order [orig: HUD_DrawFriendlyTagsPass
+// @0x5a4507..0x5a4597 over g_PlayerSlotPtrTable], each entry's roster slot
+// with an entity (slot+0x0D active, slot+0x24 entity), and emit one tag
+// source per player that passes the pass gates and the drawer's entry bails
+// (world/friendly_tag_gates.h, shared with the authority walk): not self
+// [orig: @0x5a39df], not CARRIED (state_flags & 1 @0x5a39eb), a resolved def
+// [orig: @0x5a39fb], team 0 / local team / death screen
+// [orig: @0x5a4552..0x5a456b], `g_GameType || death screen`
 // [orig: @0x5a456d..0x5a457d]. Each source carries the slot's revive
 // countdown and medic-request latch (slot+0x10 / slot+0x2C), the row's
 // dead bit (state_flags & 2 — the `Flags & 2` latch @0x5a3c1c) and the

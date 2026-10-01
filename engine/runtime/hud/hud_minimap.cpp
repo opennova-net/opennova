@@ -7,19 +7,21 @@
 
 #include <runtime/hud/hud_declutter.h>
 #include <runtime/hud/hud_math.h>
-#include <runtime/hud/hud_medic_cross.h>
+#include <runtime/hud/hud_minimap_view.h>
 #include <base/io/bam.h>
 
 namespace opennova::hud {
 
-namespace {
+// The view transform and clip helpers are shared with the leg TUs
+// (hud_minimap_view.h).
+namespace minimap_detail {
 
 constexpr double kPi = io::kPi;
 // BAM16 to radians [orig: flt_7C7988 = 9.58738019e-05 = 2*pi/65536]
 constexpr double kBam16ToRadians = (2.0 * kPi) / io::kFp16OneD;
 constexpr int kCircleSegments = 32; // [orig: ring step 0x8000000 BAM @0x5a5f40 vertex loop]
-// World-per-pixel divisor [orig: flt_7D2290 = 200.0 @0x5a5f40 scale setup]
-constexpr float kZoomHeightDivisor = 200.0f;
+// World-per-pixel divisor [orig: flt_7D2290 = 200.0 @0x5a6501 scale setup]
+constexpr float kZoomDivisor = 200.0f;
 // Terrain tile cover bound factor [orig: flt_7C6F9C = 0.8 @0x6071C0 head]
 constexpr float kTerrainBoundFactor = 0.8f;
 // Terrain tint: the map pass hands 0xD0606060 to the decal renderer, which
@@ -45,15 +47,16 @@ constexpr float kDepthspinUvOffset = 130.0f / 256.0f;
 // this is the capture-measured final color submitted above both of them.
 // [orig: fog-pass diffuse @0x607834; JOTAC 00TRa synchronized capture]
 constexpr uint32_t kDepthspinColor = 0xFF16476Bu;
-// Backing disc color: the disc pass modulates the struct RGBA through a
-// dedicated effect pass; the exact constant is not byte-witnessed, but the
-// retail capture corroborates ~75% black (the backing-only zone just past
-// the compring band reads ~0.76 alpha over sky).
-constexpr uint32_t kBackingColor = 0xC0000000u;
-// Special-bank icon quads are a fixed 6px half-extent, resolution-independent
-// [orig: Minimap_DrawBillboardDecal size_override = 6.0 @0x5be297; floor 6.0
-// @0x597666]
-constexpr float kSpecialIconHalfPx = 6.0f;
+// The bit0 backing disc carries NO colour: the rect quad (z 0.1) and the
+// 33-vertex fan (z 0.999996) submit diffuse 0 through stock shader #2 (mode
+// 0x221: SRCALPHA/INVSRCALPHA, SELECTARG2 diffuse colour and alpha), pass
+// 0x600000 (ztest always, zwrite on) — invisible; it only lays the depth the
+// later z-tested legs crop against. The port bakes that crop into those legs'
+// geometry (the 32-gon clips) and emits no backing geometry.
+// [orig: CGfxDevice_SetQuadDiffuse(0) @0x5a6068; SetQuadDepth(flt_7C69F4)
+//  @0x5a6556; dword_272E830 = 0 + flt_7D9F80 z @0x5a659d; the 33-vertex
+//  loop @0x5a6364 region -> DrawIndexedPrimitive @0x5a6645; shader #2 =
+//  sub_676D50(dev, 0, 545) @0x6780AF; pass 0x600000 @0x5a6527]
 // Compass ring spans the map radius x1.25 [orig: flt_7C6F18 @0x59c9df]
 constexpr float kCompassScale = 1.25f;
 // Retail samples only the centered 90% of COMPRING. Cropping five percent
@@ -83,17 +86,17 @@ constexpr double kGridCellReciprocal =
 //  (x1+x2)*0.5/(y1+y2)*0.5, radius (y2-y1)*0.5 into the ring vertex loop
 //  with flt_7C3610 = 2^-22; rect scaled per axis by
 //  Viewport_ScaleToVirtualCoords @0x5d2b20 (x*w/1024, y*h/768, rounded)]
-// The spinmap disc sits INSIDE its rect by two DESIGN pixels, taken through
-// the same integer scaler every other hudpos coordinate uses — on the WIDTH
+// The spinmap disc sits INSIDE its rect by (mask >> 8) & 2 DESIGN pixels —
+// two when bit9 is set (the corner map), none on the big map — taken through
+// the same integer scaler every other hudpos coordinate uses, on the WIDTH
 // axis, even though the radius itself comes from the half-HEIGHT
 // [orig: the literal edi = 2 @0x5a60d8; the inset compute
 //  (mask >> 8) & edi @0x5a64cd..0x5a64d1 scaled through
 //  Viewport_ScaleToVirtualCoords @0x5d2b20; the disc-radius subtract
 //  @0x5a6512..0x5a651d]. At 1920 wide that scales to exactly 4 px, which is why the
 // earlier live probe read it as a constant four; at other widths it is not
-// (1280 -> 3, 2560 -> 5), so the constant only matched the machine it was
-// observed on. kDiscInsetDesignPx is the witnessed literal.
-constexpr float kDiscInsetDesignPx = 2.0f;
+// (1280 -> 3, 2560 -> 5), so a constant only matched the machine it was
+// observed on.
 // TSDicon.tga is a 30-cell vertical strip of square icon cells. Retail
 // uploads the source at its authored resolution (stock JO ships 16x480,
 // JOTAC's RevX02 authors 64x1920), box-generates its mip chain, and
@@ -110,17 +113,10 @@ constexpr int kIconStripCells = 30;
 // picks the frame. [orig: HUD_LoadAllTextures WPIndctr.tga -> 0x27231A8;
 //  frame = `extra` from HUD_UpdateWaypointAltitudeColor @0x590970]
 constexpr int kWpIndicatorCells = 4;
-// TSDicon cells the waypoint state line borrows for its tip: the chevron
-// (cell 7) at the clamped edge point while the waypoint projects OUTSIDE
-// the clip, the dot (cell 1) at the waypoint itself once inside.
-// The same drawer receives a 10-design-pixel span after Y-axis viewport
-// scaling; that span also participates in its retained distance-label slot.
-// [orig: HUD_DrawMapTargetPointer @0x599220 — cell arg = lodLevel, default
-//  7, switched to 1 on the inside branch @0x59935e; single strip-cell
-//  submit @0x59953d; scaled span arg at @0x5a64df/@0x5a7885]
-constexpr int kWaypointTipCellClamped = 7;
-constexpr int kWaypointTipCellInside = 1;
-constexpr int kWaypointPointerSpanDesignPx = 10;
+// Every pointer drawer receives a 10-design-pixel span after Y-axis viewport
+// scaling [orig: renderFlags = 10 through Viewport_ScaleToVirtualCoords
+//  @0x5a60dd/@0x5a64c5; the span arg @0x5a64df/@0x5a7885].
+constexpr int kPointerSpanDesignPx = 10;
 
 // Base-26 grid column letters, A..Z then AA..ZZ, negatives folding back
 // from ZZ. [orig: HUD_FormatGridCoordinate @0x598600; 19660800 = 300 wu Q16]
@@ -154,41 +150,36 @@ void format_grid_column(char *buffer, size_t size, int32_t grid_value_q16) {
 	std::snprintf(buffer, size, "%c", idx + 'A');
 }
 
-struct MapView {
-	float center_x = 0.0f;
-	float center_y = 0.0f;
-	// The map is a TRUE PIXEL CIRCLE on any surface. The backing/stencil fan
-	// sits two width-scaled DESIGN pixels (kDiscInsetDesignPx) inside the
-	// scaled rect half-height; the compass quad uses the uninset base at x1.25.
-	float base_radius = 0.0f;
-	float disc_radius = 0.0f;
-	float rect_w = 0.0f;
-	float rect_h = 0.0f;
-	// Modes 2/3 clip to the view RECT — the circular stencil belongs to the
-	// corner spinmap alone (retail's fullscreen/window map is rectangular;
-	// the box clip is Vertex_ClipTriangleAndEmitVertices @0x688e30).
-	bool rect_clip = false;
-	float px_x1 = 0.0f;
-	float px_y1 = 0.0f;
-	float px_x2 = 0.0f;
-	float px_y2 = 0.0f;
-	float scale = 1.0f; // world units per pixel
-	float sin_a = 0.0f;
-	float cos_a = 1.0f;
-	// The pre-fold view angle (heading or the modes-2/3 north-up base, plus
-	// the flip term). Marker sprites rotate relative to THIS, not the player
-	// heading — on the north-up map a blip's facing must stay world-stable.
-	// [orig: Minimap_DrawBlip's angle rides the same map transform the view
-	//  set up @0x607ac1..0x607b13]
-	uint32_t base_angle_bam = 0;
-};
+// The pass's content mask. The corner map runs the embedder's mask; modes 2/3
+// take the view builder's: the glow byte picks 0xAF937 / 0xAE937 (bit12),
+// params+7 == 0 clears bits 11/14/17, params+6 == 0 clears bit17, then bit16
+// is set and cleared again for the fullscreen mode (and mode 4).
+// The M cycle passes no block, which is every byte on. Compass (bit9 && bit6)
+// and bit18 are absent — the big map draws neither; bit12 keys the grid leg.
+// [orig: HUD_BuildMapOverlayView @0x5a7e8a..0x5a7ed0 / @0x5a7ef5]
+uint32_t effective_flags(const HudMinimapInput &input) {
+	// The corner map and the mode-4 windowed views (hud_map_view.h
+	// command_map_mask / kDeathMapMask) carry their caller's mask.
+	if (input.map_mode != 2 && input.map_mode != 3) return input.flags;
+	uint32_t flags = input.big_map_params.glow ? 0xAF937u : 0xAE937u;
+	if (!input.big_map_params.labels) flags &= 0xFFFDB7FFu;
+	if (!input.big_map_params.player_waypoints) flags &= ~0x20000u;
+	flags |= 0x10000u;
+	if (input.map_mode == 3) flags &= ~0x10000u;
+	return flags;
+}
 
 // The authored rect through the hudpos design-space scaler, then the retail
-// transform: screen centers truncated to ints, scale = zoom / (width * 200),
-// rotation = heading (+180 on the mission attrib) - 90 degrees, folded to
-// BAM16. [orig: HUD_DrawMapOverlay @0x5a5f40 setup + Render_TerrainDecal
-// tail @0x607ac1..0x607b13 (the live twin of MapView_SetTransform @0x607130)]
-MapView make_view(const HudMinimapInput &input) {
+// setup: bit16 squares the rect on its half-height about the float centre
+// (x1 = trunc(cx - hh), x2 = trunc(cx + hh)); the scale divides the zoom by
+// the (squared) WIDTH x 200; the disc radius var_354 is the half-height less
+// the bit9-gated scaleX(2) inset; rotation = heading (+180 on the mission
+// attrib) - 90 degrees, folded to BAM16.
+// [orig: HUD_DrawMapOverlay @0x5a63b5..0x5a642e (rect + bit16 squaring),
+//  @0x5a64c5..0x5a651d (inset + scale = [ctx+0x58] / (w * flt_7D2290));
+//  Render_TerrainDecal tail @0x607ac1..0x607b13 (the live twin of
+//  MapView_SetTransform @0x607130)]
+MapView make_view(const HudMinimapInput &input, uint32_t flags) {
 	MapView view;
 	// Modes 2/3 replace the authored spinmap rect with the builder's
 	// literals: the 400x400 window at (20,20) or the full design screen.
@@ -207,48 +198,61 @@ MapView make_view(const HudMinimapInput &input) {
 		in_x2 = 1023.0f;
 		in_y2 = 767.0f;
 	}
-	const float x1 = static_cast<float>(scale_axis(in_x1,
-			input.surface_w, kDesignWidth));
-	const float x2 = static_cast<float>(scale_axis(in_x2,
-			input.surface_w, kDesignWidth));
-	const float y1 = static_cast<float>(scale_axis(in_y1,
-			input.surface_h, kDesignHeight));
-	const float y2 = static_cast<float>(scale_axis(in_y2,
-			input.surface_h, kDesignHeight));
-	view.rect_w = x2 - x1;
-	view.rect_h = y2 - y1;
-	view.rect_clip = input.map_mode != 0;
-	view.px_x1 = x1;
-	view.px_y1 = y1;
-	view.px_x2 = x2;
-	view.px_y2 = y2;
-	view.center_x = static_cast<float>(static_cast<int>((x1 + x2) * 0.5f));
-	view.center_y = static_cast<float>(static_cast<int>((y1 + y2) * 0.5f));
-	// The backing and terrain stencil share the witnessed two-design-pixel
-	// inset (scaled on the WIDTH axis); the compass texture quad hangs off the
-	// uninset half-height at x1.25.
-	view.base_radius = std::max(0.0f, view.rect_h * 0.5f);
+	int x1 = static_cast<int>(scale_axis(in_x1, input.surface_w, kDesignWidth));
+	int x2 = static_cast<int>(scale_axis(in_x2, input.surface_w, kDesignWidth));
+	const int y1 = static_cast<int>(scale_axis(in_y1, input.surface_h,
+			kDesignHeight));
+	const int y2 = static_cast<int>(scale_axis(in_y2, input.surface_h,
+			kDesignHeight));
+	const float cx = (static_cast<float>(x1) + static_cast<float>(x2)) * 0.5f;
+	const float half_h = (static_cast<float>(y2) - static_cast<float>(y1)) * 0.5f;
+	if ((flags & 0x10000u) != 0) {
+		// [orig: @0x5a6411..0x5a642e — fsub/fadd hh about cx, ftol2 truncation]
+		x1 = static_cast<int>(cx - half_h);
+		x2 = static_cast<int>(cx + half_h);
+	}
+	view.rect_w = static_cast<float>(x2 - x1);
+	view.rect_h = static_cast<float>(y2 - y1);
+	view.px_x1 = static_cast<float>(x1);
+	view.px_y1 = static_cast<float>(y1);
+	view.px_x2 = static_cast<float>(x2);
+	view.px_y2 = static_cast<float>(y2);
+	view.center_x = static_cast<float>(static_cast<int>(cx));
+	view.center_y = static_cast<float>(static_cast<int>(
+			(static_cast<float>(y1) + static_cast<float>(y2)) * 0.5f));
+	// The compass texture quad hangs off the uninset half-height at x1.25;
+	// the disc (stencil, pointer radius) subtracts scaleX((mask >> 8) & 2).
+	view.base_radius = std::max(0.0f, half_h);
 	view.disc_radius = std::max(0.0f,
 			view.base_radius - static_cast<float>(scale_axis(
-					kDiscInsetDesignPx, input.surface_w, kDesignWidth)));
+					static_cast<double>((flags >> 8) & 2u), input.surface_w,
+					kDesignWidth)));
 	// Modes 2/3 zoom from the big-map value the radar keys adjust while a
 	// map mode is up. [orig: dword_B76490 read @0x5a804b]
 	const int32_t zoom = std::clamp(
 			input.map_mode != 0 ? input.big_zoom_q16 : input.zoom_q16,
 			kSpinmapZoomMin, kSpinmapZoomMax);
-	// World-per-pixel = zoom / (rect_height_px x 200). The live completed-pass
-	// probe observes 25559 / (281 * 200) = 0.45478648 on 00TRa at 1920x1080.
-	// [orig: flt_7D2290 setup @0x5a6501]
+	// World-per-pixel = zoom / (rect_width_px x 200), the width taken AFTER the
+	// bit16 squaring. The live completed-pass probe observes 25559 /
+	// (281 * 200) = 0.45478648 on 00TRa at 1920x1080 (the squared width equals
+	// the height there). [orig: fild w; fmul flt_7D2290; fdivr [ebp+58h]
+	//  @0x5a6501]
 	view.scale = static_cast<float>(zoom) /
-			std::max(1.0f, view.rect_h * kZoomHeightDivisor);
+			std::max(1.0f, view.rect_w * kZoomDivisor);
+	// The windowed views hand their own scale in (hud_map_view.h): the CMAP
+	// computes the same zoom / (width x 200), the DEATH window its handler's.
+	if (input.map_mode == 4) view.scale = input.window_scale;
 	// Modes 2/3 rotate from the fixed 0x40000000 base — north-up after the
 	// -90 fold — instead of the player heading.
 	// [orig: HUD_BuildMapOverlayView entity_ref = 0x40000000]
 	uint32_t angle_bam = input.map_mode != 0
 			? 0x40000000u
 			: static_cast<uint32_t>(input.player_heading_bam);
+	view.heading_bam = static_cast<int32_t>(angle_bam);
 	if (input.flip_180) angle_bam += 0x80000000u; // [orig: g_MapYaw180 @0x2723EB0]
 	view.base_angle_bam = angle_bam;
+	if (input.map_mode == 4)
+		view.base_angle_bam += static_cast<uint32_t>(input.window_marker_angle_bias_bam);
 	angle_bam -= 0x40000000u; // [orig: MapView_SetTransform @0x607144 sub esi, 40000000h]
 	const double rad = static_cast<double>(angle_bam >> 16) * kBam16ToRadians;
 	view.sin_a = static_cast<float>(std::sin(rad));
@@ -271,13 +275,26 @@ void view_project(const MapView &view, const HudMinimapInput &input,
 	out_y = view.center_y + lx * view.sin_a + ly * view.cos_a;
 }
 
+// The identity-rotation twin: the same centre and scale with cos 1, sin 0 —
+// what the label legs pass instead of the map rotation.
+// [orig: Terrain_FixedPointToWorldFloat @0x607060 with fld1/fldz args
+//  @0x5a75b8 / @0x5a775f / @0x5a4e5c / @0x5a4f4f]
+void view_project_unrotated(const MapView &view, const HudMinimapInput &input,
+		int32_t world_x_q16, int32_t world_y_q16, float &out_x, float &out_y) {
+	const float inv = 1.0f / std::max(view.scale, 1e-6f);
+	const float lx = static_cast<float>(world_x_q16 - input.player_x) *
+			inv / io::kFp16One;
+	const float ly = static_cast<float>(world_y_q16 - input.player_y) *
+			inv * -io::kInvFp16One;
+	out_x = view.center_x + lx;
+	out_y = view.center_y + ly;
+}
+
 // World-unit length to pixels [orig: Terrain_FixedPointToNormalizedFloat
 // @0x607110 — fixed / scale / 65536].
 float view_length_px(const MapView &view, float world_units) {
 	return world_units / std::max(view.scale, 1e-6f);
 }
-
-using Polygon = std::vector<HudMapVertex>;
 
 // Clip `in` against one half-plane into `out` (cleared first). The two
 // buffers ping-pong across edges so a whole convex clip runs allocation-free
@@ -398,66 +415,48 @@ uint32_t marker_modulate2x_color(uint32_t argb) {
 			doubled(argb & 0xFFu);
 }
 
-// Clip a segment to the view (rect modes: Liang-Barsky; disc modes: the
-// circle intersection). Returns false when fully outside.
-bool clip_map_segment(const MapView &view, float &x0, float &y0,
+// Clip a segment to the viewport rect (Liang-Barsky). The line legs draw
+// through ztest-always passes (0x200000 / 0x300000), so only the rect
+// viewport crops them, never the disc mask. Returns false when fully outside.
+// [orig: SetViewport(rect) @0x5a64a8; the line passes @0x599412 /
+//  @0x5a6ac3 / @0x5a6f47]
+bool clip_segment_rect(const MapView &view, float &x0, float &y0,
 		float &x1, float &y1) {
-	if (view.rect_clip) {
-		float t0 = 0.0f, t1 = 1.0f;
-		const float dx = x1 - x0, dy = y1 - y0;
-		const float p[4] = {-dx, dx, -dy, dy};
-		const float q[4] = {x0 - view.px_x1, view.px_x2 - x0,
-				y0 - view.px_y1, view.px_y2 - y0};
-		for (int i = 0; i < 4; ++i) {
-			if (p[i] == 0.0f) {
-				if (q[i] < 0.0f) return false;
-				continue;
-			}
-			const float r = q[i] / p[i];
-			if (p[i] < 0.0f) {
-				if (r > t1) return false;
-				if (r > t0) t0 = r;
-			} else {
-				if (r < t0) return false;
-				if (r < t1) t1 = r;
-			}
-		}
-		const float nx0 = x0 + t0 * dx, ny0 = y0 + t0 * dy;
-		const float nx1 = x0 + t1 * dx, ny1 = y0 + t1 * dy;
-		x0 = nx0; y0 = ny0; x1 = nx1; y1 = ny1;
-		return true;
-	}
-	const float r = std::max(0.001f, view.disc_radius);
-	const float cx = view.center_x, cy = view.center_y;
-	const float fx = x0 - cx, fy = y0 - cy;
+	float t0 = 0.0f, t1 = 1.0f;
 	const float dx = x1 - x0, dy = y1 - y0;
-	const float a = dx * dx + dy * dy;
-	const float b = 2.0f * (fx * dx + fy * dy);
-	const float c = fx * fx + fy * fy - r * r;
-	if (a < 1e-6f) return c <= 0.0f;
-	const float disc = b * b - 4.0f * a * c;
-	if (disc < 0.0f) return false;
-	const float sq = std::sqrt(disc);
-	float t0 = (-b - sq) / (2.0f * a);
-	float t1 = (-b + sq) / (2.0f * a);
-	if (t0 < 0.0f) t0 = 0.0f;
-	if (t1 > 1.0f) t1 = 1.0f;
-	if (t0 >= t1) return false;
+	const float p[4] = {-dx, dx, -dy, dy};
+	const float q[4] = {x0 - view.px_x1, view.px_x2 - x0,
+			y0 - view.px_y1, view.px_y2 - y0};
+	for (int i = 0; i < 4; ++i) {
+		if (p[i] == 0.0f) {
+			if (q[i] < 0.0f) return false;
+			continue;
+		}
+		const float r = q[i] / p[i];
+		if (p[i] < 0.0f) {
+			if (r > t1) return false;
+			if (r > t0) t0 = r;
+		} else {
+			if (r < t0) return false;
+			if (r < t1) t1 = r;
+		}
+	}
 	const float nx0 = x0 + t0 * dx, ny0 = y0 + t0 * dy;
 	const float nx1 = x0 + t1 * dx, ny1 = y0 + t1 * dy;
 	x0 = nx0; y0 = ny0; x1 = nx1; y1 = ny1;
 	return true;
 }
 
-// The footprint draw submits the entity-team-color fills clipped by the map
-// stencil. Retail also builds 0x80000000 boundary vertices inside
-// Render_CollisionWireframe, but completed-pass captures show those lines
-// contribute no visible stroke; submitting them through Godot's ordinary
-// alpha line pass produced the black outlines absent from retail.
+// The footprint draw submits the entity-team-color fills, cropped by the disc
+// mask when it survives and by the viewport rect otherwise. Retail also
+// builds 0x80000000 boundary vertices inside Render_CollisionWireframe, but
+// completed-pass captures show those lines contribute no visible stroke;
+// submitting them through Godot's ordinary alpha line pass produced the
+// black outlines absent from retail.
 // [orig: Render_CollisionWireframe @0x596800; flush @0x596780]
 void emit_footprint(const MapView &view, const HudMinimapInput &input,
 		const HudMinimapFootprint &footprint, Polygon &poly, Polygon &scratch,
-		HudMapPass &pass) {
+		HudMapPass &pass, bool disc) {
 	// Whole-footprint reject on the feed-time bounding circle: a mission's
 	// far-side buildings must not cost triangle math every frame.
 	{
@@ -466,7 +465,7 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 				bx, by);
 		const float radius_px = view_length_px(view,
 				static_cast<float>(footprint.bound_radius_q16) / io::kFp16One);
-		if (view.rect_clip) {
+		if (!disc) {
 			if (bx + radius_px < view.px_x1 || bx - radius_px > view.px_x2 ||
 					by + radius_px < view.px_y1 || by - radius_px > view.px_y2)
 				return;
@@ -486,10 +485,9 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 					poly[static_cast<size_t>(corner)].x,
 					poly[static_cast<size_t>(corner)].y);
 		}
-		if (view.rect_clip) {
-			clip_rect(poly, scratch, view.px_x1, view.px_y1, view.px_x2,
-					view.px_y2);
-		} else {
+		clip_rect(poly, scratch, view.px_x1, view.px_y1, view.px_x2,
+				view.px_y2);
+		if (disc) {
 			clip_circle32(poly, scratch, view.center_x, view.center_y,
 					view.disc_radius, view.disc_radius);
 		}
@@ -497,12 +495,18 @@ void emit_footprint(const MapView &view, const HudMinimapInput &input,
 	}
 }
 
-// The 64-frame triangle color pulse toward white
-// [orig: Render_MinimapSlotBlip @0x5be3f4 — phase=((frame-8)&0x3F,
-// fold >0x20 to 63-phase), channel += phase*(255-channel)>>5].
-uint32_t pulse_color(uint32_t argb, int ticks) {
+// The 64-frame triangle phase: ((frame - 8) & 0x3F), folded to 63 - phase
+// above 0x20 [orig: Render_MinimapSlotBlip @0x5be3f4; HUD_DrawMapOverlay
+// @0x5a708f; HUD_DrawEntityLabelsAndMarkers @0x5a4b97].
+uint32_t pulse_phase(int ticks) {
 	uint32_t phase = static_cast<uint32_t>(ticks - 8) & 0x3Fu;
 	if (phase > 0x20u) phase = 63u - phase;
+	return phase;
+}
+
+// channel += phase * (255 - channel) >> 5 per RGB byte (the byte add wraps).
+// [orig: @0x5be410..0x5be444; @0x5a711c..0x5a7150]
+uint32_t pulse_toward_white(uint32_t argb, uint32_t phase) {
 	uint32_t out = argb & 0xFF000000u;
 	for (int shift = 0; shift <= 16; shift += 8) {
 		const uint32_t c = (argb >> shift) & 0xFFu;
@@ -512,7 +516,16 @@ uint32_t pulse_color(uint32_t argb, int ticks) {
 	return out;
 }
 
-} // namespace
+// The 64-frame triangle color pulse toward white
+// [orig: Render_MinimapSlotBlip @0x5be3f4 — phase=((frame-8)&0x3F,
+// fold >0x20 to 63-phase), channel += phase*(255-channel)>>5].
+uint32_t pulse_color(uint32_t argb, int ticks) {
+	return pulse_toward_white(argb, pulse_phase(ticks));
+}
+
+} // namespace minimap_detail
+
+using namespace minimap_detail;
 
 void hud_icon_strip_cell_uv(const HudMinimapInput &input, uint8_t icon,
 		float &u0, float &v0, float &u1, float &v1) {
@@ -548,7 +561,7 @@ bool project_view_point(const MapView &view, const HudMinimapInput &input,
 		int32_t world_x, int32_t world_y, bool clamp_to_edge, float &out_x,
 		float &out_y) {
 	view_project(view, input, world_x, world_y, out_x, out_y);
-	if (view.rect_clip) {
+	if (input.map_mode != 0) {
 		const bool inside = out_x >= view.px_x1 && out_x <= view.px_x2 &&
 				out_y >= view.px_y1 && out_y <= view.px_y2;
 		if (inside) return true;
@@ -574,21 +587,25 @@ void reset_pass(HudMapPass &pass) {
 	pass.center_y = 0.0f;
 	pass.radius_x = 0.0f;
 	pass.radius_y = 0.0f;
-	pass.backing.clear();
+	pass.clip_x1 = pass.clip_y1 = pass.clip_x2 = pass.clip_y2 = 0.0f;
+	pass.clear.clear();
 	pass.terrain.clear();
 	pass.terrain_water.clear();
 	pass.overlays.clear();
 	pass.sprites.clear();
+	pass.geom.clear();
 	pass.lines_under.clear();
 	pass.lines.clear();
 	pass.labels.clear();
+	pass.ring_tris.clear();
+	pass.ring_tris_before_sprite = 0;
 }
 
 } // namespace
 
 bool project_spinmap_point(const HudMinimapInput &input, int32_t world_x,
 		int32_t world_y, bool clamp_to_edge, float &out_x, float &out_y) {
-	const MapView view = make_view(input);
+	const MapView view = make_view(input, effective_flags(input));
 	return project_view_point(view, input, world_x, world_y, clamp_to_edge,
 			out_x, out_y);
 }
@@ -627,58 +644,35 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	if (input.map_mode == 0 &&
 			(input.rect_x2 <= input.rect_x1 || input.rect_y2 <= input.rect_y1))
 		return;
-	// Modes 2/3 both select the big-map content mask 0xAF937 (+bit16 for the
-	// windowed mode): the default M-cycle call takes the glow_enabled=1
-	// literal; 715063 (0xAE937) belongs to the PARAMETERIZED variant other
-	// callers use, not to a mode. Compass (bit9&&bit6) and the at-tip label
-	// bit18 are absent — the big map draws neither; bit12 keys the grid leg.
-	// [orig: HUD_BuildMapOverlayView @0x5a7e8a..0x5a7ed0 — 719159 default,
-	//  715063 when BYTE1(params+4) is clear, |0x10000 then cleared for
-	//  modes 3/4]
-	const uint32_t flags = input.map_mode != 0
-			? (0xAF937u | (input.map_mode == 2 ? 0x10000u : 0u))
-			: input.flags;
-	const MapView view = make_view(input);
+	const uint32_t flags = effective_flags(input);
+	const MapView view = make_view(input, flags);
 	out.visible = true;
 	out.center_x = view.center_x;
 	out.center_y = view.center_y;
 	out.radius_x = view.disc_radius;
 	out.radius_y = view.disc_radius;
-
-	// Backing disc: a 33-vertex/32-triangle fan. The retail ring walks the Q22
-	// BAM tables from 0x200000 in 0x8000000 steps — the offset vanishes below
-	// the table resolution, so the effective angles are exactly i/32 turns.
-	// [orig: @0x5a5f40 vertex loop @0x5a6364 region + DrawIndexedPrimitive
-	//  (4, verts, 0x21, indices, 0x60)]
-	if (flags & 0x1u) {
-		if (view.rect_clip) {
-			// The big map's backing fills its rectangle.
-			out.backing.push_back({
-					{view.px_x1, view.px_y1, 0.0f, 0.0f},
-					{view.px_x2, view.px_y1, 0.0f, 0.0f},
-					{view.px_x2, view.px_y2, 0.0f, 0.0f}, kBackingColor});
-			out.backing.push_back({
-					{view.px_x1, view.px_y1, 0.0f, 0.0f},
-					{view.px_x2, view.px_y2, 0.0f, 0.0f},
-					{view.px_x1, view.px_y2, 0.0f, 0.0f}, kBackingColor});
-		} else {
-			for (int i = 0; i < kCircleSegments; ++i) {
-				const float a0 = static_cast<float>(
-						2.0 * kPi * i / kCircleSegments);
-				const float a1 = static_cast<float>(2.0 * kPi * (i + 1) /
-						kCircleSegments);
-				out.backing.push_back({
-						{view.center_x, view.center_y, 0.5f, 0.5f},
-						{view.center_x + std::cos(a0) * view.disc_radius,
-								view.center_y + std::sin(a0) * view.disc_radius,
-								0.0f, 0.0f},
-						{view.center_x + std::cos(a1) * view.disc_radius,
-								view.center_y + std::sin(a1) * view.disc_radius,
-								0.0f, 0.0f},
-						kBackingColor});
-			}
-		}
+	out.clip_x1 = view.px_x1;
+	out.clip_y1 = view.px_y1;
+	out.clip_x2 = view.px_x2;
+	out.clip_y2 = view.px_y2;
+	MapCompile c{input, view, flags, out, clip_a_, clip_b_, geom_a_, geom_b_,
+			footprint_index_, false, {}, false, tracked_color_, tracked_alpha_,
+			{}, 10};
+	c.span = static_cast<int32_t>(scale_axis(kPointerSpanDesignPx,
+			input.surface_h, kDesignHeight));
+	// HUD_SetTrackedEntityTarget restamps ED0 at every set.
+	// [orig: @0x59D0EF..0x59D0FF]
+	if (input.overlays != nullptr &&
+			input.overlays->tracked.serial != tracked_serial_) {
+		tracked_serial_ = input.overlays->tracked.serial;
+		tracked_color_ = input.overlays->tracked.set_color;
 	}
+
+	// bit0 lays the invisible depth mask (see kTerrainTint's neighbour note);
+	// it is not geometry here. bit9 picks whether the terrain crops to it.
+	const bool mask_laid = (flags & 0x1u) != 0;
+	const bool terrain_disc_crop = mask_laid && (flags & 0x200u) != 0;
+	bool terrain_drawn = false;
 
 	// Terrain: 512-unit sector tiles over the covered disc, sampled through
 	// the TRN routing table. Terrain rows run on NEGATED mission Y. The tile
@@ -691,6 +685,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	//  diag*0.8*scale, tile snap 0x2000000 Q16, row index
 	//  (-0x1000000 - y)>>25, sector =
 	//  g_TerrainSectorGrid[16*(row&0xF)+(col&0xF)] - 1]
+	// Every tile clips to the rect (Vertex_ClipTriangleAndEmitVertices
+	// @0x688e30); bit9's pass 0x500000 (zwrite off, ztest on) additionally
+	// crops it to the disc mask, pass 0x600000 (ztest always, zwrite on)
+	// overwrites the mask instead [orig: id = use_alt_blend ? 0x500000 :
+	// 0x600000 @0x6071F7; CGfxShader_ApplyPass @0x683221..0x6832be].
 	if (input.terrain.present &&
 			input.terrain.sector_count > 0 && input.terrain.sector_rows > 0) {
 		const float player_x = static_cast<float>(input.player_x) / io::kFp16One;
@@ -717,7 +716,15 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				const terrain::CoordsSectorResolve sector =
 						terrain::coords_resolve_sector(layout, sx, sz,
 								terrain::coords_runtime_options());
-				if (!sector.valid) continue;
+				// A missing sector (grid id <= 0) is NOT skipped: the tile still
+				// draws, every UV zero and the texture Colormap0
+				// (tile_offset_x = max(sector, 0)) — the colormap's corner
+				// texel stretched over the tile; its water pass samples
+				// depthspin at UV 0 as well (no quadrant offset).
+				// [orig: Render_TerrainDecal @0x60744C (UVs 0 @0x60749A /
+				//  @0x6074F9 / @0x607559 / @0x60759B), @0x6075D9
+				//  tile_offset_x, @0x6077CF water-UV break]
+				const bool missing_sector = !sector.valid;
 				const float wx0 = static_cast<float>(
 						sx * terrain::COORDS_SECTOR_SIZE);
 				const float wx1 = wx0 + terrain::COORDS_SECTOR_SIZE;
@@ -747,19 +754,22 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				const float rect_v = static_cast<float>(sector.quadrant_z);
 				const float u0 = (rect_u + inset) / atlas_px;
 				const float v0 = (rect_v + inset) / atlas_px;
-				const float u1 = (rect_u + cell_px - inset) / atlas_px;
-				const float v1 = (rect_v + cell_px - inset) / atlas_px;
+				const float u1 = missing_sector ? u0
+						: (rect_u + cell_px - inset) / atlas_px;
+				const float v1 = missing_sector ? v0
+						: (rect_v + cell_px - inset) / atlas_px;
 				clip_a_.assign({{x[0], y[0], u0, v0}, {x[1], y[1], u1, v0},
 						{x[2], y[2], u1, v1}, {x[3], y[3], u0, v1}});
-				if (view.rect_clip) {
-					clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
-							view.px_x2, view.px_y2);
-				} else {
+				clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
+						view.px_x2, view.px_y2);
+				if (terrain_disc_crop) {
 					clip_circle32(clip_a_, clip_b_, view.center_x,
 							view.center_y, view.disc_radius,
 							view.disc_radius);
 				}
+				const size_t tris_before = out.terrain.size();
 				emit_fan(clip_a_, kTerrainTint, out.terrain);
+				terrain_drawn = terrain_drawn || out.terrain.size() > tris_before;
 
 				// Retail's unconditional fog-pass leg redraws the identical clipped
 				// tile with depthspin UVs. Sector ids 2/4 select the lower half; 3/4 the
@@ -770,16 +780,17 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 							? kDepthspinUvOffset : 0.0f;
 					const float water_v0 = sector.quadrant_z != 0
 							? kDepthspinUvOffset : 0.0f;
-					const float water_u1 = water_u0 + kDepthspinUvScale;
-					const float water_v1 = water_v0 + kDepthspinUvScale;
+					const float water_u1 = missing_sector ? 0.0f
+							: water_u0 + kDepthspinUvScale;
+					const float water_v1 = missing_sector ? 0.0f
+							: water_v0 + kDepthspinUvScale;
 					clip_a_.assign({{x[0], y[0], water_u0, water_v0},
 							{x[1], y[1], water_u1, water_v0},
 							{x[2], y[2], water_u1, water_v1},
 							{x[3], y[3], water_u0, water_v1}});
-					if (view.rect_clip) {
-						clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
-								view.px_x2, view.px_y2);
-					} else {
+					clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
+							view.px_x2, view.px_y2);
+					if (terrain_disc_crop) {
 						clip_circle32(clip_a_, clip_b_, view.center_x,
 								view.center_y, view.disc_radius,
 								view.disc_radius);
@@ -813,9 +824,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		const int32_t origin_y = input.grid_origin_present
 				? kGridCellQ16 * (input.grid_origin_y / kGridCellQ16) : 0;
 		// The grid draws only on the M-map ctx (bit12), whose seeded
-		// alphas are 64 for the rules and 128 for the labels/readout.
-		const uint32_t rule_color = 0x40FFFF7Fu;
-		const uint32_t label_color = 0x80FFFF7Fu;
+		// alphas are 64 for the rules and 128 for the labels/readout — 128 and
+		// 255 on the CMAP window's mode-4 ctx.
+		const bool window = input.map_mode == 4;
+		const uint32_t rule_color = window ? 0x80FFFF7Fu : 0x40FFFF7Fu;
+		const uint32_t label_color = window ? 0xFFFFFF7Fu : 0x80FFFF7Fu;
 		const float half_world_q16 = std::max(view.rect_w, view.rect_h) *
 				0.5f * view.scale * io::kFp16One;
 		const int32_t lo_x = input.player_x -
@@ -851,6 +864,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				label.color = label_color;
 				label.align = 0;
 				label.font = 1;
+				label.clip = 1;
 				out.labels.push_back(label);
 			}
 			wx += kGridCellQ16;
@@ -877,6 +891,7 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 				label.color = label_color;
 				label.align = 0;
 				label.font = 1;
+				label.clip = 1;
 				out.labels.push_back(label);
 			}
 			wy += kGridCellQ16;
@@ -904,13 +919,17 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			label.color = label_color;
 			label.align = 0;
 			label.font = 1;
+			label.clip = 1;
 			out.labels.push_back(label);
 		}
 	}
 
-	// Markers. Within a layer retail draws persistent, then transient, then
-	// the special bank; special slots route to layer 3 on flags bit7, low
-	// layers otherwise. [orig: MapOverlay_RenderAllByLayer @0x5be590]
+	// bit9 set: the terrain pass left the mask for the later z-tested legs;
+	// bit9 clear: its zwrite overwrote the mask wherever a tile landed.
+	c.disc_crop = mask_laid && (terrain_disc_crop || !terrain_drawn);
+
+	// The marker banks, then the legs in retail pass order.
+	// [orig: HUD_DrawMapOverlay @0x5a6d17..0x5a789b]
 	if (flags & 0x2u) {
 		footprint_index_.clear();
 		if (input.footprints != nullptr) {
@@ -918,225 +937,24 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			for (const HudMinimapFootprint &footprint : *input.footprints)
 				footprint_index_.push_back(&footprint);
 		}
-		struct Keyed {
-			const HudMinimapMarker *m;
-			int key;
-		};
-		std::vector<Keyed> order;
-		order.reserve(input.markers.size());
-		for (const HudMinimapMarker &marker : input.markers) {
-			const bool special = (marker.flags & 0x40u) != 0;
-			int layer;
-			if (special) {
-				layer = (marker.flags & 0x80u) != 0 ? 3 : 0;
-			} else {
-				layer = hud_minimap_icon_layer(marker.icon);
-			}
-			int bank_order;
-			switch (static_cast<HudMinimapBank>(marker.bank)) {
-			case HudMinimapBank::kPersistent: bank_order = 0; break;
-			case HudMinimapBank::kTransient: bank_order = 1; break;
-			default: bank_order = 2; break;
-			}
-			order.push_back({&marker, layer * 4 + bank_order});
-		}
-		std::stable_sort(order.begin(), order.end(),
-				[](const Keyed &a, const Keyed &b) { return a.key < b.key; });
-		for (const Keyed &keyed : order) {
-			const HudMinimapMarker &marker = *keyed.m;
-			const bool special = (marker.flags & 0x40u) != 0;
-			// Regular markers render from the live entity only.
-			// [orig: Render_MinimapSlotBlip @0x5be4b8 entity[538] gate]
-			if (!special && !marker.entity_known) continue;
-			// Special slots keep their handle after expiry (the bank floors
-			// the lifetime at zero) but the render walk skips them.
-			// [orig: MapOverlay_RenderAllByLayer @0x5be794 — lifetime == 0
-			//  slots are passed over]
-			if (special && marker.remaining_ticks == 0) continue;
-			// Footprint-class entities (buildings/zones with marker models)
-			// never draw an icon quad — their OOBJ occlusion ground-slice
-			// polygons draw instead, clipped like the terrain tiles.
-			// [orig: the Building leg @0x597a84 ->
-			//  Render_CollisionWireframe @0x596800]
-			if (!special && marker.footprint != 0) {
-				const HudMinimapFootprint *footprint = nullptr;
-				for (const HudMinimapFootprint *candidate : footprint_index_) {
-					if (candidate->handle == marker.handle) {
-						footprint = candidate;
-						break;
-					}
-				}
-				if (footprint != nullptr) {
-					emit_footprint(view, input, *footprint, clip_a_, clip_b_,
-							out);
-				}
-				continue;
-			}
-			float mx = 0.0f, my = 0.0f;
-			if (!project_view_point(view, input, marker.x, marker.y,
-					false, mx, my))
-				continue;
-			if (!special && marker.medic != 0) {
-				// A local-team medic draws the red-cross plate IN PLACE of its
-				// blip: the rect (px - 3.5, py - 3.5)..(px + 4.5, py + 4.5) in
-				// map pixels, through the shared white-field + two-red-bars
-				// primitive at the overlay pass's opaque alpha
-				// [orig: HUD_DrawEntityLabelsAndMarkers @0x5a49e0 — the
-				//  AnimMap_IsSlotActive(playerClass, 8) test @0x5a4ab3, the
-				//  rect @0x5a4cd6..0x5a4d24 (flt_7C44B8 = 4.0, flt_7C691C = 4.5,
-				//  flt_7C3B94 = 0.5), HUD_DrawMedicCrossQuad @0x5a4d40, then
-				//  the blip skipped]. The quads join the overlay fills, clipped
-				//  by the same map stencil as every other map polygon.
-				const float x1 = mx - 3.5f, y1 = my - 3.5f;
-				const float x2 = mx + 4.5f, y2 = my + 4.5f;
-				for (const MedicCrossQuad &q :
-						medic_cross_quads(x1, y1, x2, y2, 0xFF)) {
-					clip_a_.resize(4);
-					clip_a_[0] = {q.x0, q.y0, 0.0f, 0.0f};
-					clip_a_[1] = {q.x1, q.y0, 0.0f, 0.0f};
-					clip_a_[2] = {q.x1, q.y1, 0.0f, 0.0f};
-					clip_a_[3] = {q.x0, q.y1, 0.0f, 0.0f};
-					if (view.rect_clip) {
-						clip_rect(clip_a_, clip_b_, view.px_x1, view.px_y1,
-								view.px_x2, view.px_y2);
-					} else {
-						clip_circle32(clip_a_, clip_b_, view.center_x,
-								view.center_y, view.disc_radius, view.disc_radius);
-					}
-					emit_fan(clip_a_, q.color, out.overlays);
-				}
-				continue;
-			}
-			if (special && (marker.icon == 253 || marker.icon == 254)) {
-				// Pulse markers: the MAIN ring sized by the slot height,
-				// colors pulsing toward white; ring colors submit OPAQUE
-				// (Minimap_DrawRingBlip ORs 0xFF000000). The secondary
-				// rings draw AFTER retail zeroes the slot z, so their radii
-				// are just the min args at the marker CENTER — icon 254 =
-				// three tiny yellow rings (2/1/0 px), icon 253 = one 1-px
-				// ring in the pulse color. (The 49152/65536 folds multiply
-				// the already-zeroed z — dead code, not a shrink stack.)
-				// [orig: Render_MinimapSlotBlip 254 arm @0x5be337,
-				//  z := 0 @0x5be34f, rings @0x5be357/@0x5be393/@0x5be3ca;
-				//  253 arm @0x5be46a, z := 0 @0x5be47a, ring @0x5be482;
-				//  radius = max(arg, projected z) @0x597357..0x597366,
-				//  color | 0xFF000000 @0x597392]
-				const float height_wu =
-						static_cast<float>(marker.z) / io::kFp16One;
-				const float radius = std::max(4.0f,
-						view_length_px(view, height_wu));
-				const uint32_t pulse =
-						pulse_color(marker.color, input.ticks) | 0xFF000000u;
-				// Rings emit as the retail 32-segment vertex loop, each
-				// segment clipped by the pass stencil like every other map
-				// leg — an off-center ring must crop at the disc/rect, not
-				// paint over the surrounding HUD.
-				// [orig: the ring vertex loop steps 0x8000000 BAM
-				//  @0x597320 region; the stencil crop is the same disc]
-				const auto emit_ring = [&](float ring_radius,
-						uint32_t color) {
-					for (int i = 0; i < kCircleSegments; ++i) {
-						const float a0 = static_cast<float>(
-								2.0 * kPi * i / kCircleSegments);
-						const float a1 = static_cast<float>(
-								2.0 * kPi * (i + 1) / kCircleSegments);
-						float x0 = mx + std::cos(a0) * ring_radius;
-						float y0 = my + std::sin(a0) * ring_radius;
-						float x1 = mx + std::cos(a1) * ring_radius;
-						float y1 = my + std::sin(a1) * ring_radius;
-						if (!clip_map_segment(view, x0, y0, x1, y1))
-							continue;
-						out.lines.push_back({x0, y0, x1, y1, color});
-					}
-				};
-				emit_ring(radius, pulse);
-				if (marker.icon == 254) {
-					// Fixed-radius center rings over the zeroed z; the 0-px
-					// third ring is a degenerate point and draws nothing.
-					emit_ring(2.0f, 0xFFFFFF00u);
-					emit_ring(1.0f, 0xFFFFFF00u);
-				} else {
-					// Icon 253's second pass: a 1-px center ring in the
-					// same pulsed color. [orig: @0x5be482]
-					emit_ring(1.0f, pulse);
-				}
-				continue;
-			}
-			HudMapSprite sprite;
-			sprite.center_x = mx;
-			sprite.center_y = my;
-			if (special) {
-				// Fixed 6px half-extent, unrotated.
-				// [orig: Minimap_DrawBillboardDecal call @0x5be297, angle 0]
-				sprite.half_w = kSpecialIconHalfPx;
-				sprite.half_h = kSpecialIconHalfPx;
-				sprite.rotation_rad = 0.0f;
-			} else {
-				// The per-def draw policy: halves from the stamped model
-				// bounds when resolved (fallback = the witnessed class
-				// table: person 2.0 wu, generic 10.0 wu), the per-branch
-				// pixel floor, and rotation ONLY for the rotated classes —
-				// upright badges (armory, non-vehicle EWEAPs, cells 6/2,
-				// dead persons, ...) hold angle 0.
-				// (witness at world::minimap_blip_draw_policy;
-				//  [orig: Minimap_DrawBlip @0x597890 branch table])
-				float half_x_wu;
-				float half_y_wu;
-				if (marker.half_x_q16 > 0 || marker.half_y_q16 > 0) {
-					half_x_wu = static_cast<float>(marker.half_x_q16) /
-							io::kFp16One;
-					half_y_wu = static_cast<float>(marker.half_y_q16) /
-							io::kFp16One;
-				} else {
-					const bool person = marker.icon == 3 || marker.icon == 8;
-					half_x_wu = half_y_wu = person ? 2.0f : 10.0f;
-				}
-				const float floor_px = static_cast<float>(
-						marker.floor_px != 0 ? marker.floor_px : 6);
-				sprite.half_w = std::max(floor_px,
-						view_length_px(view, half_x_wu));
-				sprite.half_h = std::max(floor_px,
-						view_length_px(view, half_y_wu));
-				if (marker.rotate != 0) {
-					// Blip facing is heading-relative-to-VIEW: the corner
-					// map rotates with the player, the M modes hold the
-					// north-up base, and the flip term folds in on flipped
-					// missions.
-					const int32_t relative = opennova::io::bam_sub(
-							marker.heading_bam,
-							static_cast<int32_t>(view.base_angle_bam));
-					sprite.rotation_rad = static_cast<float>(
-							-static_cast<double>(
-									opennova::io::bam_sar(relative, 16)) *
-							kBam16ToRadians);
-				} else {
-					sprite.rotation_rad = 0.0f;
-				}
-			}
-			// Unlike HUD_DrawMapTargetPointer below, this path does not
-			// pre-halve the diffuse before TSDicon's MODULATE2X stage.
-			// Special billboards ignore the slot alpha: retail's caller
-			// passes drawMode 0xFF as the final alpha, so table entries
-			// with authored 0x7F alpha still draw opaque.
-			// [orig: Minimap_DrawBillboardDecal @0x597775..0x59778f; drawMode
-			//  0xFF pushed @0x5a6d20/@0x5a5a02]
-			sprite.color = marker_modulate2x_color(
-					special ? (marker.color | 0xFF000000u) : marker.color);
-			sprite.layer = static_cast<uint8_t>(keyed.key >> 2);
-			marker_uv(input, marker.icon, sprite.u0, sprite.v0, sprite.u1,
-					sprite.v1);
-			out.sprites.push_back(sprite);
-		}
+		render_all_layers(c);
 	}
+	if (flags & 0x4u) draw_objective_tethers(c);
+	if (input.overlays != nullptr && input.overlays->game_type == 0x10010 &&
+			(flags & 0x8000u) != 0)
+		draw_route_lines(c);
+	if (flags & 0x4000u) draw_zone_waypoint_labels(c);
+	if (flags & 0x8u) draw_zone_letters(c);
+	if (flags & 0x810u) draw_pool3_walk(c);
+	if (flags & 0x20000u) draw_player_waypoints(c);
+	if (flags & 0x20u) draw_entity_labels_and_markers(c);
+	if (flags & 0x80000u) draw_tracked_callout(c);
+	// The nearest-FARP chevron: an idle or lit flash timer 14 and a FARP the
+	// HUD info build found this frame [orig: @0x5a77f8..0x5a7834].
+	if ((flags & 0x80u) != 0 && hud_item_flash_shown(input.item_flash[14]) &&
+			input.farp_present)
+		draw_farp_pointer(c);
 
-	// Waypoint state line: a fixed-length bearing pointer from the player
-	// (map center) toward the current waypoint, colored by the altitude
-	// tricolor and channel-doubled at submit, tipped with a TSDicon cell
-	// (chevron ahead, dot behind). The at-tip distance label draws unless a
-	// nonzero SPINMAPWPDISTOFF value suppresses it.
-	// [orig: bit8 leg @0x5a7850..0x5a78a0 -> drawer @0x599220 (line +
-	//  sub_67BAE0 tip cell, tip stored to slot[17]/[18], distance to
-	//  slot[20]); tricolor HUD_UpdateWaypointAltitudeColor @0x590970; bit18 label gate @0x5a7a51..0x5a7ab5]
 	uint32_t waypoint_state_color = 0;
 	int waypoint_nub_frame = 3; // blank
 	if (input.waypoint_present) {
@@ -1153,117 +971,12 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 			waypoint_nub_frame = 2;
 		}
 	}
-	// The state line blinks with HUD item flash timer 5: idle or lit phase
-	// draws. [orig: HUD_DrawMapOverlay @0x5a785b..0x5a7866]
-	if (input.waypoint_present && (flags & 0x100u) &&
-			hud_item_flash_shown(input.waypoint_flash)) {
-		float wx = 0.0f, wy = 0.0f;
-		view_project(view, input, input.waypoint_x, input.waypoint_y, wx, wy);
-		const float dx = wx - view.center_x;
-		const float dy = wy - view.center_y;
-		const float len = std::sqrt(dx * dx + dy * dy);
-		if (len > 0.001f) {
-			const float ux = dx / len;
-			const float uy = dy / len;
-			// The line tethers to the waypoint, clamped at the content disc;
-			// the retail captures show the clamped form at the bezel in BOTH
-			// hemispheres. [orig: @0x599220 line submit; the clamp is the
-			//  disc stencil]
-			float clamp_len = view.disc_radius;
-			if (view.rect_clip) {
-				// Rect-mode clamp: the nearest border along the bearing.
-				clamp_len = 1e9f;
-				if (ux > 0.0001f) clamp_len = std::min(clamp_len,
-						(view.px_x2 - view.center_x) / ux);
-				if (ux < -0.0001f) clamp_len = std::min(clamp_len,
-						(view.px_x1 - view.center_x) / ux);
-				if (uy > 0.0001f) clamp_len = std::min(clamp_len,
-						(view.px_y2 - view.center_y) / uy);
-				if (uy < -0.0001f) clamp_len = std::min(clamp_len,
-						(view.px_y1 - view.center_y) / uy);
-			}
-			const bool inside = len <= clamp_len;
-			const float line_len = std::min(len, clamp_len);
-			const float ex = view.center_x + ux * line_len;
-			const float ey = view.center_y + uy * line_len;
-			// The inside-target branch BLINKS: dword_A87064 is the per-main-
-			// frame HUD counter (not device caps — ++ in Game_ProcessMainFrame
-			// @0x5265d5 via @0x434c23), and the halve fires only when its bit
-			// 5 is set, so the inside dot's line + tip alternate between the
-			// raw color (halve then vertex 2c re-double = identity) and the
-			// 2c-SATURATED color every 32 frames. The outside chevron path
-			// never halves, so it always submits 2c-saturated.
-			// [orig: bit test @0x599353 inside the lodLevel=1 branch only;
-			//  halve (c >> 1) & 0x7F7F7F @0x599397; vertex 2c-saturate
-			//  @0x5993c6..0x5993f8; the strip cell takes the same lightColor
-			//  @0x59953d]
-			const bool halved_phase =
-					(static_cast<uint32_t>(input.ticks) & 0x20u) != 0;
-			const uint32_t submit_color =
-					(inside && halved_phase)
-							? waypoint_state_color
-							: marker_modulate2x_color(waypoint_state_color);
-			out.lines.push_back({view.center_x, view.center_y, ex, ey,
-					submit_color});
-			// ONE strip cell: the dot (cell 1) AT the waypoint while it
-			// projects inside the clip, the chevron (cell 7) at the clamped
-			// tip — rotated along the bearing — once it leaves.
-			// [orig: cell = lodLevel, default 7, switched to 1 on the
-			//  inside branch @0x59935e; the single
-			//  Render_DrawIconStripCell_Debug submit @0x59953d]
-			HudMapSprite tip;
-			tip.center_x = ex;
-			tip.center_y = ey;
-			tip.half_w = kSpecialIconHalfPx;
-			tip.half_h = kSpecialIconHalfPx;
-			// Cell 7's chevron points up; +90 degrees lays it along the
-			// bearing. The inside dot is round and holds angle zero.
-			tip.rotation_rad = inside ? 0.0f
-					: std::atan2(uy, ux) + static_cast<float>(kPi * 0.5);
-			tip.color = submit_color;
-			marker_uv(input, static_cast<uint8_t>(inside
-					? kWaypointTipCellInside : kWaypointTipCellClamped),
-					tip.u0, tip.v0, tip.u1, tip.v1);
-			tip.texture = 0;
-			tip.layer = 4;
-			out.sprites.push_back(tip);
-			if ((flags & 0x40000u) &&
-					input.waypoint_distance_offset == 0) {
-				// The distance label rides the drawer's FIXED radial slot:
-				// base radius, minus the scaled compass inset selected by
-				// flags bit 9, plus the scaled pointer span and its integer
-				// half. At 1920x1080 this is radius - 4 + 14 + 7, exactly
-				// the observed radius + 17 placement.
-				// [orig: inset setup @0x5a64c0..0x5a650d; slot sum/store
-				//  @0x5995c7..0x599616 (ctx[17]/[18]); label draw
-				//  @0x5a7a51..0x5a7ab5 ->
-				//  HUD_DrawTextCentered_HalfBright(g_HUDLabelFontBold)]
-				const int pointer_span_px = static_cast<int>(scale_axis(
-						kWaypointPointerSpanDesignPx, input.surface_h,
-						kDesignHeight));
-				const int compass_inset_px = static_cast<int>(scale_axis(
-						static_cast<double>((flags >> 8) & 2u), input.surface_w,
-						kDesignWidth));
-				const float label_radius = view.base_radius -
-						static_cast<float>(compass_inset_px) +
-						static_cast<float>(pointer_span_px + pointer_span_px / 2);
-				HudMapLabel label;
-				label.x = view.center_x + ux * label_radius;
-				label.y = view.center_y + uy * label_radius;
-				label.color = input.overlay_color;
-				label.align = 0;
-				if (input.waypoint_distance_m <= 1000) {
-					std::snprintf(label.text, sizeof(label.text), "%03dm",
-							input.waypoint_distance_m);
-				} else {
-					std::snprintf(label.text, sizeof(label.text), "%01.2fk",
-							static_cast<double>(input.waypoint_distance_m) /
-							1000.0);
-				}
-				out.labels.push_back(label);
-			}
-		}
-	}
+	// The waypoint pointer: suppressed by any drawn tether, blinking with
+	// flash timer 5 (idle or lit draws) [orig: @0x5a7844..0x5a7893 —
+	//  !HIBYTE(v142) @0x5a7853, dword_2723D0C @0x5a7859].
+	if (input.waypoint_present && (flags & 0x100u) && !c.tether_drawn &&
+			hud_item_flash_shown(input.item_flash[5]))
+		draw_waypoint_pointer(c, waypoint_state_color);
 
 	// Altitude nub: the WPIndctr frame drawn just above the rect top edge,
 	// nudged -8/+8 design px for above/below, in the raw state color.
@@ -1326,6 +1039,12 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		out.labels.push_back(label);
 	}
 
+	// The pointer race's distance label, then the tracked callout's — both
+	// after the viewport restore [orig: @0x5a7a53..0x5a7ae4 /
+	//  @0x5a7aec..0x5a7b8d].
+	if (flags & 0x40000u) draw_race_label(c);
+	if (flags & 0x80000u) draw_tracked_label(c);
+
 	// Compass ring: counter-rotates so its north marker points at world
 	// north, spanning the rect x1.25. The gate needs bit9 AND bit6 — the
 	// big-map masks carry neither.
@@ -1335,6 +1054,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 	//  consumed in a +Y-down canvas, whose positive visual rotation is the
 	//  opposite of retail's matrix convention, so negate that BAM delta here.
 	if ((flags & 0x200u) != 0 && (flags & 0x40u) != 0) {
+		// The bit-10 legs first: the dmgslice marks, then the threat ring,
+		// both unclipped and under the compass [orig: `test eax, 400h`
+		// @0x5a790a -> @0x5a791c..0x5a7928, then HUD_DrawCompassIndicator
+		// @0x5a7931].
+		if ((flags & 0x400u) != 0) hud_minimap_emit_radar(input, flags, out);
 		HudMapSprite compass;
 		compass.center_x = view.center_x;
 		compass.center_y = view.center_y;

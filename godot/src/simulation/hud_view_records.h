@@ -21,6 +21,7 @@
 #include <runtime/world/waypoint_track.h> // WaypointHudView
 
 #include <cstdint>
+#include <utility>
 
 // The small per-frame HUD views Simulation hands the GDScript presenters: one
 // value wrapper per feed over the engine view it names (ADR 0043 d10 —
@@ -44,6 +45,7 @@ protected:
 
 public:
 	void assign(const opennova::world::WaypointHudView &p_value) { value_ = p_value; }
+	const opennova::world::WaypointHudView &value() const { return value_; }
 
 	bool get_show() const { return value_.show; }
 	int get_count() const { return value_.count; }
@@ -69,6 +71,29 @@ public:
 
 	bool get_present() const { return value_.present; }
 	Vector3 get_position() const;
+};
+
+// The non-bank map legs' feed (Simulation::get_hud_minimap_overlays): the
+// HUD overlay copies the value into its frame state
+// (HudOverlay::set_minimap_overlays).
+class HudMapOverlays : public RefCounted {
+	GDCLASS(HudMapOverlays, RefCounted)
+
+	opennova::hud::HudMinimapOverlays value_;
+
+protected:
+	static void _bind_methods();
+
+public:
+	void assign(opennova::hud::HudMinimapOverlays &&p_value) { value_ = std::move(p_value); }
+	const opennova::hud::HudMinimapOverlays &value() const { return value_; }
+
+	int get_pool_entity_count() const { return static_cast<int>(value_.pool3.size()); }
+	int get_location_name_count() const { return static_cast<int>(value_.location_names.size()); }
+	int get_name_count() const { return static_cast<int>(value_.names.size()); }
+	int get_tracked_ticks() const { return value_.tracked.ticks; }
+	int get_player_slot_count() const { return static_cast<int>(value_.player_slots.size()); }
+	int get_zone_score_delta() const { return value_.zone_score_delta; }
 };
 
 // The vehicle the local player rides, re-rooted from an attached gun child to
@@ -152,7 +177,9 @@ public:
 };
 
 // The SP Show Score counters (Simulation::get_end_round_statistics, null
-// without a host world): parallel Epilog label keys and engine-composed values.
+// without a host world) or the SP win epilog's lines
+// (Simulation::get_epilog_score): parallel Epilog label keys and
+// engine-composed values.
 class EndRoundStatistics : public RefCounted {
 	GDCLASS(EndRoundStatistics, RefCounted)
 
@@ -163,6 +190,13 @@ protected:
 
 public:
 	void assign(const opennova::hud::EndRoundStatisticsPanel &p_value) { value_ = p_value; }
+	// The epilog's four lines composed by hud::epilog_score_lines.
+	static Ref<EndRoundStatistics> epilog(const opennova::hud::EndRoundStatisticsInput &p_in);
+	// The same over authored counters: the shell's sim-less mount and the
+	// end-screen tests.
+	static Ref<EndRoundStatistics> make_epilog(int p_subgoals_won, int p_subgoals_defined,
+			int p_enemy_kills, int p_enemy_unit_total, int p_team_unit_kills,
+			int p_friendly_unit_kills);
 
 	bool get_raised() const { return value_.raised; }
 	PackedStringArray get_label_keys() const;
@@ -182,11 +216,9 @@ protected:
 
 public:
 	void assign(const opennova::world::RoundOutcomeView &p_value) { value_ = p_value; }
-	// The shell's sim-less fallback and the end-screen tests author one: the
-	// outcome pair and the six kill buckets.
-	static Ref<RoundOutcome> make(bool p_ended, int p_winner_team, int p_enemy_kills = 0,
-			int p_enemy_kills_by_others = 0, int p_bluekills = 0, int p_team_kills_by_others = 0,
-			int p_greenkills = 0, int p_friendly_kills_by_others = 0);
+	// The shell's sim-less fallback and the end-screen tests author the
+	// outcome pair.
+	static Ref<RoundOutcome> make(bool p_ended, int p_winner_team);
 
 	bool get_ended() const { return value_.ended; }
 	int get_winner_team() const { return value_.winner_team; }

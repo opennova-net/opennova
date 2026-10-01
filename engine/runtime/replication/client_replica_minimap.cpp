@@ -271,49 +271,65 @@ void ClientReplicaPipeline::apply_minimap_overlay_batch(
 	}
 }
 
-void ClientReplicaPipeline::tick_minimap_overlays() {
+void ClientReplicaPipeline::age_minimap_overlays(uint32_t elapsed) {
+	if (elapsed == 0) return;
+	const int64_t d = static_cast<int64_t>(elapsed);
 	bool changed = false;
-	// Transient bank ages and clears on expiry. [orig: @0x5bfce4..0x5bfd0e]
+	// Transient bank: a claimed slot ages and frees at or under zero.
+	// [orig: MapOverlay_UpdateTimers @0x5bfce4..0x5bfd0e]
 	for (ClientMinimapOverlaySlot &slot : state_.minimap.transient) {
 		if (!slot.active) continue;
-		if (slot.remaining_ticks > 0) --slot.remaining_ticks;
-		if (slot.remaining_ticks == 0) {
+		if (static_cast<int64_t>(slot.remaining_ticks) - d <= 0) {
 			slot = ClientMinimapOverlaySlot{};
 			changed = true;
+		} else {
+			slot.remaining_ticks = static_cast<uint16_t>(slot.remaining_ticks - elapsed);
 		}
 	}
-	// Special bank ages but floors at zero keeping the handle claimed until
-	// reuse. [orig: @0x5bfd10..0x5bfd38]
+	// Special bank: a live lifetime ages and floors at zero, the handle kept
+	// claimed until reuse. [orig: @0x5bfd10..0x5bfd38]
 	for (ClientMinimapOverlaySlot &slot : state_.minimap.special) {
 		if (!slot.active || slot.remaining_ticks == 0) continue;
-		--slot.remaining_ticks;
+		const int64_t left = static_cast<int64_t>(slot.remaining_ticks) - d;
+		slot.remaining_ticks = static_cast<uint16_t>(left < 0 ? 0 : left);
 		if (slot.remaining_ticks == 0) changed = true;
 	}
-	// The persistent bank is not aged. [orig: timers skip slot_data]
-	// Links live purely on their own lifetime — retail's timer walk never
-	// consults the entity — re-arming THEIR STORED SLOT's lifetime AND handle
-	// each tick (through the link's slot pointer, never a handle search: the
-	// stored entity pointer is folded back to pool<<12|index and written into
-	// the slot, which is what lets a 0x40 flags-0x20 clear be undone next tick
-	// so a later 0x40 for the handle still finds this slot) and freeing that
-	// slot when they lapse. [orig: @0x5bfd3a..0x5bfe21 —
-	//  slot+24 = 1984 while linked @0x5bfd61; handle rewrite
-	//  @0x5bfd95..0x5bfdc8; on expiry slot flags = 0x20 (whole-byte store),
-	//  lifetime 0, handle -1, link zeroed @0x5bfdf3..0x5bfe15]
+	// The persistent bank is not aged. [orig: the walk has no leg for it]
+	// Links live purely on their own lifetime. A live link first re-arms its
+	// STORED slot (through the link's slot pointer, never a handle search):
+	// lifetime 1984, a slot flagged 0x20 zeroes lifetime and handle, the link's
+	// entity pointer folds back into the slot's handle (so a 0x40 flags-0x20
+	// clear is undone and a later 0x40 for the handle finds this slot), and a
+	// lifetime left at or under zero floors at 1; then the link ages and, at or
+	// under zero, lapses: the slot's flags byte is ASSIGNED 0x20, its lifetime
+	// and handle cleared, the link zeroed.
+	// [orig: @0x5bfd3a..0x5bfe21 — re-arm @0x5bfd61, the 0x20 test
+	//  @0x5bfd8b..0x5bfd90, the handle rewrite @0x5bfd95..0x5bfdc8, the floor
+	//  @0x5bfdd2..0x5bfdd4, the age @0x5bfddf, the lapse: `mov byte [eax+3],
+	//  20h` @0x5bfdf3, lifetime / handle / link @0x5bfdf7..0x5bfe15]
 	for (ClientMinimapLinkedSlot &linked : state_.minimap.linked) {
-		if (!linked.active) continue;
-		if (linked.remaining_ticks > 0) --linked.remaining_ticks;
+		if (!linked.active || linked.remaining_ticks == 0) continue;
 		ClientMinimapOverlaySlot *slot = linked.slot_index >= 0 &&
 						static_cast<size_t>(linked.slot_index) <
 								state_.minimap.special.size()
 				? &state_.minimap.special[
 						static_cast<size_t>(linked.slot_index)]
 				: nullptr;
-		if (linked.remaining_ticks == 0) {
-			// The lapse ASSIGNS flags = 0x20 (a whole-byte store that wipes
-			// the 0x6B 0xC4 bits), lifetime 0, handle -1 through the stored
-			// pointer — the other slot fields survive here too.
-			// [orig: mov byte [eax+3], 20h @0x5bfdf3; @0x5bfdf7..0x5bfe15]
+		if (slot != nullptr && slot->active) {
+			const uint16_t before = slot->remaining_ticks;
+			int32_t lifetime = kMinimapOverlayLifetimeTicks;
+			if ((slot->flags & 0x20u) != 0) {
+				lifetime = 0;
+				slot->handle = 0xFFFF;
+			}
+			if (linked.handle != 0xFFFF) slot->handle = linked.handle;
+			if (lifetime <= 0) lifetime = 1;
+			slot->remaining_ticks = static_cast<uint16_t>(lifetime);
+			// A 0x40-cleared slot crossing 0 -> live here is the witnessed
+			// link RESURRECT — a visibility change, so bump the revision.
+			if (before == 0) changed = true;
+		}
+		if (static_cast<int64_t>(linked.remaining_ticks) - d <= 0) {
 			if (slot != nullptr && slot->active) {
 				slot->flags = 0x20u;
 				slot->remaining_ticks = 0;
@@ -323,21 +339,16 @@ void ClientReplicaPipeline::tick_minimap_overlays() {
 			changed = true;
 			continue;
 		}
-		if (slot != nullptr && slot->active) {
-			// The per-tick handle restore: retail recovers the packed handle
-			// from the link's stored entity pointer every walk, so a 0x40
-			// flags-0x20 clear (handle -1) on a linked slot is undone here
-			// and a later 0x40 record for that handle updates THIS slot in
-			// place instead of allocating a twin. [orig: @0x5bfd95..0x5bfdc8]
-			slot->handle = linked.handle;
-			if (slot->remaining_ticks != kMinimapOverlayLifetimeTicks) {
-				// A 0x40-cleared slot crossing 0 -> 1984 here is the witnessed
-				// link RESURRECT — a visibility change, so bump the revision.
-				if (slot->remaining_ticks == 0) changed = true;
-				slot->remaining_ticks = kMinimapOverlayLifetimeTicks;
-			}
-		}
+		linked.remaining_ticks -= elapsed;
 	}
+	if (changed) {
+		++state_.minimap.revision;
+		state_.mark_changed();
+	}
+}
+
+void ClientReplicaPipeline::refresh_minimap_live_markers() {
+	bool changed = false;
 	// Regular markers render from the live entity; refresh the decoded pose
 	// and the known/alive gate each tick (retail reads the pool slot at draw
 	// time — O(1) pool arithmetic there, so the per-slot lookup here rides

@@ -292,6 +292,28 @@ bool test_mouse_dispatch() {
   return true;
 }
 
+// An open chat line owns the keyboard, not the mouse [orig:
+// Input_ProcessPlayerFrame @0x49d4c0 -- the mouse pass gated only on the
+// playback file @0x49d4d5, the held keyboard pass behind !g_InputCaptureMode
+// @0x49d509].
+bool test_keyboard_capture_leaves_the_mouse_rows() {
+  BindingSet set;
+  const int fwd = set.index_of_token("move_forward");
+  const int fire = set.index_of_token("attack_1");
+  const BindingRecord *r = set.record(fwd);
+  CHECK(r != nullptr && r->primary != 0, "move_forward has a key");
+  const int vk = r->primary;
+  auto held = [vk](int k) { return k == vk; };
+  CHECK(set.pressed_key(fwd, held) == vk, "the key walks");
+  set.set_keyboard_captured(true);
+  CHECK(set.keyboard_captured(), "the capture reads back");
+  CHECK(set.pressed_key(fwd, held) == 0, "the line owns the key");
+  CHECK(set.pressed_mouse(fire, kMouseLeft, held), "the held left button still fires");
+  set.set_keyboard_captured(false);
+  CHECK(set.pressed_key(fwd, held) == vk, "the closed line hands the key back");
+  return true;
+}
+
 bool test_binding_set_assignment() {
   BindingSet set;
   const int fwd = set.index_of_token("move_forward");
@@ -572,6 +594,61 @@ bool test_joystick_pov_dispatch() {
 
 }  // namespace
 
+// The static rows' action codes and the by-code record re-lay: record i is
+// the row whose +0x00 code is i, so the death screen's record 217 is
+// MedicReq and the HUDLS key label's record 200 + category is the weapon
+// category row (201..209 Knife..medpack, 211 magazine); 200 and 210 hold the
+// zero record, which formats to "" [orig: word_8159A8 + 108 * row;
+// KeyBinding_SortBySequentialId @0x498260; g_BindingRowMedicReq @0x81B534;
+// HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
+bool test_action_codes() {
+  CHECK(action_code(64) == 217 && action_code(67) == 18 && action_code(70) == 25,
+        "MedicReq / escape / pause carry their dispatch codes");
+  CHECK(action_code(101) == 33 && action_code(102) == 54 && action_code(99) == 422,
+        "AudioEmote / RadioMacro / ShowScore carry their dispatch codes");
+  CHECK(action_code(118) == 74 && action_code(119) == -1 && action_code(-1) == -1,
+        "the 119 static rows, nothing past them");
+  const ActionDef *medic = action_for_code(217);
+  CHECK(medic != nullptr && std::string(medic->token) == "MedicReq", "record 217 is MedicReq");
+  const ActionDef *knife = action_for_code(201);
+  const ActionDef *medpack = action_for_code(209);
+  const ActionDef *magazine = action_for_code(211);
+  CHECK(knife != nullptr && std::string(knife->token) == "Knife", "record 201 is Knife");
+  CHECK(medpack != nullptr && std::string(medpack->token) == "medpack", "record 209 is medpack");
+  CHECK(magazine != nullptr && std::string(magazine->token) == "magazine",
+        "record 211 is magazine");
+  CHECK(action_for_code(200) == nullptr && action_for_code(210) == nullptr,
+        "no row dispatches 200 or 210");
+  CHECK(action_for_code(768) == nullptr, "past the 768-record table");
+  CHECK(format_display_string(BindingRecord{}).empty(), "the zero record formats to \"\"");
+  return true;
+}
+
+// The records' revision moves on every write and never on a read, so the
+// HUDLS key-label cache rebuilds only on a binding change.
+bool test_binding_revision() {
+  BindingSet set;
+  uint32_t r = set.revision();
+  set.record(0);
+  set.control_text(0, Device::Keyboard);
+  CHECK(set.revision() == r, "reads leave the revision");
+  CHECK(set.assign_key(0, 0x41, false, false, false, false), "a key assigns");
+  CHECK(set.revision() != r, "an assigned key moves it");
+  r = set.revision();
+  set.assign_mouse(0, 1);
+  CHECK(set.revision() != r, "a mouse mask moves it");
+  r = set.revision();
+  set.clear(0, Device::Keyboard);
+  CHECK(set.revision() != r, "a clear moves it");
+  r = set.revision();
+  set.set_record(0, BindingRecord{});
+  CHECK(set.revision() != r, "a persistence load moves it");
+  r = set.revision();
+  set.restore_defaults();
+  CHECK(set.revision() != r, "the defaults move it");
+  return true;
+}
+
 int main() {
   int failed = 0;
 
@@ -597,10 +674,13 @@ int main() {
   RUN_TEST(test_build_rows_keyboard);
   RUN_TEST(test_build_rows_other_devices);
   RUN_TEST(test_mouse_dispatch);
+  RUN_TEST(test_keyboard_capture_leaves_the_mouse_rows);
   RUN_TEST(test_joystick_pov_dispatch);
   RUN_TEST(test_binding_set_assignment);
   RUN_TEST(test_format_display_string);
   RUN_TEST(test_pressed_key_two_passes);
+  RUN_TEST(test_action_codes);
+  RUN_TEST(test_binding_revision);
 
   if (failed > 0) {
     std::cerr << "\n" << failed << " test(s) FAILED\n";

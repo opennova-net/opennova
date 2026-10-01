@@ -3,6 +3,9 @@
 #include <runtime/world/world.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/world/radio_call.h>
+#include <runtime/world/ai.h>
+#include <runtime/world/infantry.h>
+#include <runtime/hud/hud_minimap.h>
 #include <algorithm>
 #include <cstring>
 #include <cmath>
@@ -56,6 +59,7 @@ bool sound_actor(const ClientRuntime &runtime, const world::World &world,
     if (const auto *entity = world.registry.get(native_handle)) { out = *entity; return true; }
     return false;
 }
+} // namespace
 
 // Context flag 7: active capture entry, inside its cylinder, with a visible
 // minimap slot. The NEAREST qualifying entry (strict < on the truncated 2D
@@ -99,7 +103,55 @@ bool in_active_radio_zone(const world::World &world, const world::Entity &speake
     if (best > radius || radius == 0) return false;
     return ((int64_t(radius - best) << 16) / radius) != 0;
 }
+
+namespace {
+// The map's tracked target: a live, unhidden entity other than the local
+// player, its timer 62 x its radio seconds while it holds the radio-request
+// latch else 496 ticks, its position snapshot, friendly when on the local
+// team or team 0, the colour palette[3] for a radio request else white.
+// [orig: HUD_SetTrackedEntityTarget @0x59D050 — gates @0x59d05e..0x59d078,
+//  timer @0x59d089..0x59d0a5, snapshot @0x59d0b2..0x59d0c4, friendly
+//  @0x59d0ca..0x59d0e3, colour @0x59d0ef..0x59d0ff]
+void set_tracked_entity_target(replication::ClientState &state, const world::World &world,
+        const world::Entity &entity) {
+    const world::Entity *local = world.registry.get(world.cached.local_player);
+    if (local == nullptr) return;
+    if (((entity.flags | entity.engine_flags) & world::kEntityFlagCarried) != 0) return;
+    if (entity.handle == local->handle) return;
+    auto &target = state.tracked_target;
+    target.handle = entity.handle.packed;
+    target.ticks_remaining = entity.radio_request == 1
+            ? 62u * static_cast<uint32_t>(entity.radio_request_seconds) : 496u;
+    target.position[0] = world::to_fixed(entity.position.x);
+    target.position[1] = world::to_fixed(entity.position.y);
+    target.position[2] = world::to_fixed(entity.position.z);
+    target.friendly = entity.team == local->team || entity.team == 0;
+    target.color = entity.radio_request == 1 ? hud::kHudPaletteLightBlue : 0xFFFFFFFFu;
+    ++target.serial;
 }
+
+// PlayerSlot_IsEntityInGame: the entity's def is a person, type 3
+// [orig: @0x434220..0x434232 — entity+0x20 def, def+0x5C == 3]. A world
+// entity carries its def type; a decoded pool-0 row is an organic, whose
+// items.def rows are persons.
+bool entity_is_person(const ClientRuntime &runtime, const world::World &world,
+        const world::Entity &entity) {
+    if (const auto *row = runtime.state().find(entity.handle.packed))
+        if (world.registry.get(entity.handle) == nullptr)
+            return row->type_id != 0 &&
+                    (row->cls == EntityClass::Player || row->cls == EntityClass::Infantry);
+    return entity.has_item_def && entity.item_type == 3;
+}
+
+// The roster slot driving a raw pool-0 index, the retail PlayerSlot_FindByEntityPtr
+// over the decoded roster.
+const replication::ClientRosterSlot *slot_for_pool0(const replication::ClientState &state,
+        uint8_t index) {
+    for (const auto &slot : state.roster)
+        if (slot.bound && slot.entity_slot == index) return &slot;
+    return nullptr;
+}
+} // namespace
 
 void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
     for (auto &row : state().entities) {
@@ -120,7 +172,9 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
 
 void ClientRuntime::apply_received_effects(world::World &world) {
     for (const auto &request : view_.drain_effect_commands()) {
-        if (const auto *death = std::get_if<replication::EntityDeathEvent>(&request)) {
+        if (const auto *squad = std::get_if<replication::ClientSquadEvent>(&request)) {
+            apply_squad_event(world, *squad);
+        } else if (const auto *death = std::get_if<replication::EntityDeathEvent>(&request)) {
             // Authority already ran its callback. Remote organics use the
             // compact pose; pools 1..3 carry the materialized item/vehicle twin.
             // [orig: NapiNPClientMsg_EntityDeath @ 0x42EB50;
@@ -171,9 +225,7 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             world::Entity context;
             if (!sound_actor(*this, world, call->player_index, context) || !context.item_id) continue;
             auto *speaker = &context;
-            const replication::ClientRosterSlot *roster = nullptr;
-            for (const auto &slot : state().roster)
-                if (slot.bound && slot.entity_slot == call->player_index) { roster = &slot; break; }
+            const replication::ClientRosterSlot *roster = slot_for_pool0(state(), call->player_index);
             const bool in_zone = game_type() == 0x10010 && in_active_radio_zone(world, *speaker, *this);
             if (roster && !(roster->radio_mute_flags & 2)) {
                 const auto key = world::radio_call_key(world, *speaker, call->event, 6, game_type(), in_zone);
@@ -190,16 +242,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 speaker->radio_request = call->event == 6 ? 1 : 0;
                 if (call->event == 6) {
                     speaker->radio_request_seconds = 30;
-                    const auto *local = world.registry.get(world.cached.local_player);
-                    if (local && local->handle != speaker->handle && !((speaker->flags | speaker->engine_flags) & 1u)) {
-                        auto &target = view_.state().radio_target;
-                        target.handle = speaker->handle.packed;
-                        target.ticks_remaining = 30 * 62;
-                        target.position[0] = world::to_fixed(speaker->position.x);
-                        target.position[1] = world::to_fixed(speaker->position.y);
-                        target.position[2] = world::to_fixed(speaker->position.z);
-                        target.friendly = speaker->team == local->team || speaker->team == 0;
-                    }
+                    // [orig: HUD_SetTrackedEntityTarget @0x430de4]
+                    set_tracked_entity_target(view_.state(), world, *speaker);
                 }
                 if (auto *row = view_.state().find(call->player_index)) {
                     row->radio_request = speaker->radio_request;
@@ -209,6 +253,55 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                     entity->radio_request_seconds = speaker->radio_request_seconds;
                 }
             }
+        } else if (const auto *emote = std::get_if<EmoteBroadcast>(&request)) {
+            // A nearby player's emote: its person's emote state, then, unless
+            // its slot's voice-mute bit is set, the EMO_ voice at the speaker
+            // and the map's tracked target.
+            // [orig: NapiNPClientMsg_HandleEmote @0x427E90 -- Pool_GetEntryUnchecked
+            //  @0x427eeb, the ItemTypeIndex gate @0x427ef5, the state write
+            //  @0x427efb..0x427f18, PlayerSlot_FindByEntityPtr @0x427f29, the
+            //  slot+50 bit 0 gate @0x427f39, sub_5BFB00(.., 9, ..) +
+            //  Audio_StartEntityPlayback @0x427f44..0x427f55,
+            //  HUD_SetTrackedEntityTarget @0x427f5b]
+            world::Entity speaker;
+            if (!sound_actor(*this, world, emote->player_index, speaker) || !speaker.item_id) continue;
+            // The state lands on the speaker's secondary channel: a world body
+            // (the listen host's players, a joiner's own) through the AI
+            // system, a joiner's decoded peer on its row
+            // (world::infantry_weapon_emote_stamp / stamp_row_emote).
+            const bool row_speaker = role_ == Role::Joiner &&
+                    speaker.handle != world.cached.local_player;
+            if (row_speaker) {
+                view_.stamp_row_emote(emote->player_index, emote->emote);
+            } else if (world::AiEntity *body = world.ai.for_handle(speaker.handle)) {
+                world::infantry_weapon_emote_stamp(body->inf, world.ai.root_motion, emote->emote);
+            }
+            const replication::ClientRosterSlot *roster = slot_for_pool0(state(), emote->player_index);
+            if (roster != nullptr && (roster->radio_mute_flags & 1u) != 0) continue;
+            // The EMO_ key with the body prefix (flags 9), then the voice
+            // anchored at the speaker [orig: @0x427f3b..0x427f55].
+            const bool in_zone = game_type() == 0x10010 &&
+                    in_active_radio_zone(world, speaker, *this);
+            world.script.voice.entity_set(world,
+                    world::radio_call_key(world, speaker, emote->emote, 9, game_type(), in_zone),
+                    speaker.handle, speaker.position, row_speaker);
+            set_tracked_entity_target(view_.state(), world, speaker);
+        } else if (const auto *tip = std::get_if<replication::TipEventCommand>(&request)) {
+            // The receive legs' tip events join the world's in arrival order
+            // (replication::TipEventCommand carries the witness).
+            world.out.tip_events.push_back(tip->event);
+        } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
+            // A local-channel line: the sender slot's person becomes the
+            // tracked target (the fold already ran the dispatcher's slot
+            // gate). [orig: Chat_DispatchToChannel @0x42B910 — slot+0x24
+            //  @0x42b9ee, PlayerSlot_IsEntityInGame (def type 3) @0x42b9fb,
+            //  HUD_SetTrackedEntityTarget @0x42ba09]
+            const replication::ClientRosterSlot &slot = state().roster[chat->slot];
+            if (!slot.bound || slot.entity_slot < 0) continue;
+            world::Entity speaker;
+            if (!sound_actor(*this, world, static_cast<uint16_t>(slot.entity_slot), speaker)) continue;
+            if (!entity_is_person(*this, world, speaker)) continue;
+            set_tracked_entity_target(view_.state(), world, speaker);
         } else {
             // [orig: NapiNPClientMsg_PlaySoundByName @0x4283A0]
             const auto &command = std::get<PlaySoundCommand>(request);
@@ -227,6 +320,19 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 world.out.slot_sounds.push_back(event);
             }
         }
+    }
+    // An entity voice anchored on a decoded row follows that row, and stops
+    // once the row is gone or dead, as a freed or dead anchor stops it.
+    // [orig: Audio_UpdateAmbientStream @0x4ED9E8..0x4EDA2A]
+    const world::EntityHandle anchor = world.script.voice.speaker();
+    if (anchor.valid() && role_ == Role::Joiner) {
+        const replication::ClientEntityState *row = state().find(anchor.packed);
+        const bool present = row != nullptr && row->type_id != 0 &&
+                (row->state_flags & world::kEntityFlagDead) == 0;
+        world.script.voice.track_row_anchor(anchor, present, present
+                ? world::Vec3{float(row->x) / 65536.0f, float(row->y) / 65536.0f,
+                        float(row->z) / 65536.0f}
+                : world::Vec3{});
     }
 }
 } // namespace opennova::inmatch

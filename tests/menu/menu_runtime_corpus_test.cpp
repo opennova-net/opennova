@@ -48,7 +48,7 @@ using opennova::menu::MenuKeyInput;
 using opennova::menu::MenuRectF;
 using opennova::menu::MenuRuntime;
 using opennova::menu::MenuTableColumn;
-using opennova::menu::MenuTableRowColor;
+using opennova::menu::MenuTableRow;
 using opennova::menu::MenuTextTables;
 using opennova::strutil::iequals;
 
@@ -104,8 +104,9 @@ public:
 	void set_widget_selection(int, int, int, int) override {}
 	void set_widget_scroll_range(int, int, int, int, int) override {}
 	void set_widget_selected_set(int, const std::vector<int> &) override {}
-	void set_widget_table_rows(int, const std::vector<std::vector<std::string>> &) override {}
-	void set_widget_table_row_colors(int, const std::vector<MenuTableRowColor> &) override {}
+	void set_widget_table_rows(int, const std::vector<MenuTableRow> &) override {}
+	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
+	void set_widget_rect(int, int, int, int, int) override {}
 	void set_widget_table_columns(int, bool, const std::vector<MenuTableColumn> &, int) override {}
 	void set_widget_hover_item(int, int) override {}
 	void set_widget_popup_open(int, bool) override {}
@@ -117,6 +118,7 @@ public:
 		return it != texts_.end() ? it->second : std::string();
 	}
 	int item_count(int) const override { return 0; }
+	std::string item_display_text(int, int) const override { return std::string(); }
 	bool is_widget_disabled(int) const override { return false; }
 	MenuRectF widget_rect(int) const override { return MenuRectF{}; }
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
@@ -133,8 +135,8 @@ public:
 	bool combo_popup_contains(int, float, float) const override { return false; }
 	int list_row_at(int, float, float) const override { return -1; }
 	int spin_arrow_at(int, float, float) const override { return 0; }
-	bool table_hit(int, float, float, int &row, int &column) const override {
-		row = column = -1;
+	bool table_hit(int, float, float, int *row, int *column) const override {
+		*row = *column = -1;
 		return false;
 	}
 	std::string widget_mnemonic(int i) const override { return compiler_.widget_mnemonic(i); }

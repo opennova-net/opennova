@@ -6,6 +6,7 @@
 #include <runtime/world/entity_spawn.h> // entity_reset_to_spawn_state
 #include <runtime/world/geom.h>         // to_fixed
 #include <runtime/world/infantry.h>     // anim_state
+#include <runtime/world/local_player.h> // LocalPlayer::radar (the lock tone reset)
 #include <runtime/world/world.h>        // World, registry, cached
 
 namespace opennova::world {
@@ -116,7 +117,12 @@ EntityHandle spawn_player_entity(World &world, const PlayerSpawn &spawn, bool is
 
     // Publish the local-player handle ONLY for the host's own player — the net anchor + present
     // resolve it. A remote peer never becomes the local player. [ADR 0012]
-    if (is_local) world.cached.local_player = h;
+    if (is_local) {
+        world.cached.local_player = h;
+        // The player class init zeroes the incoming-lock tone for the local
+        // player's entity [orig: PlayerClass_InitEntity @0x4b10d0..0x4b10de].
+        if (world.local_player_state != nullptr) world.local_player_state->radar.lock_tone = 0;
+    }
     if (world.collision != nullptr)
         world.collision->refresh_after_registry_change(world);
     return h;

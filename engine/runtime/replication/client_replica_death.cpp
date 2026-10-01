@@ -90,6 +90,25 @@ void ClientReplicaPipeline::apply_spawn_wave_status(
 	// @0x429a04..0x429a0b the match]. The viewer handle is the local one.
 	state_.spawn_waves.self_zone_handle = 0xFFFF;
 	for (const SpawnWaveGroup &group : status.groups) {
+		// The zone entity's own +550 / +548 words (client_state.h
+		// ClientZoneWaveCounts): written for a handle inside the pool tables,
+		// kept for a zone this update leaves out.
+		const uint16_t handle = group.zone_handle;
+		const int pool = handle >> 12;
+		if (handle != 0xFFFFu && pool < world::kEntityPoolCount &&
+				static_cast<std::size_t>(handle & 0xFFFu) < world::retail_pool_capacity(pool)) {
+			ClientZoneWaveCounts *counts = nullptr;
+			for (ClientZoneWaveCounts &c : state_.zone_wave_counts) {
+				if (c.zone_handle == handle) counts = &c;
+			}
+			if (counts == nullptr) {
+				state_.zone_wave_counts.emplace_back();
+				counts = &state_.zone_wave_counts.back();
+				counts->zone_handle = handle;
+			}
+			counts->member_count = group.queued_count;
+			counts->wave_countdown = group.wave_countdown;
+		}
 		for (uint16_t member : group.members) {
 			if (member == viewer_handle_)
 				state_.spawn_waves.self_zone_handle = group.zone_handle;

@@ -158,6 +158,49 @@ int main() {
         CHECK(t.current == 0);
     }
 
+    // --- the NextWaypoint action [orig: case 23 @0x49b3de; Spectator_CycleTarget
+    //     @0x4dc1d0] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(10, 0, 4), wp(20, 0, 4)};
+        // No selection: SP refuses; in a session the scan starts at 0 and
+        // steps to 1 (@0x4dc246).
+        t.manual_cycle(false, false);
+        CHECK(t.current == -1);
+        t.manual_cycle(false, true);
+        CHECK(t.current == 1);
+        // In a session: plain wrap both ways.
+        t.manual_cycle(true, true);
+        CHECK(t.current == 0);
+        t.manual_cycle(true, true);
+        CHECK(t.current == 2);
+        t.manual_cycle(false, true);
+        CHECK(t.current == 0);
+        // SP forward leaves only a chain-back (+535) or done (+536) entry.
+        t.manual_cycle(false, false);
+        CHECK(t.current == 0);
+        t.entries[0].done = true;
+        t.manual_cycle(false, false);
+        CHECK(t.current == 1);
+        t.entries[1].chain_back = true;
+        t.manual_cycle(false, false);
+        CHECK(t.current == 2);
+        // SP backward: never below list[0]; reverts unless it lands on +535.
+        t.manual_cycle(true, false);
+        CHECK(t.current == 1); // entry 1 carries chain_back
+        t.manual_cycle(true, false);
+        CHECK(t.current == 1); // entry 0 does not: reverted
+        t.current = 0;
+        t.entries[0].chain_back = true;
+        t.manual_cycle(true, false);
+        CHECK(t.current == 0); // the first entry never steps back
+        // The show gate refuses the SP action.
+        t.current = 1;
+        t.show = false;
+        t.manual_cycle(false, false);
+        CHECK(t.current == 1);
+    }
+
     // --- the show gate + clear ---
     {
         WaypointTrack t;
@@ -173,24 +216,24 @@ int main() {
     // --- the HUD view fill [orig: HUD_BuildEntityInfo @0x4b88b7..0x4b8914] ---
     {
         WaypointTrack t;
-        WaypointHudView v = waypoint_hud_view(t);
+        WaypointHudView v = waypoint_hud_view(t, nullptr);
         CHECK(v.show); // the init-1 gate, no entries, no selection
         CHECK(v.count == 0);
         CHECK(v.current == -1);
         t.entries = {wp(1, 2, 4), wp(30, 40, 4)};
         t.entries[1].name_id = 7;
-        v = waypoint_hud_view(t);
+        v = waypoint_hud_view(t, nullptr);
         CHECK(v.count == 2);
         CHECK(v.current == -1); // a populated track before any selection
         t.current = 1;
         t.show = false;
-        v = waypoint_hud_view(t);
+        v = waypoint_hud_view(t, nullptr);
         CHECK(!v.show);
         CHECK(v.current == 1);
         CHECK(v.entry.x == (30 << 16) && v.entry.y == (40 << 16));
         CHECK(v.entry.name_id == 7);
         t.current = 5; // out of range reads as no selection
-        v = waypoint_hud_view(t);
+        v = waypoint_hud_view(t, nullptr);
         CHECK(v.current == -1);
     }
 

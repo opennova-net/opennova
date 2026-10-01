@@ -232,16 +232,18 @@ static int test_draw_values() {
 static int test_player_on_damage_received() {
     auto heap = std::make_unique<World>();
     World &world = *heap;
-    player_on_damage_received(world); // no local player bound: must not fault
+    const int32_t at[3] = {0, 0, 0};
+    const RadarSource none;
+    player_on_damage_received(world, none, at); // no local player bound: must not fault
     auto local = std::make_unique<LocalPlayer>(world);
     world.local_player_state = local.get();
-    player_on_damage_received(world);
+    player_on_damage_received(world, none, at);
     CHECK(local->view.flash.red == kScreenFlashRedArm);
     CHECK(local->view.shake.counter == kShakeArmDamageReceived);
-    player_on_damage_received(world);
+    player_on_damage_received(world, none, at);
     CHECK(local->view.flash.red == 2 * kScreenFlashRedArm);
     CHECK(local->view.shake.counter == 2 * kShakeArmDamageReceived);
-    for (int i = 0; i < 40; ++i) player_on_damage_received(world);
+    for (int i = 0; i < 40; ++i) player_on_damage_received(world, none, at);
     CHECK(local->view.flash.red == 255);
     CHECK(local->view.shake.counter == 255);
     // The white word is NOT this function's; only the collision/explosive legs
