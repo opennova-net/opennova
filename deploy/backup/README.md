@@ -11,7 +11,7 @@ Nightly SQLite snapshot to S3, plus on-demand backup / list / restore.
 ## Commands (via the deploy toolbox)
 
 ```bash
-./deploy/run.sh backup now      # snapshot -> s3://<bucket>/novaworld/<ts>.db.gz
+./deploy/run.sh backup now      # snapshot -> s3://<bucket>/novaworld/novaworld-<ts>.db.gz
 ./deploy/run.sh backup list     # list backups, newest last
 ```
 

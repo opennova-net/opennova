@@ -229,6 +229,39 @@ jobs:
             godot/bin/libopennova.linux.${{ matrix.target }}.x86_64.so
             godot/bin/libopennova_editor.linux.${{ matrix.target }}.x86_64.so
 
+  # The web build's side module (ADR 0049), in the Emscripten that built Godot
+  # 4.6's web templates (scripts/build_godot_web.sh pins it). A compile check:
+  # an engine change that breaks wasm32 (ILP32, -pthread) fails here, while the
+  # site image itself is game-web.yml's.
+  build-gdextension-web:
+    runs-on: ubuntu-latest
+    container: emscripten/emsdk:4.0.20
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      - name: Set up sccache
+        uses: mozilla-actions/sccache-action@v0.0.10
+
+      # The image's CMake predates the sqlite fetch's options.
+      - name: Install CMake + Ninja
+        run: pip install --no-cache-dir "cmake>=3.28,<4" ninja
+
+      - name: Build the web GDExtension (template_release)
+        run: |
+          scripts/build_godot_web.sh --release --build-dir build-godot-web
+          test -f godot/bin/libopennova.web.template_release.wasm32.wasm
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats
+
   godot-tests-linux:
     runs-on: ubuntu-latest
     needs: [build-gdextension-linux]

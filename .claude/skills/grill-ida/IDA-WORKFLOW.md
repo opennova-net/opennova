@@ -188,7 +188,7 @@ don't):
 Format: `target ← tool addr old→new (confidence: reason)`. Examples:
 
 ```
-IDA   ← rename 0x40e250  sub_40E250 → BMS_ValidateRecordCounts   (anchored: "Too many" strings @ 0x40e326)
+IDA   ← rename 0x40e250  sub_40E250 → BMS_LoadAndValidateHeader  (anchored: "Too many" strings @ 0x40e326)
 IDA   ← set_type 0x53d090  int(uint8_t*, int)                    [probable — confirm before apply?]
 IDA   ← comment 0x53d090  reimpl: opennova::scr::scr_decrypt @ engine/formats/scr/scr.cpp
 code  ← marker  engine/formats/scr/scr.cpp:41  // [orig: Scr_DecryptBuffer @ 0x53D090]

@@ -9,7 +9,8 @@ deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 
 ## Prerequisites
 
-- **CMake 3.16+** and a **C++17** compiler (MSVC, Clang, or GCC).
+- **CMake 3.24+** (the pinned SQLite and Dear ImGui fetches use 3.24 options) and a
+  **C++17** compiler (MSVC, Clang, or GCC).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
 - **Git LFS** (binary test fixtures are LFS objects).
@@ -53,7 +54,8 @@ ctest --test-dir build --output-on-failure -C Release
 ```
 
 When you are working on the NovaWorld server, configure with `-DBUILD_NOVAWORLD_HTTP=ON`
-(it fetches Asio + Crow and builds `apps/novaworld_server`; it is OFF by default so the
+(it fetches Asio + Crow and adds the HTTP/API layer to `apps/novaworld_server`, which
+otherwise builds with only its UDP listeners; it is OFF by default so the
 Windows/macOS hot path stays lean), and scope `ctest` to the net stack:
 
 ```bash
@@ -86,6 +88,13 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
+The web build (ADR 0049) compiles the same sources as a wasm32 threads side module:
+`scripts/build_godot_web.sh [--release]` refuses any Emscripten but 4.0.20 (its header
+shows the run inside the pinned `emscripten/emsdk` image), and
+`scripts/package_godot_web.sh` exports the `OpenNova Web` preset into `godot/exports/web`.
+`deploy/game/Dockerfile` runs both and serves the site on `:8090`; see
+[DEPLOY.md](DEPLOY.md) for building and running that image.
+
 ## Run the game
 
 ```bash
@@ -108,7 +117,9 @@ examples and exit codes.
 
 ## Run the NovaWorld servers locally
 
-The whole stack (gate + NovaWorld UDP + HTTP/API + web portal) via Docker:
+The whole stack (gate + NovaWorld UDP + HTTP/API + web portal + the game's web build) via
+Docker. `--build` also builds the game image (the wasm and native GDExtensions plus a
+Godot export, so its first build is slow), which needs the submodules checked out:
 
 ```bash
 cd deploy/compose
@@ -121,6 +132,7 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | NovaWorld UDP | `64206/udp` | NAPI session + in-match traffic (HELLO/JOIN/SESSION/GOODBYE) |
 | HTTP / API | `8080/tcp` | `/api/*`, the legacy `NW*.dll` routes |
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
+| game (web build) | `http://localhost:8090` | the browser build of the game (`deploy/game/`, ADR 0049), single player only |
 
 The Docker dev override sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
 test accounts, and machine-specific defaults for `ONNET_PUBLIC_HOST` and
@@ -143,7 +155,8 @@ Avoid rebuilding images to test changes:
 - **Server (C++):** the dockerized server is for "I just need the backend up." For active server work,
   run the local binary (below) and rebuild incrementally with `cmake --build build` (only the changed
   objects, seconds). To refresh just the server image in the stack: `docker compose ... up -d --build novaworld`.
-- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server. Hitting
+- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server, `8090` = the
+  game's web build. Hitting
   `http://localhost:8080/` shows an "API server" note, which is expected; the dev UI is at `:5173`.
 
 **Without Docker**, build and run the server binary directly. It reads its config from

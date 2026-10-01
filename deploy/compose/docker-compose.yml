@@ -34,5 +34,15 @@ services:
     depends_on:
       - novaworld
 
+  # The web build (ADR 0049): nginx on :8090 serving the Godot Web export. The
+  # portal's nginx routes game.<domain> to it (web/nginx.conf).
+  game:
+    image: ${GAME_IMAGE:-opennova-game:local}
+    build:
+      # The repo root: the image builds the engine, the GDExtension and the export.
+      context: ../..
+      dockerfile: deploy/game/Dockerfile
+    restart: unless-stopped
+
 volumes:
   nw_data:
