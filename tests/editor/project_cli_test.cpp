@@ -6,6 +6,7 @@
 // editor's Problems lists (S12), and the one game install the editor and the command line
 // share (S12). Since S13 A7 each verb is the editor's session, headless
 // (project_cli_session_test.cpp holds its table, its JSON and the request and query verbs).
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -348,6 +349,15 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	TEST_EXPECT(run({"status", root}) == 0);
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", editor_test::gradient_png(8, 8, 9))); // changed since
+	// Dated past the import, as a later edit is: the import cache vouches for a source's hash while
+	// its size and last write hold, and a file system's clock can stand still for milliseconds
+	// (some 4 ms on Linux), so a rewrite at the same size this soon after the import would read
+	// as unchanged (ADR 0046 S13 A3).
+	std::error_code ec;
+	const fs::file_time_type rewritten = fs::last_write_time(root + "/art/logo.png", ec);
+	TEST_EXPECT(!ec);
+	fs::last_write_time(root + "/art/logo.png", rewritten + std::chrono::hours(1), ec);
+	TEST_EXPECT(!ec);
 	TEST_EXPECT(editor_test::write_text(dir.file("notes.txt"), "notes"));
 	const std::string record = root + "/art/logo.png.import";
 	std::string stale, now, error;
@@ -360,7 +370,6 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(snapshot(root) == before);
 	// --install too: a dry run opens the project on it for that run alone, so no
 	// .opennova/local.json is made or changed.
-	std::error_code ec;
 	fs::create_directories(dir.file("install"), ec);
 	TEST_EXPECT(run_capture(dir.file("out.txt"),
 	                        {"import", root, dir.file("notes.txt"), "--dry-run", "--install", dir.file("install")}, text) == 0);
