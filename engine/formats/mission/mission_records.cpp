@@ -6,7 +6,6 @@
 #include "mission_detail.h"
 #include "mission_names.h"
 
-#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
 
 #include <algorithm>
@@ -211,6 +210,20 @@ void add_trigger_area_reference(const MissionTriggerRecord &trigger,
 				"trigger",
 				static_cast<int>(trigger.index)));
 	}
+}
+
+int next_entity_id(const bms::File &file) {
+	int max_id = 0;
+	auto scan = [&max_id](const std::vector<bms::Entity> &entities) {
+		for (const bms::Entity &entity : entities) {
+			max_id = std::max(max_id, entity.id);
+		}
+	};
+	scan(file.items);
+	scan(file.buildings);
+	scan(file.markers);
+	scan(file.organics);
+	return max_id + 1;
 }
 
 void apply_transform(bms::Entity &entity, const EntityTransform &transform) {

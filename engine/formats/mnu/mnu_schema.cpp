@@ -1,14 +1,214 @@
 // The mnu format's rules a property table reads (mnu_schema.h): the material flag tokens a FLAGS
-// text names, and which window type reads what.
+// text names, what a field names, what a new record is, a window's TYPE token, a part's string ids,
+// and which window type reads what.
 #include <formats/mnu/mnu_schema.h>
 
 #include <cstring>
+#include <iterator>
 
 #include <base/io/strutil.h>
 
 namespace opennova::mnu {
 
 using strutil::iequals;
+
+// --- what a field names ----------------------------------------------------------------------
+
+namespace {
+
+using S = SchemaShape;
+using R = SchemaReference;
+
+// A field's own reference, or `varies` where a sibling decides it (schema_reference). A part's fields
+// are a window's.
+struct ReferenceRow {
+  SchemaShape shape;
+  const char *path;
+  SchemaReference reference;
+  bool varies = false;
+};
+constexpr ReferenceRow kReferences[] = {
+    // A window's frame art and cursor are textures the menu loader picks by their extension, its FONT a
+    // .fnt by name, its TEXT_RSRC a string table, its eight font colours style colours.
+    {S::Window, "frame.stencil", R::MenuTexture},
+    {S::Window, "frame.brush", R::MenuTexture},
+    {S::Window, "frame.monogram", R::MenuTexture},
+    {S::Window, "text_rsrc", R::TextTable},
+    {S::Window, "cursor.file", R::MenuTexture},
+    {S::Window, "font.name", R::Font},
+    {S::Window, "font.default_fg", R::StyleVar},
+    {S::Window, "font.default_bg", R::StyleVar},
+    {S::Window, "font.mouseover_fg", R::StyleVar},
+    {S::Window, "font.mouseover_bg", R::StyleVar},
+    {S::Window, "font.selected_fg", R::StyleVar},
+    {S::Window, "font.selected_bg", R::StyleVar},
+    {S::Window, "font.disabled_fg", R::StyleVar},
+    {S::Window, "font.disabled_bg", R::StyleVar},
+    {S::Window, "string.value", R::None, true},
+    {S::Window, "toggle_string.value", R::None, true},
+    {S::Appearance, "value", R::None, true},
+    // A SOUND's FILE is the bank the parse opens by that name [orig: SoundBank_CollectionAddOrRef @
+    // 0x652b40 -> SoundBank_OpenFile @ 0x75caa0]; the parse ignores a bank that does not open (no sound
+    // plays for it).
+    {S::Sound, "file", R::Sound},
+    {S::Action, "file", R::Menu},
+    {S::Action, "field", R::None, true},
+    {S::Action, "target", R::None, true},
+    // A DATASOURCE names the credits file the marquee loads by that name [orig:
+    // CMarqueeWnd_ParseXMLDefinition @ 0x65ceb0 -> CMarqueeWnd_LoadCreditsFromIni @ 0x65c5a0 ->
+    // ConfigFile_LoadGlobal @ 0x760ad0]; one that does not load adds no line.
+    {S::Datasource, "value", R::Credits},
+    {S::Item, "text", R::None, true},
+    {S::Header, "text", R::None, true},
+    {S::Subst, "file", R::None, true},
+};
+
+const ReferenceRow *reference_row(SchemaShape shape, const std::string &path) {
+  const SchemaShape as = shape == S::Part ? S::Window : shape;
+  for (const ReferenceRow &row : kReferences)
+    if (row.shape == as && path == row.path) return &row;
+  return nullptr;
+}
+
+// What a field whose siblings decide it names on its record: an APPEARANCE's value is a texture for
+// IMAGE / IMAGEROW, a style colour for COLOR / OUTLINE; an ITEM's text a string id for ID, a texture
+// for IMAGE / BITMAP, a colour for COLOR; a HEADER's text and the STRING's and TOGGLE_STRING's value a
+// string id for ID; a SUBST's text a texture when it is a FILE and not a URL; an ACTION's target a
+// screen for SCREEN, a window for WINDOW, TAB, GLB_FILTER and GLB_FILTER_NUM, and its FIELD / SOURCE /
+// NAME slot a window for URL. None when it names nothing there.
+SchemaReference decided_reference(SchemaShape shape, const std::string &path, const void *record) {
+  switch (shape) {
+  case S::Appearance: {
+    const Appearance &a = *static_cast<const Appearance *>(record);
+    if (iequals(a.type, "IMAGE") || iequals(a.type, "IMAGEROW")) return R::MenuTexture;
+    if (iequals(a.type, "COLOR") || iequals(a.type, "OUTLINE")) return R::StyleVar;
+    return R::None;
+  }
+  case S::Item: {
+    const Item &i = *static_cast<const Item *>(record);
+    if (iequals(i.type, "ID")) return R::TextId;
+    if (iequals(i.type, "IMAGE") || iequals(i.type, "BITMAP")) return R::MenuTexture;
+    if (iequals(i.type, "COLOR")) return R::StyleVar;
+    return R::None;
+  }
+  case S::Header: return iequals(static_cast<const TableHeader *>(record)->type, "ID") ? R::TextId : R::None;
+  case S::Action: {
+    // The verb decides what the text and the slot name [orig: CUIWidget_HandleScriptedAction @
+    // 0x6497f0]: SCREEN selects the screen of that name in the file it loads (@ 0x649894,
+    // CUIScene_SelectNodeByName @ 0x63b6b0); WINDOW finds the window of that name on the acting
+    // window's own screen (@ 0x6498c8, UI_FindScreenControl @ 0x63ae80); TAB moves the focus to the
+    // control of that name (@ 0x649c30) and GLB_FILTER / GLB_FILTER_NUM send to it [orig:
+    // CEditWnd_HandleInputEvent @ 0x661510], each on the screen showing, the acting window's while its
+    // keys reach it; URL reads the text of the control the slot names (@ 0x649a1c). Every other verb's
+    // text is no name the file defines.
+    const Action &a = *static_cast<const Action *>(record);
+    if (path == "target") {
+      if (iequals(a.type, "SCREEN")) return R::Screen;
+      if (iequals(a.type, "WINDOW") || iequals(a.type, "TAB") || iequals(a.type, "GLB_FILTER") ||
+          iequals(a.type, "GLB_FILTER_NUM"))
+        return R::Window;
+      return R::None;
+    }
+    if (path == "field") return iequals(a.type, "URL") ? R::Window : R::None;
+    return R::None;
+  }
+  case S::Subst: {
+    const TableSubst &s = *static_cast<const TableSubst *>(record);
+    return s.is_file && !s.is_url ? R::MenuTexture : R::None;
+  }
+  case S::Window:
+  case S::Part: {
+    const Window &w = *static_cast<const Window *>(record);
+    if (path == "string.value") return iequals(w.string_data.type, "ID") ? R::TextId : R::None;
+    if (path == "toggle_string.value") return iequals(w.toggle_string.type, "ID") ? R::TextId : R::None;
+    return R::None;
+  }
+  default: return R::None;
+  }
+}
+
+}  // namespace
+
+SchemaReference schema_field_reference(SchemaShape shape, const std::string &path) {
+  const ReferenceRow *row = reference_row(shape, path);
+  return row && !row->varies ? row->reference : R::None;
+}
+
+bool schema_reference_varies(SchemaShape shape, const std::string &path) {
+  const ReferenceRow *row = reference_row(shape, path);
+  return row && row->varies;
+}
+
+SchemaReference schema_reference(SchemaShape shape, const std::string &path, const void *record) {
+  const ReferenceRow *row = reference_row(shape, path);
+  if (!row) return R::None;
+  return row->varies ? (record ? decided_reference(shape, path, record) : R::None) : row->reference;
+}
+
+// [orig: CRT_wcstoxl @ 0x76e93b through the APPEARANCE COLOR / OUTLINE arm @ 0x648562, the FONT colours
+// @ 0x648d14..0x648e64 and the spin ITEM @ 0x64bd10]: every field naming a style colour holds the hex
+// AARRGGBB word the parse reads.
+bool schema_hex_colour(SchemaReference reference) { return reference == R::StyleVar; }
+
+// --- what a new record is ----------------------------------------------------------------------
+
+void schema_default(Window &window) {
+  window.type = WindowType::Static;
+  window.position = {0, 0, 100, 20, true, true, true, true};
+  Appearance appearance;
+  schema_default(appearance);
+  window.appearances.push_back(appearance);
+}
+void schema_default(Appearance &appearance) { appearance.state = "default"; }
+void schema_default(Sound &sound) {
+  sound.state = "mousein";
+  sound.trigger = "MOUSE_OVER";
+}
+// POP_SCREEN: the one verb that takes no operand [orig: CUIWidget_HandleScriptedAction @ 0x6497f0, code
+// 12].
+void schema_default(Action &action) { action.type = "POP_SCREEN"; }
+void schema_default(Element &element) { element.tag = "TARGET"; }
+void schema_default(TableHeader &header, size_t column) {
+  header.has_column = true;
+  header.column = int(column);
+}
+void schema_default(TableBody &body, size_t column) {
+  body.has_column = true;
+  body.column = int(column);
+}
+void schema_default(TableSubst &subst) { subst.has_column = true; }
+// A window keeps only PLAYERLIST and SERVERLIST (GLB_TABLE) of its attributes; an element takes any.
+void schema_default_window_attribute(ElementAttribute &attribute) { attribute.name = "PLAYERLIST"; }
+void schema_default_element_attribute(ElementAttribute &attribute) { attribute.name = "NAME"; }
+// A part with no element would crash retail: a new one is written with a typeless DEFAULT appearance.
+Window &schema_default_part(WindowPart &part, WindowType type) {
+  Window &window = part.author(type);
+  if (window.appearances.empty()) {
+    Appearance appearance;
+    schema_default(appearance);
+    window.appearances.push_back(appearance);
+  }
+  return window;
+}
+
+// --- a window's TYPE ---------------------------------------------------------------------------
+
+// The factory's match of the token, the token written as typed: a token it does not match builds a
+// generic window [orig: CUIScene_CreateWidgetByType @ 0x64f630].
+std::string schema_type_token(const Window &window) {
+  return window.type_token.empty() ? std::string(window_type_name(window.type)) : window.type_token;
+}
+void schema_set_type_token(Window &window, const std::string &token) {
+  window.type = parse_window_type(token);
+  window.type_token = token;
+}
+
+// --- a part's string ids ------------------------------------------------------------------------
+
+// A combo's LIST_BOX is attached before its parse (its own TEXT_RSRC, else the root's); a spin arrow and
+// a scrollbar are parsed before they are attached (their own only) [orig: CComboWnd_ParseXMLDefinition @
+// 0x65c0d0; CSpinListWnd_Create @ 0x64bc40].
+bool schema_part_reads_root_text(const std::string &part_path) { return part_path == "list_box"; }
 
 const std::vector<SchemaChoice> &ui_material_flag_choices() {
   // g_UIMaterialFlagNames @ 0x84a5d0, in table order (rows of wchar name[64] + DWORD flags).

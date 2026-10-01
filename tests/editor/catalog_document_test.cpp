@@ -505,8 +505,49 @@ static int witnessed_enums() {
 	return 0;
 }
 
+// A powerup row's weapon (S13 D10): `weapon all` and `weapon <name>` fill one word of the row, the later
+// line's kept [orig: PowerUpDef_ParseProperty @0x4431A7..0x443216], so every weapon clears the name and
+// a name clears every weapon; a weapon named all, in any case, would be read back as every weapon:
+// refused. A row of a name an earlier row has is one no item binds.
+static int powerup_weapon() {
+	editor_test::TempProjectDir dir("opennova_catalog_powerup_test");
+	TEST_EXPECT(editor_test::write_text(dir.file("powerup.def"),
+	                                    "powerup \"PU_GUN\"\r\nweapon WPN_A\r\nend\r\n"
+	                                    "powerup \"PU_TWICE\"\r\nweapon WPN_A\r\nweapon all\r\nend\r\n"));
+	DefCatalogDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("powerup.def"), "powerup.def", AssetKind::PowerupDefs, "jo", error));
+	const NodeAddress gun{document.rows()[0]->id, node_kind(DefRecordKind::Powerup), 0};
+	const NodeAddress twice{document.rows()[1]->id, node_kind(DefRecordKind::Powerup), 0};
+	Value value;
+	// The parse keeps the later line: `weapon all` after a name leaves no name behind it.
+	TEST_EXPECT(document.get(twice, "weapon", value) && std::get<std::string>(value).empty() &&
+	            document.get(twice, "weapon_all", value) && std::get<int64_t>(value) == 1);
+	TEST_EXPECT(document.apply(field(gun, "weapon_all", int64_t(1)), error));
+	TEST_EXPECT(document.get(gun, "weapon", value) && std::get<std::string>(value).empty());
+	TEST_EXPECT(document.serialize().text.find("WPN_A") == std::string::npos);
+	TEST_EXPECT(document.apply(field(gun, "weapon", std::string("WPN_B")), error));
+	TEST_EXPECT(document.get(gun, "weapon_all", value) && std::get<int64_t>(value) == 0);
+	const std::string text = document.serialize().text;
+	TEST_EXPECT(text.find("weapon WPN_B") != std::string::npos && text.find("PU_GUN\"\r\n\tweapon all") == std::string::npos);
+	for (const char *all : {"all", "ALL", "All"}) {
+		TEST_EXPECT(!document.apply(field(gun, "weapon", std::string(all)), error) &&
+		            error.message.find("every weapon") != std::string::npos);
+	}
+	TEST_EXPECT(document.get(gun, "weapon", value) && std::get<std::string>(value) == "WPN_B");
+	// A second row of a name: the lookup by the name finds the first [orig: PowerUpDef_FindByName
+	// @0x442660], so no item binds it.
+	TEST_EXPECT(document.apply(field(twice, "name", std::string("pu_gun")), error));
+	size_t repeated = 0;
+	for (const Diagnostic &d : validate_catalog_file(document))
+		repeated += d.code() == "catalog.name_duplicate" && d.message.find("no item binds this one") != std::string::npos &&
+		            d.row_id == twice.row;
+	TEST_EXPECT(repeated == 1);
+	return 0;
+}
+
 int main() {
 	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
-	       witnessed_enums();
+	       witnessed_enums() || powerup_weapon();
 }

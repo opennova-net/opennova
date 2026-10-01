@@ -16,7 +16,7 @@ enum class DefRecordKind {
 };
 inline constexpr size_t kDefRecordKindCount = size_t(DefRecordKind::PowerupAction) + 1;
 enum class DefFieldType { Integer, Unsigned, Byte, Count, Real, Text };
-enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint };
+enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint, Powerup };
 using DefValue = std::variant<int64_t, double, std::string>;
 
 // A value a field takes by name: the token the file writes (or the number's name) and what
@@ -42,6 +42,11 @@ struct DefField {
 	// unit_type byte): a set outside it is refused (`ranged`, min..max inclusive).
 	bool ranged = false;
 	int64_t min = 0, max = 0;
+	// A text the member cannot hold, compared without case as its parser compares it: its line,
+	// written, reads back as another (a powerup's weapon named `all` is every weapon); a set of it
+	// is refused with `refused_why`. "" = none.
+	const char *refused = "";
+	const char *refused_why = "";
 };
 
 enum class DefEncoding {
@@ -117,6 +122,15 @@ bool def_authored_get(const DefMember &member, const void *record, DefValue &out
 // untouched, where the writer could not write the result back. A number the member already
 // writes changes nothing, as does, for a member shown as stored, its stored number.
 bool def_authored_set(const DefMember &member, void *record, const DefValue &value, std::string &error);
+// What the authored reads and sets of the calling thread have run the family's parser over so far: a
+// line written alone (def_authored_get's check that its line keeps the stored word) and a whole record
+// written (def_authored_set's two read-backs). What a keystroke in an authored member costs, which the
+// editor's tests count; a count, never a cache.
+struct DefAuthoredParses {
+	size_t lines = 0;
+	size_t records = 0;
+};
+DefAuthoredParses def_authored_parses();
 DefValue def_get(const void *record, const DefField &field);
 bool def_set(void *record, const DefField &field, const DefValue &value, std::string &error);
 void def_sync_derived(DefRecordKind kind, void *record, const std::string &field);

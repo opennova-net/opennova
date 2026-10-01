@@ -167,7 +167,7 @@ void OutlineModel::add_collection(const Document &document, const NodeAddress &o
 	lines_.push_back(std::move(line));
 	if (!open) return;
 	for (size_t i = 0; i < collection.ids.size(); ++i)
-		add_record(document, {owner.row, collection.spec.kind, collection.ids[i]}, depth + 1, i);
+		add_record(document, {owner.row, collection.kind_at(i), collection.ids[i]}, depth + 1, i);
 }
 
 bool OutlineModel::add_filtered_record(const Document &document, const NodeAddress &record, int depth,
@@ -200,7 +200,7 @@ bool OutlineModel::add_filtered_collection(const Document &document, const NodeA
 	lines_.push_back(collection_line(owner, collection, depth));
 	bool any = false;
 	for (size_t i = 0; i < collection.ids.size(); ++i)
-		any = add_filtered_record(document, {owner.row, collection.spec.kind, collection.ids[i]}, depth + 1, i) ||
+		any = add_filtered_record(document, {owner.row, collection.kind_at(i), collection.ids[i]}, depth + 1, i) ||
 		      any;
 	if (!any) {
 		lines_.resize(at);

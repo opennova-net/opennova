@@ -120,8 +120,6 @@ static_assert(finding_rows_well_formed(kFindingRows),
 		"no note's token is one of the menu's own, every row the menu's group, and only the "
 		"render check's rows say whether a finding of theirs is a Problems row");
 
-using mnu::SchemaApplies;
-
 constexpr NodeKind kScreen = node_kind(MenuKind::Screen);
 constexpr NodeKind kWindow = node_kind(MenuKind::Window);
 const char *const kByteOrderMark = "\xEF\xBB\xBF";
@@ -129,96 +127,6 @@ const char *const kByteOrderMark = "\xEF\xBB\xBF";
 MenuScreen &screen_of(Node &node) { return static_cast<MenuScreen &>(node); }
 const MenuScreen &screen_of(const Node &node) { return static_cast<const MenuScreen &>(node); }
 
-Applicability applicability(SchemaApplies applies) {
-	switch (applies) {
-	case SchemaApplies::Reads: return Applicability::Reads;
-	case SchemaApplies::Ignored: return Applicability::Ignored;
-	case SchemaApplies::Unverified: return Applicability::Unverified;
-	}
-	return Applicability::Unverified;
-}
-
-// A style colour's text is the hex AARRGGBB word the parse reads with wcstoul (a %VAR% the
-// stylesheet resolves first) [orig: CRT_wcstoxl @ 0x76e93b through the APPEARANCE COLOR /
-// OUTLINE arm @ 0x648562, the FONT colours @ 0x648d14..0x648e64 and the spin ITEM
-// @ 0x64bd10]: every field naming a style variable holds one (the menu table's references).
-FieldColor colour_of(ReferenceKind reference) {
-	return reference == ReferenceKind::StyleVar ? FieldColor::HexArgb : FieldColor::None;
-}
-
-// --- where a record sits ---------------------------------------------------------------
-
-// A record as the paths read it: the nearest window or part at or above it (a window's
-// own), the element path from that window to the record's list ("" for a window or a
-// part), and whether the lists above it are read.
-struct Context {
-	const mnu::Window *window = nullptr;
-	std::string prefix;
-	SchemaApplies applies = SchemaApplies::Reads;
-	// The root window it hangs under, and the window whose TEXT_RSRC its string ids fall
-	// back to (the root, or for a part parsed before it is attached the part itself:
-	// menu::window_text_rsrc).
-	const mnu::Window *root = nullptr;
-	const mnu::Window *text_fallback = nullptr;
-};
-
-Context root_context(const mnu::Window &root) {
-	Context c;
-	c.window = &root;
-	c.root = &root;
-	c.text_fallback = &root;
-	return c;
-}
-
-// A list's element path: its records' kind's token ("action", "items.item", "list_box").
-const char *list_token(NodeKind owner, size_t list) {
-	return menu_table().kind(menu_table().kind(owner)->lists()[list].spec.kind)->row().token;
-}
-
-std::string list_path(const Context &owner, const char *token) {
-	return owner.prefix.empty() ? std::string(token) : owner.prefix + "." + token;
-}
-
-// Whether the owner's window type reads one of the owner's lists.
-SchemaApplies list_applies_in(const Context &owner, const char *token) {
-	return mnu::schema_applies_both(owner.applies, mnu::schema_reads(owner.window->type, list_path(owner, token)));
-}
-
-// The context of the record at an index of the owner's list `list`.
-Context step_into(const Context &owner, NodeKind owner_kind, size_t list, const RecordHandle &record) {
-	const char *token = list_token(owner_kind, list);
-	Context c;
-	c.applies = list_applies_in(owner, token);
-	if (is_window_kind(owner_kind) && std::strcmp(token, "element") == 0)
-		c.applies = mnu::schema_applies_both(c.applies,
-		                                     mnu::schema_element_reads(owner.window->type, record.as<mnu::Element>().tag));
-	c.root = owner.root;
-	c.text_fallback = owner.text_fallback;
-	if (is_window_kind(record.kind)) {
-		c.window = &record.as<mnu::Window>();
-		// A combo's LIST_BOX is attached before its parse (its own TEXT_RSRC, else the
-		// root's); a spin arrow and a scrollbar are parsed before they are attached (their
-		// own only) [orig: CComboWnd_ParseXMLDefinition @ 0x65c0d0; CSpinListWnd_Create
-		// @ 0x64bc40].
-		if (menu_shape(record.kind) == MenuShape::Part)
-			c.text_fallback = std::strcmp(token, "list_box") == 0 ? owner.root : c.window;
-	} else {
-		c.window = owner.window;
-		c.prefix = list_path(owner, token);
-	}
-	return c;
-}
-
-// The context of a record of a screen (not the screen itself): its root window's, then each step
-// down its trail (the screen's roots first).
-Context context_of(const TableDocument::Located &at) {
-	const size_t steps = at.trail.size();
-	const RecordHandle root = steps > 1 ? at.trail[1].owner : at.record;
-	Context c = root_context(root.as<mnu::Window>());
-	for (size_t k = 1; k < steps; ++k)
-		c = step_into(c, at.trail[k].owner.kind, at.trail[k].list, k + 1 < steps ? at.trail[k + 1].owner : at.record);
-	return c;
-}
 
 // --- names -----------------------------------------------------------------------------
 
@@ -313,11 +221,11 @@ const std::string &window_elements_error() {
 // only as PLAYERLIST or SERVERLIST with no value, an extra element only by a tag its
 // parses read. A record that moves into a window meets the rules a Set there meets.
 bool window_keeps(const RecordHandle &record, std::string &error) {
-	if (menu_shape(record.kind) == MenuShape::Attribute) {
+	if (menu_shape(record.kind) == mnu::SchemaShape::Attribute) {
 		const auto &attribute = record.as<mnu::ElementAttribute>();
 		if (!mnu::known_token(attribute.name, mnu::kExtraAttributes)) { error = kWindowAttributes; return false; }
 		if (attribute.has_value) { error = kFlagsTakeNoValue; return false; }
-	} else if (menu_shape(record.kind) == MenuShape::Element) {
+	} else if (menu_shape(record.kind) == mnu::SchemaShape::Element) {
 		if (!mnu::known_token(record.as<mnu::Element>().tag, mnu::kExtraTags)) {
 			error = window_elements_error();
 			return false;
@@ -474,10 +382,15 @@ std::string menu_window_scope(const std::string &menu_file, const std::string &s
 Applicability MnuDocument::list_applies(const Node &, const Located &owner, size_t list) const {
 	// The screen's root windows are read; a window's lists by its type, where it sits.
 	if (owner.is_row()) return Applicability::Reads;
-	return applicability(list_applies_in(context_of(owner), list_token(owner.record.kind, list)));
+	return menu_applicability(menu_list_reads(owner.record, owner.owners(), list));
 }
 
 void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const {
+	// Whether the game reads the field where its record sits, and what a field whose sibling decides it
+	// names on this record: the table's (menu_context, the format's rules), with the colour that goes
+	// with it.
+	TableDocument::refine_field(address, out);
+	out.color = menu_reference_colour(out.reference);
 	const FieldSchema &field = *out.schema;
 	// A screen's NAME is looked up in its file, a window's on its screen (lookup_names).
 	if (out.defines == ReferenceKind::MenuScreen) out.scope = menu_screen_scope(Document::path());
@@ -486,19 +399,7 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	if (!node || node->kind != kScreen || !locate(*node, address.child, at) || at.is_row() ||
 	    at.record.kind != address.kind)
 		return;
-	const Context context = context_of(at);
-	const std::string path = context.prefix.empty() ? field.id : context.prefix + "." + field.id;
-	SchemaApplies applies = mnu::schema_applies_both(context.applies, mnu::schema_reads(context.window->type, path));
-	if (menu_shape(at.record.kind) == MenuShape::Action)
-		applies = mnu::schema_applies_both(applies, mnu::schema_action_reads(at.record.as<mnu::Action>(), field.id));
-	out.applies = applicability(applies);
-	// What a field whose sibling decides it names on this record (the table's reference).
-	const TableKind &kind = *menu_table().kind(at.record.kind);
-	const size_t place = kind.place_of(*out.schema);
-	if (place != TableKind::npos && kind.reference(place)) {
-		out.reference = kind.reference(place)(at.record);
-		out.color = colour_of(out.reference);
-	}
+	const MenuContext context = menu_context(at.record, at.owners());
 	// A string id resolves in the "menu" section of the table the window reads: its own
 	// TEXT_RSRC, else the one it falls back to (the runtime's rule, menu_screen_inputs.h).
 	// With neither, the scope names no table: the game shows the id.
@@ -517,7 +418,7 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 		out.scope = menu_window_scope(Document::path(), screen_of(*node).screen.name);
 	}
 	// A part is named by its owner when retail makes it: no lookup finds it by its NAME.
-	if (menu_shape(at.record.kind) == MenuShape::Part) out.defines = ReferenceKind::None;
+	if (menu_shape(at.record.kind) == mnu::SchemaShape::Part) out.defines = ReferenceKind::None;
 	if (out.defines == ReferenceKind::MenuWindow)
 		out.scope = menu_window_scope(Document::path(), screen_of(*node).screen.name);
 	// Any text that makes no reference of its own (a NAME, a shown text, an ACTION's target,
@@ -615,7 +516,7 @@ std::vector<MenuLookupName> MnuDocument::lookup_names() const {
 	std::vector<size_t> parts; // the part lists, in the order the parts attach
 	const std::vector<TableList> &lists = menu_table().kind(kWindow)->lists();
 	for (size_t i = 0; i < lists.size(); ++i)
-		if (menu_shape(lists[i].spec.kind) == MenuShape::Part) parts.push_back(i);
+		if (menu_shape(lists[i].spec.kind) == mnu::SchemaShape::Part) parts.push_back(i);
 	for (const auto &node : rows()) {
 		const MenuScreen &screen = screen_of(*node);
 		const bool shadowed = newest[strutil::to_upper(screen.screen.name)] != node->id;
@@ -841,21 +742,21 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 	// A name the reader would not keep here is refused: a window keeps only its PLAYERLIST
 	// and SERVERLIST attributes, and only the extra elements its parses read at its top level.
 	if (!at.is_row() && is_window_kind(at.step().owner.kind)) {
-		const MenuShape shape = menu_shape(at.record.kind);
+		const mnu::SchemaShape shape = menu_shape(at.record.kind);
 		const TableKind &kind = *menu_table().kind(at.record.kind);
 		const std::string &id = kind.fields()[field].id;
-		if (shape == MenuShape::Attribute && id == "name") {
+		if (shape == mnu::SchemaShape::Attribute && id == "name") {
 			if (!text_width(value, 64, error)) return false;
 			if (!mnu::known_token(std::get<std::string>(value), mnu::kExtraAttributes)) {
 				error = kWindowAttributes;
 				return false;
 			}
 		}
-		if (shape == MenuShape::Attribute && id == "value") {
+		if (shape == mnu::SchemaShape::Attribute && id == "value") {
 			Value current;
 			if (!kind.value(field).get(at.record, current) || current != value) { error = kFlagsTakeNoValue; return false; }
 		}
-		if (shape == MenuShape::Element && id == "tag") {
+		if (shape == mnu::SchemaShape::Element && id == "tag") {
 			if (!text_width(value, 64, error)) return false;
 			if (!mnu::known_token(std::get<std::string>(value), mnu::kExtraTags)) {
 				error = window_elements_error();
@@ -870,7 +771,7 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 // place: a field written again reads what it read while left out.
 bool MnuDocument::set_written(Node &node, const Located &at, size_t field, bool present, std::string &error) {
 	if (present && !at.is_row() && is_window_kind(at.step().owner.kind) &&
-	    menu_shape(at.record.kind) == MenuShape::Attribute && menu_table().kind(at.record.kind)->fields()[field].id == "value") {
+	    menu_shape(at.record.kind) == mnu::SchemaShape::Attribute && menu_table().kind(at.record.kind)->fields()[field].id == "value") {
 		error = kFlagsTakeNoValue;
 		return false;
 	}

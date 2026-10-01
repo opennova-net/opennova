@@ -32,14 +32,6 @@ enum class Presence {
 	          // the block out and keeps its content (mnu.h's presence contract)
 };
 
-// What a field names outside its record. Sound: a .lwf bank by file name; Credits: a marquee's
-// credits file by file name; Screen: a screen by NAME in the menu file the ACTION's FILE names; Window:
-// a window by NAME on the screen the ACTION's window is on. Dynamic: a sibling field decides
-// (reference_on resolves it per record).
-enum class Ref {
-	None, Font, MenuTexture, StyleVar, TextTable, TextId, Menu, Sound, Credits, Screen, Window, Dynamic,
-};
-
 struct Choice {
 	const char *name = "";
 	int64_t value = 0;
@@ -53,7 +45,6 @@ struct Entry {
 	Type type = Type::Text;
 	size_t width = 0;       // a text's capacity in bytes, the terminator included (0 for numbers)
 	Presence presence = Presence::Always;
-	Ref reference = Ref::None;
 	std::vector<Choice> choices; // the tokens the parse compares (a text field takes any text)
 	const char *block = "";  // the enclosing block's field ("string", "items", ...; "" = none)
 	// The choices are the tokens the parse knows, the text any list of them or other words (the
@@ -84,13 +75,12 @@ const std::vector<Choice> &id_choices() {
 }
 
 Entry text(const char *path, size_t width, std::string *(*slot)(void *), Presence presence = Presence::NonEmpty,
-           Ref reference = Ref::None, std::vector<Choice> choices = {}, const char *block = "") {
+           std::vector<Choice> choices = {}, const char *block = "") {
 	Entry e;
 	e.path = path;
 	e.type = Type::Text;
 	e.width = width;
 	e.presence = presence;
-	e.reference = reference;
 	e.choices = std::move(choices);
 	e.block = block;
 	e.text = slot;
@@ -135,31 +125,14 @@ Entry toggle(const char *path, bool *(*bit)(void *)) {
 	return e;
 }
 
-// A window's TYPE: the factory's match of the token, the token written as typed (a token it does not
-// match builds a generic window [orig: CUIScene_CreateWidgetByType @ 0x64f630]).
+// A window's TYPE, as the format reads and writes the token (mnu::schema_type_token).
 bool type_get(void *r, Value &out) {
-	const mnu::Window &w = W(r);
-	out = w.type_token.empty() ? std::string(mnu::window_type_name(w.type)) : w.type_token;
+	out = mnu::schema_type_token(W(r));
 	return true;
 }
 bool type_set(void *r, const Value &value, std::string &) {
-	mnu::Window &w = W(r);
-	const std::string &token = std::get<std::string>(value);
-	w.type = mnu::parse_window_type(token);
-	w.type_token = token;
+	mnu::schema_set_type_token(W(r), std::get<std::string>(value));
 	return true;
-}
-
-// A part's default: written, with a typeless DEFAULT appearance (a part with no element would crash
-// retail).
-mnu::Window &default_part(mnu::WindowPart &part, mnu::WindowType type) {
-	mnu::Window &w = part.author(type);
-	if (w.appearances.empty()) {
-		mnu::Appearance appearance;
-		appearance.state = "default";
-		w.appearances.push_back(appearance);
-	}
-	return w;
 }
 
 // A part's toggle: 0 leaves the part out and keeps its window, 1 writes it again. A part that was
@@ -266,67 +239,58 @@ std::vector<Entry> window_entries() {
 	                     [](void *r) { return &W(r).position.has_right; }));
 	out.push_back(number("position.bottom", [](void *r) { return &W(r).position.bottom; },
 	                     [](void *r) { return &W(r).position.has_bottom; }));
-	out.push_back(text("frame.stencil", 128, [](void *r) { return &W(r).frame.stencil; }, Presence::NonEmpty,
-	                   Ref::MenuTexture));
+	out.push_back(text("frame.stencil", 128, [](void *r) { return &W(r).frame.stencil; }, Presence::NonEmpty));
 	out.push_back(number("frame.stencil_size", [](void *r) { return &W(r).frame.stencil_size; },
 	                     [](void *r) { return &W(r).frame.has_stencil_size; }));
 	out.push_back(number("frame.insetx", [](void *r) { return &W(r).frame.insetx; },
 	                     [](void *r) { return &W(r).frame.has_insetx; }));
 	out.push_back(number("frame.insety", [](void *r) { return &W(r).frame.insety; },
 	                     [](void *r) { return &W(r).frame.has_insety; }));
-	out.push_back(text("frame.brush", 128, [](void *r) { return &W(r).frame.brush; }, Presence::NonEmpty,
-	                   Ref::MenuTexture));
-	out.push_back(text("frame.monogram", 128, [](void *r) { return &W(r).frame.monogram; }, Presence::NonEmpty,
-	                   Ref::MenuTexture));
+	out.push_back(text("frame.brush", 128, [](void *r) { return &W(r).frame.brush; }, Presence::NonEmpty));
+	out.push_back(text("frame.monogram", 128, [](void *r) { return &W(r).frame.monogram; }, Presence::NonEmpty));
 	// SCROLL: the one along-axis extent a window-level HEIGHT or WIDTH sets, with its spelling.
 	out.push_back(number("scroll_extent", [](void *r) { return &W(r).scroll_extent; },
 	                     [](void *r) { return &W(r).has_scroll_extent; }));
 	out.push_back(flag("scroll_extent_width", [](void *r) { return &W(r).scroll_extent_is_width; }));
-	out.push_back(text("orientation", 32, [](void *r) { return &W(r).orientation; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("orientation", 32, [](void *r) { return &W(r).orientation; }, Presence::NonEmpty,
 	                   {{"", 0}, {"HORIZONTAL", 1}, {"VERTICAL", 2}}));
 	{
-		Entry rsrc = text("text_rsrc", 64, [](void *r) { return &W(r).text_rsrc; }, Presence::Bit, Ref::TextTable);
+		Entry rsrc = text("text_rsrc", 64, [](void *r) { return &W(r).text_rsrc; }, Presence::Bit);
 		rsrc.bit = [](void *r) { return &W(r).has_text_rsrc; };
 		out.push_back(rsrc);
 	}
 	out.push_back(text("private_data", 1024, [](void *r) { return &W(r).private_data; }));
-	out.push_back(text("cursor.file", 64, [](void *r) { return &W(r).cursor.file; }, Presence::NonEmpty,
-	                   Ref::MenuTexture));
+	out.push_back(text("cursor.file", 64, [](void *r) { return &W(r).cursor.file; }, Presence::NonEmpty));
 	out.push_back(material_flags(text("cursor.flags", 64, [](void *r) { return &W(r).cursor.flags; })));
-	out.push_back(text("font.name", 64, [](void *r) { return &W(r).font.name; }, Presence::NonEmpty, Ref::Font));
-	const Ref color = Ref::StyleVar;
-	out.push_back(text("font.default_fg", 32, [](void *r) { return &W(r).font.default_fg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.default_bg", 32, [](void *r) { return &W(r).font.default_bg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.mouseover_fg", 32, [](void *r) { return &W(r).font.mouseover_fg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.mouseover_bg", 32, [](void *r) { return &W(r).font.mouseover_bg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.selected_fg", 32, [](void *r) { return &W(r).font.selected_fg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.selected_bg", 32, [](void *r) { return &W(r).font.selected_bg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.disabled_fg", 32, [](void *r) { return &W(r).font.disabled_fg; }, Presence::NonEmpty, color));
-	out.push_back(text("font.disabled_bg", 32, [](void *r) { return &W(r).font.disabled_bg; }, Presence::NonEmpty, color));
+	out.push_back(text("font.name", 64, [](void *r) { return &W(r).font.name; }, Presence::NonEmpty));
+	out.push_back(text("font.default_fg", 32, [](void *r) { return &W(r).font.default_fg; }, Presence::NonEmpty));
+	out.push_back(text("font.default_bg", 32, [](void *r) { return &W(r).font.default_bg; }, Presence::NonEmpty));
+	out.push_back(text("font.mouseover_fg", 32, [](void *r) { return &W(r).font.mouseover_fg; }, Presence::NonEmpty));
+	out.push_back(text("font.mouseover_bg", 32, [](void *r) { return &W(r).font.mouseover_bg; }, Presence::NonEmpty));
+	out.push_back(text("font.selected_fg", 32, [](void *r) { return &W(r).font.selected_fg; }, Presence::NonEmpty));
+	out.push_back(text("font.selected_bg", 32, [](void *r) { return &W(r).font.selected_bg; }, Presence::NonEmpty));
+	out.push_back(text("font.disabled_fg", 32, [](void *r) { return &W(r).font.disabled_fg; }, Presence::NonEmpty));
+	out.push_back(text("font.disabled_bg", 32, [](void *r) { return &W(r).font.disabled_bg; }, Presence::NonEmpty));
 	// STRING [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30].
 	out.push_back(toggle("string", [](void *r) { return &W(r).string_data.present; }));
-	out.push_back(text("string.type", 16, [](void *r) { return &W(r).string_data.type; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("string.type", 16, [](void *r) { return &W(r).string_data.type; }, Presence::NonEmpty,
 	                   id_choices(), "string"));
-	out.push_back(text("string.justify", 64, [](void *r) { return &W(r).string_data.justify; }, Presence::NonEmpty,
-	                   Ref::None, justify_choices(), "string"));
-	out.push_back(text("string.vjustify", 64, [](void *r) { return &W(r).string_data.vjustify; }, Presence::NonEmpty,
-	                   Ref::None, vjustify_choices(), "string"));
+	out.push_back(text("string.justify", 64, [](void *r) { return &W(r).string_data.justify; }, Presence::NonEmpty, justify_choices(), "string"));
+	out.push_back(text("string.vjustify", 64, [](void *r) { return &W(r).string_data.vjustify; }, Presence::NonEmpty, vjustify_choices(), "string"));
 	out.push_back(number("string.edge", [](void *r) { return &W(r).string_data.edge; },
 	                     [](void *r) { return &W(r).string_data.has_edge; }, "string"));
 	out.push_back(flag("string.wrap", [](void *r) { return &W(r).string_data.wrap; }, "string"));
-	out.push_back(text("string.value", 1024, [](void *r) { return &W(r).string_data.value; }, Presence::Always,
-	                   Ref::Dynamic, {}, "string"));
+	out.push_back(text("string.value", 1024, [](void *r) { return &W(r).string_data.value; }, Presence::Always, {}, "string"));
 	// TOGGLE_STRING [orig: CButtonWnd_ParseTooltipXML @ 0x658170].
 	out.push_back(toggle("toggle_string", [](void *r) { return &W(r).toggle_string.present; }));
-	out.push_back(text("toggle_string.type", 16, [](void *r) { return &W(r).toggle_string.type; }, Presence::NonEmpty,
-	                   Ref::None, id_choices(), "toggle_string"));
+	out.push_back(text("toggle_string.type", 16, [](void *r) { return &W(r).toggle_string.type; }, Presence::NonEmpty, id_choices(), "toggle_string"));
 	out.push_back(text("toggle_string.value", 1024, [](void *r) { return &W(r).toggle_string.value; },
-	                   Presence::Always, Ref::Dynamic, {}, "toggle_string"));
+	                   Presence::Always, {}, "toggle_string"));
 	out.push_back(toggle("items", [](void *r) { return &W(r).items.present; }));
 	out.push_back(flag("items.multiselect", [](void *r) { return &W(r).items.multiselect; }, "items"));
-	out.push_back(text("items.justify", 64, [](void *r) { return &W(r).items.justify; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("items.justify", 64, [](void *r) { return &W(r).items.justify; }, Presence::NonEmpty,
 	                   justify_choices(), "items"));
-	out.push_back(text("items.vjustify", 64, [](void *r) { return &W(r).items.vjustify; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("items.vjustify", 64, [](void *r) { return &W(r).items.vjustify; }, Presence::NonEmpty,
 	                   vjustify_choices(), "items"));
 	out.push_back(part_toggle<&mnu::Window::list_box, mnu::WindowType::List>("list_box"));
 	out.push_back(number("list_box.sb_edge_pad", [](void *r) { return &W(r).sb_edge_pad; },
@@ -340,8 +304,7 @@ std::vector<Entry> window_entries() {
 	out.push_back(sort_key<&mnu::TableColumn::primary_sort>("column.primary_sort"));
 	{
 		Entry token = text("column.primary_sort_token", 16,
-		                   [](void *r) { return &W(r).table_data.column.primary_sort_token; }, Presence::NonEmpty,
-		                   Ref::None, sort_token_choices());
+		                   [](void *r) { return &W(r).table_data.column.primary_sort_token; }, Presence::NonEmpty, sort_token_choices());
 		token.custom_set = &sort_token_set;
 		out.push_back(token);
 	}
@@ -373,11 +336,11 @@ std::vector<Entry> screen_entries() {
 mnu::Appearance &AP(void *r) { return *static_cast<mnu::Appearance *>(r); }
 std::vector<Entry> appearance_entries() {
 	return {
-	        text("state", 16, [](void *r) { return &AP(r).state; }, Presence::NonEmpty, Ref::None,
+	        text("state", 16, [](void *r) { return &AP(r).state; }, Presence::NonEmpty,
 	             {{"DEFAULT", 0}, {"DISABLED", 1}, {"MOUSEOVER", 2}, {"SELECTED", 3}}),
-	        text("type", 16, [](void *r) { return &AP(r).type; }, Presence::NonEmpty, Ref::None,
+	        text("type", 16, [](void *r) { return &AP(r).type; }, Presence::NonEmpty,
 	             {{"", 0}, {"IMAGE", 1}, {"COLOR", 2}, {"CUSTOM", 3}, {"OUTLINE", 4}, {"IMAGEROW", 5}}),
-	        text("value", 128, [](void *r) { return &AP(r).value; }, Presence::Always, Ref::Dynamic),
+	        text("value", 128, [](void *r) { return &AP(r).value; }, Presence::Always),
 	        number("map_state", [](void *r) { return &AP(r).map_state; }, [](void *r) { return &AP(r).has_map_state; }),
 	        number("height", [](void *r) { return &AP(r).height; }, [](void *r) { return &AP(r).has_height; }),
 	        material_flags(text("flags", 64, [](void *r) { return &AP(r).flags; })),
@@ -387,13 +350,13 @@ std::vector<Entry> appearance_entries() {
 mnu::Sound &SO(void *r) { return *static_cast<mnu::Sound *>(r); }
 std::vector<Entry> sound_entries() {
 	return {
-	        text("state", 16, [](void *r) { return &SO(r).state; }, Presence::NonEmpty, Ref::None,
+	        text("state", 16, [](void *r) { return &SO(r).state; }, Presence::NonEmpty,
 	             {{"MOUSEIN", 0}, {"MOUSEOUT", 1}, {"SELECTED", 2}}),
 	        text("trigger", 32, [](void *r) { return &SO(r).trigger; }),
 	        // The bank the text names, opened by that name [orig: SoundBank_CollectionAddOrRef @ 0x652b40 ->
 	        // SoundBank_OpenFile @ 0x75caa0]; the parse ignores a bank that does not open (no sound plays for
 	        // it).
-	        text("file", 128, [](void *r) { return &SO(r).file; }, Presence::Always, Ref::Sound),
+	        text("file", 128, [](void *r) { return &SO(r).file; }, Presence::Always),
 	};
 }
 
@@ -413,14 +376,14 @@ std::vector<Entry> action_entries() {
 		return choices;
 	};
 	std::vector<Entry> out;
-	out.push_back(text("type", 32, [](void *r) { return &AC(r).type; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("type", 32, [](void *r) { return &AC(r).type; }, Presence::NonEmpty,
 	                   codes(mnu::kActionTypes, {})));
-	out.push_back(text("state", 16, [](void *r) { return &AC(r).state; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("state", 16, [](void *r) { return &AC(r).state; }, Presence::NonEmpty,
 	                   codes(mnu::kActionStates, {{"", 0}})));
-	out.push_back(text("file", 128, [](void *r) { return &AC(r).file; }, Presence::NonEmpty, Ref::Menu));
-	out.push_back(text("field", 128, [](void *r) { return &AC(r).field; }, Presence::NonEmpty, Ref::Dynamic));
+	out.push_back(text("file", 128, [](void *r) { return &AC(r).file; }, Presence::NonEmpty));
+	out.push_back(text("field", 128, [](void *r) { return &AC(r).field; }, Presence::NonEmpty));
 	{
-		Entry slot = text("field_attr", 16, [](void *r) { return &AC(r).field_attr; }, Presence::NonEmpty, Ref::None,
+		Entry slot = text("field_attr", 16, [](void *r) { return &AC(r).field_attr; }, Presence::NonEmpty,
 		                  field_attr_choices());
 		slot.custom_set = &field_attr_set;
 		out.push_back(slot);
@@ -428,9 +391,9 @@ std::vector<Entry> action_entries() {
 	out.push_back(number("target_form", [](void *r) { return &AC(r).target_form; },
 	                     [](void *r) { return &AC(r).has_target_form; }));
 	out.push_back(flag("toggle", [](void *r) { return &AC(r).toggle; }));
-	out.push_back(text("test", 8, [](void *r) { return &AC(r).test; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("test", 8, [](void *r) { return &AC(r).test; }, Presence::NonEmpty,
 	                   {{"", 0}, {"LT", 1}, {"LE", 2}, {"EQ", 3}, {"GE", 4}, {"GT", 5}}));
-	out.push_back(text("target", 128, [](void *r) { return &AC(r).target; }, Presence::Always, Ref::Dynamic));
+	out.push_back(text("target", 128, [](void *r) { return &AC(r).target; }, Presence::Always));
 	out.push_back(flag("external_browser", [](void *r) { return &AC(r).external_browser; }));
 	return out;
 }
@@ -448,19 +411,19 @@ std::vector<Entry> hotkey_entries() {
 // does not load adds no line.
 std::vector<Entry> datasource_entries() {
 	return {
-	        text("value", 128, [](void *r) { return static_cast<std::string *>(r); }, Presence::Always, Ref::Credits),
+	        text("value", 128, [](void *r) { return static_cast<std::string *>(r); }, Presence::Always),
 	};
 }
 
 mnu::Item &IT(void *r) { return *static_cast<mnu::Item *>(r); }
 std::vector<Entry> item_entries() {
 	return {
-	        text("type", 16, [](void *r) { return &IT(r).type; }, Presence::NonEmpty, Ref::None,
+	        text("type", 16, [](void *r) { return &IT(r).type; }, Presence::NonEmpty,
 	             {{"", 0}, {"ID", 1}, {"IMAGE", 2}, {"COLOR", 3}, {"BITMAP", 4}}),
 	        text("value", 64, [](void *r) { return &IT(r).value; }),
-	        text("text", 1024, [](void *r) { return &IT(r).text; }, Presence::Always, Ref::Dynamic),
-	        text("justify", 64, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, Ref::None, justify_choices()),
-	        text("vjustify", 64, [](void *r) { return &IT(r).vjustify; }, Presence::NonEmpty, Ref::None,
+	        text("text", 1024, [](void *r) { return &IT(r).text; }, Presence::Always),
+	        text("justify", 64, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, justify_choices()),
+	        text("vjustify", 64, [](void *r) { return &IT(r).vjustify; }, Presence::NonEmpty,
 	             vjustify_choices()),
 	        flag("pairs_list", [](void *r) { return &IT(r).pairs_list; }),
 	        number("column", [](void *r) { return &IT(r).column; }, [](void *r) { return &IT(r).has_column; }),
@@ -470,14 +433,14 @@ std::vector<Entry> item_entries() {
 mnu::TableHeader &HD(void *r) { return *static_cast<mnu::TableHeader *>(r); }
 std::vector<Entry> header_entries() {
 	return {
-	        text("justify", 64, [](void *r) { return &HD(r).justify; }, Presence::NonEmpty, Ref::None, justify_choices()),
-	        text("vjustify", 64, [](void *r) { return &HD(r).vjustify; }, Presence::NonEmpty, Ref::None,
+	        text("justify", 64, [](void *r) { return &HD(r).justify; }, Presence::NonEmpty, justify_choices()),
+	        text("vjustify", 64, [](void *r) { return &HD(r).vjustify; }, Presence::NonEmpty,
 	             vjustify_choices()),
 	        number("column", [](void *r) { return &HD(r).column; }, [](void *r) { return &HD(r).has_column; }),
 	        text("sort", 8, [](void *r) { return &HD(r).sort; }),
 	        number("width", [](void *r) { return &HD(r).width; }, [](void *r) { return &HD(r).has_width; }),
-	        text("type", 8, [](void *r) { return &HD(r).type; }, Presence::NonEmpty, Ref::None, id_choices()),
-	        text("text", 1024, [](void *r) { return &HD(r).text; }, Presence::Always, Ref::Dynamic),
+	        text("type", 8, [](void *r) { return &HD(r).type; }, Presence::NonEmpty, id_choices()),
+	        text("text", 1024, [](void *r) { return &HD(r).text; }, Presence::Always),
 	};
 }
 
@@ -528,12 +491,12 @@ template <int K> Entry draw_flag_entry(const char *path) {
 }
 std::vector<Entry> body_entries() {
 	std::vector<Entry> out;
-	out.push_back(text("justify", 64, [](void *r) { return &BD(r).justify; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("justify", 64, [](void *r) { return &BD(r).justify; }, Presence::NonEmpty,
 	                   justify_choices()));
-	out.push_back(text("vjustify", 64, [](void *r) { return &BD(r).vjustify; }, Presence::NonEmpty, Ref::None,
+	out.push_back(text("vjustify", 64, [](void *r) { return &BD(r).vjustify; }, Presence::NonEmpty,
 	                   vjustify_choices()));
 	out.push_back(number("column", [](void *r) { return &BD(r).column; }, [](void *r) { return &BD(r).has_column; }));
-	Entry display = text("display", 16, [](void *r) { return &BD(r).display; }, Presence::NonEmpty, Ref::None,
+	Entry display = text("display", 16, [](void *r) { return &BD(r).display; }, Presence::NonEmpty,
 	                     {{"", 0}, {"CUSTOM_DRAW", 1}, {"BITMAP_DRAW", 2}, {"BITMAP_TEXT", 3}});
 	display.custom_set = &display_set;
 	out.push_back(display);
@@ -552,7 +515,7 @@ std::vector<Entry> subst_entries() {
 	        text("value", 64, [](void *r) { return &SU(r).value; }),
 	        flag("is_url", [](void *r) { return &SU(r).is_url; }),
 	        flag("is_file", [](void *r) { return &SU(r).is_file; }),
-	        text("file", 128, [](void *r) { return &SU(r).file; }, Presence::Always, Ref::Dynamic),
+	        text("file", 128, [](void *r) { return &SU(r).file; }, Presence::Always),
 	};
 }
 
@@ -607,25 +570,25 @@ std::vector<Entry> attribute_entries() {
 	return out;
 }
 
-constexpr size_t kShapeCount = size_t(MenuShape::Attribute) + 1;
+constexpr size_t kShapeCount = mnu::kSchemaShapeCount;
 
-std::vector<Entry> entries_of(MenuShape shape) {
+std::vector<Entry> entries_of(mnu::SchemaShape shape) {
 	switch (shape) {
-	case MenuShape::Screen: return screen_entries();
-	case MenuShape::Window: return window_entries();
-	case MenuShape::Part: return part_entries();
-	case MenuShape::Appearance: return appearance_entries();
-	case MenuShape::Sound: return sound_entries();
-	case MenuShape::Action: return action_entries();
-	case MenuShape::Hotkey: return hotkey_entries();
-	case MenuShape::Datasource: return datasource_entries();
-	case MenuShape::Item: return item_entries();
-	case MenuShape::Row: return {};
-	case MenuShape::Header: return header_entries();
-	case MenuShape::Body: return body_entries();
-	case MenuShape::Subst: return subst_entries();
-	case MenuShape::Element: return element_entries();
-	case MenuShape::Attribute: return attribute_entries();
+	case mnu::SchemaShape::Screen: return screen_entries();
+	case mnu::SchemaShape::Window: return window_entries();
+	case mnu::SchemaShape::Part: return part_entries();
+	case mnu::SchemaShape::Appearance: return appearance_entries();
+	case mnu::SchemaShape::Sound: return sound_entries();
+	case mnu::SchemaShape::Action: return action_entries();
+	case mnu::SchemaShape::Hotkey: return hotkey_entries();
+	case mnu::SchemaShape::Datasource: return datasource_entries();
+	case mnu::SchemaShape::Item: return item_entries();
+	case mnu::SchemaShape::Row: return {};
+	case mnu::SchemaShape::Header: return header_entries();
+	case mnu::SchemaShape::Body: return body_entries();
+	case mnu::SchemaShape::Subst: return subst_entries();
+	case mnu::SchemaShape::Element: return element_entries();
+	case mnu::SchemaShape::Attribute: return attribute_entries();
 	}
 	return {};
 }
@@ -635,7 +598,7 @@ std::vector<Entry> entries_of(MenuShape shape) {
 const std::array<std::vector<Entry>, kShapeCount> &all_entries() {
 	static const std::array<std::vector<Entry>, kShapeCount> entries = [] {
 		std::array<std::vector<Entry>, kShapeCount> out;
-		for (size_t s = 0; s < kShapeCount; ++s) out[s] = entries_of(MenuShape(s));
+		for (size_t s = 0; s < kShapeCount; ++s) out[s] = entries_of(mnu::SchemaShape(s));
 		return out;
 	}();
 	return entries;
@@ -735,79 +698,82 @@ bool entry_set(const Entry &e, const Entry *block, void *record, const Value &va
 
 // --- what a field names, by its record ----------------------------------------------------------------
 
-ReferenceKind reference_of(Ref reference) {
+// The format's answer (mnu::schema_reference) as the editor's reference kinds.
+ReferenceKind reference_of(mnu::SchemaReference reference) {
 	switch (reference) {
-	case Ref::Font: return ReferenceKind::Font;
-	case Ref::MenuTexture: return ReferenceKind::MenuTexture;
-	case Ref::StyleVar: return ReferenceKind::StyleVar;
-	case Ref::TextTable: return ReferenceKind::TextTable;
-	case Ref::TextId: return ReferenceKind::TextId;
-	case Ref::Menu: return ReferenceKind::Menu;
-	case Ref::Sound: return ReferenceKind::SoundBank;
-	case Ref::Credits: return ReferenceKind::Credits;
-	case Ref::Screen: return ReferenceKind::MenuScreen;
-	case Ref::Window: return ReferenceKind::MenuWindow;
-	default: return ReferenceKind::None;
+	case mnu::SchemaReference::Font: return ReferenceKind::Font;
+	case mnu::SchemaReference::MenuTexture: return ReferenceKind::MenuTexture;
+	case mnu::SchemaReference::StyleVar: return ReferenceKind::StyleVar;
+	case mnu::SchemaReference::TextTable: return ReferenceKind::TextTable;
+	case mnu::SchemaReference::TextId: return ReferenceKind::TextId;
+	case mnu::SchemaReference::Menu: return ReferenceKind::Menu;
+	case mnu::SchemaReference::Sound: return ReferenceKind::SoundBank;
+	case mnu::SchemaReference::Credits: return ReferenceKind::Credits;
+	case mnu::SchemaReference::Screen: return ReferenceKind::MenuScreen;
+	case mnu::SchemaReference::Window: return ReferenceKind::MenuWindow;
+	case mnu::SchemaReference::None: return ReferenceKind::None;
 	}
+	return ReferenceKind::None;
 }
 
-// What a field whose sibling decides it names on this record: an APPEARANCE's value is a texture for
-// IMAGE / IMAGEROW, a style colour for COLOR / OUTLINE; an ITEM's text a string id for ID, a texture for
-// IMAGE / BITMAP, a colour for COLOR; a HEADER's text and the STRING's and TOGGLE_STRING's value a string
-// id for ID; a SUBST's text a texture when it is a FILE and not a URL; an ACTION's target a screen for
-// SCREEN, a window for WINDOW, TAB, GLB_FILTER and GLB_FILTER_NUM, and its FIELD / SOURCE / NAME slot a
-// window for URL. None when it names nothing here.
-ReferenceKind reference_on(MenuShape shape, const char *path, void *record) {
-	const auto is = [](const std::string &token, const char *what) { return iequals(token, what); };
-	switch (shape) {
-	case MenuShape::Appearance: {
-		const mnu::Appearance &a = AP(record);
-		if (is(a.type, "IMAGE") || is(a.type, "IMAGEROW")) return ReferenceKind::MenuTexture;
-		if (is(a.type, "COLOR") || is(a.type, "OUTLINE")) return ReferenceKind::StyleVar;
-		return ReferenceKind::None;
+// --- where a record sits ------------------------------------------------------------------------------
+
+MenuContext root_context(const mnu::Window &root) {
+	MenuContext c;
+	c.window = &root;
+	c.root = &root;
+	c.text_fallback = &root;
+	return c;
+}
+
+// A list's element path: its records' kind's token ("action", "items.item", "list_box").
+const char *list_token(NodeKind owner, size_t list) {
+	return menu_table().kind(menu_table().kind(owner)->lists()[list].spec.kind)->row().token;
+}
+
+std::string list_path(const MenuContext &owner, const char *token) {
+	return owner.prefix.empty() ? std::string(token) : owner.prefix + "." + token;
+}
+
+// Whether the owner's window type reads one of the owner's lists.
+mnu::SchemaApplies list_reads_in(const MenuContext &owner, const char *token) {
+	if (!owner.window) return owner.applies; // a screen's root windows
+	return mnu::schema_applies_both(owner.applies, mnu::schema_reads(owner.window->type, list_path(owner, token)));
+}
+
+// The context of the record at an index of the owner's list `list`.
+MenuContext step_into(const MenuContext &owner, NodeKind owner_kind, size_t list, const RecordHandle &record) {
+	const char *token = list_token(owner_kind, list);
+	MenuContext c;
+	c.applies = list_reads_in(owner, token);
+	if (is_window_kind(owner_kind) && std::strcmp(token, "element") == 0)
+		c.applies = mnu::schema_applies_both(c.applies,
+		                                     mnu::schema_element_reads(owner.window->type, record.as<mnu::Element>().tag));
+	c.root = owner.root;
+	c.text_fallback = owner.text_fallback;
+	if (is_window_kind(record.kind)) {
+		c.window = &record.as<mnu::Window>();
+		// A part's string ids fall back to the root's TEXT_RSRC or are its own (the format's rule).
+		if (menu_shape(record.kind) == mnu::SchemaShape::Part)
+			c.text_fallback = mnu::schema_part_reads_root_text(token) ? owner.root : c.window;
+	} else {
+		c.window = owner.window;
+		c.prefix = list_path(owner, token);
 	}
-	case MenuShape::Item: {
-		const mnu::Item &i = IT(record);
-		if (is(i.type, "ID")) return ReferenceKind::TextId;
-		if (is(i.type, "IMAGE") || is(i.type, "BITMAP")) return ReferenceKind::MenuTexture;
-		if (is(i.type, "COLOR")) return ReferenceKind::StyleVar;
-		return ReferenceKind::None;
-	}
-	case MenuShape::Header: return is(HD(record).type, "ID") ? ReferenceKind::TextId : ReferenceKind::None;
-	case MenuShape::Action: {
-		// The verb decides what the text and the slot name [orig: CUIWidget_HandleScriptedAction @
-		// 0x6497f0]: SCREEN selects the screen of that name in the file it loads (@ 0x649894,
-		// CUIScene_SelectNodeByName @ 0x63b6b0); WINDOW finds the window of that name on the acting
-		// window's own screen (@ 0x6498c8, UI_FindScreenControl @ 0x63ae80); TAB moves the focus to the
-		// control of that name (@ 0x649c30) and GLB_FILTER / GLB_FILTER_NUM send to it [orig:
-		// CEditWnd_HandleInputEvent @ 0x661510], each on the screen showing, the acting window's while its
-		// keys reach it; URL reads the text of the control the slot names (@ 0x649a1c). Every other
-		// verb's text is no name the file defines.
-		const mnu::Action &a = AC(record);
-		if (std::strcmp(path, "target") == 0) {
-			if (is(a.type, "SCREEN")) return ReferenceKind::MenuScreen;
-			if (is(a.type, "WINDOW") || is(a.type, "TAB") || is(a.type, "GLB_FILTER") || is(a.type, "GLB_FILTER_NUM"))
-				return ReferenceKind::MenuWindow;
-			return ReferenceKind::None;
-		}
-		if (std::strcmp(path, "field") == 0) return is(a.type, "URL") ? ReferenceKind::MenuWindow : ReferenceKind::None;
-		return ReferenceKind::None;
-	}
-	case MenuShape::Subst: {
-		const mnu::TableSubst &s = SU(record);
-		return s.is_file && !s.is_url ? ReferenceKind::MenuTexture : ReferenceKind::None;
-	}
-	case MenuShape::Window:
-	case MenuShape::Part: {
-		const mnu::Window &w = W(record);
-		if (std::strcmp(path, "string.value") == 0)
-			return is(w.string_data.type, "ID") ? ReferenceKind::TextId : ReferenceKind::None;
-		if (std::strcmp(path, "toggle_string.value") == 0)
-			return is(w.toggle_string.type, "ID") ? ReferenceKind::TextId : ReferenceKind::None;
-		return ReferenceKind::None;
-	}
-	default: return ReferenceKind::None;
-	}
+	return c;
+}
+
+// Whether the game reads a field where its record sits: the type of the window it lies in reads the
+// element path down to it, the lists above it are read, and an ACTION's verb reads it.
+mnu::SchemaApplies menu_field_reads(const RecordHandle &record, const RecordOwners &owners, mnu::SchemaShape shape,
+                                    const char *path) {
+	const MenuContext context = menu_context(record, owners);
+	const std::string full = context.prefix.empty() ? std::string(path) : context.prefix + "." + path;
+	mnu::SchemaApplies applies = context.applies;
+	if (context.window) applies = mnu::schema_applies_both(applies, mnu::schema_reads(context.window->type, full));
+	if (shape == mnu::SchemaShape::Action)
+		applies = mnu::schema_applies_both(applies, mnu::schema_action_reads(record.as<mnu::Action>(), path));
+	return applies;
 }
 
 // --- what the editor shows ---------------------------------------------------------------------------
@@ -883,39 +849,39 @@ template <size_t N> const char *find_label(const PathLabel (&table)[N], const st
 	return "";
 }
 
-bool is_window_shape(MenuShape shape) { return shape == MenuShape::Window || shape == MenuShape::Part; }
+bool is_window_shape(mnu::SchemaShape shape) { return shape == mnu::SchemaShape::Window || shape == mnu::SchemaShape::Part; }
 
-const char *field_label(MenuShape shape, const std::string &path) {
+const char *field_label(mnu::SchemaShape shape, const std::string &path) {
 	switch (shape) {
-	case MenuShape::Screen: return find_label(kScreenLabels, path);
-	case MenuShape::Window:
-	case MenuShape::Part: return find_label(kWindowLabels, path);
-	case MenuShape::Appearance: return find_label(kAppearanceLabels, path);
-	case MenuShape::Sound: return find_label(kSoundLabels, path);
-	case MenuShape::Action: return find_label(kActionLabels, path);
-	case MenuShape::Hotkey: return find_label(kHotkeyLabels, path);
-	case MenuShape::Datasource: return find_label(kDatasourceLabels, path);
-	case MenuShape::Item: return find_label(kItemLabels, path);
-	case MenuShape::Row: return "";
-	case MenuShape::Header: return find_label(kHeaderLabels, path);
-	case MenuShape::Body: return find_label(kBodyLabels, path);
-	case MenuShape::Subst: return find_label(kSubstLabels, path);
-	case MenuShape::Element: return find_label(kElementLabels, path);
-	case MenuShape::Attribute: return find_label(kAttributeLabels, path);
+	case mnu::SchemaShape::Screen: return find_label(kScreenLabels, path);
+	case mnu::SchemaShape::Window:
+	case mnu::SchemaShape::Part: return find_label(kWindowLabels, path);
+	case mnu::SchemaShape::Appearance: return find_label(kAppearanceLabels, path);
+	case mnu::SchemaShape::Sound: return find_label(kSoundLabels, path);
+	case mnu::SchemaShape::Action: return find_label(kActionLabels, path);
+	case mnu::SchemaShape::Hotkey: return find_label(kHotkeyLabels, path);
+	case mnu::SchemaShape::Datasource: return find_label(kDatasourceLabels, path);
+	case mnu::SchemaShape::Item: return find_label(kItemLabels, path);
+	case mnu::SchemaShape::Row: return "";
+	case mnu::SchemaShape::Header: return find_label(kHeaderLabels, path);
+	case mnu::SchemaShape::Body: return find_label(kBodyLabels, path);
+	case mnu::SchemaShape::Subst: return find_label(kSubstLabels, path);
+	case mnu::SchemaShape::Element: return find_label(kElementLabels, path);
+	case mnu::SchemaShape::Attribute: return find_label(kAttributeLabels, path);
 	}
 	return "";
 }
 
 // The group heading of a window field: its path's first step's ("" for one outside any group; a block's
 // toggle is named as its group).
-const char *section_label(MenuShape shape, const std::string &path) {
+const char *section_label(mnu::SchemaShape shape, const std::string &path) {
 	return is_window_shape(shape) ? find_label(kWindowSections, path.substr(0, path.find('.'))) : "";
 }
 
 // Whether a text field holds prose that may run over several lines.
-bool multiline(MenuShape shape, const std::string &path) {
+bool multiline(mnu::SchemaShape shape, const std::string &path) {
 	if (is_window_shape(shape)) return path == "string.value" || path == "toggle_string.value" || path == "private_data";
-	return (shape == MenuShape::Item || shape == MenuShape::Header || shape == MenuShape::Element) && path == "text";
+	return (shape == mnu::SchemaShape::Item || shape == mnu::SchemaShape::Header || shape == mnu::SchemaShape::Element) && path == "text";
 }
 
 // The readable name of a choice: the token's meaning, the token itself the tooltip. The verbs follow
@@ -981,20 +947,20 @@ template <size_t N> const char *find_choice(const ChoiceLabel (&table)[N], const
 	return "";
 }
 
-const char *choice_label(MenuShape shape, const std::string &path, const char *token) {
+const char *choice_label(mnu::SchemaShape shape, const std::string &path, const char *token) {
 	const std::string step = path.substr(path.rfind('.') == std::string::npos ? 0 : path.rfind('.') + 1);
 	if (step == "justify" || step == "vjustify") return find_choice(kAlignLabels, step, token);
 	switch (shape) {
-	case MenuShape::Window:
-	case MenuShape::Part:
+	case mnu::SchemaShape::Window:
+	case mnu::SchemaShape::Part:
 		// STRING's and TOGGLE_STRING's TYPE: plain text or a string id, beside the window's own.
 		return find_choice(kWindowChoices, path == "string.type" || path == "toggle_string.type" ? "type" : path, token);
-	case MenuShape::Appearance: return find_choice(kAppearanceChoices, path, token);
-	case MenuShape::Sound: return find_choice(kSoundChoices, path, token);
-	case MenuShape::Action: return find_choice(kActionChoices, path, token);
-	case MenuShape::Item: return find_choice(kItemChoices, path, token);
-	case MenuShape::Header: return find_choice(kHeaderChoices, path, token);
-	case MenuShape::Body: return find_choice(kBodyChoices, path, token);
+	case mnu::SchemaShape::Appearance: return find_choice(kAppearanceChoices, path, token);
+	case mnu::SchemaShape::Sound: return find_choice(kSoundChoices, path, token);
+	case mnu::SchemaShape::Action: return find_choice(kActionChoices, path, token);
+	case mnu::SchemaShape::Item: return find_choice(kItemChoices, path, token);
+	case mnu::SchemaShape::Header: return find_choice(kHeaderChoices, path, token);
+	case mnu::SchemaShape::Body: return find_choice(kBodyChoices, path, token);
 	default: return "";
 	}
 }
@@ -1007,26 +973,22 @@ const std::vector<FieldChoice> &yes_no() {
 // One entry as a labelled field: a flag is a yes / no integer, a Bit field is optional, a field whose
 // reference a sibling decides references nothing until its record decides it; each with the name, the
 // group and the choice names the editor shows.
-LabelledField labelled(MenuShape shape, const std::vector<Entry> &entries, const Entry &e) {
+LabelledField labelled(mnu::SchemaShape shape, const std::vector<Entry> &entries, const Entry &e) {
 	LabelledField out;
 	FieldSchema &schema = out.schema;
 	schema.id = e.path;
 	schema.type = e.type == Type::Text ? FieldType::Text : FieldType::Integer;
 	schema.width = e.width;
-	schema.reference = reference_of(e.reference);
+	schema.reference = reference_of(mnu::schema_field_reference(shape, e.path));
 	if (e.type == Type::Flag) schema.choices = yes_no();
 	for (const Choice &choice : e.choices) schema.choices.push_back({choice.name, choice.value, choice_label(shape, e.path, choice.name)});
 	schema.open_choices = e.open;
-	// A style colour's text is the hex AARRGGBB word the parse reads with wcstoul (a %VAR% the stylesheet
-	// resolves first) [orig: CRT_wcstoxl @ 0x76e93b through the APPEARANCE COLOR / OUTLINE arm @ 0x648562,
-	// the FONT colours @ 0x648d14..0x648e64 and the spin ITEM @ 0x64bd10]: every field naming a style
-	// variable holds one.
-	schema.color = schema.reference == ReferenceKind::StyleVar ? FieldColor::HexArgb : FieldColor::None;
+	schema.color = menu_reference_colour(schema.reference);
 	schema.optional = e.presence == Presence::Bit;
 	// A screen's and a window's NAME is what the by-name lookups find them by (MnuDocument::lookup_names);
 	// a part's NAME no lookup reads (MnuDocument::refine_field).
 	if (std::strcmp(e.path, "name") == 0) {
-		if (shape == MenuShape::Screen) schema.defines = ReferenceKind::MenuScreen;
+		if (shape == mnu::SchemaShape::Screen) schema.defines = ReferenceKind::MenuScreen;
 		if (is_window_shape(shape)) schema.defines = ReferenceKind::MenuWindow;
 	}
 	schema.label = field_label(shape, e.path);
@@ -1053,44 +1015,32 @@ LabelledField labelled(MenuShape shape, const std::vector<Entry> &entries, const
 			if (present) author_block(block, record.data);
 			return true;
 		};
-	if (e.reference == Ref::Dynamic) {
-		const char *path = e.path;
-		out.reference = [shape, path](const RecordHandle &record) { return reference_on(shape, path, record.data); };
-	}
+	const char *path = e.path;
+	if (mnu::schema_reference_varies(shape, path))
+		out.reference = [shape, path](const RecordHandle &record, const RecordOwners &) {
+			return reference_of(mnu::schema_reference(shape, path, record.data));
+		};
+	// Whether the game reads the field where its record sits: by the type of the window it lies in and
+	// the element path down to it (a screen's own fields always), an ACTION's by its verb too.
+	if (shape != mnu::SchemaShape::Screen)
+		out.applies = [shape, path](const RecordHandle &record, const RecordOwners &owners) {
+			return menu_applicability(menu_field_reads(record, owners, shape, path));
+		};
 	return out;
 }
 
 // --- the lists ---------------------------------------------------------------------------------------
 
-// The defaults a new record takes: each survives the writer's skips and reads back as written. A window
-// of type STATIC at 0,0,100,20 with a typeless DEFAULT appearance, an APPEARANCE with STATE DEFAULT, a
-// SOUND on MOUSEIN with the MOUSE_OVER trigger, an ACTION of type POP_SCREEN (the one verb that takes no
-// operand [orig: CUIWidget_HandleScriptedAction @ 0x6497f0, code 12]), a HEADER and a BODY with their
-// COLUMN index written (the new column's), a SUBST with its COLUMN written, a window's PLAYERLIST
-// attribute, an element's NAME attribute, an extra element TARGET.
-void make_default(mnu::Window &w, size_t) {
-	w.type = mnu::WindowType::Static;
-	w.position = {0, 0, 100, 20, true, true, true, true};
-	mnu::Appearance appearance;
-	appearance.state = "default";
-	w.appearances.push_back(appearance);
-}
-void make_default(mnu::Appearance &a, size_t) { a.state = "default"; }
-void make_default(mnu::Sound &s, size_t) {
-	s.state = "mousein";
-	s.trigger = "MOUSE_OVER";
-}
-void make_default(mnu::Action &a, size_t) { a.type = "POP_SCREEN"; }
-void make_default(mnu::Element &e, size_t) { e.tag = "TARGET"; }
-void make_default(mnu::TableHeader &h, size_t index) {
-	h.has_column = true;
-	h.column = int(index);
-}
-void make_default(mnu::TableBody &b, size_t index) {
-	b.has_column = true;
-	b.column = int(index);
-}
-void make_default(mnu::TableSubst &s, size_t) { s.has_column = true; }
+// The defaults a new record takes, the format's (mnu::schema_default): each survives the writer's skips
+// and reads back as written; a HEADER's and a BODY's COLUMN is the new column's index.
+void make_default(mnu::Window &w, size_t) { mnu::schema_default(w); }
+void make_default(mnu::Appearance &a, size_t) { mnu::schema_default(a); }
+void make_default(mnu::Sound &s, size_t) { mnu::schema_default(s); }
+void make_default(mnu::Action &a, size_t) { mnu::schema_default(a); }
+void make_default(mnu::Element &e, size_t) { mnu::schema_default(e); }
+void make_default(mnu::TableHeader &h, size_t index) { mnu::schema_default(h, index); }
+void make_default(mnu::TableBody &b, size_t index) { mnu::schema_default(b, index); }
+void make_default(mnu::TableSubst &s, size_t) { mnu::schema_default(s); }
 template <class T> void make_default(T &, size_t) {}
 
 // A list of the owner's: a std::vector of its records, each new one taking its list's default, an ITEMS
@@ -1167,7 +1117,7 @@ ListOps part_ops(NodeKind kind, const char *record_label) {
 			part.author(Type) = *static_cast<const mnu::Window *>(record->data.get());
 			if (!record->shown) part.hide();
 		} else {
-			default_part(part, Type);
+			mnu::schema_default_part(part, Type);
 		}
 		return true;
 	};
@@ -1195,32 +1145,32 @@ ListOps part_ops(NodeKind kind, const char *record_label) {
 struct KindRow {
 	const char *token;
 	const char *label;
-	MenuShape shape;
+	mnu::SchemaShape shape;
 };
 constexpr KindRow kKinds[] = {
-	{"screen", "Screen", MenuShape::Screen},
-	{"window", "Window", MenuShape::Window},
-	{"attribute", "Attribute", MenuShape::Attribute},
-	{"hotkey", "Hotkey", MenuShape::Hotkey},
-	{"action", "Action", MenuShape::Action},
-	{"appearance", "Appearance", MenuShape::Appearance},
-	{"shuttle", "Shuttle", MenuShape::Appearance},
-	{"scrollup", "Scroll up", MenuShape::Appearance},
-	{"scrolldown", "Scroll down", MenuShape::Appearance},
-	{"datasource", "Data source", MenuShape::Datasource},
-	{"sound", "Sound", MenuShape::Sound},
-	{"items.appearance", "Item appearance", MenuShape::Appearance},
-	{"items.item", "Item", MenuShape::Item},
-	{"items.row", "Row", MenuShape::Row},
-	{"list_box", "List box", MenuShape::Part},
-	{"spinup", "Spin up", MenuShape::Part},
-	{"spindown", "Spin down", MenuShape::Part},
-	{"column.header", "Header", MenuShape::Header},
-	{"column.body", "Body", MenuShape::Body},
-	{"column.subst", "Substitution", MenuShape::Subst},
-	{"scrollbar", "Scrollbar", MenuShape::Part},
-	{"element", "Element", MenuShape::Element},
-	{"item", "Cell", MenuShape::Item},
+	{"screen", "Screen", mnu::SchemaShape::Screen},
+	{"window", "Window", mnu::SchemaShape::Window},
+	{"attribute", "Attribute", mnu::SchemaShape::Attribute},
+	{"hotkey", "Hotkey", mnu::SchemaShape::Hotkey},
+	{"action", "Action", mnu::SchemaShape::Action},
+	{"appearance", "Appearance", mnu::SchemaShape::Appearance},
+	{"shuttle", "Shuttle", mnu::SchemaShape::Appearance},
+	{"scrollup", "Scroll up", mnu::SchemaShape::Appearance},
+	{"scrolldown", "Scroll down", mnu::SchemaShape::Appearance},
+	{"datasource", "Data source", mnu::SchemaShape::Datasource},
+	{"sound", "Sound", mnu::SchemaShape::Sound},
+	{"items.appearance", "Item appearance", mnu::SchemaShape::Appearance},
+	{"items.item", "Item", mnu::SchemaShape::Item},
+	{"items.row", "Row", mnu::SchemaShape::Row},
+	{"list_box", "List box", mnu::SchemaShape::Part},
+	{"spinup", "Spin up", mnu::SchemaShape::Part},
+	{"spindown", "Spin down", mnu::SchemaShape::Part},
+	{"column.header", "Header", mnu::SchemaShape::Header},
+	{"column.body", "Body", mnu::SchemaShape::Body},
+	{"column.subst", "Substitution", mnu::SchemaShape::Subst},
+	{"scrollbar", "Scrollbar", mnu::SchemaShape::Part},
+	{"element", "Element", mnu::SchemaShape::Element},
+	{"item", "Cell", mnu::SchemaShape::Item},
 };
 constexpr size_t kKindCount = std::size(kKinds);
 
@@ -1234,7 +1184,7 @@ constexpr NodeKind kind_index(const char *token) {
 	return -1;
 }
 constexpr bool kinds_well_formed() {
-	if (kKinds[0].shape != MenuShape::Screen || kKinds[1].shape != MenuShape::Window) return false;
+	if (kKinds[0].shape != mnu::SchemaShape::Screen || kKinds[1].shape != mnu::SchemaShape::Window) return false;
 	for (size_t i = 0; i < kKindCount; ++i)
 		for (size_t j = i + 1; j < kKindCount; ++j)
 			if (same_text(kKinds[i].token, kKinds[j].token)) return false;
@@ -1262,8 +1212,7 @@ std::vector<TableList> window_lists() {
 	               vector_ops<Window, mnu::ElementAttribute>(
 	                       kind_index("attribute"), "Attributes", "Attribute",
 	                       [](Window &w) -> std::vector<mnu::ElementAttribute> & { return w.extra_attributes; },
-	                       // A window keeps only PLAYERLIST and SERVERLIST (GLB_TABLE).
-	                       [](mnu::ElementAttribute &a, size_t) { a.name = "PLAYERLIST"; })});
+	                       [](mnu::ElementAttribute &a, size_t) { mnu::schema_default_window_attribute(a); })});
 	out.push_back({spec("hotkey", "Hotkeys", ""),
 	               vector_ops<Window, mnu::Hotkey>(kind_index("hotkey"), "Hotkeys", "Hotkey",
 	                                               [](Window &w) -> std::vector<mnu::Hotkey> & { return w.hotkeys; })});
@@ -1354,16 +1303,16 @@ RecordTable make_table() {
 		windows.label = "Windows";
 		windows.name_field = "name";
 		switch (row.shape) {
-		case MenuShape::Screen:
+		case mnu::SchemaShape::Screen:
 			kind.list({windows, vector_ops<mnu::Screen, mnu::Window>(
 			                            kWindowKind, "Windows", "Window",
 			                            [](mnu::Screen &s) -> std::vector<mnu::Window> & { return s.roots; }, make_default)});
 			break;
-		case MenuShape::Window:
-		case MenuShape::Part:
+		case mnu::SchemaShape::Window:
+		case mnu::SchemaShape::Part:
 			for (TableList &list : window_lists()) kind.list(std::move(list));
 			break;
-		case MenuShape::Row: {
+		case mnu::SchemaShape::Row: {
 			Document::CollectionSpec cells;
 			cells.kind = kind_index("item");
 			cells.label = "Cells";
@@ -1372,7 +1321,7 @@ RecordTable make_table() {
 			                          [](mnu::TableRow &r) -> std::vector<mnu::Item> & { return r.cells; })});
 			break;
 		}
-		case MenuShape::Element: {
+		case mnu::SchemaShape::Element: {
 			Document::CollectionSpec attributes, elements;
 			attributes.kind = kind_index("attribute");
 			attributes.label = "Attributes";
@@ -1380,11 +1329,10 @@ RecordTable make_table() {
 			elements.kind = kind_index("element");
 			elements.label = "Elements";
 			elements.name_field = "tag";
-			// An element takes any attribute name.
 			kind.list({attributes, vector_ops<mnu::Element, mnu::ElementAttribute>(
 			                               kind_index("attribute"), "Attributes", "Attribute",
 			                               [](mnu::Element &e) -> std::vector<mnu::ElementAttribute> & { return e.attributes; },
-			                               [](mnu::ElementAttribute &a, size_t) { a.name = "NAME"; })});
+			                               [](mnu::ElementAttribute &a, size_t) { mnu::schema_default_element_attribute(a); })});
 			kind.list({elements, vector_ops<mnu::Element, mnu::Element>(
 			                             kind_index("element"), "Elements", "Element",
 			                             [](mnu::Element &e) -> std::vector<mnu::Element> & { return e.children; },
@@ -1405,8 +1353,38 @@ const RecordTable &menu_table() {
 	return table;
 }
 
-MenuShape menu_shape(NodeKind kind) {
-	return kind >= 0 && size_t(kind) < kKindCount ? kKinds[size_t(kind)].shape : MenuShape::Row;
+MenuContext menu_context(const RecordHandle &record, const RecordOwners &owners) {
+	// The root window: the record the screen's list holds (the second step), or the record itself.
+	const size_t steps = owners.size;
+	const RecordHandle root = steps > 1 ? owners[1].owner : record;
+	if (!is_window_kind(root.kind)) return MenuContext{}; // a screen, or a record given without its owners
+	MenuContext c = root_context(root.as<mnu::Window>());
+	for (size_t k = 1; k < steps; ++k)
+		c = step_into(c, owners[k].owner.kind, owners[k].list, k + 1 < steps ? owners[k + 1].owner : record);
+	return c;
+}
+
+mnu::SchemaApplies menu_list_reads(const RecordHandle &owner, const RecordOwners &owners, size_t list) {
+	return list_reads_in(menu_context(owner, owners), list_token(owner.kind, list));
+}
+
+Applicability menu_applicability(mnu::SchemaApplies applies) {
+	switch (applies) {
+	case mnu::SchemaApplies::Reads: return Applicability::Reads;
+	case mnu::SchemaApplies::Ignored: return Applicability::Ignored;
+	case mnu::SchemaApplies::Unverified: return Applicability::Unverified;
+	}
+	return Applicability::Unverified;
+}
+
+FieldColor menu_reference_colour(ReferenceKind reference) {
+	const mnu::SchemaReference named =
+	        reference == ReferenceKind::StyleVar ? mnu::SchemaReference::StyleVar : mnu::SchemaReference::None;
+	return mnu::schema_hex_colour(named) ? FieldColor::HexArgb : FieldColor::None;
+}
+
+mnu::SchemaShape menu_shape(NodeKind kind) {
+	return kind >= 0 && size_t(kind) < kKindCount ? kKinds[size_t(kind)].shape : mnu::SchemaShape::Row;
 }
 
 bool is_window_kind(NodeKind kind) { return kind >= 0 && size_t(kind) < kKindCount && is_window_shape(menu_shape(kind)); }

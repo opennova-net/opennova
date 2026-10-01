@@ -308,24 +308,6 @@ size_t add_entity(bms::File &file, EntityKind kind, int item_id, const EntityTra
 	return list->size() - 1;
 }
 
-bms::Entity make_entity(const bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform) {
-	return make_default_entity(file, kind, item_id, transform);
-}
-
-int next_entity_id(const bms::File &file) {
-	int max_id = 0;
-	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool) max_id = std::max(max_id, entity.id);
-	return max_id + 1;
-}
-
-bool entity_id_taken(const bms::File &file, int id) {
-	for (const std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
-		for (const bms::Entity &entity : *pool)
-			if (entity.id == id) return true;
-	return false;
-}
-
 bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &error) {
 	std::vector<bms::Entity> *list = entities(file, kind);
 	if (list == nullptr || index >= list->size()) {
@@ -415,37 +397,23 @@ bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 	return true;
 }
 
-bool insert_waypoint_stop(bms::File &file, size_t path_index, size_t index, int marker, std::string &error) {
-	if (path_index >= file.waypoint_records.size()) {
-		error = "Waypoint path index out of range";
+bool insert_waypoint_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error) {
+	std::vector<uint32_t> &stops = path.waypoint_numbers;
+	if (stops.size() >= kMaxWaypointPathMarkers) {
+		error = "Waypoint path marker count exceeds 32";
 		return false;
 	}
-	const bms::WaypointRecord &record = file.waypoint_records[path_index];
-	WaypointPath path = to_path(record, path_index);
-	path.marker_indices.insert(path.marker_indices.begin() +
-	                                   static_cast<std::ptrdiff_t>(std::min(index, path.marker_indices.size())),
-	                           marker);
-	return set_waypoint_path(file, path_index, path.marker_indices, path.flags, error);
+	stops.insert(stops.begin() + static_cast<std::ptrdiff_t>(std::min(index, stops.size())), marker);
+	resize_waypoint_padding(path, /*preserve_over_count=*/false); // the stops changed: the count is theirs
+	return true;
 }
 
-bool erase_waypoint_stop(bms::File &file, size_t path_index, size_t index, std::string &error) {
-	if (path_index >= file.waypoint_records.size() || index >= file.waypoint_records[path_index].waypoint_numbers.size()) {
-		error = "Waypoint path stop out of range";
-		return false;
-	}
-	WaypointPath path = to_path(file.waypoint_records[path_index], path_index);
-	path.marker_indices.erase(path.marker_indices.begin() + static_cast<std::ptrdiff_t>(index));
-	return set_waypoint_path(file, path_index, path.marker_indices, path.flags, error);
-}
-
-bool set_waypoint_stop(bms::File &file, size_t path_index, size_t index, int marker, std::string &error) {
-	if (path_index >= file.waypoint_records.size() || index >= file.waypoint_records[path_index].waypoint_numbers.size()) {
-		error = "Waypoint path stop out of range";
-		return false;
-	}
-	WaypointPath path = to_path(file.waypoint_records[path_index], path_index);
-	path.marker_indices[index] = marker;
-	return set_waypoint_path(file, path_index, path.marker_indices, path.flags, error);
+bool erase_waypoint_stop(bms::WaypointRecord &path, size_t index) {
+	std::vector<uint32_t> &stops = path.waypoint_numbers;
+	if (index >= stops.size()) return false;
+	stops.erase(stops.begin() + static_cast<std::ptrdiff_t>(index));
+	resize_waypoint_padding(path, /*preserve_over_count=*/false);
+	return true;
 }
 
 // --- area triggers ----------------------------------------------------------------
@@ -669,11 +637,6 @@ bool set_action(bms::File &file, size_t index, const MissionActionRecord &record
 
 bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
 		const MissionTriggerRecord &record, std::string &error) {
-	return insert_event_trigger(file, event_index, local_index, trigger_from_record(record), error);
-}
-
-bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
-		const bms::Trigger &trigger, std::string &error) {
 	if (event_index >= file.events.size()) {
 		error = "Mission event index out of range";
 		return false;
@@ -692,7 +655,7 @@ bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_inde
 		return false;
 	}
 	const size_t global_index = ev.trigger_count == 0 ? file.triggers.size() : static_cast<size_t>(ev.trigger_index) + local_index;
-	file.triggers.insert(file.triggers.begin() + static_cast<std::ptrdiff_t>(global_index), trigger);
+	file.triggers.insert(file.triggers.begin() + static_cast<std::ptrdiff_t>(global_index), trigger_from_record(record));
 	for (size_t i = 0; i < file.events.size(); ++i) {
 		if (i == event_index) {
 			continue;
@@ -765,11 +728,6 @@ bool move_event_trigger(bms::File &file, size_t event_index, size_t local_index,
 
 bool insert_event_action(bms::File &file, size_t event_index, size_t local_index,
 		const MissionActionRecord &record, std::string &error) {
-	return insert_event_action(file, event_index, local_index, action_from_record(record), error);
-}
-
-bool insert_event_action(bms::File &file, size_t event_index, size_t local_index,
-		const bms::Action &action, std::string &error) {
 	if (event_index >= file.events.size()) {
 		error = "Mission event index out of range";
 		return false;
@@ -788,7 +746,7 @@ bool insert_event_action(bms::File &file, size_t event_index, size_t local_index
 		return false;
 	}
 	const size_t global_index = ev.action_count == 0 ? file.actions.size() : static_cast<size_t>(ev.action_index) + local_index;
-	file.actions.insert(file.actions.begin() + static_cast<std::ptrdiff_t>(global_index), action);
+	file.actions.insert(file.actions.begin() + static_cast<std::ptrdiff_t>(global_index), action_from_record(record));
 	for (size_t i = 0; i < file.events.size(); ++i) {
 		if (i == event_index) {
 			continue;
@@ -874,25 +832,6 @@ size_t add_event(bms::File &file, const MissionEventRecord &record) {
 }
 
 bool remove_event(bms::File &file, size_t index, std::string &error) {
-	if (!erase_event(file, index, error)) return false;
-	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
-	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
-	// event_chain then flags as out-of-range. (Area-trigger refs are left alone because their index
-	// semantics are still under RE; here the semantics are proven, so the repair is safe.)
-	for (bms::Action &act : file.actions) {
-		if (act.action_type != bms::ActionType::ResetEvent) {
-			continue;
-		}
-		if (act.param1 > static_cast<int32_t>(index)) {
-			act.param1 -= 1;
-		} else if (act.param1 == static_cast<int32_t>(index)) {
-			act.param1 = -1;
-		}
-	}
-	return true;
-}
-
-bool erase_event(bms::File &file, size_t index, std::string &error) {
 	if (index >= file.events.size()) {
 		error = "Mission event index out of range";
 		return false;
@@ -916,50 +855,24 @@ bool erase_event(bms::File &file, size_t index, std::string &error) {
 	while (file.events[index].action_count > 0) {
 		remove_event_action(file, index, 0, drain_error);
 	}
+	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
+	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
+	// event_chain then flags as out-of-range. A *IsWithinArea trigger's param2 is the area trigger's
+	// array index (ZONE_REF, docs/mission/bms-event-runtime-re.md section 7.3) [orig:
+	// Entity_IsTeamInTriggerBounds @0x43c730], no event's: removing an event moves no zone, so
+	// remove_area_trigger is what repairs those.
+	for (bms::Action &act : file.actions) {
+		if (act.action_type != bms::ActionType::ResetEvent) {
+			continue;
+		}
+		if (act.param1 > static_cast<int32_t>(index)) {
+			act.param1 -= 1;
+		} else if (act.param1 == static_cast<int32_t>(index)) {
+			act.param1 = -1;
+		}
+	}
 	file.events.erase(file.events.begin() + static_cast<std::ptrdiff_t>(index));
 	sync_counts(file);
-	return true;
-}
-
-bool insert_event(bms::File &file, size_t index, const bms::Event &event,
-		const std::vector<bms::Trigger> &triggers, const std::vector<bms::Action> &actions,
-		std::string &error) {
-	if (triggers.size() > size_t(kMaxEventChainEntries) || actions.size() > size_t(kMaxEventChainEntries)) {
-		error = "Mission event chain exceeds 20 entries";
-		return false;
-	}
-	// The event goes in owning no chain (its range fields are the file's to assign), then its chain
-	// through the single-element inserts, each appended to the file's tables in order.
-	bms::Event fresh = event;
-	fresh.trigger_index = 0;
-	fresh.action_index = 0;
-	fresh.trigger_count = 0;
-	fresh.action_count = 0;
-	index = std::min(index, file.events.size());
-	file.events.insert(file.events.begin() + static_cast<std::ptrdiff_t>(index), fresh);
-	for (size_t i = 0; i < triggers.size(); ++i)
-		if (!insert_event_trigger(file, index, i, triggers[i], error)) return false;
-	for (size_t i = 0; i < actions.size(); ++i)
-		if (!insert_event_action(file, index, i, actions[i], error)) return false;
-	sync_counts(file);
-	return true;
-}
-
-bool event_trigger_range(const bms::File &file, size_t event_index, size_t &first, size_t &count) {
-	if (event_index >= file.events.size()) return false;
-	const bms::Event &ev = file.events[event_index];
-	if (!valid_range(ev.trigger_index, ev.trigger_count, file.triggers.size())) return false;
-	first = ev.trigger_count ? static_cast<size_t>(ev.trigger_index) : 0;
-	count = ev.trigger_count;
-	return true;
-}
-
-bool event_action_range(const bms::File &file, size_t event_index, size_t &first, size_t &count) {
-	if (event_index >= file.events.size()) return false;
-	const bms::Event &ev = file.events[event_index];
-	if (!valid_range(ev.action_index, ev.action_count, file.actions.size())) return false;
-	first = ev.action_count ? static_cast<size_t>(ev.action_index) : 0;
-	count = ev.action_count;
 	return true;
 }
 

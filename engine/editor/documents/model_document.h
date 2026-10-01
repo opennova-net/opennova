@@ -38,6 +38,14 @@ enum class ModelKind : NodeKind {
 };
 constexpr NodeKind node_kind(ModelKind kind) { return static_cast<NodeKind>(kind); }
 
+// The model row's lists, in the order its kind's lists give them (a record path's first step, the
+// row's RecordIds::lists): its LODs, materials, lights, user points, CTRL registers and MTRX rows. A
+// LOD's part animations and a material's texture rows are each the one list of their owner
+// (kModelOwnList).
+constexpr size_t kModelLods = 0, kModelMaterials = 1, kModelLights = 2, kModelUserPoints = 3, kModelRegisters = 4,
+                 kModelFrames = 5;
+constexpr size_t kModelOwnList = 0;
+
 // A LOD: the base's LOD (its geometry pointers the base's) and its PANM rows, in part order.
 struct ModelLod {
 	threedi::ThreediLod lod;
@@ -50,8 +58,8 @@ struct ModelMaterial {
 };
 
 // The model row, the record the table's Model kind is: the model's header and its tables. Its lists
-// (TableRow::ids, model_document_detail::kLods's order): 0 LODs, 1 materials, 2 lights, 3 user points,
-// 4 registers, 5 frames; a LOD's one list its part animations, a material's its texture rows.
+// (TableRow::ids) in kModelLods's order; a LOD's one list its part animations, a material's its
+// texture rows.
 struct ModelRow : TableRow {
 	assets::Model base;
 	threedi::ThreediHeader header;

@@ -5,17 +5,23 @@
 // changes nothing; a Clear leaves the element out; every list's default record writes and reads back;
 // the references a sibling decides; the two texts written as attribute names take only the reader's
 // tokens; and the shape's parts as the menu fills them (each kind's labelled fields, its choices with
-// their words, its lists by their tokens). Over a synthetic menu holding every element, and (a
-// SKIP-LEG without OPENNOVA_JO_ASSETS) the fifteen shipped revx02 menus of the reference fixture set.
-// Which window type reads what is the format's rule (tests/mnu/mnu_schema_test.cpp).
+// their words, its lists by their tokens); and what a record's owners decide of it (an ITEMS row's
+// text by its window's type). Over a synthetic menu holding every element, the fifteen shipped revx02
+// menus of the reference fixture set (a SKIP-LEG without OPENNOVA_JO_ASSETS) and every menu the packed
+// install serves, the same menus editor_menus_retail sweeps (a SKIP-LEG without OPENNOVA_JO_DIR). Which
+// window type reads what, what a field names and what a new record is are the format's rules
+// (tests/mnu/mnu_schema_test.cpp).
 #include <cstdlib>
 #include <functional>
 #include <iostream>
+#include <map>
 #include <set>
 #include <sstream>
 #include <string>
 #include <vector>
 
+#include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 #include <editor/documents/mnu_table.h>
 #include <formats/mnu/mnu.h>
 
@@ -100,7 +106,8 @@ ReferenceKind reference(const RecordHandle &record, const std::string &id) {
 	const TableKind &kind = kind_of(record);
 	const size_t place = kind.find(id);
 	if (place == TableKind::npos) return ReferenceKind::None;
-	return kind.reference(place) ? kind.reference(place)(record) : kind.fields()[place].reference;
+	return kind.reference(place) ? kind.reference(place)(record, opennova::editor::RecordOwners{})
+	                             : kind.fields()[place].reference;
 }
 const ListOps &ops_of(const RecordHandle &owner, size_t list) { return kind_of(owner).lists()[list].ops; }
 
@@ -643,6 +650,46 @@ bool test_name_tokens() {
 	return true;
 }
 
+// Where a record sits decides what the game reads of it: an ITEMS row's text by the type of the window
+// whose ITEMS hold it (the records it lies in, from its screen down), a part's fields by its own
+// window's type; the screen's root windows are always read, and so is what a record given without the
+// records it lies in holds.
+bool test_owners() {
+	using opennova::editor::Applicability;
+	using opennova::editor::OwnerStep;
+	using opennova::editor::RecordOwners;
+	mnu::Document doc;
+	CHECK(parse("<SCREEN><NAME>S</NAME><WINDOW type=\"spinlist\" name=\"W\"><POSITION><LEFT>0</LEFT></POSITION>"
+	            "<ITEMS><ITEM>one</ITEM></ITEMS></WINDOW></SCREEN>",
+	            doc),
+	      "parse");
+	const RecordHandle screen = screen_record(doc.screens[0]);
+	const RecordHandle window = window_record(doc.screens[0].roots[0]);
+	const size_t items = menu_window_list("items.item");
+	const RecordHandle item = ops_of(window, items).at(window, 0);
+	CHECK(item && item.kind == menu_kind("items.item"), "the ITEMS row");
+	const OwnerStep steps[] = {{screen, 0, 0}, {window, items, 0}};
+	const RecordOwners owners{steps, 2};
+	const TableKind &row = kind_of(item);
+	const size_t text = row.find("text");
+	CHECK(text != TableKind::npos && row.applies(text), "an ITEMS row's text decides by where it sits");
+	CHECK(row.applies(text)(item, owners) == Applicability::Reads, "a SPINLIST reads its ITEMS rows");
+	doc.screens[0].roots[0].type = mnu::WindowType::Table;
+	CHECK(row.applies(text)(item, owners) == Applicability::Ignored, "a TABLE reads its ROWs, not its ITEMS rows");
+	CHECK(opennova::editor::menu_list_reads(window, RecordOwners{steps, 1}, items) == mnu::SchemaApplies::Ignored,
+	      "the list the same");
+	doc.screens[0].roots[0].type = mnu::WindowType::SpinList;
+	CHECK(opennova::editor::menu_list_reads(window, RecordOwners{steps, 1}, items) == mnu::SchemaApplies::Reads,
+	      "a SPINLIST's ITEMS");
+	CHECK(opennova::editor::menu_list_reads(screen, RecordOwners{}, 0) == mnu::SchemaApplies::Reads,
+	      "a screen's root windows");
+	const opennova::editor::MenuContext context = opennova::editor::menu_context(item, owners);
+	CHECK(context.window == &doc.screens[0].roots[0] && context.prefix == "items.item" &&
+	              context.root == &doc.screens[0].roots[0],
+	      "the ITEMS row's window and its element path from it");
+	return true;
+}
+
 // The shipped menus, each rebuilt through the table alone.
 bool test_retail_fixtures() {
 	static const char *const kFixtures[] = {
@@ -664,6 +711,49 @@ bool test_retail_fixtures() {
 		CHECK(rebuilds(doc, name), name << " rebuilt through the table");
 	}
 	std::cout << "  fixture leg: 15 menus, " << records << " records rebuilt through the table\n";
+	return true;
+}
+
+// Every .mnu the packed install serves (the base game's, then each expansion's, a later layer's copy of
+// the same bytes counted once: the menus editor_menus_retail sweeps through MnuDocument), each rebuilt
+// through the table alone.
+bool test_retail_install() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (every .mnu the packed install serves, through the table)");
+		return true;
+	}
+	std::map<std::string, std::vector<uint8_t>> seen;
+	size_t menus = 0, repeats = 0, records = 0;
+	std::vector<std::string> mounts = {std::string()};
+	for (const std::string &expansion : retail::expansions()) mounts.push_back(expansion);
+	for (const std::string &expansion : mounts) {
+		opennova::Vfs vfs;
+		CHECK(vfs.mount_game(install, expansion, opennova::VfsMountMode::Packed),
+		      (expansion.empty() ? "<install>" : expansion) << ": " << vfs.last_error());
+		for (const auto &location : vfs.list_files()) {
+			const std::string &name = location.logical_name;
+			if (name.size() < 4 || !opennova::strutil::iequals(name.substr(name.size() - 4), ".mnu")) continue;
+			const std::string label = (expansion.empty() ? std::string("<install>/") : expansion + "/") + name;
+			std::vector<uint8_t> stored, decoded;
+			CHECK(vfs.read_file_raw(name, stored) && vfs.read_file(name, decoded), label << ": unreadable");
+			std::vector<uint8_t> &earlier = seen[name];
+			if (earlier == stored) {
+				++repeats;
+				continue;
+			}
+			earlier = stored;
+			mnu::Document doc;
+			std::string error;
+			CHECK(mnu::parse(decoded.data(), decoded.size(), doc, error), label << ": " << error);
+			records += walk(doc).size();
+			CHECK(rebuilds(doc, label), label << " rebuilt through the table");
+			++menus;
+		}
+	}
+	CHECK(menus > 0, "the packed install served no .mnu");
+	std::cout << "  install leg: " << menus << " menus (" << repeats << " more served unchanged by a later layer), "
+	          << records << " records rebuilt through the table\n";
 	return true;
 }
 
@@ -689,7 +779,9 @@ int main(int argc, char **argv) {
 	RUN_TEST(test_defaults_and_parts);
 	RUN_TEST(test_references);
 	RUN_TEST(test_name_tokens);
+	RUN_TEST(test_owners);
 	RUN_TEST(test_retail_fixtures);
+	RUN_TEST(test_retail_install);
 	if (failed > 0) {
 		std::cerr << "\n" << failed << " test(s) FAILED\n";
 		return EXIT_FAILURE;

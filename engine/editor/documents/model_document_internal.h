@@ -11,20 +11,17 @@
 
 namespace opennova::editor::model_document_detail {
 
-// The model row's collections, in the order its kind's lists give them (a record path's first step):
-// its LODs, materials, lights, user points, CTRL registers and MTRX rows. A LOD's part animations and a
-// material's texture rows are each the one list of their owner.
-constexpr uint32_t kLods = 0, kMaterials = 1, kLights = 2, kUserPoints = 3, kRegisters = 4, kFrames = 5;
-
 // What a field of the table names by an index, as the format's table declares it: a texture file, a
 // CTRL register (by its index in the model's table), a part (by its index in LOD 0), an MTRX row.
 enum class IndexReference { None, Texture, Register, Part, Frame };
 
 // A field of the model's table as the model's own rules read it, beside its labelled field (by its
 // place in its kind): what it declares it names, whether what the game does with it is witnessed, and
-// on a record whether the game reads it there (a generator's register above style 0x70, a loaded
-// track, a spot light's axis) and whether its value names what it declares there (a register byte
-// only above style 0x70, a frame byte only on a row that turns through one).
+// on a record whether the game reads it there (a generator's register only above style 0x70 and its
+// phase only at or below [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640], a PANM track only when its
+// flags make it present [orig: PANM_SampleTrack @ 0x5B2270], a spot light's axis) and whether its
+// value names what it declares there (a register byte only above style 0x70, a frame byte only on a
+// row that turns through one).
 struct ModelField {
 	IndexReference reference = IndexReference::None;
 	bool unverified = false;

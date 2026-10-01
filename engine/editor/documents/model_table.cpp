@@ -1222,8 +1222,8 @@ Document::CollectionSpec spec(ModelKind kind, const char *label, const char *nam
 }
 
 // The model row's lists (its LODs, materials, lights, user points, CTRL registers and MTRX rows, in
-// model_document_detail::kLods's order), a LOD's part animations and a material's texture rows, and
-// the collision row's sections, volumes, bullet faces and occlusion records.
+// kModelLods's order, which model_table_test pins), a LOD's part animations and a material's texture
+// rows, and the collision row's sections, volumes, bullet faces and occlusion records.
 void add_lists(ModelKind kind, TableKind &table) {
 	switch (kind) {
 	case ModelKind::Model:
@@ -1331,16 +1331,18 @@ RecordTable make_table() {
 				field.value.set = [e, shape](const RecordHandle &record, const Value &value, std::string &error) {
 					return set_entry(*e, native_of(shape, record), value, error);
 				};
-				// Whether the game reads it here (a generator's register above style 0x70, a loaded track, a
-				// spot light's axis); a field whose use the witness leaves open stays Unverified.
+				// Whether the game reads it here (a generator's register only above style 0x70 and its phase
+				// only at or below [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640], a PANM track only when its
+				// flags make it present [orig: PANM_SampleTrack @ 0x5B2270], a spot light's axis); a field
+				// whose use the witness leaves open stays Unverified.
 				if (e->reads && !e->field.unverified)
-					field.applies = [e, shape](const RecordHandle &record) {
+					field.applies = [e, shape](const RecordHandle &record, const RecordOwners &) {
 						return e->reads(native_of(shape, record), e->arg) ? Applicability::Reads : Applicability::Ignored;
 					};
 				// What it names here: a texture row's file, a register where its style makes the byte one.
 				if (e->names && e->field.reference != Ref::None) {
 					const ReferenceKind declared = field.schema.reference;
-					field.reference = [e, shape, declared](const RecordHandle &record) {
+					field.reference = [e, shape, declared](const RecordHandle &record, const RecordOwners &) {
 						return e->names(native_of(shape, record), e->arg) ? declared : ReferenceKind::None;
 					};
 				}

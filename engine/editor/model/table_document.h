@@ -28,7 +28,9 @@ protected:
 	size_t ids_footprint() const { return footprint_of(ids); }
 
 private:
-	// A table row keeps its identities in `ids`, never in the flat store a Node of another type keeps.
+	// A table row keeps its identities in `ids`, never in the flat store a Node of another type keeps:
+	// a caller that names the row by its own type (a TableRow, a MenuScreen) cannot read that store,
+	// which stays empty; one that holds it as a Node still can, and reads nothing there.
 	using Node::collections;
 };
 
@@ -41,8 +43,8 @@ private:
 // its path in its row (Document::path_in), each step a list of its owner's kind and an index there.
 // What the type keeps for itself are the hooks below: whether the game reads a list where its owner
 // sits, a rule of its own about a value or a list edit, what a new or copied record is called, and
-// whatever else a Document hook says (refine_field, record_choices, refine_symbol, copy and paste,
-// renumber_references, accept_step).
+// whatever else a Document hook says (refine_field, which calls this one first, record_choices,
+// refine_symbol, copy and paste, renumber_references, accept_step).
 class TableDocument : public Document {
 public:
 	// The type's table, in storage that outlives the document (built once for the process).
@@ -53,27 +55,25 @@ public:
 	const std::vector<RecordKindRow> &kinds() const override { return table().kinds(); }
 	// An owner's lists, in its kind's order, with the identities beside each.
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	// One pass over the row's records in pre-order, the identities read beside them.
+	// One pass over the row's records in pre-order, the identities read beside them; a record of a
+	// list of several kinds is placed as the kind its handle says.
 	void walk_records(const Node &row, const RecordVisitor &visit) const override;
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return table().fields(kind); }
 
-	// One step of a record's trail down from its row: the owner, its identities, and the list and the
-	// index it holds the next record at.
-	struct TrailStep {
-		RecordHandle owner;
-		RecordIds *owner_ids = nullptr;
-		size_t list = 0, index = 0;
-	};
 	// A record of a row found by its path, and where it sits: the native record, its identities, the
-	// trail from the row down to it (empty for the row itself), and whether the file writes it (every
-	// list it lies in, at every depth, is written).
+	// steps from the row down to it (each owner, the list it holds the next record in and the index
+	// there; none for the row itself) with each owner's identities beside them, and whether the file
+	// writes it (every list it lies in, at every depth, is written).
 	struct Located {
 		RecordHandle record;
 		RecordIds *ids = nullptr;
-		std::vector<TrailStep> trail;
+		std::vector<OwnerStep> trail;
+		std::vector<RecordIds *> owner_ids;
 		bool present = true;
 		bool is_row() const { return trail.empty(); }
-		const TrailStep &step() const { return trail.back(); }
+		const OwnerStep &step() const { return trail.back(); }
+		RecordIds *step_ids() const { return owner_ids.back(); }
+		RecordOwners owners() const { return {trail.data(), trail.size()}; }
 	};
 	// The record `record` names in `row` (0: the row's own record), found by its path in the row as
 	// the document holds it or as a batch has left it (Document::path_in); false when the row does
@@ -84,18 +84,18 @@ public:
 	// The native record an address names in `row` (the row's own for address.child 0), when it is of
 	// the kind the address says; empty otherwise.
 	RecordHandle record_in(const Node &row, const NodeAddress &address) const;
-	// The first list of `kind` the record holds (its place among its kind's lists).
+	// The list of the record's kind's that holds `kind` (its place among its kind's lists).
 	bool list_of(const Located &owner, NodeKind kind, size_t &list) const;
 
 	// What the table answered since the counters were last cleared (S13 D10's count-based rule: a
 	// keystroke in a field touches that field's row and no other): the labelled fields resolved (by
-	// their id, or by the schema a FieldUse points at), the distinct ones among them (each once, by
-	// the schema, the first four kept and `several` past them, so counting costs a read nothing that
-	// grows), and the kinds resolved. A lookup is one probe of the kind's index, never a walk of its
-	// rows.
+	// their id, or by the schema a FieldUse points at), the probes of a kind's index those and the
+	// core's own lookups made (a FieldUse's own schema needs none), the distinct fields among them
+	// (each once, the first four kept and `several` past them, so counting costs a read nothing that
+	// grows), and the kinds resolved. A probe is one lookup in a hash index, never a walk of the rows.
 	struct TableStats {
 		static constexpr size_t kDistinctKept = 4;
-		size_t fields = 0, kinds = 0;
+		size_t resolved = 0, probes = 0, kinds = 0;
 		std::vector<const FieldSchema *> distinct;
 		bool several = false;
 	};
@@ -115,17 +115,21 @@ protected:
 	               std::string &error) override;
 	bool set_present(Node &row, const NodeAddress &address, const std::string &field, bool present,
 	                 std::string &error) override;
-	// Add: the list's new record into the owner edit.parent (0 = the row) at the edit's position.
-	// Duplicate: a copy of the record with everything it holds, fresh identities, at the position.
-	// Remove: the record with everything it holds. Move: the record with everything it holds to the
-	// position of the same kind of list of edit.parent (another owner's: a reparent). The type's
-	// rules come first (accept_list_edit), then the list's ops change the native list and the
-	// identities beside it change the same way.
+	// Add: the list's new record of the edit's kind into the owner edit.parent (0 = the row) at the
+	// edit's position. Duplicate: a copy of the record with everything it holds, fresh identities, at
+	// the position. Remove: the record with everything it holds. Move: the record with everything it
+	// holds to the position of the list holding its kind in edit.parent (another owner's: a reparent).
+	// The type's rules come first (accept_list_edit), then the list's ops change the native list and
+	// the identities beside it change the same way, never one without the other (an op that refuses
+	// leaves both as they were).
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	// What the labelled field's record decides (its applies and reference functions), on the use the
-	// base seeds from the schema; a type that refines further calls this first.
+	// What the labelled field's record decides (its applies and reference functions, given the
+	// records it lies in), on the use the base seeds from the schema; a type that refines further
+	// calls this first.
 	void refine_field(const NodeAddress &address, FieldUse &use) const override;
+	// One probe of the kind's index, counted.
+	const FieldSchema *find_field(NodeKind kind, const std::string &id) const override;
 
 	// Gives a row its identities' shape (zero identities for every record it holds), which the load
 	// or the batch then numbers: a type's parse and make_node call it for each row they make.

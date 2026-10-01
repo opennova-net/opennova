@@ -22,7 +22,8 @@ bool TableDocument::descend(const PathStep *steps, size_t size, Located &out) co
 		const RecordHandle next = ops.at(out.record, index);
 		if (!next) return false;
 		out.present = out.present && (!ops.present || ops.present(out.record));
-		out.trail.push_back({out.record, out.ids, list, index});
+		out.trail.push_back({out.record, list, index});
+		out.owner_ids.push_back(out.ids);
 		out.ids = &out.ids->lists[list][index];
 		out.record = next;
 	}
@@ -44,10 +45,11 @@ TableDocument::Located TableDocument::owner_of(const Located &record) const {
 	Located owner;
 	if (record.trail.empty()) return owner;
 	owner.trail.assign(record.trail.begin(), record.trail.end() - 1);
+	owner.owner_ids.assign(record.owner_ids.begin(), record.owner_ids.end() - 1);
 	owner.record = record.step().owner;
-	owner.ids = record.step().owner_ids;
+	owner.ids = record.step_ids();
 	// Written while every list above the owner is: the trail's own lists, the owner's excepted.
-	for (const TrailStep &step : owner.trail) {
+	for (const OwnerStep &step : owner.trail) {
 		const TableKind *kind = table().kind(step.owner.kind);
 		const ListOps *ops = kind && step.list < kind->lists().size() ? &kind->lists()[step.list].ops : nullptr;
 		owner.present = owner.present && (!ops || !ops->present || ops->present(step.owner));
@@ -65,7 +67,7 @@ bool TableDocument::list_of(const Located &owner, NodeKind kind, size_t &list) c
 	const TableKind *held = table().kind(owner.record.kind);
 	if (!held) return false;
 	for (size_t i = 0; i < held->lists().size(); ++i)
-		if (held->lists()[i].spec.kind == kind) {
+		if (held->lists()[i].holds(kind)) {
 			list = i;
 			return true;
 		}
@@ -82,10 +84,20 @@ std::vector<Document::Collection> TableDocument::collections(const Node &row, co
 	std::vector<Collection> out;
 	out.reserve(kind->lists().size());
 	for (size_t l = 0; l < kind->lists().size(); ++l) {
-		Collection collection{kind->lists()[l].spec, {}};
+		const TableList &list = kind->lists()[l];
+		Collection collection{list.spec, {}, {}};
 		collection.spec.applies = list_applies(row, at, l);
-		if (l < at.ids->lists.size())
+		if (!list.kinds.empty()) {
+			collection.spec.kinds = list.kinds.data();
+			collection.spec.kind_count = list.kinds.size();
+		}
+		if (l < at.ids->lists.size()) {
 			for (const RecordIds &ids : at.ids->lists[l]) collection.ids.push_back(ids.id);
+			// A list of several kinds names each record's own (the kind its handle says).
+			if (!list.kinds.empty())
+				for (size_t i = 0; i < collection.ids.size(); ++i)
+					collection.kinds.push_back(list.ops.at(at.record, i).kind);
+		}
 		out.push_back(std::move(collection));
 	}
 	return out;
@@ -98,23 +110,31 @@ bool TableDocument::walk(const Node &row, Located &owner, const NodeAddress &sel
 		const TableList &list = kind->lists()[l];
 		CollectionSpec spec = list.spec;
 		spec.applies = list_applies(row, owner, l);
+		if (!list.kinds.empty()) {
+			spec.kinds = list.kinds.data();
+			spec.kind_count = list.kinds.size();
+		}
 		const bool written = owner.present && (!list.ops.present || list.ops.present(owner.record));
 		std::vector<RecordIds> &held = owner.ids->lists[l];
 		for (size_t i = 0; i < held.size(); ++i) {
 			const RecordHandle child = list.ops.at(owner.record, i);
-			if (!child) return false;
-			const NodeAddress address{row.id, spec.kind, held[i].id};
+			if (!child || !list.holds(child.kind)) return false;
+			// A list of several kinds places each record as the kind its handle says.
+			spec.kind = child.kind;
+			const NodeAddress address{row.id, child.kind, held[i].id};
 			if (!visit(address, Placement{self, spec, i, l})) return false;
 			// Down one step and back: the walk keeps one trail.
 			const RecordHandle record = owner.record;
 			RecordIds *ids = owner.ids;
 			const bool present = owner.present;
-			owner.trail.push_back({record, ids, l, i});
+			owner.trail.push_back({record, l, i});
+			owner.owner_ids.push_back(ids);
 			owner.record = child;
 			owner.ids = &held[i];
 			owner.present = written;
 			const bool more = walk(row, owner, address, visit);
 			owner.trail.pop_back();
+			owner.owner_ids.pop_back();
 			owner.record = record;
 			owner.ids = ids;
 			owner.present = present;
@@ -143,7 +163,7 @@ void TableDocument::shape(TableRow &row) const {
 // --- the fields ----------------------------------------------------------------------------------
 
 void TableDocument::count_field(const FieldSchema &field) const {
-	++stats_.fields;
+	++stats_.resolved;
 	if (stats_.several || std::find(stats_.distinct.begin(), stats_.distinct.end(), &field) != stats_.distinct.end())
 		return;
 	if (stats_.distinct.size() < TableStats::kDistinctKept) stats_.distinct.push_back(&field);
@@ -156,9 +176,16 @@ const TableKind *TableDocument::resolve_kind(NodeKind kind) const {
 }
 
 size_t TableDocument::resolve_field(const TableKind &kind, const std::string &id) const {
+	++stats_.probes;
 	const size_t place = kind.find(id);
 	if (place != TableKind::npos) count_field(kind.fields()[place]);
 	return place;
+}
+
+const FieldSchema *TableDocument::find_field(NodeKind kind, const std::string &id) const {
+	const TableKind *held = resolve_kind(kind);
+	const size_t place = held ? resolve_field(*held, id) : TableKind::npos;
+	return place != TableKind::npos ? &held->fields()[place] : nullptr;
 }
 
 bool TableDocument::read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const {
@@ -234,15 +261,20 @@ void TableDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 	const TableKind *kind = table().kind(address.kind);
 	if (!kind) return;
 	// The schema the use points at is the table's own (Document::fields), or a copy of it a caller
-	// kept.
-	const size_t place = kind->place_of(*use.schema);
+	// kept, which its id finds (a probe).
+	size_t place = kind->place(use.schema);
+	if (place == TableKind::npos) {
+		++stats_.probes;
+		place = kind->find(use.schema->id);
+	}
 	if (place == TableKind::npos || (!kind->applies(place) && !kind->reference(place))) return;
 	const Node *node = row(address.row);
-	const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
-	if (!record) return;
+	Located at;
+	if (!node || !locate(*node, address.child, at) || at.record.kind != address.kind) return;
 	count_field(kind->fields()[place]);
-	if (kind->applies(place)) use.applies = kind->applies(place)(record);
-	if (kind->reference(place)) use.reference = kind->reference(place)(record);
+	const RecordOwners owners = at.owners();
+	if (kind->applies(place)) use.applies = kind->applies(place)(at.record, owners);
+	if (kind->reference(place)) use.reference = kind->reference(place)(at.record, owners);
 }
 
 // --- the list edits --------------------------------------------------------------------------------
@@ -258,7 +290,8 @@ void TableDocument::after_add(Node &, const ListChange &, const RecordHandle &) 
 bool TableDocument::insert_record(const Located &owner, size_t list, size_t position, const DetachedRecord &record,
                                   const IdAllocator &allocate, NodeId &added, std::string &error) {
 	const TableKind *kind = table().kind(owner.record.kind);
-	if (!kind || list >= kind->lists().size() || list >= owner.ids->lists.size()) {
+	if (!kind || list >= kind->lists().size() || list >= owner.ids->lists.size() ||
+	    !kind->lists()[list].holds(record.kind)) {
 		error = "This record holds no such records.";
 		return false;
 	}
@@ -291,12 +324,15 @@ bool TableDocument::edit_collection(Node &row, const Edit &edit, const IdAllocat
 		change.owner = &owner;
 		change.list = list;
 		if (!accept_list_edit(row, change, error)) return false;
-		const ListOps &ops = table().kind(owner.record.kind)->lists()[list].ops;
-		const size_t position = std::min(list_position(row, change, edit.position), ops.size(owner.record));
-		if (!ops.insert(owner.record, position, nullptr, error)) return false;
-		const RecordHandle made = ops.at(owner.record, position);
-		after_add(row, change, made);
-		RecordIds fresh = shape_ids(table(), made);
+		const TableList &into = table().kind(owner.record.kind)->lists()[list];
+		const size_t position = std::min(list_position(row, change, edit.position), into.ops.size(owner.record));
+		// A list of one kind makes its new record; a list of several makes one of the kind the Add names.
+		const bool made = into.kinds.empty() ? into.ops.insert(owner.record, position, nullptr, error)
+		                                     : into.ops.make(owner.record, position, edit.address.kind, error);
+		if (!made) return false;
+		const RecordHandle record = into.ops.at(owner.record, position);
+		after_add(row, change, record);
+		RecordIds fresh = shape_ids(table(), record);
 		editor::for_each_identity(fresh, [&](NodeId &id) { id = allocate(); });
 		std::vector<RecordIds> &ids = owner.ids->lists[list];
 		ids.insert(ids.begin() + std::ptrdiff_t(std::min(position, ids.size())), std::move(fresh));
@@ -331,7 +367,7 @@ bool TableDocument::edit_collection(Node &row, const Edit &edit, const IdAllocat
 	case EditOperation::Remove:
 		if (!accept_list_edit(row, change, error)) return false;
 		if (!ops.erase(owner.record, index)) {
-			error = "The record no longer exists.";
+			error = "The list keeps the record: it gives none up here.";
 			return false;
 		}
 		source_ids.erase(source_ids.begin() + std::ptrdiff_t(index));
@@ -345,7 +381,7 @@ bool TableDocument::edit_collection(Node &row, const Edit &edit, const IdAllocat
 			return false;
 		}
 		size_t destination_list = 0;
-		if (!list_of(destination, edit.address.kind, destination_list)) {
+		if (!list_of(destination, at.record.kind, destination_list)) {
 			error = "This record holds no such records.";
 			return false;
 		}
@@ -367,12 +403,19 @@ bool TableDocument::edit_collection(Node &row, const Edit &edit, const IdAllocat
 			if (through && to[depth].collection == from[depth].collection && to[depth].index > from[depth].index)
 				--to[depth].index;
 		}
-		// The record and its identities come out; the destination, found by that path, takes them at
-		// the position.
+		// The record and its identities come out together, or neither does; the destination, found by
+		// that path, takes them at the position.
 		DetachedRecord moved = ops.copy(owner.record, index);
+		if (!moved.data) {
+			error = "The record no longer exists.";
+			return false;
+		}
 		prepare_record(row, change, moved);
+		if (!ops.erase(owner.record, index)) {
+			error = "The list keeps the record: it gives none up here.";
+			return false;
+		}
 		RecordIds moved_ids = std::move(source_ids[index]);
-		ops.erase(owner.record, index);
 		source_ids.erase(source_ids.begin() + std::ptrdiff_t(index));
 		Located there;
 		if (!locate(row, 0, there) || (edit.parent && !descend(to.data(), to.size(), there))) {

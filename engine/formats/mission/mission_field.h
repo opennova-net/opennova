@@ -8,6 +8,14 @@
 // writes the record's own struct. The rules are the witnessed ones the setters kept (the fixed slots
 // copied at full width, the byte fields clamped, the AI flags refused past the known attributes, an
 // event's delays clamped to their ten packed bits), each cited where it was.
+//
+// Every member the writer takes from a record is a field, but these, which no row reaches: the header's
+// magic (the format's version), its blocks bms.h leaves unnamed (unknown0..unknown9, something1; the
+// writer writes them as they were read), and its counts and chunk lengths (sync_counts derives them
+// from the records); an entity's pool (its record kind), its four reserved words (unk22, gen_reserved0,
+// unk42b, unk43, which the writer writes as zero) and its .mis-only fields; a path's slot bytes past its
+// stops (zero once its stops change); and the words the writer puts down as zero (an event's latch and
+// pad, a trigger's, an action's and a bounding box's reserved words).
 
 #include <cstddef>
 #include <cstdint>
@@ -19,18 +27,23 @@
 namespace opennova::mission {
 
 // The records a mission's fields are fields of, each its own struct: the header (bms::Header), an
-// entity of any of the four pools (bms::Entity), a waypoint path (bms::WaypointRecord), a group
-// (bms::GroupRecord), a layer (bms::LayerRecord), an area trigger (bms::AreaTrigger), an event
-// (bms::Event), a trigger (bms::Trigger), an action (bms::Action) and a weapon loadout entry
-// (bms::WeaponLoadoutRecord). A path's stops name markers of the file, so their field is the file's
-// (bms_edit's waypoint stops), not a row here.
-enum class MissionRecord { Header, Entity, WaypointPath, Group, Layer, Area, Event, Trigger, Action, Loadout, kCount };
+// entity of any of the four pools (bms::Entity), a waypoint path (bms::WaypointRecord) and one of its
+// stops (the marker index it holds, a uint32_t), a group (bms::GroupRecord), a layer
+// (bms::LayerRecord), an area trigger (bms::AreaTrigger), an event (bms::Event), a trigger
+// (bms::Trigger), an action (bms::Action), a weapon loadout entry (bms::WeaponLoadoutRecord), an item
+// availability rule (bms::ItemAvailabilityEntry) and a bounding box (bms::BoundingBox).
+enum class MissionRecord {
+	Header, Entity, WaypointPath, Stop, Group, Layer, Area, Event, Trigger, Action, Loadout, Availability, BoundingBox,
+	kCount,
+};
 inline constexpr size_t kMissionRecordCount = size_t(MissionRecord::kCount);
 
 // A field's value: an integer, a real (a 16.16 position or bound in mission units, the map zoom) or a
 // text.
 using MissionValue = std::variant<int64_t, double, std::string>;
-enum class MissionFieldType { Integer, Real, Text };
+// Integer: a whole number in min..max. Real: a float the record holds (the map zoom). Fixed: a 16.16
+// word read and written in mission units, bms::kFixed16Min..bms::kFixed16Max. Text: a text.
+enum class MissionFieldType { Integer, Real, Fixed, Text };
 
 // One value of an enumeration, or one bit of a flag word, by the name its enum in bms.h gives it.
 struct MissionChoice {
@@ -40,11 +53,12 @@ struct MissionChoice {
 
 // One field of a record. `width` is a text's slot in bytes (a fixed slot may be full, with no
 // terminator), 0 for a text with no slot (a loadout entry's strings, which the chunk ends with a NUL
-// each). `min` and `max` are the range a number keeps to: what the record's width holds, or the
+// each). `min` and `max` are the range a whole number keeps to: what the record's width holds, or the
 // narrower range a rule keeps; a value past it is clamped or refused by `set`, as the rule says, and
 // the editor refuses it before. `choices` are the values it takes by name (`flags`: bits of one word),
-// none for a number with no names. `set` null: shown only (derived from the record, or a value the
-// format sets alone).
+// none for a number with no names; `open`: the choices are the values the format names, and the record
+// holds any other (an unknown action type, a flag bit no name says), so a value none names is no error.
+// `set` null: shown only (derived from the record, or a value the format sets alone).
 struct MissionField {
 	MissionRecord record;
 	const char *key;
@@ -56,6 +70,7 @@ struct MissionField {
 	bool flags;
 	bool (*get)(const void *record, MissionValue &out);
 	bool (*set)(void *record, const MissionValue &value, std::string &error);
+	bool open = false;
 };
 
 // The fields of one record, in the order the editor shows them.

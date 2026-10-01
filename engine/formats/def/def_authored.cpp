@@ -14,6 +14,8 @@
 namespace opennova::def {
 namespace {
 
+thread_local DefAuthoredParses g_parses;
+
 // The authored number's type of the member at `index` of `property`, by its encoding.
 DefAuthored authored_type(DefRecordKind kind, const DefProperty &property, size_t index) {
 	const DefField *field = def_field(kind, property.fields[index]);
@@ -115,6 +117,7 @@ bool read_back(DefRecordKind kind, const void *record, const DefProperty *replac
                const std::vector<std::string> &args, std::vector<uint64_t> &out) {
 	const char *header = record_header(kind);
 	if (!header) return false;
+	++g_parses.records;
 	DefRecordWriter writer;
 	writer.replaced = replaced;
 	writer.replaced_key = key;
@@ -132,6 +135,7 @@ bool line_keeps(DefRecordKind kind, const void *record, const DefField &field, c
                 const std::vector<std::string> &args) {
 	const char *header = record_header(kind);
 	if (!header) return false;
+	++g_parses.lines;
 	DefRecordWriter writer;
 	writer.result.text = header;
 	writer.line(key, args);
@@ -147,6 +151,8 @@ std::string shortest(double number) {
 }
 
 } // namespace
+
+DefAuthoredParses def_authored_parses() { return g_parses; }
 
 const DefProperty *def_member_property(DefRecordKind kind, const std::string &id, size_t *index) {
 	for (const DefProperty &property : def_properties(kind))

@@ -1,6 +1,6 @@
 // The menu document (ADR 0046 S6c, S9g, S9h) over the neutral core: every record the
-// format holds is a record at its own depth through the format's property table
-// (formats/mnu/mnu_schema). The blank startup menu loads as one screen whose windows hold
+// format holds is a record at its own depth through the menu's table
+// (editor/documents/mnu_table, rows of the one table shape since S13 D10). The blank startup menu loads as one screen whose windows hold
 // their lists and children; fields read and write by element path; windows and the rows
 // of every list are added, duplicated (names made unique), removed and moved (a reparent
 // between windows included), each with its undo and the identities kept in the native

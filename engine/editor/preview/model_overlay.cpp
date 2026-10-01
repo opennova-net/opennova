@@ -170,18 +170,18 @@ int place_of(const std::vector<RecordIds> &ids, NodeId id) {
 NodeAddress model_overlay_record(const ModelDocument &document, const ModelOverlay &overlay, int lod) {
 	const ModelRow *row = document.model_row();
 	if (!row) return NodeAddress();
-	// The model row's lists (model_document_detail::kLods's order): 0 LODs, 2 lights, 3 user points.
 	const auto at = [&](size_t list, NodeKind kind) {
 		const NodeId id = list < row->ids.lists.size() ? identity_at(row->ids.lists[list], overlay.index) : 0;
 		return id ? NodeAddress{row->id, kind, id} : NodeAddress();
 	};
 	switch (overlay.kind) {
-	case ModelOverlayKind::UserPoint: return at(3, node_kind(ModelKind::UserPoint));
-	case ModelOverlayKind::Light: return at(2, node_kind(ModelKind::Light));
+	case ModelOverlayKind::UserPoint: return at(kModelUserPoints, node_kind(ModelKind::UserPoint));
+	case ModelOverlayKind::Light: return at(kModelLights, node_kind(ModelKind::Light));
 	case ModelOverlayKind::Pivot: {
 		// A LOD's one list is its part animations.
-		if (lod < 0 || row->ids.lists.empty() || size_t(lod) >= row->ids.lists[0].size()) return NodeAddress();
-		const NodeId id = identity_at(row->ids.lists[0][size_t(lod)].lists[0], overlay.index);
+		if (lod < 0 || row->ids.lists.size() <= kModelLods || size_t(lod) >= row->ids.lists[kModelLods].size())
+			return NodeAddress();
+		const NodeId id = identity_at(row->ids.lists[kModelLods][size_t(lod)].lists[kModelOwnList], overlay.index);
 		return id ? NodeAddress{row->id, node_kind(ModelKind::PartAnimation), id} : NodeAddress();
 	}
 	}
@@ -190,7 +190,7 @@ NodeAddress model_overlay_record(const ModelDocument &document, const ModelOverl
 
 bool model_overlay_of(const ModelDocument &document, const NodeAddress &record, ModelOverlayKind &kind, int &index) {
 	const ModelRow *row = document.model_row();
-	if (!row || record.row != row->id || !record.child || row->ids.lists.size() < 4) return false;
+	if (!row || record.row != row->id || !record.child || row->ids.lists.size() <= kModelFrames) return false;
 	const auto find = [&](size_t list, ModelOverlayKind as) {
 		const int found = place_of(row->ids.lists[list], record.child);
 		if (found < 0) return false;
@@ -198,11 +198,11 @@ bool model_overlay_of(const ModelDocument &document, const NodeAddress &record, 
 		index = found;
 		return true;
 	};
-	if (record.kind == node_kind(ModelKind::UserPoint)) return find(3, ModelOverlayKind::UserPoint);
-	if (record.kind == node_kind(ModelKind::Light)) return find(2, ModelOverlayKind::Light);
+	if (record.kind == node_kind(ModelKind::UserPoint)) return find(kModelUserPoints, ModelOverlayKind::UserPoint);
+	if (record.kind == node_kind(ModelKind::Light)) return find(kModelLights, ModelOverlayKind::Light);
 	if (record.kind == node_kind(ModelKind::PartAnimation)) {
-		for (const RecordIds &level : row->ids.lists[0]) {
-			const int found = place_of(level.lists[0], record.child);
+		for (const RecordIds &level : row->ids.lists[kModelLods]) {
+			const int found = place_of(level.lists[kModelOwnList], record.child);
 			if (found < 0) continue;
 			kind = ModelOverlayKind::Pivot;
 			index = found;

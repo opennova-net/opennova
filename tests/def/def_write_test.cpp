@@ -115,7 +115,8 @@ int refused(const char *family, const char *text) {
 
 // powerup.def (S13 D10): every key the row parser stores, both action blocks, the ammo rows, the
 // `auto` delay, and a file the row parser cuts at CR LF alone; the canonical form is a fixed point
-// (written, parsed, written again: the same text, the same rows).
+// (written, parsed, written again: the same text, the same rows) and pinned line for line; `weapon all`
+// after a name leaves no name.
 const char *const kPowerupTable =
         "// Powerup definitions\r\n"
         "powerup \"PU_MED\"\r\nrespawn_time 30\r\nmax_respawns 3\r\nhp -1\r\nmana 5\r\nweapon WPN_TEST\r\n"
@@ -126,9 +127,38 @@ const char *const kPowerupTable =
         "action respawn\r\nparticle FX_BACK\r\nend\r\nend\r\n"
         "powerup \"PU_ALL\"\r\nweapon all\r\nallammo\r\nend\r\n";
 
+// The canonical form, line for line: the header comment, a row's keys in the line table's order (its
+// scalars, its weapon, its ammo rows, then its pickup block and its respawn block, each block's keys in
+// theirs), a tab before every line of a row, a blank line after each row.
+const char *const kPowerupCanonical =
+        "// Powerup definitions\r\n\r\n"
+        "powerup \"PU_MED\"\r\n\trespawn_time 30\r\n\tmax_respawns 3\r\n\thp -1\r\n\tmana 5\r\n\tweapon WPN_TEST\r\n"
+        "\tammo AT_TEST -1\r\n\tammo AT_TWO 3\r\n"
+        "\taction \"pickup\"\r\n\tfunction powerup_med\r\n\tanim pick\r\n\tsoundset SND_PICK\r\n"
+        "\tsoundsetend SND_DONE\r\n\tparticle FX_PICK\r\n\tparticleuserpoint FX00\r\n\ttexttoken TT_PICK\r\n"
+        "\tdelaystart auto\r\n\tdelayend 10\r\n\taction_value 7\r\n\tend\r\n"
+        "\taction \"respawn\"\r\n\tparticle FX_BACK\r\n\tend\r\nend\r\n\r\n"
+        "powerup \"PU_ALL\"\r\n\tweapon all\r\n\tallammo\r\nend\r\n\r\n";
+
 int powerup_table() {
 	int failures = clean("powerup.def", kPowerupTable);
 	const Outcome first = run("powerup.def", kPowerupTable);
+	if (first.written.text != kPowerupCanonical) {
+		std::printf("FAIL powerup.def canonical lines:\n%s\n", first.written.text.c_str());
+		++failures;
+	}
+	// `weapon <name>` then `weapon all` fill one word of the row, the later line kept: no name is left
+	// behind it [orig: PowerUpDef_ParseProperty @0x4431A7..0x443216, row+0x34].
+	{
+		const char *const twice = "powerup \"PU\"\r\nweapon WPN_A\r\nweapon all\r\nend\r\n";
+		DefPowerupFile file{};
+		def_parse_powerup_memory(reinterpret_cast<const uint8_t *>(twice), std::strlen(twice), &file, nullptr);
+		if (file.count != 1 || !file.entries[0].weapon_all || file.entries[0].weapon[0] != 0) {
+			std::printf("FAIL powerup.def weapon all after a name keeps the name\n");
+			++failures;
+		}
+		def_free_powerup(&file);
+	}
 	const Outcome second = run("powerup.def", first.written.text.c_str());
 	if (first.count != 2 || !second.written.ok() || second.written.text != first.written.text || second.count != 2) {
 		std::printf("FAIL powerup.def is no fixed point:\n%s\n%s\n", first.written.text.c_str(),

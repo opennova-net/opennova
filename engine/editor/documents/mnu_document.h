@@ -32,7 +32,8 @@ namespace opennova::editor {
 // ("action", "items.item", "list_box", "column.header"). A field is named by its element
 // path ("position.left", "string.value", "font.default_fg"); which fields and lists a
 // window's type reads is the format's witnessed applicability (formats/mnu/mnu_schema.h), which
-// the document applies where each record sits. What retail's reader does not read is a
+// the table's fields apply where each record sits (by the records it lies in, menu_context). What
+// retail's reader does not read is a
 // non-blocking source issue (the reader's notes); what the file cannot hold is a blocking
 // serialize issue on the record and field that cause it. Comments do not survive: the parser
 // drops them (D-MNU-22).

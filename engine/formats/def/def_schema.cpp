@@ -10,6 +10,8 @@
 #include <cstring>
 #include <limits>
 
+#include <base/io/strutil.h>
+
 namespace opennova::def {
 
 const DefField *def_field(DefRecordKind kind, const std::string &id) {
@@ -42,6 +44,10 @@ bool def_set(void *record, const DefField &field, const DefValue &value, std::st
 		if (!text || text->size() >= field.width || text->find('\0') != std::string::npos ||
 			text->find_first_of("\r\n\"") != std::string::npos || text->find("//") != std::string::npos) {
 			error = "Text exceeds the field capacity or contains an unsupported character.";
+			return false;
+		}
+		if (*field.refused && strutil::iequals(*text, field.refused)) {
+			error = field.refused_why;
 			return false;
 		}
 		std::memset(p, 0, field.width);
@@ -180,6 +186,9 @@ const ReferenceRule kReferences[] = {
 	// a text key as an action's.
 	{{kPowerup, "weapon"}, DefReference::Weapon},
 	{{kPowerupAction, "texttoken"}, DefReference::OtherText},
+	// An item's `powerupdef` names the powerup row it binds as the mission starts [orig:
+	// PowerupEntity_InitFromDef @0x442D00 over PowerUpDef_FindByName @0x442660].
+	{{kItem, "powerup_def"}, DefReference::Powerup},
 };
 
 // The values a member takes by name.
@@ -353,6 +362,18 @@ const RangeRule kRanges[] = {
 	{{kPowerup, "allammo"}, 0, 1},
 };
 
+// The texts a member cannot hold: a powerup's `weapon all`, compared without case, is every weapon
+// [orig: PowerUpDef_ParseProperty @0x4431A7..0x4431DA], so a weapon named all would be written as a
+// line the parser reads as every weapon.
+struct RefusedRule {
+	Members members;
+	const char *text;
+	const char *why;
+};
+const RefusedRule kRefused[] = {
+	{{kPowerup, "weapon"}, "all", "A weapon named all is every weapon to the game: set weapon_all instead."},
+};
+
 } // namespace
 
 const std::vector<DefField> &def_fields(DefRecordKind kind) {
@@ -381,6 +402,11 @@ const std::vector<DefField> &def_fields(DefRecordKind kind) {
 					f.min = rule.min;
 					f.max = rule.max;
 				}
+				for (const RefusedRule &rule : kRefused) {
+					if (!matches(rule.members, k, f)) continue;
+					f.refused = rule.text;
+					f.refused_why = rule.why;
+				}
 			}
 		}
 		return all;
@@ -394,6 +420,15 @@ void def_sync_derived(DefRecordKind kind, void *value, const std::string &field)
 		if (field == "armor_kz") item.armor_blast = item.armor_kz;
 		if (field == "powerup_def" && item.powerup_def[0]) item.attrib |= DEF_ITEM_ATTRIB_POWERUP;
 		if (field == "default_aip" && item.default_aip[0]) item.attrib |= DEF_ITEM_ATTRIB_AIDATA;
+		return;
+	}
+	if (kind == DefRecordKind::Powerup) {
+		// `weapon all` and `weapon <name>` fill one word of the row, the later line's kept [orig:
+		// PowerUpDef_ParseProperty @0x4431A7..0x443216, row+0x34]: every weapon clears the name, a
+		// name clears every weapon.
+		auto &powerup = *static_cast<DefPowerupDef *>(value);
+		if (field == "weapon_all" && powerup.weapon_all) std::memset(powerup.weapon, 0, sizeof(powerup.weapon));
+		if (field == "weapon" && powerup.weapon[0]) powerup.weapon_all = 0;
 		return;
 	}
 	if (kind == DefRecordKind::Action) {

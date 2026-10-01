@@ -515,18 +515,20 @@ inline int32_t to_fixed_16_16(float v) {
     return static_cast<int32_t>(v * 65536.0f);
 }
 
+// The numbers a 16.16 word holds, in mission units: INT32_MIN / 65536 to INT32_MAX / 65536.
+inline constexpr double kFixed16Min = -32768.0;
+inline constexpr double kFixed16Max = 2147483647.0 / 65536.0;
+
 // The same conversion from a double, which holds every 16.16 value exactly (a float keeps 24 bits, so
 // a position past 256 mission units loses its low bits on the way through one): what an editor's
 // number in mission units is written by, so a value read as fixed / 65536 writes back the same word.
 inline int32_t to_fixed_16_16(double v) {
-    constexpr double kMax = 2147483647.0 / 65536.0;
-    constexpr double kMin = -32768.0;
     if (std::isnan(v)) {
         v = 0.0;
-    } else if (v > kMax) {
-        v = kMax;
-    } else if (v < kMin) {
-        v = kMin;
+    } else if (v > kFixed16Max) {
+        v = kFixed16Max;
+    } else if (v < kFixed16Min) {
+        v = kFixed16Min;
     }
     return static_cast<int32_t>(v * 65536.0);
 }

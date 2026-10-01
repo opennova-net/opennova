@@ -29,34 +29,47 @@ static_assert(finding_rows_well_formed(kFindingRows), "every row of the table ta
 
 const CatalogRow &catalog_row(const Node &node) { return static_cast<const CatalogRow &>(node); }
 
-// What the game does with a record whose name an earlier record of its kind has, in the
-// file's order: the game loads the file either way, so each is a warning naming the record
-// that wins. The name lookups compare without case.
+// What the game does with a record whose name an earlier record of its kind has, in the file's
+// order: the game loads the file either way, so each is a warning naming the record that wins, one
+// row per kind its game witnesses (a new family adds its row). The name lookups compare without case.
+struct RepeatedName {
+	DefRecordKind kind;
+	const char *message; // "{id}": the earlier record's id (an item's)
+};
+constexpr RepeatedName kRepeatedNames[] = {
+	// Both are kept (the load logs "Duplicate names", its strcmp @0x4a1ea4, and goes on) [orig:
+	// ItemDefs_LoadAndValidate @ 0x4a1da0]; the lookup by name returns the first [orig:
+	// ItemList_FindIndexByPrimaryName @ 0x49e010].
+	{DefRecordKind::Item,
+	 "An earlier item has this name (id {id}): the game keeps both, and a lookup by the name finds the earlier one."},
+	// A weapon block of a name the table has reopens that row, reset to its defaults [orig:
+	// WeaponDefs_ParseLineCallback @ 0x543680, AvatarDef_FindIndexByName @0x5436e1 -> AdmDef_InitEntryDefaults
+	// @0x543722].
+	{DefRecordKind::Weapon,
+	 "An earlier weapon has this name: the game reads this block in its place and keeps nothing of the earlier one."},
+	// Every ammo block takes a slot of its own [orig: AmmoDef_AllocateSlot @ 0x409a20]; the lookup by name
+	// returns the first [orig: AmmoDef_LookupByName @ 0x409870].
+	{DefRecordKind::Ammo,
+	 "An earlier ammo record has this name: the game keeps both, and a lookup by the name finds the earlier one."},
+	// A class the table has is found, and its limit written over [orig: WeaponDefs_ParseLineCallback @
+	// 0x543680, sub_540590 @0x543802 -> the store @0x543873].
+	{DefRecordKind::Carry, "An earlier carry limit names this class: the game reads this line's limit in its place."},
+	// The lookup by name returns the first row of it [orig: PowerUpDef_FindByName @0x442660, stricmp over the
+	// rows in order]: a later one no item binds.
+	{DefRecordKind::Powerup,
+	 "An earlier powerup has this name: an item's powerupdef finds the earlier one, and no item binds this one."},
+};
+
 std::string repeated_name(DefRecordKind kind, const Node &earlier) {
-	switch (kind) {
-	case DefRecordKind::Item:
-		// Both are kept (the load logs "Duplicate names", its strcmp @0x4a1ea4, and goes on)
-		// [orig: ItemDefs_LoadAndValidate @ 0x4a1da0]; the lookup by name returns the first
-		// [orig: ItemList_FindIndexByPrimaryName @ 0x49e010].
-		return "An earlier item has this name (id " + std::to_string(catalog_row(earlier).native.as<DefItemDef>().id) +
-		       "): the game keeps both, and a lookup by the name finds the earlier one.";
-	case DefRecordKind::Weapon:
-		// A weapon block of a name the table has reopens that row, reset to its defaults
-		// [orig: WeaponDefs_ParseLineCallback @ 0x543680, AvatarDef_FindIndexByName @0x5436e1 ->
-		// AdmDef_InitEntryDefaults @0x543722].
-		return "An earlier weapon has this name: the game reads this block in its place and keeps nothing of the "
-		       "earlier one.";
-	case DefRecordKind::Ammo:
-		// Every ammo block takes a slot of its own [orig: AmmoDef_AllocateSlot @ 0x409a20]; the
-		// lookup by name returns the first [orig: AmmoDef_LookupByName @ 0x409870].
-		return "An earlier ammo record has this name: the game keeps both, and a lookup by the name finds the "
-		       "earlier one.";
-	case DefRecordKind::Carry:
-		// A class the table has is found, and its limit written over [orig: WeaponDefs_ParseLineCallback
-		// @ 0x543680, sub_540590 @0x543802 -> the store @0x543873].
-		return "An earlier carry limit names this class: the game reads this line's limit in its place.";
-	default: return "An earlier record has this name.";
+	for (const RepeatedName &row : kRepeatedNames) {
+		if (row.kind != kind) continue;
+		std::string message = row.message;
+		const size_t id = message.find("{id}");
+		if (id != std::string::npos)
+			message.replace(id, 4, std::to_string(catalog_row(earlier).native.as<DefItemDef>().id));
+		return message;
 	}
+	return "An earlier record has this name.";
 }
 }
 const FindingCodeRow &finding_code(CatalogFinding code) {

@@ -65,13 +65,6 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 		const EntityTransform &transform, std::string &error);
 // Append a default-seeded record for `item_id`; returns its index.
 size_t add_entity(bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform);
-// The default-seeded record add_entity appends, for a caller that puts it in elsewhere: the next free
-// entity id, the format's AI defaults, the transform.
-bms::Entity make_entity(const bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform);
-// One past the highest entity id of the file's four pools (what a new record takes), and whether an
-// entity of the file holds `id`.
-int next_entity_id(const bms::File &file);
-bool entity_id_taken(const bms::File &file, int id);
 // Erase the record (later records of that kind shift down); a marker removal
 // repairs every waypoint path that referenced it.
 bool remove_entity(bms::File &file, EntityKind kind, size_t index, std::string &error);
@@ -87,13 +80,14 @@ bool clear_waypoint_path(bms::File &file, size_t index, std::string &error);
 bool add_waypoint_marker(bms::File &file, size_t path_index, int marker_item_id,
 		const EntityTransform &transform, int insert_index, std::string &error,
 		size_t *out_marker_index = nullptr);
-// A path's stops one at a time (ADR 0046 S13 D10, the mission table's): a stop naming marker `marker`
-// put in at `index` (the end past it), the one at `index` taken out, or naming another marker. Each
-// is an authored edit of the path through set_waypoint_path (its 32 slots, each a marker the file
-// holds; the count resynced to the slots).
-bool insert_waypoint_stop(bms::File &file, size_t path_index, size_t index, int marker, std::string &error);
-bool erase_waypoint_stop(bms::File &file, size_t path_index, size_t index, std::string &error);
-bool set_waypoint_stop(bms::File &file, size_t path_index, size_t index, int marker, std::string &error);
+// A path's stops one at a time (ADR 0046 S13 D10, the editor's mission table): a stop naming marker
+// `marker` put in at `index` (the end past it; the path's 128-byte slot region holds 32), or the one at
+// `index` taken out. Either changes how many stops the path has, so the count the path stores is
+// written as its slots, its slot bytes past them zero (D-MIS-6: the original editor's count for an
+// edited path is not witnessed); which marker a stop names is the editor's to check (a Record
+// reference), the runtime reading any word [orig: Pool_GetEntryUnchecked @0x441FC0].
+bool insert_waypoint_stop(bms::WaypointRecord &path, size_t index, uint32_t marker, std::string &error);
+bool erase_waypoint_stop(bms::WaypointRecord &path, size_t index);
 
 // --- area triggers ----------------------------------------------------------------
 bool area_trigger(const bms::File &file, size_t index, AreaTriggerRecord &out);
@@ -123,15 +117,6 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out);
 MissionLogicSummary logic_summary(const bms::File &file);
 bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
 		const MissionTriggerRecord &record, std::string &error);
-// The native forms (a copy keeps every byte of its record, the pad words included).
-bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
-		const bms::Trigger &trigger, std::string &error);
-bool insert_event_action(bms::File &file, size_t event_index, size_t local_index,
-		const bms::Action &action, std::string &error);
-// The range of the file's trigger (action) table an event's chain is, when it lies inside the table:
-// false for a range past it, a malformed chain no edit reaches.
-bool event_trigger_range(const bms::File &file, size_t event_index, size_t &first, size_t &count);
-bool event_action_range(const bms::File &file, size_t event_index, size_t &first, size_t &count);
 bool remove_event_trigger(bms::File &file, size_t event_index, size_t local_index, std::string &error);
 bool move_event_trigger(bms::File &file, size_t event_index, size_t local_index, int delta, std::string &error);
 bool insert_event_action(bms::File &file, size_t event_index, size_t local_index,
@@ -144,13 +129,5 @@ size_t add_event(bms::File &file, const MissionEventRecord &record);
 // Drain the event's chains through the single-element removers, repair the
 // ResetEvent references, erase the event.
 bool remove_event(bms::File &file, size_t index, std::string &error);
-// The event's structure alone (ADR 0046 S13 D10, the mission table's): one put in at `index` (the end
-// past it) with its chain, its triggers and actions appended to the file's tables in order; one taken
-// out with its chain, what names the event by its index left as it is (remove_event repairs it; the
-// editor's mission document renumbers it, S13 D8).
-bool insert_event(bms::File &file, size_t index, const bms::Event &event,
-		const std::vector<bms::Trigger> &triggers, const std::vector<bms::Action> &actions,
-		std::string &error);
-bool erase_event(bms::File &file, size_t index, std::string &error);
 
 } // namespace opennova::mission

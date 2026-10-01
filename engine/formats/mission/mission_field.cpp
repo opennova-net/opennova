@@ -7,9 +7,11 @@
 #include "mission_detail.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 #include <limits>
+#include <type_traits>
 
 namespace opennova::mission {
 
@@ -40,17 +42,20 @@ bool integer_of(const MissionValue &value, int64_t &out, std::string &error) {
 	return false;
 }
 
+// A real the record can hold: a finite number (an infinity or a NaN is no value the file holds as
+// one: the 16.16 cast would make it 0 or a bound, the map zoom's float would hold it as is).
 bool real_of(const MissionValue &value, double &out, std::string &error) {
-	if (const double *real = std::get_if<double>(&value)) {
-		out = *real;
-		return true;
+	if (const double *real = std::get_if<double>(&value)) out = *real;
+	else if (const int64_t *integer = std::get_if<int64_t>(&value)) out = double(*integer);
+	else {
+		error = "This field takes a number.";
+		return false;
 	}
-	if (const int64_t *integer = std::get_if<int64_t>(&value)) {
-		out = double(*integer);
-		return true;
+	if (!std::isfinite(out)) {
+		error = "This field takes a finite number.";
+		return false;
 	}
-	error = "This field takes a number.";
-	return false;
+	return true;
 }
 
 const std::string *text_of(const MissionValue &value, std::string &error) {
@@ -87,6 +92,56 @@ bool set_clamp_u8(void *record, const MissionValue &value, std::string &error) {
 	return true;
 }
 
+// One byte of a number member (`Byte` 0 the low one): what the .mis writer splits a packed word into
+// (weapon_type and sweapon_type, the blink pairs, the four waypoint goals).
+template <class R, class T, T R::*Member, int Byte>
+bool get_byte_of(const void *record, MissionValue &out) {
+	using U = std::make_unsigned_t<T>;
+	out = int64_t((static_cast<U>(as<R>(record).*Member) >> (8 * Byte)) & 0xFFu);
+	return true;
+}
+template <class R, class T, T R::*Member, int Byte>
+bool set_byte_of(void *record, const MissionValue &value, std::string &error) {
+	using U = std::make_unsigned_t<T>;
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	U word = static_cast<U>(as<R>(record).*Member);
+	word = static_cast<U>((word & ~(U(0xFFu) << (8 * Byte))) | (U(std::clamp<int64_t>(number, 0, kU8Max)) << (8 * Byte)));
+	as<R>(record).*Member = static_cast<T>(word);
+	return true;
+}
+
+// One byte of a byte array member (a header's eight win conditions, its eight scores).
+template <class R, size_t N, uint8_t (R::*Array)[N], size_t Index>
+bool get_array_byte(const void *record, MissionValue &out) {
+	out = int64_t((as<R>(record).*Array)[Index]);
+	return true;
+}
+template <class R, size_t N, uint8_t (R::*Array)[N], size_t Index>
+bool set_array_byte(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	(as<R>(record).*Array)[Index] = static_cast<uint8_t>(std::clamp<int64_t>(number, 0, kU8Max));
+	return true;
+}
+
+// A colour of three bytes, red first, as one 0xRRGGBB word (the .mis writer's packed_rgb).
+template <class R, uint8_t (R::*Rgb)[3]>
+bool get_rgb(const void *record, MissionValue &out) {
+	out = int64_t(packed_rgb(as<R>(record).*Rgb));
+	return true;
+}
+template <class R, uint8_t (R::*Rgb)[3]>
+bool set_rgb(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	uint8_t(&rgb)[3] = as<R>(record).*Rgb;
+	rgb[0] = static_cast<uint8_t>((number >> 16) & 0xFF);
+	rgb[1] = static_cast<uint8_t>((number >> 8) & 0xFF);
+	rgb[2] = static_cast<uint8_t>(number & 0xFF);
+	return true;
+}
+
 // A fixed-width on-disk text slot (`Size` bytes, the whole slot or its first part): read to its first
 // NUL or its end, written with copy_fixed_field, which keeps every byte of the slot (a name a shipped
 // mission fills completely loses no byte to a forced NUL) and zero-pads a shorter text.
@@ -103,7 +158,8 @@ bool set_slot(void *record, const MissionValue &value, std::string &error) {
 	return true;
 }
 
-// A 16.16 position or bound, read and written exactly in mission units (bms::to_fixed_16_16's clamp).
+// A 16.16 position or bound, read and written exactly in mission units (bms::to_fixed_16_16's clamp
+// past bms::kFixed16Min..bms::kFixed16Max, which the editor refuses before).
 template <class R, int32_t R::*Member>
 bool get_fixed(const void *record, MissionValue &out) {
 	out = double(as<R>(record).*Member) / 65536.0;
@@ -164,7 +220,10 @@ constexpr MissionChoice kAiAttributes[] = {
 constexpr MissionChoice kWaypointFlags[] = {{"DoesNotLoop", 1 << 0}, {"BlueTeam", 1 << 1}, {"RedTeam", 1 << 2}};
 constexpr MissionChoice kAreaFlags[] = {{"MissionArea", bms::AreaTrigger::kFlagMissionArea},
                                         {"ConstrainZ", bms::AreaTrigger::kFlagConstrainZ}};
-constexpr MissionChoice kEventFlags[] = {{"ResetAfter", 1 << 0}, {"PreMission", 1 << 1}, {"PostMission", 1 << 2}};
+// The author's three bits and the two internal ones shipped missions hold (bms.h's
+// kEventInternalFlagMask, which the format keeps): every bit the writer writes.
+constexpr MissionChoice kEventFlags[] = {{"ResetAfter", 1 << 0}, {"PreMission", 1 << 1}, {"PostMission", 1 << 2},
+                                         {"Internal10", 0x10},   {"Internal20", 0x20}};
 constexpr MissionChoice kConditionFlags[] = {{"Negated", bms::Trigger::kConditionNegated},
                                              {"Or", bms::Trigger::kConditionOr},
                                              {"Xor", bms::Trigger::kConditionXor}};
@@ -201,7 +260,8 @@ static_assert(kAttribFlags[19].value == int64_t(uint32_t(bms::AttribFlags::Searc
 static_assert(kAiAttributes[14].value == int64_t(uint32_t(bms::BmsiAttributeFlags::NoShadow)) &&
               kAiAttributes[9].value == int64_t(uint32_t(bms::BmsiAttributeFlags::EngineRunning)));
 static_assert(kWaypointFlags[2].value == int64_t(uint32_t(bms::WaypointFlags::RedTeam)));
-static_assert(kEventFlags[2].value == int64_t(uint32_t(bms::EventFlags::PostMission)));
+static_assert(kEventFlags[2].value == int64_t(uint32_t(bms::EventFlags::PostMission)) &&
+              (kEventFlags[3].value | kEventFlags[4].value) == int64_t(bms::kEventInternalFlagMask));
 static_assert(kTriggerMainTypes[6].value == int64_t(bms::TriggerMainType::Player));
 static_assert(kActionTypes[28].value == int64_t(bms::ActionType::SpecialSubType) &&
               kActionTypes[29].value == int64_t(bms::ActionType::GroupOpenDoorAction) &&
@@ -216,7 +276,13 @@ using H = bms::Header;
 // header.terrain[48] is three 16-byte fixed slots: terrain@+0, cnv_file@+16, tt_file@+32 (see
 // mission_mis_writer.cpp's write_mis_general_information). The field is the first slot alone, so a
 // terrain edit does not zero-fill (and lose) the cnv_file / tt_file references; the read is bounded to
-// it so a full slot never bleeds into cnv_file.
+// it so a full slot never bleeds into cnv_file. Every reader of the terrain slot stops at its first NUL
+// [orig: Environment_LoadTimeOfDayConfig @0x57db30 copies it to its NUL @0x57dba0..0x57dbaa, from
+// Game_LoadTerrainDuringConnect @0x520736 through Terrain_LoadEnvironmentConfig @0x610940;
+// Debug_DrawMissionInfo @0x44b3f3 and Debug_DrawEnvironmentValues @0x4ef0b5 print it with %s], so the
+// bytes a Set pads with zeros past its text (TDH_I3A.bms and TKH_I3A.bms ship three there) are none the
+// game reads; a host sends the header as it loaded it [orig: NetPacket_WriteBMSHeader @0x502ca0], which
+// a joiner reads the same way.
 constexpr size_t kTerrainSlot = 16;
 
 // water_override is s16 half-world-units, stored in an unsigned word; it only takes effect when
@@ -230,10 +296,29 @@ bool get_map_zoom(const void *record, MissionValue &out) {
 	out = double(as<H>(record).map_zoom);
 	return true;
 }
+// A float: a finite number it holds.
 bool set_map_zoom(void *record, const MissionValue &value, std::string &error) {
 	double real = 0.0;
 	if (!real_of(value, real, error)) return false;
+	if (std::abs(real) > double(std::numeric_limits<float>::max())) {
+		error = "The map zoom is a float: a number past its range is none.";
+		return false;
+	}
 	as<H>(record).map_zoom = float(real);
+	return true;
+}
+
+// header.terrain's second and third 16-byte slots (the .mis writer's cnv_file and tt_file).
+template <size_t Offset>
+bool get_terrain_slot(const void *record, MissionValue &out) {
+	out = fixed_string(as<H>(record).terrain + Offset, kTerrainSlot);
+	return true;
+}
+template <size_t Offset>
+bool set_terrain_slot(void *record, const MissionValue &value, std::string &error) {
+	const std::string *text = text_of(value, error);
+	if (!text) return false;
+	copy_fixed_field(as<H>(record).terrain + Offset, kTerrainSlot, *text);
 	return true;
 }
 
@@ -249,24 +334,36 @@ const MissionField kHeaderFields[] = {
 	 get_slot<H, 256, &H::mission_briefing>, set_slot<H, 256, &H::mission_briefing>},
 	{MissionRecord::Header, "terrain", MissionFieldType::Text, kTerrainSlot, 0, 0, nullptr, 0, false,
 	 get_slot<H, 48, &H::terrain, kTerrainSlot>, set_slot<H, 48, &H::terrain, kTerrainSlot>},
+	{MissionRecord::Header, "cnv_file", MissionFieldType::Text, kTerrainSlot, 0, 0, nullptr, 0, false,
+	 get_terrain_slot<16>, set_terrain_slot<16>},
+	{MissionRecord::Header, "tt_file", MissionFieldType::Text, kTerrainSlot, 0, 0, nullptr, 0, false,
+	 get_terrain_slot<32>, set_terrain_slot<32>},
+	{MissionRecord::Header, "terrain_tile", MissionFieldType::Text, sizeof(H::terrain_tile), 0, 0, nullptr, 0, false,
+	 get_slot<H, 16, &H::terrain_tile>, set_slot<H, 16, &H::terrain_tile>},
+	{MissionRecord::Header, "default_str", MissionFieldType::Text, sizeof(H::default_str), 0, 0, nullptr, 0, false,
+	 get_slot<H, 16, &H::default_str>, set_slot<H, 16, &H::default_str>},
 	{MissionRecord::Header, "environment", MissionFieldType::Text, sizeof(H::environment), 0, 0, nullptr, 0, false,
 	 get_slot<H, 16, &H::environment>, set_slot<H, 16, &H::environment>},
 	{MissionRecord::Header, "climate", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kClimates), false,
-	 get_number<H, bms::ClimateType, &H::climate>, set_cast<H, bms::ClimateType, &H::climate>},
+	 get_number<H, bms::ClimateType, &H::climate>, set_cast<H, bms::ClimateType, &H::climate>, true},
 	{MissionRecord::Header, "weather", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kWeathers), false,
-	 get_number<H, bms::WeatherType, &H::weather_type>, set_cast<H, bms::WeatherType, &H::weather_type>},
+	 get_number<H, bms::WeatherType, &H::weather_type>, set_cast<H, bms::WeatherType, &H::weather_type>, true},
 	{MissionRecord::Header, "mission_type", MissionFieldType::Integer, 0, 0, kU8Max, MISSION_CHOICES(kMissionTypes),
-	 false, get_number<H, bms::MissionType, &H::mission_type>, set_cast<H, bms::MissionType, &H::mission_type>},
+	 false, get_number<H, bms::MissionType, &H::mission_type>, set_cast<H, bms::MissionType, &H::mission_type>, true},
 	{MissionRecord::Header, "attrib_flags", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kAttribFlags),
-	 true, get_number<H, bms::AttribFlags, &H::attrib_flags>, set_cast<H, bms::AttribFlags, &H::attrib_flags>},
+	 true, get_number<H, bms::AttribFlags, &H::attrib_flags>, set_cast<H, bms::AttribFlags, &H::attrib_flags>, true},
 	{MissionRecord::Header, "start_time", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
 	 get_number<H, uint16_t, &H::start_time>, set_cast<H, uint16_t, &H::start_time>},
 	{MissionRecord::Header, "minutes_per_day", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
 	 get_number<H, uint16_t, &H::minutes_per_day>, set_cast<H, uint16_t, &H::minutes_per_day>},
 	{MissionRecord::Header, "player_health", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
 	 get_number<H, uint32_t, &H::health>, set_cast<H, uint32_t, &H::health>},
+	{MissionRecord::Header, "mana", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
+	 get_number<H, uint32_t, &H::mana>, set_cast<H, uint32_t, &H::mana>},
 	{MissionRecord::Header, "max_saves", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
 	 get_number<H, uint8_t, &H::max_saves>, set_cast<H, uint8_t, &H::max_saves>},
+	{MissionRecord::Header, "bonus_expiration", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
+	 get_number<H, uint16_t, &H::bonus_expiration>, set_cast<H, uint16_t, &H::bonus_expiration>},
 	{MissionRecord::Header, "music", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
 	 get_number<H, uint32_t, &H::music>, set_cast<H, uint32_t, &H::music>},
 	{MissionRecord::Header, "reverb", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
@@ -277,11 +374,39 @@ const MissionField kHeaderFields[] = {
 	 get_number<H, uint32_t, &H::wind_direction>, set_cast<H, uint32_t, &H::wind_direction>},
 	{MissionRecord::Header, "water_override", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
 	 get_water_override, set_cast<H, uint16_t, &H::water_override>},
+	{MissionRecord::Header, "water_color", MissionFieldType::Integer, 0, 0, 0xFFFFFF, nullptr, 0, false,
+	 get_rgb<H, &H::water_color>, set_rgb<H, &H::water_color>},
+	{MissionRecord::Header, "murk", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
+	 get_number<H, uint16_t, &H::murk>, set_cast<H, uint16_t, &H::murk>},
 	// Fog distance in world units; only takes effect when attrib_flags FogDistanceOverrideEnable (0x2) is set.
 	{MissionRecord::Header, "fog_override", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
 	 get_number<H, uint16_t, &H::fog_override>, set_cast<H, uint16_t, &H::fog_override>},
+	{MissionRecord::Header, "fog_color", MissionFieldType::Integer, 0, 0, 0xFFFFFF, nullptr, 0, false,
+	 get_rgb<H, &H::fog_color>, set_rgb<H, &H::fog_color>},
 	{MissionRecord::Header, "map_zoom", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_map_zoom,
 	 set_map_zoom},
+	// The eight win and eight lose sub-goal conditions, and their scores (each the score / 100: the .mis
+	// writer's win_scores / lose_scores) [orig editor: Med_WriteBmsFile @0x44f920 Buffer[556..571]].
+#define MISSION_HEADER_BYTE(array, index)                                                                       \
+	{MissionRecord::Header, #array "[" #index "]", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false, \
+	 get_array_byte<H, 8, &H::array, index>, set_array_byte<H, 8, &H::array, index>}
+	MISSION_HEADER_BYTE(win_conditions, 0),  MISSION_HEADER_BYTE(win_conditions, 1),
+	MISSION_HEADER_BYTE(win_conditions, 2),  MISSION_HEADER_BYTE(win_conditions, 3),
+	MISSION_HEADER_BYTE(win_conditions, 4),  MISSION_HEADER_BYTE(win_conditions, 5),
+	MISSION_HEADER_BYTE(win_conditions, 6),  MISSION_HEADER_BYTE(win_conditions, 7),
+	MISSION_HEADER_BYTE(lose_conditions, 0), MISSION_HEADER_BYTE(lose_conditions, 1),
+	MISSION_HEADER_BYTE(lose_conditions, 2), MISSION_HEADER_BYTE(lose_conditions, 3),
+	MISSION_HEADER_BYTE(lose_conditions, 4), MISSION_HEADER_BYTE(lose_conditions, 5),
+	MISSION_HEADER_BYTE(lose_conditions, 6), MISSION_HEADER_BYTE(lose_conditions, 7),
+	MISSION_HEADER_BYTE(win_scores, 0),      MISSION_HEADER_BYTE(win_scores, 1),
+	MISSION_HEADER_BYTE(win_scores, 2),      MISSION_HEADER_BYTE(win_scores, 3),
+	MISSION_HEADER_BYTE(win_scores, 4),      MISSION_HEADER_BYTE(win_scores, 5),
+	MISSION_HEADER_BYTE(win_scores, 6),      MISSION_HEADER_BYTE(win_scores, 7),
+	MISSION_HEADER_BYTE(lose_scores, 0),     MISSION_HEADER_BYTE(lose_scores, 1),
+	MISSION_HEADER_BYTE(lose_scores, 2),     MISSION_HEADER_BYTE(lose_scores, 3),
+	MISSION_HEADER_BYTE(lose_scores, 4),     MISSION_HEADER_BYTE(lose_scores, 5),
+	MISSION_HEADER_BYTE(lose_scores, 6),     MISSION_HEADER_BYTE(lose_scores, 7),
+#undef MISSION_HEADER_BYTE
 };
 
 // --- an entity -------------------------------------------------------------------------------------------
@@ -317,25 +442,65 @@ bool set_ai_flags(void *record, const MissionValue &value, std::string &error) {
 	return true;
 }
 
-// The items.def id a record names (its type_id + kItemIdOffset): what the record is, which an Add
-// names; shown only.
+// The items.def id a record names (its type_id + kItemIdOffset): what the record is. Any id whose
+// type_id the record's word holds; whether items.def defines it is the reference's to say.
 bool get_item(const void *record, MissionValue &out) {
-	out = int64_t(bms_type_id_to_item_id(as<E>(record).type_id));
+	out = int64_t(as<E>(record).type_id) + kItemIdOffset;
+	return true;
+}
+bool set_item(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	as<E>(record).type_id = static_cast<int32_t>(number - kItemIdOffset);
+	return true;
+}
+
+// .mis crouchtimer: the low byte crouch_timer and the high byte unk15a, one 16-bit word.
+bool get_crouch_timer(const void *record, MissionValue &out) {
+	out = int64_t(combined_u16(as<E>(record).crouch_timer, as<E>(record).unk15a));
+	return true;
+}
+bool set_crouch_timer(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	const uint16_t word = static_cast<uint16_t>(number);
+	as<E>(record).crouch_timer = static_cast<uint8_t>(word & 0xFF);
+	as<E>(record).unk15a = static_cast<uint8_t>(word >> 8);
+	return true;
+}
+
+// .mis group_rel: one 32-bit word over group_rel_lo and group_rel_hi.
+bool get_group_rel(const void *record, MissionValue &out) {
+	out = int64_t(combined_i32_from_i16(as<E>(record).group_rel_lo, as<E>(record).group_rel_hi));
+	return true;
+}
+bool set_group_rel(void *record, const MissionValue &value, std::string &error) {
+	int64_t number = 0;
+	if (!integer_of(value, number, error)) return false;
+	const uint32_t word = static_cast<uint32_t>(static_cast<int32_t>(number));
+	as<E>(record).group_rel_lo = static_cast<int16_t>(word & 0xFFFFu);
+	as<E>(record).group_rel_hi = static_cast<int16_t>(word >> 16);
 	return true;
 }
 
 // The entity's fields: the editable int properties by the binding's keys (the uint8-backed ones clamp),
 // the fixed 8-byte AI class / AI script slots (name1 = iai_name, name2 = ai_textfile, copied at full
-// width: a NUL-forcing copy would truncate an 8-char name at byte 7 on every edit), and its transform
-// (the 16.16 position in mission units, the integer-degree eulers).
+// width: a NUL-forcing copy would truncate an 8-char name at byte 7 on every edit), its transform
+// (the 16.16 position in mission units, the integer-degree eulers), and every other member the writer
+// takes from it, by the .mis writer's names [orig editor: Med_PackEntityRecord @0x44c8e0 packs each,
+// Med_WriteMisFile @0x454630 names it] (bms.h's Entity).
 const MissionField kEntityFields[] = {
-	{MissionRecord::Entity, "item", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false, get_item,
-	 nullptr},
-	{MissionRecord::Entity, "x", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::x>,
+	{MissionRecord::Entity, "item", MissionFieldType::Integer, 0, kI32Min + kItemIdOffset, kI32Max + kItemIdOffset,
+	 nullptr, 0, false, get_item, set_item},
+	{MissionRecord::Entity, "id", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::id>, set_cast<E, int32_t, &E::id>},
+	{MissionRecord::Entity, "name_index", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::name_index>, set_cast<E, int32_t, &E::name_index>},
+	{MissionRecord::Entity, "x", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::x>,
 	 set_fixed<E, &E::x>},
-	{MissionRecord::Entity, "y", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::y>,
+	{MissionRecord::Entity, "y", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::y>,
 	 set_fixed<E, &E::y>},
-	{MissionRecord::Entity, "z", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::z>,
+	{MissionRecord::Entity, "z", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<E, &E::z>,
 	 set_fixed<E, &E::z>},
 	{MissionRecord::Entity, "pitch", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
 	 get_number<E, int16_t, &E::pitch>, set_cast<E, int16_t, &E::pitch>},
@@ -349,6 +514,20 @@ const MissionField kEntityFields[] = {
 	 get_number<E, uint8_t, &E::waypoint_id>, set_clamp_u8<E, &E::waypoint_id>},
 	{MissionRecord::Entity, "wp_number", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<E, int32_t, &E::wp_number>, set_cast<E, int32_t, &E::wp_number>},
+	{MissionRecord::Entity, "wp_distance", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::wp_distance>, set_cast<E, int32_t, &E::wp_distance>},
+	{MissionRecord::Entity, "wp_adv_trigger", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
+	 get_number<E, int16_t, &E::wp_adv_trigger>, set_cast<E, int16_t, &E::wp_adv_trigger>},
+	{MissionRecord::Entity, "wpgoal0", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int32_t, &E::wp_goals, 0>, set_byte_of<E, int32_t, &E::wp_goals, 0>},
+	{MissionRecord::Entity, "wpgoal1", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int32_t, &E::wp_goals, 1>, set_byte_of<E, int32_t, &E::wp_goals, 1>},
+	{MissionRecord::Entity, "wpgoal2", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int32_t, &E::wp_goals, 2>, set_byte_of<E, int32_t, &E::wp_goals, 2>},
+	{MissionRecord::Entity, "wpgoal3", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int32_t, &E::wp_goals, 3>, set_byte_of<E, int32_t, &E::wp_goals, 3>},
+	{MissionRecord::Entity, "group_rel", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_group_rel, set_group_rel},
 	{MissionRecord::Entity, "team", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
 	 get_number<E, uint8_t, &E::team>, set_clamp_u8<E, &E::team>},
 	{MissionRecord::Entity, "lfp_group", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
@@ -357,8 +536,16 @@ const MissionField kEntityFields[] = {
 	 true, get_number<E, uint32_t, &E::bmsi_attributes>, set_ai_flags},
 	{MissionRecord::Entity, "perception", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<E, int32_t, &E::perception2>, set_cast<E, int32_t, &E::perception2>},
+	{MissionRecord::Entity, "perfectionist2", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::perfectionist2>, set_cast<E, int32_t, &E::perfectionist2>},
 	{MissionRecord::Entity, "accuracy", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
 	 get_number<E, int16_t, &E::w_accuracy1>, set_cast<E, int16_t, &E::w_accuracy1>},
+	{MissionRecord::Entity, "w_accuracy2", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
+	 get_number<E, int16_t, &E::w_accuracy2>, set_cast<E, int16_t, &E::w_accuracy2>},
+	{MissionRecord::Entity, "obliqueness", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::obliqueness>, set_clamp_u8<E, &E::obliqueness>},
+	{MissionRecord::Entity, "attention", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
+	 get_number<E, int16_t, &E::attention>, set_cast<E, int16_t, &E::attention>},
 	{MissionRecord::Entity, "alert_state", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
 	 get_number<E, uint8_t, &E::alert_state>, set_clamp_u8<E, &E::alert_state>},
 	{MissionRecord::Entity, "min_engagement_distance", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0,
@@ -370,6 +557,18 @@ const MissionField kEntityFields[] = {
 	// .mis movetimer (spawn_count is the binding's name for it).
 	{MissionRecord::Entity, "spawn_count", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
 	 get_number<E, int16_t, &E::spawns>, set_cast<E, int16_t, &E::spawns>},
+	{MissionRecord::Entity, "crouch_timer", MissionFieldType::Integer, 0, 0, kU16Max, nullptr, 0, false,
+	 get_crouch_timer, set_crouch_timer},
+	{MissionRecord::Entity, "shoot_timer", MissionFieldType::Integer, 0, kI16Min, kI16Max, nullptr, 0, false,
+	 get_number<E, int16_t, &E::shoot_timer>, set_cast<E, int16_t, &E::shoot_timer>},
+	{MissionRecord::Entity, "advancetimer", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::advancetimer>, set_cast<E, int32_t, &E::advancetimer>},
+	{MissionRecord::Entity, "weapon_type", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::weapon_types, 0>, set_byte_of<E, int16_t, &E::weapon_types, 0>},
+	{MissionRecord::Entity, "sweapon_type", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::weapon_types, 1>, set_byte_of<E, int16_t, &E::weapon_types, 1>},
+	{MissionRecord::Entity, "grenades", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::grenades>, set_clamp_u8<E, &E::grenades>},
 	// no_more_than (byte 74), paired with the RemoveIfMoreThan AI flag.
 	{MissionRecord::Entity, "max_simultaneous", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
 	 get_number<E, uint8_t, &E::no_more_than>, set_clamp_u8<E, &E::no_more_than>},
@@ -377,32 +576,66 @@ const MissionField kEntityFields[] = {
 	 get_number<E, uint8_t, &E::no_less_than>, set_clamp_u8<E, &E::no_less_than>},
 	{MissionRecord::Entity, "map_symbol", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
 	 get_number<E, uint8_t, &E::map_symbol>, set_clamp_u8<E, &E::map_symbol>},
+	{MissionRecord::Entity, "color_override", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::color_override>, set_clamp_u8<E, &E::color_override>},
+	{MissionRecord::Entity, "team_budget", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::team_budget>, set_clamp_u8<E, &E::team_budget>},
+	{MissionRecord::Entity, "mission_critical", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::mission_critical>, set_clamp_u8<E, &E::mission_critical>},
+	// The registration id the spawn copies into the entity's refNum [orig: Entity_SpawnFromBMSRecord
+	// @0x40e9f0] (bms.h).
+	{MissionRecord::Entity, "ref_num", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<E, uint8_t, &E::ref_num>, set_clamp_u8<E, &E::ref_num>},
+	{MissionRecord::Entity, "next_ssn", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::next_ssn>, set_cast<E, int32_t, &E::next_ssn>},
+	{MissionRecord::Entity, "ttool_index", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<E, int32_t, &E::ttool_index>, set_cast<E, int32_t, &E::ttool_index>},
+	{MissionRecord::Entity, "blink_parent_a", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::blink_parent, 0>, set_byte_of<E, int16_t, &E::blink_parent, 0>},
+	{MissionRecord::Entity, "blink_parent_b", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::blink_parent, 1>, set_byte_of<E, int16_t, &E::blink_parent, 1>},
+	{MissionRecord::Entity, "blink_group_a", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::blink_group, 0>, set_byte_of<E, int16_t, &E::blink_group, 0>},
+	{MissionRecord::Entity, "blink_group_b", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_byte_of<E, int16_t, &E::blink_group, 1>, set_byte_of<E, int16_t, &E::blink_group, 1>},
 	{MissionRecord::Entity, "name1", MissionFieldType::Text, sizeof(E::name1), 0, 0, nullptr, 0, false,
 	 get_slot<E, 8, &E::name1>, set_slot<E, 8, &E::name1>},
 	{MissionRecord::Entity, "name2", MissionFieldType::Text, sizeof(E::name2), 0, 0, nullptr, 0, false,
 	 get_slot<E, 8, &E::name2>, set_slot<E, 8, &E::name2>},
+	{MissionRecord::Entity, "gen_string", MissionFieldType::Text, sizeof(E::gen_string), 0, 0, nullptr, 0, false,
+	 get_slot<E, 31, &E::gen_string>, set_slot<E, 31, &E::gen_string>},
 };
 
 // --- a waypoint path, a group, a layer, an area trigger ---------------------------------------------------
 
 using W = bms::WaypointRecord;
 
-// A path's flags. An authored edit of a path rewrites its record, so a stored marker count above its
-// 32 slots (CP19.bms ships 39) no longer describes it: the count resyncs to the slots the path holds,
-// as every authored waypoint edit does (resize_waypoint_padding), or the engine would walk phantom
-// waypoints.
-bool set_waypoint_flags(void *record, const MissionValue &value, std::string &error) {
+// A path's flags, and the count it stores, which a stop put in or taken out writes as its slots
+// (bms_edit's insert_waypoint_stop, D-MIS-6); a flags edit leaves the count as it was read (CP19.bms
+// ships one of 39 over its 32 slots, which the runtime walks into the next record's words [orig:
+// AIWaypoint_UpdateTarget @0x457476]).
+const MissionField kWaypointPathFields[] = {
+	{MissionRecord::WaypointPath, "flags", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kWaypointFlags),
+	 true, get_number<W, bms::WaypointFlags, &W::flags>, set_cast<W, bms::WaypointFlags, &W::flags>, true},
+	{MissionRecord::WaypointPath, "marker_count", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false,
+	 get_number<W, uint32_t, &W::marker_count>, nullptr},
+};
+
+// A stop: the marker it visits, by its index in the file's markers (the runtime reads it unbounded
+// [orig: Pool_GetEntryUnchecked @0x441FC0], so any word is one the file holds).
+bool get_stop(const void *record, MissionValue &out) {
+	out = int64_t(as<uint32_t>(record));
+	return true;
+}
+bool set_stop(void *record, const MissionValue &value, std::string &error) {
 	int64_t number = 0;
 	if (!integer_of(value, number, error)) return false;
-	W &path = as<W>(record);
-	path.flags = static_cast<bms::WaypointFlags>(static_cast<uint32_t>(number));
-	resize_waypoint_padding(path, /*preserve_over_count=*/false);
+	as<uint32_t>(record) = static_cast<uint32_t>(number);
 	return true;
 }
 
-const MissionField kWaypointPathFields[] = {
-	{MissionRecord::WaypointPath, "flags", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kWaypointFlags),
-	 true, get_number<W, bms::WaypointFlags, &W::flags>, set_waypoint_flags},
+const MissionField kStopFields[] = {
+	{MissionRecord::Stop, "marker", MissionFieldType::Integer, 0, 0, kU32Max, nullptr, 0, false, get_stop, set_stop},
 };
 
 using G = bms::GroupRecord;
@@ -446,20 +679,20 @@ using A = bms::AreaTrigger;
 const MissionField kAreaFields[] = {
 	{MissionRecord::Area, "id", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<A, int32_t, &A::id>, set_cast<A, int32_t, &A::id>},
-	{MissionRecord::Area, "x_min", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::x_min>,
+	{MissionRecord::Area, "x_min", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::x_min>,
 	 set_fixed<A, &A::x_min>},
-	{MissionRecord::Area, "x_max", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::x_max>,
+	{MissionRecord::Area, "x_max", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::x_max>,
 	 set_fixed<A, &A::x_max>},
-	{MissionRecord::Area, "y_min", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::y_min>,
+	{MissionRecord::Area, "y_min", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::y_min>,
 	 set_fixed<A, &A::y_min>},
-	{MissionRecord::Area, "y_max", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::y_max>,
+	{MissionRecord::Area, "y_max", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::y_max>,
 	 set_fixed<A, &A::y_max>},
-	{MissionRecord::Area, "z_min", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::z_min>,
+	{MissionRecord::Area, "z_min", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::z_min>,
 	 set_fixed<A, &A::z_min>},
-	{MissionRecord::Area, "z_max", MissionFieldType::Real, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::z_max>,
+	{MissionRecord::Area, "z_max", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false, get_fixed<A, &A::z_max>,
 	 set_fixed<A, &A::z_max>},
 	{MissionRecord::Area, "flags", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kAreaFlags), true,
-	 get_number<A, uint32_t, &A::flags>, set_cast<A, uint32_t, &A::flags>},
+	 get_number<A, uint32_t, &A::flags>, set_cast<A, uint32_t, &A::flags>, true},
 };
 
 // --- the event logic -----------------------------------------------------------------------------------------
@@ -490,6 +723,8 @@ bool set_event_ticks(void *record, const MissionValue &value, std::string &error
 	return true;
 }
 
+// An event's run of the trigger table and of the action table: the first record's index (the loader
+// fixes it up into a pointer [orig: EventTrigger_LoadAllData @0x453eb0]) and how many follow it.
 const MissionField kEventFields[] = {
 	{MissionRecord::Event, "flags", MissionFieldType::Integer, 0, 0, kU32Max, MISSION_CHOICES(kEventFlags), true,
 	 get_number<V, bms::EventFlags, &V::flags>, set_event_flags},
@@ -497,6 +732,14 @@ const MissionField kEventFields[] = {
 	 get_number<V, int32_t, &V::reset_after>, set_event_ticks<&V::reset_after>},
 	{MissionRecord::Event, "delay", MissionFieldType::Integer, 0, 0, kMaxEventDelayTicks, nullptr, 0, false,
 	 get_number<V, int32_t, &V::delay>, set_event_ticks<&V::delay>},
+	{MissionRecord::Event, "trigger_index", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<V, int32_t, &V::trigger_index>, set_cast<V, int32_t, &V::trigger_index>},
+	{MissionRecord::Event, "trigger_count", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<V, uint8_t, &V::trigger_count>, set_clamp_u8<V, &V::trigger_count>},
+	{MissionRecord::Event, "action_index", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<V, int32_t, &V::action_index>, set_cast<V, int32_t, &V::action_index>},
+	{MissionRecord::Event, "action_count", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<V, uint8_t, &V::action_count>, set_clamp_u8<V, &V::action_count>},
 };
 
 using T = bms::Trigger;
@@ -507,10 +750,10 @@ using T = bms::Trigger;
 const MissionField kTriggerFields[] = {
 	{MissionRecord::Trigger, "condition_flags", MissionFieldType::Integer, 0, kI32Min, kI32Max,
 	 MISSION_CHOICES(kConditionFlags), true, get_number<T, int32_t, &T::condition_flags>,
-	 set_cast<T, int32_t, &T::condition_flags>},
+	 set_cast<T, int32_t, &T::condition_flags>, true},
 	{MissionRecord::Trigger, "main_type", MissionFieldType::Integer, 0, kI32Min, kI32Max,
 	 MISSION_CHOICES(kTriggerMainTypes), false, get_number<T, bms::TriggerMainType, &T::main_type>,
-	 set_cast<T, bms::TriggerMainType, &T::main_type>},
+	 set_cast<T, bms::TriggerMainType, &T::main_type>, true},
 	{MissionRecord::Trigger, "sub_type", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<T, int32_t, &T::sub_type>, set_cast<T, int32_t, &T::sub_type>},
 	{MissionRecord::Trigger, "param1", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
@@ -529,7 +772,7 @@ using X = bms::Action;
 const MissionField kActionFields[] = {
 	{MissionRecord::Action, "action_type", MissionFieldType::Integer, 0, kI32Min, kI32Max,
 	 MISSION_CHOICES(kActionTypes), false, get_number<X, bms::ActionType, &X::action_type>,
-	 set_cast<X, bms::ActionType, &X::action_type>},
+	 set_cast<X, bms::ActionType, &X::action_type>, true},
 	{MissionRecord::Action, "action_sub_type", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<X, int32_t, &X::action_sub_type>, set_cast<X, int32_t, &X::action_sub_type>},
 	{MissionRecord::Action, "param1", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
@@ -579,15 +822,74 @@ const MissionField kLoadoutFields[] = {
 	 set_loadout_flags},
 };
 
+// --- an item availability rule, a bounding box ------------------------------------------------------
+
+using Q = bms::ItemAvailabilityEntry;
+
+// The secondary chunk's {name, status} pairs [orig: WeaponDef_BuildItemRestrictionTable @0x54DDB0 over
+// the chunk], each name ended by a NUL and the chunk by an empty name: a rule needs its name.
+bool get_availability_name(const void *record, MissionValue &out) {
+	out = as<Q>(record).name;
+	return true;
+}
+bool set_availability_name(void *record, const MissionValue &value, std::string &error) {
+	const std::string *text = nullptr;
+	if (!loadout_text(value, text, error)) return false;
+	if (text->empty()) {
+		error = "An item availability rule needs a name: an empty one ends the chunk.";
+		return false;
+	}
+	as<Q>(record).name = *text;
+	return true;
+}
+
+const MissionField kAvailabilityFields[] = {
+	{MissionRecord::Availability, "name", MissionFieldType::Text, 0, 0, 0, nullptr, 0, false, get_availability_name,
+	 set_availability_name},
+	{MissionRecord::Availability, "status", MissionFieldType::Integer, 0, 0, kU8Max, nullptr, 0, false,
+	 get_number<Q, uint8_t, &Q::status>, set_clamp_u8<Q, &Q::status>},
+};
+
+using B = bms::BoundingBox;
+
+// [orig: Mission_LoadBMSFile's bounding-box block @0x40fcf4: the min / max corners in natural axis order,
+// a type and the id it refers to]
+const MissionField kBoundingBoxFields[] = {
+	{MissionRecord::BoundingBox, "min_x", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::min_x>, set_fixed<B, &B::min_x>},
+	{MissionRecord::BoundingBox, "min_y", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::min_y>, set_fixed<B, &B::min_y>},
+	{MissionRecord::BoundingBox, "min_z", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::min_z>, set_fixed<B, &B::min_z>},
+	{MissionRecord::BoundingBox, "max_x", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::max_x>, set_fixed<B, &B::max_x>},
+	{MissionRecord::BoundingBox, "max_y", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::max_y>, set_fixed<B, &B::max_y>},
+	{MissionRecord::BoundingBox, "max_z", MissionFieldType::Fixed, 0, 0, 0, nullptr, 0, false,
+	 get_fixed<B, &B::max_z>, set_fixed<B, &B::max_z>},
+	{MissionRecord::BoundingBox, "type", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<B, int32_t, &B::type>, set_cast<B, int32_t, &B::type>},
+	{MissionRecord::BoundingBox, "ref_id", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
+	 get_number<B, int32_t, &B::ref_id>, set_cast<B, int32_t, &B::ref_id>},
+};
+
 #undef MISSION_CHOICES
 
 // Every record's rows, in MissionRecord's order.
 const MissionFields kRecords[] = {
-	{kHeaderFields, std::size(kHeaderFields)},       {kEntityFields, std::size(kEntityFields)},
-	{kWaypointPathFields, std::size(kWaypointPathFields)}, {kGroupFields, std::size(kGroupFields)},
-	{kLayerFields, std::size(kLayerFields)},         {kAreaFields, std::size(kAreaFields)},
-	{kEventFields, std::size(kEventFields)},         {kTriggerFields, std::size(kTriggerFields)},
-	{kActionFields, std::size(kActionFields)},       {kLoadoutFields, std::size(kLoadoutFields)},
+	{kHeaderFields, std::size(kHeaderFields)},
+	{kEntityFields, std::size(kEntityFields)},
+	{kWaypointPathFields, std::size(kWaypointPathFields)},
+	{kStopFields, std::size(kStopFields)},
+	{kGroupFields, std::size(kGroupFields)},
+	{kLayerFields, std::size(kLayerFields)},
+	{kAreaFields, std::size(kAreaFields)},
+	{kEventFields, std::size(kEventFields)},
+	{kTriggerFields, std::size(kTriggerFields)},
+	{kActionFields, std::size(kActionFields)},
+	{kLoadoutFields, std::size(kLoadoutFields)},
+	{kAvailabilityFields, std::size(kAvailabilityFields)},
+	{kBoundingBoxFields, std::size(kBoundingBoxFields)},
 };
 static_assert(std::size(kRecords) == kMissionRecordCount, "one row set per mission record");
 

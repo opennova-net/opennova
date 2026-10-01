@@ -68,7 +68,6 @@ bool material_is_drawn(const ModelRow &row, int source) {
 
 using model_document_detail::IndexReference;
 using model_document_detail::index_reference;
-using model_document_detail::kMaterials;
 using model_document_detail::model_field;
 using model_document_detail::ModelField;
 using model_document_detail::record_reference;
@@ -121,17 +120,17 @@ bool is_model_kind(AssetKind kind) {
 }
 
 void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
+	// Whether the game reads the field here and what it names here: the table's labelled field (a
+	// generator's register only above style 0x70, a loaded track, a spot light's axis; a texture row's
+	// file where its slot loads one), which the model's own rules below narrow.
+	TableDocument::refine_field(address, use);
 	const Node *node = row(address.row);
 	Located at;
 	if (!node || !locate(*node, address.child, at) || at.record.kind != address.kind) return;
 	const size_t place = model_table().kind(at.record.kind)->place_of(*use.schema);
 	if (place == TableKind::npos) return;
-	const ModelField &field = model_field(at.record.kind, place);
-	use.applies = field.unverified    ? Applicability::Unverified
-	              : field.reads(at.record) ? Applicability::Reads
-	                                       : Applicability::Ignored;
-	use.reference = field.reference == IndexReference::Texture && field.names(at.record) ? ReferenceKind::Texture
-	                                                                                    : ReferenceKind::None;
+	// What an index names is decided below by what the model row holds, never by the declaration alone.
+	if (use.reference != ReferenceKind::Texture) use.reference = ReferenceKind::None;
 	// An index names what the model row holds: its registers and frames are its records, named
 	// by their index (a Record reference, S13 D8: the picker offers them, the core renumbers it);
 	// LOD 0's parts are not records (record_choices offers them). A model with no CTRL table skips

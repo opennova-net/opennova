@@ -52,6 +52,8 @@ void add_trigger_area_reference(const MissionTriggerRecord &trigger,
                                 size_t area_count,
                                 MissionEventChain &chain);
 
+int next_entity_id(const bms::File &file);
+
 void apply_transform(bms::Entity &entity, const EntityTransform &transform);
 
 bms::Entity make_default_entity(const bms::File &file,

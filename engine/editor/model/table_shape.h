@@ -5,17 +5,18 @@
 // catalog's items, a model's materials, a mission's entities); the type describes them to the core
 // through rows of tables, one table per type, one kind of record per row of it:
 //
-//   the record handle  a native record, the kind it is and the row's record it lies in
-//                      (RecordHandle): what a field reads and writes and a list holds;
+//   the record handle  a native record and the kind it is (RecordHandle): what a field reads and
+//                      writes and a list holds; the records it lies in, from its row down
+//                      (RecordOwners), are what a field's rule reads where its owners decide it;
 //   the value          how one field reads and writes a record, in the units its file writes it, and
 //                      whether the file writes it (FieldValue);
 //   the choice         the values a field takes by name (ChoiceRow, as constexpr data; FieldChoice);
 //   the labelled field what the editor shows of a field (FieldSchema: its label, unit, choices, the
 //                      reference it makes) with its value and what a record makes of it where the
-//                      record decides (LabelledField);
-//   the list ops       an ordered list of records a record holds: its size, the record at an index,
-//                      how a record goes in and comes out (ListOps), and what the core calls the
-//                      list (TableList).
+//                      record and its owners decide (LabelledField);
+//   the list ops       an ordered list of records a record holds, of one kind or of several: its
+//                      size, the record at an index, how a record goes in and comes out (ListOps),
+//                      and what the core calls the list (TableList).
 //
 // A kind (TableKind) is its RecordKindRow, its labelled fields in the order the Inspector shows them
 // and the lists it holds in the order the file writes them; a table (RecordTable) holds one kind per
@@ -48,17 +49,32 @@ namespace opennova::editor {
 // --- the record handle -------------------------------------------------------------------------
 // A native record of a table and the kind its table's row describes. The struct behind each kind is
 // the type's (a menu window's mnu::Window, a def item's DefItemDef); only the kind's own functions
-// cast it.
+// cast it. A record owns what it holds: no list reaches past its owner into the row's other records
+// (what one record names of another by its index is a Record reference, S13 D8).
 struct RecordHandle {
 	NodeKind kind = -1;
 	void *data = nullptr;
-	// The native record of the row the record lies in (the top of its trail), which a list whose records
-	// lie in the row's own tables reads: a mission event's triggers are a range of the file's trigger
-	// table. A type whose lists need it gives it to its row's handle and carries it into the handles its
-	// ops make (vector_list always does); null where none does.
-	void *top = nullptr;
 	explicit operator bool() const { return data != nullptr; }
 	template <class T> T &as() const { return *static_cast<T *>(data); }
+};
+
+// One step down from a row toward a record: the record that holds the next one, the list it holds it
+// in (its place among the holder's kind's lists) and the index there.
+struct OwnerStep {
+	RecordHandle owner;
+	size_t list = 0;
+	size_t index = 0;
+};
+
+// The records a record lies in, from its row down to its nearest owner (none for a row itself): what
+// a field's rule reads where the record's owners decide it (a menu ITEM's text by the type of the
+// window whose ITEMS hold it).
+struct RecordOwners {
+	const OwnerStep *steps = nullptr;
+	size_t size = 0;
+	bool empty() const { return size == 0; }
+	const OwnerStep &operator[](size_t i) const { return steps[i]; }
+	const OwnerStep &nearest() const { return steps[size - 1]; }
 };
 
 // A record held apart from any list (a record between its removal and its insertion elsewhere, a
@@ -110,25 +126,28 @@ template <size_t N> std::vector<FieldChoice> choices_of(const ChoiceRow (&rows)[
 // --- the labelled field ------------------------------------------------------------------------
 // A field of a kind: what the editor shows of it and what it takes (its FieldSchema: label, section,
 // unit, note, width, range, choices, the reference it makes and the name it defines), its value, and
-// what a record makes of it where the record decides: whether the game reads it there (a window type,
-// a light that is not a spot) and what it names there (a menu ITEM's text: a string id, a texture or a
-// colour by the ITEM's TYPE; a generator's parameter: a register only above style 0x70). Null: the
-// schema's (FieldSchema::applies, FieldSchema::reference). A type adds what no row can say (a scope by
-// the record's file, a record's own choices) in its refine_field.
+// what a record makes of it where the record and the records it lies in decide: whether the game
+// reads it there (a window type, a light that is not a spot, the type of the window whose list holds
+// the record) and what it names there (a menu ITEM's text: a string id, a texture or a colour by the
+// ITEM's TYPE; a generator's parameter: a register only above style 0x70). Null: the schema's
+// (FieldSchema::applies, FieldSchema::reference). A type adds what no row can say (a scope by the
+// record's file, a record's own choices) in its refine_field.
 struct LabelledField {
+	using Decides = std::function<Applicability(const RecordHandle &record, const RecordOwners &owners)>;
+	using Names = std::function<ReferenceKind(const RecordHandle &record, const RecordOwners &owners)>;
 	FieldSchema schema;
 	FieldValue value;
-	std::function<Applicability(const RecordHandle &record)> applies;
-	std::function<ReferenceKind(const RecordHandle &record)> reference;
+	Decides applies;
+	Names reference;
 };
 
 // --- the list ops ------------------------------------------------------------------------------
 // An ordered list of records a record holds (a window's actions, an item's attachments, a material's
-// texture rows, an event's triggers): its native list and nothing else (the identities beside it are
-// the core's, RecordIds).
+// texture rows, a path's stops): its native list and nothing else (the identities beside it are the
+// core's, RecordIds).
 struct ListOps {
 	std::function<size_t(const RecordHandle &owner)> size;
-	// The record at `index` (empty past the end), of the list's kind.
+	// The record at `index` (empty past the end), of a kind the list holds.
 	std::function<RecordHandle(const RecordHandle &owner, size_t index)> at;
 	// A record put in at `index` (the end past it): a copy of `record`, or with null the list's new
 	// record (its defaults, which the writer writes and the reader reads back as written); authors
@@ -137,6 +156,9 @@ struct ListOps {
 	std::function<bool(const RecordHandle &owner, size_t index, const DetachedRecord *record,
 	                   std::string &error)>
 	        insert;
+	// A list of several kinds: a new record of `kind` put in at `index` (what insert's null is to a
+	// list of one kind). Null for a list of one kind.
+	std::function<bool(const RecordHandle &owner, size_t index, NodeKind kind, std::string &error)> make;
 	std::function<bool(const RecordHandle &owner, size_t index)> erase;
 	// A copy of the record at `index`, held apart (empty past the end).
 	std::function<DetachedRecord(const RecordHandle &owner, size_t index)> copy;
@@ -145,11 +167,17 @@ struct ListOps {
 };
 
 // A list a kind holds: what the core calls it (its CollectionSpec: its records' kind, its label, the
-// field that names a record, whether it is fixed, whether the game reads it, the most it holds) and
-// its ops.
+// field that names a record, whether it is fixed, whether the game reads it, the most it holds), its
+// ops, and where it holds records of several kinds in one order, every kind it holds (`kinds`, the
+// spec's among them; empty: the spec's alone), each record walked as the kind its handle says.
 struct TableList {
 	Document::CollectionSpec spec;
 	ListOps ops;
+	std::vector<NodeKind> kinds;
+	bool holds(NodeKind kind) const {
+		return kinds.empty() ? kind == spec.kind : std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
+	}
+	std::vector<NodeKind> held() const { return kinds.empty() ? std::vector<NodeKind>{spec.kind} : kinds; }
 };
 
 // --- the kinds and the table -------------------------------------------------------------------
@@ -178,7 +206,8 @@ public:
 	const RecordKindRow &row() const { return row_; }
 	const std::vector<FieldSchema> &fields() const { return fields_; }
 	const std::vector<TableList> &lists() const { return lists_; }
-	// The labelled field `id` names (its place among the fields), or npos: one lookup, no walk.
+	// The labelled field `id` names (its place among the fields), or npos: one probe of the kind's
+	// index, no walk.
 	static constexpr size_t npos = SIZE_MAX;
 	size_t find(const std::string &id) const {
 		const auto found = index_.find(id);
@@ -195,23 +224,21 @@ public:
 		return at != npos ? at : find(field.id);
 	}
 	const FieldValue &value(size_t place) const { return values_[place]; }
-	const std::function<Applicability(const RecordHandle &)> &applies(size_t place) const { return applies_[place]; }
-	const std::function<ReferenceKind(const RecordHandle &)> &reference(size_t place) const {
-		return references_[place];
-	}
+	const LabelledField::Decides &applies(size_t place) const { return applies_[place]; }
+	const LabelledField::Names &reference(size_t place) const { return references_[place]; }
 
 private:
 	RecordKindRow row_;
 	std::vector<FieldSchema> fields_;
 	std::vector<FieldValue> values_;
-	std::vector<std::function<Applicability(const RecordHandle &)>> applies_;
-	std::vector<std::function<ReferenceKind(const RecordHandle &)>> references_;
+	std::vector<LabelledField::Decides> applies_;
+	std::vector<LabelledField::Names> references_;
 	std::vector<TableList> lists_;
 	std::unordered_map<std::string, size_t> index_;
 };
 
 // A type's records: one kind per NodeKind, in its order (kind(k).row().kind == k), each of its lists
-// naming a kind the table holds. Made once for the process.
+// naming kinds the table holds. Made once for the process.
 class RecordTable {
 public:
 	RecordTable() = default;
@@ -227,16 +254,25 @@ public:
 		const TableKind *found = this->kind(kind);
 		return found ? found->fields() : none;
 	}
-	// The table's invariants: each kind at its own place and its token its own; each list naming a
-	// kind of the table; each field's id its own within its kind. What a type's tests assert of it.
+	// The table's invariants: each kind at its own place and its token its own; each list naming kinds
+	// of the table, its spec's among them, with the ops to read it and, holding several, to make a
+	// record of each; no kind in two lists of one owner (an Add names its list by the kind); each
+	// field's id its own within its kind. What a type's tests assert of it.
 	bool well_formed() const {
 		for (size_t k = 0; k < kinds_.size(); ++k) {
 			const TableKind &kind = kinds_[k];
 			if (kind.row().kind != NodeKind(k) || !kind.row().token || !*kind.row().token) return false;
 			for (size_t other = 0; other < k; ++other)
 				if (std::string(kinds_[other].row().token) == kind.row().token) return false;
-			for (const TableList &list : kind.lists())
-				if (!this->kind(list.spec.kind) || !list.ops.size || !list.ops.at) return false;
+			std::vector<NodeKind> held;
+			for (const TableList &list : kind.lists()) {
+				if (!list.ops.size || !list.ops.at || !list.holds(list.spec.kind)) return false;
+				if (!list.kinds.empty() && !list.ops.make) return false;
+				for (NodeKind each : list.held()) {
+					if (!this->kind(each) || std::find(held.begin(), held.end(), each) != held.end()) return false;
+					held.push_back(each);
+				}
+			}
 			for (size_t f = 0; f < kind.fields().size(); ++f)
 				if (kind.find(kind.fields()[f].id) != f || !kind.value(f).get) return false;
 		}
@@ -290,7 +326,7 @@ ListOps vector_list(NodeKind kind, std::vector<Record> &(*list)(Owner &owner),
 	ops.size = [list](const RecordHandle &owner) { return list(owner.as<Owner>()).size(); };
 	ops.at = [list, kind](const RecordHandle &owner, size_t index) {
 		std::vector<Record> &records = list(owner.as<Owner>());
-		return index < records.size() ? RecordHandle{kind, &records[index], owner.top} : RecordHandle{};
+		return index < records.size() ? RecordHandle{kind, &records[index]} : RecordHandle{};
 	};
 	ops.insert = [list, kind, fresh](const RecordHandle &owner, size_t index, const DetachedRecord *record,
 	                                 std::string &error) {

@@ -168,6 +168,9 @@ void DefCatalogDocument::after_edit(Node &node) {
 }
 
 void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
+	// What the table's labelled field decides on its record (none of a catalog's decides: the rows say
+	// it all), then the catalog's own rules.
+	TableDocument::refine_field(address, use);
 	// A bit per id of the file-wide registry (record_choices).
 	if (use.schema->id == "vehicle_spawn_mask" && def_kind(address.kind) == DefRecordKind::Item) {
 		use.own_choices = true;

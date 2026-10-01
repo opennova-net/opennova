@@ -55,13 +55,14 @@ bool set(const RecordHandle &record, const std::string &id, const Value &value, 
 bool reads(const RecordHandle &record, const std::string &id) {
 	const TableKind &kind = *T().kind(record.kind);
 	const size_t place = kind.find(id);
-	return place != TableKind::npos && (!kind.applies(place) || kind.applies(place)(record) == Applicability::Reads);
+	return place != TableKind::npos &&
+	       (!kind.applies(place) || kind.applies(place)(record, RecordOwners{}) == Applicability::Reads);
 }
 ReferenceKind names(const RecordHandle &record, const std::string &id) {
 	const TableKind &kind = *T().kind(record.kind);
 	const size_t place = kind.find(id);
 	if (place == TableKind::npos) return ReferenceKind::None;
-	return kind.reference(place) ? kind.reference(place)(record) : kind.fields()[place].reference;
+	return kind.reference(place) ? kind.reference(place)(record, RecordOwners{}) : kind.fields()[place].reference;
 }
 
 // Every record a row holds, the row's own first, each list's records with what they hold before the
@@ -279,7 +280,17 @@ int test_lists() {
 	TEST_EXPECT(mat.texture_count == had);
 	for (size_t i = had; i < 24; ++i) TEST_EXPECT(mat.textures[i].name[0] == 0 && mat.textures[i].slot == 0);
 	const TableKind &model = *T().kind(k(ModelKind::Model));
-	TEST_EXPECT(model.lists().size() == 6 && model.lists()[0].spec.fixed && !model.lists()[1].spec.fixed);
+	TEST_EXPECT(model.lists().size() == 6 && model.lists()[kModelLods].spec.fixed &&
+	            !model.lists()[kModelMaterials].spec.fixed);
+	// The named places are the table's order (what the overlay and the edits index the row's ids by).
+	TEST_EXPECT(model.lists()[kModelLods].spec.kind == k(ModelKind::Lod) &&
+	            model.lists()[kModelMaterials].spec.kind == k(ModelKind::Material) &&
+	            model.lists()[kModelLights].spec.kind == k(ModelKind::Light) &&
+	            model.lists()[kModelUserPoints].spec.kind == k(ModelKind::UserPoint) &&
+	            model.lists()[kModelRegisters].spec.kind == k(ModelKind::Register) &&
+	            model.lists()[kModelFrames].spec.kind == k(ModelKind::Frame));
+	TEST_EXPECT(T().kind(k(ModelKind::Lod))->lists()[kModelOwnList].spec.kind == k(ModelKind::PartAnimation) &&
+	            T().kind(k(ModelKind::Material))->lists()[kModelOwnList].spec.kind == k(ModelKind::Texture));
 	for (const TableList &list : T().kind(k(ModelKind::Collision))->lists()) TEST_EXPECT(list.spec.fixed);
 	TEST_EXPECT(T().well_formed());
 	std::printf("lists: 24 texture rows at most, the LODs and the collision records fixed\n");

@@ -1726,9 +1726,9 @@ bool writes_elements(const Window &w) {
   return !probe.out.empty();
 }
 
-// Each issue names the record that holds the value by the property table's list paths
-// and the field by its path (formats/mnu/mnu_schema.h), so the editor shows it on the
-// field that causes it.
+// Each issue names the record that holds the value by its lists' element paths and the
+// field by its element path (WriteIssue::locator; the names the editor's menu table
+// gives them), so the editor shows it on the field that causes it.
 class IssueCheck {
 public:
   explicit IssueCheck(std::vector<WriteIssue> &out) : out_(out) {}

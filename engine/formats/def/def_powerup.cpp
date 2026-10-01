@@ -179,8 +179,11 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, 
             // The name resolves against the weapon table at runtime; `all`
             // is the -1 sentinel; a name the table lacks logs "Weapon not
             // found" and leaves the row's 0 [orig: @0x4431A7..0x443216].
+            // Both fill the one word row+0x34, the later line's kept: `all`
+            // leaves no name behind it.
             current.weapon_all = key_is(v, "all") ? 1 : 0;
-            if (!current.weapon_all) safe_copy(current.weapon, sizeof(current.weapon), v, vl);
+            if (current.weapon_all) memset(current.weapon, 0, sizeof(current.weapon));
+            else safe_copy(current.weapon, sizeof(current.weapon), v, vl);
         } else if (key_is(key, "allammo")) {
             current.allammo = 1; // @0x443220
         } else if (key_is(key, "ammo")) {

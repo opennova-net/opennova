@@ -131,12 +131,13 @@ ReferenceKind reference_kind(DefReference reference) {
 	case DefReference::GameText: return ReferenceKind::TextId;
 	case DefReference::OtherText: return ReferenceKind::OtherText;
 	case DefReference::UserPoint: return ReferenceKind::UserPoint;
+	case DefReference::Powerup: return ReferenceKind::Powerup;
 	default: return ReferenceKind::None;
 	}
 }
 
 // The symbol a record's field defines, which the other catalogs and the game name it by: a weapon's
-// name, an ammo's name, an item's id.
+// name, an ammo's name, an item's id, a powerup row's name.
 struct Defines {
 	R kind;
 	const char *field;
@@ -146,6 +147,7 @@ constexpr Defines kDefines[] = {
 	{R::Weapon, "weapon_name", ReferenceKind::Weapon},
 	{R::Ammo, "name", ReferenceKind::Ammo},
 	{R::Item, "id", ReferenceKind::Item},
+	{R::Powerup, "name", ReferenceKind::Powerup},
 };
 
 // Where a field's reference resolves, when the field says: a def's game-text fields are string ids in

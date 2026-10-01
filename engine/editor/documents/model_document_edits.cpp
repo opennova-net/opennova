@@ -368,7 +368,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			    ModelKind::Register, 4, i, "name");
 	for (size_t l = 0; l < row->lods.size(); ++l) {
 		const ModelLod &lod = row->lods[l];
-		const std::vector<RecordIds> &panm_ids = row->ids.lists[kLods][l].lists[0];
+		const std::vector<RecordIds> &panm_ids = row->ids.lists[kModelLods][l].lists[kModelOwnList];
 		if (l > 0 && lod.lod.lod_threshold > row->lods[l - 1].lod.lod_threshold)
 			add(DiagnosticSeverity::Warning, ModelFinding::LodOrder,
 			    "LOD " + std::to_string(l) + " takes over at more pixels than LOD " + std::to_string(l - 1) + ".",
