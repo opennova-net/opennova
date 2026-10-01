@@ -112,9 +112,11 @@ void test_frame_bracket_follows_the_table() {
 	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
 	                              K::Build, K::Play, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
 	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::Quit};
+	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
+	// pathless request does.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
 	                               K::RevertToSaved, K::EndEdit, K::Copy, K::Cut, K::Paste, K::Duplicate, K::Save,
-	                               K::Undo, K::Redo};
+	                               K::Undo, K::Redo, K::SetViewport, K::EditInViewport};
 	const auto listed = [](const std::vector<K> &kinds, K kind) {
 		return std::find(kinds.begin(), kinds.end(), kind) != kinds.end();
 	};

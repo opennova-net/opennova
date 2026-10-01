@@ -18,6 +18,7 @@ namespace opennova::editor {
 class CanvasHalf;
 class DocumentBase;
 class ViewportDevice;
+struct JsonPage;
 struct SessionView;
 struct ViewportDeviceReport;
 
@@ -33,6 +34,12 @@ const char *viewport_status_token(ViewportStatus status);
 // The JSON text of a SetViewport that changes one member of a viewport of `kind`: {"kind": its
 // token, member: value} (a canvas's camera, a toolbar's options, the clock, the device's size).
 std::string viewport_change(ViewportKind kind, const char *member, io::JsonValue value);
+
+// A SetViewport's clock member, {playing, rate, time_ms, ticks} each optional, set on `clock`: every
+// member checked before any applies; false, nothing changed, with `error` naming the member and what
+// it takes (a viewport's change applies it with its other members, ViewportModel::apply; a pathless
+// change of the clock alone, Viewports::set_clock).
+bool set_preview_clock(const io::JsonValue &json, PreviewClock &clock, std::string &error);
 
 // What changed in a viewport's document since the viewport last followed it (Viewports::follow: the
 // document's identity and load, and what it answers changed since the revision followed,
@@ -87,7 +94,17 @@ struct ViewportContext {
 	// An edit is planned only where the session takes one now: no running operation refuses an edit
 	// (S13 A3, SessionView::allows), and the document is open and not blocked.
 	bool editable() const;
+	// Why no edit is planned ("" when editable): the document blocked (its file holds what it cannot
+	// carry), or an operation that holds the documents running.
+	std::string not_editable() const;
 };
+
+class ViewportModel;
+// What a planner reads of a viewport the session keeps, with no canvas drawing it (the viewport
+// query's hit, an EditInViewport's drag and command, a test): the view, the preview clock, the
+// document open at its path, as it followed (ChangeClass None), at the size its device draws at
+// (ViewportModel::size), snapped by `snap`, over no device.
+ViewportContext viewport_context(const SessionView &view, const ViewportModel &model, float snap = 0.0f);
 
 // How a canvas lays the picture out: a design picture `design_width` x `design_height` (a menu's
 // 800 x 600, which the canvas fits, zooms and scrolls), or with none a picture filling the canvas
@@ -107,20 +124,6 @@ struct ViewportHit {
 	std::string name;
 	std::string kind;
 	bool current = false;
-};
-
-// A drag the MCP plans (ADR 0046 S10p5, S9k1): the record `id`, the handle by its token (a menu
-// window's "move", "left", ... "bottom_right"; a model marker's "place" or "axis"), by (x, y) from
-// where the picture shows it (`by`: a menu's, design units) or to the point (x, y) of the picture
-// (a model's, pixels), snapped by `snap` (a menu's grid when it is not 0; a model's grid in metres,
-// 0 free).
-struct ViewportDrag {
-	NodeId id = 0;
-	std::string handle;
-	bool by = true;
-	float x = 0.0f;
-	float y = 0.0f;
-	float snap = 0.0f;
 };
 
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would
@@ -180,9 +183,20 @@ public:
 	// machine, what a press or a nudge took), made once per canvas.
 	virtual std::unique_ptr<CanvasHalf> make_canvas() const = 0;
 	virtual ViewportHit hit(const ViewportContext &context, float x, float y) const = 0;
-	// The MCP's drag planned into requests (a batch of the gesture's steps and its end): false, with
-	// why, for a picture that is not the document's own, a record it does not show, a handle the
-	// record has not, a drag that writes nothing the session would take.
+	// Where the picture shows the record `id`'s handle `handle` now, in its units: a menu window's
+	// edge or corner (a move's its top left corner, an edge's middle), a model marker's place or the
+	// tip of its axis, projected. What a drag's `by` goes from. False, with why, where drag refuses
+	// the record or the handle.
+	virtual bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
+			float &y, std::string &error) const = 0;
+	// A drag of a record's handle (the editor MCP's, EditInViewport: session/editor_request.h's
+	// ViewportDrag) planned into requests: one EditRecord, the batch of the edits over every selected
+	// record the drag moves, each carrying `drag.gesture` (a new one when 0), so the drags of one
+	// gesture fold into one undo step; then the gesture's EndEdit when `drag.end` (with or without a
+	// batch: a last drag that moves nothing still ends the gesture its sample names). `by` (x, y) from
+	// where the picture shows the handle now (handle_point; a `by` of nothing plans no batch), else to
+	// the point (x, y). False, with why, for a picture that is not the document's own, a record it
+	// does not show, a handle the record has not, a drag that writes nothing the session would take.
 	virtual bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const = 0;
 	// A command by its name over the records `ids` (the menu's arrange of windows, "align_left" ...;
@@ -202,6 +216,12 @@ public:
 	virtual io::JsonValue body_json(const ViewportInput &input) const = 0;
 	virtual io::JsonValue items_json(const ViewportInput &input) const = 0;
 	virtual io::JsonValue notes_json(const ViewportInput &input) const;
+	// One row of its document as the kind renders it alone, whatever the picture shows (the viewport
+	// query's render, S13 V7): a menu's screen by its row, as the render check compiled it (the
+	// menu_render query's answer, a page of its widgets and notes). Null, with why, for a row it does
+	// not render (by default: a kind whose picture is its whole document, a model's).
+	virtual io::JsonValue render_json(
+			const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const;
 
 	// --- the device's -------------------------------------------------------------------------------
 

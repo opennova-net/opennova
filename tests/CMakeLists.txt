@@ -3970,6 +3970,16 @@ target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_viewport COMMAND editor_viewport_test)
 
+# Edits in a viewport over the wire (S13 V7: edit_in_viewport through a session's JSON requests): its
+# refusals, a drag one batch over the selection, a command one request; the wire's gestures (a
+# snapped gesture where a canvas's lands, refused and forged tokens, interleaving, what ends one,
+# the 10 s lapse); the menu's rounding and its drag to a point; a model's drag by nothing, its frame
+# beside any operation; the clock set with no document named; a model read at a canvas's size.
+add_executable(editor_viewport_wire_test editor/viewport_wire_test.cpp)
+target_link_libraries(editor_viewport_wire_test PRIVATE opennova_editor)
+target_include_directories(editor_viewport_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_viewport_wire COMMAND editor_viewport_wire_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)

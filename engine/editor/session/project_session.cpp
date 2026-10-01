@@ -73,6 +73,9 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
 	const SessionCore::RequestScope scope(impl_->core);
+	// A gesture of the wire's open in the document the request is on ends first, unless the request is
+	// its next sample (S13 V7).
+	impl_->core.request_arrives(request);
 	return serve_request(impl_->core, request);
 }
 
@@ -156,6 +159,9 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 						made.set(names.labels[i], io::json_number(double(outcome.made[i])));
 			came.set("made", std::move(made));
 		}
+		// A drag in a viewport names its gesture, which the gesture's next drag passes back (S13 V7).
+		if (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag())
+			came.set("gesture", io::json_number(double(outcome.gesture)));
 		answer.set("outcome", std::move(came));
 	}
 	answer.set("status", io::json_string(view().activity.status));
@@ -185,18 +191,17 @@ uint64_t ProjectSession::handle_entries() const {
 
 // --- the poll and the operation slot -------------------------------------------------------------
 
-// The poll's order (S13 A3), one budget a poll: the gestures past their deadline ended first (S13
-// V8: a client that stopped mid-drag holds no validation for good), so the validation they leave due
-// steps in the same poll; the validation left due, a step at a time within the budget; the running
-// operation's steps within what is left of it, at least one; the child's state and the game's log
-// tail; last, the operation found done finishes: the view learns what it came to (a project opens, a
-// build lands and the game a Play waits on starts on it), and what it read leaves the validation
-// due, which the next poll steps.
+// The poll's order (S13 A3), one budget a poll: a gesture of the wire's with no sample for
+// kWireGestureLapseMs ended (S13 V7: a client that went away holds no validation); the validation
+// left due, a step at a time within the budget; the running operation's steps within what is left of
+// it, at least one; the child's state and the game's log tail; last, the operation found done
+// finishes: the view learns what it came to (a project opens, a build lands and the game a Play waits
+// on starts on it), and what it read leaves the validation due, which the next poll steps.
 void ProjectSession::poll() {
 	Impl &session = *impl_;
+	session.core.lapse_wire_gestures();
 	const PollBudget budget = session.core.poll_budget();
 	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
-	session.documents.expire_gestures(steady_clock_ms());
 	session.problems.step_validation(budget, steady_clock_ms);
 	PollBudget rest = budget;
 	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
@@ -207,10 +212,6 @@ void ProjectSession::poll() {
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {
 	impl_->core.set_poll_budget(budget);
-}
-
-void ProjectSession::set_gesture_deadline(int64_t ms) {
-	impl_->documents.set_gesture_deadline(ms);
 }
 
 void ProjectSession::run_operations() {

@@ -25,8 +25,10 @@ inline constexpr float kModelHandleSnaps[] = {0.0f, 1.0f / 64.0f, 1.0f / 16.0f, 
 // point from the marker at `to`. The part's pose at `time_ms` is undone first (the record
 // is authored in the model's frame and the part carries it), and the file's axes are the
 // schema's position and direction fields (threedi_build_to_mission). Each edit carries
-// `gesture`, so a drag is one undo step. False for a marker with no record that moves (a
-// pivot is geometry), an axis on an omni light, or a turn to a zero-length axis.
+// `gesture`, so a drag is one undo step. A field the record would hold as it holds it now gets
+// no edit (S13 V7: a user point's 16.16 word within half its step, a light's float the same), so
+// a drag that lands where the marker is changes nothing. False for a marker with no record that
+// moves (a pivot is geometry), an axis on an omni light, or a turn to a zero-length axis.
 bool model_handle_edits(const ModelDocument &document, const threedi::Threedi3di3 &model, const ModelOverlay &overlay,
                         int lod, uint32_t time_ms, const int32_t bus[96], ModelHandle handle, const PreviewVec3 &to,
                         float snap, uint64_t gesture, std::vector<Edit> &out);

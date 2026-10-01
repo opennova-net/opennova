@@ -100,8 +100,10 @@
     read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
     Clear; for a kind whose row holds for a gesture, the model's, a Rebuild held while a gesture is
     open in its document over a picture the device holds), its envelope on the wire
-    (`viewport_json`), what a drag or a command plans as requests,
-    and the device seam (`viewport_device`) with its least-recently-used cache of four
+    (`viewport_json`), what a drag or a command plans as requests (S13 V7: the session's `viewport`
+    query reads a viewport by op, and its `edit_in_viewport` request serves a drag or a command the
+    viewport plans), and the device seam (`viewport_device`) with its least-recently-used cache of
+    four
     (`viewport_device_cache`); the Shell's devices are `godot/src/authoring`'s over the runtime's
     `MenuFrame` and `ObjectModel`. The menu's viewport (`menu_viewport`): its screen compiled
     headless, the options it holds, what a drag of a window's handles or of several windows

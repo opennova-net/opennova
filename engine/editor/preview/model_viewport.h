@@ -159,8 +159,12 @@ public:
 	ViewportLayout layout() const override { return ViewportLayout(); }
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
+	// The frame command: the camera on the marker of the first record named (one that is no marker
+	// refused), else on the whole model.
 	bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const override;
 	io::JsonValue options_json() const override;
@@ -176,6 +180,11 @@ protected:
 	void report_(const ViewportDeviceReport &report) override;
 
 private:
+	// What a drag of the record `id` by its handle `token` holds: the handle and the record's marker
+	// as the picture shows it now. False, with why: a handle no marker has, a picture that is not the
+	// model as it is now, a record that is no marker of it.
+	bool dragged_marker_(const ViewportContext &context, NodeId id, const std::string &token, ModelHandle &handle,
+			ModelOverlay &marker, std::string &error) const;
 	ViewportAction stop_(ModelViewStatus reason, const std::string &detail, bool failed);
 	ViewportAction follow_model_(const ViewportInput &input, const ModelDocument &document);
 	// Whether what changed since the last follow is the overlays' alone (S13 V8): a change set

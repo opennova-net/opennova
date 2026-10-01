@@ -337,6 +337,8 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// [orig: 0x82 MI TLV = conn->connection_id @ CNapiNPConnection_SendSessionInit 0x620ef0] — the
 	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
 	reply.mi = conn.connection_id;
+	// [orig: SendSessionInit @0x62125d — RCNT, only when nonzero]
+	reply.rcnt = conn.rcnt;
 	// A GAME host advertises the JOINTOPERATIONS session template (120 s reap,
 	// 30 s idle keepalive, 10 s active probe, 512/256 pools, 1200 msg cap), not
 	// the NOVAWORLDUDP service block build_server_auth defaults to for the
@@ -746,6 +748,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	conn.client_scrk = auth.scrk;
 	conn.client_ck = auth.ck;
 	conn.client_ci = auth.ci;
+	// A re-join counts its reconnect: DCNT as sent, RCNT one past the client's when DCNT > 0.
+	// [orig: HandleClientJoin @0x62c28d..0x62c2a3 — `jle` signed]
+	conn.dcnt = auth.dcnt;
+	conn.rcnt = static_cast<int32_t>(auth.dcnt) > 0 ? auth.rcnt + 1u : auth.rcnt;
 	conn.receive_inactive_ms = 0;
 	conn.c2s_reassembly = {};
 	// The 0x42's CU chunks carry the joiner's character/profile vars — the per-side character

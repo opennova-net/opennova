@@ -5,7 +5,7 @@
 // that changes the checklist, what a validation costs (the closed files it reads,
 // the edits a pump holds), the menu screen the preview follows, (S11a) the save
 // contract, the unsaved prompt and the selection each open document keeps, and (S13 V8)
-// the gestures, one open per document, and what ends each.
+// the gestures a canvas's batches open, one per document, and what ends each.
 #include <chrono>
 #include <cstdio>
 #include <iterator>
@@ -31,6 +31,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
@@ -1454,14 +1455,15 @@ static int test_save_contract() {
 	return 0;
 }
 
-// S13 V8: the gestures, one open per document (the view's documents.gestures), each from the first of
-// its batches that changes its document until it ends: a request on its document that is not its
-// batch (its EndEdit, an Undo, a Save, a select, the Inspector typing into it, another gesture's
-// batch), every edit group ended (a Rescan), or no batch of it in the gesture deadline (the next
-// poll). A request on another document ends none: the Inspector typing into the string table, its
-// EndEdit included, while a drag is open in the item table leaves the drag open. While any is open
-// the poll steps no validation. A pathless EndEdit names the active document; one gesture's samples
-// are one undo step.
+// S13 V8: the gestures a canvas's batches open (S13 V7's state, the view's documents.gestures: one per
+// document at most, from the first of its batches that changes its document until it ends): its
+// document's EndEdit (a pathless one the active document's), an Undo or a Save of it, another
+// gesture's batch in it, or every edit group ended (a Rescan). A request on another document ends
+// none: the Inspector typing into the string table, its EndEdit included, while a drag is open in the
+// item table leaves the drag open. A canvas ends its own: any other request on its document and the
+// wire's deadline end nothing of its (the wire's gestures, which any request on their document and
+// ten seconds with no sample end, are viewport_wire_test.cpp's). While any is open the poll steps no
+// validation; the samples of one gesture are one undo step.
 static int test_gestures_per_document() {
 	SaveProject project("opennova_editor_session_gestures");
 	TEST_EXPECT(project.open());
@@ -1491,16 +1493,14 @@ static int test_gestures_per_document() {
 		return session.outcome().done();
 	};
 	// The token of the gesture open in the document at `path` (0: none).
-	const auto open = [&](const std::string &path) {
-		const OpenGesture *gesture = v.documents.gesture_in(path);
-		return gesture ? gesture->token : uint64_t(0);
-	};
+	const auto open = [&](const std::string &path) { return v.documents.gesture_in(path).token; };
 
-	// A drag in the item table (two samples) and one in the string table: both open, the validation
-	// waiting.
+	// A drag in the item table (two samples) and one in the string table: both open, neither a
+	// gesture of the wire's, the validation waiting.
 	size_t passes = stats.passes;
 	TEST_EXPECT(hp(20, 7) && hp(21, 7) && section(9));
 	TEST_EXPECT(open(project.items_path) == 7 && open(project.strings_path) == 9 && v.documents.gestures.size() == 2);
+	TEST_EXPECT(!v.documents.gesture_in(project.items_path).wire() && !v.documents.gesture_in(project.strings_path).wire());
 	session.poll();
 	TEST_EXPECT(stats.passes == passes);
 	// The string table's EndEdit ends its gesture alone.
@@ -1515,15 +1515,24 @@ static int test_gestures_per_document() {
 	TEST_EXPECT(open(project.items_path) == 7 && open(project.strings_path) == 0);
 	session.poll();
 	TEST_EXPECT(stats.passes == passes);
-	// The drag's samples one step: undone together. Typing into the item table itself (no token) ends
-	// the drag there: the validation runs at the poll.
-	TEST_EXPECT(hp(22, 0) && open(project.items_path) == 0 && v.documents.gestures.empty() && project.hp() == 22);
+	// A canvas ends its own: typing into the item table itself, a select in it and the clock passing the
+	// wire's deadline end nothing of its drag, which the poll still waits for.
+	TEST_EXPECT(hp(22, 0) && open(project.items_path) == 7);
+	session.handle(request::select_record(project.items_path, project.marker()));
+	TEST_EXPECT(open(project.items_path) == 7);
+	project.platform.clock += 3 * kWireGestureLapseMs;
+	session.poll();
+	TEST_EXPECT(open(project.items_path) == 7 && stats.passes == passes);
+	// Its EndEdit ends it: the validation runs at the poll; the drag's samples are one undo step
+	// (the typing before them another).
+	session.handle(request::end_edit(project.items_path));
+	TEST_EXPECT(open(project.items_path) == 0 && v.documents.gestures.empty() && project.hp() == 22);
+	session.poll();
+	TEST_EXPECT(stats.passes == passes + 1);
 	session.handle(request::undo(project.items_path));
 	TEST_EXPECT(project.hp() == 21);
 	session.handle(request::undo(project.items_path));
 	TEST_EXPECT(project.hp() == 10);
-	session.poll();
-	TEST_EXPECT(stats.passes == passes + 1);
 
 	// An Undo ends the gesture of its own document alone.
 	TEST_EXPECT(hp(23, 11) && section(12));
@@ -1536,16 +1545,11 @@ static int test_gestures_per_document() {
 	TEST_EXPECT(v.documents.active == project.strings_path);
 	session.handle(request::end_edit(std::string()));
 	TEST_EXPECT(open(project.items_path) == 13);
-	session.handle(request::end_edit(project.items_path));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && hp(25, 14) && open(project.items_path) == 14);
+	TEST_EXPECT(v.documents.active == project.items_path && open(project.items_path) == 13);
 	session.handle(request::end_edit(std::string()));
 	TEST_EXPECT(session.outcome().done() && v.documents.gestures.empty());
-	// A select in the document ends its gesture; a Save of one document its own alone; Save All the
-	// rest.
-	TEST_EXPECT(hp(26, 15) && open(project.items_path) == 15);
-	session.handle(request::select_record(project.items_path, project.marker()));
-	TEST_EXPECT(open(project.items_path) == 0);
+	// A Save of one document ends its own alone; Save All the rest.
 	TEST_EXPECT(hp(27, 16) && section(17));
 	session.handle(request::save(project.strings_path));
 	TEST_EXPECT(open(project.strings_path) == 0 && open(project.items_path) == 16 && !project.strings->dirty());
@@ -1556,15 +1560,6 @@ static int test_gestures_per_document() {
 	session.handle(request::rescan());
 	TEST_EXPECT(v.documents.gestures.empty());
 	session.run_operations();
-
-	// No batch of it in the gesture deadline: ended at the next poll, which validates.
-	TEST_EXPECT(hp(29, 20) && open(project.items_path) == 20);
-	passes = stats.passes;
-	session.poll();
-	TEST_EXPECT(open(project.items_path) == 20 && stats.passes == passes);
-	session.set_gesture_deadline(0);
-	session.poll();
-	TEST_EXPECT(open(project.items_path) == 0 && stats.passes == passes + 1);
 	return 0;
 }
 

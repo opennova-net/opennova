@@ -26,20 +26,27 @@ struct PreviewTarget {
 	NodeId part = 0;
 };
 
-// A gesture open in a document (ADR 0046 S13 V8; CONTEXT.md "Gesture"): the document its batches
-// changed, the token they carry (Edit::gesture) and when its last batch came (the session's
-// milliseconds, steady_clock_ms), from its first batch that changes the document until it ends: any
-// other request on that document (its EndEdit, an Undo, a Redo or a Save of it, a select, another
-// batch: a request whose row names the document, its own batches alone excepted), a Save All or a
-// close that writes or drops the document, every edit group ended (Build, Play, a project opened,
-// the imports and the renames), another gesture's batch in the document, or no batch of it for the
-// session's gesture deadline (a client that stopped mid-drag). Its edits' validation waits for its
-// end, and so does the picture a viewport whose kind holds for a gesture makes again of the document
-// (the model's scene: the device keeps the last one meanwhile).
+// The gesture open in a document (ADR 0046 S13 V7), one per document at most: the document its
+// batches changed and the token they carry (Edit::gesture), from its first batch that changes the
+// document (a drag of the wire's, from its first sample) until it ends: an EndEdit of that document
+// (let go, its canvas not drawn, the wire's last sample), an Undo, a Redo or a Save of that document,
+// every edit group ended (Build, Play, the unsaved-changes prompt), its document closed, discarded or
+// read again, or another gesture changing that document. A gesture of the wire's (a drag in a
+// viewport over the editor MCP, EditInViewport) carries when its last sample came (sampled_ms, the
+// session's ProcessPlatform::now_ms; -1 for a canvas's, which its canvas ends): any other request on
+// its document ends it, and so do 10 s with no sample (SessionCore). Its edits' validation waits for
+// its end, and so does the picture a viewport whose kind holds for a gesture makes again of the
+// document (S13 V8: the model's scene, the device keeping the last one meanwhile). Token 0: none
+// open.
 struct OpenGesture {
 	std::string path;
 	uint64_t token = 0;
-	int64_t last_ms = 0;
+	int64_t sampled_ms = -1;
+	bool open() const { return token != 0; }
+	// Open in the document at `document` (its project-relative path).
+	bool in(const std::string &document) const { return open() && path == document; }
+	// A gesture of the wire's: one whose samples came over the wire (they have a time).
+	bool wire() const { return open() && sampled_ms >= 0; }
 };
 
 // One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's).
@@ -66,15 +73,16 @@ struct DocumentsView {
 	// What Copy and Cut put on the clipboard: the payload of the document type that made
 	// it (Document::copy), which Paste hands back to the same type.
 	std::string clipboard;
-	// The gestures open now, one per document at most (S13 V8): kept by DocumentSet as the gestures'
-	// batches and their ends are served and the polls pass their deadline, read by the viewports as
-	// they follow (no concern moves with them: the Shell's pump reads them each frame). gesture_in:
-	// the one open in the document at `path` (its project-relative path), null for none.
+	// The gestures open now, one per document at most (S13 V7): kept by DocumentSet as each gesture's
+	// batches and its end are served (no concern moves with them: the viewports read them as they
+	// follow, S13 V8, the Shell's pump each frame).
 	std::vector<OpenGesture> gestures;
-	const OpenGesture *gesture_in(const std::string &path) const {
+	// The gesture open in the document at `path` (one whose token is 0 for none).
+	const OpenGesture &gesture_in(const std::string &path) const {
+		static const OpenGesture kNone;
 		for (const OpenGesture &gesture : gestures)
-			if (gesture.path == path) return &gesture;
-		return nullptr;
+			if (gesture.in(path)) return gesture;
+		return kNone;
 	}
 	// What the Preview window follows of each viewport kind (S13 V5): the last document of a type
 	// the kind shows made active (a model, a clip or an animation table for the model's), and for a

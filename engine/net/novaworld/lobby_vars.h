@@ -31,8 +31,8 @@ struct HostLobbyText {
 	std::array<std::string, 5> time_of_day{"Unknown", "Dawn", "Day", "Dusk", "Night"};
 };
 
-// The GDScript-set host fields the binding holds (the NovaWorldHost members) plus the live
-// server state the Host list republishes. Defaults match the binding's property defaults.
+// The host fields the binding holds (NovaWorldClient's hosting half, NwuHostRole) plus the live
+// server state the Host list republishes; a field the hosting leg leaves alone keeps its default.
 struct HostRegistration {
 	// --- HostSetup [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50, the +460 list] ---
 	std::string lobby_name = "jop_2_consumer"; // LobbyName (g_LobbyName)
@@ -45,6 +45,12 @@ struct HostRegistration {
 	std::string access_code_list;             // AccessCodeList
 	std::string expansion;                    // Exp (g_ExpansionName); PLoad is always empty
 	int lan_only = 0;                         // LAN (hostLanOnly_340)
+	// ReconnectCounter (session+0x500): the HostSetup list's last var. A fresh host request
+	// zeroes it; each re-host after an NWU reconnect counts one up.
+	// [orig: BuildHostVarLists @0x4d0b50 zeroes it @0x4d0b7b and appends it through
+	//  CNapiGameSession_InitHeapsAndSerializeCounter @0x4ce300 (@0x4d0e08);
+	//  HandleConnectVerifyResponse @0x4d5800 ++ @0x4d5968 before StartHostingSession(1)]
+	int reconnect_counter = 0;
 	// --- Host extras [orig: Lobby_UpdateServerInfo @0x4fe8c0] ---
 	std::string host_key;                     // HostKey (byte_C867B0, the NWHost relay HOSTKEY)
 	std::string game_type;                    // GameType (GameType_GetAbbreviation(g_GameType, 1))
@@ -95,7 +101,7 @@ struct HostPlayerSlot {
 };
 
 // The "HostSetup" var-list, in retail's insertion order: LobbyName, ServerName, Msg,
-// MaxPlayers, Password, Dedicated, AppId, AccessCodeList, PLoad, Exp, LAN.
+// MaxPlayers, Password, Dedicated, AppId, AccessCodeList, PLoad, Exp, LAN, ReconnectCounter.
 // [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 — the +460 SetOrCreate run; the second
 //  AccessCodeList store @0x4d0d9d re-sets the same entry]
 std::vector<ClientVar> make_host_setup_var_list(const HostRegistration &cfg);

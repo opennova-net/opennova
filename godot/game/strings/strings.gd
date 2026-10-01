@@ -38,6 +38,10 @@ const TABLE_GAMEUI := "gameui"
 ## (RtxtStringFile.install_key_strings -> controls::set_key_strings, the
 ## KeyHelp_GetStringWithFallback lookup over retail's g_TextKeyHelp).
 const TABLE_KEYHELP := "keyhelp"
+## gameerr.bin: the "Generic Error Strings" the post-mission error dialog shows
+## (STRE_CDTROUBLE / STRE_SYSTEM / STRE_PIRATE / STRE_BADMISSION).
+const TABLE_GAMEERR := "gameerr"
+const SECTION_GENERIC_ERRORS := "Generic Error Strings"
 const SECTION_MENU := "Menu"
 
 var _table: RtxtStringFile

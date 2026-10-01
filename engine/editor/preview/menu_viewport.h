@@ -58,12 +58,11 @@ void apply_menu_options(const MenuViewportOptions &options, int forced_index,
 		const menu::MenuFrameCompiler &compiler, menu::MenuFrameState &state);
 
 // A menu's clock on the preview clock (ADR 0046 S13 V8; CONTEXT.md "Preview clock"): the frame's
-// clock (MenuFrameState::time_ms, which the game reads from GetTickCount) is the preview clock's
-// milliseconds. What reads it in a preview is a focused edit box's caret, drawn while
-// (milliseconds & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63] (menu-re.md, the edit's caret and
-// the multiline edit's): it blinks as the clock plays, stands while it is paused and seeks with it. A
-// marquee rolls a step a frame drawn, not by the clock, and only over the credits its embedder loads,
-// which no preview does (D-MNU-6).
+// clock (MenuFrameState::time_ms) is the preview clock's milliseconds, where the game reads
+// GetTickCount. What reads it in a preview is a focused edit box's caret, which the game draws while
+// (GetTickCount() & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63] (menu_caret_shown, the one gate
+// the edit and the multiline edit draw by; docs/mnu/menu-re.md, the edit's caret and the multiline
+// edit's): it blinks as the clock plays, stands while it is paused and seeks with it.
 uint32_t menu_frame_time(const PreviewClock &clock);
 // Whether a device's frame drawn at `frame_ms` (its MenuFrameState::time_ms) draws otherwise at the
 // preview clock's time, and that time (S13 V8): only while a focused edit box of the shown screen
@@ -143,6 +142,8 @@ public:
 	ViewportLayout layout() const override;
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	bool command(const ViewportContext &context, const std::string &name,
@@ -151,6 +152,9 @@ public:
 	io::JsonValue body_json(const ViewportInput &input) const override;
 	io::JsonValue items_json(const ViewportInput &input) const override;
 	io::JsonValue notes_json(const ViewportInput &input) const override;
+	// A screen of the menu by its row, as the render check compiled it (menu_render_to_json).
+	io::JsonValue render_json(
+			const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const override;
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;

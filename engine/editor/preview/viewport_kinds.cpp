@@ -1,6 +1,9 @@
 #include <editor/preview/viewport_kinds.h>
 
+#include <cctype>
+#include <cstring>
 #include <iterator>
+#include <vector>
 
 #include <editor/model/document.h>
 #include <editor/preview/menu_viewport.h>
@@ -99,6 +102,11 @@ ViewportKind main_viewport_kind(DocumentTypeId type) {
 	return ViewportKind::kCount;
 }
 
+ViewportKind default_viewport_kind(DocumentTypeId type) {
+	const ViewportKind preview = preview_kind_of(type);
+	return viewport_kind_shows(preview, type) ? preview : main_viewport_kind(type);
+}
+
 ViewportKind preview_kind_of(DocumentTypeId type) {
 	for (const ViewportKindRow &row : kRows) {
 		if (row.role != ViewportRole::Preview) continue;
@@ -106,6 +114,28 @@ ViewportKind preview_kind_of(DocumentTypeId type) {
 			if (row.feeds[i].type == type) return row.kind;
 	}
 	return ViewportKind::kCount;
+}
+
+std::string viewport_shown_types() {
+	std::vector<std::string> named;
+	for (const ViewportKindRow &row : kRows)
+		for (size_t f = 0; f < row.feed_count; ++f) {
+			if (!row.feeds[f].shows) continue;
+			// The type in the words of the first asset kind it opens ("Animation map").
+			for (size_t k = 0; k < kAssetKindCount; ++k) {
+				const AssetKindRow &kind = asset_kind_row(static_cast<AssetKind>(k));
+				if (kind.document != row.feeds[f].type) continue;
+				std::string label = kind.label;
+				for (char &c : label) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				const bool vowel = !label.empty() && std::strchr("aeiou", label[0]) != nullptr;
+				named.push_back((vowel ? "an " : "a ") + label);
+				break;
+			}
+		}
+	std::string out;
+	for (size_t i = 0; i < named.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == named.size() ? " or " : ", ") + named[i];
+	return out;
 }
 
 ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {

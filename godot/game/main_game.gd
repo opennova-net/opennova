@@ -1080,7 +1080,11 @@ func _maybe_exit_round_cycle() -> void:
 		return
 	if er.is_session_open():
 		return
-	_abort_to_menu("round cycle", "post-round linger expired (mission exit 3)")
+	# The host's linger expiry is the map cycle (3); a joiner's own linger expiry is 4.
+	var exit_reason := GameWorld.MISSION_EXIT_ROUND_OVER if sim.is_joiner() \
+			else GameWorld.MISSION_EXIT_MAP_CYCLE
+	_abort_to_menu("round cycle", "post-round linger expired (mission exit %d)" % exit_reason,
+			exit_reason)
 
 
 ## An established session ended without the player asking: the host closed it on its own
@@ -1101,7 +1105,13 @@ func _on_session_lost(reason: String) -> void:
 	# _world_load_pending on its way to the menu.
 	if _state == State.MENU and not _world_load_pending:
 		return
-	_abort_to_menu("session ended", reason)
+	# The exit reason the session stored (the NovaWorld exit, a mapped disconnect record);
+	# an unmapped loss leaves the mission the way the player's own quit would.
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	var exit_reason := sim.get_mission_exit_reason() if sim != null else 0
+	if exit_reason == 0:
+		exit_reason = GameWorld.MISSION_EXIT_QUIT
+	_abort_to_menu("session ended", reason, exit_reason)
 
 
 func _on_world_load_failed(reason: String) -> void:
@@ -1115,11 +1125,13 @@ func _on_world_load_failed(reason: String) -> void:
 
 
 # THE abort-to-menu leg. Every caller names the stage it aborted from; the presentation
-# is one teardown because retail's is one too (every reason lands on the same nav push).
-func _abort_to_menu(stage: String, reason: String) -> void:
+# is one teardown because retail's is one too (every reason lands on the same nav push),
+# and the exit reason picks the post-mission route.
+func _abort_to_menu(stage: String, reason: String,
+		exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
 	_world_load_pending = false
 	push_warning("MainGame: %s: %s" % [stage, reason])
-	_teardown_world_to_menu()
+	_teardown_world_to_menu(exit_reason)
 
 
 func _on_camera_escape() -> void:
@@ -1245,8 +1257,16 @@ func mcp_open_armory() -> Error:
 
 # One idempotent rollback for a normal return and every load failure. Runtime
 # presenters keep references to the old world/root, so their teardown order is part
-# of the shell boundary rather than a menu-specific detail.
-func _teardown_world_to_menu() -> void:
+# of the shell boundary rather than a menu-specific detail. The exit reason picks the
+# post-mission route (GameWorld.post_mission_route): a NovaWorld session the route keeps
+# leaves the world before it unloads and re-enters the NovaWorld menu; an error route
+# shows its text first.
+func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void:
+	var route: PostMissionRoute = _world.post_mission_route(exit_reason) if _world != null \
+			else PostMissionRoute.new()
+	var novaworld_client: NovaWorldClient = null
+	if route.keep_session:
+		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
 	_world_load.dismiss()
 	finish_hud_hidden_capture()
 	_end_flow.reset()
@@ -1271,9 +1291,26 @@ func _teardown_world_to_menu() -> void:
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
+		_net.return_from_mission(novaworld_client, route.error, _post_mission_error_text(route))
 		return
+	if novaworld_client != null:
+		novaworld_client.stop()
+		novaworld_client.free()
 	push_warning("OpenNova: the game-data directory is no longer mountable")
 	get_tree().quit(1)
+
+
+# The error text the post-mission route stores: a gameerr.bin generic error, else the
+# in-match connection's disconnect reason (empty while it was healthy; the dialog then
+# shows its unknown-error text).
+static func _post_mission_error_text(route: PostMissionRoute) -> String:
+	var key := route.error_key
+	if key.is_empty():
+		return route.error_text
+	var text := Strings.lookup_or(Strings.TABLE_GAMEERR, Strings.SECTION_GENERIC_ERRORS, key, "")
+	if text.is_empty() and key == "STRE_BADMISSION":
+		return "Error - Mission requires assets or an expansion that is not present"
+	return text if not text.is_empty() else key
 
 
 # A browser tab cannot be quit from inside: stopping the engine would only

@@ -221,10 +221,11 @@ _Avoid_: editor MCP (the editor's own server, below)
 The `opennova-editor` Model Context Protocol server the OpenNova Editor embeds
 (`--mcp-port`, 8977 in `.mcp.json`; `scripts/mcp/editor_mcp.py`), through which an
 agent drives the editor's session by its two seams: the state by section, a request by
-kind (`editor_request`), a query by name (`editor_query`), Build and Play, and the two
-preview devices (ADR 0046 S6d, S13 A5, `docs/mcp.md`). Its tools and their schemas are
-made from the `catalog` query when it starts. The game a Play starts is then driven
-through its own runtime MCP.
+kind (`editor_request`), a query by name (`editor_query`), Build and Play, and a document's
+viewport (`editor_viewport`: the `viewport` query's reads, and `set_viewport` and
+`edit_in_viewport` for its writes) (ADR 0046 S6d, S13 A5, S13 V7, `docs/mcp.md`). Its tools and
+their schemas are made from the `catalog` query when it starts. The game a Play starts is then
+driven through its own runtime MCP.
 _Avoid_: runtime MCP (the game's), game MCP (when the editor is meant)
 
 **In-match / Matchmaking**:
@@ -646,15 +647,17 @@ canvas sizes the picture, the kind's options and camera) changes by a SetViewpor
 change a person or a client makes; three changes alone are derived by its follow instead (a menu's
 held window following the selection, a model framed when another model first shows, the preview
 clock sought when the clip the selection plays changes or a clip event is selected), and nothing
-else moves it between two follows. It follows its document (what its change set says changed),
-the files its picture read and its state into what its device does next (make the picture again,
-apply the state again, drop it, or nothing), a picture the game could not read kept so until the
-document changes, and, for a kind that holds for a gesture (the model's scene), a picture made again
-held while a gesture is open in its document over one the device holds. Its
-device is the Shell's (an offscreen Godot viewport for one document and kind, four kept, the least
-recently used not drawn since the last pump given up and its viewport keeping its state), drawn
-only by the viewport's canvas, which owns the pointer and the keys and sizes the picture it draws.
-Headless, it answers as its envelope (JSON).
+else moves it between two follows. It follows its document (what its change set says changed), the
+files its picture read and its state into what its device does next (make the picture again, apply
+the state again, drop it, or nothing), a picture the game could not read kept so until the document
+changes, and, for a kind that holds for a gesture (the model's scene), a picture made again held
+while a gesture is open in its document over one the device holds. Its device is the Shell's (an
+offscreen Godot viewport for one document and kind, four kept, the least recently used not drawn
+since the last pump given up and its viewport keeping its state), drawn only by the viewport's
+canvas, which owns the pointer and the keys and sizes the picture it draws. Headless, it answers as
+its envelope (JSON, the `viewport` query), and a client drags and commands through it as its canvas
+would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it moves, a
+command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
 
@@ -836,10 +839,12 @@ over several entities): they carry one token and fold into one undo step over ev
 change (each row's version before the gesture and its latest after) until it ends (let go, or the
 canvas stops drawing it: one end, for the document it began in); a batch of it that adds, removes
 or moves a row is a step of its own and ends it. The view keeps the gestures open, one per document
-(its token and when its last batch came): one also ends with any other request on its document (an
-undo, a save, a select, another edit), with every edit group (Build, Play), and with no batch of it
-for the session's deadline (a client that stopped mid-drag). The Problems wait for every one to end.
-A viewport whose kind holds for a gesture (the model's scene, costly to make) keeps the picture its
+(its token, and for a client's drag over the wire when its last sample came): one also ends with an
+undo, a redo or a save of its document, its document closed or read again, every edit group ended
+(Build, Play) and another gesture's batch in its document; a canvas ends its own, while one of the
+wire's also ends with any other request on its document and with ten seconds with no sample (a
+client that went away). The Problems wait for every one to end. A viewport whose kind holds for a
+gesture (the model's scene, costly to make) keeps the picture its
 device holds while one is open in its document, its markers following each edit, and makes the
 picture once when it ends; a change only the state shows (a model's user point moved) applies
 meanwhile; a menu's picture is made again each edit.

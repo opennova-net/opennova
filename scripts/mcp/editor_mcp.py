@@ -22,17 +22,22 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
     python scripts/mcp/editor_mcp.py request edit_record --path main.mnu --edits '[{"op": "add", "kind": "window",
         "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
-    python scripts/mcp/editor_mcp.py request set_viewport --viewport '{"kind": "model", "camera": {"yaw": 1.2},
-        "clock": {"playing": false, "time_ms": 250}}'   # the Preview's model viewport (--path names another)
+    python scripts/mcp/editor_mcp.py request set_viewport --path models/tank.3di --viewport '{"kind": "model",
+        "camera": {"yaw": 1.2}}'                     # that model's viewport (left out: the active document's)
+    python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
+    python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
+    python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
+    python scripts/mcp/editor_mcp.py viewport --op command --name align_left --ids 5,7,9          # one request
+    python scripts/mcp/editor_mcp.py viewport --op seek --clock '{"playing": false, "time_ms": 250}'  # no document named
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
-    python scripts/mcp/editor_mcp.py call editor_menu_preview '{"op": "state"}'
+    python scripts/mcp/editor_mcp.py call editor_viewport '{"op": "items", "limit": 20}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
 
 Exit codes, as opennova-project's (1 not done, 2 not read): 0 ok; 1 a `request`
-was not done (its outcome: refused, did not finish, or waits on the
+(or a `viewport` write) was not done (its outcome: refused, did not finish, or waits on the
 unsaved-changes prompt), or a build or play did not land or did not end in
 time; 2 not read: a usage error, no endpoint answered, or the tool reported
 isError (a request or query the editor did not read); 3 a JSON-RPC error; 6
@@ -228,7 +233,7 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
                  "out_dir", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
-REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass")
+REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -250,7 +255,7 @@ def request_of(args: argparse.Namespace) -> dict:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
     if args.records:
         request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
-    for field in ("address", "paste_at", "settings", "viewport"):
+    for field in ("address", "paste_at", "settings", "viewport", "drag", "command"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
     return request
@@ -281,6 +286,71 @@ def cmd_request(args: argparse.Namespace) -> int:
     ended = answer.get("operation") or {}
     done = not outcome or outcome.get("done", False)
     return EXIT_OK if done and ended.get("end", "done") == "done" else EXIT_NOT_DONE
+
+
+VIEWPORT_OPS = ("state", "items", "hit", "notes", "render", "options", "camera", "seek", "drag", "command")
+
+
+def parse_pair(text: str, flag: str) -> list:
+    """--by / --to: two numbers, "X,Y" (a negative one as --by=-8,4)."""
+    parts = [part.strip() for part in text.split(",")]
+    try:
+        if len(parts) != 2:
+            raise ValueError
+        return [float(parts[0]), float(parts[1])]
+    except ValueError as error:
+        raise GameMcpError(EXIT_NOT_READ, f"{flag} takes two numbers, X,Y, not {text!r}") from error
+
+
+def viewport_of(args: argparse.Namespace) -> dict:
+    """editor_viewport's arguments: op and path, then the op's fields (the editor refuses those its op
+    does not take, naming what it takes)."""
+    request: dict = {"op": args.op}
+    for name in ("path", "kind", "x", "y", "row", "offset", "limit"):
+        if getattr(args, name) is not None:
+            request[name] = getattr(args, name)
+    for name in ("options", "camera", "clock", "device"):
+        if getattr(args, name):
+            request[name] = parse_json_arg(getattr(args, name), None)
+    drag: dict = {}
+    for name in ("id", "handle", "snap", "gesture"):
+        if getattr(args, name) is not None:
+            drag[name] = getattr(args, name)
+    if args.by is not None:
+        drag["by"] = parse_pair(args.by, "--by")
+    if args.to is not None:
+        drag["to"] = parse_pair(args.to, "--to")
+    if args.end is not None:
+        drag["end"] = args.end == "true"
+    command: dict = {}
+    if args.name is not None:
+        command["name"] = args.name
+    if args.ids:
+        try:
+            command["ids"] = [int(item) for item in args.ids.split(",") if item.strip()]
+        except ValueError as error:
+            raise GameMcpError(EXIT_NOT_READ, f"--ids takes record ids, comma-separated, not {args.ids!r}") from error
+    if args.op == "command":
+        request["command"] = command
+    elif command:
+        raise GameMcpError(EXIT_NOT_READ, "--name and --ids are op command's")
+    if args.op == "drag":
+        request["drag"] = drag
+    elif drag:
+        raise GameMcpError(EXIT_NOT_READ, "--id, --handle, --by, --to, --snap, --gesture and --end are op drag's")
+    return request
+
+
+def cmd_viewport(args: argparse.Namespace) -> int:
+    payload = client_of(args).call("editor_viewport", viewport_of(args), timeout=args.timeout)
+    if payload.get("isError"):
+        print(text_of(payload), file=sys.stderr)
+        return EXIT_NOT_READ
+    answer = payload.get("structuredContent", {})
+    print_json(answer)
+    # A write answers as a request does: `ok` says it read, its outcome whether it happened.
+    outcome = answer.get("outcome")
+    return EXIT_NOT_DONE if isinstance(outcome, dict) and not outcome.get("done", False) else EXIT_OK
 
 
 def progress_line(operation: dict) -> str:
@@ -549,8 +619,13 @@ def build_parser() -> argparse.ArgumentParser:
                               "multiplayer, game_install, runtime_executable, play_in_install; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
-                              "(without --path: the Preview's viewport of the kind; device only where no canvas "
-                              "sizes the picture)")
+                              "(without --path: the active document's viewport, or the clock alone whatever is "
+                              "active; device only where no canvas sizes the picture)")
+    request.add_argument("--drag", default=None,
+                         help="edit_in_viewport: a drag as a JSON object {id, handle, by | to, snap, gesture, end, "
+                              "kind}")
+    request.add_argument("--command", default=None,
+                         help="edit_in_viewport: a command as a JSON object {name, ids, kind}")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,
                          help="preview_import, plan_import, preview_install_import: with the files they need; "
@@ -565,12 +640,60 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--import-pass", dest="import_pass", choices=switch, default=None,
                          help="open_project, new_project: false opens it on its files as they are, scanned and "
                               "checked, no source imported")
+    request.add_argument("--rehash", choices=switch, default=None,
+                         help="build: read every file again, the build cache set aside")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "
                               "validation after it; the answer's operation says what it came to")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)
+
+    viewport = commands.add_parser("viewport", help="editor_viewport: a document's viewport read or changed by op, "
+                                                    "its answer as JSON")
+    add_endpoint_options(viewport)
+    viewport.add_argument("--op", required=True, choices=VIEWPORT_OPS,
+                          help="state, items, notes, hit or render read it (the viewport query); options and camera "
+                               "change its state, seek the preview clock (set_viewport); drag and command edit "
+                               "through it (edit_in_viewport)")
+    viewport.add_argument("--path", default=None,
+                          help="the document (a project-relative path or a logical name; the active one when left "
+                               "out; seek takes none)")
+    viewport.add_argument("--kind", default=None,
+                          help="the viewport's kind (menu, model; the one the document shows in when left out; seek "
+                               "takes none)")
+    viewport.add_argument("--x", type=float, default=None, help="hit: the point across (design units or pixels)")
+    viewport.add_argument("--y", type=float, default=None, help="hit: the point down")
+    viewport.add_argument("--row", type=int, default=None, help="render: the row, by its identity (a menu's screen)")
+    viewport.add_argument("--offset", type=int, default=None, help="state, items, notes, render: a page's first entry")
+    viewport.add_argument("--limit", type=int, default=None, help="state, items, notes, render: a page's size, 1 to 200")
+    viewport.add_argument("--options", default=None, help="options: the kind's options, a JSON object")
+    viewport.add_argument("--camera", default=None, help="camera: the camera, a JSON object (yaw, pitch, distance, "
+                                                         "target, frame)")
+    viewport.add_argument("--device", default=None,
+                          help="options, camera: the device's size, a JSON object {width, height} (refused while a "
+                               "canvas sizes the picture)")
+    viewport.add_argument("--clock", default=None,
+                          help="seek: the preview clock, a JSON object {playing, rate, time_ms, ticks}")
+    viewport.add_argument("--id", type=int, default=None, help="drag: the record whose handle is dragged")
+    viewport.add_argument("--handle", default=None,
+                          help="drag: a menu window's move, left, right, top, bottom, top_left, top_right, bottom_left "
+                               "or bottom_right; a model marker's place or axis")
+    viewport.add_argument("--by", default=None, help="drag: DX,DY from where the picture shows the handle "
+                                                     "(--by=-8,4 for a negative one)")
+    viewport.add_argument("--to", default=None, help="drag: X,Y, the point of the picture the handle goes to")
+    viewport.add_argument("--snap", type=float, default=None,
+                          help="drag: a menu's grid of 8 when not 0, a model's grid in metres (0, free, by default)")
+    viewport.add_argument("--gesture", type=int, default=None,
+                          help="drag: the gesture the first sample's answer named, to go on with it (one undo step; "
+                               "the samples of one gesture are consecutive drags of one handle on its document)")
+    viewport.add_argument("--end", choices=("true", "false"), default=None,
+                          help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
+    viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame")
+    viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
+                                                      "others follow)")
+    viewport.add_argument("--timeout", type=float, default=120.0)
+    viewport.set_defaults(func=cmd_viewport)
 
     build = commands.add_parser("build", help="build the project and wait on its operation (progress on stderr)")
     add_endpoint_options(build)

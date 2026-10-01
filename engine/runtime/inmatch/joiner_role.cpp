@@ -2212,9 +2212,19 @@ void JoinerRole::reset_world_stream() {
 }
 
 bool JoinerRole::session_lost(SessionError &error) const {
-	if (!runtime || !runtime->session_lost()) return false;
-	error = {SessionErrorCode::SessionLost, runtime->session_loss_reason()};
-	return true;
+	if (!runtime) return false;
+	if (runtime->session_lost()) {
+		error = {SessionErrorCode::SessionLost, runtime->session_loss_reason()};
+		return true;
+	}
+	// A stored exit reason (the NovaWorld session's end) exits the mission like
+	// a lost connection; the shell's post-mission route reads the reason itself.
+	if (runtime->mission_exit_reason() != 0) {
+		error = {SessionErrorCode::SessionLost,
+				"mission exit " + std::to_string(runtime->mission_exit_reason())};
+		return true;
+	}
+	return false;
 }
 
 // The editor Stop/Start rewind on a joiner: the kernel's restore, then one
