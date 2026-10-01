@@ -149,6 +149,17 @@ bool LocalPlayer::request_stance(int stance) {
 	return true;
 }
 
+void LocalPlayer::clear_stance_latches() {
+	// [orig: `g_PlayerStanceProneLatch = 0; g_PlayerStanceCrouchLatch = 0`
+	//  @0x435c54/@0x435c59 and @0x43561e/@0x435624, beside the entity's
+	//  `MoveOrder &= ~0x300` @0x435c42 / @0x43560c]
+	stance_latch_ = 0;
+	input.crouch = false;
+	input.prone = false;
+	move_order.stance = w::InfantryState::Stance::kStand;
+	if (w::AiEntity *p = player_ai()) p->inf.stance = w::InfantryState::Stance::kStand;
+}
+
 // Mouse pixels onto the look angles through the witnessed integer pipeline
 // [orig: Input_ProcessMouseAxisBindings @0x499680]. The float accumulator is
 // the device-input fold over retail's integer remainder pump [orig:

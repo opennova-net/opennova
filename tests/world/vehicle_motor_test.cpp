@@ -2768,8 +2768,39 @@ static void test_local_controls_reach_first_carrier_tick() {
     CHECK(r.veh().veh.cmd_speed == 0); // release reaches this motor tick too
 }
 
+// A successful attach and a detach clear the local player's prone/crouch
+// latches with MoveOrder's stance bits, so a crouched or prone player stands
+// on mounting and on dismounting. [orig: Entity_ProcessVehicleAttach
+// @0x435c42..0x435c59; Entity_DetachFromVehicle @0x43560c..0x435624]
+static void test_mount_and_dismount_clear_the_local_stance_latches() {
+    Rig r;
+    auto &body = *r.w.ai.at(r.w.ai.attach(r.drv_h));
+    body.inf.active = true;
+    body.inf.is_local_player = true;
+    body.health = r.drv().health;
+    r.w.cached.local_player = r.drv_h;
+    r.w.ai.is_authority = true;
+    LocalPlayer local(r.w);
+    r.w.local_player_state = &local;
+    CHECK(local.request_stance(2));
+    local.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(body.inf.stance == InfantryState::Stance::kProne);
+    r.mount();
+    CHECK(local.stance_latch() == 0);
+    CHECK(!local.input.prone && !local.input.crouch);
+    CHECK(local.move_order.stance == InfantryState::Stance::kStand);
+    CHECK(local.request_stance(1));
+    local.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(r.w.vehicles.detach(r.drv_h));
+    CHECK(local.stance_latch() == 0);
+    local.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(body.inf.stance == InfantryState::Stance::kStand);
+    r.w.local_player_state = nullptr;
+}
+
 int main() {
     test_local_controls_reach_first_carrier_tick();
+    test_mount_and_dismount_clear_the_local_stance_latches();
     test_rider_below_its_carrier_follows_the_same_pass();
 	test_state0_brain_with_ai_driver_holds();
 	test_vehicle_carrier_follow_and_refresh();

@@ -118,6 +118,11 @@ public:
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
     // dword_B76484 prone-latch equivalent the render-slot drape gate reads.
     int stance_latch() const { return stance_latch_; }
+    // A vehicle attach or detach of the local player clears both latches
+    // with MoveOrder's stance bits: the player stands on mounting and on
+    // dismounting. [orig: Entity_ProcessVehicleAttach @0x435c42..0x435c59;
+    //  Entity_DetachFromVehicle @0x43560c..0x435624]
+    void clear_stance_latches();
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
     // Point the look straight at a mission-space target from a mission-space
