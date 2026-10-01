@@ -474,7 +474,7 @@ func test_accept_saves_beside_the_game_never_in_the_root() -> void:
 		return
 	var run_dir := OS.get_cache_dir().path_join("opennova_player_info_run_%d" % Time.get_ticks_usec())
 	assert_eq(DirAccess.make_dir_recursive_absolute(run_dir), OK)
-	LaunchFlags.set_working_dir_override(run_dir)
+	LaunchFlags.set_args_override(PackedStringArray(["--working-dir", run_dir]))
 	var before := _tree_digest(String(root.get_root_dir()))
 	var companion := PlayerInfoMenuCompanion.new()
 	companion.set_database(_load_db())

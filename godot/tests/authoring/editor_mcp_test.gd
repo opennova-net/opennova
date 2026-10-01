@@ -688,14 +688,21 @@ func test_john_smith_through_the_editor_mcp() -> void:
 		pending("Play is Windows-only (godot/src/authoring/child_process.h)")
 		return
 	_app.set("play_engine_args", PackedStringArray(["--headless", "--disable-render-loop", "--max-fps", "60"]))
+	# What the checkout's Godot project holds: a source Play (the Godot binary with --path on it)
+	# writes nothing there.
+	var project_before := _top_level_entries(ProjectSettings.globalize_path("res://"))
 	var play := await _call("editor_play", {"op": "start"})
 	assert_eq(String(play.get("state", "")), "running", str(play))
 	var port := int(play.get("mcp_port", 0))
 	assert_gt(port, 0)
-	# S13 A8: the game runs in a run directory of its own, its log there, the build only read.
+	# S13 A8: the game runs in a run directory of its own, its log there, the build only read; a
+	# source run names it (--working-dir), since Godot's --path moves the process to the project.
 	var run_dir := String(play.get("run_dir", ""))
 	assert_true(run_dir.ends_with("/.opennova/run/1"), str(play))
 	assert_eq(String(play.get("log_file", "")), run_dir.path_join("session.log"), str(play))
+	var command_line := String(play.get("command_line", ""))
+	assert_true(command_line.contains("--path") and command_line.contains("--working-dir") and
+			command_line.contains(run_dir), command_line)
 	var game: RefCounted = null
 	var deadline := Time.get_ticks_msec() + 30000
 	while Time.get_ticks_msec() < deadline:
@@ -742,6 +749,21 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_true(FileAccess.file_exists(run_dir.path_join("session.log")), "the log stays in the run directory")
 	assert_false(FileAccess.file_exists(String(built.get("dir", "")).path_join("session.log")),
 			"nothing is written into the build")
+	assert_eq(_top_level_entries(ProjectSettings.globalize_path("res://")), project_before,
+			"a source Play writes nothing in the checkout's Godot project")
+
+
+# The files and folders at the top of `dir`, sorted, without the tools' own dot-folders (.godot,
+# Godot's cache, which a run of the project may write).
+func _top_level_entries(dir: String) -> PackedStringArray:
+	var names := PackedStringArray()
+	for name in DirAccess.get_files_at(dir):
+		names.append(name)
+	for name in DirAccess.get_directories_at(dir):
+		if not name.begins_with("."):
+			names.append(name + "/")
+	names.sort()
+	return names
 
 
 ## The stylesheet document (S9i) through the endpoint: menu_style.mns opens as its lines,

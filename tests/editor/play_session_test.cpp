@@ -3,6 +3,7 @@
 // game works in and what the game install's game finds there (S13 A8), one child at a
 // time, the stop request, the deadline kill, exit on its own with the code it exited with,
 // and the build directory the session protects while alive.
+#include <algorithm>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -39,11 +40,17 @@ static int test_launch_plans() {
 	const LaunchPlan headless = make_play_launch_plan("opennova", "/b", "/r", "", 0, "", {"--headless", "--quit-after", "3"});
 	TEST_EXPECT(headless.args[0] == "--headless" && headless.args[2] == "3" && headless.args[3] == "--log-file");
 
+	// A source run names its run directory too: Godot's --path moves the process to the project,
+	// and the game keeps its saves in the directory it was started in (LaunchFlags.working_dir). A
+	// packaged runtime is started in it, and takes no such flag.
 	const LaunchPlan source = make_source_launch_plan("godot", "C:/repo/godot", "C:/p/build", "C:/p/run/2", "jo", 0);
 	TEST_EXPECT(source.args[0] == "--path" && source.args[1] == "C:/repo/godot");
 	TEST_EXPECT(source.args[2] == "res://game/game_runtime_root.tscn");
 	TEST_EXPECT(source.args[3] == "--log-file" && source.args[4] == "C:/p/run/2/session.log");
 	TEST_EXPECT(source.working_dir == "C:/p/run/2" && source.build_dir == "C:/p/build");
+	TEST_EXPECT(source.args.size() >= 2 && source.args[source.args.size() - 2] == "--working-dir" &&
+	            source.args.back() == "C:/p/run/2");
+	TEST_EXPECT(std::find(play.args.begin(), play.args.end(), "--working-dir") == play.args.end());
 	TEST_EXPECT(launch_plan_command_line(make_play_launch_plan("C:/a b/opennova.exe", "/x y", "/r", "", 0))
 	                    .find("\"C:/a b/opennova.exe\"") == 0);
 

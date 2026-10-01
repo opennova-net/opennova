@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <system_error>
@@ -16,7 +17,6 @@ using opennova::to_std;
 
 std::vector<std::string> LaunchFlags::args_override_;
 bool LaunchFlags::args_override_set_ = false;
-std::string LaunchFlags::working_dir_override_;
 
 void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("loose_override_enabled"),
@@ -45,8 +45,6 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("working_dir"), &LaunchFlags::working_dir);
-	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_working_dir_override", "dir"),
-			&LaunchFlags::set_working_dir_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("clear_args_override"),
 			&LaunchFlags::clear_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("has_args_override"),
@@ -179,20 +177,19 @@ void LaunchFlags::set_args_override(const PackedStringArray &args) {
 }
 
 String LaunchFlags::working_dir() {
-	if (!working_dir_override_.empty()) return to_gd(working_dir_override_);
+	// The flag's UTF-8 text as given, '/'-separated (a narrow std::filesystem::path would read it
+	// in the ANSI code page).
+	std::string given = parse().working_dir;
+	std::replace(given.begin(), given.end(), '\\', '/');
+	if (!given.empty()) return to_gd(given);
 	std::error_code ec;
 	const std::filesystem::path cwd = std::filesystem::current_path(ec);
 	return ec ? String() : to_gd(cwd.generic_u8string());
 }
 
-void LaunchFlags::set_working_dir_override(const String &dir) {
-	working_dir_override_ = to_std(dir);
-}
-
 void LaunchFlags::clear_args_override() {
 	args_override_.clear();
 	args_override_set_ = false;
-	working_dir_override_.clear();
 }
 
 bool LaunchFlags::has_args_override() {

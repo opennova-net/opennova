@@ -87,10 +87,6 @@ godot/exports/
 .godot-bin/
 godot/addons/gut/
 godot/addons/imgui-godot/
-# A source run's game keeps its saves where it runs, the project Godot's --path makes its working
-# directory (weapon.sav, an expansion's under expansion/<name>/: ADR 0046 S13 A8).
-godot/weapon.sav
-godot/expansion/
 
 CLAUDE.local.md
 .superpowers/

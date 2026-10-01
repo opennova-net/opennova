@@ -46,10 +46,11 @@ static func save_callsign(callsign: String) -> void:
 # Retail keeps the five PLAYER_INFO/weapon records in weapon.sav, the active
 # expansion's under expansion\<name>\, relative to the directory the game runs in,
 # not under user:// [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, path build
-# @0x54F68C-0x54F6B7]: the working directory (LaunchFlags.working_dir), never the
-# mounted resource root, which for the editor's Play is a build no game may write
-# (ADR 0046 S13 A8). OpenNova uses retail profile slot 0 as its active slot; the
-# native reader/writer preserves the other four slots.
+# @0x54F68C-0x54F6B7]: LaunchFlags.working_dir (`--working-dir`, which a source run
+# passes, else the process's working directory), never the mounted resource root,
+# which for the editor's Play is a build no game may write (ADR 0046 S13 A8).
+# OpenNova uses retail profile slot 0 as its active slot; the native reader/writer
+# preserves the other four slots.
 static func weapon_profile_path(root: ResourceRoot) -> String:
 	var dir := String(LaunchFlags.working_dir())
 	if dir.is_empty():

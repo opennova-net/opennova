@@ -632,6 +632,9 @@ static int test_retail_play() {
 	TEST_EXPECT(platform.spawns == 3 && platform.last_plan.executable == launcher.executable);
 	TEST_EXPECT(platform.last_plan.args[0] == "--path" && platform.last_plan.mcp_port == 8999);
 	TEST_EXPECT(platform.last_plan.working_dir == run && platform.last_plan.build_dir == rebuilt);
+	// The source run names its run directory: Godot's --path moves it to the checkout.
+	TEST_EXPECT(platform.last_plan.args.size() >= 2 && platform.last_plan.args.back() == run &&
+	            platform.last_plan.args[platform.last_plan.args.size() - 2] == "--working-dir");
 	TEST_EXPECT(!fs::exists(run + "/Jointops.exe") && !fs::exists(run + "/localres.pff"));
 	TEST_EXPECT(editor_test::tree_digest(rebuilt) == rebuilt_tree);
 	TEST_EXPECT(read_file_text(install + "/game.cfg", copied, io_error) && copied == "video settings");

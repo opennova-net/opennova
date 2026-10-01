@@ -39,6 +39,15 @@
 //   --capture-pcap <path>       record this session's datagrams to a pcap.
 //   --mcp-port <n>              host the runtime MCP endpoint on that loopback
 //                               port (1..65535); absent = no endpoint.
+//   --working-dir <path>        the directory the game was started in, where it
+//                               keeps the files it writes beside itself as retail
+//                               keeps its saves in its working directory
+//                               [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0];
+//                               absent = the process's own working directory. A
+//                               source run passes it (the editor's Play: its run
+//                               directory), since Godot's `--path` moves the
+//                               process's working directory to the project; a
+//                               packaged runtime needs none (ADR 0046 S13 A8).
 //
 // Flags match case-insensitively; a flag's value is the following token,
 // stripped, and a flag given twice takes its last value, as the game's own
@@ -73,6 +82,7 @@ inline constexpr const char *kLaunchFlagCallsign = "--callsign";
 inline constexpr const char *kLaunchFlagIntegrityProfile = "--integrity-profile";
 inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
+inline constexpr const char *kLaunchFlagWorkingDir = "--working-dir";
 inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 
 struct LaunchFlags {
@@ -96,6 +106,7 @@ struct LaunchFlags {
     std::string integrity_profile; // --integrity-profile <name>
     std::string capture_pcap;      // --capture-pcap <path>
     int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
+    std::string working_dir;       // --working-dir <path>; "" = the process's own
     // /NOHUD — the whole token, any case: clears the HUD overlay master word
     // (runtime/hud/hud_frame.h hud_overlay_master) [orig:
     // Game_ParseCommandLineAndInit @0x4a7310 — `_stricmp(token, "/NOHUD")`

@@ -109,6 +109,11 @@ LaunchPlan make_source_launch_plan(const std::string &godot_executable, const st
 	plan.args.push_back("--log-file");
 	plan.args.push_back(plan.log_file);
 	append_game_flags(plan, game_code, mission);
+	// Godot's --path moves the process's working directory to the project, so the run directory
+	// is named: the runtime keeps the files it writes beside itself there (LaunchFlags.working_dir),
+	// as the packaged runtime does in the working directory it is started in.
+	plan.args.push_back(kLaunchFlagWorkingDir);
+	plan.args.push_back(plan.working_dir);
 	return plan;
 }
 

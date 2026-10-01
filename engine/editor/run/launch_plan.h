@@ -32,7 +32,9 @@ LaunchPlan make_play_launch_plan(const std::string &runtime_executable, const st
                                  const std::string &mission = std::string(),
                                  const std::vector<std::string> &engine_args = {});
 
-// The same run from source: `godot --path <project> res://game/game_runtime_root.tscn -- ...`.
+// The same run from source: `godot --path <project> res://game/game_runtime_root.tscn -- ...`, with
+// `--working-dir <run>` among the game flags, since Godot's `--path` moves the process's working
+// directory to the project and the game keeps its saves in the directory it was started in.
 LaunchPlan make_source_launch_plan(const std::string &godot_executable, const std::string &godot_project_dir,
                                    const std::string &build_dir, const std::string &run_dir,
                                    const std::string &game_code, int mcp_port,
