@@ -29,7 +29,8 @@ using graph_names::key;
 using graph_names::style_variable;
 
 bool references_unread(AssetKind kind, const std::string &file) {
-	return asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+	const AssetKindRow &row = asset_kind_row(kind);
+	return row.names_files && (row.names_unfollowed || !graph_reads_file(kind, file));
 }
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
@@ -80,7 +81,7 @@ std::string ImportOrigin::find(const std::string &name) const {
 }
 
 bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) const {
-	if (kind_ != Kind::Folder) return vfs_.read_file(name, out);
+	if (kind_ != Kind::Folder) return read_served(vfs_, name, out);
 	std::string error;
 	return read_file_bytes((fs::path(path_) / name).generic_string(), out, error);
 }
@@ -164,7 +165,7 @@ public:
 		auto found = origins_.find({kind, path});
 		if (found == origins_.end()) {
 			Opened opened;
-			auto made = std::make_unique<ImportOrigin>();
+			auto made = std::make_shared<ImportOrigin>();
 			if (made->open(kind, path, document_, opened.error)) opened.origin = std::move(made);
 			found = origins_.emplace(std::make_pair(kind, path), std::move(opened)).first;
 		}
@@ -173,6 +174,10 @@ public:
 	}
 
 	void set_install(const ImportOrigin *install) { install_ = install; }
+	// The place of a kind at a path, opened already (the game install a caller mounted).
+	void adopt(ImportOrigin::Kind kind, const std::string &path, std::shared_ptr<const ImportOrigin> origin) {
+		origins_[{kind, path}] = Opened{std::move(origin), std::string()};
+	}
 
 	// A selected source, read as import_assets reads it; what a converter makes of it, each
 	// output a row (the first file of a name only is walked). The cap stops it before it is
@@ -303,7 +308,7 @@ public:
 
 private:
 	struct Opened {
-		std::unique_ptr<ImportOrigin> origin;
+		std::shared_ptr<const ImportOrigin> origin;
 		std::string error;
 	};
 	// A file the plan takes, by its normalized name: its row and what it is to the engine.
@@ -584,9 +589,12 @@ private:
 
 ImportPlan plan_import(const std::vector<ImportSource> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
-                       const std::string &retail_directory, size_t file_cap) {
+                       const std::string &retail_directory, size_t file_cap,
+                       std::shared_ptr<const ImportOrigin> install_mounted) {
 	ImportPlan plan;
 	Planner planner(plan, paths, document, scan, graph, file_cap);
+	if (install_mounted && !retail_directory.empty())
+		planner.adopt(ImportOrigin::Kind::GameInstall, retail_directory, std::move(install_mounted));
 	if (with_dependencies && !retail_directory.empty()) {
 		std::string error;
 		const ImportOrigin *install = planner.origin(ImportOrigin::Kind::GameInstall, retail_directory, error);

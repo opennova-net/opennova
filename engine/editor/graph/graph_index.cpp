@@ -117,6 +117,9 @@ void GraphIndex::erase_content(uint32_t id) {
 		const Ref ref{id, i};
 		if (graph_names::is_style_reference(edge.value))
 			erase_from(variables_, graph_names::style_variable(edge.value), ref);
+		if (!edge.fallback.empty())
+			for (const std::string *name : { &edge.value, &edge.fallback })
+				erase_from(alternates_, key_of(edge.kind, graph_names::symbol_name(edge.kind, *name), edge.scope), ref);
 		if (i >= slot.resolutions.size() || !slot.resolutions[i].resolved) continue;
 		const EdgeResolution &resolution = slot.resolutions[i];
 		erase_from(targets_, key_of(edge.kind, edge.target, edge.scope), ref);
@@ -153,6 +156,15 @@ void GraphIndex::insert_content(uint32_t id) {
 		slot.edges_at[edge.locator].push_back(i);
 		if (graph_names::is_style_reference(edge.value))
 			insert(variables_[graph_names::style_variable(edge.value)], {id, i});
+		if (!edge.fallback.empty())
+			for (const std::string *name : { &edge.value, &edge.fallback }) {
+				std::vector<Ref> &list =
+						alternates_[key_of(edge.kind, graph_names::symbol_name(edge.kind, *name), edge.scope)];
+				if (std::find_if(list.begin(), list.end(), [&](Ref ref) {
+						return ref.slot == id && ref.index == i;
+					}) == list.end())
+					insert(list, {id, i});
+			}
 	}
 	edges_ += slot.edges.size();
 	symbols_ += slot.symbols.size();

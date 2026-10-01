@@ -500,6 +500,7 @@ void test_reveal_in_views() {
 	CHECK(opennova::rtxt::write(table, bytes, io_error) && editor_test::write_bytes(v.project.root + "/strings/many.bin", bytes),
 	      "a table of 200 keys");
 	session.handle(request::rescan());
+	session.run_operations();
 	const AssetEntry *many = v.project.scan->find("many.bin");
 	CHECK(many != nullptr, "the table scanned");
 	if (!many) return;

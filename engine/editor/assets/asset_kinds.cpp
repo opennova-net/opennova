@@ -88,6 +88,16 @@ struct Kind {
 		out.row.new_name = name;
 		return out;
 	}
+	constexpr Kind scr(ScrForm form) const {
+		Kind out = *this;
+		out.row.scr = form;
+		return out;
+	}
+	constexpr Kind names_unfollowed() const {
+		Kind out = *this;
+		out.row.names_unfollowed = true;
+		return out;
+	}
 };
 
 constexpr AssetKindRow kRows[] = {
@@ -138,6 +148,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::MusicScript, "music_script", "Music script", ArchiveSlot::Localres)
 	        .runtime("music_script")
+	        .edited_by(DocumentTypeId::MusicScript)
 	        .row,
 	// A raw table read through the archives, fgn2.bin among them: its only reader asks after the
 	// archives mount [orig: CEffectSystem_Init @ 0x5f6070 through FileSystem_FileExists @
@@ -150,7 +161,10 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::CountryCode, "country_code", "Country code", ArchiveSlot::Loose)
 	        .file("cc.bin")
 	        .row,
-	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres).runtime("credits").row,
+	Kind(AssetKind::Credits, "credits", "Credits", ArchiveSlot::Localres)
+	        .runtime("credits")
+	        .edited_by(DocumentTypeId::Credits)
+	        .row,
 	// A .bms in localres: retail's mission list walks only the localres/language volumes [orig:
 	// Mission_BuildMapListFromPFF @ 0x562910].
 	Kind(AssetKind::Mission, "mission", "Mission", ArchiveSlot::Localres)
@@ -215,9 +229,13 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("particle")
 	        .names_files()
 	        .row,
+	// A RUN names another script [orig: Script_LoadAndCompileFile @ 0x4EE660], which the graph
+	// makes no edge of yet (S13 D9): an import does not follow it.
 	Kind(AssetKind::Script, "script", "Script", ArchiveSlot::Localres)
 	        .extensions(kScript)
+	        .edited_by(DocumentTypeId::Script)
 	        .names_files()
+	        .names_unfollowed()
 	        .row,
 	// The .def family by name: the runtime consumes each by its exact name, and browses only
 	// Avatars.def and hudpos.def.
@@ -284,11 +302,23 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::PlayerSave, "player_save", "Player save", ArchiveSlot::Loose)
 	        .extensions(kPlayerSave)
 	        .row,
-	Kind(AssetKind::Shader, "shader", "Shader", ArchiveSlot::Resource).extensions(kShader).row,
-	Kind(AssetKind::Config, "config", "Configuration", ArchiveSlot::Loose).extensions(kConfig).row,
+	// The HLSL effects, which the shader loader takes in the SCR form alone, under its own key
+	// [orig: ScriptFile_LoadAndDecrypt @ 0x5AE060].
+	Kind(AssetKind::Shader, "shader", "Shader", ArchiveSlot::Resource)
+	        .extensions(kShader)
+	        .edited_by(DocumentTypeId::Shader)
+	        .scr(ScrForm::Shader)
+	        .row,
+	Kind(AssetKind::Config, "config", "Configuration", ArchiveSlot::Loose)
+	        .extensions(kConfig)
+	        .edited_by(DocumentTypeId::Text)
+	        .row,
 	// Loose in the install root, where retail ships it.
 	Kind(AssetKind::Score, "score", "Score table", ArchiveSlot::Loose).file("score.ini").row,
-	Kind(AssetKind::Text, "text", "Text", ArchiveSlot::Loose).extensions(kText).row,
+	Kind(AssetKind::Text, "text", "Text", ArchiveSlot::Loose)
+	        .extensions(kText)
+	        .edited_by(DocumentTypeId::Text)
+	        .row,
 	// A PNG is a source only while its import record is there (scan_project_assets): its outputs,
 	// named after it, land in resource.pff as textures.
 	Kind(AssetKind::ImageSource, "image_source", "Image source", ArchiveSlot::None)

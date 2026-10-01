@@ -26,6 +26,7 @@ add_library(opennova_formats STATIC
     # third_party/miniz, linked below)
     ${CMAKE_CURRENT_SOURCE_DIR}/bfc1/bfc1.cpp
     # cbin — credits binary
+    ${CMAKE_CURRENT_SOURCE_DIR}/cbin/binary_config.cpp # the CBIN form read and written exactly
     ${CMAKE_CURRENT_SOURCE_DIR}/cbin/cbin.cpp
     # cpt — terrain height/CDEP container
     ${CMAKE_CURRENT_SOURCE_DIR}/cpt/cpt_crypto.cpp

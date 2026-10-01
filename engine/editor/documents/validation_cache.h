@@ -50,8 +50,8 @@ struct ValidationInput {
 // alone and reads no file. A closed file is loaded for its findings and let go: the cache keeps
 // the findings, never the document (a model's geometry included). A load gives the same file's
 // records the same identities, so a finding still names its record (row_id, child_id) in the
-// document a later load or an open of the file makes. A type whose documents hold no records
-// (holds_records, S13 D6) makes document.no_records for its file, the file unread.
+// document a later load or an open of the file makes. A type whose documents hold neither records
+// nor a text (document_content, S13 D6 and D9) makes document.no_records for its file, unread.
 class ValidationCache {
 public:
 	// A validation starts: its counters restart and no file has been asked.

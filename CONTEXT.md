@@ -600,9 +600,10 @@ A file open in the editor: read as the game's loader reads it, changed through i
 history, and written back over the file only while the file still holds what it was read from.
 That lifecycle is every document's (the base); what a document holds is its kind's. A record
 document holds rows of records, each edit naming a record and one of its fields (the def
-catalogs, string tables, menus, stylesheets, models, clips and animation tables); a document of
-another kind (a terrain's raster, a script's text) holds its own content and takes the changes
-its type makes (an Apply edit's payload).
+catalogs, string tables, menus, stylesheets, models, clips and animation tables); a text document
+holds a text whose spans its edits replace (a script, a music script, a credits file, a shader, a
+configuration); a document of another kind (a terrain's raster) will hold its own content and take
+the changes its type makes (an Apply edit's payload).
 _Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
 project file by its logical name)
 
@@ -783,10 +784,32 @@ follow (the same-file rename S13 D5 removed)
 **Change set**:
 What changed in a document between a state a window or a preview last read and the state it is
 in, in the words of its kind: a record document's rows added, removed and changed, whether rows
-moved among one another and whether the file-wide state changed (a text's spans and a raster's
-regions later). When the document cannot say (it was read again, or its history no longer holds
-that state), everything changed.
+moved among one another and whether the file-wide state changed; a text document's spans (each run
+of text that changed, a removal a span of no length); a raster's regions later. When the document
+cannot say (it was read again, or its history no longer holds that state), everything changed.
 _Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
+
+**Text document**:
+A document of text (a script, a music script, a credits file, a shader, a configuration or a text),
+held as the game reads it, in its code page (one byte a character, which is what a column counts),
+as lines, its places `line:column`. Its one change is a span replaced. Its type reads and writes
+the form its file is stored in (a music script's bytecode, a credits file's CBIN form and a shader's
+SCR form are held as their text and written back in the form, byte for byte while the text is left
+as it is), checks it through the game's own reader where the editor has a port of it (the WAC
+compiler, the ConfigFile text reader) or else the toolchain that writes the form (the MUS compiler,
+which is ours, not the game's), writes each line end as its game reader ends a line (CR LF for a
+script and a credits text), and names the references its text makes (a script's operands), each at
+its span. A file its text cannot carry as it is (a music script's message handler) opens read only.
+_Avoid_: source (an import's input), code (the bytecode a compiler makes), script (one kind of text
+document)
+
+**Span**:
+A run of a text document's text: the line and the column it starts at (both from 1) and how many
+characters it covers (a line end counting its own). An edit replaces a span; a reference a text
+makes is at a span, which Rename everywhere rewrites and a Go to opens the document at; what changed
+in a text is its spans.
+_Avoid_: range, selection (the records a document's selection holds), offset (the byte a span's
+place maps to)
 
 **Build**:
 The one operation behind Play and Export: validate the project, route every asset into
@@ -798,16 +821,25 @@ _Avoid_: pack (a step inside a build), export (a build copied to a chosen direct
 stage (the retired retail-staging vocabulary)
 
 **Operation**:
-A long job of the editor's session (a build; opening a project, a refresh, an import's plan and
-its write, a rename's rewrite to follow), run one at a time a step at a time, each step within
-the frame's budget, so the editor keeps drawing while it runs. Its progress shows while it runs;
-nothing it makes reaches the view until it finishes, and a Cancel stops it between two steps, its
-work discarded. It declares what it reads and writes (a build reads the project's files), as each
-request kind does, and a request that writes what it reads or writes, or reads what it writes,
-meets the busy gate, the two rows saying what happens: it is refused (a save while a build packs),
-joins the operation (a Build or a Play onto a build), takes its place (a new import plan over a
-running one) or cancels it as it commits (a project switch, Quit). A request that conflicts with
-nothing it holds (an edit, an open) goes on.
+A long job of the editor's session: opening a project (the game install's names, the import pass,
+the scan, the requirements), a refresh (a Rescan, a Reimport), an import's plan and its write, a
+rename's commit (a file at a time, then the one step that writes) and a build. One runs at a time,
+a step at a time, each step within the frame's budget, so the editor keeps drawing while it runs;
+the request that starts one returns at once, naming it. Its progress shows while it runs; nothing
+it makes reaches the view until it finishes (a project being opened is not the open one yet), and
+a Cancel stops it between two steps with nothing of it in the view (an import once it wrote, a
+rename once it committed, run to their end). On disk a cancel leaves only what an Open's or a
+refresh's import pass had written by then: the outputs of the sources it reached, and its cache
+once the pass had ended. It declares what it reads and writes (a build reads the project's
+files), as each request kind does, and a request that writes what it reads or writes, or reads
+what it writes, meets the busy gate, the two rows saying what happens: it is refused (a save while
+a build packs, an edit while a project opens), joins the operation (a Build or a Play onto a
+build), takes its place (a new import plan over a running one) or cancels it as it commits (a
+project switch, Quit). A request that starts an operation of its own waits for the one that runs;
+one that conflicts with nothing it holds (an edit beside a build, a selection, a query) goes on.
+The validation that follows one steps a file at a time too, but is no operation: it holds nothing,
+an edit starts it again, and an operation that reads the graph (an import's plan, a rename) runs
+its remaining steps first.
 _Avoid_: task, job, background work (nothing runs on another thread)
 
 **Play**:

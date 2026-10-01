@@ -22,6 +22,7 @@
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
@@ -651,6 +652,9 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 		error = "no project is open.";
 		return JsonValue::make_null();
 	}
+	// The gate is the Problems rows a validation makes: the one left due or under way runs to its
+	// end first (S13 A3: the polls step it, and no request runs it).
+	core.problems().validate_pending();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
 			core.problems().gate_findings());
 	std::vector<const Diagnostic *> blocking;
@@ -744,15 +748,16 @@ constexpr EditorQueryRow kRows[] = {
 			"The active document and a page of the open documents, each's lifecycle state: path, "
 			"kind, dirty, blocked, revision, can_undo, can_redo, ignored_lines and its source "
 			"issues; a record document's also file_state_changed, row_count, last_added and the "
-			"kinds of row its outline adds (top_kinds).")
+			"kinds of row its outline adds (top_kinds); a text document's its line_count.")
 			.pages("documents")
 			.row,
 	Query(K::Document, "document", answer_document, kDocumentParams, kDocumentReads,
 			"One open document's lifecycle state (as the documents query gives it) and, for a "
 			"record document, a page of its rows, each with its id, kind, name, change since the "
 			"save (unchanged, changed, added) and the collections it holds, their records at "
-			"every depth.")
-			.pages("rows")
+			"every depth; for a text document, by the same offset and limit, a page of its lines "
+			"(each its line, from 1, and its text).")
+			.pages("rows, or a text document's lines")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,
 			"One record of an open record document, by its id or by the symbol it defines: its id, "
@@ -860,9 +865,11 @@ constexpr EditorQueryRow kRows[] = {
 			.pages("lines")
 			.row,
 	Query(K::Operation, "operation", answer_operation, concern_set({ C::Operation }),
-			"The operation that runs (running, and while one does its id, kind, label, done and "
-			"total in its unit, cancellable, and what it reads and writes), what the last one "
-			"came to (last_operation: id, kind, end, findings) and the last build.")
+			"The operation that runs (running, and while one does its id, kind (open, refresh, "
+			"build, import_plan, import_apply, rename_apply), label, done and total in its unit, "
+			"cancellable, and what it reads and writes), what the last one came to "
+			"(last_operation: id, kind, end, findings), the validation the polls step "
+			"(validation: running, done and total files) and the last build.")
 			.row,
 	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,
 			concern_set({ C::Project, C::Files, C::Findings }),
@@ -871,8 +878,10 @@ constexpr EditorQueryRow kRows[] = {
 			"among the Problems rows the build gates on, the scan's and the requirements', and the "
 			"build's own checks of the files (an archive in the project, a name no archive can "
 			"store). A Problems row the build does not gate on (a project check's: the render "
-			"check's) blocks nothing. A build request reads changed files again first, joins a "
-			"build that runs and waits on unsaved edits, which the gate does not weigh.")
+			"check's) blocks nothing. The query runs the validation left due to its end first, so "
+			"the rows it reads are the files' as they stand. A build request reads changed files "
+			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
+			"not weigh.")
 			.pages("blocking")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
@@ -880,14 +889,18 @@ constexpr EditorQueryRow kRows[] = {
 			concern_set({ C::Selection, C::Dialogs }),
 			"A page of the view events by seq (the one-shot asks a request makes of a window): "
 			"first, next, cursor, next_cursor and the items, each its seq, kind (reveal_record, "
-			"reveal_file, ask_rename, settings_applied, import_planned) and the fields its kind "
-			"sets. The last 64 are held: a client more than 64 behind misses the events dropped, "
-			"the cursor coming back larger than it asked.")
+			"reveal_text, reveal_file, ask_rename, settings_applied, import_planned) and the fields "
+			"its kind sets (a reveal_text's locator, line:column). The last 64 are held: a client "
+			"more than 64 behind misses the events dropped, the cursor coming back larger than it "
+			"asked.")
 			.pages("items")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "
-			"needs, who serves it and what it does; every request field; every query with its "
+			"needs, who serves it and what it does; every request field; the batch form of a "
+			"request's edits (batch: its forms, its ops, each with the form it is read in, and the "
+			"members an edit takes, each with its JSON type, the forms that read it, its least "
+			"value or the one string it takes); every query with its "
 			"params, the list it pages and the concerns it reads; the state's sections; the view's "
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
@@ -1089,6 +1102,44 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		fields.push(std::move(entry));
 	}
 	out.set("fields", std::move(fields));
+	// The batch form of a request's edits (record_batch.h): its forms, ops and members, from which
+	// the editor MCP makes its edit schema.
+	JsonValue batch = JsonValue::make_object();
+	JsonValue forms = JsonValue::make_array();
+	for (size_t i = 0; i < kRecordBatchFormCount; ++i) {
+		const auto form = static_cast<RecordBatchForm>(i);
+		JsonValue entry = JsonValue::make_object();
+		entry.set("form", json_string(batch_form_token(form)));
+		entry.set("doc", json_string(batch_form_doc(form)));
+		forms.push(std::move(entry));
+	}
+	batch.set("forms", std::move(forms));
+	JsonValue ops = JsonValue::make_array();
+	for (const BatchOp &row : batch_ops()) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("op", json_string(row.token));
+		entry.set("form", json_string(batch_form_token(row.form)));
+		entry.set("doc", json_string(row.doc));
+		ops.push(std::move(entry));
+	}
+	batch.set("ops", std::move(ops));
+	JsonValue members = JsonValue::make_array();
+	for (const BatchMember &row : batch_members()) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("name", json_string(row.name));
+		entry.set("type", json_string(batch_json_token(row.json)));
+		JsonValue read_by = JsonValue::make_array();
+		for (size_t i = 0; i < kRecordBatchFormCount; ++i)
+			if (row.forms & batch_form_bit(static_cast<RecordBatchForm>(i)))
+				read_by.push(json_string(batch_form_token(static_cast<RecordBatchForm>(i))));
+		entry.set("forms", std::move(read_by));
+		if (row.minimum >= 0) entry.set("minimum", json_number(double(row.minimum)));
+		if (row.only[0]) entry.set("only", json_string(row.only));
+		entry.set("doc", json_string(row.doc));
+		members.push(std::move(entry));
+	}
+	batch.set("members", std::move(members));
+	out.set("batch", std::move(batch));
 	JsonValue queries = JsonValue::make_array();
 	for (const EditorQueryRow &row : kRows) {
 		JsonValue entry = JsonValue::make_object();

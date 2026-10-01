@@ -310,7 +310,7 @@ static int test_validation() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Styles"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Styles"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const auto unused = [&view]() {
@@ -329,25 +329,25 @@ static int test_validation() {
 	// The blank menus name the large font and the four text colours.
 	TEST_EXPECT(unused() == std::vector<std::string>({"COLOR_BLACK", "DEF_FONTNAME", "IMPACT_FONTNAME", "ITEM_SELECTED_BG",
 	                                                  "SEMIOPAQUE_BLACK", "TRIM_COLOR"}));
-	session.handle(request::open_document("main.mnu"));
+	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress title;
 	TEST_EXPECT(menu && find_definition(AssetGraph(), *menu, "TITLE", title));
 	if (!menu) return 1;
 	EditorRequest name_it = request::edit_record(
 			menu->path(), set(title, "font.default_bg", std::string("%TRIM_COLOR%")));
-	session.handle(name_it);
+	editor_test::handle_to_end(session, name_it);
 	const std::vector<std::string> left = unused();
 	TEST_EXPECT(left.size() == 5 && std::find(left.begin(), left.end(), "TRIM_COLOR") == left.end());
-	session.handle(request::undo(menu->path()));
-	session.handle(request::close_document(menu->path()));
+	editor_test::handle_to_end(session, request::undo(menu->path()));
+	editor_test::handle_to_end(session, request::close_document(menu->path()));
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	const std::string style_dir = (dir.path / "project" / style->relative_path).parent_path().generic_string();
 	// LF line ends, a lone backslash, a stray #else, and a stylesheet by another name.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/brand.mns", "A x\\ y\nB 2\n"));
 	TEST_EXPECT(editor_test::write_text(style_dir + "/other.mns", "#else\r\nC 3\r\n"));
-	session.handle(request::rescan());
+	editor_test::handle_to_end(session, request::rescan());
 	bool line_ending = false;
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.code() == "style.line_ending") {
@@ -365,7 +365,7 @@ static int test_validation() {
 	TEST_EXPECT(brand != nullptr);
 	if (!brand) return 1;
 	const std::string brand_path = brand->relative_path;
-	session.handle(request::open_document(brand_path));
+	editor_test::handle_to_end(session, request::open_document(brand_path));
 	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(brand_path));
 	TEST_EXPECT(styles != nullptr);
 	if (!styles) return 1;
@@ -373,9 +373,9 @@ static int test_validation() {
 	NodeAddress b;
 	TEST_EXPECT(find_definition(AssetGraph(), *styles, "B", b));
 	EditorRequest edit = request::edit_record(brand_path, set(b, "value", std::string("3")));
-	session.handle(edit);
+	editor_test::handle_to_end(session, edit);
 	TEST_EXPECT(styles->dirty() && has_code(view.findings.diagnostics, "style.line_ending"));
-	session.handle(request::save_all());
+	editor_test::handle_to_end(session, request::save_all());
 	TEST_EXPECT(!styles->dirty() && styles->wrote_file());
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "style.line_ending"));
 	std::string written, message;
@@ -383,8 +383,7 @@ static int test_validation() {
 	const opennova::mns::EvaluationResult evaluated = styles->native().evaluate();
 	TEST_EXPECT(evaluated.success && !evaluated.hangs && evaluated.sheet.get("B") == "3");
 	TEST_EXPECT(opennova::mns::Document::parse(written).evaluate().sheet.variables == evaluated.sheet.variables);
-	session.handle(request::build());
-	session.run_operations();
+	editor_test::handle_to_end(session, request::build());
 	for (const Diagnostic &d : view.activity.last_build->diagnostics)
 		if (d.severity == DiagnosticSeverity::Error)
 			std::fprintf(stderr, "build: %s %s %s\n", d.code().c_str(), d.asset.c_str(), d.message.c_str());
@@ -392,7 +391,7 @@ static int test_validation() {
 	// A clean sheet with LF line ends: an explicit Save of it (no edit) rewrites it CR LF,
 	// and its finding is gone.
 	TEST_EXPECT(editor_test::write_text(style_dir + "/note.mns", "N 1\nM 2\n"));
-	session.handle(request::rescan());
+	editor_test::handle_to_end(session, request::rescan());
 	const AssetEntry *note = view.project.scan->find("note.mns");
 	TEST_EXPECT(note != nullptr);
 	if (!note) return 1;
@@ -403,12 +402,12 @@ static int test_validation() {
 		return false;
 	};
 	TEST_EXPECT(line_ending_on(note_path));
-	session.handle(request::open_document(note_path));
+	editor_test::handle_to_end(session, request::open_document(note_path));
 	TEST_EXPECT(session.document_for(note_path) && !session.document_for(note_path)->dirty());
-	session.handle(request::save(note_path));
+	editor_test::handle_to_end(session, request::save(note_path));
 	TEST_EXPECT(session.outcome().done() && !line_ending_on(note_path));
 	TEST_EXPECT(read_file_text(dir.file("project") + "/" + note_path, written, message) && written == "N 1\r\nM 2\r\n");
-	session.handle(request::save(note_path));
+	editor_test::handle_to_end(session, request::save(note_path));
 	TEST_EXPECT(session.outcome().done() &&
 			view.activity.status == note_path + " has no changes to save.");
 	std::printf("test_validation passed\n");
@@ -450,7 +449,7 @@ static int test_style_value_use() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Uses"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Uses"));
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 	const AssetEntry *style = view.project.scan->find("menu_style.mns");
@@ -468,8 +467,8 @@ static int test_style_value_use() {
 	                "<STRING TYPE=\"ID\">%ID_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"B\">\r\n" +
 	                window + "<STRING>%TEXT_ONLY%</STRING>\r\n</WINDOW>\r\n<WINDOW TYPE=\"STATIC\" NAME=\"C\">\r\n" +
 	                window + "<APPEARANCE STATE=\"DEFAULT\" TYPE=\"COLOR\">%PAINT%</APPEARANCE>\r\n</WINDOW>\r\n</SCREEN>\r\n"));
-	session.handle(request::rescan());
-	session.handle(request::open_document(path));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(path));
 	const auto *styles = dynamic_cast<const MnsDocument *>(session.document_for(path));
 	const std::shared_ptr<const AssetGraph> &graph = view.findings.graph;
 	TEST_EXPECT(styles != nullptr && graph != nullptr);

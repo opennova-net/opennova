@@ -3,11 +3,15 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/catalog_validation.h>
+#include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/music_script_type.h>
+#include <editor/documents/script_type.h>
 #include <editor/documents/strings_document.h>
+#include <editor/documents/text_types.h>
 // The menu type's project check, by its hook alone: the render check runs the preview's headless
 // screen compile (MenuScreenRender), so it sits with it in preview/ (ADR 0046 S13 V9).
 #include <editor/preview/make_menu_render_check.h>
@@ -44,6 +48,18 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
 			validate_animation_map_file, AnimationMapDocument::schema,
 			animation_map_finding_codes },
+	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
+	// (text_fields) or a project check; the script's text names references.
+	{ DocumentTypeId::Script, "script", make_script_document, validate_script_file, text_fields,
+			script_finding_codes, nullptr, script_references },
+	{ DocumentTypeId::MusicScript, "music_script", make_music_script_document,
+			validate_music_script_file, text_fields, music_script_finding_codes },
+	{ DocumentTypeId::Credits, "credits", make_credits_document, validate_credits_file,
+			text_fields, credits_finding_codes },
+	{ DocumentTypeId::Shader, "shader", make_shader_document, validate_shader_file, text_fields,
+			shader_finding_codes },
+	{ DocumentTypeId::Text, "text", make_text_document, validate_text_file, text_fields,
+			text_finding_codes },
 };
 
 // One type per DocumentTypeId past None, in its order, each making its documents, validating its
@@ -77,9 +93,12 @@ static_assert(project_checks_own(),
 // A test's type in a registered one's place (DocumentTypeStandIn), null for none.
 std::atomic<const DocumentType *> g_stand_in{nullptr};
 
-// Whether a type's documents are record documents: asked of one it makes.
-bool makes_records(const DocumentType &type) {
-	return type.make && records_of(type.make()) != nullptr;
+// What a type's documents hold: asked of one it makes.
+DocumentContent content_made(const DocumentType &type) {
+	if (!type.make) return DocumentContent::Other;
+	const std::unique_ptr<DocumentBase> made = type.make();
+	if (records_of(*made)) return DocumentContent::Records;
+	return text_of(*made) ? DocumentContent::Text : DocumentContent::Other;
 }
 
 } // namespace
@@ -101,14 +120,14 @@ const DocumentType *document_type_for(AssetKind kind) {
 
 bool is_editable_kind(AssetKind kind) { return document_type_for(kind) != nullptr; }
 
-bool holds_records(const DocumentType &type) {
+DocumentContent document_content(const DocumentType &type) {
 	// A registered type is asked once; a stand-in (a test's) each time.
 	const size_t index = static_cast<size_t>(type.id);
 	if (index < 1 || index > kDocumentTypeCount || &type != &kTypes[index - 1])
-		return makes_records(type);
-	static const std::array<bool, kDocumentTypeCount> answers = [] {
-		std::array<bool, kDocumentTypeCount> out{};
-		for (size_t i = 0; i < kDocumentTypeCount; ++i) out[i] = makes_records(kTypes[i]);
+		return content_made(type);
+	static const std::array<DocumentContent, kDocumentTypeCount> answers = [] {
+		std::array<DocumentContent, kDocumentTypeCount> out{};
+		for (size_t i = 0; i < kDocumentTypeCount; ++i) out[i] = content_made(kTypes[i]);
 		return out;
 	}();
 	return answers[index - 1];

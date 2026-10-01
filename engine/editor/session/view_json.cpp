@@ -5,6 +5,7 @@
 #include <deque>
 #include <iterator>
 
+#include <base/io/cp1252.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -240,8 +241,18 @@ JsonValue dialogs_section(const SessionView &view) {
 				entry.set("record", json_string(site.record));
 			if (!site.locator.empty())
 				entry.set("locator", json_string(site.locator));
+			// A text's site (S13 D9): its span, and the name it holds written as its text is, from
+			// the game's code page (as the references query writes an edge's); the new name is as
+			// typed.
+			if (site.span.line) {
+				JsonValue span = JsonValue::make_object();
+				span.set("line", json_number(double(site.span.line)));
+				span.set("column", json_number(double(site.span.column)));
+				span.set("length", json_number(double(site.span.length)));
+				entry.set("span", std::move(span));
+			}
 			entry.set("field", json_string(site.field));
-			entry.set("before", json_string(site.before));
+			entry.set("before", json_string(site.span.line ? cp1252_to_utf8(site.before) : site.before));
 			entry.set("after", json_string(site.after));
 			sites.push(std::move(entry));
 		}
@@ -340,8 +351,11 @@ constexpr ViewSectionRow kSections[] = {
 			"The selection in the active document, over any of its rows: its primary record and "
 			"its records, every selected one ({row, kind, child}), and the clipboard's size." },
 	{ S::Operation, "operation", concern_set({ C::Operation }), activity_operation_to_json,
-			"The operation that runs (a build: done and total in its unit, cancellable, what it "
-			"reads and writes), what the last one came to and the last build." },
+			"The operation that runs (its kind: open, refresh, build, import_plan, import_apply or "
+			"rename_apply; done and total in its unit, what it works on, cancellable, what it reads "
+			"and writes), what the last one came to, the validation the polls step (running, the "
+			"files done of total: the problems are the last composed until it ends) and the last "
+			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
 			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
 			"the files it reported missing at boot, and what Play runs (the game install, in it or "
@@ -537,6 +551,9 @@ JsonValue operation_outcome_to_json(const OperationOutcome &outcome) {
 	out.set("kind", json_string(operation_kind_row(outcome.kind).token));
 	out.set("end", json_string(operation_end_token(outcome.end)));
 	out.set("findings", diagnostics_to_json(outcome.findings));
+	// An import's write: the files it wrote and those it did not reach, each only when it has any.
+	if (!outcome.imported.empty()) out.set("imported", strings_to_json(outcome.imported));
+	if (!outcome.not_imported.empty()) out.set("not_imported", strings_to_json(outcome.not_imported));
 	return out;
 }
 
@@ -545,6 +562,11 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("operation", operation_status_to_json(activity.operation));
 	out.set("last_operation", operation_outcome_to_json(activity.last_operation));
+	JsonValue validation = JsonValue::make_object();
+	validation.set("running", boolean(activity.validation.running));
+	validation.set("done", json_number(double(activity.validation.done)));
+	validation.set("total", json_number(double(activity.validation.total)));
+	out.set("validation", std::move(validation));
 	JsonValue build = JsonValue::make_object();
 	build.set("has_build", boolean(activity.has_build));
 	if (activity.has_build) {
@@ -572,6 +594,8 @@ JsonValue view_event_to_json(const ViewEvent &event) {
 		out.set("address", address_to_json(event.address));
 	if (!event.field.empty())
 		out.set("field", json_string(event.field));
+	if (!event.locator.empty())
+		out.set("locator", json_string(event.locator));
 	if (event.flag)
 		out.set("flag", boolean(true));
 	if (event.tag)

@@ -20,7 +20,9 @@ namespace opennova::editor {
 // language for the user; `asset` is the offending asset's project-relative path (empty for
 // project-level findings) and `field` the field id inside it (empty when the whole asset is
 // meant). A finding inside a document also carries the record it concerns (`record`, `row_id`,
-// `child_id`, `record_kind`) so Problems can open and select it. A finding about a required file
+// `child_id`, `record_kind`) so Problems can open and select it, and a finding inside a text
+// document the place in it (`line`, `column`: 1-based, the character a compiler reported at; ADR
+// 0046 S13 D9), which Problems opens the document at. A finding about a required file
 // or a reference carries what it is about (`subject`), so a fix and a filter read it rather than
 // the message.
 enum class DiagnosticSeverity { Info, Warning, Error };
@@ -70,6 +72,7 @@ struct Diagnostic {
 	std::string field;
 	std::string record;
 	size_t line = 0;
+	size_t column = 0; // in a text document, the character on `line` (1-based); 0 for none
 	NodeId row_id = 0, child_id = 0;
 	NodeKind record_kind = 0;
 	FindingSubject subject;
@@ -133,7 +136,7 @@ inline const std::string &subject_target(const Diagnostic &d) {
 inline bool operator==(const Diagnostic &a, const Diagnostic &b) {
 	return a.severity == b.severity && a.row() == b.row() && a.message == b.message &&
 			a.asset == b.asset && a.field == b.field && a.record == b.record && a.line == b.line &&
-			a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
+			a.column == b.column && a.row_id == b.row_id && a.child_id == b.child_id && a.record_kind == b.record_kind &&
 			a.subject == b.subject;
 }
 inline bool operator!=(const Diagnostic &a, const Diagnostic &b) { return !(a == b); }

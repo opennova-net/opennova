@@ -31,6 +31,7 @@ struct FindProject {
 
 	bool open() {
 		session.handle(request::new_project(dir.file("project"), "Find"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		const AssetEntry *items = v.project.scan->find("items.def");
@@ -45,6 +46,7 @@ struct FindProject {
 		    !editor_test::write_text(v.project.root + "/" + weapons_path, "weapon \"Searchgun\"\nend\n"))
 			return false;
 		session.handle(request::rescan());
+		session.run_operations();
 		session.handle(request::open_document(weapons_path));
 		const Document *weapons_document = session.document_for(weapons_path);
 		session.handle(request::open_document(items_path));

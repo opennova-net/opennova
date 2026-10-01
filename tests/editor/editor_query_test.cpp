@@ -33,6 +33,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -76,8 +77,12 @@ std::string refusal(ProjectSession &session, const char *name, const std::string
 }
 
 // A request in its wire form.
+// A request on the wire, then the operation it starts and the validation it leaves due run to
+// their end (S13 A3: no request runs the validation): its answer.
 JsonValue send(ProjectSession &session, const std::string &json) {
-	return session.handle_json(parse(json));
+	JsonValue answer = session.handle_json(parse(json));
+	session.run_operations();
+	return answer;
 }
 
 bool done(const JsonValue &answer) {
@@ -236,6 +241,7 @@ static int test_paging() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Pages"));
+	session.run_operations();
 	// A new project's problems: every required file missing, each an error, and the notes.
 	TEST_EXPECT(pages_concatenate(session, "problems", "{}", "problems", 3, 7));
 	TEST_EXPECT(pages_concatenate(session, "problems",
@@ -338,6 +344,7 @@ static int test_build_gate() {
 	ProjectSession session(platform, preferences);
 	TEST_EXPECT(refusal(session, "build_gate", "{}") == "query build_gate: no project is open.");
 	session.handle(request::new_project(dir.file("project"), "Gate"));
+	session.run_operations(); // the Open (S13 A3)
 	JsonValue gate = ask(session, "build_gate");
 	size_t missing = 0;
 	for (const JsonValue &finding : gate.get("blocking")->array)
@@ -354,6 +361,7 @@ static int test_build_gate() {
 	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
 						opennova::pff::PFF_FORMAT_PFF3, entries, 1) == opennova::pff::PFF_WRITE_OK);
 	session.handle(request::rescan());
+	session.run_operations(); // the Rescan's refresh (S13 A3)
 	gate = ask(session, "build_gate", R"({"limit": 1})");
 	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
 			gate.get("blocking")->array.size() == 1 &&
@@ -374,6 +382,7 @@ static int test_refusals() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Refusals"));
+	session.run_operations();
 	const auto says = [&](const char *name, const std::string &args, const char *what) {
 		const std::string error = refusal(session, name, args);
 		const bool named = error.find(std::string("query ") + name + ":") == 0;
@@ -431,10 +440,12 @@ static int test_problems_params() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Problems"));
+	session.run_operations();
 	// The stylesheet alone made: every other required file missing (errors, each with a fix), and
 	// the stylesheet's variables no menu names (notes about its file, open and active).
 	session.handle(request::create_missing({ "menu_style" }));
 	session.handle(request::open_document("menu_style.mns"));
+	session.run_operations(); // the validation they left due (S13 A3: no request runs it)
 	const SessionView &view = session.view();
 	const Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style && view.documents.active == style->path());
@@ -546,6 +557,7 @@ static int test_state_since() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "State"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	const SessionView &view = session.view();
@@ -668,6 +680,7 @@ static int test_catalog() {
 	for (size_t i = 0; known && i < known->array.size(); ++i)
 		TEST_EXPECT(known->array[i].get_number("count", -1.0) == 0.0);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
+	session.run_operations();
 	const JsonValue catalog = ask(session, "catalog");
 	const JsonValue *requests = catalog.get("requests");
 	TEST_EXPECT(requests && requests->array.size() == kEditorRequestKindCount);
@@ -698,6 +711,31 @@ static int test_catalog() {
 		TEST_EXPECT(fields->array[i].get_string("field", "") == field.token &&
 				fields->array[i].get_string("type", "") == request_json_token(field.json) &&
 				fields->array[i].get_string("doc", "") == field.doc);
+	}
+	// The batch form's table (S13 D9): its forms, its ops with their form, its members with their
+	// type, the forms that read them, a least value and the one string an apply's payload takes.
+	const JsonValue *batch = catalog.get("batch");
+	const JsonValue *batch_forms = batch ? batch->get("forms") : nullptr;
+	const JsonValue *batch_ops_json = batch ? batch->get("ops") : nullptr;
+	const JsonValue *batch_members_json = batch ? batch->get("members") : nullptr;
+	TEST_EXPECT(batch_forms && batch_forms->array.size() == kRecordBatchFormCount && batch_ops_json &&
+	            batch_ops_json->array.size() == batch_ops().count && batch_members_json &&
+	            batch_members_json->array.size() == batch_members().count);
+	for (size_t i = 0; batch_ops_json && i < batch_ops_json->array.size(); ++i)
+		TEST_EXPECT(batch_ops_json->array[i].get_string("op", "") == batch_ops().rows[i].token &&
+		            batch_ops_json->array[i].get_string("form", "") == batch_form_token(batch_ops().rows[i].form));
+	for (size_t i = 0; batch_members_json && i < batch_members_json->array.size(); ++i) {
+		const BatchMember &member = batch_members().rows[i];
+		const JsonValue &entry = batch_members_json->array[i];
+		TEST_EXPECT(entry.get_string("name", "") == member.name &&
+		            entry.get_string("type", "") == batch_json_token(member.json) &&
+		            entry.get_number("minimum", -1) == double(member.minimum) &&
+		            entry.get_string("only", "") == member.only && entry.get_string("doc", "") == member.doc);
+		const JsonValue *forms = entry.get("forms");
+		size_t read_by = 0;
+		for (size_t f = 0; f < kRecordBatchFormCount; ++f)
+			read_by += (member.forms & batch_form_bit(static_cast<RecordBatchForm>(f))) ? 1 : 0;
+		TEST_EXPECT(forms && forms->array.size() == read_by && read_by > 0);
 	}
 	const JsonValue *queries = catalog.get("queries");
 	TEST_EXPECT(queries && queries->array.size() == kEditorQueryKindCount);
@@ -801,6 +839,7 @@ static int test_menu_reads_and_batches() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Tools"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &view = session.view();
 
@@ -1192,6 +1231,7 @@ static int test_wire_edits() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Wire"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	// An edit naming a record of a document that is not open: refused as it is read.
 	TEST_EXPECT(refused_with(
@@ -1270,6 +1310,7 @@ static int test_rows_on_the_wire() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Rows"));
+	session.run_operations(); // the Open (S13 A3)
 	editor_test::create_missing_files(session);
 	session.handle(request::open_document("main.mnu"));
 	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -25,6 +27,9 @@ struct AssetEntry {
 
 struct AssetScan {
 	std::vector<AssetEntry> entries; // sorted by key (the normalized logical name), then path
+	// The walk's findings (each file's, in the order of the files' paths), then the names' (too
+	// long, blank, two files of one name, a kind the game does not use: in the entries' order),
+	// then the import pass's that neither made (set_import_findings).
 	std::vector<Diagnostic> diagnostics;
 
 	// The entry for a logical name (case-insensitive, the engine's lookup), or nullptr: a
@@ -38,8 +43,36 @@ struct AssetScan {
 	// entries (a warning on the log sink says so) and never read past them.
 	void index();
 
+	// What the walk made of one project file (assets/project_scan.h, S13 A3): its entries (the file
+	// itself, or the outputs an import record lists) and its findings. A scan keeps each by the
+	// file's project-relative path, so a file visited again replaces what it made, alone.
+	struct Visit {
+		std::vector<AssetEntry> entries;
+		std::vector<Diagnostic> findings;
+	};
+	// The scan of the walk's visits, by path ("" the project's folder itself, when it cannot be
+	// read): the entries indexed and the findings made from them (what a ProjectScan hands over).
+	void set_visits(std::map<std::string, Visit> visits);
+	// The files at `changed` (project-relative) visited again as the walk visits them
+	// (scan_project_file), and nothing else read: a file gone, or one the walk does not reach,
+	// leaves the scan; an import record is visited with its source and a source with its record (a
+	// PNG's kind follows its record, a record's findings its source). The entries and the findings
+	// are made again from the visits, so a scan updated equals a scan of the files made afresh. The
+	// files it read: those found. A scan made by hand holds no visits and is not updated.
+	size_t update(const ProjectPaths &paths, const ProjectDocument &doc, const std::vector<std::string> &changed);
+	// The import pass's findings (import/import_run.h), each one neither the walk nor the names
+	// made listed after theirs, so whatever reads the scan (the Problems rows, `validate`, the
+	// build's gate) sees them; an update keeps them.
+	void set_import_findings(std::vector<Diagnostic> findings);
+	const std::vector<Diagnostic> &import_findings() const { return import_findings_; }
+
 private:
-	std::vector<size_t> by_path_; // the entries' indexes, by relative path
+	// The entries from the visits, indexed, and the findings made again.
+	void compose();
+
+	std::vector<size_t> by_path_;         // the entries' indexes, by relative path
+	std::map<std::string, Visit> visits_; // the walk's visits, by project-relative path
+	std::vector<Diagnostic> import_findings_;
 };
 
 // The engine's identity for a logical name: the PFF normalization (uppercase, trailing
@@ -50,15 +83,16 @@ std::string normalized_logical_name(std::string_view name);
 // after normalization.
 bool logical_name_fits_archive(std::string_view name);
 
-// Walk the project tree. Skips the project file, `.opennova/`, every dot-directory and
-// the export output directory; an import sidecar is no file of its own but lists the
-// outputs its source's importer made under the cache (a record whose source is gone
-// lists nothing and is an `import.orphan_record` warning; an output that is not there
-// is an `import.output_missing` warning). Classifies each file (reading only the `.bin`
-// files, whose kind needs a content peek); reports duplicate logical names, and over-long
-// ones of a kind the build packs (a loose kind takes any name, check_file_name's rule), as
-// errors and unknown kinds as warnings. It reads what is on disk: the import pass
-// (project/project_state.h) runs first wherever the outputs must be current.
+// Walk the project tree to its end (ProjectScan, assets/project_scan.h, steps the same walk by
+// bytes). Skips the project file, `.opennova/`, every dot-directory and the export output
+// directory; an import sidecar is no file of its own but lists the outputs its source's importer
+// made under the cache (a record whose source is gone lists nothing and is an
+// `import.orphan_record` warning; an output that is not there is an `import.output_missing`
+// warning). Classifies each file (reading only the `.bin` files, whose kind needs a content
+// peek); reports duplicate logical names, and over-long ones of a kind the build packs (a loose
+// kind takes any name, check_file_name's rule), as errors and unknown kinds as warnings. It reads
+// what is on disk: the import pass (project/project_refresh.h) runs first wherever the outputs
+// must be current.
 AssetScan scan_project_assets(const ProjectPaths &paths, const ProjectDocument &doc);
 
 } // namespace opennova::editor

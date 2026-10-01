@@ -1,9 +1,15 @@
 #include <editor/session/project_session.h>
 
+#include <algorithm>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_registry.h>
+#include <editor/documents/document_types.h>
+#include <editor/model/text_document.h>
+#include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
@@ -65,15 +71,8 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
-	bool served = false, outermost = false;
-	{
-		const SessionCore::RequestScope scope(impl_->core);
-		outermost = scope.outermost();
-		served = serve_request(impl_->core, request);
-	}
-	// A request from outside returns validated, unless a pump holds validation for its poll.
-	if (outermost && !impl_->problems.held()) impl_->problems.validate_pending();
-	return served;
+	const SessionCore::RequestScope scope(impl_->core);
+	return serve_request(impl_->core, request);
 }
 
 io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorRequest *shell) {
@@ -95,15 +94,28 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				"settings.game_install or settings.runtime_executable of apply_project_settings, "
 				"files to import as the paths of preview_import.";
 	}
+	// Whether a request's edits are a text document's spans (S13 D9): the document open at the path
+	// (the active one for none), else the file the project's scan lists there, by the kind the scan
+	// read (a music script's .bin by its content, which its name alone does not say).
+	const auto text_at = [this](const std::string &path) {
+		if (const DocumentBase *document = document_base_for(path)) return text_of(*document) != nullptr;
+		const std::shared_ptr<const AssetScan> &scan = view().project.scan;
+		if (path.empty() || !scan) return false;
+		const AssetEntry *entry = scan->at_path(path);
+		if (!entry) entry = scan->find(basename_of(path));
+		const DocumentType *type = entry ? document_type_for(entry->kind) : nullptr;
+		return type && document_content(*type) == DocumentContent::Text;
+	};
 	// The record document a request's edits are named in: the one its path names, else the active
-	// one (an open document of another kind holds no records to name, S13 D6). A kind that takes
-	// open_first, asking it with nothing open at its path (a fix's edit), is read once before the
-	// document opens, so one refused as it is read asks nothing of the session.
+	// one; over a text document they are its spans (S13 D9); an open document of another kind holds
+	// nothing to name (S13 D6). A kind that takes open_first, asking it with nothing open at its path
+	// (a fix's edit), is read once before the document opens, so one refused as it is read asks
+	// nothing of the session; what the edits are is known again once it is open.
 	if (ok && token && token->is_string() && request_kind_from_token(token->string, kind) &&
 			request_kind_row(kind).params.has(RequestFieldId::Edits)) {
 		const std::string path = json.get_string("path", "");
 		const DocumentBase *open = document_base_for(path);
-		if (open && !records_of(*open)) {
+		if (open && !records_of(*open) && !text_of(*open)) {
 			ok = false;
 			error = open->path() + " holds no records (document.no_records): its edits name none.";
 		} else if (!open && !path.empty() && project_open() &&
@@ -111,12 +123,14 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 				json.get_bool("open_first", false)) {
 			RequestNames first;
 			first.unresolved = true;
+			first.text = text_at(path);
 			EditorRequest unread;
 			ok = editor_request_from_json(json, unread, error, &first);
 			if (ok)
 				handle(request::open_document(path));
 		}
 		names.document = document_for(path);
+		names.text = text_at(path);
 	}
 	ok = ok && editor_request_from_json(json, request, error, &names);
 	bool served = false;
@@ -153,9 +167,6 @@ io::JsonValue ProjectSession::query(
 	return run_query(impl_->core, name, args, error);
 }
 
-void ProjectSession::hold_validation() {
-	impl_->problems.hold();
-}
 
 const ActionOutcome &ProjectSession::outcome() const {
 	return impl_->core.outcome();
@@ -173,14 +184,20 @@ uint64_t ProjectSession::handle_entries() const {
 
 // --- the poll and the operation slot -------------------------------------------------------------
 
+// The poll's order (S13 A3), one budget a poll: the validation left due first, a step at a time
+// within the budget; the running operation's steps within what is left of it, at least one; the
+// child's state and the game's log tail; last, the operation found done finishes: the view learns
+// what it came to (a project opens, a build lands and the game a Play waits on starts on it), and
+// what it read leaves the validation due, which the next poll steps.
 void ProjectSession::poll() {
 	Impl &session = *impl_;
-	session.problems.release();
-	session.problems.validate_pending();
-	session.core.step_operation();
+	const PollBudget budget = session.core.poll_budget();
+	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
+	session.problems.step_validation(budget, steady_clock_ms);
+	PollBudget rest = budget;
+	if (budget.ms > 0) rest.ms = std::max<int64_t>(0, budget.ms - (steady_clock_ms() - started));
+	session.core.step_operation(rest);
 	session.play.poll();
-	// Last, the operation found done finishes: the view learns what it came to (a build lands,
-	// and the game a Play waits on starts on it).
 	if (session.core.operations().done()) session.core.finish_operation();
 }
 
@@ -193,6 +210,7 @@ void ProjectSession::run_operations() {
 		impl_->core.operations().run_to_end();
 		poll();
 	}
+	impl_->problems.validate_pending();
 }
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
@@ -223,6 +241,10 @@ const ValidationStats &ProjectSession::validation_stats() const {
 
 size_t ProjectSession::problems_compositions() const {
 	return impl_->problems.compositions();
+}
+
+size_t ProjectSession::files_scanned() const {
+	return impl_->core.files_scanned();
 }
 
 std::string ProjectSession::running_build_dir() const {

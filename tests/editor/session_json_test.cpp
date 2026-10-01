@@ -34,6 +34,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
+#include <editor/session/record_batch.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -104,9 +105,9 @@ struct OpenMenu {
 	NodeAddress main, title;
 
 	explicit OpenMenu(const char *name) : dir(name), session(platform, preferences) {
-		session.handle(request::new_project(dir.file("project"), "Names"));
+		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Names"));
 		editor_test::create_missing_files(session);
-		session.handle(request::open_document("main.mnu"));
+		editor_test::handle_to_end(session, request::open_document("main.mnu"));
 		menu = session.document_for("main.mnu");
 		if (!menu) return;
 		find_definition(AssetGraph(), *menu, "MAIN", main);
@@ -195,7 +196,7 @@ static int test_asset_kind_tokens() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
-	session.handle(request::new_project(dir.file("project"), "Kinds"));
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Kinds"));
 	const std::string root = session.view().project.root;
 	TEST_EXPECT(!root.empty());
 	const std::pair<const char *, const char *> files[] = {
@@ -210,7 +211,7 @@ static int test_asset_kind_tokens() {
 	};
 	for (const auto &file : files)
 		TEST_EXPECT(editor_test::write_text(root + "/" + file.first, "x"));
-	session.handle(request::rescan());
+	editor_test::handle_to_end(session, request::rescan());
 	JsonValue args = JsonValue::make_object();
 	args.set("limit", JsonValue::make_number(200.0));
 	std::string error;
@@ -360,10 +361,10 @@ static int test_request_round_trip() {
 	            row_edits->array[2].get_string("parent", "") == "edit0");
 	TEST_EXPECT(editor_request_from_json(rows_json, back, error, &names) && back.edits.size() == 3);
 	const size_t screens = menu.rows().size();
-	open.session.handle(back);
+	editor_test::handle_to_end(open.session, back);
 	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 &&
 	            menu.rows().back()->name() == "EXTRA" && menu.last_added_records().size() == 2);
-	open.session.handle(request::undo(path));
+	editor_test::handle_to_end(open.session, request::undo(path));
 	TEST_EXPECT(menu.rows().size() == screens);
 	// A row's copy named by its label (S13 D7's second review): the copy is a row of its own, so a
 	// Set naming the label, written and read back as it was, applies to the copy; a duplicate naming
@@ -381,9 +382,9 @@ static int test_request_round_trip() {
 	            copy_edits->array[0].get_string("as", "") == "edit0" && copy_edits->array[1].get_string("id", "") == "edit0");
 	TEST_EXPECT(editor_request_from_json(copy_json, back, error, &names) && back == copy_request &&
 	            names.labels == std::vector<std::string>({"edit0", ""}));
-	open.session.handle(back);
+	editor_test::handle_to_end(open.session, back);
 	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 && menu.rows()[1]->name() == "COPIED");
-	open.session.handle(request::undo(path));
+	editor_test::handle_to_end(open.session, request::undo(path));
 	TEST_EXPECT(menu.rows().size() == screens);
 	// A Paste has no batch form (the paste request carries the clipboard): written by its op, which
 	// the reader refuses.
@@ -912,11 +913,12 @@ static int test_settings_json() {
 				: JsonValue::make_null();
 	};
 	TEST_EXPECT(session.handle(request::new_project(dir.file("project"), "Settings")));
+	session.run_operations();
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":4,\"title\":\"Harbor\","
 	                          "\"runtime_executable\":\"C:/tools/opennova.exe\"}}",
 	                          back)
 	                    .empty());
-	session.handle(back);
+	editor_test::handle_to_end(session, back);
 	JsonValue dialogs = view_section_to_json(view, ViewSection::Dialogs);
 	const JsonValue *result = dialogs.get("settings_result");
 	TEST_EXPECT(result && result->get("serial") == nullptr && result->get("failures") &&
@@ -930,7 +932,7 @@ static int test_settings_json() {
 	// A name the project cannot take: the failure is the result's, its event the next serial's,
 	// flagged.
 	TEST_EXPECT(request_error("{\"kind\":\"apply_project_settings\",\"settings\":{\"serial\":5,\"title\":\"\"}}", back).empty());
-	session.handle(back);
+	editor_test::handle_to_end(session, back);
 	dialogs = view_section_to_json(view, ViewSection::Dialogs);
 	result = dialogs.get("settings_result");
 	TEST_EXPECT(result && result->get("failures") && result->get("failures")->array.size() == 1 &&
@@ -1009,6 +1011,16 @@ static int test_over_a_session() {
 	EditorRequest request;
 	TEST_EXPECT(request_error(("{\"kind\":\"new_project\",\"dir\":\"" + root + "\",\"title\":\"John Smith\"}").c_str(), request).empty());
 	TEST_EXPECT(session.handle(request));
+	// Opening it is an operation (S13 A3): the view holds nothing of the project until it ends, and
+	// the operation section says what runs.
+	const JsonValue opening = section(ViewSection::Operation);
+	TEST_EXPECT(!section(ViewSection::Project).get_bool("open", true) &&
+	            opening.get("operation")->get_bool("running", false) &&
+	            opening.get("operation")->get_string("kind", "") == "open" &&
+	            opening.get("operation")->get_string("unit", "") == "files" &&
+	            opening.get("operation")->get_bool("cancellable", false) &&
+	            !opening.get("validation")->get_bool("running", true));
+	session.run_operations();
 	const JsonValue project = section(ViewSection::Project);
 	TEST_EXPECT(project.get_bool("open", false) && project.get_string("title", "") == "John Smith");
 	TEST_EXPECT(project.get_string("target_game", "") == "jo" && project.get("features")->get_bool("menu", false));
@@ -1061,6 +1073,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(create_fix.get("request") && editor_request_from_json(*create_fix.get("request"), request, parse_error));
 	TEST_EXPECT(request.kind == EditorRequestKind::CreateMissing && request.roles == std::vector<std::string>{"gameerr"});
 	TEST_EXPECT(session.handle(request) && session.outcome().done() && view.project.scan->find("gameerr.bin") != nullptr);
+	session.run_operations(); // the validation the file made left due (S13 A3: no request runs it)
 	// A page, and the rows grouped by kind: one group, its title in plain words.
 	const JsonValue page = problems_to_json(view, answer_problems(errors_only, view), JsonPage{1, 2}, fix_cache);
 	const JsonValue all = problems_to_json(view, answer_problems(errors_only, view), JsonPage{}, fix_cache);
@@ -1113,6 +1126,7 @@ static int test_over_a_session() {
 		}
 	TEST_EXPECT(menu_editable && some_not_editable);
 	TEST_EXPECT(request_error("{\"kind\":\"open_document\",\"path\":\"main.mnu\"}", request).empty() && session.handle(request));
+	session.run_operations(); // the validation the files made and the open left due (S13 A3)
 	const Document *document = session.document_for();
 	TEST_EXPECT(document != nullptr);
 	if (!document) return 1;
@@ -1407,9 +1421,10 @@ static int test_over_a_session() {
 	outcome = action_outcome_to_json(session.outcome());
 	TEST_EXPECT(outcome.get_bool("done", false) && !outcome.get_bool("unsaved_prompt", true));
 	TEST_EXPECT(outcome.get("findings")->is_array() && outcome.get("findings")->array.empty());
-	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"new_name\":\"../x.mnu\"}", request).empty() &&
-	            session.handle(request));
-	outcome = action_outcome_to_json(session.outcome());
+	// A rename's plan is its operation's (S13 A3): what the request came to with what its
+	// operation came to folded in, as a caller that runs it to its end reads it (handle_to_end).
+	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"main.mnu\",\"new_name\":\"../x.mnu\"}", request).empty());
+	outcome = action_outcome_to_json(editor_test::handle_to_end(session, request));
 	TEST_EXPECT(!outcome.get_bool("done", true) && !outcome.get_bool("unsaved_prompt", true));
 	TEST_EXPECT(outcome.get("findings")->array.size() == 1);
 	if (outcome.get("findings")->array.size() == 1) {
@@ -2073,8 +2088,78 @@ static int test_view_events_json() {
 	return 0;
 }
 
+// The batch form's table (record_batch.h, S13 D9): the readers read the ops and members it lists and
+// refuse the rest. In each form, every member the table lists for it is never refused as unknown
+// there and every other one is (a payload over records refused in its own words); each op is read
+// in its own form and refused as an op in the others.
+static int test_batch_table() {
+	const auto read = [](RecordBatchForm form, const std::string &edit, std::string &error) {
+		JsonValue json;
+		std::string unparsed;
+		opennova::io::json_parse("[" + edit + "]", json, unparsed);
+		RecordBatch batch;
+		return record_batch_from_json(json, nullptr, form, batch, error, false);
+	};
+	const auto sample = [](const BatchMember &member) -> std::string {
+		switch (member.json) {
+		case BatchJson::String: return member.only[0] ? std::string("\"") + member.only + "\"" : std::string("\"x\"");
+		case BatchJson::Boolean: return "true";
+		case BatchJson::Records: return "[]";
+		case BatchJson::Integer:
+		case BatchJson::Id:
+		case BatchJson::Value: break;
+		}
+		return "1";
+	};
+	// A form's first op, which its edits name ("" for the fields form, which names none).
+	const auto first_op = [](RecordBatchForm form) {
+		for (const BatchOp &op : batch_ops())
+			if (op.form == form) return std::string(op.token);
+		return std::string();
+	};
+	size_t members = 0, ops = 0;
+	for (size_t f = 0; f < kRecordBatchFormCount; ++f) {
+		const auto form = static_cast<RecordBatchForm>(f);
+		const std::string op = first_op(form);
+		for (const BatchMember &member : batch_members()) {
+			if (std::string(member.name) == "op") continue;
+			const std::string edit = "{" + (op.empty() ? std::string() : "\"op\": \"" + op + "\", ") + "\"" +
+			                         member.name + "\": " + sample(member) + "}";
+			std::string error;
+			read(form, edit, error);
+			const bool unknown = error.find("Unknown edits[0] member") != std::string::npos;
+			const bool listed = (member.forms & batch_form_bit(form)) != 0;
+			const bool payload = std::string(member.name) == "payload" && form == RecordBatchForm::Edits;
+			if (listed ? unknown : !(unknown || payload))
+				std::fprintf(stderr, "batch table: %s in the %s form: %s\n", member.name, batch_form_token(form),
+				             error.c_str());
+			TEST_EXPECT(listed ? !unknown : (unknown || payload));
+			++members;
+		}
+	}
+	for (const BatchOp &op : batch_ops())
+		for (size_t f = 0; f < kRecordBatchFormCount; ++f) {
+			const auto form = static_cast<RecordBatchForm>(f);
+			if (form == RecordBatchForm::Fields) continue; // its edits name no op
+			std::string error;
+			read(form, std::string("{\"op\": \"") + op.token + "\"}", error);
+			const bool refused = error.find("unknown edit op") != std::string::npos ||
+			                     error.find("edits alone") != std::string::npos ||
+			                     error.find("an apply edit carries") != std::string::npos;
+			TEST_EXPECT((op.form == form) != refused);
+			++ops;
+		}
+	// The catalog writes the table.
+	TEST_EXPECT(std::string(batch_form_token(RecordBatchForm::Spans)) == "spans" &&
+	            std::string(batch_json_token(BatchJson::Id)) == "id");
+	std::printf("batch table: %zu ops, %zu members, %zu reads of a member, %zu of an op\n", batch_ops().count,
+	            batch_members().count, members, ops);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_batch_table();
 	failures += test_apply_edit_json();
 	failures += test_tokens();
 	failures += test_asset_kind_tokens();

@@ -32,6 +32,15 @@ public:
 	// Every check brought to the project as `input` has it, each once, in the registry's order:
 	// true when one says its findings moved, or a check with findings went with its row.
 	bool update(const ProjectCheckInput &input);
+	// update a slot at a time, each a step at a time (S13 A3: a validation stepped over several
+	// polls): the slots in the registry's order, `slot` from 0 to slot_count(). begin_slot starts the
+	// slot's update (the first following the registry as update does); step_slot goes on within
+	// `budget` bytes, true once the slot is up, `moved` then saying what update says for it. A slot
+	// with no check is up in its first step.
+	size_t slot_count() const { return slots_.size(); }
+	bool has_check(size_t slot) const { return slot < slots_.size() && slots_[slot].check != nullptr; }
+	void begin_slot(size_t slot);
+	bool step_slot(size_t slot, const ProjectCheckInput &input, uint64_t budget, bool &moved);
 	// Every check's findings as the last update left them, in the registry's order.
 	void append_findings(std::vector<Diagnostic> &out) const;
 	size_t findings_size() const;
@@ -51,6 +60,7 @@ private:
 	bool follow_registry();
 
 	std::array<Slot, kDocumentTypeCount> slots_; // by DocumentTypeId, None left out
+	bool registry_moved_ = false; // slot 0's begin made a check with findings go (follow_registry)
 };
 
 } // namespace opennova::editor

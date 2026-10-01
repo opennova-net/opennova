@@ -3772,6 +3772,18 @@ target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
 target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_project_validation COMMAND editor_project_validation_test)
 
+# Long operations everywhere (S13 A3): the walks stepped by bytes (the scan, the import pass, a
+# scan's targeted update), the validation a file at a time and a rename's commit a file at a time,
+# each equal to its run in one call; the session's Open, Rescan, import and rename stepped a poll
+# at a time (progress only rising, finished once, cancelled leaving nothing, the view a run to the
+# end makes), a Save scanning and validating its one file, a stale import refused without writing.
+# Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
+# editor's budget, its polls and wall time, and the base layer a dependency mount would build.
+add_executable(editor_long_operations_test editor/long_operations_test.cpp)
+target_link_libraries(editor_long_operations_test PRIVATE opennova_editor)
+target_include_directories(editor_long_operations_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_long_operations COMMAND editor_long_operations_test)
+
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
 # stand-in type's check runs once per validation, its findings after the build's gate, and its
@@ -3809,6 +3821,16 @@ add_executable(editor_non_record_document_test editor/non_record_document_test.c
 target_link_libraries(editor_non_record_document_test PRIVATE opennova_editor)
 target_include_directories(editor_non_record_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_non_record_document COMMAND editor_non_record_document_test)
+
+# The text documents and their types (S13 D9): the model's spans, history and change sets; the
+# script's compiler findings and operand references with spans; the graph's span edges, the
+# fallback name, Rename everywhere through a span, a Go to's RevealText; the wire's span edits and
+# pages of lines; the credits, music script and shader codecs byte for byte; and the install's
+# scripts, music scripts, credits and shaders (OPENNOVA_JO_DIR) as the retail leg.
+add_executable(editor_text_document_test editor/text_document_test.cpp)
+target_link_libraries(editor_text_document_test PRIVATE opennova_editor)
+target_include_directories(editor_text_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_text_document COMMAND editor_text_document_test)
 
 add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
 target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)

@@ -16,6 +16,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
+#include <editor/model/text_document.h>
 #include <editor/model/value.h>
 #include <editor/project/project_document.h>
 
@@ -76,6 +77,22 @@ struct GraphStats {
 	size_t findings_made = 0;   // missing edges' findings made (missing_finding)
 };
 
+// A closed file of the project read ahead of an update (S13 A3): a validation stepped a file at a
+// time reads the files the update would read a step at a time (AssetGraph::files_to_read,
+// read_file), and the update takes each reading whose file is still as the scan lists it (the same
+// name, kind, size and last write) where it would read the file itself. What extract_from_asset
+// made of it.
+struct GraphReading {
+	std::string logical_name;
+	AssetKind kind = AssetKind::Unknown;
+	uint64_t size = 0;
+	int64_t modified = 0;
+	bool ok = false;
+	Extracted content;
+	Diagnostic error;
+};
+using GraphReadings = std::map<std::string, GraphReading>; // by project-relative path
+
 // What an update changed (AssetGraph::update, set_base). `changed`: what the graph holds moved
 // (a new generation). `files`: the files whose slots were added, removed or read differently,
 // project-relative. `bindings`: the style variables whose binding (the definition the game reads:
@@ -101,9 +118,19 @@ public:
 	// do, the edges into the names that file defines. A missing edge's finding is worded as it
 	// resolves, and again only when what its words read changed (the definitions of a style
 	// variable's name; which files the project has, for a kind whose row says its words read
-	// them). The generation moves exactly when what the graph holds changed.
+	// them). The generation moves exactly when what the graph holds changed. `read_ahead`: the
+	// closed files read before (S13 A3), each taken (moved out) where the scan lists it as it was
+	// read, the others read here.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
-			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open);
+			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open,
+			GraphReadings *read_ahead = nullptr);
+	// The closed files an update over `scan` would read (S13 A3): those of a kind the graph reads,
+	// not open as a record document, whose slot holds no reading of them as the scan lists them (new,
+	// of another name or kind, or of another size or last write); in the scan's order.
+	std::vector<const AssetEntry *> files_to_read(const AssetScan &scan,
+			const std::vector<std::shared_ptr<const DocumentBase>> &open) const;
+	// A file read as an update reads it (extract_from_asset), for a later update to take.
+	static GraphReading read_file(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
 	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out
@@ -180,8 +207,15 @@ public:
 	ReferenceStatus resolve(ReferenceKind kind, const std::string &name, const std::string &scope = std::string(),
 	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
-	// texture's rule reads its case), in its scope, by its loader's argument.
+	// texture's rule reads its case), in its scope, by its loader's argument; for a symbol kind's
+	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing.
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
+	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
+	// fallback's; null for none.
+	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;
+	// The edges of `kind` with a fallback (GraphEdge::fallback) that name `name` as their value or
+	// their fallback, in the files' order: what a rename to `name` checks (a use it would take over).
+	std::vector<const GraphEdge *> edges_naming(ReferenceKind kind, const std::string &name) const;
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
 	// compares names, that `scope` matches (scope_matches: a string id in its table and
@@ -365,18 +399,24 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 // scoped to the file and defined by no field (what an index resolves to, lists its users and
 // offers the picker).
 void extract_from_document(const Document &document, Extracted &out);
+// What a text document references (ADR 0046 S13 D9): an edge of each name its type's references
+// read from its text (DocumentType::references, a script's operands), with its span, its locator
+// the span's "line:column"; nothing for a type whose text names nothing. It defines nothing.
+void extract_from_text(const TextDocument &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
-// loader decodes them): a record type's through its document (Document::load_bytes), a
-// native kind's through the engine's parser. `name` is what the edges and symbols name
-// the file by (the project-relative path in the graph). True with nothing for a file the
-// graph does not read (graph_reads_file), a type's whose documents hold no records included.
+// loader decodes them): a record type's or a text type's through its document
+// (DocumentBase::load_bytes), a native kind's through the engine's parser. `name` is what the edges
+// and symbols name the file by (the project-relative path in the graph). True with nothing for a
+// file the graph does not read (graph_reads_file), a type's whose documents hold neither records
+// nor a text that names anything included.
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
 bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset,
                         Extracted &out, Diagnostic &error);
 // True when files of this kind carry references or symbols the graph reads: a record type's
-// (holds_records) or a native extractor's kind.
+// (document_content), a text type's whose text names references (DocumentType::references), or
+// a native extractor's kind.
 bool graph_reads_kind(AssetKind kind);
 // The same for one file, by its name: false for a mission's .mis, the mission editors' text
 // form, which the mission document will read (the graph reads the .bms the game loads), so

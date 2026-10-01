@@ -183,7 +183,6 @@ void PlayController::poll() {
 		view_.activity.play_pid = play_.pid();
 		if (now == PlayState::Stopped) view_.activity.play_mcp_port = 0;
 		core_.touch(ViewConcern::Run);
-		core_.problems().validate_pending();
 	}
 }
 
@@ -229,8 +228,8 @@ void PlayController::tail_game_log() {
 		start = nl + 1;
 	}
 	game_log_partial_.erase(0, start);
-	// The names the lines reported become their rows in one validation.
-	core_.problems().validate_pending();
+	// The names the lines reported become their rows in the validation they left due
+	// (absorb_boot_report), which the polls step (S13 A3).
 }
 
 // The runtime names each boot-required file it could not find, one line per file

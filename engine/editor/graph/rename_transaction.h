@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstddef>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -21,8 +24,11 @@ struct RenameSite {
 	std::string file;   // the referencing document, project-relative
 	AssetKind kind = AssetKind::Unknown;
 	std::string record;
-	std::string locator; // the record's place in the file (Document::locator), what the commit finds it by
-	std::string field;
+	// The record's place in the file (Document::locator), what the commit finds it by; in a text
+	// document the span's place ("line:column", TextDocument::locator).
+	std::string locator;
+	std::string field;  // "" in a text document, whose site is its span
+	TextSpan span;      // in a text document (S13 D9): where the name is written (line 0 for none)
 	std::string before;
 	std::string after;
 	std::string target; // the file the site names today, project-relative (the renamed file, or one of its outputs)
@@ -77,16 +83,16 @@ struct RenamePlan {
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
                        const std::string &new_name);
 
-// Commit a plan that is ok: the file (and an import source's sidecar) is copied under
-// the new name, every referencing document is rewritten through its type and saved,
-// then the old file, its sidecar and its old outputs are removed. Only the planned
-// sites are rewritten (the same record place, field and value, still resolving to the
-// file the site names); a file left with fewer rewrites than its planned sites is a
-// `rename.partial` finding and the old file stays. An interruption leaves both names
-// present and no reference to the file dangling (a site naming a renamed output
-// resolves once the next import pass makes it, and every refresh runs that pass first);
-// the findings say what failed. Open documents among the sites must be reloaded by the
-// caller.
+// Commit a plan that is ok, to its end (RenameTransaction below steps it a file at a time): every
+// referencing document is read and rewritten through its type in memory, then the file (and an
+// import source's sidecar) is copied under the new name, the rewritten documents are saved, and
+// the old file, its sidecar and its old outputs are removed. Only the planned sites are rewritten
+// (the same record place, field and value, still resolving to the file the site names); a file
+// left with fewer rewrites than its planned sites is a `rename.partial` finding and the old file
+// stays. An interruption leaves both names present and no reference to the file dangling (a site
+// naming a renamed output resolves once the next import pass makes it, and every refresh runs that
+// pass first); the findings say what failed. Open documents among the sites must be reloaded by
+// the caller.
 bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                   const AssetGraph &graph, const RenamePlan &plan, std::vector<Diagnostic> &findings);
 
@@ -95,7 +101,8 @@ bool apply_rename(const ProjectPaths &paths, const ProjectDocument &project, con
 // screen or window's NAME, a model's user point) and every use that reaches exactly that
 // definition (AssetGraph::users_of: never a use a same-named symbol of another scope answers),
 // in every file. The plan lists the sites (the definition first, each file, record, field, the
-// value before and after) and the refusals first, so a window can preview it and a test read it.
+// value before and after) and the refusals first, so a window can preview it and a test read it. A
+// use in a text document (S13 D9: a script's operand) is its span, which the rename replaces.
 struct SymbolRenamePlan {
 	ReferenceKind kind = ReferenceKind::None;
 	std::string file;    // the file defining it, project-relative
@@ -131,20 +138,88 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 // open document that would not write as it stands (its unsaved edits could not be saved first), a
 // site its document refuses (a stylesheet's name the reader would not take) or would hold in
 // another form than planned (a stylesheet's name trimmed of its spaces), one no longer there, a
-// file that would not write.
+// file that would not write. A text document's sites are its spans, each found by its place and
+// the name it held, replaced in one batch from the last to the first, and read back from the text
+// as the new name at the same place (a name the text would read otherwise, cut or split, is
+// refused).
 bool check_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan,
                          const std::vector<std::shared_ptr<const DocumentBase>> &open,
                          std::vector<Diagnostic> &findings);
-// Commit a plan that is ok, on disk as apply_rename does (not undoable, like a file's rename):
-// every file of its sites read again from disk and rewritten in memory as check_symbol_rename
-// does, and only when every one of them takes every site and would write, written together
-// (write_files_together: each text beside its file, then each replaced, `replace` the step; a
-// file the system will not replace puts back the ones replaced before it); else nothing is
-// written and the findings say why. Open documents among the sites must be reloaded by the
-// caller.
+// Commit a plan that is ok, on disk as apply_rename does (not undoable, like a file's rename), to
+// its end (RenameTransaction steps it): every file of its sites read again from disk and rewritten
+// in memory as check_symbol_rename does, and only when every one of them takes every site and
+// would write, written together (write_files_together: each text beside its file, then each
+// replaced, `replace` the step; a file the system will not replace puts back the ones replaced
+// before it); else nothing is written and the findings say why. Open documents among the sites
+// must be reloaded by the caller.
 bool apply_symbol_rename(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
                          const AssetGraph &graph, const SymbolRenamePlan &plan, std::vector<Diagnostic> &findings,
                          const FileReplace &replace = replace_file);
+
+// A rename's commit a file at a time (ADR 0046 S13 A3): apply_rename's or apply_symbol_rename's
+// work as a cursor, so the session runs it as an operation's steps. Each step before the commit
+// reads one file of the sites (in the order of their paths) and sets its sites in memory, nothing
+// written, so a transaction dropped between two steps has done nothing; once every file is
+// staged, the commit is one step, the only one that writes (a file's rename: the file copied under
+// its new name, the rewritten documents saved, the old file removed; a name's: every file written
+// together). A plan that is not ok commits at once, refused. It reads `scan` and `graph` as they
+// are at each step: a site is found again in the file staged (the same record place, field and
+// value) and must still resolve where the plan said, and the commit writes the bytes staged. Its
+// caller keeps `scan` as it was planned over; the graph may move between two steps (the session's
+// validation steps before its operation every poll), but nothing writes the project's files or
+// the open documents while the session's operation holds them, so a validation brings the graph
+// to the same files and resolves each staged site where it did.
+class RenameTransaction {
+public:
+	RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
+			const AssetGraph &graph, RenamePlan plan);
+	RenameTransaction(const ProjectPaths &paths, const ProjectDocument &project, const AssetScan &scan,
+			const AssetGraph &graph, SymbolRenamePlan plan, FileReplace replace = replace_file);
+	~RenameTransaction();
+	RenameTransaction(const RenameTransaction &) = delete;
+	RenameTransaction &operator=(const RenameTransaction &) = delete;
+
+	// One step: the next file staged, or once each is, the commit. True once committed.
+	bool step();
+	bool committed() const { return committed_; }
+	// What the commit came to (apply_rename's and apply_symbol_rename's answer); false before it.
+	bool ok() const { return committed_ && ok_; }
+	const std::vector<Diagnostic> &findings() const { return findings_; }
+	// Where it stands: the files staged of the files the sites are in, and the file staged last.
+	size_t files_staged() const { return next_; }
+	size_t files_total() const { return files_.size(); }
+	const std::string &current() const { return current_; }
+	// The project-relative paths a commit writes, makes or removes (the file and its new name, an
+	// import source's records, every file of the sites): what a scan reads again after it.
+	std::vector<std::string> touched() const;
+
+private:
+	struct Staged;
+
+	void stage_file(const std::string &file, const std::vector<const RenameSite *> &sites);
+	void commit();
+	void commit_file_rename();
+	void commit_symbol_rename();
+
+	const ProjectPaths &paths_;
+	const ProjectDocument &project_;
+	const AssetScan &scan_;
+	const AssetGraph &graph_;
+	bool symbol_ = false;
+	RenamePlan file_plan_;
+	SymbolRenamePlan symbol_plan_;
+	FileReplace replace_;
+	// The sites by file, in the order of the files' paths.
+	std::map<std::string, std::vector<const RenameSite *>> files_;
+	std::map<std::string, std::vector<const RenameSite *>>::const_iterator at_;
+	size_t next_ = 0;
+	std::string current_;
+	std::vector<std::unique_ptr<Staged>> staged_;
+	std::vector<Diagnostic> findings_;
+	bool staged_ok_ = true;
+	bool committed_ = false;
+	bool ok_ = false;
+};
 
 } // namespace opennova::editor

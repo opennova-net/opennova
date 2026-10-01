@@ -614,6 +614,7 @@ void test_project_settings() {
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
 	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	session.run_operations();
 	const SessionView &v = session.view();
 	const std::string armory = v.project.root;
 	Ui ui;
@@ -711,6 +712,7 @@ void test_project_settings() {
 	CHECK(one(ui.drain(), EditorRequestKind::PickFile) != nullptr, "a Browse... pending");
 	CHECK(session.handle(request::new_project(dir.file("Harbor"), "Harbor")) && v.project.root != armory,
 	      "the editor MCP opens another project");
+	session.run_operations();
 	ui.frames(3);
 	CHECK(!modal_open("Project settings") && ui.drain().empty(), "the dialog closes with its project, raising nothing");
 	choose(ui, "File", {"Project settings..."});
@@ -752,6 +754,7 @@ void test_project_settings_two_applies() {
 	FilePreferencesStore preferences(settings_file);
 	ProjectSession session(platform, preferences);
 	CHECK(session.handle(request::new_project(dir.file("Armory"), "Armory")), "a project");
+	session.run_operations();
 	const SessionView &v = session.view();
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -1137,12 +1140,21 @@ void test_files_window() {
 	ui.button(false);
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "menus/main.mnu", "a double click opens it");
+	// A text opens too (S13 D9: a text document); an image source, which no document type opens, is
+	// selected, not opened.
 	CHECK(hover_find(ui, item_id(table, {"readme.txt", "##row"}), x, top, bottom, row), "readme.txt's row");
 	ui.button(true);
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	CHECK(window->selected() == "readme.txt" && ui.drain().empty(), "a text file is selected, not opened");
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "readme.txt", "a text file opens");
+	CHECK(hover_find(ui, item_id(table, {"art", "art/logo.png", "##row"}), x, top, bottom, row), "logo.png's row");
+	ui.button(true);
+	ui.button(false);
+	ui.button(true);
+	ui.button(false);
+	CHECK(window->selected() == "art/logo.png" && ui.drain().empty(), "an image source is selected, not opened");
 
 	// New: weapon.def made at once; items.def, which the project has, not offered; a menu's
 	// name asked first, checked as it is typed.
@@ -1767,6 +1779,7 @@ void test_files_tree_kept() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Kept"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	Ui ui;
 	ui.windows.set_view(&session.view());
@@ -1807,6 +1820,7 @@ void test_files_tree_kept() {
 	const std::string readme = session.view().project.root + "/notes/readme.txt";
 	CHECK(editor_test::write_text(readme, "x"), "a file written");
 	session.handle(request::rescan());
+	session.run_operations();
 	ui.frames(2);
 	CHECK(window->rebuilds() > building && logged_frame(ui).find("readme.txt") != std::string::npos,
 	      "a file found anew: the tree made again");

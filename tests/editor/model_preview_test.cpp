@@ -88,8 +88,10 @@ static int test_status_and_builds() {
 	TEST_EXPECT(model_preview_to_json(model_preview_snapshot(view, model, false)).get_string("status", "") == "no_device");
 
 	session.handle(request::new_project(dir.file("project"), "Model Preview Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/armory.3di"), test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	model.follow(view);
 	TEST_EXPECT(json(view, model).get_string("status", "") == "no_model");
 	TEST_EXPECT(json(view, model).get_string("message", "") ==
@@ -149,6 +151,7 @@ static int test_status_and_builds() {
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Keep);
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/textures/preview_skin.tga"), std::vector<uint8_t>(18, 0)));
 	session.handle(request::rescan());
+	session.run_operations();
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild && model.builds() == 3);
 
 	// Saved and closed: nothing to show.
@@ -213,9 +216,11 @@ static int test_overlays() {
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Overlay Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && model.follow(view) == ModelPreviewAction::Rebuild);
@@ -301,9 +306,11 @@ static int test_handles() {
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Handle Test"));
+	session.run_operations();
 	TEST_EXPECT(editor_test::write_bytes(dir.file("project/models/house.3di"),
 	                                     test_io::read_file(synth("house_lod0_sine_rotx.3di"))));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("models/house.3di"));
 	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/house.3di"));
 	TEST_EXPECT(document && model.follow(view) == ModelPreviewAction::Rebuild);
@@ -495,6 +502,7 @@ static int test_animation() {
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Animation Test"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
@@ -504,11 +512,13 @@ static int test_animation() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("skinned.3di") && view.project.scan->find("SKIN.adm") && view.project.scan->find("walk.bad"));
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
 	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
 	                                    "anim_def skin\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 
 	// The table plays on the item's graphic.
 	session.handle(request::open_document("anims/SKIN.adm"));
@@ -561,6 +571,7 @@ static int test_animation() {
 	// No item pairs a table: no rig, until a model is chosen.
 	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def", "begin \"Nothing\"\nid 100201\ntype building\nend\n"));
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document("anims/SKIN.adm"));
 	model.follow(view);
 	TEST_EXPECT(model.status() == ModelPreviewStatus::NoRig);
@@ -633,6 +644,7 @@ static int test_runtime_clips() {
 	ModelPreviewModel model;
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Runtime Clips"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const std::string source = dir.file("source");
 	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
@@ -643,6 +655,7 @@ static int test_runtime_clips() {
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	TEST_EXPECT(view.project.scan->find("SKIN.adm") && view.project.scan->find("STEP.adm") && view.project.scan->find("step.bad"));
 	ModelPreviewOptions chosen = model.options();
 	chosen.rig_model = "skinned.3di";

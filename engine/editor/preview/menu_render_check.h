@@ -38,6 +38,10 @@ NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument
 Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,
                                 DiagnosticSeverity severity);
 
+// What a step of the render check spends on a menu of the scan it does not render again (S13 A3);
+// a menu it renders ends the step.
+inline constexpr uint64_t kMenuStepCost = 4096;
+
 // The render check (ADR 0046 S9j2), the menu type's project check (S13 V9: its registry row
 // makes it, make_menu_render_check, and whoever validates keeps it among the types' checks,
 // documents/project_checks.h): every screen of every menu in the project compiled headless the
@@ -57,6 +61,12 @@ public:
 	// took another value: a stylesheet edit that changes no variable's value renders nothing.
 	// True when the notes may have moved: a menu rendered again, or one's notes went.
 	bool update(const ProjectCheckInput &input) override;
+	// A menu a step (S13 A3): each step goes through the scan's menus from where the last left off,
+	// reusing those that did not move, and ends once it rendered one (or spent `budget`, a menu
+	// kMenuStepCost); the step that reaches the end lets the menus no longer listed go and composes
+	// the notes.
+	void begin() override;
+	bool step(const ProjectCheckInput &input, uint64_t budget, bool &moved) override;
 	void clear() override;
 	const std::vector<Diagnostic> &findings() const override { return diagnostics_; }
 	// The render of a screen row of the menu at `path`, null when there is none.
@@ -99,6 +109,19 @@ private:
 	std::map<std::string, std::string> vars_; // the shell's variables the renders were made with
 	std::vector<Diagnostic> diagnostics_;
 	size_t rendered_ = 0;
+	// The update under way: whether it started (the variables read, the menus not seen yet), the
+	// scan's file it goes on from, and the shell's variables it renders with.
+	struct Cursor {
+		bool started = false;
+		size_t next = 0;
+		std::map<std::string, std::string> vars;
+	};
+	Cursor cursor_;
+	// Kept until an update ends, however often one starts again: the variables that changed (the
+	// menus naming one render again) and whether a menu rendered or one's notes went (the notes are
+	// composed again).
+	std::vector<std::string> changed_;
+	bool moved_ = false;
 };
 
 // The render check among a validation's project checks (the menu type's; the registry's hook that

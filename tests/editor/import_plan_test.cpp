@@ -80,6 +80,7 @@ static int test_plan_folder() {
 	const std::string root = project.root();
 	TEST_EXPECT(editor_test::write_text(root + "/fonts/have.fnt", "fnt"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
 	                                                                    window("STATIC", "KEEP", font("have")))));
@@ -377,11 +378,13 @@ static int test_plan_not_followed() {
 
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
-// file (graph_reads_file). Those are the kinds the hand-written list named (a terrain, a script,
-// the two sound banks, a dialog bank, the def tables beyond the catalogs and the avatar table)
-// and the ones S13 D5 added that name files (a face, a map project); a mission's .mis, which the
-// graph does not read, where its .bms is read. powerup.def left the list when the catalog opened it
-// (S13 D10): the graph reads it through the catalog's records.
+// file (graph_reads_file), or reads it but not the files it names (AssetKindRow::names_unfollowed).
+// Those are the kinds the hand-written list named (a terrain, a script, the two sound banks, a
+// dialog bank, the def tables beyond the catalogs and the avatar table) and the ones S13 D5 added
+// that name files (a face, a map project); a mission's .mis, which the graph does not read, where
+// its .bms is read. A script the graph reads since S13 D9 (its operands' names), but not its RUN,
+// which names another script: it stays not followed. powerup.def left the list when the catalog
+// opened it (S13 D10): the graph reads it through the catalog's records.
 static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
 	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
@@ -390,7 +393,8 @@ static int test_references_unread() {
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";
-		const bool rule = asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+		const AssetKindRow &row = asset_kind_row(kind);
+		const bool rule = row.names_files && (row.names_unfollowed || !graph_reads_file(kind, file));
 		TEST_EXPECT(references_unread(kind, file) == rule);
 		if (rule != (unread.count(kind) > 0))
 			std::fprintf(stderr, "references_unread(%s) moved\n", asset_kind_token(kind));
@@ -463,6 +467,7 @@ static int test_plan_material_sources() {
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 3);
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	size_t resolved = 0;
 	for (const GraphEdge *edge : view.findings.graph->references_of("models/relief.3di"))
@@ -489,6 +494,7 @@ static int test_plan_stylesheets() {
 	TEST_EXPECT(editor_test::write_text(root + "/menus/menu_style.mns", "FONT_X old.fnt\r\nVAR_Y gone.fnt\r\n") &&
 	            editor_test::write_text(root + "/menus/brand.mns", "FONT_X brand.fnt\r\n"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/menu_style.mns", "FONT_X base.fnt\r\n"));
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "X", font("%FONT_X%")) +
@@ -574,6 +580,7 @@ static int test_plan_native_png() {
 	const ImportResult result = import_assets(selected_sources(plan), ProjectPaths::for_root(root), *project.view().project.document, false);
 	TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 2);
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	const AssetEntry *png = view.project.scan->find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));

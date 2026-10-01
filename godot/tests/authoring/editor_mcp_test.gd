@@ -83,7 +83,12 @@ func _play_state() -> String:
 
 
 ## One tools/call: the structuredContent, or {"_error": text} when the tool refused.
+## An editor_request waits for the operation it starts (its `wait`, S13 A3: an Open, a refresh, an
+## import, a rename) unless the call says otherwise, as a test that reads the operation mid-way does.
 func _call(name: String, args := {}) -> Dictionary:
+	if name == "editor_request" and not args.has("wait"):
+		args = args.duplicate()
+		args["wait"] = true
 	var envelope: Variant = await _client.call_tool(get_tree(), name, args)
 	assert_true(envelope is Dictionary, "%s answered" % name)
 	if not (envelope is Dictionary):
@@ -110,14 +115,23 @@ func _state(sections: Array) -> Dictionary:
 	return await _call("editor_state", {"sections": sections})
 
 
-## Whether a request's answer says it read and was done.
+## What the operation a request started came to, when the call waited for it ({} for none).
+static func _ended(answer: Dictionary) -> Dictionary:
+	var ended: Variant = answer.get("operation", {})
+	return ended if ended is Dictionary else {}
+
+
+## Whether a request's answer says it read and was done, and the operation it started ended done.
 static func _done(answer: Dictionary) -> bool:
-	return bool(answer.get("ok", false)) and bool(answer.get("outcome", {}).get("done", false))
+	var ended := _ended(answer)
+	return bool(answer.get("ok", false)) and bool(answer.get("outcome", {}).get("done", false)) \
+			and (ended.is_empty() or String(ended.get("end", "")) == "done")
 
 
-## Whether a request's answer names a finding of `code` (it read, and the session reported it).
+## Whether a request's answer names a finding of `code` (it read, and the session reported it:
+## the request's, or the operation's it started).
 static func _found(answer: Dictionary, code: String) -> bool:
-	for finding: Variant in answer.get("outcome", {}).get("findings", []):
+	for finding: Variant in answer.get("outcome", {}).get("findings", []) + _ended(answer).get("findings", []):
 		if finding is Dictionary and String((finding as Dictionary).get("code", "")) == code:
 			return true
 	return false
@@ -236,7 +250,7 @@ func test_build_is_an_operation_the_state_reads_mid_way() -> void:
 	assert_true(bool(made.get("ok", false)), str(made))
 	assert_true(bool((await _create_missing()).get("ok", false)))
 	_app.call("set_poll_budget", 0, 8192) # a step of 8 KiB a frame
-	var raised := await _call("editor_request", {"kind": "build"})
+	var raised := await _call("editor_request", {"kind": "build", "wait": false})
 	var outcome: Dictionary = raised.get("outcome", {})
 	assert_true(bool(outcome.get("done", false)), str(raised))
 	var id := int(outcome.get("operation", 0))
@@ -331,7 +345,9 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 ## serves (S13 A5: the catalog query's request kinds but those a person answers, the pickers),
 ## each a kind the reader knows (a member no kind takes is refused as that member, never as an
 ## unknown kind), the retail token gone; a field outside a kind's set is refused naming what it
-## takes, and one it must carry left out is refused. The game install's words: the settings take
+## takes, and one it must carry left out is refused. The edits' schema is the session's batch table
+## (S13 D9: the catalog's batch): its op enum the table's ops, apply among them, one property per
+## member, an apply's payload the one token it takes and a span's line from 1. The game install's words: the settings take
 ## game_install and play_in_install (the retail keys refused), the run section says in_install
 ## and game_install, the import section install_files, and an import from an install that holds
 ## no archives is import.install.
@@ -341,9 +357,11 @@ func test_request_table_on_the_wire() -> void:
 	var listed: Variant = await _client.rpc(get_tree(), "tools/list")
 	var kinds: Array = []
 	var queries: Array = []
+	var edit: Dictionary = {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
 		if String(tool["name"]) == "editor_request":
 			kinds = tool["inputSchema"]["properties"]["kind"].get("enum", [])
+			edit = tool["inputSchema"]["properties"]["edits"].get("items", {})
 		if String(tool["name"]) == "editor_query":
 			queries = tool["inputSchema"]["properties"]["query"].get("enum", [])
 	var catalog := await _query("catalog")
@@ -356,6 +374,17 @@ func test_request_table_on_the_wire() -> void:
 	for row: Variant in catalog.get("queries", []):
 		named.append(String((row as Dictionary).get("name", "")))
 	assert_eq(queries, named, "the query enum is the catalog's queries")
+	var batch: Dictionary = catalog.get("batch", {})
+	var ops: Array = []
+	for row: Variant in batch.get("ops", []):
+		ops.append(String((row as Dictionary).get("op", "")))
+	var members: Dictionary = edit.get("properties", {})
+	assert_eq(members.get("op", {}).get("enum", []), ops, "the edit's ops are the batch table's")
+	assert_true(ops.has("apply") and ops.has("replace_list"), str(ops))
+	assert_eq(members.size(), (batch.get("members", []) as Array).size(), "a property per member of the table")
+	assert_eq(members.get("payload", {}).get("enum", []), ["text.span"], str(members.get("payload")))
+	assert_eq(int(members.get("line", {}).get("minimum", 0)), 1, str(members.get("line")))
+	assert_true(String(members.get("text", {}).get("description", "")).contains("spans"), str(members.get("text")))
 	assert_false(served.has("pick_directory") or served.has("pick_file"), "the pickers need a person")
 	assert_true(served.has("preview_install_import") and not served.has("preview_retail_import"))
 	for kind: Variant in served:

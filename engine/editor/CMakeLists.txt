@@ -14,6 +14,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
@@ -36,6 +37,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/table_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/text_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/text_history.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
     # per type that has one, kept between validations
@@ -51,6 +54,10 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/catalog_validation.cpp
@@ -75,6 +82,7 @@ add_library(opennova_editor STATIC
     # the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
@@ -115,7 +123,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
     # project_build — routing into the boot-table archives, the plan, the immutable build
     # (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
@@ -140,6 +148,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
@@ -148,7 +159,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp
@@ -200,6 +213,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp

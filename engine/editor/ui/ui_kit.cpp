@@ -76,9 +76,12 @@ bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip,
 	row.next(button_width(label));
 	ImGui::BeginDisabled(!enabled);
 	const bool pressed = small ? ImGui::SmallButton(label) : ImGui::Button(label);
+	// Held back by an enclosing BeginDisabled too (a view the busy gate holds back, S13 A3), however
+	// the button was activated.
+	const bool held = (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) != 0;
 	ImGui::EndDisabled();
 	tooltip(tip);
-	return pressed && enabled;
+	return pressed && enabled && !held;
 }
 
 RowTool row_tools(WrapRow &row, const RowTools &t) {
