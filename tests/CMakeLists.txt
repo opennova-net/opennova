@@ -943,6 +943,14 @@ target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
 
+# ResourceIndex over an embedder's own file set (mount_source, ADR 0046 S14: the editor's project
+# files in place of an install): what it has and reads, what it does not index, its revision, and an
+# AssetStore parsing a model through it.
+add_executable(resource_index_source_test resource_index/resource_index_source_test.cpp)
+target_link_libraries(resource_index_source_test PRIVATE opennova_runtime)
+target_include_directories(resource_index_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME resource_index_source COMMAND resource_index_source_test)
+
 # The presented-model lookup (world/entity_index.h): the BMS-id and origin
 # candidates, groups and area-trigger zones an embedder resolves its presented
 # models by.

@@ -95,6 +95,8 @@ struct ResourceIndex::Impl {
 	std::string root_dir;
 	std::string last_error;
 	std::vector<ResourceFileEntry> records; // recognized-kind entries
+	// An embedder's own file set mounted in place of an install (mount_source); null otherwise.
+	std::shared_ptr<const FileSource> source;
 };
 
 uint64_t cache_epoch() {
@@ -137,6 +139,17 @@ ResourceIndex::InstallScan ResourceIndex::scan_install(const std::string &root_d
 	}
 	index_mounted();
 	return InstallScan::Mounted;
+}
+
+bool ResourceIndex::mount_source(std::shared_ptr<const FileSource> files) {
+	clear();
+	if (!files) {
+		impl_->last_error = "No file source to mount";
+		return false;
+	}
+	impl_->source = std::move(files);
+	impl_->root_dir = kSourceRootDir;
+	return true;
 }
 
 void ResourceIndex::index_mounted() {
@@ -201,6 +214,7 @@ void ResourceIndex::clear() {
 	impl_->root_dir.clear();
 	impl_->last_error.clear();
 	impl_->records.clear();
+	impl_->source.reset();
 }
 
 bool ResourceIndex::has_mounted_archive() const {
@@ -227,7 +241,7 @@ std::string ResourceIndex::particle_extension() const {
 	// [orig: Game_LoadConfig @ 0x551480 sets byte_24D4DF9 = FileSystem_FileExists(
 	// "fgn2.bin") != 0 @0x5514e8..0x5514fa; CEffectSystem_Init @ 0x5f6070 reads it to
 	// pick ".ptg" over the ".ptu" default @0x5f608b..0x5f6095].
-	return impl_->vfs.has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
+	return has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
 }
 
 void ResourceIndex::set_scr_policy(int scr_policy) {
@@ -237,23 +251,29 @@ void ResourceIndex::set_scr_policy(int scr_policy) {
 }
 
 bool ResourceIndex::prefers_loose_file(const std::string &name) const {
-    return impl_->vfs.prefers_loose_file(name);
+	// A file source has no archive a loose file could be preferred over.
+	if (impl_->source) return false;
+	return impl_->vfs.prefers_loose_file(name);
 }
 
 bool ResourceIndex::has_file(const std::string &name) const {
+	if (impl_->source) return impl_->source->stamp(name) != 0;
 	return impl_->vfs.has_file(name);
 }
 
 bool ResourceIndex::has_file(const std::string &name, VfsLookupPolicy policy) const {
+	if (impl_->source) return impl_->source->stamp(name) != 0;
 	return impl_->vfs.has_file(name, policy);
 }
 
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out) const {
+	if (impl_->source) return impl_->source->read(name, out);
 	return impl_->vfs.read_file(name, out);
 }
 
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out,
                               VfsLookupPolicy policy) const {
+	if (impl_->source) return impl_->source->read(name, out);
 	return impl_->vfs.read_file(name, out, policy);
 }
 

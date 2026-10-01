@@ -242,6 +242,29 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 	return OK;
 }
 
+Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
+	expansion_ = String();
+	mount_kind_ = MountKind::None;
+	// As begin_mount: the caches keyed to the old mount dropped, the old native source discarded.
+	opennova::clear_texture_resolver_caches();
+	opennova::bump_cache_epoch();
+	assets_.invalidate();
+	if (!index_.mount_source(std::move(files))) {
+		root_dir_ = String();
+		last_error_ = String(index_.last_error().c_str());
+		return ERR_INVALID_PARAMETER;
+	}
+	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
+	last_error_ = String();
+	mount_kind_ = MountKind::Source;
+	return OK;
+}
+
+void ResourceRoot::files_changed() {
+	index_.mark_changed();
+	bump_cache_epoch();
+}
+
 Error ResourceRoot::begin_mount(const String &path, String &r_clean) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// a new or re-scanned resource directory is read fresh. The epoch bump tells
@@ -347,6 +370,10 @@ String ResourceRoot::resolve_file(const String &name) {
 	}
 	if (!is_flat_filename(name.strip_edges())) {
 		last_error_ = "Resource lookup requires a flat filename: " + name;
+		return String();
+	}
+	if (mount_kind_ == MountKind::Source) {
+		last_error_ = "A file source has no directory to resolve a file in: " + file;
 		return String();
 	}
 	const String wanted = file.to_lower();
@@ -576,6 +603,10 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 		if (font->load_from_bytes(bytes) == OK) {
 			return font;
 		}
+	}
+	// A CBIN font is found by walking the root's directory: a file source has none.
+	if (mount_kind_ == MountKind::Source) {
+		return Ref<Resource>();
 	}
 	return cbin_internal::find_font_by_name(file, root_dir_);
 }
