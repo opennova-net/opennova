@@ -20,7 +20,9 @@ bool write_file_atomic(const std::string &path, const void *data, size_t size, s
 bool write_file_atomic(const std::string &path, const std::string &text, std::string &error);
 
 // The written file at `from` put in the place of `to`, replacing it (one rename); false with the
-// OS reason when it is refused (a write-protected `to`), `from` then left where it is.
+// OS reason when it is refused (a write-protected `to`), `from` then left where it is. The file
+// replaced, its last write moves past the one it had, however soon after it the new one was
+// written (the stamps that tell a file changed are its size and last write).
 bool replace_file(const std::string &from, const std::string &to, std::string &error);
 using FileReplace = std::function<bool(const std::string &from, const std::string &to, std::string &error)>;
 

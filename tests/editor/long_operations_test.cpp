@@ -10,7 +10,8 @@
 // import that finds its plan stale refusing without writing, stepped; a Rescan, an import and a
 // rename stepped coming to the view they come to run to their end; a validation started again
 // mid-way composing what the one it replaced had moved; a rename keeping the selection the modder
-// made while it ran. Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
+// made while it ran; a file rewritten at its size moving its stamp however soon after its last
+// write. Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a
 // step at a time at the editor's budget (its polls, its steps, its longest poll, bounded, and its
 // wall time), and the base layer a dependency mount of the install would build.
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/file_time.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
@@ -239,6 +241,27 @@ Stepped open_stepped(ProjectSession &session, const std::string &root, const Pol
 }
 
 } // namespace
+
+// A file rewritten at its size moves its stamp however soon after its last write (S13 A3: the scan,
+// the graph and the caches tell a change by the size and the last write, and a file system's clock
+// can stand still for milliseconds, Linux's above all): ten back-to-back rewrites of one size
+// through write_file_atomic, and ten through write_files_together, each leave a later last write.
+static int test_rewrite_moves_the_stamp() {
+	editor_test::TempProjectDir dir("opennova_long_ops_stamp");
+	const std::string path = dir.file("same.def");
+	std::string error;
+	TEST_EXPECT(write_file_atomic(path, std::string("weapon \"GUN_A\"\nend\n"), error));
+	int64_t last = opennova::io::file_modified_ticks(path);
+	for (int i = 0; i < 20; ++i) {
+		const std::string text = std::string("weapon \"GUN_") + char('B' + i) + "\"\nend\n";
+		std::vector<std::string> problems;
+		TEST_EXPECT(i < 10 ? write_file_atomic(path, text, error) : write_files_together({{path, text}}, problems));
+		const int64_t now = opennova::io::file_modified_ticks(path);
+		TEST_EXPECT(now > last && fs::file_size(path) == text.size());
+		last = now;
+	}
+	return 0;
+}
 
 // The scan a step at a time: at a budget of one byte (a file a step), of 64 KB and whole, over the
 // four fixture projects and one with import sources (a PNG with its record and its output, one
@@ -1128,6 +1151,7 @@ int main(int argc, char **argv) {
 	failures += test_stepped_equals_whole();
 	failures += test_validation_started_again();
 	failures += test_rename_keeps_the_selection();
+	failures += test_rewrite_moves_the_stamp();
 	failures += test_retail_open();
 	return failures == 0 ? 0 : 1;
 }
