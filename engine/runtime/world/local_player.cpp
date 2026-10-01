@@ -480,6 +480,14 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 		// the pack's too [orig: Player_PackInputStateToEntity @0x4df450 --
 		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
 		// the clear @0x4df904/@0x4df909].
+		// A NoMove weapon strips the direction and lean bits from the word
+		// first, the saved copy included; jump, the look keys and free look
+		// survive. An OnlyScoped weapon answers only once promoted.
+		// [orig: Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c;
+		//  `g_InputFlags &= 0xFFFF9FE1` @0x4df482]
+		if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+					DEF_WEAPON_FLAG_NOMOVE))
+			input_flags.flags &= 0xFFFF9FE1u;
 		move_order = w::pack_player_body_input(input_flags.flags, input);
 		// The packed word's direction bits drive the movement legs: the
 		// movement-held latch (it refuses scope-UP on a Scoped weapon

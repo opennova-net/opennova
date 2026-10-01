@@ -2318,6 +2318,39 @@ void test_pack_owns_the_movement_latch_and_unscope() {
     CHECK(b.player.view.binoculars_requested);
 }
 
+// A NoMove weapon strips the direction and lean bits from the word before the
+// pack reads it; jump, the look keys and free look survive. An OnlyScoped
+// weapon answers the seat-flag query only once promoted (the mortar walks
+// while carried, stands while set up). [orig: Player_PackInputStateToEntity --
+// Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c,
+// `g_InputFlags &= 0xFFFF9FE1` @0x4df482; Entity_CheckWeaponSeatFlags @0x540D00]
+void test_pack_masks_movement_under_a_nomove_weapon() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    f.player.set_movement_keys(true, false, true, false, true, false, true);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.move_order.moving);
+    CHECK(f.player.move_order.direction_bits == 0);
+    CHECK(!f.player.move_order.lean_left);
+    CHECK(f.player.move_order.jump);
+    CHECK(!f.player.view.move_held);
+    CHECK(f.player.input_flags.prev == kInputFlagJump);
+
+    ScopedAimFixture m;
+    m.player.weapon.def.flags =
+            static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE | DEF_WEAPON_FLAG_ONLYSCOPED);
+    m.player.view.scope_engaged = false;
+    m.player.view.scope_settled = false;
+    m.player.set_movement_keys(true, false, false, false, false, false, false);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.player.move_order.moving);
+    m.player.view.scope_engaged = true;
+    m.player.view.scope_settled = true;
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving);
+    CHECK(m.player.view.scope_settled);
+}
+
 void test_scoped_aim_body_input_camera_and_fired_round() {
     ScopedAimFixture f;
     WeaponInstallData data;
@@ -2537,6 +2570,7 @@ int main() {
     test_scoped_aim_body_input_camera_and_fired_round();
     test_pack_drops_the_binocular_toggle_on_movement();
     test_pack_owns_the_movement_latch_and_unscope();
+    test_pack_masks_movement_under_a_nomove_weapon();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {
