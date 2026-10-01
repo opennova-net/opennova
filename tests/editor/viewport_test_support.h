@@ -123,19 +123,4 @@ inline bool serve(opennova::editor::ProjectSession &session,
 	return done;
 }
 
-// What the planners read of the viewport of `kind` over `path` (the view, its clock, the document
-// open there), at the size its state says.
-inline opennova::editor::ViewportContext viewport_context(const opennova::editor::ProjectSession &session,
-		const opennova::editor::ViewportModel &model, float snap = 0.0f) {
-	const opennova::editor::SessionView &view = session.view();
-	const opennova::editor::DocumentBase *document = nullptr;
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == model.path()) document = open.get();
-	return opennova::editor::ViewportContext{
-		opennova::editor::ViewportInput{ view, view.documents.viewports->clock(), document,
-				opennova::editor::ChangeClass::None },
-		model.size().width, model.size().height, snap, nullptr
-	};
-}
-
 } // namespace editor_test

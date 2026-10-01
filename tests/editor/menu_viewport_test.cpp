@@ -79,7 +79,7 @@ struct Rig {
 		return static_cast<const MenuViewport *>(session.viewports().find(path(), ViewportKind::Menu));
 	}
 	JsonValue json() { return viewport_to_json(view(), viewport(), ViewportKind::Menu, JsonPage()); }
-	ViewportContext context(float snap = 0.0f) { return editor_test::viewport_context(session, *viewport(), snap); }
+	ViewportContext context(float snap = 0.0f) { return viewport_context(session.view(), *viewport(), snap); }
 	size_t configures() { return viewport() ? viewport()->configures() : 0; }
 };
 

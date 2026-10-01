@@ -1,5 +1,6 @@
 #include <editor/preview/menu_viewport.h>
 
+#include <cmath>
 #include <cstdio>
 #include <variant>
 
@@ -361,7 +362,8 @@ bool MenuViewport::drag(const ViewportContext &context, const ViewportDrag &drag
 	const MenuCanvasFrame frame = canvas_frame(context);
 	LayoutHandle handle = LayoutHandle::Move;
 	if (!layout_handle_from_token(drag.handle, handle)) {
-		error = "Unknown handle \"" + drag.handle + "\".";
+		error = "Unknown handle \"" + drag.handle +
+				"\" (move, left, right, top, bottom, top_left, top_right, bottom_left, bottom_right).";
 		return false;
 	}
 	if (!frame.current) {
@@ -377,18 +379,42 @@ bool MenuViewport::drag(const ViewportContext &context, const ViewportDrag &drag
 		error = "Record " + std::to_string(drag.id) + " is no window of the screen the viewport shows.";
 		return false;
 	}
+	// To a design point: as far as the handle is from it where the picture shows it now (a move's
+	// handle the window's top left corner, an edge's its edge, a corner's its corner).
+	int dx = int(drag.x), dy = int(drag.y);
+	if (!drag.by) {
+		mnu::RectEdges rect{};
+		const int index = frame.document->window_index(held);
+		if (index < 0 || !frame.compiler->widget_rect(index, *frame.state, &rect)) {
+			error = "Record " + std::to_string(drag.id) + " has no rect on the screen the viewport shows.";
+			return false;
+		}
+		const bool left = handle == LayoutHandle::Move || handle == LayoutHandle::Left ||
+				handle == LayoutHandle::TopLeft || handle == LayoutHandle::BottomLeft;
+		const bool right = handle == LayoutHandle::Right || handle == LayoutHandle::TopRight ||
+				handle == LayoutHandle::BottomRight;
+		const bool top = handle == LayoutHandle::Move || handle == LayoutHandle::Top ||
+				handle == LayoutHandle::TopLeft || handle == LayoutHandle::TopRight;
+		const bool bottom = handle == LayoutHandle::Bottom || handle == LayoutHandle::BottomLeft ||
+				handle == LayoutHandle::BottomRight;
+		const int x = int(std::lround(drag.x)), y = int(std::lround(drag.y));
+		dx = left ? x - rect.left : right ? x - rect.right : 0;
+		dy = top ? y - rect.top : bottom ? y - rect.bottom : 0;
+	}
 	LayoutPress press;
 	std::vector<Edit> edits;
 	if (!layout_press(*frame.document, held, handle, frame.windows, *frame.compiler, *frame.state, press) ||
-			!layout_press_edits(*frame.document, press, *frame.compiler, int(drag.x), int(drag.y),
-					drag.snap != 0.0f ? kLayoutGrid : 0, next_edit_gesture(), edits)) {
+			!layout_press_edits(*frame.document, press, *frame.compiler, dx, dy,
+					drag.snap != 0.0f ? kLayoutGrid : 0, drag.gesture ? drag.gesture : next_edit_gesture(), edits)) {
 		error = "The drag leaves the window no area.";
 		return false;
 	}
-	if (edits.empty()) return true;
+	// The batch, then the gesture's end where there is one to end: this batch's, or the gesture the
+	// drag went on with (its last drag may move nothing).
 	const std::string &path = frame.document->path();
-	out.request(request::edit_record(path, std::move(edits)));
-	out.request(request::end_edit(path));
+	const bool planned = !edits.empty();
+	if (planned) out.request(request::edit_record(path, std::move(edits)));
+	if (drag.end && (planned || drag.gesture)) out.request(request::end_edit(path));
 	return true;
 }
 
@@ -478,6 +504,13 @@ io::JsonValue MenuViewport::notes_json(const ViewportInput &input) const {
 	const Node *screen = document ? document->row(part_) : nullptr;
 	if (!screen || !current(input)) return JsonValue::make_array();
 	return menu_notes_to_json(*document, *screen, render_.compiler(), notes_);
+}
+
+io::JsonValue MenuViewport::render_json(
+		const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const {
+	JsonValue render = menu_render_to_json(input.view, path(), row, page);
+	if (render.is_null()) error = "no menu '" + path() + "' in the project.";
+	return render;
 }
 
 } // namespace opennova::editor

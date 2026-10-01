@@ -5,6 +5,7 @@
 
 #include <editor/model/document_base.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -113,6 +114,19 @@ bool ViewportContext::editable() const {
 			input.view.allows(EditorRequestKind::EditRecord);
 }
 
+ViewportContext viewport_context(const SessionView &view, const ViewportModel &model, float snap) {
+	static const PreviewClock kStill;
+	const DocumentBase *document = nullptr;
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == model.path()) document = open.get();
+	const ViewportState size = model.size();
+	return ViewportContext{
+		ViewportInput{ view, view.documents.viewports ? view.documents.viewports->clock() : kStill, document,
+				ChangeClass::None },
+		size.width, size.height, snap, nullptr
+	};
+}
+
 ViewportModel::ViewportModel(ViewportKind kind, std::string path, ViewportState state) :
 		state_(state), kind_(kind), path_(std::move(path)) {}
 
@@ -131,6 +145,13 @@ bool ViewportModel::current(const ViewportInput &input) const {
 
 io::JsonValue ViewportModel::notes_json(const ViewportInput &) const {
 	return JsonValue::make_array();
+}
+
+io::JsonValue ViewportModel::render_json(
+		const ViewportInput &, NodeId, const JsonPage &, std::string &error) const {
+	error = std::string("a ") + viewport_kind_token(kind_) +
+			" viewport's picture is its whole document: it renders no row apart (op state reads it).";
+	return JsonValue::make_null();
 }
 
 void ViewportModel::shown(const DocumentBase &document) {

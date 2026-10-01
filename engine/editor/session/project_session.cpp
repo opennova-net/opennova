@@ -156,6 +156,9 @@ io::JsonValue ProjectSession::handle_json(const io::JsonValue &json, EditorReque
 						made.set(names.labels[i], io::json_number(double(outcome.made[i])));
 			came.set("made", std::move(made));
 		}
+		// A drag in a viewport names its gesture, which the gesture's next drag passes back (S13 V7).
+		if (request.kind == EditorRequestKind::EditInViewport && request.drag != ViewportDrag())
+			came.set("gesture", io::json_number(double(outcome.gesture)));
 		answer.set("outcome", std::move(came));
 	}
 	answer.set("status", io::json_string(view().activity.status));

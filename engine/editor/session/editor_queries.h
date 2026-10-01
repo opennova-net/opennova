@@ -36,6 +36,7 @@ enum class EditorQueryKind : uint8_t {
 	MenuTree,
 	MenuFindings,
 	MenuRender,
+	Viewport,
 	ImportPreview,
 	Output,
 	Operation,
@@ -51,6 +52,7 @@ inline constexpr size_t kEditorQueryKindCount = static_cast<size_t>(EditorQueryK
 enum class QueryJson : uint8_t {
 	String, // a string (a path, a token, a text)
 	Integer, // a whole number, 0 or more (an identity, an offset, a revision)
+	Number, // a finite number (a point on a picture)
 	Boolean, // true or false
 	Strings, // an array of strings
 };
@@ -75,8 +77,8 @@ struct EditorQueryRow;
 
 // A query's args as its row's params read them. run_query checked each once, before the handler
 // runs: every member a param of the row, every param the row needs there, each of its type, an
-// integer 0 or more, and a paged row's `limit` from 1 to kQueryPageMax; a param left out reads as
-// its default.
+// integer 0 or more, a number finite, and a paged row's `limit` from 1 to kQueryPageMax; a param
+// left out reads as its default.
 class QueryArgs {
 public:
 	QueryArgs(const EditorQueryRow &row, const io::JsonValue &args) : row_(row), args_(args) {}
@@ -85,6 +87,7 @@ public:
 	bool has(const char *name) const;
 	std::string text(const char *name) const;
 	int64_t integer(const char *name) const;
+	double number(const char *name) const;
 	bool boolean(const char *name) const;
 	std::vector<std::string> strings(const char *name) const;
 	// A paged row's page: from `offset` (a list in order) or `cursor` (a list by absolute index or
@@ -131,7 +134,7 @@ struct EditorQueryRow {
 const EditorQueryRow &editor_query_row(EditorQueryKind kind);
 // The kind a wire token names ("files"); false for none.
 bool editor_query_from_token(std::string_view token, EditorQueryKind &out);
-// A param type's word: "string", "integer", "boolean", "string[]".
+// A param type's word: "string", "integer", "number", "boolean", "string[]".
 const char *query_json_token(QueryJson type);
 
 // The query `name` answered over the session's core: its row found, its args checked (an object

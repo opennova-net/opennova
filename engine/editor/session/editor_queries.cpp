@@ -18,6 +18,9 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/preview/menu_report.h>
+#include <editor/preview/viewport_json.h>
+#include <editor/preview/viewport_model.h>
+#include <editor/preview/viewports.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
@@ -174,6 +177,25 @@ constexpr QueryParam kMenuFindingsParams[] = {
 constexpr QueryParam kMenuRenderParams[] = {
 	{ "path", J::String, false, nullptr, kMenuDoc },
 	{ "screen", J::Integer, true, nullptr, "The screen, by its row identity." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+constexpr QueryParam kViewportParams[] = {
+	{ "path", J::String, false, nullptr,
+			"An open document by its project-relative path or its logical name; left out, the active "
+			"one. Its viewport is the Preview's kind that shows it (a menu's; a model's, over a "
+			"model, a clip or an animation table), else its Main view." },
+	{ "op", J::String, true, nullptr,
+			"What is read: state (the envelope, a page of its items and by the same page its "
+			"notes), items or notes (a page of one), hit (what lies under x, y), render (one row of "
+			"the document as the kind renders it apart: a menu's screen, as the render check "
+			"compiled it)." },
+	{ "x", J::Number, false, nullptr,
+			"hit's point across, in the viewport's units (a menu's 800x600 design units, a model's "
+			"picture pixels)." },
+	{ "y", J::Number, false, nullptr, "hit's point down, as x." },
+	{ "row", J::Integer, false, nullptr, "render's row, by its identity (a menu's screen)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
@@ -628,6 +650,82 @@ JsonValue answer_menu_render(
 	return render;
 }
 
+// The viewport query's ops (S13 V7), each with what it takes beside path and op: a page (offset,
+// limit), a point of the picture (x and y, both needed), a row (needed).
+struct ViewportRead {
+	const char *op;
+	bool page;
+	bool point;
+	bool row;
+};
+
+constexpr ViewportRead kViewportReads[] = {
+	{ "state", true, false, false },
+	{ "items", true, false, false },
+	{ "hit", false, true, false },
+	{ "notes", true, false, false },
+	{ "render", true, false, true },
+};
+
+// Whether the op takes the viewport query's param `name` (path and op every op takes).
+bool read_takes(const ViewportRead &read, const std::string &name) {
+	if (name == "offset" || name == "limit") return read.page;
+	if (name == "x" || name == "y") return read.point;
+	if (name == "row") return read.row;
+	return true;
+}
+
+JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const std::string op = args.text("op");
+	const ViewportRead *read = nullptr;
+	std::string ops;
+	for (const ViewportRead &row : kViewportReads) {
+		ops += (ops.empty() ? "" : ", ") + std::string(row.op);
+		if (op == row.op) read = &row;
+	}
+	if (!read) {
+		error = "no op \"" + op + "\" (" + ops + ").";
+		return JsonValue::make_null();
+	}
+	// A param the op does not take is refused, naming those it takes.
+	const EditorQueryRow &row = editor_query_row(EditorQueryKind::Viewport);
+	std::string takes;
+	for (size_t i = 0; i < row.param_count; ++i)
+		if (read_takes(*read, row.params[i].name))
+			takes += (takes.empty() ? "" : ", ") + std::string(row.params[i].name);
+	for (size_t i = 0; i < row.param_count; ++i) {
+		if (args.has(row.params[i].name) && !read_takes(*read, row.params[i].name)) {
+			error = "op " + op + " takes no \"" + row.params[i].name + "\" (it takes " + takes + ").";
+			return JsonValue::make_null();
+		}
+	}
+	if (read->point && !(args.has("x") && args.has("y"))) {
+		error = "op " + op + " needs \"x\" and \"y\", the point in the viewport's units (a menu's "
+				"design units, a model's picture pixels).";
+		return JsonValue::make_null();
+	}
+	if (read->row && !args.has("row")) {
+		error = "op " + op + " needs \"row\", the row by its identity (a menu's screen).";
+		return JsonValue::make_null();
+	}
+	// The viewport of the document named, followed now, so what it answers is the document as it is.
+	SessionCore &core = context.core;
+	const DocumentBase *document = open_document_of(context, args, error);
+	ViewportModel *model = document ? core.viewports().resolve(core.view(), document->path(), error) : nullptr;
+	if (!model) return JsonValue::make_null();
+	const SessionView &view = core.view();
+	const JsonPage page = page_of(args);
+	if (read->point) {
+		return viewport_hit_to_json(
+				model->hit(viewport_context(view, *model), float(args.number("x")), float(args.number("y"))));
+	}
+	if (read->row)
+		return model->render_json(viewport_context(view, *model).input, NodeId(args.integer("row")), page, error);
+	if (op == "items") return viewport_items_to_json(view, *model, page);
+	if (op == "notes") return viewport_notes_to_json(view, *model, page);
+	return viewport_to_json(view, model, model->kind(), page);
+}
+
 JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &) {
 	return import_preview_to_json(context.core.view(), page_of(args));
 }
@@ -729,6 +827,11 @@ constexpr ConcernSet kMenuReads =
 constexpr ConcernSet kProblemsReads = concern_set({ C::Findings, C::ActiveDocument, C::DocumentSet,
 		C::Project, C::Files, C::Graph, C::Preferences });
 constexpr ConcernSet kGraphReads = concern_set({ C::Graph });
+// A viewport's answer: its state and the clock, its document and the selection in it, the documents
+// open and the active one (a pathless read's), the files its picture read, the graph (a rig's model),
+// the project, and the render check's findings (render's screen).
+constexpr ConcernSet kViewportConcerns = concern_set({ C::Viewports, C::Documents, C::Selection,
+		C::DocumentSet, C::ActiveDocument, C::Files, C::Graph, C::Project, C::Findings });
 
 constexpr EditorQueryRow kRows[] = {
 	Query(K::State, "state", answer_state, kStateParams, kEveryConcern,
@@ -847,6 +950,21 @@ constexpr EditorQueryRow kRows[] = {
 			"to the end of the longer list).")
 			.pages("widgets")
 			.row,
+	Query(K::Viewport, "viewport", answer_viewport, kViewportParams, kViewportConcerns,
+			"A document's viewport (the Preview's kind that shows it, else its Main view), followed "
+			"first so it answers the document as it is now, by op. state: the envelope (kind, path, "
+			"as_saved, status and reason, message, detail, revision, shown_revision, current, "
+			"builds, units, device {attached, width, height, canvas_sized}, options, camera, clock "
+			"{playing, rate, time_ms, ticks}, body, a page of its items and by the same page its "
+			"notes, note_count). items or notes: a page of one (a menu's widgets, each with its rect "
+			"and the device_rect the Shell's device placed it at; a model's markers, each with its "
+			"record, position and picture pixel; a menu's compiler notes), while the picture is "
+			"current. hit: the item under the point x, y (kind, index, id, name, current). render: "
+			"one row of the document as its kind renders it apart (a menu's screen as the render "
+			"check compiled it, the menu_render query's answer). Its changes are set_viewport's and "
+			"edit_in_viewport's.")
+			.pages("items, notes or render's widgets")
+			.row,
 	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
 			concern_set({ C::Dialogs, C::Preferences, C::Files }),
 			"The import dialog's preview: open, with_dependencies, a page of its plan's rows in "
@@ -962,6 +1080,18 @@ static_assert(rows_named(),
 		"each query has a token of its own, a handler, a doc and a concern it reads, its params a "
 		"name of their own and a doc, and a paged query its limit and its offset or cursor");
 
+// The viewport query's ops: each a token of its own; a page, a point or a row what it takes.
+constexpr bool viewport_reads_named() {
+	for (size_t i = 0; i < std::size(kViewportReads); ++i) {
+		const ViewportRead &read = kViewportReads[i];
+		if (!read.op[0] || (read.point && read.page)) return false;
+		for (size_t j = i + 1; j < std::size(kViewportReads); ++j)
+			if (same_text(read.op, kViewportReads[j].op)) return false;
+	}
+	return true;
+}
+static_assert(viewport_reads_named(), "each viewport op has a token of its own, and a point is no page");
+
 // A param a query takes, by name, or null.
 const QueryParam *param_of(const EditorQueryRow &row, const char *name) {
 	for (size_t i = 0; i < row.param_count; ++i)
@@ -1012,6 +1142,9 @@ bool check_args(const EditorQueryRow &row, const JsonValue &args, std::string &e
 			case J::Integer:
 				typed = whole(value);
 				break;
+			case J::Number:
+				typed = value.is_number() && std::isfinite(value.number);
+				break;
 			case J::Boolean:
 				typed = value.is_bool();
 				break;
@@ -1049,6 +1182,8 @@ JsonValue default_to_json(const QueryParam &param) {
 	switch (param.type) {
 		case J::Integer:
 			return json_number(double(std::strtoll(text.c_str(), nullptr, 10)));
+		case J::Number:
+			return json_number(std::strtod(text.c_str(), nullptr));
 		case J::Boolean:
 			return JsonValue::make_bool(text == "true");
 		default:
@@ -1259,6 +1394,13 @@ int64_t QueryArgs::integer(const char *name) const {
 	return param && param->default_value ? std::strtoll(param->default_value, nullptr, 10) : 0;
 }
 
+double QueryArgs::number(const char *name) const {
+	if (const JsonValue *member = value(name); member && member->is_number())
+		return member->number;
+	const QueryParam *param = param_of(row_, name);
+	return param && param->default_value ? std::strtod(param->default_value, nullptr) : 0.0;
+}
+
 bool QueryArgs::boolean(const char *name) const {
 	if (const JsonValue *member = value(name); member && member->is_bool())
 		return member->boolean;
@@ -1296,6 +1438,8 @@ const char *query_json_token(QueryJson type) {
 			return "string";
 		case QueryJson::Integer:
 			return "integer";
+		case QueryJson::Number:
+			return "number";
 		case QueryJson::Boolean:
 			return "boolean";
 		case QueryJson::Strings:

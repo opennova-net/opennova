@@ -178,10 +178,17 @@ public:
 	void forget_recent(const std::string &root);
 	// Output's Clear: the output lines emptied.
 	void clear_output();
-	// SetViewport: the viewport over `path` ("" the Preview's of the kind the change names) changed
-	// as `change` (its JSON text) says (Viewports::set); refused, nothing changed, with why
-	// (viewport.refused).
+	// SetViewport: the viewport over the document `path` names ("" the active one; by its path or
+	// its logical name, as every request names one) changed as `change` (its JSON text) says
+	// (Viewports::set); refused, nothing changed, with why (viewport.refused).
 	void set_viewport(const std::string &path, const std::string &change);
+	// EditInViewport (S13 V7): the request's drag or command planned by the viewport over the
+	// document its path names (Viewports::resolve: followed first, so it plans over the document as
+	// it is now), then each request the plan made served in order through its own row (an
+	// EditRecord, its gesture's EndEdit, a SetViewport); a drag's gesture in the outcome. Refused,
+	// nothing changed, with why (viewport.refused): neither or both of a drag and a command, no
+	// viewport there, a plan the viewport refuses.
+	void edit_in_viewport(const EditorRequest &request);
 	// Quit: the running operation cancelled first (one that cannot be keeps the editor open,
 	// refused), then the view's quit_requested set, which the shell acts on.
 	void quit();
@@ -207,6 +214,10 @@ public:
 	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, bool then_play);
 
 private:
+	// The path of the document a viewport request names (its path or logical name; "" the active
+	// one), the name as it came when none is open there.
+	std::string viewport_document(const std::string &path);
+
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;
 	Parts parts_;

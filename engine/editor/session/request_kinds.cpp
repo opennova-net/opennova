@@ -161,6 +161,9 @@ void serve_clear_output(SessionCore &core, const EditorRequest &) {
 void serve_set_viewport(SessionCore &core, const EditorRequest &request) {
 	core.set_viewport(request.path, request.viewport);
 }
+void serve_edit_in_viewport(SessionCore &core, const EditorRequest &request) {
+	core.edit_in_viewport(request);
+}
 void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
 }
@@ -576,12 +579,30 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	// A viewport's state is no file and no document: it runs beside any operation.
 	Request(K::SetViewport, "set_viewport", serve_set_viewport,
-			"The viewport over the document at path (left out, the Preview's of the kind viewport "
-			"names) changed as viewport says: the size its device draws at where no canvas sizes the "
-			"picture, the preview clock, the kind's options and camera; refused, nothing changed, "
-			"naming a member it does not take, a value out of range, a document not open, a kind "
-			"that does not show it or a device a canvas sizes (viewport.refused).")
+			"The viewport over the document at path (left out, the active one; of the kind viewport "
+			"names, else the Preview's kind that shows the document, else its Main view) changed as "
+			"viewport says: the size its device draws at where no canvas sizes the picture, the "
+			"preview clock, the kind's options and camera; refused, nothing changed, naming a member "
+			"it does not take, a value out of range, a document not open, a kind that does not show "
+			"it or a device a canvas sizes (viewport.refused).")
 			.takes(request_params({ F::Viewport }, { F::Path }))
+			.names_active()
+			.row,
+	// What a viewport's canvas would raise, planned by the viewport (S13 V7): its edits wait for an
+	// operation that holds the documents, as an edit_record's do.
+	Request(K::EditInViewport, "edit_in_viewport", serve_edit_in_viewport,
+			"A drag or a command in the viewport over the document at path (left out, the active "
+			"one; the Preview's kind that shows it, else its Main view), planned as its canvas plans "
+			"it and served: drag, one batch of the edits under one gesture over every selected "
+			"record the drag moves (the drags of one gesture one undo step, which end ends; the "
+			"outcome's gesture names it); command, one request (a menu's arrange of windows, a "
+			"model's frame of its camera). Refused, nothing changed, naming a document not open, a "
+			"viewport that does not show it as it is now, a record or a handle it does not show, a "
+			"command it has not, or a drag that writes nothing the session takes (viewport.refused); "
+			"a planned edit the session refuses is not done.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command }))
+			.holds(kNone, kDocuments)
+			.names_active()
 			.row,
 	Request(K::Quit, "quit", serve_quit,
 			"The editor quits once the prompt has asked about unsaved edits; the running operation "

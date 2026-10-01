@@ -698,14 +698,28 @@ bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &dra
 	}
 	for (const ModelOverlay &overlay : marks) {
 		if (overlay.kind != kind || overlay.index != index) continue;
+		// By (dx, dy) pixels: to the pixel the picture shows the handle on now, moved as far.
+		float x = drag.x, y = drag.y;
+		if (drag.by) {
+			const PreviewVec3 through = handle == ModelHandle::Axis ? axis_tip(overlay) : overlay.at;
+			float px = 0.0f, py = 0.0f;
+			if (!camera_.project(through, context.width, context.height, px, py)) {
+				error = "The marker's handle is not on the picture: drag it to a point of the picture (to).";
+				return false;
+			}
+			x = px + drag.x;
+			y = py + drag.y;
+		}
 		std::vector<Edit> edits;
-		if (!handle_edits(*document, overlay, handle, drag.x, drag.y, context.width, context.height, drag.snap,
-					next_edit_gesture(), context.input.clock, edits, &others)) {
+		if (!handle_edits(*document, overlay, handle, x, y, context.width, context.height, drag.snap,
+					drag.gesture ? drag.gesture : next_edit_gesture(), context.input.clock, edits, &others)) {
 			error = "The marker has no such handle (a pivot is geometry; an omni light has no axis).";
 			return false;
 		}
-		out.request(request::edit_record(document->path(), std::move(edits)));
-		out.request(request::end_edit(document->path()));
+		// The batch, then the gesture's end where there is one to end (as the menu's drag).
+		const bool planned = !edits.empty();
+		if (planned) out.request(request::edit_record(document->path(), std::move(edits)));
+		if (drag.end && (planned || drag.gesture)) out.request(request::end_edit(document->path()));
 		return true;
 	}
 	error = "Record " + std::to_string(drag.id) + " is no marker the viewport shows.";

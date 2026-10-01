@@ -231,13 +231,27 @@ inline EditorRequest end_edit(std::string path = std::string()) {
 	request.path = std::move(path);
 	return request;
 }
-// The viewport over the document at `path` ("" the Preview's of the kind the change names) changed
-// as `viewport` says: the JSON text of an object {kind?, device?, clock?, and the kind's options and
-// camera} (S13 V5, preview/viewports.h).
+// The viewport over the document at `path` ("" the active one) changed as `viewport` says: the JSON
+// text of an object {kind?, device?, clock?, and the kind's options and camera} (S13 V5,
+// preview/viewports.h).
 inline EditorRequest set_viewport(std::string path, std::string viewport) {
 	EditorRequest request = of(EditorRequestKind::SetViewport);
 	request.path = std::move(path);
 	request.viewport = std::move(viewport);
+	return request;
+}
+// A drag, or a command, in the viewport over the document at `path` ("" the active one), planned by
+// the viewport as its canvas would plan it (S13 V7).
+inline EditorRequest edit_in_viewport(std::string path, ViewportDrag drag) {
+	EditorRequest request = of(EditorRequestKind::EditInViewport);
+	request.path = std::move(path);
+	request.drag = std::move(drag);
+	return request;
+}
+inline EditorRequest edit_in_viewport(std::string path, ViewportCommand command) {
+	EditorRequest request = of(EditorRequestKind::EditInViewport);
+	request.path = std::move(path);
+	request.command = std::move(command);
 	return request;
 }
 inline EditorRequest copy(std::string path = std::string()) {

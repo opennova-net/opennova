@@ -4,8 +4,8 @@ extends RefCounted
 ## The editor MCP's handlers over the editor's wire seam (EditorApp.request_json and query_json,
 ## ADR 0046 S13 A5): a request and a query cross as JSON text the portable session marshals, so
 ## this module forwards and waits; it never reaches into the session, and it pages nothing (the
-## queries page their lists). The two preview tools stay device tools until S13 V7, each answering
-## with its viewport's envelope (S13 V5, editor/preview/viewport_json.h).
+## queries page their lists). editor_viewport (S13 V7) is the same two seams under one tool: its
+## reads the viewport query, its writes set_viewport and edit_in_viewport.
 
 ## How long editor_play op=stop waits for the game to leave.
 const STOP_WAIT_MS := 10_000
@@ -31,8 +31,7 @@ func _handlers() -> Dictionary:
 		"editor_query": _tool_editor_query,
 		"editor_build": _tool_editor_build,
 		"editor_play": _tool_editor_play,
-		"editor_menu_preview": _tool_editor_menu_preview,
-		"editor_model_preview": _tool_editor_model_preview,
+		"editor_viewport": _tool_editor_viewport,
 		"editor_screenshot": _tool_editor_screenshot,
 		"editor_logs": _tool_editor_logs,
 	}
@@ -158,185 +157,55 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 			return McpToolResult.error("Unknown editor_play op '%s'." % op)
 
 
-func _tool_editor_menu_preview(args: Dictionary, _ctx: McpToolContext) -> Variant:
-	var op := String(args.get("op", ""))
-	match op:
-		"state":
-			return _menu_preview_state()
-		"rects", "notes":
-			var offset: Variant = _integer_number(args.get("offset", 0))
-			var limit: Variant = _integer_number(args.get("limit", EditorMcpCatalog.PAGE_DEFAULT))
-			if offset == null or int(offset) < 0 or limit == null or int(limit) < 1 or int(limit) > EditorMcpCatalog.PAGE_MAX:
-				return McpToolResult.error("editor_menu_preview op=%s takes offset >= 0 and limit from 1 to %d." % [op, EditorMcpCatalog.PAGE_MAX])
-			var preview := _menu_preview()
-			var key := "items" if op == "rects" else "notes"
-			var items: Array = preview.get(key, [])
-			var end := int(offset) + int(limit)
-			var next: Variant = null
-			if end < items.size():
-				next = end
-			return {
-				"status": preview.get("status", ""),
-				"reason": preview.get("reason", ""),
-				"current": preview.get("current", false),
-				"count": items.size(),
-				"offset": int(offset),
-				"next_offset": next,
-				key: items.slice(int(offset), end),
-			}
-		"hit":
-			var x: Variant = _finite_number(args.get("x"))
-			var y: Variant = _finite_number(args.get("y"))
-			if x == null or y == null:
-				return McpToolResult.error("editor_menu_preview op=hit requires numbers x and y (800x600 design units).")
-			var hit: Variant = _parsed(String(app.call("menu_preview_hit_json", float(x), float(y))))
-			if not (hit is Dictionary):
-				return McpToolResult.error("The editor returned an invalid answer.")
-			return hit
-		"options":
-			var options := {}
-			if args.has("force_id"):
-				var number: Variant = _integer_number(args["force_id"])
-				if number == null:
-					return McpToolResult.error("editor_menu_preview option force_id must be an integer.")
-				options["force_id"] = int(number)
-			for key in ["show_hidden", "checked", "popup_open", "focus"]:
-				if args.has(key):
-					options[key] = bool(args[key])
-			if args.has("force_state"):
-				options["force_state"] = String(args["force_state"])
-			var shared: Variant = _viewport_members(args, "editor_menu_preview", options)
-			if shared != null:
-				return shared
-			if not bool(app.call("set_menu_preview_options", options)):
-				return McpToolResult.error("editor_menu_preview op=options: %s" % String(app.call("get_preview_error")))
-			return _menu_preview_state()
-		"drag", "nudge":
-			var id: Variant = _integer_number(args.get("id"))
-			var dx: Variant = _integer_number(args.get("dx"))
-			var dy: Variant = _integer_number(args.get("dy"))
-			if id == null or int(id) < 1 or dx == null or dy == null:
-				return McpToolResult.error("editor_menu_preview op=%s requires id (a window of the previewed screen) " % op
-						+ "and whole numbers dx and dy (design units).")
-			var handle := "move"
-			var snap := false
-			if op == "drag":
-				handle = String(args.get("handle", ""))
-				if not EditorMcpCatalog.MENU_PREVIEW_HANDLES.has(handle):
-					return McpToolResult.error("editor_menu_preview op=drag requires handle: %s." % ", ".join(PackedStringArray(EditorMcpCatalog.MENU_PREVIEW_HANDLES)))
-				snap = bool(args.get("snap", true))
-			if not bool(app.call("menu_preview_drag", int(id), handle, int(dx), int(dy), snap)):
-				return McpToolResult.error("editor_menu_preview op=%s: the preview is not showing that window " % op
-						+ "(select its screen and let the preview catch up), or the drag leaves it no area.")
-			return _menu_preview_state()
-		"arrange":
-			var ids: Variant = args.get("ids")
-			var arrange := String(args.get("arrange", ""))
-			if not (ids is Array) or not EditorMcpCatalog.ARRANGE_OPS.has(arrange):
-				return McpToolResult.error("editor_menu_preview op=arrange requires ids (windows of the previewed screen, "
-						+ "the first the one the others align to) and arrange: %s."
-						% ", ".join(PackedStringArray(EditorMcpCatalog.ARRANGE_OPS)))
-			var windows := PackedInt64Array()
-			for item: Variant in ids as Array:
-				var window: Variant = _integer_number(item)
-				if window == null or int(window) < 1:
-					return McpToolResult.error("editor_menu_preview op=arrange: every id is a window's record id.")
-				windows.append(int(window))
-			if not bool(app.call("menu_preview_arrange", windows, arrange)):
-				return McpToolResult.error("editor_menu_preview op=arrange: too few windows (two to align, three to "
-						+ "distribute, one to reorder), or a window the preview is not showing (select its screen "
-						+ "and let the preview catch up).")
-			return _menu_preview_state()
-		_:
-			return McpToolResult.error("Unknown editor_menu_preview op '%s'." % op)
-
-
-func _menu_preview() -> Dictionary:
-	var preview: Variant = _parsed(String(app.call("get_menu_preview_json")))
-	return preview if preview is Dictionary else {}
-
-
-## A preview tool's `device` {width, height} and `clock` {playing, rate, time_ms, ticks}, objects
-## passed as the SetViewport's own members (into `into`); an error naming the tool when one is not
-## an object, else null.
-func _viewport_members(args: Dictionary, tool: String, into: Dictionary) -> Variant:
-	for key in ["device", "clock"]:
-		if args.has(key):
-			if not (args[key] is Dictionary):
-				return McpToolResult.error("%s %s is an object (device {width, height}; clock {playing, rate, "
-						% [tool, key] + "time_ms, ticks}).")
-			into[key] = args[key]
-	return null
-
-
-## The menu's viewport envelope without its items (the widgets) and notes, which op=rects and
-## op=notes page: `count` the widgets', `note_count` the notes'.
-func _menu_preview_state() -> Dictionary:
-	var preview := _menu_preview()
-	preview.erase("items")
-	preview.erase("notes")
-	preview.erase("offset")
-	preview.erase("next_offset")
-	return preview
-
-
-func _tool_editor_model_preview(args: Dictionary, _ctx: McpToolContext) -> Variant:
-	var op := String(args.get("op", ""))
-	match op:
-		"state":
-			return _model_preview()
-		"options":
-			var options := {}
-			for key in ["lod", "ctrl", "overlays", "rig_model"]:
-				if args.has(key):
-					options[key] = args[key]
-			var shared: Variant = _viewport_members(args, "editor_model_preview", options)
-			if shared != null:
-				return shared
-			if not bool(app.call("set_model_preview_options", options)):
-				return McpToolResult.error("editor_model_preview op=options: %s" % String(app.call("get_preview_error")))
-			return _model_preview()
-		"camera":
-			var camera := {}
-			for key in ["yaw", "pitch", "distance", "target", "frame"]:
-				if args.has(key):
-					camera[key] = args[key]
-			var shared: Variant = _viewport_members(args, "editor_model_preview", camera)
-			if shared != null:
-				return shared
-			if not bool(app.call("set_model_preview_camera", camera)):
-				return McpToolResult.error("editor_model_preview op=camera: %s" % String(app.call("get_preview_error")))
-			return _model_preview()
-		"hit":
-			var x: Variant = args.get("x")
-			var y: Variant = args.get("y")
-			if not (x is float or x is int) or not (y is float or y is int):
-				return McpToolResult.error("editor_model_preview op=hit requires numbers x and y (device pixels).")
-			var hit: Variant = _parsed(String(app.call("model_preview_hit_json", float(x), float(y))))
-			return hit if hit is Dictionary else {}
-		"drag":
-			var id: Variant = _integer_number(args.get("id"))
-			var at_x: Variant = args.get("x")
-			var at_y: Variant = args.get("y")
-			var snap: Variant = args.get("snap", 0.0)
-			var handle := String(args.get("handle", "place"))
-			if id == null or not (at_x is float or at_x is int) or not (at_y is float or at_y is int) \
-					or not (snap is float or snap is int) or not EditorMcpCatalog.MODEL_PREVIEW_HANDLES.has(handle):
-				return McpToolResult.error("editor_model_preview op=drag requires id (a user point or light record), "
-						+ "numbers x and y (device pixels), handle place or axis, snap >= 0.")
-			if not bool(app.call("model_preview_drag", int(id), handle, float(at_x), float(at_y), float(snap))):
-				return McpToolResult.error("editor_model_preview op=drag: the preview is not showing that record at "
-						+ "the model's current revision, or it has no such handle (a pivot is geometry; an omni "
-						+ "light has no axis).")
-			return _model_preview()
-		_:
-			return McpToolResult.error("Unknown editor_model_preview op '%s'." % op)
-
-
-func _model_preview() -> Dictionary:
-	var preview: Variant = _parsed(String(app.call("get_model_preview_json")))
-	return preview if preview is Dictionary else {}
-
+## editor_viewport (S13 V7): a document's viewport, `op` dispatched to the session's two seams. A read
+## is the viewport query, its params flat beside op as the query takes them; a write is a request
+## (EditorMcpCatalog.VIEWPORT_WRITES: options, camera and seek a set_viewport of the viewport's state,
+## drag and command an edit_in_viewport), answered as editor_request answers it (a request that did
+## not read a tool error, one refused ok with its outcome not done) with the viewport's state after
+## it as `viewport`.
+func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:
+	var params := args.duplicate()
+	params.erase("_session_id")
+	var op := String(params.get("op", ""))
+	if EditorMcpCatalog.VIEWPORT_READS.has(op):
+		return _answer("viewport", params)
+	if not EditorMcpCatalog.VIEWPORT_WRITES.has(op):
+		var ops: Array[String] = EditorMcpCatalog.VIEWPORT_READS.duplicate()
+		for name: String in EditorMcpCatalog.VIEWPORT_WRITES:
+			ops.append(name)
+		return McpToolResult.error("editor_viewport has no op '%s' (%s)." % [op, ", ".join(PackedStringArray(ops))])
+	var write: Dictionary = EditorMcpCatalog.VIEWPORT_WRITES[op]
+	var takes: Array = write["takes"]
+	var request := {"kind": String(write["kind"])}
+	var members := {}
+	for key: String in params:
+		if key == "op":
+			continue
+		if key == "path":
+			request["path"] = params[key]
+		elif takes.has(key):
+			members[key] = params[key]
+		else:
+			return McpToolResult.error("editor_viewport op=%s takes no \"%s\" (it takes path, %s)."
+					% [op, key, ", ".join(PackedStringArray(takes))])
+	if not members.has(write["needs"]):
+		return McpToolResult.error("editor_viewport op=%s needs \"%s\"." % [op, String(write["needs"])])
+	# A set_viewport carries the change as its viewport object; an edit_in_viewport its drag or command.
+	if String(write["kind"]) == "set_viewport":
+		request["viewport"] = members
+	else:
+		request.merge(members)
+	# Unsorted: a change's members as written.
+	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request, "", false))))
+	if not (answer is Dictionary):
+		return McpToolResult.error("The editor returned an invalid answer.")
+	if not bool(answer.get("ok", false)):
+		return McpToolResult.error(String(answer.get("error", "The request was refused.")))
+	var state := {"op": "state"}
+	if request.has("path"):
+		state["path"] = request["path"]
+	answer["viewport"] = _query("viewport", state)
+	return answer
 
 func _tool_editor_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:
 	var max_dim: Variant = _integer_number(args.get("max_dim", McpScreenshot.DEFAULT_MAX_DIM))

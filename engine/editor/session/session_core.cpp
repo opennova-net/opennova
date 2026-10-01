@@ -10,6 +10,8 @@
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_files.h>
+#include <editor/preview/canvas_gesture.h>
+#include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
@@ -22,6 +24,7 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
+#include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
 
 namespace fs = std::filesystem;
@@ -564,12 +567,50 @@ void SessionCore::clear_output() {
 	touch(ViewConcern::Output);
 }
 
+std::string SessionCore::viewport_document(const std::string &path) {
+	const DocumentBase *document = documents().document_for(path);
+	return document ? document->path() : path;
+}
+
 void SessionCore::set_viewport(const std::string &path, const std::string &change) {
 	io::JsonValue json;
 	std::string error;
+	const std::string at = viewport_document(path);
 	if (!io::json_parse(change, json, error)) error = "The viewport's change is not JSON: " + error;
-	else if (viewports_->set(view_, path, json, error)) touch(ViewConcern::Viewports);
-	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, path));
+	else if (viewports_->set(view_, at, json, error)) touch(ViewConcern::Viewports);
+	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+}
+
+void SessionCore::edit_in_viewport(const EditorRequest &request) {
+	// What the viewport plans, as its canvas would raise it.
+	struct Planned final : CanvasRequests {
+		std::vector<EditorRequest> requests;
+		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
+	} planned;
+	const bool drag = request.drag != ViewportDrag(), command = request.command != ViewportCommand();
+	const std::string at = viewport_document(request.path);
+	std::string error;
+	if (drag == command) {
+		error = "edit_in_viewport names a drag or a command, one of them.";
+	} else if (const ViewportModel *viewport = viewports_->resolve(view_, at, error)) {
+		const ViewportContext context = viewport_context(view_, *viewport, drag ? request.drag.snap : 0.0f);
+		if (drag) viewport->drag(context, request.drag, planned, error);
+		else viewport->command(context, request.command.name, request.command.ids, planned, error);
+	}
+	if (!error.empty()) {
+		report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, at));
+		return;
+	}
+	// The gesture the drag's batch carries (the one it went on with, or the new one its planner took),
+	// which the gesture's next drag passes back.
+	if (drag) {
+		outcome_.gesture = request.drag.gesture;
+		for (const EditorRequest &each : planned.requests)
+			if (each.kind == EditorRequestKind::EditRecord && !each.edits.empty()) outcome_.gesture = each.edits.front().gesture;
+	}
+	// Served in order, as the parts serve what they compose (never through handle()): each meets its
+	// own row's gate, and its findings are this request's outcome.
+	for (const EditorRequest &each : planned.requests) serve_request(*this, each);
 }
 
 // The running operation goes first (a build's staging directory with it); one that cannot be

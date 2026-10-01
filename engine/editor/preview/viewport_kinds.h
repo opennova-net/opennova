@@ -58,6 +58,11 @@ ViewportKind preview_kind_of(DocumentTypeId type);
 // The Main-role kind that shows a document of `type` (its Document tab's main view); kCount for
 // none (no kind plays the Main role yet).
 ViewportKind main_viewport_kind(DocumentTypeId type);
+// The kind a document of `type` is read and changed through when none is named (S13 V7: the
+// viewport query, a SetViewport, an edit in a viewport): the Preview-role kind that shows it (the
+// one the Preview window shows while the document is active), else its Main-role kind; kCount for a
+// type no kind shows (a stylesheet feeds the menu's, but shows in none).
+ViewportKind default_viewport_kind(DocumentTypeId type);
 
 // The Preview-role kind the Preview window shows over `documents`' targets: the active document's
 // (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed; kCount

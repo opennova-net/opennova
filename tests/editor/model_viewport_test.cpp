@@ -87,7 +87,7 @@ struct Rig {
 	}
 	JsonValue json() { return viewport_to_json(view(), viewport(), ViewportKind::Model, JsonPage()); }
 	const PreviewClock &clock() { return session.viewports().clock(); }
-	ViewportContext context(float snap = 0.0f) { return editor_test::viewport_context(session, *viewport(), snap); }
+	ViewportContext context(float snap = 0.0f) { return viewport_context(session.view(), *viewport(), snap); }
 	// A SetViewport of the followed model's viewport.
 	bool set(const std::string &change) {
 		session.handle(request::set_viewport(path(), change));

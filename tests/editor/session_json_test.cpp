@@ -736,6 +736,21 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.viewport = opennova::io::json_write(change);
 			break;
 		}
+		case F::Drag:
+			// Every member away from its default, each a value a float holds exactly.
+			out.drag.id = 9;
+			out.drag.handle = "bottom_right";
+			out.drag.by = false;
+			out.drag.x = 412.5f;
+			out.drag.y = 300.0f;
+			out.drag.snap = 0.25f;
+			out.drag.gesture = 7;
+			out.drag.end = false;
+			break;
+		case F::Command:
+			out.command.name = "align_left";
+			out.command.ids = {9, 11, 12};
+			break;
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;
 		case F::Replace: out.replace = true; break;

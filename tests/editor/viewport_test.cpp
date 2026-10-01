@@ -9,7 +9,9 @@
 // again. The envelope and its pages. A SetViewport, a drag and a command through a real session, the
 // refused answering false. One undo step per gesture through a real session: a menu drag of four
 // samples, a drag of three selected windows moving all three, a gesture its canvas ends by not
-// drawing, a model marker's drag (two selected markers moving as one).
+// drawing, a model marker's drag (two selected markers moving as one). S13 V7: a SetViewport with no
+// path the active document's; an edit in a viewport over the wire (edit_in_viewport), its drags of one
+// gesture one undo step and its command one request.
 
 #include <climits>
 #include <cmath>
@@ -33,6 +35,7 @@
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
+#include <editor/session/editor_queries.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -181,7 +184,7 @@ struct CanvasRig {
 		const ViewportModel *model = viewport();
 		if (!model) return;
 		if (!half) half = model->make_canvas();
-		ViewportContext context = editor_test::viewport_context(session, *model, snap);
+		ViewportContext context = viewport_context(session.view(), *model, snap);
 		context.width = in.width;
 		context.height = in.height;
 		half->follow(*model, context, out);
@@ -750,15 +753,22 @@ static int test_envelope() {
 	const JsonValue whole = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
 	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "revision",
 				 "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock", "body",
-				 "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
+				 "items", "notes", "count", "offset", "next_offset", "note_count" })
 		TEST_EXPECT(whole.get(key) != nullptr);
-	// Stamped with the view's clock at which what it reads last moved: a SetViewport moves it.
-	TEST_EXPECT(whole.get_number("view_revision", -1) == double(view.revisions.stamp_of(kViewportConcerns)) &&
-			whole.get_number("view_revision", 0) > 0.0);
+	// The viewport query stamps it (S13 V7) with the view's clock at which what its row reads last
+	// moved: a SetViewport moves it.
+	TEST_EXPECT(!whole.get("view_revision"));
+	const auto stamp_of = [&session]() {
+		std::string error;
+		JsonValue args = JsonValue::make_object();
+		args.set("op", JsonValue::make_string("state"));
+		return session.query("viewport", args, error).get_number("view_revision", -1);
+	};
+	const ConcernSet reads = editor_query_row(EditorQueryKind::Viewport).reads;
+	const double before = stamp_of();
+	TEST_EXPECT(before == double(view.revisions.stamp_of(reads)) && before > 0.0);
 	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": true}})"));
-	const JsonValue stamped = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
-	TEST_EXPECT(stamped.get_number("view_revision", 0) > whole.get_number("view_revision", 0) &&
-			stamped.get_number("view_revision", 0) == double(view.revisions.stamp(ViewConcern::Viewports)));
+	TEST_EXPECT(stamp_of() > before && stamp_of() == double(view.revisions.stamp(ViewConcern::Viewports)));
 	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": false}})"));
 	devices.sync(session);
 	TEST_EXPECT(whole.get_string("kind", "") == "menu" && whole.get_string("path", "") == path &&
@@ -828,10 +838,11 @@ static int test_envelope() {
 	return 0;
 }
 
-// A SetViewport over the wire (the session's JSON requests): read, served, done; refused whole
-// (a Problems row, viewport.refused, the request's outcome), the viewport as it was. A drag and a
-// command planned by the viewport (the MCP's) and served: one undo step each; a drag the session
-// refuses as it is served answers false, the menu as it was.
+// A SetViewport over the wire (the session's JSON requests): read, served, done; with no path the
+// active document's (S13 V7), refused when it shows in no viewport (a stylesheet), a document by its
+// logical name; refused whole (a Problems row, viewport.refused, the request's outcome), the viewport
+// as it was. A drag and a command planned by the viewport (the MCP's) and served: one undo step
+// each; a drag the session refuses as it is served answers false, the menu as it was.
 static int test_requests() {
 	editor_test::TempProjectDir dir("opennova_editor_viewport_requests");
 	NoProcess platform;
@@ -858,13 +869,13 @@ static int test_requests() {
 			R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"kind": "menu", "options": {"show_hidden": true}}})");
 	TEST_EXPECT(answer.get_bool("ok", false) && answer.get_bool("served", false) &&
 			answer.get("outcome")->get_bool("done", false) && shown->options().show_hidden);
-	// No path: the kind's Preview target.
-	answer = wire(R"({"kind": "set_viewport", "viewport": {"kind": "menu", "options": {"show_hidden": false}}})");
+	// No path: the active document's (S13 V7, A5's pathless rule), its kind the one it shows in.
+	answer = wire(R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": false}}})");
 	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && !shown->options().show_hidden);
 	for (const char *refused : {
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"options": {"bogus": 1}}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"kind": "model", "options": {"lod": 0}}})",
-				 R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": true}}})",
+				 R"({"kind": "set_viewport", "viewport": {"kind": "model", "options": {"lod": 0}}})",
 				 R"({"kind": "set_viewport", "path": "nosuch.mnu", "viewport": {"kind": "menu"}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"device": {"width": 0}}})",
 				 R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": {"options": {"show_hidden": true}, "zoom": 2}})" }) {
@@ -879,6 +890,18 @@ static int test_requests() {
 	// A change that is no object is not read at all.
 	answer = wire(R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": 3})");
 	TEST_EXPECT(!answer.get_bool("ok", true));
+	// A stylesheet active (it feeds the menu's viewport, and shows in none): a pathless change refused,
+	// naming why; the menu named by its logical name, changed.
+	session.handle(request::open_document("menu_style.mns"));
+	answer = wire(R"({"kind": "set_viewport", "viewport": {"options": {"show_hidden": true}}})");
+	TEST_EXPECT(!answer.get("outcome")->get_bool("done", true) &&
+			answer.get("outcome")->get("findings")->array[0].get_string("message", "").find("shows in no viewport") !=
+					std::string::npos);
+	answer = wire(R"({"kind": "set_viewport", "path": "MAIN.MNU", "viewport": {"options": {"show_hidden": true}}})");
+	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && shown->options().show_hidden);
+	answer = wire(R"({"kind": "set_viewport", "path": "MAIN.MNU", "viewport": {"options": {"show_hidden": false}}})");
+	TEST_EXPECT(answer.get("outcome")->get_bool("done", false) && !shown->options().show_hidden);
+	session.handle(request::open_document("main.mnu"));
 	// A viewport the change is for is made only once the change applies: a refused one makes none.
 	{
 		Viewports fresh;
@@ -901,7 +924,7 @@ static int test_requests() {
 	drag.snap = 1;
 	editor_test::Gathered planned;
 	std::string error;
-	TEST_EXPECT(shown->drag(editor_test::viewport_context(session, *shown), drag, planned, error));
+	TEST_EXPECT(shown->drag(viewport_context(session.view(), *shown), drag, planned, error));
 	TEST_EXPECT(editor_test::serve(session, planned.requests) && menu->dirty());
 	session.handle(request::undo(menu->path()));
 	TEST_EXPECT(!menu->dirty() && !menu->can_undo());
@@ -909,7 +932,7 @@ static int test_requests() {
 	// nothing written.
 	devices.sync(session);
 	planned.requests.clear();
-	TEST_EXPECT(shown->drag(editor_test::viewport_context(session, *shown), drag, planned, error));
+	TEST_EXPECT(shown->drag(viewport_context(session.view(), *shown), drag, planned, error));
 	const uint64_t revision = menu->revision();
 	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
 	TEST_EXPECT(!editor_test::serve(session, planned.requests));
@@ -919,7 +942,7 @@ static int test_requests() {
 	// The command (an arrange): EXIT's left edge to TITLE's, one batch, one undo step.
 	devices.sync(session);
 	editor_test::Gathered arranged;
-	TEST_EXPECT(shown->command(editor_test::viewport_context(session, *shown), "align_left", { title.child, exit.child },
+	TEST_EXPECT(shown->command(viewport_context(session.view(), *shown), "align_left", { title.child, exit.child },
 			arranged, error));
 	TEST_EXPECT(arranged.requests.size() == 1 && editor_test::serve(session, arranged.requests));
 	TEST_EXPECT(field_of(*menu, exit, "position.left") == field_of(*menu, title, "position.left") || menu->dirty());
@@ -1071,7 +1094,7 @@ static int test_gestures() {
 		drag.y = y - 12.0f;
 		editor_test::Gathered planned;
 		std::string error;
-		TEST_EXPECT(model->drag(editor_test::viewport_context(session, *model), drag, planned, error));
+		TEST_EXPECT(model->drag(viewport_context(session.view(), *model), drag, planned, error));
 		TEST_EXPECT(editor_test::serve(session, planned.requests));
 		TEST_EXPECT(place(point) != was && (selected ? place(second) != second_was : place(second) == second_was));
 		if (selected) {
@@ -1086,6 +1109,208 @@ static int test_gestures() {
 	return 0;
 }
 
+// An edit in a viewport over the wire (S13 V7: edit_in_viewport, the editor MCP's drag and command):
+// a drag the reader refuses is not read (ok false: by and to both, neither, a member a drag does not
+// take, a command with no name), and nothing is asked of the session; one read and refused is not
+// done, viewport.refused naming why (neither a drag nor a command, both, an unknown handle, a record
+// the viewport does not show, a command it has not), nothing written. A drag of four samples under
+// one gesture (the first's answer names it, the last ends it) is one undo step; a drag of one of three
+// selected windows moves the three in one batch; a drag to a point puts the handle there; an operation
+// holding the documents refuses it at the gate. A command over three windows is one request, one undo
+// step. A model's marker dragged by pixels lands where a drag to that pixel puts it; its frame command
+// moves the camera and makes no undo step.
+static int test_edits_in_viewport() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_edits");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Edits"));
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("layout.mnu"));
+	Document *menu = session.document_for("layout.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const NodeAddress box = named(*menu, "BOX"), other = named(*menu, "OTHER"), tiny = named(*menu, "TINY");
+	TEST_EXPECT(box.child && other.child && tiny.child);
+	const std::string id_box = std::to_string(box.child), id_other = std::to_string(other.child),
+			id_tiny = std::to_string(tiny.child);
+	const auto wire = [&session](const std::string &text) {
+		const JsonValue answer = session.handle_json(parse(text.c_str()));
+		session.run_operations();
+		return answer;
+	};
+	const auto done = [](const JsonValue &answer) {
+		const JsonValue *outcome = answer.get("outcome");
+		return answer.get_bool("ok", false) && outcome && outcome->get_bool("done", false);
+	};
+	// A read request refused as it was served: viewport.refused, its message saying `says`.
+	const auto refused = [](const JsonValue &answer, const char *says) {
+		const JsonValue *outcome = answer.get("outcome");
+		const JsonValue *findings = outcome ? outcome->get("findings") : nullptr;
+		const bool ok = answer.get_bool("ok", false) && outcome && !outcome->get_bool("done", true) && findings &&
+				findings->array.size() == 1 && findings->array[0].get_string("code", "") == "viewport.refused" &&
+				findings->array[0].get_string("message", "").find(says) != std::string::npos;
+		if (!ok) std::printf("  refusal: %s\n", opennova::io::json_write(answer).c_str());
+		return ok;
+	};
+	const uint64_t untouched = menu->revision();
+
+	// Not read: nothing asked of the session.
+	for (const std::string &unread : {
+				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8, 0], "to": [1, 1]}})",
+				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move"}})",
+				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8, 0], "colour": 1}})",
+				 R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box + R"(, "handle": "move", "by": [8]}})",
+				 std::string(R"({"kind": "edit_in_viewport", "command": {"ids": [1]}})"),
+				 std::string(R"({"kind": "edit_in_viewport", "viewport": {}})") }) {
+		const JsonValue answer = wire(unread);
+		TEST_EXPECT(!answer.get_bool("ok", true) && !answer.get_string("error", "").empty());
+	}
+	TEST_EXPECT(menu->revision() == untouched && !menu->dirty());
+	// Read, and refused as it is served: viewport.refused, nothing written.
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport"})"), "one of them"));
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+							R"(, "handle": "move", "by": [1, 1]}, "command": {"name": "align_left"}})"),
+			"one of them"));
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+							R"(, "handle": "middle", "by": [1, 1]}})"),
+			"Unknown handle"));
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport", "drag": {"id": 999999, "handle": "move", "by": [1, 1]}})"),
+			"no window of the screen"));
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport", "command": {"name": "align_middle", "ids": [)" + id_box +
+							", " + id_other + "]}}"),
+			"Unknown menu command"));
+	TEST_EXPECT(refused(wire(R"({"kind": "edit_in_viewport", "path": "nosuch.mnu", "command": {"name": "align_left"}})"),
+			"No document is open at nosuch.mnu"));
+	TEST_EXPECT(menu->revision() == untouched && !menu->dirty());
+
+	// A drag of four samples, one gesture: the first names it, the last ends it; one undo step.
+	session.handle(request::select_record(menu->path(), box));
+	uint64_t gesture = 0;
+	for (int sample = 0; sample < 4; ++sample) {
+		std::string drag = R"({"id": )" + id_box + R"(, "handle": "move", "by": [10, 5])";
+		if (gesture) drag += R"(, "gesture": )" + std::to_string(gesture);
+		if (sample < 3) drag += R"(, "end": false)";
+		const JsonValue answer = wire(R"({"kind": "edit_in_viewport", "drag": )" + drag + "}");
+		TEST_EXPECT(done(answer));
+		const uint64_t named_gesture = uint64_t(answer.get("outcome")->get_number("gesture", 0));
+		TEST_EXPECT(named_gesture != 0 && (!gesture || named_gesture == gesture));
+		gesture = named_gesture;
+	}
+	TEST_EXPECT(edges(*menu, box) == (std::vector<int64_t>{ 140, 120, 340, 220 }) && menu->dirty());
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(edges(*menu, box) == (std::vector<int64_t>{ 100, 100, 300, 200 }) && !menu->dirty() &&
+			!menu->can_undo());
+
+	// Three windows selected, BOX dragged: the three move in one batch, one undo step.
+	session.handle(request::select_record(menu->path(), box, SelectMode::Replace, { box, other, tiny }));
+	TEST_EXPECT(done(wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+			R"(, "handle": "move", "by": [8, 8]}})")));
+	TEST_EXPECT(edges(*menu, box) == (std::vector<int64_t>{ 108, 108, 308, 208 }));
+	TEST_EXPECT(edges(*menu, other) == (std::vector<int64_t>{ 408, 308, 608, 408 }));
+	TEST_EXPECT(edges(*menu, tiny) == (std::vector<int64_t>{ 608, 112, 620, 124 }));
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(!menu->dirty() && !menu->can_undo());
+
+	// To a point: OTHER's bottom right corner to (650, 450), its left and top kept.
+	TEST_EXPECT(done(wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_other +
+			R"(, "handle": "bottom_right", "to": [650, 450]}})")));
+	TEST_EXPECT(edges(*menu, other) == (std::vector<int64_t>{ 400, 300, 650, 450 }));
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(!menu->dirty());
+
+	// An operation holding the documents: refused at the gate, nothing written.
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	const JsonValue held = session.handle_json(parse((R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_box +
+			R"(, "handle": "move", "by": [8, 8]}})").c_str()));
+	TEST_EXPECT(held.get_bool("ok", false) && !held.get("outcome")->get_bool("done", true) && !menu->dirty());
+	session.run_operations();
+
+	// A command over three windows: one request (the planner's one batch), one undo step.
+	{
+		const ViewportModel *viewport = session.viewports().find(menu->path(), ViewportKind::Menu);
+		TEST_EXPECT(viewport != nullptr);
+		if (!viewport) return 1;
+		editor_test::Gathered planned;
+		std::string error;
+		TEST_EXPECT(viewport->command(viewport_context(view, *viewport), "align_left",
+				{ box.child, other.child, tiny.child }, planned, error));
+		TEST_EXPECT(planned.requests.size() == 1 && planned.requests[0].kind == EditorRequestKind::EditRecord);
+	}
+	const uint64_t entries = session.handle_entries();
+	const JsonValue aligned = wire(R"({"kind": "edit_in_viewport", "command": {"name": "align_left", "ids": [)" + id_box +
+			", " + id_other + ", " + id_tiny + "]}}");
+	TEST_EXPECT(done(aligned) && !aligned.get("outcome")->get("gesture") && session.handle_entries() == entries + 1);
+	TEST_EXPECT(field_of(*menu, other, "position.left") == 100 && field_of(*menu, tiny, "position.left") == 100);
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(!menu->dirty() && !menu->can_undo() && field_of(*menu, other, "position.left") == 400);
+
+	// A model's marker by pixels, then to the pixel it reached: the same place; the frame command.
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	auto *document = dynamic_cast<ModelDocument *>(session.document_for("models/armory.3di"));
+	TEST_EXPECT(document && document->model_row() && !document->model_row()->ids.lists[3].empty());
+	if (!document || !document->model_row() || document->model_row()->ids.lists[3].empty()) return 1;
+	const ModelRow &row = *document->model_row();
+	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
+	const auto place = [&]() {
+		std::vector<double> at;
+		for (const char *field : { "position.x", "position.y", "position.z" }) {
+			Value value;
+			at.push_back(document->get(point, field, value) ? std::get<double>(value) : 0.0);
+		}
+		return at;
+	};
+	const auto pixel = [&](float &x, float &y) {
+		std::string error;
+		const ViewportModel *found = session.viewports().resolve(view, document->path(), error);
+		const auto *model = static_cast<const ModelViewport *>(found);
+		if (!model) return false;
+		for (const ModelOverlay &overlay : model->overlays(session.viewports().clock()))
+			if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0)
+				return model->camera().project(overlay.at, model->size().width, model->size().height, x, y);
+		return false;
+	};
+	const std::vector<double> was = place();
+	float x = 0.0f, y = 0.0f;
+	TEST_EXPECT(pixel(x, y));
+	const std::string id_point = std::to_string(point.child);
+	const JsonValue by = wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_point +
+			R"(, "handle": "place", "by": [24, -12]}})");
+	TEST_EXPECT(done(by) && by.get("outcome")->get_number("gesture", 0) != 0.0 && place() != was);
+	float moved_x = 0.0f, moved_y = 0.0f;
+	TEST_EXPECT(pixel(moved_x, moved_y) && std::fabs(moved_x - (x + 24.0f)) < 0.5f && std::fabs(moved_y - (y - 12.0f)) < 0.5f);
+	const std::vector<double> by_place = place();
+	session.handle(request::undo(document->path()));
+	TEST_EXPECT(place() == was && !document->dirty());
+	char to[96];
+	std::snprintf(to, sizeof(to), "[%.6f, %.6f]", double(x + 24.0f), double(y - 12.0f));
+	TEST_EXPECT(done(wire(R"({"kind": "edit_in_viewport", "drag": {"id": )" + id_point +
+			R"(, "handle": "place", "to": )" + to + "}}")));
+	const std::vector<double> to_place = place();
+	for (size_t i = 0; i < 3; ++i) TEST_EXPECT(std::fabs(to_place[i] - by_place[i]) < 1e-3);
+	session.handle(request::undo(document->path()));
+	TEST_EXPECT(place() == was && !document->dirty() && !document->can_undo());
+	// The frame command: the camera looks at the whole model again; no document step.
+	const auto *model = viewport_of<ModelViewport>(session, document->path(), ViewportKind::Model);
+	TEST_EXPECT(model != nullptr);
+	if (!model) return 1;
+	const float framed = model->camera().distance;
+	session.handle(request::set_viewport(document->path(), R"({"camera": {"distance": 5000}})"));
+	TEST_EXPECT(model->camera().distance == 5000.0f);
+	const uint64_t revision = document->revision();
+	TEST_EXPECT(done(wire(R"({"kind": "edit_in_viewport", "command": {"name": "frame"}})")));
+	TEST_EXPECT(std::fabs(model->camera().distance - framed) < 1e-3f && document->revision() == revision &&
+			!document->can_undo());
+	std::printf("test_edits_in_viewport passed\n");
+	return 0;
+}
+
 int main() {
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);
@@ -1096,6 +1321,7 @@ int main() {
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_requests() == 0);
 	TEST_EXPECT(test_gestures() == 0);
+	TEST_EXPECT(test_edits_in_viewport() == 0);
 	std::printf("editor_viewport: all tests passed\n");
 	return 0;
 }

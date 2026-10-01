@@ -126,6 +126,9 @@ public:
 	io::JsonValue body_json(const ViewportInput &input) const override;
 	io::JsonValue items_json(const ViewportInput &input) const override;
 	io::JsonValue notes_json(const ViewportInput &input) const override;
+	// A screen of the menu by its row, as the render check compiled it (menu_render_to_json).
+	io::JsonValue render_json(
+			const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const override;
 
 protected:
 	ViewportAction follow_(const ViewportInput &input, PreviewClock &clock) override;

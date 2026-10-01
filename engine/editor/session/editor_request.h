@@ -62,6 +62,7 @@ enum class EditorRequestKind {
 	PreviewInstallImport,
 	ClearOutput,
 	SetViewport,
+	EditInViewport,
 	Quit,
 	// The shell's: the portable session cannot serve these.
 	PickDirectory,
@@ -129,6 +130,47 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 	return a.row == b.row && a.parent == b.parent && a.position == b.position;
 }
 
+// A drag in a viewport (EditInViewport, ADR 0046 S13 V7; S9k1, S10p5), as the viewport's canvas
+// drags: the record `id`'s handle by its token (a menu window's "move", "left", ... "bottom_right";
+// a model marker's "place" or "axis"), by (x, y) from where the picture shows the handle now (`by`),
+// else to the point (x, y) of the picture, in the viewport's units (a menu's design units, a model's
+// picture pixels), snapped by `snap` (a menu's grid of 8 when it is not 0; a model's grid in metres,
+// 0 free). Its batch carries the gesture `gesture` (0: a new one, the session's), so the drags of
+// one gesture fold into one undo step, and `end` ends the gesture with it.
+struct ViewportDrag {
+	NodeId id = 0;
+	std::string handle;
+	bool by = true;
+	float x = 0.0f;
+	float y = 0.0f;
+	float snap = 0.0f;
+	uint64_t gesture = 0;
+	bool end = true;
+};
+
+inline bool operator==(const ViewportDrag &a, const ViewportDrag &b) {
+	return a.id == b.id && a.handle == b.handle && a.by == b.by && a.x == b.x && a.y == b.y &&
+			a.snap == b.snap && a.gesture == b.gesture && a.end == b.end;
+}
+inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
+	return !(a == b);
+}
+
+// A command in a viewport (EditInViewport, S13 V7): its name (a menu's arrange of windows,
+// "align_left" ... "send_to_back"; a model's "frame") over the records `ids` (the windows arranged,
+// the first the one the others follow; the marker a frame looks at, none the whole model).
+struct ViewportCommand {
+	std::string name;
+	std::vector<NodeId> ids;
+};
+
+inline bool operator==(const ViewportCommand &a, const ViewportCommand &b) {
+	return a.name == b.name && a.ids == b.ids;
+}
+inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
+	return !(a == b);
+}
+
 // One request: its kind and the fields that kind takes, each field meaning one thing
 // whatever the kind (request_fields.cpp has a row per field: its token on the wire, its
 // JSON type and what it means; the kind's row lists the fields it takes and those it must
@@ -174,6 +216,9 @@ struct EditorRequest {
 	// options?, camera?}, as preview/viewports.h's set takes it (text: this header pulls no JSON
 	// reader).
 	std::string viewport;
+	// A drag or a command in a viewport, one of them (EditInViewport, S13 V7).
+	ViewportDrag drag;
+	ViewportCommand command;
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
@@ -198,7 +243,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
-			a.viewport == b.viewport && a.purpose == b.purpose &&
+			a.viewport == b.viewport && a.drag == b.drag && a.command == b.command &&
+			a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
 			a.open_first == b.open_first && a.import_pass == b.import_pass;
@@ -227,6 +273,9 @@ struct ActionOutcome {
 	// (Document::last_made(): 0 for an edit that made nothing or whose record a later edit
 	// removed), which its labels name.
 	std::vector<NodeId> added, made;
+	// The gesture an EditInViewport's drag carried (S13 V7: the one it went on with, or the one the
+	// session handed it), which a later drag names to fold into the same undo step; 0 for none.
+	uint64_t gesture = 0;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

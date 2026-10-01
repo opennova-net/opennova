@@ -75,11 +75,28 @@ constexpr RequestField kFields[] = {
 			"runtime_executable?, play_in_install?}, each left out as it is." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
-			"(menu, model; left out where one kind shows the document), device {width, height} the "
-			"size its device draws at (1 to 8192), clock {playing, rate, time_ms, ticks} the preview "
-			"clock, options the kind's (a menu's show_hidden, force_id, force_state, checked, "
-			"popup_open, focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, "
-			"pitch, distance, target, frame}, each member optional." },
+			"(menu, model; left out, the kind the document shows in: the Preview's kind that shows "
+			"it, else its Main view), device {width, height} the size its device draws at (1 to "
+			"8192), clock {playing, rate, time_ms, ticks} the preview clock, options the kind's (a "
+			"menu's show_hidden, force_id, force_state, checked, popup_open, focus; a model's lod, "
+			"ctrl, overlays, rig_model), camera a model's {yaw, pitch, distance, target, frame}, each "
+			"member optional." },
+	{ F::Drag, "drag", J::Object,
+			"A drag in a viewport, {id, handle, by | to, snap?, gesture?, end?}: the record id's "
+			"handle (a menu window's move, left, right, top, bottom, top_left, top_right, "
+			"bottom_left or bottom_right; a model marker's place or axis) dragged by [dx, dy] from "
+			"where the picture shows it now, or to the point [x, y] of the picture, in the "
+			"viewport's units (a menu's 800x600 design units, a model's picture pixels); snap a "
+			"menu's grid of 8 when not 0, a model's grid in metres (0, free, when left out); gesture "
+			"the gesture it goes on with (the token an earlier drag's answer gave; left out, a new "
+			"one); end false keeps the gesture open for the next drag (true when left out)." },
+	{ F::Command, "command", J::Object,
+			"A command in a viewport, {name, ids?}: a menu's arrange of the windows ids, the first "
+			"the one the others follow (align_left, align_right, align_top, align_bottom, "
+			"align_horizontal_centers, align_vertical_centers; distribute_horizontally and "
+			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
+			"send_to_back), or a model's frame (its camera on the marker of the first id, else on "
+			"the whole model)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

@@ -34,6 +34,8 @@ enum class RequestFieldId : uint8_t {
 	Choice,
 	Settings,
 	Viewport,
+	Drag,
+	Command,
 	Purpose,
 	WithDependencies,
 	Replace,
@@ -51,7 +53,7 @@ enum class RequestJson : uint8_t {
 	String, // a string (a token for mode, choice and purpose)
 	Boolean, // true or false
 	Strings, // an array of strings
-	Object, // an object (address, paste_at, settings, viewport)
+	Object, // an object (address, paste_at, settings, viewport, drag, command)
 	Objects, // an array of objects (imports, edits, records)
 };
 
@@ -72,8 +74,8 @@ bool request_field_from_token(const std::string &token, RequestFieldId &out);
 const char *request_json_token(RequestJson json);
 
 // A set of fields, one bit each.
-using RequestFieldSet = uint32_t;
-static_assert(kRequestFieldCount <= 32, "a RequestFieldSet holds every request field");
+using RequestFieldSet = uint64_t;
+static_assert(kRequestFieldCount <= 64, "a RequestFieldSet holds every request field");
 
 constexpr RequestFieldSet field_bit(RequestFieldId id) {
 	return RequestFieldSet(1) << static_cast<unsigned>(id);

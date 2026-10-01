@@ -96,6 +96,11 @@ ViewportKind main_viewport_kind(DocumentTypeId type) {
 	return ViewportKind::kCount;
 }
 
+ViewportKind default_viewport_kind(DocumentTypeId type) {
+	const ViewportKind preview = preview_kind_of(type);
+	return viewport_kind_shows(preview, type) ? preview : main_viewport_kind(type);
+}
+
 ViewportKind preview_kind_of(DocumentTypeId type) {
 	for (const ViewportKindRow &row : kRows) {
 		if (row.role != ViewportRole::Preview) continue;
