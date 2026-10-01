@@ -45,6 +45,12 @@ public:
 		DEBUG_MODE_NORMALS = 3,
 		DEBUG_MODE_HEIGHTMAP = 4,
 	};
+	// What one step of a build came to (build_step).
+	enum BuildStep {
+		BUILD_STEP_MORE = 0,
+		BUILD_STEP_DONE = 1,
+		BUILD_STEP_FAILED = 2,
+	};
 
 private:
 	Ref<TerrainData> terrain_data;
@@ -155,6 +161,14 @@ private:
 	TerrainTileCacheDevice tile_cache_device;
 
 	bool built = false;
+	// A build in flight (build_begin / build_step): the units that ran of its total, and the
+	// tallies its tiles add to.
+	static constexpr int kBuildTailUnits = 6;
+	bool building_ = false;
+	int build_done_ = 0;
+	int build_total_ = 0;
+	int build_total_verts_ = 0;
+	int build_total_indices_ = 0;
 
 	// The terrain leg of the EffectWorld light pool: the shell hands this node
 	// the shared LightScene + the frame time each light frame (the SlotShadow
@@ -203,7 +217,8 @@ private:
 	opennova::TraversalConfig traversal_config;
 	DebugMode debug_mode = DEBUG_MODE_NORMAL; // the shader's u_debug_mode
 
-	bool _build_terrain();
+	bool _build_terrain_begin();
+	bool _build_terrain_tile(size_t ti);
 	void _load_textures();
 	void _clear_derived_textures();
 	void _rebuild_tile_overlay_pages();
@@ -285,6 +300,20 @@ public:
 	int get_light_rows_total() const { return light_rows_total; }
 
 	void build();
+	// The same build a unit at a time (the OpenNova Editor's mission device builds a terrain over
+	// its frames): build_begin drops what was built and plans the units (the scene snapshot and
+	// the material, a unit per tile's meshes, the patch pool, the surface inputs' heightfield,
+	// blend and detail textures, the tile cache's pages, the lights); build_step runs the next and
+	// says whether more are left, the terrain is built or the build failed (no valid baked
+	// terrain). build() is build_begin and every step. The node must be in the tree, as for
+	// build(): its patch pool binds the scenario. False from build_begin: no loaded terrain data.
+	bool build_begin();
+	BuildStep build_step();
+	bool is_built() const { return built; }
+	// The units of the build in flight, how many ran, and what the next one makes ("" none).
+	int get_build_step_count() const { return build_total_; }
+	int get_build_steps_done() const { return build_done_; }
+	String get_build_step_label() const;
 
 	// The terrain frame leg (ADR 0033 R2): compile the engine patch draw list for
 	// this node's viewport camera and apply it onto the instance pool. Driven
@@ -349,3 +378,4 @@ public:
 } // namespace godot
 
 VARIANT_ENUM_CAST(godot::Terrain::DebugMode);
+VARIANT_ENUM_CAST(godot::Terrain::BuildStep);
