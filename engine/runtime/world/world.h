@@ -706,7 +706,8 @@ struct WorldOutbox {
     // and 0x12 removal. The host drains this once, excluding its loopback.
     // [orig: Entity_HandleDeathEvent @ 0x4070F0; Entity_HandleDeathOnAuthority @ 0x407CC0;
     // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
-    using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent>;
+    using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent,
+            DoorRowEvent>;
     std::vector<EntityNetworkEvent> entity_events;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;

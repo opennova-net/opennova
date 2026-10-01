@@ -47,6 +47,24 @@ bool DoorSystem::target_section_closed(const Entity &entity, int section) const 
     return size_t(index) >= slots_.size() || slots_[size_t(index)].state == 0;
 }
 
+int32_t DoorSystem::wire_row_state(const Entity &entity, int number) const {
+    if (number > entity.door_count) return 0;
+    const int index = int(entity.door_slot) + number - 1;
+    if (entity.door_slot < 0 || index < 0 || size_t(index) >= slots_.size()) return 0;
+    return slots_[size_t(index)].state;
+}
+
+// A completed record tells every in-match remote its own 1-based number, on the
+// authority. [orig: FadeEffect_UpdateAll @0x44E920 — completion @0x44e94c /
+// @0x44e96a, is_authority @0x44e978 -> Server_SendWeaponSlotActionPacket(owner,
+// number) @0x44e982]
+static void queue_door_row(World &world, const Entity &entity, int number) {
+    if (!world.rules.logic_authority || !world.rules.mp_session) return;
+    world.out.entity_events.push_back(DoorRowEvent{entity.handle.packed,
+            static_cast<int16_t>(world.doors.wire_row_state(entity, number)),
+            static_cast<uint8_t>(number)});
+}
+
 // [orig: FadeEffect_UpdateAll @0x44E920]
 void DoorSystem::tick(World &world) {
     for (Slot &value : slots_) {
@@ -58,6 +76,7 @@ void DoorSystem::tick(World &world) {
             if (value.phase >= 65536) {
                 value.phase = 65536;
                 value.state = 2;
+                queue_door_row(world, *entity, value.number);
             }
         } else if (value.state == 3) {
             value.phase = static_cast<int32_t>(static_cast<uint32_t>(value.phase) -
@@ -65,6 +84,7 @@ void DoorSystem::tick(World &world) {
             if (value.phase <= 0) {
                 value.phase = 0;
                 value.state = 0;
+                queue_door_row(world, *entity, value.number);
             }
         }
     }
@@ -88,6 +108,12 @@ void DoorSystem::command(World &world, Entity &entity, int event, uint32_t touch
                 value.state = 3;
                 sound = entity.door_close_sound;
             }
+            // Every selected section, changed or not, reports on the wire
+            // ahead of its sound: the authority's packet numbers it 0-based,
+            // so the record it carries is the one BEFORE this section's
+            // [orig: @0x43f460 is_authority -> Server_SendWeaponSlotActionPacket
+            //  (entity, section) @0x43f462].
+            queue_door_row(world, entity, i);
             if (sound != nullptr && sound[0] != '\0') {
                 SoundSlotEvent output;
                 output.source_handle = entity.handle.packed;

@@ -45,6 +45,16 @@ void Server_FanEntityEvents(NapiNPServerCtx &ctx, world::World &world) {
                     std::vector<uint8_t> body;
                     io::append_u16_le(body, removal->handle);
                     conn.link.transport->host_send(s2c::ENTITY_REMOVE, body, true, 0);
+                } else if (const auto *door = std::get_if<world::DoorRowEvent>(&event)) {
+                    // A door record's state, mask 0x90 like the state packet
+                    // [orig: Server_SendWeaponSlotActionPacket @0x50F9A0 — send
+                    //  mask 144 @0x50f9d9, the 5-byte body @0x50fa15..0x50fa3a]
+                    DoorSlotAction row;
+                    row.entity_handle = door->handle;
+                    row.state = door->state;
+                    row.number = door->number;
+                    conn.link.transport->host_send(s2c::DOOR_SLOT_ACTION,
+                            encode_door_slot_action(row), true, 0);
                 }
             }
             // The HUD relays ride the same 0x90 mask: every active remote
