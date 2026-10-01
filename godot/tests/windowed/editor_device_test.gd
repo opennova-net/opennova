@@ -11,7 +11,8 @@ extends GutTest
 ##   complete picture, and no unit runs in that frame;
 ## - a take sizes nothing while the device keeps a rendered picture: a model no canvas draws (the
 ##   Preview showing another one) keeps the size the canvas drew it at while it builds, never its
-##   viewport's state's.
+##   viewport's state's, and takes the state's once the build ends. The state takes a size only
+##   where no canvas sizes the picture (S13 V5), so it is set once the canvas stops drawing it.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -178,23 +179,40 @@ func test_a_take_sizes_nothing_while_the_last_picture_is_kept() -> void:
 	assert_not_null(device)
 	if device == null:
 		return
-	# The canvas draws it at a size of its own; the viewport's state another.
+	# The canvas draws it at a size of its own, so its viewport's state takes none (S13 V5).
 	var drawn: Vector2i = device.size
-	assert_true(_seam.done({"kind": "set_viewport", "path": first,
-			"viewport": {"device": {"width": 123, "height": 77}}}))
-	await get_tree().process_frame
-	assert_ne(drawn, Vector2i(123, 77), "the canvas's size is not the state's")
-	assert_eq(device.size, drawn, "drawn by the canvas, at its size")
+	var sized := {"kind": "set_viewport", "path": first,
+			"viewport": {"device": {"width": 123, "height": 77}}}
+	assert_ne(drawn, Vector2i(123, 77), "the canvas's size is not the one the state takes")
+	assert_true(bool(_state(first).get("device", {}).get("canvas_sized", false)), "sized by the canvas")
+	assert_false(_seam.done(sized), "refused while a canvas sizes the picture")
 	# Building at a unit a frame, then the Preview showing the second model (its build first: the most
-	# recently used): the first no canvas draws while it keeps its picture, at the size it was drawn.
+	# recently used): the first no canvas draws while it keeps its picture.
 	_app.build_budget_ms = 0
 	_edit_light(first, 12)
 	await get_tree().process_frame
 	assert_eq(String(_state(first).get("status", "")), "loading")
 	assert_true(_seam.open_document("models/armory1.3di"))
-	for frame in 5:
-		await get_tree().process_frame
-		if String(_state(first).get("status", "")) != "loading":
+	# A whole frame undrawn, its device reports no canvas sizing it: the state takes a size of its own,
+	# the one a take sizes an undrawn device to.
+	for _frame in 10:
+		if not bool(_state(first).get("device", {}).get("canvas_sized", true)):
 			break
-		assert_eq(device.size, drawn, "frame %d undrawn: the kept picture is not sized again" % frame)
-	assert_eq(String((await _await_ready(first)).get("status", "")), "ready")
+		await get_tree().process_frame
+	assert_false(bool(_state(first).get("device", {}).get("canvas_sized", true)),
+			"undrawn: no canvas sizes it")
+	assert_eq(String(_state(first).get("status", "")), "loading", "still building")
+	assert_true(_seam.done(sized), "no canvas sizes it: the state takes the size")
+	# Each frame's take runs before its units, so every frame that began with the build running keeps
+	# the size the canvas drew it at, the one that ends it included.
+	var frames := 0
+	while String(_state(first).get("status", "")) == "loading" and frames < 600:
+		await get_tree().process_frame
+		frames += 1
+		assert_eq(device.size, drawn,
+				"frame %d of the build undrawn: the kept picture is not sized again" % frames)
+	assert_gt(frames, 0, "a take while the picture is kept")
+	assert_eq(String(_state(first).get("status", "")), "ready", "built")
+	# The build over, the next take sizes the undrawn device to its state's size.
+	await get_tree().process_frame
+	assert_eq(device.size, Vector2i(123, 77), "no picture kept: the state's size")
