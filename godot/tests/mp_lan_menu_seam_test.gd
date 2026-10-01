@@ -517,6 +517,35 @@ func test_refreshed_lan_rows_require_a_fresh_selection() -> void:
 		"refreshed rows invalidate the selection from the previous result set")
 
 
+# A host discovered while the player has a row highlighted is appended below it;
+# the highlighted row stays selected and JOIN still joins it (the retail LAN list
+# only appends during a browse window). Before, every new row cleared the
+# selection and JOIN did nothing.
+func test_appended_lan_row_keeps_the_selection() -> void:
+	var mp := MpMenuCompanion.new()
+	watch_signals(mp)
+	var driver := _make_lan_driver()
+	mp.on_menu_built(driver, "jo_mp.mnu", "LAN_MULTI_PLAYER", null)
+	var session := LanSession.new()
+	autofree(session)
+	mp.set_lan_session(session)
+	var alpha := LanServerRow.make("alpha", "192.168.1.10", 32768)
+	var bravo := LanServerRow.make("bravo", "192.168.1.11", 32768)
+	var charlie := LanServerRow.make("charlie", "192.168.1.12", 32768)
+	_publish(session, [alpha, bravo])
+	var lan_list := driver.widget_id("LAN_GAME_LIST")
+	driver.select_row(lan_list, 1)  # single click on bravo
+	_publish(session, [alpha, bravo, charlie])
+	assert_eq(driver.item_count(lan_list), 3, "the new host is appended")
+	assert_eq(driver.selected_row(lan_list), 1, "the highlighted row stays selected")
+	_press(driver, "LAN_JOINGAME")
+	assert_signal_emitted(mp, "lan_join_requested",
+		"JOIN still joins the row the player selected after a host was appended")
+	if get_signal_emit_count(mp, "lan_join_requested") > 0:
+		var target: JoinTarget = get_signal_parameters(mp, "lan_join_requested")[0]
+		assert_eq(target.host_ip, "192.168.1.11", "the selected row, not the new one")
+
+
 func test_swapping_lan_sessions_disconnects_the_previous_discovery_source() -> void:
 	var mp := MpMenuCompanion.new()
 	var driver := _make_lan_driver()

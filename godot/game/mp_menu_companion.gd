@@ -124,11 +124,28 @@ func _on_lan_browse_error(message: String) -> void:
 
 
 func _on_servers_changed(servers: Array) -> void:
+	# Within a browse window a newly discovered host is appended to the list and
+	# the player's highlighted row stays selected; only a new search (which
+	# empties the list) or a snapshot that no longer holds the selected endpoint
+	# at its row drops the selection (the LAN state machine adds rows with
+	# UIList_AddRow and LAN_SEARCH clears the list first).
+	var keep := _selected_server >= 0 and _selected_server < _servers.size() \
+			and _selected_server < servers.size() \
+			and _same_endpoint(_servers[_selected_server], servers[_selected_server])
 	_servers = servers
-	_selected_server = -1
+	if not keep:
+		_selected_server = -1
 	if not servers.is_empty():
 		_browse_error = ""
 	_refresh_lan_list()
+	if keep:
+		var id := _id("LAN_GAME_LIST")
+		if id >= 0:
+			_driver.select_row(id, _selected_server, false)
+
+
+static func _same_endpoint(a: LanServerRow, b: LanServerRow) -> bool:
+	return a != null and b != null and a.host_ip == b.host_ip and a.port == b.port
 
 
 func _refresh_lan_list() -> void:
