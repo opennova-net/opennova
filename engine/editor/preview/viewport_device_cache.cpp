@@ -8,10 +8,19 @@
 
 namespace opennova::editor {
 
-ViewportDeviceCache::ViewportDeviceCache(Factory make, size_t capacity) :
-		make_(std::move(make)), capacity_(std::max<size_t>(capacity, 1)) {}
+ViewportDeviceCache::ViewportDeviceCache(Factory make, size_t capacity, KindLimit limit) :
+		make_(std::move(make)), capacity_(std::max<size_t>(capacity, 1)), limit_(std::move(limit)) {
+	if (!limit_) limit_ = [](ViewportKind kind) { return viewport_kind_row(kind).devices; };
+}
 
 ViewportDeviceCache::~ViewportDeviceCache() = default;
+
+ViewportDevice *ViewportDeviceCache::most_recently_used() const {
+	const Slot *newest = nullptr;
+	for (const Slot &slot : slots_)
+		if (!newest || slot.asked > newest->asked) newest = &slot;
+	return newest ? newest->device.get() : nullptr;
+}
 
 ViewportDeviceCache::Slot *ViewportDeviceCache::slot_(const std::string &path, ViewportKind kind) {
 	for (Slot &slot : slots_)
@@ -32,16 +41,28 @@ void ViewportDeviceCache::use_(Viewports &viewports, const std::string &path, Vi
 		return;
 	}
 	if (!make_) return;
-	if (slots_.size() >= capacity_) {
-		// The least recently used not used this round given up: its viewport keeps its state for the
-		// next device. Every device used this round: none is made, and the viewport waits.
+	// The least recently used not used this round given up: its viewport keeps its state for the
+	// next device. Every device used this round: none is made, and the viewport waits. Of the kind
+	// first, where the kind keeps fewer than the cache (S14), then of all past the capacity.
+	const auto give_up = [&](bool of_kind) {
 		auto oldest = slots_.end();
-		for (auto it = slots_.begin(); it != slots_.end(); ++it)
-			if (it->round != round_ && (oldest == slots_.end() || it->used < oldest->used)) oldest = it;
-		if (oldest == slots_.end()) return;
+		for (auto it = slots_.begin(); it != slots_.end(); ++it) {
+			if (it->round == round_ || (of_kind && it->kind != kind)) continue;
+			if (oldest == slots_.end() || it->used < oldest->used) oldest = it;
+		}
+		if (oldest == slots_.end()) return false;
 		viewports.detach(oldest->path, oldest->kind);
 		slots_.erase(oldest);
+		return true;
+	};
+	const size_t limit = limit_(kind);
+	if (limit > 0) {
+		size_t held = 0;
+		for (const Slot &slot : slots_)
+			if (slot.kind == kind) ++held;
+		if (held >= limit && !give_up(true)) return;
 	}
+	if (slots_.size() >= capacity_ && !give_up(false)) return;
 	std::unique_ptr<ViewportDevice> device = make_(kind);
 	if (!device) return;
 	Slot slot;
@@ -49,6 +70,7 @@ void ViewportDeviceCache::use_(Viewports &viewports, const std::string &path, Vi
 	slot.kind = kind;
 	slot.device = std::move(device);
 	slot.used = ++clock_;
+	slot.asked = slot.used;
 	slot.round = round_;
 	slots_.push_back(std::move(slot));
 	viewports.attach(path, kind);
@@ -130,6 +152,7 @@ ViewportDevice *ViewportDeviceCache::device(const std::string &path, ViewportKin
 	if (Slot *slot = slot_(path, kind)) {
 		// Asked for since the last sync: kept through the next (its round's).
 		slot->used = ++clock_;
+		slot->asked = slot->used;
 		slot->round = round_ + 1;
 		return slot->device.get();
 	}

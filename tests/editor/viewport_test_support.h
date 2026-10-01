@@ -104,6 +104,8 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		canvas_sized = picture.canvas_sized;
 	}
 	opennova::editor::ViewportBuildReport build() const override { return built; }
+	// A picture to draw once a build ended (whole, or by its last unit): the generation it draws.
+	bool holds_picture() const override { return shown != 0; }
 	bool step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) override {
 		if (!built.loading) return false;
 		++steps;

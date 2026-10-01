@@ -112,6 +112,7 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 			// Made whole as it was taken: one unit on one frame.
 			build_.frames = 1;
 			build_.frame_us = build_.unit_us = build_.total_us = now_us() - start;
+			built_once_ = true;
 		}
 		break;
 	}
@@ -171,6 +172,7 @@ bool ViewportDevice::step(const opennova::editor::ViewportModel &model, const op
 	case ApplierStep::Built:
 		build_.loading = false;
 		build_.progress.done = build_.progress.total;
+		built_once_ = true;
 		break;
 	case ApplierStep::Failed:
 		build_.loading = false;

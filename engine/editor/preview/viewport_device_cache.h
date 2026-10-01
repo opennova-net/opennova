@@ -25,11 +25,17 @@ inline constexpr size_t kViewportDeviceCapacity = 4;
 // every frame). Each is attached to its viewport while it lives: given up, its viewport keeps its
 // state (its camera, its options), and the next device made for it builds its picture again. The
 // Shell (EditorApp) makes one with its factory, the devices its kind's table makes
-// (godot/src/authoring/viewport_devices.cpp); a test makes one with fakes.
+// (godot/src/authoring/viewport_devices.cpp); a test makes one with fakes. A kind may keep fewer
+// than the capacity (ADR 0046 S14, ViewportKindRow::devices: a mission's device holds a terrain
+// and the mission's models): past the kind's limit, the least recently used device of that kind not
+// used this round is given up first, as the capacity gives up the least recently used of all.
 class ViewportDeviceCache : public ViewportDeviceSource {
 public:
 	using Factory = std::function<std::unique_ptr<ViewportDevice>(ViewportKind kind)>;
-	explicit ViewportDeviceCache(Factory make, size_t capacity = kViewportDeviceCapacity);
+	// How many devices of a kind the cache keeps at once (0: no limit of the kind's own): the kinds'
+	// table's column by default; a test gives its own.
+	using KindLimit = std::function<size_t(ViewportKind kind)>;
+	explicit ViewportDeviceCache(Factory make, size_t capacity = kViewportDeviceCapacity, KindLimit limit = nullptr);
 	~ViewportDeviceCache() override;
 	ViewportDeviceCache(const ViewportDeviceCache &) = delete;
 	ViewportDeviceCache &operator=(const ViewportDeviceCache &) = delete;
@@ -69,6 +75,11 @@ public:
 	// How many devices it holds, and the one of (path, kind) (null: none), its recency untouched.
 	size_t size() const { return slots_.size(); }
 	ViewportDevice *held(const std::string &path, ViewportKind kind) const;
+	// The device a canvas asked for most recently, or the newest made where none asked since (null:
+	// none held): the one the Shell's frame budget looks at (ADR 0046 S14: more of the frame while it
+	// holds no picture yet). A pin (sync) keeps a device but is no ask: the Preview's pinned device
+	// never outranks the Main viewport a canvas just drew.
+	ViewportDevice *most_recently_used() const;
 
 private:
 	struct Slot {
@@ -77,6 +88,7 @@ private:
 		std::unique_ptr<ViewportDevice> device;
 		uint64_t used = 0; // the recency stamp
 		uint64_t round = 0; // the last round (sync) it was used in or asked for
+		uint64_t asked = 0; // the stamp of its making or a canvas's last ask (most_recently_used)
 	};
 	Slot *slot_(const std::string &path, ViewportKind kind);
 	// The device of (path, kind), made and attached when there is none, the least recently used
@@ -85,6 +97,7 @@ private:
 
 	Factory make_;
 	size_t capacity_;
+	KindLimit limit_;
 	std::vector<Slot> slots_;
 	struct Want {
 		std::string path;

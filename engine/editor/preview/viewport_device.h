@@ -131,6 +131,12 @@ public:
 	// Its build as it stands now (ViewportBuildReport; none for a device that never builds over
 	// frames).
 	virtual ViewportBuildReport build() const { return ViewportBuildReport(); }
+	// Whether it holds a picture a canvas can draw: false from its making until its first build
+	// ends (the Shell gives the builds more of a frame while the most recently used device holds
+	// none, ADR 0046 S14: a first picture has nothing to look at), true from then on, a later build
+	// keeping the last picture meanwhile. A device that makes its picture whole holds one from its
+	// first Rebuild (the default: true).
+	virtual bool holds_picture() const { return true; }
 };
 
 // Where a canvas finds the device of a viewport (the Shell's devices, ViewportDeviceCache; a test's):

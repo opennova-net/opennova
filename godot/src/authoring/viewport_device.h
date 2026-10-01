@@ -55,6 +55,8 @@ public:
 	void tick(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	bool step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	opennova::editor::ViewportBuildReport build() const override { return build_; }
+	// A first build ended (whole as it was taken, or by its last unit): there is a picture to draw.
+	bool holds_picture() const override { return built_once_; }
 
 	ViewportApplier &applier() { return *applier_; }
 	SubViewport *sub_viewport() const { return viewport_; }
@@ -76,6 +78,8 @@ private:
 	bool canvas_sized_ = false;
 	// It rendered a picture (a canvas drew it built): there is a last picture to keep.
 	bool rendered_ = false;
+	// A build ended (holds_picture): the Shell's first-picture budget is spent.
+	bool built_once_ = false;
 	// The process frame whose draw asked for a render (UINT64_MAX: none yet): that frame renders
 	// what stands as it ends, so no unit runs in it.
 	uint64_t render_frame_ = UINT64_MAX;

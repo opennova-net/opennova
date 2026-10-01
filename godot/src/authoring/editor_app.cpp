@@ -60,6 +60,10 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_build_budget_ms", "ms"), &EditorApp::set_build_budget_ms);
 	ClassDB::bind_method(D_METHOD("get_build_budget_ms"), &EditorApp::get_build_budget_ms);
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "build_budget_ms"), "set_build_budget_ms", "get_build_budget_ms");
+	ClassDB::bind_method(D_METHOD("set_first_picture_budget_ms", "ms"), &EditorApp::set_first_picture_budget_ms);
+	ClassDB::bind_method(D_METHOD("get_first_picture_budget_ms"), &EditorApp::get_first_picture_budget_ms);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "first_picture_budget_ms"), "set_first_picture_budget_ms",
+			"get_first_picture_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
@@ -246,12 +250,18 @@ void EditorApp::_process(double p_delta) {
 	// preview clock runs, and the viewports' part animations, flipbooks, generators and clips run on
 	// it, whether a canvas draws them or not (pump() synced the devices). Then the devices' builds a
 	// unit further (S13 V6): one unit a frame in all, the most recently used device's first, the next
-	// while the frame's build budget lasts (shared by every build in flight).
+	// while the frame's build budget lasts (shared by every build in flight): the first-picture
+	// budget while that device holds no picture yet (S14: a Main viewport's first picture has nothing
+	// to look at), the steady one from then on; a budget of 0 is a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
 		devices_->tick(session_->viewports());
 		const uint64_t start = Time::get_singleton()->get_ticks_usec();
-		const uint64_t budget = uint64_t(build_budget_ms_) * 1000;
+		const opennova::editor::ViewportDevice *newest = devices_->most_recently_used();
+		const int budget_ms = build_budget_ms_ == 0 ? 0
+				: newest && !newest->holds_picture() ? std::max(first_picture_budget_ms_, build_budget_ms_)
+													 : build_budget_ms_;
+		const uint64_t budget = uint64_t(budget_ms) * 1000;
 		devices_->step(session_->viewports(),
 				[start, budget] { return Time::get_singleton()->get_ticks_usec() - start < budget; });
 		ObjectModel::advance_awake_frame(p_delta);

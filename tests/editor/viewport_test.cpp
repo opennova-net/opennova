@@ -2090,8 +2090,68 @@ static int test_follow_reads() {
 	return 0;
 }
 
+// ADR 0046 S14: a kind may keep fewer devices than the cache (ViewportKindRow::devices; here a test's
+// limit of two menus): the third menu given a device gives up the least recently used menu's, the
+// model's device untouched and the capacity not reached; most_recently_used is the device used last;
+// a device holds no picture until its first build ends.
+static int test_kind_limit() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_kind_limit");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache cache(
+			[&made](ViewportKind) {
+				auto device = std::make_unique<editor_test::FakeDevice>();
+				made.push_back(device.get());
+				return std::unique_ptr<ViewportDevice>(std::move(device));
+			},
+			4, [](ViewportKind kind) { return kind == ViewportKind::Menu ? size_t(2) : size_t(0); });
+	const auto sync = [&] { cache.sync(session.viewports(), view); };
+	session.handle(request::new_project(dir.file("project"), "Kind Limit"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	editor_test::FakeDevice fresh;
+	TEST_EXPECT(!fresh.holds_picture() && cache.most_recently_used() == nullptr);
+	session.handle(request::open_document("models/armory.3di"));
+	sync();
+	TEST_EXPECT(cache.size() == 1 && made.size() == 1 && cache.most_recently_used() == made[0] && made[0]->holds_picture());
+	session.handle(request::open_document("main.mnu"));
+	sync();
+	const std::string main_path = session.document_for("main.mnu")->path();
+	TEST_EXPECT(cache.size() == 2 && cache.held(main_path, ViewportKind::Menu) == made[1] && cache.most_recently_used() == made[1]);
+	session.handle(request::create_file("a.mnu", "menu"));
+	sync();
+	const std::string a_path = session.document_for("a.mnu")->path();
+	TEST_EXPECT(cache.size() == 3 && cache.held(a_path, ViewportKind::Menu) && cache.held(main_path, ViewportKind::Menu));
+	// A third menu: the menu's limit of two gives up the least recently used menu (main's), though the
+	// cache holds three of its four.
+	session.handle(request::create_file("b.mnu", "menu"));
+	sync();
+	const std::string b_path = session.document_for("b.mnu")->path();
+	TEST_EXPECT(cache.size() == 3 && made.size() == 4);
+	TEST_EXPECT(cache.held(b_path, ViewportKind::Menu) == made[3] && cache.held(a_path, ViewportKind::Menu) &&
+			!cache.held(main_path, ViewportKind::Menu) && cache.held("models/armory.3di", ViewportKind::Model) == made[0]);
+	TEST_EXPECT(!session.viewports().find(main_path, ViewportKind::Menu)->attached());
+	TEST_EXPECT(cache.most_recently_used() == made[3]);
+	// The model's device asked for: now the most recently used; the menus' limit stands as main's view
+	// asks for its device back (a's, the least recently used menu, given up at the next sync).
+	TEST_EXPECT(cache.device("models/armory.3di", ViewportKind::Model) == made[0] && cache.most_recently_used() == made[0]);
+	TEST_EXPECT(cache.device(main_path, ViewportKind::Menu) == nullptr);
+	sync();
+	TEST_EXPECT(cache.size() == 3 && made.size() == 5 && cache.held(main_path, ViewportKind::Menu) == made[4] &&
+			!cache.held(a_path, ViewportKind::Menu) && cache.held(b_path, ViewportKind::Menu) == made[3]);
+	std::printf("test_kind_limit passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_kind_limit() == 0);
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);
 	TEST_EXPECT(test_two_menus() == 0);
