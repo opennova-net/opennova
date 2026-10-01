@@ -13,7 +13,14 @@ using J = RequestJson;
 // what it does with it (request_kinds.cpp).
 constexpr RequestField kFields[] = {
 	{ F::Dir, "dir", J::String, "A project's directory on disk." },
-	{ F::Title, "title", J::String, "A new project's title (New Game when left out)." },
+	{ F::Title, "title", J::String, "A new project's title (its folder's name when left out)." },
+	{ F::Game, "game", J::String,
+			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
+			"out)." },
+	{ F::GameInstall, "game_install", J::String,
+			"A game install the project opens with for the session alone, in place of the one its "
+			".opennova/local.json names, which stays as it is (a dry run's install); left out, its "
+			"own." },
 	{ F::Path, "path", J::String,
 			"A file: a project file or an open document by its project-relative path or its "
 			"logical "
@@ -29,6 +36,10 @@ constexpr RequestField kFields[] = {
 	{ F::Role, "role", J::String, "A requirement's role, as the requirements' rows name it." },
 	{ F::FileKind, "file_kind", J::String,
 			"An asset kind's token, for a file whose name cannot say its kind (a .bin)." },
+	{ F::OutDir, "out_dir", J::String,
+			"Where a build lands: a directory on disk, each build a directory under it named by "
+			"its id (left out, the project's .opennova/build/play; a relative one from the "
+			"project's folder; one inside the project refused but its cache or export folder)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
@@ -73,6 +84,10 @@ constexpr RequestField kFields[] = {
 			"And asks the new name (Files' Rename..., the Rename everywhere dialog)." },
 	{ F::OpenFirst, "open_first", J::Boolean,
 			"The document opens first when it is not open (a fix's edit)." },
+	{ F::ImportPass, "import_pass", J::Boolean,
+			"The project opens with its import pass, the sources that changed imported first "
+			"(true when left out); false: it opens on its files as they are, scanned and checked, "
+			"no source imported (a dry run's read, a project made in a folder that holds sources)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

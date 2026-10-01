@@ -569,13 +569,21 @@ The editor MCP reads it; the request's `ok` only says it parsed.
 _Avoid_: status (the one-line text the editor shows), result
 
 **Query**:
-What the editor MCP, the Shell or a test asks of the editor's session without changing it: a
-name, one row of the query table (`session/editor_queries`: the params it takes, the list it
-pages, the view concern whose revision its answer carries), and those params. The state is one,
-by section and since a revision; every list a query serves comes a page at a time (an offset, or
-a cursor for the output lines and the events, a limit, and the whole count); the `catalog` query
-lists every request kind, query, section and concern from the tables themselves.
+What the editor MCP, the Shell, the command line or a test asks of the editor's session without
+changing it: a name, one row of the query table (`session/editor_queries`: the params it takes,
+the list it pages, the view concern whose revision its answer carries), and those params. The
+state is one, by section and since a revision; every list a query serves comes a page at a time
+(an offset, or a cursor for the output lines and the events, a limit, and the whole count); the
+`catalog` query lists every request kind, query, section and concern from the tables themselves.
 _Avoid_: request (a request changes the session), view (what the windows draw from), getter
+
+**Verb**:
+What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
+`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+(`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
+that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
+`query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
+_Avoid_: command (a request, a menu's COMMAND, a script's command), subcommand
 
 **Workspace**:
 The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar

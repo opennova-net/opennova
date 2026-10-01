@@ -59,6 +59,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildChanged, code("build.changed", G::Build) },
 	{ C::BuildCopy, code("build.copy", G::Build) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
+	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
 	{ C::BuildRead, code("build.read", G::Build) },
 	{ C::BuildVerify, code("build.verify", G::Build) },
 	{ C::BuildWrite, code("build.write", G::Build) },
