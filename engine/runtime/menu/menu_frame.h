@@ -12,10 +12,12 @@
 
 #include <runtime/hud/game_font.h>
 #include <runtime/menu/menu_edit.h>
+#include <runtime/menu/menu_table_row.h>
 #include <formats/mnu/mnu.h>
 #include <formats/mnu/mnu_layout.h>
 
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <string>
 #include <utility>
@@ -115,6 +117,16 @@ struct MenuDrawList {
 	// embedder that mounts its own controls over the frame (the PLAYER_INFO
 	// preview and icon mounts) must draw ops from here on ABOVE those mounts.
 	int32_t overlay_op_start = 0;
+	// The custom-draw slot (MenuFrameState::custom_slot_index): the op index
+	// its widget's CUSTOM appearance pass runs at, -1 when it did not draw.
+	// Every op before it paints under the embedder's slot draw and every op
+	// from it on above; it never precedes overlay_op_start (a slot before the
+	// split pulls the split to it), so the embedder layers its slot item
+	// between the overlay ops before and after it.
+	// [orig: CUIElement_Draw @ 0x64a8a0 — the CUSTOM (&4) pass,
+	//  CUIElement_DispatchCustomDrawEvent @ 0x647f10, after COLOR / IMAGE /
+	//  OUTLINE and before the frame and the children]
+	int32_t custom_slot_op = -1;
 	int64_t widgets_drawn = 0;
 };
 
@@ -164,11 +176,21 @@ struct MenuWidgetState {
 	// Additional selected rows for MULTI lists (drawn with the selection
 	// style alongside selected_item); the single-select widgets ignore it.
 	std::vector<int32_t> selected_items;
-	// TABLE data rows (runtime content the embedder seeds — the Control-tree
-	// path seeded these from the shell): one vector of cell strings per row,
-	// in column order [orig: the 40-byte row records, CUITable_Render
+	// A runtime rect replacing the POSITION solve (CWnd_SetRect), relative to
+	// the parent's origin.
+	bool has_rect = false;
+	mnu::RectEdges rect;
+	// TABLE data rows (menu_table_row.h: the texts, cell values, row state,
+	// flags and colour of the 40-byte row records) [orig: CUITable_Render
 	// @ 0x6411d0]. scroll_row above is the first visible row.
-	std::vector<std::vector<std::string>> table_rows;
+	std::vector<MenuTableRow> table_rows;
+	// A clip rect (CWnd_SetClipRect, absolute design units): the widget's own
+	// passes draw through the viewport it scales to; its children do not.
+	// [orig: CWnd_SetClipRect @0x646210; CWnd_ApplyClipViewport @0x6472a0 /
+	//  CWnd_RestoreViewport @0x6473f0 around CStaticWnd_Render's own passes
+	//  @0x657b10]
+	bool has_clip = false;
+	mnu::RectEdges clip;
 	// MARQUEE nodes (runtime content from the widget's datasource file):
 	// text lines in roll order; empty string = a blank spacer line
 	// [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00 walks the node list].
@@ -187,7 +209,51 @@ struct MenuFrameState {
 	bool cursor_visible = false;
 	float cursor_x = 0.0f;
 	float cursor_y = 0.0f;
+	// The custom-draw widget an embedder mounts its own Control over (a map
+	// window), -1 none: every op the walk emits after that widget's subtree
+	// joins the menu-top overlay, so the later siblings still paint over the
+	// custom draw like the retail walk [orig: the forward child walk —
+	// CMapWindow_HandleEvent's pass runs inside MAP's draw, before
+	// WAYPOINTNAME_DLG / USERWP_CLOSE paint].
+	int32_t mount_index = -1;
+	// The widget whose CUSTOM appearance pass the embedder draws into the
+	// walk (a registered event-1 handler that draws no Control of its own,
+	// like CMAP's CHAT_MSGS console), -1 none (MenuDrawList::custom_slot_op).
+	int32_t custom_slot_index = -1;
 };
+
+// The table's custom-draw event (0x8000002) for a CUSTOM_DRAW column: the
+// header cell (row -1, state 0, value 0) or a body cell (the row index, its
+// state +24 and the column's cell value), with the cell's device rect — the
+// design rect plus the ancestors' offsets, scaled.
+// [orig: CUITable_Render @0x6413b3..0x641419 (header), @0x641730..0x6417bc
+//  (body) — the payload {this, name, row, column, state, value, L, T, R, B}]
+struct MenuTableCellEvent {
+	int row = -1;
+	int column = 0;
+	int32_t state = 0;
+	int32_t value = 0;
+	float left = 0.0f, top = 0.0f, right = 0.0f, bottom = 0.0f;
+};
+
+// What a custom-draw handler may draw from inside the table's walk, in the
+// walk's order: the table's own cell draw (flags 1 the row-state appearance
+// pass, 2 the content), a device clear of a device rect, and a device line.
+// [orig: CTableWnd_DrawCell @0x640be0; CGfxDevice_SetClearColor @0x677050 +
+//  CGfxDevice_Clear @0x677100; CGfxDevice_SetQuadDiffuse @0x677060 +
+//  sub_678850 @0x678850]
+class MenuTableCellCanvas {
+public:
+	virtual ~MenuTableCellCanvas() = default;
+	virtual void draw_cell(int row, int column, int flags) = 0;
+	virtual void clear_rect(uint32_t argb, float left, float top, float right, float bottom) = 0;
+	virtual void line(uint32_t argb, float x0, float y0, float x1, float y1) = 0;
+};
+
+// A table's registered custom-draw handler (the control callback bound on the
+// 0x08 event class) [orig: CUIScene_RegisterControlCallback @0x63c060].
+using MenuTableCellPainter =
+		std::function<void(const MenuTableCellEvent &, MenuTableCellCanvas &)>;
 
 // Deep in-process module: configure() walks the screen once (interning every
 // texture and font name it will reference); compile() emits one frame's draw
@@ -286,9 +352,16 @@ public:
 	// the hit walk both use. False when the index is out of range.
 	bool widget_rect(int index, const MenuFrameState &state,
 			mnu::RectEdges *out) const;
+	// The widget's own solved rect, relative to its parent's origin (no
+	// ancestor offsets) [orig: CWnd_GetRect @0x6465c0 — the rect at +0xD0].
+	bool widget_local_rect(int index, const MenuFrameState &state,
+			mnu::RectEdges *out) const;
 	// The item-row count the draw uses (runtime rows when seeded, else the
 	// authored <ITEM> rows; combo popups prefer the authored LIST_BOX rows).
 	int item_count(int index, const MenuFrameState &state) const;
+	// The text a list-like widget's row displays (runtime rows when seeded,
+	// else the authored row after the string-table lookup).
+	std::string item_display_text(int index, const MenuFrameState &state, int row) const;
 
 	// --- interaction geometry (the same witnessed layout math the emitters
 	// use; raw-mouse coordinates against the scaled rects, like pump_mouse) --
@@ -338,11 +411,19 @@ public:
 	int scroll_page_rows(int index, const MenuFrameState &state) const;
 	int spin_arrow_at(int index, const MenuFrameState &state, float mx,
 			float my, float sx, float sy) const;
-	// Table DATA row under the mouse (absolute row index into table_rows,
-	// honoring the scroll window below the header), -1 = none
-	// [orig: CUITable_Render @ 0x6411d0 row layout].
-	int table_row_at(int index, const MenuFrameState &state, float mx, float my,
-			float sx, float sy) const;
+	// The table hit test on the raw mouse (converted to the design point the
+	// dispatch hands the widget): the absolute data row (-1 in the header) and
+	// the column under the point (-1 none). False when the test fails (no
+	// row under the point, a header column past the table's edge).
+	// [orig: CTableWnd_HitTest @0x63fe90; UI_DispatchMouseEvent @0x63ab00]
+	bool table_hit(int index, const MenuFrameState &state, float mx, float my, float sx,
+			float sy, int *row, int *column) const;
+	// The table's COLUMN COUNT (1 without an authored count of 1 or more),
+	// 0 for a widget that is not a table [orig: resize_column_count @0x63f6c0].
+	int table_column_count(int index) const;
+	// Bind (or clear, with an empty function) the custom-draw handler of the
+	// table at `index`; kept across configure() while the index stays a table.
+	void set_table_cell_painter(int index, MenuTableCellPainter painter);
 	// Non-mutating front-most hit (the pump's claim walk without the state
 	// writes) — editor/preview picking.
 	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
@@ -422,6 +503,9 @@ private:
 		int32_t image_height = 0;
 		bool has_outline = false;       // OUTLINE=8 [orig: entry+16]
 		uint32_t outline = 0;
+		// CUSTOM=4: the event-1 custom-draw hook [orig: the parse
+		// @ 0x64839c..0x6483ae; CUIElement_DispatchCustomDrawEvent @ 0x647f10].
+		bool has_custom = false;
 	};
 	struct EditScroll {
 		int start = 0;
@@ -479,6 +563,49 @@ private:
 			float sx, float sy) const;
 	void table_row_heights_(const WidgetNode &node, int *header_height,
 			int *body_row_height) const;
+	// One TABLE column as the XML sets it up [orig: the 180-byte column
+	// records at +780: width +124, label +0, header justification +128 /
+	// +132, cell justification +144 / +148, cell offsets +152 / +156, draw
+	// kind +108, SCALE_BITMAP +168, the SUBST list +164].
+	struct TableColumnSetup {
+		int width = 0;
+		std::string label;
+		int header_justify = 0;
+		int header_vjustify = 0;
+		int body_justify = 0;
+		int body_vjustify = 0;
+		int body_x = 0;
+		int body_y = 0;
+		int cell_type = 0;
+		bool scale_bitmap = false;
+		struct Subst {
+			std::string value;
+			int32_t texture = kMenuTexNone;
+		};
+		std::vector<Subst> subst;
+	};
+	// The draw kinds (+108): text, image (BITMAP_DRAW), custom (CUSTOM_DRAW),
+	// image-else-text (BITMAP_TEXT, not in this model).
+	static constexpr int kTableCellText = 0;
+	static constexpr int kTableCellImage = 1;
+	static constexpr int kTableCellCustom = 2;
+	static constexpr int kTableCellImageText = 4;
+	class TableCanvas;
+	void build_table_columns_(WidgetNode &node);
+	int32_t table_cell_image_(const WidgetNode &node, int column, const std::string &text) const;
+	int table_pitch_(const WidgetNode &node, const mnu::RectEdges &rect, int row_h) const;
+	int table_visible_rows_(const WidgetNode &node, const mnu::RectEdges &rect) const;
+	static int table_live_rows_(const MenuWidgetState *ws);
+	static uint32_t table_row_color_(const WidgetNode &node, const MenuTableRow &row);
+	void emit_table_text_(const WidgetNode &node, const std::string &text, int align, int dx,
+			int dy, const mnu::RectEdges &cell, const WalkScale &s, uint32_t color);
+	void emit_table_texture_(int32_t texture, int align, int dx, int dy, bool scale,
+			const mnu::RectEdges &cell, const WalkScale &s);
+	void emit_table_cell_(int index, const WidgetNode &node, const mnu::RectEdges &rect,
+			const WalkScale &s, const MenuWidgetState *ws, int row, int column, int flags);
+	// The clip viewport of a widget's own passes: every op from `first_op`
+	// on cut to the scaled clip rect [orig: CWnd_ApplyClipViewport @ 0x6472a0].
+	void clip_ops_(int32_t first_op, const mnu::RectEdges &clip, const WalkScale &s);
 	bool widget_shown_(int index, const MenuFrameState &state) const;
 	int pump_visual_state(const mnu::Window &w,
 			const MenuWidgetState *ws) const;
@@ -554,6 +681,11 @@ private:
 	// (the D-MNU-12 menu-top decision — retail's inline tree order visibly
 	// renders popups on top via a still-unwalked mechanism).
 	std::vector<int> deferred_popups_;
+	// The draw-op count when the mount widget's subtree closed (-1 not yet).
+	int32_t mount_split_ = -1;
+	// The custom-draw slot widget's CUSTOM pass point.
+	void mark_custom_slot_(int index, const WidgetNode &node, int appearance_slot,
+			const MenuFrameState &state);
 	bool resolve_scrollbar_rect(const WidgetNode &node, ScrollbarKind kind,
 			const mnu::RectEdges &owner, int fallback_top,
 			int fallback_height, int fallback_width,
@@ -624,6 +756,7 @@ private:
 	int32_t screen_cursor_ = kMenuTexNone;
 	std::map<int, EditScroll> edit_scroll_;
 	std::map<int, MarqueeScroll> marquee_scroll_;
+	std::map<int, MenuTableCellPainter> table_painters_;
 	MenuDrawList draw_list_;
 };
 

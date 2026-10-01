@@ -11,12 +11,19 @@
 
 #include <runtime/hud/end_round_overlay.h>
 #include <runtime/hud/game_text_lookup.h>
+#include <runtime/hud/hud_chat_entry.h> // ChatEntryFacts
+#include <runtime/hud/hud_frame.h> // HudSessionState
 #include <runtime/hud/hud_minimap.h> // HudMapGridOrigin
+#include <runtime/hud/hud_map_view.h> // DeathMapFacts
+#include <net/npwire/session_vars.h> // SessionVars
 #include <runtime/inmatch/stat_screen_feed.h>
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/friendly_tags.h>
 #include <runtime/world/lfp_feed.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/weapon_inventory.h> // WeaponSlotBarCategory
+
+#include <array>
 
 #include <cstdint>
 #include <string>
@@ -26,6 +33,13 @@
 
 namespace opennova::mission {
 class MissionKernel;
+}
+namespace opennova::hud {
+struct HudScoreboardState;
+}
+namespace opennova::menu {
+struct CommandMapRoster;
+struct CommandMapLocations;
 }
 
 namespace opennova::inmatch {
@@ -66,6 +80,57 @@ EndRoundSessionState end_round_session_state(const RoleView &view);
 // The overlay ladder's input off the folded 0x1D header and the round clock.
 hud::EndRoundOverlayInput end_round_overlay_input(const RoleView &view);
 
+// THE TAB BOARD'S FACTS for this client: the projected rows (their live
+// entity team and class answered by the role's own entity model — the
+// authority's pools, a joiner's decoded rows), the 0x16 team table and side
+// count, the SU gate and the timed flag off the replica, the KOTH minutes
+// (the authority's own g_TimeLimitMinutes, a joiner's session-config copy),
+// the local player's team byte, and the latched flag carrier's name and team.
+// Strings (title, labels, class names) stay the embedder's.
+// [orig: HUD_DrawKillList @0x423a30 — T @0x423a4b..0x423a5e, the local team
+//  @0x423d64; HUD_DrawGameScoreOverlay @0x423060 — the team table
+//  @0x4232c5.., the carrier dword_A860C4 @0x423944..0x4239ee]
+void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out);
+
+// THE SESSION VARIABLES this client's HUD reads (the Tab board header's
+// server and mission rungs): a joiner's parse of the host's S2C 0x60 stream;
+// on the authority its own serializer's copies, which a listen host (a
+// session peer) then re-parses from its own stream, so the same caps apply;
+// empty on the bare local role.
+// [orig: Game_StartMission @0x5247d3..0x5247eb -> Game_SerializeMissionInfoToDataStream
+//  @0x523620 (the authority's copies); the peer's self-parse
+//  SaveFile_SendAndWaitForServerAck @0x5204c4..0x5204f5 ->
+//  Client_ParseServerSessionVariables @0x5202f0; the reader
+//  HUD_GetLoadingScreenTextByGameType @0x51f408 / @0x51f46b]
+SessionVars scoreboard_session_vars(const RoleView &view);
+
+// THE CMAP RULES TEXT for this client (RULELIST at the CMAP show): a
+// joiner's S2C 0x58 record and 0x7E strings; on the authority its own report,
+// built fresh as every C2S 0x2D rebuilds it (its uptime part is the time since
+// the session start whenever it is read, the rest fixed for the round) and its
+// mission text; plus the game type, the 0x16 in-game count, the local team and
+// the spawn-zone test. False (nothing built, RULELIST keeps its text) while
+// the record is not valid, or on the bare local role (retail's single player
+// builds a valid report, but out of a session its RULES tab is disabled, so
+// the text is never shown).
+// [orig: sub_54B320 @0x54b490 -> Overlay_BuildEndGameStatsText @0x54a240; the
+//  authority's report Server_BuildStatusReport @0x530a60, rebuilt at
+//  Game_StartMission @0x524871 / @0x525b95, Render_LoadingScreen @0x521ecd and
+//  Server_BuildAndSerializeSessionStatus @0x4fc990]
+bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
+		std::string &out);
+
+// THE TALK KEYS' FACTS for this client (hud::ChatEntryFacts): the death
+// screen and round-over latches off the replica, the session (a joiner's
+// connection, the authority's is_in_session), the replica's reset hold, the
+// game type's team bit, the authority bit, the local player and whether it
+// rides a def-type-1 carrier, the NovaWorld network type (the embedder's —
+// a joiner's runtime carries none) and the per-main-frame counter. Every
+// process with a HUD in a session is a session peer.
+// [orig: Input_HandleActionBinding @0x49b989..0x49badd; the vehicle walk
+//  Entity_FindChildByDefType(local, 1, 0) @0x49ba38]
+hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame);
+
 // The breath bar's facts for THIS client (hud::HudFrameState breath_samples /
 // breath_time / spawn_success_gate; the label is the embedder's gametext).
 // The samples ride every role's replica (the listen host's loopback included);
@@ -81,6 +146,40 @@ struct BreathBarFacts {
 	bool spawn_success_gate = false;
 };
 BreathBarFacts breath_bar_facts(const RoleView &view);
+
+// THE HUD'S ROLE FACTS, one read per display frame: the breath bar's, the MP
+// session lines' (hud::HudSessionState — its gametext strings are the
+// embedder's hud_session_text) and the HUDLS slot bar's per-category scan with
+// each category's first def's hud_loadout_select texture name (the device
+// loads it). Every field cites its retail global at the fill.
+struct HudRoleFacts {
+	BreathBarFacts breath;
+	hud::HudSessionState session;
+	// The two squad order lines the role's replica folded from S2C 0x72.
+	std::array<std::string, 2> squad_orders;
+	std::array<world::WeaponSlotBarCategory, 10> slot_bar{};
+	std::array<std::string, 10> slot_bar_icons;
+	// The F9 / F10 voice-macro menus the caller asked for (their open words;
+	// the frame compiler applies the death-screen gate): each row's key is
+	// the local player's voice-macro name (flags 0xC for the emotes, 6 for the
+	// radio) and its text the vmacros macrotext entry, the key itself on a
+	// miss; the titles are macrotext EMOTES_TITLE / RADIO_TITLE, else the
+	// literal fallbacks. No local player resolves nothing.
+	// [orig: HUD_DrawEmotesMenu @0x5bff00 (sub_5BFB00(buf, i, 0xC, local)
+	//  @0x5bff9e, the title @0x5bff25..0x5bff57); HUD_DrawRadioTitleMenu
+	//  @0x5bfb90 (sub_5BFB00(buf, i, 6, local) @0x5bfc2e, the title
+	//  @0x5bfbb5..0x5bfbe7); the dword_24C1930 & 0x10000 arms are dead: no
+	//  writer sets that bit]
+	hud::HudVoiceMacroMenuState emotes_menu;
+	hud::HudVoiceMacroMenuState radio_menu;
+	// The connection indicators' feed (hud/net_quality_indicators.h): the
+	// session gate, the NovaWorld icon gate and the runtime's g_NetQuality.
+	hud::HudNetQualityState net_quality;
+};
+// `voice_menus`: bit 0 asks for the emotes menu, bit 1 for the radio menu.
+inline constexpr uint32_t kHudVoiceMenuEmotes = 1u;
+inline constexpr uint32_t kHudVoiceMenuRadio = 2u;
+HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus = 0);
 
 // The stat.mnu RESULTLIST rows the tab filter admits (0 all, 1 team 2, 2 team
 // 1): the roster joined to the frozen board, the local row resolved from the
@@ -132,6 +231,41 @@ bool joiner_in_match_ready(const RoleView &view, bool auto_deploy);
 // of the populate has no secured gate, so the list builder
 // (world/deploy_screen_feed.h) decides which rows list and where the
 // occupants land. A joiner's feed: false (nothing emitted) on every other role.
+// THE MINIMAP BANKS' SPAWN ZONES: the 1160 overlay slots in address order
+// (transient, persistent, special), each whose handle is set and whose flag
+// byte lacks 0x40, resolved to its pool entity and kept when the entity's def
+// carries the spawn-zone attribute 0x40000 — the zone walk of the DEATH list,
+// the DEATH map and the CMAP LOCATION combo. The banks are the replica's (S2C
+// 0x40 on every client, the listen host's loopback included; the bare local
+// role has none, and neither does a dedicated host). A zone reaches a bank
+// only when the server's overlay pass sends it, in first-arrival order.
+// [orig: UI_UpdateDeathScreenContent @0x553b53..0x553c4e / @0x553c5f..0x553de3,
+//  MapOverlay_DrawView @0x5a5a4d, CMap_OnOpenPopulate @0x5495b0..0x549676 — the
+//  walk from word_28E5620 (transient 328 @0x28E5620, persistent 328
+//  @0x28E7F20, special 504 @0x28EA820, 32-byte slots); the 0x40 writers
+//  MapOverlay_AllocSlot @0x5be970 (only local people and the laser probe,
+//  never a zone: Server_BuildOverlayStateForPlayer @0x517fc0 sends the zones
+//  with `dead | 0x10`)]
+void banked_spawn_zones(const RoleView &view, std::vector<world::EntityHandle> &out);
+
+// The CMAP tables' roster snapshot: the bound connection slots in slot order
+// with their squad bytes and the entity's class, the local slot and team, the
+// death-screen latch and the session bit.
+// [orig: g_PlayerSlotTable[5] (PlayerSlotTable_RebuildLinkedLists links the
+//  active slots in index order); g_LocalPlayerEntity+0x154 / +0x162;
+//  g_DeathScreenActive; g_NapiNPCtx.is_in_session]
+bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out);
+
+// What the CMAP LOCATION combo lists besides My Position and the squad: the
+// placed-waypoint table's names (the entity's +244, "" for a free slot), the
+// banked spawn zones' SpawnZoneList indices, and the mission's location names
+// (the replica's 0x0F copy, else the authority's own).
+// [orig: CMap_OnOpenPopulate @0x549544..0x549575 (the table), @0x5495b0..0x549676
+//  (the banks), @0x549682..0x5496ab (g_LocationNames @0xa2ed10 /
+//  g_LocationNameCount @0xa77644)]
+bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		menu::CommandMapLocations &out);
+
 bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		std::vector<world::DeployZoneRow> &out);
 
@@ -145,6 +279,28 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 // False without a kernel, a replica runtime or a local player.
 bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zones,
 		int local_team, std::vector<hud::HudLfpZone> &out);
+
+// The DEATH MAP window's world facts (hud_map_view.h DeathMapFacts): the
+// local player (position, team +354), the deploy-overlay latch, the
+// spawn-target hold, the game type, the local player's wave zone, the
+// spawn-zone AABB, and one row per registered spawn zone — its team (the
+// zone-timer image's owner once a 0x6F value has landed, else the entity's),
+// the ready verdict of the timer entry the letter gate reads (no entry, or
+// DWORD 9 >= DWORD 10 — the same image collect_lfp_zones reads), the label
+// anchor and the 0x6E queued count / countdown. False without a kernel.
+// [orig: MapOverlay_DrawView @0x5a58e0 — CProximityList_FindEntryById
+//  @0x5a5b6e, EntryById[9] >= [10] @0x5a5b77; the anchor sub_59C300
+//  @0x59c300; entity+550/+548 from the 0x6E fold @0x429880]
+bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		hud::DeathMapFacts &out);
+
+// Whether the DEATH screen's shroud shows this main frame (world/
+// deploy_screen_feed.h death_shroud_revealed): the role's deploy-overlay
+// latch, or more than 240 logic ticks since the local player view's death
+// stamp. False without a kernel.
+// [orig: DeathScreen_UpdateShroudReveal @0x554737..0x554752 —
+//  g_DeployScreenActive, g_CurrentTick - g_CameraLerpStartTick]
+bool death_shroud_revealed(const RoleView &view);
 
 // THE PER-DRAWN-ENTITY LIGHTING FEED (D-RLIT-3 plus the interior lerp).
 // Retail pushes a render-state stack level around every drawn entity's
@@ -210,5 +366,18 @@ struct EntityLightingFeed {
 			const std::unordered_set<int32_t> &culled_wire, int64_t layout_revision,
 			std::vector<EntityLightingChange> &out);
 };
+
+// One HUD frame of the spinmap's bit-10 radar legs for the role: the local
+// player's contact update, lock tone, snapshot and missile-count clear on the
+// logic tick (world::radar_hud_frame; `pass_runs` / `map_site` the overlay's
+// gate bits, `menu_paused` the in-game menu pause), then the retained map
+// banks' MapOverlay_UpdateTimers with the tick count the update aged by —
+// the banks age only when the HUD pass's radar update runs, as in retail.
+// The session runs it once per frame (Session's radar step), whatever the
+// embedder's HUD does.
+// [orig: HUD_RenderAllOverlays @0x5a817d / HUD_DrawMapOverlay @0x5a791c ->
+//  Radar_UpdateContacts @0x59a7e0 -> MapOverlay_UpdateTimers @0x59a9ce]
+void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,
+		bool map_site, bool menu_paused, hud::HudMinimapRadar &out);
 
 } // namespace opennova::inmatch

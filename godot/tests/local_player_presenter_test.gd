@@ -71,6 +71,20 @@ func _hold(keycode: Key, pressed: bool) -> void:
 	Input.flush_buffered_events()
 
 
+# One press of a polled binding row over the live key state (Ctrl held for a
+# modified row), a frame down and a frame up.
+func _tap_row(world: GameWorld, presenter: LocalPlayerPresenter, camera: Camera3D,
+		keycode: Key, ctrl: bool = false) -> void:
+	if ctrl:
+		_hold(KEY_CTRL, true)
+	_hold(keycode, true)
+	_frame(world, presenter, camera, 1)
+	_hold(keycode, false)
+	if ctrl:
+		_hold(KEY_CTRL, false)
+	_frame(world, presenter, camera, 1)
+
+
 # --- real-world staging -------------------------------------------------------
 # The minimal fixture plus the committed model/anim fixtures arranged under the
 # names the production resolvers ask for: a small authored weapon table
@@ -260,16 +274,6 @@ func _frame_until(world: GameWorld, presenter: LocalPlayerPresenter, camera: Cam
 		if bool(predicate.call()):
 			return true
 	return false
-
-
-func _key(keycode: Key, physical: bool = false) -> InputEventKey:
-	var key := InputEventKey.new()
-	if physical:
-		key.physical_keycode = keycode
-	else:
-		key.keycode = keycode
-	key.pressed = true
-	return key
 
 
 func _look(presenter: LocalPlayerPresenter, relative: Vector2, active: bool = true) -> bool:
@@ -569,35 +573,45 @@ func test_nvg_composite_renders_the_world_into_the_nvg_raster() -> void:
 	assert_false(camera.get_viewport().disable_3d)
 
 
-func test_binoculars_nvg_and_gain_keys_route_retail_actions() -> void:
+# The binocular, NVG and NVG-gain rows over the live binding table: B and N
+# bare, the gain rows behind their Ctrl modifier, so a bare '=' stays the
+# radarin row alone [orig: rows 103/104/45/46 -> dispatch 26 / 41 / 56 / 57].
+func test_binoculars_nvg_and_gain_rows_route_retail_actions() -> void:
 	var world := _load_player_world()
 	var camera := Camera3D.new()
 	add_child_autofree(camera)
 	var presenter := _attach_presenter(world, camera)
 	await get_tree().process_frame
 
-	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	_tap_row(world, presenter, camera, KEY_B)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return world.local_player_view().binoculars_view_active),
 			"B raises the binocular view through the sim's own ease")
-	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	_tap_row(world, presenter, camera, KEY_B)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return not world.local_player_view().binoculars_view_active),
 			"a second B lowers the binoculars again")
 
-	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
+	_tap_row(world, presenter, camera, KEY_N)
 	_frame(world, presenter, camera, 2)
 	var view := world.local_player_view()
 	assert_true(view.nvg_active, "N toggles the sim's NVG state")
 	assert_eq(view.nvg_gain, 0, "NVG starts at the base gain step")
-	assert_true(presenter.handle_key_input(_key(KEY_EQUAL, true), true))
-	_frame(world, presenter, camera, 2)
-	assert_eq(world.local_player_view().nvg_gain, 1, "'+' steps the gain up")
-	assert_true(presenter.handle_key_input(_key(KEY_MINUS, true), true))
-	assert_true(presenter.handle_key_input(_key(KEY_MINUS, true), true))
-	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var zoom := sim.get_hud_radar_zoom_q16()
+	_tap_row(world, presenter, camera, KEY_EQUAL)
+	assert_eq(world.local_player_view().nvg_gain, 0, "a bare '=' leaves the NVG gain")
+	assert_lt(sim.get_hud_radar_zoom_q16(), zoom, "a bare '=' is radarin")
+	zoom = sim.get_hud_radar_zoom_q16()
+	_tap_row(world, presenter, camera, KEY_EQUAL, true)
+	_frame(world, presenter, camera, 1)
+	assert_eq(world.local_player_view().nvg_gain, 1, "Ctrl+'=' steps the gain up")
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "Ctrl+'=' does not zoom the radar")
+	_tap_row(world, presenter, camera, KEY_MINUS, true)
+	_tap_row(world, presenter, camera, KEY_MINUS, true)
+	_frame(world, presenter, camera, 1)
 	assert_eq(world.local_player_view().nvg_gain, 0,
-			"'-' steps the gain down and the sim clamps at the floor")
+			"Ctrl+'-' steps the gain down and the sim clamps at the floor")
 
 
 # The local avatar's goggles (retail draw 3) follow the body's first-person rule:
@@ -623,8 +637,8 @@ func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
 		assert_true(owner == avatar or (owner != null and owner.get_parent() == avatar),
 				"the held weapon's RLOD owner is the avatar's first submit part")
 
-	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
-	_frame(world, presenter, camera, 2)
+	_tap_row(world, presenter, camera, KEY_N)
+	_frame(world, presenter, camera, 1)
 	var overlays: PersonOverlayModels = presenter.person_overlays()
 	var nvg := overlays.get_node(PersonOverlayModels.KIND_NVG,
 			PersonOverlayModels.PASS_FIRST) as ObjectModel
@@ -644,8 +658,8 @@ func test_local_avatar_overlays_follow_the_first_person_rule() -> void:
 	for vi in _visual_instances(nvg):
 		tp_mask |= (vi as VisualInstance3D).layers
 	assert_ne(tp_mask & Water.VISUAL_LAYER_WORLD, 0, "third person draws the goggles")
-	assert_true(presenter.handle_key_input(_key(KEY_N, true), true))
-	_frame(world, presenter, camera, 2)
+	_tap_row(world, presenter, camera, KEY_N)
+	_frame(world, presenter, camera, 1)
 	assert_false(nvg.visible, "removed goggles hide")
 
 
@@ -714,6 +728,52 @@ func test_use_hold_swallows_digit_rows_and_ctrl_digit_claims_them() -> void:
 	_frame(world, presenter, camera, 2)
 
 
+# The router's menu arms: while the HUD's F9 Emotes menu is open a digit is its
+# pick, closing the menu and reaching no row (radarout rebound to 7 stays put);
+# once the menu is closed the same 7 fires the row again.
+# [orig: Input_HandleSpecialKeys @0x49c731..0x49c77c; the consumed key skips
+#  the binding scan, Input_ProcessKeyboardEvents @0x49d2fb]
+func test_open_voice_menu_takes_the_digit_before_the_rows() -> void:
+	var world := _load_player_world()
+	var camera := Camera3D.new()
+	add_child_autofree(camera)
+	var model := ControlsModel.new()
+	var radar_out := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "Radar Zoom Out":
+			radar_out = model.action_index_for_row(i)
+	assert_gte(radar_out, 0, "the radarout row is in the table")
+	assert_true(model.assign_godot_key(radar_out, KEY_7, false), "radarout takes 7 as its second key")
+	var presenter := LocalPlayerPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, camera, null, model)
+	presenter.set_input_override(_move_intent())
+	var toggles := HudToggles.new()
+	presenter.set_hud_toggles(toggles)
+	await get_tree().process_frame
+	_frame(world, presenter, camera, 2)
+	var sim := world.get_sim()
+	var zoom := sim.get_hud_radar_zoom_q16()
+	# F9's row opens the menu (the HUD presenter's poll, here by hand).
+	toggles.poll(1 << HudToggles.ROW_AUDIO_EMOTE, false, false, true, false, false)
+	toggles.poll(0, false, false, true, false, false)
+	assert_true(toggles.is_emotes_menu_open(), "the emotes menu is open")
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_false(toggles.is_emotes_menu_open(), "the digit picks and closes the menu")
+	assert_eq(sim.get_hud_radar_zoom_q16(), zoom, "the picked digit reaches no row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+
+	_hold(KEY_7, true)
+	_frame(world, presenter, camera, 2)
+	assert_gt(sim.get_hud_radar_zoom_q16(), zoom, "with the menu closed the 7 fires the row")
+	_hold(KEY_7, false)
+	_frame(world, presenter, camera, 2)
+
+
 # --- the camera cluster -------------------------------------------------------
 
 
@@ -772,8 +832,6 @@ func test_camera_stamps_the_sim_composed_pose_and_policy_fov() -> void:
 	# the player.
 	var player_pos: Vector3 = sim.get_local_player_position()
 	var fp_distance := (camera.global_position - player_pos).length()
-	assert_false(presenter.handle_key_input(_key(KEY_F4), true),
-			"F4 is not a shell camera key")
 	assert_false(presenter.is_third_person(), "on foot the chase preference stays first person")
 	presenter.set_debug_third_person(true)
 	assert_true(presenter.is_third_person(), "the debug override resolves third person on foot")
@@ -1158,7 +1216,7 @@ func test_viewmodel_ctrl_registers_follow_visibility_and_team() -> void:
 			"returning to first person re-runs the CTRL writers")
 
 	# The binocular card path suppresses the FP model submit entirely.
-	assert_true(presenter.handle_key_input(_key(KEY_B, true), true))
+	_tap_row(world, presenter, camera, KEY_B)
 	assert_true(_frame_until(world, presenter, camera, func() -> bool:
 		return world.local_player_view().binoculars_view_active))
 	_frame(world, presenter, camera, 1)

@@ -313,6 +313,12 @@ void MenuRuntime::replay_state_() {
 					state->scroll_range.value);
 		if (state->has_selected_set) frame_->set_widget_selected_set(index, state->selected_set);
 		if (state->has_table_rows) frame_->set_widget_table_rows(index, state->table_rows);
+		if (state->has_clip)
+			frame_->set_widget_clip_rect(index, state->clip_enabled, state->clip_left,
+					state->clip_top, state->clip_right, state->clip_bottom);
+		if (state->has_rect)
+			frame_->set_widget_rect(index, state->rect_left, state->rect_top, state->rect_right,
+					state->rect_bottom);
 	}
 }
 
@@ -426,6 +432,30 @@ void MenuRuntime::set_widget_text(int id, const std::string &text) {
 	if (index >= 0) frame_->set_widget_text(index, text);
 }
 
+void MenuRuntime::set_widget_rect(int id, int left, int top, int right, int bottom) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	state.has_rect = true;
+	state.rect_left = left;
+	state.rect_top = top;
+	state.rect_right = right;
+	state.rect_bottom = bottom;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_rect(index, left, top, right, bottom);
+}
+
+void MenuRuntime::set_widget_clip_rect(int id, bool enabled, int left, int top, int right,
+		int bottom) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	state.has_clip = true;
+	state.clip_enabled = enabled;
+	state.clip_left = left;
+	state.clip_top = top;
+	state.clip_right = right;
+	state.clip_bottom = bottom;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_clip_rect(index, enabled, left, top, right, bottom);
+}
+
 std::string MenuRuntime::get_widget_text(int id) const {
 	const int index = frame_index(id);
 	if (index >= 0) return frame_->get_widget_text(index);
@@ -486,6 +516,11 @@ std::string MenuRuntime::item_text(int id, int row) const {
 	if (items == nullptr || row < 0 || row >= static_cast<int>(items->items.size()))
 		return std::string();
 	return items->items[static_cast<size_t>(row)].text;
+}
+
+std::string MenuRuntime::item_display_text(int id, int row) const {
+	const int index = frame_index(id);
+	return index >= 0 && frame_ != nullptr ? frame_->item_display_text(index, row) : std::string();
 }
 
 std::string MenuRuntime::item_value(int id, int row) const {
@@ -593,33 +628,66 @@ bool MenuRuntime::get_widget_scroll_range(int id, MenuScrollRangeState &out) con
 
 // ---- tables -----------------------------------------------------------------
 
+bool MenuRuntime::table_multiselect_(int id) const {
+	const mnu::Window *w = index_.window(id);
+	return w != nullptr && w->items.multiselect;
+}
+
+// The COLUMN COUNT the row operations bound (1 without an authored count of
+// 1 or more) [orig: resize_column_count @0x63f6c0].
+int MenuRuntime::table_column_count_(int id) const {
+	const mnu::Window *w = index_.window(id);
+	if (w == nullptr) return 0;
+	const mnu::TableColumn &column = w->table_data.column;
+	return column.has_count && column.count >= 1 ? column.count : 1;
+}
+
 void MenuRuntime::table_add_row(int id, const std::vector<std::string> &cells) {
 	MenuWidgetRuntimeState &state = state_of_(id);
-	state.table_rows.push_back(cells);
+	MenuTableRow row;
+	row.cells = cells;
+	state.table_rows.push_back(std::move(row));
 	state.has_table_rows = true;
 	push_table_rows_(id);
+}
+
+int MenuRuntime::table_insert_row(int id, const std::string &text0, int32_t value0,
+		uint32_t flags, int insert_index) {
+	if (widget_kind_of(id) != kKindTable) return -1;
+	MenuWidgetRuntimeState &state = state_of_(id);
+	const int at = menu::table_insert_row(state.table_rows, text0, value0, flags, insert_index);
+	state.has_table_rows = true;
+	push_table_rows_(id);
+	return at;
+}
+
+void MenuRuntime::table_set_cell_text(int id, int row, int col, const std::string &text) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (menu::table_set_cell_text(state.table_rows, row, col, table_column_count_(id), text))
+		push_table_rows_(id);
+}
+
+void MenuRuntime::table_set_cell_value(int id, int row, int col, int32_t value) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (menu::table_set_cell_value(state.table_rows, row, col, table_column_count_(id), value))
+		push_table_rows_(id);
+}
+
+int32_t MenuRuntime::table_cell_value(int id, int row, int col) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	return state != nullptr ? menu::table_cell_value(state->table_rows, row, col) : 0;
 }
 
 void MenuRuntime::table_remove_row(int id, int row) {
 	MenuWidgetRuntimeState &state = state_of_(id);
-	if (row < 0 || row >= static_cast<int>(state.table_rows.size())) return;
-	state.table_rows.erase(state.table_rows.begin() + row);
-	std::vector<int> reindexed;
-	for (int r : state.table_selected) {
-		if (r < row)
-			reindexed.push_back(r);
-		else if (r > row)
-			reindexed.push_back(r - 1);
-	}
-	state.table_selected = std::move(reindexed);
-	push_table_rows_(id);
-}
-
-void MenuRuntime::table_clear_rows(int id) {
-	MenuWidgetRuntimeState &state = state_of_(id);
-	state.table_rows.clear();
+	if (row != -1 && (row < 0 || row >= static_cast<int>(state.table_rows.size()))) return;
+	menu::table_remove_row(state.table_rows, row);
 	state.has_table_rows = true;
-	state.table_selected.clear();
+	// The first visible row clamps to the count [orig: @0x641c0b..0x641c1a].
+	if (state.scroll_row > static_cast<int>(state.table_rows.size())) {
+		state.scroll_row = static_cast<int>(state.table_rows.size());
+		state.has_scroll_row = true;
+	}
 	push_table_rows_(id);
 }
 
@@ -632,22 +700,45 @@ std::string MenuRuntime::table_cell_text(int id, int row, int col) const {
 	const MenuWidgetRuntimeState *state = saved_state_(id);
 	if (state == nullptr || row < 0 || row >= static_cast<int>(state->table_rows.size()))
 		return std::string();
-	const std::vector<std::string> &cells = state->table_rows[static_cast<size_t>(row)];
-	return col >= 0 && col < static_cast<int>(cells.size()) ? cells[static_cast<size_t>(col)]
-															  : std::string();
+	return state->table_rows[static_cast<size_t>(row)].cell(col);
+}
+
+int32_t MenuRuntime::table_row_state(int id, int row) const {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	if (state == nullptr || row < 0 || row >= static_cast<int>(state->table_rows.size()))
+		return kTableRowDefault;
+	return state->table_rows[static_cast<size_t>(row)].state;
+}
+
+void MenuRuntime::table_set_row_selected(int id, int row, bool selected) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (menu::table_set_row_selected(state.table_rows, row, selected, table_multiselect_(id)))
+		push_table_rows_(id);
+}
+
+void MenuRuntime::table_set_row_color(int id, int row, bool enable, uint32_t color) {
+	MenuWidgetRuntimeState &state = state_of_(id);
+	menu::table_set_row_color(state.table_rows, row, enable, color);
+	push_table_rows_(id);
 }
 
 std::vector<int> MenuRuntime::table_selected_rows(int id) const {
+	std::vector<int> out;
 	const MenuWidgetRuntimeState *state = saved_state_(id);
-	return state != nullptr ? state->table_selected : std::vector<int>();
+	if (state == nullptr) return out;
+	for (size_t r = 0; r < state->table_rows.size(); ++r)
+		if (state->table_rows[r].state == kTableRowSelected) out.push_back(static_cast<int>(r));
+	return out;
 }
 
 void MenuRuntime::table_select_row(int id, int row, bool additive) {
 	MenuWidgetRuntimeState &state = state_of_(id);
-	std::vector<int> selected = additive ? state.table_selected : std::vector<int>();
-	toggle_row(selected, row);
-	state.table_selected = std::move(selected);
-	push_table_selection_(id);
+	if (row < 0 || row >= static_cast<int>(state.table_rows.size())) return;
+	if (additive)
+		menu::table_click_select(state.table_rows, row, true);
+	else
+		menu::table_set_row_selected(state.table_rows, row, true, false);
+	push_table_rows_(id);
 }
 
 void MenuRuntime::push_table_rows_(int id) {
@@ -655,16 +746,7 @@ void MenuRuntime::push_table_rows_(int id) {
 	const MenuWidgetRuntimeState *state = saved_state_(id);
 	if (index < 0 || state == nullptr) return;
 	frame_->set_widget_table_rows(index, state->table_rows);
-	push_table_selection_(id);
-}
-
-void MenuRuntime::push_table_selection_(int id) {
-	const int index = frame_index(id);
-	const MenuWidgetRuntimeState *state = saved_state_(id);
-	if (index < 0 || state == nullptr) return;
-	frame_->set_widget_selected_set(index, state->table_selected);
-	const int first = state->table_selected.empty() ? -1 : state->table_selected.front();
-	frame_->set_widget_selection(index, first, -1, state->scroll_row);
+	frame_->set_widget_selection(index, -1, -1, state->scroll_row);
 }
 
 // ---- activation / actions ---------------------------------------------------
@@ -979,8 +1061,10 @@ void MenuRuntime::activate_widget_(int id, int index, float x, float y, uint32_t
 			focus_edit(id);
 			break;
 		case kKindTable: {
-			const int row = frame_->table_row_at(index, x, y);
-			if (row >= 0) table_click_(id, row, now_ms, ctrl_down);
+			int row = -1;
+			int column = -1;
+			if (frame_->table_hit(index, x, y, &row, &column) && row >= 0)
+				table_click_(id, row, column, now_ms);
 			break;
 		}
 		default: {
@@ -1025,12 +1109,30 @@ void MenuRuntime::list_click_(int id, int kind, int row, uint32_t now_ms, bool c
 	}
 }
 
-void MenuRuntime::table_click_(int id, int row, uint32_t now_ms, bool ctrl_down) {
+// The table's own press on a data row: a locked row takes nothing; the
+// selection write (single: that row alone; MULTISELECT: toggled), then the
+// cell event the registered handlers read, carrying the row's new state and
+// the column's cell value. The header's click sorts the columns in retail
+// (CTableWnd_SortByColumn), which is not ported: the shipped header tables
+// hold rows the companions address by index.
+// [orig: CTableWnd_HandleNamedEvent @0x642400 — the L-down / double-click arm
+//  @0x6424d4..0x6426d4 (0x5000001 / 0x5000002 then 0x8000001)]
+void MenuRuntime::table_click_(int id, int row, int column, uint32_t now_ms) {
 	const bool is_double = register_click_(id, row, now_ms);
-	const mnu::Window *w = index_.window(id);
-	const bool multiselect = w != nullptr && w->items.multiselect;
-	table_select_row(id, row, multiselect && ctrl_down);
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (!menu::table_click_select(state.table_rows, row, table_multiselect_(id))) return;
+	push_table_rows_(id);
 	play_widget_state_sound(id, "SELECTED");
+	MenuEvent cell;
+	cell.kind = MenuEvent::Kind::TableCellClicked;
+	cell.id = id;
+	cell.text = widget_name_of(id);
+	cell.value = row;
+	cell.column = column;
+	cell.state = table_row_state(id, row);
+	cell.cell_value = column >= 0 ? table_cell_value(id, row, column) : 0;
+	cell.flag = is_double;
+	emit_(cell);
 	if (is_double) {
 		MenuEvent e;
 		e.kind = MenuEvent::Kind::ListActivated;
@@ -1135,11 +1237,17 @@ bool MenuRuntime::route_edit_key_(const MenuKeyInput &key) {
 	if (vk != 0) {
 		const int result = frame_->edit_key(index, vk, key.shift);
 		if (result == static_cast<int>(EditKeyResult::kCommit)) {
-			// Enter commits: the value fires and focus releases (menu_edit.h
-			// EditKeyResult::kCommit — clears g_UIFocusWnd and fires the commit
-			// event 0x7000002).
+			// Enter commits: focus releases, then the edit's own callback takes
+			// event 0x7000002 (the embedder's EditCommitted).
+			// [orig: CEditWnd_HandleKeyEvent @0x6623a0 — g_UIFocusWnd = 0
+			//  @0x66249f, the widget event 0x7000002 @0x6624e3]
 			clear_edit_focus_();
 			play_widget_state_sound(id, "SELECTED");
+			MenuEvent committed;
+			committed.kind = MenuEvent::Kind::EditCommitted;
+			committed.id = id;
+			committed.text = widget_name_of(id);
+			emit_(committed);
 		} else if (result == static_cast<int>(EditKeyResult::kChanged)) {
 			emit_edit_changed(id);
 		}

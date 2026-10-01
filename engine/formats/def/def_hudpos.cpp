@@ -309,7 +309,8 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parse_pos_aligned(vals, nvals, hud->wpd_info);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "zoneinfo", 8)) {
-            parse_pos_aligned(vals, nvals, hud->zone_info);
+            /* x, y, alignment word [orig: @0x5A0642..0x5A0676] */
+            parse_pos_align3(vals, nvals, hud->zone_info);
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "exppoints", 9)) {
             parse_pos_aligned(vals, nvals, hud->exp_points);
@@ -342,6 +343,42 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "breathtime", 10)) {
             parse_pos_align3(vals, nvals, hud->breath_time);
+            parsed = 1;
+        }
+        /* HUDLS — the weapon slot bar (def.h DefHudPosDef carries the field
+           map). [orig: HUD_ParseHudposToken @0x59FE41..0x59FF9C] */
+        else if (lower_starts_with(lower, ll, "hudls_system", 12)) {
+            if (nvals >= 1) hud->hudls_system = parse_int_n(vals[0].s, vals[0].len); /* @0x59FE66 */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_bracket", 13)) {
+            if (nvals >= 1)
+                safe_copy(hud->hudls_bracket, sizeof(hud->hudls_bracket), vals[0].s,
+                          vals[0].len); /* the strcpy @0x59FE90 */
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_keyofst", 13)) {
+            for (int i = 0; i < 2 && i < nvals; ++i) /* @0x59FEC7 / @0x59FEDF */
+                hud->hudls_keyofst[i] = parse_int_n(vals[i].s, vals[i].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_moreav", 12)) {
+            if (nvals >= 1)
+                safe_copy(hud->hudls_moreav, sizeof(hud->hudls_moreav), vals[0].s,
+                          vals[0].len); /* the strcpy @0x59FF05 */
+            /* the ftol'd offsets keep their LOW BYTE [orig: `mov byte_2723733, al`
+               @0x59FF21, `mov byte_2723734, al` @0x59FF39] */
+            for (int i = 0; i < 2 && i + 1 < nvals; ++i)
+                hud->hudls_moreav_off[i] =
+                    (int8_t)(uint8_t)parse_int_n(vals[i + 1].s, vals[i + 1].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "hudls_slot", 10)) {
+            if (nvals >= 1) {
+                const int n = parse_int_n(vals[0].s, vals[0].len);
+                /* n outside 1..10 authors nothing [orig: `sub edi,1; cmp edi,9; ja`
+                   @0x59FF6A..0x59FF70] */
+                if ((unsigned)(n - 1) <= 9u) {
+                    if (nvals >= 2) hud->hudls_slot[n - 1][0] = parse_int_n(vals[1].s, vals[1].len);
+                    if (nvals >= 3) hud->hudls_slot[n - 1][1] = parse_int_n(vals[2].s, vals[2].len);
+                }
+            }
             parsed = 1;
         }
         /* XY positions */
@@ -379,6 +416,18 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
         } else if (lower_starts_with(lower, ll, "cargopos", 8)) {
             for (int i = 0; i < 2 && i < nvals; ++i)
                 hud->cargo_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "pausedpos", 9)) {
+            /* [orig: @0x59FC8D..0x59FCC8 -> dword_272360C / dword_2723610] */
+            for (int i = 0; i < 2 && i < nvals; ++i)
+                hud->paused_pos[i] = parse_int_n(vals[i].s, vals[i].len);
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "networkindicator", 16)) {
+            /* [orig: @0x59F981 _stricmp "NETWORKINDICATOR", six atof/ftol stores
+               @0x59F9A8..0x59FA0C -> g_NetQuality +0x40..+0x54] */
+            for (int i = 0; i < 6 && i < nvals; ++i)
+                hud->network_indicator[i] = parse_int_n(vals[i].s, vals[i].len);
+            hud->network_indicator_present = 1;
             parsed = 1;
         } else if (lower_starts_with(lower, ll, "roomtkpos", 9) && !lower_starts_with(lower, ll, "roomtktxtpos", 12)) {
             for (int i = 0; i < 2 && i < nvals; ++i)
@@ -548,6 +597,9 @@ static int parse_hudpos_buf(const char *buf, size_t file_len, DefHudPosFile *out
 
 int def_parse_hudpos(const char *path, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
+    /* HUDORDERS defaults to -1 / -1, the globals' static value
+       [orig: dword_2723D84 / dword_2723D88] */
+    out->hud.orders[0] = out->hud.orders[1] = -1;
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
@@ -558,6 +610,9 @@ int def_parse_hudpos(const char *path, DefHudPosFile *out) {
 
 int def_parse_hudpos_memory(const uint8_t *data, size_t size, DefHudPosFile *out) {
     memset(out, 0, sizeof(*out));
+    /* HUDORDERS defaults to -1 / -1, the globals' static value
+       [orig: dword_2723D84 / dword_2723D88] */
+    out->hud.orders[0] = out->hud.orders[1] = -1;
     if (!data) return -1;
     return parse_hudpos_buf((const char *)data, size, out);
 }

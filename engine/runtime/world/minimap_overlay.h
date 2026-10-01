@@ -10,6 +10,7 @@
 namespace opennova::world {
 
 struct Entity;
+class World;
 
 struct MinimapOverlayClassification {
 	uint16_t handle = 0;
@@ -21,7 +22,9 @@ struct MinimapOverlayClassification {
 };
 
 uint8_t minimap_team_color(uint8_t team);
-MinimapOverlayClassification classify_minimap_overlay(const Entity &entity);
+// `world` resolves the EWEAP groundEntity parent (null skips that gate).
+MinimapOverlayClassification classify_minimap_overlay(const Entity &entity,
+		const World *world);
 bool minimap_overlay_entity_enabled(const Entity &entity);
 
 // The client-side blip DRAW policy — the per-def-class size/floor/rotation

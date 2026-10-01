@@ -554,6 +554,10 @@ void LocalPlayer::tick_view() {
 }
 
 void LocalPlayer::reset_for_new_round() {
+    // The overlay-buffer reset is unconditional in retail's round init; the
+    // local-player gate below covers only the view state
+    // [orig: Game_InitNewRound @0x4227a7 -> HUD_ResetAllOverlayBuffers @0x59dd40].
+    w::radar_reset(radar);
     Entity *local = player();
     if (local == nullptr) return;
     // [orig: Game_InitNewRound @0x422740; Camera_ResetToLocalPlayer @0x4a3d30]
@@ -608,6 +612,24 @@ void LocalPlayer::reset_local_player_input(int32_t look_heading_bam) {
 	stance_latch_ = 0;
 	look_accum_x_ = look_accum_y_ = 0.0f;
 	input.look_heading = look_heading_bam;
+}
+
+
+void LocalPlayer::latch_attack_defend_role(uint32_t game_type) {
+	// [orig: sub_524110 @0x524110 — cleared first @0x52411A]
+	attack_defend_role = 0;
+	if (game_type != 0x10002u) return; // [orig: `cmp g_GameType, 10002h` @0x524110]
+	const w::Entity *local = player();
+	if (local == nullptr) return;
+	const World &world = world_;
+	for (const int pool : {2, 1}) {
+		for (size_t i = 0; i < world.registry.pool_capacity(pool); ++i) {
+			const w::Entity *e = world.registry.get(w::EntityHandle::make(pool, static_cast<int>(i)));
+			if (e == nullptr || !e->has_item_def || (e->item_attrib & 0x8000u) == 0u) continue;
+			attack_defend_role = e->team != local->team ? 2u : 1u;
+			return;
+		}
+	}
 }
 
 } // namespace opennova::world

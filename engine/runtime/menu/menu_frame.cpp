@@ -225,8 +225,11 @@ void MenuFrameCompiler::build_state_passes(
 			pass.has_image_height = ap.has_height;
 			pass.image_height = ap.height;
 		}
-		// type="cursor" is the shell-owned custom hook (the CURSOR=4 bit ->
-		// the vtable+28 event); the compiler emits nothing for it.
+		else if (iequals(ap.type, "custom")) {
+			// CUSTOM=4: the event-1 hook (the registered handler draws; the
+			// compiler emits nothing and marks the slot) [orig: @ 0x64839c..0x6483ae].
+			pass.has_custom = true;
+		}
 	}
 }
 
@@ -395,6 +398,7 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 		};
 		build_items(w.items.items, node.items);
 		build_items(w.list_box.items.items, node.popup_items);
+		if (w.type == mnu::WindowType::Table) build_table_columns_(node);
 		nodes_[static_cast<size_t>(index)] = std::move(node);
 	}
 	for (const mnu::Window &child : w.children) {
@@ -449,6 +453,9 @@ int MenuFrameCompiler::appearance_state_with_fallback(const WidgetNode &node,
 // [orig: the parse tail @ 0x648120 -> CStaticWnd_AdjustRectToTextSize @ 0x6575f0].
 mnu::RectEdges MenuFrameCompiler::solve_rect(const WidgetNode &node,
 		const MenuWidgetState *ws) const {
+	// A moved widget keeps the rect it was given [orig: CWnd_SetRect
+	// @0x646560 — CopyRect into +0xD0].
+	if (ws != nullptr && ws->has_rect) return ws->rect;
 	const mnu::Window &w = *node.window;
 	int max_w = 0;
 	int max_h = 0;
@@ -1659,6 +1666,13 @@ bool MenuFrameCompiler::widget_rect(int index, const MenuFrameState &state,
 	return true;
 }
 
+bool MenuFrameCompiler::widget_local_rect(int index, const MenuFrameState &state,
+		mnu::RectEdges *out) const {
+	if (out == nullptr || index < 0 || index >= static_cast<int>(nodes_.size())) return false;
+	*out = solve_rect(nodes_[static_cast<size_t>(index)], state_for(state, index));
+	return true;
+}
+
 int MenuFrameCompiler::item_count(int index, const MenuFrameState &state) const {
 	if (index < 0 || index >= static_cast<int>(nodes_.size())) {
 		return 0;
@@ -2035,6 +2049,9 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 	const bool checked =
 			ws != nullptr && ws->has_checked ? ws->checked : w.checked;
 	++draw_list_.widgets_drawn;
+	const int32_t clip_first = ws != nullptr && ws->has_clip
+			? static_cast<int32_t>(draw_list_.draw_ops.size())
+			: -1;
 	switch (w.type) {
 		case mnu::WindowType::Static:
 		case mnu::WindowType::Label:
@@ -2217,21 +2234,28 @@ int MenuFrameCompiler::walk_widget(int index, int origin_x, int origin_y,
 		}
 		default: {
 			// [orig: CUIElement_Draw @ 0x64a8a0 — appearance BEFORE frame
-			//  for generic containers; the RADIOEDIT interior stays deferred
-			//  (D-MNU-13)]
-			emit_appearance(node, rect, s,
-					appearance_state_with_fallback(node, pump));
+			//  for generic containers, the CUSTOM pass last among them; the
+			//  RADIOEDIT interior stays deferred (D-MNU-13)]
+			const int slot = appearance_state_with_fallback(node, pump);
+			emit_appearance(node, rect, s, slot);
+			mark_custom_slot_(index, node, slot, state);
 			if (w.draw_frame) {
 				emit_frame(node, rect, s);
 			}
 			break;
 		}
 	}
+	// The widget's own passes ran inside its clip viewport; the viewport is
+	// restored before the children draw [orig: CStaticWnd_Render @ 0x657b10 —
+	// CWnd_ApplyClipViewport @0x657b22, CWnd_RestoreViewport @0x657be8].
+	if (clip_first >= 0) clip_ops_(clip_first, ws->clip, s);
 	// Children in authored array order [orig: the forward child walk — later
 	// siblings paint over earlier ones].
 	for (size_t c = 0; c < w.children.size(); ++c) {
 		next = walk_widget(next, rect.left, rect.top, state, s);
 	}
+	if (index == state.mount_index && mount_split_ < 0)
+		mount_split_ = static_cast<int32_t>(draw_list_.draw_ops.size());
 	return next;
 }
 
@@ -2293,6 +2317,13 @@ void MenuFrameCompiler::emit_marquee(int index, const WidgetNode &node,
 	}
 }
 
+void MenuFrameCompiler::mark_custom_slot_(int index, const WidgetNode &node,
+		int appearance_slot, const MenuFrameState &state) {
+	if (index != state.custom_slot_index || appearance_slot < 0 || appearance_slot > 3) return;
+	if (!node.states[appearance_slot].has_custom) return;
+	draw_list_.custom_slot_op = static_cast<int32_t>(draw_list_.draw_ops.size());
+}
+
 const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 		float scale_x, float scale_y) {
 	draw_list_.quads.clear();
@@ -2302,6 +2333,7 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	draw_list_.font_runs.clear();
 	draw_list_.draw_ops.clear();
 	draw_list_.overlay_op_start = 0;
+	draw_list_.custom_slot_op = -1;
 	draw_list_.widgets_drawn = 0;
 	if (screen_ == nullptr || nodes_.empty()) {
 		return draw_list_;
@@ -2310,9 +2342,15 @@ const MenuDrawList &MenuFrameCompiler::compile(const MenuFrameState &state,
 	s.x = scale_x;
 	s.y = scale_y;
 	deferred_popups_.clear();
+	mount_split_ = -1;
 	walk_widget(0, 0, 0, state, s);
-	// Everything from here on is the menu-top overlay (popups, then cursor).
-	draw_list_.overlay_op_start = static_cast<int32_t>(draw_list_.draw_ops.size());
+	// Everything from here on is the menu-top overlay (popups, then cursor),
+	// and with a mounted widget everything after its subtree too.
+	draw_list_.overlay_op_start = mount_split_ >= 0
+			? mount_split_
+			: static_cast<int32_t>(draw_list_.draw_ops.size());
+	if (draw_list_.custom_slot_op >= 0 && draw_list_.custom_slot_op < draw_list_.overlay_op_start)
+		draw_list_.overlay_op_start = draw_list_.custom_slot_op;
 	// The open-dropdown overlay pass (D-MNU-12): popups collected during the
 	// walk paint after every widget, before the cursor.
 	for (int index : deferred_popups_) {

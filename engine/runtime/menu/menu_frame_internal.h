@@ -72,6 +72,10 @@ struct MenuFrameCompiler::WidgetNode {
 	ScrollbarVisual scrollbar;
 	ScrollbarVisual embedded_scrollbar;
 	ScrollbarVisual popup_scrollbar;
+	// TABLE: the column set-up and SPACING (menu_frame_table.cpp
+	// build_table_columns_).
+	std::vector<TableColumnSetup> table_columns;
+	int table_spacing = 0;
 };
 
 } // namespace opennova::menu

@@ -370,6 +370,20 @@ func test_crosshair_color_and_spread_use_shared_options_and_persist() -> void:
 			"the checkbox activation writes the shared owner")
 	assert_true(PlayerOptions.new().current().crosshair_spread,
 			"the spread toggle persists")
+	# The two tip rows are served: seeded from the tip words, written back.
+	for tip_row in ["MR_CLIPPY_KEYBOARD", "MR_CLIPPY_HINTS"]:
+		var id: int = driver.widget_id(tip_row)
+		assert_gte(id, 0, "Options authors %s." % tip_row)
+		assert_false(driver.is_widget_disabled(id), "%s is interactive" % tip_row)
+		assert_true(driver.is_widget_checked(id), "%s seeds the default-on word" % tip_row)
+	var keyboard_tips: int = driver.widget_id("MR_CLIPPY_KEYBOARD")
+	driver.set_widget_checked(keyboard_tips, false)
+	driver.widget_activated.emit(keyboard_tips, "MR_CLIPPY_KEYBOARD")
+	assert_false(options.current().keyboard_tips,
+			"the keyboard-tips row writes the shared owner")
+	assert_false(PlayerOptions.new().current().keyboard_tips,
+			"the keyboard-tips word persists")
+	assert_true(options.current().gameplay_tips)
 	shell.get_resource_root().clear()
 	TestFs.remove_dir_recursive(dir)
 

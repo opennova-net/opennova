@@ -96,7 +96,7 @@ builds and serves the site; see [DEPLOY.md](DEPLOY.md).
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, the `assets/`
 placeholder data, and launch instructions. Retail game data is supplied
-separately. Debug builds include the game's F3 tools.
+separately. Debug builds include the game's dev tools (Insert).
 
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include

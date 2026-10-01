@@ -29,7 +29,7 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 		return
 	if not open:
 		if _pushed:
-			hud.set_scoreboard(false, 0, 0, {}, null)
+			hud.set_scoreboard(false, 0, 0, {}, null, null)
 			_pushed = false
 		return
 	var sim: Simulation = world.get_sim()
@@ -74,6 +74,7 @@ func update(hud: HudOverlay, world: GameWorld, open: bool, frame_counter: int) -
 				PAGE_HINT_FALLBACK)
 	# The rows never round-trip through script: the overlay pulls them (and the
 	# team count the 4-team page reads) natively from the sim
-	# (HudOverlay.set_scoreboard -> fill_scoreboard_rows); the frame counter is
+	# (HudOverlay.set_scoreboard -> fill_scoreboard), with the drawers' own
+	# gametext lookups resolved natively off the table; the frame counter is
 	# the HUD tick the engine's page alternates on (hud_scoreboard.h).
-	hud.set_scoreboard(true, game_type, frame_counter, strings, sim)
+	hud.set_scoreboard(true, game_type, frame_counter, strings, sim, table)

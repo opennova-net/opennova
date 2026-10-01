@@ -38,6 +38,67 @@ struct ClientRosterSlot {
 	uint8_t quality = 0;      // 0x0400, clamped 4 [orig: @0x43170d] — the connection-icon band
 	int16_t entity_slot = -1; // pool-0 slot this connection drives; -1 = none
 	                          // [orig: the no-entity -1 store @0x431489]
+	// 0x0800: the NovaWorld account netId (slot dword 15, 0 on LAN) — the
+	// clan-registry key [orig: the store @0x431736].
+	uint32_t account_id = 0;
+	// The slot's registry-resolved clan tag (slot+0x20, the table's 9-byte
+	// "extra" buffer): the registry node's tag when the account id is nonzero
+	// and a node carries it, else empty — re-resolved on every 0x800 store and
+	// every 0x6A change [orig: PlayerSlot_SetName @0x4348f0 — Napi_CopyString
+	// (slot+0x20, node+81, 9) @0x434935, "" @0x434909; the buffer size
+	// PlayerSlotTable_Create(.., 9) @0x434bb0]. The kill feed's <ch>..<co>
+	// suffix and the Tab row's label read it.
+	std::string registry_clan;
+	// THE COMMAND MAP'S SQUAD BYTES. The squad leader's slot (+48; 0xFF
+	// none) the 0x46 0x0040 field and S2C 0x71 write, the fireteam (+49; 0
+	// none, 1..3 A..C) the 0x0080 field, S2C 0x73 and a 0x71 (reset to 0)
+	// write, the 0x0020 byte (+45) and the spectator byte (+46, field
+	// 0x1000). The local-only squad colour index (+51, the TEAMLIST Map
+	// column's (i + 1) % 14 cycle) and the PLAYERS tab's punt mark (+52,
+	// the voted slot's own index, 0xFF none). A slot's first activation
+	// seeds +48 = +52 = 0xFF and +45/+46/+49 = 0; the mute flags (+50,
+	// radio_mute_flags) and the colour (+51) survive a removal and a
+	// re-activation — nothing but the table's (re)creation clears them.
+	// [orig: PlayerSlotTable_GetOrInitSlot @0x4346c0 — @0x4346f6..0x43470e;
+	//  PlayerSlot_ClearAndUnlink @0x434730 leaves +48..+52;
+	//  NapiNPClientMsg_PlayerSync @0x431370 — 0x20 -> +45, 0x1000 -> +46,
+	//  0x40 -> +48, 0x80 -> +49]
+	uint8_t squad_leader = 0xFF;
+	uint8_t fireteam = 0;
+	uint8_t vehicle_score = 0;
+	bool spectator = false;
+	uint8_t squad_color = 0;
+	uint8_t punt_mark = 0xFF;
+};
+
+// One S2C 0x4C entry of the player-slot pointer table: the roster slot the
+// entry points at (the table keeps the slot pointer, so every reader sees the
+// slot's LIVE fields) and the entity the snapshot named, 0xFFFF where retail
+// resolves a null pointer (the sentinel or a pool nibble past the five
+// pools); the only reader of that entity is the map's own-slot test.
+// [orig: NapiNPClientMsg_0x04C @0x428570 — {entity, slot} pairs @0x42868e /
+//  @0x428695, the handle gates @0x428679..0x42868c]
+struct ClientVisiblePlayer {
+	uint8_t slot = 0;
+	uint16_t entity_handle = 0xFFFF;
+};
+
+// One C2S 0x22 {slot, fields} + C2S 0x23 pair a receive handler queues so the
+// host re-sends the slot's 0x46 row and this client's 0x4C snapshot (the
+// runtime frames and clears them). [orig: NapiNPClientMsg_HandleSpawnSlot
+// @0x431804..0x43183e; NapiNPClientMsg_TeamAssign @0x431acb..0x431b05]
+struct ClientVisiblePlayersRefresh {
+	uint8_t slot = 0;
+	uint16_t fields = 0;
+};
+
+// One S2C 0x6A clan-registry node [orig: the CLinkedList node — netId +0xC,
+// name +16 (char[65]), tag +81 (char[9]); CLinkedList_FindOrCreateByNetId
+// @0x52B540 copies both with Napi_CopyString 65 / 9].
+struct ClientClanRegistryNode {
+	uint32_t net_id = 0;
+	std::string name;
+	std::string tag;
 };
 
 // The decoded S2C 0x16 scoreboard. Rows arrive PRE-SORTED by the server (team
@@ -66,6 +127,10 @@ struct ClientScoreboardRow {
 	bool spectator = false;     // flags bit0
 	std::string name;           // joined from the roster at apply time
 	std::string clan;
+	// The slot's registry clan tag copied into rec+32 with a 7-character cap
+	// [orig: Napi_CopyString(rec + 32, slot+0x20, 8) @0x42fd85; "" @0x42fd8f]
+	// — the board's <ch>..<co> label.
+	std::string label;
 };
 
 // One team-table row. The u16 pair carries the SAME two stats as the player
@@ -74,9 +139,12 @@ struct ClientScoreboardRow {
 // byte (game type 0x10001 [orig: @0x50dc62]) and the CTF flag state (types
 // 0x10002/0x90002/0x10004 [orig: @0x50dd30]). The old player_count/alive_count
 // names were decode-era guesses.
+// Both words are SIGN-EXTENDED into their dwords like the player rows'
+// [orig: the movsx stores @0x42fe08 / @0x42fe19 into 0xA85AEC + 16t], and
+// the header block prints them "%3i" / "%i".
 struct ClientScoreboardTeam {
-	uint16_t score1 = 0;
-	uint16_t score2 = 0;
+	int16_t score1 = 0;
+	int16_t score2 = 0;
 	uint8_t koth_hold = 0;
 	uint8_t ctf_flag = 0;
 };
@@ -133,6 +201,13 @@ struct ClientRoundEvent {
 // HUD_FormatKillEventMessage @0x422DA0 -> Chat_FormatMessage @0x422C60].
 // `kind` is hud::GameEventKind (runtime/hud/feed_format.h) carried as its
 // underlying byte so this header stays free of the runtime include.
+// Every ring-bound record (0x1E game events, 0x14 chat lines, 0x32 game texts)
+// carries `feed_order`, the replica's dispatch stamp: retail posts each line
+// the moment its message dispatches, so the HUD rings take the lines in this
+// order across the three lanes (hud::order_feed_posts) [orig: the 0x1E arm
+// NetPacket_HandleGameEvent @0x426270 -> Chat_AddMessageChannel2, the 0x32
+// arm @0x428181..0x428195, the 0x14 arm Chat_DispatchToChannel @0x42b910 —
+// each posts inside its own message handler].
 struct ClientGameEvent {
 	uint8_t event_type = 0;
 	uint8_t attacker_index = 0xFF;
@@ -141,20 +216,65 @@ struct ClientGameEvent {
 	int16_t pos_x = 0;
 	int16_t pos_y = 0;
 	uint8_t kind = 0;
+	uint32_t feed_order = 0;
+};
+
+// One folded S2C 0x32 formatted game text — the join/leave SYSTEM-ring lane.
+// The record rides verbatim (subtype, the $A text, the signed team byte of the
+// join/leave pair); the Client-template pick and the $A substitution are the
+// HUD's (hud/feed_format.h formatted_game_text_line), where gametext lives
+// [orig: NapiNPClientMsg_0x032 @0x428060 -> Chat_FormatPlayerTokens @0x4a5190
+//  -> Chat_AddMessageChannel2(line, 0xFFAFAFAF, 930) @0x428195].
+struct ClientGameText {
+	int8_t subtype = 0;
+	std::string text;
+	int8_t team = 0;
+	uint32_t feed_order = 0;
 };
 
 // One folded S2C 0x14 chat line — the player-chat lane. The wire carries
 // [channel][sender_slot][cstr text] (D-NET-215); the text is already the
 // server-formatted "name(/squad): text" line. Which ring it lands in and which
 // colour it takes is the HUD's channel table (hud/feed_format.h
-// chat_channel_sink/color); the sender gate (a muted slot, or an unspawned
-// spectator while the spawn gate is down) reads the roster the embedder owns
+// chat_channel_sink/color); the sender gate (a chat-muted slot, or a
+// spectator slot while the spawn gate is down) drops the line in the fold
 // [orig: NapiNPClientMsg_ChatMessage @0x42f240 -> Chat_DispatchToChannel
 //  @0x42b910 — the slot gate @0x42b923..0x42b943, the switch @0x42b95d].
 struct ClientChatLine {
 	int8_t channel = 0;      // body[0], sign-extended into the switch
 	uint8_t sender_slot = 0; // body[1], the roster index
 	std::string text;
+	uint32_t feed_order = 0;
+};
+
+// One command-map squad or waypoint consequence an S2C fold leaves for the
+// embedding role (the world rows and the sounds, inmatch client_squad.cpp)
+// and for the HUD (the lines, hud/squad_feed.h).
+// [orig: NapiNPClientMsg_HandleSquadJoin @0x425600, NapiNPClientMsg_0x072
+//  @0x425710, NapiNPClientMsg_0x073 @0x425770, NapiNPClientMsg_PlayerRecruited
+//  @0x4258b0, NapiNPClientMsg_0x078 @0x425970, NapiNPClientMsg_0x033 @0x425fa0,
+//  NapiNPClientMsg_0x07C @0x426020]
+struct ClientSquadEvent {
+	enum class Kind : uint8_t {
+		MemberJoined,   // S2C 0x71 naming the local slot as leader
+		SquadLeft,      // S2C 0x71 with leader 0xFF
+		FireteamSet,    // S2C 0x73 on the local slot
+		Recruited,      // S2C 0x74
+		GoCode,         // S2C 0x78
+		OrderSound,     // S2C 0x72 with a non-empty line
+		WaypointCreate, // S2C 0x33
+		EntityDestroy,  // S2C 0x7C
+	};
+	Kind kind = Kind::OrderSound;
+	uint8_t slot = 0;         // the subject's roster slot
+	int16_t entity_slot = -1; // that slot's pool-0 entity index (-1 none)
+	std::string name;         // the subject's name / the waypoint's name
+	uint8_t value = 0;        // the fireteam / the go code
+	uint8_t mute = 0;         // the mute flags the handler reads (+50)
+	int32_t x = 0;            // the shared waypoint's position
+	int32_t y = 0;
+	uint16_t handle = 0xFFFF; // 0x7C's packed handle / 0x33's owner index
+	uint32_t feed_order = 0;  // the dispatch stamp (ClientGameEvent::feed_order)
 };
 
 // One entity as the local client has DECODED it off the wire. Per ADR 0011 the
@@ -571,6 +691,25 @@ struct ClientEntityState {
 	int32_t rm_leg_target[2] = {};
 	int32_t rm_body_heading = 0;
 	bool rm_leg_seeded = false;
+	// --- The secondary (upper-body weapon) AnimMap channel, advanced locally
+	// for every armed player row, as retail's client runs it for every player
+	// body: the wire carries no secondary state. The 16-tick selection with
+	// its locked / emote commit (the hold ladder off the wire ADM index and
+	// Flags byte), the clip-end deferred promotion, the playhead and the blend,
+	// on the replica's variant-0 track (D-NET-196). The S2C 0x2D emote stamps
+	// the target. wpn_state < 0 = unarmed (no root-motion source).
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b5d71..0x4b5ea3 (selection +
+	//  commit); AnimMap_UpdateDualChannels @0x40b8c0 (advance);
+	//  NapiNPClientMsg_HandleEmote @0x427f12..0x427f18 (the stamp)]
+	int16_t wpn_state = -1;      // entity+0x2C8, the target
+	int16_t wpn_deferred = 0;    // entity+0x2C4
+	int16_t wpn_playing = -1;    // the channel's playing state
+	int16_t wpn_prev = -1;       // the blend source
+	int32_t wpn_phase = 0;
+	int32_t wpn_prev_phase = 0;
+	int32_t wpn_deferred_boundary = -1;
+	float wpn_blend_weight = 1.0f;
+	float wpn_blend_step = 0.0f;
 	int32_t net_seat_local[3] = {};
 	// The record's carrier-LOCAL heading (BAM32): the player/infantry yaw byte
 	// widened (<< 24), the vehicle euler_z high half (<< 16). Every carried class
@@ -735,6 +874,19 @@ struct ClientSpawnWaveStatus {
 	uint16_t self_zone_handle = 0xFFFF;
 };
 
+// One zone ENTITY's two 0x6E-written words: the member-count byte (+550) and
+// the wave countdown (+548). Each group whose zone handle resolves inside the
+// pool tables rewrites them; a later 0x6E that leaves the zone out writes
+// nothing, so the DEATH map keeps showing the last values.
+// [orig: NapiNPClientMsg_HandleSquadRosterSync @0x429880 — the resolve
+//  @0x429985..0x4299bd (`handle & 0xF000 < 0x5000`, slot < capacity), the
+//  stores @0x4299bf / @0x4299c5]
+struct ClientZoneWaveCounts {
+	uint16_t zone_handle = 0xFFFF;
+	uint8_t member_count = 0;   // entity+550
+	uint16_t wave_countdown = 0; // entity+548
+};
+
 // Latest victim-local S2C 0x52 camera anchor. Retail stores the three fixed
 // coordinates globally and Camera_ComputeThirdPersonPositions consumes them.
 // [orig: NapiNPClientMsg_0x052 @0x428A80; consumer @0x438B80]
@@ -779,6 +931,55 @@ struct ClientNetQuality {
 	std::uint8_t level = 0;
 };
 
+// The session status a client keeps from S2C 0x58 (the authority builds the
+// same record from its own report): the CMAP RULES text's source. The fold
+// memsets it, keeps at most 31 characters of the server name and 63 of the
+// mission name, the three bytes, the uptime and the 39 stat values, then only
+// the first 8 option pairs whose key is 9 or less (the cursor still reads
+// every advertised pair, each short read 0), stamps the local clock and marks
+// it valid.
+// [orig: NapiNPClientMsg_SessionStatus @0x4228c0 -> SessionStatus_ParseFromBuffer
+//  @0x530ed0 into g_SessionStatus @0x24E3E88 — the name loops (32 / 64-byte
+//  fields), the pair gate `count < 8 && key <= 9` @0x53107f, the GetTickCount
+//  stamp +0x74 and valid @0x5310aa]
+struct ClientSessionStatus {
+	bool valid = false;               // +0x00
+	std::string server_name;          // +0x04 g_SessionStatusServerName
+	std::string mission_name;         // +0x24 g_ServerMissionName
+	uint32_t game_type_byte = 0;      // +0x64
+	uint32_t score_table = 0;         // +0x68
+	uint32_t max_players = 0;         // +0x6C g_ServerMaxPlayers
+	uint32_t uptime_ms = 0;           // +0x70
+	uint32_t stamp_ms = 0;            // +0x74, the local clock at the fold
+	std::array<int32_t, 39> stats{};  // +0x78
+	struct Option {
+		uint32_t key = 0;
+		uint32_t value = 0;
+	};
+	std::vector<Option> options;      // +0x114 g_SessionStatusOptionCount, +0x118
+};
+ClientSessionStatus fold_session_status(const SessionStatusBlock &block, uint32_t now_ms);
+// The session's elapsed milliseconds: 0 while not valid, else the uptime plus
+// the time since the stamp (u32 wrap) [orig: SessionStatus_GetElapsedMS @0x52d5f0].
+uint32_t session_status_elapsed_ms(const ClientSessionStatus &status, uint32_t now_ms);
+
+// The S2C 0x7E strings a client keeps: each strncpy'd into its own 1024-byte
+// buffer, the second buffer (byte_A86120) lying directly below the first
+// (byte_A86520). The handler reads the first string up to its NUL (or the
+// body end) and the second from just past it.
+// [orig: NapiNPClientMsg_ServerConfigStrings @0x425e20 — strncpy(byte_A86520,
+//  body, 0x400) @0x425e56, strncpy(byte_A86120, second, 0x400) @0x425e6d]
+struct ClientServerConfigStrings {
+	std::string first;  // the raw first string (briefing3 on a stock host)
+	std::string second; // the raw second string (briefing2, else briefing)
+};
+void fold_server_config_strings(const std::vector<uint8_t> &body, ClientServerConfigStrings &out);
+// The two buffers as a C-string read sees them: byte_A86520 (at most its 1024
+// bytes: what lies past it is not this record's) and byte_A86120, whose read
+// runs on into byte_A86520 when strncpy left its 1024 bytes unterminated.
+std::string server_config_first_text(const ClientServerConfigStrings &strings);
+std::string server_config_second_text(const ClientServerConfigStrings &strings);
+
 struct ClientState {
 	// Monotonic decoded-state edges. topology_revision changes only when the
 	// ordered (handle,type) row layout changes; revision also covers field updates.
@@ -807,10 +1008,43 @@ struct ClientState {
 	std::array<int32_t, 255> weapon_availability{};
 	uint64_t weapon_availability_revision = 0;
 	bool cease_fire = false; // g_InCeaseFire @ 0x24C196C
+	// The per-recipient SU gate: S2C 0x24 "SU <n>" stores (u8)atol(n); it
+	// zeroes the 0x16 status words at parse time while clear and gates the
+	// Tab board's " [..]" suffix; a session start clears it
+	// [orig: g_ScoreboardStatusSuffixEnabled @0xA85B49 — the store
+	//  NapiNPClientMsg_HandleTextCommand @0x429f71, the parse gate @0x42fbfb,
+	//  the drawer test @0x423ef8, the reset Client_ResetDisconnectState
+	//  @0x5202d9].
+	uint8_t scoreboard_status_suffix = 0;
 	hud::KillAnnouncement kill_announcement;
 	// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 	bool permanent_death = false;
+	// The session's KOTH time limit in minutes, the 0x08 record's second rule
+	// dword — a joiner's GAMEINFO team timers read this copy where the
+	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored
+	// @0x428218; read by HUD_DrawGameTimerOverlay @0x59CCEB, and by the Tab
+	// board's KOTH countdowns @0x423281 / @0x423a58].
+	int32_t session_time_limit_minutes = 0;
 	bool spectators_allowed = false;
+	// The flag carrier the FlagBall / type-8 header line names: the carrier
+	// handle of the last S2C 0x2F for a flag item (4091/4093/4095) in those
+	// game types, 0xFFFF when none [orig: dword_A860C4 — the stores
+	// NapiNPClientMsg_0x02F @0x43114d/@0x43115a; cleared by ZoneTimers_ResetState
+	// @0x4244ac].
+	uint16_t flag_carrier_handle = 0xFFFF;
+	// The talk keys' reset hold: raised by S2C 0x25 on a client, lowered by
+	// the next S2C 0x0F [orig: dword_24C195C — NapiNPClientMsg_GameReset
+	// @0x42284e, NapiNPClientMsg_0x00F @0x42e396; read by the talk arms
+	// @0x49b9ad].
+	bool round_reset_hold = false;
+	// The round-over latch (g_SpawnSuccessGate): a client raises it on the
+	// 0x1D header ahead of its parse and on S2C 0x25; the authority's own
+	// round end raises it beside the 0x1D it broadcasts; only a mission start
+	// lowers it (ClientReplicaPipeline::begin_mission). The talk keys, the
+	// chat senders and the sender gate, the breath bar and the Esc chain
+	// read it. [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset
+	// @0x422849; Server_ProcessRoundEnd @0x5168e4; Game_StartMission @0x524a1f]
+	bool spawn_success_gate = false;
 	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
 	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
@@ -848,11 +1082,17 @@ struct ClientState {
 	// sub-mode / kill-cam target and arms the enemy-tag grant; a falling edge
 	// closes it and clears the grant [orig: NapiNPClientMsg_0x00A
 	// @0x42ff88..0x43002b — dword_A860F0/A860F4 = 0 @0x42ffa6, g_EnemyTagsVisible
-	// @0x42ffb2/@0x430025]. The sub-mode is written by the spectate actions
-	// (unported) and stays 0 here.
+	// @0x42ffb2/@0x430025]. S2C 0x75 writes the same latch, sub-mode and
+	// target [orig: NapiNPClientMsg_SetSpectatorMode @0x4259e0]; the
+	// spectate actions cycle them (client_replica_spectate.cpp).
 	uint8_t hud_hit_feedback_frames = 0; // [orig: dword_A8235C @0x42FF60..0x42FF74]
 	bool death_screen_active = false;
+	// 0 free, 1 chase, 2 first person [orig: dword_A860F0].
 	std::uint8_t death_screen_submode = 0;
+	// The spectated entity's wire handle, 0xFFFF none [orig: dword_A860F4, a
+	// pool pointer]. The falling edge leaves it stale, as retail's does; every
+	// reader gates on the death screen.
+	std::uint16_t spectate_target = 0xFFFF;
 	// The local entity's +0x1E0 "a medic is reviving me" latch: set by S2C
 	// 0x3A, cleared when the local player's own dead->alive edge runs
 	// Game_InitNewRound and at mission start. The DEATH screen hides its
@@ -926,15 +1166,62 @@ struct ClientState {
 	// ladder, hud/score_fanfare.h) [orig: g_SessionVarExpFanfare @0x24d5a10].
 	uint16_t exp_fanfare = 0;
 	ClientSpawnWaveStatus spawn_waves;
+	std::vector<ClientZoneWaveCounts> zone_wave_counts;
+	// The client's local millisecond clock (the platform stand-in for
+	// GetTickCount the 0x58 fold stamps and the elapsed read compares):
+	// advanced io::kTickMs per client net frame.
+	uint32_t local_clock_ms = 0;
+	// S2C 0x58 (the CMAP RULES text's record) and S2C 0x7E (a client's
+	// briefing strings).
+	ClientSessionStatus session_status;
+	ClientServerConfigStrings server_config_strings;
+	// The two HUD order lines S2C 0x72 writes: [0] the individual order, [1]
+	// the fireteam order, 127 characters each; an empty line cancels. They
+	// hold until overwritten or the next mission start clears them.
+	// [orig: Team_SetNameByIndex @0x59c2d0 (a misnomer: the order-line
+	//  store) — strncpy(byte_2721DB8 + kind*128, str, 127) for kind < 2;
+	//  cleared by HUD_InitOverlaySystem @0x5a49b0]
+	std::array<std::string, 2> squad_orders;
+	// Bumps on every S2C 0x71 / 0x73 fold: the CMAP team list re-populates
+	// on it [orig: j_cmap_populate_team_list_0 @0x54e3c0 from @0x4256e5 /
+	// @0x425892].
+	uint32_t squad_revision = 0;
 	ClientDeathCameraTarget death_camera;
 	std::array<ClientRosterSlot, 256> roster{};
+	// The S2C 0x6A clan registry, in node insertion order (retail walks its
+	// list head-first by netId, ids unique) [orig: g_SpawnWaveList.field_C —
+	// the IDB name is a misnomer; NapiNPClientMsg_HandlePlayerJoinLeave
+	// @0x432510].
+	std::vector<ClientClanRegistryNode> clan_registry;
+	// The C2S 0x4E {netId} continuations each action-3 update queues (the
+	// runtime frames and clears them) [orig: CNapiNetwork_QueueReliableMessage
+	// (0x4E, {netId}) @0x43266c].
+	std::vector<uint32_t> pending_clan_walk_requests;
+	// The S2C 0x4C player-slot pointer table, replaced whole by every snapshot
+	// [orig: g_PlayerSlotPtrTable / g_PlayerSlotPtrCount @0xA822D0/D4 — freed
+	//  and zeroed @0x428583..0x4285a1, one entry per snapshot entry @0x428698].
+	std::vector<ClientVisiblePlayer> visible_players;
+	// The 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queue.
+	std::vector<ClientVisiblePlayersRefresh> pending_visible_refreshes;
 	std::vector<std::string> location_names;
-	struct RadioTarget {
+	// The map's tracked target (the retail globals g_HUDTrackedTarget and
+	// dword_2721EBC..dword_2721ED0), set by HUD_SetTrackedEntityTarget from
+	// the S2C 0x6D event-6 radio call, the S2C 0x2D emote and a chat line on
+	// channel 13; the per-tick decrement is the entity update's.
+	// [orig: HUD_SetTrackedEntityTarget @0x59D050 — callers
+	//  NapiNPClientMsg_HandleEntityDeath @0x430de4, NapiNPClientMsg_HandleEmote
+	//  @0x427f5b, Chat_DispatchToChannel @0x42ba09; the decrement sub_590950
+	//  from Entity_UpdateAllEntities @0x4C2221]
+	struct TrackedTarget {
 		uint16_t handle = 0xFFFF;
-		uint32_t ticks_remaining = 0;
-		int32_t position[3] = {};
-		bool friendly = false;
-	} radio_target;
+		uint32_t ticks_remaining = 0; // dword_2721EBC
+		int32_t position[3] = {};     // dword_2721EC0..EC8
+		bool friendly = false;        // byte_2721ECC
+		uint32_t color = 0xFFFFFFFFu; // dword_2721ED0 at the set
+		// Bumps on every set: the map's tracked callout restamps its colour
+		// global then [orig: HUD_SetTrackedEntityTarget @0x59D0EF..0x59D0FF].
+		uint32_t serial = 0;
+	} tracked_target;
 	std::vector<ClientEntityState> entities;
 	std::uint32_t frames_applied = 0;
 

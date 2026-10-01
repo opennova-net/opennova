@@ -23,6 +23,7 @@
 
 #include <runtime/world/ai.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/objectives_feed.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/world.h>
@@ -293,6 +294,10 @@ void test_tdm_round_wire_and_linger() {
 			"TDM kill limit ends for the killer's team");
 	expect(ctx.round_end_announced && ctx.round_end_linger_ticks == 2790,
 			"TDM announces once and seeds the exact MP linger");
+	// The round tallies the status page shows: one TDM round, one team 1 win
+	// [orig: Server_ProcessRoundEnd @0x516883..0x5168d8].
+	expect(ctx.rounds_played == 1 && ctx.round_wins[0] == 1 && ctx.round_wins[1] == 0,
+			"a TDM round end counts the round and the winner's win");
 	// The producer froze the stream once (stru_C947D8) before the 0x61/0x1D
 	// push; every 0x2B pull cuts from that same byte sequence.
 	// [orig: Server_BuildEndOfRoundScoreboard(1, winTeam) @0x516590]
@@ -1406,7 +1411,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	run_ticks(3);
 	expect(entity_death_records(peer_wire, shot) == 1,
 			"org1 kill: one 0x13, raised by the motor edge");
-	expect(world.kill_stats.enemy_kills_by_player == 1,
+	expect(world.kill_stats.enemy_kills_by_player() == 1,
 			"org1 kill: the damage-time record tallies once, the edge record never");
 	expect(dead_bit(shot), "org1 kill: the edge latches the dead bit");
 
@@ -1416,7 +1421,7 @@ void test_org1_death_transaction_is_the_motor_edge() {
 	run_ticks(3);
 	expect(entity_death_records(peer_wire, written) == 1,
 			"org1 health write: the motor edge sends the 0x13");
-	expect(world.kill_stats.enemy_kills_by_player == 1 &&
+	expect(world.kill_stats.enemy_kills_by_player() == 1 &&
 			world.kill_stats.enemy_kills_by_others == 0,
 			"org1 health write: no kill tally");
 
@@ -1492,7 +1497,7 @@ void test_kill_event_unit_score_rides_every_session() {
 			row->stats[w::MatchStats::kEnemyKills] == 2 &&
 			world.match.team_stats(1)[w::MatchStats::kUnitScore] == 25,
 			"only the kill event adds the victim's score to field 30");
-	expect(world.kill_stats.enemy_kills_by_player == 0 &&
+	expect(world.kill_stats.enemy_kills_by_player() == 0 &&
 			world.kill_stats.enemy_kills_by_others == 0,
 			"the session skips the SP tallies");
 	world.process_round_end(1);
@@ -1566,7 +1571,7 @@ int main() {
 	push_kill(world, green_item, player);
 	inmatch::Server_TickUpdate(ctx);
 	expect(world.kill_stats.bluekills_by_player == 1, "blue person kill -> bluekills");
-	expect(world.kill_stats.enemy_kills_by_player == 1, "team>=2 kill -> enemy bucket");
+	expect(world.kill_stats.enemy_kills_by_player() == 1, "team>=2 kill -> enemy bucket");
 	expect(world.kill_stats.greenkills_by_player == 1,
 	       "a green NON-person victim tallies nothing [orig: the def+92==3 gate]");
 
@@ -1593,15 +1598,62 @@ int main() {
 		world.registry.spawn(0, unit);
 		if (w::Entity *rp = world.registry.get(red_person))
 			rp->item_unit_type = 1; // dead or alive: the census is start-time state
+		// A pool-2 row never counts: the census walks pools 0 and 1 only
+		// [orig: Score_CountMissionSubgoalsAndUnits @0x509e13..0x509e4a].
+		world.registry.configure_pool(2, 4);
+		w::Entity pool2_unit = unit;
+		pool2_unit.net_id = 201;
+		pool2_unit.item_unit_type = 3;
+		world.registry.spawn(2, pool2_unit);
 		w::count_mission_units(world);
 		expect(world.kill_stats.enemy_unit_total == 2,
 		       "census counts team>=2 units with a unit-class byte only");
+		expect(world.kill_stats.enemy_aircraft_total == 1 &&
+		               world.kill_stats.enemy_infantry_total == 1 &&
+		               world.kill_stats.enemy_vehicle_total == 0,
+		       "the census splits per def+406 class; the pool-2 vehicle is not counted");
 		world.script.subgoals.win_text_ids[1] = 3;
 		world.script.subgoals.win_text_ids[2] = 7;
 		world.script.subgoals.win_text_ids[3] = 0; // terminator: slots past it ignored
 		world.script.subgoals.win_text_ids[4] = 5;
 		expect(w::count_defined_subgoals(world) == 2,
 		       "defined subgoals = the leading non-zero, non-0xFF run");
+	}
+
+	// --- 2c. A by-player kill that takes a unit class past its census grows
+	// the class and the enemy total by the overflow; a kill by others never
+	// does. The pre-census red_person kill already sits in the infantry count.
+	// [orig: Score_TallyKillByLocalPlayer @0x4FD242 (the class switch),
+	//  @0x4FD264 / @0x4FD2C2 (the vehicle / infantry overflow);
+	//  Score_TallyKillByOthers @0x4FD300 (no census write)] ---
+	{
+		const w::EntityHandle red2 = spawn_npc(110, 2, w::EntityKind::Organic);
+		world.registry.get(red2)->item_unit_type = 1;
+		const w::EntityHandle red_truck = spawn_npc(111, 4, w::EntityKind::Item);
+		world.registry.get(red_truck)->item_unit_type = 3;
+		push_kill(world, red2, player);
+		push_kill(world, red_truck, player);
+		inmatch::Server_TickUpdate(ctx);
+		const w::MissionKillStats &ks = world.kill_stats;
+		expect(ks.enemy_infantry_kills_by_player == 2 &&
+		               ks.enemy_vehicle_kills_by_player == 1 &&
+		               ks.enemy_kills_by_player() == 3,
+		       "by-player enemy kills land in their unit class");
+		expect(ks.enemy_infantry_total == 2 && ks.enemy_vehicle_total == 1 &&
+		               ks.enemy_unit_total == 4,
+		       "each class overflow grows its census and the enemy total");
+		const w::EntityHandle red3 = spawn_npc(112, 2, w::EntityKind::Organic);
+		world.registry.get(red3)->item_unit_type = 1;
+		push_kill(world, red3, red_person);
+		inmatch::Server_TickUpdate(ctx);
+		expect(ks.enemy_kills_by_others == 1 && ks.enemy_unit_total == 4,
+		       "a kill by others never grows the census");
+		// Both SP screens read the grown max: 4 enemy kills over 4.
+		const hud::EndRoundStatisticsInput in = w::end_round_statistics_input(world);
+		expect(in.enemy_kills == 4 && in.enemy_unit_total == 4 &&
+		               hud::end_round_statistics_rows(in)[1].value == "4/4" &&
+		               hud::epilog_score_lines(in)[1].value == "4/4",
+		       "the ENEMYUNITS line carries the overflowed total");
 	}
 
 	// --- 3. A kill by someone else lands in the by-others family, whose team-1

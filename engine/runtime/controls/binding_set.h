@@ -69,6 +69,17 @@ inline constexpr uint16_t kMouseWheelDown = 0x800;
 struct BindingRecord;
 std::string format_display_string(const BindingRecord &rec, bool flagged = false);
 
+class BindingSet;
+// The in-game display string of the binding NAMED by a config token, the
+// tip text's "$name$" expansion: the first record whose token matches
+// case-insensitively, formatted as above with its own flag word's 0x200
+// star; "???" when no record carries the token.
+// [orig: KeyBinding_GetDisplayStringByActionName @0x5b6a00 — the stricmp walk
+//  over the 768 records @0x5b6a10..0x5b6a2a, the "???" miss @0x5b6a2e, the
+//  KeyBinding_FormatDisplayString call @0x5b6a46 (its star reads the
+//  record's own +4 flags, `test [esi+4], 200h` @0x49715f)]
+std::string display_string_for_token(const BindingSet &set, const std::string &token);
+
 struct BindingRecord {
   uint16_t primary = 0;        // slot-1 VK scan (0 = unbound)
   uint16_t secondary = 0;      // slot-2 VK scan
@@ -148,7 +159,24 @@ class BindingSet {
   //  (modifier held @0x49d36a/@0x49d377, key match @0x49d3a7, fire and skip
   //  the fallback @0x49d42f..0x49d437); fallback @0x49d3ba..0x49d488 (both
   //  modifier words zero @0x49d3c1.., key match, fire @0x49d488)]
+  // 0 while the keyboard is captured (below).
   int pressed_key(int index, const std::function<bool(int)> &key_down) const;
+
+  // An open text line (the chat entry) owns the keyboard: while set, no
+  // keyboard slot fires, so a token resolves from its mouse and joystick arms
+  // alone (a mouse row's modifier word still reads the live key state).
+  // Retail hands every key press to the line and skips the held keyboard
+  // pass, but samples mouse look, the held mouse buttons, the mouse
+  // click/wheel rows and the joystick unchanged.
+  // [orig: Input_ProcessKeyboardEvents @0x49d2e3 -> Chat_HandleInputChar
+  //  @0x49d498 (no binding dispatch, no Input_HandleSpecialKeys), the release
+  //  queue skipped @0x49d29f; Input_ProcessPlayerFrame @0x49d4c0: the mouse
+  //  axis/button and toggle passes gated only on the playback file @0x49d4d5,
+  //  the held keyboard pass Input_ProcessAnalogBindings behind
+  //  !g_InputCaptureMode @0x49d509; the click/wheel callback
+  //  process_input_bindings @0x4dda50 gated on the open menu @0x4dda76]
+  void set_keyboard_captured(bool captured) { keyboard_captured_ = captured; }
+  bool keyboard_captured() const { return keyboard_captured_; }
 
   // Held mouse rows are polled independently. Event rows dispatch the FIRST
   // eligible match, modified rows before unmodified, in catalog order.
@@ -178,8 +206,15 @@ class BindingSet {
   bool set_record(int index, const BindingRecord &rec);  // persistence load
   int index_of_token(const std::string &token) const;
 
+  // Moves on every record write (defaults, assign, clear, a persistence
+  // load), so a reader that formats labels from the records (the HUDLS key
+  // labels) rebuilds them only when a binding changed.
+  uint32_t revision() const { return revision_; }
+
  private:
   std::vector<BindingRecord> records_;  // catalog order
+  bool keyboard_captured_ = false;
+  uint32_t revision_ = 0;
 };
 
 }  // namespace opennova::controls

@@ -288,6 +288,29 @@ int main() {
 				"terminal tick aborts the batch and fails the session")) return 1;
 	}
 
+	// The frame statistics: every 62 logic updates publish the frames drawn
+	// since, the frame whose drain crosses the 62nd not yet among them
+	// [orig: Game_ProcessMainFrame @0x5267ab..0x5267df; GameLoop_RenderFrame
+	// @0x521cf9].
+	{
+		TickProbe target;
+		Session session(target);
+		if (!load(session)) return 1;
+		if (!expect(session.frame_statistics().frames_last_second == 0,
+				"no second has passed yet")) return 1;
+		FrameInput in;
+		in.delta_seconds = TickAccumulator::kTickDt;
+		int32_t total = 0;
+		int32_t crossing_frame = -1;
+		for (int32_t frame = 0; frame < 200 && crossing_frame < 0; ++frame) {
+			total += session.advance(in).ticks_run();
+			if (total >= 62) crossing_frame = frame;
+		}
+		if (!expect(crossing_frame > 0 &&
+				session.frame_statistics().frames_last_second == crossing_frame,
+				"the 62nd update publishes the frames drawn before its frame")) return 1;
+	}
+
 	std::printf("OK: in-match session lifecycle/cadence/input/failure\n");
 	return 0;
 }

@@ -33,6 +33,19 @@ using opennova::hud::HudTri;
 
 namespace {
 
+// A regular marker whose slot entity is live: the drawer reads the entity's
+// position and the placement-matrix anchor (here the slot position), and the
+// persistent bank draws only model-bearing entities.
+// [orig: Minimap_DrawBlip @0x5978B2..0x5978DC; MapOverlay_RenderAllByLayer
+//  @0x5BE6C4]
+void mark_live(opennova::hud::HudMinimapMarker &m) {
+	m.entity_known = 1;
+	m.entity_bits = static_cast<uint8_t>(m.entity_bits |
+			opennova::hud::kMarkerEntityHasModel);
+	m.entity_x = m.anchor_x = m.x;
+	m.entity_y = m.anchor_y = m.y;
+}
+
 int failures = 0;
 
 #define CHECK(cond, msg)                                                       \
@@ -714,11 +727,12 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	high.icon = 3;
 	high.x = 32 << 16;
 	high.color = 0xFF304080u;
-	high.entity_known = 1;
+	mark_live(high);
 	state.minimap.markers.push_back(high);
 	opennova::hud::HudMinimapMarker low = high;
 	low.icon = 10;
 	low.x = -(32 << 16);
+	mark_live(low);
 	state.minimap.markers.push_back(low);
 	// An unknown-entity regular marker stays retained but does not draw.
 	// [orig: Render_MinimapSlotBlip @0x5be4b8 entity[538] gate]
@@ -731,7 +745,12 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 	state.waypoint.distance_m = 1024;
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(list.map.visible, "an authored HUDSPINMAP rect compiles the spinmap");
-	CHECK(list.map.backing.size() == 32, "spinmap backing is a 32-sided fan");
+	// The bit0 disc is an invisible depth mask (diffuse 0 through stock
+	// shader #2): no backing geometry; the pass reports its bit16-squared
+	// viewport. [orig: @0x5a6527..0x5a6667; squaring @0x5a63bf..0x5a642e]
+	CHECK(list.map.clip_x1 == 810.0f && list.map.clip_x2 == 1020.0f &&
+			list.map.clip_y1 == 552.0f && list.map.clip_y2 == 762.0f,
+			"the pass carries the squared rect viewport");
 	CHECK(!list.map.terrain.empty(), "sector routing emits clipped terrain triangles");
 	CHECK(list.map.terrain_water.size() == list.map.terrain.size(),
 			"depthspin redraws the same clipped sector geometry as the colormap");
@@ -868,6 +887,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		opennova::hud::HudMinimapMarker east = high;
 		east.x = big_state.minimap.player_x + (32 << 16);
 		east.heading_bam = 0x40000000;
+		mark_live(east);
 		big_state.minimap.markers.push_back(east);
 		const HudDrawList &big = compiler.compile(big_state, 1024.0f, 768.0f);
 		CHECK(big.map.visible, "the corner spinmap still compiles under a map mode");
@@ -956,6 +976,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		expiry_state.minimap.markers.clear();
 		expiry_state.waypoint.present = false;
 		opennova::hud::HudMinimapMarker live_special;
+		live_special.bank = static_cast<uint8_t>(opennova::hud::HudMinimapBank::kSpecial);
 		live_special.flags = 0x40;
 		live_special.icon = 12;
 		live_special.remaining_ticks = 5;
@@ -969,8 +990,11 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		for (const auto &sprite : pass.map.sprites) {
 			if (sprite.half_w == 6.0f && sprite.texture == 0) ++special_sprites;
 		}
-		CHECK(special_sprites == 1,
-				"an expired special slot is skipped by the draw pass");
+		// A live special slot draws on three of the four layer passes (bit7
+		// clear: layers 0, 1 and 2); the expired one on none.
+		// [orig: MapOverlay_RenderAllByLayer @0x5BE780..0x5BE7D7]
+		CHECK(special_sprites == 3,
+				"an expired special slot is skipped; a live one draws three times");
 	}
 
 	// Footprint markers skip the icon quad for their polygon feed; markers
@@ -984,7 +1008,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		opennova::hud::HudMinimapMarker building;
 		building.handle = 0x2042;
 		building.icon = 0;
-		building.entity_known = 1;
+		mark_live(building);
 		building.footprint = 1;
 		fp_state.minimap.markers.push_back(building);
 		opennova::hud::HudMinimapFootprint footprint;
@@ -999,7 +1023,7 @@ void test_spinmap_mesh_layers_and_waypoint(const fnt_font_t *font) {
 		upright.icon = 13;
 		upright.x = -(10 << 16);
 		upright.heading_bam = 0x30000000;
-		upright.entity_known = 1;
+		mark_live(upright);
 		upright.rotate = 0;
 		fp_state.minimap.markers.push_back(upright);
 		const HudDrawList &fp_list = compiler.compile(fp_state, 1024.0f,
@@ -1420,9 +1444,9 @@ void test_compiler_hud_font_falls_back_to_bold(const fnt_font_t *font) {
 	compiler.configure(layout, nullptr);
 	compiler.configure_label_fonts(font, font, font, 2.0f, 2.0f);
 
-	// The objective line draws through the HUD slot (emit_text).
+	// A SYSTEM feed line draws through the HUD slot (emit_text).
 	HudFrameState state;
-	state.objective_text = "Sit";
+	compiler.push_feed_line("Sit", 0xFFFFFFFFu, 0);
 	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 	bool all_bold = list.glyphs.size() == 3;
 	for (const opennova::hud::GameFontQuad &g : list.glyphs) {
@@ -1584,6 +1608,37 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
 	CHECK(full_tiles > 0, "the interior contains full-period tiles");
 
+	// The pieces' second texture stage: with the boxtile camo loaded every
+	// border piece carries it at the camo's own dims (the screen-anchored UV1
+	// divisors) and the fill carries none; without the camo's dims nothing
+	// does. [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c,
+	//  applied for the pieces @0x56b902; the style floats @0x56b357/@0x56b361]
+	for (const HudQuad &q : wide)
+		CHECK(q.texture2 == opennova::hud::kHudTexNone,
+				"no second stage while the camo's dims are unknown");
+	layout.box_tile_w = 256;
+	layout.box_tile_h = 128;
+	compiler.update_layout(layout);
+	{
+		int pieces = 0;
+		bool pieces_ok = true;
+		bool fill_ok = true;
+		for (const HudQuad &q : box_quads(1600.0f, 1200.0f)) {
+			const bool fill_cell = q.u0 > 3.0f * kCell - 0.01f;
+			if (fill_cell) {
+				if (q.texture2 != opennova::hud::kHudTexNone) fill_ok = false;
+				continue;
+			}
+			++pieces;
+			if (q.texture2 != opennova::hud::kHudTexBoxTile || q.stage2_w != 256.0f ||
+					q.stage2_h != 128.0f)
+				pieces_ok = false;
+		}
+		CHECK(pieces == 8, "the untitled box draws eight border pieces");
+		CHECK(pieces_ok, "every border piece binds the camo stage at its own dims");
+		CHECK(fill_ok, "the fill rides its own single-texture material");
+	}
+
 	// The TITLED top row: a title swaps the top edge for the row-3 cells —
 	// the stub, the title bar stretched to the measured gap, the end cap —
 	// and the plain top edge resumes after [orig: the outTechnique arm
@@ -1615,6 +1670,13 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(saw_stub && saw_bar && saw_cap,
 			"the titled top row draws the row-3 stub/bar/cap cells");
 	CHECK(!saw_plain_tl, "the plain (0,0) corner cell yields to the titled row");
+	{
+		int camo_pieces = 0;
+		for (const HudQuad &q : titled)
+			if (q.u0 < 3.0f * kCell - 0.01f && q.texture2 == opennova::hud::kHudTexBoxTile)
+				++camo_pieces;
+		CHECK(camo_pieces == 10, "the titled row's ten pieces all bind the camo stage");
+	}
 	state.scoreboard.title.clear();
 }
 
@@ -1664,15 +1726,16 @@ void test_compiler_scoreboard_rows(const fnt_font_t *font) {
 	// Rows with quality 1..3 draw an icon (the spectator too); quality 4 and
 	// the vanished leaver do not.
 	CHECK(icons.size() == 3, "three rows carry a drawable quality band");
-	// The header has four rungs (no spectator line fed), so the list base is
-	// 105 + 4*20 + 20 = 205 and the first row of each column sits at 223.
-	// count_a = 2, count_b = 1 (the leaver dropped), spectators = 1 ->
-	// the spectator cursor seeds at 205 + 18*(2+2), first row at 295.
+	// The header has four rungs (no spectator line fed) plus TDM's two
+	// team-score lines [orig: @0x4232c5..0x423354], so the list base is
+	// 105 + 4*20 + 2*20 + 20 = 245 and the first row of each column sits at
+	// 263. count_a = 2, count_b = 1 (the leaver dropped), spectators = 1 ->
+	// the spectator cursor seeds at 245 + 18*(2+2), first row at 335.
 	bool saw_team_first = false;
 	bool saw_spec = false;
 	for (const HudQuad &q : icons) {
-		if (std::fabs(q.y0 - 223.0f) < 0.75f) saw_team_first = true;
-		if (std::fabs(q.y0 - 295.0f) < 0.75f && std::fabs(q.x0 - 420.0f) < 0.75f)
+		if (std::fabs(q.y0 - 263.0f) < 0.75f) saw_team_first = true;
+		if (std::fabs(q.y0 - 335.0f) < 0.75f && std::fabs(q.x0 - 420.0f) < 0.75f)
 			saw_spec = true;
 	}
 	CHECK(saw_team_first, "the first team rows sit one pitch below the list base");
@@ -1681,6 +1744,93 @@ void test_compiler_scoreboard_rows(const fnt_font_t *font) {
 	// The band is a quarter of the 4-row strip.
 	CHECK(std::fabs((icons[0].v1 - icons[0].v0) - 0.25f) < 0.001f,
 			"an icon samples exactly one band of the strip");
+}
+
+// The board's page fold, end to end: forty non-team rows (twenty a column)
+// need two pages over the 285-unit list; page 1 scrolls the base up one page
+// height and only rows back inside [base, 490) draw; a page past the last
+// folds to 0 and is written back [orig: HUD_DrawKillList @0x423bb4..0x424168].
+void test_compiler_scoreboard_paging(const fnt_font_t *font) {
+	using opennova::hud::HudQuad;
+	using opennova::hud::ScoreboardEntry;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.net_icon_texture_valid = true;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.scoreboard.shown = true;
+	state.scoreboard.game_type = 0; // non-team: no team-score block
+	for (int i = 0; i < 40; ++i) {
+		ScoreboardEntry e;
+		e.slot_id = static_cast<uint8_t>(i);
+		e.name = "P";
+		e.quality = 1;
+		e.has_entity = true;
+		state.scoreboard.rows.push_back(e);
+	}
+	const auto icon_ys = [&]() {
+		std::vector<float> ys;
+		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+		for (const HudQuad &q : list.quads)
+			if (q.texture == opennova::hud::kHudTexNetIcon) ys.push_back(q.y0);
+		return ys;
+	};
+	// Page 0: base 205, rows 223..475 — fifteen a column.
+	std::vector<float> ys = icon_ys();
+	CHECK(ys.size() == 30, "page 0 draws fifteen rows a column");
+	CHECK(compiler.scoreboard_page() == 0, "page 0 stays page 0");
+	compiler.scoreboard_page_step(1);
+	ys = icon_ys();
+	// Page 1: row base 205 - 285 = -80; rows 16..20 land at 208..280.
+	CHECK(ys.size() == 10, "page 1 draws the five rows a column back in view");
+	bool first_at_208 = false;
+	for (float y : ys) {
+		if (std::fabs(y - 208.0f) < 0.75f) first_at_208 = true;
+		CHECK(y >= 205.0f - 0.75f && y < 490.0f, "every drawn row sits inside the list");
+	}
+	CHECK(first_at_208, "the first page-1 row sits at row base + 16 pitches");
+	CHECK(compiler.scoreboard_page() == 1, "an in-range page is kept");
+	// Past the last page folds to the first and is written back.
+	compiler.scoreboard_page_step(1);
+	ys = icon_ys();
+	CHECK(ys.size() == 30 && compiler.scoreboard_page() == 0,
+			"a page past the last folds to page 0");
+	// Below zero wraps to the last page.
+	compiler.scoreboard_page_step(-1);
+	ys = icon_ys();
+	CHECK(ys.size() == 10 && compiler.scoreboard_page() == 1,
+			"a page below zero wraps to the last page");
+	compiler.reset_scoreboard_page();
+	CHECK(compiler.scoreboard_page() == 0, "the open edge zeroes the page");
+}
+
+// The chat input line: a titled stdbox with the typed line, a '_' cursor
+// while bits 4..5 of the main-frame counter are set, drawn at level 3 too,
+// nothing when closed [orig: StdCtype_Destructor @0x5b8f30; the
+// `dword_A8705C & 0x30` blink @0x5b8fbb; HUD_DrawOverlayPanels @0x5c014e].
+void test_compiler_chat_input(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	const size_t base = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
+	state.chat_input.shown = true;
+	state.chat_input.prompt = "Talk:";
+	state.chat_input.text = "hi";
+	state.chat_input.color = 0xFF00FF00u;
+	state.chat_input.frame = 0x40; // cursor off
+	const size_t closed_cursor = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
+	CHECK(closed_cursor == base + 5 + 2, "the prompt and the line draw");
+	state.chat_input.frame = 0x10; // cursor on
+	const size_t open_cursor = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
+	CHECK(open_cursor == closed_cursor + 1, "the blink adds the '_' cursor");
+	state.hud_detail_level = 3;
+	const size_t blank = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
+	CHECK(blank >= 5 + 2, "the input line survives the level-3 blank");
+	state.hud_detail_level = 0;
+	state.chat_input.shown = false;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() == base,
+			"a closed line draws nothing");
 }
 
 // The hudpos StaticFrame pick: retail keeps one static frame and each authored
@@ -2134,7 +2284,7 @@ void test_spinmap_medic_marker(const fnt_font_t *font) {
 	plain.icon = 3;
 	plain.x = 8 << 16;
 	plain.color = 0xFF304080u;
-	plain.entity_known = 1;
+	mark_live(plain);
 	state.minimap.markers.push_back(plain);
 	const HudDrawList &before = compiler.compile(state, 1024.0f, 768.0f);
 	const size_t sprites_before = before.map.sprites.size();
@@ -2646,6 +2796,8 @@ int main() {
 	test_vehicle_panel_element(&font);
 	test_compiler_stdbox_geometry(&font);
 	test_compiler_scoreboard_rows(&font);
+	test_compiler_scoreboard_paging(&font);
+	test_compiler_chat_input(&font);
 	test_message_log_element(&font);
 	test_chat_feed_loop(&font);
 	test_lfp_panel_element(&font);

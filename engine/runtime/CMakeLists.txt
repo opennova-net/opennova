@@ -34,6 +34,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/key_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/player_actions.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/controls/help_screen.cpp       # the F1 key-binding help pages
     # environment — the TOD environment state owner + the weather runtime
     # embedding (the 62 Hz tick credit, reset epoch, prewarm, per-tick
     # target-feed/writeback order) + the mission-start network sample
@@ -52,6 +53,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
@@ -62,6 +65,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
@@ -90,23 +94,45 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/session_rules_text.cpp # the CMAP RULELIST text (the session status, rules, briefing)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_capture_labels.cpp # the capture-point label walk + element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/inset_scope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/sight_overlay.cpp # the SIGHTS card row modes + the dotsize cycle
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_server_status.cpp       # the authority's status page: roster, score list, throttle
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_server_status.cpp # its compile, the quit dialog and the console lines
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/end_round_overlay.cpp # the 0x1D end-round text ladder + column layout
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_scoreboard.cpp   # the Tab player list's row policy
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_scoreboard.cpp # its compile element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/net_quality_indicators.cpp # the g_NetQuality display state
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_net_quality.cpp  # the connection indicators element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_chat_entry.cpp   # the talk keys + the captured line editor
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_chat_input.cpp # the chat input line element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_vehicle_panel.cpp # the mounted-vehicle seat markers
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_vehicle_panel.cpp # its compile element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_message_log.cpp   # the Recent Messages (J) window element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_overlay_windows.cpp # the briefing / help / map legend windows
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_end_round_statistics.cpp # the SP Show Score panel element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_lfp_panel.cpp     # the AAS zone status panel element
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_session_lines.cpp # GAMEINFO/ZONEINFO, CLOCK, TEAMID
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_slot_bar.cpp      # the HUDLS weapon slot bar element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_banks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_pointer.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_rings.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_map_view.cpp       # the DEATH / CMAP windowed map views
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_radar.cpp # the spinmap's bit-10 legs
     # renderer — fixed-function material/light/order math
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/authored_occluder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
@@ -183,6 +209,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/user_waypoints.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_aircraft.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_handlers.cpp   # scoring, state names, per-state handlers + the table
@@ -239,6 +266,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/music_vars.cpp       # the gamemus var pump from the local player
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/player_view.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/radar_contacts.cpp # the local radar contact state + producers
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/local_player_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/hud_combat_feed.cpp
@@ -320,6 +348,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_death.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_endround.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_lifecycle.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
@@ -327,6 +356,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_script_commands.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_placed_device.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_spectate.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_weapon_channel.cpp # the player rows' secondary channel and the 0x2D emote stamp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_scoreboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_roster_tags.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_scoreboard_view.cpp
@@ -346,6 +377,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_effects.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
@@ -361,23 +393,31 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_markers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_initial_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_loadout_grant.cpp        # the C2S 0x2F grant family (split off server_message_dispatch.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_message_dispatch.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_overlay_state.cpp        # the 14-tick minimap overlay visits (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_vehicle_spawn.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_visible_players.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_emote.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/role_feeds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/effect_pose_index.cpp # the present-effect pose index (wire / SSN / BMS / origin)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/udp_session_transport.cpp

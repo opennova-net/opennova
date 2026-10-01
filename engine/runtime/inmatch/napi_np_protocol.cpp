@@ -1,6 +1,8 @@
 #include <runtime/inmatch/napi_np_protocol.h>
+#include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
 
 #include <runtime/inmatch/server_initial_state.h>    // Server_SendInitialGameStateToPlayer (the §5.2a burst)
+#include <runtime/inmatch/server_chat.h>             // broadcast_player_joined/leaving_text (the 0x32 lines)
 #include <runtime/inmatch/server_message_dispatch.h> // dispatch_session_replies (the reactive §5.1 replies)
 #include <runtime/inmatch/server_spawn.h>            // Server_ProcessPendingPlayerSpawns (World-driven spawn)
 
@@ -219,6 +221,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	const world::EntityHandle owned_entity = it->link.owned_entity;
 	const uint8_t player_slot = it->reply.player_slot;
 	if (had_player) {
+		// The leave line first, while the leaver's entity still stands
+		// [orig: Server_HandlePlayerDisconnect @0x51b6d3, before the teardown
+		// @0x51b809..0x51b82e].
+		broadcast_player_leaving_text(list, *it, ctx.world);
 		const bool freed_pool0_entity = ctx.world != nullptr && owned_entity.valid() &&
 				owned_entity.pool() == 0;
 		const uint16_t freed_pool0_slot =
@@ -249,6 +255,10 @@ bool teardown_connection(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			ctx.world->ai.release(owned_entity);
 			ctx.world->registry.despawn(owned_entity);
 		}
+		// The leaver's squad breaks up after its entity is gone and before its
+		// removal record [orig: Server_SendPlayerStateAndSquad from
+		// Server_HandlePlayerDisconnect @0x51b837].
+		Server_DissolveSquadOf(ctx, *it);
 		// The witnessed leave broadcast is S2C 0x46 bit15, which clears the peer's
 		// ROSTER BOOKKEEPING ONLY — PlayerSlot_ClearAndUnlink @0x434730 never
 		// destroys the entity (@0x431411..0x43144c; the entity-field wipes @0x431437
@@ -796,6 +806,10 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		conn.server_sk = make_random_session_u32();
 	}
 	conn.phase = ConnectionPhase::Joined;
+	// The connection is up: the new-connection callback counts a login
+	// [orig: CNapiNPConnection_OnStateChange @0x6261c6 ->
+	//  NapiNPServer_HandleNewConnection @0x4c8203].
+	++ctx.total_logins;
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
 	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
@@ -1010,9 +1024,13 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
 	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
 	//  the loop on a key-only body]
+	// The same callback raises the outgoing link error of the host's own
+	// connection indicators [orig: sub_4C62A0 @0x4c62c0..0x4c62d5 — the
+	// g_NetQuality flag-1 store behind the cooldown test].
 	if (std::any_of(requested.begin(), requested.end(),
 			[](uint32_t sequence) { return sequence != 0; })) {
 		conn->link.nak_backoff_pending = true;
+		ctx.net_quality_link_errors |= kNetQualityLinkErrorOutgoing;
 	}
 	for (uint32_t requested_sequence : requested) {
 		const uint32_t sequence = requested_sequence == 0
@@ -1065,9 +1083,11 @@ void handle_client_goodbye(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// the roster slot's 0x46 REMOVAL to the remaining in-match peers (@0x51b8ad re-serializes
 	// fieldFlags 0x1CF7 over the memset player slot -> the 0x8000 removal record
 	// @0x505ecb..0x505ee0; send_mask 128 @0x51b8bc; the client's apply is
-	// PlayerSlot_ClearAndUnlink @0x431420). Deferred, tracked in D-NET-149: the 0x32
-	// minimap-slot + 0x6A squad broadcasts and the team spawn-token return
-	// (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses this same teardown path.
+	// PlayerSlot_ClearAndUnlink @0x431420), led by the 0x32 leave line (@0x51b6d3, see
+	// teardown_connection). Deferred, tracked in D-NET-149: the 0x32 subtype-4 + 0x6A
+	// clan-registry pair (an opennova host keeps no NovaWorld registry) and the team
+	// spawn-token return (@0x51b661..0x51b67a). The 120-second receive-timeout sweep uses
+	// this same teardown path.
 	NapiNPConnection *conn = find_connection(ctx, peer);
 	if (conn == nullptr || conn->type != NapiNPConnection::kTypeServerSide || body.size() < 4) return;
 	const uint32_t receiver_local_key =
@@ -1164,6 +1184,13 @@ std::vector<TickOut> flush_server_missing_requests(
 		item.outbound.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_RESEND_LIST, std::move(missing_body)));
 		out.push_back(std::move(item));
+		// A request that named a sequence fires the incoming link-error
+		// callback [orig: SendMissingSeqList has_missing_seqs @0x623690,
+		// cb_server_5 @0x623788..0x62379b = @0x4c4681, the g_NetQuality
+		// flag-2 store behind the cooldown test].
+		if (std::any_of(missing.begin(), missing.end(),
+				[](uint32_t sequence) { return sequence != 0; }))
+			ctx.net_quality_link_errors |= kNetQualityLinkErrorIncoming;
 	}
 	return out;
 }
@@ -1366,8 +1393,10 @@ std::vector<TickOut> tick_connections(
 			++ctx.np_protocol.roster_generation;
 			// The join-time 0x46 push (fieldFlags 0x1CF7) to every EXISTING in-match client,
 			// so its next 0x16's new row is ACCEPTED instead of dropped + 0x22-retried — the
-			// unknown-slot churn behind the stale HUD count (D-NET-158). [orig:
-			// Server_PlayerAdd @0x51D296]
+			// unknown-slot churn behind the stale HUD count (D-NET-158). The
+			// 0x32 join line leads it, as in the original [orig:
+			// Server_PlayerAdd @0x51d28a (0x32) then @0x51D296 (0x46)].
+			broadcast_player_joined_text(ctx.np_protocol.connection_list, conn, ctx.world);
 			broadcast_player_sync_on_join(ctx.config, ctx.np_protocol.connection_list, conn,
 			                              ctx.world);
 		}

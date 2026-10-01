@@ -11,7 +11,21 @@ extends Node
 ##  gametext Game_InitSubsystems @0x4a6cd0; mission .bin
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
+## The HUDLS key label's binding records: 200 + the weapon category 0..11.
+const SLOT_BAR_KEY_RECORD_BASE := 200
+const SLOT_BAR_CATEGORY_COUNT := 12
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
+
+## The commander_menu row fired (the poll ran its gates and the respawn init):
+## the shell opens the CMAP screen (hud_toggles.h kCommandMapOpened).
+signal command_map_requested
+## The quit dialog's yes key ran the Exit Mission action (engine hud_toggles.h
+## hud_toggles_quit_dialog_key): the shell plays the exit tone and leaves the
+## mission.
+signal quit_confirmed
+## The Exit Mission action's interface tone (the trigger-set registry's
+## PU_EXIT_CONFIRM row; engine hud_toggles.h carries the witness).
+const QUIT_CONFIRM_SOUNDSET := "PU_EXIT_CONFIRM"
 const HudScopeCircleMaskScript := preload("res://game/world/hud_scope_circle_mask.gd")
 const PlayerViewEffectsScript := preload("res://game/world/player_view_effects.gd")
 
@@ -59,6 +73,12 @@ var _nvg_scene_card_published := false
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
+# The HUD clock's tick the tip countdown last advanced to (-1 = not yet this
+# mission): each frame advances the countdown by the main frames since.
+var _tip_ticks_seen := -1
+# The binding revision the HUDLS key labels were last formatted at (-1 = not
+# yet for this HUD): the labels rebuild only on a binding change or a new HUD.
+var _slot_bar_key_labels_revision := -1
 var _hud_weapon_name := ""  # equipped-weapon cache (re-resolves WepDes on change)
 # Latest player-facing mission text. Presentation rides the message feed; this is
 # the public ADR 0018 read seam used by parity tests and future HUD consumers.
@@ -111,6 +131,11 @@ var _toggles: HudToggles = _seed_toggles(
 		int(ConfigStore.read(HUD_COLOR_CONFIG_PATH, HUD_COLOR_SECTION,
 				HUD_COLOR_CONFIG_KEY, HudOverlay.hud_color_index_default())),
 		_hud_detail_config)
+# The talk keys and the captured chat line (engine hud_chat_entry: the
+# dispatch gates, the capture, the line editor) -- process-lifetime like the
+# toggles; this presenter samples the talk rows, routes key events to it
+# while it captures and applies the echo it asks for.
+var _chat := HudChatEntry.new()
 # Render-comparison declutter is a reversible runtime transaction over the
 # live level; it saves and restores the exact level around the capture.
 var _hud_hidden_capture_active := false
@@ -132,38 +157,31 @@ var _map_footprints_fed := false
 var _map_footprints_next_query_ticks := 0
 var _map_grid_origin_next_query_ticks := 0
 const MAP_FOOTPRINT_QUERY_INTERVAL_TICKS := 62
+# The g_GameType objective bit the Goals row reads (engine gameprofile
+# kObjectiveBit).
+const GAME_TYPE_OBJECTIVE_BIT := 0x20000
+# The F12 legend's resolved gametext (once per mission, on first open).
+var _map_legend_title := ""
+var _map_legend_labels := PackedStringArray()
 
-# The gameplay key bindings the shell routes here via handle_gameplay_key. Each
-# action is witnessed; the authored default binding rows ride the unported
-# input-binding layer (D-CTRL-3), so the keys themselves are reimpl mappings.
-# Objectives = the co-op alpha toggle [orig: @0x49b68b ->
-# HUD_DrawWinConditions @0x5be163], polled from its catalog row `Goals` (row
-# 55, dispatch 31, default G) in tick() like the other HUD rows; friendly
-# tags KEY_F, N is NVG [orig: action 30 @0x49b573]. Retail has NO
-# HUD-visibility key: H is only the secondary `pause` binding (SP-only), and
-# the boot /NOHUD switch is the sole whole-overlay master [orig: catalog row
-# 70 vk2 0x48; case 25 @0x49b520; /NOHUD gates dword_840B18 & 2 @0x4a7a09 —
-# a DIFFERENT global from the declutter level]. The
-# huddetail/hudcolor/showhud/dotsize cycles ride their polled binding rows in
-# tick() instead of shell keys.
-const FRIENDLY_TAGS_KEY := KEY_F
-
-
-## Route one gameplay keycode to its HUD action; false = not a HUD key (the
-## shell lets it fall through to the other handlers).
-func handle_gameplay_key(keycode: int) -> bool:
-	match keycode:
-		FRIENDLY_TAGS_KEY:
-			cycle_friendly_tags()
-		_:
-			return false
-	return true
+# Every HUD key is a polled catalog row (HudToggles.Row: Goals G, ShowFriendly
+# K, help F1, helpmap F12, Briefing I, ...) sampled in tick(); the rows, the
+# cycles and the window toggles are the engine's (runtime/hud/hud_toggles.h).
+# Retail has NO HUD-visibility key: H is only the secondary `pause` binding
+# (SP-only), and the boot /NOHUD switch is the sole whole-overlay master
+# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520; /NOHUD gates
+# dword_840B18 & 2 @0x4a7a09 — a DIFFERENT global from the declutter level].
 
 
 func setup(world: GameWorld, player_presenter_in: LocalPlayerPresenter, ui_parent: Node) -> void:
 	_world = world
 	_player_presenter = player_presenter_in
 	_ui_parent = ui_parent
+	# The F9 Emotes / F10 Radio menus take a digit ahead of the weapon rows:
+	# the player input router reads and closes them (engine controls
+	# PlayerActions' menu arms carry the witness).
+	if _player_presenter != null:
+		_player_presenter.set_hud_toggles(_toggles)
 	# Connect before any world can tick: PreMission/WAC effects may drain on the
 	# first runtime tick, while the local-player HUD is deliberately built only
 	# after that tick (the pending queue holds them). The connect persists for the
@@ -194,6 +212,9 @@ func teardown() -> void:
 	_hud_objective = ""
 	_endround_banner = ""
 	_toggles.reset_mission()
+	_tip_ticks_seen = -1
+	_slot_bar_key_labels_revision = -1
+	_chat.reset()
 	_scoreboard.reset()
 	_vehicle_panel.reset()
 	_message_log.reset()
@@ -203,6 +224,9 @@ func teardown() -> void:
 	_pending_hud_messages.clear()
 	Strings.register_table(Strings.TABLE_MISSION, null)
 	_warned_no_player = false
+	# The session's end clears the status view (engine
+	# hud_toggles_session_init: out of a session nothing holds it).
+	_toggles.session_init(false, true)
 
 
 ## The layer every HUD element hangs under (hiding it hides the whole HUD,
@@ -236,6 +260,12 @@ func _sync_second_scene_camera() -> void:
 
 ## The USER crosshair options; cache each even before the lazy HUD exists,
 ## then apply it immediately to an existing HUD.
+## The two tip options (PlayerOptions keyboard_tips / gameplay_tips): the
+## engine tip's show gates.
+func set_tip_options(keyboard_tips: bool, gameplay_tips: bool) -> void:
+	_toggles.set_tip_options(keyboard_tips, gameplay_tips)
+
+
 func set_aspect_mode(mode: int) -> void:
 	_aspect_mode = mode
 	if _game_hud != null:
@@ -271,6 +301,24 @@ func set_crosshair_spread_enabled(enabled: bool) -> void:
 # PlayerViewEffects post stack mount as behind-parent children of the overlay,
 # exactly the child-control stack the ported shell HUD carried.
 # [orig: HUD_RenderAllOverlays @0x5a8070]
+func _apply_slot_bar_key_labels() -> void:
+	var model: ControlsModel = ControlsBindings.model()
+	var revision := model.get_binding_revision()
+	if revision == _slot_bar_key_labels_revision:
+		return
+	_slot_bar_key_labels_revision = revision
+	var key_labels := PackedStringArray()
+	for category in SLOT_BAR_CATEGORY_COUNT:
+		key_labels.append(model.display_text_for_action_code(
+				SLOT_BAR_KEY_RECORD_BASE + category))
+	_game_hud.set_slot_bar_key_labels(key_labels)
+
+
+## The binding revision the HUDLS key labels were last formatted at (tests).
+func get_slot_bar_key_labels_revision() -> int:
+	return _slot_bar_key_labels_revision
+
+
 ## Build the overlay if the mission has none yet (update() does it on the first
 ## frame with a local player; the GUT files build it over a staged root).
 func ensure_game_hud() -> void:
@@ -278,6 +326,12 @@ func ensure_game_hud() -> void:
 		return
 	_game_hud = HudOverlay.new()
 	_game_hud.name = "GameHud"
+	# The /NOHUD launch flag clears the overlay master word for the process.
+	_game_hud.set_no_hud(LaunchFlags.no_hud())
+	# The F1 help pages rebuild from the live bindings at every mission start.
+	ControlsBindings.model().build_help_screen()
+	_slot_bar_key_labels_revision = -1
+	_map_legend_labels = PackedStringArray()
 	_game_hud.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mount: Node = _ui_parent if _ui_parent != null else self
 	mount.add_child(_game_hud)
@@ -373,6 +427,11 @@ func ensure_game_hud() -> void:
 	# @0x59DD75 from Game_InitNewRound / HUD_InitOverlaySystem]
 	_game_hud.set_hud_detail_level(_toggles.get_hud_detail_level())
 	_push_showhud_flags()
+	# The session's start applies the status view's rule by role (engine
+	# hud_toggles_session_init: only a dedicated host starts on it).
+	var session_sim: Simulation = _world.get_sim() if _world != null else null
+	if session_sim != null:
+		_toggles.session_init(session_sim.is_mp_session(), _mp_session_peer(session_sim))
 
 
 # The shared F3 frame-stats board (null outside the game shell): while its
@@ -429,7 +488,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 		_hud_weapon_name = weapon_name
 		if weapon != null:
 			_game_hud.set_weapon(weapon.weapon_name,
-					_resolve_weapon_display_name(weapon_name), weapon.round_type,
+					_resolve_weapon_display_name(weapon_name),
 					weapon.clipsize, weapon.rounds_per_icon,
 					weapon.clipgfx_texture, weapon.clipgfx_offset,
 					weapon.rndgfx_texture, weapon.rndgfx_offset, weapon.rndgfx_step)
@@ -503,9 +562,30 @@ func tick(gameplay_input_active: bool = false) -> void:
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
-	# The breath bar, from the same sim and gametext table (HudOverlay.set_breath_bar
+	# The overlay-panel pass's key-toggled state (the F9 / F10 menus resolve
+	# their rows in the role-facts read below; the pause word draws STROVER7).
+	_game_hud.set_overlay_panel_windows(_toggles.is_emotes_menu_open(),
+			_toggles.is_radio_menu_open(), _toggles.is_paused())
+	# The tip (engine hud/tip_system.h): the world's producer events in the
+	# order they were raised, then the countdown by the HUD clock's main
+	# frames since the last frame (paused or not), then the draw feed.
+	_toggles.apply_tip_events(sim.take_tip_events())
+	var tip_ticks := _hud_ticks()
+	if _tip_ticks_seen >= 0:
+		_toggles.advance_tip_frames(maxi(tip_ticks - _tip_ticks_seen, 0))
+	_tip_ticks_seen = tip_ticks
+	_game_hud.set_tip(_toggles.get_tip(), _toggles.get_tip_countdown(),
+			bool(sim.is_local_player_dead()), Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model())
+	# The HUDLS key labels by weapon category: the live binding of the row the
+	# start-up re-lay puts at record 200 + category (engine controls
+	# action_for_code carries the witness), formatted again only when a
+	# binding changed or the HUD was rebuilt.
+	_apply_slot_bar_key_labels()
+	# The breath bar, the MP session lines, the HUDLS scan and the open menus,
+	# from the same sim and gametext table (HudOverlay.set_role_facts
 	# carries the witness).
-	_game_hud.set_breath_bar(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_game_hud.set_role_facts(sim, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_apply_friendly_tags()
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
@@ -515,12 +595,25 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# [orig: HUD_BuildEntityInfo @0x4b8440]
 	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
 	_game_hud.set_player_context(lv)
+	# The radar-contact legs (spinmap content-mask bit 10): the session steps
+	# the contact table once per frame behind the overlay pass's gates and ages
+	# the retained map banks by the ticks that update consumed, whether or not
+	# this presenter ticks (the in-game menu, inmatch/session.h carries the
+	# witness); the overlay draws the frame's snapshot ahead of the marker
+	# snapshot below, and the session gets this HUD's pass gates back.
+	_game_hud.set_minimap_radar(sim.get_hud_radar())
+	sim.set_hud_radar_gates(_game_hud.get_radar_frame_gates())
 	var player_pos: Vector3 = sim.get_local_player_position()
 	_game_hud.set_minimap_state(Vector2(player_pos.x, -player_pos.z),
 			player_pos.y, sim.get_local_player_heading_bam(),
 			sim.get_hud_radar_zoom_q16(), sim.get_hud_big_zoom_q16(),
 			sim.get_hud_map_mode(), sim.get_hud_map_flip_180(),
 			sim.get_hud_minimap_snapshot())
+	# The non-bank map legs' feed: zone labels, pool-3 rings, the tracked
+	# callout (the engine gathers it; the WPNames/Overlays strings resolve
+	# through the gametext table).
+	_game_hud.set_minimap_overlays(
+			sim.get_hud_minimap_overlays(Strings.get_table(Strings.TABLE_GAMETEXT)))
 	# A joiner's type-2043 origin entity decodes from the world stream after
 	# the HUD builds — keep querying until it appears (the host resolves the
 	# origin at promotion, so this latches immediately there). Throttled to
@@ -563,22 +656,38 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# The key sampling is this presenter's; the edge latches, the cycles, the
 	# window toggles and the shared-key shadowing are the engine's poll.
 	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
-	var detail_down := ControlsBindings.pressed("huddetail")
-	var color_down := ControlsBindings.pressed("hudcolor")
-	var toggle_events := _toggles.poll(
-			detail_down, color_down,
-			detail_down and color_down and _hud_rows_share_key(),
-			ControlsBindings.pressed("showhud"),
-			ControlsBindings.pressed("dotsize"), ControlsBindings.pressed("Goals"),
-			ControlsBindings.pressed("view1st"), ControlsBindings.pressed("viewwithgun"),
-			ControlsBindings.pressed("viewchase"), ControlsBindings.pressed("playerlist_alt"),
-			ControlsBindings.pressed("OldMessages"), ControlsBindings.pressed("ShowScore"),
-			hud_keys_chorded, gameplay_input_active, sim.is_mp_session())
+	# The talk rows ride the same sampler; the dispatch gates, the capture and
+	# the line editor are the engine's chat entry.
+	var talk_rows := 0
+	for row in HudChatEntry.ROW_COUNT:
+		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
+			talk_rows |= 1 << row
+	_chat.poll_rows(talk_rows, gameplay_input_active, hud_keys_chorded, sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks())
+	_game_hud.set_chat_input(_chat, _hud_ticks(), sim.is_mp_session())
+	var rows_down := 0
+	for row in HudToggles.ROW_COUNT:
+		if ControlsBindings.pressed(HudToggles.row_token(row)):
+			rows_down |= 1 << row
+	var both_hud_rows := (1 << HudToggles.ROW_HUD_DETAIL) | (1 << HudToggles.ROW_HUD_COLOR)
+	var toggle_events := _toggles.poll(rows_down,
+			(rows_down & both_hud_rows) == both_hud_rows and _hud_rows_share_key(),
+			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
+			(sim.get_session_game_type() & GAME_TYPE_OBJECTIVE_BIT) != 0,
+			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim))
 	# The window actions' respawn init also closes the sim's map overlay (the
 	# witness rides hud_toggles.h kOverlayWindowsCleared).
 	if toggle_events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED:
 		sim.request_hud_map_close()
 	_apply_toggle_events(toggle_events)
+	# The quit dialog and the authority's server-status page (engine
+	# hud_toggles.h / hud_server_status.h): while the page is up it stands in
+	# for the whole scene frame.
+	var status_gametext: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	_game_hud.set_quit_dialog(_toggles.is_quit_dialog_open(), sim.is_mp_session(),
+			_authority(sim), status_gametext)
+	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
+			_toggles.is_server_status_score_list_open(), status_gametext, sim)
 	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
 	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
 	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
@@ -598,6 +707,9 @@ func tick(gameplay_input_active: bool = false) -> void:
 			keep_crosshair_while_aimed,
 			live and wv.windup_active,
 			wv.windup_held_ticks if live else 0)
+	# The clip-flash key's def halves (HudOverlay.set_weapon_ammo_key).
+	_game_hud.set_weapon_ammo_key(wv.ammo_bucket if live else 0,
+			wv.ammo_class_id if live else 0)
 	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
@@ -665,12 +777,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# Effects drain synchronously during _world.tick(), before this HUD update.
 	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
 	_flush_pending_hud_messages()
-	_flush_feed_events()
+	_flush_feed_lines()
 	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
 	_score_fanfare.update(sim, _world)
 	# The three overlay windows follow the engine's toggle flags (the ShowScore
 	# gate, the sibling close and the respawn clears are its rules).
-	_message_log.update(_game_hud, sim, _toggles.is_message_log_open())
+	_message_log.update(_game_hud, _toggles.is_message_log_open())
+	_update_overlay_windows(sim)
 	_end_round_stats.update(_game_hud, sim, _toggles.is_end_round_stats_open())
 	_lfp_panel.update(_game_hud, sim, _hud_ticks())
 	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open(), _hud_ticks())
@@ -710,7 +823,7 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	var pos := wp.position
 	var player: Vector3 = sim.get_local_player_position()
 	var entry := WaypointHudEntry.new()
-	entry.text_name = _resolve_waypoint_name(wp.name_id)
+	entry.text_name = _resolve_waypoint_name(wp, sim)
 	entry.mission_position = Vector2(pos.x, -pos.z)
 	entry.altitude_wu = pos.y
 	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated
@@ -720,11 +833,14 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	return entry
 
 
-# The waypoint display name (the engine's HUD_GetWaypointName rule with its
-# STRWPNAMEDEFAULT fallback; hud_game_text.h) over the mission and gametext tables.
-func _resolve_waypoint_name(name_id: int) -> String:
-	return HudPos.waypoint_display_name(Strings.get_table(Strings.TABLE_MISSION),
-			Strings.get_table(Strings.TABLE_GAMETEXT), name_id)
+# The waypoint label: the engine's name rule (the in-session id remap, the
+# def-keyed specials, the STRWPNAMEDEFAULT fallback) composed with "m to", the
+# CTF runs and the LFP override (hud_game_text.h) over the mission and
+# gametext tables; the sim hands the session bit and game type.
+func _resolve_waypoint_name(wp: WaypointHudView, sim: Simulation) -> String:
+	return HudPos.waypoint_label(Strings.get_table(Strings.TABLE_MISSION),
+			Strings.get_table(Strings.TABLE_GAMETEXT), wp, sim.is_mp_session(),
+			sim.get_session_game_type())
 
 
 # The projection the HUD projects world points through (the attach labels, the
@@ -897,13 +1013,163 @@ func toggle_objectives() -> void:
 
 
 ## The friendly-tags mode cycle with the retail toast through the message
-## feed: the cycle and the toast key are the engine's, the table lookup and
-## the push are this presenter's.
+## feed (the ShowFriendly row's action without a key): the cycle and the
+## toast key are the engine's, the table lookup and the push are this
+## presenter's.
 func cycle_friendly_tags() -> void:
-	var key := _toggles.cycle_friendly_tags()
+	_toggles.cycle_friendly_tags()
+	_apply_toggle_events(HudToggles.EVENT_FRIENDLY_TAGS_CYCLED)
+
+
+# The key-toggled windows: the F1 help page's text from the live help pages,
+# the F12 legend's gametext Hud labels (resolved once per mission), and the I
+# briefing panel, which draws only out of a session (a session's window draws
+# the MP end-game screen instead).
+func _update_overlay_windows(sim: Simulation) -> void:
+	var legend_open := _toggles.is_map_legend_open()
+	if _toggles.is_help_open() and not legend_open:
+		var model := ControlsBindings.model()
+		_game_hud.set_help_screen(true, model.get_help_title(), model.get_help_page_line(),
+				ControlsModel.help_footer(), model.get_help_keys(), model.get_help_texts())
+	else:
+		_game_hud.set_help_screen(false, "", "", "", PackedStringArray(), PackedStringArray())
+	if legend_open and _map_legend_labels.is_empty():
+		_map_legend_labels = _resolve_map_legend_labels()
+	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels, _hud_ticks())
+	_game_hud.set_briefing(_toggles.get_briefing_mode() != 0 and not sim.is_mp_session(), sim)
+
+
+func _resolve_map_legend_labels() -> PackedStringArray:
+	var labels := PackedStringArray()
+	_map_legend_title = ""
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	if t != null and t.has_string_in_section("Hud", "hud_map_legend"):
+		_map_legend_title = t.get_string_in_section("Hud", "hud_map_legend")
+	for key in HudOverlay.map_legend_keys():
+		var label := ""
+		if t != null and t.has_string_in_section("Hud", key):
+			label = t.get_string_in_section("Hud", key)
+		labels.push_back(label)
+	return labels
+
+
+## Whether a chat line is open: every key belongs to the editor then.
+func is_chat_capturing() -> bool:
+	return _chat.is_capturing()
+
+
+## One key event while the chat line is open (true = the editor took it).
+## A flooded repeat echoes into the CHAT ring in its sender's color.
+func handle_chat_key(key: InputEventKey) -> bool:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if not _chat.key_event(key, sim, Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks()):
+		return false
+	if _game_hud != null:
+		if _chat.last_events() & HudChatEntry.EVENT_FLOOD_ECHO:
+			_game_hud.push_chat_line(_chat.get_echo_text(), _chat.get_echo_argb())
+		_game_hud.set_chat_input(_chat, _hud_ticks(), sim != null and sim.is_mp_session())
+	return true
+
+
+## One key-down over live play through the special-key chain (engine
+## hud_toggles.h): the quit dialog's keys first; unless the dialog took the
+## chain, the Tab board's page keys, then the status page's Enter / PgUp /
+## PgDn; then the help and briefing pages. A key a leg takes never reaches
+## the action rows (ControlsModel.consume_key_press); true = consumed.
+func handle_special_key(key: InputEventKey) -> bool:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim == null:
+		return false
+	var vk := ControlsModel.vk_from_godot_key(key.physical_keycode)
+	var in_session := sim.is_mp_session()
+	var bits := _toggles.quit_dialog_key(vk, in_session, _key_press_vk("STRKEYPRESS_YES", "Y"),
+			_key_press_vk("STRKEYPRESS_NO", "N"), _key_press_vk("STRKEYPRESS_RESTART", "R"))
+	if bits & HudToggles.SPECIAL_KEY_QUIT_CONFIRMED:
+		quit_confirmed.emit()
+	if bits & HudToggles.SPECIAL_KEY_CONSUMED:
+		ControlsBindings.model().consume_key_press(vk)
+		return true
+	var page_key := key.keycode == KEY_PAGEUP or key.keycode == KEY_PAGEDOWN
+	var taken := false
+	if (bits & HudToggles.SPECIAL_KEY_CHAIN_TAKEN) == 0:
+		if page_key and _game_hud != null and _game_hud.scoreboard_page_key(
+				key.keycode == KEY_PAGEDOWN, in_session, _toggles.is_scoreboard_open()):
+			taken = true
+		elif _toggles.server_status_page_key(vk, in_session, _authority(sim),
+				_mp_session_peer(sim)):
+			taken = true
+	if not taken and page_key:
+		taken = handle_page_key(key.keycode == KEY_PAGEDOWN, false)
+	if taken:
+		ControlsBindings.model().consume_key_press(vk)
+	return taken
+
+
+## The KeyPress gametext key's code: its first character as written, the
+## default letter when the table lacks it or the string is empty (engine
+## hud_toggles.h HudQuitDialogKeyInput carries the witness).
+func _key_press_vk(key: String, fallback: String) -> int:
+	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
+	var text := fallback
+	if t != null and t.has_string_in_section("KeyPress", key):
+		var s := t.get_string_in_section("KeyPress", key)
+		if not s.is_empty():
+			text = s
+	return text.unicode_at(0)
+
+
+## The connection mode's two bits by role (engine HudKeyPoll): single player
+## and a listen host carry both, a joiner only the peer bit, a dedicated host
+## only the authority bit.
+static func _authority(sim: Simulation) -> bool:
+	return sim.session_role() != Simulation.ROLE_JOINER
+
+
+static func _mp_session_peer(sim: Simulation) -> bool:
+	return sim.session_role() != Simulation.ROLE_DEDICATED_HOST
+
+
+## PgUp / PgDn over live play: the Tab board takes them first (in a session
+## with the board up — the engine's gate), else the open help screen turns its
+## page, else an open briefing panel turns its page; false = not consumed.
+## `with_board` false skips the board (the special-key chain already ran it).
+func handle_page_key(forward: bool, with_board := true) -> bool:
+	if _game_hud == null:
+		return false
+	var board_sim: Simulation = _world.get_sim() if _world != null else null
+	if with_board and _game_hud.scoreboard_page_key(forward,
+			board_sim != null and board_sim.is_mp_session(), _toggles.is_scoreboard_open()):
+		return true
+	if _toggles.is_help_open():
+		ControlsBindings.model().cycle_help_page(forward)
+		return true
+	if (_toggles.get_briefing_mode() & 2) != 0:
+		var sim: Simulation = _world.get_sim() if _world != null else null
+		_game_hud.cycle_briefing_page(1 if forward else -1, sim != null and sim.is_mp_session())
+		return true
+	return false
+
+
+## The escape key over live play: the engine's HUD-window close chain closes
+## the first open window (true = consumed); with none open it runs the
+## respawn init and the shell opens the in-game menu (false).
+func handle_escape() -> bool:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	var in_session := sim != null and sim.is_mp_session()
+	# The round-over latch: out of a session it makes Esc a no-op (the
+	# engine's hud_toggles_escape carries the witness).
+	var events := _toggles.escape(in_session, sim != null and sim.is_round_over(),
+			sim != null and _authority(sim))
+	if events & HudToggles.EVENT_OVERLAY_WINDOWS_CLEARED and sim != null:
+		sim.request_hud_map_close()
+	_apply_toggle_events(events)
+	return (events & HudToggles.EVENT_ESCAPE_CLOSED_WINDOW) != 0
+
+
+# A Misc gametext toast through the message feed.
+func _post_misc_toast(key: String) -> void:
 	if _game_hud == null:
 		return
-	_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
 	var t: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
 	if t != null and t.has_string_in_section("Misc", key):
 		_game_hud.push_message(t.get_string_in_section("Misc", key))
@@ -942,13 +1208,42 @@ func _apply_toggle_events(events: int) -> void:
 		_apply_view_action(Simulation.VIEW_ACTION_WITH_GUN)
 	if events & HudToggles.EVENT_THIRD_PERSON_SELECTED:
 		_apply_view_action(Simulation.VIEW_ACTION_CHASE)
+	if events & HudToggles.EVENT_FRIENDLY_TAGS_CYCLED:
+		if _game_hud != null:
+			_game_hud.set_friendly_tag_mode(_toggles.get_friendly_tag_mode())
+		_post_misc_toast(_toggles.friendly_tag_toast_key())
+	if events & HudToggles.EVENT_VERBOSE_TOGGLED:
+		_post_misc_toast(_toggles.verbose_toast_key())
+	if events & HudToggles.EVENT_BRIEFING_PAGES_RESET and _game_hud != null:
+		_game_hud.cycle_briefing_page(0, false)
+	if events & HudToggles.EVENT_SCOREBOARD_PAGE_RESET and _game_hud != null:
+		_game_hud.reset_scoreboard_page()
+	if events & HudToggles.EVENT_COMMAND_MAP_OPENED:
+		command_map_requested.emit()
+	# The single-player pause word drives the session pause: the pause row flips
+	# it, the escape chain clears it (engine hud_toggles.h carries the witness).
+	if events & (HudToggles.EVENT_PAUSE_TOGGLED | HudToggles.EVENT_PAUSE_CLEARED):
+		if _world != null:
+			_world.set_shell_paused(_toggles.is_paused())
+
+
+## The in-game menu's share of the single-player pause word: its open sets
+## bit 0 and its resume clears it, out of a session only (the witness rides
+## engine hud_toggles.h HudToggleState::paused). The shell pauses the session
+## itself.
+func set_menu_pause(paused: bool) -> void:
+	var sim: Simulation = _world.get_sim() if _world != null else null
+	if sim != null and sim.is_mp_session():
+		return
+	_toggles.set_paused(paused)
 
 
 ## One hudcolor poll step over pre-sampled device state (the seam the tests
 ## drive); every other row idle.
 func poll_hud_color_edge(color_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(false, color_down, false, false, false, false,
-			false, false, false, false, false, false, chorded, active, false))
+	_apply_toggle_events(_toggles.poll(
+			(1 << HudToggles.ROW_HUD_COLOR) if color_down else 0, false, chorded, active,
+			false, false))
 
 
 func cycle_hud_color() -> void:
@@ -960,9 +1255,10 @@ func cycle_hud_color() -> void:
 ## live shared-key shadowing (D-CTRL-4) -- the seam the tests drive.
 func poll_hud_keys(detail_down: bool, color_down: bool, chorded: bool,
 		active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(detail_down, color_down, _hud_rows_share_key(),
-			false, false, false, false, false, false, false, false, false, chorded, active,
-			false))
+	var rows_down := ((1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0) \
+			| ((1 << HudToggles.ROW_HUD_COLOR) if color_down else 0)
+	_apply_toggle_events(_toggles.poll(rows_down, _hud_rows_share_key(), chorded, active,
+			false, false))
 
 
 # Whether the huddetail and hudcolor rows currently resolve to a common bound
@@ -978,8 +1274,9 @@ func _hud_rows_share_key() -> bool:
 
 ## One huddetail poll step (the seam the tests drive); every other row idle.
 func poll_hud_detail_edge(detail_down: bool, chorded: bool, active: bool) -> void:
-	_apply_toggle_events(_toggles.poll(detail_down, false, false, false, false, false,
-			false, false, false, false, false, false, chorded, active, false))
+	_apply_toggle_events(_toggles.poll(
+			(1 << HudToggles.ROW_HUD_DETAIL) if detail_down else 0, false, chorded, active,
+			false, false))
 
 
 func cycle_hud_detail() -> void:
@@ -1020,6 +1317,11 @@ func hud_detail_config() -> int:
 ## The persisted HUD color-scheme index (the token cycle_hud_color writes).
 func hud_color_index() -> int:
 	return _toggles.get_hud_color_index()
+
+
+## The process-lifetime HUD toggle state (read seam: the window flags).
+func toggles() -> HudToggles:
+	return _toggles
 
 
 ## The process-lifetime friendly-tags mode (cycle_friendly_tags advances it).
@@ -1186,30 +1488,21 @@ func _queue_chat_line(text: String) -> void:
 		_pending_hud_messages.pop_front()
 
 
-## The message feed: this frame's folded S2C 0x1E game events, each resolved
-## into the game's own canned sentence and posted to the SYSTEM ring. The sim
-## hands over the rows; the gametext resolve and the witnessed substitution
-## are the engine's (FeedRow.resolve_line over hud::feed_row_line), so the
-## sentence is always the game's own text and never one we compose.
-func _flush_feed_events() -> void:
+## The message feeds: this frame's S2C 0x1E game events (the game's own canned
+## sentences), 0x14 chat lines and 0x32 join/leave lines, posted into their
+## rings in wire order. The resolve, the formatting, the channel routing and
+## the order are the engine's (HudOverlay.post_feed_lines over
+## Simulation::drain_feed_posts); the involved 0x1E line feeds the banner.
+func _flush_feed_lines() -> void:
 	if _game_hud == null or _world == null:
 		return
 	var sim: Simulation = _world.get_sim()
 	if sim == null:
 		return
-	var rows: Array[FeedRow] = sim.drain_feed_events()
-	if rows.is_empty():
-		return
-	var table: RtxtStringFile = Strings.get_table(Strings.TABLE_GAMETEXT)
-	if table == null:
-		return
-	for row: FeedRow in rows:
-		var line := row.resolve_line(table)
-		if line.is_empty():
-			continue
-		_game_hud.push_feed_line(line, row.get_color())
-		if row.is_announcement():
-			sim.retain_feed_announcement(line, _hud_ticks())
+	var announcement := _game_hud.post_feed_lines(sim,
+			Strings.get_table(Strings.TABLE_GAMETEXT), _toggles.is_mp_verbose())
+	if not announcement.is_empty():
+		sim.retain_feed_announcement(announcement, _hud_ticks())
 
 
 func _flush_pending_hud_messages() -> void:

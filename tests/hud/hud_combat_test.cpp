@@ -5,6 +5,7 @@
 #include <cstring>
 #include <formats/def/def.h>
 #include <net/npwire/ingame_encode.h>
+#include <runtime/hud/hud_bay_logos.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/inset_scope.h>
 #include <runtime/inmatch/loopback_channel.h>
@@ -134,12 +135,19 @@ static void mortar_map_and_world_cues() {
 	state.combat.impact_radius_q16 = 3 << 16;
 	const auto &map = compiler.compile(state, 1024, 768).big_map;
 	CHECK(map.visible);
-	CHECK(std::count_if(map.lines.begin(), map.lines.end(),
-				  [](const auto &l) { return l.color == 0xFFFFFF00u; }) == 64);
+	// The 254 preview's three filled yellow centre rings are anti-aliased
+	// bands (untextured sprites), and the 0xD0 special slot (bit7 set) draws
+	// on layers 1, 2 and 3 — nine yellow bands.
+	// [orig: Render_MinimapSlotBlip 254 arm @0x5be2a8..0x5be3b5 ->
+	//  Render_DrawRingOverlay @0x5D4270; MapOverlay_RenderAllByLayer
+	//  @0x5BE780..0x5BE7D7]
+	const auto yellow_band = [](const auto &sp) {
+		return sp.texture == opennova::hud::kHudMapTextureNone && sp.color == 0xFFFFFF00u;
+	};
+	CHECK(std::count_if(map.sprites.begin(), map.sprites.end(), yellow_band) == 9);
 	state.combat.impact_map = false;
 	const auto &cleared = compiler.compile(state, 1024, 768).big_map;
-	CHECK(std::none_of(cleared.lines.begin(), cleared.lines.end(),
-			[](const auto &l) { return l.color == 0xFFFFFF00u; }));
+	CHECK(std::none_of(cleared.sprites.begin(), cleared.sprites.end(), yellow_band));
 	state.combat.designator = true;
 	state.combat.impact_point = { 512, 384, 0, true };
 	const auto &designator = compiler.compile(state, 1024, 768);
@@ -159,6 +167,18 @@ static void mortar_map_and_world_cues() {
 		}
 	CHECK(std::abs((max_y - min_y) - 42) < 0.5f && std::abs((max_x - min_x) - 84) < 0.5f);
 	CHECK(std::abs((min_x + max_x) / 2 - 512) < 0.5f && std::abs((min_y + max_y) / 2 - 344) < 0.5f);
+	// The ring's first vertex takes the SINE on x and the cosine on y: the
+	// outer stop of step 0 sits straight below the centre, (512, 344 + 21).
+	// [orig: Render_DrawRingOverlay -- g_BamSinTableQ22 x @0x5d43d2,
+	//  off_849934 y @0x5d43db, angle 0x200000 @0x5d43af]
+	CHECK(std::any_of(designator.tris.begin(), designator.tris.end(), [](const auto &t) {
+		return t.c.x == 512.0f && t.c.y == 365.0f;
+	}));
+	// No fill on the LollyPop: no centre fan, so no vertex at the centre.
+	// [orig: texture_id 0 @0x5a8916 -> rec+0x14 == 0 @0x5d42a0]
+	CHECK(std::none_of(designator.tris.begin(), designator.tris.end(), [](const auto &t) {
+		return t.a.x == 512.0f && t.a.y == 344.0f;
+	}));
 	// Neither cue tests the death screen: the overlay walk's tail is ungated.
 	// [orig: HUD_RenderAllOverlays @0x5A87EF..0x5A89DA]
 	state.combat.death_screen = true;
@@ -598,8 +618,147 @@ static void integer_screen_mapping() {
 	}));
 }
 
+// The vehicle-bay logo walk and its three marker types.
+// [orig: HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a2c00 ->
+//  HUD_DrawEntityMarker types 5/6/7 @0x59355d..0x5936a0]
+static void vehicle_bay_logos() {
+	const auto bay = [](HudMinimapBank bank, uint16_t handle, uint8_t team, uint8_t groups,
+							 int32_t x, int32_t y) {
+		HudMinimapMarker m;
+		m.bank = uint8_t(bank);
+		m.handle = handle;
+		m.flags = 0x10;
+		m.entity_known = 1;
+		m.team = team;
+		m.entity_bits = kMarkerEntityVehicleBay;
+		m.bay_groups = groups;
+		m.entity_x = x;
+		m.entity_y = y;
+		m.entity_z = 3 << 16;
+		return m;
+	};
+	constexpr int32_t u = 65536;
+	std::vector<HudMinimapMarker> markers;
+	// The special bank first in the vector: the walk still runs it last.
+	markers.push_back(bay(HudMinimapBank::kSpecial, 30, 1, 4, 0, 149 * u + u / 2));
+	markers.push_back(bay(HudMinimapBank::kTransient, 10, 1, 2, 100 * u, 0));
+	markers.push_back(bay(HudMinimapBank::kPersistent, 20, 0, 1, 130 * u, 0));
+	markers.push_back(bay(HudMinimapBank::kPersistent, 21, 1, 3, 0, 150 * u)); // the edge
+	markers.push_back(bay(HudMinimapBank::kPersistent, 22, 2, 2, 10 * u, 0)); // other team
+	markers.push_back(bay(HudMinimapBank::kPersistent, 23, 1, 2, 150 * u + 1, 0)); // out
+	markers.push_back(bay(HudMinimapBank::kPersistent, 24, 1, 0, 10 * u, 0)); // no family
+	auto special = bay(HudMinimapBank::kSpecial, 25, 1, 2, 10 * u, 0);
+	special.flags = 0x40;
+	markers.push_back(special);
+	markers.push_back(bay(HudMinimapBank::kTransient, 0xFFFF, 1, 2, 10 * u, 0));
+	auto not_bay = bay(HudMinimapBank::kTransient, 26, 1, 2, 10 * u, 0);
+	not_bay.entity_bits = kMarkerEntityHasModel;
+	markers.push_back(not_bay);
+	auto unresolved = bay(HudMinimapBank::kTransient, 27, 1, 2, 10 * u, 0);
+	unresolved.entity_known = 0;
+	markers.push_back(unresolved);
+	std::vector<HudBayLogo> logos;
+	vehicle_bay_logo_walk(markers, { 0, 0, 0 }, 1, logos);
+	CHECK(logos.size() == 4);
+	if (logos.size() == 4) {
+		// The transient air bay at 100 u: palette[3], full alpha, lifted 8 u.
+		CHECK(logos[0].type == 5 && logos[0].palette == 3 && logos[0].alpha == 255);
+		CHECK(logos[0].position[0] == 100 * u && logos[0].position[2] == (3 << 16) + 0x80000);
+		// The neutral land bay at 130 u: palette[1], (0x960000 - 130u) * slope = 170.
+		CHECK(logos[1].type == 6 && logos[1].palette == 1 && logos[1].alpha == 170);
+		// Land + air picks the helicopter; exactly 150 u draws at alpha 0.
+		CHECK(logos[2].type == 5 && logos[2].alpha == 0);
+		// The special-bank water bay last: 149.5 u -> trunc(4.25) = 4.
+		CHECK(logos[3].type == 7 && logos[3].alpha == 4);
+	}
+	// A team-2 viewer admits the neutral bay and the team-2 one, in bank order.
+	vehicle_bay_logo_walk(markers, { 0, 0, 0 }, 2, logos);
+	CHECK(logos.size() == 2 && logos[0].palette == 1 && logos[1].palette == 5);
+
+	HudLayout layout;
+	layout.combat.logo_helo = { 64, 32, true };
+	layout.combat.logo_humm = { 64, 32, true };
+	HudFrameCompiler compiler;
+	compiler.configure(layout, nullptr);
+	HudFrameState state;
+	HudBayLogo logo;
+	logo.type = 5;
+	logo.palette = 3;
+	logo.alpha = 255;
+	logo.point = { 512.7f, 400.2f, 0, true, 16 << 16 };
+	state.combat.bay_logos = { logo };
+	const HudDrawList &d = compiler.compile(state, 1024, 768);
+	CHECK(d.order_breaks.size() == 2);
+	if (d.order_breaks.size() != 2)
+		return;
+	const size_t t0 = d.order_breaks[0].tris, t1 = d.order_breaks[1].tris;
+	// The backing at design (512, 360 - 84), radius t = trunc(128 * 0.66):
+	// 95 segments, each a fill fan triangle plus six band triangles, then the
+	// two logo triangles. [orig: @0x593586..0x5935d4; Render_DrawRingOverlay
+	//  the fan @0x5d43fb]
+	CHECK(t1 - t0 == 95 * 7 + 2);
+	float min_x = 1e9f, max_x = -1e9f, min_y = 1e9f, max_y = -1e9f;
+	for (size_t i = t0; i + 2 < t1; ++i)
+		for (const auto *v : { &d.tris[i].a, &d.tris[i].b, &d.tris[i].c }) {
+			min_x = std::min(min_x, v->x);
+			max_x = std::max(max_x, v->x);
+			min_y = std::min(min_y, v->y);
+			max_y = std::max(max_y, v->y);
+		}
+	// Stroke 2 * 768/768 -> i = 0: the band spans r +- 1, twice as wide.
+	CHECK(std::abs(max_y - (276 + 85)) < 0.01f && std::abs(min_y - (276 - 85)) < 0.1f);
+	CHECK(std::abs(max_x - (512 + 170)) < 0.1f && std::abs(min_x - (512 - 170)) < 0.1f);
+	// The fill (255 & ~3) << 22 rides the centre and the inner stop.
+	CHECK(d.tris[t0].a.x == 512.0f && d.tris[t0].a.y == 276.0f &&
+			d.tris[t0].a.color == 0x3F000000u);
+	CHECK(d.tris[t0 + 1].a.color == 0x3F000000u && d.tris[t0 + 1].c.color == 0xFF80A0FFu);
+	// The logo: 256 x 128 about (512, 276), half-bright under MODULATE2X at
+	// full alpha, UVs inset half a design texel and widened one pixel.
+	const HudTri &q = d.tris[t1 - 2];
+	CHECK(q.texture == kHudTexLogoHelo && d.tris[t1 - 1].texture == kHudTexLogoHelo);
+	CHECK(q.a.x == 384.0f && q.a.y == 212.0f && q.c.x == 640.0f && q.c.y == 340.0f);
+	CHECK(q.a.color == 0xFF80A0FEu);
+	CHECK(near(q.a.u, 0.5f / 256) && near(q.a.v, 0.5f / 128));
+	CHECK(near(q.c.u, 1 - 0.5f / 256 + 1.0f / 256) && near(q.c.v, 1 - 0.5f / 128 + 1.0f / 128));
+	// The 40-px stem from the integral projected pixel, in the ring colour.
+	CHECK(std::any_of(d.lines.begin(), d.lines.end(), [](const HudLine &l) {
+		return l.x0 == 512.0f && l.y0 == 400.0f && l.x1 == 512.0f && l.y1 == 360.0f &&
+				l.color == 0xFF80A0FFu;
+	}));
+	// The depth scale clamps 32..256: 64 u -> 64 wide, 200 u -> 32.
+	const auto logo_width = [&](int32_t depth) {
+		state.combat.bay_logos[0].point.depth_q16 = depth;
+		const HudDrawList &dd = compiler.compile(state, 1024, 768);
+		const HudTri &tri = dd.tris[dd.order_breaks[1].tris - 2];
+		return tri.c.x - tri.a.x;
+	};
+	CHECK(logo_width(64 << 16) == 64.0f);
+	CHECK(logo_width(200 << 16) == 32.0f);
+	// An unloaded logo keeps the stem and the backing; a clipped point draws
+	// nothing [orig: HUD_DrawTexturedQuadCentered `if (textureId)`
+	//  @0x590adf; the clip return @0x59319e].
+	state.combat.bay_logos[0].point.depth_q16 = 16 << 16;
+	state.combat.bay_logos[0].type = 7;
+	const HudDrawList &boat = compiler.compile(state, 1024, 768);
+	CHECK(boat.order_breaks[1].tris - boat.order_breaks[0].tris == 95 * 7);
+	state.combat.bay_logos[0].point.clip = 4;
+	const HudDrawList &clipped = compiler.compile(state, 1024, 768);
+	CHECK(clipped.order_breaks[1].tris == clipped.order_breaks[0].tris);
+	CHECK(clipped.order_breaks[1].lines == clipped.order_breaks[0].lines);
+	// A faded logo's fill quarters its alpha: 170 -> 168 << 22.
+	state.combat.bay_logos[0].point.clip = 0;
+	state.combat.bay_logos[0].type = 6;
+	state.combat.bay_logos[0].palette = 1;
+	state.combat.bay_logos[0].alpha = 170;
+	const HudDrawList &faded = compiler.compile(state, 1024, 768);
+	const HudTri &fan = faded.tris[faded.order_breaks[0].tris];
+	CHECK(fan.a.color == 0x2A000000u && fan.b.color == 0x2A000000u);
+	CHECK(faded.tris[faded.order_breaks[1].tris - 1].a.color == 0xFF00FE00u);
+}
+
 int main() {
 	integer_screen_mapping();
+	vehicle_bay_logos();
 	geometry_and_draw();
 	mortar_map_callbacks();
 	mortar_map_and_world_cues();

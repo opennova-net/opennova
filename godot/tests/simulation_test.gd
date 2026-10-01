@@ -442,13 +442,13 @@ func test_hud_minimap_snapshot_and_controls_have_a_stable_contract() -> void:
 			"A fresh Simulation publishes an empty minimap snapshot.")
 	assert_eq(snapshot[0], int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION),
 			"Snapshot version leads the header.")
-	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 4,
-			"Row layout v4: the draw-policy tail plus the local-team medic bit ride each row.")
+	assert_eq(int(Simulation.HUD_MINIMAP_SNAPSHOT_VERSION), 7,
+			"Row layout v7: the draw-policy tail, the medic bit, the live entity facts, the vehicle-bay logo facts and the zone-timer entry ride each row.")
 	assert_eq(snapshot[1], int(Simulation.HUD_MINIMAP_STRIDE))
 	assert_eq(snapshot[2], 0, "No retained rows without a mission.")
 	assert_eq(int(Simulation.HUD_MINIMAP_HEADER_SIZE), 3)
-	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 17,
-			"v4 appends the medic bit the map marker walk turns into the cross.")
+	assert_eq(int(Simulation.HUD_MINIMAP_STRIDE), 36,
+			"v7 appends the zone-timer entry (flags, team, bar team, value, limit, rate) the capture-point labels read.")
 	assert_eq(sim.get_local_player_heading_bam(), 0,
 			"No local player -> heading zero.")
 	assert_eq(sim.get_hud_radar_zoom_q16(), 65536,

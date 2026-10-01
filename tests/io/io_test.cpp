@@ -93,6 +93,28 @@ static int test_byte_reader_bounds()
     return 0;
 }
 
+// The protocol handlers' two string/skip forms: a NUL-terminated read that
+// clamps to the end, and a skip that does not move on a clipped field.
+static int test_byte_reader_cstr_and_skip_if_available()
+{
+    const uint8_t bytes[] = {'A', 'B', 0, 7, 'Z'};
+    io::ByteReader r(bytes, sizeof(bytes));
+    TEST_EXPECT(r.read_cstr() == "AB");
+    TEST_EXPECT(r.position() == 3 && r.ok());
+    TEST_EXPECT(r.read_u8() == 7);
+    TEST_EXPECT(r.read_cstr() == "Z"); // no terminator: the rest, clipped
+    TEST_EXPECT(r.position() == sizeof(bytes) && !r.ok());
+    TEST_EXPECT(r.read_cstr().empty());
+
+    io::ByteReader s(bytes, sizeof(bytes));
+    s.skip_if_available(4);
+    TEST_EXPECT(s.position() == 4 && s.ok());
+    s.skip_if_available(4); // one byte left: no move
+    TEST_EXPECT(s.position() == 4 && !s.ok());
+    TEST_EXPECT(s.read_u8() == 'Z');
+    return 0;
+}
+
 static int test_byte_writer_roundtrip()
 {
     io::ByteWriter w;
@@ -485,6 +507,7 @@ int main()
     if (test_strutil_parse_numbers()) return 1;
     if (test_append_writers()) return 1;
     if (test_byte_reader_truncation_latch()) return 1;
+    if (test_byte_reader_cstr_and_skip_if_available()) return 1;
     if (test_log_sink()) return 1;
     if (test_log_ring_cursor_drain_and_wrap()) return 1;
     if (test_log_ring_concurrent_record_and_drain()) return 1;

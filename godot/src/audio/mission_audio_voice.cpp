@@ -13,10 +13,10 @@ void MissionAudio::_install_voice_resolver() {
     const Ref<Simulation> sim = _simulation();
     if (sim.is_null()) return;
     const ObjectID bank_id = bank_.is_valid() ? ObjectID(bank_->get_instance_id()) : ObjectID();
-    sim->set_script_voice_resolver([bank_id](const std::string &name, uint8_t listener_view_flags)
-            -> std::optional<opennova::world::ScriptVoiceChannel::SetSelection> {
+    sim->set_script_voice_resolver([bank_id](const std::string &name, uint8_t listener_view_flags,
+            bool bank_member) -> std::optional<opennova::world::ScriptVoiceChannel::SetSelection> {
         auto *bank = Object::cast_to<SoundBank>(ObjectDB::get_instance(bank_id));
-        return bank ? bank->select_radio_set(name, listener_view_flags) : std::nullopt;
+        return bank ? bank->select_radio_set(name, listener_view_flags, bank_member) : std::nullopt;
     });
 }
 

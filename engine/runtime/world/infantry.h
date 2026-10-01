@@ -976,6 +976,17 @@ void infantry_weapon_weight_spread_tick(
 // [orig: WeaponAction_Fire @ 0x542bbc..0x542bea — +0x2C8 = state, +0x2C4 = 0]
 void infantry_weapon_attack_stamp(InfantryState &inf, int attack_kind);
 
+// The S2C 0x2D emote stamp: when the body's anim set authors `emote_N` (state
+// 114 + emote, the emote_1..emote_10 rows 115..124, flag 0x20), the secondary
+// channel's target becomes it and its deferred clears; the next selection
+// defers the hold pose to the clip's end (the 0x20 commit rule). An unauthored
+// state (its slot backfilled with RESET) leaves the channel alone. Returns
+// whether it stamped.
+// [orig: NapiNPClientMsg_HandleEmote @0x427efb..0x427f18 — `animMap[114 +
+//  emote] != animMap[0]`, entity+0x2C8 = 114 + emote, +0x2C4 = 0]
+inline constexpr int kEmoteAnimStateBase = 114;
+bool infantry_weapon_emote_stamp(InfantryState &inf, const IRootMotionSource *source, int emote);
+
 // Stamp the witnessed 20-tick arms dip when this entity observes a different resolved
 // held AnimMap identity. Serial 0 means no mounted weapon map. Keeping the observed
 // serial on InfantryState makes the edge per entity rather than simulation-global.

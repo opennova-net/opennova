@@ -10,6 +10,7 @@
 #include <variant>
 
 #include <net/npwire/ingame_decode.h> // EntityClass + WeaponReload (a per-family decode-header split candidate)
+#include <net/npwire/emote_wire.h> // EmoteBroadcast (S2C 0x2D)
 
 #include <runtime/replication/client_state.h>
 #include <runtime/replication/item_replication_catalog.h>
@@ -17,6 +18,7 @@
 
 namespace opennova::world {
 class IRootMotionSource;
+struct WeaponTable;
 struct LiveRound;
 } // namespace opennova::world
 
@@ -39,8 +41,25 @@ struct EntityDeathEvent {
     int16_t hit_section = 0;
     bool item_state = false;
 };
+// A chat line on channel 13 (local) names its sender's slot: the sender's
+// person becomes the map's tracked target. The slot resolves at the effect
+// pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
+// 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
+// HUD_SetTrackedEntityTarget @0x59D050]
+struct LocalChatSpeaker {
+    uint8_t slot = 0;
+};
+// A tip event the client's own receive legs raise (hud/tip_system.h
+// TipEvent): the spectator begin on the S2C 0x0A death-screen edge and on
+// the own slot's S2C 0x4D. The effect pass queues it on the world's tip
+// events. [orig: NapiNPClientMsg_0x00A @0x42ffd8..0x42ffdf;
+// NapiNPClientMsg_HandleSpawnSlot @0x431857..0x43185e]
+struct TipEventCommand {
+    uint8_t event = 0;
+};
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
-        TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent>;
+        TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
+        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand>;
 
 class ClientReplicaPipeline {
 public:
@@ -73,15 +92,19 @@ public:
 	// embedding runtime drains and sends them once per frame.
 	std::vector<uint16_t> drain_carrier_repair_requests();
 	void tick_recoil();
-	// Advance the retained 0x40/0x6B banks once per client tick. Persistent
-	// 0x10 slots do not age; the transient bank clears on expiry while the
-	// special bank floors its lifetime at zero keeping the handle; live links
-	// keep their slot's lifetime refreshed and clear it when they lapse.
-	// Regular (non-special) markers refresh pose/known from the decoded
-	// entity, mirroring retail's draw-time pool read.
-	// [orig: MapOverlay_UpdateTimers @0x5BFCE0;
-	//  Render_MinimapSlotBlip @0x5be4ac]
-	void tick_minimap_overlays();
+	// Age the retained 0x40/0x6B banks by `elapsed` ticks. Persistent 0x10
+	// slots do not age; the transient bank clears on expiry while the special
+	// bank floors its lifetime at zero keeping the handle; live links re-arm
+	// their slot's lifetime and handle and clear it when they lapse. Retail
+	// runs it from the HUD pass's radar update with that update's elapsed
+	// tick count, so the session's frame calls it (inmatch step_hud_radar
+	// from Session's radar step) [orig: MapOverlay_UpdateTimers @0x5BFCE0,
+	// called by Radar_UpdateContacts @0x59a9ce].
+	void age_minimap_overlays(uint32_t elapsed);
+	// Once per client tick: regular (non-special) markers refresh pose and
+	// known from the decoded entity, mirroring retail's draw-time pool read.
+	// [orig: Render_MinimapSlotBlip @0x5be4ac]
+	void refresh_minimap_live_markers();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.
@@ -189,6 +212,9 @@ public:
 	//    for traitless vehicles and lib-only embedders.
 	// No-op unless remote-motion mode is enabled.
 	void tick_remote_motion(uint16_t self_handle);
+	// Every armed player row's secondary channel for one tick (the advance,
+	// then the 16-tick selection keyed on `tick`), the own row excepted.
+	void tick_row_weapon_channels(uint16_t self_handle, uint32_t tick);
 
 	// Recompose every carried row after its carrier's mover has completed. The
 	// ordinary library-only tick_remote_motion path calls this as its final
@@ -242,9 +268,22 @@ public:
 	// (client_replica_feed.cpp). Drained once per frame by the embedder, which
 	// routes each line by the HUD channel table and posts it to its ring.
 	std::vector<ClientChatLine> drain_chat_lines();
+	// S2C 0x32 join/leave records folded by apply() (client_replica_feed.cpp),
+	// drained once per frame by the embedder that owns gametext.
+	std::vector<ClientGameText> drain_game_texts();
 	std::vector<WeaponReload> drain_weapon_reloads();
 	std::vector<ClientEffectCommand> drain_effect_commands();
-	void post_chat_line(ClientChatLine line) { pending_chat_lines_.push_back(std::move(line)); }
+	void post_chat_line(ClientChatLine line) {
+		line.feed_order = next_feed_order_++;
+		pending_chat_lines_.push_back(std::move(line));
+	}
+	// A ring line the client raises itself (the CMAP go code) takes the next
+	// dispatch stamp, so it lands after every line already dispatched.
+	uint32_t claim_feed_order() { return next_feed_order_++; }
+	// A mission start lowers the round-over latch; a joiner's runtime lives
+	// across its round-cycle reloads, so each load calls this
+	// [orig: Game_StartMission @0x524a1f].
+	void begin_mission() { state_.spawn_success_gate = false; }
 	// S2C 0x23 WAC remote commands the fold accepted this frame; the embedding
 	// role runs each registry row's handler (wac::run_remote_command) against
 	// its world. A non-authority endpoint only: the retail handler returns
@@ -283,6 +322,13 @@ public:
 	void set_root_motion_source(world::IRootMotionSource *source) {
 		root_motion_ = source;
 	}
+	// The joiner's weapon table: the held record's special_hold the player
+	// rows' secondary selection reads by the wire ADM index. Null = kind 0.
+	void set_weapon_table(const world::WeaponTable *weapons) { weapon_table_ = weapons; }
+	// The S2C 0x2D emote stamp on a decoded player row (a speaker with no
+	// world twin): an armed row whose map authors emote_N takes it as its
+	// secondary target (client_replica_weapon_channel.cpp). False = no stamp.
+	bool stamp_row_emote(uint16_t handle, uint8_t emote);
 
 	// Install the joiner's terrain column for the bounded remote-person
 	// post-motion probe. The pipeline owns neither field nor backing buffers.
@@ -324,8 +370,39 @@ public:
 	uint16_t viewer_handle() const { return viewer_handle_; }
 	void set_mp_attributes(uint32_t attributes) { mp_attributes_ = attributes; }
 	uint32_t mp_attributes() const { return mp_attributes_; }
+	// This client's own roster slot (retail g_LocalPlayerSlotId): the S2C 0x4D
+	// fold tells its own slot's notice from another's [orig:
+	// NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
+	void set_local_player_slot(uint8_t slot) { local_player_slot_ = slot; }
 
+	// The death screen's spectate writers over the replica rows
+	// (client_replica_spectate.cpp): the local player's own wire handle the
+	// walk starts from and excludes (the embedder stamps it each frame), the
+	// target walk (direction 0 clears target and sub-mode), the sub-mode cycle
+	// and the SPECTATORTARGET track.
+	// [orig: Spectator_CycleTarget_0 @0x52ac20; sub_52AFF0 @0x52aff0;
+	//  Entity_TrySetMinimapTrackTarget @0x52abc0]
+	void set_spectate_local_handle(uint16_t handle) { spectate_local_handle_ = handle; }
+	void spectate_cycle_target(int direction);
+	void spectate_cycle_mode(int direction);
+	void spectate_track(uint16_t handle);
+	// The death screen's three spectator actions by their dispatch codes: 500
+	// cycles the sub-mode, 501 / 502 step the target +1 / -1 in a chase or
+	// first-person sub-mode [orig: Input_HandleActionBinding cases 500
+	// @0x49bd58, 501 @0x49bd67, 502 @0x49bd89; catalog rows 110..112].
+	static constexpr int kSpectateActionCycleMode = 500;
+	static constexpr int kSpectateActionNextTarget = 501;
+	static constexpr int kSpectateActionPrevTarget = 502;
+	void spectate_action(int code);
+
+	// The local player's roster slot (entity+0x154, which the host stamps
+	// from the slot id S2C 0x04 byte 17 carries): the slot
+	// set_local_player_slot latched, whether or not its entity is bound.
+	int local_roster_slot() const;
 private:
+	// A destroyed spectate target re-picks [orig: Entity_Destroy @0x43e820].
+	void spectate_on_entity_removed(uint16_t handle);
+	void apply_spectator_mode(const std::vector<uint8_t> &body); // 0x75
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
@@ -362,6 +439,21 @@ private:
 	void apply_chat_broadcast(const std::vector<uint8_t> &body); // 0x14 (player chat)
 	void apply_player_list(const std::vector<uint8_t> &body);  // 0x16 (the Tab board)
 	void apply_player_sync(const std::vector<uint8_t> &body);  // 0x46 (its name join)
+	// The command map's squad and waypoint legs (client_replica_squad.cpp).
+	void apply_squad_join(const std::vector<uint8_t> &body);      // 0x71
+	void apply_squad_order(const std::vector<uint8_t> &body);     // 0x72
+	void apply_fireteam_set(const std::vector<uint8_t> &body);    // 0x73
+	void apply_squad_recruited(const std::vector<uint8_t> &body); // 0x74
+	void apply_go_code(const std::vector<uint8_t> &body);         // 0x78
+	void apply_waypoint_create(const std::vector<uint8_t> &body); // 0x33
+	void apply_destroy_entity(const std::vector<uint8_t> &body);  // 0x7C
+	void apply_clan_roster(const std::vector<uint8_t> &body);  // 0x6A (the clan registry)
+	void apply_visible_players(const std::vector<uint8_t> &body); // 0x4C (the slot pointer table)
+	void apply_spawn_slot_notice(const std::vector<uint8_t> &body); // 0x4D (a player joined)
+	// Whether a pool-0 handle is a player entity (the Flags 0x100 class bit):
+	// a decoded Player row, or the entity a bound roster slot drives.
+	bool is_player_entity(uint16_t handle) const;
+	void apply_formatted_game_text(const std::vector<uint8_t> &body); // 0x32 (join/leave lines)
 	void apply_entity_routed(const std::vector<uint8_t> &body); // 0x44 (guided, §5.15)
 	void apply_deployed_item(const std::vector<uint8_t> &body); // 0x59 pool-1
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
@@ -389,6 +481,7 @@ private:
 
 	ClientState state_;
 	world::IRootMotionSource *root_motion_ = nullptr;
+	const world::WeaponTable *weapon_table_ = nullptr;
 	const terrain::TerrainHeightField *remote_motion_terrain_ = nullptr;
 	uint32_t rm_tick_counter_ = 0; // the leg re-plant window clock [orig: tick&63]
 	bool remote_motion_mode_ = false;
@@ -411,6 +504,9 @@ private:
     std::function<void(const ClientRoundEvent &)> round_receiver_;
 	std::vector<ClientGameEvent> pending_game_events_;
 	std::vector<ClientChatLine> pending_chat_lines_;
+	std::vector<ClientGameText> pending_game_texts_;
+	// The dispatch stamp the ring-bound records take (ClientGameEvent::feed_order).
+	uint32_t next_feed_order_ = 0;
 	std::vector<WeaponReload> pending_weapon_reloads_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
@@ -424,7 +520,9 @@ private:
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;
 	uint16_t viewer_handle_ = 0xFFFF;
+	uint16_t spectate_local_handle_ = 0xFFFF;
 	uint32_t mp_attributes_ = 0;
+	uint8_t local_player_slot_ = 0;
 	// Mission-seeded PRNG_Next16 stand-in shared by every decoded row in this
 	// view. The body consumes one draw per person per tick even when recoil is
 	// zero. Retail also has unrelated process-global consumers that this decoded

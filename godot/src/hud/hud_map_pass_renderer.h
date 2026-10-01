@@ -1,0 +1,90 @@
+#pragma once
+
+#include <godot_cpp/classes/texture2d.hpp>
+#include <godot_cpp/variant/rid.hpp>
+#include <godot_cpp/variant/transform2d.hpp>
+
+#include <runtime/hud/game_font.h>
+#include <runtime/hud/hud_map_view.h>
+#include <runtime/hud/hud_minimap.h>
+
+#include <vector>
+
+namespace godot {
+
+// The textures one map pass samples: the colormap atlas, the depthspin water
+// mask, the texture-slot table the sprites index (kHudTexMapIcons + the
+// sprite's texture offset) and the font page table the map glyphs index.
+struct HudMapPassTextures {
+	Ref<Texture2D> terrain;
+	Ref<Texture2D> water;
+	const Ref<Texture2D> *slots = nullptr;
+	int slot_count = 0;
+	const Ref<Texture2D> *pages = nullptr;
+	size_t page_count = 0;
+};
+
+// The DEATH window's zone-walk segments (hud_map_view.h HudMapWindowPass::
+// zones / segments) and their per-segment glyph ends: drawn after the pass's
+// own glyphs, each zone's blip then its letters.
+struct HudMapSegmentsView {
+	const opennova::hud::HudMapPass *pass = nullptr;
+	const std::vector<opennova::hud::HudMapWindowSegment> *segments = nullptr;
+	const std::vector<opennova::hud::GameFontQuad> *glyphs = nullptr;
+	const std::vector<size_t> *glyph_ends = nullptr;
+};
+
+// The device leg of one compiled map pass (engine/runtime/hud/hud_minimap.h
+// HudMapPass): four pinned-order child canvas items under a parent item —
+// the base (a pass's rect clear + terrain), the additive terrain resubmission (the
+// retail decal stage's x4 output split across two 1x items), the depthspin
+// water cutout, and the top item (grid rules, footprints, sprites, lines,
+// glyphs, then any over-lines). A pass carrying MODULATE2X sprites (the bit-10
+// radar marks) splits the top item's content across two ordered children of
+// it: the MODULATE2X item (those sprites, under the owner's modulate-2x
+// material) and the post item (everything after them: the threat ring, the
+// compass, the lines, the glyphs), so the retail draw order holds while the
+// marks run their own colour stage. The corner spinmap, the M-cycle big map
+// and the DEATH MAP window each own one; the materials stay their owner's.
+class HudMapPassRenderer {
+public:
+	HudMapPassRenderer() = default;
+	~HudMapPassRenderer();
+	HudMapPassRenderer(const HudMapPassRenderer &) = delete;
+	HudMapPassRenderer &operator=(const HudMapPassRenderer &) = delete;
+
+	// Create the four items under `parent` (idempotent) at draw indices
+	// first_draw_index..+3, optionally behind the parent's own commands, plus
+	// the top item's two ordered children.
+	void ensure(const RID &parent, int first_draw_index, bool behind_parent,
+			const RID &additive_material, const RID &water_material,
+			const RID &modulate2x_material);
+	bool is_ready() const;
+	// Clear every item's commands (the owner's per-draw reset).
+	void clear();
+	// Free the items (the owner's teardown).
+	void release();
+	// Place every item under a transform (a host whose pass coordinates are
+	// its parent's, not its own).
+	void set_transform(const Transform2D &transform);
+	void render(const opennova::hud::HudMapPass &map,
+			const std::vector<opennova::hud::GameFontQuad> &glyphs,
+			const HudMapPassTextures &textures,
+			const std::vector<opennova::hud::HudMapLine> *over_lines = nullptr,
+			const HudMapSegmentsView *segments = nullptr);
+
+	bool water_sampling_configured() const { return water_sampling_configured_; }
+	bool top_sampling_configured() const { return top_sampling_configured_; }
+
+private:
+	RID base_item_;
+	RID add_item_;
+	RID water_item_;
+	RID top_item_;
+	RID modulate2x_item_; // child of top_item_, first
+	RID post_item_;       // child of top_item_, after the MODULATE2X item
+	bool water_sampling_configured_ = false;
+	bool top_sampling_configured_ = false;
+};
+
+} // namespace godot

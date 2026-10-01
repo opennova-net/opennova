@@ -52,6 +52,9 @@ std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in) {
     // `cmp dword_A85BC4[ecx*4],0; jle` @0x553d2f..0x553d36 skips only the member
     // run, the blank UIList_AddRow @0x553dbf..0x553dce follows either way].
     for (const DeployZoneRow &z : in.zones) {
+        // An unregistered zone (SpawnZoneList_IndexOf -1) is skipped here
+        // [orig: @0x553cea].
+        if (z.index < 0) continue;
         int insert_pos = 0;
         for (size_t r = 0; r < rows.size(); ++r) {
             if (rows[r].value == z.index + 1) {

@@ -155,12 +155,13 @@ public:
 		if (MenuFrame *f = frame()) f->set_widget_selected_set(index, to_gd_ints(rows));
 	}
 	void set_widget_table_rows(int index,
-			const std::vector<std::vector<std::string>> &rows) override {
-		MenuFrame *f = frame();
-		if (f == nullptr) return;
-		TypedArray<PackedStringArray> out;
-		for (const std::vector<std::string> &row : rows) out.push_back(to_gd_strings(row));
-		f->set_widget_table_rows(index, out);
+			const std::vector<opennova::menu::MenuTableRow> &rows) override {
+		if (MenuFrame *f = frame()) f->set_widget_table_rows(index, rows);
+	}
+	void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
+			int bottom) override {
+		if (MenuFrame *f = frame())
+			f->set_widget_clip_rect(index, enabled, Rect2i(left, top, right - left, bottom - top));
 	}
 	void set_widget_hover_item(int index, int row) override {
 		if (MenuFrame *f = frame()) f->set_widget_hover_item(index, row);
@@ -170,6 +171,10 @@ public:
 	}
 	void set_widget_focused(int index, bool focused) override {
 		if (MenuFrame *f = frame()) f->set_widget_focused(index, focused);
+	}
+	void set_widget_rect(int index, int left, int top, int right, int bottom) override {
+		if (MenuFrame *f = frame())
+			f->set_widget_rect(index, Rect2i(left, top, right - left, bottom - top));
 	}
 	void set_widget_caret(int index, int caret) override {
 		if (MenuFrame *f = frame()) f->set_widget_caret(index, caret);
@@ -185,6 +190,10 @@ public:
 	int item_count(int index) const override {
 		MenuFrame *f = frame();
 		return f != nullptr ? f->item_count(index) : 0;
+	}
+	std::string item_display_text(int index, int row) const override {
+		MenuFrame *f = frame();
+		return f != nullptr ? f->item_display_text(index, row) : std::string();
 	}
 	bool is_widget_disabled(int index) const override {
 		MenuFrame *f = frame();
@@ -248,9 +257,14 @@ public:
 		MenuFrame *f = frame();
 		return f != nullptr ? f->spin_arrow_at(index, Vector2(x, y)) : 0;
 	}
-	int table_row_at(int index, float x, float y) const override {
+	bool table_hit(int index, float x, float y, int *row, int *column) const override {
 		MenuFrame *f = frame();
-		return f != nullptr ? f->table_row_at(index, Vector2(x, y)) : -1;
+		if (f == nullptr) {
+			*row = -1;
+			*column = -1;
+			return false;
+		}
+		return f->table_hit(index, Vector2(x, y), row, column);
 	}
 	int hotkey_widget(const std::string &key, bool virtual_key) const override {
 		MenuFrame *f = frame();
@@ -375,6 +389,13 @@ void MenuDriver::on_runtime_event_(const opennova::menu::MenuEvent &p_event) {
 		case Kind::ShownChanged:
 			sync_credits_();
 			break;
+		case Kind::EditCommitted:
+			emit_signal("edit_committed", p_event.id, to_gd(p_event.text));
+			break;
+		case Kind::TableCellClicked:
+			emit_signal("table_cell_clicked", p_event.id, to_gd(p_event.text), p_event.value,
+					p_event.column, p_event.state, p_event.cell_value, p_event.flag);
+			break;
 	}
 }
 
@@ -493,6 +514,22 @@ Rect2 MenuDriver::widget_frame_rect(int p_id) const {
 	return Rect2(design.position * scale, design.size * scale);
 }
 
+Rect2 MenuDriver::widget_local_rect(int p_id) const {
+	const int index = frame_index(p_id);
+	MenuFrame *frame = frame_();
+	if (index < 0 || frame == nullptr) return Rect2();
+	return frame->widget_local_rect(index);
+}
+
+void MenuDriver::set_widget_rect(int p_id, const Rect2i &p_rect) {
+	runtime_.set_widget_rect(p_id, p_rect.position.x, p_rect.position.y,
+			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
+}
+
+void MenuDriver::focus_widget(int p_id) {
+	runtime_.focus_edit(p_id);
+}
+
 Vector2 MenuDriver::design_scale() const {
 	// The fixed authoring design space (the witness lives at the engine home,
 	// engine/runtime/menu menu_frame.h kMenuDesignWidth/Height).
@@ -546,6 +583,7 @@ void MenuDriver::set_widget_scroll_range(int p_id, int p_minimum, int p_maximum,
 		int p_value) {
 	runtime_.set_widget_scroll_range(p_id, p_minimum, p_maximum, p_page, p_value);
 }
+void MenuDriver::set_scroll_row(int p_id, int p_row) { runtime_.set_scroll_row(p_id, p_row); }
 Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 	opennova::menu::MenuScrollRangeState state;
 	Ref<MenuScrollRange> out;
@@ -565,6 +603,39 @@ String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
 }
 void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 	runtime_.table_select_row(p_id, p_row, p_additive);
+}
+int MenuDriver::table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
+		int p_insert_index) {
+	return runtime_.table_insert_row(p_id, to_std(p_text0), p_value0,
+			static_cast<uint32_t>(p_flags), p_insert_index);
+}
+void MenuDriver::table_set_cell_text(int p_id, int p_row, int p_col, const String &p_text) {
+	runtime_.table_set_cell_text(p_id, p_row, p_col, to_std(p_text));
+}
+void MenuDriver::table_set_cell_value(int p_id, int p_row, int p_col, int p_value) {
+	runtime_.table_set_cell_value(p_id, p_row, p_col, p_value);
+}
+int MenuDriver::table_cell_value(int p_id, int p_row, int p_col) const {
+	return runtime_.table_cell_value(p_id, p_row, p_col);
+}
+void MenuDriver::table_remove_row(int p_id, int p_row) { runtime_.table_remove_row(p_id, p_row); }
+int MenuDriver::table_row_state(int p_id, int p_row) const {
+	return runtime_.table_row_state(p_id, p_row);
+}
+void MenuDriver::table_set_row_selected(int p_id, int p_row, bool p_selected) {
+	runtime_.table_set_row_selected(p_id, p_row, p_selected);
+}
+PackedInt32Array MenuDriver::table_selected_rows(int p_id) const {
+	PackedInt32Array out;
+	for (int row : runtime_.table_selected_rows(p_id)) out.push_back(row);
+	return out;
+}
+void MenuDriver::set_widget_clip_rect(int p_id, const Rect2i &p_rect) {
+	runtime_.set_widget_clip_rect(p_id, true, p_rect.position.x, p_rect.position.y,
+			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
+}
+void MenuDriver::clear_widget_clip_rect(int p_id) {
+	runtime_.set_widget_clip_rect(p_id, false, 0, 0, 0, 0);
 }
 
 // ---- activation / actions --------------------------------------------------------
@@ -877,6 +948,9 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_widget", "name"), &MenuDriver::has_widget);
 	ClassDB::bind_method(D_METHOD("frame_index", "id"), &MenuDriver::frame_index);
 	ClassDB::bind_method(D_METHOD("widget_frame_rect", "id"), &MenuDriver::widget_frame_rect);
+	ClassDB::bind_method(D_METHOD("widget_local_rect", "id"), &MenuDriver::widget_local_rect);
+	ClassDB::bind_method(D_METHOD("set_widget_rect", "id", "rect"), &MenuDriver::set_widget_rect);
+	ClassDB::bind_method(D_METHOD("focus_widget", "id"), &MenuDriver::focus_widget);
 
 	ClassDB::bind_method(D_METHOD("set_widget_shown", "id", "shown"), &MenuDriver::set_widget_shown);
 	ClassDB::bind_method(D_METHOD("is_widget_shown", "id"), &MenuDriver::is_widget_shown);
@@ -902,6 +976,7 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "id", "minimum", "maximum", "page",
 								 "value"),
 			&MenuDriver::set_widget_scroll_range);
+	ClassDB::bind_method(D_METHOD("set_scroll_row", "id", "row"), &MenuDriver::set_scroll_row);
 	ClassDB::bind_method(D_METHOD("get_widget_scroll_range", "id"),
 			&MenuDriver::get_widget_scroll_range);
 
@@ -912,6 +987,24 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::table_cell_text);
 	ClassDB::bind_method(D_METHOD("table_select_row", "id", "row", "additive"),
 			&MenuDriver::table_select_row, DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("table_insert_row", "id", "text0", "value0", "flags",
+								 "insert_index"),
+			&MenuDriver::table_insert_row, DEFVAL(0), DEFVAL(-1));
+	ClassDB::bind_method(D_METHOD("table_set_cell_text", "id", "row", "col", "text"),
+			&MenuDriver::table_set_cell_text);
+	ClassDB::bind_method(D_METHOD("table_set_cell_value", "id", "row", "col", "value"),
+			&MenuDriver::table_set_cell_value);
+	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
+			&MenuDriver::table_cell_value);
+	ClassDB::bind_method(D_METHOD("table_remove_row", "id", "row"), &MenuDriver::table_remove_row);
+	ClassDB::bind_method(D_METHOD("table_row_state", "id", "row"), &MenuDriver::table_row_state);
+	ClassDB::bind_method(D_METHOD("table_set_row_selected", "id", "row", "selected"),
+			&MenuDriver::table_set_row_selected);
+	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);
+	ClassDB::bind_method(D_METHOD("set_widget_clip_rect", "id", "rect"),
+			&MenuDriver::set_widget_clip_rect);
+	ClassDB::bind_method(D_METHOD("clear_widget_clip_rect", "id"),
+			&MenuDriver::clear_widget_clip_rect);
 
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
@@ -961,6 +1054,16 @@ void MenuDriver::_bind_methods() {
 	// The pump's claim moved between widgets (hover edges; PLAYER_PREVIEW zoom).
 	ADD_SIGNAL(MethodInfo("widget_hover_changed", PropertyInfo(Variant::INT, "id"),
 			PropertyInfo(Variant::BOOL, "hovered")));
+	// An edit's Enter commit, after the focus released (event 0x7000002).
+	ADD_SIGNAL(MethodInfo("edit_committed", PropertyInfo(Variant::INT, "id"),
+			PropertyInfo(Variant::STRING, "widget_name")));
+	// A press on a table's data row, after the table's own selection write
+	// (the 0x8000001 cell event): the row's new state and the column's cell
+	// value; `double_click` for the double-click form.
+	ADD_SIGNAL(MethodInfo("table_cell_clicked", PropertyInfo(Variant::INT, "id"),
+			PropertyInfo(Variant::STRING, "widget_name"), PropertyInfo(Variant::INT, "row"),
+			PropertyInfo(Variant::INT, "column"), PropertyInfo(Variant::INT, "state"),
+			PropertyInfo(Variant::INT, "cell_value"), PropertyInfo(Variant::BOOL, "double_click")));
 }
 
 } // namespace godot

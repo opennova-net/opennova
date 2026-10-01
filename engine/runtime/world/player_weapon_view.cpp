@@ -102,6 +102,17 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	v.rescope_serial = static_cast<int32_t>(w.rescope_serial);
 	v.clip = active_slot.clip;
 	v.reserve = active_slot.reserve;
+	// The equipped def's two clip-flash key halves: its ammo bucket (def+0xDC)
+	// and its ammo-class id (def+0xD8) [orig: HUD_DrawAmmoIndicator
+	// @0x599A90 / @0x599AAC over the HUD info's def pointer, D-HUD-5].
+	{
+		const int def_index = world.tables.weapons.index_of(w.def_name.c_str());
+		const WeaponTableEntry *def = def_index >= 0
+				? world.tables.weapons.by_index(static_cast<uint8_t>(def_index))
+				: nullptr;
+		v.ammo_bucket = def != nullptr ? def->ammo_bucket : 0;
+		v.ammo_class_id = def != nullptr ? def->ammo_class_id : 0;
+	}
 	v.kick = static_cast<int>(active_slot.kick);
 	// Crosshair spread remains in retail's exact integer domains through the
 	// presentation edge: choose the stance triplet, then add the two arithmetic

@@ -30,6 +30,10 @@ namespace opennova::audio {
 struct SetLocation {
 	int32_t bank = -1;
 	int32_t set = -1;
+	// The set's in-memory +72 word (Multi.target_id): the 3D one-shot cull
+	// range in whole units, also read by the ammo loader's whiz radius
+	// [orig: AmmoDef_InitEffectsTable @0x40a050 / @0x40a072].
+	int32_t cull_range = 0;
 	bool valid() const { return bank >= 0; }
 };
 
@@ -79,8 +83,19 @@ struct RadioVoice {
     std::string filename;
     int32_t volume = 255;
     int32_t max_distance = 0;
+    uint32_t pitch_q16 = 0x10000u; // the radio line never writes it
 };
 std::optional<RadioVoice> select_radio_voice(const lwf::File &bank,
+        const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags);
+
+// The first resolved member of an entity-voice set (the channel-0 line
+// Audio_StartEntityPlayback starts): the same layer walk and member pick as
+// the radio line, but the member file as the bank loaded it (no extension
+// swap) and the set's then the member's pitch jitter composed on the shared
+// stream. [orig: SoundBank_SelectTriggerEntryFromBank @0x75BF20 -- the walk
+//  @0x75bf56..0x75c062, the lazy load sub_75BC20 @0x75c07b, the pitch
+//  @0x75c089..0x75c109, the volume @0x75c113, the radius @0x75c122]
+std::optional<RadioVoice> select_entity_voice(const lwf::File &bank,
         const SetLocation &loc, SoundSelector &selector, uint8_t listener_view_flags);
 
 // Q16 listener distance the way the shell measured it: the float length of

@@ -526,10 +526,15 @@ void World::update_all_entities(const TickContext &ctx) {
 //  @0x526697), between the Client_ProcessNetworkFrame call @0x526692 and the
 //  Server_TickUpdate call @0x5266B6 (its receive pump @0x51D895)]
 void World::run_logic_tick(bool is_authority, TickPhase phase) {
-    out.fire_sounds.tick();
+    tick_pending_sound_slots();
     const TickContext ctx = begin_tick(is_authority, phase);
     run_script_pass(ctx);
     run_entity_pass(ctx);
+}
+
+void World::tick_pending_sound_slots() {
+    out.fire_sounds.tick();
+    if (local_player_state != nullptr) radar_tick_lock_tone(local_player_state->radar);
 }
 
 TickContext World::begin_tick(bool is_authority, TickPhase phase) {
@@ -826,6 +831,8 @@ World::Snapshot World::snapshot() const {
     s.teammates = teammates;
     s.vehicle_ai_spawn_phase = vehicle_ai_spawn_phase;
     s.match = match;
+    s.kill_stats = kill_stats;
+    s.subgoals = script.subgoals;
     s.spawn_waves = zones.spawn_waves;
     s.zone_capture_state = zones.capture;
     s.spawn_cycle_counter = zones.spawn_cycle_counter;
@@ -896,7 +903,15 @@ void World::restore(const Snapshot &s) {
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is
     // sealed, and reset must not reconstruct them through another seam.
-    kill_stats = MissionKillStats{};
+    // The SP score block and the subgoal masks come back at their play-start
+    // values: the block zeroed after the PreMission pass and then censused,
+    // the masks as the PreMission pass left them — the state retail's restart
+    // rebuilds by re-running Game_StartMission.
+    // [orig: Game_RestartRoundSP @0x5263a0 — EventSystem_FreeAll's mask clears
+    //  @0x453356..0x453368, Server_ResetRoundCounters @0x516c5e, the census
+    //  @0x525d5d]
+    kill_stats = s.kill_stats;
+    script.subgoals = s.subgoals;
     load_systems(); // systems re-init their per-mission state
     teammates = s.teammates;
     vehicle_ai_spawn_phase = s.vehicle_ai_spawn_phase;
@@ -918,20 +933,33 @@ void World::restore(const Snapshot &s) {
 
 void count_mission_units(World &world) {
     // Players (the +534 byte; our player_class != 0) count into the separate
-    // player bucket the panel never draws; everything else with team >= 2 and
-    // a non-zero items.def unit-class byte is one enemy unit. The original's
-    // vehicle(3/4)/aircraft(9)/infantry split is fold-consumed as the total.
+    // player bucket the panels never draw; everything else with team >= 2 and
+    // a non-zero items.def unit-class byte is one enemy unit, split per class
+    // (the by-player kill tally grows a class past its count). Pools 0 then 1
+    // only: the pool-2/3/4 rows are never counted.
     // [orig: Score_ClassifyEntityForCounts @0x4fd070 — player @0x4fd074,
-    //  team gate @0x4fd08d, def+0x196 gate @0x4fd09f, total @0x4fd0a8;
-    //  driven over both pools by Score_CountMissionSubgoalsAndUnits @0x509e13..0x509e4a]
-    int32_t total = 0;
-    world.registry.for_each([&](const Entity &e) {
+    //  team gate @0x4fd08d, def+0x196 gate @0x4fd09f, total @0x4fd0a8, the
+    //  class split @0x4fd0c7..0x4fd0dc; Score_CountMissionSubgoalsAndUnits
+    //  zeroes the four @0x509dfb..0x509e0d and walks pool 0 @0x509e13, then
+    //  pool 1 @0x509e40]
+    MissionKillStats &ks = world.kill_stats;
+    ks.enemy_unit_total = 0;
+    ks.enemy_vehicle_total = 0;
+    ks.enemy_infantry_total = 0;
+    ks.enemy_aircraft_total = 0;
+    const auto classify = [&](const Entity &e) {
         if (e.player_class != 0) return;
         if (e.team < 2) return;
-        if (e.item_unit_type == 0) return;
-        ++total;
-    });
-    world.kill_stats.enemy_unit_total = total;
+        if (static_cast<uint8_t>(e.item_unit_type) == 0) return;
+        ++ks.enemy_unit_total;
+        switch (score_unit_class(e.item_unit_type)) {
+            case ScoreUnitClass::Vehicle: ++ks.enemy_vehicle_total; break;
+            case ScoreUnitClass::Aircraft: ++ks.enemy_aircraft_total; break;
+            case ScoreUnitClass::Infantry: ++ks.enemy_infantry_total; break;
+        }
+    };
+    world.registry.for_each_in_pool(0, classify);
+    world.registry.for_each_in_pool(1, classify);
 }
 
 int32_t count_defined_subgoals(const World &world) {

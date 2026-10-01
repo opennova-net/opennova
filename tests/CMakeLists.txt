@@ -316,22 +316,20 @@ target_link_libraries(def_flag_parity_test PRIVATE opennova_formats)
 add_test(NAME def_flag_parity COMMAND def_flag_parity_test)
 
 # The def parsers. items / item_attrib / item_type read the authored tables;
-# weapons and ammo run their inline blocks unconditionally and pin the shipped
-# tables from the reference fixture set as SKIP-LEG legs; every hudpos leg
-# reads the shipped table, so it gates whole on OPENNOVA_JO_ASSETS.
+# weapons, ammo, powerup and hudpos run their inline blocks unconditionally and
+# pin the shipped tables from the reference fixture set as SKIP-LEG legs.
 foreach(test items weapons ammo powerup hudpos item_attrib item_part_bytes item_type)
     add_executable(def_parse_${test}_test def/def_parse_${test}_test.cpp)
     target_link_libraries(def_parse_${test}_test PRIVATE opennova_formats)
     target_include_directories(def_parse_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 endforeach()
-foreach(test items weapons ammo powerup item_attrib item_part_bytes item_type)
-    if(test MATCHES "^(items|weapons|ammo|powerup)$")
+foreach(test items weapons ammo powerup hudpos item_attrib item_part_bytes item_type)
+    if(test MATCHES "^(items|weapons|ammo|powerup|hudpos)$")
         opennova_add_mixed_test(def_parse_${test} COMMAND def_parse_${test}_test)
     else()
         add_test(NAME def_parse_${test} COMMAND def_parse_${test}_test)
     endif()
 endforeach()
-opennova_add_gated_test(def_parse_hudpos COMMAND def_parse_hudpos_test)
 # The powerup retail leg reads powerup.def off the packed install through the Vfs.
 target_link_libraries(def_parse_powerup_test PRIVATE opennova_base)
 
@@ -1150,6 +1148,30 @@ add_executable(hud_toggles_test hud/hud_toggles_test.cpp)
 target_link_libraries(hud_toggles_test PRIVATE opennova_runtime)
 target_compile_features(hud_toggles_test PRIVATE cxx_std_17)
 add_test(NAME hud_toggles COMMAND hud_toggles_test)
+# The authority's server-status page (hud/hud_server_status.h): the throttle,
+# the roster grid and cells, the score list rows and the page compile with the
+# quit dialog and the console lines [orig: Server_DrawStatusScreen @0x50a2d0].
+add_executable(hud_server_status_test hud/hud_server_status_test.cpp)
+target_link_libraries(hud_server_status_test PRIVATE opennova_runtime)
+target_include_directories(hud_server_status_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_server_status COMMAND hud_server_status_test)
+
+# The tip system (hud/tip_system.h): the event table, the once-counters and
+# option gates, the countdown / fade / reset, the text keys and expansion, the
+# escape leg, the panel draw, the "$token$" key display and the local player's
+# boarding producers.
+add_executable(tip_system_test hud/tip_system_test.cpp)
+target_link_libraries(tip_system_test PRIVATE opennova_runtime)
+target_include_directories(tip_system_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(tip_system_test PRIVATE cxx_std_17)
+add_test(NAME tip_system COMMAND tip_system_test)
+
+# The key-toggled overlay windows (hud/hud_overlay_windows.h): the block
+# wrapper, the briefing pages, and the briefing / help / map-legend elements.
+add_executable(hud_overlay_windows_test hud/hud_overlay_windows_test.cpp)
+target_link_libraries(hud_overlay_windows_test PRIVATE opennova_runtime)
+target_include_directories(hud_overlay_windows_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_overlay_windows COMMAND hud_overlay_windows_test)
 
 # The loading screen spec (hud/loading_screen.h): the sidecar name rule, the
 # present-due rule and the composited resource names.
@@ -1269,6 +1291,25 @@ target_include_directories(hud_minimap_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_
 target_compile_features(hud_minimap_feed_test PRIVATE cxx_std_17)
 add_test(NAME hud_minimap_feed COMMAND hud_minimap_feed_test)
 
+# The spinmap's corrected and newly ported legs (hud/hud_minimap_view.h):
+# the bit16 squaring and width scale, the invisible bit0 mask, the pointer
+# race, the ring band, the bank walk, the blip crop/flash gates, and the
+# tether / FARP / zone / pool-3 / waypoint / name / tracked / route legs.
+add_executable(hud_minimap_legs_test hud/hud_minimap_legs_test.cpp)
+target_link_libraries(hud_minimap_legs_test PRIVATE opennova_runtime)
+target_include_directories(hud_minimap_legs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_minimap_legs_test PRIVATE cxx_std_17)
+add_test(NAME hud_minimap_legs COMMAND hud_minimap_legs_test)
+
+# The windowed map views (hud/hud_map_view.h): the DEATH MAP window and the
+# CMAP map's pan/zoom state machines, the CMAP mode-4 input, and the DEATH
+# pass compile (zone letters, colours, score lines, crosshair).
+add_executable(hud_map_view_test hud/hud_map_view_test.cpp)
+target_link_libraries(hud_map_view_test PRIVATE opennova_runtime)
+target_include_directories(hud_map_view_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_map_view_test PRIVATE cxx_std_17)
+add_test(NAME hud_map_view COMMAND hud_map_view_test)
+
 # The LAN browse window (npruntime/lan_discovery.h LanDiscoveryBrowser): the
 # probe identity, the 30 s window, the 3 s re-announce cadence, the reply
 # filter and the endpoint-keyed rows.
@@ -1283,6 +1324,13 @@ target_link_libraries(minimap_markers_test PRIVATE opennova_net opennova_runtime
 target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(minimap_markers_test PRIVATE cxx_std_17)
 add_test(NAME minimap_markers COMMAND minimap_markers_test)
+
+# The map feed's v5 entity facts and the non-bank legs' gather.
+add_executable(minimap_overlays_test npruntime/minimap_overlays_test.cpp)
+target_link_libraries(minimap_overlays_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(minimap_overlays_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(minimap_overlays_test PRIVATE cxx_std_17)
+add_test(NAME minimap_overlays COMMAND minimap_overlays_test)
 
 # The character registry (runtime/inmatch/character_registry.h): the packed-id
 # decode, the per-side default walk, and the joiner profile projection
@@ -1325,6 +1373,12 @@ add_executable(hud_game_text_test hud/hud_game_text_test.cpp)
 target_link_libraries(hud_game_text_test PRIVATE opennova_runtime)
 add_test(NAME hud_game_text COMMAND hud_game_text_test)
 
+# The CMAP RULES tab's text (hud/session_rules_text.h) over the S2C 0x58 fold and
+# the 0x7E briefing strings (replication client_state.h), the serializer's key 9.
+add_executable(session_rules_text_test hud/session_rules_text_test.cpp)
+target_link_libraries(session_rules_text_test PRIVATE opennova_runtime)
+add_test(NAME session_rules_text COMMAND session_rules_text_test)
+
 # The HUD item flash BMS action 28 sub 37 arms and the declutter level-0 side
 # path it takes (hud/hud_declutter.h HudItemFlash / apply_level).
 add_executable(hud_item_flash_test hud/hud_item_flash_test.cpp)
@@ -1343,6 +1397,18 @@ add_executable(hud_frame_compiler_test hud/hud_frame_compiler_test.cpp)
 target_link_libraries(hud_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(hud_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_frame_compiler COMMAND hud_frame_compiler_test)
+
+# The flat HUD residual elements (GAMEINFO/ZONEINFO, CLOCK, TEAMID, HUDLS, the
+# objectives panel, /NOHUD, the squad colours, the clip-flash key).
+add_executable(hud_frame_elements_test hud/hud_frame_elements_test.cpp)
+target_link_libraries(hud_frame_elements_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_elements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME hud_frame_elements COMMAND hud_frame_elements_test)
+
+# The spinmap's bit-10 legs: the dmgslice marks and the threat ring.
+add_executable(hud_minimap_radar_test hud/hud_minimap_radar_test.cpp)
+target_link_libraries(hud_minimap_radar_test PRIVATE opennova_runtime)
+add_test(NAME hud_minimap_radar COMMAND hud_minimap_radar_test)
 
 # The SIGHTS card row modes + the dotsize sight-scale cycle (hud/sight_overlay.h).
 add_executable(sight_overlay_test hud/sight_overlay_test.cpp)
@@ -1424,6 +1490,14 @@ add_test(NAME player_info_avatars COMMAND player_info_avatars_test)
 # witnessed .mnu widget draw walk — order, state-driven appearance/color
 # selection, text placement/truncation, the edit caret, frame pieces, and the
 # per-element int truncation (docs/mnu/menu-re.md "Widget render dispatch").
+add_executable(menu_table_test menu/menu_table_test.cpp)
+target_link_libraries(menu_table_test PRIVATE opennova_runtime)
+target_include_directories(menu_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_table COMMAND menu_table_test)
+add_executable(command_map_screen_test menu/command_map_screen_test.cpp)
+target_link_libraries(command_map_screen_test PRIVATE opennova_runtime)
+target_compile_features(command_map_screen_test PRIVATE cxx_std_17)
+add_test(NAME command_map_screen COMMAND command_map_screen_test)
 add_executable(menu_frame_compiler_test menu/menu_frame_compiler_test.cpp)
 target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1585,6 +1659,11 @@ add_executable(player_actions_test controls/player_actions_test.cpp)
 target_link_libraries(player_actions_test PRIVATE opennova_runtime)
 add_test(NAME player_actions COMMAND player_actions_test)
 
+# The F1 key-binding help pages (controls/help_screen.h).
+add_executable(help_screen_test controls/help_screen_test.cpp)
+target_link_libraries(help_screen_test PRIVATE opennova_runtime)
+add_test(NAME help_screen COMMAND help_screen_test)
+
 add_executable(mnu_unit_test mnu/mnu_unit_test.cpp)
 target_link_libraries(mnu_unit_test PRIVATE opennova_formats)
 target_include_directories(mnu_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1689,6 +1768,21 @@ target_include_directories(scoreboard_format_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(scoreboard_format_test PRIVATE cxx_std_17)
 add_test(NAME scoreboard_format COMMAND scoreboard_format_test)
 
+# The talk keys and the captured chat line (hud/hud_chat_entry.h): the dispatch
+# gates and debounce, the line editor, the '\' cycle, the channel bytes.
+add_executable(hud_chat_entry_test hud/hud_chat_entry_test.cpp)
+target_link_libraries(hud_chat_entry_test PRIVATE opennova_runtime)
+target_include_directories(hud_chat_entry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_chat_entry_test PRIVATE cxx_std_17)
+add_test(NAME hud_chat_entry COMMAND hud_chat_entry_test)
+
+# The connection indicators (D-HUD-38): g_NetQuality's frame step and the three icons' draw.
+add_executable(net_quality_indicators_test hud/net_quality_indicators_test.cpp)
+target_link_libraries(net_quality_indicators_test PRIVATE opennova_runtime)
+target_include_directories(net_quality_indicators_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(net_quality_indicators_test PRIVATE cxx_std_17)
+add_test(NAME net_quality_indicators COMMAND net_quality_indicators_test)
+
 add_executable(hud_vehicle_panel_test hud/hud_vehicle_panel_test.cpp)
 target_link_libraries(hud_vehicle_panel_test PRIVATE opennova_runtime)
 target_include_directories(hud_vehicle_panel_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1739,6 +1833,10 @@ add_executable(client_replica_chat_test netsim/client_replica_chat_test.cpp)
 target_link_libraries(client_replica_chat_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(client_replica_chat_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_replica_chat COMMAND client_replica_chat_test)
+add_executable(client_replica_spectate_test netsim/client_replica_spectate_test.cpp)
+target_link_libraries(client_replica_spectate_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_replica_spectate_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_replica_spectate COMMAND client_replica_spectate_test)
 
 add_executable(impact_scar_test world/impact_scar_test.cpp)
 target_link_libraries(impact_scar_test PRIVATE opennova_runtime)
@@ -1932,6 +2030,11 @@ add_test(NAME collision_force COMMAND collision_force_test)
 add_executable(screen_flash_test world/screen_flash_test.cpp)
 target_link_libraries(screen_flash_test PRIVATE opennova_runtime)
 add_test(NAME screen_flash COMMAND screen_flash_test)
+
+# The local radar contact state and its producers (spinmap mask bit 10).
+add_executable(radar_contacts_test world/radar_contacts_test.cpp)
+target_link_libraries(radar_contacts_test PRIVATE opennova_runtime)
+add_test(NAME radar_contacts COMMAND radar_contacts_test)
 
 add_executable(infantry_terrain_test world/infantry_terrain_test.cpp)
 target_link_libraries(infantry_terrain_test PRIVATE opennova_runtime)
@@ -2887,6 +2990,14 @@ target_link_libraries(nw_ingame_encode_test PRIVATE opennova_net)
 target_include_directories(nw_ingame_encode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME nw_ingame_encode COMMAND nw_ingame_encode_test)
 
+# The session-variable list (npwire/session_vars.h): the 0x60 server-info
+# stream and the client parse [orig: Game_SerializeMissionInfoToDataStream
+# @0x523620; Client_ParseServerSessionVariables @0x5202f0].
+add_executable(session_vars_test novaworld/session_vars_test.cpp)
+target_link_libraries(session_vars_test PRIVATE opennova_net)
+target_include_directories(session_vars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME session_vars COMMAND session_vars_test)
+
 # NET-0 tier-1 byte-stability gate (docs/maturity-program.md): FNV-1a64 vectors
 # over a deterministic synthetic corpus through every in-match encoder. Catches
 # SYMMETRIC codec changes the encode<->decode round-trip cannot see; vectors
@@ -3308,6 +3419,22 @@ target_link_libraries(npruntime_host_producers_test PRIVATE opennova_net opennov
 target_include_directories(npruntime_host_producers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_host_producers COMMAND npruntime_host_producers_test)
 
+# The status page's roster and host facts off the host context
+# (inmatch/server_status_feed.h) and the total-logins count.
+add_executable(npruntime_server_status_feed_test npruntime/server_status_feed_test.cpp)
+target_link_libraries(npruntime_server_status_feed_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_status_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_test)
+add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
+target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_squad_relay COMMAND npruntime_squad_relay_test)
+
+add_executable(npruntime_squad_client_test npruntime/squad_client_test.cpp)
+target_link_libraries(npruntime_squad_client_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_squad_client_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_squad_client COMMAND npruntime_squad_client_test)
+
 # The `_NSTMOUT.TXT` connection-template override (CNapiNetwork_Init's NEVER / seconds /
 # negative legs) and the joiner's 0x82 CS overlay of the host's timeout_ms / msg_out_max:
 # the reap runs from the accepted 0x82, -1 disables it, and the pool bound follows the host.
@@ -3469,3 +3596,9 @@ add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
 target_compile_features(hud_combat_test PRIVATE cxx_std_17)
 add_test(NAME hud_combat COMMAND hud_combat_test)
+
+# The capture-point labels: the map-overlay slot walk and the marker types 8/9.
+add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
+target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
+target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
+add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)

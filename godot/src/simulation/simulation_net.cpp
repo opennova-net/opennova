@@ -7,7 +7,6 @@
 #include "network/udp_pump_datagram_socket.h"
 #include "simulation/hud_view_records.h"
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
-#include "hud/feed_row.h" // the typed message-feed row (ADR 0040 B3)
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
 #include "util/string_convert.h"
@@ -23,6 +22,8 @@
 #include <net/npwire/ingame_decode.h> // kRoundEventFlag* (the fire-mode byte)
 #include <runtime/hud/feed_format.h> // the witnessed feed line/color policy
 #include <runtime/replication/client_scoreboard_view.h> // the Tab board's draw-time projection
+#include <runtime/hud/hud_frame.h> // HudScoreboardState (the Tab board feed)
+#include <runtime/inmatch/role_feeds.h> // scoreboard_feed
 #include <runtime/world/wire_body_sound.h> // the wire-fed remote body's footstep/foley consume
 #include <net/npwire/net_ports.h> // lan_host_bind_ports (the D-NET-210 bind scan)
 #include <base/vfs/vfs.h> // vfs_expansion_version_checksum (the D-NET-166 JOIN CRC)
@@ -280,9 +281,10 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::set_novaworld_gsid(const String &p_gsid) {
+void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
+		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
 	}
 }
 
@@ -526,6 +528,13 @@ void Simulation::set_app_id(const String &p_token) {
 	net_.app_id = opennova::to_std(p_token.strip_edges());
 	if (net_.app_id.empty()) net_.app_id = "0";
 	install_app_id();
+}
+
+void Simulation::set_join_network_type(int p_type) {
+	net_.join_network_type =
+			p_type == static_cast<int>(opennova::inmatch::NetworkType::NovaWorld)
+			? opennova::inmatch::NetworkType::NovaWorld
+			: opennova::inmatch::NetworkType::Lan;
 }
 
 void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
@@ -1016,39 +1025,6 @@ bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int
 }
 
 
-// Drain this frame's folded S2C 0x1E game events into typed feed rows. The
-// fold is the engine's (runtime/hud/feed_format.h feed_event_rows); this seam
-// only resolves actor names against the decoded roster (a pool-0 INDEX on the
-// wire becomes the handle (0<<12)|index) and packs the rows.
-TypedArray<FeedRow> Simulation::drain_feed_events() {
-	TypedArray<FeedRow> out;
-	if (!runtime_) return out;
-	opennova::replication::ClientState &cs = runtime_->state();
-	const uint16_t self_handle =
-			runtime_->has_self_handle() ? runtime_->self_handle() : 0xFFFF;
-	const auto actor_of = [&cs](uint8_t index) -> opennova::hud::FeedActor {
-		const auto *e = cs.find(static_cast<uint16_t>(index));
-		return e != nullptr ? opennova::hud::FeedActor{e->display_name, e->team}
-		                    : opennova::hud::FeedActor{};
-	};
-	std::vector<opennova::hud::FeedEventInput> inputs;
-	for (const opennova::replication::ClientGameEvent &ev : runtime_->drain_game_events()) {
-		inputs.push_back({ ev.event_type, ev.attacker_index, ev.victim_index,
-				ev.aux_index, ev.kind, ev.pos_x });
-	}
-	std::vector<opennova::hud::FeedRow> rows;
-	const opennova::hud::FeedContext context{
-		self_handle, opennova::hud::kMpVerboseDefault, runtime_->game_type()};
-	opennova::hud::feed_event_rows(inputs.data(), inputs.size(), context, actor_of, rows);
-	for (const opennova::hud::FeedRow &row : rows) {
-		Ref<FeedRow> r;
-		r.instantiate();
-		r->assign(row);
-		out.push_back(r);
-	}
-	return out;
-}
-
 void Simulation::retain_feed_announcement(const String &text, int64_t tick) {
 	if (runtime_) runtime_->state().kill_announcement.record(
 			opennova::to_std(text), static_cast<uint32_t>(tick));
@@ -1132,26 +1108,17 @@ Ref<ScoreboardHeader> Simulation::get_scoreboard() const {
 	opennova::replication::ClientScoreboardSession v;
 	v.header = opennova::replication::scoreboard_header(runtime_->state());
 	// The drawer branches on the session game type (retail reads g_GameType
-	// @0x423acb); the header's session strings ride along — joiner-decoded,
-	// empty on a host until the host sessionvars are plumbed (D-HUD-24).
+	// @0x423acb); the header's session strings are the role's session
+	// variables (inmatch/role_feeds.h scoreboard_session_vars).
 	v.game_type = runtime_->game_type();
-	v.server_name = runtime_->server_name();
-	v.mission_name = runtime_->mission_name();
+	const opennova::SessionVars vars = opennova::inmatch::scoreboard_session_vars(role_view());
+	v.server_name = vars.server_name;
+	v.mission_name = vars.mission_name;
 	out->assign(v);
 	return out;
 }
 
-bool Simulation::fill_scoreboard_rows(
-		std::vector<opennova::hud::ScoreboardEntry> &r_rows) const {
-	if (!runtime_) {
-		r_rows.clear();
-		return false;
-	}
-	opennova::replication::project_scoreboard(runtime_->state(), r_rows);
-	return true;
-}
-
-int Simulation::scoreboard_team_count() const {
-	if (!runtime_) return 0;
-	return static_cast<int>(runtime_->state().scoreboard.team_count);
+bool Simulation::fill_scoreboard(opennova::hud::HudScoreboardState &r_state) const {
+	opennova::inmatch::scoreboard_feed(role_view(), r_state);
+	return runtime_ != nullptr;
 }

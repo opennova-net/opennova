@@ -1225,16 +1225,19 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
 // when it is the killer, else by others. By-player blue/green buckets take
 // only PERSON victims (ItemDef+0x5C == 3) by the team byte (0 = green, 1 =
 // blue); the by-others team 1 / team 0 buckets take any victim type; any team
-// >= 2 victim tallies as an enemy kill (the original's infantry/vehicle/
-// aircraft split folds into one count; the epilog sums the split anyway).
-// Point values (def+404, difficulty-scaled) and the human-player-victim bucket
-// (victim+534 -> 0xC846A0, unreachable behind the score gate) are unmodeled:
-// counts only, which is what the WAC predicates and the epilog columns consume
-// (D-AI-10; world-wac-ai-re §20.4).
+// >= 2 victim tallies as an enemy kill. By the player, the enemy kill lands in
+// its def+406 unit class, and a class count that passes the class census grows
+// the census and the enemy-unit total by the overflow — the Show Score / epilog
+// ENEMYUNITS max; by others the split folds into one count (only the sum is
+// read). Point values (def+404, difficulty-scaled) and the human-player-victim
+// bucket (victim+534 -> 0xC846A0, unreachable behind the score gate) are
+// unmodeled: nothing live reads them (world.h MissionKillStats; D-AI-10;
+// world-wac-ai-re §20.4).
 // [orig: Score_ProcessKillEvent @0x4FD400 — killer @0x4FD405, target def
 //  @0x4FD41E, `cmp word ptr [eax+194h], 0` @0x4FD422, event 12 @0x4FD438, the
 //  session test @0x4FD440..0x4FD447, `cmp edi, g_LocalPlayerEntity` @0x4FD449;
-//  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213);
+//  Score_TallyKillByLocalPlayer @0x4FD160 (persons @0x4FD1F6 / @0x4FD213; the
+//  class switch @0x4FD242, the overflows @0x4FD264 / @0x4FD293 / @0x4FD2C2);
 //  Score_TallyKillByOthers @0x4FD300 (@0x4FD325..0x4FD366)]
 void Match::process_kill_event(World &world, const RoundDeath &death) {
     if (!death.kill_event || !death.killer.valid())
@@ -1253,7 +1256,26 @@ void Match::process_kill_event(World &world, const RoundDeath &death) {
         } else if (victim->team == 0) {
             if (person) ++ks.greenkills_by_player;
         } else {
-            ++ks.enemy_kills_by_player;
+            int32_t *kills = &ks.enemy_infantry_kills_by_player;
+            int32_t *census = &ks.enemy_infantry_total;
+            switch (score_unit_class(victim->item_unit_type)) {
+                case ScoreUnitClass::Vehicle:
+                    kills = &ks.enemy_vehicle_kills_by_player;
+                    census = &ks.enemy_vehicle_total;
+                    break;
+                case ScoreUnitClass::Aircraft:
+                    kills = &ks.enemy_aircraft_kills_by_player;
+                    census = &ks.enemy_aircraft_total;
+                    break;
+                case ScoreUnitClass::Infantry:
+                    break;
+            }
+            ++*kills;
+            if (*kills > *census) {
+                const int32_t overflow = *kills - *census;
+                ks.enemy_unit_total += overflow;
+                *census += overflow;
+            }
         }
     } else if (victim->team == 1) {
         ++ks.team_kills_by_others;

@@ -35,6 +35,15 @@ double pixel_delta_to_design(double delta, double surface, double design_extent)
 int32_t screen_to_design_x(int32_t x, int32_t surface_w);
 int32_t screen_to_design_y(int32_t y, int32_t surface_h);
 
+// The forward pair in integers, as the HUD's integer callers scale a design
+// coordinate or extent: x = (x * w + 512) / 1024 and y = (y * h + 384) / 768,
+// each divide truncating toward zero (scale_axis floors instead, which parts
+// from this only below zero) [orig: Viewport_ScaleToVirtualCoords @0x5D2B20 --
+// the cdq / and 3FFh / sar x @0x5D2B2E..0x5D2B41, the reciprocal y
+// @0x5D2B4E..0x5D2B69].
+int32_t design_to_screen_x(int32_t x, int32_t surface_w);
+int32_t design_to_screen_y(int32_t y, int32_t surface_h);
+
 // The bordered textured quad's texture window: u0 = 0.05 / tex_w inside the
 // left edge, u1 = 1 - u0 + 1 / (right - left) in on-screen pixels, and the
 // same on v; tex_w / tex_h are the caller's AUTHORED extents. The vertex

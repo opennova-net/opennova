@@ -326,6 +326,16 @@ struct LiveRound {
     // victim takes the same-projectile cause bit 0x100 [orig:
     // Projectile_ProcessDamageOnTarget @0x4e8169..0x4e816b].
     uint8_t player_kills = 0;
+    // The tracer-whiz latch, bit 0x40000 of the round's ammo-flags copy: set
+    // once the round's pass near the listener has been judged, so it whizzes
+    // once [orig: +0x114 |= 0x40000 @0x4e5cb9; tested @0x4ea98e].
+    bool whiz_latched = false;
+    // The +0x88 word: the Z the round's +0x80 copy last held — the spawn
+    // point, then each ballistic tick's start, copied just after the whiz
+    // [orig: RoundData_SpawnRound @0x4ec655; Projectile_UpdatePhysics
+    // @0x4eaa15]. The zip row's ClipWaterFx gate reads it
+    // [orig: AmmoDef_ProcessImpactEffect @0x40a18d..0x40a1b1].
+    int32_t prev_z_q16 = 0;
 };
 
 // Retail keeps the selected TrcrID item/class bound independently of tracer
@@ -613,6 +623,21 @@ public:
     // Returns the round slot, or -1 (pool full / non-ballistic ammo / null ammo).
     LiveRound *find_guided(int16_t net_id);
     std::function<void(const LiveRound &, GuidedInputs &)> guided_inputs_provider;
+    // A joiner's wire actors. Its remote players are decoded replica rows
+    // with no registry entity, where retail's client resolves a wire handle
+    // to its own pool slot (the round event's shooter +0x170, the guided
+    // missile's target +0x2D4). The joiner role binds this resolver; host and
+    // single-player worlds leave it empty (their players are registry
+    // entities). [orig: NetPacket_DeserializeRoundEvent @0x42f491;
+    //  Entity_SerializeGuidedMissileState @0x447ece / @0x447f74 / @0x44808c]
+    struct WireActor {
+        uint8_t team = 0;         // entity+0x162
+        int32_t player_class = 0; // entity+0x294
+        uint8_t equipped_adm_index = 0xFF; // entity+0x2B0
+        int32_t pos[3] = {};      // entity+4..+0xC, 16.16
+        bool is_local = false;    // the handle is the local player's own
+    };
+    std::function<bool(uint16_t wire_handle, WireActor &out)> wire_actor_provider;
     struct GuidedUpdate { uint16_t shooter, net_id; uint8_t groups; GuidedFlightState state; };
     std::vector<GuidedUpdate> guided_updates;
     void init_guided(World &, LiveRound &, const AmmoTableEntry &);

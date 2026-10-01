@@ -16,6 +16,10 @@ public:
 	virtual bool pressed(const char *token) const = 0;
 	virtual int pressed_key(const char *token) const = 0;
 	virtual bool digit_down(int digit) const = 0;
+	// Shift held: a fallback-pass row fires with the direction bit
+	// [orig: Input_ProcessKeyboardEvents @0x49d452..0x49d470 — Shift or row
+	//  flag 0x200 ORs 0x80000000 into the queued action].
+	virtual bool shift_down() const = 0;
 };
 
 enum class PlayerAction {
@@ -28,6 +32,18 @@ enum class PlayerAction {
 	ScopeZero,
 	RadarZoom,
 	MapCycle,
+	Binoculars,
+	NightVision,
+	NvgGain,
+	WaypointCycle, // value -1 = backward (the Shift direction bit)
+	// The death screen's spectator rows (value = the dispatch code 500 / 501
+	// / 502; replication::ClientReplicaPipeline::spectate_action).
+	Spectate,
+	// A digit while the Emotes / Radio menu is open: value 1..10 (the 0 key
+	// is 10). The embedder sends it (C2S 0x14 / C2S 0x13) and closes that
+	// menu (hud::hud_toggles_close_voice_menu).
+	EmotePick,
+	RadioPick,
 };
 
 struct PlayerActionRequest {
@@ -39,6 +55,13 @@ struct PlayerActionPoll {
 	bool active = false;
 	bool captured = false;
 	bool simulation_available = false;
+	// An open text line owns the keyboard (BindingSet::set_keyboard_captured):
+	// the held-USE digits go to the line, not the seats.
+	bool keyboard_captured = false;
+	// The F9 Emotes / F10 Radio menus' open words as the HUD toggles hold them
+	// this frame (hud::HudToggleState): a digit goes to the open menu.
+	bool emotes_menu_open = false;
+	bool radio_menu_open = false;
 };
 
 struct PlayerActionFrame {
@@ -82,6 +105,13 @@ public:
 	void reset();
 	// Deferred until after the next poll's fresh-USE-press reset.
 	void consume_use_hold();
+	// The death screen's spectator rows, the catalog's mode-2 rows 110..112
+	// (CycleSpectatorMode, IncSpectatorTarget, DecSpectatorTarget): the binding
+	// scan admits them only while the death screen is up, so the embedder
+	// polls them there, on their press edges, while gameplay input is active.
+	// [orig: Input_IsBindingActiveForMode @0x497ea0 — row +8 bit 2 on the
+	//  death screen; rows @0x818810 / @0x81887C / @0x8188E8 -> codes 500..502]
+	std::vector<PlayerActionRequest> poll_spectator(const PlayerActionSource &source, bool active);
 
 private:
 	struct RowLatch { bool down = false; };
@@ -94,6 +124,9 @@ private:
 	bool use_hold_consumed_ = false;
 	bool use_consume_pending_ = false;
 	bool use_digit_was_down_[10] = {};
+	// This frame's menu digit arm: a menu was open while gameplay input ran.
+	bool menu_digits_ = false;
+	bool spectator_was_down_[3] = {};
 
 	void sample_use(const PlayerActionSource &source, const PlayerActionPoll &gate,
 			PlayerActionFrame &frame);
