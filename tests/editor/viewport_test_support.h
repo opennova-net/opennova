@@ -15,6 +15,8 @@
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_device_cache.h>
+#include <editor/preview/viewport_json.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/project_session.h>
@@ -123,19 +125,17 @@ inline bool serve(opennova::editor::ProjectSession &session,
 	return done;
 }
 
-// What the planners read of the viewport of `kind` over `path` (the view, its clock, the document
-// open there), at the size its state says.
-inline opennova::editor::ViewportContext viewport_context(const opennova::editor::ProjectSession &session,
-		const opennova::editor::ViewportModel &model, float snap = 0.0f) {
-	const opennova::editor::SessionView &view = session.view();
-	const opennova::editor::DocumentBase *document = nullptr;
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == model.path()) document = open.get();
-	return opennova::editor::ViewportContext{
-		opennova::editor::ViewportInput{ view, view.documents.viewports->clock(), document,
-				opennova::editor::ChangeClass::None },
-		model.size().width, model.size().height, snap, nullptr
-	};
+// The envelope of a viewport of `kind` over no document, followed once over `view`: what the kind's
+// follow says with nothing of it to show (no project, none of its kind open, a menu with no screen
+// selected). No wire reaches one (the viewport query reads a document's); the kind's follow keeps
+// these reasons for a viewport whose document went.
+inline opennova::io::JsonValue empty_viewport_json(
+		const opennova::editor::SessionView &view, opennova::editor::ViewportKind kind) {
+	using namespace opennova::editor;
+	std::unique_ptr<ViewportModel> empty = viewport_kind_row(kind).make(std::string());
+	PreviewClock clock;
+	empty->follow(ViewportInput{ view, clock, nullptr, ChangeClass::Loaded }, clock);
+	return viewport_to_json(view, *empty, JsonPage());
 }
 
 } // namespace editor_test

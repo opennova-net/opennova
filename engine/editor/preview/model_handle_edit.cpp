@@ -2,6 +2,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <variant>
 
 #include <editor/documents/model_document.h>
 #include <formats/threedi/threedi_build.h>
@@ -52,6 +53,24 @@ Edit set(const NodeAddress &record, const char *field, double value, uint64_t ge
 	return edit;
 }
 
+// Whether `value` leaves the record's `field` as the record holds it: a user point's 16.16 word the
+// same to within half its step (a point of the picture taken back to the model loses a little of
+// it, which a write would turn into a step of the word), a light's float the same.
+bool held(const ModelDocument &document, const NodeAddress &record, const char *field, ModelOverlayKind kind,
+		double value) {
+	Value current;
+	if (!document.get(record, field, current) || !std::holds_alternative<double>(current)) return false;
+	const double now = std::get<double>(current);
+	if (kind == ModelOverlayKind::UserPoint) return std::llround(value * 65536.0) == std::llround(now * 65536.0);
+	return float(value) == float(now);
+}
+
+// A Set of `field` to `value` where it changes what the record holds.
+void set_changed(const ModelDocument &document, const NodeAddress &record, const char *field,
+		ModelOverlayKind kind, double value, uint64_t gesture, std::vector<Edit> &out) {
+	if (!held(document, record, field, kind, value)) out.push_back(set(record, field, value, gesture));
+}
+
 } // namespace
 
 bool model_handle_from_token(const char *token, ModelHandle &out) {
@@ -76,9 +95,9 @@ bool model_handle_edits(const ModelDocument &document, const threedi::Threedi3di
 		// The preview's point in the model's axes (x mirrored back), the part's pose undone.
 		const double posed[3] = {-double(to.x) - pose.m[12], double(to.y) - pose.m[13], double(to.z) - pose.m[14]};
 		const ThreediBuildVec3 file = threedi::threedi_build_to_mission(apply(inverse, posed));
-		out.push_back(set(record, "position.x", snapped(file.x, snap), gesture));
-		out.push_back(set(record, "position.y", snapped(file.y, snap), gesture));
-		out.push_back(set(record, "position.z", snapped(file.z, snap), gesture));
+		set_changed(document, record, "position.x", overlay.kind, snapped(file.x, snap), gesture, out);
+		set_changed(document, record, "position.y", overlay.kind, snapped(file.y, snap), gesture, out);
+		set_changed(document, record, "position.z", overlay.kind, snapped(file.z, snap), gesture, out);
 		return true;
 	}
 	const double dx = double(to.x) - overlay.at.x, dy = double(to.y) - overlay.at.y, dz = double(to.z) - overlay.at.z;
@@ -88,9 +107,9 @@ bool model_handle_edits(const ModelDocument &document, const threedi::Threedi3di
 	const ThreediBuildVec3 axis = threedi::threedi_build_to_mission(apply(inverse, turned));
 	const double norm = std::sqrt(axis.x * axis.x + axis.y * axis.y + axis.z * axis.z);
 	if (!(norm > 1e-6)) return false;
-	out.push_back(set(record, "direction.x", axis.x / norm, gesture));
-	out.push_back(set(record, "direction.y", axis.y / norm, gesture));
-	out.push_back(set(record, "direction.z", axis.z / norm, gesture));
+	set_changed(document, record, "direction.x", overlay.kind, axis.x / norm, gesture, out);
+	set_changed(document, record, "direction.y", overlay.kind, axis.y / norm, gesture, out);
+	set_changed(document, record, "direction.z", overlay.kind, axis.z / norm, gesture, out);
 	return true;
 }
 

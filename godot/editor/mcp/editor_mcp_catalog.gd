@@ -4,30 +4,53 @@ extends RefCounted
 ## The editor MCP's tool definitions (docs/mcp.md), generated at startup from the session's own
 ## tables (ADR 0046 S13 A5): `editor_query catalog` answers every request kind with the fields it
 ## takes, every request field, every query with its params and every state section, each with its
-## doc, and editor_request, editor_query and editor_state are made from it. What a table cannot
-## carry (how a request answers, how a query pages, the build, Play, the previews, a picture, the
-## transport's log) is written here, once each.
+## doc, and editor_request, editor_query, editor_state and editor_viewport are made from it. What a
+## table cannot carry (how a request answers, how a query pages, which viewport op is a read and
+## which a request, the build, Play, a picture, the transport's log) is written here, once each.
 
 const SCREENSHOT_TIMEOUT_MS := 60_000
 ## Play builds first, and editor_build waits for its operation.
 const BUILD_TIMEOUT_MS := 300_000
-## The preview tools' pages (until S13 V7's viewport tool): the result sanitizer caps a list at
-## McpJson.MAX_ENTRIES.
+## The most entries a query's page holds when the catalog does not say (its page_max).
 const PAGE_MAX := McpJson.MAX_ENTRIES
-const PAGE_DEFAULT := 100
 
 const PLAY_OPS: Array[String] = ["start", "stop", "state"]
 
-const MENU_PREVIEW_OPS: Array[String] = ["state", "rects", "hit", "options", "drag", "nudge", "arrange", "notes"]
-## editor_menu_preview op=arrange (editor/preview/menu_arrange.h's tokens).
-const ARRANGE_OPS: Array[String] = ["align_left", "align_right", "align_top", "align_bottom",
-		"align_horizontal_centers", "align_vertical_centers", "distribute_horizontally", "distribute_vertically",
-		"bring_to_front", "bring_forward", "send_backward", "send_to_back"]
-const MENU_PREVIEW_STATES: Array[String] = ["normal", "mouseover", "selected", "disabled"]
-const MENU_PREVIEW_HANDLES: Array[String] = ["move", "left", "right", "top", "bottom", "top_left", "top_right",
-		"bottom_left", "bottom_right"]
-const MODEL_PREVIEW_OPS: Array[String] = ["state", "options", "camera", "hit", "drag"]
-const MODEL_PREVIEW_HANDLES: Array[String] = ["place", "axis"]
+## editor_viewport's writes (S13 V7): each a request, the members it takes flat beside op and the one
+## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
+## options and camera a set_viewport of the viewport's state (`device`, its device's size, beside the
+## options or the camera; kind the change's), seek a set_viewport of the clock alone, which names no
+## document and no kind (the one preview clock every viewport reads), drag and command an
+## edit_in_viewport (kind the drag's or the command's). Its reads are the viewport query's own op, the
+## tokens the catalog lists for it (viewport_reads).
+const VIEWPORT_WRITES := {
+	"options": {"kind": "set_viewport", "takes": ["options", "device"], "needs": "options", "kind_in": "viewport"},
+	"camera": {"kind": "set_viewport", "takes": ["camera", "device"], "needs": "camera", "kind_in": "viewport"},
+	"seek": {"kind": "set_viewport", "takes": ["clock"], "needs": "clock", "pathless": true},
+	"drag": {"kind": "edit_in_viewport", "takes": ["drag"], "needs": "drag", "kind_in": "drag"},
+	"command": {"kind": "edit_in_viewport", "takes": ["command"], "needs": "command", "kind_in": "command"},
+}
+
+const VIEWPORT_PROSE := (
+		"A document's viewport (S13 V7): its picture as the game would draw it, of the kind kind names (menu, "
+		+ "model), else the kind it shows in (the Preview's kind that shows it: a menu's screen, a model, a clip "
+		+ "or an animation table on its rig's model; else its Main view), headless included. path names the "
+		+ "document as editor_query takes it, the active one when left out (refused when it shows in no "
+		+ "viewport: a stylesheet feeds the menu's and shows in none). The reads (the viewport query's ops, "
+		+ "below) are followed first so they answer the document as it is now (a first read of a document "
+		+ "makes its viewport, which can move view_revision); a refusal is a tool error naming the query. op "
+		+ "options and camera change its state (a set_viewport: options {...} the kind's options, camera {...} "
+		+ "its camera, each with device {width, height}, its device's size, beside it); op seek sets the "
+		+ "preview clock every viewport reads (clock {playing, rate, time_ms, ticks}; it names no document and "
+		+ "no kind, and takes no path); op drag and command edit through it (an edit_in_viewport: drag {...}, "
+		+ "command {...}; a gesture's samples are consecutive drags of one handle on its document, gesture "
+		+ "the token the first's answer gave, end false keeping it open; any other request on the document, "
+		+ "another gesture, or 10 s with no sample ends it). Each write answers as editor_request answers (ok, "
+		+ "served, outcome: done, findings, a drag's gesture; status, view_revision; a request that did not read "
+		+ "is a tool error, one refused is ok with an outcome not done) with the viewport's state after it, "
+		+ "viewport (none after a seek with nothing to show). Its device takes what changed at the editor's "
+		+ "next frame (device.attached, builds, a widget's device_rect) where the Preview window or a canvas "
+		+ "draws it; one neither draws holds no device.")
 
 const REQUEST_PROSE := (
 		"Raise one typed editor request by kind, the vocabulary the windows use (the request table, "
@@ -109,11 +132,10 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			+ "game_probe on that port drive it, exit_code). op=stop ends the game and waits; op=state reads the "
 			+ "run section.",
 			{"op": {"type": "string", "enum": PLAY_OPS}}, ["op"], true, BUILD_TIMEOUT_MS),
-		_menu_preview_tool(),
-		_model_preview_tool(),
+		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
-			"Capture the editor window (its ImGui workspace, the menu preview and the model preview); a headless "
-			+ "editor refuses.",
+			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "
+			+ "a headless editor refuses.",
 			{
 				"max_dim": {"type": "integer", "minimum": 64, "maximum": 4096, "default": 1280},
 				"format": {"type": "string", "enum": ["webp", "png"], "default": "webp"},
@@ -151,6 +173,24 @@ static func query_names(catalog: Dictionary) -> Array[String]:
 	for row: Variant in catalog.get("queries", []):
 		names.append(String(row.get("name", "")))
 	return names
+
+
+## The viewport query's ops (its op param's enum in the catalog): editor_viewport's reads.
+static func viewport_reads(catalog: Dictionary) -> Array[String]:
+	var ops: Array[String] = []
+	for param: Variant in _query_row(catalog, "viewport").get("params", []):
+		if String((param as Dictionary).get("name", "")) == "op":
+			for token: Variant in (param as Dictionary).get("enum", []):
+				ops.append(String(token))
+	return ops
+
+
+## A query's row in the catalog by name ({} for none).
+static func _query_row(catalog: Dictionary, name: String) -> Dictionary:
+	for row: Variant in catalog.get("queries", []):
+		if String((row as Dictionary).get("name", "")) == name:
+			return row as Dictionary
+	return {}
 
 
 ## The state's sections, by name.
@@ -205,6 +245,8 @@ static func _json_schema(type: String) -> Dictionary:
 	match type:
 		"integer":
 			return {"type": "integer", "minimum": 0}
+		"number":
+			return {"type": "number"}
 		"boolean":
 			return {"type": "boolean"}
 		"string[]":
@@ -304,117 +346,42 @@ static func _query_tool(catalog: Dictionary) -> McpToolDef:
 	return McpToolDef.make("editor_query", " ".join(PackedStringArray(lines)), properties, ["query"], false)
 
 
-static func _menu_preview_tool() -> McpToolDef:
-	return McpToolDef.make("editor_menu_preview",
-		"The menu preview, headless included (a device tool until S13 V7's viewport tool): the previewed "
-		+ "screen (the last menu screen selected) as the game would draw it were the menu saved now, the open "
-		+ "stylesheets and string tables standing in for their files; every answer the menu viewport's envelope "
-		+ "(S13 V5). op=state: kind, path, as_saved, status (empty, failed, ready) and reason (no_project, "
-		+ "no_menu, no_screen, unserializable, screen_missing, ready) and its message and detail, the revision "
-		+ "shown and whether it is current, builds, units (design), device {attached, width, height, "
-		+ "canvas_sized} (the size its device draws at: a canvas's own where one sizes it), the options, camera "
-		+ "(null), the preview clock, body {screen {id, name}, missing (the files it names that the project "
-		+ "lacks), unreadable (those that did not load)}, count (the widgets), note_count and view_revision (the "
-		+ "view's clock at which what it reads last moved: editor_state's since); rects {offset?, limit?}: a "
-		+ "page of the items, the widgets as the runtime placed them (index, id, name, type, shown, disabled, "
-		+ "rect and local [left, top, right, bottom] in 800x600 design units, device_rect where the Shell's "
-		+ "device placed it, text, font, text_color); hit {x, y}: the widget the game's hit test finds at a "
-		+ "design point (index -1 for none); options {show_hidden?, force_id?, force_state?, checked?, "
-		+ "popup_open?, focus?, device?, clock?}: a SetViewport of the previewed screen's viewport (device "
-		+ "{width, height} its device's size, refused while a canvas sizes the picture; clock {playing, rate, "
-		+ "time_ms, ticks} the preview clock; the rest its options), then the state; drag {id, handle, dx, "
-		+ "dy, snap?=true}: a window of the previewed screen moved or resized by a handle, the moved edges "
-		+ "snapped to the grid of 8, one undo step, then the state; nudge {id, dx, dy}: a move with no snap; "
-		+ "arrange {ids, arrange}: windows aligned, distributed or reordered, one undo step, then the state; "
-		+ "notes {offset?, limit?}: a page of the frame compiler's notes on the previewed screen. A screen as "
-		+ "the render check compiled it is editor_query menu_render; any viewport's state is editor_request "
-		+ "set_viewport's.",
-		{
-			"op": {"type": "string", "enum": MENU_PREVIEW_OPS},
-			"x": {"type": "number"},
-			"y": {"type": "number"},
-			"device": _device_schema(),
-			"clock": _clock_schema(),
-			"show_hidden": {"type": "boolean"},
-			"force_id": {"type": "integer", "minimum": 0},
-			"force_state": {"type": "string", "enum": MENU_PREVIEW_STATES},
-			"checked": {"type": "boolean"},
-			"popup_open": {"type": "boolean"},
-			"focus": {"type": "boolean"},
-			"id": {"type": "integer", "minimum": 1},
-			"handle": {"type": "string", "enum": MENU_PREVIEW_HANDLES},
-			"dx": {"type": "integer"},
-			"dy": {"type": "integer"},
-			"snap": {"type": "boolean", "default": true},
-			"ids": {"type": "array", "items": {"type": "integer", "minimum": 1}},
-			"arrange": {"type": "string", "enum": ARRANGE_OPS},
-			"offset": {"type": "integer", "minimum": 0, "default": 0},
-			"limit": {"type": "integer", "minimum": 1, "maximum": PAGE_MAX, "default": PAGE_DEFAULT},
-		}, ["op"])
-
-
-static func _model_preview_tool() -> McpToolDef:
-	return McpToolDef.make("editor_model_preview",
-		"The model preview, headless included (a device tool until S13 V7's viewport tool): the previewed "
-		+ "model (the last model, clip or animation table made active) as the game would draw it were it saved "
-		+ "now, through the runtime's own renderer; every answer the model viewport's envelope (S13 V5). "
-		+ "op=state: kind, path, as_saved, status (empty, failed, ready) and reason (no_project, no_model, "
-		+ "unserializable, unreadable, no_rig, ready) and its message and detail, the revision shown and "
-		+ "whether it is current, builds, units (pixels), device {attached, width, height, canvas_sized} (the "
-		+ "size its device draws at: a canvas's own where one sizes it), the options {lod, ctrl, overlays, "
-		+ "rig_model}, camera {target, yaw, pitch, distance, fov}, the preview clock {playing, rate, time_ms, "
-		+ "ticks}, body {lod {shown, auto, count, projected_px, thresholds}, sphere, registers, animation}, the "
-		+ "items (the markers: user points, lights, pivots, each with its record id, position and device "
-		+ "pixel), count and view_revision (the view's clock at which what it reads last moved: editor_state's "
-		+ "since); options {lod?, ctrl?, overlays?, rig_model?, device?, clock?} and camera {yaw?, pitch?, "
-		+ "distance?, target?, frame?, device?, clock?}: a SetViewport of the previewed model's viewport (device "
-		+ "{width, height} its device's size, refused while a canvas sizes the picture; clock {playing, rate, "
-		+ "time_ms, ticks} the preview clock, ticks a clip's; the rest its options or its camera), then the "
-		+ "state; hit {x, y}: the marker at a device point (index -1 for none); drag {id, handle?=place|axis, "
-		+ "x, y, snap?=0}: a user point or a light moved, or its axis turned, to the point under device pixel "
-		+ "x, y, the other selected markers moved as far with a selected one's place, one undo step, then the "
-		+ "state.",
-		{
-			"op": {"type": "string", "enum": MODEL_PREVIEW_OPS},
-			"lod": {"description": "a level (an integer from 0) or \"auto\""},
-			"ctrl": {"type": "object"},
-			"overlays": {"type": "object"},
-			"rig_model": {"type": "string"},
-			"device": _device_schema(),
-			"clock": _clock_schema(),
-			"x": {"type": "number"},
-			"y": {"type": "number"},
-			"id": {"type": "integer", "minimum": 1},
-			"handle": {"type": "string", "enum": MODEL_PREVIEW_HANDLES, "default": "place"},
-			"snap": {"type": "number", "minimum": 0, "default": 0},
-			"yaw": {"type": "number"},
-			"pitch": {"type": "number"},
-			"distance": {"type": "number"},
-			"target": {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3},
-			"frame": {"type": "boolean"},
-		}, ["op"])
-
-
-## A viewport's `device` and `clock`, the SetViewport members every preview tool's setters take.
-static func _device_schema() -> Dictionary:
-	return {
-		"type": "object",
-		"description": "the device's size in pixels (refused while a canvas sizes the picture)",
-		"properties": {
-			"width": {"type": "integer", "minimum": 1, "maximum": 8192},
-			"height": {"type": "integer", "minimum": 1, "maximum": 8192},
-		},
-	}
-
-
-static func _clock_schema() -> Dictionary:
-	return {
-		"type": "object",
-		"description": "the preview clock every viewport reads",
-		"properties": {
-			"playing": {"type": "boolean"},
-			"rate": {"type": "number", "minimum": 0},
-			"time_ms": {"type": "integer", "minimum": 0},
-			"ticks": {"type": "integer", "minimum": 0},
-		},
-	}
+## editor_viewport (S13 V7), made from the catalog: the viewport query's row (its doc, its op's tokens
+## the reads, and its params but op as the tool's own, flat beside op, a param's choices its enum) and
+## the two requests its writes raise (set_viewport's and edit_in_viewport's docs, and the docs of the
+## fields they carry: viewport, drag, command).
+static func _viewport_tool(catalog: Dictionary) -> McpToolDef:
+	var lines: Array[String] = [VIEWPORT_PROSE]
+	var ops: Array[String] = viewport_reads(catalog)
+	for op: String in VIEWPORT_WRITES:
+		ops.append(op)
+	var properties := {"op": {"type": "string", "enum": ops}}
+	var query := _query_row(catalog, "viewport")
+	if not query.is_empty():
+		lines.append("The reads: " + String(query.get("doc", "")))
+		for param: Variant in query.get("params", []):
+			var key := String(param.get("name", ""))
+			if key == "op":
+				continue
+			var schema := _json_schema(String(param.get("type", "string")))
+			if key == "limit":
+				schema["minimum"] = 1
+				schema["maximum"] = int(catalog.get("page_max", PAGE_MAX))
+			if (param as Dictionary).has("enum"):
+				schema["enum"] = (param as Dictionary)["enum"]
+			schema["description"] = String(param.get("doc", ""))
+			properties[key] = schema
+	for row: Variant in catalog.get("requests", []):
+		var kind := String(row.get("kind", ""))
+		if kind == "set_viewport" or kind == "edit_in_viewport":
+			lines.append("%s: %s" % [kind, String(row.get("doc", ""))])
+	var docs := {}
+	for field: Variant in catalog.get("fields", []):
+		docs[String(field.get("field", ""))] = String(field.get("doc", ""))
+	var change := String(docs.get("viewport", ""))
+	for member: String in ["options", "camera", "clock", "device"]:
+		properties[member] = {"type": "object", "description": "op %s: set_viewport's %s, as its viewport field takes it: %s"
+				% ["seek" if member == "clock" else ("options or camera" if member == "device" else member), member, change]}
+	for member: String in ["drag", "command"]:
+		properties[member] = {"type": "object", "description": "op %s: edit_in_viewport's: %s" % [member, docs.get(member, "")]}
+	return McpToolDef.make("editor_viewport", " ".join(PackedStringArray(lines)), properties, ["op"], true)

@@ -466,6 +466,125 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 	return true;
 }
 
+// A viewport's kind as a drag or a command names it ("kind": its token), left out its default
+// (kCount: the kind the document shows in).
+bool viewport_kind_member(const JsonValue &json, const char *owner, ViewportKind &out, std::string &error) {
+	const JsonValue *kind = json.get("kind");
+	if (!kind) return true;
+	if (!kind->is_string() || !viewport_kind_from_token(kind->string, out)) {
+		std::string kinds;
+		for (size_t i = 0; i < kViewportKindCount; ++i)
+			kinds += std::string(i ? ", " : "") + viewport_kind_token(static_cast<ViewportKind>(i));
+		error = std::string("\"") + owner + ".kind\" must be a viewport's kind (" + kinds + ").";
+		return false;
+	}
+	return true;
+}
+
+// A drag in a viewport (S13 V7): {id, handle, by: [dx, dy] | to: [x, y], snap?, gesture?, end?,
+// kind?}, each left out at its default. The handle's token is the viewport's kind to read (a menu
+// window's, a model marker's), so it is a text here, refused where the kind plans the drag.
+JsonValue drag_to_json(const ViewportDrag &drag) {
+	JsonValue out = JsonValue::make_object();
+	out.set("id", json_number(double(drag.id)));
+	out.set("handle", json_string(drag.handle));
+	JsonValue point = JsonValue::make_array();
+	point.push(json_number(drag.x));
+	point.push(json_number(drag.y));
+	out.set(drag.by ? "by" : "to", std::move(point));
+	if (drag.snap != 0.0f) out.set("snap", json_number(drag.snap));
+	if (drag.gesture) out.set("gesture", json_number(double(drag.gesture)));
+	if (!drag.end) out.set("end", boolean(false));
+	if (drag.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drag.kind)));
+	return out;
+}
+
+bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"drag\" must be an object {id, handle, by | to, snap, gesture, end, kind}.";
+		return false;
+	}
+	if (!members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end", "kind"}, "drag", error))
+		return false;
+	const auto refuse = [&error](const char *member, const char *must) {
+		error = std::string("\"drag.") + member + "\" must be " + must + ".";
+		return false;
+	};
+	ViewportDrag drag;
+	const JsonValue *id = json.get("id");
+	if (!id || !read_id(*id, drag.id) || drag.id == 0) return refuse("id", "a record identity");
+	const JsonValue *handle = json.get("handle");
+	if (!handle || !handle->is_string() || handle->string.empty()) return refuse("handle", "a handle's token");
+	drag.handle = handle->string;
+	const JsonValue *by = json.get("by"), *to = json.get("to");
+	if ((by != nullptr) == (to != nullptr)) {
+		error = "\"drag\" goes by [dx, dy] or to [x, y], one of them.";
+		return false;
+	}
+	// Numbers the drag's floats hold (finite, none past a float's largest).
+	const JsonValue &point = by ? *by : *to;
+	if (!point.is_array() || point.array.size() != 2 || !io::json_float(point.array[0], drag.x) ||
+			!io::json_float(point.array[1], drag.y))
+		return refuse(by ? "by" : "to", "two numbers, [x, y]");
+	drag.by = by != nullptr;
+	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drag.snap) || drag.snap < 0.0f))
+		return refuse("snap", "a number, 0 or more");
+	if (const JsonValue *gesture = json.get("gesture"); gesture && !read_id(*gesture, drag.gesture))
+		return refuse("gesture", "a gesture's token, a whole number");
+	if (const JsonValue *end = json.get("end")) {
+		if (!end->is_bool()) return refuse("end", "true or false");
+		drag.end = end->boolean;
+	}
+	if (!viewport_kind_member(json, "drag", drag.kind, error)) return false;
+	out = std::move(drag);
+	return true;
+}
+
+// A command in a viewport (S13 V7): {name, ids?, kind?}. The name is the viewport's kind to read.
+JsonValue command_to_json(const ViewportCommand &command) {
+	JsonValue out = JsonValue::make_object();
+	out.set("name", json_string(command.name));
+	if (!command.ids.empty()) {
+		JsonValue ids = JsonValue::make_array();
+		for (const NodeId id : command.ids) ids.push(json_number(double(id)));
+		out.set("ids", std::move(ids));
+	}
+	if (command.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(command.kind)));
+	return out;
+}
+
+bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"command\" must be an object {name, ids, kind}.";
+		return false;
+	}
+	if (!members_known(json, {"name", "ids", "kind"}, "command", error)) return false;
+	ViewportCommand command;
+	const JsonValue *name = json.get("name");
+	if (!name || !name->is_string() || name->string.empty()) {
+		error = "\"command.name\" must be a command's name.";
+		return false;
+	}
+	command.name = name->string;
+	if (!viewport_kind_member(json, "command", command.kind, error)) return false;
+	if (const JsonValue *ids = json.get("ids")) {
+		if (!ids->is_array()) {
+			error = "\"command.ids\" must be an array of record identities.";
+			return false;
+		}
+		for (size_t i = 0; i < ids->array.size(); ++i) {
+			NodeId id = 0;
+			if (!read_id(ids->array[i], id) || id == 0) {
+				error = "\"command.ids[" + std::to_string(i) + "]\" must be a record identity.";
+				return false;
+			}
+			command.ids.push_back(id);
+		}
+	}
+	out = std::move(command);
+	return true;
+}
+
 // An import source: {path, entry?, install?, native?}.
 constexpr const char *kImportsShape =
         "\"imports\" must be an array of {path, entry, install, native}.";
@@ -568,6 +687,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		}
 		request.viewport = io::json_write(json);
 		return true;
+	case F::Drag: return drag_from_json(json, request.drag, error);
+	case F::Command: return command_from_json(json, request.command, error);
 	case F::Purpose:
 		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
 		error = "Unknown pick purpose \"" + shown + "\".";
@@ -637,6 +758,12 @@ bool field_to_json(
 			out = JsonValue::make_object();
 		return !request.viewport.empty();
 	}
+	case F::Drag:
+		out = drag_to_json(request.drag);
+		return request.drag != ViewportDrag();
+	case F::Command:
+		out = command_to_json(request.command);
+		return request.command != ViewportCommand();
 	case F::Purpose:
 		out = json_string(pick_purpose_token(request.purpose));
 		return request.purpose != PickPurpose::None;
