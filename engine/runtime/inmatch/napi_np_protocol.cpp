@@ -575,6 +575,23 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
 	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
 	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
+	// The host writes its OWN protocol identity, not the prober's: the JO identity the
+	// network init installed (no PV3 on the JO protocol, so none is written), and UT, the
+	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
+	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated);
+	//  UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0]
+	{
+		const ClientHello self = make_jointoperations_client_hello(0);
+		reply.co = self.co;
+		reply.ap = self.ap;
+		reply.bdat = self.bdat;
+		reply.pn = self.pn;
+		reply.pg = self.pg;
+		reply.pv1 = self.pv1;
+		reply.pv2 = self.pv2;
+		reply.pv3 = self.pv3;
+		reply.ut = ctx.np_protocol.host_run_duration_ms;
+	}
 	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
 	// game-server fields from live host state without registering the source as
 	// a peer; only a validated 0x42 creates the connection node.

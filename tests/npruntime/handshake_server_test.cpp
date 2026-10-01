@@ -2503,6 +2503,45 @@ bool run_reconnect_counters_echo_rcnt() {
 	return true;
 }
 
+// A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
+// installed (CO, AP "Jointops.exe", the 2009 build stamp, PN, PG, PV1, PV2 "16", and no PV3, an
+// empty string on the JO protocol) -- whatever the prober sent, plus UT, the host's uptime in ms,
+// whenever nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the
+// protocol's identity strings, each gated on non-empty), UT @0x62064f..0x620683; the identity
+// CNapiNetwork_Init @0x4ca4a0 installs]
+bool run_host_server_hello_writes_its_own_identity() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	ctx.np_protocol.host_run_duration_ms = 123456u;
+	// A probe that passes the gate only through retail's own case-insensitive / PM-bypass
+	// leniency: its PN / PV1 / PV2 spellings must not come back.
+	ClientHello probe = make_jointoperations_client_hello(0x0BADF00Du);
+	probe.pn = "jointoperations";
+	probe.pv1 = "0.0.0 1/12/2004 em";
+	probe.pv2 = "17";
+	probe.pv3 = "prober-pv3";
+	probe.ap = "Prober.exe";
+	probe.bdat = "Jan  1 2030 00:00:00";
+	probe.pm = 1; // a host's own announce shape: bypasses the identity check
+	const auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(probe));
+	auto r = inmatch::handle_server_datagram(ctx, PeerAddr{0x0100007Fu, 32110}, dg.data(), dg.size(), 1);
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	ServerHello sh;
+	if (!expect(r.outbound.size() == 1 &&
+	                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+	                    op == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh),
+	            "the probe draws one 0x81")) return false;
+	const ClientHello self = make_jointoperations_client_hello(0);
+	if (!expect(sh.co == self.co && sh.ap == "Jointops.exe" && sh.bdat == "Jul 21 2009 18:54:42",
+	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
+	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
+	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;
+	if (!expect(sh.pv3.empty(), "the JO protocol has no PV3, so the 0x81 writes none")) return false;
+	if (!expect(sh.ut == 123456u, "the 0x81 carries the host's uptime as UT")) return false;
+	return true;
+}
+
 // A game host's 0x82 carries no CU on either network type. SendSessionInit writes only the
 // connection's type-3 vars; a host stores the 0x42's CUs under their own type 1/2, and only a
 // client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is the
@@ -3655,6 +3694,7 @@ int main(int argc, char **argv) {
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
 	ok = run_game_host_server_auth_carries_no_cu() && ok;
+	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;
