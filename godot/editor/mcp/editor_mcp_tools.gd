@@ -4,7 +4,8 @@ extends RefCounted
 ## The editor MCP's handlers over the editor's wire seam (EditorApp.request_json and query_json,
 ## ADR 0046 S13 A5): a request and a query cross as JSON text the portable session marshals, so
 ## this module forwards and waits; it never reaches into the session, and it pages nothing (the
-## queries page their lists). The two preview tools stay device tools until S13 V7.
+## queries page their lists). The two preview tools stay device tools until S13 V7, each answering
+## with its viewport's envelope (S13 V5, editor/preview/viewport_json.h).
 
 ## How long editor_play op=stop waits for the game to leave.
 const STOP_WAIT_MS := 10_000
@@ -135,14 +136,17 @@ func _tool_editor_menu_preview(args: Dictionary, _ctx: McpToolContext) -> Varian
 			if offset == null or int(offset) < 0 or limit == null or int(limit) < 1 or int(limit) > EditorMcpCatalog.PAGE_MAX:
 				return McpToolResult.error("editor_menu_preview op=%s takes offset >= 0 and limit from 1 to %d." % [op, EditorMcpCatalog.PAGE_MAX])
 			var preview := _menu_preview()
-			var key := "widgets" if op == "rects" else "notes"
+			var key := "items" if op == "rects" else "notes"
 			var items: Array = preview.get(key, [])
+			var end := int(offset) + int(limit)
 			return {
 				"status": preview.get("status", ""),
+				"reason": preview.get("reason", ""),
 				"current": preview.get("current", false),
 				"count": items.size(),
 				"offset": int(offset),
-				key: items.slice(int(offset), int(offset) + int(limit)),
+				"next_offset": end if end < items.size() else null,
+				key: items.slice(int(offset), end),
 			}
 		"hit":
 			var x: Variant = _finite_number(args.get("x"))
@@ -215,15 +219,14 @@ func _menu_preview() -> Dictionary:
 	return preview if preview is Dictionary else {}
 
 
-## The preview without its widgets and notes (op=rects and op=notes page them).
+## The menu's viewport envelope without its items (the widgets) and notes, which op=rects and
+## op=notes page: `count` the widgets', `note_count` the notes'.
 func _menu_preview_state() -> Dictionary:
 	var preview := _menu_preview()
-	var widgets: Array = preview.get("widgets", [])
-	var notes: Array = preview.get("notes", [])
-	preview.erase("widgets")
+	preview.erase("items")
 	preview.erase("notes")
-	preview["widget_count"] = widgets.size()
-	preview["note_count"] = notes.size()
+	preview.erase("offset")
+	preview.erase("next_offset")
 	return preview
 
 

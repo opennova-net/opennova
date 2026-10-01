@@ -136,8 +136,8 @@ public:
 	const opennova::menu::MenuFrameCompiler &native_compiler() const { return compiler_; }
 	const opennova::menu::MenuFrameState &native_state() const { return state_; }
 	const opennova::menu::MenuFrameAssets &native_assets() const { return assets_; }
-	// The editor preview's frame state (it never pumps): what its options hold on the
-	// configured screen (editor/preview apply_menu_preview_options), set after each configure.
+	// The editor viewport's frame state (it never pumps): what its options hold on the
+	// configured screen (editor/preview apply_menu_options), set after each configure.
 	void set_native_state(const opennova::menu::MenuFrameState &p_state);
 
 	// Typed per-widget per-frame state, keyed by the widget's pre-order index

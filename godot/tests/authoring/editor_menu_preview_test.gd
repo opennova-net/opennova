@@ -1,7 +1,9 @@
 extends GutTest
 
-## The menu preview headless (ADR 0046 S9j): the editor boots with no ImGui context and
-## its preview still renders through the runtime's MenuFrame, read as JSON. A new
+## The menu preview headless (ADR 0046 S9j, S13 V5): the editor boots with no ImGui context and
+## its menu viewport's device still renders through the runtime's MenuFrame, the viewport read as
+## its envelope (JSON), the device placing every window where the viewport's own headless compile
+## did. A new
 ## project's menu opens on its first screen, STARTUP, which shows its title where the
 ## game draws it, in its font from fonts/; the game's hit test at the title's centre
 ## finds it; an unsaved string table edit and an unsaved stylesheet colour show at once
@@ -46,7 +48,7 @@ func _preview() -> Dictionary:
 
 
 func _widget(preview: Dictionary, name: String) -> Dictionary:
-	for widget: Variant in preview.get("widgets", []):
+	for widget: Variant in preview.get("items", []):
 		if widget is Dictionary and String(widget.get("name", "")) == name:
 			return widget as Dictionary
 	return {}
@@ -67,18 +69,21 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 		return
 	assert_false(_app.is_available(), "headless: no ImGui context")
 	var none := _preview()
-	assert_eq(String(none.get("status", "")), "no_project", str(none))
+	assert_eq(String(none.get("status", "")), "empty", str(none))
+	assert_eq(String(none.get("reason", "")), "no_project", str(none))
 	assert_eq(String(none.get("message", "")), "Open a project to preview its menus.")
+	assert_false(bool(none.get("device", {}).get("attached", true)), "no viewport, no device")
 
 	var dir := OS.get_cache_dir().path_join("opennova editor preview project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Preview Game"))
 	assert_eq(_seam.create_missing_files(), 0)
-	assert_eq(String(_preview().get("status", "")), "no_menu")
+	assert_eq(String(_preview().get("reason", "")), "no_menu")
 	assert_true(_seam.open_document("main.mnu"))
 	var opened := _preview()
 	assert_eq(String(opened.get("status", "")), "ready", "opened, a menu shows its first screen: %s" % str(opened))
-	assert_eq(String(opened.get("screen", {}).get("name", "")), "STARTUP")
+	assert_eq(String(opened.get("body", {}).get("screen", {}).get("name", "")), "STARTUP")
+	assert_true(bool(opened.get("device", {}).get("attached", false)), "its device attached: %s" % str(opened))
 	var title: int = _seam.find_record("TITLE")
 	var main: int = _seam.find_record("MAIN")
 	var exit: int = _seam.find_record("EXIT")
@@ -89,9 +94,9 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	var preview := _preview()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
 	assert_true(bool(preview.get("current", false)))
-	assert_eq(String(preview.get("screen", {}).get("name", "")), "STARTUP")
-	assert_eq(preview.get("missing", [1]).size(), 0, str(preview))
-	assert_eq(preview.get("unreadable", [1]).size(), 0, str(preview))
+	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "STARTUP")
+	assert_eq(preview.get("body", {}).get("missing", [1]).size(), 0, str(preview))
+	assert_eq(preview.get("body", {}).get("unreadable", [1]).size(), 0, str(preview))
 	var widget := _widget(preview, "TITLE")
 	assert_eq(String(widget.get("text", "")), "Preview Game", str(widget))
 	assert_eq(int(widget.get("id", 0)), title)
@@ -103,17 +108,23 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	assert_eq(int(rect[1]), 75 + 120, "absolute: MAIN's top plus its own")
 	assert_eq(String(widget.get("font", "")), "Arial16b.fnt")
 	assert_eq(String(widget.get("text_color", "")), "FFFFFFFF")
+	# The device (the runtime's MenuFrame over Godot's decoders) placed every window where the
+	# viewport's headless compile did.
+	for item: Variant in preview.get("items", []):
+		var placed := item as Dictionary
+		if placed.has("rect"):
+			assert_eq(str(placed.get("device_rect", [])), str(placed.get("rect", [])), String(placed.get("name", "")))
 
 	# The render check compiled the same screen headless (texture sizes from their headers):
 	# every window where the preview (Godot's decoders) placed it, the same notes.
-	var screen_id := int(preview.get("screen", {}).get("id", 0))
+	var screen_id := int(preview.get("body", {}).get("screen", {}).get("id", 0))
 	var rendered: Variant = JSON.parse_string(String(_seam.get_menu_render_json(String(preview.get("path", "")), screen_id)))
 	assert_true(rendered is Dictionary, str(rendered))
 	if rendered is Dictionary:
 		var render := rendered as Dictionary
 		assert_eq(String(render.get("status", "")), "ready", str(render))
 		assert_true(bool(render.get("current", false)), str(render))
-		var ours: Array = preview.get("widgets", [])
+		var ours: Array = preview.get("items", [])
 		var theirs: Array = render.get("widgets", [])
 		assert_eq(theirs.size(), ours.size())
 		for i in mini(ours.size(), theirs.size()):
@@ -161,7 +172,8 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	assert_true(_seam.set_field(exit_string, "text", "Leave"))
 	assert_true(_seam.is_document_dirty(), "the table edit is not saved")
 	preview = _preview()
-	assert_eq(String(preview.get("screen", {}).get("name", "")), "STARTUP", "the preview stays on the menu screen")
+	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "STARTUP",
+			"the preview stays on the menu screen")
 	assert_eq(String(_widget(preview, "TITLE").get("text", "")), "Leave", str(preview))
 
 	# An unsaved stylesheet colour shows.
@@ -181,7 +193,7 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
-	assert_eq(String(_preview().get("status", "")), "no_project")
+	assert_eq(String(_preview().get("reason", "")), "no_project")
 
 
 ## S9k1: a drag of a window's handles through the preview, as the preview window writes it:
@@ -240,7 +252,7 @@ func test_a_drag_moves_a_window_on_the_grid() -> void:
 
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
-	assert_eq(String(_preview().get("status", "")), "no_project")
+	assert_eq(String(_preview().get("reason", "")), "no_project")
 
 
 ## S9k2: several windows through the preview. TITLE and EXIT selected together: a move of
@@ -313,4 +325,4 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
-	assert_eq(String(_preview().get("status", "")), "no_project")
+	assert_eq(String(_preview().get("reason", "")), "no_project")

@@ -72,6 +72,13 @@ constexpr RequestField kFields[] = {
 	{ F::Settings, "settings", J::Object,
 			"The settings to set, {serial?, title?, mission?, multiplayer?, game_install?, "
 			"runtime_executable?, play_in_install?}, each left out as it is." },
+	{ F::Viewport, "viewport", J::Object,
+			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
+			"(menu, model; left out where one kind shows the document), device {width, height} the "
+			"size its device draws at (1 to 8192), clock {playing, rate, time_ms, ticks} the preview "
+			"clock, options the kind's (a menu's show_hidden, force_id, force_state, checked, "
+			"popup_open, focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, "
+			"pitch, distance, target, frame}, each member optional." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

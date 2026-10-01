@@ -7,6 +7,7 @@
 #include <editor/documents/mnu_clipboard.h>
 #include <editor/model/edit.h>
 #include <editor/preview/canvas_gesture.h>
+#include <editor/preview/canvas_half.h>
 #include <editor/preview/menu_arrange.h>
 #include <editor/preview/menu_layout_edit.h>
 #include <editor/preview/viewport_overlay.h>
@@ -18,14 +19,14 @@ namespace opennova::editor {
 class MnuDocument;
 struct Node;
 
-// The menu preview's canvas (ADR 0046 S9k1, S9k2, S13 V2): what a press on the screen's picture
-// takes, what a drag or the arrow keys write, what a box selects, and what is drawn over the
-// picture, from the device's compiled screen (the game's own hit test and rects). The rect math
-// is the runtime's; the writes are the layout planner's (menu_layout_edit) and the arrange's
-// (menu_arrange). An editor authoring aid, not a port.
+// The menu viewport's canvas (ADR 0046 S9k1, S9k2, S13 V2, V5): what a press on the screen's
+// picture takes, what a drag or the arrow keys write, what a box selects, and what is drawn over the
+// picture, from the viewport's headless compile of the screen (the game's own hit test and rects,
+// which the Shell's device draws alike). The rect math is the runtime's; the writes are the layout
+// planner's (menu_layout_edit) and the arrange's (menu_arrange). An editor authoring aid, not a port.
 
 // What the canvas maps, one frame's worth: the menu shown and its screen, the selection on it,
-// and the device's compiled screen, which maps a point to a window only while it shows the
+// and the viewport's compiled screen, which maps a point to a window only while it is of the
 // document's own revision.
 struct MenuCanvasFrame {
 	const MnuDocument *document = nullptr;
@@ -42,7 +43,11 @@ struct MenuCanvasFrame {
 	const menu::MenuFrameState *state = nullptr;
 	bool current = false; // the picture shows the document's revision: only then does it map
 	bool snap = true; // a drag snaps its moved edges to kLayoutGrid (Alt: free)
-	std::vector<menu::MenuFrameNote> notes; // the compiler's notes on the screen as it stands
+	// The session takes an edit now (ViewportContext::editable: no operation holds the documents,
+	// S13 A3): a drag, the arrows and an arrange write nothing while it does not.
+	bool editable = true;
+	// The compiler's notes on the screen as it stands (the viewport's, null: none).
+	const std::vector<menu::MenuFrameNote> *notes = nullptr;
 };
 
 // The frame's selection, the session's while the menu is the active document (none while it
@@ -112,15 +117,26 @@ std::vector<NodeAddress> menu_marquee_windows(
 // or the screen). False when the selection is not a record of this screen.
 bool menu_canvas_escape(const MenuCanvasFrame &frame, CanvasRequests &out);
 // One arrange of the selected windows (align, distribute, drawing order), one batch; nothing on
-// a stale picture or when arrange_edits refuses.
+// a stale picture, while the session takes no edit, or when arrange_edits refuses.
 void menu_canvas_arrange(const MenuCanvasFrame &frame, ArrangeOp op, CanvasRequests &out);
 
-// The canvas's gestures on one menu pane: a press, the drag it becomes and its release; the
-// arrow keys (1 unit, 8 with Shift) moving the selected windows while one is held; and what
-// the canvas draws and shows while they last.
-class MenuCanvas {
+// The canvas's gestures on a menu viewport (its CanvasHalf): a press, the drag it becomes and its
+// release; the arrow keys (1 unit, 8 with Shift) moving the selected windows while one is held; and
+// what the canvas draws and shows while they last. Over a frame it is given (a test's), or the one
+// it makes of the viewport at each frame's start (MenuViewport::canvas_frame).
+class MenuCanvas final : public CanvasHalf {
 public:
-	const CanvasGesture &gesture() const { return gesture_; }
+	const CanvasGesture &gesture() const override { return gesture_; }
+	// The frame it made of the viewport at the frame's start.
+	const MenuCanvasFrame &frame() const { return frame_; }
+
+	// CanvasHalf, over the frame made of the viewport (a MenuViewport) at follow.
+	void follow(const ViewportModel &viewport, const ViewportContext &context,
+			CanvasRequests &out) override;
+	void input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) override;
+	OverlayList shapes(const ViewportContext &context, const CanvasInput &in) const override;
+	CanvasCursor cursor(const ViewportContext &context, const CanvasInput &in) const override;
+	std::string hover_tip(const ViewportContext &context, const CanvasInput &in) const override;
 
 	// The frame's start, while the pane draws its canvas: a gesture begun on another subject
 	// ends (another menu, a reload of it, another of its screens), and a nudge ends when the
@@ -136,9 +152,9 @@ public:
 	// the screen when nothing).
 	void input(const MenuCanvasFrame &frame, const CanvasInput &in, CanvasRequests &out);
 	// The gesture ends.
-	void end(CanvasRequests &out);
+	void end(CanvasRequests &out) override;
 	// The frame bracket (CanvasGesture::end_frame).
-	void end_frame(CanvasRequests &out);
+	void end_frame(CanvasRequests &out) override;
 
 	// Over the picture: a mark on every noted window, the window under the pointer, the other
 	// selected windows, the marquee's box, and the primary window with its eight handles.
@@ -156,6 +172,7 @@ private:
 	void release_(const MenuCanvasFrame &frame, CanvasRequests &out);
 
 	CanvasGesture gesture_;
+	MenuCanvasFrame frame_;
 	MenuPress press_;
 	// The nudge: the windows it moves, where they began, and how far in all.
 	std::vector<NodeAddress> nudged_;

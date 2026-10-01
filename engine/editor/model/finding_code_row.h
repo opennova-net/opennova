@@ -69,6 +69,7 @@ enum class FindingGroup {
 	Models,
 	Animations,
 	AnimationMaps,
+	Viewports,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -323,6 +324,7 @@ enum class CoreFinding {
 	RequirementWrongKind,
 	UnsavedDiscard,
 	UnsavedNone,
+	ViewportRefused,
 	kCount
 };
 inline constexpr size_t kCoreFindingCount = static_cast<size_t>(CoreFinding::kCount);

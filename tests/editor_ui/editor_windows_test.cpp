@@ -39,6 +39,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/menu_screen_render.h>
+#include <editor/preview/menu_viewport.h>
 #include <editor/model/field_text.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
@@ -891,7 +892,7 @@ void test_actions_after_edits() {
 	ui.drain();
 }
 
-// --- S9k1, S13 V2: the preview window's canvas ------------------------------------------
+// --- S9k1, S13 V2, V5: the preview window's canvas ------------------------------------------
 
 // MAIN over the whole design, BOX, OTHER and the 12-unit TINY inside it, every edge written.
 const char *const kLayoutMenu =
@@ -937,50 +938,100 @@ int64_t set_value(const std::vector<Edit> &edits, const char *field) {
 	return -1;
 }
 
-// S13 V2: the canvas through the menu pane on the null backend (its rules are its portable
-// half's, tests/editor/canvas_test.cpp: preview/canvas_gesture, menu_canvas). The pane over a fake
-// device backed by the headless render: Fit at the design's 4:3, then 100% from the toolbar; a
-// click selects what the game's hit test finds; a drag of the selected window is one gesture of
-// Sets on the grid, then its end; the arrows through the canvas's key channel (Right a unit, a
-// nudge one gesture while held and ended when let go, Shift+Up 8, the focus taken mid-nudge ending
-// it once); a stale picture maps nothing; the held state follows the selection, Checked only where
-// the type has one; Ctrl+wheel steps the zoom about the mouse; each empty state says why. The
-// gestures' ends when the pane stops drawing, and the pane hidden taking no key, are
+// The Preview window over a hand-made view of the layout menu (S13 V5): the menu open and active,
+// its first screen the Preview's target, the viewports the view shares pumped before each frame as
+// the Shell pumps them (the SetViewports the windows raise served), Preview focused and, unless
+// asked to Fit, at 100% (a pixel a design unit). The menu's viewport, its device, and the scope of
+// its view's items in the Preview window.
+struct LayoutPreview {
+	editor_test::TempProjectDir dir;
+	std::shared_ptr<MnuDocument> document = std::make_shared<MnuDocument>();
+	SessionView v;
+	HandViewports shell;
+	Ui ui;
+	const MenuViewport *menu = nullptr;
+	DrawnDevice *device = nullptr;
+	ImGuiID scope = 0;
+
+	explicit LayoutPreview(const char *name) : dir(name) {}
+	bool start(bool fit = false) {
+		Diagnostic error;
+		CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
+		CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
+		if (document->rows().empty()) return false;
+		const Node &screen = *document->rows()[0];
+		v = menu_view(document);
+		v.documents.previews[ViewportKind::Menu].path = document->path();
+		v.documents.previews[ViewportKind::Menu].part = screen.id;
+		select_in(v, {screen.id, kScreen, 0});
+		shell.bind(v);
+		ui.windows.set_view(&v);
+		ui.windows.set_devices(&shell.devices.cache);
+		ui.pump = [this] { shell.pump(ui.windows, v); };
+		ui.frames(6);
+		ui.focus("Preview");
+		menu = static_cast<const MenuViewport *>(shell.find(document->path(), ViewportKind::Menu));
+		device = shell.device(document->path(), ViewportKind::Menu);
+		CHECK(menu && menu->status() == ViewportStatus::Ready && device && device->width > 0,
+				"the screen compiled, drawn on its device");
+		if (!menu || !device) return false;
+		scope = item_id(Ui::window_id("Preview"), {"menu", document->path().c_str()});
+		if (!fit) {
+			ui.activate(item_id(scope, {"Zoom"}));
+			ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
+			ui.frames(2);
+		}
+		ui.drain();
+		return true;
+	}
+	// A design point's pixel on the screen.
+	ImVec2 at(float x, float y) const {
+		return ImVec2(device->origin.x + x * float(device->width) / 800.0f, device->origin.y + y * float(device->height) / 600.0f);
+	}
+	// The pump back, after a test held it.
+	void pumping() { ui.pump = [this] { shell.pump(ui.windows, v); }; }
+};
+
+// A Set of one field.
+Edit set_edit(const NodeAddress &address, const char *field, Value value) {
+	Edit edit;
+	edit.address = address;
+	edit.field = field;
+	edit.value = std::move(value);
+	return edit;
+}
+
+// S13 V2, V5: the canvas through the menu's viewport view in the Preview window, on the null
+// backend (its rules are its portable half's, tests/editor/canvas_test.cpp: preview/canvas_gesture,
+// menu_canvas), over the viewports a hand-made view shares and a device drawing an invisible
+// button: Fit at the design's 4:3, then 100% from the toolbar; a click selects what the game's hit
+// test finds; a drag of the selected window is one gesture of Sets on the grid, then its end; the
+// arrows through the canvas's key channel (Right a unit, a nudge one gesture while held and ended
+// when let go, Shift+Up 8, the focus taken mid-nudge ending it once); a stale picture (the menu
+// edited since the pump) maps nothing; the held state follows the selection, Checked only where the
+// type has one, each a SetViewport of the options; Ctrl+wheel steps the zoom about the mouse; a
+// viewport with nothing to show says why; with no device the canvas draws nothing and raises
+// nothing. The gestures' ends when the view stops drawing, and the view hidden taking no key, are
 // test_preview_gestures_end's; the several windows, the clipboard's keys and Arrange
 // test_preview_several_windows_ui's.
 void test_preview_canvas_smoke() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_test");
-	auto document = std::make_shared<MnuDocument>();
-	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
-	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
-	if (document->rows().empty()) return;
-	const Node &screen = *document->rows()[0];
-	FakePreview fake;
-	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
-	SessionView v = menu_view(document);
-	v.documents.previews.menu.path = document->path();
-	v.documents.previews.menu.screen = screen.id;
-	select_in(v, {screen.id, kScreen, 0});
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_menu_preview_viewport(&fake);
-	ui.frames(6);
-	ui.focus("Preview");
-	ui.drain();
+	LayoutPreview preview("opennova_editor_ui_preview_test");
+	if (!preview.start(true)) return;
+	Ui &ui = preview.ui;
+	SessionView &v = preview.v;
+	const std::shared_ptr<MnuDocument> &document = preview.document;
+	DrawnDevice &fake = *preview.device;
+	const MenuViewport &menu = *preview.menu;
 	CHECK(ui.windows.pending_requests() == 0, "drawing the preview raises nothing");
-	CHECK(fake.width > 0 && fake.width * 3 == fake.height * 4, "Fit: the design's 4:3");
+	CHECK(fake.width * 3 == fake.height * 4, "Fit: the design's 4:3");
 	// 100% from the toolbar: a pixel is a design unit (ImGui floors the mouse to pixels).
-	const ImGuiID preview_id = item_id(Ui::window_id("Preview"), {"menu"}); // the menu pane's scope
-	ui.activate(item_id(preview_id, {"Zoom"}));
+	ui.activate(item_id(preview.scope, {"Zoom"}));
 	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
 	ui.frames(2);
 	CHECK(fake.width == 800 && fake.height == 600, "100%");
 	ui.drain();
 	const NodeAddress box = named(*document, "BOX"), other = named(*document, "OTHER");
-	auto at = [&](float x, float y) {
-		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
-	};
+	auto at = [&](float x, float y) { return preview.at(x, y); };
 	// A drag from `from` by (dx, dy) design units in steps, released there.
 	auto drag = [&](ImVec2 from, float dx, float dy) {
 		ui.mouse(from.x, from.y);
@@ -1048,29 +1099,34 @@ void test_preview_canvas_smoke() {
 	ui.focus("Preview");
 	ui.drain();
 
-	// A picture of another revision maps nothing, through the pane either.
-	fake.stale = true;
+	// A picture of another revision maps nothing, through the view either: the menu edited, no pump
+	// since; undone, the picture is the menu's again.
+	ui.pump = nullptr;
+	Diagnostic error;
+	CHECK(document->apply(set_edit(box, "position.bottom", int64_t(208)), error), "the menu edited");
 	ui.click(at(500.0f, 350.0f));
 	CHECK(!only(ui.drain(), EditorRequestKind::SelectRecord), "a stale picture selects nothing");
 	requests = drag(at(200.0f, 150.0f), 40.0f, 0.0f);
 	CHECK(!only(requests, EditorRequestKind::EditRecord), "a stale picture drags nothing");
-	fake.stale = false;
+	document->undo();
+	preview.pumping();
 
-	// The held state follows the selection; Checked only where the type has one.
+	// The held state follows the selection; Checked only where the type has one (each a SetViewport
+	// of the options, which the pump serves as the session does).
 	ui.focus("Preview");
-	MenuPreviewOptions options;
-	options.force_state = opennova::menu::kStateMouseover;
-	options.force_window = box.child;
-	fake.held = options;
+	CHECK(preview.shell.set(v, document->path(),
+				  (R"({"options": {"force_state": "mouseover", "force_id": )" + std::to_string(box.child) + "}}").c_str()),
+			"BOX held under the mouse");
 	select_in(v, other);
 	ui.frames(2);
-	CHECK(fake.held.force_window == other.child && fake.held.force_state == opennova::menu::kStateMouseover,
+	CHECK(menu.options().force_window == other.child && menu.options().force_state == opennova::menu::kStateMouseover,
 	      "the held state moves to the selected window");
-	ui.activate(item_id(preview_id, {"Checked"}));
-	CHECK(fake.held.checked && fake.held.force_window == other.child, "a check box can be held checked");
+	ui.activate(item_id(preview.scope, {"Checked"}));
+	ui.frames();
+	CHECK(menu.options().checked && menu.options().force_window == other.child, "a check box can be held checked");
 	select_in(v, box);
 	ui.frames(2);
-	CHECK(fake.held.force_window == box.child && !fake.held.checked, "a plain window lets the check go");
+	CHECK(menu.options().force_window == box.child && !menu.options().checked, "a plain window lets the check go");
 	ui.drain();
 
 	// Ctrl+wheel over the picture steps the zoom about the mouse: 100% to 150%.
@@ -1084,64 +1140,59 @@ void test_preview_canvas_smoke() {
 	CHECK(fake.width == 1200 && fake.height == 900, "Ctrl+wheel zooms in to 150%");
 	ui.drain();
 
-	// Each empty state says why.
-	const MenuPreviewStatus empty[] = {MenuPreviewStatus::NoProject, MenuPreviewStatus::NoMenu, MenuPreviewStatus::NoScreen,
-	                               MenuPreviewStatus::Unserializable, MenuPreviewStatus::ScreenMissing};
-	for (const MenuPreviewStatus status : empty) {
-		fake.shown_status = status;
-		fake.shown_detail = status == MenuPreviewStatus::ScreenMissing ? "LAYOUT" : "a reason";
-		const std::string text = logged_frame(ui);
-		const std::string message = menu_preview_status_message(status, fake.shown_detail);
-		CHECK(text.find(message) != std::string::npos, message.c_str());
-	}
-	ui.windows.set_menu_preview_viewport(nullptr);
-	CHECK(logged_frame(ui).find("No preview renderer is attached.") != std::string::npos, "no device");
-	CHECK(ui.windows.pending_requests() == 0, "the empty states raise nothing");
+	// A viewport with nothing to show says why (its reason's sentence): no project; a menu the game
+	// could not read, until it changes.
+	v.project.open = false;
+	v.revisions.touch(ViewConcern::Project);
+	CHECK(logged_frame(ui).find(menu_screen_status_message(MenuScreenStatus::NoProject, std::string())) != std::string::npos,
+			"no project: what to open");
+	v.project.open = true;
+	v.revisions.touch(ViewConcern::Project);
+	CHECK(document->apply(set_edit(box, "string.justify", std::string("CEN\"TER")), error), "a justify the game cannot read");
+	CHECK(logged_frame(ui).find("The game could not read this menu as it stands") != std::string::npos,
+			"a menu the game could not read: why");
+	document->undo();
+	ui.frames(2);
+	CHECK(menu.status() == ViewportStatus::Ready, "undone: the screen again");
+	// No device (a headless Shell): the canvas keeps the picture's room, draws nothing, raises nothing.
+	ui.windows.set_devices(nullptr);
+	const int draws = fake.draws;
+	ui.frames(3);
+	CHECK(fake.draws == draws && ui.windows.pending_requests() == 0, "no device: nothing drawn, nothing raised");
+	ui.windows.set_devices(&preview.shell.devices.cache);
+	ui.frames(2);
+	CHECK(fake.draws > draws, "the device again: drawn");
 }
 
-// S11d: a gesture the menu pane began ends once, for the menu it began in, whenever the pane
-// stops drawing mid-gesture: the model pane shown (a model made the active document) during
-// a drag or a held nudge, and Preview closed during either (the workspace's frame bracket
-// ends what a window the pass skipped left open); after that, letting go raises nothing.
-// The pane not drawn takes no key: with the model pane shown, an arrow, Esc and Space raise
-// nothing.
+// S11d, S13 V5: a gesture the menu's view began ends once, for the menu it began in, whenever the
+// view stops drawing mid-gesture: the model's viewport shown (a model made the active document)
+// during a drag or a held nudge, and Preview closed during either (the workspace's frame bracket
+// ends what a window the pass skipped left open); after that, letting go raises nothing. The view
+// not drawn takes no key: with the model's shown, an arrow, Esc and Space raise nothing.
 void test_preview_gestures_end() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_gestures_test");
-	auto document = std::make_shared<MnuDocument>();
-	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
-	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
+	LayoutPreview preview("opennova_editor_ui_preview_gestures_test");
+	if (!preview.start()) return;
+	Ui &ui = preview.ui;
+	SessionView &v = preview.v;
+	const std::shared_ptr<MnuDocument> &document = preview.document;
 	auto model = std::make_shared<ModelDocument>();
+	Diagnostic error;
 	CHECK(model->load(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di", "models/armory.3di",
 	                  AssetKind::Model, "jo", error),
 	      "a model");
-	if (document->rows().empty()) return;
-	const Node &screen = *document->rows()[0];
-	FakePreview fake;
-	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
-	SessionView v = menu_view(document);
-	v.documents.previews.menu.path = document->path();
-	v.documents.previews.menu.screen = screen.id;
 	select_in(v, named(*document, "BOX"));
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_menu_preview_viewport(&fake);
-	ui.frames(6);
-	ui.focus("Preview");
-	ui.activate(item_id(item_id(Ui::window_id("Preview"), {"menu"}), {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
 	ui.frames(2);
 	ui.drain();
-	devtools::Window *preview = nullptr;
+	devtools::Window *preview_window = nullptr;
 	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
-		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview = &ui.windows.pass().window(i);
-	CHECK(preview && preview->is_closeable(), "Preview has a close button");
-	if (!preview) return;
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview_window = &ui.windows.pass().window(i);
+	CHECK(preview_window && preview_window->is_closeable(), "Preview has a close button");
+	if (!preview_window) return;
 	// The model the active document, or the menu again.
 	const auto show_model = [&](bool on) {
 		v.documents.open = on ? std::vector<std::shared_ptr<const DocumentBase>>{document, model}
 		                      : std::vector<std::shared_ptr<const DocumentBase>>{document};
-		v.documents.previews.model.path = on ? model->path() : std::string();
+		v.documents.previews[ViewportKind::Model].path = on ? model->path() : std::string();
 		v.documents.active = on ? model->path() : document->path();
 		v.revisions.touch(ViewConcern::Documents);
 		v.revisions.touch(ViewConcern::Selection);
@@ -1151,7 +1202,7 @@ void test_preview_gestures_end() {
 	const auto one_end = [&](const std::vector<EditorRequest> &requests) {
 		return one(requests, EditorRequestKind::EndEdit) && requests[0].path == document->path();
 	};
-	const ImVec2 box(fake.origin.x + 200.0f, fake.origin.y + 150.0f); // BOX at 100%
+	const ImVec2 box = preview.at(200.0f, 150.0f); // BOX at 100%
 	const auto start_drag = [&]() {
 		ui.mouse(box.x, box.y);
 		ui.button(true);
@@ -1166,6 +1217,9 @@ void test_preview_gestures_end() {
 	// The model shown mid-drag, then mid-nudge.
 	CHECK(start_drag(), "a drag's first step");
 	show_model(true);
+	CHECK(preview.shell.find(model->path(), ViewportKind::Model) &&
+					preview.shell.device(model->path(), ViewportKind::Model),
+			"the model's viewport shown, on a device of its own");
 	CHECK(one_end(ui.drain()), "the model shown mid-drag: the drag's one end");
 	ui.button(false);
 	ui.frames(2);
@@ -1180,31 +1234,32 @@ void test_preview_gestures_end() {
 	ui.frames(2);
 	CHECK(ui.drain().empty(), "letting go of the arrow raises nothing");
 	show_model(false);
+	CHECK(!preview.shell.find(model->path(), ViewportKind::Model), "the model closed: its viewport gone");
 
 	// Preview closed mid-drag, then mid-nudge: the frame bracket ends each once.
 	ui.focus("Preview");
 	ui.drain();
 	CHECK(start_drag(), "a drag's first step");
-	preview->open = false;
+	preview_window->open = false;
 	ui.frames(2);
 	CHECK(one_end(ui.drain()), "Preview closed mid-drag: the drag's one end");
 	ui.button(false);
 	ui.frames(2);
-	preview->open = true;
+	preview_window->open = true;
 	ui.frames(3);
 	CHECK(ui.drain().empty(), "let go and opened again: nothing");
 	ui.focus("Preview");
 	ui.drain();
 	CHECK(start_nudge(), "a nudge's first step");
-	preview->open = false;
+	preview_window->open = false;
 	ui.frames(2);
 	CHECK(one_end(ui.drain()), "Preview closed mid-nudge: the nudge's one end");
 	ui.key(ImGuiKey_RightArrow, false);
-	preview->open = true;
+	preview_window->open = true;
 	ui.frames(3);
 	CHECK(ui.drain().empty(), "let go and opened again: nothing");
 
-	// The menu pane hidden behind the model's: its keys do nothing.
+	// The menu's view hidden behind the model's: its keys do nothing.
 	show_model(true);
 	ui.focus("Preview");
 	ui.drain();
@@ -1212,41 +1267,26 @@ void test_preview_gestures_end() {
 		ui.key(key, true);
 		ui.key(key, false);
 	}
-	CHECK(ui.drain().empty(), "the hidden menu pane takes no key");
+	CHECK(ui.drain().empty(), "the hidden menu view takes no key");
 }
 
 // S9k2: several windows on the canvas. Shift+click adds a window, Ctrl+click toggles one; a
-// drag from the screen's background selects what its box touches (none: the screen); a
-// drag of a selected window moves every selected one in one batch per step, one gesture;
-// the arrows nudge them all; Ctrl+C / X / V / D; the toolbar's Arrange aligns them.
+// drag from the screen's background selects what its box touches, in one selection (none: the
+// screen); a drag of a selected window moves every selected one in one batch per step, one
+// gesture; the arrows nudge them all; Ctrl+C / X / V / D; the toolbar's Arrange aligns them.
 void test_preview_several_windows_ui() {
-	editor_test::TempProjectDir dir("opennova_editor_ui_preview_multi_test");
-	auto document = std::make_shared<MnuDocument>();
-	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file("layout.mnu"), kLayoutMenu), "layout fixture");
-	CHECK(document->load(dir.file("layout.mnu"), "layout.mnu", AssetKind::Menu, "jo", error), error.message.c_str());
-	if (document->rows().empty()) return;
+	LayoutPreview preview("opennova_editor_ui_preview_multi_test");
+	if (!preview.start()) return;
+	Ui &ui = preview.ui;
+	SessionView &v = preview.v;
+	const std::shared_ptr<MnuDocument> &document = preview.document;
 	const Node &screen = *document->rows()[0];
-	FakePreview fake;
-	CHECK(fake.render.configure(*document, screen.id, fake.files, {}) == MenuPreviewStatus::Ready, "the screen renders");
-	SessionView v = menu_view(document);
-	v.documents.previews.menu.path = document->path();
-	v.documents.previews.menu.screen = screen.id;
 	const NodeAddress main = named(*document, "MAIN"), box = named(*document, "BOX"), other = named(*document, "OTHER");
 	select_in(v, box);
-	Ui ui;
-	ui.windows.set_view(&v);
-	ui.windows.set_menu_preview_viewport(&fake);
-	ui.frames(6);
-	ui.focus("Preview");
-	const ImGuiID preview_id = item_id(Ui::window_id("Preview"), {"menu"}); // the menu pane's scope
-	ui.activate(item_id(preview_id, {"Zoom"}));
-	ui.activate(item_id(ImHashStr("##Combo_00"), {"100%"}));
 	ui.frames(2);
 	ui.drain();
-	auto at = [&](float x, float y) {
-		return ImVec2(fake.origin.x + x * float(fake.width) / 800.0f, fake.origin.y + y * float(fake.height) / 600.0f);
-	};
+	const ImGuiID preview_id = preview.scope;
+	auto at = [&](float x, float y) { return preview.at(x, y); };
 	auto click = [&](ImVec2 p, ImGuiKey modifier) {
 		ui.mouse(p.x, p.y);
 		if (modifier != ImGuiKey_None) ImGui::GetIO().AddKeyEvent(modifier, true);
@@ -1315,12 +1355,13 @@ void test_preview_several_windows_ui() {
 	CHECK(count == 1 && set_on(last, box, "position.left") == 101 && set_on(last, other, "position.left") == 401,
 	      "Right moves every selected window a unit");
 
-	// A drag from MAIN's empty part (a root window not selected) selects what the box touches.
+	// A drag from MAIN's empty part (a root window not selected) selects what the box touches, in
+	// one selection (S13 D7, V5): BOX and OTHER, the last the primary.
 	requests = drag(at(50.0f, 500.0f), 400.0f, -390.0f);
-	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{box, SelectMode::Replace},
-	                                                                              {other, SelectMode::Add}}) &&
-	              !only(requests, EditorRequestKind::EditRecord),
-	      "the marquee selects BOX and OTHER, not TINY or MAIN");
+	const EditorRequest *boxed = only(requests, EditorRequestKind::SelectRecord);
+	CHECK(boxed && boxed->address == other && boxed->mode == SelectMode::Replace &&
+	              boxed->records == (std::vector<NodeAddress>{box, other}) && !only(requests, EditorRequestKind::EditRecord),
+	      "the marquee selects BOX and OTHER in one selection, not TINY or MAIN");
 	requests = drag(at(20.0f, 500.0f), 40.0f, 60.0f);
 	const NodeAddress screen_address{screen.id, node_kind(MenuKind::Screen), 0};
 	CHECK(selections(requests) == (std::vector<std::pair<NodeAddress, SelectMode>>{{screen_address, SelectMode::Replace}}),

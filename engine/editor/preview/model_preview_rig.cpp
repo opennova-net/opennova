@@ -6,7 +6,7 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/graph/asset_graph.h>
-#include <editor/preview/model_preview_state.h>
+#include <editor/preview/viewport_follow.h>
 #include <formats/adm/adm.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/world/entity_pose.h>

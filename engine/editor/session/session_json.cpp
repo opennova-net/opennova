@@ -547,6 +547,14 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		error = "Unknown unsaved choice \"" + shown + "\".";
 		return false;
 	case F::Settings: return settings_from_json(json, request.settings, error);
+	case F::Viewport:
+		// Held as its text (editor_request.h pulls no JSON reader); preview/viewports.h reads it.
+		if (!json.is_object()) {
+			error = "\"viewport\" must be an object.";
+			return false;
+		}
+		request.viewport = io::json_write(json);
+		return true;
 	case F::Purpose:
 		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
 		error = "Unknown pick purpose \"" + shown + "\".";
@@ -609,6 +617,12 @@ bool field_to_json(
 	case F::Settings:
 		out = settings_to_json(request.settings);
 		return !(request.settings == ProjectSettingsChange());
+	case F::Viewport: {
+		std::string error;
+		if (request.viewport.empty() || !io::json_parse(request.viewport, out, error))
+			out = JsonValue::make_object();
+		return !request.viewport.empty();
+	}
 	case F::Purpose:
 		out = json_string(pick_purpose_token(request.purpose));
 		return request.purpose != PickPurpose::None;

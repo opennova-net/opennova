@@ -3725,12 +3725,12 @@ target_link_libraries(editor_mnu_clipboard_test PRIVATE opennova_editor)
 target_include_directories(editor_mnu_clipboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_mnu_clipboard COMMAND editor_mnu_clipboard_test)
 
-# The Preview's one canvas with no ImGui (S13 V2: preview/canvas_gesture, menu_canvas,
+# The viewports' one canvas with no ImGui (S13 V2, V5: preview/canvas_gesture, menu_canvas,
 # model_canvas): the one gesture machine and its single EndEdit; the menu's canvas over a
 # headless render (a click, a drag of a window and of a handle on the grid, the arrows, Esc,
-# several windows, the marquee, the clipboard's rule, Arrange, a part's window, what it draws);
-# the model's canvas over a real session (F, a click on a marker, a marker's drag ended once, the
-# orbit and the dolly).
+# several windows, the marquee's one selection, the clipboard's rule, Arrange, a part's window,
+# what it draws); the model's canvas over a real session's model viewport (F, a click on a marker,
+# a marker's drag ended once, the orbit and the dolly as SetViewports of its camera).
 add_executable(editor_canvas_test editor/canvas_test.cpp)
 target_link_libraries(editor_canvas_test PRIVATE opennova_editor)
 target_include_directories(editor_canvas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3810,20 +3810,31 @@ target_link_libraries(editor_project_asset_source_test PRIVATE opennova_editor)
 target_include_directories(editor_project_asset_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_project_asset_source COMMAND editor_project_asset_source_test)
 
-# The menu preview's portable half with a headless device: the status, the configure
-# trigger, the JSON (editor/preview).
-add_executable(editor_menu_preview_test editor/menu_preview_test.cpp)
-target_link_libraries(editor_menu_preview_test PRIVATE opennova_editor)
-target_include_directories(editor_menu_preview_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_menu_preview COMMAND editor_menu_preview_test)
+# The viewport seam (S13 V5, editor/preview/viewport_*, viewports, viewport_device_cache) over
+# devices that draw nothing and a real session: the actions a device takes (Keep, Rebuild, Update,
+# Clear) from the document's change, the files its picture read and the viewport's options; the
+# failure latch; the preview clock; two menus' own options; the device cache's four, its least
+# recently used given up and its viewport's camera kept; the envelope and its pages; a SetViewport,
+# a drag and a command through the session; one undo step per gesture.
+add_executable(editor_viewport_test editor/viewport_test.cpp)
+target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_viewport COMMAND editor_viewport_test)
 
-# The model preview's portable half (editor/preview/model_preview_*, S10p2): what it
-# shows, when it builds again (a user point's edit builds nothing), the camera's
-# projection, the level Auto picks, the JSON.
-add_executable(editor_model_preview_test editor/model_preview_test.cpp)
-target_link_libraries(editor_model_preview_test PRIVATE opennova_editor)
-target_include_directories(editor_model_preview_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_model_preview COMMAND editor_model_preview_test)
+# The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
+# screen, its reason, when its device configures again, the envelope, its drag and arrange.
+add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
+target_link_libraries(editor_menu_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_viewport COMMAND editor_menu_viewport_test)
+
+# The model's viewport (editor/preview/model_viewport, S10p2, S13 V5): what it shows, when it
+# builds again (a user point's edit builds nothing), the camera's projection, the level Auto picks,
+# the envelope, what a SetViewport sets, the drag of a marker, a clip on its rig.
+add_executable(editor_model_viewport_test editor/model_viewport_test.cpp)
+target_link_libraries(editor_model_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_model_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_model_viewport COMMAND editor_model_viewport_test)
 
 # What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
 # the plan against the runtime's POSITION solve, the grid, the handles, the edits.

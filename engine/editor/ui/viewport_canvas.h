@@ -13,22 +13,20 @@ namespace opennova::editor {
 class Workspace;
 
 // A canvas's requests raised as the windows raise theirs (editor_requests.h): a record selected,
-// a step's batch, a gesture's end.
+// a step's batch, a gesture's end, the viewport's state.
 class CanvasWindowRequests final : public CanvasRequests {
 public:
 	explicit CanvasWindowRequests(Workspace &workspace) : workspace_(workspace) {}
-	void select(const std::string &path, const NodeAddress &record, CanvasJoin join) override;
-	void edits(const std::string &path, std::vector<Edit> batch) override;
-	void end_edit(const std::string &path) override;
+	void request(EditorRequest request) override;
 
 private:
 	Workspace &workspace_;
 };
 
-// The editor's canvas (ADR 0046 S13 V2), one for the Preview window's menu pane and one for its
-// model pane, each drawing its picture on it: the surface first, so every press on the canvas is
-// its own and the device's item under it never takes the mouse; the kind's hover tip, made only
-// while it shows; the device's picture (the shell's SubViewport texture, drawn as an ImGui item);
+// The editor's canvas (ADR 0046 S13 V2, V5), one per viewport view (ui/viewport_view), drawing the
+// viewport's picture on it: the surface first, so every press on the canvas is its own and the
+// device's item under it never takes the mouse; the kind's hover tip, made only while it shows;
+// the device's picture (the Shell's SubViewport texture, drawn as an ImGui item);
 // the kind's overlay shapes over it, clipped to the canvas, coloured by their roles; the cursor the
 // kind asks for; the keys the kinds act on (the arrows, Esc, F), read while the canvas's window has
 // the keyboard; and the zoom and the pan. A picture that fills the canvas (the model's) leaves the

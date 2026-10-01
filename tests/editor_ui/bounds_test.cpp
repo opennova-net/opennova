@@ -133,13 +133,12 @@ Diagnostic long_finding(const std::string &asset, const char *code) {
 	return d;
 }
 
-// The workspace over a copy of the session's view with long findings added, the preview
-// devices following it as the shell's do.
+// The workspace over a copy of the session's view with long findings added, the viewports'
+// devices following it as the Shell's do.
 struct Sweep {
 	ProjectSession &session;
 	Ui &ui;
-	FakePreview &menu;
-	ModelDevice &model;
+	DrawnDevices &devices;
 	SessionView view;
 
 	// The session's view again, the long findings added, drawn until it settles.
@@ -150,7 +149,7 @@ struct Sweep {
 		view.revisions.touch(ViewConcern::Findings);
 		ui.windows.set_view(&view);
 		for (int i = 0; i < 4; ++i) {
-			model.held.follow(view);
+			devices.sync(session.viewports(), view);
 			ui.frames();
 		}
 		ui.away();
@@ -403,18 +402,31 @@ void test_bounds() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	CHECK(bounds_project(session, dir), "the project");
-	FakePreview menu;
 	session.handle(request::open_document("menus/deep.mnu"));
 	const auto *deep = dynamic_cast<const MnuDocument *>(session.document_for("menus/deep.mnu"));
-	CHECK(deep && !deep->rows().empty() &&
-	              menu.render.configure(*deep, deep->rows().front()->id, menu.files, {}) == MenuPreviewStatus::Ready,
+	DrawnDevices devices;
+	devices.sync(session.viewports(), session.view());
+	const ViewportModel *deep_viewport =
+			deep ? session.viewports().find(deep->path(), ViewportKind::Menu) : nullptr;
+	CHECK(deep && !deep->rows().empty() && deep_viewport && deep_viewport->status() == ViewportStatus::Ready,
 	      "the deep menu renders");
-	ModelDevice model;
 	Ui ui;
 	ImGui::GetIO().DisplaySize = ImVec2(1280.0f, 720.0f);
-	ui.windows.set_menu_preview_viewport(&menu);
-	ui.windows.set_model_preview_viewport(&model);
-	Sweep sweep{session, ui, menu, model, SessionView()};
+	ui.windows.set_devices(&devices.cache);
+	Sweep sweep{session, ui, devices, SessionView()};
+	// The Shell's pump before each frame: the SetViewports the canvases raise (a model's picture
+	// sized to its canvas) served by the session, the windows' other requests kept for the sweep to
+	// take, the devices following the view.
+	ui.pump = [&] {
+		std::vector<EditorRequest> kept;
+		EditorRequest request;
+		while (ui.windows.take_request(request)) {
+			if (request.kind == EditorRequestKind::SetViewport) session.handle(request);
+			else kept.push_back(std::move(request));
+		}
+		for (EditorRequest &held : kept) ui.windows.request(std::move(held));
+		devices.sync(session.viewports(), sweep.view);
+	};
 	sweep.follow();
 	ui.frames(4);
 

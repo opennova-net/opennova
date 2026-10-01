@@ -262,20 +262,24 @@ static func _menu_preview_tool() -> McpToolDef:
 	return McpToolDef.make("editor_menu_preview",
 		"The menu preview, headless included (a device tool until S13 V7's viewport tool): the previewed "
 		+ "screen (the last menu screen selected) as the game would draw it were the menu saved now, the open "
-		+ "stylesheets and string tables standing in for their files. op=state: status (no_project, no_menu, "
-		+ "no_screen, unserializable, screen_missing, ready) and its message, the menu path and screen, the "
-		+ "revision shown and whether it is current, the device size, the options, the files it names that the "
-		+ "project lacks (missing) or that did not load (unreadable), widget_count and note_count; rects "
-		+ "{offset?, limit?}: a page of the widgets as the runtime placed them (index, id, name, type, shown, "
-		+ "disabled, rect and local [left, top, right, bottom] in 800x600 design units, text, font, "
-		+ "text_color); hit {x, y}: the widget the game's hit test finds at a design point (index -1 for "
-		+ "none); options {width?, height?, show_hidden?, force_id?, force_state?, checked?, popup_open?, "
-		+ "focus?}: how it draws, then the state; drag {id, handle, dx, dy, snap?=true}: a window of the "
-		+ "previewed screen moved or resized by a handle, the moved edges snapped to the grid of 8, one undo "
-		+ "step, then the state; nudge {id, dx, dy}: a move with no snap; arrange {ids, arrange}: windows "
-		+ "aligned, distributed or reordered, one undo step, then the state; notes {offset?, limit?}: a page of "
-		+ "the frame compiler's notes on the previewed screen. A screen as the render check compiled it is "
-		+ "editor_query menu_render.",
+		+ "stylesheets and string tables standing in for their files; every answer the menu viewport's envelope "
+		+ "(S13 V5). op=state: kind, path, as_saved, status (empty, failed, ready) and reason (no_project, "
+		+ "no_menu, no_screen, unserializable, screen_missing, ready) and its message and detail, the revision "
+		+ "shown and whether it is current, builds, units (design), device {attached, width, height}, the "
+		+ "options, camera (null), the preview clock, body {screen {id, name}, missing (the files it names that "
+		+ "the project lacks), unreadable (those that did not load)}, count (the widgets) and note_count; rects "
+		+ "{offset?, limit?}: a page of the items, the widgets as the runtime placed them (index, id, name, "
+		+ "type, shown, disabled, rect and local [left, top, right, bottom] in 800x600 design units, "
+		+ "device_rect where the Shell's device placed it, text, font, text_color); hit {x, y}: the widget the "
+		+ "game's hit test finds at a design point (index -1 for none); options {width?, height?, "
+		+ "show_hidden?, force_id?, force_state?, checked?, popup_open?, focus?}: how it draws (width and "
+		+ "height the device's, the rest a SetViewport of its options), then the state; drag {id, handle, dx, "
+		+ "dy, snap?=true}: a window of the previewed screen moved or resized by a handle, the moved edges "
+		+ "snapped to the grid of 8, one undo step, then the state; nudge {id, dx, dy}: a move with no snap; "
+		+ "arrange {ids, arrange}: windows aligned, distributed or reordered, one undo step, then the state; "
+		+ "notes {offset?, limit?}: a page of the frame compiler's notes on the previewed screen. A screen as "
+		+ "the render check compiled it is editor_query menu_render; any viewport's state is editor_request "
+		+ "set_viewport's.",
 		{
 			"op": {"type": "string", "enum": MENU_PREVIEW_OPS},
 			"x": {"type": "number"},
@@ -304,16 +308,19 @@ static func _model_preview_tool() -> McpToolDef:
 	return McpToolDef.make("editor_model_preview",
 		"The model preview, headless included (a device tool until S13 V7's viewport tool): the previewed "
 		+ "model (the last model, clip or animation table made active) as the game would draw it were it saved "
-		+ "now, through the runtime's own renderer. op=state: status (no_project, no_model, unserializable, "
-		+ "unreadable, ready) and its message, the path, the revision shown and whether it is current, builds, "
-		+ "the device size, the options, lod {shown, auto, count, projected_px, thresholds}, camera {target, "
-		+ "yaw, pitch, distance, fov}, sphere, registers, the overlays (user points, lights, pivots: each with "
-		+ "its record id, position and device pixel), the clock and the animation; options {lod?, ctrl?, "
-		+ "playing?, overlays?, time_ms?, rig_model?, clip_ticks?}: how it draws, then the state; camera {yaw?, "
-		+ "pitch?, distance?, target?, frame?, width?, height?}: then the state; hit {x, y}: the marker at a "
-		+ "device point (index -1 for none); drag {id, handle?=place|axis, x, y, snap?=0}: a user point or a "
-		+ "light moved, or its axis turned, to the point under device pixel x, y, one undo step, then the "
-		+ "state.",
+		+ "now, through the runtime's own renderer; every answer the model viewport's envelope (S13 V5). "
+		+ "op=state: kind, path, as_saved, status (empty, failed, ready) and reason (no_project, no_model, "
+		+ "unserializable, unreadable, no_rig, ready) and its message and detail, the revision shown and "
+		+ "whether it is current, builds, units (pixels), device {attached, width, height}, the options {lod, "
+		+ "ctrl, overlays, rig_model}, camera {target, yaw, pitch, distance, fov}, the preview clock {playing, "
+		+ "rate, time_ms, ticks}, body {lod {shown, auto, count, projected_px, thresholds}, sphere, registers, "
+		+ "animation}, the items (the markers: user points, lights, pivots, each with its record id, position "
+		+ "and device pixel) and count; options {lod?, ctrl?, playing?, overlays?, time_ms?, rig_model?, "
+		+ "clip_ticks?}: how it draws (playing, time_ms and clip_ticks the preview clock's, the rest a "
+		+ "SetViewport of its options), then the state; camera {yaw?, pitch?, distance?, target?, frame?, "
+		+ "width?, height?}: then the state; hit {x, y}: the marker at a device point (index -1 for none); "
+		+ "drag {id, handle?=place|axis, x, y, snap?=0}: a user point or a light moved, or its axis turned, "
+		+ "to the point under device pixel x, y, one undo step, then the state.",
 		{
 			"op": {"type": "string", "enum": MODEL_PREVIEW_OPS},
 			"lod": {"description": "a level (an integer from 0) or \"auto\""},

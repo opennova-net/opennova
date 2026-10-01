@@ -80,25 +80,35 @@
     findings), `import` (the importers: a PNG to the game's
     PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
     one-shot converters: an `.o3d` to a `.3di`, an `.o3a` to its `.adm` and `.bad` files), `preview`
-    (the menu preview's portable half: what it shows, when to configure it again, its
-    JSON, the options it holds, what a drag of a window's handles or of several windows
-    writes, and what arranging several windows (align, distribute, drawing order) writes; the shell's
-    `MenuFrame` is its device; the model preview's portable half: its orbit camera and the
-    level the game draws, what it shows and when the device builds again, its JSON; the
-    shell's `ObjectModel` is its device; and the render check, the menu type's project check:
+    (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
+    kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
+    Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
+    changed only by a SetViewport request; what follows from its document, the files its picture
+    read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
+    Clear), its envelope on the wire (`viewport_json`), what a drag or a command plans as requests,
+    and the device seam (`viewport_device`) with its least-recently-used cache of four
+    (`viewport_device_cache`); the Shell's devices are `godot/src/authoring`'s over the runtime's
+    `MenuFrame` and `ObjectModel`. The menu's viewport (`menu_viewport`): its screen compiled
+    headless, the options it holds, what a drag of a window's handles or of several windows
+    writes, and what arranging several windows (align, distribute, drawing order) writes; the
+    model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and
+    when the device builds again, a clip on its rig; and the render check, the menu type's project check:
     every menu screen compiled headless, its compiler notes as Problems rows, a menu rendered
     again only when it, a file it read or a variable it names changes; a menu's tree, its
     findings and a screen as the render check compiled it, as the menu_tree, menu_findings and
     menu_render queries read them;
     and the
-    canvas's portable half: its one gesture machine, its overlay shapes, and what a press
-    on the menu's or the model's picture takes, what a drag writes and what is drawn), `ui`
+    canvas's portable half: its one gesture machine, its overlay shapes, and each kind's half of
+    it (`canvas_half`: what a press on the menu's or the model's picture takes, the requests a drag
+    raises and what is drawn)), `ui`
     (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
     the only tree besides `runtime/devtools` that may include an ImGui header; each window
     reaches the session through the `Workspace` seam, `ui/workspace.h`; the
     inspector is generic, and a document's view in its Document tab is its type's row of
     `ui/document_views` (S13 V3: an outline over `ui/outline_model` as a tree, a list or master
-    and detail, or a view of its own), one per open document)).
+    and detail, or a view of its own; S13 V5: or a Main-role viewport filling the tab beside the
+    outline, `ui/main_viewport_view`), one per open document; a viewport's view (`ui/viewport_view`,
+    one per kind from `ui/viewport_views`) draws its canvas through the Workspace's devices)).
     STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
     the engine's own load paths; nothing under the four groups below may include or link it
     (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play

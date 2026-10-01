@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/preview/viewports.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/editor_preferences.h>
@@ -197,6 +198,14 @@ void ProjectSession::run_operations() {
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
 	return impl_->core.start_operation(std::move(operation));
+}
+
+Viewports &ProjectSession::viewports() {
+	return impl_->core.viewports();
+}
+
+void ProjectSession::advance(double seconds) {
+	impl_->core.viewports().advance(seconds);
 }
 
 // --- what is asked without a request -------------------------------------------------------------

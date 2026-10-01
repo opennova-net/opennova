@@ -14,17 +14,22 @@
 #include <string>
 #include <vector>
 
-#include <editor/preview/menu_arrange.h>
-#include <editor/preview/menu_layout_edit.h>
-#include <editor/preview/menu_preview_json.h>
-#include <editor/preview/menu_preview_state.h>
-#include <editor/preview/model_preview_json.h>
+#include <editor/model/document_base.h>
+#include <editor/preview/canvas_gesture.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/viewport_device_cache.h>
+#include <editor/preview/viewport_json.h>
+#include <editor/preview/viewport_model.h>
+#include <editor/preview/viewports.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 
+#include "authoring/model_viewport_applier.h"
+#include "authoring/viewport_device.h"
+#include "authoring/viewport_devices.h"
 #include "resource_index/launch_flags.h"
 #include "util/string_convert.h"
 
@@ -33,6 +38,7 @@ using opennova::editor::EditorRequestKind;
 using opennova::editor::PickPurpose;
 using opennova::editor::PlayLauncher;
 using opennova::editor::ProjectSession;
+using opennova::editor::ViewportKind;
 
 namespace godot {
 
@@ -139,18 +145,14 @@ void EditorApp::_ready() {
 	ImGuiPassNode::_ready();
 	// The session pumps whether or not the workspace draws (headless tests, the smoke).
 	set_process(true);
-#if OPENNOVA_EDITOR_UI
-	// The menu preview renders through the runtime's MenuFrame into an offscreen viewport
-	// the Preview window's menu pane draws; headless runs keep it too (its JSON: the MCP,
-	// the tests).
-	menu_preview_ = std::make_unique<MenuPreview>(*this);
-	// The model preview the same way, through the runtime's ObjectModel.
-	model_preview_ = std::make_unique<ModelPreview>(*this);
-#endif
+	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel
+	// (authoring/viewport_devices), drawn only by a viewport's canvas; headless runs keep them too
+	// (the MCP, the tests read what they placed).
+	devices_ = std::make_unique<opennova::editor::ViewportDeviceCache>(
+			[this](ViewportKind p_kind) { return make_viewport_device(*this, p_kind); });
 	if (is_available()) {
 #if OPENNOVA_EDITOR_UI
-		windows_->set_menu_preview_viewport(menu_preview_.get());
-		windows_->set_model_preview_viewport(model_preview_.get());
+		windows_->set_devices(devices_.get());
 #endif
 		UtilityFunctions::print_verbose("OpenNova Editor: editor variant loaded, workspace attached");
 	} else {
@@ -210,15 +212,9 @@ void EditorApp::_exit_tree() {
 	mcp_service_ = nullptr; // a child: it leaves with the tree and stops its server
 	mcp_port_ = 0;
 #if OPENNOVA_EDITOR_UI
-	if (menu_preview_) {
-		windows_->set_menu_preview_viewport(nullptr);
-		menu_preview_.reset();
-	}
-	if (model_preview_) {
-		windows_->set_model_preview_viewport(nullptr);
-		model_preview_.reset();
-	}
+	windows_->set_devices(nullptr);
 #endif
+	devices_.reset();
 	if (picker_ != nullptr) {
 		picker_->queue_free();
 		picker_ = nullptr;
@@ -230,15 +226,14 @@ void EditorApp::_exit_tree() {
 void EditorApp::_process(double p_delta) {
 	ImGuiPassNode::_process(p_delta); // the layout pass (no-op headless): the windows raise requests
 	pump();
-#if OPENNOVA_EDITOR_UI
-	// The one model runtime-frame driver in the editor (menu_shell.gd's for the game's
-	// menus): the preview's part animations, flipbooks and generators run on it, whether
-	// the Preview window shows the model pane or not (pump() refreshed both devices).
-	if (model_preview_) {
-		model_preview_->tick(p_delta);
+	// The one model runtime-frame driver in the editor (menu_shell.gd's for the game's menus): the
+	// preview clock runs, and the viewports' part animations, flipbooks, generators and clips run on
+	// it, whether a canvas draws them or not (pump() synced the devices).
+	if (devices_) {
+		session_->advance(p_delta);
+		devices_->tick(session_->viewports());
 		ObjectModel::advance_awake_frame(p_delta);
 	}
-#endif
 }
 
 void EditorApp::before_layout(double) {
@@ -260,10 +255,9 @@ void EditorApp::pump() {
 	session_->hold_validation();
 	drain_requests();
 	session_->poll();
-#if OPENNOVA_EDITOR_UI
-	if (menu_preview_) menu_preview_->refresh(session_->view());
-	if (model_preview_) model_preview_->refresh(session_->view());
-#endif
+	// The devices follow their viewports: the Preview's targets given one, each taking what its
+	// viewport asks.
+	if (devices_) devices_->sync(session_->viewports(), session_->view());
 	apply_window_title();
 	if (session_->view().dialogs.quit_requested) get_tree()->quit(0);
 }
@@ -477,182 +471,191 @@ String EditorApp::query_json(const String &p_name, const String &p_args) {
 	return json_text(answer);
 }
 
-String EditorApp::get_menu_preview_json() {
+// --- the Preview's viewports, until S13 V7's viewport tool -------------------------------------------
+
+namespace {
+
+// What a planner asks, gathered to be handled in order.
+struct Gathered final : opennova::editor::CanvasRequests {
+	std::vector<EditorRequest> requests;
+	void request(EditorRequest p_request) override { requests.push_back(std::move(p_request)); }
+};
+
+const opennova::editor::DocumentBase *open_at(const opennova::editor::SessionView &p_view, const std::string &p_path) {
+	for (const auto &document : p_view.documents.open)
+		if (document && document->path() == p_path) return document.get();
+	return nullptr;
+}
+
+} // namespace
+
+const opennova::editor::ViewportModel *EditorApp::preview_(ViewportKind p_kind) {
 	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	if (menu_preview_) {
-		menu_preview_->refresh(session_->view());
-		return json_text(opennova::editor::menu_preview_to_json(menu_preview_->snapshot(session_->view())));
+	if (devices_) devices_->sync(session_->viewports(), session_->view());
+	const opennova::editor::SessionView &view = session_->view();
+	const std::string &path = view.documents.previews[p_kind].path;
+	// Followed now, with a device or not (one made since the sync followed already).
+	return path.empty() ? nullptr : session_->viewports().follow_one(view, path, p_kind);
+}
+
+String EditorApp::preview_json_(ViewportKind p_kind) {
+	const opennova::editor::ViewportModel *model = preview_(p_kind);
+	return json_text(opennova::editor::viewport_to_json(session_->view(), model, p_kind, opennova::editor::JsonPage()));
+}
+
+opennova::editor::ViewportContext EditorApp::context_(const opennova::editor::ViewportModel &p_model, float p_snap) const {
+	const opennova::editor::SessionView &view = session_->view();
+	return opennova::editor::ViewportContext{
+		opennova::editor::ViewportInput{ view, view.documents.viewports->clock(), open_at(view, p_model.path()),
+				opennova::editor::ChangeClass::None },
+		p_model.state().width, p_model.state().height, p_snap,
+		devices_ ? devices_->held(p_model.path(), p_model.kind()) : nullptr
+	};
+}
+
+bool EditorApp::serve_(const std::vector<EditorRequest> &p_requests) {
+	bool done = !p_requests.empty();
+	for (const EditorRequest &request : p_requests) {
+		session_->handle(request);
+		done = done && session_->outcome().done();
 	}
-#endif
-	opennova::editor::MenuPreviewModel none;
-	return json_text(opennova::editor::menu_preview_to_json(
-			opennova::editor::menu_preview_snapshot(session_->view(), none, nullptr, nullptr)));
+	if (devices_) devices_->sync(session_->viewports(), session_->view());
+	return done;
+}
+
+bool EditorApp::set_viewport_(ViewportKind p_kind, const opennova::io::JsonValue &p_change) {
+	if (!preview_(p_kind)) return false;
+	opennova::io::JsonValue change = p_change;
+	change.set("kind", opennova::io::json_string(opennova::editor::viewport_kind_token(p_kind)));
+	return serve_({ opennova::editor::request::set_viewport(std::string(), opennova::io::json_write(change)) });
+}
+
+String EditorApp::get_menu_preview_json() {
+	return preview_json_(ViewportKind::Menu);
 }
 
 String EditorApp::menu_preview_hit_json(double p_x, double p_y) {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	if (menu_preview_) {
-		menu_preview_->refresh(session_->view());
-		return json_text(opennova::editor::menu_preview_hit_to_json(menu_preview_->snapshot(session_->view()),
-				float(p_x), float(p_y)));
-	}
-#endif
-	opennova::editor::MenuPreviewModel none;
-	return json_text(opennova::editor::menu_preview_hit_to_json(
-			opennova::editor::menu_preview_snapshot(session_->view(), none, nullptr, nullptr), float(p_x), float(p_y)));
+	opennova::editor::ViewportHit hit;
+	if (const opennova::editor::ViewportModel *model = preview_(ViewportKind::Menu))
+		hit = model->hit(context_(*model, 0.0f), float(p_x), float(p_y));
+	return json_text(opennova::editor::viewport_hit_to_json(hit));
 }
 
 bool EditorApp::set_menu_preview_options(const Dictionary &p_options) {
 	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	if (!menu_preview_) return false;
 	opennova::io::JsonValue json;
-	opennova::editor::MenuPreviewOptions options = menu_preview_->options();
-	if (!to_json(p_options, json) || !opennova::editor::menu_preview_options_from_json(json, options)) return false;
-	menu_preview_->set_options(options);
-	menu_preview_->refresh(session_->view());
-	return true;
-#else
-	(void)p_options;
-	return false;
-#endif
+	if (!to_json(p_options, json) || !json.is_object()) return false;
+	// The device's size apart from the options.
+	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue options = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue device = opennova::io::JsonValue::make_object();
+	for (const opennova::io::JsonMember &member : json.object)
+		(member.key == "width" || member.key == "height" ? device : options).set(member.key, member.value);
+	if (!options.object.empty()) change.set("options", std::move(options));
+	if (!device.object.empty()) change.set("device", std::move(device));
+	return set_viewport_(ViewportKind::Menu, change);
+}
+
+bool EditorApp::menu_preview_drag(int64_t p_id, const String &p_handle, int p_dx, int p_dy, bool p_snap) {
+	const opennova::editor::ViewportModel *model = preview_(ViewportKind::Menu);
+	if (!model) return false;
+	opennova::editor::ViewportDrag drag;
+	drag.id = opennova::editor::NodeId(p_id);
+	drag.handle = opennova::to_std(p_handle);
+	drag.x = float(p_dx);
+	drag.y = float(p_dy);
+	drag.snap = p_snap ? 1.0f : 0.0f;
+	Gathered planned;
+	std::string error;
+	if (!model->drag(context_(*model, drag.snap), drag, planned, error)) return false;
+	return planned.requests.empty() || serve_(planned.requests);
+}
+
+bool EditorApp::menu_preview_arrange(const PackedInt64Array &p_ids, const String &p_op) {
+	const opennova::editor::ViewportModel *model = preview_(ViewportKind::Menu);
+	if (!model) return false;
+	std::vector<opennova::editor::NodeId> windows;
+	for (int64_t i = 0; i < p_ids.size(); ++i) windows.push_back(opennova::editor::NodeId(p_ids[i]));
+	Gathered planned;
+	std::string error;
+	if (!model->command(context_(*model, 0.0f), opennova::to_std(p_op), windows, planned, error)) return false;
+	return planned.requests.empty() || serve_(planned.requests);
 }
 
 String EditorApp::get_model_preview_json() {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	if (model_preview_) {
-		model_preview_->refresh(session_->view());
-		return json_text(opennova::editor::model_preview_to_json(model_preview_->snapshot(session_->view())));
-	}
-#endif
-	opennova::editor::ModelPreviewModel none;
-	return json_text(opennova::editor::model_preview_to_json(
-			opennova::editor::model_preview_snapshot(session_->view(), none, false)));
+	return preview_json_(ViewportKind::Model);
 }
 
 String EditorApp::model_preview_hit_json(double p_x, double p_y) {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	if (model_preview_) {
-		model_preview_->refresh(session_->view());
-		return json_text(opennova::editor::model_preview_hit_to_json(model_preview_->snapshot(session_->view()),
-				float(p_x), float(p_y)));
-	}
-#endif
-	opennova::editor::ModelPreviewModel none;
-	return json_text(opennova::editor::model_preview_hit_to_json(
-			opennova::editor::model_preview_snapshot(session_->view(), none, false), float(p_x), float(p_y)));
+	opennova::editor::ViewportHit hit;
+	if (const opennova::editor::ViewportModel *model = preview_(ViewportKind::Model))
+		hit = model->hit(context_(*model, 0.0f), float(p_x), float(p_y));
+	return json_text(opennova::editor::viewport_hit_to_json(hit));
 }
 
 bool EditorApp::set_model_preview_options(const Dictionary &p_options) {
 	ensure_session();
-#if OPENNOVA_EDITOR_UI
 	opennova::io::JsonValue json;
-	if (!model_preview_ || !to_json(p_options, json) ||
-			!opennova::editor::model_preview_options_from_json(json, model_preview_->model())) {
-		return false;
+	if (!to_json(p_options, json) || !json.is_object()) return false;
+	// The preview clock's members apart from the options: playing, time_ms, and the clip's ticks.
+	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue options = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue clock = opennova::io::JsonValue::make_object();
+	for (const opennova::io::JsonMember &member : json.object) {
+		if (member.key == "playing" || member.key == "time_ms") clock.set(member.key, member.value);
+		else if (member.key == "clip_ticks") clock.set("ticks", member.value);
+		else options.set(member.key, member.value);
 	}
-	model_preview_->refresh(session_->view());
-	return true;
-#else
-	(void)p_options;
-	return false;
-#endif
+	if (!options.object.empty()) change.set("options", std::move(options));
+	if (!clock.object.empty()) change.set("clock", std::move(clock));
+	return set_viewport_(ViewportKind::Model, change);
 }
 
 bool EditorApp::set_model_preview_camera(const Dictionary &p_camera) {
 	ensure_session();
-#if OPENNOVA_EDITOR_UI
 	opennova::io::JsonValue json;
-	if (!model_preview_ || !to_json(p_camera, json) ||
-			!opennova::editor::model_preview_camera_from_json(json, model_preview_->model())) {
-		return false;
-	}
-	model_preview_->refresh(session_->view());
-	return true;
-#else
-	(void)p_camera;
-	return false;
-#endif
+	if (!to_json(p_camera, json) || !json.is_object()) return false;
+	// The device's size apart from the camera.
+	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue camera = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue device = opennova::io::JsonValue::make_object();
+	for (const opennova::io::JsonMember &member : json.object)
+		(member.key == "width" || member.key == "height" ? device : camera).set(member.key, member.value);
+	if (!camera.object.empty()) change.set("camera", std::move(camera));
+	if (!device.object.empty()) change.set("device", std::move(device));
+	return set_viewport_(ViewportKind::Model, change);
 }
 
 bool EditorApp::model_preview_drag(int64_t p_id, const String &p_handle, double p_x, double p_y, double p_snap) {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	opennova::editor::ModelHandle handle;
-	if (!model_preview_ || !opennova::editor::model_handle_from_token(p_handle.utf8().get_data(), handle)) return false;
-	model_preview_->refresh(session_->view());
-	const bool ok = opennova::editor::model_preview_drag(*session_, model_preview_->snapshot(session_->view()),
-			opennova::editor::NodeId(p_id), handle, float(p_x), float(p_y), float(p_snap));
-	model_preview_->refresh(session_->view());
-	return ok;
-#else
-	(void)p_id;
-	(void)p_handle;
-	(void)p_x;
-	(void)p_y;
-	(void)p_snap;
-	return false;
-#endif
+	const opennova::editor::ViewportModel *model = preview_(ViewportKind::Model);
+	if (!model) return false;
+	opennova::editor::ViewportDrag drag;
+	drag.id = opennova::editor::NodeId(p_id);
+	drag.handle = opennova::to_std(p_handle);
+	drag.by = false;
+	drag.x = float(p_x);
+	drag.y = float(p_y);
+	drag.snap = float(p_snap);
+	Gathered planned;
+	std::string error;
+	if (!model->drag(context_(*model, drag.snap), drag, planned, error)) return false;
+	return serve_(planned.requests);
 }
 
 Camera3D *EditorApp::get_model_preview_camera() const {
-#if OPENNOVA_EDITOR_UI
-	return model_preview_ ? model_preview_->camera() : nullptr;
-#else
-	return nullptr;
-#endif
+	if (!session_ || !devices_) return nullptr;
+	const std::string &path = session_->view().documents.previews[ViewportKind::Model].path;
+	auto *device = static_cast<ViewportDevice *>(devices_->held(path, ViewportKind::Model));
+	return device ? static_cast<ModelViewportApplier &>(device->applier()).camera() : nullptr;
 }
 
 ObjectModel *EditorApp::get_model_preview_model() const {
-#if OPENNOVA_EDITOR_UI
-	return model_preview_ ? model_preview_->object_model() : nullptr;
-#else
-	return nullptr;
-#endif
+	if (!session_ || !devices_) return nullptr;
+	const std::string &path = session_->view().documents.previews[ViewportKind::Model].path;
+	auto *device = static_cast<ViewportDevice *>(devices_->held(path, ViewportKind::Model));
+	return device ? static_cast<ModelViewportApplier &>(device->applier()).object_model() : nullptr;
 }
 
-bool EditorApp::menu_preview_drag(int64_t p_id, const String &p_handle, int p_dx, int p_dy, bool p_snap) {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	opennova::editor::LayoutHandle handle;
-	if (!menu_preview_ || !opennova::editor::layout_handle_from_token(opennova::to_std(p_handle), handle)) return false;
-	menu_preview_->refresh(session_->view());
-	const bool ok = opennova::editor::menu_preview_drag(*session_, menu_preview_->snapshot(session_->view()),
-			opennova::editor::NodeId(p_id), handle, p_dx, p_dy, p_snap);
-	menu_preview_->refresh(session_->view());
-	return ok;
-#else
-	(void)p_id;
-	(void)p_handle;
-	(void)p_dx;
-	(void)p_dy;
-	(void)p_snap;
-	return false;
-#endif
-}
-
-bool EditorApp::menu_preview_arrange(const PackedInt64Array &p_ids, const String &p_op) {
-	ensure_session();
-#if OPENNOVA_EDITOR_UI
-	opennova::editor::ArrangeOp op;
-	if (!menu_preview_ || !opennova::editor::arrange_op_from_token(opennova::to_std(p_op), op)) return false;
-	menu_preview_->refresh(session_->view());
-	std::vector<opennova::editor::NodeId> windows;
-	for (int64_t i = 0; i < p_ids.size(); ++i) windows.push_back(opennova::editor::NodeId(p_ids[i]));
-	const bool ok = opennova::editor::menu_preview_arrange(*session_, menu_preview_->snapshot(session_->view()), windows,
-			op);
-	menu_preview_->refresh(session_->view());
-	return ok;
-#else
-	(void)p_ids;
-	(void)p_op;
-	return false;
-#endif
-}
 void EditorApp::_notification(int p_what) {
 	if (p_what == NOTIFICATION_WM_CLOSE_REQUEST) {
 		ensure_session(); session_->handle(opennova::editor::request::quit());

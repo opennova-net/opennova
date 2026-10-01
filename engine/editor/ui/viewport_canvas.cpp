@@ -118,18 +118,6 @@ void draw_shape(ImDrawList &paint, CanvasPoint origin, const OverlayShape &shape
 	}
 }
 
-SelectMode select_mode(CanvasJoin join) {
-	switch (join) {
-		case CanvasJoin::Add:
-			return SelectMode::Add;
-		case CanvasJoin::Toggle:
-			return SelectMode::Toggle;
-		case CanvasJoin::Replace:
-			break;
-	}
-	return SelectMode::Replace;
-}
-
 ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 	switch (cursor) {
 		case CanvasCursor::ResizeEW:
@@ -149,17 +137,8 @@ ImGuiMouseCursor imgui_cursor(CanvasCursor cursor) {
 
 } // namespace
 
-void CanvasWindowRequests::select(
-		const std::string &path, const NodeAddress &record, CanvasJoin join) {
-	workspace_.request(request::select_record(path, record, select_mode(join)));
-}
-
-void CanvasWindowRequests::edits(const std::string &path, std::vector<Edit> batch) {
-	workspace_.request(request::edit_record(path, std::move(batch)));
-}
-
-void CanvasWindowRequests::end_edit(const std::string &path) {
-	workspace_.request(request::end_edit(path));
+void CanvasWindowRequests::request(EditorRequest request) {
+	workspace_.request(std::move(request));
 }
 
 ViewportCanvas::ViewportCanvas(int design_width, int design_height) :

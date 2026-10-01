@@ -842,7 +842,7 @@ static int test_menu_reads_and_batches() {
 	session.handle(request::open_document("menu_style.mns"));
 	const Document *style = session.document_for("menu_style.mns");
 	TEST_EXPECT(style && view.documents.active == style->path() &&
-			view.documents.previews.menu.path.empty());
+			view.documents.previews[ViewportKind::Menu].path.empty());
 	if (!style)
 		return 1;
 	const uint64_t style_revision = style->revision();
@@ -1153,7 +1153,7 @@ static int test_menu_reads_and_batches() {
 	// of that identity.
 	session.handle(request::open_document("menu_style.mns"));
 	TEST_EXPECT(view.documents.active == style->path() &&
-			view.documents.previews.menu.path == menu->path());
+			view.documents.previews[ViewportKind::Menu].path == menu->path());
 	TEST_EXPECT(refusal(session, "menu_tree", "{}").find(not_a_menu) != std::string::npos &&
 			refusal(session, "menu_findings", "{}").find(not_a_menu) != std::string::npos);
 	const uint64_t style_before = style->revision();

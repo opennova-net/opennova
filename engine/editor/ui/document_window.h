@@ -55,6 +55,9 @@ public:
 	// with its modals, whether a tab shows them or not; the views of documents no longer open go
 	// after (a closed menu's prompt closes first).
 	void draw_modals();
+	// After every frame's windows (the workspace's frame bracket): each view's (a Main-role view's
+	// canvas not drawn this frame ends its gesture).
+	void end_frame();
 	// Opens the find bar with the keyboard in its text (Edit > Find..., Ctrl+F).
 	void open_find();
 	// A RevealRecord event, sent to the view of its document (made for it when the document is

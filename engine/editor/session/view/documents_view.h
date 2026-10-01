@@ -1,16 +1,37 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include <editor/model/value.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/selection.h>
 
 namespace opennova::editor {
 
 class DocumentBase;
+class Viewports;
+
+// What the Preview window shows of a viewport kind (ADR 0046 S13 V5): the document of the kind it
+// follows, and for a kind that shows one row of it (ViewportKindRow::part) the row, a menu's
+// screen.
+struct PreviewTarget {
+	std::string path;
+	NodeId part = 0;
+};
+
+// One target per ViewportKind (a Main-role kind's stays empty: its view is the Document tab's).
+struct PreviewTargets {
+	std::array<PreviewTarget, kViewportKindCount> targets;
+	PreviewTarget &operator[](ViewportKind kind) { return targets[static_cast<size_t>(kind)]; }
+	const PreviewTarget &operator[](ViewportKind kind) const {
+		return targets[static_cast<size_t>(kind)];
+	}
+};
 
 // The open documents as the view shows them (ADR 0046 S13 V4; the Documents, DocumentSet,
 // ActiveDocument and Selection concerns): each document, the active one, the selection in it,
@@ -27,24 +48,16 @@ struct DocumentsView {
 	// What Copy and Cut put on the clipboard: the payload of the document type that made
 	// it (Document::copy), which Paste hands back to the same type.
 	std::string clipboard;
-	// What the menu preview shows: the selected screen (row) of the last menu document a
-	// selection landed in. It stays while another document is active (the stylesheet the
-	// screen draws with), and clears when that menu closes or the screen is gone.
-	struct MenuPreviewTarget {
-		std::string path;
-		NodeId screen = 0;
-	};
-	// What the model preview shows (S10p2, S10p6): the last model, clip or animation table
-	// document made active (a clip or a table plays on its rig's model). It stays while
-	// another document is active, and clears when that document closes.
-	struct ModelPreviewTarget {
-		std::string path;
-	};
-	struct Previews {
-		MenuPreviewTarget menu;
-		ModelPreviewTarget model;
-	};
-	Previews previews;
+	// What the Preview window follows of each viewport kind (S13 V5): the last document of a type
+	// the kind shows made active (a model, a clip or an animation table for the model's), and for a
+	// kind that shows one row of it the row the selection last landed in there (a menu's screen: set
+	// when a record of the menu is selected). A target stays while another document is active (the
+	// stylesheet the menu's screen draws with), and clears when its document closes or its row goes.
+	PreviewTargets previews;
+	// The session's viewports (preview/viewports.h), each a document's picture with its state, and
+	// the preview clock: shared const, the windows reading what a viewport shows and changing it
+	// only by a request (SetViewport). Made with the session (null only in a view no session made).
+	std::shared_ptr<const Viewports> viewports;
 
 	// Follow the active document and the selection (every view change calls it).
 	void update_previews();

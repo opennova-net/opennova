@@ -231,6 +231,15 @@ inline EditorRequest end_edit(std::string path = std::string()) {
 	request.path = std::move(path);
 	return request;
 }
+// The viewport over the document at `path` ("" the Preview's of the kind the change names) changed
+// as `viewport` says: the JSON text of an object {kind?, device?, clock?, and the kind's options and
+// camera} (S13 V5, preview/viewports.h).
+inline EditorRequest set_viewport(std::string path, std::string viewport) {
+	EditorRequest request = of(EditorRequestKind::SetViewport);
+	request.path = std::move(path);
+	request.viewport = std::move(viewport);
+	return request;
+}
 inline EditorRequest copy(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::Copy);
 	request.path = std::move(path);

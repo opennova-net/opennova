@@ -6,9 +6,11 @@
 #include <optional>
 #include <utility>
 
+#include <base/io/json.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_files.h>
 #include <editor/project/project_state.h>
+#include <editor/preview/viewports.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
@@ -45,7 +47,15 @@ bool inside(const fs::path &path, const fs::path &dir) {
 } // namespace
 
 SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferences) :
-		platform_(platform), preferences_(preferences) {}
+		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
+	view_.documents.viewports = viewports_;
+}
+
+void SessionCore::touch(ViewConcern concern) {
+	view_.documents.update_previews();
+	viewports_->track(view_);
+	view_.revisions.touch(concern);
+}
 
 void SessionCore::start() {
 	// A store that cannot be read, or a settings file set aside (another schema): said, the
@@ -472,6 +482,14 @@ void SessionCore::forget_recent(const std::string &root) {
 void SessionCore::clear_output() {
 	view_.activity.output.clear();
 	touch(ViewConcern::Output);
+}
+
+void SessionCore::set_viewport(const std::string &path, const std::string &change) {
+	io::JsonValue json;
+	std::string error;
+	if (!io::json_parse(change, json, error)) error = "The viewport's change is not JSON: " + error;
+	else viewports_->set(view_, path, json, error);
+	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, path));
 }
 
 // The running operation goes first (a build's staging directory with it); one that cannot be

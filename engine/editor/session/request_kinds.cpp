@@ -156,6 +156,9 @@ void serve_preview_install_import(SessionCore &core, const EditorRequest &reques
 void serve_clear_output(SessionCore &core, const EditorRequest &) {
 	core.clear_output();
 }
+void serve_set_viewport(SessionCore &core, const EditorRequest &request) {
+	core.set_viewport(request.path, request.viewport);
+}
 void serve_quit(SessionCore &core, const EditorRequest &) {
 	core.quit();
 }
@@ -557,6 +560,15 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::ClearOutput, "clear_output", serve_clear_output,
 			"The output lines emptied, as Output's Clear does.")
+			.row,
+	// A viewport's state is no file and no document: it runs beside any operation.
+	Request(K::SetViewport, "set_viewport", serve_set_viewport,
+			"The viewport over the document at path (left out, the Preview's of the kind viewport "
+			"names) changed as viewport says: the size its device draws at, the preview clock, the "
+			"kind's options and camera; refused, nothing changed, naming a member it does not take, "
+			"a value out of range, a document not open or a kind that does not show it "
+			"(viewport.refused).")
+			.takes(request_params({ F::Viewport }, { F::Path }))
 			.row,
 	Request(K::Quit, "quit", serve_quit,
 			"The editor quits once the prompt has asked about unsaved edits; the running operation "

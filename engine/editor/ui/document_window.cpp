@@ -140,6 +140,10 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 	}
 }
 
+void DocumentWindow::end_frame() {
+	for (auto &slot : views_) slot.second.view->end_frame(workspace_);
+}
+
 void DocumentWindow::draw_modals() {
 	for (auto &slot : views_) slot.second.view->draw_modals(workspace_);
 	prune(workspace_.view());

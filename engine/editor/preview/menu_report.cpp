@@ -1,6 +1,7 @@
 #include <editor/preview/menu_report.h>
 
 #include <cstddef>
+#include <cstdio>
 #include <map>
 #include <memory>
 #include <variant>
@@ -8,7 +9,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mnu_document.h>
-#include <editor/preview/menu_preview_json.h>
+#include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/project/project_files.h>
@@ -68,12 +69,18 @@ const MenuScreenRender *render_of(const SessionView &view, const MnuDocument &do
 	if (!check) return nullptr;
 	const MenuScreenRender *render = check->render(document.path(), row);
 	current = render && check->document(document.path()) == &document &&
-	          render->status() == MenuPreviewStatus::Ready && render->revision() == document.revision();
+	          render->status() == MenuScreenStatus::Ready && render->revision() == document.revision();
 	return render;
 }
 
 const char *render_status(const MenuScreenRender *render) {
-	return render ? menu_preview_status_token(render->status()) : "none";
+	return render ? menu_screen_status_token(render->status()) : "none";
+}
+
+std::string argb(uint32_t color) {
+	char text[9];
+	std::snprintf(text, sizeof(text), "%08X", static_cast<unsigned>(color));
+	return text;
 }
 
 // Where a finding comes from: its row's source (the asset graph's, the render check's, else its
@@ -126,6 +133,70 @@ JsonValue window_to_json(const MnuDocument &document, const NodeAddress &window,
 }
 
 } // namespace
+
+io::JsonValue menu_widgets_to_json(const MnuDocument &document, const Node &screen,
+		const menu::MenuFrameCompiler &compiler, const menu::MenuFrameState &state) {
+	JsonValue widgets = JsonValue::make_array();
+	for (int index = 0; index < compiler.widget_count(); ++index) {
+		JsonValue widget = JsonValue::make_object();
+		widget.set("index", json_number(index));
+		widget.set("id", json_number(double(document.window_at(screen, size_t(index)))));
+		widget.set("name", json_string(compiler.widget_name(index)));
+		const int kind = compiler.widget_kind(index);
+		widget.set("type", json_string(kind >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(kind)) : ""));
+		widget.set("shown", JsonValue::make_bool(compiler.widget_shown(index, state)));
+		widget.set("disabled", JsonValue::make_bool(compiler.widget_disabled(index, state)));
+		mnu::RectEdges rect{};
+		if (compiler.widget_rect(index, state, &rect)) {
+			widget.set("rect", edges(rect));
+			mnu::RectEdges local = rect;
+			mnu::RectEdges parent{};
+			if (compiler.widget_rect(compiler.widget_parent(index), state, &parent)) {
+				local.left -= parent.left;
+				local.right -= parent.left;
+				local.top -= parent.top;
+				local.bottom -= parent.top;
+			}
+			widget.set("local", edges(local));
+		}
+		widget.set("text", json_string(compiler.widget_authored_text(index)));
+		std::string font;
+		uint32_t colors[4] = {};
+		if (compiler.widget_font(index, &font, colors)) {
+			widget.set("font", json_string(font));
+			widget.set("text_color", json_string(argb(colors[menu::kStateDefault])));
+		}
+		widgets.push(std::move(widget));
+	}
+	return widgets;
+}
+
+io::JsonValue menu_notes_to_json(const MnuDocument &document, const Node &screen,
+		const menu::MenuFrameCompiler &compiler, const std::vector<menu::MenuFrameNote> &notes) {
+	JsonValue out = JsonValue::make_array();
+	for (const menu::MenuFrameNote &note : notes) {
+		std::string field;
+		const NodeAddress address = menu_note_address(note, document, screen, &field);
+		DiagnosticSeverity severity = DiagnosticSeverity::Warning;
+		const bool problem = menu_note_problem(note.code, &severity);
+		JsonValue row = JsonValue::make_object();
+		row.set("index", json_number(note.widget));
+		row.set("window_id", json_number(note.widget >= 0 ? double(document.window_at(screen, size_t(note.widget))) : 0.0));
+		row.set("id", json_number(double(address.child)));
+		row.set("name", json_string(note.widget >= 0 ? compiler.widget_name(note.widget) : ""));
+		row.set("code", json_string(menu::menu_frame_note_token(note.code)));
+		row.set("finding", json_string(finding_code(note.code).token));
+		row.set("basis", json_string(menu::menu_frame_note_basis_token(menu::menu_frame_note_basis(note.code))));
+		row.set("severity", json_string(problem ? diagnostic_severity_label(severity) : "preview"));
+		row.set("subject", json_string(note.subject));
+		row.set("list", json_string(note.list));
+		row.set("record", json_number(note.record));
+		row.set("field", json_string(field));
+		row.set("message", json_string(menu_note_message(note)));
+		out.push(row);
+	}
+	return out;
+}
 
 const MnuDocument *menu_for(const SessionView &view, const std::string &path) {
 	const std::string relative = menu_path(view, path);
@@ -200,7 +271,7 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 		screen.set("name", json_string(row->name()));
 		screen.set("status", json_string(render_status(render)));
 		screen.set("current", JsonValue::make_bool(current));
-		const size_t notes = render && render->status() == MenuPreviewStatus::Ready ? render->notes().size() : 0;
+		const size_t notes = render && render->status() == MenuScreenStatus::Ready ? render->notes().size() : 0;
 		size_t rows = 0;
 		for (const Diagnostic &d : view.findings.diagnostics) rows += d.asset == document->path() && d.row_id == row->id ? 1 : 0;
 		screen.set("notes", json_number(double(notes)));
@@ -214,46 +285,69 @@ io::JsonValue menu_findings_to_json(const SessionView &view, const std::string &
 
 io::JsonValue menu_render_to_json(
 		const SessionView &view, const std::string &path, NodeId row, const JsonPage &page) {
-	MenuPreviewSnapshot none;
-	none.status = MenuPreviewStatus::NoScreen;
-	JsonValue out;
 	const MenuRenderCheck *render_check = menu_render_check(view.findings.project_checks.get());
-	if (!render_check) {
-		none.status = MenuPreviewStatus::NoProject;
-		out = menu_preview_to_json(none);
-	} else {
+	const MnuDocument *document = nullptr;
+	const Node *screen = nullptr;
+	const MenuScreenRender *render = nullptr;
+	if (render_check) {
 		const std::string relative = menu_path(view, path);
 		if (relative.empty()) return JsonValue::make_null();
-		const MenuRenderCheck &check = *render_check;
 		// The open document when the menu is open (its current state), else the file as the check
 		// read it.
-		const MnuDocument *document = check.document(relative);
+		document = render_check->document(relative);
 		if (const MnuDocument *open = open_menu(view, relative)) document = open;
-		const Node *screen = document ? document->row(row) : nullptr;
-		const MenuScreenRender *render = check.render(relative, row);
-		if (!document || !screen || !render) {
-			none.document = document;
-			out = menu_preview_to_json(none);
-		} else {
-			out = menu_preview_to_json(render_snapshot(*render, *document, *screen));
-		}
+		screen = document ? document->row(row) : nullptr;
+		render = screen ? render_check->render(relative, row) : nullptr;
+	}
+	const MenuScreenStatus status = !render_check ? MenuScreenStatus::NoProject
+			: !render                             ? MenuScreenStatus::NoScreen
+												  : render->status();
+	const std::string detail = render ? render->detail() : std::string();
+	JsonValue out = JsonValue::make_object();
+	out.set("status", json_string(menu_screen_status_token(status)));
+	out.set("message", json_string(menu_screen_status_message(status, detail)));
+	out.set("detail", json_string(detail));
+	out.set("path", json_string(document ? document->path() : std::string()));
+	if (screen && render) {
+		JsonValue named = JsonValue::make_object();
+		named.set("id", json_number(double(screen->id)));
+		named.set("name", json_string(screen->name()));
+		out.set("screen", std::move(named));
+	}
+	out.set("revision", json_number(double(document ? document->revision() : 0)));
+	out.set("shown_revision", json_number(double(render ? render->revision() : 0)));
+	const bool current = render && status == MenuScreenStatus::Ready && document &&
+			render->revision() == document->revision();
+	out.set("current", JsonValue::make_bool(current));
+	std::vector<std::string> missing, unreadable;
+	if (render) split_unloaded(render->assets(), missing, unreadable);
+	JsonValue lacked = JsonValue::make_array();
+	for (const std::string &name : missing) lacked.push(json_string(name));
+	out.set("missing", std::move(lacked));
+	JsonValue failed = JsonValue::make_array();
+	for (const std::string &name : unreadable) failed.push(json_string(name));
+	out.set("unreadable", std::move(failed));
+	JsonValue widgets = JsonValue::make_array(), notes = JsonValue::make_array();
+	if (current) {
+		widgets = menu_widgets_to_json(*document, *screen, render->compiler(), render->state());
+		notes = menu_notes_to_json(*document, *screen, render->compiler(), render->notes());
 	}
 	// A page of the widgets and, by the same page, of the notes.
-	const auto page_of = [&out, &page](const char *key) {
-		JsonValue *list = out.get(key);
-		if (!list || !list->is_array()) return size_t(0);
-		const size_t total = list->array.size();
-		std::vector<JsonValue> kept(list->array.begin() + std::ptrdiff_t(page.first(total)),
-				list->array.begin() + std::ptrdiff_t(page.last(total)));
-		list->array = std::move(kept);
+	const auto page_of = [&page](JsonValue &list) {
+		const size_t total = list.array.size();
+		std::vector<JsonValue> kept(list.array.begin() + std::ptrdiff_t(page.first(total)),
+				list.array.begin() + std::ptrdiff_t(page.last(total)));
+		list.array = std::move(kept);
 		return total;
 	};
-	const size_t widgets = page_of("widgets");
-	const size_t notes = page_of("notes");
+	const size_t widget_total = page_of(widgets);
+	const size_t note_total = page_of(notes);
+	out.set("widgets", std::move(widgets));
+	out.set("notes", std::move(notes));
 	// `count` the widgets'; the page runs on while either list has entries past it.
-	set_page(out, page, widgets, notes);
-	out.set("widget_count", json_number(double(widgets)));
-	out.set("note_count", json_number(double(notes)));
+	set_page(out, page, widget_total, note_total);
+	out.set("widget_count", json_number(double(widget_total)));
+	out.set("note_count", json_number(double(note_total)));
 	return out;
 }
 

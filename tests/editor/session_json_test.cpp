@@ -727,6 +727,14 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.settings.game_install = "C:/games/JO";
 			out.settings.play_in_install = true;
 			break;
+		case F::Viewport: {
+			// The text the wire reader keeps of the object (json_write's), so it reads back equal.
+			opennova::io::JsonValue change;
+			std::string error;
+			opennova::io::json_parse(R"({"kind": "menu", "options": {"show_hidden": true}})", change, error);
+			out.viewport = opennova::io::json_write(change);
+			break;
+		}
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;
 		case F::Replace: out.replace = true; break;

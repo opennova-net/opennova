@@ -10,9 +10,11 @@
 // (the bounds sweep's measure: every window's content within its width, every table cell within
 // its column), and it draws its document (the title of its first row of its own kind shows, the
 // first kind the type declares: a stylesheet's variable, not its comment). A RevealRecord it
-// is sent is held until it draws and taken as it does. Two open documents of a type get a view
-// each, whose filters are their own. A string table's cell being edited keeps the keyboard, and
-// ends its edit, scrolled out of sight.
+// is sent is held until it draws and taken as it does; a MainViewport row's type is one a Main-role
+// viewport kind shows (S13 V5). Two open documents of a type get a view each, whose filters are their
+// own. A string table's cell being edited keeps the keyboard, and ends its edit, scrolled out of
+// sight. The MainViewport role's view (no type plays it yet) draws its outline beside the viewport,
+// whose canvas fills the rest of the tab through the workspace's device.
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -21,9 +23,12 @@
 
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
+#include <editor/ui/main_viewport_view.h>
 #include <formats/rtxt/rtxt.h>
 #include "editor_ui_test_support.h"
 
@@ -34,17 +39,16 @@ namespace editor_ui_test {
 
 namespace {
 
-// A workspace of the test's own: a view it seeds, the requests it is asked, no devices.
+// A workspace of the test's own: a view it seeds, the requests it is asked, and the devices a test
+// hands it (none unless it does).
 class TestWorkspace : public Workspace {
 public:
 	SessionView seeded;
 	std::vector<EditorRequest> requests;
+	ViewportDeviceSource *source = nullptr;
 	const SessionView &view() const override { return seeded; }
 	void request(EditorRequest request) override { requests.push_back(std::move(request)); }
-	const WorkspaceDevices &devices() const override { return devices_; }
-
-private:
-	WorkspaceDevices devices_;
+	ViewportDeviceSource *devices() const override { return source; }
 };
 
 struct Fixture {
@@ -144,6 +148,13 @@ void test_every_view() {
 		CHECK(type && row && row->type == type_id && (row->outline || row->make),
 		      "every document type has its view's row, an outline or a make");
 		if (!type || !row) continue;
+		// A MainViewport row's type is one a Main-role viewport kind shows, the tab's viewport, with
+		// the outline beside it.
+		if (row->role == DocumentViewRole::MainViewport) {
+			const ViewportKind main = main_viewport_kind(type_id);
+			CHECK(main != ViewportKind::kCount && viewport_kind_row(main).role == ViewportRole::Main && row->outline,
+			      (std::string(type->name) + ": its MainViewport row's Main-role kind and outline").c_str());
+		}
 		size_t drawn = 0;
 		for (const Fixture &fixture : files) {
 			if (asset_kind_row(fixture.kind).document != type_id) continue;
@@ -334,6 +345,54 @@ void test_edit_scrolled_out() {
 	CHECK(ended && GImGui->ActiveId != key, "Enter ends its edit");
 }
 
+// S13 V5: the MainViewport role's view (ui/main_viewport_view), which no type's row plays yet: the
+// document's outline in a column, the viewport beside it, its canvas filling the rest of the tab,
+// drawn through the workspace's device of (document, kind) once the Shell's pump has made it; the
+// viewport the one kept for the document (a model's here, until a Main-role kind ships).
+void test_main_viewport_view() {
+	const std::string repo = test_paths_repo_root(__FILE__);
+	auto model = std::make_shared<ModelDocument>();
+	Diagnostic error;
+	CHECK(model->load_bytes(test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model,
+	                        "jo", error),
+	      "a model");
+	const DocumentViewRow *row = document_view_row(DocumentTypeId::Model);
+	CHECK(row && row->outline, "the model's row names an outline");
+	if (!row || !row->outline) return;
+	NullBackend backend;
+	TestWorkspace workspace;
+	seed(workspace.seeded, model);
+	HandViewports shell;
+	shell.bind(workspace.seeded);
+	shell.viewports->ensure(model->path(), ViewportKind::Model);
+	workspace.source = &shell.devices.cache;
+	MainViewportView view(*row->outline, ViewportKind::Model);
+	CHECK(view.kind() == ViewportKind::Model && view.outline() && view.outline()->mode() == row->outline->mode,
+	      "its outline in its row's mode, beside the kind's viewport");
+	// The Shell's pump before each frame: the device the canvas asked for made, the canvas's size
+	// (a SetViewport of the viewport's device) served.
+	for (int i = 0; i < 4; ++i) {
+		shell.devices.sync(*shell.viewports, workspace.seeded);
+		view_frame(workspace, view, *model, 720.0f);
+		view.end_frame(workspace);
+		for (const EditorRequest &request : workspace.requests)
+			CHECK(request.kind == EditorRequestKind::SetViewport && request.path == model->path() &&
+			              shell.set(workspace.seeded, request.path, request.viewport.c_str()),
+			      "the canvas raises only its viewport's size");
+		workspace.requests.clear();
+	}
+	const ViewportModel *viewport = shell.find(model->path(), ViewportKind::Model);
+	const DrawnDevice *device = shell.device(model->path(), ViewportKind::Model);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready, "the viewport shows the model");
+	CHECK(device && device->draws > 0 && device->width > 0 && device->width < 720 && device->origin.x > 100.0f,
+	      "the viewport drawn on its device beside the outline");
+	CHECK(device && viewport && device->width == viewport->state().width && device->height == viewport->state().height,
+	      "the viewport at the canvas's size");
+	const std::string title = first_title(*model);
+	CHECK(!title.empty() && view_frame(workspace, view, *model, 720.0f, true).find(title.substr(0, 8)) != std::string::npos,
+	      "the outline drawn beside it");
+}
+
 } // namespace
 
 } // namespace editor_ui_test
@@ -342,6 +401,7 @@ int main() {
 	editor_ui_test::test_every_view();
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
+	editor_ui_test::test_main_viewport_view();
 	if (editor_ui_test::g_failures) {
 		std::printf("%d check(s) failed\n", editor_ui_test::g_failures);
 		return 1;

@@ -46,6 +46,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::Models, "model", "Models" },
 	{ G::Animations, "animation", "Animations" },
 	{ G::AnimationMaps, "animation_map", "Animation maps" },
+	{ G::Viewports, "viewport", "Viewports" },
 };
 
 constexpr bool groups_well_formed() {

@@ -1,4 +1,4 @@
-#include "model_preview_pane.h"
+#include <editor/ui/model_viewport_view.h>
 
 #include <algorithm>
 #include <cmath>
@@ -8,19 +8,20 @@
 
 #include <imgui.h>
 
+#include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
-#include <editor/preview/model_preview_state.h>
-#include <editor/preview/model_preview_viewport.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/viewports.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
-#include <editor/ui/workspace.h>
 #include <runtime/anim/anim_event_bits.h>
 
 namespace opennova::editor {
@@ -31,79 +32,64 @@ constexpr int64_t kRegisterRange = 32767; // a slider's reach (the value is the 
 // A clip event's tick on the timeline (a step's is green, a shot's red).
 constexpr ImU32 kEventColor = IM_COL32(255, 220, 90, 255);
 
-// The model document the preview shows (open), or null.
-const ModelDocument *previewed(const SessionView &view, const std::string &path) {
-	for (const auto &open : view.documents.open)
-		if (open && open->path() == path) return dynamic_cast<const ModelDocument *>(open.get());
-	return nullptr;
+void set_options(Workspace &workspace, const ModelViewport &model, const ModelViewportOptions &options) {
+	workspace.request(request::set_viewport(
+			model.path(), viewport_change(ViewportKind::Model, "options", model_options_to_json(options))));
+}
+
+// The preview clock run or held, or sought to a clip tick (and held).
+void set_playing(Workspace &workspace, const ModelViewport &model, bool playing) {
+	io::JsonValue clock = io::JsonValue::make_object();
+	clock.set("playing", io::JsonValue::make_bool(playing));
+	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
+}
+void seek_ticks(Workspace &workspace, const ModelViewport &model, int32_t ticks, bool hold) {
+	io::JsonValue clock = io::JsonValue::make_object();
+	clock.set("ticks", io::json_number(std::max(ticks, 0)));
+	if (hold) clock.set("playing", io::JsonValue::make_bool(false));
+	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
 }
 
 } // namespace
 
-// The pane's own state and its drawing: the canvas, the model's half of it, the requests the
-// canvas raises and the toolbar's snap.
-class ModelPreviewPane::Impl {
-public:
-	explicit Impl(Workspace &workspace) : workspace_(workspace), requests_(workspace) {}
-	void draw();
-	void end_frame() {
-		model_canvas_.end_frame(requests_);
-		canvas_.end_frame();
-	}
+// What the view keeps of its own: the snap.
+struct ModelViewportView::Tools {
+	int snap = 2; // kModelHandleSnaps: 1/16 m
 
-private:
-	void toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame);
-	void registers_(ModelPreviewModel &model);
-	void draw_canvas_(const ModelCanvasFrame &frame, float available_height);
-	void rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model);
-	void timeline_(ModelPreviewModel &model);
-
-	// The Shell's model device (the workspace's devices), null for none.
-	ModelPreviewViewport *viewport() const { return workspace_.devices().model; }
-
-	Workspace &workspace_;
-	ViewportCanvas canvas_;
-	ModelCanvas model_canvas_;
-	CanvasWindowRequests requests_;
-	int snap_ = 2; // kModelHandleSnaps: 1/16 m
+	void toolbar(Workspace &workspace, const ModelViewport &model, const ViewportContext &context);
+	void registers(Workspace &workspace, const ModelViewport &model);
+	void rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model);
+	void timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock);
 };
 
-ModelPreviewPane::ModelPreviewPane(Workspace &workspace) :
-		impl_(std::make_unique<Impl>(workspace)) {}
+ModelViewportView::ModelViewportView() : ViewportView(ViewportKind::Model), tools_(std::make_unique<Tools>()) {}
 
-ModelPreviewPane::~ModelPreviewPane() = default;
+ModelViewportView::~ModelViewportView() = default;
 
-void ModelPreviewPane::draw() {
-	impl_->draw();
-}
-
-void ModelPreviewPane::end_frame() {
-	impl_->end_frame();
-}
-
-void ModelPreviewPane::Impl::draw() {
-	if (!viewport()) {
-		ui_kit::empty_state(model_preview_status_message(ModelPreviewStatus::NoDevice, std::string()).c_str());
-		return;
+void ModelViewportView::draw_empty(Workspace &workspace, const ViewportModel *model, const std::string &path) {
+	ViewportView::draw_empty(workspace, model, path);
+	// An animation no item pairs: the author picks the model it plays on.
+	const auto *shown = static_cast<const ModelViewport *>(model);
+	if (shown && shown->view_status() == ModelViewStatus::NoRig) {
+		ui_kit::WrapRow row;
+		tools_->rig_chooser(workspace, row, *shown);
 	}
-	ModelPreviewModel &model = viewport()->model();
-	if (model.status() != ModelPreviewStatus::Ready || !model.model()) {
-		ui_kit::empty_state(model_preview_status_message(model.status(), model.detail()).c_str());
-		// An animation no item pairs: the author picks the model it plays on.
-		if (model.status() == ModelPreviewStatus::NoRig) {
-			ui_kit::WrapRow row;
-			rig_chooser_(row, model);
-		}
+}
+
+void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &viewport, ViewportContext &context) {
+	const auto &model = static_cast<const ModelViewport &>(viewport);
+	if (!model.model()) {
+		draw_empty(workspace, &viewport, viewport.path());
 		return;
 	}
 	// An animation: the model it plays on (the Preview window's line names it), the clip the
-	// selection plays (its slot in words, the table's key in the tooltip) and where the
-	// pairing comes from, cut to the room left (whole in its tooltip) or on a line of its own
-	// in a narrow window.
+	// selection plays (its slot in words, the table's key in the tooltip) and where the pairing
+	// comes from, cut to the room left (whole in its tooltip) or on a line of its own in a narrow
+	// window.
 	if (model.animating()) {
 		const PreviewRig &rig = model.rig();
 		ui_kit::WrapRow row;
-		rig_chooser_(row, model);
+		tools_->rig_chooser(workspace, row, model);
 		const std::string &key = model.clip_key();
 		const std::string slot = animation_key_title(key);
 		const std::string clip = key.empty() ? "(" + rig.source + ")"
@@ -119,29 +105,19 @@ void ModelPreviewPane::Impl::draw() {
 			ImGui::PopStyleColor();
 		}
 	}
-	// What the canvas maps: the model document shown (an animation's rig model has none), and the
-	// selected record's marker while the picture is the document's and it is the active one.
-	const SessionView &view = workspace_.view();
-	ModelCanvasFrame frame;
-	frame.document = previewed(view, model.shown_path());
-	frame.model = &model;
-	frame.current = frame.document && model.shown_revision() == frame.document->revision();
-	if (frame.current && view.documents.active == frame.document->path())
-		model_overlay_of(*frame.document, view.documents.selection.primary, frame.selected_kind,
-				frame.selected);
-	toolbar_(model, frame);
-	frame.overlays = model.overlays();
-	frame.snap = kModelHandleSnaps[std::clamp(snap_, 0, 4)];
+	tools_->toolbar(workspace, model, context);
+	snap = kModelHandleSnaps[std::clamp(tools_->snap, 0, 4)];
+	context.snap = snap;
 	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + 6.0f : 0.0f;
-	draw_canvas_(frame, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
-	if (model.animating()) timeline_(model);
+	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
+	if (model.animating()) tools_->timeline(workspace, model, context.input.clock);
 }
 
 // The model an animation plays on: Auto (the one an item pairs with the table) or a model
 // of the project's.
-void ModelPreviewPane::Impl::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewModel &model) {
-	const SessionView &view = workspace_.view();
-	ModelPreviewOptions options = model.options();
+void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
+	const SessionView &view = workspace.view();
+	ModelViewportOptions options = model.options();
 	const float width = ImGui::GetFontSize() * 10.0f;
 	row.next(ui_kit::field_width(width, "Plays on"));
 	ImGui::SetNextItemWidth(width);
@@ -155,12 +131,12 @@ void ModelPreviewPane::Impl::rig_chooser_(ui_kit::WrapRow &row, ModelPreviewMode
 	}
 	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
 	                "anim_def names the table.");
-	if (options != model.options()) model.set_options(options);
+	if (options != model.options()) set_options(workspace, model, options);
 }
 
 // The clip the selection plays: run or hold it, step a tick, scrub; its trigger events
 // under the track (a click on one seeks there and, in the clip's own document, selects it).
-void ModelPreviewPane::Impl::timeline_(ModelPreviewModel &model) {
+void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
 	const int32_t length = model.clip_length_ticks();
 	if (model.clip_key().empty() || length <= 0) {
 		ImGui::TextDisabled("%s", model.rig().table.empty() || model.clip_key().empty()
@@ -168,39 +144,34 @@ void ModelPreviewPane::Impl::timeline_(ModelPreviewModel &model) {
 		                                  : "The clip does not load in the rig.");
 		return;
 	}
-	ModelPreviewOptions options = model.options();
-	const int32_t ticks = model.clip_ticks();
+	const int32_t ticks = clock.ticks();
 	const int32_t shown = model.clip_loops() ? ticks % length : std::min(ticks, length);
-	if (ImGui::Button(options.playing ? "Pause##clip" : "Run##clip")) options.playing = !options.playing;
-	ui_kit::tooltip(options.playing ? "Hold the clip where it is." : "Run the clip.");
+	if (ImGui::Button(clock.playing() ? "Pause##clip" : "Run##clip")) set_playing(workspace, model, !clock.playing());
+	ui_kit::tooltip(clock.playing() ? "Hold the clip where it is." : "Run the clip.");
 	ImGui::SameLine();
-	if (ImGui::ArrowButton("##back", ImGuiDir_Left)) model.seek_ticks(std::max(shown - 1, 0));
+	if (ImGui::ArrowButton("##back", ImGuiDir_Left)) seek_ticks(workspace, model, std::max(shown - 1, 0), false);
 	ui_kit::tooltip("A tick back.");
 	ImGui::SameLine();
-	if (ImGui::ArrowButton("##forward", ImGuiDir_Right)) model.seek_ticks(shown + 1);
+	if (ImGui::ArrowButton("##forward", ImGuiDir_Right)) seek_ticks(workspace, model, shown + 1, false);
 	ui_kit::tooltip("A tick on.");
 	ImGui::SameLine();
 	// The frame the clip shows after the track, its width kept for it; in a window too
 	// narrow for both, in the track's tooltip.
 	const anim::SkeletalClips::LoadedClip *clip = model.skeleton()->find_clip_variant(model.clip_key(), model.clip_variant());
 	char frame[48];
-	std::snprintf(frame, sizeof(frame), "frame %.1f / %u", model.clip_frame(), clip ? clip->clip.frame_count : 0u);
+	std::snprintf(frame, sizeof(frame), "frame %.1f / %u", model.clip_frame(clock), clip ? clip->clip.frame_count : 0u);
 	const float spacing = ImGui::GetStyle().ItemSpacing.x;
 	const float track_room = ImGui::GetContentRegionAvail().x - ui_kit::text_width(frame) - spacing;
 	const bool frame_beside = track_room >= ImGui::GetFontSize() * 5.0f;
 	int scrub = shown;
 	ImGui::SetNextItemWidth(frame_beside ? track_room : ImGui::GetContentRegionAvail().x);
-	if (ImGui::SliderInt("##clip_ticks", &scrub, 0, length, "tick %d")) {
-		model.seek_ticks(scrub);
-		options.playing = false;
-	}
+	if (ImGui::SliderInt("##clip_ticks", &scrub, 0, length, "tick %d")) seek_ticks(workspace, model, scrub, true);
 	if (!frame_beside) ui_kit::tooltip(frame);
 	const ImVec2 track_min = ImGui::GetItemRectMin(), track_max = ImGui::GetItemRectMax();
 	if (frame_beside) {
 		ImGui::SameLine();
 		ImGui::TextUnformatted(frame);
 	}
-	if (options != model.options()) model.set_options(options);
 
 	// The events under the track.
 	const float strip = 8.0f;
@@ -230,27 +201,24 @@ void ModelPreviewPane::Impl::timeline_(ModelPreviewModel &model) {
 	                std::to_string(under->tick) + ": " +
 	                (bits.empty() ? std::string("no named bit") : bits));
 	if (!clicked) return;
-	model.seek_ticks(under->tick);
-	ModelPreviewOptions held = model.options();
-	held.playing = false;
-	model.set_options(held);
+	seek_ticks(workspace, model, under->tick, true);
 	// In the clip's own document the event is a record: select it.
-	const SessionView &view = workspace_.view();
+	const SessionView &view = workspace.view();
 	for (const auto &open : view.documents.open) {
-		const auto *clip = dynamic_cast<const AnimationDocument *>(open.get());
-		if (!clip || clip->path() != model.shown_path() || clip->rows().empty()) continue;
-		const Node &row = *clip->rows().front();
+		const auto *clip_document = dynamic_cast<const AnimationDocument *>(open.get());
+		if (!clip_document || clip_document->path() != model.path() || clip_document->rows().empty()) continue;
+		const Node &row = *clip_document->rows().front();
 		if (size_t(under->frame) < row.collections[1].size())
-			window_requests::select(workspace_, *clip,
+			window_requests::select(workspace, *clip_document,
 			                        {row.id, node_kind(AnimationKind::Event), row.collections[1][size_t(under->frame)]});
 	}
 }
 
 // The level (Auto or one held), what Auto picks and why, the clock, what the overlays
 // mark, Frame, and the registers, on a row that wraps whole controls in a narrow window.
-void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanvasFrame &frame) {
+void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport &model, const ViewportContext &context) {
 	const threedi::Threedi3di3 &shown = *model.model();
-	ModelPreviewOptions options = model.options();
+	ModelViewportOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
 	int32_t projected = 0;
 	const int automatic = model.auto_lod(&projected);
@@ -263,9 +231,9 @@ void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanva
 	if (ImGui::BeginCombo("Level", label)) {
 		if (ImGui::Selectable("Auto", options.lod < 0)) options.lod = -1;
 		for (size_t i = 0; i < shown.lod_count; ++i) {
-			char row[48];
-			std::snprintf(row, sizeof(row), "Level %d (%d px)", int(i), int(shown.lods[i].lod_threshold));
-			if (ImGui::Selectable(row, options.lod == int(i))) options.lod = int(i);
+			char text[48];
+			std::snprintf(text, sizeof(text), "Level %d (%d px)", int(i), int(shown.lods[i].lod_threshold));
+			if (ImGui::Selectable(text, options.lod == int(i))) options.lod = int(i);
 		}
 		ImGui::EndCombo();
 	}
@@ -277,15 +245,16 @@ void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanva
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", radius);
 	ui_kit::tooltip("The model's projected radius, the size Auto measures.");
-	// The clock: Run or Pause (Play is the game's).
-	const char *clock = options.playing ? "Pause" : "Run";
+	// The preview clock: Run or Pause (Play is the game's).
+	const bool playing = context.input.clock.playing();
+	const char *clock = playing ? "Pause" : "Run";
 	row.next(ui_kit::button_width(clock));
-	if (ImGui::Button(clock)) options.playing = !options.playing;
-	ui_kit::tooltip("Run or hold the model's clock: its part animations, flipbooks and colour "
+	if (ImGui::Button(clock)) set_playing(workspace, model, !playing);
+	ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
 	                "generators.");
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
-	ui_kit::tooltip("What the preview marks over the model.");
+	ui_kit::tooltip("What the viewport marks over the model.");
 	if (ImGui::BeginPopup("marks")) {
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
@@ -295,12 +264,20 @@ void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanva
 	static const char *const kSnapNames[] = {"Free", "1/64 m", "1/16 m", "1/4 m", "1 m"};
 	row.next(ui_kit::field_width(unit * 5.0f, "Snap"));
 	ImGui::SetNextItemWidth(unit * 5.0f);
-	ImGui::Combo("Snap", &snap_, kSnapNames, IM_ARRAYSIZE(kSnapNames));
+	ImGui::Combo("Snap", &snap, kSnapNames, IM_ARRAYSIZE(kSnapNames));
 	ui_kit::tooltip("A dragged marker's place snaps to this grid on each of the file's axes. Hold "
 	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
-	if (ImGui::Button("Frame"))
-		model_canvas_.frame_selected(frame);
+	if (ImGui::Button("Frame")) {
+		// The selected record's marker, else the whole model.
+		const SessionView &view = workspace.view();
+		std::vector<NodeId> ids;
+		if (view.documents.active == model.path() && view.documents.selection.primary.child)
+			ids.push_back(view.documents.selection.primary.child);
+		CanvasWindowRequests requests(workspace);
+		std::string error;
+		model.command(context, "frame", ids, requests, error);
+	}
 	ui_kit::tooltip("Look at the selected marker, or at the whole model (F).");
 	row.next(ui_kit::button_width("Registers"));
 	ImGui::BeginDisabled(shown.ctrl.count == 0);
@@ -309,16 +286,16 @@ void ModelPreviewPane::Impl::toolbar_(ModelPreviewModel &model, const ModelCanva
 	ui_kit::tooltip(shown.ctrl.count == 0 ? "The model declares no CTRL registers."
 	                                      : "Hold the model's CTRL registers at a value, as the game's "
 	                                        "entity would drive them.");
-	if (options != model.options()) model.set_options(options);
+	if (options != model.options()) set_options(workspace, model, options);
 	if (ImGui::BeginPopup("registers")) {
-		registers_(model);
+		registers(workspace, model);
 		ImGui::EndPopup();
 	}
 }
 
-void ModelPreviewPane::Impl::registers_(ModelPreviewModel &model) {
+void ModelViewportView::Tools::registers(Workspace &workspace, const ModelViewport &model) {
 	const threedi::Threedi3di3 &shown = *model.model();
-	ModelPreviewOptions options = model.options();
+	ModelViewportOptions options = model.options();
 	const float unit = ImGui::GetFontSize();
 	for (uint32_t i = 0; i < shown.ctrl.count; ++i) {
 		const std::string name = strutil::fixed_string(shown.ctrl.registers[i].name, sizeof(shown.ctrl.registers[i].name));
@@ -334,24 +311,7 @@ void ModelPreviewPane::Impl::registers_(ModelPreviewModel &model) {
 	}
 	if (ImGui::Button("Reset all")) options.ctrl.clear();
 	ui_kit::tooltip("Let every register go back to 0.");
-	if (options != model.options()) model.set_options(options);
-}
-
-// The canvas: the marker under the pointer, found once a frame; the markers where the device drew
-// the model (the camera as it placed it), then the pointer's gestures and F (an orbit moves the
-// camera the next frame draws with).
-void ModelPreviewPane::Impl::draw_canvas_(const ModelCanvasFrame &frame, float available_height) {
-	model_canvas_.follow(frame, requests_);
-	if (canvas_.begin(available_height, 0, 0)) {
-		const CanvasInput &in = canvas_.input();
-		const int under = model_canvas_under(frame, in);
-		canvas_.picture([this](int width, int height) { viewport()->draw(width, height); },
-				[&] { return model_canvas_.hover_tip(frame, under); });
-		const OverlayList shapes = model_canvas_.shapes(frame, in, under);
-		model_canvas_.input(frame, in, under, requests_);
-		canvas_.draw(shapes, CanvasCursor::Default);
-	}
-	canvas_.end();
+	if (options != model.options()) set_options(workspace, model, options);
 }
 
 } // namespace opennova::editor

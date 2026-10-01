@@ -304,7 +304,7 @@ static int test_on_a_menu() {
 			find_definition(AssetGraph(), document, "FLAT", flat));
 	NoFiles files;
 	MenuScreenRender render;
-	auto compile = [&] { return render.configure(document, screen, files, {}) == MenuPreviewStatus::Ready; };
+	auto compile = [&] { return render.configure(document, screen, files, {}) == MenuScreenStatus::Ready; };
 	TEST_EXPECT(compile());
 
 	// The draw order: where A and B overlap, the later sibling B is the one the hit walk
