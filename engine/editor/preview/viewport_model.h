@@ -209,20 +209,21 @@ public:
 	// How many times its device was told to make its picture again (an edit that changes only what
 	// the overlays show is not one).
 	uint64_t builds() const { return builds_; }
-	// A picture made again waits for the gesture open in its document to end (S13 V8): the device
-	// keeps the last picture meanwhile, while what the viewport shows (its compile, its overlays)
-	// follows the live rows.
+	// A picture made again waits for the gesture open in its document to end (S13 V8, a kind whose
+	// row holds for a gesture: the model's scene): the device keeps the picture it holds meanwhile,
+	// while what the viewport shows (its overlays) follows the live rows.
 	bool held() const { return held_; }
 
 	// --- the session's (Viewports) ------------------------------------------------------------------
 
 	// Follow `input`: what it shows now, and the action its device takes next, merged into the one
 	// its device has not taken yet (Rebuild over Update, a Clear that drops a picture the device
-	// holds; a Clear of nothing is nothing). A Rebuild due while a gesture is open in its document
-	// (the view's documents.gesture) is held, and issued at the first follow after that gesture ends
-	// (another gesture begun since included); an Update applies meanwhile (the state applied again
-	// over the picture that stands: cheap), as does a Clear, which drops what is held. The action
-	// pending.
+	// holds; a Clear of nothing is nothing). Where its kind's row holds for a gesture
+	// (ViewportKindRow::holds_for_gesture), a Rebuild due while a gesture is open in its document
+	// (the view's documents.gestures) over a picture the device holds is held, and issued at the
+	// first follow after that gesture ends (another gesture begun since included); an Update applies
+	// meanwhile (the state applied again over the picture that stands: cheap), as does a Clear, which
+	// drops what is held, and a device holding no picture makes it at once. The action pending.
 	ViewportAction follow(const ViewportInput &input, PreviewClock &clock);
 	// What changed in its document as its last follow read it.
 	ChangeClass followed_change() const { return followed_change_; }

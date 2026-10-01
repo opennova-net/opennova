@@ -78,9 +78,13 @@ void MenuViewportApplier::step(const opennova::editor::ViewportModel &, const op
 	}
 }
 
-void MenuViewportApplier::tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) {
-	const uint32_t time = opennova::editor::menu_frame_time(clock);
-	if (frame_->is_configured() && frame_->native_state().time_ms != time) frame_->set_time_ms(time);
+void MenuViewportApplier::tick(const opennova::editor::ViewportModel &model,
+		const opennova::editor::PreviewClock &clock) {
+	if (!frame_->is_configured()) return;
+	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
+	uint32_t time = 0;
+	if (opennova::editor::menu_frame_clock(menu, frame_->native_state().time_ms, clock, time))
+		frame_->set_time_ms(time);
 }
 
 void MenuViewportApplier::resize(int width, int height) {

@@ -147,10 +147,10 @@ void ViewportModel::shown_none() {
 
 ViewportAction ViewportModel::follow(const ViewportInput &input, PreviewClock &clock) {
 	followed_change_ = input.change;
-	const OpenGesture &gesture = input.view.documents.gesture;
-	const bool gesture_here = gesture.in(path_);
+	// The gesture open in its document, where its kind's picture made again waits for one.
+	const OpenGesture *gesture = row().holds_for_gesture ? input.view.documents.gesture_in(path_) : nullptr;
 	// A Rebuild held for a gesture that ended since (or gave way to another) is due now.
-	if (held_ && (!gesture_here || gesture.token != held_for_)) {
+	if (held_ && (!gesture || gesture->token != held_for_)) {
 		held_ = false;
 		pending_ = ViewportAction::Rebuild;
 	}
@@ -160,11 +160,12 @@ ViewportAction ViewportModel::follow(const ViewportInput &input, PreviewClock &c
 		if (pending_ == ViewportAction::Keep) pending_ = ViewportAction::Update;
 		break;
 	case ViewportAction::Rebuild:
-		// The device keeps its last picture while a gesture is open in the document: the picture is
-		// made again at the gesture's end (one already pending makes the state as it is now).
-		if (gesture_here && pending_ != ViewportAction::Rebuild) {
+		// The device keeps the picture it holds while a gesture is open in the document: it is made
+		// again at the gesture's end. A device holding none (never made, or cleared), or with a Rebuild
+		// or a Clear to take, makes it now.
+		if (gesture && holds_ && (pending_ == ViewportAction::Keep || pending_ == ViewportAction::Update)) {
 			held_ = true;
-			held_for_ = gesture.token;
+			held_for_ = gesture->token;
 		} else {
 			pending_ = ViewportAction::Rebuild;
 		}

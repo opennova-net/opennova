@@ -88,20 +88,34 @@ NodeAddress shown_window(const MenuCanvasFrame &frame, NodeId id) {
 	return shown ? window : NodeAddress();
 }
 
-// Whether what changed in the menu (S13 V8) reaches the picture of the screen `row`: the screen's own
-// row changed (its fields, a window of it, what they hold) or went, or the file-wide state did (the
-// encoding the game reads the text in). A screen added, moved or changed elsewhere does not: the game
-// compiles each screen by itself.
-bool feeds_screen(const ChangeSet &changes, NodeId row) {
+// Whether what changed in the menu (S13 V8) reaches the picture of the screen `row`. The compile reads
+// more than the screen: the frame notes the first load of every texture across the whole menu before
+// it compiles one screen, and that first load fixes the band every later user of the texture draws
+// (an IMAGE row's HEIGHT, the cache keyed by the name and FLAGS alone: menu-re.md "The IMAGE pass",
+// MenuFrameCompiler::note_texture_loads), so a screen before the shown one in the file feeds its
+// picture. It reaches it: the file-wide state (the encoding the game reads the text in); the screens
+// reordered or one removed (where it stood is gone with it); the shown screen's own row changed or a
+// row before it added or changed. A screen added or changed after it does not: no first load there is
+// one the shown screen's textures take.
+bool feeds_screen(const ChangeSet &changes, const MnuDocument &document, NodeId row) {
 	const auto *rows = std::get_if<RowChanges>(&changes);
-	return !rows || rows->file_state || rows->was_changed(row) || rows->was_removed(row);
+	if (!rows || rows->file_state || rows->reordered || !rows->removed.empty()) return true;
+	for (const auto &screen : document.rows()) {
+		if (rows->was_changed(screen->id) || rows->was_added(screen->id)) return true;
+		if (screen->id == row) return false;
+	}
+	return true; // the screen is not the menu's: its picture goes
 }
 
-// The text of one screen as the menu's writer writes it.
-std::string screen_text(const mnu::Screen &screen) {
-	mnu::Document alone;
-	alone.screens.push_back(screen);
-	return mnu::serialize(alone);
+// The text of the screens up to `last` (the one a picture shows) as the menu's writer writes them:
+// every screen whose first loads the picture's compile took.
+std::string screens_text(const mnu::Document &image, const mnu::Screen *last) {
+	mnu::Document upto;
+	for (const mnu::Screen &screen : image.screens) {
+		upto.screens.push_back(screen);
+		if (&screen == last) break;
+	}
+	return mnu::serialize(upto);
 }
 
 } // namespace
@@ -162,6 +176,17 @@ void apply_menu_options(const MenuViewportOptions &options, int forced_index,
 
 uint32_t menu_frame_time(const PreviewClock &clock) {
 	return clock.ms();
+}
+
+bool menu_frame_clock(const MenuViewport &menu, uint32_t frame_ms, const PreviewClock &clock,
+		uint32_t &time) {
+	const int index = menu.forced_index();
+	const menu::MenuFrameCompiler &compiler = menu.render().compiler();
+	if (!menu.options().focused || index < 0 || index >= compiler.widget_count()) return false;
+	const int type = compiler.widget_kind(index);
+	if (type != int(mnu::WindowType::Edit) && type != int(mnu::WindowType::MultilineEdit)) return false;
+	time = menu_frame_time(clock);
+	return menu::menu_caret_shown(time) != menu::menu_caret_shown(frame_ms);
 }
 
 mnu::WindowType menu_window_type(const MnuDocument &document, const NodeAddress &window) {
@@ -325,10 +350,11 @@ bool MenuViewport::moves_(const ViewportInput &input, const MnuDocument &documen
 	case ChangeClass::Loaded: return true;
 	case ChangeClass::Changed: break;
 	}
-	if (reason_ != MenuScreenStatus::Ready || !input.changes || feeds_screen(*input.changes, row)) return true;
-	// A change elsewhere that leaves the menu unwritable reaches every screen. The text is the one
-	// the menu's validation reads too, made once per state.
-	return !document.saved_serialization().ok();
+	if (reason_ != MenuScreenStatus::Ready || !input.changes || feeds_screen(*input.changes, document, row))
+		return true;
+	// A change after it that leaves the menu without an image the game would read (unwritable, or not
+	// read back) reaches every screen: the image a configure compiles, made once per state.
+	return !document.saved_image();
 }
 
 bool MenuViewport::styles_alone_(const FileSource &files) {
@@ -336,10 +362,10 @@ bool MenuViewport::styles_alone_(const FileSource &files) {
 	style_.dependencies(sheets);
 	std::vector<std::string> names;
 	for (const menu::MenuDependency &sheet : sheets) names.push_back(sheet.name);
-	if (picture_.files().moved_but(files, names) || !render_.screen()) return false;
+	if (picture_.files().moved_but(files, names) || !render_.image() || !render_.screen()) return false;
 	const std::map<std::string, std::string> vars = style_.vars(files);
 	if (!screen_variables_made_) {
-		screen_variables_ = menu_variables_named(screen_text(*render_.screen()));
+		screen_variables_ = menu_variables_named(screens_text(*render_.image(), render_.screen()));
 		screen_variables_made_ = true;
 	}
 	for (const std::string &name : changed_menu_variables(style_vars_, vars))

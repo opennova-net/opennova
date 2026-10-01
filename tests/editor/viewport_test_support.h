@@ -29,12 +29,16 @@ using opennova::editor::ViewportAction;
 // (and whether that was a size of the canvas's own), else its viewport's state's. A menu's reports
 // where its picture placed each widget: where the viewport's own compile did (the Shell's MenuFrame
 // draws the same screen alike). It reads `reads` through the project's files as it makes its
-// picture, as a model's device reads its textures, and reports them. Each tick notes the preview
-// clock's milliseconds it was ticked at (what a menu's frame sets its clock to, menu_frame_time).
+// picture, as a model's device reads its textures, and reports them. A menu's keeps its frame's
+// clock as the Shell's applier does (MenuViewportApplier::tick): 0 at each configure (a Rebuild),
+// set at a tick only where menu_frame_clock says the frame draws otherwise; the times it set, in
+// order, and the ticks it had.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
-	std::vector<uint32_t> ticked;
+	uint32_t frame_ms = 0;
+	std::vector<uint32_t> clock_sets;
+	size_t ticks = 0;
 	int draws = 0;
 	int width = 0;
 	int height = 0;
@@ -51,6 +55,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &,
 			opennova::editor::ViewportDeviceReport &report) override {
 		taken.push_back(action);
+		if (action == ViewportAction::Rebuild) frame_ms = 0;
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && canvas_sized;
@@ -75,8 +80,16 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 			placed.bottom = rect.bottom;
 		}
 	}
-	void tick(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &clock) override {
-		ticked.push_back(clock.ms());
+	void tick(const opennova::editor::ViewportModel &model,
+			const opennova::editor::PreviewClock &clock) override {
+		++ticks;
+		const auto *menu = dynamic_cast<const opennova::editor::MenuViewport *>(&model);
+		uint32_t time = 0;
+		if (!menu || menu->status() != opennova::editor::ViewportStatus::Ready ||
+				!opennova::editor::menu_frame_clock(*menu, frame_ms, clock, time))
+			return;
+		frame_ms = time;
+		clock_sets.push_back(time);
 	}
 	// The last action it took (Keep before any).
 	ViewportAction last() const { return taken.empty() ? ViewportAction::Keep : taken.back(); }

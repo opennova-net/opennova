@@ -12,7 +12,8 @@ extends GutTest
 ## several selected windows move, align and change their drawing order in one undo step
 ## each (S9k2). A TABLE draws through the device (its rows' cells, a SUBST image, a clip rect)
 ## where the viewport's own compile places it; a device given up (its menu closed) retires its
-## SubViewport, freed at the next frame, and the menu opened again gets a device of its own.
+## SubViewport, freed at the next frame, and the menu opened again gets a device of its own. A
+## focused edit box's caret blinks on the preview clock through the device's own frame (S13 V8).
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -74,6 +75,15 @@ const TABLE_MENU := ("<SCREEN>\n\t<NAME>TBL</NAME>\n\t<WINDOW type=\"window\" na
 		+ "\t\t\t</COLUMN>\n"
 		+ "\t\t\t<ITEMS><APPEARANCE type=\"color\" state=\"selected\">FF336699</APPEARANCE></ITEMS>\n"
 		+ "\t\t\t<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>\n"
+		+ "\t\t</WINDOW>\n\t</WINDOW>\n</SCREEN>\n")
+
+
+## A screen with an edit box in the stylesheet's large font (its caret blinks while it is focused).
+const CARET_MENU := ("<SCREEN>\n\t<NAME>CARET</NAME>\n\t<WINDOW type=\"window\" name=\"ROOT\">\n"
+		+ "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\n"
+		+ "\t\t<FONT><NAME>%DEF_FONTNAME_LG%</NAME><DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG></FONT>\n"
+		+ "\t\t<WINDOW type=\"edit\" name=\"NAME_BOX\">\n"
+		+ "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>140</BOTTOM></POSITION>\n"
 		+ "\t\t</WINDOW>\n\t</WINDOW>\n</SCREEN>\n")
 
 
@@ -463,3 +473,39 @@ func test_several_windows_move_and_arrange_in_one_step() -> void:
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
 	assert_eq(String(_preview().get("reason", "")), "no_project")
+
+
+## S13 V8: a focused edit box's caret on the preview clock, through the device's own frame (the
+## Shell's MenuViewportApplier and its tick): the clock paused in the blink's hidden half, the frame
+## draws no caret; sought into the shown half, the next frame's tick sets the frame's clock and it
+## draws the caret (a glyph more); sought into the next hidden half, it is gone again.
+func test_the_caret_blinks_on_the_preview_clock() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor preview caret %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Caret Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("caret.mnu"), CARET_MENU.to_utf8_buffer())
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("caret.mnu"))
+	var box: int = _seam.find_record("NAME_BOX")
+	assert_gt(box, 0)
+	assert_true(_app.set_menu_preview_options({"force_id": box, "focus": true,
+			"clock": {"playing": false, "time_ms": 256}}))
+	assert_eq(String(_preview().get("status", "")), "ready", str(_preview()))
+	var frame: Object = _app.get_menu_preview_frame()
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	await get_tree().process_frame
+	var hidden: int = frame.get_draw_list_stats().glyphs
+	assert_true(_app.set_menu_preview_options({"clock": {"time_ms": 768}}))
+	await get_tree().process_frame
+	var shown: int = frame.get_draw_list_stats().glyphs
+	assert_gt(shown, hidden, "the caret drawn in the blink's shown half")
+	assert_true(_app.set_menu_preview_options({"clock": {"time_ms": 1280}}))
+	await get_tree().process_frame
+	assert_eq(frame.get_draw_list_stats().glyphs, hidden, "and gone in the next hidden half")

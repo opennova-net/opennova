@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <variant>
 
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/animation_document.h>
@@ -33,20 +34,18 @@ JsonValue vec3(const PreviewVec3 &v) {
 	return out;
 }
 
-// Whether two models draw the same, their user points aside: each written without them (a user
-// point's edit shows in the overlays alone, so it builds nothing), the bytes compared; false when
-// either does not write. Asked only where the document cannot say what changed (ChangeClass::Unknown,
-// S13 V8): a change set says it without writing anything.
-bool draws_alike(const threedi::Threedi3di3 &a, const threedi::Threedi3di3 &b) {
-	std::vector<uint8_t> written[2];
-	const threedi::Threedi3di3 *models[2] = { &a, &b };
-	for (int i = 0; i < 2; ++i) {
-		threedi::Threedi3di3 drawn = *models[i];
-		drawn.user_points = nullptr;
-		drawn.user_point_count = 0;
-		if (threedi::threedi_3di3_write_memory(&drawn, written[i]) != 0) return false;
-	}
-	return written[0] == written[1];
+// The hash of a model as it draws, its user points aside: its bytes written without them (a user
+// point's edit shows in the overlays alone, so it builds nothing); false when it does not write.
+// Taken only where the document cannot say what changed (ChangeClass::Unknown, S13 V8): a change set
+// says it without writing anything.
+bool drawn_hash(const threedi::Threedi3di3 &model, uint64_t &out) {
+	threedi::Threedi3di3 drawn = model;
+	drawn.user_points = nullptr;
+	drawn.user_point_count = 0;
+	std::vector<uint8_t> written;
+	if (threedi::threedi_3di3_write_memory(&drawn, written) != 0) return false;
+	out = io::fnv1a64_bytes(io::kFnv1a64Offset, written.data(), written.size());
+	return true;
 }
 
 // The model row of a model document, as the document holds it (null: none).
@@ -387,6 +386,7 @@ ViewportAction ModelViewport::stop_(ModelViewStatus reason, const std::string &d
 	model_.reset();
 	read_.reset();
 	read_row_.reset();
+	drawn_hashed_ = false;
 	scene_ = false;
 	shown_none();
 	return failed ? picture_.failed() : picture_.stop();
@@ -435,13 +435,10 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	const bool overlays = input.change == ChangeClass::Changed && overlays_alone_(input, document);
 	switch (picture_.follow(key, input.change != ChangeClass::None && !overlays, files, generation)) {
 	case PreviewFollow::Found::Same: {
-		if (overlays) {
-			patch_user_points_(document);
-			shown(document);
-			options_moved_ = false;
-			return ViewportAction::Update;
-		}
-		if (!options_moved_ || picture_.is_failed()) return ViewportAction::Keep;
+		// A change set naming nothing patches nothing: Keep, as for no change.
+		const bool patched = overlays && patch_user_points_(document);
+		if (overlays) shown(document);
+		if (!patched && (!options_moved_ || picture_.is_failed())) return ViewportAction::Keep;
 		options_moved_ = false;
 		return ViewportAction::Update;
 	}
@@ -465,12 +462,17 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 			assets::parse_model(reinterpret_cast<const uint8_t *>(written.text.data()), written.text.size());
 	if (!model) return stop_(ModelViewStatus::Unreadable, std::string(), true);
 	// A change set that reached here names something the scene draws; what the document cannot say
-	// builds again only when the drawn model moved, the user points aside.
-	const bool rebuild = !scene_ || !model_ || textures || input.change != ChangeClass::Unknown ||
-			!draws_alike(*model, *model_);
+	// builds again only when the drawn model moved, the user points aside: the model read now written
+	// once, its hash against the held model's.
+	uint64_t drawn = 0;
+	const bool hashed = input.change == ChangeClass::Unknown && drawn_hash(*model, drawn);
+	const bool rebuild =
+			!hashed || !scene_ || !model_ || textures || !held_drawn_hash_() || drawn != drawn_hash_;
 	read_ = model;
 	model_ = std::move(model);
 	read_row_ = model_row_of(document);
+	drawn_hash_ = drawn;
+	drawn_hashed_ = hashed;
 	reason_ = ModelViewStatus::Ready;
 	detail_.clear();
 	shown(document);
@@ -497,12 +499,18 @@ bool ModelViewport::overlays_alone_(const ViewportInput &input, const ModelDocum
 			alike_but_user_points(static_cast<const ModelRow &>(*read_row_), static_cast<const ModelRow &>(*now));
 }
 
-void ModelViewport::patch_user_points_(const ModelDocument &document) {
+bool ModelViewport::patch_user_points_(const ModelDocument &document) {
 	const std::shared_ptr<const Node> now = model_row_of(document);
-	if (!now || now == read_row_) return;
+	if (!now || now == read_row_) return false;
 	read_row_ = now;
 	model_ = with_user_points(read_, static_cast<const ModelRow &>(*now).user_points);
 	++patches_;
+	return true;
+}
+
+bool ModelViewport::held_drawn_hash_() {
+	if (!drawn_hashed_ && read_) drawn_hashed_ = drawn_hash(*read_, drawn_hash_);
+	return drawn_hashed_;
 }
 
 // A clip or a table plays on its rig's model (as the project's files hold it): the model is read
@@ -516,6 +524,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 		model_.reset();
 		read_.reset();
 		read_row_.reset();
+		drawn_hashed_ = false;
 		scene_ = false;
 		picture_.stop();
 	}

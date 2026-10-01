@@ -29,7 +29,7 @@ struct SessionView;
 // Add, a batch over any rows, a Revert to saved), Copy, Cut, Paste and Duplicate by one position
 // rule (position_after), and the edit groups (a coalesced burst of typing, a gesture) with the
 // validation a gesture's edits wait on. It keeps the view's documents, active document, selection,
-// clipboard and open gesture (S13 V8), and moves DocumentSet when which documents are open, or which
+// clipboard and open gestures (S13 V8), and moves DocumentSet when which documents are open, or which
 // of them have unsaved edits, changes (S13 D1).
 class DocumentSet {
 public:
@@ -106,9 +106,20 @@ public:
 	// a gesture's edits left waiting is due.
 	void end_edit_groups();
 	// True while a gesture's edits wait for it to end (their validation with them, and a viewport's
-	// picture of its document made again: the view's documents.gesture, S13 V8): the poll steps no
+	// picture of its document made again: the view's documents.gestures, S13 V8): the poll steps no
 	// validation meanwhile.
 	bool gesture_open() const;
+	// The gestures (S13 V8), one open per document at most. A request on a document (its row names
+	// one: its path, else the active document) ends the gesture open in it unless the request is a
+	// batch of that gesture (an EditRecord whose edits carry its token): the request table's rule,
+	// serve_request. A gesture no batch of which came for the deadline (kGestureDeadlineMs; a test's
+	// shorter) ends at the next poll: a client that stopped mid-drag holds no validation for good.
+	// Each end ends its document's edit group, so a later batch of its token is a step of its own,
+	// and leaves the validation due.
+	void end_gesture_for(const EditorRequest &request);
+	void expire_gestures(int64_t now_ms);
+	void set_gesture_deadline(int64_t ms) { gesture_deadline_ms_ = ms; }
+	static constexpr int64_t kGestureDeadlineMs = 10000;
 
 	// The unsaved-changes prompt's Discard: the document at `path` dropped unsaved (a Close or a
 	// Reload waited on it), or every document (a project switch, Quit).
@@ -140,13 +151,12 @@ private:
 	void rewrite_file(const std::string &path);
 	// The open document at exactly `path` (activate's), or null.
 	const DocumentBase *open_at(const std::string &path) const;
-	// A batch of the gesture `token` changed the document at `path`: the gesture is the view's open
-	// one (another open before it ends first). The open gesture ends: the validation its edits left
-	// waiting is due (`validate`), the view's gesture none.
+	// A batch of the gesture `token` came for the document at `path`: the gesture open there (made
+	// when the batch changed the document, its last batch's time moved).
 	void open_gesture(const std::string &path, uint64_t token);
-	void end_gesture(bool validate);
-	// The document at `path` closed or was discarded: a gesture open in it goes with it.
-	void drop_gesture_of(const std::string &path);
+	// The gesture open in the document at `path` ends (its edit group too, while it is open), the
+	// validation its edits left waiting due; nothing when none is open there.
+	void end_gesture_in(const std::string &path);
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -164,6 +174,7 @@ private:
 	// the document closes.
 	std::map<std::string, Diagnostic> stale_;
 	std::set<std::string> conflicts_;
+	int64_t gesture_deadline_ms_ = kGestureDeadlineMs;
 	bool last_edit_ok_ = false;
 };
 

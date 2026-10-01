@@ -112,7 +112,9 @@ bool busy_refuses_answer(
 		EditorRequestKind waiting, UnsavedChoice choice, const OperationStatus &running);
 
 // The request served by its row: false for a shell row (the shell serves it); else, in this order,
-// every edit group ended where the row says so (Build, Play), the busy gate (refused, or joined to
+// every edit group ended where the row says so (Build, Play), or for a row naming a document the
+// gesture open in that document ended unless the request is that gesture's batch (S13 V8,
+// DocumentSet::end_gesture_for), the busy gate (refused, or joined to
 // the running operation: served), the validation an edit left due where the row reads the graph
 // first, the unsaved-changes prompt (the request held: served), then the row's handler. The facade
 // serves a request from outside through it (ProjectSession::handle), and the prompt's answer what

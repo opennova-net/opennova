@@ -30,7 +30,7 @@ void MenuFrameCompiler::emit_multiline_edit(const WidgetNode &node,
 		text.assign(text.size(), '*');
 	}
 	const bool focused = ws != nullptr && ws->focused && !w.readonly;
-	const bool blink_on = (frame.time_ms & 0x3FFu) > 0x200u;
+	const bool blink_on = menu_caret_shown(frame.time_ms);
 	int caret = -1;
 	if (focused && blink_on && ws != nullptr) {
 		caret = std::clamp(ws->caret, 0,

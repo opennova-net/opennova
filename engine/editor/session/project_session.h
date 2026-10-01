@@ -86,14 +86,18 @@ public:
 	// rename's close and reload, the unsaved prompt's answer) never enter it.
 	uint64_t handle_entries() const;
 
-	// Once per frame, within one budget: the validation left due, stepped a file at a time first,
-	// the running operation's steps within what is left (at least one), the child's state and the
-	// game's log tail, then the operation that is done finished (a project opens, a build lands,
-	// and the Play waiting on it starts).
+	// Once per frame, within one budget: the gestures no batch came for in the gesture deadline ended
+	// (S13 V8), the validation left due, stepped a file at a time, the running operation's steps
+	// within what is left (at least one), the child's state and the game's log tail, then the
+	// operation that is done finished (a project opens, a build lands, and the Play waiting on it
+	// starts).
 	void poll();
 	// How much a poll steps (kDefaultPollBudget; a test's ms 0 is one step of the validation and one
 	// of the running operation per poll).
 	void set_poll_budget(const PollBudget &budget);
+	// How long a gesture stays open with no batch of it (DocumentSet::kGestureDeadlineMs; a test's
+	// 0 ends every open gesture at the next poll).
+	void set_gesture_deadline(int64_t ms);
 	// The running operation, and those its finish starts, run to their end and finished, then the
 	// validation they left due run to its end (a test, a command line).
 	void run_operations();

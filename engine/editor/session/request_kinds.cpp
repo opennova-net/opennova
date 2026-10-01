@@ -443,7 +443,8 @@ constexpr RequestKindRow kRows[] = {
 			.names_active()
 			.row,
 	Request(K::EndEdit, "end_edit", serve_end_edit,
-			"The coalesced edit group, or the gesture, of the document at path ends.")
+			"The coalesced edit group, or the gesture, of the document at path (left out, the active "
+			"document) ends; a gesture open in another document stays open.")
 			.takes(request_params({}, { F::Path }))
 			.names_active()
 			.row,
@@ -814,9 +815,13 @@ bool serve_request(SessionCore &core, const EditorRequest &request) {
 	if (!row.handler)
 		return false;
 	// Build and Play pack the files as saved: every edit group ends first, as EndEdit ends one, so
-	// a keystroke after them is a step of its own.
+	// a keystroke after them is a step of its own. A request on a document a gesture is open in, but
+	// a batch of that gesture, ends the gesture first (S13 V8: its EndEdit, an Undo, a Save, a select
+	// or another edit of the document).
 	if (row.ends_edit_groups)
 		core.documents().end_edit_groups();
+	else if (row.names_active)
+		core.documents().end_gesture_for(request);
 	if (gate_busy(core, request))
 		return true;
 	if (core.guard().holds(request))

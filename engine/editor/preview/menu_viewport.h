@@ -17,6 +17,7 @@
 
 namespace opennova::editor {
 
+class MenuViewport;
 class MnuDocument;
 struct MenuCanvasFrame;
 
@@ -56,14 +57,22 @@ bool menu_force_state_from_token(const std::string &token, int &out);
 void apply_menu_options(const MenuViewportOptions &options, int forced_index,
 		const menu::MenuFrameCompiler &compiler, menu::MenuFrameState &state);
 
-// A menu's animations on the preview clock (ADR 0046 S13 V8; CONTEXT.md "Preview clock"): the
-// frame's clock (MenuFrameState::time_ms, the game's menu clock, a millisecond one) is the preview
-// clock's milliseconds, so what animates in a menu plays, pauses, runs at the clock's rate and seeks
-// with it: an edit's caret blinks as the frame compiler draws it (shown while the clock's
-// (milliseconds & 0x3FF) are past 0x200) and a marquee's credits roll a step on each frame drawn
-// whose clock moved. The device sets it on its frame as the clock moves (its tick) and the frame is
-// drawn again, never configured again.
+// A menu's clock on the preview clock (ADR 0046 S13 V8; CONTEXT.md "Preview clock"): the frame's
+// clock (MenuFrameState::time_ms, which the game reads from GetTickCount) is the preview clock's
+// milliseconds. What reads it in a preview is a focused edit box's caret, drawn while
+// (milliseconds & 0x3FF) > 0x200 [orig: CEditWnd_Render @ 0x661c63] (menu-re.md, the edit's caret and
+// the multiline edit's): it blinks as the clock plays, stands while it is paused and seeks with it. A
+// marquee rolls a step a frame drawn, not by the clock, and only over the credits its embedder loads,
+// which no preview does (D-MNU-6).
 uint32_t menu_frame_time(const PreviewClock &clock);
+// Whether a device's frame drawn at `frame_ms` (its MenuFrameState::time_ms) draws otherwise at the
+// preview clock's time, and that time (S13 V8): only while a focused edit box of the shown screen
+// reads the clock (the options' focus on the window they hold, an edit box) and the caret's half of
+// the blink at the one differs from the other's. So the device draws its frame again twice a blink,
+// never once a frame as the clock plays, and never with no focused edit box; a frame configured anew
+// (its time the configure's) takes the clock's time at its first tick that would show otherwise.
+bool menu_frame_clock(const MenuViewport &menu, uint32_t frame_ms, const PreviewClock &clock,
+		uint32_t &time);
 
 // A window's TYPE as the factory matches it (the generic window for none), and what the options
 // can hold it in by its type: checked (a check box, a radio button), its list open (a combo box),
@@ -82,13 +91,16 @@ bool menu_type_editable(mnu::WindowType type);
 // handles and its drags read, and its compiler's notes, made once per configure; the Shell's device
 // configures the same image with the runtime's MenuFrame and Godot's decoders, and reports where it
 // placed each widget. It configures again only when what feeds its screen moved (S13 V8): its screen
-// or its options, the screen's own row as the menu's change set names it (the screen's fields, a
-// window of it and what they hold), the menu's file-wide state, a file the compile read (the string
-// tables, the fonts, the textures) moving its stamp, or a stylesheet's moving where a variable the
-// screen names came, went or took another value; an edit of another screen, or a stylesheet
-// variable the screen does not name, leaves the picture as it is (Keep). A menu the game could not
-// read keeps its reason until it changes (no retry every frame). Its held window follows the
-// selection: a window of the screen newly selected is the one held, what its type cannot hold let go.
+// or its options; of the menu's change set, the screen's own row (its fields, a window of it and what
+// they hold) or a screen before it in the file (the first load of a texture, which any screen may
+// make, fixes the band every later user of it draws: menu-re.md "The IMAGE pass"), the screens
+// reordered or one removed, the file-wide state; a file the compile read (the string tables, the
+// fonts, the textures) moving its stamp; or a stylesheet's moving where a variable the text of the
+// screens up to it names came, went or took another value. An edit of a screen after it, or a
+// stylesheet variable only later screens name, leaves the picture as it is (Keep). A menu the game
+// could not read keeps its reason until it changes (no retry every frame). Its held window follows
+// the selection: a window of the screen newly selected is the one held, what its type cannot hold let
+// go.
 class MenuViewport final : public ViewportModel {
 public:
 	explicit MenuViewport(std::string path);
@@ -153,12 +165,13 @@ private:
 	void follow_selection_(const ViewportInput &input, const MnuDocument &document);
 	// Whether what changed in the document since the last follow reaches the picture of the screen
 	// `row` (S13 V8): everything the document cannot say, any change while the picture failed (it is
-	// tried again once the document changes), and of a change set what feeds the screen or leaves the
-	// menu unwritable (the game would read none of its screens).
+	// tried again once the document changes), and of a change set what feeds the screen (the screen,
+	// the screens before it, their order) or leaves the menu with no image the game would read (none
+	// of its screens).
 	bool moves_(const ViewportInput &input, const MnuDocument &document, NodeId row) const;
 	// Whether what moved of the files the picture read is the shell's stylesheets alone, with no
-	// variable the screen names come, gone or of another value (S13 V8): the picture stands, the
-	// variables read again kept for the device's next configure.
+	// variable the screens up to the shown one name come, gone or of another value (S13 V8): the
+	// picture stands, the variables read again kept for the device's next configure.
 	bool styles_alone_(const FileSource &files);
 	// The picture stands for the document as it is now (Keep).
 	ViewportAction kept_(const MnuDocument &document);
@@ -174,8 +187,9 @@ private:
 	MenuScreenRender render_;
 	menu::MenuStyleSource style_;
 	std::map<std::string, std::string> style_vars_;
-	// The variables the shown screen's text names (menu_variables_named of the screen as the menu's
-	// writer writes it), sorted: made when a stylesheet first moves after a configure.
+	// The variables the text of the screens up to the shown one names (menu_variables_named of them as
+	// the menu's writer writes them: a screen before it makes first loads its textures take), sorted:
+	// made when a stylesheet first moves after a configure.
 	std::vector<std::string> screen_variables_;
 	bool screen_variables_made_ = false;
 	std::vector<menu::MenuFrameNote> notes_;

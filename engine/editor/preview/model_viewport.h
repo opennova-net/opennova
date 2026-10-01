@@ -180,11 +180,16 @@ private:
 	ViewportAction follow_model_(const ViewportInput &input, const ModelDocument &document);
 	// Whether what changed since the last follow is the overlays' alone (S13 V8): a change set
 	// naming the model row alone, whose version now is alike but for its user points to the one the
-	// held model holds.
+	// held model holds, or naming nothing.
 	bool overlays_alone_(const ViewportInput &input, const ModelDocument &document) const;
 	// The held model with the document's user points: what was read, everything but its user
-	// points, which are the model row's as it is now.
-	void patch_user_points_(const ModelDocument &document);
+	// points, which are the model row's as it is now. False, nothing patched, when the held model
+	// holds that version of the row already (a change set that names nothing).
+	bool patch_user_points_(const ModelDocument &document);
+	// The hash of the held model as drawn (written without its user points), taken once and kept with
+	// it: what a model read for a change the document cannot say (ChangeClass::Unknown) is compared
+	// with, written once itself. False when the held model does not write.
+	bool held_drawn_hash_();
 	ViewportAction follow_animation_(const ViewportInput &input, const Document &document,
 			PreviewClock &clock);
 	void reset_animation_();
@@ -203,6 +208,9 @@ private:
 	assets::Model model_; // what the device draws and the overlays mark: read_, or read_ patched
 	assets::Model read_; // the model as last read (a model document's written and read back)
 	std::shared_ptr<const Node> read_row_; // the model row's version model_ holds
+	// The hash of read_ written without its user points (drawn_hashed_: taken), held_drawn_hash_'s.
+	uint64_t drawn_hash_ = 0;
+	bool drawn_hashed_ = false;
 	std::string framed_; // the model the camera last framed
 	// The animation's.
 	bool animating_ = false;
