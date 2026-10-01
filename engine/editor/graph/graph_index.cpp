@@ -6,8 +6,11 @@
 
 namespace opennova::editor {
 
-std::string GraphIndex::key_of(ReferenceKind kind, const std::string &name) {
-	return std::string(reference_row(kind).token) + '\n' + name;
+std::string GraphIndex::key_of(ReferenceKind kind, const std::string &name, const std::string &scope) {
+	const ReferenceKindRow &row = reference_row(kind);
+	if (row.resolution == ReferenceResolution::Record)
+		return std::string(row.token) + '\n' + scope + '\n' + name;
+	return std::string(row.token) + '\n' + name;
 }
 
 uint32_t GraphIndex::find(const std::string &path) const {
@@ -100,7 +103,7 @@ void GraphIndex::erase_content(uint32_t id) {
 	GraphSlot &slot = slots_[id];
 	for (uint32_t i = 0; i < slot.symbols.size(); ++i) {
 		const GraphSymbol &symbol = slot.symbols[i];
-		erase_from(names_, key_of(symbol.kind, symbol.name), {id, i});
+		erase_from(names_, key_of(symbol.kind, symbol.name, symbol.scope), {id, i});
 	}
 	// A file's symbols of a kind lie together in the kind's list.
 	for (std::vector<Ref> &list : kinds_) {
@@ -116,7 +119,7 @@ void GraphIndex::erase_content(uint32_t id) {
 			erase_from(variables_, graph_names::style_variable(edge.value), ref);
 		if (i >= slot.resolutions.size() || !slot.resolutions[i].resolved) continue;
 		const EdgeResolution &resolution = slot.resolutions[i];
-		erase_from(targets_, key_of(edge.kind, edge.target), ref);
+		erase_from(targets_, key_of(edge.kind, edge.target, edge.scope), ref);
 		if (!resolution.file.empty()) erase_from(users_, resolution.file, ref);
 		if (resolution.missing) erase(missing_, ref);
 	}
@@ -136,7 +139,7 @@ void GraphIndex::insert_content(uint32_t id) {
 		const GraphSymbol &symbol = slot.symbols[i];
 		slot.symbols_at[symbol.locator].push_back(i);
 		slot.symbols_in[symbol.record].push_back(i);
-		insert(names_[key_of(symbol.kind, symbol.name)], {id, i});
+		insert(names_[key_of(symbol.kind, symbol.name, symbol.scope)], {id, i});
 		const size_t kind = static_cast<size_t>(symbol.kind);
 		if (kind < of_kind.size()) of_kind[kind].push_back({id, i});
 	}

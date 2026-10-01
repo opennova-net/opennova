@@ -46,6 +46,9 @@ struct ReferenceChoice {
 	ReferenceKind kind = ReferenceKind::None; // what it names: the reference's kind, or one it also offers
 	std::string file;   // the defining file, or the file itself (a base layer's by its name)
 	std::string record; // the defining record ("" for a file)
+	// What the picker shows beside the name and filters by too: a record set's record by its own
+	// name (a CTRL register's NAME), "" for the rest.
+	std::string label;
 	// The reference set to it, in its scope: Present, or Missing where the lookup would not
 	// reach it there (a string id of another section, a menu texture whose loader reads
 	// another file of the name).
@@ -164,20 +167,24 @@ public:
 	// The edges that resolve to a file (any kind that names it).
 	std::vector<const GraphEdge *> referrers_of_file(const std::string &file) const;
 	// The edges into a symbol of `kind` (indexed by kind and name): with `scope`, the symbol's
-	// own, only the edges whose scope reads it there (scope_matches).
+	// own, only the edges whose scope reads it there (scope_matches); a record of a file's record
+	// set by its index (a Record kind, S13 D8) in the file `scope` names, which only that file's
+	// edges name.
 	std::vector<const GraphEdge *> referrers_of(ReferenceKind kind, const std::string &name,
 	                                            const std::string &scope = std::string()) const;
 	// Who uses a file: the edges that resolve to it (referrers_of_file), then the edges into each
 	// symbol it defines that a lookup finds (a string table's ids, a catalog's names, a
 	// stylesheet's variables the game reads, a menu's screens and windows, a model's user points),
-	// each edge once.
+	// each edge once. A file's own records by index (its record sets) are no use of it: their users
+	// are its own edges.
 	std::vector<const GraphEdge *> usages_of(const std::string &file) const;
 	// The edges whose name reaches exactly this definition (resolve_symbol returns it: never a
 	// definition of the name in another scope, nor one no lookup finds, which has none).
 	std::vector<const GraphEdge *> users_of(const GraphSymbol &symbol) const;
 	// Find in the project: the files whose logical name, and the symbols whose name as defined,
 	// holds `text` (ASCII letters without case), files first (by name), then symbols in the order
-	// the files define them, each with its usage count. None for an empty text.
+	// the files define them, each with its usage count; a record set's records, named by an index
+	// and no name, are not searched. None for an empty text.
 	std::vector<GraphSearchHit> search(const std::string &text) const;
 	// The symbol a document's field defines, by its file, its record's locator and the field; null
 	// for none (a rename everywhere names its symbol so: the graph may have been rebuilt since).
@@ -204,8 +211,9 @@ public:
 	// The one definition a name of a symbol kind reaches, as the game's lookup finds it: a style
 	// variable's binding (style_binding), else the first symbol of the name, as the kind
 	// compares names, that `scope` matches (scope_matches: a string id in its table and
-	// section, a window on its screen) and a lookup finds, the project's before the base's; null
-	// for none, and for a file kind.
+	// section, a window on its screen) and a lookup finds, the project's before the base's; for a
+	// Record kind the record at that index of the file `scope` names (its record set: the project's
+	// file's own); null for none, and for a file kind.
 	const GraphSymbol *resolve_symbol(ReferenceKind kind, const std::string &name,
 	                                  const std::string &scope = std::string()) const;
 	// A menu-style %NAME% through the stylesheets the game reads: its value, or the input
@@ -227,7 +235,8 @@ public:
 	// game reads. In each of the two the project's names, then the base layer's the same way, the
 	// names offered before left out: a name the project defines only where no lookup finds it is
 	// the base's live definition when the base has one. A base layer's style variable is inert
-	// unless it is the binding.
+	// unless it is the binding. A Record kind's: the records of the file `scope` names that its
+	// collection holds, in their order, each by its index.
 	std::vector<ReferenceChoice> choices(ReferenceKind kind, const std::string &scope = std::string(),
 	                                     int32_t loader_arg = -1) const;
 
@@ -236,7 +245,8 @@ public:
 	// variable, a string id, a menu's sound bank or credits file, the screen or window an
 	// ACTION names; a file a menu names through a style variable is reported
 	// once, where the stylesheet names it, and never for a stylesheet value the game does
-	// not read), then a warning for each file of a native kind the graph
+	// not read; never a kind whose row has no missing message, a Record reference, which its
+	// file's own validation reports), then a warning for each file of a native kind the graph
 	// could not read ("graph.unreadable": its references are not checked; a document
 	// type's own validation reports a file of its kinds that does not load), by path. Both are
 	// kept as the update resolves the edges (each finding with its edge), never made again by a
@@ -252,8 +262,10 @@ public:
 	// path's file name).
 	bool has_file(const std::string &name) const;
 	// Every symbol of `kind` named `name` (compared as the kind compares names), inert ones
-	// too, in the order the files define them, the project's then the base's.
-	std::vector<const GraphSymbol *> symbols_named(ReferenceKind kind, const std::string &name) const;
+	// too, in the order the files define them, the project's then the base's; of a Record kind,
+	// the record at that index of the file `scope` names.
+	std::vector<const GraphSymbol *> symbols_named(ReferenceKind kind, const std::string &name,
+	                                               const std::string &scope = std::string()) const;
 
 private:
 	using Ref = GraphIndex::Ref;
@@ -373,7 +385,11 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 
 // What a document references and defines, through its schema: every field's reference as it
 // applies to its record (Document::field_on), and a symbol for every field field_on says
-// defines one, with what the type's lookup makes of it (Document::refine_symbol).
+// defines one, with what the type's lookup makes of it (Document::refine_symbol). And its record
+// sets (S13 D8): of each collection a Record reference names (Document::targeted_collections),
+// every record as a symbol of the Record kind named by its index in the file, in the file's order,
+// scoped to the file and defined by no field (what an index resolves to, lists its users and
+// offers the picker).
 void extract_from_document(const Document &document, Extracted &out);
 // What a file references and defines, from its bytes as stored (decoded as the game's
 // loader decodes them): a record type's through its document (Document::load_bytes), a

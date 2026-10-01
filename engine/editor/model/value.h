@@ -40,7 +40,8 @@ inline bool operator!=(const NodeAddress &a, const NodeAddress &b) { return !(a 
 
 enum class FieldType { Integer, Unsigned, Byte, Count, Real, Text };
 
-// What a field names outside its own record. A document type resolves each kind
+// What a field names outside its own record: a file, a name some file defines, or another record
+// of its own file by its index (a Record reference, S13 D8). A document type resolves each kind
 // against the project (reference_status, graph/reference_queries). What each kind is to the graph
 // (its token, words, where it resolves, how names compare, what a missing one means) is its row in
 // graph/reference_kinds: a new kind is one value here and one row there, UserPoint staying the
@@ -62,6 +63,8 @@ enum class ReferenceKind {
 	MenuWindow,  // a menu window by NAME, on the screen the scope names (an ACTION WINDOW's target)
 	Animation,   // a .bad clip by file name, its extension optional (an animation map row's variant)
 	MenuText,    // a menu's text as the game reads it: never a reference, what a style variable stands for
+	ModelRegister, // a model's CTRL register by its index in the model's table (a generator's, a track's, a light's)
+	ModelFrame,    // a model's rotation frame by its MTRX row (a part animation's)
 	UserPoint,   // a model's user point by name, on the model file the scope names (an item's particle slot)
 };
 

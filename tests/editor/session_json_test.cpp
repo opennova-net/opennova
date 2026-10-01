@@ -1614,12 +1614,12 @@ public:
 			tint.type = FieldType::Text;
 			tint.width = 32;
 			tint.color = FieldColor::HexArgb;
-			// Open, with nothing known on this record (a model with no registers): its own
-			// choices, none of them (record_choices).
+			// Open, with nothing known on this record (a part index on a model whose LOD 0 has no
+			// parts): its own choices, none of them (record_choices).
 			FieldSchema reg;
 			reg.id = "param";
 			reg.open_choices = true;
-			// The same field where the record names no register: a number, no list to open.
+			// The same field where the record names no part: a number, no list to open.
 			FieldSchema phase = reg;
 			phase.id = "phase";
 			return std::vector<FieldSchema>{reach, red, filter, tint, reg, phase};

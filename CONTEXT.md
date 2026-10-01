@@ -638,6 +638,18 @@ file finds it again by; its path is every name from the row down
 (`STARTUP/MAIN/EXIT`), which is what findings and graph edges show.
 _Avoid_: node (the core's type for a row), child (an identity field, not a relation)
 
+**Record reference / record set**:
+A field naming a record of its own file by its index among the file's records of one kind, in
+the file's order: a model's generator, track or light naming one of its CTRL registers, a part
+animation's frame byte naming a rotation frame (a mission's entity, waypoint or group index,
+later). Those records are the file's record set of that kind, each found by its index: the
+picker offers them by index and name, and each shows what names it (Referenced by). An edit that
+adds, removes or moves one of them changes, in the same undo step, every index that named a
+record it moved (an index past the set staying past it), and is refused while a field the game
+reads still names a record it removes. An index past the set is the file's own finding (what the
+game makes of it), never a missing reference.
+_Avoid_: id (an id stays with its record; an index is its place), link, pointer
+
 **Menu preview**:
 The Preview window's menu pane: the editor's render of the previewed screen (the last
 menu screen selected) through the runtime's own menu frame, reading the project's files

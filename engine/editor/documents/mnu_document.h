@@ -42,31 +42,18 @@ constexpr NodeKind node_kind(MenuKind kind) { return static_cast<NodeKind>(kind)
 // The kind of a list's records by its element path ("action", "items.item"); -1 when none.
 NodeKind menu_kind(const std::string &token);
 
+// A screen: its native screen, and the identities of its root windows and everything they hold
+// beside the native roots. Where a record sits (the root's index, then each list and index down to
+// it) is its path in the core's index of the row (Document::path_in, S13 D8), never the row's own.
 struct MenuScreen : Node {
 	mnu::Screen screen;
-	// The identities of the root windows and everything they hold, beside the native roots.
 	std::vector<RecordIds> roots;
 	MenuScreen();
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return screen.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
-	// The screen's windows, all they hold, their identities and their places.
+	// The screen's windows, all they hold and their identities.
 	size_t footprint() const override;
-
-	// Where each identity sits: the root's index, then each list and index down to it. Made
-	// when the row is (for_each_identity, which gives a new or duplicated row its identities)
-	// and again by every structural edit of a clone (index_places), before it commits; shared
-	// by a clone, and never made inside a const query (the thread confinement, model/document.h).
-	struct Step {
-		size_t list = 0; // SIZE_MAX: the screen's roots
-		size_t index = 0;
-	};
-	using Places = std::unordered_map<NodeId, std::vector<Step>>;
-	const Places &places() const;
-	void index_places();
-
-private:
-	std::shared_ptr<const Places> places_;
 };
 
 // A NAME retail's by-name lookups find a record by (docs/mnu/menu-re.md, "Names and the
@@ -158,7 +145,7 @@ protected:
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
-	// A record located inside `row` (the screen) by the row's own places.
+	// A record located inside `row` (the screen) by its path there (path_in).
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
 	// A field: whether the file writes it. "": whether the record itself is written (not
 	// inside an absent ITEMS or a part left out).

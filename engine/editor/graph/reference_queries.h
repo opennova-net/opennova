@@ -39,7 +39,8 @@ struct ReferenceTarget {
 // (record_name, without case: an animation table's slot, a clip's bone). The definitions are the
 // ones the graph read from the document when its slot is current for it (the same instance at the
 // same revision), each as the document's own lookup makes it (AssetGraph::for_each_definition),
-// else the document's own extraction.
+// else the document's own extraction; never a record of its record sets, which goes by its index
+// in its own file and no other file's name.
 bool find_definition(const AssetGraph &graph, const Document &document, const std::string &symbol,
 		NodeAddress &out, const std::string &scope = std::string());
 // Present / Missing / Unverified for a field's value (NotAReference when it names nothing);
@@ -48,14 +49,17 @@ ReferenceStatus reference_status(const AssetGraph &graph, const FieldUse &field,
                                  std::string *symbol = nullptr);
 // What the picker offers a field: the names of its kind in its scope (AssetGraph::choices),
 // then what the value may name instead (a menu's font or texture a stylesheet variable, ADR
-// 0005; an unchecked text a string id), each with what the field would reference, set to it.
+// 0005; an unchecked text a string id), each with what the field would reference, set to it. A
+// Record reference's (S13 D8): the records of its collection in its own file, each by its index,
+// those the field can hold and that name a record.
 std::vector<ReferenceChoice> reference_choices(const AssetGraph &graph, const FieldUse &field);
 // The finding the graph makes of a record's field whose value resolves to nothing
 // (AssetGraph::missing_finding), for the fixes Problems offers for it: of the variable itself
 // where a %NAME% the stylesheets the game reads do not define stands for a file (the graph
 // reports the variable, never a file of that name), else of the reference, a file named
 // through a variable by the name its value gives. False when the value resolves or names
-// nothing.
+// nothing, and for a kind the graph finds none of missing (a Record reference: its file's own
+// validation reports an index past its collection).
 bool missing_finding(const AssetGraph &graph, const Document &document, const NodeAddress &address,
                      const FieldUse &field, const Value &value, Diagnostic &out);
 // The file a field's value loads, where it resolves to one (a symbol's defining file for a symbol

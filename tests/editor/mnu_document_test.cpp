@@ -578,9 +578,12 @@ int every_list() {
 	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
 	const NodeAddress item{back.row, menu_kind("items.item"), document.last_added()};
 	TEST_EXPECT(window_of(document, back)->items.present && document.present(item, std::string()));
-	// The committed screen holds its new record's place, made by the edit, not by a query (the
-	// thread confinement, model/document.h).
-	TEST_EXPECT(static_cast<const MenuScreen *>(document.row(item.row))->places().count(item.child) == 1);
+	// Where the new record sits is the core's index of the committed screen (Document::path_in, S13
+	// D8): the window's path, then the ITEMS row's list and index.
+	const Document::RecordPath item_path = document.path_in(*document.row(item.row), item.child);
+	const Document::RecordPath back_path = document.path_in(*document.row(back.row), back.child);
+	TEST_EXPECT(!back_path.empty() && item_path.size() == back_path.size() + 1 &&
+	            item_path[back_path.size()].index == 0);
 	// ... which a button does not read (flagged, still written).
 	FieldSchema text;
 	for (const FieldSchema &field : document.fields(item.kind))

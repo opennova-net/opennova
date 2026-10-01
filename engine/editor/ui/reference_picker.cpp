@@ -17,7 +17,11 @@
 namespace opennova::editor {
 namespace {
 
-// A choice's line: its name, then where it is defined, dimmed.
+// A choice's line: its name and label (a record set's record by its own name, S13 D8), then where
+// it is defined, dimmed.
+std::string name_of(const ReferenceChoice &choice) {
+	return choice.label.empty() ? choice.name : choice.name + "  " + choice.label;
+}
 std::string where_of(const ReferenceChoice &choice) {
 	if (choice.record.empty()) return choice.file;
 	return choice.file + ": " + choice.record;
@@ -26,7 +30,7 @@ std::string where_of(const ReferenceChoice &choice) {
 // What a choice's tooltip says: the name, where, what the field would reference, why a lookup
 // never finds it.
 std::string choice_tip(const ReferenceChoice &choice) {
-	std::string tip = choice.name + "\n" + (choice.record.empty() ? "The file " : "Defined in ") + where_of(choice);
+	std::string tip = name_of(choice) + "\n" + (choice.record.empty() ? "The file " : "Defined in ") + where_of(choice);
 	if (choice.status == ReferenceStatus::Missing) tip += "\nSet here, the game would not find it: Missing.";
 	if (choice.inert) tip += "\nNo lookup of the game finds this definition: " + choice.reason + ".";
 	return tip;
@@ -157,10 +161,13 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 		if (ImGui::Checkbox(label.c_str(), &popup.unreachable)) popup.cursor = 0;
 		ui_kit::tooltip("Names defined only where no lookup of the game finds them.");
 	}
-	// The rows shown: the filter's matches, the unreachable ones while shown.
+	// The rows shown: the filter's matches by name or label (a register by its index or its NAME),
+	// the unreachable ones while shown.
 	std::vector<const ReferenceChoice *> shown;
 	for (const ReferenceChoice &choice : popup.choices)
-		if ((!choice.inert || popup.unreachable) && (!popup.filter[0] || window_requests::matches(choice.name, popup.filter)))
+		if ((!choice.inert || popup.unreachable) &&
+		    (!popup.filter[0] || window_requests::matches(choice.name, popup.filter) ||
+		     (!choice.label.empty() && window_requests::matches(choice.label, popup.filter))))
 			shown.push_back(&choice);
 	// The keys: the arrows move the highlighted row, Enter picks it, Escape closes.
 	popup.moved = false;
@@ -202,7 +209,7 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
 			const char *word = found ? "" : ui_kit::reference_word(choice.status);
 			const float room = ImGui::GetContentRegionAvail().x - (found ? 0.0f : ui_kit::text_width(word));
-			const std::string name = ui_kit::fit(choice.name, room * 0.6f);
+			const std::string name = ui_kit::fit(name_of(choice), room * 0.6f);
 			if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
 			else ImGui::TextUnformatted(name.c_str());
 			ImGui::SameLine();

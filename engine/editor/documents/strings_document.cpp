@@ -4,6 +4,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/id_list.h>
 #include <editor/project/project_files.h>
 
 #include <algorithm>
@@ -352,40 +353,9 @@ bool StringsDocument::edit_collection(Node &node, const Edit &edit, const IdAllo
                                       std::string &error) {
 	StringsSection &section = section_of(node);
 	if (edit.address.kind != kString) { error = "A section holds strings only."; return false; }
-	auto &ids = section.collections[0];
-	auto &entries = section.entries;
-	const size_t index = size_t(std::find(ids.begin(), ids.end(), edit.address.child) - ids.begin());
-	if (edit.operation != EditOperation::Add && index == entries.size()) { error = "The string no longer exists."; return false; }
-	switch (edit.operation) {
-	case EditOperation::Add:
-	case EditOperation::Duplicate: {
-		rtxt::Entry entry;
-		if (edit.operation == EditOperation::Duplicate) entry = entries[index];
-		else entry.key = "NEW_STRING";
-		const size_t position = std::min(edit.position, entries.size());
-		entries.insert(entries.begin() + static_cast<std::ptrdiff_t>(position), entry);
-		added = allocate();
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(position), added);
-		return true;
-	}
-	case EditOperation::Remove:
-		entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-		return true;
-	case EditOperation::Move: {
-		const size_t to = std::min(edit.position, entries.size() - 1);
-		const rtxt::Entry entry = entries[index];
-		const NodeId id = ids[index];
-		entries.erase(entries.begin() + static_cast<std::ptrdiff_t>(index));
-		entries.insert(entries.begin() + static_cast<std::ptrdiff_t>(to), entry);
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(to), id);
-		return true;
-	}
-	default:
-		error = "This collection cannot accept that edit.";
-		return false;
-	}
+	rtxt::Entry fresh;
+	fresh.key = "NEW_STRING";
+	return edit_id_list(section.entries, section.collections[0], edit, std::move(fresh), allocate, added, error);
 }
 
 namespace {
