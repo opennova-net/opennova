@@ -226,9 +226,10 @@ void EditorWindows::dispatch_events() {
 }
 
 void EditorWindows::end_frame() {
-	// A Preview canvas not drawn this frame (the other pane shown, the window closed, collapsed
-	// or its tab hidden): its gesture ends, before what waits on the files as saved.
+	// A viewport's canvas not drawn this frame (another shown, the window closed, collapsed or its
+	// tab hidden): its gesture ends, before what waits on the files as saved.
 	if (preview_window_) preview_window_->end_frame();
+	if (document_window_) document_window_->end_frame();
 	in_frame_ = false;
 	for (EditorRequest &request : deferred_) requests_.push_back(std::move(request));
 	deferred_.clear();
@@ -239,14 +240,6 @@ bool EditorWindows::take_request(EditorRequest &out) {
 	out = std::move(requests_.front());
 	requests_.pop_front();
 	return true;
-}
-
-void EditorWindows::set_menu_preview_viewport(MenuPreviewViewport *viewport) {
-	devices_.menu = viewport;
-}
-
-void EditorWindows::set_model_preview_viewport(ModelPreviewViewport *viewport) {
-	devices_.model = viewport;
 }
 
 void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {

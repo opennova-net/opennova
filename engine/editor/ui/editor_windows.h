@@ -20,9 +20,8 @@ namespace opennova::editor {
 
 class DocumentWindow;
 class InspectorWindow;
-class MenuPreviewViewport;
-class ModelPreviewViewport;
 class PreviewWindow;
+class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
 // six windows on it (Files on the left, Document in the centre with Preview beside it,
@@ -58,8 +57,8 @@ public:
 	// for it, an AskRename to Rename everywhere, a SettingsApplied to the project settings, an
 	// ImportPlanned to the import dialog); a request that acts on the files as saved, raised in
 	// between, waits for every other request of the frame (request()), and end_frame queues it
-	// after them, once the Preview window's canvases that did not draw this frame have ended
-	// their gestures.
+	// after them, once the viewports' canvases that did not draw this frame (the Preview window's,
+	// a document view's) have ended their gestures.
 	void begin_frame();
 	void end_frame();
 
@@ -78,10 +77,9 @@ public:
 	// request), with the files they need when the editor's setting says so.
 	void deliver_picks(PickPurpose purpose, const std::vector<std::string> &paths);
 
-	// The shell's offscreen menu renderer for the Preview window's menu pane (null = no
-	// picture), and its model renderer for the model pane.
-	void set_menu_preview_viewport(MenuPreviewViewport *viewport);
-	void set_model_preview_viewport(ModelPreviewViewport *viewport);
+	// The Shell's devices, by document and viewport kind, the viewports' canvases draw through
+	// (null: no picture).
+	void set_devices(ViewportDeviceSource *devices) { devices_ = devices; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
 	const NewProjectForm &new_project_form() const { return new_project_; }
@@ -89,7 +87,7 @@ public:
 	// Workspace
 	const SessionView &view() const override;
 	void request(EditorRequest request) override;
-	const WorkspaceDevices &devices() const override { return devices_; }
+	ViewportDeviceSource *devices() const override { return devices_; }
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -108,7 +106,7 @@ private:
 	const SessionView *view_ = nullptr;
 	SessionView empty_;
 	uint64_t dispatched_ = 0; // the seq of the last view event sent to a window
-	WorkspaceDevices devices_; // the Shell's, handed in by the set_*_preview_viewport calls
+	ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;

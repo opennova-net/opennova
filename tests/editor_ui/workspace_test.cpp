@@ -34,7 +34,8 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
-#include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/file_preferences_store.h>
@@ -1445,12 +1446,12 @@ std::string lowered(std::string text) {
 	return text;
 }
 
-// The Preview window over a real session as the shell drives it: after each frame the
-// requests the windows raised go to the session (kept, for a test to take) and the model
-// pane's device follows the view.
+// The Preview window over a real session as the Shell drives it: after each frame the requests
+// the windows raised go to the session (kept, for a test to take), and the viewports' devices
+// follow the view (the Shell's pump).
 struct PreviewRun {
 	ProjectSession &session;
-	ModelDevice &device;
+	DrawnDevices &devices;
 	Ui &ui;
 	std::vector<EditorRequest> raised;
 
@@ -1459,8 +1460,15 @@ struct PreviewRun {
 			raised.push_back(request);
 			session.handle(request);
 		}
-		device.held.follow(session.view());
+		devices.sync(session.viewports(), session.view());
 	}
+	// The model's viewport at `path` and its device (null: none).
+	const ModelViewport *model(const std::string &path) const {
+		return static_cast<const ModelViewport *>(session.viewports().find(path, ViewportKind::Model));
+	}
+	DrawnDevice *device(const std::string &path) const { return devices.held(path, ViewportKind::Model); }
+	// The model's camera set through the session (as the editor MCP sets it).
+	void camera(const std::string &path, const char *change) { session.handle(request::set_viewport(path, change)); }
 	void settle() {
 		for (int i = 0; i < 3; ++i) {
 			pump();
@@ -1521,18 +1529,18 @@ void test_preview_follows() {
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
-	ModelDevice device;
+	DrawnDevices devices;
 	Ui ui;
 	ui.windows.set_view(&v);
-	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{ session, device, ui, {} };
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
 	const char *const kNothing = "open a menu, a model or an animation to preview it.";
 	run.settle();
 	CHECK(lowered(logged_frame(ui)).find(kNothing) != std::string::npos, "nothing to preview: what to open");
 
 	std::string text = run.open("main.mnu");
-	CHECK(text.find("main.mnu - startup") != std::string::npos && text.find("no preview renderer is attached.") != std::string::npos,
-	      "a menu: the menu pane, its screen named");
+	CHECK(text.find("main.mnu - startup") != std::string::npos && text.find("x -, y -") != std::string::npos,
+	      "a menu: the menu's viewport, its screen named");
 	text = run.open("anims/SKIN.adm");
 	CHECK(text.find("skin.adm on skinned.3di") != std::string::npos && text.find("main.mnu - startup") == std::string::npos,
 	      "the table: the model pane, the table on the model it plays on");
@@ -1545,7 +1553,9 @@ void test_preview_follows() {
 	run.open("anims/SKIN.adm");
 	text = run.open("items.def");
 	CHECK(text.find("skin.adm on skinned.3di") != std::string::npos, "a catalog keeps the pane shown");
-	CHECK(preview_family(v, PreviewFamily::None) == PreviewFamily::Menu, "before it showed anything, with both: the menu's");
+	CHECK(preview_kind(v.documents, ViewportKind::kCount) == ViewportKind::Menu &&
+	              v.documents.preview_shown == ViewportKind::Model,
+	      "before it showed anything, with both: the menu's; after the table, still the table's");
 
 	// A family with nothing to show gives way to the other.
 	session.handle(request::close_document("anims/SKIN.adm"));
@@ -1607,18 +1617,19 @@ void test_preview_model_gestures() {
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
-	ModelDevice device;
+	DrawnDevices devices;
 	Ui ui;
 	ui.windows.set_view(&v);
-	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{ session, device, ui, {} };
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
 	run.open("main.mnu");
 	run.open("models/armory.3di");
 	const auto *armory =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
-	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready,
+	const ModelViewport *model = run.model("models/armory.3di");
+	CHECK(armory && armory->model_row() && model && model->status() == ViewportStatus::Ready,
 			"armory previewed");
-	if (!armory || !armory->model_row())
+	if (!armory || !armory->model_row() || !model)
 		return;
 	const ModelRow &row = *armory->model_row();
 	EditorRequest select = request::select_record(
@@ -1627,20 +1638,21 @@ void test_preview_model_gestures() {
 	ui.focus("Preview");
 	run.settle();
 
-	// F: the selected marker framed while the pane shows; nothing while the menu's shows.
+	// F: the selected marker framed while the model's view shows (a SetViewport of its camera);
+	// nothing while the menu's shows.
 	const auto press_f = [&]() {
 		ui.key(ImGuiKey_F, true);
 		ui.key(ImGuiKey_F, false);
 		run.pump();
 	};
-	device.held.camera().distance = 40.0f;
+	run.camera(armory->path(), R"({"camera": {"distance": 40}})");
 	press_f();
-	CHECK(device.held.camera().distance != 40.0f, "F frames the selected marker");
+	CHECK(model->camera().distance != 40.0f, "F frames the selected marker");
 	run.open("main.mnu");
 	ui.focus("Preview");
-	device.held.camera().distance = 40.0f;
+	run.camera(armory->path(), R"({"camera": {"distance": 40}})");
 	press_f();
-	CHECK(device.held.camera().distance == 40.0f, "the model pane hidden: F leaves its camera");
+	CHECK(model->camera().distance == 40.0f, "the model's view hidden: F leaves its camera");
 
 	// A drag of the selected marker (Alt: placed freely), the menu made active mid-drag.
 	run.open("models/armory.3di");
@@ -1650,18 +1662,20 @@ void test_preview_model_gestures() {
 	run.settle();
 	run.take();
 	const ModelOverlay *marker = nullptr;
-	const std::vector<ModelOverlay> overlays = device.held.overlays();
+	const std::vector<ModelOverlay> overlays = model->overlays(session.viewports().clock());
 	for (const ModelOverlay &overlay : overlays)
 		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0)
 			marker = &overlay;
 	float x = 0.0f, y = 0.0f;
-	CHECK(marker &&
-					device.held.camera().project(marker->at, device.held.device_width(),
-							device.held.device_height(), x, y),
+	const DrawnDevice *device = run.device(armory->path());
+	CHECK(marker && device &&
+					model->camera().project(marker->at, model->size().width, model->size().height, x, y),
 			"the marker on the picture");
-	if (!marker)
+	if (!marker || !device)
 		return;
-	const ImVec2 at(device.origin.x + x, device.origin.y + y);
+	CHECK(device->width == model->size().width && device->height == model->size().height && model->canvas_sized(),
+			"the viewport's size is the canvas's (its device's as drawn, reported at the pump)");
+	const ImVec2 at(device->origin.x + x, device->origin.y + y);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
 	ui.mouse(at.x, at.y);
 	ui.button(true);
@@ -1686,9 +1700,10 @@ void test_preview_model_gestures() {
 	CHECK(run.take().empty(), "letting go raises nothing");
 }
 
-// The model pane's pointer through ImGui over a real session, raising no request: the middle
-// button drags the camera's target (a pan), a wheel notch over the picture dollies it
-// (kModelWheelDolly of the distance), a double-click frames the selected marker.
+// The model's view's pointer through ImGui over a real session, each gesture a SetViewport of its
+// camera and nothing else: the middle button drags the camera's target (a pan), a wheel notch over
+// the picture dollies it (kModelWheelDolly of the distance), a double-click frames the selected
+// marker.
 void test_preview_model_pane_input() {
 	editor_test::TempProjectDir dir("opennova_editor_ui_preview_model_input");
 	NoProcess platform;
@@ -1696,17 +1711,18 @@ void test_preview_model_pane_input() {
 	ProjectSession session(platform, preferences);
 	CHECK(preview_project(session, dir), "the preview project");
 	const SessionView &v = session.view();
-	ModelDevice device;
+	DrawnDevices devices;
 	Ui ui;
 	ui.windows.set_view(&v);
-	ui.windows.set_model_preview_viewport(&device);
-	PreviewRun run{ session, device, ui, {} };
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
 	run.open("models/armory.3di");
 	const auto *armory =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
-	CHECK(armory && armory->model_row() && device.held.status() == ModelPreviewStatus::Ready,
+	const ModelViewport *model = run.model("models/armory.3di");
+	CHECK(armory && armory->model_row() && model && model->status() == ViewportStatus::Ready,
 			"armory previewed");
-	if (!armory || !armory->model_row())
+	if (!armory || !armory->model_row() || !model)
 		return;
 	const ModelRow &row = *armory->model_row();
 	EditorRequest select = request::select_record(
@@ -1715,40 +1731,46 @@ void test_preview_model_pane_input() {
 	ui.focus("Preview");
 	run.settle();
 	run.take();
+	const DrawnDevice *device = run.device(armory->path());
+	CHECK(device != nullptr, "the model's device");
+	if (!device)
+		return;
 	// A point on the picture away from every marker: its top-left corner.
-	const ImVec2 corner(device.origin.x + 12.0f, device.origin.y + 12.0f);
+	const ImVec2 corner(device->origin.x + 12.0f, device->origin.y + 12.0f);
 
 	// The middle button drags the camera's target.
-	const PreviewVec3 target = device.held.camera().target;
+	const PreviewVec3 target = model->camera().target;
 	ui.mouse(corner.x, corner.y);
 	ui.button(true, 2);
 	ui.mouse(corner.x + 40.0f, corner.y + 10.0f);
 	ui.mouse(corner.x + 80.0f, corner.y + 20.0f);
 	ui.button(false, 2);
 	run.settle();
-	const PreviewVec3 panned = device.held.camera().target;
+	const PreviewVec3 panned = model->camera().target;
 	CHECK(panned.x != target.x || panned.y != target.y || panned.z != target.z,
 			"the middle button pans the camera");
 
 	// A wheel notch over the picture dollies the camera toward its target.
-	const float distance = device.held.camera().distance;
+	const float distance = model->camera().distance;
 	ui.mouse(corner.x, corner.y);
 	ImGui::GetIO().AddMouseWheelEvent(0.0f, 1.0f);
 	ui.frames(2);
 	run.settle();
-	CHECK(std::fabs(device.held.camera().distance - distance * kModelWheelDolly) < 1e-3f,
+	CHECK(std::fabs(model->camera().distance - distance * kModelWheelDolly) < 1e-3f,
 			"a wheel notch dollies the camera");
 
 	// A double-click frames the selected marker.
-	device.held.camera().distance = 40.0f;
+	run.camera(armory->path(), R"({"camera": {"distance": 40}})");
 	ui.mouse(corner.x, corner.y);
 	ui.button(true);
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
 	run.settle();
-	CHECK(device.held.camera().distance != 40.0f, "a double-click frames the selected marker");
-	CHECK(run.take().empty(), "the camera's gestures raise nothing");
+	CHECK(model->camera().distance != 40.0f, "a double-click frames the selected marker");
+	const std::vector<EditorRequest> raised = run.take();
+	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size(),
+			"the camera's gestures raise SetViewports of it, nothing else");
 }
 
 // The OS window's title: the product, the project's name before it, a bullet while a file has

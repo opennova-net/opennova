@@ -979,7 +979,7 @@ static int test_preview_target() {
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
-	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path.empty() && v.documents.previews[ViewportKind::Menu].part == 0);
 	session.handle(request::open_document("main.mnu"));
 	const Document *menu = session.document_for("main.mnu");
 	NodeAddress exit;
@@ -988,16 +988,16 @@ static int test_preview_target() {
 	const std::string menu_path = menu->path();
 	EditorRequest select = request::select_record(menu_path, exit);
 	session.handle(select);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == exit.row);
 	// The stylesheet active: the preview stays on the screen.
 	const AssetEntry *style = v.project.scan->find("menu_style.mns");
 	TEST_EXPECT(style != nullptr);
 	if (!style) return 1;
 	session.handle(request::open_document(style->relative_path));
 	TEST_EXPECT(v.documents.active == style->relative_path);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == exit.row);
 	// A second screen selected, then removed: the preview clears.
 	const NodeKind screen_kind = menu->kind_from_name("screen");
 	EditorRequest add = request::edit_record(menu_path, Edit());
@@ -1005,24 +1005,24 @@ static int test_preview_target() {
 	add.edits[0].address = {0, screen_kind, 0};
 	session.handle(add);
 	const NodeId added = menu->last_added();
-	TEST_EXPECT(added != 0 && v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == added);
+	TEST_EXPECT(added != 0 && v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == added);
 	EditorRequest remove = request::edit_record(menu_path, Edit());
 	remove.edits[0].operation = EditOperation::Remove;
 	remove.edits[0].address = {added, screen_kind, 0};
 	session.handle(remove);
-	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path.empty() && v.documents.previews[ViewportKind::Menu].part == 0);
 	// The first screen again, then the menu closed: the preview clears.
 	session.handle(select);
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == exit.row);
 	session.handle(request::open_document(style->relative_path));
 	session.handle(request::save_all()); // the screen added and removed: dirty
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == exit.row);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == exit.row);
 	session.handle(request::close_document(menu_path));
 	TEST_EXPECT(session.document_for("main.mnu") == nullptr);
-	TEST_EXPECT(v.documents.previews.menu.path.empty() && v.documents.previews.menu.screen == 0);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path.empty() && v.documents.previews[ViewportKind::Menu].part == 0);
 	return 0;
 }
 
@@ -2244,8 +2244,8 @@ static int test_menu_first_screen() {
 	const std::string menu_path = menu->path();
 	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == first_row(menu) &&
 	            v.documents.selection.records == std::vector<NodeAddress>{first_row(menu)});
-	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
-			v.documents.previews.menu.screen == first_row(menu).row);
+	TEST_EXPECT(v.documents.previews[ViewportKind::Menu].path == menu_path &&
+			v.documents.previews[ViewportKind::Menu].part == first_row(menu).row);
 	const auto select = [&](const NodeAddress &address) {
 		EditorRequest request = request::select_record(menu_path, address);
 		session.handle(request);

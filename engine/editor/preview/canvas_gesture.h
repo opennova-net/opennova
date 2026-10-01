@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/model/edit.h>
+#include <editor/session/editor_request.h>
 
 namespace opennova::editor {
 
@@ -28,6 +29,8 @@ struct CanvasKeys {
 // plain press replaces the selection.
 enum class CanvasJoin : uint8_t { Replace, Add, Toggle };
 CanvasJoin canvas_join(const CanvasKeys &keys);
+// The SelectRecord mode a join is.
+SelectMode select_mode(CanvasJoin join);
 
 // The keys a canvas acts on in one frame. `focused`: the canvas's window has the keyboard and no
 // text field takes it (the rest reads nothing otherwise). The arrows pressed this frame, their key
@@ -81,18 +84,16 @@ inline bool operator!=(const CanvasSubject &a, const CanvasSubject &b) {
 	return !(a == b);
 }
 
-// What a canvas asks of the session: the editor's windows raise each as a window request
-// (ui/viewport_canvas), a test records them.
+// What a canvas asks of the session (ADR 0046 S13 V2, V5): every change a request, raised by the
+// editor's windows as a window request (ui/viewport_canvas), recorded by a test: a record selected,
+// joining the selection as Shift or Ctrl say (SelectRecord, a marquee's records with it); a batch of
+// the document over any rows, a step of a gesture (its edits carrying the gesture's token) or an
+// arrange (EditRecord); the gesture's end (EndEdit), its steps one undo step; the viewport's state
+// (SetViewport: a camera orbited, panned, dollied or framed).
 class CanvasRequests {
 public:
 	virtual ~CanvasRequests() = default;
-	// `record` of the document at `path` selected, joining the selection as `join` says.
-	virtual void select(const std::string &path, const NodeAddress &record, CanvasJoin join) = 0;
-	// One batch of the document at `path` (over any rows): a step of a gesture (its edits carry the
-	// gesture's token) or an arrange.
-	virtual void edits(const std::string &path, std::vector<Edit> batch) = 0;
-	// The gesture's edits end (EndEdit): its steps are one undo step.
-	virtual void end_edit(const std::string &path) = 0;
+	virtual void request(EditorRequest request) = 0;
 };
 
 // The one gesture machine of a canvas (ADR 0046 S13 V2): a button pressed on the picture,

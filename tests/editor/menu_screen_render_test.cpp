@@ -32,7 +32,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
-#include <editor/preview/menu_preview_json.h>
+#include <editor/preview/menu_report.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/menu_screen_render.h>
 #include <editor/project_build/build_run.h>
@@ -120,7 +120,7 @@ static int test_blank_startup() {
 	const Node *startup = menu->rows().front().get();
 	TEST_EXPECT(startup && startup->name() == "STARTUP");
 	const MenuScreenRender *render = check.render(menu->path(), startup->id);
-	TEST_EXPECT(render && render->status() == MenuPreviewStatus::Ready);
+	TEST_EXPECT(render && render->status() == MenuScreenStatus::Ready);
 	const opennova::menu::MenuFrameCompiler &compiler = render->compiler();
 	TEST_EXPECT(same_order(*menu, *startup, compiler));
 	const int title_index = compiler.widget_index("TITLE");
@@ -131,8 +131,8 @@ static int test_blank_startup() {
 	TEST_EXPECT(!has_note(notes, MenuFrameNoteCode::FontMissing) && !has_note(notes, MenuFrameNoteCode::TextNoFont));
 	// MAIN's CUSTOM appearance is the shell's hook: the preview says so, Problems does not.
 	TEST_EXPECT(has_note(notes, MenuFrameNoteCode::AppearanceCustom));
-	// The render in the preview's schema: every window, current.
-	const opennova::io::JsonValue json = menu_preview_to_json(render_snapshot(*render, *menu, *startup));
+	// The render as the menu_render query reads it: every window, current.
+	const opennova::io::JsonValue json = menu_render_to_json(view, menu->path(), startup->id, JsonPage());
 	TEST_EXPECT(json.get_string("status", "") == "ready" && json.get_bool("current", false));
 	TEST_EXPECT(json.get("widgets") && int(json.get("widgets")->array.size()) == compiler.widget_count());
 	TEST_EXPECT(json.get("notes") && !json.get("notes")->array.empty());
@@ -367,7 +367,7 @@ void sweep_menu(const std::string &label, const std::string &path, const opennov
 	for (const auto &row : document.rows()) {
 		++totals.screens;
 		MenuScreenRender render;
-		if (render.configure(document, row->id, files, vars) != MenuPreviewStatus::Ready) {
+		if (render.configure(document, row->id, files, vars) != MenuScreenStatus::Ready) {
 			std::printf("  FAIL %s %s: %s\n", label.c_str(), row->name().c_str(), render.detail().c_str());
 			++totals.failures;
 			continue;

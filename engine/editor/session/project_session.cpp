@@ -9,6 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_queries.h>
@@ -215,6 +216,14 @@ void ProjectSession::run_operations() {
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
 	return impl_->core.start_operation(std::move(operation));
+}
+
+Viewports &ProjectSession::viewports() {
+	return impl_->core.viewports();
+}
+
+void ProjectSession::advance(double seconds) {
+	impl_->core.viewports().advance(seconds);
 }
 
 // --- what is asked without a request -------------------------------------------------------------

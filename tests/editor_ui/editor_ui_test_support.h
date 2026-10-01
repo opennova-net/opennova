@@ -5,14 +5,16 @@
 // (a display size and a built font atlas, no platform or renderer), the workspace driven
 // frame by frame with the mouse and the keys (Ui), the ids ImGui gives items, what a frame
 // writes as text, what runs past the width that shows of it, the requests a test looks for, the
-// menu fixture the windows are driven over, the preview devices a test stands in for the shell's,
-// and a project with every preview's files.
+// menu fixture the windows are driven over, the viewports' devices a test stands in for the Shell's
+// (and the viewports a hand-made view shares, pumped as the Shell pumps them), and a project with
+// every preview's files.
 #pragma once
 
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <memory>
@@ -21,12 +23,13 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
+#include <base/io/json.h>
+#include <editor/assets/project_asset_source.h>
 #include <editor/import/import_plan.h>
-#include <editor/preview/menu_preview_state.h>
-#include <editor/preview/menu_preview_viewport.h>
-#include <editor/preview/menu_screen_render.h>
-#include <editor/preview/model_preview_state.h>
-#include <editor/preview/model_preview_viewport.h>
+#include <editor/preview/viewport_device.h>
+#include <editor/preview/viewport_device_cache.h>
+#include <editor/preview/viewport_model.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -90,18 +93,24 @@ inline const devtools::Window *find_window(const devtools::ImGuiPass &pass, cons
 	return nullptr;
 }
 
-// The workspace over a 1920x1080 display unless a test sizes it, driven frame by frame.
+// The workspace over a 1920x1080 display unless a test sizes it, driven frame by frame; `pump`,
+// when a test sets it, runs before each frame as the Shell's pump does (its viewports' devices
+// following the view).
 struct Ui {
 	NullBackend backend;
 	EditorWindows windows;
 	uint64_t index = 0;
+	std::function<void()> pump;
 	Ui() {
 		ImGui::GetIO().DisplaySize = ImVec2(1920.0f, 1080.0f);
 		windows.pass().attach_imgui(backend.context, test_alloc, test_free, nullptr);
 	}
 	~Ui() { windows.pass().detach_imgui(); }
 	void frames(int count = 1) {
-		for (int i = 0; i < count; ++i) frame(windows, ++index);
+		for (int i = 0; i < count; ++i) {
+			if (pump) pump();
+			frame(windows, ++index);
+		}
 	}
 	void focus(const char *title) {
 		for (int i = 0; i < windows.pass().window_count(); ++i)
@@ -224,7 +233,10 @@ inline std::string logged_frame(EditorWindows &windows, uint64_t index) {
 	ImGui::Render();
 	return text;
 }
-inline std::string logged_frame(Ui &ui) { return logged_frame(ui.windows, ++ui.index); }
+inline std::string logged_frame(Ui &ui) {
+	if (ui.pump) ui.pump();
+	return logged_frame(ui.windows, ++ui.index);
+}
 
 // Every window drawn in the last frame whose content is wider than what shows of it while it
 // does not scroll sideways (its content size against its content region), and every cell of
@@ -408,63 +420,90 @@ inline ViewEvent newest_event(const SessionView &v, ViewEventKind kind) {
 
 using editor_test::NoProcess;
 
-// No file at all: a headless menu render with nothing mounted.
-struct NoFiles : opennova::FileSource {
-	bool read(const std::string &, std::vector<uint8_t> &) const override { return false; }
-	uint64_t stamp(const std::string &) const override { return 0; }
-};
-
-// A device over the engine's headless render, drawing an invisible button where the
-// shell's SubViewport image goes (what ImGuiGD draws), and remembering where.
-class FakePreview : public MenuPreviewViewport {
-public:
-	MenuScreenRender render;
-	NoFiles files;
-	MenuPreviewOptions held;
-	MenuPreviewStatus shown_status = MenuPreviewStatus::Ready;
-	std::string shown_detail;
-	bool stale = false; // the picture of another revision than the document's
+// A viewport's device as the Shell's stands in a test: its picture an invisible button where the
+// Shell's SubViewport image goes (what ImGuiGD draws), at the size the canvas draws it, the origin
+// kept (where a design unit or a marker's pixel is: the picture's corner the canvas hands it, which
+// is where the canvas's cursor stands) and the canvas's clip; what its viewport asked of it, in order.
+struct DrawnDevice final : ViewportDevice {
 	ImVec2 origin;
 	int width = 0, height = 0;
-
-	MenuPreviewStatus status(std::string *detail) const override {
-		if (detail) *detail = shown_detail;
-		return shown_status;
+	int draws = 0;
+	bool drawn = false; // a canvas drew it since the last pump
+	ViewportPicture last;
+	std::vector<ViewportAction> taken;
+	void draw(const ViewportPicture &picture) override {
+		drawn = true;
+		const ImVec2 cursor = ImGui::GetCursorScreenPos();
+		origin = ImVec2(picture.x, picture.y);
+		CHECK(cursor.x == picture.x && cursor.y == picture.y, "the picture where the canvas's cursor stands");
+		width = picture.width;
+		height = picture.height;
+		last = picture;
+		++draws;
+		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(picture.width), float(picture.height)));
 	}
-	const std::vector<std::string> &missing() const override { return none_; }
-	const std::vector<std::string> &unreadable() const override { return none_; }
-	void draw(int device_width, int device_height) override {
-		origin = ImGui::GetCursorScreenPos();
-		width = device_width;
-		height = device_height;
-		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(device_width), float(device_height)));
+	// Its size as the Shell's device reports it: the one a canvas drew it at since the last pump, else
+	// its viewport's state's.
+	void take(ViewportAction action, const ViewportModel &model, const SessionView &, const PreviewClock &,
+			ViewportDeviceReport &report) override {
+		taken.push_back(action);
+		report.width = drawn ? width : model.state().width;
+		report.height = drawn ? height : model.state().height;
+		report.canvas_sized = drawn && last.canvas_sized;
+		drawn = false;
 	}
-	void set_options(const MenuPreviewOptions &options) override { held = options; }
-	const MenuPreviewOptions &options() const override { return held; }
-	const opennova::menu::MenuFrameCompiler *compiler() const override {
-		return shown_status == MenuPreviewStatus::Ready ? &render.compiler() : nullptr;
-	}
-	const opennova::menu::MenuFrameState *frame_state() const override {
-		return shown_status == MenuPreviewStatus::Ready ? &render.state() : nullptr;
-	}
-	uint64_t shown_revision() const override { return render.revision() + (stale ? 1 : 0); }
-
-private:
-	std::vector<std::string> none_;
+	void tick(const ViewportModel &, const PreviewClock &) override {}
 };
 
-// The model pane's device over the real portable half: the test's follow() is the shell's
-// refresh; the picture an invisible button where the shell draws its texture, at the size
-// the pane asks for, the origin kept (where a marker's pixel is).
-struct ModelDevice : ModelPreviewViewport {
-	ModelPreviewModel held;
-	ImVec2 origin;
-	ModelPreviewModel &model() override { return held; }
-	void draw(int device_width, int device_height) override {
-		origin = ImGui::GetCursorScreenPos();
-		held.set_device_size(device_width, device_height);
-		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(device_width), float(device_height)));
+// The Shell's devices in a test (the windows' device source, set_devices): one DrawnDevice per
+// (document, kind) the cache holds, every one it made kept by its address.
+struct DrawnDevices {
+	std::vector<DrawnDevice *> made;
+	ViewportDeviceCache cache{ [this](ViewportKind) {
+		auto device = std::make_unique<DrawnDevice>();
+		made.push_back(device.get());
+		return std::unique_ptr<ViewportDevice>(std::move(device));
+	} };
+	// The Shell's pump after the session's poll: the devices follow the viewports.
+	void sync(Viewports &viewports, const SessionView &view) { cache.sync(viewports, view); }
+	DrawnDevice *held(const std::string &path, ViewportKind kind) const {
+		return static_cast<DrawnDevice *>(cache.held(path, kind));
 	}
+};
+
+// The viewports a hand-made view shares, kept as the session keeps its own (DocumentsView::
+// viewports): with the project's files an empty project's (a menu's compile reads none: its fonts
+// and textures missing, its rects the game's), tracked to the view and followed by their devices at
+// each pump, and a SetViewport the windows raise applied as the session serves it (the windows'
+// other requests kept for the test to drain).
+struct HandViewports {
+	std::shared_ptr<Viewports> viewports = std::make_shared<Viewports>();
+	DrawnDevices devices;
+	void bind(SessionView &v) {
+		v.documents.viewports = viewports;
+		if (!v.findings.assets) v.findings.assets = std::make_shared<const ProjectAssetSource>();
+	}
+	// A SetViewport's change applied to the viewport at `path` (the session's set_viewport).
+	bool set(const SessionView &v, const std::string &path, const char *change) {
+		opennova::io::JsonValue json;
+		std::string error;
+		return opennova::io::json_parse(change, json, error) && viewports->set(v, path, json, error);
+	}
+	// The Shell's pump: the windows' SetViewports served, the viewports tracked to the view (as the
+	// session does after each change) and their devices synced.
+	void pump(EditorWindows &windows, SessionView &v) {
+		std::vector<EditorRequest> kept;
+		EditorRequest request;
+		while (windows.take_request(request)) {
+			if (request.kind == EditorRequestKind::SetViewport) set(v, request.path, request.viewport.c_str());
+			else kept.push_back(std::move(request));
+		}
+		for (EditorRequest &held : kept) windows.request(std::move(held));
+		viewports->track(v);
+		devices.sync(*viewports, v);
+	}
+	const ViewportModel *find(const std::string &path, ViewportKind kind) const { return viewports->find(path, kind); }
+	DrawnDevice *device(const std::string &path, ViewportKind kind) const { return devices.held(path, kind); }
 };
 
 // A project for the Preview window: a new project's files (main.mnu among them), a skinned

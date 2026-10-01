@@ -2,12 +2,26 @@
 
 #include <cmath>
 
+#include <editor/session/request_factories.h>
+
 namespace opennova::editor {
 
 CanvasJoin canvas_join(const CanvasKeys &keys) {
 	if (keys.ctrl)
 		return CanvasJoin::Toggle;
 	return keys.shift ? CanvasJoin::Add : CanvasJoin::Replace;
+}
+
+SelectMode select_mode(CanvasJoin join) {
+	switch (join) {
+		case CanvasJoin::Add:
+			return SelectMode::Add;
+		case CanvasJoin::Toggle:
+			return SelectMode::Toggle;
+		case CanvasJoin::Replace:
+			break;
+	}
+	return SelectMode::Replace;
 }
 
 void CanvasGesture::press(const CanvasSubject &subject, CanvasPoint at, CanvasRequests &out) {
@@ -48,7 +62,7 @@ bool CanvasGesture::release(CanvasRequests &out) {
 
 void CanvasGesture::end(CanvasRequests &out) {
 	if (mode_ != Mode::None && sent_)
-		out.end_edit(subject_.path);
+		out.request(request::end_edit(subject_.path));
 	mode_ = Mode::None;
 	dragging_ = false;
 	sent_ = false;

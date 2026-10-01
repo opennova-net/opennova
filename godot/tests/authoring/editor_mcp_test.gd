@@ -299,9 +299,10 @@ static func _document_state(state: Dictionary, path: String) -> Dictionary:
 	return {}
 
 
-## A widget's absolute rect in an editor_menu_preview rects page (all zero when it is not there).
+## A widget's absolute rect in an editor_menu_preview rects page, its items (all zero when it is not
+## there).
 func _rect_of(rects: Dictionary, name: String) -> Array:
-	for widget: Variant in rects.get("widgets", []):
+	for widget: Variant in rects.get("items", []):
 		if widget is Dictionary and String((widget as Dictionary).get("name", "")) == name:
 			return (widget as Dictionary).get("rect", [0, 0, 0, 0])
 	return [0, 0, 0, 0]
@@ -330,8 +331,10 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true((await _call("editor_play", {"op": "start"})).get("_error", "").contains("No project"))
 	assert_true((await _call("editor_screenshot")).get("_error", "").contains("headless"))
 	var preview := await _call("editor_menu_preview", {"op": "state"})
-	assert_eq(String(preview.get("status", "")), "no_project", str(preview))
-	assert_eq(int(preview.get("widget_count", -1)), 0)
+	assert_eq(String(preview.get("reason", "")), "no_project", str(preview))
+	assert_eq(String(preview.get("status", "")), "empty", str(preview))
+	assert_eq(int(preview.get("count", -1)), 0)
+	assert_false(preview.has("items"), "the state leaves the items to op=rects")
 	assert_true((await _query("menu_tree")).get("_error", "").contains("no document is active"), "no project, no menu")
 	assert_true((await _query("nope")).get("_error", "").contains("Unknown query"), "an unknown query")
 	var logs := await _call("editor_logs")
@@ -556,11 +559,12 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	# options hold it under the mouse.
 	var preview := await _call("editor_menu_preview", {"op": "state"})
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
-	assert_eq(String(preview.get("screen", {}).get("name", "")), "STARTUP")
-	assert_gt(int(preview.get("widget_count", 0)), 3)
+	assert_eq(String(preview.get("kind", "")), "menu", str(preview))
+	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "STARTUP")
+	assert_gt(int(preview.get("count", 0)), 3)
 	var rects := await _call("editor_menu_preview", {"op": "rects"})
 	var by_name := {}
-	for widget: Variant in rects.get("widgets", []):
+	for widget: Variant in rects.get("items", []):
 		by_name[String(widget["name"])] = widget
 	assert_eq(String(by_name.get("TITLE", {}).get("text", "")), "John Smith's Game", str(rects))
 	var later_rect: Array = by_name.get("LATER", {}).get("rect", [])
@@ -598,9 +602,9 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_eq(String(notes.get("status", "")), "ready", str(notes))
 	assert_eq(int(notes.get("count", -1)), (notes.get("notes", []) as Array).size(), str(notes))
 	var render := await _query("menu_render", {"path": String(preview.get("path", "")),
-			"screen": int(preview.get("screen", {}).get("id", 0)), "limit": 200})
+			"screen": int(preview.get("body", {}).get("screen", {}).get("id", 0)), "limit": 200})
 	assert_eq(String(render.get("status", "")), "ready", str(render))
-	assert_eq(int(render.get("widget_count", 0)), int(preview.get("widget_count", -1)), str(render))
+	assert_eq(int(render.get("widget_count", 0)), int(preview.get("count", -1)), str(render))
 	var render_names := {}
 	for widget: Variant in render.get("widgets", []):
 		render_names[String(widget["name"])] = widget
@@ -1423,7 +1427,7 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 	var rects := await _call("editor_menu_preview", {"op": "rects", "limit": 200})
 	var hello_rect := _rect_of(rects, "HELLO")
 	assert_eq(int(hello_rect[0]), 340, str(rects))
-	for widget: Variant in rects.get("widgets", []):
+	for widget: Variant in rects.get("items", []):
 		if widget is Dictionary and String((widget as Dictionary).get("name", "")) == "HELLO":
 			assert_eq(String((widget as Dictionary).get("text", "")), "Hello")
 

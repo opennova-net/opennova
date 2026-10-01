@@ -6,9 +6,11 @@
 #include <optional>
 #include <utility>
 
+#include <base/io/json.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/project/project_files.h>
+#include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/run/play_lease.h>
@@ -48,7 +50,19 @@ bool inside(const fs::path &path, const fs::path &dir) {
 } // namespace
 
 SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferences) :
-		platform_(platform), preferences_(preferences) {}
+		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
+	view_.documents.viewports = viewports_;
+	// What a viewport's follow derives (a menu's held window, a model framed, a clip's clock sought)
+	// moves the Viewports concern as a SetViewport does; the follow runs at the Shell's pump, outside
+	// any request, so the counter alone moves (nothing is tracked again).
+	viewports_->set_on_derived_change([this] { view_.revisions.touch(ViewConcern::Viewports); });
+}
+
+void SessionCore::touch(ViewConcern concern) {
+	update_preview_targets(view_.documents);
+	viewports_->track(view_);
+	view_.revisions.touch(concern);
+}
 
 void SessionCore::start() {
 	// A store that cannot be read, or a settings file set aside (another schema): said, the
@@ -548,6 +562,14 @@ void SessionCore::forget_recent(const std::string &root) {
 void SessionCore::clear_output() {
 	view_.activity.output.clear();
 	touch(ViewConcern::Output);
+}
+
+void SessionCore::set_viewport(const std::string &path, const std::string &change) {
+	io::JsonValue json;
+	std::string error;
+	if (!io::json_parse(change, json, error)) error = "The viewport's change is not JSON: " + error;
+	else if (viewports_->set(view_, path, json, error)) touch(ViewConcern::Viewports);
+	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, path));
 }
 
 // The running operation goes first (a build's staging directory with it); one that cannot be

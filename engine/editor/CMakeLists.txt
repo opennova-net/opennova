@@ -89,34 +89,40 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
-    # preview — the menu preview's portable half: what it shows and when to configure it
-    # again, and its JSON (the device is the shell's MenuFrame); the headless render of a
-    # screen, the render check over every menu (the menu type's project check: the compiler
-    # notes as findings), and the texture header probe it measures with; what a drag of a
-    # window's handles writes, and what arranging several windows (align, distribute, drawing
-    # order) writes; a menu's tree, its findings and a screen as the render check compiled it,
-    # as the menu_tree, menu_findings and menu_render queries read them; the model preview's
-    # portable half: its camera and the level the game draws, what it shows and when to build
-    # it again, and its JSON (the device is the shell's ObjectModel); the canvas's one gesture
-    # machine, and what a press on the menu's or the model's picture takes, what its drag
+    # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
+    # clock, the follow every kind shares (the files a picture read, the action its device takes),
+    # the base every kind's viewport derives from, the Shell's devices (an LRU of four keyed by
+    # document and kind) and the one envelope on the wire; the menu's viewport (its screen compiled
+    # headless, the geometry its hit tests, handles and drags read) and the model's (its orbit camera
+    # and the level the game draws, its rig and the clip it plays); the headless render of a screen,
+    # the render check over every menu (the menu type's project check: the compiler notes as
+    # findings), and the texture header probe it measures with; what a drag of a window's handles
+    # writes, and what arranging several windows (align, distribute, drawing order) writes; a menu's
+    # tree, its findings and a screen as the render check compiled it, as the menu_tree,
+    # menu_findings and menu_render queries read them; the canvas's one gesture machine, and the
+    # kinds' halves of it: what a press on the menu's or the model's picture takes, what its drag
     # writes and what is drawn over the picture
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_layout_edit.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_preview_state.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_preview_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_render_check.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_camera.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_rig.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_preview_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_json.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_kinds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_model.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewports.cpp
     # project — project.opennova, the cache directory, machine-local settings, file plumbing,
     # and the one refresh (import, scan, requirements) and the one findings composer the
     # editor and the CLI share
@@ -176,11 +182,11 @@ add_library(opennova_editor STATIC
     # the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/documents_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/viewport_kind.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the
@@ -198,9 +204,10 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/import_dialog.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_layout.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/inspector_window.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_preview_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_preview_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
@@ -218,6 +225,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp
     )
     target_link_libraries(opennova_editor PRIVATE opennova_imgui)

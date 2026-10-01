@@ -178,6 +178,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::RequirementWrongKind, code("requirement.wrong_kind", G::RequiredFiles, F::WrongKind) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
+	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },
 };
 
 static_assert(std::size(kEntries) == kCoreFindingCount, "every CoreFinding has exactly one row");

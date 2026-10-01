@@ -6,6 +6,8 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/preview/menu_render_check.h>
+#include <editor/preview/menu_viewport.h>
+#include <editor/session/request_factories.h>
 
 namespace opennova::editor {
 
@@ -293,7 +295,7 @@ bool menu_canvas_escape(const MenuCanvasFrame &frame, CanvasRequests &out) {
 		return false;
 	const std::vector<NodeAddress> owners = frame.document->ancestors(frame.record);
 	if (!owners.empty())
-		out.select(frame.document->path(), owners.back(), CanvasJoin::Replace);
+		out.request(request::select_record(frame.document->path(), owners.back()));
 	return true;
 }
 
@@ -304,10 +306,32 @@ void menu_canvas_arrange(const MenuCanvasFrame &frame, ArrangeOp op, CanvasReque
 	if (arrange_edits(*frame.document, frame.windows, frame.primary, op, *frame.compiler,
 				*frame.state, edits, nullptr) &&
 			!edits.empty())
-		out.edits(frame.document->path(), std::move(edits));
+		out.request(request::edit_record(frame.document->path(), std::move(edits)));
 }
 
 // --- MenuCanvas ------------------------------------------------------------------------------
+
+void MenuCanvas::follow(
+		const ViewportModel &viewport, const ViewportContext &context, CanvasRequests &out) {
+	frame_ = static_cast<const MenuViewport &>(viewport).canvas_frame(context);
+	follow(frame_, out);
+}
+
+void MenuCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRequests &out) {
+	input(frame_, in, out);
+}
+
+OverlayList MenuCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
+	return shapes(frame_, in);
+}
+
+CanvasCursor MenuCanvas::cursor(const ViewportContext &, const CanvasInput &in) const {
+	return cursor(frame_, in);
+}
+
+std::string MenuCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
+	return hover_tip(frame_, in);
+}
 
 void MenuCanvas::follow(const MenuCanvasFrame &frame, CanvasRequests &out) {
 	gesture_.frame(subject_of(frame), out);
@@ -359,8 +383,8 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 		// The window a drag holds is the primary one (its handles follow it); the others the move
 		// takes stay selected.
 		if (!press_.marquee && press_.window != frame.primary)
-			out.select(gesture_.path(), press_.window,
-					press_.layout.windows.size() > 1 ? CanvasJoin::Add : CanvasJoin::Replace);
+			out.request(request::select_record(gesture_.path(), press_.window,
+					press_.layout.windows.size() > 1 ? SelectMode::Add : SelectMode::Replace));
 	}
 	if (press_.marquee) {
 		// The design point under the pointer now, whatever the zoom did since the press.
@@ -375,8 +399,8 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 	const int grid = frame.snap && !in.keys.alt ? kLayoutGrid : 0;
 	if (dx == press_.dx && dy == press_.dy && grid == press_.grid)
 		return;
-	if (!frame.compiler)
-		return; // no solve until the picture is back
+	if (!frame.compiler || !frame.editable)
+		return; // no solve until the picture is back; no edit while the session takes none
 	press_.dx = dx;
 	press_.dy = dy;
 	press_.grid = grid;
@@ -384,7 +408,7 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 	if (layout_press_edits(*frame.document, press_.layout, *frame.compiler, dx, dy, grid,
 				gesture_.token(), edits) &&
 			!edits.empty()) {
-		out.edits(gesture_.path(), std::move(edits));
+		out.request(request::edit_record(gesture_.path(), std::move(edits)));
 		gesture_.sent();
 	}
 }
@@ -392,29 +416,33 @@ void MenuCanvas::move_(const MenuCanvasFrame &frame, const CanvasInput &in, Canv
 void MenuCanvas::release_(const MenuCanvasFrame &frame, CanvasRequests &out) {
 	const std::string &path = gesture_.path();
 	if (press_.marquee && gesture_.dragging()) {
-		// What the box touches: the selection (the last one the primary), or added to it with
-		// Shift or Ctrl; a box that touches nothing selects the screen.
+		// What the box touches, one selection (S13 D7: a selection over any records): the
+		// selection, or added to it with Shift or Ctrl, the last one the primary; a box that
+		// touches nothing selects the screen.
 		if (frame.current) {
 			const std::vector<NodeAddress> touched =
 					menu_marquee_windows(frame, press_.from, press_.to);
-			if (press_.join == CanvasJoin::Replace && touched.empty())
-				out.select(path, { frame.screen->id, frame.screen->kind, 0 }, CanvasJoin::Replace);
 			const bool replace = press_.join == CanvasJoin::Replace;
-			for (size_t i = 0; i < touched.size(); ++i)
-				out.select(path, touched[i],
-						i == 0 && replace ? CanvasJoin::Replace : CanvasJoin::Add);
+			if (replace && touched.empty())
+				out.request(request::select_record(
+						path, { frame.screen->id, frame.screen->kind, 0 }));
+			else if (!touched.empty())
+				out.request(request::select_record(path, touched.back(),
+						replace ? SelectMode::Replace : SelectMode::Add, touched));
 		}
 	} else if (!gesture_.dragging() && !press_.resize && press_.pick >= 0 && frame.current) {
 		const NodeId id = frame.document->window_at(*frame.screen, size_t(press_.pick));
 		if (id)
-			out.select(path, { frame.screen->id, kWindowKind, id }, press_.join);
+			out.request(request::select_record(
+					path, { frame.screen->id, kWindowKind, id }, select_mode(press_.join)));
 	}
 	gesture_.release(out);
 	press_ = MenuPress();
 }
 
 void MenuCanvas::nudge_by_(const MenuCanvasFrame &frame, int dx, int dy, CanvasRequests &out) {
-	if ((!dx && !dy) || gesture_.pressed() || !frame.primary.child || !frame.compiler)
+	if ((!dx && !dy) || gesture_.pressed() || !frame.primary.child || !frame.compiler ||
+			!frame.editable)
 		return;
 	if (!gesture_.nudging()) {
 		// The nudge starts where the picture shows the windows: it must be the document's own.
@@ -433,7 +461,7 @@ void MenuCanvas::nudge_by_(const MenuCanvasFrame &frame, int dx, int dy, CanvasR
 	if (layout_press_edits(*frame.document, nudge_, *frame.compiler, nudge_dx_, nudge_dy_, 0,
 				gesture_.token(), edits) &&
 			!edits.empty()) {
-		out.edits(gesture_.path(), std::move(edits));
+		out.request(request::edit_record(gesture_.path(), std::move(edits)));
 		gesture_.sent();
 	}
 }
@@ -457,7 +485,8 @@ OverlayList MenuCanvas::shapes(const MenuCanvasFrame &frame, const CanvasInput &
 	const float sx = scale_x_of(in), sy = scale_y_of(in);
 	// A mark on every window that has a note: a small triangle in its top-left corner.
 	std::vector<char> marked(size_t(std::max(compiler.widget_count(), 0)), 0);
-	for (const menu::MenuFrameNote &note : frame.notes) {
+	static const std::vector<menu::MenuFrameNote> kNoNotes;
+	for (const menu::MenuFrameNote &note : frame.notes ? *frame.notes : kNoNotes) {
 		mnu::RectEdges rect{};
 		if (note.widget < 0 || size_t(note.widget) >= marked.size() ||
 				marked[size_t(note.widget)] ||
@@ -541,9 +570,10 @@ std::string MenuCanvas::hover_tip(const MenuCanvasFrame &frame, const CanvasInpu
 			rect.right - parent.left, rect.bottom - parent.top };
 		tip += "\nIn " + compiler.widget_name(owner) + ": " + rect_text(local);
 	}
-	for (const menu::MenuFrameNote &note : frame.notes)
-		if (note.widget == under)
-			tip += "\n- " + menu_note_message(note);
+	if (frame.notes)
+		for (const menu::MenuFrameNote &note : *frame.notes)
+			if (note.widget == under)
+				tip += "\n- " + menu_note_message(note);
 	return tip;
 }
 

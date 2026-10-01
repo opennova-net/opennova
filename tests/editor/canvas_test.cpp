@@ -1,4 +1,4 @@
-// S13 V2 (ADR 0046 S13): the Preview's canvas without ImGui. The one gesture machine
+// S13 V2, V5 (ADR 0046 S13): the viewports' canvas without ImGui. The one gesture machine
 // (preview/canvas_gesture): the drag threshold on the screen, one token per gesture, a click told
 // from a drag, and exactly one EndEdit for the document a gesture began in when it ends (let go,
 // lost, the canvas not drawn, another subject shown: another document, a reload of it, another
@@ -11,17 +11,19 @@
 // the keyboard gone elsewhere ends a nudge, and Esc selects MAIN; a stale picture maps nothing.
 // Several windows: Shift and Ctrl
 // clicks, a drag of a selected window moving both, the arrows moving both, the marquee picking
-// BOX and OTHER (nothing: the screen), the clipboard's rule (a Paste after OTHER at position 2)
+// BOX and OTHER in one selection (nothing: the screen), the clipboard's rule (a Paste after OTHER at
+// position 2)
 // and Arrange; a press inside a selected window moving the selection. A window a list's part
 // holds is never the canvas's to pick or move, and its clipboard takes nothing (a Paste after the
 // listed window holding the part). The shapes the canvas draws. The model's canvas
-// (preview/model_canvas) over a real session: F frames the selected marker, a click selects a
-// marker's record, a drag of it is one gesture ended once when its canvas is not drawn, a drag
-// elsewhere orbits and the wheel dollies, and a press ends when the model's document goes. Held
-// while an operation holds the documents (S13 A3), neither canvas raises an edit: a drag, a
-// resize, the arrows and an Arrange of the menu's, a marker's drag of the model's (it orbits),
-// while a click and Esc still select. The panes' wiring of all this is tests/editor_ui's (the
-// preview and workspace groups).
+// (preview/model_canvas) over a real session's model viewport: F frames the selected marker, a
+// click selects a marker's record, a drag of it is one gesture ended once when its canvas is not
+// drawn, a drag elsewhere orbits and the wheel dollies (each a SetViewport of the viewport's camera,
+// which the session applies), and a press ends when the model's document goes. Held while an
+// operation holds the documents (S13 A3), neither canvas raises an edit: a drag, a resize, the
+// arrows and an Arrange of the menu's, a marker's drag of the model's (it orbits), while a click
+// and Esc still select. The views' wiring of all this is tests/editor_ui's (the preview and
+// workspace groups).
 
 #include <algorithm>
 #include <cmath>
@@ -41,8 +43,10 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
-#include <editor/preview/model_preview_state.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/viewport_model.h>
 #include <editor/preview/viewport_overlay.h>
+#include <editor/preview/viewports.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -65,36 +69,48 @@ constexpr NodeKind kScreenKind = node_kind(MenuKind::Screen);
 // --- a canvas's requests, recorded ---------------------------------------------------------
 
 struct Request {
-	enum class Kind { Select, Edits, EndEdit };
+	enum class Kind { Select, Edits, EndEdit, Viewport };
 	Kind kind = Kind::Select;
 	std::string path;
 	NodeAddress record;
+	std::vector<NodeAddress> records; // the records a selection names with it (a marquee's)
 	CanvasJoin join = CanvasJoin::Replace;
 	std::vector<Edit> edits;
+	std::string viewport; // a SetViewport's change
 };
 
+// What the canvas raises, by kind; a kind a canvas never raises fails the test.
 struct Recorder final : CanvasRequests {
 	std::vector<Request> requests;
-	void select(const std::string &path, const NodeAddress &record, CanvasJoin join) override {
-		Request request;
-		request.kind = Request::Kind::Select;
-		request.path = path;
-		request.record = record;
-		request.join = join;
-		requests.push_back(std::move(request));
-	}
-	void edits(const std::string &path, std::vector<Edit> batch) override {
-		Request request;
-		request.kind = Request::Kind::Edits;
-		request.path = path;
-		request.edits = std::move(batch);
-		requests.push_back(std::move(request));
-	}
-	void end_edit(const std::string &path) override {
-		Request request;
-		request.kind = Request::Kind::EndEdit;
-		request.path = path;
-		requests.push_back(std::move(request));
+	bool unexpected = false;
+	void request(EditorRequest raised) override {
+		Request out;
+		out.path = raised.path;
+		switch (raised.kind) {
+			case EditorRequestKind::SelectRecord:
+				out.kind = Request::Kind::Select;
+				out.record = raised.address;
+				out.records = raised.records;
+				out.join = raised.mode == SelectMode::Add ? CanvasJoin::Add
+						: raised.mode == SelectMode::Toggle ? CanvasJoin::Toggle
+															: CanvasJoin::Replace;
+				break;
+			case EditorRequestKind::EditRecord:
+				out.kind = Request::Kind::Edits;
+				out.edits = std::move(raised.edits);
+				break;
+			case EditorRequestKind::EndEdit:
+				out.kind = Request::Kind::EndEdit;
+				break;
+			case EditorRequestKind::SetViewport:
+				out.kind = Request::Kind::Viewport;
+				out.viewport = raised.viewport;
+				break;
+			default:
+				unexpected = true;
+				return;
+		}
+		requests.push_back(std::move(out));
 	}
 	std::vector<Request> take() {
 		std::vector<Request> out;
@@ -244,7 +260,7 @@ struct MenuRig {
 				document.rows().empty())
 			return false;
 		const Node &screen = *document.rows()[0];
-		if (render.configure(document, screen.id, files, {}) != MenuPreviewStatus::Ready)
+		if (render.configure(document, screen.id, files, {}) != MenuScreenStatus::Ready)
 			return false;
 		frame.document = &document;
 		frame.screen = &screen;
@@ -745,13 +761,13 @@ int test_menu_several_windows() {
 	TEST_EXPECT(count == 1 && set_value(last, "position.left", box) == 101 &&
 			set_value(last, "position.left", other) == 401);
 
-	// A drag from MAIN's empty part (a root window not selected) selects what the box touches;
-	// a box over nothing selects the screen; a click on the background still selects it.
+	// A drag from MAIN's empty part (a root window not selected) selects what the box touches, in
+	// one selection (S13 D7, V5): BOX and OTHER, the last the primary; a box over nothing selects the
+	// screen; a click on the background still selects it.
 	requests = rig.drag(50.0f, 500.0f, 400.0f, -390.0f);
-	TEST_EXPECT(selections(requests) ==
-					(Selections{ { box, CanvasJoin::Replace }, { other, CanvasJoin::Add } }) &&
-			count_of(requests, Request::Kind::Edits) == 0 &&
-			count_of(requests, Request::Kind::EndEdit) == 0);
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select &&
+			requests[0].record == other && requests[0].join == CanvasJoin::Replace &&
+			requests[0].records == (std::vector<NodeAddress>{ box, other }));
 	requests = rig.drag(20.0f, 500.0f, 40.0f, 60.0f);
 	TEST_EXPECT(selections(requests) == (Selections{ { screen, CanvasJoin::Replace } }));
 	requests = rig.click(20.0f, 500.0f);
@@ -910,23 +926,9 @@ std::string synth(const char *name) {
 	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/" + name;
 }
 
-// What the model pane hands its canvas: the model shown, the picture's markers, the selected
-// record's marker while the model is the active document.
-ModelCanvasFrame model_frame(
-		const SessionView &view, ModelPreviewModel &model, const ModelDocument &document) {
-	ModelCanvasFrame frame;
-	frame.document = &document;
-	frame.model = &model;
-	frame.current = model.shown_revision() == document.revision();
-	if (frame.current && view.documents.active == document.path())
-		model_overlay_of(document, view.documents.selection.primary, frame.selected_kind, frame.selected);
-	frame.overlays = model.overlays();
-	return frame;
-}
-
-// Held (S13 A3: `editable` false while an operation holds the documents, as the pane sets it from
-// SessionView::allows): a drag of the selected BOX, a resize at its corner, the arrows and an
-// Arrange raise no edit; a click still selects, and Esc too. Editable again, the drag moves BOX.
+// Held (S13 A3: `editable` false while an operation holds the documents, as the viewport's context
+// says from SessionView::allows): a drag of the selected BOX, a resize at its corner, the arrows and
+// an Arrange raise no edit; a click still selects, and Esc too. Editable again, the drag moves BOX.
 int test_menu_canvas_held() {
 	MenuRig rig;
 	TEST_EXPECT(rig.load(kLayoutMenu, "layout.mnu"));
@@ -978,16 +980,25 @@ int test_model_canvas() {
 	session.handle(request::open_document("models/armory.3di"));
 	const auto *document =
 			dynamic_cast<const ModelDocument *>(session.document_for("models/armory.3di"));
-	ModelPreviewModel model;
-	TEST_EXPECT(
-			document && document->model_row() && model.follow(view) == ModelPreviewAction::Rebuild);
+	TEST_EXPECT(document && document->model_row());
 	if (!document || !document->model_row())
 		return 1;
+	const std::string path = document->path();
+	// The model's viewport, the size its device draws at the canvas's: 640 x 480.
 	const int width = 640, height = 480;
-	model.set_device_size(width, height);
+	session.handle(request::set_viewport(
+			path, R"({"kind": "model", "device": {"width": 640, "height": 480}})"));
+	const auto follow = [&]() {
+		return static_cast<const ModelViewport *>(
+				session.viewports().follow_one(view, path, ViewportKind::Model));
+	};
+	const ModelViewport *model = follow();
+	TEST_EXPECT(model && model->status() == ViewportStatus::Ready && model->state().width == width);
+	if (!model)
+		return 1;
 	const ModelRow &row = *document->model_row();
 	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
-	EditorRequest select = request::select_record(document->path(), point);
+	EditorRequest select = request::select_record(path, point);
 	session.handle(select);
 	ModelCanvas canvas;
 	Recorder out;
@@ -1000,33 +1011,54 @@ int test_model_canvas() {
 		in.hovered = true;
 		return in;
 	};
-	// One frame of the canvas as the pane draws it: the marker under the pointer found once,
-	// then the pointer and the keys.
-	ModelCanvasFrame frame = model_frame(view, model, *document);
+	// What the canvas maps of the viewport this frame (the view's input, the picture's size).
+	const auto frame_of = [&]() {
+		const ViewportContext context{
+			ViewportInput{ view, session.viewports().clock(), document, ChangeClass::None }, width,
+			height, 0.0f, nullptr
+		};
+		return follow()->canvas_frame(context);
+	};
+	// One frame of the canvas as its view draws it: the marker under the pointer found once, then
+	// the pointer and the keys.
+	ModelCanvasFrame frame = frame_of();
 	const auto step = [&](const CanvasInput &in) {
 		canvas.follow(frame, out);
 		canvas.input(frame, in, model_canvas_under(frame, in), out);
 	};
+	// The SetViewports the canvas raised, served as the session serves them.
+	const auto serve = [&](const std::vector<Request> &requests) {
+		size_t served = 0;
+		for (const Request &request : requests)
+			if (request.kind == Request::Kind::Viewport && request.path == path) {
+				session.handle(request::set_viewport(path, request.viewport));
+				served += session.outcome().done() ? 1 : 0;
+			}
+		return served;
+	};
 
-	// F, through the key channel while the canvas has the keyboard, frames the selected marker;
-	// without the keyboard it does nothing.
+	// F, through the key channel while the canvas has the keyboard, frames the selected marker (a
+	// SetViewport of the camera); without the keyboard it does nothing.
 	TEST_EXPECT(frame.selected == 0 && frame.selected_kind == ModelOverlayKind::UserPoint);
+	session.handle(request::set_viewport(path, R"({"kind": "model", "camera": {"distance": 40}})"));
+	TEST_EXPECT(follow()->camera().distance == 40.0f);
+	frame = frame_of();
 	CanvasInput keys = at(20.0f, 20.0f);
 	keys.hovered = false;
 	keys.keyboard.frame = true;
-	model.camera().distance = 40.0f;
 	step(keys);
-	TEST_EXPECT(model.camera().distance == 40.0f);
+	TEST_EXPECT(out.take().empty());
 	keys.keyboard.focused = true;
 	step(keys);
-	TEST_EXPECT(model.camera().distance != 40.0f);
-	frame = model_frame(view, model, *document);
+	std::vector<Request> requests = out.take();
+	TEST_EXPECT(requests.size() == 1 && serve(requests) == 1 && follow()->camera().distance != 40.0f);
+	frame = frame_of();
 	const ModelOverlay *marker = nullptr;
 	for (const ModelOverlay &overlay : frame.overlays)
 		if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == 0)
 			marker = &overlay;
 	float x = 0.0f, y = 0.0f;
-	TEST_EXPECT(marker && model.camera().project(marker->at, width, height, x, y));
+	TEST_EXPECT(marker && model->camera().project(marker->at, width, height, x, y));
 	if (!marker)
 		return 1;
 
@@ -1051,12 +1083,12 @@ int test_model_canvas() {
 	step(in);
 	in.pressed = in.down = false;
 	step(in);
-	std::vector<Request> requests = out.take();
+	requests = out.take();
 	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select &&
-			requests[0].record == point && requests[0].path == document->path());
+			requests[0].record == point && requests[0].path == path);
 
 	// A drag of the selected marker (Alt: placed freely): its first step edits the model under
-	// one token; the canvas not drawn the next frame (the menu made active, its pane shown): the
+	// one token; the canvas not drawn the next frame (the menu made active, its view shown): the
 	// drag's one end, for the model; letting go raises nothing.
 	in = at(x, y);
 	in.keys.alt = true;
@@ -1072,23 +1104,23 @@ int test_model_canvas() {
 	uint64_t gesture = 0;
 	size_t count = 0;
 	batches(requests, gesture, count);
-	TEST_EXPECT(count == 1 && gesture != 0 && requests[0].path == document->path() &&
+	TEST_EXPECT(count == 1 && gesture != 0 && requests[0].path == path &&
 			count_of(requests, Request::Kind::EndEdit) == 0);
 	canvas.end_frame(out);
 	requests = out.take();
-	TEST_EXPECT(requests.size() == 1 && ends_once(requests, document->path()));
+	TEST_EXPECT(requests.size() == 1 && ends_once(requests, path));
 	in.down = false;
 	step(in);
 	canvas.end_frame(out);
 	TEST_EXPECT(out.take().empty());
 
-	// Held (S13 A3: `editable` false while an operation holds the documents, as the pane sets it
-	// from SessionView::allows): the same drag of the selected marker takes no handle and edits
-	// nothing; it orbits the camera.
+	// Held (S13 A3: `editable` false while an operation holds the documents, as the viewport's
+	// context says from SessionView::allows): the same drag of the selected marker takes no handle
+	// and edits nothing; it orbits the camera (a SetViewport of it, which the session applies).
 	{
 		ModelCanvasFrame held = frame;
 		held.editable = false;
-		const float before = model.camera().yaw;
+		const float before = follow()->camera().yaw;
 		const auto held_step = [&](const CanvasInput &input) {
 			canvas.follow(held, out);
 			canvas.input(held, input, model_canvas_under(held, input), out);
@@ -1106,11 +1138,15 @@ int test_model_canvas() {
 		moved.delta = CanvasPoint();
 		held_step(moved);
 		canvas.end_frame(out);
-		TEST_EXPECT(count_of(out.take(), Request::Kind::Edits) == 0 && model.camera().yaw != before);
+		const std::vector<Request> orbited = out.take();
+		TEST_EXPECT(count_of(orbited, Request::Kind::Edits) == 0 && serve(orbited) >= 1 &&
+				follow()->camera().yaw != before);
+		frame = frame_of();
 	}
 
-	// A drag away from the markers orbits the camera and raises nothing; the wheel dollies.
-	const float yaw = model.camera().yaw, distance = model.camera().distance;
+	// A drag away from the markers orbits the camera: a SetViewport of it per sample, no edit and
+	// no selection; the wheel dollies.
+	const float yaw = follow()->camera().yaw, distance = follow()->camera().distance;
 	in = at(20.0f, 20.0f);
 	in.pressed = in.down = true;
 	step(in);
@@ -1121,15 +1157,45 @@ int test_model_canvas() {
 	in.down = false;
 	in.delta = CanvasPoint();
 	step(in);
-	TEST_EXPECT(model.camera().yaw != yaw && out.take().empty());
+	requests = out.take();
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Viewport &&
+			serve(requests) == 1 && follow()->camera().yaw != yaw &&
+			follow()->camera().distance == distance);
+	frame = frame_of();
 	in = at(70.0f, 20.0f);
 	in.wheel = 1.0f;
 	step(in);
-	TEST_EXPECT(std::fabs(model.camera().distance - distance * kModelWheelDolly) < 1e-4f &&
-			out.take().empty());
+	requests = out.take();
+	TEST_EXPECT(requests.size() == 1 && serve(requests) == 1 &&
+			std::fabs(follow()->camera().distance - distance * kModelWheelDolly) < 1e-4f);
+	// An orbit and the wheel in one frame: one SetViewport with both (the dolly on the orbited
+	// camera; two would each start from the camera the frame began with, the second undoing the
+	// first's orbit).
+	frame = frame_of();
+	const float yaw_before = follow()->camera().yaw, distance_before = follow()->camera().distance;
+	in = at(20.0f, 20.0f);
+	in.pressed = in.down = true;
+	step(in);
+	TEST_EXPECT(out.take().empty());
+	in = at(70.0f, 20.0f);
+	in.down = true;
+	in.delta = CanvasPoint{ 50.0f, 0.0f };
+	in.wheel = 1.0f;
+	step(in);
+	requests = out.take();
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Viewport && serve(requests) == 1);
+	TEST_EXPECT(follow()->camera().yaw != yaw_before &&
+			std::fabs(follow()->camera().distance - distance_before * kModelWheelDolly) < 1e-4f);
+	in.down = false;
+	in.delta = CanvasPoint();
+	in.wheel = 0.0f;
+	step(in);
+	TEST_EXPECT(out.take().empty());
+	TEST_EXPECT(!out.unexpected);
 
 	// A press ends when the model's document goes from the canvas (an animation's rig model
 	// shown, which no document holds): an orbit stops there, raising nothing.
+	frame = frame_of();
 	in = at(20.0f, 20.0f);
 	in.pressed = in.down = true;
 	step(in);

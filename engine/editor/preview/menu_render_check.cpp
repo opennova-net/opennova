@@ -403,7 +403,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 		Screen screen;
 		screen.row = row->id;
 		screen.render = std::make_unique<MenuScreenRender>();
-		if (screen.render->configure(document, row->id, files, vars) == MenuPreviewStatus::Ready) {
+		if (screen.render->configure(document, row->id, files, vars) == MenuScreenStatus::Ready) {
 			const menu::MenuFrameCompiler &compiler = screen.render->compiler();
 			const std::vector<menu::MenuDependency> &read = screen.render->assets().dependencies();
 			menu.dependencies.insert(menu.dependencies.end(), read.begin(), read.end());
