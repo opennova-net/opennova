@@ -174,7 +174,7 @@ from the vault into a tmpfs, and drives the remote docker engine over
 
 The browser build of the game (ADR 0049) is a third image,
 `ghcr.io/<owner>/opennova-game`, published by `.github/workflows/game-web.yml`
-from `deploy/game/Dockerfile`: the wasm GDExtension, the Godot Web export and an
+(manual runs only while the web build is paused) from `deploy/game/Dockerfile`: the wasm GDExtension, the Godot Web export and an
 nginx on `:8090` that sends the COOP/COEP headers the threaded build needs. The
 portal's nginx routes `game.<domain>` to it, `infra apply` creates the proxied
 `game` record, and the security group keeps `:8090` private. Make the

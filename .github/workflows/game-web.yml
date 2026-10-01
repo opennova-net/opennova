@@ -6,29 +6,23 @@ name: Game web image
 # ghcr.io/<owner>/opennova-game. The wasm side module alone is also compiled on
 # every pull request by ci.yml's build-gdextension-web job; this workflow's PR
 # leg builds the whole image only when the web packaging itself changes.
+#
+# Paused: the web build is on hold (the Compatibility renderer's 4096-value
+# instance-uniform buffer cannot hold a mission's terrain and objects), so the
+# push and pull-request triggers are off and the site keeps its last image. A
+# manual run still builds and publishes. To turn it back on, restore:
+#
+#   push:
+#     branches: [master]
+#     paths: [engine/**, godot/**, assets/**, third_party/**, deploy/game/**,
+#       scripts/build_godot_web.sh, scripts/package_godot_web.sh,
+#       scripts/bootstrap_imgui_godot.sh, .github/workflows/game-web.yml]
+#   pull_request:
+#     paths: [deploy/game/**, godot/web/**, godot/export_presets.cfg,
+#       godot/bin/opennova.gdextension, scripts/build_godot_web.sh,
+#       scripts/package_godot_web.sh, .github/workflows/game-web.yml]
 
 on:
-  push:
-    branches: [master]
-    paths:
-      - 'engine/**'
-      - 'godot/**'
-      - 'assets/**'
-      - 'third_party/**'
-      - 'deploy/game/**'
-      - 'scripts/build_godot_web.sh'
-      - 'scripts/package_godot_web.sh'
-      - 'scripts/bootstrap_imgui_godot.sh'
-      - '.github/workflows/game-web.yml'
-  pull_request:
-    paths:
-      - 'deploy/game/**'
-      - 'godot/web/**'
-      - 'godot/export_presets.cfg'
-      - 'godot/bin/opennova.gdextension'
-      - 'scripts/build_godot_web.sh'
-      - 'scripts/package_godot_web.sh'
-      - '.github/workflows/game-web.yml'
   workflow_dispatch:
 
 concurrency:
