@@ -18,6 +18,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
 #include <editor/preview/menu_report.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/problems_service.h>
@@ -632,6 +633,35 @@ JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::
 	return activity_operation_to_json(context.core.view());
 }
 
+// What a build would be refused for, nothing built (S13 A7): the build's own plan
+// (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
+// rows the build gates on; `blocked` exactly when that plan would not pack. start_build reads the
+// changed documents again and refreshes first, and a build request joins a running build and waits
+// on unsaved edits: the gate says none of that.
+JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	SessionCore &core = context.core;
+	const SessionView &view = core.view();
+	if (!view.project.open) {
+		error = "no project is open.";
+		return JsonValue::make_null();
+	}
+	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
+			core.problems().gate_findings());
+	std::vector<const Diagnostic *> blocking;
+	for (const Diagnostic &d : plan.diagnostics)
+		if (d.severity == DiagnosticSeverity::Error)
+			blocking.push_back(&d);
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	out.set("blocked", JsonValue::make_bool(!plan.ok));
+	set_page(out, page, blocking.size());
+	JsonValue list = JsonValue::make_array();
+	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i)
+		list.push(diagnostic_to_json(*blocking[i]));
+	out.set("blocking", std::move(list));
+	return out;
+}
+
 JsonValue answer_events(const QueryContext &context, const QueryArgs &args, std::string &) {
 	return events_page_to_json(context.core.view().events, args.cursor(), args.limit());
 }
@@ -828,6 +858,17 @@ constexpr EditorQueryRow kRows[] = {
 			"The operation that runs (running, and while one does its id, kind, label, done and "
 			"total in its unit, cancellable, and what it reads and writes), what the last one "
 			"came to (last_operation: id, kind, end, findings) and the last build.")
+			.row,
+	Query(K::BuildGate, "build_gate", answer_build_gate, kPageParams,
+			concern_set({ C::Project, C::Files, C::Findings }),
+			"What a build would be refused for over the files as last scanned, nothing built: "
+			"blocked (a build would not pack) and a page of the findings that block it, the errors "
+			"among the Problems rows the build gates on, the scan's and the requirements', and the "
+			"build's own checks of the files (an archive in the project, a name no archive can "
+			"store). A Problems row the build does not gate on (a project check's: the render "
+			"check's) blocks nothing. A build request reads changed files again first, joins a "
+			"build that runs and waits on unsaved edits, which the gate does not weigh.")
+			.pages("blocking")
 			.row,
 	// Events are posted beside a Selection or a Dialogs change (view_revisions.h).
 	Query(K::Events, "events", answer_events, kCursorParams,

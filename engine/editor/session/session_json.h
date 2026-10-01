@@ -11,6 +11,7 @@
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/outcome_json.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/session_operation.h>
@@ -126,11 +127,6 @@ io::JsonValue problem_fix_to_json(const ProblemFix &fix);
 // its first row among the shown), count, errors, warnings, infos}.
 io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		const JsonPage &page, ProblemFixCache &fixes);
-// What one request came to: {done, unsaved_prompt, operation, findings, added}; `done` is false
-// when it was refused or failed (an error among the findings) or waits on the unsaved prompt;
-// `operation` names the operation it started or joined (0: none); `added` the records its edits
-// made, in order (an edit_record's adds and duplicates, a paste's, a duplicate's copies).
-io::JsonValue action_outcome_to_json(const ActionOutcome &outcome);
 // A document: its lifecycle state and the source issues; for a record document (as_records) also
 // file_state_changed (its file-wide state differs from the saved baseline's), its row count, the
 // last record added and the kinds its outline adds, and, with a page of rows (`rows`: `count` the

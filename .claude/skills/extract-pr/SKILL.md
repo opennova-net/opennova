@@ -25,7 +25,8 @@ All commands are Git Bash, inside the current worktree only.
 - Bring changes over by `git checkout <mega-branch> -- <paths>` or cherry-pick,
   whichever yields a cleaner minimal diff. Re-read the resulting diff: a slice
   must not smuggle unrelated hunks that ride along in shared files.
-- LFS hazard: anything under `fixtures/**` must land as LFS pointers — after
+- LFS hazard: binary files under `fixtures/**` must land as LFS pointers
+  (plain-text fixtures are plain blobs by the `.gitattributes` carve-outs) — after
   staging, check `git lfs status` and the staged diff (a pointer file is a few
   lines of text; megabytes of binary in the diff means LFS missed it).
 - Edit only inside the worktree.
@@ -38,6 +39,7 @@ All commands are Git Bash, inside the current worktree only.
     for c in ratchet_counts maturity_lint link_graph_check include_graph_check \
              orphan_header_check cite_census fixture_lint env_lint conventions_lint; do
         python scripts/lint/$c.py --enforce; done   # the CI lint gates
+    python scripts/ci/test_suites.py --suite core --check-layout  # suite layout (same CI step)
     python docs/tools/ledger_check.py --check        # the ledger scoreboard (docs repo)
 
 Scope ctest with `-R` while iterating, but the pre-push run is the full suite.

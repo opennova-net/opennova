@@ -58,7 +58,8 @@ skip). For one file, invoke GUT directly:
       -gtest=res://tests/<file>_test.gd -gexit
 
 - One test within the file: add `-gunit_test_name=<substring>`.
-- Filename-substring selection needs the wrapper's collection flags:
+- Filename-substring selection needs collection flags matching the wrapper's
+  generated `-gconfig` (`scripts/ci/test_suites.py`: empty prefix, `_test.gd` suffix):
   `-gdir=res://tests -ginclude_subdirs -gprefix= -gsuffix=_test.gd -gselect=<substring>`
   (GUT's default prefix is `test_`; this repo's files are suffix-named).
   Flag reference: `godot/addons/gut/cli/gut_cli.gd` (installed by bootstrap).

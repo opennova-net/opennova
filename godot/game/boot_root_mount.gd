@@ -3,6 +3,9 @@ extends RefCounted
 ## Mount the CLI-supplied or picked game directory (--loose-root permits a
 ## loose-only root), or OpenNova's own bundled assets/ (ADR 0048).
 
+## Where godot/web/opennova_stage.js copies the site's assets/ (keep in step).
+const WEB_BUNDLED_ASSETS_DIR := "/opennova/assets"
+
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	var expansion := LaunchFlags.expansion(ResourceDirSettings.get_expansion())
@@ -23,8 +26,12 @@ static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 
 
 ## The assets/ directory shipped beside the exported exe; from the editor or a
-## source run, the repo's own assets/ beside the Godot project.
+## source run, the repo's own assets/ beside the Godot project. The web build
+## has no exe beside anything: its page stages the site's assets/ into the
+## in-memory filesystem before the engine starts (ADR 0049).
 static func bundled_assets_dir() -> String:
+	if OS.has_feature("web"):
+		return WEB_BUNDLED_ASSETS_DIR
 	if OS.has_feature("template"):
 		return OS.get_executable_path().get_base_dir().path_join("assets")
 	return ProjectSettings.globalize_path("res://").path_join("../assets").simplify_path()

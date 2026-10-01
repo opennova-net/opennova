@@ -18,11 +18,12 @@ easier to relay than to rediscover.
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime),
   `probes/` (the registered `game_probe` runtime probes, source-only and
-  excluded from the runtime export preset, ADR 0041; see `docs/mcp.md`),
-  `tests/` (GUT suite).
+  excluded from every export preset, ADR 0041; see `docs/mcp.md`),
+  `web/` (the `OpenNova Web` export's page shell; the site image is
+  `deploy/game/`, ADR 0049), `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
   `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
-  `project/` (`opennova-project`, the editor's project core on the command line, ADR 0046),
+  `project/` (`opennova-project`, the editor's session on the command line, ADR 0046 S13 A7),
   `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
@@ -40,7 +41,7 @@ easier to relay than to rediscover.
   row (`blender_<name>` plus a retail-labelled `_retail` row) when Blender 5.x is on PATH,
   run against the source-tree add-on; the Blender packaging workflow runs them against
   the installed zip (`tools/blender/opennova_3di/README.md`).
-- `fixtures/` — test inputs, each minted (by a `tests/fixtures/minimal_*_gen.cpp` generator
+- `fixtures/` — test inputs, each minted (by a `tests/fixtures/*_gen.cpp` generator
   through our own writer), authored, or keep (the small retail-interop set); binaries are
   LFS-tracked, text fixtures plain blobs (`.gitattributes`), and each is classified by
   `scripts/lint/fixture_lint.py` (`fixtures/README.md`, ADR 0041).
@@ -72,13 +73,13 @@ processes.
 ```bash
 scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
 scripts/build_godot.sh    # both GDExtension variants -> godot/bin/ (--runtime-only for one); fully restart the editor after
-scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ scripts (local, no CI job)
+scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ + tests/retail/windowed/ scripts (local, no CI job)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv)
 python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (docs repo; --write regenerates)
 ```
 
-- Fresh worktree/clone: `git submodule update --init --recursive` first — `third_party/`
-  ships empty and the build scripts self-init only GUT (`scripts/build.sh` and
+- Fresh worktree/clone: `git submodule update --init --recursive` first — the `third_party/`
+  submodules ship empty and the build scripts self-init only GUT (`scripts/build.sh` and
   `scripts/test_godot.sh` both run `scripts/bootstrap_godot.sh`); godot-cpp still
   needs the manual init. With the docs opt-in set, the same command clones `docs/` over
   SSH; an empty `docs/` means the opt-in is missing, so never write into it. Then build
@@ -167,12 +168,14 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   (every pointer this repo recorded must stay reachable). Two PRs that both move the
   pointer conflict on it; `scripts/land_docs.sh --sync` resolves that (docs `master` holds
   both). `git grep` skips the submodule unless given `--recurse-submodules`.
-- PR CI builds only the `template_debug` GDExtension (both variants) and packages
+- PR CI builds only the `template_debug` desktop GDExtension (both variants) and packages
   debug-mode exports (`-ExportMode debug`: the game zip and the editor zip);
   `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
-  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The engine
-  test job runs Ninja + sccache (the VS generator is local-only).
+  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. Every PR also
+  compiles the wasm32 web side module (`build-gdextension-web`, `scripts/build_godot_web.sh`,
+  Emscripten 4.0.20 only; ADR 0049 d5: no exceptions as control flow, ILP32-safe layout
+  guards). The engine test job runs Ninja + sccache (the VS generator is local-only).
 
 ## Deeper docs
 

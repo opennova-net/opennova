@@ -3,10 +3,10 @@
 > **Retirement pending (ADR 0048).** The server's expansion publish callback
 > and the web catalogue are gone and migration 0007 dropped the expansion
 > tables, so `./deploy/run.sh github apply` would regenerate
-> `backend/seed/0002_expansions.generated.sql` and break server boot
-> (DEPLOY.md section 4). Do not apply this stack. Its removal is tracked in
-> `TODO.md` (the first row: drop the seed output first, keep the expansion
-> repos with `removed` blocks). The text below describes the stack as it was.
+> `backend/seed/0002_expansions.generated.sql`, a seed that then fails on every
+> server boot and fails the `backend_schema` ctest (DEPLOY.md section 4). Do not
+> apply this stack. Its removal is tracked in `TODO.md` (the first row: drop the
+> seed output first, keep the expansion repos with `removed` blocks). The text below describes the stack as it was.
 
 Manages the GitHub side of the deployment: the expansion content repositories
 (`revx02`, `onjo01`, `ondx01`) and the GitHub Actions secrets their build

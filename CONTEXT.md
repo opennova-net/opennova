@@ -432,14 +432,17 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **Bundled assets**:
 The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
-authored from scratch. Today it is only the placeholder main menu that says the
-OpenNova game is coming and offers **PLAY RETAIL**. The game mounts it when no
-`--resource-dir` is given (ADR 0048).
+authored from scratch. Today it is the placeholder main menu that says the
+OpenNova game is coming and offers **PLAY RETAIL**, plus the first pieces of the
+game's own data (the `on_ar15` carbine and arms the Blender add-on exports from
+`art/`, not yet referenced). The game mounts it when no `--resource-dir` is given
+(ADR 0048); the web build stages it, minus that unreferenced art, into the page's
+filesystem before boot (ADR 0049).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
 `opennova.exe` hosting a match without being a player: the host screen's retail Serve Only
-server type (`SERVERTYPE` = 1), runnable windowed or `--headless`. A mode of the game product, never a separate binary,
+server type (`SERVERTYPE` = 1); retail has no command-line auto-host to port. A mode of the game product, never a separate binary,
 riding the one in-match seam (ADR 0015).
 _Avoid_: dedicated server product, server exe, opennova-server
 
@@ -569,13 +572,21 @@ The editor MCP reads it; the request's `ok` only says it parsed.
 _Avoid_: status (the one-line text the editor shows), result
 
 **Query**:
-What the editor MCP, the Shell or a test asks of the editor's session without changing it: a
-name, one row of the query table (`session/editor_queries`: the params it takes, the list it
-pages, the view concern whose revision its answer carries), and those params. The state is one,
-by section and since a revision; every list a query serves comes a page at a time (an offset, or
-a cursor for the output lines and the events, a limit, and the whole count); the `catalog` query
-lists every request kind, query, section and concern from the tables themselves.
+What the editor MCP, the Shell, the command line or a test asks of the editor's session without
+changing it: a name, one row of the query table (`session/editor_queries`: the params it takes,
+the list it pages, the view concern whose revision its answer carries), and those params. The
+state is one, by section and since a revision; every list a query serves comes a page at a time
+(an offset, or a cursor for the output lines and the events, a limit, and the whole count); the
+`catalog` query lists every request kind, query, section and concern from the tables themselves.
 _Avoid_: request (a request changes the session), view (what the windows draw from), getter
+
+**Verb**:
+What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
+`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+(`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
+that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
+`query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
+_Avoid_: command (a request, a menu's COMMAND, a script's command), subcommand
 
 **Workspace**:
 The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar

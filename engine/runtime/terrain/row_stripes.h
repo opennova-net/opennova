@@ -20,8 +20,12 @@ inline constexpr int kRowStripeRows = 8;
 // could not start; lanes then run on their caller). An owner that rasters
 // repeatedly holds one so each call reuses the same threads. The pool lives
 // beside its one owner, the page workers (terrain_tile_composition_worker.cpp).
+// `threads` sizes a pool this call starts (a live pool keeps its size); the
+// caller is always one more lane, so 0 runs every lane on the caller.
 using RowStripePoolLease = std::shared_ptr<void>;
-RowStripePoolLease retain_row_stripe_pool();
+// The desktop sizing: every hardware thread but the caller's.
+std::size_t row_stripe_hardware_threads() noexcept;
+RowStripePoolLease retain_row_stripe_pool(std::size_t threads = row_stripe_hardware_threads());
 
 namespace detail {
 // Runs lane(index) for every index in [0, lanes) on the shared lane pool: a

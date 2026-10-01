@@ -68,7 +68,11 @@ struct TerrainHeightFieldNoLocks {
 };
 } // namespace detail
 
-static_assert(sizeof(TerrainHeightField) == sizeof(detail::TerrainHeightFieldNoLocks),
+// On a 64-bit target the four policy bytes fill `dim`'s tail padding exactly. An
+// ILP32 target (the wasm32 web build) packs `dim` right after the pointer, so there
+// they cost one word; either way the struct stays what it was but for that word.
+static_assert(sizeof(TerrainHeightField) ==
+                      sizeof(detail::TerrainHeightFieldNoLocks) + (sizeof(void *) == 4 ? 4 : 0),
               "TerrainHeightField grew: the sampling policy no longer fits its padding. This is a "
               "by-value POD copied into deep stack frames — a 32-byte lock array here overflowed "
               "tests/world/infantry_test's stack.");

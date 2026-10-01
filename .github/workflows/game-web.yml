@@ -1,0 +1,89 @@
+name: Game web image
+
+# Builds and publishes the web build's site image (ADR 0049;
+# deploy/game/Dockerfile): the wasm GDExtension, the OpenNova Web export and
+# the nginx that serves it at game.<domain>. The deploy toolbox (deploy/) pulls
+# ghcr.io/<owner>/opennova-game. The wasm side module alone is also compiled on
+# every pull request by ci.yml's build-gdextension-web job; this workflow's PR
+# leg builds the whole image only when the web packaging itself changes.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'engine/**'
+      - 'godot/**'
+      - 'assets/**'
+      - 'third_party/**'
+      - 'deploy/game/**'
+      - 'scripts/build_godot_web.sh'
+      - 'scripts/package_godot_web.sh'
+      - 'scripts/bootstrap_imgui_godot.sh'
+      - '.github/workflows/game-web.yml'
+  pull_request:
+    paths:
+      - 'deploy/game/**'
+      - 'godot/web/**'
+      - 'godot/export_presets.cfg'
+      - 'godot/bin/opennova.gdextension'
+      - 'scripts/build_godot_web.sh'
+      - 'scripts/package_godot_web.sh'
+      - '.github/workflows/game-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: game-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false
+
+      # The site ships assets/ except the unreferenced art
+      # scripts/package_godot_web.sh excludes (keep the two lists in step).
+      - name: Pull the shipped assets/ from LFS
+        run: |
+          git lfs install --local
+          git lfs pull --include="assets/**" --exclude="assets/on_ar15*,assets/on_arms*"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # Only log in + push on push events (PRs from forks can't push to GHCR).
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-game
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push the game image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/game/Dockerfile
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=game
+          cache-to: type=gha,scope=game,mode=max

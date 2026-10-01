@@ -9,6 +9,7 @@
 #include <formats/cbin/binary_config.h>
 
 #include <base/io/le.h>
+#include <base/io/strutil.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -27,9 +28,8 @@ uint32_t read_le_u32(const uint8_t* data) {
 // Parse a hex color from ~Crrggbb format
 uint32_t parse_color(const std::string& s) {
     if (s.length() >= 8 && s[0] == '~' && s[1] == 'C') {
-        try {
-            return std::stoul(s.substr(2, 6), nullptr, 16);
-        } catch (...) {}
+        if (auto rgb = strutil::parse_ulong(s.substr(2, 6), 16))
+            return static_cast<uint32_t>(*rgb);
     }
     return 0xFFFFFF;
 }
@@ -83,21 +83,21 @@ Entry Entry::make_justify(Justify j) {
 
 void Credits::set_env(const std::string& key, const std::string& value) {
     if (key == "scroll_rate") {
-        try { scroll_rate = std::stof(value); } catch (...) {}
+        if (auto v = strutil::parse_float(value)) scroll_rate = *v;
     } else if (key == "vertical_space") {
-        try { vertical_space = std::stoi(value); } catch (...) {}
+        if (auto v = strutil::parse_int(value)) vertical_space = *v;
     } else if (key == "center_x") {
-        try { center_x = std::stoi(value); } catch (...) {}
+        if (auto v = strutil::parse_int(value)) center_x = *v;
     } else if (key == "top_y") {
-        try {
-            top_y = std::stoi(value);
+        if (auto v = strutil::parse_int(value)) {
+            top_y = *v;
             has_top_y = true;
-        } catch (...) {}
+        }
     } else if (key == "bottom_y") {
-        try {
-            bottom_y = std::stoi(value);
+        if (auto v = strutil::parse_int(value)) {
+            bottom_y = *v;
             has_bottom_y = true;
-        } catch (...) {}
+        }
     } else {
         env_extra[key] = value;
     }
@@ -401,9 +401,11 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
                     size_t second_pipe = main_value.find('|', first_pipe + 1);
                     if (first_pipe != std::string::npos && second_pipe != std::string::npos) {
                         // First number after ~F is X offset
-                        try { e.image_display_x = std::stoi(main_value.substr(2, first_pipe - 2)); } catch (...) {}
+                        if (auto x = strutil::parse_int(main_value.substr(2, first_pipe - 2)))
+                            e.image_display_x = *x;
                         // Second number is Y offset
-                        try { e.image_display_y = std::stoi(main_value.substr(first_pipe + 1, second_pipe - first_pipe - 1)); } catch (...) {}
+                        if (auto y = strutil::parse_int(main_value.substr(first_pipe + 1, second_pipe - first_pipe - 1)))
+                            e.image_display_y = *y;
                         e.image_path = main_value.substr(second_pipe + 1);
                     }
                 } else if (starts_with_tilde('I')) {
