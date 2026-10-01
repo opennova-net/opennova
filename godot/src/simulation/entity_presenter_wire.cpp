@@ -719,6 +719,10 @@ void EntityPresenter::append_wire_row(Object *node, int base, int handle,
 		row.anim_request = cached->request;
 		row.remote_body_tick = cached->latch;
 	}
+	if (const Vector2i *foot = wire_foot_cursor_.getptr(handle)) {
+		row.foot_state = foot->x;
+		row.foot_phase = foot->y;
+	}
 	wire_rows_.push_back(row);
 }
 
@@ -763,6 +767,7 @@ bool EntityPresenter::wire_plan_is_current(int64_t snapshot_size, int stride,
 // (clear_render_culled) forgets verdicts.
 void EntityPresenter::release_wire_handle(int handle) {
 	wire_remote_body_.erase(handle);
+	wire_foot_cursor_.erase(handle);
 	wire_respawn_revisions_.erase(handle);
 	wire_held_weapon_adm_.erase(handle);
 	wire_held_weapon_ids_.erase(handle);
@@ -775,6 +780,7 @@ void EntityPresenter::reset_wire_plan_state() {
 	wire_render_culled_.clear();
 	wire_render_culled_inset_.clear();
 	wire_remote_body_.clear();
+	wire_foot_cursor_.clear();
 	wire_respawn_revisions_.clear();
 	wire_held_weapon_adm_.clear();
 	wire_held_weapon_ids_.clear();
@@ -1105,6 +1111,7 @@ void EntityPresenter::present_wire_row_body_sounds(WireRow &row,
 		row.foot_state = -2;
 		row.foot_phase = -1;
 	}
+	wire_foot_cursor_.insert(row.handle, Vector2i(row.foot_state, row.foot_phase));
 }
 
 // Keep dynamically materialized items on the same PANM path as placed mission

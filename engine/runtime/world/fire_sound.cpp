@@ -265,6 +265,13 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
         return;
     const Entity *shooter = world.registry.get(params.owner);
     const int32_t source_bms_id = shooter != nullptr ? shooter->bms_id : 0;
+    // The plays carry the SHOOTER entity, whose refire retakes its own channel
+    // [orig: the entity rides Sound_Play3DPositional @ 0x527E4A into the open
+    // @ 0x766F46 / @ 0x766F8E — D-SND-10]. A decoded wire shooter has no local
+    // owner; its wire handle names it, the key the wire bodies' slot sounds
+    // already use — without it every remote shot took a fresh channel.
+    const uint16_t source_handle =
+            params.owner.valid() ? params.owner.packed : params.shooter_handle;
     const bool adm_arm =
             (params.wire_round_flags & round_event_flag::kAltFire) == 0 &&
             (params.wire_round_flags & round_event_flag::kAdmIndexed) != 0;
@@ -301,12 +308,12 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
             if (mounted && row_id == weapon_action::kRecoil)
                 slot.current = slot.next = weapon_action::kRecoil;
             const WeaponFsmAction &row = def->action_fsm.actions[row_id];
-            queue.play_immediate(row.soundset, pos, source_bms_id, params.owner.packed);
-            queue.play_immediate(row.soundsetend, pos, source_bms_id, params.owner.packed);
+            queue.play_immediate(row.soundset, pos, source_bms_id, source_handle);
+            queue.play_immediate(row.soundsetend, pos, source_bms_id, source_handle);
             WeaponFsmEvents events;
             weapon_fsm_replay_action(slot_def, slot, static_cast<int32_t>(world.logic_tick), events);
             if (events.head_started)
-                queue.play_immediate(slot_def.soundhead, pos, source_bms_id, params.owner.packed);
+                queue.play_immediate(slot_def.soundhead, pos, source_bms_id, source_handle);
         }
         if (mounted) slot.current = slot.next = weapon_action::kIdle;
         return;
@@ -319,7 +326,7 @@ void fire_sound_on_spawn(World &world, const RoundSpawnParams &params) {
     const AmmoTableEntry *ammo = world.tables.ammo.by_index(params.ammo_index);
     if (ammo == nullptr || ammo->ai_launch_set.empty()) return;
     queue.play_with_distance_delay(ammo->ai_launch_set.c_str(), params.origin,
-            source_bms_id, params.owner.packed);
+            source_bms_id, source_handle);
 }
 
 } // namespace opennova::world

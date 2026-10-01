@@ -11,6 +11,7 @@
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
+#include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
@@ -668,6 +669,10 @@ private:
 	std::vector<WireRow> wire_rows_;
 	std::vector<ObjectID> wire_deferred_ids_;
 	HashMap<int32_t, RemoteBodyCache> wire_remote_body_;
+	// The footstep cursor (WireRow::foot_state, foot_phase) per wire handle:
+	// a cold re-plan rebuilds every WireRow, and a fresh cursor re-seeds at
+	// the playhead, dropping the steps the re-plan frame crossed.
+	HashMap<int32_t, Vector2i> wire_foot_cursor_;
 	HashMap<int32_t, int32_t> wire_respawn_revisions_;
 	HashMap<int32_t, bool> wire_render_culled_;
 	HashMap<int32_t, bool> wire_render_culled_inset_;
