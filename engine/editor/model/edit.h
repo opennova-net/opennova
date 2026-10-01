@@ -34,7 +34,8 @@ enum class EditOperation {
 // it (a raster's brush stroke, a text's span replaced, a record type's own change) and immutable
 // once made, so whatever keeps it (a batch, a history of payloads) shares it. Its token names its
 // kind: a type takes the payloads it makes and refuses another's. The editor's JSON writes an
-// edit's payload as its token and reads none back: the editor MCP cannot send an Apply edit yet.
+// edit's payload as its token and reads none back but a text document's span replaced
+// (TextSpanEdit, "text.span", S13 D9): the editor MCP sends no other Apply edit.
 struct EditPayload {
 	virtual ~EditPayload();
 	virtual const char *token() const = 0;

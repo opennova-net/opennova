@@ -19,6 +19,10 @@ enum class ViewEventKind : uint8_t {
 	// document, `address` the record, `field` its field to show. The document's view shows the
 	// record and the Inspector lights the field.
 	RevealRecord,
+	// An OpenDocument of a text document that named a place in it (a Go to's span, a Problems
+	// row's line; ADR 0046 S13 D9): `path` the document, `locator` the place ("line:column"). The
+	// document's view scrolls to the line and marks it (S13 V10's script device to the span).
+	RevealText,
 	// A ShowInFiles: `path` the project file (project-relative), `flag` asks its new name (Files'
 	// Rename...). Files comes forward and selects it.
 	RevealFile,
@@ -47,6 +51,7 @@ struct ViewEventKindRow {
 
 inline constexpr ViewEventKindRow kViewEventKindRows[] = {
 	{ViewEventKind::RevealRecord, "reveal_record"},
+	{ViewEventKind::RevealText, "reveal_text"},
 	{ViewEventKind::RevealFile, "reveal_file"},
 	{ViewEventKind::AskRename, "ask_rename"},
 	{ViewEventKind::SettingsApplied, "settings_applied"},
@@ -88,6 +93,7 @@ struct ViewEvent {
 	std::string path;
 	NodeAddress address;
 	std::string field;
+	std::string locator; // a text's place (RevealText)
 	bool flag = false;
 	uint64_t tag = 0;
 };

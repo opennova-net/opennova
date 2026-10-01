@@ -11,6 +11,7 @@
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/document_types.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -261,8 +262,19 @@ void DocumentSet::open_document(const EditorRequest &request) {
 	// The record a request names (by its address, or by its locator: a Go to) is selected,
 	// and its field (a Problems row's, the defining field a Go to shows) shown: a RevealRecord
 	// event for the document's view and the Inspector, one per ask (the same row clicked again
-	// shows it again).
+	// shows it again). A text document's place (its locator "line:column": a Go to's span, a
+	// Problems row's line) is a RevealText event for its view.
 	const auto select_named = [this, &request](const DocumentBase &document) {
+		if (text_of(document)) {
+			size_t line = 0, column = 0;
+			if (!TextDocument::read_locator(request.locator, line, column)) return;
+			ViewEvent reveal;
+			reveal.kind = ViewEventKind::RevealText;
+			reveal.path = document.path();
+			reveal.locator = request.locator;
+			view_.events.post(std::move(reveal));
+			return;
+		}
 		const Document *records = records_of(document);
 		if (!records) return; // a document of another kind holds no records to select
 		const NodeAddress record =

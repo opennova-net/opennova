@@ -161,6 +161,12 @@ public:
 	const std::vector<Ref> &edges_through(const std::string &name) const {
 		return list(variables_, name);
 	}
+	// The edges of a kind that name a symbol `key` (key_of) as one of their two names, the value or
+	// the fallback (GraphEdge::fallback): a change of its definitions resolves them again, whichever
+	// of the two they reach.
+	const std::vector<Ref> &edges_naming(const std::string &key) const {
+		return list(alternates_, key);
+	}
 	// The file edges that load a file (by its path), in order.
 	const std::vector<Ref> &users_of(const std::string &file) const { return list(users_, file); }
 	const std::vector<Ref> &missing() const { return missing_; }
@@ -182,6 +188,7 @@ private:
 	std::array<std::vector<Ref>, kReferenceKindCount> kinds_;       // kind -> symbols
 	Lists targets_;                                                 // kind + target -> edges
 	Lists variables_;                                               // variable -> edges naming it
+	Lists alternates_;                                              // kind + name -> edges with a fallback naming it
 	Lists users_;                                                   // path -> the edges loading it
 	std::vector<Ref> missing_;
 	size_t edges_ = 0;

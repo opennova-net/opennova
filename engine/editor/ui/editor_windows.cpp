@@ -211,6 +211,9 @@ void EditorWindows::dispatch_events() {
 			if (document_window_) document_window_->receive(event);
 			if (inspector_window_) inspector_window_->receive(event);
 			break;
+		case ViewEventKind::RevealText:
+			if (document_window_) document_window_->receive(event);
+			break;
 		case ViewEventKind::RevealFile:
 			if (files_window_) files_window_->receive(event);
 			break;

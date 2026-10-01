@@ -262,6 +262,7 @@ private:
 		int line = 1;                  // lineNum: CR alone counts
 		uint8_t last = 0;              // bl, the last byte the tokenizer read
 		size_t token_length = 0;       // paramLen
+		size_t token_start = 0;        // where the token began in the text (tooling metadata)
 		uint32_t token_hash = 0;       // edi
 		size_t lookahead_cursor = 0;   // var_4A08
 		int lookahead_line = 1;        // var_49EC
@@ -316,9 +317,22 @@ private:
 	}
 
 	// Retail keeps the first error only ("%s (%d) %s" into byte_C6EB30,
-	// Script_SetCompileError @0x4EE7C0); every one is kept here, in order.
-	void error(const File &f, int line, std::string message, bool catalog_miss = false) {
-		prog_.diagnostics.push_back(Diagnostic{line, 0, std::move(message), catalog_miss, f.source});
+	// Script_SetCompileError @0x4EE7C0); every one is kept here, in order, with the place of
+	// the token the compiler was at (tooling metadata).
+	// `table`: a name a table the embedder gives does not hold (Diagnostic::table).
+	void error(const File &f, int line, std::string message, bool catalog_miss = false,
+			bool table = false) {
+		prog_.diagnostics.push_back(Diagnostic{
+				line, 0, std::move(message), catalog_miss, f.source, f.token_start, table});
+	}
+
+	// A catalog lookup of the current token's name past a prefix of `prefix` bytes, and whether it
+	// found the name (tooling metadata: Program::catalog_lookups); one a declaration's check of its
+	// name as new made (a declaration mode set) marked so.
+	void note_lookup(const File &f, ParamType kind, size_t prefix, bool found) {
+		const size_t skipped = prefix < f.token_length ? prefix : f.token_length;
+		prog_.catalog_lookups.push_back({kind, std::string(token_view(f).substr(skipped)), f.source,
+				f.token_start + skipped, f.token_length - skipped, found, f.decl_mode != 0});
 	}
 
 	// [orig: WacScript_FormatActionParameters @0x4EFC20] "  name (type, type)".
@@ -475,6 +489,7 @@ private:
 				while (f.cursor < f.end && at(f, f.cursor) != '\r') ++f.cursor;
 				continue;
 			}
+			f.token_start = f.cursor - 1;
 			tokenize(f, c);
 			lookahead(f);
 			if (!take_by_mode(f)) continue;
@@ -1066,9 +1081,10 @@ private:
 	// A TextToken key's text: a found key keeps its own entry, and every
 	// missing key shares the one "" string the lookup answers with.
 	// [orig: MissionText_GetStringByKeyOrGameText @0x51ECD0, the "" @0x51ED2A]
-	int32_t text_token(const std::string &key, std::string &symbol) {
+	int32_t text_token(const std::string &key, std::string &symbol, bool &found) {
 		std::optional<std::string> text;
 		if (env_.text_token) text = env_.text_token(key);
+		found = text.has_value();
 		if (!text) {
 			symbol = "TT:";
 			if (text_miss_ < 0) {
@@ -1159,7 +1175,7 @@ private:
 			int group = env_.registry ? env_.registry->script_group_index(group_name)
 					: world::EntityRegistry::default_script_group_index(group_name);
 			if (group < 0) {
-				error(f, f.line, "Unknown Group");
+				error(f, f.line, "Unknown Group", false, true);
 				group = 0;
 			}
 			return pooled(f, group, int(ParamType::Group), expected);
@@ -1169,8 +1185,9 @@ private:
 			const std::string effect(name.substr(p));
 			const particle::EffectHandle handle = env_.effects ? env_.effects->intern(effect)
 					: particle::EffectHandle{};
+			note_lookup(f, ParamType::Fx, p, bool(handle));
 			if (!handle) {
-				error(f, f.line, "Unknown FX", true);
+				error(f, f.line, "Unknown FX", true, true);
 				return pooled(f, 0, int(ParamType::Fx), expected);
 			}
 			return pooled(f, int32_t(handle.value), int(ParamType::Fx), expected, "FX:" + effect);
@@ -1197,8 +1214,9 @@ private:
 					}
 				}
 			}
+			note_lookup(f, ParamType::SoundSet, p, handle != 0);
 			if (handle == 0) {
-				error(f, f.line, "Unknown SOUNDSET", true);
+				error(f, f.line, "Unknown SOUNDSET", true, true);
 				return pooled(f, 0, int(ParamType::SoundSet), expected);
 			}
 			return pooled(f, handle, int(ParamType::SoundSet), expected, "SS:" + set);
@@ -1208,7 +1226,9 @@ private:
 			// TextTool Token" never fires. [orig: @0x4F2F96..0x4F2FD5 ->
 			// MissionText_GetStringByKeyOrGameText @0x51ECD0]
 			std::string symbol;
-			const int32_t index = text_token(std::string(name.substr(p)), symbol);
+			bool found = false;
+			const int32_t index = text_token(std::string(name.substr(p)), symbol, found);
+			note_lookup(f, ParamType::TextToken, p, found);
 			return pooled(f, index, int(ParamType::TextToken), expected, symbol);
 		}
 		if (const size_t p = prefix("ANIM_"); p || expected == int(ParamType::Anim)) {
@@ -1246,8 +1266,9 @@ private:
 				ammo = "ammo_" + ammo;
 				index = env_.ammo->index_of(ammo.c_str());
 			}
+			note_lookup(f, ParamType::Ammo, p, index > 0);
 			if (index <= 0) {
-				error(f, f.line, "Unknown AMMO", true);
+				error(f, f.line, "Unknown AMMO", true, true);
 				return pooled(f, 0, int(ParamType::Ammo), expected);
 			}
 			return pooled(f, index, int(ParamType::Ammo), expected, "AMMO:" + ammo);

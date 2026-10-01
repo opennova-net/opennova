@@ -40,6 +40,7 @@
 #include <base/resource_index/texture_candidates.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
+#include <editor/documents/document_types.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
@@ -51,6 +52,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_plan.h>
+#include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 #include <editor/session/preferences_store.h>
@@ -1878,7 +1880,9 @@ bool same_edge(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.target == b.target && a.scope == b.scope &&
-			a.rewritable == b.rewritable && a.through == b.through && a.loader_arg == b.loader_arg;
+			a.rewritable == b.rewritable && a.through == b.through && a.loader_arg == b.loader_arg &&
+			a.span.line == b.span.line && a.span.column == b.span.column &&
+			a.span.length == b.span.length && a.fallback == b.fallback;
 }
 
 bool same_symbol(const GraphSymbol &a, const GraphSymbol &b) {
@@ -1944,6 +1948,10 @@ struct Seen {
 	void add(const AssetGraph &graph, const AssetScan &scan) {
 		graph.for_each_edge([this](const GraphEdge &edge) {
 			names.insert({edge.kind, edge.target, edge.scope});
+			// An edge with a fallback (S13 D9) is indexed under both its names (edges_naming).
+			if (!edge.fallback.empty())
+				for (const std::string *name : {&edge.value, &edge.fallback})
+					names.insert({edge.kind, graph_names::symbol_name(edge.kind, *name), edge.scope});
 			if (graph_names::is_style_reference(edge.value))
 				variables.insert(graph_names::style_variable(edge.value));
 			lookups.insert({edge.kind, edge.scope, edge.loader_arg});
@@ -2059,6 +2067,10 @@ std::string difference(
 		if (!same_symbols(symbols_at(index, index.symbols_named(key)),
 					symbols_at(fresh_index, fresh_index.symbols_named(key))))
 			return "the symbols named " + target;
+		if (!same_edges(edges_at(index, index.edges_naming(key)),
+					edges_at(fresh_index, fresh_index.edges_naming(key))) ||
+				!same_edges(graph.edges_naming(kind, target), fresh.edges_naming(kind, target)))
+			return "the edges naming " + target + " as one of their two names";
 	}
 	for (const std::string &path : seen.paths) {
 		if (!same_edges(edges_at(index, index.users_of(path)),
@@ -2247,6 +2259,36 @@ static int test_incremental_equals_fresh() {
 	TEST_EXPECT(step("the ammo renamed to the name the second weapon names", true));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "AMMO_NEW") == ReferenceStatus::Present &&
 			graph.resolve(ReferenceKind::Ammo, "AMMO_OLD") == ReferenceStatus::Missing);
+	// A script naming an ammo directly and one through its fallback (S13 D9: spans and fallbacks);
+	// the fallback's ammo defined, then renamed to the script's first name, which reaches it directly;
+	// the script's span made longer; the script open and its text edited (standing in for its file),
+	// then closed.
+	const std::string script_file = root + "/scripts/d3.wac";
+	TEST_EXPECT(rewrite(script_file,
+			"If true(bluekills) then\r\n\tammoarea AMMO_NEW 1\r\n\tammo2tgt(ammo_D3, 2)\r\nendif\r\n"));
+	TEST_EXPECT(step("a script naming two ammo, one through its fallback", true));
+	TEST_EXPECT(rewrite(root + "/defs/ammo.def", "ammo AMMO_NEW\nend\nammo ammo_D3\nend\n"));
+	TEST_EXPECT(step("the ammo its fallback names defined", true));
+	TEST_EXPECT(graph.resolve(ReferenceKind::Ammo, "ammo_D3") == ReferenceStatus::Present);
+	TEST_EXPECT(rewrite(root + "/defs/ammo.def", "ammo AMMO_NEW\nend\nammo D3\nend\n"));
+	TEST_EXPECT(step("the ammo renamed to the script's first name", true));
+	TEST_EXPECT(rewrite(script_file,
+			"If true(bluekills) then\r\n\tammoarea AMMO_NEW 1\r\n\tammo2tgt(ammo_D3_LONGER, 2)\r\nendif\r\n"));
+	TEST_EXPECT(step("the script's span made longer", true));
+	{
+		std::shared_ptr<DocumentBase> script = document_type_for(AssetKind::Script)->make();
+		Diagnostic error;
+		TEST_EXPECT(script->load(script_file, "scripts/d3.wac", AssetKind::Script, project.target_game, error));
+		TextSpan longer;
+		longer.line = 3;
+		longer.column = 16;
+		longer.length = 9;
+		TEST_EXPECT(script->apply(TextDocument::replace(longer, "D3"), error));
+		open = {script};
+		TEST_EXPECT(step("the open script's span renamed back", true));
+		open.clear();
+		TEST_EXPECT(step("the script closed", true));
+	}
 	// A string id added to the open table's WepDes, which the first weapon's label reads, then
 	// moved to another section; the table closed (the file on disk has neither).
 	if (const AssetEntry *table = scan.find("gametext.bin")) {

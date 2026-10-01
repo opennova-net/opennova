@@ -41,7 +41,9 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
-			a.through == b.through && a.loader_arg == b.loader_arg;
+			a.through == b.through && a.loader_arg == b.loader_arg &&
+			a.span.line == b.span.line && a.span.column == b.span.column &&
+			a.span.length == b.span.length && a.fallback == b.fallback;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -200,11 +202,12 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		GraphReadings *read_ahead) {
 	stats_ = GraphStats();
 	Patch patch;
-	// The open record documents stand in for their files (another kind of document reads none).
-	std::unordered_map<std::string, const Document *> documents;
+	// The open record and text documents stand in for their files (another kind of document reads
+	// none).
+	std::unordered_map<std::string, const DocumentBase *> documents;
 	for (const auto &document : open)
-		if (const Document *records = document ? records_of(*document) : nullptr)
-			documents[document->path()] = records;
+		if (document && (records_of(*document) || text_of(*document)))
+			documents[document->path()] = document.get();
 	std::unordered_set<uint32_t> listed;
 	listed.reserve(scan.entries.size());
 	for (const AssetEntry &asset : scan.entries) {
@@ -239,7 +242,7 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 			continue;
 		}
 		const auto found = documents.find(asset.relative_path);
-		const Document *document = found == documents.end() ? nullptr : found->second;
+		const DocumentBase *document = found == documents.end() ? nullptr : found->second;
 		if (document) {
 			if (!retyped && slot.read && slot.open && slot.identity == document->identity() &&
 			    slot.revision == document->revision()) {
@@ -247,7 +250,10 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 				continue;
 			}
 			Extracted content;
-			extract_from_document(*document, content);
+			if (const Document *records = records_of(*document))
+				extract_from_document(*records, content);
+			else
+				extract_from_text(*text_of(*document), content);
 			++stats_.files_extracted;
 			slot.read = slot.open = true;
 			slot.identity = document->identity();
@@ -404,8 +410,11 @@ void AssetGraph::resolve_patch(Patch &patch, GraphUpdate &out) {
 		for (const uint32_t id : patch.slots)
 			for (uint32_t i = 0; i < index_.slot(id).edges.size(); ++i) work.push_back({id, i});
 	}
-	for (const std::string &name_key : patch.symbol_keys)
+	for (const std::string &name_key : patch.symbol_keys) {
 		for (const Ref ref : index_.edges_targeting(name_key)) work.push_back(ref);
+		// An edge with a fallback reaches either of its two names.
+		for (const Ref ref : index_.edges_naming(name_key)) work.push_back(ref);
+	}
 	for (const std::string &name : out.bindings)
 		for (const Ref ref : index_.edges_through(name)) work.push_back(ref);
 	const auto before = [this](Ref a, Ref b) { return index_.before(a, b); };
@@ -710,7 +719,13 @@ const GraphSymbol *AssetGraph::style_binding(const std::string &name) const {
 std::string AssetGraph::resolved_target(const GraphEdge &edge) const {
 	switch (reference_row(edge.kind).resolution) {
 	case ReferenceResolution::StyleVariable: return is_style_reference(edge.value) ? style_variable(edge.value) : std::string();
-	case ReferenceResolution::Symbol: return symbol_name(edge.kind, edge.value);
+	case ReferenceResolution::Symbol: {
+		// The name it reaches: its value, else its fallback where only that one is defined.
+		if (!edge.fallback.empty() && !resolve_symbol(edge.kind, edge.value, edge.scope) &&
+				resolve_symbol(edge.kind, edge.fallback, edge.scope))
+			return symbol_name(edge.kind, edge.fallback);
+		return symbol_name(edge.kind, edge.value);
+	}
 	// A record's index, in the file the edge's scope names (the key holds it).
 	case ReferenceResolution::Record: return edge.value;
 	case ReferenceResolution::File:
@@ -727,7 +742,25 @@ std::string AssetGraph::resolve_style(const std::string &value) const {
 }
 
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
-	return resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
+	const ReferenceStatus status = resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
+	if (status != ReferenceStatus::Missing || edge.fallback.empty()) return status;
+	// The lookup's second name, where the first finds nothing.
+	const ReferenceStatus second =
+			resolve(edge.kind, edge.fallback, edge.scope, file_out, edge.loader_arg);
+	return second == ReferenceStatus::Present ? second : status;
+}
+
+const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
+	if (const GraphSymbol *found = resolve_symbol(edge.kind, edge.value, edge.scope)) return found;
+	return edge.fallback.empty() ? nullptr : resolve_symbol(edge.kind, edge.fallback, edge.scope);
+}
+
+std::vector<const GraphEdge *> AssetGraph::edges_naming(ReferenceKind kind, const std::string &name) const {
+	std::vector<const GraphEdge *> out;
+	// A fallback is a symbol kind's (never a Record kind's, whose key would hold its file).
+	for (const Ref ref : index_.edges_naming(GraphIndex::key_of(kind, graph_names::symbol_name(kind, name), std::string())))
+		out.push_back(&index_.edge(ref));
+	return out;
 }
 
 ReferenceStatus AssetGraph::resolve(ReferenceKind kind, const std::string &name, const std::string &scope,
@@ -950,7 +983,7 @@ std::vector<const GraphEdge *> AssetGraph::users_of(const GraphSymbol &symbol) c
 	// A record of a record set is named in its own file alone, which its key holds.
 	const bool record = reference_row(symbol.kind).resolution == ReferenceResolution::Record;
 	for (const GraphEdge *edge : referrers_of(symbol.kind, symbol.name, record ? symbol.scope : std::string()))
-		if (resolve_symbol(edge->kind, edge->value, edge->scope) == &symbol) out.push_back(edge);
+		if (symbol_reached(*edge) == &symbol) out.push_back(edge);
 	return out;
 }
 
@@ -1061,6 +1094,9 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	                                                 : std::string(", which the project does not have."));
 	Diagnostic d = make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
+	// A text's reference: its place, where Problems opens the document.
+	d.line = edge.span.line;
+	d.column = edge.span.column;
 	d.row_id = edge.address.row;
 	d.child_id = edge.address.child;
 	d.record_kind = edge.address.kind;

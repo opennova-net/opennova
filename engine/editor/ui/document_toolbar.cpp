@@ -9,7 +9,7 @@
 namespace opennova::editor {
 
 // Each tool enabled while the busy gate takes its request too (SessionView::allows).
-void draw_document_toolbar(Workspace &workspace, const Document &document) {
+void draw_document_toolbar(Workspace &workspace, const DocumentBase &document, const char *blocked_notice) {
 	const SessionView &view = workspace.view();
 	ui_kit::WrapRow row;
 	if (ui_kit::tool(row, "Reload", view.allows(EditorRequestKind::ReloadDocument),
@@ -22,7 +22,9 @@ void draw_document_toolbar(Workspace &workspace, const Document &document) {
 	                 document.can_redo() ? "Redo what Undo took back (Ctrl+Y)." : "Nothing to redo in this file."))
 		workspace.request(request::redo(document.path()));
 	if (document.blocked())
-		ImGui::TextWrapped("This file has unsupported or malformed input. See Problems, correct the source, then Reload.");
+		ImGui::TextWrapped("%s", blocked_notice ? blocked_notice
+		                                        : "This file has unsupported or malformed input. See Problems, correct "
+		                                          "the source, then Reload.");
 	else if (const size_t ignored = document.ignored_lines())
 		ImGui::TextWrapped("%zu line(s) the game ignores will be dropped when this file is saved. See Problems.", ignored);
 }

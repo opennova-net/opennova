@@ -6,6 +6,7 @@
 #include <editor/ui/menu_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/styles_view.h>
+#include <editor/ui/text_view.h>
 
 namespace opennova::editor {
 
@@ -32,11 +33,12 @@ constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nul
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }
 std::unique_ptr<DocumentView> make_styles_view() { return std::make_unique<StylesView>(); }
+std::unique_ptr<DocumentView> make_text_view() { return std::make_unique<TextView>(); }
 
 // A view per document type, in DocumentTypeId's order: a catalog's rows as a list with its
 // spawn registry after them, a string table's sections and strings as master and detail, a menu's
 // screens and windows and a stylesheet's lines each their own view, a model, a clip and an
-// animation table their records as a tree.
+// animation table their records as a tree, and every text type its lines (S13 D9).
 constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Catalog, DocumentViewRole::Records, &kCatalogOutline, nullptr},
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
@@ -45,6 +47,11 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	{DocumentTypeId::Script, DocumentViewRole::Text, nullptr, make_text_view},
+	{DocumentTypeId::MusicScript, DocumentViewRole::Text, nullptr, make_text_view},
+	{DocumentTypeId::Credits, DocumentViewRole::Text, nullptr, make_text_view},
+	{DocumentTypeId::Shader, DocumentViewRole::Text, nullptr, make_text_view},
+	{DocumentTypeId::Text, DocumentViewRole::Text, nullptr, make_text_view},
 };
 
 // One view per DocumentTypeId past None, in its order, each an outline or a view its make makes.

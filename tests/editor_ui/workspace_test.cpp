@@ -1140,12 +1140,21 @@ void test_files_window() {
 	ui.button(false);
 	std::vector<EditorRequest> requests = ui.drain();
 	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "menus/main.mnu", "a double click opens it");
+	// A text opens too (S13 D9: a text document); an image source, which no document type opens, is
+	// selected, not opened.
 	CHECK(hover_find(ui, item_id(table, {"readme.txt", "##row"}), x, top, bottom, row), "readme.txt's row");
 	ui.button(true);
 	ui.button(false);
 	ui.button(true);
 	ui.button(false);
-	CHECK(window->selected() == "readme.txt" && ui.drain().empty(), "a text file is selected, not opened");
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::OpenDocument) && requests[0].path == "readme.txt", "a text file opens");
+	CHECK(hover_find(ui, item_id(table, {"art", "art/logo.png", "##row"}), x, top, bottom, row), "logo.png's row");
+	ui.button(true);
+	ui.button(false);
+	ui.button(true);
+	ui.button(false);
+	CHECK(window->selected() == "art/logo.png" && ui.drain().empty(), "an image source is selected, not opened");
 
 	// New: weapon.def made at once; items.def, which the project has, not offered; a menu's
 	// name asked first, checked as it is typed.

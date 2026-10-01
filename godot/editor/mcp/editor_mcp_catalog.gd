@@ -29,36 +29,15 @@ const MENU_PREVIEW_HANDLES: Array[String] = ["move", "left", "right", "top", "bo
 const MODEL_PREVIEW_OPS: Array[String] = ["state", "options", "camera", "hit", "drag"]
 const MODEL_PREVIEW_HANDLES: Array[String] = ["place", "axis"]
 
-## One edit of editor_request's `edits`, the batch form (engine/editor/session/record_batch.h):
-## records by identity or by the label an earlier add or duplicate of the batch gave with `as`.
-const EDIT_SCHEMA := {
-	"type": "object",
-	"properties": {
-		"op": {"type": "string",
-				"enum": ["set", "clear", "write", "add", "duplicate", "remove", "move", "set_file_value", "replace_list"]},
-		"id": {"type": ["integer", "string"], "description": "the record: its identity, or a label an earlier edit gave"},
-		"parent": {"type": ["integer", "string"], "description": "an add's owner (a row's identity for a record in it; none adds a row), a move's destination"},
-		"kind": {"type": "string", "description": "an add's record kind token (window, action, sound, items.item, ...)"},
-		"field": {"type": "string"},
-		"value": {},
-		"position": {"type": "integer", "minimum": 0},
-		"as": {"type": "string", "description": "the label an add or a duplicate gives the record it makes"},
-		"coalesce": {"type": "boolean"},
-		"gesture": {"type": "integer", "minimum": 0},
-		"list": {"type": "string", "description": "a replace_list's collection kind token"},
-		"records": {"type": "array", "items": {"type": "object"}, "description": "a replace_list's records, each {field: value, ...}"},
-	},
-}
-
 const REQUEST_PROSE := (
 		"Raise one typed editor request by kind, the vocabulary the windows use (the request table, "
 		+ "engine/editor/session/request_kinds.cpp). Each kind takes its own fields, each field meaning one thing "
 		+ "whatever the kind; a field the kind does not take, or one it must carry left out, is refused naming "
 		+ "what it takes. path left out names the active document where the kind acts on one. edits is the "
-		+ "batch form: [{op, id, parent, kind, field, value, position, as, coalesce, gesture}] over any rows, one "
-		+ "undo step, a record by its identity (as editor_query document and record give it) or by the label "
-		+ "(as) an earlier add or duplicate of the batch gave, an add's kind by its token (op replace_list "
-		+ "{id, list, records}: the list replaced by these records); revert_to_saved's edits are [{id, field}]. "
+		+ "batch form, one undo step: its forms and ops follow the kinds and its members are its schema's, both "
+		+ "the session's batch table (engine/editor/session/record_batch.h, editor_query catalog's batch), a "
+		+ "record by its identity (as editor_query document and record give it) or by the label (as) an earlier "
+		+ "add or duplicate of the batch gave. "
 		+ "The answer: ok (it read), served, and outcome: done (false when it was refused, did not finish, or "
 		+ "waits on the unsaved-changes prompt: editor_state's dialogs say what waits, resolve_unsaved answers), "
 		+ "unsaved_prompt, operation (the one it started or joined, 0 for none: open_project, new_project, rescan, "
@@ -100,10 +79,9 @@ const STATE_PROSE := (
 		+ "section; one past the clock is refused). The lists are editor_query's (files, problems, output, "
 		+ "events, import_preview). The sections:")
 
-## The request fields whose schema says more than their type.
+## The request fields whose schema says more than their type (edits: the batch table's, edit_schema).
 const FIELD_SCHEMAS := {
 	"new_name": {"type": ["string", "integer"]},
-	"edits": {"type": "array", "items": EDIT_SCHEMA},
 	"mode": {"type": "string", "enum": ["replace", "add", "toggle"]},
 	"choice": {"type": "string", "enum": ["save", "discard", "cancel"]},
 }
@@ -183,6 +161,46 @@ static func section_names(catalog: Dictionary) -> Array[String]:
 	return names
 
 
+## One edit of editor_request's `edits`, made from the session's batch table (the catalog's batch:
+## engine/editor/session/record_batch.h): every member any form reads, its JSON type, its least
+## value or the one string it takes, and what it carries with the forms that read it; op the ops.
+static func edit_schema(catalog: Dictionary) -> Dictionary:
+	var batch: Dictionary = catalog.get("batch", {})
+	var ops: Array[String] = []
+	for row: Variant in batch.get("ops", []):
+		ops.append(String((row as Dictionary).get("op", "")))
+	var properties := {}
+	for row: Variant in batch.get("members", []):
+		var member: Dictionary = row
+		var schema: Dictionary
+		match String(member.get("type", "string")):
+			"integer":
+				schema = {"type": "integer"}
+			"id":
+				schema = {"type": ["integer", "string"]}
+			"boolean":
+				schema = {"type": "boolean"}
+			"value":
+				schema = {"type": ["number", "string", "boolean"]}
+			"records":
+				schema = {"type": "array", "items": {"type": "object"}}
+			_:
+				schema = {"type": "string"}
+		if member.has("minimum"):
+			schema["minimum"] = int(member["minimum"])
+		if member.has("only"):
+			schema["enum"] = [String(member["only"])]
+		var name := String(member.get("name", ""))
+		if name == "op":
+			schema["enum"] = ops
+		var forms: Array[String] = []
+		for form: Variant in member.get("forms", []):
+			forms.append(String(form))
+		schema["description"] = "%s (%s)" % [String(member.get("doc", "")), ", ".join(PackedStringArray(forms))]
+		properties[name] = schema
+	return {"type": "object", "properties": properties}
+
+
 static func _json_schema(type: String) -> Dictionary:
 	match type:
 		"integer":
@@ -221,6 +239,17 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 			takes.append(String(field) + ("" if needs.has(field) else "?"))
 		var fields := (" {%s}" % ", ".join(PackedStringArray(takes))) if not takes.is_empty() else ""
 		lines.append("%s%s: %s" % [kind, fields, String(row.get("doc", ""))])
+	# The batch form's forms and ops, from the session's batch table.
+	var batch: Dictionary = catalog.get("batch", {})
+	lines.append("The edits' forms:")
+	for row: Variant in batch.get("forms", []):
+		var form: Dictionary = row
+		var ops: Array[String] = []
+		for op: Variant in batch.get("ops", []):
+			if String((op as Dictionary).get("form", "")) == String(form.get("form", "")):
+				ops.append("%s: %s" % [String(op.get("op", "")), String(op.get("doc", ""))])
+		lines.append("%s: %s%s" % [String(form.get("form", "")), String(form.get("doc", "")),
+				(" Its ops: " + " ".join(PackedStringArray(ops))) if not ops.is_empty() else ""])
 	var properties := {"kind": {"type": "string", "enum": served},
 			"wait": {"type": "boolean", "description": "Await the operation the request starts or joins, and the "
 					+ "validation after it, before answering (this tool's, not the request's)."},
@@ -228,7 +257,11 @@ static func _request_tool(catalog: Dictionary) -> McpToolDef:
 					+ "out); past it the answer says timed_out."}}
 	for field: Variant in catalog.get("fields", []):
 		var name := String(field.get("field", ""))
-		var schema: Dictionary = FIELD_SCHEMAS.get(name, _json_schema(String(field.get("type", "string")))).duplicate(true)
+		var schema: Dictionary
+		if name == "edits":
+			schema = {"type": "array", "items": edit_schema(catalog)}
+		else:
+			schema = FIELD_SCHEMAS.get(name, _json_schema(String(field.get("type", "string")))).duplicate(true)
 		schema["description"] = String(field.get("doc", ""))
 		properties[name] = schema
 	return McpToolDef.make("editor_request", " ".join(PackedStringArray(lines)), properties, ["kind"], true, BUILD_TIMEOUT_MS)

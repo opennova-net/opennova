@@ -82,13 +82,14 @@ static int test_non_record_type() {
 	const std::string &path = asset.relative_path;
 	const std::string file = dir.file("project") + "/" + path;
 	const std::string original = file_text(file);
-	TEST_EXPECT(holds_records(*document_type_for(kind)));
+	TEST_EXPECT(document_content(*document_type_for(kind)) == DocumentContent::Records);
 	{
 		const DocumentTypeStandIn stand_in(kBlobType);
-		// The registry answers the stand-in; its documents hold no records.
+		// The registry answers the stand-in; its documents hold neither records nor a text.
 		TEST_EXPECT(document_type_for(kind) == &kBlobType && is_editable_kind(kind));
-		TEST_EXPECT(!holds_records(kBlobType));
-		TEST_EXPECT(holds_records(*document_type(DocumentTypeId::Menu)));
+		TEST_EXPECT(document_content(kBlobType) == DocumentContent::Other);
+		TEST_EXPECT(document_content(*document_type(DocumentTypeId::Menu)) == DocumentContent::Records);
+		TEST_EXPECT(document_content(*document_type(DocumentTypeId::Script)) == DocumentContent::Text);
 		// The graph reads none of its files; an import lists the kind as not followed.
 		TEST_EXPECT(!graph_reads_kind(kind) && !graph_reads_file(kind, asset.logical_name));
 		Extracted extracted;
