@@ -85,7 +85,11 @@ struct Rig {
 	const ModelViewport *viewport() {
 		return static_cast<const ModelViewport *>(session.viewports().find(path(), ViewportKind::Model));
 	}
-	JsonValue json() { return viewport_to_json(view(), viewport(), ViewportKind::Model, JsonPage()); }
+	// Its envelope; none kept, the kind's over no document (editor_test::empty_viewport_json).
+	JsonValue json() {
+		return viewport() ? viewport_to_json(view(), *viewport(), JsonPage())
+						  : editor_test::empty_viewport_json(view(), ViewportKind::Model);
+	}
 	const PreviewClock &clock() { return session.viewports().clock(); }
 	ViewportContext context(float snap = 0.0f) { return viewport_context(session.view(), *viewport(), snap); }
 	// A SetViewport of the followed model's viewport.
@@ -354,6 +358,11 @@ static int test_handles() {
 	point = find_overlay(model->overlays(rig.clock()), ModelOverlayKind::UserPoint, 0);
 	TEST_EXPECT(point && near(point->at.x, to.x, 1e-3) && near(point->at.y, to.y, 1e-3) && near(point->at.z, to.z, 1e-3));
 	TEST_EXPECT(rig.builds() == 1);
+	// To where it is: nothing to write (S13 V7: a field the record would hold as it holds it, its
+	// 16.16 word within half a step, gets no edit).
+	TEST_EXPECT(point && model_handle_edits(*document, *model->model(), *point, model->lod(), rig.clock().ms(), bus,
+	                                        ModelHandle::Place, point->at, 0.0f, next_edit_gesture(), edits) &&
+	            edits.empty());
 
 	// Snapped: every place field on the grid.
 	TEST_EXPECT(model_handle_edits(*document, *model->model(), *point, model->lod(), rig.clock().ms(), bus,
@@ -367,7 +376,9 @@ static int test_handles() {
 	const PreviewVec3 aim{point->at.x, point->at.y + 1.0f, point->at.z + 1.0f};
 	TEST_EXPECT(model_handle_edits(*document, *model->model(), *point, model->lod(), rig.clock().ms(), bus,
 	                               ModelHandle::Axis, aim, 0.0f, next_edit_gesture(), edits));
-	TEST_EXPECT(edits.size() == 3 && edits[0].field == "direction.x");
+	// The axis's fields the turn changes (S13 V7: one it leaves as the record holds it gets no edit).
+	TEST_EXPECT(!edits.empty() && edits.size() <= 3);
+	for (const Edit &edit : edits) TEST_EXPECT(edit.field.rfind("direction.", 0) == 0);
 	apply(session, document->path(), edits);
 	rig.pump();
 	point = find_overlay(model->overlays(rig.clock()), ModelOverlayKind::UserPoint, 0);

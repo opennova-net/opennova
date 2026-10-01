@@ -746,10 +746,12 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.drag.snap = 0.25f;
 			out.drag.gesture = 7;
 			out.drag.end = false;
+			out.drag.kind = ViewportKind::Model;
 			break;
 		case F::Command:
 			out.command.name = "align_left";
 			out.command.ids = {9, 11, 12};
+			out.command.kind = ViewportKind::Menu;
 			break;
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;

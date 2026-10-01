@@ -91,6 +91,14 @@ bool read_clock(const JsonValue &json, Common &out, std::string &error) {
 	return true;
 }
 
+// The clock's members read (read_clock) set on `clock`.
+void apply_clock(const Common &common, PreviewClock &clock) {
+	if (common.playing_set) clock.set_playing(common.playing);
+	if (common.rate_set) clock.set_rate(common.rate);
+	if (common.time_ms >= 0) clock.seek_ms(uint32_t(common.time_ms));
+	if (common.ticks >= 0) clock.seek_ticks(int32_t(common.ticks));
+}
+
 } // namespace
 
 const char *viewport_status_token(ViewportStatus status) {
@@ -109,9 +117,26 @@ std::string viewport_change(ViewportKind kind, const char *member, io::JsonValue
 	return io::json_write(change);
 }
 
+bool set_preview_clock(const io::JsonValue &json, PreviewClock &clock, std::string &error) {
+	Common common;
+	if (!read_clock(json, common, error)) return false;
+	apply_clock(common, clock);
+	return true;
+}
+
 bool ViewportContext::editable() const {
 	return input.document && !input.document->blocked() &&
 			input.view.allows(EditorRequestKind::EditRecord);
+}
+
+std::string ViewportContext::not_editable() const {
+	if (!input.document) return "The document is not open.";
+	if (input.document->blocked())
+		return input.document->path() + " takes no edit until its file is corrected and read again (it holds what "
+										"the editor cannot carry).";
+	if (!input.view.allows(EditorRequestKind::EditRecord))
+		return "The session takes no edit now (an operation holds the documents).";
+	return std::string();
 }
 
 ViewportContext viewport_context(const SessionView &view, const ViewportModel &model, float snap) {
@@ -214,10 +239,7 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 		state_.width = int(common.width);
 		state_.height = int(common.height);
 	}
-	if (common.playing_set) clock.set_playing(common.playing);
-	if (common.rate_set) clock.set_rate(common.rate);
-	if (common.time_ms >= 0) clock.seek_ms(uint32_t(common.time_ms));
-	if (common.ticks >= 0) clock.seek_ticks(int32_t(common.ticks));
+	apply_clock(common, clock);
 	apply_(json, clock);
 	++state_serial_;
 	return true;

@@ -16,34 +16,41 @@ const PAGE_MAX := McpJson.MAX_ENTRIES
 
 const PLAY_OPS: Array[String] = ["start", "stop", "state"]
 
-## editor_viewport's ops (S13 V7): the reads are the viewport query's own op (its params flat beside
-## op); each write is a request, the members it takes flat beside op and the one it needs: options,
-## camera and seek a set_viewport of the viewport's state (`device`, its device's size, beside the
-## options or the camera), drag and command an edit_in_viewport.
-const VIEWPORT_READS: Array[String] = ["state", "items", "hit", "notes", "render"]
+## editor_viewport's writes (S13 V7): each a request, the members it takes flat beside op and the one
+## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
+## options and camera a set_viewport of the viewport's state (`device`, its device's size, beside the
+## options or the camera; kind the change's), seek a set_viewport of the clock alone, which names no
+## document and no kind (the one preview clock every viewport reads), drag and command an
+## edit_in_viewport (kind the drag's or the command's). Its reads are the viewport query's own op, the
+## tokens the catalog lists for it (viewport_reads).
 const VIEWPORT_WRITES := {
-	"options": {"kind": "set_viewport", "takes": ["options", "device"], "needs": "options"},
-	"camera": {"kind": "set_viewport", "takes": ["camera", "device"], "needs": "camera"},
-	"seek": {"kind": "set_viewport", "takes": ["clock"], "needs": "clock"},
-	"drag": {"kind": "edit_in_viewport", "takes": ["drag"], "needs": "drag"},
-	"command": {"kind": "edit_in_viewport", "takes": ["command"], "needs": "command"},
+	"options": {"kind": "set_viewport", "takes": ["options", "device"], "needs": "options", "kind_in": "viewport"},
+	"camera": {"kind": "set_viewport", "takes": ["camera", "device"], "needs": "camera", "kind_in": "viewport"},
+	"seek": {"kind": "set_viewport", "takes": ["clock"], "needs": "clock", "pathless": true},
+	"drag": {"kind": "edit_in_viewport", "takes": ["drag"], "needs": "drag", "kind_in": "drag"},
+	"command": {"kind": "edit_in_viewport", "takes": ["command"], "needs": "command", "kind_in": "command"},
 }
 
 const VIEWPORT_PROSE := (
-		"A document's viewport (S13 V7): its picture as the game would draw it, of the kind it shows in (the "
-		+ "Preview's kind that shows it: a menu's screen, a model, a clip or an animation table on its rig's "
-		+ "model; else its Main view), headless included. path names the document as editor_query takes it, the "
-		+ "active one when left out (refused when it shows in no viewport: a stylesheet feeds the menu's and "
-		+ "shows in none). op state, items, hit, notes and render read it (the viewport query, followed first so "
-		+ "it answers the document as it is now; a refusal is a tool error naming the query); op options, camera "
-		+ "and seek change its state (a set_viewport: options {...} the kind's options, camera {...} its camera, "
-		+ "each with device {width, height}, its device's size, beside it; seek clock {playing, rate, time_ms, "
-		+ "ticks}, the preview clock every viewport reads), and op drag and command edit through it (an "
-		+ "edit_in_viewport: drag {...}, command {...}), each answered with the request's answer (ok, served, "
-		+ "outcome: done, findings, a drag's gesture; status, view_revision; a request that did not read is a "
-		+ "tool error, one refused is ok with an outcome not done) and the viewport's state after it, viewport. "
-		+ "Its device takes what changed at the editor's next frame (device.attached, builds, a widget's "
-		+ "device_rect).")
+		"A document's viewport (S13 V7): its picture as the game would draw it, of the kind kind names (menu, "
+		+ "model), else the kind it shows in (the Preview's kind that shows it: a menu's screen, a model, a clip "
+		+ "or an animation table on its rig's model; else its Main view), headless included. path names the "
+		+ "document as editor_query takes it, the active one when left out (refused when it shows in no "
+		+ "viewport: a stylesheet feeds the menu's and shows in none). The reads (the viewport query's ops, "
+		+ "below) are followed first so they answer the document as it is now (a first read of a document "
+		+ "makes its viewport, which can move view_revision); a refusal is a tool error naming the query. op "
+		+ "options and camera change its state (a set_viewport: options {...} the kind's options, camera {...} "
+		+ "its camera, each with device {width, height}, its device's size, beside it); op seek sets the "
+		+ "preview clock every viewport reads (clock {playing, rate, time_ms, ticks}; it names no document and "
+		+ "no kind, and takes no path); op drag and command edit through it (an edit_in_viewport: drag {...}, "
+		+ "command {...}; a gesture's samples are consecutive drags of one handle on its document, gesture "
+		+ "the token the first's answer gave, end false keeping it open; any other request on the document, "
+		+ "another gesture, or 10 s with no sample ends it). Each write answers as editor_request answers (ok, "
+		+ "served, outcome: done, findings, a drag's gesture; status, view_revision; a request that did not read "
+		+ "is a tool error, one refused is ok with an outcome not done) with the viewport's state after it, "
+		+ "viewport (none after a seek with nothing to show). Its device takes what changed at the editor's "
+		+ "next frame (device.attached, builds, a widget's device_rect) where the Preview window or a canvas "
+		+ "draws it; one neither draws holds no device.")
 
 const REQUEST_PROSE := (
 		"Raise one typed editor request by kind, the vocabulary the windows use (the request table, "
@@ -166,6 +173,24 @@ static func query_names(catalog: Dictionary) -> Array[String]:
 	for row: Variant in catalog.get("queries", []):
 		names.append(String(row.get("name", "")))
 	return names
+
+
+## The viewport query's ops (its op param's enum in the catalog): editor_viewport's reads.
+static func viewport_reads(catalog: Dictionary) -> Array[String]:
+	var ops: Array[String] = []
+	for param: Variant in _query_row(catalog, "viewport").get("params", []):
+		if String((param as Dictionary).get("name", "")) == "op":
+			for token: Variant in (param as Dictionary).get("enum", []):
+				ops.append(String(token))
+	return ops
+
+
+## A query's row in the catalog by name ({} for none).
+static func _query_row(catalog: Dictionary, name: String) -> Dictionary:
+	for row: Variant in catalog.get("queries", []):
+		if String((row as Dictionary).get("name", "")) == name:
+			return row as Dictionary
+	return {}
 
 
 ## The state's sections, by name.
@@ -321,20 +346,20 @@ static func _query_tool(catalog: Dictionary) -> McpToolDef:
 	return McpToolDef.make("editor_query", " ".join(PackedStringArray(lines)), properties, ["query"], false)
 
 
-## editor_viewport (S13 V7), made from the catalog: the viewport query's row (its doc, and its params
-## but op as the tool's own, flat beside op) and the two requests its writes raise (set_viewport's and
-## edit_in_viewport's docs, and the docs of the fields they carry: viewport, drag, command).
+## editor_viewport (S13 V7), made from the catalog: the viewport query's row (its doc, its op's tokens
+## the reads, and its params but op as the tool's own, flat beside op, a param's choices its enum) and
+## the two requests its writes raise (set_viewport's and edit_in_viewport's docs, and the docs of the
+## fields they carry: viewport, drag, command).
 static func _viewport_tool(catalog: Dictionary) -> McpToolDef:
 	var lines: Array[String] = [VIEWPORT_PROSE]
-	var ops: Array[String] = VIEWPORT_READS.duplicate()
+	var ops: Array[String] = viewport_reads(catalog)
 	for op: String in VIEWPORT_WRITES:
 		ops.append(op)
 	var properties := {"op": {"type": "string", "enum": ops}}
-	for row: Variant in catalog.get("queries", []):
-		if String(row.get("name", "")) != "viewport":
-			continue
-		lines.append("The reads: " + String(row.get("doc", "")))
-		for param: Variant in row.get("params", []):
+	var query := _query_row(catalog, "viewport")
+	if not query.is_empty():
+		lines.append("The reads: " + String(query.get("doc", "")))
+		for param: Variant in query.get("params", []):
 			var key := String(param.get("name", ""))
 			if key == "op":
 				continue
@@ -342,6 +367,8 @@ static func _viewport_tool(catalog: Dictionary) -> McpToolDef:
 			if key == "limit":
 				schema["minimum"] = 1
 				schema["maximum"] = int(catalog.get("page_max", PAGE_MAX))
+			if (param as Dictionary).has("enum"):
+				schema["enum"] = (param as Dictionary)["enum"]
 			schema["description"] = String(param.get("doc", ""))
 			properties[key] = schema
 	for row: Variant in catalog.get("requests", []):

@@ -25,18 +25,17 @@ struct ViewportHit;
 // kind's items, the menu's widgets or the model's markers, `count` their whole number, set_page's)
 // and notes (by the same page, the menu's compiler notes, `note_count` theirs)}. The items and the
 // notes only while the picture is current. The viewport query (session/editor_queries) answers it
-// and stamps its view_revision. `model` null writes the kind's empty viewport: what a viewport of
-// `kind` over no document of it says (no project, nothing of the kind open, a menu with no screen
-// selected).
-io::JsonValue viewport_to_json(const SessionView &view, const ViewportModel *model, ViewportKind kind,
-		const JsonPage &page);
+// and stamps its view_revision; every viewport it reads is a document's (the query refuses with no
+// document open), so a viewport over no document is on no wire.
+io::JsonValue viewport_to_json(const SessionView &view, const ViewportModel &model, const JsonPage &page);
 // A page of a viewport's items, or of its notes (the viewport query's items and notes): {kind, path,
 // status, reason, current, shown_revision, items or notes (the page), count (the list's whole
 // length), offset, next_offset}.
 io::JsonValue viewport_items_to_json(const SessionView &view, const ViewportModel &model, const JsonPage &page);
 io::JsonValue viewport_notes_to_json(const SessionView &view, const ViewportModel &model, const JsonPage &page);
-// What lies under a point of the picture, in the viewport's units: {kind (the item's: a window's
-// type, a marker's kind), index, id, name, current}, index -1 for none.
-io::JsonValue viewport_hit_to_json(const ViewportHit &hit);
+// What lies under a point of the picture of `model`, in its units: {viewport (the viewport's kind),
+// path (its document), kind (the item's: a window's type, a marker's kind), index, id, name,
+// current}, index -1 for none.
+io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit &hit);
 
 } // namespace opennova::editor

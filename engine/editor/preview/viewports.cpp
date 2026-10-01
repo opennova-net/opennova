@@ -148,7 +148,7 @@ bool Viewports::addressed_(const SessionView &view, const std::string &path, Vie
 	const DocumentTypeId type = type_of(*document);
 	kind = named == ViewportKind::kCount ? default_viewport_kind(type) : named;
 	if (kind == ViewportKind::kCount) {
-		error = at + " shows in no viewport (a menu, a model, a clip or an animation table does).";
+		error = at + " shows in no viewport (" + viewport_shown_types() + " does).";
 		return false;
 	}
 	if (!viewport_kind_shows(kind, type)) {
@@ -185,12 +185,17 @@ bool Viewports::set(const SessionView &view, const std::string &path, const io::
 	return true;
 }
 
-ViewportModel *Viewports::resolve(const SessionView &view, const std::string &path, std::string &error) {
+ViewportModel *Viewports::resolve(
+		const SessionView &view, const std::string &path, ViewportKind named, std::string &error) {
 	std::string at;
 	ViewportKind kind = ViewportKind::kCount;
-	if (!addressed_(view, path, ViewportKind::kCount, at, kind, error)) return nullptr;
+	if (!addressed_(view, path, named, at, kind, error)) return nullptr;
 	ensure(at, kind);
 	return follow_one(view, at, kind);
+}
+
+bool Viewports::set_clock(const io::JsonValue &json, std::string &error) {
+	return set_preview_clock(json, clock_, error);
 }
 
 } // namespace opennova::editor

@@ -63,6 +63,9 @@ ViewportKind main_viewport_kind(DocumentTypeId type);
 // one the Preview window shows while the document is active), else its Main-role kind; kCount for a
 // type no kind shows (a stylesheet feeds the menu's, but shows in none).
 ViewportKind default_viewport_kind(DocumentTypeId type);
+// The types a viewport shows, in words, from the kinds' table ("a menu, a model, an animation or an
+// animation map"): what a refusal of a document that shows in none names.
+std::string viewport_shown_types();
 
 // The Preview-role kind the Preview window shows over `documents`' targets: the active document's
 // (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed; kCount

@@ -1,6 +1,5 @@
 #include <editor/preview/viewport_json.h>
 
-#include <memory>
 #include <vector>
 
 #include <editor/model/document_base.h>
@@ -107,15 +106,8 @@ JsonValue list_page(const SessionView &view, const ViewportModel &model, const c
 
 } // namespace
 
-io::JsonValue viewport_to_json(const SessionView &view, const ViewportModel *model, ViewportKind kind,
-		const JsonPage &page) {
-	const PreviewClock &clock = clock_of(view);
-	if (model) return envelope(view, *model, clock, page);
-	// The kind's empty viewport: one over no document of it, followed once.
-	std::unique_ptr<ViewportModel> empty = viewport_kind_row(kind).make(std::string());
-	PreviewClock still = clock;
-	empty->follow(ViewportInput{ view, still, nullptr, ChangeClass::Loaded }, still);
-	return envelope(view, *empty, clock, page);
+io::JsonValue viewport_to_json(const SessionView &view, const ViewportModel &model, const JsonPage &page) {
+	return envelope(view, model, clock_of(view), page);
 }
 
 io::JsonValue viewport_items_to_json(const SessionView &view, const ViewportModel &model, const JsonPage &page) {
@@ -126,8 +118,10 @@ io::JsonValue viewport_notes_to_json(const SessionView &view, const ViewportMode
 	return list_page(view, model, "notes", model.notes_json(input_of(view, model, clock_of(view))), page);
 }
 
-io::JsonValue viewport_hit_to_json(const ViewportHit &hit) {
+io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit &hit) {
 	JsonValue out = JsonValue::make_object();
+	out.set("viewport", json_string(viewport_kind_token(model.kind())));
+	out.set("path", json_string(model.path()));
 	out.set("kind", json_string(hit.kind));
 	out.set("index", json_number(hit.index));
 	out.set("id", json_number(double(hit.id)));

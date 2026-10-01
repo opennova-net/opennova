@@ -71,14 +71,19 @@ public:
 			std::string &error);
 	// The viewport a read of the document open at `path` (its own path; "" the active document)
 	// addresses, and an edit in a viewport plans over (S13 V7: the viewport query, EditInViewport): of
-	// the kind its type shows in (default_viewport_kind), kept, or made at the kind's defaults as a
-	// SetViewport makes one, then followed now (follow_one). Null, with `error` naming why, for no
-	// document open there or a type that shows in no viewport.
-	ViewportModel *resolve(const SessionView &view, const std::string &path, std::string &error);
+	// the kind `named` (kCount: the kind its type shows in, default_viewport_kind), kept, or made at
+	// the kind's defaults as a SetViewport makes one, then followed now (follow_one), so a first read
+	// of a document makes its viewport and its follow may derive a change (the Viewports concern
+	// moving). Null, with `error` naming why, for no document open there, a type that shows in no
+	// viewport, or a kind that does not show it.
+	ViewportModel *resolve(const SessionView &view, const std::string &path, ViewportKind named, std::string &error);
 
 	// `seconds` of the Shell's frames pass (the clock's while it plays).
 	void advance(double seconds) { clock_.advance(seconds); }
 	const PreviewClock &clock() const { return clock_; }
+	// A SetViewport's clock alone, named by no document (S13 V7: the editor MCP's seek): the preview
+	// clock set as set_preview_clock says; false, nothing changed, with `error`.
+	bool set_clock(const io::JsonValue &json, std::string &error);
 	// Told when a follow derived a change of a viewport's state or the clock (viewport_model.h
 	// ViewportState: a held window, a framing, a clip's clock sought): the session moves its
 	// Viewports concern.

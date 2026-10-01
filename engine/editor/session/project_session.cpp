@@ -73,6 +73,9 @@ void ProjectSession::set_launcher_source(PlayLauncherSource source) {
 bool ProjectSession::handle(const EditorRequest &request) {
 	++impl_->handle_entries;
 	const SessionCore::RequestScope scope(impl_->core);
+	// A gesture of the wire's open in the document the request is on ends first, unless the request is
+	// its next sample (S13 V7).
+	impl_->core.request_arrives(request);
 	return serve_request(impl_->core, request);
 }
 
@@ -188,13 +191,15 @@ uint64_t ProjectSession::handle_entries() const {
 
 // --- the poll and the operation slot -------------------------------------------------------------
 
-// The poll's order (S13 A3), one budget a poll: the validation left due first, a step at a time
-// within the budget; the running operation's steps within what is left of it, at least one; the
-// child's state and the game's log tail; last, the operation found done finishes: the view learns
-// what it came to (a project opens, a build lands and the game a Play waits on starts on it), and
-// what it read leaves the validation due, which the next poll steps.
+// The poll's order (S13 A3), one budget a poll: a gesture of the wire's with no sample for
+// kWireGestureLapseMs ended (S13 V7: a client that went away holds no validation); the validation
+// left due, a step at a time within the budget; the running operation's steps within what is left of
+// it, at least one; the child's state and the game's log tail; last, the operation found done
+// finishes: the view learns what it came to (a project opens, a build lands and the game a Play waits
+// on starts on it), and what it read leaves the validation due, which the next poll steps.
 void ProjectSession::poll() {
 	Impl &session = *impl_;
+	session.core.lapse_wire_gestures();
 	const PollBudget budget = session.core.poll_budget();
 	const int64_t started = budget.ms > 0 ? steady_clock_ms() : 0;
 	session.problems.step_validation(budget, steady_clock_ms);

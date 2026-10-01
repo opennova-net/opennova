@@ -34,6 +34,12 @@ const char *viewport_status_token(ViewportStatus status);
 // token, member: value} (a canvas's camera, a toolbar's options, the clock, the device's size).
 std::string viewport_change(ViewportKind kind, const char *member, io::JsonValue value);
 
+// A SetViewport's clock member, {playing, rate, time_ms, ticks} each optional, set on `clock`: every
+// member checked before any applies; false, nothing changed, with `error` naming the member and what
+// it takes (a viewport's change applies it with its other members, ViewportModel::apply; a pathless
+// change of the clock alone, Viewports::set_clock).
+bool set_preview_clock(const io::JsonValue &json, PreviewClock &clock, std::string &error);
+
 // What changed in a viewport's document since the viewport last followed it (Viewports::follow,
 // from the document's identity, load and revision; S13 V8 reads the document's changes_since to say
 // more).
@@ -82,6 +88,9 @@ struct ViewportContext {
 	// An edit is planned only where the session takes one now: no running operation refuses an edit
 	// (S13 A3, SessionView::allows), and the document is open and not blocked.
 	bool editable() const;
+	// Why no edit is planned ("" when editable): the document blocked (its file holds what it cannot
+	// carry), or an operation that holds the documents running.
+	std::string not_editable() const;
 };
 
 class ViewportModel;
@@ -168,14 +177,20 @@ public:
 	// machine, what a press or a nudge took), made once per canvas.
 	virtual std::unique_ptr<CanvasHalf> make_canvas() const = 0;
 	virtual ViewportHit hit(const ViewportContext &context, float x, float y) const = 0;
+	// Where the picture shows the record `id`'s handle `handle` now, in its units: a menu window's
+	// edge or corner (a move's its top left corner, an edge's middle), a model marker's place or the
+	// tip of its axis, projected. What a drag's `by` goes from. False, with why, where drag refuses
+	// the record or the handle.
+	virtual bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
+			float &y, std::string &error) const = 0;
 	// A drag of a record's handle (the editor MCP's, EditInViewport: session/editor_request.h's
 	// ViewportDrag) planned into requests: one EditRecord, the batch of the edits over every selected
 	// record the drag moves, each carrying `drag.gesture` (a new one when 0), so the drags of one
 	// gesture fold into one undo step; then the gesture's EndEdit when `drag.end` (with or without a
-	// batch: a last drag that moves nothing still ends the gesture). `by` (x, y) from where the
-	// picture shows the handle now, else to the point (x, y). False, with why, for a picture that is
-	// not the document's own, a record it does not show, a handle the record has not, a drag that
-	// writes nothing the session would take.
+	// batch: a last drag that moves nothing still ends the gesture its sample names). `by` (x, y) from
+	// where the picture shows the handle now (handle_point; a `by` of nothing plans no batch), else to
+	// the point (x, y). False, with why, for a picture that is not the document's own, a record it
+	// does not show, a handle the record has not, a drag that writes nothing the session would take.
 	virtual bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const = 0;
 	// A command by its name over the records `ids` (the menu's arrange of windows, "align_left" ...;

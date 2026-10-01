@@ -15,6 +15,8 @@
 #include <editor/preview/menu_viewport.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_device_cache.h>
+#include <editor/preview/viewport_json.h>
+#include <editor/preview/viewport_kinds.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/session/project_session.h>
@@ -121,6 +123,19 @@ inline bool serve(opennova::editor::ProjectSession &session,
 		done = done && session.outcome().done();
 	}
 	return done;
+}
+
+// The envelope of a viewport of `kind` over no document, followed once over `view`: what the kind's
+// follow says with nothing of it to show (no project, none of its kind open, a menu with no screen
+// selected). No wire reaches one (the viewport query reads a document's); the kind's follow keeps
+// these reasons for a viewport whose document went.
+inline opennova::io::JsonValue empty_viewport_json(
+		const opennova::editor::SessionView &view, opennova::editor::ViewportKind kind) {
+	using namespace opennova::editor;
+	std::unique_ptr<ViewportModel> empty = viewport_kind_row(kind).make(std::string());
+	PreviewClock clock;
+	empty->follow(ViewportInput{ view, clock, nullptr, ChangeClass::Loaded }, clock);
+	return viewport_to_json(view, *empty, JsonPage());
 }
 
 } // namespace editor_test

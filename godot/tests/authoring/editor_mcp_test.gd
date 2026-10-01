@@ -23,9 +23,10 @@ extends GutTest
 ## naming what it added and what each label made; the tool list and the request enum come from
 ## `editor_query catalog`, and editor_document, editor_graph, editor_problems and editor_menu
 ## are gone. S13 V7: one editor_viewport tool for every viewport, its reads the viewport query
-## (state, items, hit, notes, render) and its writes requests (options, camera and seek a
-## set_viewport, drag and command an edit_in_viewport); editor_menu_preview and
-## editor_model_preview are gone.
+## (state, items, hit, notes, render: the catalog's op tokens) and its writes requests (options,
+## camera and seek a set_viewport, seek the clock alone with no document named, drag and command an
+## edit_in_viewport), a menu's through the John Smith flow and a model's camera and clock;
+## editor_menu_preview and editor_model_preview are gone.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
@@ -379,15 +380,22 @@ func test_request_table_on_the_wire() -> void:
 	for row: Variant in catalog.get("queries", []):
 		named.append(String((row as Dictionary).get("name", "")))
 	assert_eq(queries, named, "the query enum is the catalog's queries")
-	# S13 V7: editor_viewport, made from the catalog: its op the viewport query's reads and the writes
-	# (set_viewport's and edit_in_viewport's), the query's params but op flat beside it, the objects
-	# the writes carry.
+	# S13 V7: editor_viewport, made from the catalog: its op the viewport query's reads (the catalog's
+	# op tokens) and the writes (set_viewport's and edit_in_viewport's), the query's params but op flat
+	# beside it (kind's tokens its enum), the objects the writes carry.
 	assert_true(served.has("set_viewport") and served.has("edit_in_viewport") and named.has("viewport"))
+	var reads: Array = []
+	for row: Variant in catalog.get("queries", []):
+		if String((row as Dictionary).get("name", "")) == "viewport":
+			for param: Variant in (row as Dictionary).get("params", []):
+				if String((param as Dictionary).get("name", "")) == "op":
+					reads = (param as Dictionary).get("enum", [])
+	assert_eq(reads, ["state", "items", "hit", "notes", "render"], "the catalog lists the query's ops")
 	var properties: Dictionary = viewport.get("inputSchema", {}).get("properties", {})
-	assert_eq(properties.get("op", {}).get("enum", []),
-			["state", "items", "hit", "notes", "render", "options", "camera", "seek", "drag", "command"])
-	for key in ["path", "x", "y", "row", "offset", "limit", "options", "camera", "clock", "device", "drag", "command"]:
+	assert_eq(properties.get("op", {}).get("enum", []), reads + ["options", "camera", "seek", "drag", "command"])
+	for key in ["path", "kind", "x", "y", "row", "offset", "limit", "options", "camera", "clock", "device", "drag", "command"]:
 		assert_true(properties.has(key), "editor_viewport takes %s" % key)
+	assert_eq(properties.get("kind", {}).get("enum", []), ["menu", "model"], "the viewport kinds' tokens")
 	assert_eq(String(properties.get("x", {}).get("type", "")), "number", "a point is a number")
 	assert_eq(int(properties.get("limit", {}).get("maximum", 0)), int(catalog.get("page_max", -1)))
 	var description := String(viewport.get("description", ""))
@@ -1153,6 +1161,75 @@ func test_file_list_pages_past_the_cap() -> void:
 	assert_eq(last.get("files", []).size(), 1, "the last page of the files")
 	assert_eq(last.get("next_offset"), null, "no page after the last")
 	assert_eq(int((await _state(["project"])).get("project", {}).get("file_count", 0)), total)
+
+
+## S13 V7: a model's viewport through editor_viewport. Its camera set (a set_viewport, the state after
+## it its answer's viewport); the preview clock sought with op seek, which names no document and no
+## kind (path and kind refused) and sets the clock whatever is active (a stylesheet included, its
+## answer then naming no viewport); the viewport of a kind named, and a kind that does not show the
+## document refused; a hit naming the viewport it read.
+func test_model_viewport_through_the_editor_mcp() -> void:
+	if _client == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova viewport mcp %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(bool((await _call("editor_request", {"kind": "new_project", "dir": dir, "title": "Models"})).get("ok", false)))
+	assert_true(bool((await _create_missing()).get("ok", false)))
+	var root: String = (await _state(["project"]))["project"]["root"]
+	var bytes := FileAccess.get_file_as_bytes(ProjectSettings.globalize_path("res://../fixtures/threedi/synth/armory.3di"))
+	assert_gt(bytes.size(), 0, "the synthetic armory model")
+	assert_eq(DirAccess.make_dir_recursive_absolute(root.path_join("models")), OK)
+	var file := FileAccess.open(root.path_join("models/armory.3di"), FileAccess.WRITE)
+	assert_not_null(file)
+	if file == null:
+		return
+	file.store_buffer(bytes)
+	file.close()
+	assert_true(_done(await _call("editor_request", {"kind": "rescan", "wait": true})))
+	assert_true(_done(await _call("editor_request", {"kind": "open_document", "path": "models/armory.3di"})))
+	var state := await _call("editor_viewport", {"op": "state", "limit": 1})
+	assert_eq(String(state.get("kind", "")), "model", str(state))
+	assert_eq(String(state.get("units", "")), "pixels", str(state))
+	# The camera: a set_viewport of it, the state after it its answer's viewport.
+	var turned := await _call("editor_viewport", {"op": "camera", "camera": {"yaw": 1.25, "distance": 12}})
+	assert_true(_done(turned), str(turned))
+	assert_almost_eq(float(turned.get("viewport", {}).get("camera", {}).get("yaw", 0.0)), 1.25, 0.0001, str(turned))
+	assert_almost_eq(float(turned.get("viewport", {}).get("camera", {}).get("distance", 0.0)), 12.0, 0.0001)
+	# seek: the clock alone, no path and no kind.
+	var sought := await _call("editor_viewport", {"op": "seek", "clock": {"playing": false, "time_ms": 250}})
+	assert_true(_done(sought), str(sought))
+	var clock: Dictionary = sought.get("viewport", {}).get("clock", {})
+	assert_false(bool(clock.get("playing", true)), str(sought))
+	assert_eq(int(clock.get("time_ms", 0)), 250, str(sought))
+	assert_true(String((await _call("editor_viewport", {"op": "seek", "path": "models/armory.3di",
+			"clock": {"time_ms": 1}})).get("_error", "")).contains("takes no \"path\""))
+	assert_true(String((await _call("editor_viewport", {"op": "seek", "kind": "model",
+			"clock": {"time_ms": 1}})).get("_error", "")).contains("takes no \"kind\""))
+	# The viewport of a kind named; a kind that does not show the document refused.
+	assert_eq(String((await _call("editor_viewport", {"op": "state", "kind": "model", "limit": 1})).get("kind", "")), "model")
+	assert_true(String((await _call("editor_viewport", {"op": "state", "kind": "menu"})).get("_error", "")).contains(
+			"does not show in a menu viewport"))
+	# A hit names the viewport it read beside the marker it found.
+	var hits := 0
+	for item: Variant in (await _call("editor_viewport", {"op": "items", "limit": 200})).get("items", []):
+		var marker: Dictionary = item
+		if String(marker.get("kind", "")) != "user_point" or not (marker.get("screen") is Array):
+			continue
+		var hit := await _call("editor_viewport", {"op": "hit", "x": float(marker["screen"][0]), "y": float(marker["screen"][1])})
+		assert_eq(String(hit.get("viewport", "")), "model", str(hit))
+		assert_eq(String(hit.get("path", "")), "models/armory.3di", str(hit))
+		assert_eq(int(hit.get("id", 0)), int(marker.get("id", -1)), str(hit))
+		hits += 1
+		break
+	assert_eq(hits, 1, "a user point on the picture")
+	# A stylesheet active: seek is done all the same (it names no document), its answer naming no
+	# viewport; the model's reads the clock it set.
+	assert_true(_done(await _call("editor_request", {"kind": "open_document", "path": "menu_style.mns"})))
+	var still := await _call("editor_viewport", {"op": "seek", "clock": {"time_ms": 500}})
+	assert_true(_done(still), str(still))
+	assert_false(still.has("viewport"), str(still))
+	var read := await _call("editor_viewport", {"op": "state", "path": "models/armory.3di", "limit": 1})
+	assert_eq(int(read.get("clock", {}).get("time_ms", 0)), 500, str(read))
 
 
 ## The image importer through the endpoint (S8): a PNG imported into the project becomes a

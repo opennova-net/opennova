@@ -297,7 +297,16 @@ func test_menu_follows_its_tables_and_its_style() -> void:
 	_new_project("Preview Game")
 	assert_eq(_seam.create_missing_files(), 0)
 	assert_true(String(_viewport("state").get("error", "")).contains("no document is open"))
-	assert_true(_seam.open_document("main.mnu"))
+	# Read before the editor's next frame: the menu's viewport (its first read makes it), no device
+	# attached to it yet and nothing built; the frames after attach one (the empty states the preview
+	# tools answered with no project, no menu or no model are no wire's now: the query refuses with no
+	# document open, and a stylesheet shows in no viewport).
+	_app.request_json(JSON.stringify({"kind": "open_document", "path": "main.mnu"}))
+	var before := _state()
+	assert_eq(String(before.get("kind", "")), "menu", str(before))
+	assert_false(bool(before.get("device", {}).get("attached", true)), str(before))
+	assert_eq(int(before.get("builds", -1)), 0, str(before))
+	assert_true(_seam.settle())
 	var opened := await _await_ready()
 	assert_eq(String(opened.get("status", "")), "ready", "opened, a menu shows its first screen: %s" % str(opened))
 	assert_eq(String(opened.get("kind", "")), "menu")

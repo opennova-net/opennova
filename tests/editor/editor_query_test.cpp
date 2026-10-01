@@ -1415,15 +1415,44 @@ static int test_viewport_query() {
 	NodeAddress title;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title) && title.child);
 
-	// The refusals by the op and its params.
-	TEST_EXPECT(says(R"({"op": "zoom"})", "no op \"zoom\" (state, items, hit, notes, render)."));
-	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, op, offset, limit)."));
-	TEST_EXPECT(says(R"({"op": "hit", "x": 1, "y": 2, "limit": 3})", "op hit takes no \"limit\" (it takes path, op, x, y)."));
+	// The refusals by the op and its params: an op or a kind no choice of theirs, a param the op does
+	// not take, one it needs, a point no number a float holds.
+	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, notes, render, not \"zoom\"."));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})", "\"kind\" is one of menu, model, not \"map\"."));
+	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
+	TEST_EXPECT(says(R"({"op": "hit", "x": 1, "y": 2, "limit": 3})",
+			"op hit takes no \"limit\" (it takes path, kind, op, x, y)."));
 	TEST_EXPECT(says(R"({"op": "items", "row": 3})", "op items takes no \"row\""));
 	TEST_EXPECT(says(R"({"op": "hit", "x": 1})", "op hit needs \"x\" and \"y\""));
 	TEST_EXPECT(says(R"({"op": "render"})", "op render needs \"row\""));
 	TEST_EXPECT(says(R"({"op": "hit", "x": "1", "y": 2})", "\"x\" must be a number."));
+	TEST_EXPECT(says(R"({"op": "hit", "x": 1e300, "y": 2})", "\"x\" must be a number."));
 	TEST_EXPECT(says(R"({"op": "state", "path": "nope.mnu"})", "no open document nope.mnu."));
+	TEST_EXPECT(says(R"({"op": "state", "kind": "model"})", "does not show in a model viewport."));
+	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "kind": "menu"})").get_string("kind", "") == "menu");
+
+	// The catalog's op and kind are the query's choices: every op it lists answers (none refused by
+	// its op), and the kinds are the viewport kinds' tokens.
+	const JsonValue catalog = ask(session, "catalog", "{}");
+	std::vector<std::string> ops, kinds;
+	for (const JsonValue &query : catalog.get("queries")->array) {
+		if (query.get_string("name", "") != "viewport") continue;
+		for (const JsonValue &param : query.get("params")->array) {
+			const JsonValue *tokens = param.get("enum");
+			for (size_t i = 0; tokens && i < tokens->array.size(); ++i)
+				(param.get_string("name", "") == "op" ? ops : kinds).push_back(tokens->array[i].string);
+		}
+	}
+	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "notes", "render" }));
+	TEST_EXPECT(kinds == (std::vector<std::string>{ "menu", "model" }));
+	for (const std::string &op : ops) {
+		std::string args = R"({"op": ")" + op + "\"";
+		if (op == "hit") args += R"(, "x": 1, "y": 1)";
+		if (op == "render") args += R"(, "row": )" + std::to_string(menu->rows()[0]->id);
+		const std::string error = refusal(session, "viewport", args + "}");
+		TEST_EXPECT(error.empty());
+		if (!error.empty()) std::printf("  op %s: %s\n", op.c_str(), error.c_str());
+	}
 
 	// The envelope, every member, stamped with the concerns its row reads.
 	const JsonValue state = ask(session, "viewport", R"({"op": "state"})");
@@ -1467,6 +1496,7 @@ static int test_viewport_query() {
 			R"({"op": "hit", "x": )" + std::to_string(cx) + R"(, "y": )" + std::to_string(cy) + "}");
 	TEST_EXPECT(id_of(hit, "id") == title.child && hit.get_string("name", "") == "TITLE" &&
 			hit.get_bool("current", false) && hit.get_string("kind", "") == "static");
+	TEST_EXPECT(hit.get_string("viewport", "") == "menu" && hit.get_string("path", "") == menu->path());
 	const ViewportModel *viewport = session.viewports().find(menu->path(), ViewportKind::Menu);
 	TEST_EXPECT(viewport != nullptr);
 	if (!viewport)

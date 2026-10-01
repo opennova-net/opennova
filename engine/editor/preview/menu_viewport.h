@@ -118,6 +118,8 @@ public:
 	ViewportLayout layout() const override;
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
+			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	bool command(const ViewportContext &context, const std::string &name,

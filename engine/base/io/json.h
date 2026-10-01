@@ -15,6 +15,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -167,6 +168,14 @@ inline bool json_whole_in(const JsonValue &json, double lo, double hi, int64_t &
 	const double whole = std::trunc(json.number);
 	if (!(whole >= lo && whole <= hi)) return false;
 	out = static_cast<int64_t>(whole);
+	return true;
+}
+
+// A number a float holds (finite, and no larger than a float's largest), read as one; false for
+// anything else, so no double past what a float holds is ever converted to one.
+inline bool json_float(const JsonValue &json, float &out) {
+	if (!json.is_number() || !(std::fabs(json.number) <= double(std::numeric_limits<float>::max()))) return false;
+	out = static_cast<float>(json.number);
 	return true;
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -28,6 +29,10 @@ class ProjectRefresh;
 class RenameController;
 class UnsavedGuard;
 class Viewports;
+
+// How long a gesture of the wire's stays open with no sample (S13 V7): a client that began a drag
+// and went away ends it, its Problems' validation no longer waiting on it.
+inline constexpr int64_t kWireGestureLapseMs = 10000;
 
 // The project session's core (ADR 0046 S13 A2): what every part of the session shares. The open
 // project (its paths, its local settings, its document) and what opens, refreshes, sets up and
@@ -180,15 +185,32 @@ public:
 	void clear_output();
 	// SetViewport: the viewport over the document `path` names ("" the active one; by its path or
 	// its logical name, as every request names one) changed as `change` (its JSON text) says
-	// (Viewports::set); refused, nothing changed, with why (viewport.refused).
+	// (Viewports::set); a change of the clock alone with no path, the preview clock whatever document
+	// is active (Viewports::set_clock, S13 V7). Refused, nothing changed, with why (viewport.refused).
 	void set_viewport(const std::string &path, const std::string &change);
 	// EditInViewport (S13 V7): the request's drag or command planned by the viewport over the
-	// document its path names (Viewports::resolve: followed first, so it plans over the document as
-	// it is now), then each request the plan made served in order through its own row (an
-	// EditRecord, its gesture's EndEdit, a SetViewport); a drag's gesture in the outcome. Refused,
-	// nothing changed, with why (viewport.refused): neither or both of a drag and a command, no
-	// viewport there, a plan the viewport refuses.
+	// document its path names (Viewports::resolve, of the kind the drag or the command names:
+	// followed first, so it plans over the document as it is now), then each request the plan made
+	// served in order through its own row (an EditRecord, its gesture's EndEdit, a SetViewport); a
+	// drag's gesture in the outcome, refused or not. A drag that keeps its gesture open (`end` false)
+	// opens a gesture of the wire's in the document (its token the session's, whatever the sample
+	// plans), which only the document's next drag naming it goes on with, from the point of the
+	// picture its samples took the handle to (a canvas's drag goes on from its press); a refused
+	// sample that ends it ends it all the same. Refused, nothing changed, with why (viewport.refused):
+	// neither or both of a drag and a command, no viewport there, a gesture the document holds no open
+	// one of the wire's of (or one of another record's handle), a plan the viewport refuses.
 	void edit_in_viewport(const EditorRequest &request);
+	// The gesture open in the document at `path` (the view's documents.gestures; its token 0 for
+	// none): a drag of the wire's goes on only with one the wire opened.
+	const OpenGesture &open_gesture(const std::string &path) const { return view_.documents.gesture_in(path); }
+	// A request from outside arrives (ProjectSession::handle, before it is served): a gesture of the
+	// wire's open in the document the request is on (its path's, else the active one where its row
+	// names it) ends, unless the request is a drag naming it (S13 V7: S13 A3's rule, every edit group
+	// ending before a request that starts an operation, widened to the wire's gestures).
+	void request_arrives(const EditorRequest &request);
+	// The poll's: a gesture of the wire's that had no sample for kWireGestureLapseMs (the platform's
+	// clock) ends.
+	void lapse_wire_gestures();
 	// Quit: the running operation cancelled first (one that cannot be keeps the editor open,
 	// refused), then the view's quit_requested set, which the shell acts on.
 	void quit();
@@ -219,6 +241,25 @@ private:
 	// one), the name as it came when none is open there.
 	std::string viewport_document(const std::string &path);
 
+	// What a drag of the wire's keeps between its samples (S13 V7), by its document while its gesture
+	// is open there: the gesture's token, the viewport's kind, the record and the handle its samples
+	// drag, and the point of the picture its samples took the handle to (the viewport's units, before
+	// any snap), which the next sample's `by` goes on from.
+	struct WireDrag {
+		uint64_t token = 0;
+		ViewportKind kind = ViewportKind::kCount;
+		NodeId id = 0;
+		std::string handle;
+		float x = 0.0f;
+		float y = 0.0f;
+	};
+	// The wire's drag in the document at `path` while its gesture is open there (null for none; one
+	// whose gesture ended another way forgotten).
+	WireDrag *wire_drag(const std::string &path);
+	// The gesture of the wire's open in the document at `path` ends (its EndEdit, as a client's last
+	// sample would raise it).
+	void end_wire_gesture(const std::string &path);
+
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;
 	Parts parts_;
@@ -229,6 +270,7 @@ private:
 	SessionView view_;
 	std::shared_ptr<Viewports> viewports_;
 	ActionOutcome outcome_;
+	std::map<std::string, WireDrag> wire_drags_;
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 };

@@ -466,9 +466,24 @@ bool paste_at_from_json(const JsonValue &json, PasteAt &out, std::string &error)
 	return true;
 }
 
-// A drag in a viewport (S13 V7): {id, handle, by: [dx, dy] | to: [x, y], snap?, gesture?, end?},
-// each left out at its default. The handle's token is the viewport's kind to read (a menu window's,
-// a model marker's), so it is a text here, refused where the kind plans the drag.
+// A viewport's kind as a drag or a command names it ("kind": its token), left out its default
+// (kCount: the kind the document shows in).
+bool viewport_kind_member(const JsonValue &json, const char *owner, ViewportKind &out, std::string &error) {
+	const JsonValue *kind = json.get("kind");
+	if (!kind) return true;
+	if (!kind->is_string() || !viewport_kind_from_token(kind->string, out)) {
+		std::string kinds;
+		for (size_t i = 0; i < kViewportKindCount; ++i)
+			kinds += std::string(i ? ", " : "") + viewport_kind_token(static_cast<ViewportKind>(i));
+		error = std::string("\"") + owner + ".kind\" must be a viewport's kind (" + kinds + ").";
+		return false;
+	}
+	return true;
+}
+
+// A drag in a viewport (S13 V7): {id, handle, by: [dx, dy] | to: [x, y], snap?, gesture?, end?,
+// kind?}, each left out at its default. The handle's token is the viewport's kind to read (a menu
+// window's, a model marker's), so it is a text here, refused where the kind plans the drag.
 JsonValue drag_to_json(const ViewportDrag &drag) {
 	JsonValue out = JsonValue::make_object();
 	out.set("id", json_number(double(drag.id)));
@@ -480,22 +495,20 @@ JsonValue drag_to_json(const ViewportDrag &drag) {
 	if (drag.snap != 0.0f) out.set("snap", json_number(drag.snap));
 	if (drag.gesture) out.set("gesture", json_number(double(drag.gesture)));
 	if (!drag.end) out.set("end", boolean(false));
+	if (drag.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drag.kind)));
 	return out;
 }
 
 bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"drag\" must be an object {id, handle, by | to, snap, gesture, end}.";
+		error = "\"drag\" must be an object {id, handle, by | to, snap, gesture, end, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end"}, "drag", error)) return false;
+	if (!members_known(json, {"id", "handle", "by", "to", "snap", "gesture", "end", "kind"}, "drag", error))
+		return false;
 	const auto refuse = [&error](const char *member, const char *must) {
 		error = std::string("\"drag.") + member + "\" must be " + must + ".";
 		return false;
-	};
-	// A number the drag's float holds (a finite one).
-	const auto finite = [](const JsonValue &value) {
-		return value.is_number() && std::isfinite(value.number) && std::isfinite(float(value.number));
 	};
 	ViewportDrag drag;
 	const JsonValue *id = json.get("id");
@@ -508,27 +521,26 @@ bool drag_from_json(const JsonValue &json, ViewportDrag &out, std::string &error
 		error = "\"drag\" goes by [dx, dy] or to [x, y], one of them.";
 		return false;
 	}
+	// Numbers the drag's floats hold (finite, none past a float's largest).
 	const JsonValue &point = by ? *by : *to;
-	if (!point.is_array() || point.array.size() != 2 || !finite(point.array[0]) || !finite(point.array[1]))
+	if (!point.is_array() || point.array.size() != 2 || !io::json_float(point.array[0], drag.x) ||
+			!io::json_float(point.array[1], drag.y))
 		return refuse(by ? "by" : "to", "two numbers, [x, y]");
 	drag.by = by != nullptr;
-	drag.x = float(point.array[0].number);
-	drag.y = float(point.array[1].number);
-	if (const JsonValue *snap = json.get("snap")) {
-		if (!finite(*snap) || snap->number < 0.0) return refuse("snap", "a number, 0 or more");
-		drag.snap = float(snap->number);
-	}
+	if (const JsonValue *snap = json.get("snap"); snap && (!io::json_float(*snap, drag.snap) || drag.snap < 0.0f))
+		return refuse("snap", "a number, 0 or more");
 	if (const JsonValue *gesture = json.get("gesture"); gesture && !read_id(*gesture, drag.gesture))
 		return refuse("gesture", "a gesture's token, a whole number");
 	if (const JsonValue *end = json.get("end")) {
 		if (!end->is_bool()) return refuse("end", "true or false");
 		drag.end = end->boolean;
 	}
+	if (!viewport_kind_member(json, "drag", drag.kind, error)) return false;
 	out = std::move(drag);
 	return true;
 }
 
-// A command in a viewport (S13 V7): {name, ids?}. The name is the viewport's kind to read.
+// A command in a viewport (S13 V7): {name, ids?, kind?}. The name is the viewport's kind to read.
 JsonValue command_to_json(const ViewportCommand &command) {
 	JsonValue out = JsonValue::make_object();
 	out.set("name", json_string(command.name));
@@ -537,15 +549,16 @@ JsonValue command_to_json(const ViewportCommand &command) {
 		for (const NodeId id : command.ids) ids.push(json_number(double(id)));
 		out.set("ids", std::move(ids));
 	}
+	if (command.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(command.kind)));
 	return out;
 }
 
 bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string &error) {
 	if (!json.is_object()) {
-		error = "\"command\" must be an object {name, ids}.";
+		error = "\"command\" must be an object {name, ids, kind}.";
 		return false;
 	}
-	if (!members_known(json, {"name", "ids"}, "command", error)) return false;
+	if (!members_known(json, {"name", "ids", "kind"}, "command", error)) return false;
 	ViewportCommand command;
 	const JsonValue *name = json.get("name");
 	if (!name || !name->is_string() || name->string.empty()) {
@@ -553,6 +566,7 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 		return false;
 	}
 	command.name = name->string;
+	if (!viewport_kind_member(json, "command", command.kind, error)) return false;
 	if (const JsonValue *ids = json.get("ids")) {
 		if (!ids->is_array()) {
 			error = "\"command.ids\" must be an array of record identities.";

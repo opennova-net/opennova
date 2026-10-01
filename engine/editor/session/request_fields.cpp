@@ -77,26 +77,33 @@ constexpr RequestField kFields[] = {
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
 			"(menu, model; left out, the kind the document shows in: the Preview's kind that shows "
 			"it, else its Main view), device {width, height} the size its device draws at (1 to "
-			"8192), clock {playing, rate, time_ms, ticks} the preview clock, options the kind's (a "
-			"menu's show_hidden, force_id, force_state, checked, popup_open, focus; a model's lod, "
-			"ctrl, overlays, rig_model), camera a model's {yaw, pitch, distance, target, frame}, each "
-			"member optional." },
+			"8192), clock {playing, rate, time_ms, ticks} the preview clock every viewport reads, "
+			"options the kind's (a menu's show_hidden, force_id, force_state, checked, popup_open, "
+			"focus; a model's lod, ctrl, overlays, rig_model), camera a model's {yaw, pitch, "
+			"distance, target, frame}, each member optional. A change of the clock alone with no "
+			"path sets the clock whatever document is active (none, or one that shows in no "
+			"viewport)." },
 	{ F::Drag, "drag", J::Object,
-			"A drag in a viewport, {id, handle, by | to, snap?, gesture?, end?}: the record id's "
-			"handle (a menu window's move, left, right, top, bottom, top_left, top_right, "
+			"A drag in a viewport, {id, handle, by | to, snap?, gesture?, end?, kind?}: the record "
+			"id's handle (a menu window's move, left, right, top, bottom, top_left, top_right, "
 			"bottom_left or bottom_right; a model marker's place or axis) dragged by [dx, dy] from "
 			"where the picture shows it now, or to the point [x, y] of the picture, in the "
 			"viewport's units (a menu's 800x600 design units, a model's picture pixels); snap a "
-			"menu's grid of 8 when not 0, a model's grid in metres (0, free, when left out); gesture "
-			"the gesture it goes on with (the token an earlier drag's answer gave; left out, a new "
-			"one); end false keeps the gesture open for the next drag (true when left out)." },
+			"menu's grid of 8 when not 0, a model's grid in metres (0, free, when left out); kind "
+			"the viewport's (left out, the one the document shows in). A gesture's samples are "
+			"consecutive drags of one handle on its document: gesture left out begins one (its token "
+			"the answer's gesture), a sample naming the gesture open on the document goes on with "
+			"it, its by from where the gesture's samples took the handle, one undo step in all; end "
+			"false keeps the gesture open for the next sample (true when left out). Any other request "
+			"on the document, another gesture, or 10 s with no sample ends it; a token no gesture of "
+			"the document's holds is refused." },
 	{ F::Command, "command", J::Object,
-			"A command in a viewport, {name, ids?}: a menu's arrange of the windows ids, the first "
-			"the one the others follow (align_left, align_right, align_top, align_bottom, "
+			"A command in a viewport, {name, ids?, kind?}: a menu's arrange of the windows ids, the "
+			"first the one the others follow (align_left, align_right, align_top, align_bottom, "
 			"align_horizontal_centers, align_vertical_centers; distribute_horizontally and "
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
 			"send_to_back), or a model's frame (its camera on the marker of the first id, else on "
-			"the whole model)." },
+			"the whole model); kind the viewport's (left out, the one the document shows in)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

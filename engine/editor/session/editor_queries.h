@@ -52,9 +52,17 @@ inline constexpr size_t kEditorQueryKindCount = static_cast<size_t>(EditorQueryK
 enum class QueryJson : uint8_t {
 	String, // a string (a path, a token, a text)
 	Integer, // a whole number, 0 or more (an identity, an offset, a revision)
-	Number, // a finite number (a point on a picture)
+	Number, // a number a float holds, finite (a point on a picture)
 	Boolean, // true or false
 	Strings, // an array of strings
+};
+
+// A string param that takes one of a list of tokens (S13 V7: the viewport query's op and kind): its
+// name, and its index-th token (null past the last). The args check refuses any other, naming them,
+// and the catalog writes them as the param's `enum`.
+struct QueryChoices {
+	const char *param = "";
+	const char *(*token)(size_t index) = nullptr;
 };
 
 // One param a query takes: its name on the wire, its type, whether the query needs it, its default
@@ -77,8 +85,8 @@ struct EditorQueryRow;
 
 // A query's args as its row's params read them. run_query checked each once, before the handler
 // runs: every member a param of the row, every param the row needs there, each of its type, an
-// integer 0 or more, a number finite, and a paged row's `limit` from 1 to kQueryPageMax; a param
-// left out reads as its default.
+// integer 0 or more, a number one a float holds, a param with choices one of its tokens, and a paged
+// row's `limit` from 1 to kQueryPageMax; a param left out reads as its default.
 class QueryArgs {
 public:
 	QueryArgs(const EditorQueryRow &row, const io::JsonValue &args) : row_(row), args_(args) {}
@@ -117,8 +125,8 @@ using QueryHandler = io::JsonValue (*)(
 // it pages (null for none: its offset or cursor and its limit checked once, the answer's `count`
 // the list's whole length), the concerns its answer reads (one at least: every one whose move can
 // change what it answers, ActiveDocument too where a pathless read follows the active document;
-// the state's are every concern), whose stamps give the answer's `view_revision`, and what it
-// answers.
+// the state's are every concern), whose stamps give the answer's `view_revision`, what it answers,
+// and the tokens its string params with choices take (none for most).
 struct EditorQueryRow {
 	EditorQueryKind kind = EditorQueryKind::kCount;
 	const char *token = "";
@@ -128,6 +136,8 @@ struct EditorQueryRow {
 	const char *list_key = nullptr;
 	ConcernSet reads = 0;
 	const char *doc = "";
+	const QueryChoices *choices = nullptr;
+	size_t choice_count = 0;
 };
 
 // A kind's row; the Catalog row for a value past the last kind.

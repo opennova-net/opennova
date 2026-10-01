@@ -15,6 +15,8 @@ const REQUEST_WAIT_MS := 300_000
 
 var service: EditorMcpService
 var app: Node
+## editor_viewport's reads: the viewport query's ops, as the catalog lists them (register_all).
+var _viewport_reads: Array[String] = []
 
 
 func _init(editor_service: EditorMcpService, editor_app: Node) -> void:
@@ -39,6 +41,7 @@ func _handlers() -> Dictionary:
 
 func register_all(registry: McpToolRegistry) -> void:
 	var handlers := _handlers()
+	_viewport_reads = EditorMcpCatalog.viewport_reads(EditorMcpCatalog.catalog_of(app))
 	for def in EditorMcpCatalog.definitions(app):
 		if not handlers.has(def.name):
 			push_error("EditorMcpTools has no handler for cataloged tool '%s'." % def.name)
@@ -158,53 +161,71 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 
 
 ## editor_viewport (S13 V7): a document's viewport, `op` dispatched to the session's two seams. A read
-## is the viewport query, its params flat beside op as the query takes them; a write is a request
-## (EditorMcpCatalog.VIEWPORT_WRITES: options, camera and seek a set_viewport of the viewport's state,
-## drag and command an edit_in_viewport), answered as editor_request answers it (a request that did
-## not read a tool error, one refused ok with its outcome not done) with the viewport's state after
-## it as `viewport`.
+## (the viewport query's ops, as the catalog lists them) is the viewport query, its params flat beside
+## op as the query takes them; a write is a request (EditorMcpCatalog.VIEWPORT_WRITES: options and
+## camera a set_viewport of the viewport's state, seek a set_viewport of the clock alone, drag and
+## command an edit_in_viewport; `kind` the member of the request that names the viewport's kind),
+## answered as editor_request answers it (a request that did not read a tool error, one refused ok with
+## its outcome not done) with the viewport's state after it as `viewport`.
 func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:
 	var params := args.duplicate()
 	params.erase("_session_id")
 	var op := String(params.get("op", ""))
-	if EditorMcpCatalog.VIEWPORT_READS.has(op):
+	if _viewport_reads.has(op):
 		return _answer("viewport", params)
 	if not EditorMcpCatalog.VIEWPORT_WRITES.has(op):
-		var ops: Array[String] = EditorMcpCatalog.VIEWPORT_READS.duplicate()
+		var ops: Array[String] = _viewport_reads.duplicate()
 		for name: String in EditorMcpCatalog.VIEWPORT_WRITES:
 			ops.append(name)
 		return McpToolResult.error("editor_viewport has no op '%s' (%s)." % [op, ", ".join(PackedStringArray(ops))])
 	var write: Dictionary = EditorMcpCatalog.VIEWPORT_WRITES[op]
+	var pathless := bool(write.get("pathless", false))
 	var takes: Array = write["takes"]
 	var request := {"kind": String(write["kind"])}
 	var members := {}
+	var kind: Variant = null
 	for key: String in params:
 		if key == "op":
 			continue
-		if key == "path":
-			request["path"] = params[key]
+		if (key == "path" or key == "kind") and not pathless:
+			if key == "path":
+				request["path"] = params[key]
+			else:
+				kind = params[key]
 		elif takes.has(key):
 			members[key] = params[key]
 		else:
-			return McpToolResult.error("editor_viewport op=%s takes no \"%s\" (it takes path, %s)."
-					% [op, key, ", ".join(PackedStringArray(takes))])
+			var taken: Array = takes.duplicate() if pathless else ["path", "kind"] + takes
+			return McpToolResult.error("editor_viewport op=%s takes no \"%s\" (it takes %s)."
+					% [op, key, ", ".join(PackedStringArray(taken))])
 	if not members.has(write["needs"]):
 		return McpToolResult.error("editor_viewport op=%s needs \"%s\"." % [op, String(write["needs"])])
-	# A set_viewport carries the change as its viewport object; an edit_in_viewport its drag or command.
+	# A set_viewport carries the change as its viewport object, an edit_in_viewport its drag or
+	# command; the kind goes in the one its write names.
 	if String(write["kind"]) == "set_viewport":
 		request["viewport"] = members
 	else:
 		request.merge(members)
+	if kind != null:
+		var named: Variant = request.get(String(write["kind_in"]))
+		if not (named is Dictionary):
+			return McpToolResult.error("editor_viewport op=%s: \"%s\" must be an object." % [op, String(write["kind_in"])])
+		(named as Dictionary)["kind"] = kind
 	# Unsorted: a change's members as written.
 	var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(request, "", false))))
 	if not (answer is Dictionary):
 		return McpToolResult.error("The editor returned an invalid answer.")
 	if not bool(answer.get("ok", false)):
 		return McpToolResult.error(String(answer.get("error", "The request was refused.")))
+	# The viewport the write named, after it (a seek's: the active document's, none with nothing to show).
 	var state := {"op": "state"}
 	if request.has("path"):
 		state["path"] = request["path"]
-	answer["viewport"] = _query("viewport", state)
+	if kind != null:
+		state["kind"] = kind
+	var after := _query("viewport", state)
+	if not after.is_empty():
+		answer["viewport"] = after
 	return answer
 
 func _tool_editor_screenshot(args: Dictionary, ctx: McpToolContext) -> Variant:

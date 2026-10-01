@@ -9,6 +9,7 @@
 #include <editor/assets/import_choice.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/edit.h>
+#include <editor/session/view/viewport_kind.h>
 
 namespace opennova::editor {
 
@@ -135,8 +136,11 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 // a model marker's "place" or "axis"), by (x, y) from where the picture shows the handle now (`by`),
 // else to the point (x, y) of the picture, in the viewport's units (a menu's design units, a model's
 // picture pixels), snapped by `snap` (a menu's grid of 8 when it is not 0; a model's grid in metres,
-// 0 free). Its batch carries the gesture `gesture` (0: a new one, the session's), so the drags of
-// one gesture fold into one undo step, and `end` ends the gesture with it.
+// 0 free), in the viewport of `kind` (kCount: the one the document shows in). A gesture's samples
+// are consecutive drags of one handle: `gesture` 0 begins one (the session's token, which the answer
+// names), and a sample that names the gesture open on the document goes on with it, its `by` from
+// where the gesture's samples took the handle (as a canvas drags from its press), so its batches fold
+// into one undo step; `end` ends the gesture with the sample.
 struct ViewportDrag {
 	NodeId id = 0;
 	std::string handle;
@@ -146,11 +150,12 @@ struct ViewportDrag {
 	float snap = 0.0f;
 	uint64_t gesture = 0;
 	bool end = true;
+	ViewportKind kind = ViewportKind::kCount;
 };
 
 inline bool operator==(const ViewportDrag &a, const ViewportDrag &b) {
 	return a.id == b.id && a.handle == b.handle && a.by == b.by && a.x == b.x && a.y == b.y &&
-			a.snap == b.snap && a.gesture == b.gesture && a.end == b.end;
+			a.snap == b.snap && a.gesture == b.gesture && a.end == b.end && a.kind == b.kind;
 }
 inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
 	return !(a == b);
@@ -158,14 +163,16 @@ inline bool operator!=(const ViewportDrag &a, const ViewportDrag &b) {
 
 // A command in a viewport (EditInViewport, S13 V7): its name (a menu's arrange of windows,
 // "align_left" ... "send_to_back"; a model's "frame") over the records `ids` (the windows arranged,
-// the first the one the others follow; the marker a frame looks at, none the whole model).
+// the first the one the others follow; the marker a frame looks at, none the whole model), in the
+// viewport of `kind` (kCount: the one the document shows in).
 struct ViewportCommand {
 	std::string name;
 	std::vector<NodeId> ids;
+	ViewportKind kind = ViewportKind::kCount;
 };
 
 inline bool operator==(const ViewportCommand &a, const ViewportCommand &b) {
-	return a.name == b.name && a.ids == b.ids;
+	return a.name == b.name && a.ids == b.ids && a.kind == b.kind;
 }
 inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 	return !(a == b);
@@ -275,8 +282,9 @@ struct ActionOutcome {
 	// (Document::last_made(): 0 for an edit that made nothing or whose record a later edit
 	// removed), which its labels name.
 	std::vector<NodeId> added, made;
-	// The gesture an EditInViewport's drag carried (S13 V7: the one it went on with, or the one the
-	// session handed it), which a later drag names to fold into the same undo step; 0 for none.
+	// The gesture an EditInViewport's drag carried (S13 V7: the one it named, refused or not, or the one
+	// the session handed it), which the gesture's next sample names to fold into the same undo step; 0
+	// for none (a first sample that planned nothing and ended its gesture with it).
 	uint64_t gesture = 0;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
