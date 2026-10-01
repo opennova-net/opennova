@@ -1249,7 +1249,9 @@ bool check_host_admits_exact_retail_message_prefix() {
 
 // The dictated CS field-3 period applies in both directions. The host keeps
 // simulation/C2S full-rate, but remote 0x0A production and the S2C flush open
-// only on the exact decrement-before-gate boundary. The high retail BANDWIDTH
+// only on the exact decrement-before-gate boundary. Its send pump still runs
+// every tick, so +0x64C advances once per host tick, held or open (D-NET-230)
+// [orig: PumpServerProtocolSend @0x51e487 -> PumpFlags increment @0x6297d5]. The high retail BANDWIDTH
 // setting must still fit one 1300-byte session packet after its LEN16 envelope.
 bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::HostOwner owner;
@@ -1319,20 +1321,20 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.empty() && remote.s2c_send_holdoff_countdown == 2,
 	            "first host S2C holdoff tick stays closed") ||
-	    !expect(remote.seq.send_flush_counter == 0,
-	            "closed host boundary does not age finite retention")) return false;
+	    !expect(remote.seq.send_flush_counter == 1,
+	            "the host's send pump ages finite retention on a held tick too")) return false;
 	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.empty() && remote.s2c_send_holdoff_countdown == 1,
 	            "second host S2C holdoff tick stays closed") ||
-	    !expect(remote.seq.send_flush_counter == 0,
-	            "second closed host boundary still does not advance the flush counter")) return false;
+	    !expect(remote.seq.send_flush_counter == 2,
+	            "every host tick advances the flush counter once")) return false;
 	opennova::inmatch::host_session_pump(owner, socket);
 	const std::size_t boundary_packet_count = socket.sent.size();
 	if (!expect(boundary_packet_count >= 1 && boundary_packet_count <= 2 &&
 	                    remote.s2c_send_holdoff_countdown == 3,
 	            "third host tick opens one S2C boundary and reloads") ||
-	    !expect(remote.seq.send_flush_counter == 1,
-	            "one open host boundary increments the flush counter exactly once")) return false;
+	    !expect(remote.seq.send_flush_counter == 3,
+	            "an open host boundary, however many packets it builds, advances it once")) return false;
 	if (!expect(world.logic_tick == 3,
 	            "host simulation remains full-rate while S2C is held")) return false;
 
@@ -1384,7 +1386,7 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::host_session_pump(owner, socket);
 	return expect(socket.sent.size() == boundary_packet_count &&
 	                      remote.s2c_send_holdoff_countdown == 2 &&
-	                      remote.seq.send_flush_counter == 1,
+	                      remote.seq.send_flush_counter == 4,
 	              "next host S2C boundary remains closed for the full period");
 }
 

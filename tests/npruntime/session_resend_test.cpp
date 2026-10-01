@@ -9,6 +9,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/udp_session_transport.h>
 
 #include <net/npwire/idatagram_socket.h>
 #include <net/npwire/nw_session_framing.h>
@@ -448,6 +449,58 @@ bool check_host_receive_pump_sends_ignore_the_s2c_boundary() {
 	              "the missing-sequence request never waits for the send boundary");
 }
 
+// D-NET-230: a host's send pump runs every Server_TickUpdate, so +0x64C advances once per server
+// tick whether or not the connection's S2C boundary opened, and a finite-lifetime S2C record ages
+// per tick. Retail's 0x57 RTT echo (userParam 62) built at counter C is pruned at the first build
+// whose counter reaches C+61 — about a second — not 62 send boundaries later (12 s at holdoff 12).
+// [orig: Server_TickUpdate -> PumpServerProtocolSend @0x51e487 (flags 0x2E1) -> PumpFlags
+//  increment @0x6297d5; BuildOutgoingPackets deadline @0x6285a0; PrunePacketQueue @0x6292bb;
+//  the 0x57 send SendFiltered(0x57, 1, 62) @0x51e450]
+bool check_host_flush_counter_ages_finite_records_per_tick() {
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::admit_peer(owner, kPeer);
+	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
+	if (!expect(conn.link.transport != nullptr, "the owner attached the peer's transport"))
+		return false;
+	inmatch::arm_s2c_send_holdoff(conn, 12);
+	ScriptedDatagramSocket sock;
+
+	// The finite record waits for the first open boundary (the 12th pump); every pump after that
+	// also queues a one-send record so each boundary builds, as the per-boundary 0x0A does.
+	conn.link.transport->host_send(0x57, {0x10, 0x20, 0x30, 0x40, 0x00},
+			/*reliable=*/true, 0, false, /*retention_flushes=*/62);
+	uint32_t pumps = 0;
+	auto pump_to = [&](uint32_t target) {
+		while (pumps < target) {
+			inmatch::host_session_pump(owner, sock);
+			++pumps;
+			conn.link.transport->host_send(0x49, {0x01}, /*reliable=*/false);
+		}
+	};
+	pump_to(11);
+	if (!expect(sock.sent.empty(), "nothing leaves while the S2C boundary is held"))
+		return false;
+	pump_to(12);
+	if (!expect(!sock.sent.empty() && conn.seq.retained_outbound_message_count == 1,
+	            "the first open boundary sends and retains the finite record"))
+		return false;
+	if (!expect(conn.seq.send_flush_counter == 12,
+	            "+0x64C advances once per host pump, held or open"))
+		return false;
+	// Built at counter 11 (pumps 1..11 advanced it), the record's deadline is 11 + 62 - 1 = 72.
+	// The boundary at pump 72 builds at 71: the record survives and a 0x44 could still rebuild it.
+	pump_to(72);
+	if (!expect(conn.seq.retained_outbound_message_count == 1,
+	            "the record survives every build before its deadline"))
+		return false;
+	// The boundary at pump 84 builds at 83 and prunes it.
+	pump_to(84);
+	return expect(conn.seq.send_flush_counter == 84 &&
+	                      conn.seq.retained_outbound_message_count == 0,
+	              "the first build past the deadline prunes the finite record");
+}
+
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
@@ -737,6 +790,7 @@ int main() {
 	ok = check_s2c_loss_requests_0x44_and_host_reconstructs() && ok;
 	ok = check_c2s_loss_requests_0x84_and_joiner_reconstructs() && ok;
 	ok = check_host_receive_pump_sends_ignore_the_s2c_boundary() && ok;
+	ok = check_host_flush_counter_ages_finite_records_per_tick() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

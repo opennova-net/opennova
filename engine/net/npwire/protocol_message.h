@@ -317,9 +317,11 @@ struct SessionSequencing {
 	// Zero keeps retention disabled for protocol users that have not opted into the 0x44/0x84 flow.
 	// Joint Operations game-session connections set this to retail's cs_dir0.msg_out_max (1200).
 	size_t outbound_message_limit = 0;
-	// Retail connection+0x64C. One open logical send boundary builds every
-	// packet with the current value, prunes sent nodes, then increments once.
-	// Held frames do not advance it.
+	// Retail connection+0x64C. A send boundary builds every packet with the
+	// current value and prunes sent nodes against it; the send pump's 0x80 leg
+	// then increments it once per call. On a joiner that pump sits behind the
+	// holdoff gate, so held frames do not advance it; a host calls its send pump
+	// every server tick, so the counter ages finite records per tick.
 	uint32_t send_flush_counter = 0;
 };
 
@@ -418,12 +420,19 @@ bool frame_session_packet_for_sequence(SessionSequencing &seq, const SessionCryp
 // crossed the contiguous receive gate.
 void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence);
 
-// Complete one OPEN logical send boundary: prune each finite retained message
-// whose deadline has been reached at the current counter, clear the boundary's
-// transient-node count, then increment the counter once. Call after all packets
-// for the boundary have been framed.
+// The two halves of one send-pump call. prune_session_send_boundary runs after
+// the packets of a build: it drops each finite retained message whose deadline
+// the current counter has reached and clears the build's transient-node count.
+// advance_session_send_flush_counter is the pump's 0x80 leg, once per call.
 // [orig: PumpEnumeratorAndSend @0x6290C0 -> BuildOutgoingPackets @0x6292B4 ->
-// PrunePacketQueue @0x6292BB; PumpFlags increment @0x6297D5]
+// PrunePacketQueue @0x6292BB; CNapiNPConnection_PumpFlags increment @0x6297D5]
+void prune_session_send_boundary(SessionSequencing &seq);
+void advance_session_send_flush_counter(SessionSequencing &seq);
+
+// Complete one OPEN logical send boundary of a pump that only runs when the
+// boundary opens (the joiner's, behind the client send gate @0x42c3dd): prune,
+// then increment the counter once. Call after all packets for the boundary
+// have been framed.
 void complete_session_send_flush(SessionSequencing &seq);
 
 // Inverse: validate the receiver-local session_id, SCRK-decrypt `body`, then apply the owner's receive
