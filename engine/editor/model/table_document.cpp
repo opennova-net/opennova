@@ -144,8 +144,10 @@ void TableDocument::shape(TableRow &row) const {
 
 void TableDocument::count_field(const FieldSchema &field) const {
 	++stats_.fields;
-	if (std::find(stats_.distinct.begin(), stats_.distinct.end(), &field) == stats_.distinct.end())
-		stats_.distinct.push_back(&field);
+	if (stats_.several || std::find(stats_.distinct.begin(), stats_.distinct.end(), &field) != stats_.distinct.end())
+		return;
+	if (stats_.distinct.size() < TableStats::kDistinctKept) stats_.distinct.push_back(&field);
+	else stats_.several = true;
 }
 
 const TableKind *TableDocument::resolve_kind(NodeKind kind) const {

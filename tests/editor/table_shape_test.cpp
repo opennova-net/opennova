@@ -390,7 +390,7 @@ int keystroke_in_a_catalog() {
 	// The core asks the field four times (the value before, whether it is written, the Set, the value
 	// after: Document's apply skipping a Set of the value held), each one probe of the kind's index for
 	// the field's own row; no other field's row is touched.
-	TEST_EXPECT(stats.distinct.size() == 1 && stats.distinct[0] == hp);
+	TEST_EXPECT(stats.distinct.size() == 1 && stats.distinct[0] == hp && !stats.several);
 	TEST_EXPECT(stats.fields == 4 && stats.kinds == 4);
 	return 0;
 }

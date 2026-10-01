@@ -398,38 +398,55 @@ Document::CollectionSpec spec(CatalogKind kind, const char *label, const char *n
 	return out;
 }
 
-const CArray &array_for(R owner, R element) {
+constexpr const CArray *array_for(R owner, R element) {
 	for (const CArray &array : kArrays)
-		if (array.owner == owner && array.element == element) return array;
-	return kArrays[0];
+		if (array.owner == owner && array.element == element) return &array;
+	return nullptr;
 }
+
+// The lists a kind's records hold, in the order its writer emits them: a C array the record owns (its
+// CArray row), or a powerup's action block, written or not, a list of one at most. A family's records
+// that hold lists are rows here.
+struct ListRow {
+	C owner, kind;
+	const char *label;
+	const char *name_field;
+	DefPowerupAction DefPowerupDef::*block; // null: the owner's C array of `kind`
+};
+constexpr ListRow kLists[] = {
+	{C::Item, C::Attachment, "Attachments", "userpoint", nullptr},
+	{C::Weapon, C::Action, "Actions", "name", nullptr},
+	{C::Weapon, C::Sight, "Sights", "texture", nullptr},
+	{C::Ammo, C::Effect, "Effects", "surface_type", nullptr},
+	{C::Powerup, C::PowerupAmmo, "Ammo", "class_name", nullptr},
+	{C::Powerup, C::Pickup, "Pickup", "", &DefPowerupDef::pickup},
+	{C::Powerup, C::Respawn, "Respawn", "", &DefPowerupDef::respawn},
+};
+// Each list holds records nested in its owner, of a kind no other list holds, and a C array's list
+// names an array its owner's record has.
+constexpr bool lists_well_formed() {
+	for (size_t i = 0; i < std::size(kLists); ++i) {
+		const ListRow &list = kLists[i];
+		if (kKinds[size_t(list.kind)].top || list.owner == list.kind) return false;
+		if (!list.block && !array_for(kKinds[size_t(list.owner)].record, kKinds[size_t(list.kind)].record)) return false;
+		for (size_t j = i + 1; j < std::size(kLists); ++j)
+			if (kLists[j].kind == list.kind) return false;
+	}
+	return true;
+}
+static_assert(lists_well_formed(), "each list holds nested records of a kind of its own, an array its owner has");
 
 RecordTable make_table() {
 	std::vector<TableKind> kinds;
 	for (const CatalogKindRow &row : kKinds) {
 		TableKind kind(RecordKindRow{node_kind(row.kind), row.token, row.label, row.add_label, row.top});
 		for (const DefField &field : def_fields(row.record)) kind.field(labelled(row.record, field));
-		switch (row.kind) {
-		case C::Item:
-			kind.list({spec(C::Attachment, "Attachments", "userpoint"),
-			           array_list(array_for(R::Item, R::Attachment), node_kind(C::Attachment))});
-			break;
-		case C::Weapon:
-			kind.list({spec(C::Action, "Actions", "name"), array_list(array_for(R::Weapon, R::Action), node_kind(C::Action))});
-			kind.list({spec(C::Sight, "Sights", "texture"), array_list(array_for(R::Weapon, R::Sight), node_kind(C::Sight))});
-			break;
-		case C::Ammo:
-			kind.list({spec(C::Effect, "Effects", "surface_type"),
-			           array_list(array_for(R::Ammo, R::Effect), node_kind(C::Effect))});
-			break;
-		case C::Powerup:
-			kind.list({spec(C::PowerupAmmo, "Ammo", "class_name"),
-			           array_list(array_for(R::Powerup, R::PowerupAmmo), node_kind(C::PowerupAmmo))});
-			kind.list({spec(C::Pickup, "Pickup", "", 1), block_list(&DefPowerupDef::pickup, node_kind(C::Pickup), "pickup")});
-			kind.list({spec(C::Respawn, "Respawn", "", 1),
-			           block_list(&DefPowerupDef::respawn, node_kind(C::Respawn), "respawn")});
-			break;
-		default: break;
+		for (const ListRow &list : kLists) {
+			if (list.owner != row.kind) continue;
+			const CatalogKindRow &held = kKinds[size_t(list.kind)];
+			kind.list({spec(list.kind, list.label, list.name_field, list.block ? 1 : 0),
+			           list.block ? block_list(list.block, node_kind(list.kind), held.token)
+			                      : array_list(*array_for(row.record, held.record), node_kind(list.kind))});
 		}
 		kinds.push_back(std::move(kind));
 	}

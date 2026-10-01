@@ -90,11 +90,14 @@ public:
 	// What the table answered since the counters were last cleared (S13 D10's count-based rule: a
 	// keystroke in a field touches that field's row and no other): the labelled fields resolved (by
 	// their id, or by the schema a FieldUse points at), the distinct ones among them (each once, by
-	// the schema; "several" past four), and the kinds resolved. A lookup is one probe of the kind's
-	// index, never a walk of its rows.
+	// the schema, the first four kept and `several` past them, so counting costs a read nothing that
+	// grows), and the kinds resolved. A lookup is one probe of the kind's index, never a walk of its
+	// rows.
 	struct TableStats {
+		static constexpr size_t kDistinctKept = 4;
 		size_t fields = 0, kinds = 0;
 		std::vector<const FieldSchema *> distinct;
+		bool several = false;
 	};
 	const TableStats &table_stats() const { return stats_; }
 	void clear_table_stats() const { stats_ = TableStats(); }

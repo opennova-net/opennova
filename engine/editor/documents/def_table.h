@@ -18,8 +18,9 @@ namespace opennova::editor {
 
 // The def catalogs' table (ADR 0046 S5; S13 D10 made it rows of the one table shape,
 // model/table_shape.h): every family of `.def` the catalog document opens (items.def, weapon.def,
-// ammo.def, powerup.def) is a family row, every kind of record they hold a kind row, and every member
-// of a record a labelled field projected from the format's own member inventory and line table
+// ammo.def, powerup.def) is a family row, every kind of record they hold a kind row, every list a
+// record holds (a C array it owns, a powerup's action block) a list row, and every member of a record
+// a labelled field projected from the format's own member inventory and line table
 // (formats/def/def_schema.h), its value read and written through the member it is, in the units its
 // line writes it. A new family of the catalog is rows here and in the format's tables (its member
 // inventory, its lines, its rules), its parser and its writer, and its asset kind's row naming the
