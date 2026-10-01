@@ -150,8 +150,10 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 				out.ck.c_str(), decoded_ck.c_str(), out.app_id.c_str(),
 				out.host_ip.c_str(), out.host_port.c_str());
 	}
-	if (out.host_ip.empty()) out.host_ip = out.ni;
-	if (out.host_port.empty()) out.host_port = out.np;
+	// NK is the only dial authority: a string without "NK=" is no join at all (no
+	// PlaySetup, no dial), whatever NI/NP carry -- those feed only the proxy
+	// rendezvous. [orig: URL_ParseConnectionQueryString @0x54e13c strstr "NK=" ->
+	//  jz @0x54e146 (return 0); NI/NP read @0x54e214.. into the proxy buffers only]
 	out.ok = !out.host_ip.empty() && !out.host_port.empty();
 	return out;
 }

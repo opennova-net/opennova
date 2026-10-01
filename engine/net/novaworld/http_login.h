@@ -100,8 +100,8 @@ struct JoiConnection {
 	//  @0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4d5418]
 	int ln = 0;
 	std::string gs;
-	std::string host_ip;   // decoded NK head, fallback NI
-	std::string host_port; // decoded NK tail, fallback NP
+	std::string host_ip;   // decoded NK head (empty without NK: no join)
+	std::string host_port; // decoded NK tail
 	// The game-session APPID join token: atol(decoded CK), re-serialized as retail
 	// does (an int field). Sent as the ClientAuth APPID conn-tag, which the
 	// NovaWorld host validates (code 9). "0" when no CK is present (the LAN
