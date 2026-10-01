@@ -3776,6 +3776,18 @@ target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
 target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_project_validation COMMAND editor_project_validation_test)
 
+# Long operations everywhere (S13 A3): the walks stepped by bytes (the scan, the import pass, a
+# scan's targeted update), the validation a file at a time and a rename's commit a file at a time,
+# each equal to its run in one call; the session's Open, Rescan, import and rename stepped a poll
+# at a time (progress only rising, finished once, cancelled leaving nothing, the view a run to the
+# end makes), a Save scanning and validating its one file, a stale import refused without writing.
+# Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
+# editor's budget, its polls and wall time, and the base layer a dependency mount would build.
+add_executable(editor_long_operations_test editor/long_operations_test.cpp)
+target_link_libraries(editor_long_operations_test PRIVATE opennova_editor)
+target_include_directories(editor_long_operations_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_long_operations COMMAND editor_long_operations_test)
+
 # The document types' project checks (S13 V9): a type's own check across the project's files,
 # made by its registry row (the menu type's render check) and kept by whoever validates; a
 # stand-in type's check runs once per validation, its findings after the build's gate, and its

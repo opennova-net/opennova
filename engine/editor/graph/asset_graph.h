@@ -77,6 +77,22 @@ struct GraphStats {
 	size_t findings_made = 0;   // missing edges' findings made (missing_finding)
 };
 
+// A closed file of the project read ahead of an update (S13 A3): a validation stepped a file at a
+// time reads the files the update would read a step at a time (AssetGraph::files_to_read,
+// read_file), and the update takes each reading whose file is still as the scan lists it (the same
+// name, kind, size and last write) where it would read the file itself. What extract_from_asset
+// made of it.
+struct GraphReading {
+	std::string logical_name;
+	AssetKind kind = AssetKind::Unknown;
+	uint64_t size = 0;
+	int64_t modified = 0;
+	bool ok = false;
+	Extracted content;
+	Diagnostic error;
+};
+using GraphReadings = std::map<std::string, GraphReading>; // by project-relative path
+
 // What an update changed (AssetGraph::update, set_base). `changed`: what the graph holds moved
 // (a new generation). `files`: the files whose slots were added, removed or read differently,
 // project-relative. `bindings`: the style variables whose binding (the definition the game reads:
@@ -102,9 +118,19 @@ public:
 	// do, the edges into the names that file defines. A missing edge's finding is worded as it
 	// resolves, and again only when what its words read changed (the definitions of a style
 	// variable's name; which files the project has, for a kind whose row says its words read
-	// them). The generation moves exactly when what the graph holds changed.
+	// them). The generation moves exactly when what the graph holds changed. `read_ahead`: the
+	// closed files read before (S13 A3), each taken (moved out) where the scan lists it as it was
+	// read, the others read here.
 	GraphUpdate update(const ProjectPaths &paths, const ProjectDocument &project,
-			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open);
+			const AssetScan &scan, const std::vector<std::shared_ptr<const DocumentBase>> &open,
+			GraphReadings *read_ahead = nullptr);
+	// The closed files an update over `scan` would read (S13 A3): those of a kind the graph reads,
+	// not open as a record document, whose slot holds no reading of them as the scan lists them (new,
+	// of another name or kind, or of another size or last write); in the scan's order.
+	std::vector<const AssetEntry *> files_to_read(const AssetScan &scan,
+			const std::vector<std::shared_ptr<const DocumentBase>> &open) const;
+	// A file read as an update reads it (extract_from_asset), for a later update to take.
+	static GraphReading read_file(const ProjectPaths &paths, const ProjectDocument &project, const AssetEntry &asset);
 	// A value of a process-wide counter: taken anew each time an update changes what the graph
 	// holds, and by every graph made, copied, assigned or cleared, so no two graphs and no two
 	// states of one graph share it. While it stands, every edge and symbol the graph handed out

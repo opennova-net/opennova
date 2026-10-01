@@ -14,6 +14,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
     # missing texture's placeholder
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_coo.cpp
@@ -78,6 +79,7 @@ add_library(opennova_editor STATIC
     # the plan of an import with the files it needs
     ${CMAKE_CURRENT_SOURCE_DIR}/import/converter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/importers.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
@@ -118,7 +120,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_state.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
     # project_build — routing into the boot-table archives, the plan, the immutable build
     # (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
@@ -143,6 +145,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp
@@ -151,7 +156,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp

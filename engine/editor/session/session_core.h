@@ -21,8 +21,10 @@ namespace opennova::editor {
 class DocumentSet;
 class EditorPreferences;
 class ImportController;
+class OpenOperation;
 class PlayController;
 class ProblemsService;
+class ProjectRefresh;
 class RenameController;
 class UnsavedGuard;
 
@@ -86,8 +88,6 @@ public:
 		~RequestScope();
 		RequestScope(const RequestScope &) = delete;
 		RequestScope &operator=(const RequestScope &) = delete;
-		// True for the request from outside, false for one served inside it.
-		bool outermost() const { return outermost_; }
 
 	private:
 		SessionCore &core_;
@@ -119,10 +119,12 @@ public:
 	const OperationSlot &operations() const { return operations_; }
 	OperationSlot &operations() { return operations_; }
 	void set_poll_budget(const PollBudget &budget) { poll_budget_ = budget; }
+	const PollBudget &poll_budget() const { return poll_budget_; }
 	// `operation` started in the slot: its id, 0 while another runs.
 	uint64_t start_operation(std::unique_ptr<SessionOperation> operation);
-	// The running operation's steps within the poll's budget (the poll's).
-	void step_operation();
+	// The running operation's steps within `budget` (the poll's: what its validation steps left of
+	// its budget, at least one step).
+	void step_operation(const PollBudget &budget);
 	// True when what reads `reads` and writes `writes` conflicts with the running operation.
 	bool busy_for(Holds reads, Holds writes) const;
 	// "Wait for the build to finish, or cancel it, first.": `until` ends it.
@@ -138,19 +140,37 @@ public:
 	// --- the project ------------------------------------------------------------------------
 
 	// A project of `game` (a gameprofile code; "" the default, jo) made in `dir` (titled `title`,
-	// else the folder's name), then opened, with its import pass unless `import_pass` is false.
+	// else the folder's name), then opened as open_project opens it, with its import pass unless
+	// `import_pass` is false.
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
 	                 bool import_pass = true);
-	// The project in `dir` opened, its import pass first unless `import_pass` is false (its files
-	// read as they are, no source imported), on `game_install` for the session alone when given (its
-	// local.json kept as it is).
+	// The project in `dir` read (its document, its local settings; `game_install` in place of the
+	// install they name, for the session alone, when given), then, the open one closed, opened as an
+	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`
+	// is false, the scan, the requirements), whose id the request's outcome names: the view holds
+	// nothing of it until it finishes (absorb_open). False, the open project kept, for a folder that
+	// holds none.
 	bool open_project(const std::string &dir, bool import_pass = true, const std::string &game_install = std::string());
+	// An Open's finish: the project it read is the open one, with its files as it read them.
+	OperationOutcome absorb_open(OpenOperation &open);
 	// The open project closed, its operation cancelled first; false (refused, said why, nothing
 	// closed) when that operation cannot be cancelled.
 	bool close_project();
-	// The files read again: the import pass (none when `import_pass` is false), the scan, the
-	// requirements, the validation.
-	ImportRunResult refresh(bool force_import = false, const std::string &only = std::string(), bool import_pass = true);
+	// The project's files read again as an operation (RefreshOperation): a Rescan, or a Reimport
+	// (`force` over the sources `only` names); false, refused, while another runs.
+	bool start_refresh(bool reimport = false, bool force = false, const std::string &only = std::string());
+	// A refresh done (an Open's, a Refresh's, an import's, an import source's rename's): its
+	// imports, scan and requirements are the view's, an Output line for each source it imported,
+	// the validation left due. What its import pass came to.
+	ImportRunResult absorb_refresh(ProjectRefresh &refresh);
+	// The refresh run to its end now and the project validated (the build's, before it plans).
+	void refresh_now();
+	// The project files at `paths` read again alone (AssetScan::update: a Save's, a create's, a
+	// rename's commit), the requirements evaluated again over the scan, the validation left due.
+	void update_files(const std::vector<std::string> &paths);
+	// How many files the last scan the view took read: every file of the project by a refresh (an
+	// Open's, a Rescan's, an import's), those it named by an update (update_files).
+	size_t files_scanned() const { return files_scanned_; }
 	void apply_project_settings(const ProjectSettingsChange &change);
 	void create_missing(const std::vector<std::string> &roles);
 	// The recent project `root` dropped from the preferences (ForgetRecent).
@@ -191,6 +211,7 @@ private:
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
 	ActionOutcome outcome_;
+	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 };
 

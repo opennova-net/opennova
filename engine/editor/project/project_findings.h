@@ -18,7 +18,7 @@ namespace opennova::editor {
 class ProjectChecks;
 
 // What a project's findings are made of beside its files (ADR 0046 S12): the project as the
-// one refresh read it (project_state.h: the scan, carrying the import pass's findings, and the
+// one refresh read it (project_refresh.h: the scan, carrying the import pass's findings, and the
 // requirements), the documents open in the editor (standing in for their files), and what
 // only the editor knows: the files the last Play's game reported missing when it booted and
 // the last Play's own findings (a game that ended with a nonzero exit code), the open

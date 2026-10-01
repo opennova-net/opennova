@@ -222,7 +222,7 @@ void MenuPreviewPane::Impl::toolbar_(const Frame &frame) {
 
 	// Arrange: the selected windows aligned to the primary, spread, or reordered.
 	row.next(ui_kit::button_width("Arrange"));
-	ImGui::BeginDisabled(frame.canvas.windows.empty() || document.blocked());
+	ImGui::BeginDisabled(frame.canvas.windows.empty() || document.blocked() || !frame.canvas.editable);
 	if (ImGui::Button("Arrange")) ImGui::OpenPopup("arrange");
 	ImGui::EndDisabled();
 	ui_kit::tooltip("Align the selected windows to the primary one (the last selected), spread "
@@ -281,6 +281,9 @@ void MenuPreviewPane::Impl::draw() {
 	// A picture of another revision (the edit lands on the next pump) maps no index.
 	canvas.current =
 			canvas.compiler && canvas.state && viewport()->shown_revision() == document.revision();
+	// Its drags, its Arrange and its clipboard's edits held back while an operation holds the
+	// documents (S13 A3), as the session would refuse them.
+	canvas.editable = view.allows(EditorRequestKind::EditRecord);
 	// The selection on this screen while the menu is the active document: the primary record,
 	// the window holding it, every selected window, and what the clipboard takes of it.
 	const bool active = view.documents.active == document.path();
@@ -340,6 +343,9 @@ void MenuPreviewPane::Impl::keys_(const Frame &frame) {
 		return;
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C))
 		return clipboard_(frame, EditorRequestKind::Copy);
+	// The edits wait while an operation holds the documents (S13 A3).
+	if (!frame.canvas.editable)
+		return;
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X))
 		return clipboard_(frame, EditorRequestKind::Cut);
 	if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V))
@@ -366,8 +372,8 @@ void MenuPreviewPane::Impl::arrange_items_(const Frame &frame) {
 	const size_t count = canvas.windows.size();
 	for (const ArrangeOp op : kArrangeOps) {
 		if (op == ArrangeOp::DistributeHorizontally || op == ArrangeOp::BringToFront) ImGui::Separator();
-		const bool enabled =
-				canvas.current && count >= arrange_minimum(op) && !canvas.document->blocked();
+		const bool enabled = canvas.current && count >= arrange_minimum(op) && !canvas.document->blocked() &&
+		                     canvas.editable;
 		if (ImGui::MenuItem(arrange_op_label(op), nullptr, false, enabled))
 			menu_canvas_arrange(canvas, op, requests_);
 		if (!enabled)
@@ -402,11 +408,13 @@ void MenuPreviewPane::Impl::draw_canvas_(const Frame &frame, float height) {
 			ImGui::OpenPopup("canvas_menu");
 		}
 		if (ImGui::BeginPopup("canvas_menu")) {
-			const bool editable_now = !document.blocked();
+			// The edits held back while an operation holds the documents (S13 A3); a Copy edits nothing.
+			const bool readable = !document.blocked();
+			const bool editable_now = readable && canvas.editable;
 			const bool copyable = frame.clipboard.copy && editable_now;
 			if (ImGui::MenuItem("Cut", "Ctrl+X", false, copyable))
 				clipboard_(frame, EditorRequestKind::Cut);
-			if (ImGui::MenuItem("Copy", "Ctrl+C", false, copyable))
+			if (ImGui::MenuItem("Copy", "Ctrl+C", false, frame.clipboard.copy && readable))
 				clipboard_(frame, EditorRequestKind::Copy);
 			if (ImGui::MenuItem("Paste", "Ctrl+V", false, editable_now && frame.clipboard.paste))
 				clipboard_(frame, EditorRequestKind::Paste);

@@ -556,7 +556,7 @@ struct ScriptProject {
 };
 
 bool make_script_project(ScriptProject &project) {
-	project.session.handle(request::new_project(project.root(), "Texts"));
+	editor_test::handle_to_end(project.session, request::new_project(project.root(), "Texts"));
 	editor_test::create_missing_files(project.session);
 	opennova::rtxt::File table;
 	table.sections.push_back({"mission", 1});
@@ -572,7 +572,7 @@ bool make_script_project(ScriptProject &project) {
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n"
 	                                "ammo bomb\nmax_age 3\nend\n") &&
 	        editor_test::write_bytes(root + "/strings/missiontext.bin", strings);
-	project.session.handle(request::rescan());
+	editor_test::handle_to_end(project.session, request::rescan());
 	return written && project.view().findings.graph;
 }
 
@@ -625,11 +625,11 @@ static int test_graph_and_rename() {
 	for (const GraphEdge *missing : graph.missing()) TEST_EXPECT(missing->source != script);
 	// The open script stands in for its file: a span renamed to a name nothing defines is a missing
 	// reference at its line and column, its undo resolved again.
-	project.session.handle(request::open_document(script));
+	editor_test::handle_to_end(project.session, request::open_document(script));
 	TextDocument *open = text_of(*project.session.document_base_for(script));
 	TEST_EXPECT(open != nullptr);
 	if (!open) return 1;
-	project.session.handle(request::edit_record(script, {TextDocument::replace(span(3, 12, 7), "Nothing")}));
+	editor_test::handle_to_end(project.session, request::edit_record(script, {TextDocument::replace(span(3, 12, 7), "Nothing")}));
 	TEST_EXPECT(project.session.last_edit_ok() && open->line(3) == "\tfxrain FX_Nothing");
 	const auto missing_at = [&](size_t line, size_t column) {
 		for (const Diagnostic &d : project.view().findings.diagnostics)
@@ -637,7 +637,7 @@ static int test_graph_and_rename() {
 		return false;
 	};
 	TEST_EXPECT(missing_at(3, 12));
-	project.session.handle(request::undo(script));
+	editor_test::handle_to_end(project.session, request::undo(script));
 	TEST_EXPECT(open->line(3) == "\tfxrain FX_Buildup" && !missing_at(3, 12));
 	// Rename everywhere: the ammo AT_CONTRACT, defined in ammo.def, used by the script's span.
 	const std::vector<const GraphSymbol *> contract = project.graph().symbols_named(ReferenceKind::Ammo, "AT_CONTRACT");
@@ -649,7 +649,7 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(plan.ok() && plan.sites.size() == 2 && plan.sites[1].file == script &&
 	            plan.sites[1].span.line == 5 && plan.sites[1].field.empty());
 	// The preview's text site: its span, the name it holds as UTF-8.
-	project.session.handle(request::preview_rename(definition.file, definition.locator, definition.field, "AT_RENAMED"));
+	editor_test::handle_to_end(project.session, request::preview_rename(definition.file, definition.locator, definition.field, "AT_RENAMED"));
 	const JsonValue dialogs = view_section_to_json(project.view(), ViewSection::Dialogs);
 	const JsonValue *preview = dialogs.get("rename_preview");
 	const JsonValue *sites = preview ? preview->get("sites") : nullptr;
@@ -661,13 +661,13 @@ static int test_graph_and_rename() {
 	            sites->array[1].get_string("after", "") == "AT_RENAMED" && !sites->array[0].get("span"));
 	// A stale site: the open script changed at its place since the plan, the staging finds it no
 	// more (rename.partial), nothing written.
-	project.session.handle(request::edit_record(script, {TextDocument::replace(span(5, 16, 11), "AT_ELSEWHERE")}));
+	editor_test::handle_to_end(project.session, request::edit_record(script, {TextDocument::replace(span(5, 16, 11), "AT_ELSEWHERE")}));
 	std::vector<Diagnostic> stale;
 	TEST_EXPECT(!check_symbol_rename(ProjectPaths::for_root(project.root()), *project.view().project.document,
 	                                 *project.view().project.scan, project.graph(), plan, project.view().documents.open,
 	                                 stale) &&
 	            has_code(stale, "rename.partial"));
-	project.session.handle(request::undo(script));
+	editor_test::handle_to_end(project.session, request::undo(script));
 	TEST_EXPECT(open->line(5) == "\tammoarea AMMO_AT_CONTRACT 8");
 	// A text key's use is not rewritten: its definition's rename is refused at the script's span.
 	const std::vector<const GraphSymbol *> start = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
@@ -687,8 +687,7 @@ static int test_graph_and_rename() {
 	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *bomb.front(), "satchel");
 	TEST_EXPECT(!captures.ok() && has_code(captures.refusals, "rename.exists") &&
 	            captures.refusals[0].message.find("ammo_satchel") != std::string::npos);
-	project.session.handle(request::rename_symbol(definition.file, definition.locator, definition.field, "AT_RENAMED"));
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, request::rename_symbol(definition.file, definition.locator, definition.field, "AT_RENAMED")).done());
 	const std::string written = test_io::read_file_text(project.root() + "/" + script);
 	TEST_EXPECT(written.find("\tammoarea AMMO_AT_RENAMED 8\r\n") != std::string::npos &&
 	            written.find("AT_CONTRACT") == std::string::npos);
@@ -700,9 +699,8 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(satchel_now.size() == 1);
 	if (satchel_now.empty()) return 1;
 	const GraphSymbol satchel_definition = *satchel_now.front();
-	project.session.handle(request::rename_symbol(satchel_definition.file, satchel_definition.locator,
-	                                              satchel_definition.field, "ammo_charge"));
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, request::rename_symbol(satchel_definition.file, satchel_definition.locator,
+	                                              satchel_definition.field, "ammo_charge")).done());
 	// The prefix kept once: the span reads "charge", its lookup's second name the renamed ammo.
 	TEST_EXPECT(test_io::read_file_text(project.root() + "/" + script).find("\tammo2tgt(ammo_charge, 3)\r\n") !=
 	            std::string::npos);
@@ -715,9 +713,8 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(charge_now.size() == 1);
 	if (charge_now.empty()) return 1;
 	const GraphSymbol charge_definition = *charge_now.front();
-	project.session.handle(request::rename_symbol(charge_definition.file, charge_definition.locator,
-	                                              charge_definition.field, "ammo_bomb"));
-	TEST_EXPECT(project.session.outcome().done());
+	TEST_EXPECT(editor_test::handle_to_end(project.session, request::rename_symbol(charge_definition.file, charge_definition.locator,
+	                                              charge_definition.field, "ammo_bomb")).done());
 	TEST_EXPECT(test_io::read_file_text(project.root() + "/" + script).find("\tammo2tgt(ammo_ammo_bomb, 3)\r\n") !=
 	            std::string::npos);
 	const GraphEdge *whole = edge_at(project.graph(), script, "6:16");
@@ -743,12 +740,12 @@ static int test_go_to_and_problems() {
 	TEST_EXPECT(make_script_project(project));
 	const std::string script = "scripts/text_document.wac";
 	const uint64_t before = project.view().events.next_seq();
-	project.session.handle(request::open_document(script, "5:16"));
+	editor_test::handle_to_end(project.session, request::open_document(script, "5:16"));
 	const std::vector<ViewEvent> reveals = editor_test::events_after(project.view(), before - 1, ViewEventKind::RevealText);
 	TEST_EXPECT(reveals.size() == 1 && reveals.front().path == script && reveals.front().locator == "5:16");
 	TEST_EXPECT(project.view().documents.active == script && project.view().documents.selection.records.empty());
 	// A compile report as the open script now holds it.
-	project.session.handle(request::edit_record(script, {TextDocument::replace(span(3, 19, 0), " )")}));
+	editor_test::handle_to_end(project.session, request::edit_record(script, {TextDocument::replace(span(3, 19, 0), " )")}));
 	const Diagnostic *report = nullptr;
 	for (const Diagnostic &d : project.view().findings.diagnostics)
 		if (d.code() == "script.compile" && d.asset == script) report = &d;
@@ -769,12 +766,14 @@ static int test_wire() {
 	ScriptProject project;
 	TEST_EXPECT(make_script_project(project));
 	const std::string script = "scripts/text_document.wac";
-	project.session.handle(request::open_document(script));
+	editor_test::handle_to_end(project.session, request::open_document(script));
 	std::string error;
 	const auto send = [&](const std::string &text) {
 		JsonValue json;
 		opennova::io::json_parse(text, json, error);
-		return project.session.handle_json(json);
+		const JsonValue answer = project.session.handle_json(json);
+		project.session.run_operations();
+		return answer;
 	};
 	JsonValue answer = send(R"({"kind": "edit_record", "path": ")" + script +
 	                        R"(", "edits": [{"op": "apply", "payload": "text.span", "line": 3, "column": 12, "length": 7, "text": "Spark"}, {"op": "apply", "payload": "text.span", "line": 1, "column": 1, "length": 0, "text": "; café\r\n"}]})");
@@ -822,7 +821,7 @@ static int test_wire() {
 	// A closed music script, a .bin its name alone does not type: its spans read by the kind the scan
 	// read (its content), the document open after its first read.
 	TEST_EXPECT(editor_test::write_text(project.root() + "/gamemus.bin", repo_file("mus/synth_gamemus.bin")));
-	project.session.handle(request::rescan());
+	editor_test::handle_to_end(project.session, request::rescan());
 	answer = send(R"({"kind": "edit_record", "path": "gamemus.bin", "open_first": true, "edits": [{"op": "apply", "payload": "text.span", "line": 6, "column": 1, "text": "// note\n"}]})");
 	const DocumentBase *music = project.session.document_base_for("gamemus.bin");
 	TEST_EXPECT(answer.get_bool("ok", false) && music && text_of(*music) && text_of(*music)->line(6) == "// note");

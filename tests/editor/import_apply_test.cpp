@@ -9,9 +9,10 @@
 // was, a failure while publishing is said file by file, an import record goes in with its
 // file, and a crash's staging folder is never scanned and goes with the next import; an
 // .o3d's textures come through its plan, a direct import saying which it leaves; a plan cut
-// by its cap holds a converter's files whole or not at all; and, with a packed game install
-// (OPENNOVA_JO_DIR), a retail menu and its stylesheet imported with the files they need,
-// against what is known of them without the planner.
+// by its cap holds a converter's files whole or not at all; the unsaved guard reads the plan the
+// dialog shows (S13 A3); and, with a packed game install (OPENNOVA_JO_DIR), a retail menu and
+// its stylesheet imported with the files they need, against what is known of them without the
+// planner.
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -21,6 +22,7 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/import_plan.h>
@@ -62,20 +64,21 @@ std::string closure_folder(const editor_test::TempProjectDir &dir) {
 	return art;
 }
 
-// The preview of `paths` with the files they need.
-void preview(ProjectSession &session, const std::vector<std::string> &paths) {
+// The preview of `paths` with the files they need: what the request and its plan came to.
+ActionOutcome preview(ProjectSession &session, const std::vector<std::string> &paths) {
 	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
 	request.with_dependencies = true;
-	session.handle(request);
+	return editor_test::handle_to_end(session, request);
 }
 
-// Import of `imports` (the rows kept).
-void import(ProjectSession &session, const std::vector<ImportSource> &imports, bool replace = false) {
+// Import of `imports` (the rows kept): what the request and its operation came to (S13 A3: the
+// import's write refuses or fails once the request that started it is done).
+ActionOutcome import(ProjectSession &session, const std::vector<ImportSource> &imports, bool replace = false) {
 	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
 	request.imports = imports;
 	request.replace = replace;
-	session.handle(request);
+	return editor_test::handle_to_end(session, request);
 }
 
 // What a file references by the name it gives, each reference to a file resolved.
@@ -120,9 +123,9 @@ static int test_apply_closure() {
 	Project project("opennova_editor_apply_closure");
 	const std::string art = closure_folder(project.dir);
 	const SessionView &view = project.view();
-	preview(project.session, {art + "/a.mnu"});
+	const ActionOutcome previewed = preview(project.session, {art + "/a.mnu"});
 	const DialogsView::ImportPreview &shown = view.dialogs.import_preview;
-	TEST_EXPECT(project.session.outcome().done() && shown.open && shown.with_dependencies && shown.choices.empty());
+	TEST_EXPECT(previewed.done() && shown.open && shown.with_dependencies && shown.choices.empty());
 	TEST_EXPECT(shown.roots.size() == 1 && shown.roots[0].path == art + "/a.mnu" && !shown.changed);
 	const ImportPlan &plan = *shown.plan;
 	TEST_EXPECT(plan.rows.size() == 6 && !plan.truncated && plan.diagnostics.empty());
@@ -142,8 +145,8 @@ static int test_apply_closure() {
 
 	const std::vector<ImportSource> kept = selected_sources(plan);
 	TEST_EXPECT(kept.size() == 5);
-	import(project.session, kept);
-	TEST_EXPECT(project.session.outcome().done() && !view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
+	const ActionOutcome imported = import(project.session, kept);
+	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
 	for (const char *name : {"a.mnu", "b.mnu", "arial99.fnt", "fb.fnt", "LOGO.TGA"}) TEST_EXPECT(view.project.scan->find(name));
 	TEST_EXPECT(!view.project.scan->find("gone.tga") && said(view, "Imported menus/a.mnu") && said(view, "Imported LOGO.TGA"));
 	// Each font and texture copied as the game's own: no import record beside it.
@@ -174,8 +177,8 @@ static int test_apply_unchecked() {
 	for (const ImportSource &source : selected_sources(*view.dialogs.import_preview.plan))
 		if (source.path != art + "/LOGO.TGA") kept.push_back(source);
 	TEST_EXPECT(kept.size() == 4);
-	import(project.session, kept);
-	TEST_EXPECT(project.session.outcome().done() && !view.dialogs.import_preview.open);
+	const ActionOutcome imported = import(project.session, kept);
+	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	TEST_EXPECT(view.project.scan->find("arial99.fnt") && view.project.scan->find("b.mnu") && view.project.scan->find("fb.fnt") && !view.project.scan->find("LOGO.TGA"));
 	TEST_EXPECT(!fs::exists(project.root() + "/LOGO.TGA"));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.tga") == ReferenceStatus::Missing);
@@ -200,9 +203,9 @@ static int test_apply_changed() {
 	TEST_EXPECT(editor_test::write_text(art + "/new.tga", "tga"));
 	const auto before = snapshot(root);
 	const uint64_t seen = view.events.next_seq() - 1;
-	import(project.session, shown);
-	TEST_EXPECT(!project.session.outcome().done() &&
-	            finding(project.session.outcome(), "import.changed", DiagnosticSeverity::Warning, std::string()));
+	const ActionOutcome stale = import(project.session, shown);
+	TEST_EXPECT(!stale.done() &&
+	            finding(stale, "import.changed", DiagnosticSeverity::Warning, std::string()));
 	TEST_EXPECT(snapshot(root) == before && !view.project.scan->find("a.mnu"));
 	// Planned again before writing: one ImportPlanned event, flagged (the files changed).
 	const std::vector<ViewEvent> planned =
@@ -213,8 +216,8 @@ static int test_apply_changed() {
 	const ImportPlanRow *added = row_named(*view.dialogs.import_preview.plan, "new.tga");
 	TEST_EXPECT(added && added->state == State::Found && added->selected &&
 			!row_named(*view.dialogs.import_preview.plan, "gone.tga"));
-	import(project.session, selected_sources(*view.dialogs.import_preview.plan));
-	TEST_EXPECT(project.session.outcome().done() && !view.dialogs.import_preview.open);
+	const ActionOutcome imported = import(project.session, selected_sources(*view.dialogs.import_preview.plan));
+	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	TEST_EXPECT(view.project.scan->find("a.mnu") && view.project.scan->find("new.tga") &&
 			view.project.scan->find("LOGO.TGA"));
 
@@ -228,14 +231,14 @@ static int test_apply_changed() {
 	std::error_code ec;
 	fs::remove(more + "/fc.fnt", ec);
 	const auto unchanged = snapshot(root);
-	import(project.session, with_font);
-	TEST_EXPECT(!project.session.outcome().done() && snapshot(root) == unchanged && view.dialogs.import_preview.changed);
+	const ActionOutcome gone = import(project.session, with_font);
+	TEST_EXPECT(!gone.done() && snapshot(root) == unchanged && view.dialogs.import_preview.changed);
 	const ImportPlanRow *font_row = row_named(*view.dialogs.import_preview.plan, "fc");
 	TEST_EXPECT(font_row && font_row->state == State::NotFound && font_row->needed_by.file == "c.mnu");
 	// A row the plan does not have: refused, nothing written, the preview still open.
-	import(project.session, {{art + "/arial99.fnt", {}}});
-	TEST_EXPECT(!project.session.outcome().done() &&
-	            finding(project.session.outcome(), "import.not_planned", DiagnosticSeverity::Error, "arial99.fnt"));
+	const ActionOutcome unplanned = import(project.session, {{art + "/arial99.fnt", {}}});
+	TEST_EXPECT(!unplanned.done() &&
+	            finding(unplanned, "import.not_planned", DiagnosticSeverity::Error, "arial99.fnt"));
 	TEST_EXPECT(snapshot(root) == unchanged && view.dialogs.import_preview.open);
 	project.session.handle(request::cancel_import());
 	TEST_EXPECT(!view.dialogs.import_preview.open);
@@ -253,6 +256,7 @@ static int test_apply_staging() {
 	            editor_test::write_text(art + "/Custom.fnt", "fnt"));
 	TEST_EXPECT(editor_test::write_text(root + "/fonts", "a file where a folder goes"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const bool menus = fs::exists(root + "/menus");
 	const auto before = snapshot(root);
 	const ImportResult result = import_assets({{art + "/extra.mnu", {}}, {art + "/Custom.fnt", {}}},
@@ -286,8 +290,7 @@ static int test_apply_partial_publish() {
 	fs::create_directories(root + "/menus/b.mnu", ec);
 	TEST_EXPECT(!ec);
 	const SessionView &view = project.view();
-	import(project.session, {{art + "/a.mnu", {}}, {art + "/b.mnu", {}}, {art + "/c.mnu", {}}});
-	const ActionOutcome &outcome = project.session.outcome();
+	const ActionOutcome outcome = import(project.session, {{art + "/a.mnu", {}}, {art + "/b.mnu", {}}, {art + "/c.mnu", {}}});
 	TEST_EXPECT(!outcome.done() && finding(outcome, "import.publish", DiagnosticSeverity::Error, "b.mnu") &&
 	            finding(outcome, "import.not_published", DiagnosticSeverity::Warning, "c.mnu"));
 	TEST_EXPECT(fs::is_regular_file(root + "/menus/a.mnu") && fs::is_directory(root + "/menus/b.mnu") &&
@@ -311,6 +314,7 @@ static int test_apply_reads_the_disk() {
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "GO", font("arial99")))) &&
 	            editor_test::write_text(art + "/arial99.fnt", "fnt") && editor_test::write_text(root + "/fonts/arial99.fnt", "fnt"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	preview(project.session, {art + "/a.mnu"});
 	TEST_EXPECT(view.dialogs.import_preview.plan->rows.size() == 1 && view.dialogs.import_preview.plan->rows[0].name == "a.mnu");
@@ -319,17 +323,71 @@ static int test_apply_reads_the_disk() {
 	fs::remove(root + "/fonts/arial99.fnt", ec); // outside the editor: no rescan
 	TEST_EXPECT(!ec && view.project.scan->find("arial99.fnt"));
 	const auto before = snapshot(root);
-	import(project.session, shown);
-	TEST_EXPECT(!project.session.outcome().done() &&
-	            finding(project.session.outcome(), "import.changed", DiagnosticSeverity::Warning, std::string()));
+	const ActionOutcome stale = import(project.session, shown);
+	TEST_EXPECT(!stale.done() &&
+	            finding(stale, "import.changed", DiagnosticSeverity::Warning, std::string()));
 	TEST_EXPECT(snapshot(root) == before && view.dialogs.import_preview.changed);
 	const ImportPlanRow *font_row = row_named(*view.dialogs.import_preview.plan, "arial99.fnt");
 	TEST_EXPECT(font_row && font_row->state == State::Found && font_row->found_in == "the folder " + art);
-	import(project.session, selected_sources(*view.dialogs.import_preview.plan));
-	TEST_EXPECT(project.session.outcome().done() && fs::is_regular_file(root + "/menus/a.mnu") &&
+	const ActionOutcome imported = import(project.session, selected_sources(*view.dialogs.import_preview.plan));
+	TEST_EXPECT(imported.done() && fs::is_regular_file(root + "/menus/a.mnu") &&
 	            fs::is_regular_file(root + "/fonts/arial99.fnt"));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Font, "arial99") ==
 			ReferenceStatus::Present);
+	return 0;
+}
+
+// The unsaved guard reads the plan the import dialog shows (S13 A3: the ImportPlan operation's),
+// not one made again in the request: a catalog open with unsaved edits, the dialog planning a file
+// of its name over it, the file to import then gone. Import with replace waits on the unsaved
+// prompt, which lists the catalog as the shown plan puts the file there (a plan made in the
+// request would find the file gone and list nothing); its Save writes the edits, and the import,
+// planning again before it writes, finds its file gone and writes nothing (import.changed).
+static int test_apply_guard_reads_the_shown_plan() {
+	Project project("opennova_editor_apply_guard");
+	const std::string root = project.root();
+	const SessionView &view = project.view();
+	TEST_EXPECT(editor_test::write_text(root + "/defs/items.def", "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::open_document("items.def"));
+	const Document *items = project.session.document_for("items.def");
+	TEST_EXPECT(items != nullptr && !items->rows().empty());
+	if (!items || items->rows().empty()) return 1;
+	EditorRequest edit = request::edit_record("defs/items.def", Edit());
+	edit.edits[0].address = {items->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item), 0};
+	edit.edits[0].field = "hp";
+	edit.edits[0].value = int64_t(20);
+	project.session.handle(edit);
+	TEST_EXPECT(items->dirty());
+	const std::string loose = project.dir.file("art/items.def");
+	TEST_EXPECT(editor_test::write_text(loose, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
+	preview(project.session, {loose});
+	const ImportPlanRow *row = row_named(*view.dialogs.import_preview.plan, "items.def");
+	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected &&
+	            row->destination == "defs/items.def");
+	const std::vector<ImportSource> shown = selected_sources(*view.dialogs.import_preview.plan);
+	std::error_code ec;
+	fs::remove(loose, ec);
+	TEST_EXPECT(!ec);
+	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
+	request.imports = shown;
+	request.replace = true;
+	project.session.handle(request);
+	const DialogsView::UnsavedPrompt &prompt = view.dialogs.unsaved_prompt;
+	TEST_EXPECT(project.session.outcome().unsaved_prompt && prompt.open && prompt.action == EditorRequestKind::ImportFiles &&
+	            prompt.files == std::vector<std::string>({"defs/items.def"}) && !prompt.can_discard);
+	project.session.handle(request::resolve_unsaved(UnsavedChoice::Save));
+	project.session.run_operations();
+	std::string text, error;
+	TEST_EXPECT(!items->dirty() && read_file_text(root + "/defs/items.def", text, error) &&
+	            text.find("hp 20") != std::string::npos);
+	TEST_EXPECT(view.activity.last_operation.kind == OperationKind::ImportApply &&
+	            view.activity.last_operation.end != OperationEnd::Done && view.dialogs.import_preview.changed);
+	bool changed = false;
+	for (const Diagnostic &d : view.activity.last_operation.findings) changed = changed || d.code() == "import.changed";
+	TEST_EXPECT(changed);
+	project.session.handle(request::cancel_import());
 	return 0;
 }
 
@@ -352,8 +410,7 @@ static int test_apply_scene_textures() {
 	preview(project.session, {scene + "/spinner.o3d"});
 	const ImportPlan plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(row_named(plan, "spinner.3di") && row_named(plan, "SPINNER.TGA") && row_named(plan, "glow.tga"));
-	import(project.session, selected_sources(plan));
-	const ActionOutcome &outcome = project.session.outcome();
+	const ActionOutcome outcome = import(project.session, selected_sources(plan));
 	TEST_EXPECT(outcome.done() && fs::is_regular_file(root + "/models/spinner.3di") && fs::is_regular_file(root + "/SPINNER.TGA"));
 	TEST_EXPECT(has_warning(outcome.findings, "import.texture_not_imported", "spinner.3di"));
 	size_t textures = 0, resolved = 0;
@@ -410,14 +467,14 @@ static int test_apply_record_with_its_file() {
 	fs::create_directories(root + "/logo.png.import", ec);
 	TEST_EXPECT(!ec);
 	const auto before = snapshot(root);
-	import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
-	TEST_EXPECT(!project.session.outcome().done() &&
-	            finding(project.session.outcome(), "import.record", DiagnosticSeverity::Error, "logo.png"));
+	const ActionOutcome refused = import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
+	TEST_EXPECT(!refused.done() &&
+	            finding(refused, "import.record", DiagnosticSeverity::Error, "logo.png"));
 	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/logo.png") && !fs::exists(root + "/menus/extra.mnu"));
 	fs::remove(root + "/logo.png.import", ec);
-	import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
+	const ActionOutcome imported = import(project.session, {{art + "/extra.mnu", {}}, {art + "/logo.png", {}}});
 	const SessionView &view = project.view();
-	TEST_EXPECT(project.session.outcome().done() && fs::is_regular_file(root + "/logo.png.import") &&
+	TEST_EXPECT(imported.done() && fs::is_regular_file(root + "/logo.png.import") &&
 	            fs::is_regular_file(root + "/menus/extra.mnu") && !staged_left(root));
 	TEST_EXPECT(
 			view.project.imports->size() == 1 && (*view.project.imports)[0].source == "logo.png");
@@ -447,14 +504,15 @@ static int test_apply_cap_keeps_groups() {
 	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
 	project.session.handle(request);
+	project.session.run_operations();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(plan.truncated && plan.rows.size() == 999 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
 	std::vector<ImportSource> every;
 	for (const std::string &path : paths) every.push_back({path, {}});
 	const auto before = snapshot(root);
-	import(project.session, every);
-	TEST_EXPECT(!project.session.outcome().done() &&
-	            finding(project.session.outcome(), "import.not_planned", DiagnosticSeverity::Error, "walk.o3a"));
+	const ActionOutcome unplanned = import(project.session, every);
+	TEST_EXPECT(!unplanned.done() &&
+	            finding(unplanned, "import.not_planned", DiagnosticSeverity::Error, "walk.o3a"));
 	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/anims"));
 	return 0;
 }
@@ -469,14 +527,15 @@ static int test_apply_staging_leftover() {
 	TEST_EXPECT(staging == root + "/.opennova/staging");
 	TEST_EXPECT(editor_test::write_text(staging + "/crashed/menu_style.mns.staged", "left by a crash"));
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	const SessionView &view = project.view();
 	for (const AssetEntry &entry : view.project.scan->entries)
 		TEST_EXPECT(entry.logical_name.find("staged") == std::string::npos && entry.relative_path.find("staging") == std::string::npos);
 	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(d.message.find("menu_style.mns.staged") == std::string::npos);
 	const std::string art = project.dir.file("art");
 	TEST_EXPECT(editor_test::write_text(art + "/notes.txt", "notes"));
-	import(project.session, {{art + "/notes.txt", {}}});
-	TEST_EXPECT(project.session.outcome().done() && view.project.scan->find("notes.txt") && !fs::exists(staging));
+	const ActionOutcome imported = import(project.session, {{art + "/notes.txt", {}}});
+	TEST_EXPECT(imported.done() && view.project.scan->find("notes.txt") && !fs::exists(staging));
 	return 0;
 }
 
@@ -497,6 +556,7 @@ static int test_apply_retail_menu() {
 	listed.names = {"main.mnu", "menu_style.mns"};
 	listed.with_dependencies = true;
 	project.session.handle(listed);
+	project.session.run_operations();
 	const ImportPlan plan = *view.dialogs.import_preview.plan;
 	TEST_EXPECT(project.session.outcome().done() && view.dialogs.import_preview.open && view.dialogs.import_preview.roots.size() == 2);
 	TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
@@ -514,8 +574,8 @@ static int test_apply_retail_menu() {
 		skipped.insert(entry.reference != ReferenceKind::None ? reference_row(entry.reference).token
 		                                                      : asset_kind_token(entry.kind));
 	TEST_EXPECT(skipped == std::set<std::string>({"style_var", "menu_screen", "menu_window", "text_id", "sound_bank"}));
-	import(project.session, selected_sources(plan));
-	TEST_EXPECT(project.session.outcome().done() && !view.dialogs.import_preview.open);
+	const ActionOutcome imported = import(project.session, selected_sources(plan));
+	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	size_t references = 0;
 	for (const ImportPlanRow &row : plan.rows) {
 		TEST_EXPECT(view.project.scan->find(row.name) != nullptr);
@@ -545,6 +605,7 @@ int run_import_apply_tests() {
 	failures += test_apply_record_with_its_file();
 	failures += test_apply_cap_keeps_groups();
 	failures += test_apply_staging_leftover();
+	failures += test_apply_guard_reads_the_shown_plan();
 	failures += test_apply_retail_menu();
 	return failures;
 }

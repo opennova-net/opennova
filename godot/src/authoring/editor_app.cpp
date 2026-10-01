@@ -255,9 +255,8 @@ void EditorApp::after_layout(uint64_t, bool, int64_t) {
 
 void EditorApp::pump() {
 	ensure_session();
-	// The windows' requests of this frame (a burst of keystrokes, a drag) validate once,
-	// at the poll; a request that arrives any other way returns validated.
-	session_->hold_validation();
+	// The windows' requests of this frame (a burst of keystrokes, a drag), then the poll, whose
+	// budget steps the validation they left due first (S13 A3: no request runs it).
 	drain_requests();
 	session_->poll();
 #if OPENNOVA_EDITOR_UI

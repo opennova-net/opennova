@@ -245,7 +245,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 			core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
 			return;
 		}
-		core_.refresh();
+		core_.update_files({relative}); // the file made, read into the scan alone
 		core_.note("Created " + relative);
 	}
 	if (is_editable_kind(kind)) {
@@ -319,7 +319,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		select_named(*document);
 		select_first_screen(); // no record named: a menu shows its first screen
 		core_.touch(ViewConcern::Selection);
-		update_view(); core_.problems().validate_documents(); return;
+		update_view(); core_.problems().validate_later(); return;
 	}
 	core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
 }
@@ -351,7 +351,7 @@ void DocumentSet::close_document(const std::string &requested) {
 		activate(documents_.empty() ? "" : documents_.back()->path());
 		core_.touch(ViewConcern::Selection);
 	}
-	update_view(); core_.problems().validate_documents();
+	update_view(); core_.problems().validate_later();
 }
 
 // The document's own path, however the request named it (a logical name included), so a
@@ -479,8 +479,10 @@ void DocumentSet::save_all() {
 // Writes each open document at `paths` that has unsaved edits (`rewrite`: an explicit Save,
 // which also writes one with none whose file holds other bytes than it would write, and
 // refuses one that does not serialize), past a failure: an Output line per file written, the
-// refresh, then one finding per file that could not be, the status counting both. False when
-// one could not be. (A save while a build packs never reaches here: the busy gate refused it.)
+// files written read into the scan alone (SessionCore::update_files, S13 A3: no import pass, no
+// other file read), then one finding per file that could not be, the status counting both. False
+// when one could not be. (A save while a build packs never reaches here: the busy gate refused
+// it.)
 bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rewrite) {
 	std::vector<DocumentBase *> writes;
 	for (const std::string &path : paths)
@@ -495,6 +497,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 	}
 	size_t saved = 0;
 	std::vector<Diagnostic> failures;
+	std::vector<std::string> written;
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
 		if (!document->save(error)) {
@@ -507,12 +510,13 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 		}
 		forget_file_state(document->path());
 		++saved;
+		written.push_back(document->path());
 		core_.note("Saved " + document->path());
 	}
 	gesture_validation_due_ = false;
 	update_view();
-	core_.refresh();
-	// Reported after the refresh, which rebuilds the Problems rows.
+	core_.update_files(written);
+	// Reported after the scan's update, which leaves the validation that rebuilds the rows due.
 	for (const Diagnostic &d : failures) core_.report(d);
 	view_.activity.status = "Saved " + std::to_string(saved) + " file(s)" +
 	               (failures.empty() ? "." : "; " + std::to_string(failures.size()) + " could not be saved: see Problems.");
@@ -522,8 +526,8 @@ bool DocumentSet::save_documents(const std::vector<std::string> &paths, bool rew
 
 // A Save of a file that is not open: read as its document type, written when it would
 // write other bytes than the file holds (the canonical rewrite: the lines the game ignores
-// dropped, the line ends fixed, a table regrouped), and left closed; the refresh then reads
-// the file as written, so the findings the rewrite fixed leave Problems. One that does not
+// dropped, the line ends fixed, a table regrouped), and left closed; the scan then reads the
+// file as written (alone), so the findings the rewrite fixed leave Problems. One that does not
 // serialize is refused with the reason (document.unserializable), the file untouched. Of two
 // files of one name, the one project_file picks: the path named, else the first of the name.
 void DocumentSet::rewrite_file(const std::string &path) {
@@ -545,7 +549,7 @@ void DocumentSet::rewrite_file(const std::string &path) {
 		return;
 	}
 	core_.note("Saved " + relative);
-	core_.refresh();
+	core_.update_files({relative});
 	view_.activity.status = "Saved 1 file(s).";
 	core_.touch(ViewConcern::Output);
 }

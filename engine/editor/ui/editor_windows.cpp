@@ -440,6 +440,12 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (v.activity.operation.running()) {
 		state = operation_text(v.activity.operation);
 		state_tip = operation_tip(v.activity.operation);
+	} else if (v.activity.validation.running) {
+		// The validation the polls step (the first one of a large project above all).
+		const ValidationStatus &validation = v.activity.validation;
+		state = "Validating" + (validation.total ? " " + std::to_string(validation.done) + "/" +
+				std::to_string(validation.total) : std::string());
+		state_tip = "Problems lists what was found before until it ends.";
 	} else if (v.activity.play_state == PlayState::Running) {
 		state = v.project.play_retail ? "Game install running" : "Game running";
 		state_tip = "Process " + std::to_string(v.activity.play_pid) + ". Stop ends it.";

@@ -36,6 +36,7 @@ using editor_test::NoProcess;
 // imported from the Blender add-on's scene text.
 bool make_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
 	session.handle(request::new_project(dir.file("project"), "Search"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *items = v.project.scan->find("items.def");
@@ -55,7 +56,9 @@ bool make_project(ProjectSession &session, const editor_test::TempProjectDir &di
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
+	session.run_operations();
 	session.handle(request::rescan());
+	session.run_operations();
 	return v.project.scan->find("SKIN.adm") && v.project.scan->find("walk.bad") &&
 			v.project.scan->find("armory.3di");
 }

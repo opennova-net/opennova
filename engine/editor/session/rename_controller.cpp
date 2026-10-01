@@ -7,8 +7,10 @@
 
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/problems_service.h>
+#include <editor/session/rename_operation.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
 
@@ -16,61 +18,113 @@ namespace opennova::editor {
 
 RenameController::RenameController(SessionCore &core) : core_(core), view_(core.view()), paths_(core.paths()) {}
 
-// A file renamed with every reference rewritten (graph/rename_transaction), or refused
-// with the reasons as findings; the rewritten documents that are open reload. A rename that
-// would rewrite a file with unsaved edits, or leave them behind on the old name, never
-// reaches here with them: it waits on the unsaved prompt first (UnsavedGuard), whose Save
-// writes them.
+// A file renamed with every reference rewritten (graph/rename_transaction), or refused with the
+// reasons as findings: an operation (RenameOperation) that joins the validation left due, plans
+// (the plan reads the graph: an edit saved before it is planned or refused like any other), stages
+// and commits, whose finish reloads the rewritten documents that are open (absorb_rename). A
+// rename that would rewrite a file with unsaved edits, or leave them behind on the old name, never
+// reaches here with them: it waits on the unsaved prompt first (UnsavedGuard), whose Save writes
+// them.
 void RenameController::rename_asset(const std::string &file, const std::string &new_name) {
 	if (!view_.project.open) return;
-	DocumentSet &documents = core_.documents();
-	// The plan reads the graph: its rows validate first (`validates`, request_kinds.cpp), so an
-	// edit a held pump made reaches it (and the Problems rows), and a reference it added is
-	// planned or refused like any other.
-	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
-	if (!plan.ok()) {
-		for (const Diagnostic &d : plan.refusals) core_.report(d);
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	RenameOperation::FilePlanner planner = [this, file, new_name](std::shared_ptr<const AssetScan> &scan) {
+		scan = view_.project.scan;
+		return plan_rename(paths_, *scan, core_.problems().graph(), file, new_name);
+	};
+	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
+	if (id == 0) return core_.refuse_busy(file); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Renaming " + basename_of(file) + " to " + new_name + "...";
+	core_.touch(ViewConcern::Output);
+}
+
+// A rename's commit read back into the session. A plan refused wrote nothing: its refusals are
+// what the rename came to. Else the document the modder was in stays active through the closes and
+// reloads (a file's rename: the renamed file's own document follows it to the new name); a
+// reloaded document holds new records, so only an untouched one keeps its selection, which is the
+// one kept from the start unless the modder selected while the rename ran (the selection's serial
+// moved since: theirs stays). What the commit touched is read again: an import source's refresh
+// (its outputs made under the new name), else the touched files alone (AssetScan::update).
+OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
+	OperationOutcome outcome;
+	if (operation.refused()) {
+		for (const Diagnostic &d : operation.refusals()) core_.report(d);
 		view_.activity.status = "The rename was refused.";
 		core_.touch(ViewConcern::Output);
-		return;
+		outcome.end = OperationEnd::Failed;
+		outcome.findings = operation.refusals();
+		return outcome;
 	}
-	std::vector<Diagnostic> findings;
-	const bool ok = apply_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, findings);
+	DocumentSet &documents = core_.documents();
+	const RenameTransaction &transaction = *operation.transaction();
+	const bool ok = transaction.ok();
+	const std::vector<RenameSite> &sites = operation.symbol() ? operation.symbol_plan().sites : operation.file_plan().sites;
+	const auto read_files = [&]() {
+		if (ProjectRefresh *refresh = operation.refresh()) core_.absorb_refresh(*refresh);
+		else core_.update_files(transaction.touched());
+	};
 	std::vector<std::string> reload;
-	for (const RenameSite &site : plan.sites)
+	for (const RenameSite &site : sites)
 		if (documents.document_for(site.file) && std::find(reload.begin(), reload.end(), site.file) == reload.end()) reload.push_back(site.file);
-	// The document the modder was in stays active through the closes and reloads below
-	// (the renamed file's own document follows it to the new name). A reloaded document
-	// holds new records, so only an untouched one keeps its selection.
-	std::string active = view_.documents.active;
-	const Selection kept = view_.documents.selection;
+	const RenameOperation::Kept &kept = operation.kept();
+	const Selection wanted = view_.documents.selection.serial == kept.selection.serial ? kept.selection
+	                                                                                    : view_.documents.selection;
+	std::string active = kept.active;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
-	// A refused commit leaves the file where it was: its open document stays.
-	DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
-	if (renamed) {
-		const std::string renamed_path = renamed->path();
-		const bool was_active = renamed_path == active;
-		documents.close_document(renamed_path);
-		core_.refresh();
-		documents.open_document(request::open_document(plan.new_path));
-		if (was_active) {
-			active = view_.documents.active;
-			keep_selection = false;
+	bool files_read = false;
+	if (!operation.symbol()) {
+		const RenamePlan &plan = operation.file_plan();
+		// A refused commit leaves the file where it was: its open document stays.
+		DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
+		if (renamed) {
+			const std::string renamed_path = renamed->path();
+			const bool was_active = renamed_path == active;
+			documents.close_document(renamed_path);
+			read_files();
+			files_read = true;
+			documents.open_document(request::open_document(plan.new_path));
+			if (was_active) {
+				active = view_.documents.active;
+				keep_selection = false;
+			}
 		}
 	}
-	core_.refresh();
+	if (!files_read) read_files();
 	for (const std::string &path : reload) documents.open_document(request::reload_document(path));
-	bool active_open = active.empty();
-	for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
-	if (active_open) {
-		documents.activate(active);
-		if (keep_selection) view_.documents.selection.restore(kept);
-		else view_.documents.selection.select_only(active, NodeAddress());
-		documents.select_first_screen();
+	if (operation.symbol()) {
+		const SymbolRenamePlan &plan = operation.symbol_plan();
+		if (!active.empty() && documents.document_for(active)) {
+			documents.activate(active);
+			if (keep_selection) view_.documents.selection.restore(wanted);
+			else view_.documents.selection.select_only(active, NodeAddress());
+			// The renamed definition selected again where it was, its field shown.
+			if (!keep_selection && active == plan.file)
+				if (Document *defining = documents.records_for(active))
+					view_.documents.selection.select_only(active, defining->address_at(plan.locator));
+			documents.select_first_screen();
+		}
+	} else {
+		bool active_open = active.empty();
+		for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
+		if (active_open) {
+			documents.activate(active);
+			if (keep_selection) view_.documents.selection.restore(wanted);
+			else view_.documents.selection.select_only(active, NodeAddress());
+			documents.select_first_screen();
+		}
 	}
-	// Reported last: the refresh and the reloads above rebuild the Problems rows.
-	for (const Diagnostic &d : findings) core_.report(d);
-	if (ok) {
+	// Reported last: the scan's update and the reloads above leave the rows' validation due.
+	for (const Diagnostic &d : transaction.findings()) core_.report(d);
+	if (ok && operation.symbol()) {
+		const SymbolRenamePlan &plan = operation.symbol_plan();
+		const size_t uses = plan.sites.size() - 1;
+		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
+		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)");
+		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
+	} else if (ok) {
+		const RenamePlan &plan = operation.file_plan();
 		core_.note("Renamed " + plan.old_name + " to " + plan.new_name + " (" + std::to_string(plan.sites.size()) +
 		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten)");
 		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
@@ -79,6 +133,9 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	}
 	core_.touch(ViewConcern::Selection); // the active document and its selection, kept or started over
 	core_.touch(ViewConcern::Output);
+	outcome.end = ok ? OperationEnd::Done : OperationEnd::Failed;
+	outcome.findings = transaction.findings();
+	return outcome;
 }
 
 // Whether the project file at `path`, as saved, has a use that reaches exactly the renamed
@@ -96,9 +153,9 @@ bool RenameController::saved_file_uses(const std::string &path, const SymbolRena
 	return false;
 }
 
+// The plan over the graph as the validation last left it: the rename's own plan is made once the
+// validation it joins has ended; a preview's and the unsaved guard's read the graph as it stands.
 SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
-	// The plan reads the graph: an edit a held pump made first reaches it.
-	core_.problems().validate_pending();
 	const AssetGraph &graph = core_.problems().graph();
 	const GraphSymbol *symbol = graph.symbol_at(request.path, request.locator, request.field);
 	if (!symbol) {
@@ -115,9 +172,10 @@ SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
 }
 
 // What a rename would do, planned into the view (nothing written, nothing reported): a name's
-// rename everywhere, or a file's (no field). Its row validates first: the plan reads the graph.
-// One that asks the new name (ask_name) posts an AskRename event naming the preview by its
-// serial: the Rename everywhere dialog opens on it.
+// rename everywhere, or a file's (no field), over the graph as the validation last left it (the
+// rename itself plans again once the validation it joins has ended). One that asks the new name
+// (ask_name) posts an AskRename event naming the preview by its serial: the Rename everywhere
+// dialog opens on it.
 void RenameController::preview(const EditorRequest &request) {
 	if (!view_.project.open) return;
 	DialogsView::RenamePreview preview;
@@ -166,52 +224,22 @@ void RenameController::preview(const EditorRequest &request) {
 }
 
 // A name renamed everywhere (graph/rename_transaction), or refused with the reasons as
-// findings; the rewritten documents that are open reload. One that would rewrite a file with
-// unsaved edits never reaches here with them: it waits on the unsaved prompt first
-// (UnsavedGuard), whose Save writes them.
+// findings: an operation (RenameOperation) that joins the validation left due, plans, stages and
+// commits, whose finish reloads the rewritten documents that are open (absorb_rename). One that
+// would rewrite a file with unsaved edits never reaches here with them: it waits on the unsaved
+// prompt first (UnsavedGuard), whose Save writes them.
 void RenameController::rename_symbol(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	DocumentSet &documents = core_.documents();
-	const SymbolRenamePlan plan = plan_symbol(request);
-	if (!plan.ok()) {
-		for (const Diagnostic &d : plan.refusals) core_.report(d);
-		view_.activity.status = "The rename was refused.";
-		core_.touch(ViewConcern::Output);
-		return;
-	}
-	std::vector<Diagnostic> findings;
-	const bool ok = apply_symbol_rename(paths_, *view_.project.document, *view_.project.scan, core_.problems().graph(), plan, findings);
-	std::vector<std::string> reload;
-	for (const RenameSite &site : plan.sites)
-		if (documents.document_for(site.file) && std::find(reload.begin(), reload.end(), site.file) == reload.end()) reload.push_back(site.file);
-	// The document the modder was in stays active; one read again holds new records, so only an
-	// untouched one keeps its selection.
-	const std::string active = view_.documents.active;
-	const Selection kept = view_.documents.selection;
-	const bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
-	core_.refresh();
-	for (const std::string &path : reload) documents.open_document(request::reload_document(path));
-	if (!active.empty() && documents.document_for(active)) {
-		documents.activate(active);
-		if (keep_selection) view_.documents.selection.restore(kept);
-		else view_.documents.selection.select_only(active, NodeAddress());
-		// The renamed definition selected again where it was, its field shown.
-		if (!keep_selection && active == plan.file)
-			if (Document *defining = documents.records_for(active))
-				view_.documents.selection.select_only(active, defining->address_at(plan.locator));
-		documents.select_first_screen();
-	}
-	for (const Diagnostic &d : findings) core_.report(d);
-	if (ok) {
-		const size_t uses = plan.sites.size() - 1;
-		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
-		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)");
-		view_.activity.status =
-				"Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
-	} else {
-		view_.activity.status = "The rename did not finish.";
-	}
-	core_.touch(ViewConcern::Selection); // the active document and its selection, kept or started over
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	RenameOperation::SymbolPlanner planner = [this, request](std::shared_ptr<const AssetScan> &scan) {
+		scan = view_.project.scan;
+		return plan_symbol(request);
+	};
+	const uint64_t id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_,
+			*view_.project.document, core_.problems().graph(), std::move(planner), kept));
+	if (id == 0) return core_.refuse_busy(request.path); // the gate let no operation run beside it
+	core_.outcome().operation = id;
+	view_.activity.status = "Renaming in " + basename_of(request.path) + " everywhere...";
 	core_.touch(ViewConcern::Output);
 }
 
@@ -254,8 +282,9 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 		// saved file names the name (the commit reads the files on disk: an unsaved edit that
 		// stopped naming it would leave the saved use behind); none when the plan is refused
 		// anyway (the rename then says why, with nothing to save first). Saved, the rename is
-		// planned again.
+		// planned again. While a validation is due or under way every one is (unsaved_while_due).
 		if (view_.project.open && documents.documents_dirty()) {
+			if (unsaved_while_due(files)) return;
 			const SymbolRenamePlan plan = plan_symbol(request);
 			if (!plan.ok()) return;
 			for (const auto &document : documents.documents()) {
@@ -277,14 +306,26 @@ void RenameController::unsaved_files(const EditorRequest &request, std::vector<s
 	}
 }
 
+// While a validation is due or under way (S13 A3: the polls step it, and no request runs it), the
+// graph may not hold the edits the documents have not been validated with, so the plan cannot say
+// which of them a rename rewrites: every document with unsaved edits is listed (the prompt saves
+// them all, and the rename plans again once the validation it joins has ended). True then.
+bool RenameController::unsaved_while_due(std::vector<std::string> &files) {
+	if (!core_.problems().validating()) return false;
+	for (const auto &document : core_.documents().documents())
+		if (document->dirty()) files.push_back(document->path());
+	return true;
+}
+
 // The documents with unsaved edits a rename of `file` to `new_name` would rewrite (its
 // plan's sites) or leave behind on the old name (the file's own), in the order they were
 // opened; none when the plan is refused anyway (the rename then says why, with nothing to
-// save first). The plan reads the graph: an edit a held pump made first reaches it.
+// save first). The plan reads the graph, which holds every edit when no validation is due
+// (else unsaved_while_due).
 void RenameController::rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
 	if (!view_.project.open || !documents.documents_dirty()) return;
-	core_.problems().validate_pending();
+	if (unsaved_while_due(files)) return;
 	const RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), file, new_name);
 	if (!plan.ok()) return;
 	for (const auto &document : documents.documents()) {

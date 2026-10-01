@@ -35,6 +35,7 @@ struct PickerProject {
 
 	bool open() {
 		session.handle(request::new_project(dir.file("project"), "Picker"));
+		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		const std::string repo = test_paths_repo_root(__FILE__);
@@ -47,6 +48,7 @@ struct PickerProject {
 		                             "begin \"Other\"\nid 100301\ntype building\ngraphic gamma\nend\n"))
 			return false;
 		session.handle(request::rescan());
+		session.run_operations();
 		session.handle(request::open_document("defs/items.def"));
 		items = session.document_for("defs/items.def");
 		if (!items || !find_definition(AssetGraph(), *items, "100300", item)) return false;
@@ -300,6 +302,7 @@ void test_list_kept() {
 	rename.edits[0].field = "name";
 	rename.edits[0].value = std::string("HEADING");
 	project.session.handle(rename);
+	project.session.run_operations(); // the validation the edit left due (S13 A3: the polls run it)
 	const ViewRevisions &after = project.session.view().revisions;
 	CHECK(after.of(ViewConcern::Graph) != before.of(ViewConcern::Graph), "the graph moved");
 	CHECK(after.of(ViewConcern::Files) == before.of(ViewConcern::Files) &&
@@ -314,6 +317,7 @@ void test_list_kept() {
 	                               test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")),
 	      "another model");
 	project.session.handle(request::rescan());
+	project.session.run_operations();
 	draw(false);
 	draw(false);
 	CHECK(picker.lists_made() == 4, "a model the graph gains: the list made again");

@@ -28,6 +28,7 @@ void test_rename_everywhere_ui() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Rename"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *weapons = v.project.scan->find("weapon.def");
@@ -40,6 +41,7 @@ void test_rename_everywhere_ui() {
 	                                      "begin \"Carrier\"\nid 100300\ntype vehicle\nprimary_weapon GUN_A\nend\n"),
 	      "the fixtures");
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(weapons_path));
 	const Document *document = session.document_for(weapons_path);
 	NodeAddress gun;
@@ -106,6 +108,7 @@ void test_hint_on_a_fallback() {
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	session.handle(request::new_project(dir.file("project"), "Hint"));
+	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const AssetEntry *sheet = v.project.scan->find("menu_style.mns");
@@ -122,6 +125,7 @@ void test_hint_on_a_fallback() {
 	                                      "</WINDOW>\r\n</SCREEN>\r\n"),
 	      "the fixtures");
 	session.handle(request::rescan());
+	session.run_operations();
 	session.handle(request::open_document(brand_path));
 	const Document *brand = session.document_for(brand_path);
 	NodeAddress line;
