@@ -7,16 +7,17 @@
 #include <vector>
 
 #include <editor/model/value.h>
-#include <editor/preview/viewport_kinds.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/selection.h>
+#include <editor/session/view/viewport_kind.h>
 
 namespace opennova::editor {
 
 class DocumentBase;
 class Viewports;
 
-// What the Preview window shows of a viewport kind (ADR 0046 S13 V5): the document of the kind it
+// What the Preview window shows of a viewport kind (ADR 0046 S13 V5; the kinds are
+// session/view/viewport_kind.h's, so the view holds no preview header): the document of the kind it
 // follows, and for a kind that shows one row of it (ViewportKindRow::part) the row, a menu's
 // screen.
 struct PreviewTarget {
@@ -54,13 +55,17 @@ struct DocumentsView {
 	// when a record of the menu is selected). A target stays while another document is active (the
 	// stylesheet the menu's screen draws with), and clears when its document closes or its row goes.
 	PreviewTargets previews;
+	// The Preview-role kind the Preview window shows (S13 V5; preview/viewport_kinds' preview_kind):
+	// the active document's (the kind its type shows in or feeds), else the one it showed before;
+	// when that kind has no target, the first kind that has one; kCount when none has.
+	ViewportKind preview_shown = ViewportKind::kCount;
 	// The session's viewports (preview/viewports.h), each a document's picture with its state, and
 	// the preview clock: shared const, the windows reading what a viewport shows and changing it
 	// only by a request (SetViewport). Made with the session (null only in a view no session made).
+	// The previews (their targets and the kind shown) follow the active document and the selection
+	// at every change of the view (preview/viewport_kinds' update_preview_targets, the session's
+	// touch).
 	std::shared_ptr<const Viewports> viewports;
-
-	// Follow the active document and the selection (every view change calls it).
-	void update_previews();
 };
 
 } // namespace opennova::editor

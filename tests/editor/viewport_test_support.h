@@ -25,24 +25,34 @@ namespace editor_test {
 using opennova::editor::ViewportAction;
 
 // A device that draws nothing: the actions its viewport asked of it, in order, and the size it was
-// drawn at. A menu's reports where its picture placed each widget: where the viewport's own
-// compile did (the Shell's MenuFrame draws the same screen alike). It reads `reads` through the
-// project's files as it makes its picture, as a model's device reads its textures, and reports them.
+// drawn at. It reports its size as the Shell's does: the one a canvas drew it at since the last pump
+// (and whether that was a size of the canvas's own), else its viewport's state's. A menu's reports
+// where its picture placed each widget: where the viewport's own compile did (the Shell's MenuFrame
+// draws the same screen alike). It reads `reads` through the project's files as it makes its
+// picture, as a model's device reads its textures, and reports them.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
 	int draws = 0;
 	int width = 0;
 	int height = 0;
+	bool drawn = false; // a canvas drew it since the last pump
+	bool canvas_sized = false;
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
 		width = picture.width;
 		height = picture.height;
+		drawn = true;
+		canvas_sized = picture.canvas_sized;
 	}
 	void take(ViewportAction action, const opennova::editor::ViewportModel &model,
 			const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &,
 			opennova::editor::ViewportDeviceReport &report) override {
 		taken.push_back(action);
+		report.width = drawn ? width : model.state().width;
+		report.height = drawn ? height : model.state().height;
+		report.canvas_sized = drawn && canvas_sized;
+		drawn = false;
 		if (!reads.empty() && view.findings.assets) {
 			opennova::editor::StampedFiles files(view.findings.assets);
 			std::vector<uint8_t> bytes;
@@ -124,7 +134,7 @@ inline opennova::editor::ViewportContext viewport_context(const opennova::editor
 	return opennova::editor::ViewportContext{
 		opennova::editor::ViewportInput{ view, view.documents.viewports->clock(), document,
 				opennova::editor::ChangeClass::None },
-		model.state().width, model.state().height, snap, nullptr
+		model.size().width, model.size().height, snap, nullptr
 	};
 }
 

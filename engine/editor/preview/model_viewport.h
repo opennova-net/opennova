@@ -83,6 +83,10 @@ public:
 	// How many times it read its document's bytes (wrote and read back the model, wrote the clip or
 	// the table): a follow over a document that did not change reads none.
 	uint64_t reads() const { return reads_; }
+	// How many times a clip's or a table's viewport read its rig's model from the project's files:
+	// once per model chosen or file changed, a model that does not read included (the failure latch:
+	// not again each pump until its file changes).
+	uint64_t rig_model_reads() const { return rig_model_reads_; }
 	// The level to draw: the options', clamped to the model's levels, else Auto's at the device's
 	// width.
 	int lod() const;
@@ -187,6 +191,7 @@ private:
 	std::string model_file_; // the rig's model the scene is built of
 	FileStamps model_read_; // its stamp as read
 	bool model_failed_ = false; // the rig's model did not read
+	uint64_t rig_model_reads_ = 0;
 	std::string unwritable_; // why the clip or table cannot be written ("" it can)
 	std::shared_ptr<const anim::SkeletalClips> skeleton_;
 	FileStamps rig_read_; // what the rig read

@@ -190,6 +190,15 @@ func test_preview_draws_the_open_model() -> void:
 	var size: Vector2i = (camera.get_viewport() as SubViewport).size
 	assert_eq(size.x, int(preview.get("device", {}).get("width", 0)), "the device at the viewport's size")
 	assert_eq(size.y, int(preview.get("device", {}).get("height", 0)))
+	assert_false(bool(preview.get("device", {}).get("canvas_sized", true)), "headless: no canvas sizes it")
+	# Headless, the device's size is the viewport's to set: a `device` object, never flat keys.
+	assert_true(_app.set_model_preview_camera({"device": {"width": 320, "height": 240}}))
+	assert_eq((camera.get_viewport() as SubViewport).size, Vector2i(320, 240))
+	assert_eq(int(_preview().get("device", {}).get("width", 0)), 320)
+	assert_false(_app.set_model_preview_camera({"width": 640}), "the device's size is the device's member")
+	assert_ne(String(_app.get_preview_error()), "", "the refusal says why")
+	assert_true(_app.set_model_preview_camera({"device": {"width": size.x, "height": size.y}}))
+	preview = _preview()
 
 	# A user point on the pixel the device's camera projects it to.
 	var points: Array = _overlays(preview, "user_point")
@@ -253,11 +262,16 @@ func test_markers_ride_the_parts_the_device_draws() -> void:
 	assert_gt(point, 0)
 	assert_true(_seam.set_field(point, "position.x", 2.0))
 	# The clock held at a quarter second: the device's part node and the overlay pose alike.
-	assert_true(_app.set_model_preview_options({"playing": false, "time_ms": 250}))
+	assert_true(_app.set_model_preview_options({"clock": {"playing": false, "time_ms": 250}}))
 	await get_tree().process_frame
 	await get_tree().process_frame
 	var preview := _preview()
 	assert_eq(int(preview.get("clock", {}).get("time_ms", -1)), 250)
+	# The clock's members are the clock's (its rate among them), never the options'.
+	assert_false(_app.set_model_preview_options({"time_ms": 250}))
+	assert_true(_app.set_model_preview_options({"clock": {"rate": 2.0}}))
+	assert_eq(float(_preview().get("clock", {}).get("rate", 0.0)), 2.0)
+	assert_true(_app.set_model_preview_options({"clock": {"rate": 1.0}}))
 	var marker: Dictionary = _overlays(preview, "user_point")[0]
 	var model: ObjectModel = _app.get_model_preview_model()
 	var parts: Dictionary = model.get_render_part_nodes()
@@ -311,7 +325,7 @@ func test_a_table_plays_on_its_rig() -> void:
 	var walk: int = _seam.find_record("anim_walk_forward")
 	assert_gt(walk, 0)
 	assert_true(_seam.select_record(walk))
-	assert_true(_app.set_model_preview_options({"playing": false, "clip_ticks": 0}))
+	assert_true(_app.set_model_preview_options({"clock": {"playing": false, "ticks": 0}}))
 	var preview := await _await_ready()
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
 	var animation: Dictionary = preview.get("body", {}).get("animation", {})
@@ -326,7 +340,7 @@ func test_a_table_plays_on_its_rig() -> void:
 	var skeleton := model.get_skeleton()
 	var at_rest := skeleton.get_bone_pose_rotation(0)
 	# A quarter of the way in, the root has turned.
-	assert_true(_app.set_model_preview_options({"clip_ticks": 8}))
+	assert_true(_app.set_model_preview_options({"clock": {"ticks": 8}}))
 	await get_tree().process_frame
 	var turned := skeleton.get_bone_pose_rotation(0)
 	assert_gt(at_rest.angle_to(turned), 0.05, "the clip poses the skeleton at the clip clock")

@@ -178,11 +178,11 @@ add_library(opennova_editor STATIC
     # the findings by file and record
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/activity_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/dialogs_view.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/documents_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/findings_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/project_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/session_view.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view/view_events.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/view/viewport_kind.cpp
 )
 
 # ui — the Dear ImGui windows on the engine's ImGui pass (ADR 0046 d11). Built when the

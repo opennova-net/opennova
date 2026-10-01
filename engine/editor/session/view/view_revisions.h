@@ -50,6 +50,11 @@ enum class ViewConcern : uint8_t {
 	// DocumentsView: which document is the active one; moves only when another becomes it
 	// (Selection moves with every record picked in it).
 	ActiveDocument,
+	// DocumentsView: the viewports' state (S13 V5): what a SetViewport changed (a device's size, a
+	// kind's options or camera, the preview clock), and what a viewport's follow derived from its
+	// document, the selection or a changed model or clip (a menu's held window, a model framed, a
+	// clip's clock sought); never the clock running as the Shell's frames pass.
+	Viewports,
 	kCount,
 };
 
@@ -70,6 +75,7 @@ inline constexpr ViewConcernRow kViewConcernRows[] = {
 	{ViewConcern::Preferences, "preferences"},
 	{ViewConcern::DocumentSet, "document_set"},
 	{ViewConcern::ActiveDocument, "active_document"},
+	{ViewConcern::Viewports, "viewports"},
 };
 
 static_assert(std::size(kViewConcernRows) == kViewConcernCount,

@@ -52,10 +52,14 @@ bool inside(const fs::path &path, const fs::path &dir) {
 SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferences) :
 		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
 	view_.documents.viewports = viewports_;
+	// What a viewport's follow derives (a menu's held window, a model framed, a clip's clock sought)
+	// moves the Viewports concern as a SetViewport does; the follow runs at the Shell's pump, outside
+	// any request, so the counter alone moves (nothing is tracked again).
+	viewports_->set_on_derived_change([this] { view_.revisions.touch(ViewConcern::Viewports); });
 }
 
 void SessionCore::touch(ViewConcern concern) {
-	view_.documents.update_previews();
+	update_preview_targets(view_.documents);
 	viewports_->track(view_);
 	view_.revisions.touch(concern);
 }
@@ -564,7 +568,7 @@ void SessionCore::set_viewport(const std::string &path, const std::string &chang
 	io::JsonValue json;
 	std::string error;
 	if (!io::json_parse(change, json, error)) error = "The viewport's change is not JSON: " + error;
-	else viewports_->set(view_, path, json, error);
+	else if (viewports_->set(view_, path, json, error)) touch(ViewConcern::Viewports);
 	if (!error.empty()) report(make_finding(CoreFinding::ViewportRefused, DiagnosticSeverity::Error, error, path));
 }
 

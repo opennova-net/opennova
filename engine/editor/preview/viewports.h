@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -21,9 +22,12 @@ struct ViewportDeviceReport;
 // document owning several where kinds show it (a mission's 3D view and its map), kept while the
 // document is open; and the one preview clock they all read (CONTEXT.md "Preview clock"). The
 // session owns them and the view shares them const (DocumentsView::viewports), so the windows read a
-// viewport and never change it: its state changes only through a SetViewport request (set), which
-// the session serves; what follows from it changes as it follows the view, which the Shell's
-// devices drive (ViewportDeviceCache), as they attach, detach, take actions and report.
+// viewport and never change it: every change a person or a client makes to its state is a
+// SetViewport request (set), which the session serves, and the three changes its follow derives
+// (viewport_model.h's ViewportState) are the only others; each moves the view's Viewports concern
+// (set_on_derived_change for the derived ones). What follows from the state changes as the viewport
+// follows the view, which the Shell's devices drive (ViewportDeviceCache), as they attach, detach,
+// take actions and report.
 class Viewports {
 public:
 	Viewports();
@@ -69,6 +73,10 @@ public:
 	// `seconds` of the Shell's frames pass (the clock's while it plays).
 	void advance(double seconds) { clock_.advance(seconds); }
 	const PreviewClock &clock() const { return clock_; }
+	// Told when a follow derived a change of a viewport's state or the clock (viewport_model.h
+	// ViewportState: a held window, a framing, a clip's clock sought): the session moves its
+	// Viewports concern.
+	void set_on_derived_change(std::function<void()> notify) { on_derived_change_ = std::move(notify); }
 
 private:
 	struct Slot {
@@ -84,6 +92,7 @@ private:
 
 	std::vector<Slot> slots_;
 	PreviewClock clock_;
+	std::function<void()> on_derived_change_;
 };
 
 } // namespace opennova::editor

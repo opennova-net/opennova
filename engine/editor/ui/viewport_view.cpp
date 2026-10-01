@@ -48,7 +48,7 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 	if (!half_) half_ = model->make_canvas();
 	ViewportContext context{ ViewportInput{ view, view.documents.viewports->clock(), open_at(view, path),
 									 ChangeClass::None },
-		model->state().width, model->state().height, snap, nullptr };
+		model->size().width, model->size().height, snap, nullptr };
 	draw_ready(workspace, *model, context);
 }
 
@@ -70,14 +70,8 @@ void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, View
 		ViewportDeviceSource *devices = workspace.devices();
 		ViewportDevice *device = devices ? devices->device(path_, kind_) : nullptr;
 		context.device = device;
-		// A picture that fills the canvas is drawn at the canvas's size, and its device with it.
-		if (model.layout().design_width == 0 &&
-				(in.width != model.state().width || in.height != model.state().height)) {
-			io::JsonValue size = io::JsonValue::make_object();
-			size.set("width", io::json_number(in.width));
-			size.set("height", io::json_number(in.height));
-			requests.request(request::set_viewport(path_, viewport_change(kind_, "device", std::move(size))));
-		}
+		// A picture that fills the canvas, or a design picture fitted or scaled, is drawn at the
+		// canvas's size: its device sizes itself as it draws, and reports it at the next pump.
 		ui.picture(
 				[device](const ViewportPicture &picture) {
 					if (device) device->draw(picture);

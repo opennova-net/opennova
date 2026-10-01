@@ -1168,6 +1168,29 @@ int test_model_canvas() {
 	requests = out.take();
 	TEST_EXPECT(requests.size() == 1 && serve(requests) == 1 &&
 			std::fabs(follow()->camera().distance - distance * kModelWheelDolly) < 1e-4f);
+	// An orbit and the wheel in one frame: one SetViewport with both (the dolly on the orbited
+	// camera; two would each start from the camera the frame began with, the second undoing the
+	// first's orbit).
+	frame = frame_of();
+	const float yaw_before = follow()->camera().yaw, distance_before = follow()->camera().distance;
+	in = at(20.0f, 20.0f);
+	in.pressed = in.down = true;
+	step(in);
+	TEST_EXPECT(out.take().empty());
+	in = at(70.0f, 20.0f);
+	in.down = true;
+	in.delta = CanvasPoint{ 50.0f, 0.0f };
+	in.wheel = 1.0f;
+	step(in);
+	requests = out.take();
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Viewport && serve(requests) == 1);
+	TEST_EXPECT(follow()->camera().yaw != yaw_before &&
+			std::fabs(follow()->camera().distance - distance_before * kModelWheelDolly) < 1e-4f);
+	in.down = false;
+	in.delta = CanvasPoint();
+	in.wheel = 0.0f;
+	step(in);
+	TEST_EXPECT(out.take().empty());
 	TEST_EXPECT(!out.unexpected);
 
 	// A press ends when the model's document goes from the canvas (an animation's rig model

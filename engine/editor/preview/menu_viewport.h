@@ -85,10 +85,10 @@ public:
 	const MenuViewportOptions &options() const { return options_; }
 	// The screen row it shows (0 none).
 	NodeId screen_row() const { return part_; }
-	// What the device configures (null unless ready): the menu image and its screen, valid until the
-	// next follow; the Shell's %VAR% list; the pre-order index of the window the options hold (-1
-	// none).
-	const mnu::Document *image() const { return render_.image(); }
+	// What the device configures (null unless ready): the menu image, which the device holds while
+	// its frame borrows the screen (the viewport's next configure lets go of its own), and its screen;
+	// the Shell's %VAR% list; the pre-order index of the window the options hold (-1 none).
+	const std::shared_ptr<const mnu::Document> &image() const { return render_.image(); }
 	const mnu::Screen *screen() const { return render_.screen(); }
 	const std::map<std::string, std::string> &style_vars() const { return style_vars_; }
 	int forced_index() const { return forced_index_; }

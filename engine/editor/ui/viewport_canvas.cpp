@@ -306,6 +306,7 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	shown.clip_top = surface_min_.y;
 	shown.clip_right = surface_max_.x;
 	shown.clip_bottom = surface_max_.y;
+	shown.canvas_sized = zoom_ != Zoom::Device;
 	device(shown);
 	// The picture's edge: a design picture's just outside it, on its margin.
 	const float edge = zoom_ != Zoom::Fill ? 1.0f : 0.0f;

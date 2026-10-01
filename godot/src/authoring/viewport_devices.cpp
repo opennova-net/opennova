@@ -40,11 +40,12 @@ const ViewportDeviceRow *viewport_device_row(ViewportKind kind) {
 	return index < opennova::editor::kViewportKindCount ? &kDevices[index] : nullptr;
 }
 
-std::unique_ptr<opennova::editor::ViewportDevice> make_viewport_device(Node &owner, ViewportKind kind) {
+std::unique_ptr<opennova::editor::ViewportDevice> make_viewport_device(Node &owner, ViewportKind kind,
+		std::function<void(SubViewport *)> retire) {
 	const ViewportDeviceRow *row = viewport_device_row(kind);
 	if (!row) return nullptr;
 	return std::make_unique<ViewportDevice>(owner, String("Viewport ") + opennova::editor::viewport_kind_token(kind),
-			[row](SubViewport &viewport) { return row->make(viewport); });
+			[row](SubViewport &viewport) { return row->make(viewport); }, std::move(retire));
 }
 
 } // namespace godot

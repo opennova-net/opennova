@@ -28,7 +28,7 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	const DocumentBase *document = model.path().empty() ? nullptr : open_at(view, model.path());
 	const ViewportInput input{ view, clock, document, ChangeClass::None };
 	JsonValue out = JsonValue::make_object();
-	out.set("kind", json_string(model.row().token));
+	out.set("kind", json_string(viewport_kind_token(model.kind())));
 	out.set("path", json_string(model.path()));
 	out.set("as_saved", JsonValue::make_bool(model.row().as_saved));
 	out.set("status", json_string(viewport_status_token(model.status())));
@@ -42,8 +42,10 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	out.set("units", json_string(model.units()));
 	JsonValue device = JsonValue::make_object();
 	device.set("attached", JsonValue::make_bool(model.attached()));
-	device.set("width", json_number(model.state().width));
-	device.set("height", json_number(model.state().height));
+	const ViewportState size = model.size();
+	device.set("width", json_number(size.width));
+	device.set("height", json_number(size.height));
+	device.set("canvas_sized", JsonValue::make_bool(model.canvas_sized()));
 	out.set("device", std::move(device));
 	out.set("options", model.options_json());
 	out.set("camera", model.camera_json());
@@ -70,6 +72,7 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	out.set("notes", std::move(notes));
 	set_page(out, page, item_total, note_total);
 	out.set("note_count", json_number(double(note_total)));
+	out.set("view_revision", json_number(double(view.revisions.stamp_of(kViewportConcerns))));
 	return out;
 }
 

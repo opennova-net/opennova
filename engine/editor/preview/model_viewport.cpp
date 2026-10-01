@@ -253,7 +253,7 @@ std::unique_ptr<CanvasHalf> ModelViewport::make_canvas() const {
 
 int ModelViewport::auto_lod(int32_t *projected_q16) const {
 	if (projected_q16) *projected_q16 = 0;
-	return model_ ? model_preview_auto_lod(*model_, camera_, state_.width, projected_q16) : -1;
+	return model_ ? model_preview_auto_lod(*model_, camera_, size().width, projected_q16) : -1;
 }
 
 int ModelViewport::lod() const {
@@ -324,7 +324,7 @@ OrbitCamera ModelViewport::framed_on(const ModelOverlay &overlay, int width, int
 }
 
 void ModelViewport::frame_() {
-	camera_ = framed(state_.width, state_.height);
+	camera_ = framed(size().width, size().height);
 }
 
 int32_t ModelViewport::clip_length_ticks() const {
@@ -432,6 +432,7 @@ ViewportAction ModelViewport::follow_model_(const ViewportInput &input, const Mo
 	if (framed_ != path()) {
 		framed_ = path();
 		frame_();
+		state_moved();
 	}
 	options_moved_ = false;
 	// A drawn model the same as before, the user points aside: the overlays alone show the change.
@@ -490,10 +491,12 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	const bool files_moved = generation != generation_;
 	generation_ = generation;
 	bool rebuild = false;
-	const bool model_moved = !model_ || rig.model != model_file_ || model_read_.moved(files);
-	// A rig model that does not read stays that way until its file changes.
-	if (model_failed_ && !model_moved && rig.model == model_file_) return ViewportAction::Keep;
-	if (model_moved || model_failed_) {
+	// Another model, its file changed, or none read yet (one that failed is not read again: it stays
+	// failed until its file changes, the failure latch).
+	const bool model_moved = rig.model != model_file_ || model_read_.moved(files) || (!model_ && !model_failed_);
+	if (model_failed_ && !model_moved) return ViewportAction::Keep;
+	if (model_moved) {
+		++rig_model_reads_;
 		std::vector<uint8_t> bytes;
 		FileStamps read;
 		read.note(rig.model, files.stamp(rig.model));
@@ -562,6 +565,7 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	if (framed_ != model_file_) {
 		framed_ = model_file_;
 		frame_();
+		state_moved();
 	}
 	const bool options = options_moved_;
 	options_moved_ = false;
@@ -673,15 +677,30 @@ bool ModelViewport::drag(const ViewportContext &context, const ViewportDrag &dra
 	}
 	ModelOverlayKind kind;
 	int index = -1;
-	if (!model_overlay_of(*document, document->address_of(drag.id), kind, index)) {
+	const NodeAddress dragged = document->address_of(drag.id);
+	if (!model_overlay_of(*document, dragged, kind, index)) {
 		error = "Record " + std::to_string(drag.id) + " is no marker the viewport shows.";
 		return false;
 	}
-	for (const ModelOverlay &overlay : overlays(context.input.clock)) {
+	const std::vector<ModelOverlay> marks = overlays(context.input.clock);
+	// A place's drag of a selected marker moves the other selected markers as far, as the canvas's
+	// drag of the primary's does (canvas_frame's others).
+	std::vector<ModelOverlay> others;
+	const DocumentsView &documents = context.input.view.documents;
+	if (handle == ModelHandle::Place && documents.active == document->path() && documents.selection.holds(dragged)) {
+		for (const NodeAddress &record : documents.selection.records) {
+			ModelOverlayKind other_kind = ModelOverlayKind::UserPoint;
+			int other_index = -1;
+			if (record == dragged || !model_overlay_of(*document, record, other_kind, other_index)) continue;
+			for (const ModelOverlay &overlay : marks)
+				if (overlay.kind == other_kind && overlay.index == other_index) others.push_back(overlay);
+		}
+	}
+	for (const ModelOverlay &overlay : marks) {
 		if (overlay.kind != kind || overlay.index != index) continue;
 		std::vector<Edit> edits;
 		if (!handle_edits(*document, overlay, handle, drag.x, drag.y, context.width, context.height, drag.snap,
-					next_edit_gesture(), context.input.clock, edits)) {
+					next_edit_gesture(), context.input.clock, edits, &others)) {
 			error = "The marker has no such handle (a pivot is geometry; an omni light has no axis).";
 			return false;
 		}
@@ -807,7 +826,7 @@ io::JsonValue ModelViewport::items_json(const ViewportInput &input) const {
 		row.set("part", json_number(overlay.part));
 		row.set("position", vec3(overlay.at));
 		float x = 0.0f, y = 0.0f;
-		if (camera_.project(overlay.at, state_.width, state_.height, x, y)) {
+		if (camera_.project(overlay.at, size().width, size().height, x, y)) {
 			JsonValue screen = JsonValue::make_array();
 			screen.push(json_number(x));
 			screen.push(json_number(y));

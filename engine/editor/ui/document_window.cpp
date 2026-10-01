@@ -70,6 +70,15 @@ size_t DocumentWindow::held_events(const std::string &path) const {
 	return found == views_.end() ? 0 : found->second.view->held_events();
 }
 
+void DocumentWindow::set_view(const DocumentBase &document, std::unique_ptr<DocumentView> view) {
+	Slot slot;
+	slot.view = std::move(view);
+	slot.type = asset_kind_row(document.kind()).document;
+	slot.identity = document.identity();
+	slot.load = document.load_generation();
+	views_[document.path()] = std::move(slot);
+}
+
 DocumentView *DocumentWindow::view_of(const std::string &path) {
 	const auto found = views_.find(path);
 	return found == views_.end() ? nullptr : found->second.view.get();
@@ -126,8 +135,9 @@ void DocumentWindow::draw_tabs(const SessionView &view) {
 			if (const Document *records = records_of(*document)) draw_find(*records);
 			if (DocumentView *shown_view = view_for(*document)) {
 				// Its record tools and cells are edits: the view held back while an operation
-				// holds the documents (S13 A3), as the session would refuse them.
-				ImGui::BeginDisabled(!view.allows(EditorRequestKind::EditRecord));
+				// holds the documents (S13 A3), as the session would refuse them; one that holds
+				// back its own (a Main-role view: its outline, never its canvas) drawn as it is.
+				ImGui::BeginDisabled(!shown_view->holds_back_itself() && !view.allows(EditorRequestKind::EditRecord));
 				shown_view->draw(workspace_, *document);
 				ImGui::EndDisabled();
 			} else {

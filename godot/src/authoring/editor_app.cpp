@@ -7,6 +7,7 @@
 #include <godot_cpp/classes/scene_tree.hpp>
 #include <godot_cpp/classes/script.hpp>
 #include <godot_cpp/classes/tcp_server.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -27,6 +28,7 @@
 #include <editor/session/session_operation.h>
 #include <editor/session/view/session_view.h>
 
+#include "authoring/menu_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
 #include "authoring/viewport_device.h"
 #include "authoring/viewport_devices.h"
@@ -67,10 +69,12 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("model_preview_hit_json", "x", "y"), &EditorApp::model_preview_hit_json);
 	ClassDB::bind_method(D_METHOD("set_model_preview_options", "options"), &EditorApp::set_model_preview_options);
 	ClassDB::bind_method(D_METHOD("set_model_preview_camera", "camera"), &EditorApp::set_model_preview_camera);
+	ClassDB::bind_method(D_METHOD("get_preview_error"), &EditorApp::get_preview_error);
 	ClassDB::bind_method(D_METHOD("model_preview_drag", "id", "handle", "x", "y", "snap"), &EditorApp::model_preview_drag,
 			DEFVAL(0.0));
 	ClassDB::bind_method(D_METHOD("get_model_preview_camera"), &EditorApp::get_model_preview_camera);
 	ClassDB::bind_method(D_METHOD("get_model_preview_model"), &EditorApp::get_model_preview_model);
+	ClassDB::bind_method(D_METHOD("get_menu_preview_frame"), &EditorApp::get_menu_preview_frame);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 
@@ -147,9 +151,14 @@ void EditorApp::_ready() {
 	set_process(true);
 	// The viewports' devices render offscreen through the runtime's MenuFrame and ObjectModel
 	// (authoring/viewport_devices), drawn only by a viewport's canvas; headless runs keep them too
-	// (the MCP, the tests read what they placed).
-	devices_ = std::make_unique<opennova::editor::ViewportDeviceCache>(
-			[this](ViewportKind p_kind) { return make_viewport_device(*this, p_kind); });
+	// (the MCP, the tests read what they placed), each Preview-role kind's target given one, where the
+	// workspace gives one only to the kind the Preview window shows (its views ask for the rest as they
+	// draw). A device given up retires its SubViewport here, freed at the next frame.
+	devices_ = std::make_unique<opennova::editor::ViewportDeviceCache>([this](ViewportKind p_kind) {
+		return make_viewport_device(*this, p_kind,
+				[this](SubViewport *p_viewport) { retired_.push_back(p_viewport->get_instance_id()); });
+	});
+	devices_->set_pin_all_targets(!is_available());
 	if (is_available()) {
 #if OPENNOVA_EDITOR_UI
 		windows_->set_devices(devices_.get());
@@ -215,6 +224,7 @@ void EditorApp::_exit_tree() {
 	windows_->set_devices(nullptr);
 #endif
 	devices_.reset();
+	free_retired_();
 	if (picker_ != nullptr) {
 		picker_->queue_free();
 		picker_ = nullptr;
@@ -223,7 +233,15 @@ void EditorApp::_exit_tree() {
 	set_process(false);
 }
 
+void EditorApp::free_retired_() {
+	for (const uint64_t id : retired_)
+		if (Node *viewport = Object::cast_to<Node>(ObjectDB::get_instance(id))) viewport->queue_free();
+	retired_.clear();
+}
+
 void EditorApp::_process(double p_delta) {
+	// What the last frame gave up: its draw is done.
+	free_retired_();
 	ImGuiPassNode::_process(p_delta); // the layout pass (no-op headless): the windows raise requests
 	pump();
 	// The one model runtime-frame driver in the editor (menu_shell.gd's for the game's menus): the
@@ -486,11 +504,31 @@ const opennova::editor::DocumentBase *open_at(const opennova::editor::SessionVie
 	return nullptr;
 }
 
+// A preview tool's arguments as a SetViewport's change: `device` and `clock` (objects: the change's
+// own members, as a SetViewport takes them) as they are, every other key under `p_member` (the
+// kind's options, or its camera). False when they are no object.
+bool preview_change(const Dictionary &p_args, const char *p_member, opennova::io::JsonValue &r_change) {
+	opennova::io::JsonValue json;
+	if (!to_json(p_args, json) || !json.is_object()) return false;
+	r_change = opennova::io::JsonValue::make_object();
+	opennova::io::JsonValue member = opennova::io::JsonValue::make_object();
+	for (const opennova::io::JsonMember &entry : json.object)
+		(entry.key == "device" || entry.key == "clock" ? r_change : member).set(entry.key, entry.value);
+	if (!member.object.empty()) r_change.set(p_member, std::move(member));
+	return true;
+}
+
 } // namespace
 
 const opennova::editor::ViewportModel *EditorApp::preview_(ViewportKind p_kind) {
 	ensure_session();
-	if (devices_) devices_->sync(session_->viewports(), session_->view());
+	// The Preview's viewport of the kind given a device as a canvas asks for one (the workspace gives
+	// one only to the kind the Preview window shows), made by the sync.
+	if (devices_) {
+		const std::string &target = session_->view().documents.previews[p_kind].path;
+		if (!target.empty()) devices_->device(target, p_kind);
+		devices_->sync(session_->viewports(), session_->view());
+	}
 	const opennova::editor::SessionView &view = session_->view();
 	const std::string &path = view.documents.previews[p_kind].path;
 	// Followed now, with a device or not (one made since the sync followed already).
@@ -507,7 +545,7 @@ opennova::editor::ViewportContext EditorApp::context_(const opennova::editor::Vi
 	return opennova::editor::ViewportContext{
 		opennova::editor::ViewportInput{ view, view.documents.viewports->clock(), open_at(view, p_model.path()),
 				opennova::editor::ChangeClass::None },
-		p_model.state().width, p_model.state().height, p_snap,
+		p_model.size().width, p_model.size().height, p_snap,
 		devices_ ? devices_->held(p_model.path(), p_model.kind()) : nullptr
 	};
 }
@@ -523,10 +561,18 @@ bool EditorApp::serve_(const std::vector<EditorRequest> &p_requests) {
 }
 
 bool EditorApp::set_viewport_(ViewportKind p_kind, const opennova::io::JsonValue &p_change) {
-	if (!preview_(p_kind)) return false;
+	preview_error_ = String();
+	if (!preview_(p_kind)) {
+		preview_error_ = String("The Preview shows no ") + opennova::editor::viewport_kind_token(p_kind) + ".";
+		return false;
+	}
 	opennova::io::JsonValue change = p_change;
 	change.set("kind", opennova::io::json_string(opennova::editor::viewport_kind_token(p_kind)));
-	return serve_({ opennova::editor::request::set_viewport(std::string(), opennova::io::json_write(change)) });
+	if (serve_({ opennova::editor::request::set_viewport(std::string(), opennova::io::json_write(change)) })) return true;
+	// Why the session refused it (viewport.refused's message).
+	const opennova::editor::ActionOutcome &outcome = session_->outcome();
+	if (!outcome.findings.empty()) preview_error_ = opennova::to_gd(outcome.findings.front().message);
+	return false;
 }
 
 String EditorApp::get_menu_preview_json() {
@@ -542,16 +588,11 @@ String EditorApp::menu_preview_hit_json(double p_x, double p_y) {
 
 bool EditorApp::set_menu_preview_options(const Dictionary &p_options) {
 	ensure_session();
-	opennova::io::JsonValue json;
-	if (!to_json(p_options, json) || !json.is_object()) return false;
-	// The device's size apart from the options.
-	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue options = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue device = opennova::io::JsonValue::make_object();
-	for (const opennova::io::JsonMember &member : json.object)
-		(member.key == "width" || member.key == "height" ? device : options).set(member.key, member.value);
-	if (!options.object.empty()) change.set("options", std::move(options));
-	if (!device.object.empty()) change.set("device", std::move(device));
+	opennova::io::JsonValue change;
+	if (!preview_change(p_options, "options", change)) {
+		preview_error_ = "The options are an object.";
+		return false;
+	}
 	return set_viewport_(ViewportKind::Menu, change);
 }
 
@@ -594,34 +635,21 @@ String EditorApp::model_preview_hit_json(double p_x, double p_y) {
 
 bool EditorApp::set_model_preview_options(const Dictionary &p_options) {
 	ensure_session();
-	opennova::io::JsonValue json;
-	if (!to_json(p_options, json) || !json.is_object()) return false;
-	// The preview clock's members apart from the options: playing, time_ms, and the clip's ticks.
-	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue options = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue clock = opennova::io::JsonValue::make_object();
-	for (const opennova::io::JsonMember &member : json.object) {
-		if (member.key == "playing" || member.key == "time_ms") clock.set(member.key, member.value);
-		else if (member.key == "clip_ticks") clock.set("ticks", member.value);
-		else options.set(member.key, member.value);
+	opennova::io::JsonValue change;
+	if (!preview_change(p_options, "options", change)) {
+		preview_error_ = "The options are an object.";
+		return false;
 	}
-	if (!options.object.empty()) change.set("options", std::move(options));
-	if (!clock.object.empty()) change.set("clock", std::move(clock));
 	return set_viewport_(ViewportKind::Model, change);
 }
 
 bool EditorApp::set_model_preview_camera(const Dictionary &p_camera) {
 	ensure_session();
-	opennova::io::JsonValue json;
-	if (!to_json(p_camera, json) || !json.is_object()) return false;
-	// The device's size apart from the camera.
-	opennova::io::JsonValue change = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue camera = opennova::io::JsonValue::make_object();
-	opennova::io::JsonValue device = opennova::io::JsonValue::make_object();
-	for (const opennova::io::JsonMember &member : json.object)
-		(member.key == "width" || member.key == "height" ? device : camera).set(member.key, member.value);
-	if (!camera.object.empty()) change.set("camera", std::move(camera));
-	if (!device.object.empty()) change.set("device", std::move(device));
+	opennova::io::JsonValue change;
+	if (!preview_change(p_camera, "camera", change)) {
+		preview_error_ = "The camera is an object.";
+		return false;
+	}
 	return set_viewport_(ViewportKind::Model, change);
 }
 
@@ -653,6 +681,13 @@ ObjectModel *EditorApp::get_model_preview_model() const {
 	const std::string &path = session_->view().documents.previews[ViewportKind::Model].path;
 	auto *device = static_cast<ViewportDevice *>(devices_->held(path, ViewportKind::Model));
 	return device ? static_cast<ModelViewportApplier &>(device->applier()).object_model() : nullptr;
+}
+
+MenuFrame *EditorApp::get_menu_preview_frame() const {
+	if (!session_ || !devices_) return nullptr;
+	const std::string &path = session_->view().documents.previews[ViewportKind::Menu].path;
+	auto *device = static_cast<ViewportDevice *>(devices_->held(path, ViewportKind::Menu));
+	return device ? static_cast<MenuViewportApplier &>(device->applier()).frame() : nullptr;
 }
 
 void EditorApp::_notification(int p_what) {

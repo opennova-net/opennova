@@ -107,6 +107,10 @@ void ModelCanvas::input(
 	if (!frame.model)
 		return;
 	const ModelViewport &model = *frame.model;
+	// The camera this frame moves to, an orbit or a pan then the wheel's dolly on it: one SetViewport
+	// (two would each start from the camera as the frame began, the second undoing the first).
+	OrbitCamera camera = model.camera();
+	bool camera_moved = false;
 	if (in.pressed) {
 		gesture_.press(subject_of(frame), in.screen, out);
 		grab_ = model_canvas_grab(frame, in, under);
@@ -136,21 +140,20 @@ void ModelCanvas::input(
 				out.request(request::edit_record(gesture_.path(), std::move(edits)));
 				gesture_.sent();
 			}
-		} else if (gesture_.dragging() && !grab_.handle) {
-			OrbitCamera camera = model.camera();
+		} else if (gesture_.dragging() && !grab_.handle && (in.delta.x != 0.0f || in.delta.y != 0.0f)) {
 			if (grab_.pan)
 				camera.pan(in.delta.x, in.delta.y, in.width);
 			else
 				camera.orbit(in.delta.x, in.delta.y);
-			if (in.delta.x != 0.0f || in.delta.y != 0.0f)
-				set_camera(frame, camera, out);
+			camera_moved = true;
 		}
 	}
 	if (in.hovered && in.wheel != 0.0f) {
-		OrbitCamera camera = model.camera();
 		camera.dolly(std::pow(kModelWheelDolly, in.wheel));
-		set_camera(frame, camera, out);
+		camera_moved = true;
 	}
+	if (camera_moved)
+		set_camera(frame, camera, out);
 	if (in.double_clicked || (in.keyboard.focused && in.keyboard.frame))
 		frame_selected(frame, in.width, in.height, out);
 }

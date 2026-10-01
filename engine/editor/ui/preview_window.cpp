@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <string>
 
-#include <editor/assets/asset_kinds.h>
 #include <editor/model/document_base.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
@@ -26,22 +25,6 @@ const DocumentBase *open_document(const SessionView &view, const std::string &pa
 }
 
 } // namespace
-
-ViewportKind preview_kind(const SessionView &view, ViewportKind last) {
-	ViewportKind kind = last;
-	if (const DocumentBase *active = open_document(view, view.documents.active)) {
-		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
-		if (fed != ViewportKind::kCount) kind = fed;
-	}
-	// What each has to show: the view keeps a kind's target until its document closes.
-	if (kind != ViewportKind::kCount && !view.documents.previews[kind].path.empty()) return kind;
-	for (size_t i = 0; i < kViewportKindCount; ++i) {
-		const auto other = static_cast<ViewportKind>(i);
-		if (viewport_kind_row(other).role == ViewportRole::Preview && !view.documents.previews[other].path.empty())
-			return other;
-	}
-	return ViewportKind::kCount;
-}
 
 PreviewWindow::PreviewWindow(Workspace &workspace) : workspace_(workspace) {
 	open = true;
@@ -77,12 +60,11 @@ void PreviewWindow::prune_(const SessionView &view) {
 void PreviewWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
 	prune_(view);
-	const ViewportKind kind = preview_kind(view, shown_);
+	const ViewportKind kind = view.documents.preview_shown;
 	if (kind == ViewportKind::kCount) {
 		ui_kit::empty_state("Open a menu, a model or an animation to preview it.");
 		return;
 	}
-	shown_ = kind;
 	const std::string &path = view.documents.previews[kind].path;
 	header_(view, kind, path);
 	// Each viewport in its own id scope: they share labels (the canvas, Play), never an item.

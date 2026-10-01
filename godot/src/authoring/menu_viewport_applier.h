@@ -21,6 +21,9 @@ namespace godot {
 class MenuViewportApplier final : public ViewportApplier {
 public:
 	explicit MenuViewportApplier(SubViewport &viewport);
+	// The frame lets go of the screen it borrowed (it may outlive the applier until its SubViewport
+	// is freed).
+	~MenuViewportApplier() override;
 
 	void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) override;
 	void update(const opennova::editor::ViewportModel &model) override;
@@ -37,7 +40,10 @@ private:
 	void apply_options_(const opennova::editor::ViewportModel &model);
 
 	MenuFrame *frame_ = nullptr;
-	// The files the frame reads through (it borrows them until its next configure).
+	uint64_t frame_id_ = 0; // the frame's instance, checked as the applier goes
+	// The menu image and the files the frame reads through, held while the frame borrows them (until
+	// its next configure, or its clear): the viewport may make its image again, or go, first.
+	std::shared_ptr<const opennova::mnu::Document> image_;
 	std::shared_ptr<const opennova::editor::ProjectAssetSource> assets_;
 };
 

@@ -14,9 +14,12 @@ struct SessionView;
 
 // What a device reports each pump (ADR 0046 S13 V5): the files its picture read, each with its
 // stamp then (a model's textures, a flipbook's frames, read as they are first drawn too), so the
-// viewport makes its picture again when one moves; and where its own compile placed each widget of
-// a menu's screen (in the compiled screen's pre-order, design units: the Shell's MenuFrame beside
-// the viewport's headless compile, which the hit tests and the handles read).
+// viewport makes its picture again when one moves; where its own compile placed each widget of a
+// menu's screen (in the compiled screen's pre-order, design units: the Shell's MenuFrame beside the
+// viewport's headless compile, which the hit tests and the handles read); and the size its picture
+// is now, in pixels, with whether a canvas drew it this frame at a size of the canvas's own (a
+// design picture fitted or scaled, a picture that fills the canvas: the viewport's device size then
+// set by no SetViewport) rather than the viewport's.
 struct ViewportDeviceReport {
 	struct Rect {
 		bool placed = false; // the widget has a rect
@@ -27,6 +30,9 @@ struct ViewportDeviceReport {
 	};
 	FileStamps files;
 	std::vector<Rect> rects;
+	int width = 0;
+	int height = 0;
+	bool canvas_sized = false;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas
@@ -44,6 +50,9 @@ struct ViewportPicture {
 	float clip_top = 0.0f;
 	float clip_right = 0.0f;
 	float clip_bottom = 0.0f;
+	// The canvas draws the picture at a size of its own (a design picture fitted or scaled, a picture
+	// that fills it), not at the viewport's device size (a menu's Device size zoom).
+	bool canvas_sized = true;
 };
 
 // A device (ADR 0046 S13 V5): what draws one viewport's picture, the Shell's (an offscreen

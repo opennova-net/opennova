@@ -963,6 +963,8 @@ struct LayoutPreview {
 		v = menu_view(document);
 		v.documents.previews[ViewportKind::Menu].path = document->path();
 		v.documents.previews[ViewportKind::Menu].part = screen.id;
+		// The kind the Preview window shows, as the session derives it with its targets.
+		v.documents.preview_shown = preview_kind(v.documents, v.documents.preview_shown);
 		select_in(v, {screen.id, kScreen, 0});
 		shell.bind(v);
 		ui.windows.set_view(&v);
@@ -1194,6 +1196,7 @@ void test_preview_gestures_end() {
 		                      : std::vector<std::shared_ptr<const DocumentBase>>{document};
 		v.documents.previews[ViewportKind::Model].path = on ? model->path() : std::string();
 		v.documents.active = on ? model->path() : document->path();
+		v.documents.preview_shown = preview_kind(v.documents, v.documents.preview_shown);
 		v.revisions.touch(ViewConcern::Documents);
 		v.revisions.touch(ViewConcern::Selection);
 		ui.frames(2);

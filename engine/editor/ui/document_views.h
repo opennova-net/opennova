@@ -63,6 +63,10 @@ public:
 	// After every frame's windows (the workspace's frame bracket): a view with a viewport whose canvas
 	// did not draw this frame (its tab hidden, the window closed) ends that canvas's gesture.
 	virtual void end_frame(Workspace &workspace) { (void)workspace; }
+	// Whether the view holds back its own controls while an operation holds the documents (S13 A3):
+	// a Main-role view does, its outline column held and its canvas live (its camera is no document,
+	// and its canvas holds back its own edits); the Document window holds back any other view whole.
+	virtual bool holds_back_itself() const { return false; }
 	// An outline's model (its row's OutlineSpec): its lines, its filter, its order and what is open,
 	// which its filter box, its sort and its arrows read and write; null for a view of its own.
 	virtual OutlineModel *outline() { return nullptr; }

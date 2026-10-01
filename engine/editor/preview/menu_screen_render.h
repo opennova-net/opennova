@@ -63,8 +63,9 @@ public:
 	// The document revision the render read.
 	uint64_t revision() const { return revision_; }
 
-	// The menu image it compiled and its screen (null unless ready): what a device configures.
-	const mnu::Document *image() const { return image_.get(); }
+	// The menu image it compiled and its screen (null unless ready): what a device configures, which
+	// holds the image while its frame borrows the screen (the next configure here lets this one go).
+	const std::shared_ptr<const mnu::Document> &image() const { return image_; }
 	const mnu::Screen *screen() const { return screen_; }
 	const menu::MenuFrameCompiler &compiler() const { return compiler_; }
 	const menu::MenuFrameState &state() const { return state_; }

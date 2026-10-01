@@ -118,6 +118,10 @@ ViewportModel::ViewportModel(ViewportKind kind, std::string path, ViewportState 
 
 ViewportModel::~ViewportModel() = default;
 
+ViewportState ViewportModel::size() const {
+	return attached_ && shown_size_.width > 0 && shown_size_.height > 0 ? shown_size_ : state_;
+}
+
 bool ViewportModel::current(const ViewportInput &input) const {
 	return status() == ViewportStatus::Ready && shows_document_ && input.document &&
 			input.document->identity() == shown_identity_ &&
@@ -167,7 +171,7 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 			ViewportKind named = ViewportKind::kCount;
 			if (!member.value.is_string() || !viewport_kind_from_token(member.value.string, named) ||
 					named != kind_) {
-				error = std::string("\"kind\" names this viewport's kind, \"") + row().token + "\".";
+				error = std::string("\"kind\" names this viewport's kind, \"") + viewport_kind_token(kind_) + "\".";
 				return false;
 			}
 		} else if (member.key == "device") {
@@ -179,6 +183,11 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 			return false;
 		}
 	}
+	if (common.device && canvas_sized_) {
+		error = "device: a canvas draws this viewport at a size of its own; the device's size is set "
+				"only where no canvas sizes the picture (a headless editor, a menu at its Device size).";
+		return false;
+	}
 	if (!check_(json, error)) return false;
 	if (common.device) {
 		state_.width = int(common.width);
@@ -189,6 +198,7 @@ bool ViewportModel::apply(const io::JsonValue &json, PreviewClock &clock, std::s
 	if (common.time_ms >= 0) clock.seek_ms(uint32_t(common.time_ms));
 	if (common.ticks >= 0) clock.seek_ticks(int32_t(common.ticks));
 	apply_(json, clock);
+	++state_serial_;
 	return true;
 }
 
@@ -216,9 +226,13 @@ void ViewportModel::detach() {
 	attached_ = false;
 	holds_ = false;
 	pending_ = ViewportAction::Keep;
+	shown_size_ = ViewportState();
+	canvas_sized_ = false;
 }
 
 void ViewportModel::device_report(const ViewportDeviceReport &report) {
+	shown_size_ = ViewportState{ report.width, report.height };
+	canvas_sized_ = report.canvas_sized;
 	report_(report);
 }
 

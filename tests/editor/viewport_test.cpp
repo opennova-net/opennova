@@ -254,6 +254,34 @@ static int test_actions() {
 	from = device->taken.size();
 	devices.sync(session);
 	TEST_EXPECT(device->since(from).empty() && shown->state().width == 640 && shown->state().height == 480);
+	TEST_EXPECT(shown->size().width == 640 && shown->size().height == 480 && !shown->canvas_sized());
+	// A canvas drawing it at a size of its own (a picture fitted to the room it has): the device
+	// reports that size, and a SetViewport of the device's size is refused, naming why; a pump with
+	// no canvas drawing it, it is the state's size again and the SetViewport applies.
+	ViewportPicture fitted;
+	fitted.width = 720;
+	fitted.height = 540;
+	fitted.canvas_sized = true;
+	device->draw(fitted);
+	devices.sync(session);
+	TEST_EXPECT(shown->canvas_sized() && shown->size().width == 720 && shown->size().height == 540 &&
+			shown->state().width == 640);
+	session.handle(request::set_viewport(path, R"({"device": {"width": 1024, "height": 768}})"));
+	TEST_EXPECT(!session.outcome().done() && shown->state().width == 640 && !session.outcome().findings.empty() &&
+			session.outcome().findings.front().message.find("canvas") != std::string::npos);
+	// Drawn at the state's size (a menu at its Device size): not a canvas's own size.
+	fitted.width = 640;
+	fitted.height = 480;
+	fitted.canvas_sized = false;
+	device->draw(fitted);
+	devices.sync(session);
+	TEST_EXPECT(!shown->canvas_sized() && shown->size().width == 640);
+	session.handle(request::set_viewport(path, R"({"device": {"width": 1024, "height": 768}})"));
+	TEST_EXPECT(session.outcome().done() && shown->state().width == 1024);
+	session.handle(request::set_viewport(path, R"({"device": {"width": 640, "height": 480}})"));
+	TEST_EXPECT(session.outcome().done());
+	devices.sync(session);
+	TEST_EXPECT(shown->size().width == 640 && shown->size().height == 480 && !shown->canvas_sized());
 	// Its options: the screen configured again; the same options again, nothing.
 	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": true}})"));
 	from = device->taken.size();
@@ -502,7 +530,201 @@ static int test_device_cache() {
 	devices.sync(session);
 	TEST_EXPECT(!session.viewports().find(paths[0], ViewportKind::Model) && !devices.held(paths[0], ViewportKind::Model) &&
 			devices.cache.size() == 3);
+
+	// Opened again and synced, closed and opened again between two syncs (a viewport made again, at
+	// the defaults, attached to no device): the device of the one that went goes, and the one made
+	// again is given a device of its own, which makes its picture.
+	session.handle(request::open_document(paths[0]));
+	devices.sync(session);
+	const FakeDevice *reopened = devices.held(paths[0], ViewportKind::Model);
+	TEST_EXPECT(reopened && session.viewports().find(paths[0], ViewportKind::Model)->attached());
+	session.handle(request::close_document(paths[0]));
+	session.handle(request::open_document(paths[0]));
+	const ViewportModel *again = session.viewports().find(paths[0], ViewportKind::Model);
+	TEST_EXPECT(again && !again->attached());
+	devices.sync(session);
+	TEST_EXPECT(again && again->attached() && again->status() == ViewportStatus::Ready && again->builds() == 1);
+	TEST_EXPECT(devices.held(paths[0], ViewportKind::Model) == devices.made.back() &&
+			devices.made.back()->taken == (Actions{ ViewportAction::Rebuild }));
 	std::printf("test_device_cache passed\n");
+	return 0;
+}
+
+// The cache never gives up a device used in the round it needs one (a sync and the asks since the
+// one before): one a view asked for since the last sync is kept, the least recently used of the
+// rest given up (the second here, the first bumped); five viewports a view asks for every frame keep
+// four devices and the fifth waits, rather than thrashing. A workspace's cache pins the Preview's
+// target of the kind the Preview window shows alone (the menu's while a menu is shown), a headless
+// one every kind's.
+static int test_cache_rounds() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_rounds");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Rounds"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::vector<uint8_t> armory = test_io::read_file(synth("armory.3di"));
+	std::vector<std::string> paths;
+	for (int i = 0; i < 5; ++i) {
+		paths.push_back("models/m" + std::to_string(i) + ".3di");
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/" + paths.back(), armory));
+	}
+	session.handle(request::rescan());
+	session.run_operations();
+	for (size_t i = 0; i < 4; ++i) {
+		session.handle(request::open_document(paths[i]));
+		devices.sync(session);
+	}
+	TEST_EXPECT(devices.cache.size() == 4);
+	// m0, the least recently used, asked for by a view: kept; m4 opened takes m1's device.
+	FakeDevice *first = devices.held(paths[0], ViewportKind::Model);
+	TEST_EXPECT(first && devices.cache.device(paths[0], ViewportKind::Model) == first);
+	session.handle(request::open_document(paths[4]));
+	devices.sync(session);
+	TEST_EXPECT(devices.held(paths[0], ViewportKind::Model) == first && !devices.held(paths[1], ViewportKind::Model) &&
+			devices.held(paths[4], ViewportKind::Model) && devices.cache.size() == 4);
+	TEST_EXPECT(!session.viewports().find(paths[1], ViewportKind::Model)->attached());
+
+	// Five asked for every round: four keep their devices, the fifth waits; nothing made again.
+	const size_t made = devices.made.size();
+	for (int round = 0; round < 3; ++round) {
+		for (const std::string &path : paths) devices.cache.device(path, ViewportKind::Model);
+		devices.sync(session);
+	}
+	TEST_EXPECT(devices.made.size() == made && devices.cache.size() == 4 && !devices.held(paths[1], ViewportKind::Model));
+
+	// A workspace's cache (set_pin_all_targets(false)), over a project of its own: the Preview window
+	// showing the menu, its target given a device and the model's not; showing the model, the model's
+	// too (the menu's kept). A headless cache (the default) gives both kinds' targets one.
+	editor_test::TempProjectDir pin_dir("opennova_editor_viewport_pins");
+	ProjectSession pins(platform, preferences);
+	const SessionView &pinned = pins.view();
+	pins.handle(request::new_project(pin_dir.file("project"), "Pins"));
+	pins.run_operations();
+	editor_test::create_missing_files(pins);
+	TEST_EXPECT(editor_test::write_bytes(pinned.project.root + "/models/armory.3di", armory));
+	pins.handle(request::rescan());
+	pins.run_operations();
+	pins.handle(request::open_document("models/armory.3di"));
+	pins.handle(request::open_document("main.mnu"));
+	const Document *menu_document = pins.document_for("main.mnu");
+	TEST_EXPECT(menu_document != nullptr);
+	if (!menu_document) return 1;
+	const std::string menu = menu_document->path(), model = "models/armory.3di";
+	TEST_EXPECT(pinned.documents.preview_shown == ViewportKind::Menu &&
+			pinned.documents.previews[ViewportKind::Model].path == model);
+	{
+		FakeDevices shown;
+		shown.cache.set_pin_all_targets(false);
+		shown.sync(pins);
+		TEST_EXPECT(shown.held(menu, ViewportKind::Menu) && !shown.held(model, ViewportKind::Model) && shown.cache.size() == 1);
+		TEST_EXPECT(!pins.viewports().find(model, ViewportKind::Model)->attached());
+		pins.handle(request::open_document(model));
+		TEST_EXPECT(pinned.documents.preview_shown == ViewportKind::Model);
+		shown.sync(pins);
+		TEST_EXPECT(shown.held(model, ViewportKind::Model) && shown.held(menu, ViewportKind::Menu) && shown.cache.size() == 2);
+	}
+	pins.handle(request::open_document("main.mnu"));
+	FakeDevices headless;
+	headless.sync(pins);
+	TEST_EXPECT(headless.held(model, ViewportKind::Model) && headless.held(menu, ViewportKind::Menu));
+	std::printf("test_cache_rounds passed\n");
+	return 0;
+}
+
+// A viewport's state moves by a SetViewport, or by one of the three things its follow derives (ADR
+// 0046 S13 V5's derived changes): a menu's held window following the selection, a model framed
+// when another is shown, the clock sought for a new clip or a selected event (model_viewport_test's
+// test_animation pins the third). Each moves the view's Viewports concern, as a SetViewport does
+// (a refused one moves nothing); syncs with nothing asked move no viewport's state, the clock or
+// the concern.
+static int test_state_moves() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_state");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	FakeDevices devices;
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "State"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	const auto moves = [&]() { return view.revisions.of(ViewConcern::Viewports); };
+
+	// The menu: a SetViewport moves the concern, a refused one does not; the held window follows the
+	// selection (derived), moving it at the sync that follows.
+	session.handle(request::open_document("main.mnu"));
+	Document *menu = session.document_for("main.mnu");
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	devices.sync(session);
+	const NodeAddress title = named(*menu, "TITLE"), exit = named(*menu, "EXIT");
+	uint64_t at = moves();
+	session.handle(request::set_viewport(menu->path(), R"({"options": {"force_state": "mouseover", "force_id": )" +
+			std::to_string(exit.child) + "}}"));
+	TEST_EXPECT(session.outcome().done() && moves() == at + 1);
+	at = moves();
+	session.handle(request::set_viewport(menu->path(), R"({"options": {"force_state": "sideways"}})"));
+	TEST_EXPECT(!session.outcome().done() && moves() == at);
+	devices.sync(session);
+	at = moves();
+	session.handle(request::select_record(menu->path(), title));
+	TEST_EXPECT(moves() == at);
+	devices.sync(session);
+	const auto *shown_menu = viewport_of<MenuViewport>(session, menu->path(), ViewportKind::Menu);
+	TEST_EXPECT(shown_menu && shown_menu->options().force_window == title.child && moves() == at + 1);
+
+	// The model: framed when it is first shown (derived).
+	session.handle(request::open_document("models/armory.3di"));
+	at = moves();
+	devices.sync(session);
+	const auto *model = viewport_of<ModelViewport>(session, "models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(model && model->status() == ViewportStatus::Ready && moves() > at);
+	if (!model) return 1;
+
+	// Nothing asked: syncs and polls move no viewport's state, the clock or the concern.
+	devices.sync(session);
+	struct Seen {
+		std::string menu_options, model_options, camera;
+		int width = 0, height = 0;
+		bool playing = false;
+		uint32_t ms = 0;
+		int32_t ticks = 0;
+		double rate = 0.0;
+		uint64_t moved = 0;
+		bool operator==(const Seen &o) const {
+			return menu_options == o.menu_options && model_options == o.model_options && camera == o.camera &&
+					width == o.width && height == o.height && playing == o.playing && ms == o.ms &&
+					ticks == o.ticks && rate == o.rate && moved == o.moved;
+		}
+	};
+	const auto seen = [&]() {
+		Seen out;
+		out.menu_options = opennova::io::json_write(shown_menu->options_json());
+		out.model_options = opennova::io::json_write(model->options_json());
+		out.camera = opennova::io::json_write(model->camera_json());
+		out.width = model->state().width;
+		out.height = model->state().height;
+		const PreviewClock &clock = session.viewports().clock();
+		out.playing = clock.playing();
+		out.ms = clock.ms();
+		out.ticks = clock.ticks();
+		out.rate = clock.rate();
+		out.moved = moves();
+		return out;
+	};
+	const Seen before = seen();
+	for (int i = 0; i < 3; ++i) {
+		session.poll();
+		devices.sync(session);
+	}
+	TEST_EXPECT(seen() == before);
+	std::printf("test_state_moves passed\n");
 	return 0;
 }
 
@@ -528,8 +750,17 @@ static int test_envelope() {
 	const JsonValue whole = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
 	for (const char *key : { "kind", "path", "as_saved", "status", "reason", "message", "detail", "revision",
 				 "shown_revision", "current", "builds", "units", "device", "options", "camera", "clock", "body",
-				 "items", "notes", "count", "offset", "next_offset", "note_count" })
+				 "items", "notes", "count", "offset", "next_offset", "note_count", "view_revision" })
 		TEST_EXPECT(whole.get(key) != nullptr);
+	// Stamped with the view's clock at which what it reads last moved: a SetViewport moves it.
+	TEST_EXPECT(whole.get_number("view_revision", -1) == double(view.revisions.stamp_of(kViewportConcerns)) &&
+			whole.get_number("view_revision", 0) > 0.0);
+	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": true}})"));
+	const JsonValue stamped = viewport_to_json(view, menu, ViewportKind::Menu, JsonPage());
+	TEST_EXPECT(stamped.get_number("view_revision", 0) > whole.get_number("view_revision", 0) &&
+			stamped.get_number("view_revision", 0) == double(view.revisions.stamp(ViewConcern::Viewports)));
+	session.handle(request::set_viewport(path, R"({"options": {"show_hidden": false}})"));
+	devices.sync(session);
 	TEST_EXPECT(whole.get_string("kind", "") == "menu" && whole.get_string("path", "") == path &&
 			whole.get_bool("as_saved", false) && whole.get_string("status", "") == "ready" &&
 			whole.get_string("reason", "") == "ready" && whole.get_string("message", "x").empty());
@@ -538,7 +769,7 @@ static int test_envelope() {
 	TEST_EXPECT(whole.get_number("revision", -1) == whole.get_number("shown_revision", -2));
 	const JsonValue &device = *whole.get("device");
 	TEST_EXPECT(device.get_bool("attached", false) && device.get_number("width", 0) == 800 &&
-			device.get_number("height", 0) == 600);
+			device.get_number("height", 0) == 600 && !device.get_bool("canvas_sized", true));
 	const JsonValue &timing = *whole.get("clock");
 	TEST_EXPECT(timing.get_bool("playing", false) && timing.get_number("rate", 0) == 1.0 &&
 			timing.get_number("time_ms", -1) == 0.0 && timing.get_number("ticks", -1) == 0.0);
@@ -648,6 +879,16 @@ static int test_requests() {
 	// A change that is no object is not read at all.
 	answer = wire(R"({"kind": "set_viewport", "path": "MAIN_PATH", "viewport": 3})");
 	TEST_EXPECT(!answer.get_bool("ok", true));
+	// A viewport the change is for is made only once the change applies: a refused one makes none.
+	{
+		Viewports fresh;
+		std::string error;
+		TEST_EXPECT(!fresh.set(session.view(), path, parse(R"({"kind": "menu", "options": {"bogus": 1}})"), error) &&
+				!error.empty() && fresh.size() == 0);
+		error.clear();
+		TEST_EXPECT(fresh.set(session.view(), path, parse(R"({"kind": "menu", "options": {"show_hidden": true}})"), error) &&
+				error.empty() && fresh.size() == 1 && fresh.find(path, ViewportKind::Menu));
+	}
 
 	// The MCP's drag, planned by the viewport and served: one undo step.
 	const NodeAddress title = named(*menu, "TITLE"), exit = named(*menu, "EXIT");
@@ -784,7 +1025,7 @@ static int test_gestures() {
 		const auto *model = viewport_of<ModelViewport>(session, "models/armory.3di", ViewportKind::Model);
 		for (const ModelOverlay &overlay : model->overlays(session.viewports().clock()))
 			if (overlay.kind == ModelOverlayKind::UserPoint && overlay.index == index)
-				return model->camera().project(overlay.at, model->state().width, model->state().height, x, y);
+				return model->camera().project(overlay.at, model->size().width, model->size().height, x, y);
 		return false;
 	};
 	for (const bool both : { false, true }) {
@@ -811,6 +1052,36 @@ static int test_gestures() {
 		session.handle(request::undo(document->path()));
 		TEST_EXPECT(place(point) == was && place(second) == second_was && !document->dirty() && !document->can_undo());
 	}
+	// The MCP's drag (the viewport's planner) of a selected marker's place moves the other selected
+	// markers as far, in one step, as the canvas's does; of a marker not selected, it alone.
+	for (const bool selected : { true, false }) {
+		const std::vector<double> was = place(point), second_was = place(second);
+		session.handle(selected ? request::select_record(document->path(), point, SelectMode::Replace, { second, point })
+								: request::select_record(document->path(), second));
+		devices.sync(session);
+		const auto *model = viewport_of<ModelViewport>(session, "models/armory.3di", ViewportKind::Model);
+		float x = 0.0f, y = 0.0f;
+		TEST_EXPECT(model && marker_pixel(0, x, y));
+		if (!model) return 1;
+		ViewportDrag drag;
+		drag.id = point.child;
+		drag.handle = "place";
+		drag.by = false;
+		drag.x = x + 24.0f;
+		drag.y = y - 12.0f;
+		editor_test::Gathered planned;
+		std::string error;
+		TEST_EXPECT(model->drag(editor_test::viewport_context(session, *model), drag, planned, error));
+		TEST_EXPECT(editor_test::serve(session, planned.requests));
+		TEST_EXPECT(place(point) != was && (selected ? place(second) != second_was : place(second) == second_was));
+		if (selected) {
+			const std::vector<double> moved = place(point), second_moved = place(second);
+			for (size_t i = 0; i < 3; ++i)
+				TEST_EXPECT(std::fabs((moved[i] - was[i]) - (second_moved[i] - second_was[i])) < 1e-3);
+		}
+		session.handle(request::undo(document->path()));
+		TEST_EXPECT(place(point) == was && place(second) == second_was && !document->dirty() && !document->can_undo());
+	}
 	std::printf("test_gestures passed\n");
 	return 0;
 }
@@ -820,6 +1091,8 @@ int main() {
 	TEST_EXPECT(test_clock() == 0);
 	TEST_EXPECT(test_two_menus() == 0);
 	TEST_EXPECT(test_device_cache() == 0);
+	TEST_EXPECT(test_cache_rounds() == 0);
+	TEST_EXPECT(test_state_moves() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_requests() == 0);
 	TEST_EXPECT(test_gestures() == 0);

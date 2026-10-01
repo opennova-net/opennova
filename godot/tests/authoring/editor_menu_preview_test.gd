@@ -10,7 +10,9 @@ extends GutTest
 ## (the open documents stand in for their files); the options hold a window in a state; a
 ## drag of a window's handles (S9k1) writes its POSITION on the grid as one undo step;
 ## several selected windows move, align and change their drawing order in one undo step
-## each (S9k2).
+## each (S9k2). A TABLE draws through the device (its rows' cells, a SUBST image, a clip rect)
+## where the viewport's own compile places it; a device given up (its menu closed) retires its
+## SubViewport, freed at the next frame, and the menu opened again gets a device of its own.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -52,6 +54,51 @@ func _widget(preview: Dictionary, name: String) -> Dictionary:
 		if widget is Dictionary and String(widget.get("name", "")) == name:
 			return widget as Dictionary
 	return {}
+
+
+## A screen with a TABLE (the table layer the menu frame compiles since the trunk's third master
+## sync): two columns, the first a BITMAP_DRAW column whose "1" cells draw chk.tga (SUBST FILE).
+const TABLE_MENU := ("<SCREEN>\n\t<NAME>TBL</NAME>\n\t<WINDOW type=\"window\" name=\"ROOT\">\n"
+		+ "\t\t<POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>\n"
+		+ "\t\t<FONT><NAME>%DEF_FONTNAME_LG%</NAME><DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG></FONT>\n"
+		+ "\t\t<APPEARANCE type=\"color\" state=\"default\">FF203040</APPEARANCE>\n"
+		+ "\t\t<WINDOW type=\"table\" name=\"LIST\">\n"
+		+ "\t\t\t<POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>400</RIGHT><BOTTOM>300</BOTTOM></POSITION>\n"
+		+ "\t\t\t<APPEARANCE type=\"color\" state=\"default\">FF101010</APPEARANCE>\n"
+		+ "\t\t\t<COLUMN count=\"2\" spacing=\"0\">\n"
+		+ "\t\t\t\t<HEADER column=\"0\" width=\"60\">Pick</HEADER>\n"
+		+ "\t\t\t\t<HEADER column=\"1\" width=\"200\">Name</HEADER>\n"
+		+ "\t\t\t\t<BODY column=\"0\" BITMAP_DRAW></BODY>\n"
+		+ "\t\t\t\t<BODY column=\"1\"></BODY>\n"
+		+ "\t\t\t\t<SUBST column=\"0\" value=\"1\" FILE>chk.tga</SUBST>\n"
+		+ "\t\t\t</COLUMN>\n"
+		+ "\t\t\t<ITEMS><APPEARANCE type=\"color\" state=\"selected\">FF336699</APPEARANCE></ITEMS>\n"
+		+ "\t\t\t<MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>\n"
+		+ "\t\t</WINDOW>\n\t</WINDOW>\n</SCREEN>\n")
+
+
+func _write(path: String, bytes: PackedByteArray) -> void:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	assert_not_null(file, "wrote %s" % path)
+	if file != null:
+		file.store_buffer(bytes)
+		file.close()
+
+
+## An uncompressed 32-bit TGA of `size` x `size`, top-left first, one colour.
+func _tga(size: int) -> PackedByteArray:
+	var bytes := PackedByteArray()
+	bytes.resize(18)
+	bytes[2] = 2
+	bytes[12] = size & 0xFF
+	bytes[13] = (size >> 8) & 0xFF
+	bytes[14] = size & 0xFF
+	bytes[15] = (size >> 8) & 0xFF
+	bytes[16] = 32
+	bytes[17] = 0x28
+	for i in size * size:
+		bytes.append_array(PackedByteArray([40, 200, 255, 255]))
+	return bytes
 
 
 func _string_record(table: String, key: String) -> int:
@@ -190,6 +237,15 @@ func test_preview_follows_the_menu_its_tables_and_its_style() -> void:
 	assert_true(bool(options.get("show_hidden", false)))
 	assert_false(_app.set_menu_preview_options({"force_state": "sideways"}))
 	assert_false(_app.set_menu_preview_options({"bogus": 1}))
+	# The device's size, an object (headless: no canvas sizes it); flat width and height are no option.
+	assert_true(_app.set_menu_preview_options({"device": {"width": 1024, "height": 768}}))
+	var device: Dictionary = _preview().get("device", {})
+	assert_eq(int(device.get("width", 0)), 1024, str(device))
+	assert_eq(int(device.get("height", 0)), 768)
+	assert_false(bool(device.get("canvas_sized", true)))
+	assert_false(_app.set_menu_preview_options({"width": 800}))
+	assert_true(String(_app.get_preview_error()).contains("width"), String(_app.get_preview_error()))
+	assert_true(_app.set_menu_preview_options({"device": {"width": 800, "height": 600}}))
 
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
@@ -253,6 +309,87 @@ func test_a_drag_moves_a_window_on_the_grid() -> void:
 	_seam.close_project()
 	_seam.resolve_unsaved(1) # Discard
 	assert_eq(String(_preview().get("reason", "")), "no_project")
+
+
+## S13 V5 (the review): a TABLE through the device, after the trunk's third master sync made the
+## table layer the menu frame's (MenuTableRow cells, SUBST images, a widget's clip rect): the device's
+## frame draws the screen (quads, a textured one more for the SUBST image a row's "1" cell names,
+## with the rows as a shell hands them and a clip rect on the table), and places the table where the
+## viewport's own headless compile does.
+func test_a_table_draws_through_the_device() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor preview table %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Table Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("table.mnu"), TABLE_MENU.to_utf8_buffer())
+	_write(root.path_join("chk.tga"), _tga(16))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
+	assert_true(_seam.open_document("table.mnu"))
+	var table: int = _seam.find_record("LIST")
+	assert_gt(table, 0)
+	assert_true(_seam.select_record(table))
+	var preview := _preview()
+	assert_eq(String(preview.get("status", "")), "ready", str(preview))
+	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "TBL")
+	var frame: Object = _app.get_menu_preview_frame()
+	assert_not_null(frame, "the device's frame")
+	if frame == null:
+		return
+	var index: int = frame.widget_index("LIST")
+	assert_true(index >= 0, "the table among the frame's widgets")
+	var drawn = frame.get_draw_list_stats()
+	assert_gt(drawn.quads, 0, "the device draws the screen")
+	assert_gt(drawn.widgets_drawn, 1, "the root and the table")
+	# Its rows as a shell hands them (CTableWnd_AddRow): the "1" cell draws the SUBST image; a clip
+	# rect on the table (CWnd_SetClipRect) keeps its picture.
+	frame.set_widget_table_cells(index, [PackedStringArray(["1", "alpha"]), PackedStringArray(["0", "beta"])])
+	frame.set_widget_clip_rect(index, true, Rect2i(100, 100, 300, 120))
+	var rows = frame.get_draw_list_stats()
+	assert_gt(rows.quads_textured, drawn.quads_textured, "the SUBST image drawn for the row that names it")
+	assert_gt(rows.quads, drawn.quads)
+	# Where the device placed the table is where the viewport's own compile did.
+	var widget := _widget(_preview(), "LIST")
+	assert_eq(widget.get("rect", []).size(), 4, str(widget))
+	assert_eq(str(widget.get("device_rect", [])), str(widget.get("rect", [])), str(widget))
+
+
+## S13 V5 (the review): a device given up (its menu closed) retires its SubViewport to the editor,
+## which frees it at its next frame, never under the frame that may have drawn its texture; the menu
+## opened again gets a device of its own.
+func test_a_closed_menus_device_is_freed_at_the_next_frame() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor preview retire %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Retire Game"))
+	assert_eq(_seam.create_missing_files(), 0)
+	assert_true(_seam.open_document("main.mnu"))
+	var opened := _preview()
+	assert_eq(String(opened.get("status", "")), "ready", str(opened))
+	var frame: Node = _app.get_menu_preview_frame()
+	assert_not_null(frame)
+	if frame == null:
+		return
+	var viewport := frame.get_parent()
+	assert_true(viewport is SubViewport, "the frame lies in the device's SubViewport")
+	var id := viewport.get_instance_id()
+	assert_true(_seam.done({"kind": "close_document", "path": String(opened.get("path", ""))}))
+	_app.pump()
+	assert_null(_app.get_menu_preview_frame(), "the device given up")
+	assert_true(is_instance_id_valid(id), "its SubViewport retired, not freed, the frame it went")
+	await get_tree().process_frame
+	await get_tree().process_frame
+	assert_false(is_instance_id_valid(id), "freed at the next frame")
+	assert_true(_seam.open_document("main.mnu"))
+	assert_eq(String(_preview().get("status", "")), "ready")
+	var again: Node = _app.get_menu_preview_frame()
+	assert_not_null(again, "the menu opened again has a device of its own")
+	if again != null:
+		assert_ne(again.get_parent().get_instance_id(), id)
 
 
 ## S9k2: several windows through the preview. TITLE and EXIT selected together: a move of

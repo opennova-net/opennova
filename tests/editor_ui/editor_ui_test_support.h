@@ -428,9 +428,11 @@ struct DrawnDevice final : ViewportDevice {
 	ImVec2 origin;
 	int width = 0, height = 0;
 	int draws = 0;
+	bool drawn = false; // a canvas drew it since the last pump
 	ViewportPicture last;
 	std::vector<ViewportAction> taken;
 	void draw(const ViewportPicture &picture) override {
+		drawn = true;
 		const ImVec2 cursor = ImGui::GetCursorScreenPos();
 		origin = ImVec2(picture.x, picture.y);
 		CHECK(cursor.x == picture.x && cursor.y == picture.y, "the picture where the canvas's cursor stands");
@@ -440,9 +442,15 @@ struct DrawnDevice final : ViewportDevice {
 		++draws;
 		ImGui::InvisibleButton("godot_subviewport", ImVec2(float(picture.width), float(picture.height)));
 	}
-	void take(ViewportAction action, const ViewportModel &, const SessionView &, const PreviewClock &,
-			ViewportDeviceReport &) override {
+	// Its size as the Shell's device reports it: the one a canvas drew it at since the last pump, else
+	// its viewport's state's.
+	void take(ViewportAction action, const ViewportModel &model, const SessionView &, const PreviewClock &,
+			ViewportDeviceReport &report) override {
 		taken.push_back(action);
+		report.width = drawn ? width : model.state().width;
+		report.height = drawn ? height : model.state().height;
+		report.canvas_sized = drawn && last.canvas_sized;
+		drawn = false;
 	}
 	void tick(const ViewportModel &, const PreviewClock &) override {}
 };

@@ -94,7 +94,8 @@
     (the viewports, S13 V5: a document's picture as the game would draw it, one per (document,
     kind) from a compiled-in kind table (`viewport_kinds`: the menu's and the model's, each a
     Preview or a Main role), kept by the session (`viewports`, with the one preview clock) and
-    changed only by a SetViewport request; what follows from its document, the files its picture
+    changed by a SetViewport request and the three changes its follow derives; what follows from
+    its document, the files its picture
     read and its state (`viewport_follow`: the action its device takes, Keep, Rebuild, Update or
     Clear), its envelope on the wire (`viewport_json`), what a drag or a command plans as requests,
     and the device seam (`viewport_device`) with its least-recently-used cache of four

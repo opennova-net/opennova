@@ -17,7 +17,8 @@
 // has no main viewport, and a RevealText it is sent marks its line; a text of many thousand lines
 // draws only those in sight, the line a reveal names among them. The MainViewport role's view (no
 // type plays it yet) draws its outline beside the viewport, whose canvas fills the rest of the tab
-// through the workspace's device.
+// through the workspace's device; in the Document window while an operation holds the documents,
+// its outline is held back and its canvas is not (a drag orbits its camera).
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -29,7 +30,9 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_kinds.h>
+#include <editor/session/session_operation.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/document_window.h>
 #include <editor/ui/main_viewport_view.h>
@@ -402,28 +405,122 @@ void test_main_viewport_view() {
 	MainViewportView view(*row->outline, ViewportKind::Model);
 	CHECK(view.kind() == ViewportKind::Model && view.outline() && view.outline()->mode() == row->outline->mode,
 	      "its outline in its row's mode, beside the kind's viewport");
-	// The Shell's pump before each frame: the device the canvas asked for made, the canvas's size
-	// (a SetViewport of the viewport's device) served.
+	// The Shell's pump before each frame: the device the canvas asked for made; the canvas sizes the
+	// device as it draws it, raising nothing (the device reports its size at the pump).
 	for (int i = 0; i < 4; ++i) {
 		shell.devices.sync(*shell.viewports, workspace.seeded);
 		view_frame(workspace, view, *model, 720.0f);
 		view.end_frame(workspace);
-		for (const EditorRequest &request : workspace.requests)
-			CHECK(request.kind == EditorRequestKind::SetViewport && request.path == model->path() &&
-			              shell.set(workspace.seeded, request.path, request.viewport.c_str()),
-			      "the canvas raises only its viewport's size");
+		CHECK(workspace.requests.empty(), "the canvas raises nothing as it draws");
 		workspace.requests.clear();
 	}
+	shell.devices.sync(*shell.viewports, workspace.seeded);
 	const ViewportModel *viewport = shell.find(model->path(), ViewportKind::Model);
 	const DrawnDevice *device = shell.device(model->path(), ViewportKind::Model);
 	CHECK(viewport && viewport->status() == ViewportStatus::Ready, "the viewport shows the model");
 	CHECK(device && device->draws > 0 && device->width > 0 && device->width < 720 && device->origin.x > 100.0f,
 	      "the viewport drawn on its device beside the outline");
-	CHECK(device && viewport && device->width == viewport->state().width && device->height == viewport->state().height,
-	      "the viewport at the canvas's size");
+	CHECK(device && viewport && device->width == viewport->size().width && device->height == viewport->size().height &&
+	              viewport->canvas_sized(),
+	      "the viewport at the canvas's size, its device's as drawn");
 	const std::string title = first_title(*model);
 	CHECK(!title.empty() && view_frame(workspace, view, *model, 720.0f, true).find(title.substr(0, 8)) != std::string::npos,
 	      "the outline drawn beside it");
+}
+
+// The MainViewport role's view in the Document window, as its tab draws it, while an operation holds
+// the documents (a refresh, S13 A3): its outline column is held back (a click on a line selects
+// nothing), its canvas is not (a drag on the picture orbits the camera, a SetViewport that runs
+// beside any operation); with no operation, the same click on the line selects its record.
+void test_main_viewport_held() {
+	const std::string repo = test_paths_repo_root(__FILE__);
+	auto model = std::make_shared<ModelDocument>();
+	Diagnostic error;
+	CHECK(model->load_bytes(test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model,
+	                        "jo", error),
+	      "a model");
+	const DocumentViewRow *row = document_view_row(DocumentTypeId::Model);
+	CHECK(row && row->outline, "the model's row names an outline");
+	if (!row || !row->outline) return;
+	SessionView v;
+	seed(v, model);
+	HandViewports shell;
+	shell.bind(v);
+	shell.viewports->ensure(model->path(), ViewportKind::Model);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&shell.devices.cache);
+	ui.pump = [&] { shell.pump(ui.windows, v); };
+	ui.frames(2);
+	DocumentWindow *documents = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count() && !documents; ++i)
+		documents = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i));
+	CHECK(documents != nullptr, "the Document window");
+	if (!documents) return;
+	documents->set_view(*model, std::make_unique<MainViewportView>(*row->outline, ViewportKind::Model));
+	ui.focus("Document");
+	ui.frames(4);
+	ui.away();
+	ui.drain();
+	const auto *viewport = static_cast<const ModelViewport *>(shell.find(model->path(), ViewportKind::Model));
+	const DrawnDevice *device = shell.device(model->path(), ViewportKind::Model);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0,
+	      "the viewport drawn in the tab through its device");
+	if (!viewport || !device) return;
+
+	// A line of the outline (the tree's own child, in the view's outline column: two outline children
+	// deep) under the mouse.
+	const ImGuiWindow *window = ImGui::FindWindowByName("Document");
+	CHECK(window != nullptr, "the Document window's ImGui window");
+	if (!window) return;
+	const auto selects = [&](const std::vector<EditorRequest> &requests) {
+		return std::count_if(requests.begin(), requests.end(),
+		                     [](const EditorRequest &request) { return request.kind == EditorRequestKind::SelectRecord; });
+	};
+	const float x = window->Pos.x + 40.0f;
+	ImVec2 line(0.0f, 0.0f);
+	for (float y = window->Pos.y + 30.0f; y < window->Pos.y + window->Size.y && line.y == 0.0f; y += 3.0f) {
+		ui.mouse(x, y);
+		const ImGuiWindow *hovered = GImGui->HoveredWindow;
+		const std::string name = hovered ? hovered->Name : "";
+		const size_t first = name.find("/outline_");
+		if (GImGui->HoveredId == 0 || first == std::string::npos || name.find("/outline_", first + 1) == std::string::npos)
+			continue;
+		ui.button(true);
+		ui.button(false);
+		if (selects(ui.drain()) > 0) line = ImVec2(x, y);
+	}
+	CHECK(line.y != 0.0f, "with no operation, a click on an outline line selects its record");
+
+	// A refresh holds the documents: the outline held back, the canvas not.
+	OperationStatus refresh;
+	refresh.id = 9;
+	refresh.kind = OperationKind::Refresh;
+	refresh.label = "Refreshing";
+	refresh.reads = operation_kind_row(OperationKind::Refresh).reads;
+	refresh.writes = operation_kind_row(OperationKind::Refresh).writes;
+	v.activity.operation = refresh;
+	v.revisions.touch(ViewConcern::Operation);
+	CHECK(!v.allows(EditorRequestKind::EditRecord) && v.allows(EditorRequestKind::SetViewport),
+	      "a refresh holds the documents, never a viewport");
+	ui.frames(2);
+	ui.drain();
+	if (line.y != 0.0f) {
+		ui.click(line);
+		CHECK(selects(ui.drain()) == 0, "held: a click on the outline line selects nothing");
+	}
+	ui.away();
+	const float yaw = viewport->camera().yaw;
+	const ImVec2 from(device->origin.x + 16.0f, device->origin.y + 16.0f);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	ui.mouse(from.x + 40.0f, from.y + 8.0f);
+	ui.mouse(from.x + 90.0f, from.y + 16.0f);
+	ui.button(false);
+	ui.frames(2);
+	CHECK(viewport->camera().yaw != yaw, "held: a drag on the picture orbits the camera");
+	CHECK(selects(ui.drain()) == 0, "the drag selects nothing");
+	ui.away();
 }
 
 // A text of many lines is a list clipped to what shows (a log of a frame draws every line: Dear
@@ -478,6 +575,7 @@ int main() {
 	editor_ui_test::test_a_view_per_document();
 	editor_ui_test::test_edit_scrolled_out();
 	editor_ui_test::test_main_viewport_view();
+	editor_ui_test::test_main_viewport_held();
 	if (editor_ui_test::g_failures) {
 		std::printf("%d check(s) failed\n", editor_ui_test::g_failures);
 		return 1;

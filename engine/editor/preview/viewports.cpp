@@ -96,7 +96,13 @@ void Viewports::follow_(const SessionView &view, Slot &slot) {
 		slot.load = document->load_generation();
 		slot.revision = document->revision();
 	}
+	// What the follow derives (its held window, a framing, the clock sought) said once it has.
+	const uint64_t serial = slot.model->state_serial();
+	const PreviewClock clock = clock_;
 	slot.model->follow(ViewportInput{ view, clock_, document, change }, clock_);
+	const bool clock_moved = clock.playing() != clock_.playing() || clock.ms() != clock_.ms() ||
+			clock.ticks() != clock_.ticks() || clock.rate() != clock_.rate();
+	if ((slot.model->state_serial() != serial || clock_moved) && on_derived_change_) on_derived_change_();
 }
 
 void Viewports::follow(const SessionView &view) {
@@ -180,7 +186,15 @@ bool Viewports::set(const SessionView &view, const std::string &path, const io::
 		error = at + " does not show in a " + viewport_kind_token(kind) + " viewport.";
 		return false;
 	}
-	return ensure(at, kind).apply(json, clock_, error);
+	// The viewport the change is for, made only once the change applies to it (a refused change makes
+	// none).
+	if (ViewportModel *held = find(at, kind)) return held->apply(json, clock_, error);
+	std::unique_ptr<ViewportModel> made = viewport_kind_row(kind).make(at);
+	if (!made->apply(json, clock_, error)) return false;
+	Slot slot;
+	slot.model = std::move(made);
+	slots_.push_back(std::move(slot));
+	return true;
 }
 
 } // namespace opennova::editor

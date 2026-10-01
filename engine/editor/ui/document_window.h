@@ -67,6 +67,9 @@ public:
 	size_t held_events(const std::string &path) const;
 	// The view of the document open at `path`; null until the window meets the document.
 	DocumentView *view_of(const std::string &path);
+	// The view of the open `document` set by hand, kept and rebound as one its type's row made (a
+	// test's: a Main-role view over a type no row gives one yet).
+	void set_view(const DocumentBase &document, std::unique_ptr<DocumentView> view);
 
 private:
 	// A document's view, its type, and the document it is bound to: the instance and its load.

@@ -1,6 +1,7 @@
 #include "authoring/menu_viewport_applier.h"
 
 #include <godot_cpp/classes/control.hpp>
+#include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 
 #include <algorithm>
@@ -17,6 +18,11 @@ MenuViewportApplier::MenuViewportApplier(SubViewport &viewport) {
 	frame_->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
 	frame_->set_size(Vector2(float(opennova::menu::kMenuDesignWidth), float(opennova::menu::kMenuDesignHeight)));
 	viewport.add_child(frame_);
+	frame_id_ = frame_->get_instance_id();
+}
+
+MenuViewportApplier::~MenuViewportApplier() {
+	if (MenuFrame *frame = Object::cast_to<MenuFrame>(ObjectDB::get_instance(frame_id_))) frame->clear_screen();
 }
 
 void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) {
@@ -25,12 +31,13 @@ void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 		clear();
 		return;
 	}
-	// The frame borrows the file source until its next configure.
-	assets_ = view.findings.assets;
 	// Every configure is a first load of its textures: no earlier menu's first load fixes a band
-	// height here.
+	// height here. The frame borrows the image's screen and the file source until its next
+	// configure: both held here as long.
 	frame_->reset_loads();
-	frame_->configure_screen(menu.image(), menu.screen(), *assets_, menu.style_vars(), nullptr);
+	frame_->configure_screen(menu.image().get(), menu.screen(), *view.findings.assets, menu.style_vars(), nullptr);
+	image_ = menu.image();
+	assets_ = view.findings.assets;
 	apply_options_(model);
 }
 
@@ -40,6 +47,7 @@ void MenuViewportApplier::update(const opennova::editor::ViewportModel &model) {
 
 void MenuViewportApplier::clear() {
 	frame_->clear_screen();
+	image_.reset();
 	assets_.reset();
 }
 

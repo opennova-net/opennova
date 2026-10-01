@@ -25,7 +25,7 @@ using io::json_whole_in;
 
 constexpr NodeKind kWindowKind = node_kind(MenuKind::Window);
 
-// The frame state's row for a widget// The frame state's row for a widget, made on first use (the runtime's per-widget state).
+// The frame state's row for a widget, made on first use (the runtime's per-widget state).
 menu::MenuWidgetState &widget_state(menu::MenuFrameState &state, int index) {
 	for (menu::MenuWidgetState &row : state.widgets)
 		if (row.index == index) return row;
@@ -225,6 +225,7 @@ void MenuViewport::follow_selection_(const ViewportInput &input, const MnuDocume
 	if (options == options_) return;
 	options_ = options;
 	++options_serial_;
+	state_moved();
 }
 
 ViewportAction MenuViewport::follow_(const ViewportInput &input, PreviewClock &) {

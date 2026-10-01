@@ -395,7 +395,7 @@ static int test_handles() {
 			                                ModelHandle::Axis, to, 0.0f, 1, edits));
 
 	// The pixel a marker is drawn at, on the plane through it, is the marker's point.
-	const int width = model->state().width, height = model->state().height;
+	const int width = model->size().width, height = model->size().height;
 	std::optional<ModelOverlay> light = find_overlay(marks, ModelOverlayKind::Light, 0);
 	if (light) {
 		float x = 0.0f, y = 0.0f;
@@ -570,13 +570,20 @@ static int test_animation() {
 	TEST_EXPECT(animation->get_bool("rig", false) && model->skeleton() && model->skeleton()->bone_count() == 3);
 	TEST_EXPECT(model->caption() == " on " + model->rig().model);
 
-	// The walk row selected: it plays from tick 0, the clock in game ticks.
+	// The walk row selected: it plays from tick 0, the clock in game ticks. The clock sought is one of
+	// the follow's derived changes: the view's Viewports concern moves at the pump (the clock running
+	// as frames pass never moves it).
 	NodeAddress walk;
 	TEST_EXPECT(find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
+	uint64_t moved = view.revisions.of(ViewConcern::Viewports);
+	session.advance(0.5);
+	TEST_EXPECT(rig.clock().ticks() > 0 && view.revisions.of(ViewConcern::Viewports) == moved);
 	EditorRequest select = request::select_record(table->path(), walk);
 	session.handle(select);
+	TEST_EXPECT(view.revisions.of(ViewConcern::Viewports) == moved);
 	rig.pump();
 	TEST_EXPECT(model->clip_key() == "anim_walk_forward" && model->clip_variant() == 0 && rig.clock().ticks() == 0);
+	TEST_EXPECT(view.revisions.of(ViewConcern::Viewports) > moved);
 	TEST_EXPECT(strutil_iequals(model->clip_file(), "walk"));
 	session.advance(1.0);
 	TEST_EXPECT(rig.clock().ticks() == 62);
@@ -603,8 +610,10 @@ static int test_animation() {
 			{ clip_row.id, node_kind(AnimationKind::Event), clip_row.collections[1][3] });
 	session.handle(pick);
 	session.advance(0.5);
+	moved = view.revisions.of(ViewConcern::Viewports);
 	rig.pump();
 	TEST_EXPECT(rig.clock().ticks() == clip_model->tick_of_frame(3) && !rig.clock().playing());
+	TEST_EXPECT(view.revisions.of(ViewConcern::Viewports) > moved);
 	session.advance(0.5);
 	TEST_EXPECT(rig.clock().ticks() == clip_model->tick_of_frame(3));
 
@@ -619,6 +628,27 @@ static int test_animation() {
 	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
 	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && model->view_status() == ModelViewStatus::Ready);
 	TEST_EXPECT(model->rig().source == "chosen" && model->skeleton());
+
+	// A rig model that does not read: the picture dropped, the model read once and not again each
+	// pump (the failure latch), until its file changes; another model chosen, read and shown.
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/models/garbage.3di", "not a model"));
+	session.handle(request::rescan());
+	session.run_operations();
+	const uint64_t rig_reads = model->rig_model_reads();
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "garbage.3di"}})"));
+	TEST_EXPECT(rig.pump() == ViewportAction::Clear && model->view_status() == ModelViewStatus::Unreadable);
+	TEST_EXPECT(model->rig_model_reads() == rig_reads + 1);
+	for (int i = 0; i < 4; ++i) TEST_EXPECT(rig.pump() == ViewportAction::Keep);
+	TEST_EXPECT(model->rig_model_reads() == rig_reads + 1 && model->view_status() == ModelViewStatus::Unreadable);
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/models/garbage.3di", "still not a model, a longer one"));
+	session.handle(request::rescan());
+	session.run_operations();
+	rig.pump();
+	rig.pump();
+	TEST_EXPECT(model->rig_model_reads() == rig_reads + 2 && model->view_status() == ModelViewStatus::Unreadable);
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+	TEST_EXPECT(rig.pump() == ViewportAction::Rebuild && model->view_status() == ModelViewStatus::Ready);
+	TEST_EXPECT(model->rig_model_reads() == rig_reads + 3);
 	return 0;
 }
 

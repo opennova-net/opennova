@@ -582,6 +582,21 @@ void MenuFrame::set_widget_table_rows(int p_index,
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_table_cells(int p_index, const Array &p_rows) {
+	std::vector<opennova::menu::MenuTableRow> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
+	for (int64_t i = 0; i < p_rows.size(); ++i) {
+		const PackedStringArray cells = p_rows[i];
+		opennova::menu::MenuTableRow row;
+		for (int64_t c = 0; c < cells.size(); ++c) {
+			row.cells.push_back(opennova::to_std(cells[c]));
+		}
+		row.values.push_back(0);
+		rows.push_back(std::move(row));
+	}
+	set_widget_table_rows(p_index, rows);
+}
+
 void MenuFrame::set_table_cell_painter(int p_index,
 		opennova::menu::MenuTableCellPainter p_painter) {
 	compiler_.set_table_cell_painter(p_index, std::move(p_painter));
@@ -1213,6 +1228,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("set_widget_items", "index", "items"),
 			&MenuFrame::set_widget_items);
+	ClassDB::bind_method(D_METHOD("set_widget_table_cells", "index", "rows"),
+			&MenuFrame::set_widget_table_cells);
+	ClassDB::bind_method(D_METHOD("set_widget_clip_rect", "index", "enabled", "rect"),
+			&MenuFrame::set_widget_clip_rect);
 	ClassDB::bind_method(D_METHOD("widget_count"), &MenuFrame::widget_count);
 	ClassDB::bind_method(D_METHOD("widget_name", "index"),
 			&MenuFrame::widget_name);

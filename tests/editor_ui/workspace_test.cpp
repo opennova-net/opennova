@@ -1553,7 +1553,9 @@ void test_preview_follows() {
 	run.open("anims/SKIN.adm");
 	text = run.open("items.def");
 	CHECK(text.find("skin.adm on skinned.3di") != std::string::npos, "a catalog keeps the pane shown");
-	CHECK(preview_kind(v, ViewportKind::kCount) == ViewportKind::Menu, "before it showed anything, with both: the menu's");
+	CHECK(preview_kind(v.documents, ViewportKind::kCount) == ViewportKind::Menu &&
+	              v.documents.preview_shown == ViewportKind::Model,
+	      "before it showed anything, with both: the menu's; after the table, still the table's");
 
 	// A family with nothing to show gives way to the other.
 	session.handle(request::close_document("anims/SKIN.adm"));
@@ -1667,12 +1669,12 @@ void test_preview_model_gestures() {
 	float x = 0.0f, y = 0.0f;
 	const DrawnDevice *device = run.device(armory->path());
 	CHECK(marker && device &&
-					model->camera().project(marker->at, model->state().width, model->state().height, x, y),
+					model->camera().project(marker->at, model->size().width, model->size().height, x, y),
 			"the marker on the picture");
 	if (!marker || !device)
 		return;
-	CHECK(device->width == model->state().width && device->height == model->state().height,
-			"the viewport's size is the canvas's (a SetViewport of its device)");
+	CHECK(device->width == model->size().width && device->height == model->size().height && model->canvas_sized(),
+			"the viewport's size is the canvas's (its device's as drawn, reported at the pump)");
 	const ImVec2 at(device->origin.x + x, device->origin.y + y);
 	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
 	ui.mouse(at.x, at.y);

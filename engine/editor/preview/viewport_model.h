@@ -43,10 +43,15 @@ enum class ChangeClass : uint8_t {
 };
 
 // A viewport's own state beside its kind's (a menu's options, a model's options and camera): the
-// size its device draws its picture at, in pixels (a menu's drawn at a size of its own, a model's
-// at the size its canvas draws, which its camera projects to). It changes only through a
-// SetViewport request (apply) and the kind's own rules as it follows (a menu's held window following
-// the selection, a model framed when it first shows).
+// size its device draws its picture at where no canvas sizes the picture (a headless Shell's, the
+// menu's Device size), in pixels. Every change a person or a client makes to a viewport's state (a
+// toolbar's options, a canvas's camera, the clock's play, pause and seek, the device's size) is a
+// SetViewport request (apply). Three changes alone are derived instead, by the viewport's follow,
+// from its document, the selection and a changed model or clip: a menu's held window following the
+// selection (what its type cannot hold let go), a model's camera framed when another model first
+// shows, and the preview clock sought (and held) when the clip the selection plays changes or a clip
+// event is selected. Nothing else moves a viewport's state between two follows with no request, and
+// each of these (a SetViewport, a derived change) moves the view's Viewports concern.
 struct ViewportState {
 	int width = 0;
 	int height = 0;
@@ -115,9 +120,10 @@ struct ViewportDrag {
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would
 // draw it, of one kind (viewport_kinds.h), kept by the session (Viewports) while its document is
 // open and shared const on the view, so the windows read it and never change it. Its state (the
-// device's size, the kind's options and camera) changes only through a SetViewport request (apply)
-// and the kind's own rules as it follows; what follows from it (its status, what its picture is made
-// from, the action its device takes next) is made by follow, which the session's devices drive
+// device's size, the kind's options and camera) changes by a SetViewport request (apply) and by the
+// three changes its follow derives (ViewportState's), nothing else; what follows from it (its
+// status, what its picture is made from, the action its device takes next) is made by follow, which
+// the session's devices drive
 // (ViewportDeviceCache). A device attached to it takes its actions (take_action) and reports what it
 // read (device_report); the device's picture is drawn only by a canvas, which owns input and plans
 // every change as a request through the kind's half of it (make_canvas).
@@ -132,6 +138,12 @@ public:
 	// The document it shows, by its project-relative path.
 	const std::string &path() const { return path_; }
 	const ViewportState &state() const { return state_; }
+	// The size its picture is drawn at now, in pixels: its device's, as the device last reported it (a
+	// canvas's size where a canvas sizes the picture), else its state's (no device yet).
+	ViewportState size() const;
+	// A canvas draws its picture at a size of the canvas's own this frame (the device's report): its
+	// device's size is then set by no SetViewport.
+	bool canvas_sized() const { return canvas_sized_; }
 
 	// --- what it shows ---------------------------------------------------------------------------
 
@@ -142,6 +154,9 @@ public:
 	virtual const char *reason() const = 0;
 	virtual std::string message() const = 0;
 	virtual const std::string &detail() const = 0;
+	// A serial that moves with every change of its state, a SetViewport's or one its follow derived
+	// (Viewports reads it to say the Viewports concern moved).
+	uint64_t state_serial() const { return state_serial_; }
 	// The document state its picture shows (its revision; 0 before any), and whether that is the
 	// document at its path as it is now: the picture maps a point to a record only then.
 	uint64_t shown_revision() const { return shown_revision_; }
@@ -197,7 +212,9 @@ public:
 	ViewportAction follow(const ViewportInput &input, PreviewClock &clock);
 	// A SetViewport's change (`json` an object: kind, device {width, height}, clock {playing, rate,
 	// time_ms, ticks}, and the kind's own members): every member checked before any applies; false,
-	// nothing changed, with `error` naming the member and what it takes.
+	// nothing changed, with `error` naming the member and what it takes. The device's size is refused
+	// while a canvas sizes the picture (canvas_sized): it applies where none does (a headless Shell,
+	// a menu at its Device size).
 	bool apply(const io::JsonValue &json, PreviewClock &clock, std::string &error);
 	// What its device does now (Keep: nothing; Keep while no device is attached), then Keep until a
 	// follow says otherwise.
@@ -207,7 +224,8 @@ public:
 	// the device cache's least recently used): nothing pending, its state kept for the next.
 	void attach();
 	void detach();
-	// What the device read as it made its picture (its textures), and where it placed what it drew.
+	// What the device read as it made its picture (its textures), where it placed what it drew, and
+	// the size its picture is now.
 	void device_report(const ViewportDeviceReport &report);
 
 protected:
@@ -226,6 +244,9 @@ protected:
 	// The document state the picture shows from now on.
 	void shown(const DocumentBase &document);
 	void shown_none();
+	// The kind's follow derived a change of its state (viewport_model.h ViewportState: a held
+	// window, a framing).
+	void state_moved() { ++state_serial_; }
 
 	ViewportState state_;
 
@@ -240,6 +261,9 @@ private:
 	bool attached_ = false;
 	bool holds_ = false; // the attached device holds a picture
 	uint64_t builds_ = 0;
+	uint64_t state_serial_ = 0;
+	ViewportState shown_size_; // the device's picture, as it last reported it (0 x 0: none yet)
+	bool canvas_sized_ = false;
 };
 
 } // namespace opennova::editor

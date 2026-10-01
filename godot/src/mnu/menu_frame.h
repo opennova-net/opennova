@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -175,6 +176,10 @@ public:
 	// CUSTOM_DRAW cells' control callback), C++ only.
 	void set_widget_table_rows(int p_index,
 			const std::vector<opennova::menu::MenuTableRow> &p_rows);
+	// The same rows from GDScript (a test's, a GDScript shell's): each an Array or a
+	// PackedStringArray of its cells' texts, the rest of the row as CTableWnd_AddRow
+	// leaves it (column 0's value 0, state 0, no flags).
+	void set_widget_table_cells(int p_index, const Array &p_rows);
 	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
 	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
 	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);

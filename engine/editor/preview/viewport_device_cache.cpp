@@ -28,34 +28,48 @@ ViewportDevice *ViewportDeviceCache::held(const std::string &path, ViewportKind 
 void ViewportDeviceCache::use_(Viewports &viewports, const std::string &path, ViewportKind kind) {
 	if (Slot *slot = slot_(path, kind)) {
 		slot->used = ++clock_;
+		slot->round = round_;
 		return;
 	}
-	std::unique_ptr<ViewportDevice> device = make_ ? make_(kind) : nullptr;
-	if (!device) return;
+	if (!make_) return;
 	if (slots_.size() >= capacity_) {
-		// The least recently used given up: its viewport keeps its state for the next device.
-		const auto oldest = std::min_element(slots_.begin(), slots_.end(),
-				[](const Slot &a, const Slot &b) { return a.used < b.used; });
+		// The least recently used not used this round given up: its viewport keeps its state for the
+		// next device. Every device used this round: none is made, and the viewport waits.
+		auto oldest = slots_.end();
+		for (auto it = slots_.begin(); it != slots_.end(); ++it)
+			if (it->round != round_ && (oldest == slots_.end() || it->used < oldest->used)) oldest = it;
+		if (oldest == slots_.end()) return;
 		viewports.detach(oldest->path, oldest->kind);
 		slots_.erase(oldest);
 	}
+	std::unique_ptr<ViewportDevice> device = make_(kind);
+	if (!device) return;
 	Slot slot;
 	slot.path = path;
 	slot.kind = kind;
 	slot.device = std::move(device);
 	slot.used = ++clock_;
+	slot.round = round_;
 	slots_.push_back(std::move(slot));
 	viewports.attach(path, kind);
 }
 
 void ViewportDeviceCache::sync(Viewports &viewports, const SessionView &view) {
-	// A device whose viewport went (its document closed) goes with it.
+	++round_;
+	// A device whose viewport went (its document closed), or is another than the one it was attached
+	// to (closed and opened again since: made again at the defaults, attached to nothing), goes; the
+	// viewport made again is given a device as any other.
 	slots_.erase(std::remove_if(slots_.begin(), slots_.end(),
-						 [&](const Slot &slot) { return !viewports.find(slot.path, slot.kind); }),
+						 [&](const Slot &slot) {
+							 const ViewportModel *model = viewports.find(slot.path, slot.kind);
+							 return !model || !model->attached();
+						 }),
 			slots_.end());
-	// What the Preview window follows, then what a canvas asked for.
+	// What the Preview window shows (every kind's target where nothing draws to ask), then what a
+	// view asked for.
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
+		if (!pin_all_ && kind != view.documents.preview_shown) continue;
 		const std::string &target = view.documents.previews[kind].path;
 		if (!target.empty() && viewports.find(target, kind)) use_(viewports, target, kind);
 	}
@@ -82,7 +96,9 @@ void ViewportDeviceCache::tick(const Viewports &viewports) {
 
 ViewportDevice *ViewportDeviceCache::device(const std::string &path, ViewportKind kind) {
 	if (Slot *slot = slot_(path, kind)) {
+		// Asked for since the last sync: kept through the next (its round's).
 		slot->used = ++clock_;
+		slot->round = round_ + 1;
 		return slot->device.get();
 	}
 	const bool asked = std::any_of(wanted_.begin(), wanted_.end(),
