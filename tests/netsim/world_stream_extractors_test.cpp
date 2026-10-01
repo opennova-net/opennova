@@ -392,6 +392,28 @@ bool run_pool0_player_bit0_is_per_entity() {
 	return ok;
 }
 
+// A non-player body's 0x0C / 0x18 flags word is its own entity+36 low half: an
+// AI corpse a joiner downloads at join arrives dead, not standing, before its
+// first compact [orig: NetPacket_SerializeEntityStatesToBuffer @0x50324c;
+// NetPacket_SerializeObjectToBuffer @0x504df0..0x504e00] (D-NET-133).
+bool run_nonplayer_records_carry_the_flags_word() {
+	FourPoolWorld world;
+	w::Entity *ai = world.registry.get(w::EntityHandle::make(0, 0));
+	if (!expect(ai != nullptr, "the AI organic spawned")) return false;
+	ai->flags |= w::kEntityFlagDead;
+	ai->engine_flags |= w::kEntityFlagDead | w::kEntityFlagInAir;
+	const nw::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
+	const nw::FullEntitySpawnRecord full = ns::build_full_entity_spawn(*ai);
+	std::printf("[ai-flags] 0x0C=%04x 0x18=%04x\n",
+	            batch.records.empty() ? 0 : batch.records[0].minimap_flags, full.minimap_flags);
+	const bool ok = expect(batch.records.size() == 1 &&
+	                               batch.records[0].minimap_flags == 0x2002 &&
+	                               full.minimap_flags == 0x2002,
+	                       "the AI corpse streams its own Flags word in both records");
+	if (ok) std::printf("PASS nonplayer_records_carry_the_flags_word\n");
+	return ok;
+}
+
 // The S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) — the 0x0F-query reply. A PLAYER record
 // must carry the same wire rules as its 0x0C sibling (per-entity flags, minimap
 // net_id, playerClass clamp) or the client's rebuild re-breaks what the query was
@@ -501,7 +523,9 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.slot_id == entity.handle.packed, "rich slot id")) return false;
 	if (!expect(rec.item_type_id == 0x050E && rec.item_type == 1,
 	            "resolved item id/type")) return false;
-	if (!expect(rec.team == 2 && rec.minimap_flags == 0 &&
+	// entity+36's low half for a vehicle too: its REFLECTABLE bit [orig:
+	// NetPacket_SerializeObjectToBuffer @0x504df0..0x504e00] (D-NET-133).
+	if (!expect(rec.team == 2 && rec.minimap_flags == 0x0400 &&
 	                    rec.entity_flags == 0x10203040u,
 	            "team/minimap/owner flags")) return false;
 	if (!expect(rec.entity_name == "repair_target", "AIData-gated name")) return false;
@@ -744,6 +768,7 @@ int main() {
 	ok = run_pool3_marker() && ok;
 	ok = run_pools_are_disjoint() && ok;
 	ok = run_pool0_player_bit0_is_per_entity() && ok;
+	ok = run_nonplayer_records_carry_the_flags_word() && ok;
 	ok = run_full_entity_spawn_player() && ok;
 	ok = run_full_entity_spawn_rich_fields() && ok;
 	ok = run_full_entity_spawn_itemdef_gates() && ok;

@@ -328,6 +328,25 @@ uint16_t player_wire_flags(const world::Entity &e) {
 			((e.flags | e.engine_flags) & world::kEntityFlagParachute) | (e.flags & 0x3u));
 }
 
+// The entity's one retail Flags dword as the load-stream serializers read it,
+// raw: the runtime word and the spawn-composed word the port splits it into,
+// plus the REFLECTABLE bit every vehicle's init sets, which the port keeps as
+// the ItemDefType-1 trait. [orig: Entity_InitFromModel @0x40e204..0x40e20a]
+uint32_t load_stream_flags_dword(const world::Entity &e) {
+	return e.flags | e.engine_flags | (e.item_type == 1 ? world::kEntityFlagReflective : 0u);
+}
+
+// The 0x0C / 0x18 record's u16 flags word: entity+36's low half for EVERY entity
+// [orig: NetPacket_SerializeEntityStatesToBuffer @0x50324c; NetPacket_SerializeObjectToBuffer
+// @0x504df0..0x504e00] - the player composition above for a player, the load-stream dword
+// for every other body (an AI corpse streams its dead bit, a vehicle its REFLECTABLE bit;
+// D-NET-133).
+uint16_t record_flags_word(const world::Entity &e) {
+	return e.item_id == kPlayerPersonTypeId
+			? player_wire_flags(e)
+			: static_cast<uint16_t>(load_stream_flags_dword(e) & 0xFFFFu);
+}
+
 // entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
 // (e.net_id, which players keep at 0 to stay out of find_by_net_id; D-NET-112 conflated the
 // two). The retail host allocates a per-team minimap id here [orig: Server_PlayerAdd @0x51cbc0
@@ -385,8 +404,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		rec.entity_name = e.display_name;
 		// Player-record wire rules (flags/minimap net_id/playerClass) are shared with the
 		// S2C 0x18 repair record — see the witness comments on the helpers above.
-		rec.minimap_flags =
-				(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e) : 0;
+		rec.minimap_flags = record_flags_word(e);
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
@@ -420,8 +438,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	rec.item_type_id = e.has_item_def ? static_cast<uint16_t>(e.item_id) : 0;
 	rec.item_type = e.has_item_def ? e.item_type : 0;
 	rec.team = e.team;
-	rec.minimap_flags =
-			(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e) : 0;
+	rec.minimap_flags = record_flags_word(e);
 	rec.entity_flags = e.owner_connection_id;
 	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
 	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required
@@ -480,13 +497,6 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	return rec;
 }
 
-// The entity's one retail Flags dword as the load-stream serializers read it,
-// raw: the runtime word and the spawn-composed word the port splits it into,
-// plus the REFLECTABLE bit every vehicle's init sets, which the port keeps as
-// the ItemDefType-1 trait. [orig: Entity_InitFromModel @0x40e204..0x40e20a]
-static uint32_t load_stream_flags_dword(const world::Entity &e) {
-	return e.flags | e.engine_flags | (e.item_type == 1 ? world::kEntityFlagReflective : 0u);
-}
 
 // The vehicle brain's +0x318 state byte the 0x0D record streams under field
 // 0x1000, rebuilt from the latches the port keeps on the motor state (bit 0
