@@ -21,6 +21,7 @@
 
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_gate_info.h"
+#include "network/nwu_host_role.h"
 #include "network/nwu_lobby_session.h"
 #include "network/ping_sweep_worker.h"
 
@@ -30,6 +31,8 @@
 #include <vector>
 
 namespace godot {
+
+class HostSessionOptions;
 
 // Godot-side novaworld client. One instance per game client.
 // Wraps the C++ libs (engine/net/novacrypto + engine/net/napi + engine/net/novaworld) via
@@ -49,6 +52,12 @@ namespace godot {
 // State machine:
 //   Idle -> GateProbing -> SessionHello -> SessionJoin -> Connected
 //                                                       \-> Disconnected
+//   Connected -> Joining -> InGameHello            (the play leg)
+//   Connected -> HostingRequested -> Hosting       (the host leg)
+//
+// This node is retail's one NovaWorld game session (CNapiGameSession): the
+// session the player logs in and browses with is the one that plays or hosts,
+// and the shell keeps it up through the match (SessionDrive::adopt_nw_client).
 class NovaWorldClient : public Node {
 	GDCLASS(NovaWorldClient, Node)
 
@@ -68,6 +77,10 @@ public:
 		// takes over the in-match handshake from here.
 		STATE_JOINING,
 		STATE_IN_GAME_HELLO,
+		// The host leg: ClientHostRequest sent, awaiting its ServerHostResult
+		// (the session's state 5), then hosting (state 6).
+		STATE_HOSTING_REQUESTED,
+		STATE_HOSTING,
 	};
 
 	NovaWorldClient();
@@ -83,6 +96,11 @@ public:
 	void set_player_name(const String &name);
 	String get_player_name() const;
 
+	// The gametext table the hosted Host list's STRNOVA / TimeOfDay tokens
+	// resolve through (null keeps the stock English fallbacks).
+	void set_gametext(const Ref<RtxtStringFile> &gametext);
+	Ref<RtxtStringFile> get_gametext() const { return gametext_; }
+
 	// Lifecycle.
 	void start();
 	void stop();
@@ -90,9 +108,25 @@ public:
 	State get_state() const { return state_; }
 	bool is_session_active() const { return state_ == STATE_CONNECTED; }
 	bool is_authenticated() const { return authenticated_; }
-	// The NWU session as the joined match reads it (C++ only): the shell keeps
-	// this node alive through the match (SessionDrive::adopt_nw_client).
+	// The NWU session as the match reads it (C++ only): the shell keeps this
+	// node alive through the match (SessionDrive::adopt_nw_client).
 	NwuLobbySession::MatchFacts nwu_match_facts() const { return lobby_.match_facts(); }
+
+	// Host a game (the NovaWorld menu's Host): ConnectOrHost's hosting leg on
+	// this logged-in session -- the session-state and gate checks, the host var
+	// lists and ClientHostRequest, then the 60 s wait for the ServerHostResult.
+	// Emits hosting_started once hosting (the shell then loads the mission) or
+	// host_failed(NWEC tag). `options` supplies the registration columns.
+	void start_hosting(const Ref<HostSessionOptions> &options);
+	bool is_hosting() const { return host_role_.is_hosting(); }
+	// The NovaWorld menu's re-entry after a match: CGameSession_StopHosting and
+	// CGameSession_StopPlaying (each a statement only from its own states),
+	// back to the verified lobby.
+	void stop_hosting();
+	void stop_playing();
+	// The hosting session's in-match half (C++ only): the roster, the round
+	// clock, the GSID, the join tickets and the ServerCommand config changes.
+	NwuHostRole &host_role() { return host_role_; }
 	// The gate reply the lobby HTTP legs resolve their base URL from; null
 	// until a gate response landed.
 	Ref<NovaWorldGateInfo> get_server_info() const;
@@ -171,6 +205,7 @@ private:
 	std::vector<std::pair<std::string, std::string>> make_cookie_vars();
 	void trace_sent_datagram(const std::vector<uint8_t> &dg);
 	void on_session_datagram(const NwuLobbySession::RxInfo &rx);
+	NwuHostRole::Hooks make_host_hooks();
 	void sync_session_state(); // ClientSession::State -> our State + signals
 	void drain_session_notices(); // the server notifications (stop/punt/command/results)
 
@@ -218,6 +253,8 @@ private:
 	int gate_port_ = opennova::GATE_DEFAULT_PORT;
 	String player_name_ = "GodotPlayer";
 
+	Ref<RtxtStringFile> gametext_;
+
 	// State.
 	State state_ = STATE_IDLE;
 	bool authenticated_ = false; // true only after the EPASK login returns NWHANDLE
@@ -225,6 +262,8 @@ private:
 	// The shared gate/session driver: sockets, ClientSession, ci/ck, the NW
 	// endpoint, and the connect deadlines all live in here.
 	NwuLobbySession lobby_;
+	// The hosting half of the session (declared after lobby_, which it drives).
+	NwuHostRole host_role_;
 
 	// The CD-key/hardware identity set (CountryName..NWHWI), built once per
 	// session and used for BOTH the UDP verify var-list and the HTTP login

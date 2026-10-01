@@ -848,6 +848,15 @@ bool Simulation::is_session_lost() const {
 	return is_joiner() && runtime_ && runtime_->session_lost();
 }
 
+int Simulation::get_mission_exit_reason() const {
+	if (is_joiner()) {
+		return runtime_ ? runtime_->mission_exit_reason() : 0;
+	}
+	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
+	return ctx != nullptr ? ctx->mission_exit_reason : 0;
+}
+
+
 bool Simulation::is_joined_in_match() const {
 	return is_joiner() && runtime_ && runtime_->in_match();
 }

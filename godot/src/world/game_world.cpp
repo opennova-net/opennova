@@ -12,6 +12,7 @@
 
 #include "network/net_session_policy.h"
 #include "network/novaworld_client.h"
+#include <runtime/inmatch/mission_exit.h>
 #include "audio/music_director.h"
 #include "hud/hud_inset_scope.h"
 
@@ -193,6 +194,14 @@ int GameWorld::load_mission_as_joiner(const Ref<JoinTarget> &p_target) {
 
 void GameWorld::adopt_novaworld_client(Node *p_client) {
 	drive_.adopt_nw_client(Object::cast_to<NovaWorldClient>(p_client));
+}
+
+Node *GameWorld::release_novaworld_client() {
+	return drive_.release_nw_client();
+}
+
+Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
+	return drive_.post_mission_route(p_reason);
 }
 
 bool GameWorld::cancel_join_preload() {
@@ -555,14 +564,6 @@ MissionAudio *GameWorld::get_mission_audio() const {
 	return Object::cast_to<MissionAudio>(ObjectDB::get_instance(mission_audio_id_));
 }
 
-void GameWorld::on_nw_host_registered() {
-	drive_.on_nw_host_registered();
-}
-
-void GameWorld::on_nw_host_error(const String &p_message) {
-	drive_.on_nw_host_error(p_message);
-}
-
 void GameWorld::on_nw_host_server_command(const String &p_verb, const String &p_target,
 		const PackedStringArray &p_args) {
 	drive_.on_nw_host_server_command(p_verb, p_target, p_args);
@@ -654,6 +655,15 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_mission_as_host", "options"), &GameWorld::load_mission_as_host);
 	ClassDB::bind_method(D_METHOD("load_mission_as_joiner", "target"), &GameWorld::load_mission_as_joiner);
 	ClassDB::bind_method(D_METHOD("adopt_novaworld_client", "client"), &GameWorld::adopt_novaworld_client);
+	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
+	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	// The exit reasons the shell's own exits store (engine: inmatch/mission_exit.h).
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_QUIT",
+			opennova::inmatch::kMissionExitQuit);
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_MAP_CYCLE",
+			opennova::inmatch::kMissionExitMapCycle);
+	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_ROUND_OVER",
+			opennova::inmatch::kMissionExitRoundOver);
 	ClassDB::bind_method(D_METHOD("load_mission_data", "mission", "bms_name", "dir"),
 			&GameWorld::load_mission_data, DEFVAL(String()));
 	ClassDB::bind_method(D_METHOD("cancel_join_preload"), &GameWorld::cancel_join_preload);

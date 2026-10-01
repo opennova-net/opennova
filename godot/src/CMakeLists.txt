@@ -46,7 +46,7 @@ add_library(${TARGET_NAME} SHARED
     network/novaworld_gate_info.cpp
     network/novaworld_server_browser.cpp
     network/ping_sweep_worker.cpp
-    network/novaworld_host.cpp
+    network/nwu_host_role.cpp
     network/novaworld_identity.cpp
     network/nwu_lobby_session.cpp
     network/udp_datagram.cpp
@@ -225,6 +225,7 @@ add_library(${TARGET_NAME} SHARED
     world/world_view.cpp
     world/load_timeline.cpp
     world/loading_screen_info.cpp
+    world/post_mission_route.cpp
     world/runtime_perf_counters.cpp
     world/resource_root_resolver.cpp
     world/scar_draw_list.cpp

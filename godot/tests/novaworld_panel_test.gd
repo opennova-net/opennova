@@ -204,11 +204,31 @@ func test_empty_and_filtered_states_are_not_fake_server_rows() -> void:
 			"the first sorted server is selected when no prior rid exists")
 
 
-func test_host_pressed_emits_selected_mission() -> void:
+# Host goes out on the panel's own session (ConnectOrHost's hosting leg): the
+# mission only starts once the service granted the hosting.
+func test_host_request_waits_for_the_service() -> void:
 	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
 	panel.select_mission(1)
 	watch_signals(panel)
 	panel.press_host()
+	assert_signal_not_emitted(panel, "host_requested",
+		"no mission starts before the service's ServerHostResult")
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE,
+		"a session that is not set up fails the hosting leg")
+	assert_string_contains(panel.message_text(), "NWEC01")
+
+
+func test_hosting_started_hands_the_request_up() -> void:
+	var panel := _make_panel(PackedStringArray(["alpha.bms", "bravo.bms"]))
+	panel.select_mission(1)
+	var client := panel.client_for_test()
+	# The unstarted session fails the leg at once; detach that answer so the
+	# service's grant can be played in its place.
+	for connection in client.get_signal_connection_list("host_failed"):
+		client.disconnect("host_failed", connection["callable"])
+	watch_signals(panel)
+	panel.press_host()
+	client.emit_signal("hosting_started")
 	assert_signal_emitted(panel, "host_requested")
 	var config: HostSessionConfig = get_signal_parameters(panel, "host_requested")[0]
 	assert_eq(config.mission, "bravo.bms", "the picked map rides the host request")
@@ -217,6 +237,31 @@ func test_host_pressed_emits_selected_mission() -> void:
 	assert_eq(config.to_session_options().channel,
 		HostSessionConfig.CHANNEL_NOVAWORLD,
 		"the FFI options retain the NovaWorld period-12 selector")
+
+
+# The NovaWorld menu's re-entry after a match: the panel takes the session
+# back, leaves its hosting and play, and lands in the lobby when signed in.
+func test_adopted_session_lands_in_the_lobby_or_sign_in() -> void:
+	var panel := _make_panel(PackedStringArray())
+	var session := NovaWorldClient.new()
+	panel.adopt_client(session)
+	assert_eq(panel.client_for_test(), session, "the panel holds the returned session")
+	assert_eq(session.get_parent(), panel)
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.LOGIN,
+		"an unauthenticated session lands on the sign-in screen")
+
+
+# A match that ended with an error text shows it first; Back re-enters
+# NovaWorld only when the match was entered from it.
+func test_post_mission_error_shows_the_text() -> void:
+	var panel := _make_panel(PackedStringArray())
+	panel.show_post_mission_error("The host closed the session.", true)
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.message_text(), "The host closed the session.")
+	assert_null(panel.client_for_test(), "the reset session is gone until Back reconnects")
+	panel.show_post_mission_error("", false)
+	assert_string_contains(panel.message_text(), "CVUNKNOWN",
+		"an empty disconnect text falls back to the unknown-error text")
 
 
 func test_host_pressed_reports_when_no_missions() -> void:

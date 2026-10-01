@@ -2217,12 +2217,11 @@ bool JoinerRole::session_lost(SessionError &error) const {
 		error = {SessionErrorCode::SessionLost, runtime->session_loss_reason()};
 		return true;
 	}
-	// The NovaWorld session's end exits the mission like a lost connection:
-	// the main menu, the in-match connection torn down with it.
+	// A stored exit reason (the NovaWorld session's end) exits the mission like
+	// a lost connection; the shell's post-mission route reads the reason itself.
 	if (runtime->mission_exit_reason() != 0) {
 		error = {SessionErrorCode::SessionLost,
-				"the NovaWorld session ended (mission exit " +
-						std::to_string(runtime->mission_exit_reason()) + ")"};
+				"mission exit " + std::to_string(runtime->mission_exit_reason())};
 		return true;
 	}
 	return false;

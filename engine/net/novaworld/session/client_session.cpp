@@ -10,6 +10,7 @@
 #include <net/npwire/protocol_message.h> // decode_cs_config_update
 #include <net/npwire/session_keys.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <utility>
@@ -64,6 +65,25 @@ std::string copy_capped(const std::string &s, size_t n) {
 // The retail atol over a param value: strtol base 10.
 int atol_field(const NapiField &f) {
 	return static_cast<int>(std::strtol(field_to_string(f).c_str(), nullptr, 10));
+}
+
+// CNapiVarList_SetOrCreate keyed on (VarFNum, name): update the match in place, else append.
+// [orig: CNapiVarList_SetOrCreate @0x6318c0 -> NapiLinkedList_FindByTypeAndName @0x6304f0]
+void set_or_create_var(std::vector<ClientVar> &list, const ClientVar &var) {
+	for (ClientVar &v : list) {
+		if (v.fnum == var.fnum && strutil::iequals(v.name, var.name)) {
+			v.value = var.value;
+			return;
+		}
+	}
+	list.push_back(var);
+}
+
+// NapiLinkedList_RemoveByUserData: drop every var a slot owns. [orig: @0x630810]
+void remove_slot_vars(std::vector<ClientVar> &list, int slot) {
+	list.erase(std::remove_if(list.begin(), list.end(),
+	                          [slot](const ClientVar &v) { return v.fnum == slot; }),
+	           list.end());
 }
 
 } // namespace
@@ -148,10 +168,22 @@ std::vector<uint8_t> ClientSession::start() {
 	seq_ = SessionSequencing{1, 0};
 	sent_client_connected_ = false;
 	reassembly_ = ProtocolReassemblyState{};
+	// A fresh connection: no counted disconnects and no reconnect pending
+	// [orig: InitNPConnection @0x4d408f (+0x710 = 0); NapiNPConnection_Create @0x62acb0].
+	reconnect_ = Reconnect{};
+	dcnt_ = 0;
+	rcnt_ = 0;
+	host_setup_.clear();
+	host_list_.clear();
+	player_list_.clear();
+	play_setup_.clear();
+	reconnect_counter_ = 0;
 	return build_client_hello();
 }
 
 std::vector<uint8_t> ClientSession::retransmit_stage_datagram() {
+	// A reconnect's 0x41 / 0x42 ride the session's own pump (pump_send_intervals).
+	if (reconnecting()) return {};
 	switch (state_) {
 	case State::Hello: return build_client_hello();
 	case State::Auth: return build_client_auth();
@@ -220,9 +252,12 @@ std::vector<uint8_t> ClientSession::build_client_hello() {
 
 std::vector<uint8_t> ClientSession::build_client_auth() {
 	last_framed_send_ms_ = clock_ms_;
-	return nw_encode_outbound(
-			SESSION_OPCODE_CLIENT_AUTH,
-			client_auth_to_bytes(make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_)));
+	ClientAuth auth = make_client_auth(cfg_, cfg_.co, server_hk_, client_scrk_);
+	// A re-join carries the counted disconnects and the last 0x82's RCNT (each only when
+	// nonzero, so a first join is unchanged) [orig: SendClientJoin @0x62033d..0x62037f].
+	auth.dcnt = dcnt_;
+	auth.rcnt = rcnt_;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 
 std::vector<uint8_t> ClientSession::build_lobby_packet(const NapiMessage &container) {
@@ -317,7 +352,11 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 	}
 	switch (opcode) {
 	case SESSION_OPCODE_SERVER_HELLO:
-		if (state_ == State::Hello) on_server_hello(body, out);
+		// The first connect's hello, or a reconnect's: a ServerHello re-joins while the
+		// connection is down and armed, probing or already in the 0x42 leg.
+		// [orig: Nwu_HandleServerHello @0x627e3e..0x627e5f — !conn_flag0 && is_client &&
+		//  conn_flag1 && +0x710]
+		if (state_ == State::Hello || reconnecting()) on_server_hello(body, out);
 		break;
 	case SESSION_OPCODE_SERVER_AUTH:
 		if (state_ == State::Auth) on_server_auth(body);
@@ -328,7 +367,7 @@ bool ClientSession::handle_datagram(const uint8_t *data, size_t len,
 		}
 		break;
 	case SESSION_OPCODE_SERVER_GOODBYE:
-		if (state_ == State::Verifying || state_ == State::Verified) on_server_goodbye(body);
+		if (state_ == State::Verifying || state_ == State::Verified) on_server_goodbye(body, out);
 		break;
 	default:
 		// Unexpected opcode for a client — ignore (server-only opcodes never
@@ -349,6 +388,27 @@ void ClientSession::on_server_hello(const std::vector<uint8_t> &body,
 	// observe a valid reply for another in-flight hello; ignore it without
 	// advancing this connection's handshake.
 	if (sh.ci != cfg_.client_index) return;
+	if (reconnecting()) {
+		// The re-join: the probe stops and InitFromSession re-keys the connection (a fresh CK
+		// and SCRK, this hello's HK, the peer's keys and the CS template reset) into the 0x42
+		// leg, DCNT/RCNT kept across it; the schedule's next check waits out the join.
+		// [orig: Nwu_HandleServerHello @0x627e62..0x627eb3; CNapiNPConnection_InitFromSession
+		//  @0x626320 — the keys @0x6263fb/@0x626401, the cs_dir copies @0x626449/@0x62645c,
+		//  state 3 @0x626496]
+		reconnect_.probing = false;
+		cfg_.client_key = cfg_.next_client_key ? cfg_.next_client_key() : make_random_session_u32();
+		client_scrk_ = cfg_.next_scrk ? cfg_.next_scrk() : make_dev_scrk();
+		server_hk_ = sh.hk;
+		server_sk_ = 0;
+		server_scrk_.clear();
+		cs_ = ConnectionSettings{};
+		state_ = State::Auth;
+		reconnect_.join_started_ms = clock_ms_;
+		reconnect_.join_last_send_ms = clock_ms_;
+		reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_FIRST_DELAY_MS + SESSION_JOIN_TIMEOUT_MS;
+		out.push_back(build_client_auth());
+		return;
+	}
 	server_hk_ = sh.hk;       // [Phase 1] the value we must echo in ClientAuth
 	state_ = State::Auth;
 	out.push_back(build_client_auth());
@@ -363,6 +423,9 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	// ServerAuth echoes both correlation values chosen by this client. Do not
 	// install a foreign connection's session/SCRK material.
 	if (sa.ci != cfg_.client_index || sa.ck != cfg_.client_key) return;
+	// The 0x82's reconnect count is kept (0 when absent) and rides the next re-join.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629e2e]
+	rcnt_ = sa.rcnt;
 	if (sa.cr != 1) {
 		fail("ServerAuth rejected (cr=" + std::to_string(sa.cr) + ")");
 		return;
@@ -389,6 +452,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	for (const CsField &field : sa.client_cs) {
 		switch (field.field_index) {
 		case 0: cs_.timeout_ms = static_cast<int32_t>(field.value); break;
+		case 1: cs_.recv_max_per_tick = static_cast<int32_t>(field.value); break;
 		case 4: cs_.idle_send_interval_ms = static_cast<int32_t>(field.value); break;
 		case 5: cs_.active_send_interval_ms = static_cast<int32_t>(field.value); break;
 		case 6: cs_.packet_queue_interval_ms = static_cast<int32_t>(field.value); break;
@@ -401,6 +465,19 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	last_receive_ms_ = clock_ms_;
 	last_framed_send_ms_ = clock_ms_;
 	receive_clock_armed_ = true;
+	// The rest of the state-5 entry: the last connection's disconnect record and sequencing
+	// start over, and the connection is up again (conn_flag0 set, conn_flag1 cleared).
+	// [orig: CNapiNPConnection_OnStateChange @0x626060 — the record @0x626096..0x62609b, the
+	//  sequence counters @0x62609d..0x6260af, conn_flag0/1 @0x626172..0x626176, the reconnect
+	//  next @0x62617d]
+	disconnect_event_ = DisconnectEvent{};
+	disconnect_latched_ = false;
+	disconnected_by_peer_ = false;
+	seq_ = SessionSequencing{1, 0};
+	reassembly_ = ProtocolReassemblyState{};
+	reconnect_.was_connected = false;
+	reconnect_.next_ms = 0;
+	// OnNovaWorldConnected marks every var list for a whole resend. [orig: @0x4d1570]
 	set_lobby_state(2);
 }
 
@@ -408,23 +485,68 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 //  (@0x623e74), then the lenient TLV walk @0x623eb2..0x623fbd; the response arm latches the
 //  184-byte description when none is set and calls CNapiNPConnection_RequestDisconnect
 //  @0x6240c4]
-void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body) {
+void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
+                                      std::vector<std::vector<uint8_t>> &out) {
 	if (body.size() < 4 || opennova::io::read_u32_le(body.data()) != cfg_.client_key) return;
 	DisconnectEvent event;
 	if (!parse_disconnect_event(body.data() + 4, body.size() - 4, event)) return;
 	last_receive_ms_ = clock_ms_;
 	latch_disconnect(event);
 	disconnected_by_peer_ = true;
-	on_disconnected();
+	teardown_connection(out);
 }
 
-// Every connection teardown (the peer's goodbye or description record, the reap) runs the
-// session's disconnect callback, which drops the session to state 0 and leaves the
-// hosting/playing word alone [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 ->
-// conn+0xC4 = CNapiGameSession_OnDisconnect @0x4cfaa0 -> SetState(0) @0x4cfb68].
+// Every teardown of the connected connection (the peer's goodbye or description record, the
+// reap, the punt): DCNT counts it, the 0x46 burst echoes the latched record to the peer, the
+// session's disconnect callback runs, and the reconnect schedule restarts (the tail acts on it
+// only while the hosting/playing word is set).
+// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — ++DCNT under conn_flag0
+//  @0x6253c9..0x6253dc; the state-5 burst @0x62549e..0x6254d3 then conn+0xC4 =
+//  CNapiGameSession_OnDisconnect @0x6254d5..0x6254e7; conn_flag1 and the client's
+//  gap/next restart @0x6254f7..0x625525; conn_flag0 cleared @0x625535]
+void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) {
+	const bool connected = receive_clock_armed_;
+	if (connected) {
+		++dcnt_;
+		const std::vector<uint8_t> goodbye = nw_encode_outbound(
+				SESSION_OPCODE_CLIENT_GOODBYE,
+				disconnect_latched_ ? client_goodbye_to_bytes(server_sk_, disconnect_event_)
+				                    : client_goodbye_to_bytes(server_sk_));
+		for (size_t i = 0; i < disconnect_burst_count(); ++i) out.push_back(goodbye);
+	}
+	on_disconnected();
+	if (connected) {
+		reconnect_.was_connected = true;
+		reconnect_.gap_ms = SESSION_RECONNECT_GAP_INITIAL_MS;
+		reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_FIRST_DELAY_MS;
+	}
+	receive_clock_armed_ = false;
+}
+
+size_t ClientSession::disconnect_burst_count() const {
+	const int32_t n = cs_.recv_max_per_tick < 0 ? 0 : (cs_.recv_max_per_tick > 32 ? 32 : cs_.recv_max_per_tick);
+	return n < 1 ? 1u : static_cast<size_t>(n);
+}
+
+bool ClientSession::reconnecting() const {
+	return !receive_clock_armed_ && reconnect_.was_connected && reconnect_armed();
+}
+
+// The disconnect callback drops the session to state 0 (so neither the host nor the play leg
+// stands) and leaves the hosting/playing word alone; it resets the session strings the
+// connection fed: the web domain to "???", the NWUID and the GSID (the in-match SUS1) cleared
+// until a reconnect's 0x82 and re-host re-supply them.
+// [orig: CNapiGameSession_OnDisconnect @0x4cfaa0 — SetState(0) @0x4cfb68; the web domain
+//  @0x4cfb8e; the NWUID @0x4cfbe3; the GSID global and np_protocol->server_user_string1
+//  @0x4cfc3b..0x4cfc54]
 void ClientSession::on_disconnected() {
 	state_ = State::Closed;
 	set_lobby_state(0);
+	host_state_ = HostState::Idle;
+	play_state_ = PlayState::Idle;
+	server_web_domain_ = "???";
+	server_nwuid_.clear();
+	host_gsid_.clear();
 }
 
 void ClientSession::latch_disconnect(const DisconnectEvent &event) {
@@ -510,13 +632,17 @@ void ClientSession::process_periodic_update(
 //  idle_send_interval_ms >= 0, nothing queued, nothing retained, elapsed since the last
 //  send > the interval -> one forced (header-only) packet]
 void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) {
-	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) return;
+	if (!receive_clock_armed_ || (state_ != State::Verifying && state_ != State::Verified)) {
+		pump_reconnect(out);
+		return;
+	}
 	if (cs_.timeout_ms >= 0) {
 		const uint32_t elapsed = clock_ms_ - last_receive_ms_;
 		if (elapsed > static_cast<uint32_t>(cs_.timeout_ms)) {
 			latch_disconnect(make_disconnect_event(2, 3, elapsed,
 					static_cast<uint32_t>(cs_.timeout_ms), "", 0, "NP.C:PT:CLNTTMOUT"));
-			on_disconnected();
+			// RequestDisconnect -> the teardown [orig: @0x62940a]
+			teardown_connection(out);
 			return;
 		}
 	}
@@ -527,8 +653,69 @@ void ClientSession::pump_send_intervals(std::vector<std::vector<uint8_t>> &out) 
 	out.push_back(build_heartbeat());
 }
 
-// The lobby keeps the cs_dir0 slots it runs on: CS field 0 (the reap timeout) and
-// fields 4/5/6 (the send-interval legs), each only when the update stored it.
+// The reconnect, in the connection pump's order: the enumerator's re-announce first, then the
+// state machine's 0x42 leg and its schedule tail.
+// [orig: CNapiNPConnection_PumpFlags @0x629780 — PumpEnumeratorAndSend @0x6297b7 ahead of
+//  PumpStateMachine @0x6297c3]
+void ClientSession::pump_reconnect(std::vector<std::vector<uint8_t>> &out) {
+	if (!reconnecting()) return;
+	// The probe: the same-CI 0x41 at once and then every SESSION_CONNECT_RETRANSMIT_MS while
+	// the window is open. [orig: PumpEnumeratorAndSend @0x6290c0 @0x6290e0..0x629170 —
+	//  `!last_send_tick || now - last_send_tick > interval`, NapiNPSession_SendAnnouncePacket
+	//  @0x61fa00 to each UDPNOVAWORLD session]
+	if (reconnect_.probing &&
+	    (!reconnect_.probe_sent || clock_ms_ - reconnect_.last_probe_ms > SESSION_CONNECT_RETRANSMIT_MS)) {
+		reconnect_.probe_sent = true;
+		reconnect_.last_probe_ms = clock_ms_;
+		out.push_back(build_client_hello());
+	}
+	// Case 3, the re-join: the 0x42 re-sent every SESSION_CONNECT_RETRANSMIT_MS until
+	// SESSION_JOIN_TIMEOUT_MS from the state-3 entry, which drops back to the down state with
+	// no teardown (the connection never came up). [orig: PumpStateMachine @0x629508..0x629595,
+	//  the timeout @0x629525..0x629564]
+	if (state_ == State::Auth) {
+		if (clock_ms_ - reconnect_.join_started_ms > SESSION_JOIN_TIMEOUT_MS) {
+			state_ = State::Closed;
+		} else if (clock_ms_ - reconnect_.join_last_send_ms > SESSION_CONNECT_RETRANSMIT_MS) {
+			reconnect_.join_last_send_ms = clock_ms_;
+			out.push_back(build_client_auth());
+		}
+	}
+	// The schedule tail: past `next`, a re-join in flight pushes the check out by the gap plus
+	// the join timeout; a down connection opens a SESSION_RECONNECT_PROBE_WINDOW_MS probe
+	// window, and a window that ran out closes and waits the gap, which grows each time.
+	// [orig: PumpStateMachine @0x629487..0x6296cb — state 3 @0x6294ec..0x629501, the window
+	//  @0x629632..0x629676, the window's end @0x62968b..0x629693, the gap growth
+	//  @0x6296a3..0x6296cb]
+	if (clock_ms_ <= reconnect_.next_ms) return;
+	if (state_ == State::Auth) {
+		reconnect_.next_ms = clock_ms_ + reconnect_.gap_ms + SESSION_JOIN_TIMEOUT_MS;
+		grow_reconnect_gap();
+		return;
+	}
+	if (reconnect_.probing) {
+		if (clock_ms_ <= reconnect_.window_start_ms + SESSION_RECONNECT_PROBE_WINDOW_MS) return;
+		reconnect_.probing = false;
+		reconnect_.next_ms = clock_ms_ + reconnect_.gap_ms;
+		grow_reconnect_gap();
+		return;
+	}
+	reconnect_.probing = true;
+	reconnect_.window_start_ms = clock_ms_;
+	reconnect_.probe_sent = false;
+	reconnect_.next_ms = clock_ms_ + SESSION_RECONNECT_PROBE_WINDOW_MS;
+}
+
+// [orig: @0x6296a3..0x6296cb — gap += step, clamped to [min, max]]
+void ClientSession::grow_reconnect_gap() {
+	const int32_t grown = static_cast<int32_t>(reconnect_.gap_ms + SESSION_RECONNECT_GAP_STEP_MS);
+	reconnect_.gap_ms = static_cast<uint32_t>(grown < SESSION_RECONNECT_GAP_MIN_MS
+			? SESSION_RECONNECT_GAP_MIN_MS
+			: (grown > SESSION_RECONNECT_GAP_MAX_MS ? SESSION_RECONNECT_GAP_MAX_MS : grown));
+}
+
+// The lobby keeps the cs_dir0 slots it runs on: CS field 0 (the reap timeout), field 1 (the
+// teardown burst) and fields 4/5/6 (the send-interval legs), each only when the update stored it.
 // [orig: CNapiNPConnection_HandleCSConfigUpdate @0x621940 — a nonzero direction
 //  byte stores into cs_dir0 @0x6219C8]
 void ClientSession::apply_cs_config_update(const ProtocolMessage &pm) {
@@ -538,6 +725,7 @@ void ClientSession::apply_cs_config_update(const ProtocolMessage &pm) {
 		if ((update.written & (1u << slot)) != 0) field = update.value[static_cast<size_t>(slot)];
 	};
 	apply(0, cs_.timeout_ms);
+	apply(1, cs_.recv_max_per_tick);
 	apply(4, cs_.idle_send_interval_ms);
 	apply(5, cs_.active_send_interval_ms);
 	apply(6, cs_.packet_queue_interval_ms);
@@ -569,7 +757,7 @@ void ClientSession::on_server_protocol_message(const std::vector<uint8_t> &body,
 			parse_disconnect_event(pm.payload.data(), pm.payload.size(), event);
 			latch_disconnect(event);
 			disconnected_by_peer_ = true;
-			on_disconnected();
+			teardown_connection(out);
 			return;
 		}
 		if (pm.flags.settings_update) {
@@ -642,11 +830,30 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			sess_id_string_ = sess;
 			state_ = State::Verified;
 			set_lobby_state(4);
-			// A first verify marks the session verified; a word already hosting or playing
-			// is the reconnect, which retail re-requests (StartHostingSession(1) /
-			// StartPlayingSession(1) @0x4d5961..0x4d599e). This session has no reconnect
-			// leg, so the word stands. [orig: @0x4d5920..0x4d5940]
-			if (session_role_ == kSessionRoleNone) session_role_ = kSessionRoleVerified;
+			// A first verify marks the session verified [orig: @0x4d5920..0x4d5940]. A word
+			// already hosting or playing is a reconnect's re-verify, which re-requests at once:
+			// the host counts its ReconnectCounter up and re-sends ClientHostRequest with
+			// CurrentlyHosting=1 and every list, the joiner re-sends ClientPlayRequest with
+			// CurrentlyPlaying=1 and its PlaySetup. [orig: @0x4d5961..0x4d5978 (++session+0x500,
+			//  InitHeapsAndSerializeCounter, StartHostingSession(1)); @0x4d5998..0x4d599e
+			//  (StartPlayingSession(1))]
+			if (session_role_ == kSessionRoleNone) {
+				session_role_ = kSessionRoleVerified;
+			} else if (session_role_ == kSessionRoleHosting) {
+				++reconnect_counter_;
+				set_or_create_var(host_setup_, {0, "ReconnectCounter", std::to_string(reconnect_counter_)});
+				const std::vector<uint8_t> request = send_host_request(1);
+				if (!request.empty()) out.push_back(request);
+				Notice notice;
+				notice.kind = Notice::Kind::Rehost;
+				notices_.push_back(std::move(notice));
+			} else if (session_role_ == kSessionRolePlaying) {
+				const std::vector<uint8_t> request = send_play_request(1);
+				if (!request.empty()) out.push_back(request);
+				Notice notice;
+				notice.kind = Notice::Kind::Replay;
+				notices_.push_back(std::move(notice));
+			}
 		} else {
 			// The rejection drops the word and the state to 0 [orig: @0x4d58ac..0x4d58de].
 			session_role_ = kSessionRoleNone;
@@ -746,11 +953,13 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 		host_state_ = HostState::Idle;
 		play_state_ = PlayState::Idle;
 		set_lobby_state(0);
-		// [orig: @0x4d21cd..0x4d21ec — a word 1..3 becomes 0]
+		// [orig: @0x4d21cd..0x4d21ec — a word 1..3 becomes 0, the reconnect disarmed with it]
 		session_role_ = kSessionRoleNone;
 		mission_exit_reason_ = 12;
 		disconnected_by_peer_ = true;
-		state_ = State::Closed;
+		// RequestDisconnect: the teardown's burst and disconnect callback.
+		// [orig: HandlePuntNotification @0x4d20b0 -> CNapiNPConnection_RequestDisconnect]
+		teardown_connection(out);
 		notices_.push_back(std::move(notice));
 		return;
 	}
@@ -802,31 +1011,61 @@ std::vector<ClientSession::Notice> ClientSession::take_notices() {
 	return drained;
 }
 
+// BuildHostVarLists then StartHostingSession: the lists start over (HostSetup with
+// ReconnectCounter zeroed, the Host list's first run, an empty PlayerList) and the request goes.
+// [orig: CNapiGameSession_BuildHostVarLists @0x4d0b50 (ReconnectCounter = 0 @0x4d0b7b) ->
+//  StartHostingSession(0) @0x4d5113]
 std::vector<uint8_t> ClientSession::build_host_request(const HostRegistration &cfg,
                                                        int currently_hosting) {
-	// [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5, else -1]
+	if (state_ != State::Verified || (host_state_ != HostState::Idle && host_state_ != HostState::Failed))
+		return {};
+	reconnect_counter_ = 0;
+	HostRegistration setup = cfg;
+	setup.reconnect_counter = reconnect_counter_;
+	host_setup_ = make_host_setup_var_list(setup);
+	host_list_ = make_host_var_list(setup, HostLobbyText{}, /*full=*/false);
+	player_list_.clear();
+	return send_host_request(currently_hosting);
+}
+
+// [orig: CNapiGameSession_StartHostingSession @0x4d4540 — state 4 -> 5, else -1;
+//  SendHostRequest @0x4d3700 — CurrentlyHosting, VarCheck, Cookie, HostSetup, Host, PlayerList]
+std::vector<uint8_t> ClientSession::send_host_request(int currently_hosting) {
 	if (state_ != State::Verified || (host_state_ != HostState::Idle && host_state_ != HostState::Failed))
 		return {};
 	host_state_ = HostState::Requested;
 	host_result_ = ServerResultFields{};
 	set_lobby_state(5);
-	return build_lobby_packet(make_host_request(cfg, cookie_vars(), currently_hosting));
+	return build_lobby_packet(make_client_host_request(currently_hosting, cookie_vars(), host_setup_,
+	                                                   host_list_, player_list_));
 }
 
+// The Host and PlayerList vars land in the session's lists (SetOrCreate) and the update
+// carries them. [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the SetOrCreates) ->
+//  CNapiGameSession_SendHostUpdate @0x4d3860]
 std::vector<uint8_t> ClientSession::build_host_update(const std::vector<ClientVar> &host,
                                                       const std::vector<ClientVar> &player_list) {
-	// [orig: CNapiGameSession_SendHostUpdate @0x4d3860]
+	for (const ClientVar &v : host) set_or_create_var(host_list_, v);
+	for (const ClientVar &v : player_list) set_or_create_var(player_list_, v);
 	return build_lobby_message(make_client_host_update(host, player_list));
 }
 
+// The slot's five vars replace whatever it held, then the statement goes only in state 6.
+// [orig: Server_PlayerAdd @0x51d421..0x51d4aa (RemoveByUserData + the five SetOrCreates) ->
+//  the state-6 wrapper @0x4d0e20]
 std::vector<uint8_t> ClientSession::build_host_player_added(const HostPlayerSlot &player) {
+	remove_slot_vars(player_list_, player.slot);
+	for (const ClientVar &v : make_player_list({player})) player_list_.push_back(v);
 	if (host_state_ != HostState::Established) return {};
 	return build_lobby_message(make_client_host_player_added(
 			player.slot, player.player_name, player.ip_and_port, player.pcid, player.team,
 			player.type));
 }
 
+// [orig: the slot's vars dropped (NapiLinkedList_RemoveByUserData @0x630810), then the
+//  state-6 wrapper @0x4d0e40]
 std::vector<uint8_t> ClientSession::build_host_player_removed(int player_number) {
+	remove_slot_vars(player_list_, player_number);
 	if (host_state_ != HostState::Established) return {};
 	return build_lobby_message(make_client_host_player_removed(player_number));
 }
@@ -841,35 +1080,53 @@ std::vector<uint8_t> ClientSession::build_player_enter_request(uint32_t connecti
 }
 
 std::vector<uint8_t> ClientSession::build_stop_hosting() {
-	// [orig: CGameSession_StopHosting @0x4d0e60 — states 5/6 back to 4 + the statement]
-	if (host_state_ != HostState::Requested && host_state_ != HostState::Established) return {};
-	host_state_ = HostState::Idle;
-	set_lobby_state(4);
-	// A hosting word steps back to verified [orig: @0x4d0e89..0x4d0e9e].
+	// [orig: CGameSession_StopHosting @0x4d0e60 — states 5/6 back to 4 + the statement
+	//  @0x4d0e63..0x4d0e86]
+	std::vector<uint8_t> out;
+	if (host_state_ == HostState::Requested || host_state_ == HostState::Established) {
+		host_state_ = HostState::Idle;
+		set_lobby_state(4);
+		out = build_lobby_message(make_client_stop_hosting());
+	}
+	// A hosting word steps back to verified whatever the state, so a session torn down
+	// mid-hosting stops its reconnect's re-host too [orig: @0x4d0e89..0x4d0e9e].
 	if (session_role_ == kSessionRoleHosting) session_role_ = kSessionRoleVerified;
-	return build_lobby_message(make_client_stop_hosting());
+	return out;
 }
 
-std::vector<uint8_t> ClientSession::build_play_request(const std::vector<ClientVar> &play_setup) {
-	// [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 — state 4 -> 7, else -1;
-	//  the reconnect flag is CurrentlyPlaying, 0 on the fresh path @0x4d5449]
+// ConnectOrHost rebuilds the PlaySetup list, then StartPlayingSession sends it.
+// [orig: ConnectOrHost @0x4d53bb..0x4d542b (g_SessionConnectVarList) -> StartPlayingSession(0)
+//  @0x4d5449]
+std::vector<uint8_t> ClientSession::build_play_request(const std::vector<ClientVar> &play_setup,
+                                                       int currently_playing) {
+	play_setup_ = play_setup;
+	return send_play_request(currently_playing);
+}
+
+// [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 — state 4 -> 7 and the MsgCode
+//  cleared, else -1; SendPlayRequest @0x4d3920 — CurrentlyPlaying, Cookie, PlaySetup]
+std::vector<uint8_t> ClientSession::send_play_request(int currently_playing) {
 	if (state_ != State::Verified || (play_state_ != PlayState::Idle && play_state_ != PlayState::Failed))
 		return {};
 	play_state_ = PlayState::Requested;
 	play_result_ = ServerResultFields{};
 	set_lobby_state(7);
-	return build_lobby_packet(make_client_play_request(0, cookie_vars(), play_setup));
+	return build_lobby_packet(make_client_play_request(currently_playing, cookie_vars(), play_setup_));
 }
 
 std::vector<uint8_t> ClientSession::build_stop_playing() {
 	// [orig: CGameSession_StopPlaying @0x4d0ec0 — states 7/8 back to 4 + the statement; the
 	//  NovaWorld menu re-entered after a match runs it, UI_ProcessLANSessionStateMachine @0x558e80]
-	if (play_state_ != PlayState::Requested && play_state_ != PlayState::Playing) return {};
-	play_state_ = PlayState::Idle;
-	set_lobby_state(4);
-	// A playing word steps back to verified [orig: @0x4d0ee9..0x4d0efe].
+	std::vector<uint8_t> out;
+	if (play_state_ == PlayState::Requested || play_state_ == PlayState::Playing) {
+		play_state_ = PlayState::Idle;
+		set_lobby_state(4);
+		out = build_lobby_message(make_client_stop_playing());
+	}
+	// A playing word steps back to verified whatever the state, so a session torn down
+	// mid-play stops its reconnect's re-play too [orig: @0x4d0ee9..0x4d0efe].
 	if (session_role_ == kSessionRolePlaying) session_role_ = kSessionRoleVerified;
-	return build_lobby_message(make_client_stop_playing());
+	return out;
 }
 
 std::vector<uint8_t> ClientSession::build_heartbeat() {
@@ -896,10 +1153,11 @@ std::vector<uint8_t> ClientSession::build_goodbye() {
 	std::vector<uint8_t> body = disconnect_latched_
 			? client_goodbye_to_bytes(server_sk_, disconnect_event_)
 			: client_goodbye_to_bytes(server_sk_);
-	state_ = State::Closed;
-	// The reset drops the state and the hosting/playing word to 0 [orig: @0x4d08fc..0x4d0927].
-	set_lobby_state(0);
+	// The reset drops the hosting/playing word to 0 (the reconnect disarmed with it), and the
+	// connection's teardown runs the disconnect callback. [orig: @0x4d08fc..0x4d0927]
 	session_role_ = kSessionRoleNone;
+	on_disconnected();
+	receive_clock_armed_ = false;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_GOODBYE, std::move(body));
 }
 

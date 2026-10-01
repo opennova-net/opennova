@@ -207,3 +207,31 @@ func test_abandoned_novaworld_join_frees_the_held_session() -> void:
 	(prompt.find_child("CancelJoin", true, false) as Button).pressed.emit()
 	await wait_frames(2)
 	assert_false(is_instance_valid(client), "an abandoned join frees the held session")
+
+
+# The post-mission route's NovaWorld half: only a match entered from the
+# NovaWorld menu returns there with its session (the panel's adopt_client leg,
+# novaworld_panel_test); a stray session after any other match is left.
+func test_normal_exit_outside_novaworld_leaves_a_stray_session() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var session := NovaWorldClient.new()
+	controller.return_from_mission(session, false, "")
+	assert_null(layer.get_node_or_null("NovaWorldPanel"),
+			"no NovaWorld menu re-entry for a match not entered from it")
+	await wait_frames(2)
+	assert_false(is_instance_valid(session), "the stray session is stopped and freed")
+
+
+func test_error_exit_shows_the_novaworld_error_dialog() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	controller.return_from_mission(null, true, "The host closed the session.")
+	var panel := layer.get_node_or_null("NovaWorldPanel") as NovaWorldPanel
+	assert_not_null(panel, "an error exit shows the NovaWorld error dialog")
+	if panel == null:
+		return
+	assert_eq(panel.current_screen(), NovaWorldPanel.Screen.MESSAGE)
+	assert_eq(panel.message_text(), "The host closed the session.")

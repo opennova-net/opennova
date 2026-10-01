@@ -1048,13 +1048,10 @@ public:
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
 	int32_t round_time_remaining_ticks() const; // the live round clock (world::Match), -1 untimed
-	// A NovaWorld ServerCommand (the NovaWorldHost `server_command` signal's verb,
-	// target selector and argument tokens) run against the in-match host through
-	// inmatch::Server_ExecuteServerCommand. The caller owns the two shell legs:
-	// `stop_hosting` (drop the gate registration) and `config_changed` (republish
-	// the name / message columns below on the gate registration). A config change
-	// is also kept on the sim's host session record, so a later session rebuild
-	// retains it. Unhandled without a host role.
+	// A NovaWorld ServerCommand (the hosting session's `server_command` verb, target and args)
+	// run against the in-match host through inmatch::Server_ExecuteServerCommand. The caller
+	// owns `stop_hosting` (leave the hosting) and `config_changed` (republish the name/message
+	// columns); a config change also stays on the host session record. Unhandled without a host.
 	struct ServerCommandResult {
 		bool handled = false;
 		bool stop_hosting = false;
@@ -1259,6 +1256,8 @@ public:
 	// The same edge as a state test rather than a presentation string: in-world surfaces
 	// (the deploy screen) need to know the session is gone, not what to tell the player.
 	bool is_session_lost() const;
+	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record.
+	int get_mission_exit_reason() const;
 	// True once the joiner has name-matched its organic-spawn record and received the
 	// applicable deployment release (self handle H known and gameplay uplink enabled).
 	bool is_joined_in_match() const;

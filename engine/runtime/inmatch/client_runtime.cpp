@@ -613,6 +613,14 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 // max(host, client) and the host window never runs on a non-authority, so it
 // folds as 0. The loss counter (stru_A86920.aimPoint.Y) is read-and-zeroed
 // here and NOTHING in the binary increments it: the term is the floor 1.
+int32_t ClientRuntime::mission_exit_reason() const {
+	if (mission_exit_reason_ != kMissionExitNone) return mission_exit_reason_;
+	if (joiner_ != nullptr && joiner_->has_disconnect_event()) {
+		return mission_exit_reason_for_disconnect(joiner_->last_disconnect_event());
+	}
+	return kMissionExitNone;
+}
+
 void ClientRuntime::update_net_quality() {
 	if (--quality_update_countdown_ > 0) return;
 	quality_update_countdown_ = 62;

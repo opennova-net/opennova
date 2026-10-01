@@ -18,9 +18,12 @@ var _novaworld_panel: NovaWorldPanel
 var _menu_visible_before_novaworld := false
 var _menu_key_input_before_novaworld := false
 var _novaworld_menu_state_captured := false
-# The NovaWorld lobby session a resolved join hands over, held from the panel's
-# dismissal until the joiner load takes it (or the join is abandoned).
+# The NovaWorld session a resolved join or a granted host hands over, held from
+# the panel's dismissal until the load takes it (or the join is abandoned).
 var _novaworld_client: NovaWorldClient
+# The match was entered from the NovaWorld menu: a normal exit returns there
+# (retail's g_ReturnToNovaWorldMenu, docs/net/novaworld-net-re.md).
+var _return_to_novaworld := false
 var _join_role_prompt: Control
 var _join_role_password: LineEdit
 var _join_server_password: LineEdit
@@ -191,9 +194,7 @@ func _start_lan_join(target: JoinTarget) -> void:
 		target.player_name = resolve_player_callsign()
 	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
 			target.game_type, "")
-	if _novaworld_client != null:
-		_world.adopt_novaworld_client(_novaworld_client)
-		_novaworld_client = null
+	_adopt_held_novaworld_client()
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
@@ -444,11 +445,14 @@ func resolve_player_callsign() -> String:
 # screen. The full-rect panel blocks pointer input; suspend the MenuShell's
 # unhandled-key path as well so Enter/Escape cannot activate controls behind
 # the compact overlay.
-func open_novaworld_panel() -> void:
+func open_novaworld_panel(start_client := true) -> void:
 	if _novaworld_panel != null or _refuse_on_web():
 		return
 	_capture_menu_behind_novaworld()
 	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel
+	# A return from a match hands the panel its session (or its error) instead
+	# of starting a fresh connect.
+	_novaworld_panel.start_client_on_ready = start_client
 	# Dev default: localhost. A prod build sets the server host from the
 	# resolved server IP before showing the panel.
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
@@ -497,26 +501,30 @@ func _restore_menu_after_novaworld() -> void:
 	_novaworld_menu_state_captured = false
 
 
-# The NovaWorld panel asked to host. Resolve a mission (the menu's selected one, else the first
-# available .bms), fill the callsign, and stand up a browsable listen host through the SAME bring-up
-# the mp.mnu host screen uses — the panel supplied the gate (nw_gate_host) + the NovaWorld channel,
-# so SessionDrive::maybe_start_nw_host registers it. (A mission picker in the panel is a follow-up.)
+# The NovaWorld panel's session is hosting (the service's ServerHostResult landed). Resolve a
+# mission (the panel's pick, else the menu's selected one, else the first available .bms), fill the
+# callsign, and load it as a listen host through the SAME bring-up the mp.mnu host screen uses; the
+# hosting session rides in with the load and keeps the match registered.
 func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 	# The panel picks the map; fall back to the first available .bms only if it sent none.
 	var mission := config.mission
 	if mission.is_empty():
 		mission = _resolve_default_mission()
 	if mission.is_empty():
-		# Report back so the panel leaves "Starting..." instead of hanging silently.
+		# Report back so the panel leaves "Starting..." instead of hanging silently, and leave the
+		# hosting the service just granted.
 		push_warning("NetSessionController: NovaWorld host requested but no mission is available")
 		if _novaworld_panel != null:
 			_novaworld_panel.host_failed("No mission available to host (check the game folder).")
 		return
+	_hold_novaworld_client(_novaworld_panel.release_client())
+	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
 	config.mission = mission
 	config.player_name = resolve_player_callsign()
 	if config.server_name.is_empty():
 		config.server_name = "OpenNova Host"
+	_adopt_held_novaworld_client()
 	_shell.start_world_load(
 			LoadingScreenInfo.make(mission, true, config.server_name,
 					_resolve_mission_title(mission), config.game_type, config.custom_text),
@@ -528,8 +536,39 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
 	_hold_novaworld_client(_novaworld_panel.release_client())
+	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
 	join_lan_server(target)
+
+
+## The post-mission route's NovaWorld half, once the shell is back in the menu. A normal exit
+## keeps the NovaWorld session: a player who left from the NovaWorld menu re-enters it with the
+## session (still verified, its hosting and play left on re-entry). An exit with an error text
+## shows the NovaWorld error dialog first, the session already reset with the world
+## (the router's verdict, engine: inmatch/mission_exit.h).
+func return_from_mission(client: NovaWorldClient, error_exit: bool, error_text: String) -> void:
+	var reenter := _return_to_novaworld
+	_return_to_novaworld = false
+	if error_exit:
+		if client != null:
+			client.stop()
+			client.queue_free()
+		open_novaworld_panel(false)
+		if _novaworld_panel != null:
+			_novaworld_panel.show_post_mission_error(error_text, reenter)
+		return
+	if client == null:
+		return
+	if not reenter:
+		client.stop()
+		client.queue_free()
+		return
+	open_novaworld_panel(false)
+	if _novaworld_panel != null:
+		_novaworld_panel.adopt_client(client)
+	else:
+		client.stop()
+		client.queue_free()
 
 
 # The play the service admitted stays up through the match: the client waits
@@ -541,12 +580,21 @@ func _hold_novaworld_client(client: NovaWorldClient) -> void:
 		add_child(client)
 
 
+# The world takes the held session with the load it is about to run.
+func _adopt_held_novaworld_client() -> void:
+	if _novaworld_client == null:
+		return
+	_world.adopt_novaworld_client(_novaworld_client)
+	_novaworld_client = null
+
+
 # An abandoned NovaWorld join leaves its play and the session.
 func _release_novaworld_client() -> void:
 	if _novaworld_client != null:
 		_novaworld_client.stop()
 		_novaworld_client.queue_free()
 	_novaworld_client = null
+	_return_to_novaworld = false
 
 
 # A default mission for a panel-initiated host: the mission highlighted in the menu if any, else the

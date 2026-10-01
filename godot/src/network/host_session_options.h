@@ -7,7 +7,6 @@
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
-#include <net/npwire/net_ports.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
 
@@ -36,10 +35,7 @@ class HostSessionOptions : public RefCounted {
 	// G10: the ex HostSessionConfig fields the net-session drive consumed):
 	// the resource-dir override, and the NovaWorld gate registration row.
 	String dir_;
-	String nw_gate_host_;
-	int nw_gate_port_ = opennova::kNovaWorldGatePort;
 	int region_index_ = 0;
-	String advertise_;
 	opennova::inmatch::NetworkType network_type_ = opennova::inmatch::NetworkType::Lan;
 
 protected:
@@ -159,20 +155,10 @@ public:
 	// Resource-dir override (dev/tests); empty = the persisted directory.
 	String get_dir() const { return dir_; }
 	void set_dir(const String &p_dir) { dir_ = p_dir; }
-	// NovaWorld gate registration (the "NovaWorld" channel): where the world
-	// registers the browsable listen host. An empty gate host means pure LAN,
-	// nothing is registered.
-	String get_nw_gate_host() const { return nw_gate_host_; }
-	void set_nw_gate_host(const String &p_host) { nw_gate_host_ = p_host; }
-	int get_nw_gate_port() const { return nw_gate_port_; }
-	void set_nw_gate_port(int p_port) { nw_gate_port_ = p_port; }
-	// The gate row's Region column selector (0/1/2 -> the STRNOVA07/08/09
-	// gametext tokens; the NovaWorldHost resolves it through the gametext table).
+	// The hosted Host row's Region column selector (0/1/2 -> the STRNOVA07/08/09
+	// gametext tokens, resolved by the hosting NovaWorld session).
 	int get_region_index() const { return region_index_; }
 	void set_region_index(int p_index) { region_index_ = p_index; }
-	// Explicit advertised-IP override for the gate row.
-	String get_advertise() const { return advertise_; }
-	void set_advertise(const String &p_advertise) { advertise_ = p_advertise; }
 	// The host's network type (HostConfig::network_type): NovaWorld only for a
 	// host the world registers with the NovaWorld gate. Set by the world's
 	// host entry, not a GDScript field.

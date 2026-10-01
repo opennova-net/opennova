@@ -1,16 +1,10 @@
 #pragma once
 
+#include <runtime/inmatch/mission_exit.h> // kMissionExitNovaWorld
+
 #include <cstdint>
 
 namespace opennova::inmatch {
-
-// The mission exit reason a NovaWorld session's end stores: the main frame's check below, a
-// ServerStopPlaying and the service's punt all write it [orig: g_MissionExitReason = 12 —
-// Game_ProcessMainFrame @0x52657c, CNapiGameSession_HandleServerDisconnectMsg @0x4d208f,
-// CNapiGameSession_HandlePuntNotification @0x4d2216]. The post-mission router sends it to the
-// main menu with the network type cleared, which tears the NovaWorld session down
-// [orig: @0x568552 -> @0x5686cb..0x5686fe].
-inline constexpr int32_t kMissionExitNovaWorld = 12;
 
 // The NovaWorld UDP (NWU) session's hosting/playing word (session+0x128, dword_B60108).
 inline constexpr int32_t kNwuSessionRoleHosting = 2;

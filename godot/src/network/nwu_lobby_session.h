@@ -2,11 +2,11 @@
 
 // The shared NWU gate/session driver (ADR 0010): gate probe -> gate response ->
 // ClientSession handshake -> verified lobby session, pumped over two
-// PacketPeerUDP sockets. NovaWorldClient (lobby browse/login/join) and
-// NovaWorldHost (host registration) both delegate their formerly duplicated
-// socket/pump legs here and keep only their role behavior + GDScript surface.
+// PacketPeerUDP sockets. NovaWorldClient (lobby browse/login/join/host) delegates
+// its socket/pump legs here and keeps its role behavior + GDScript surface
+// (NwuHostRole carries the hosting half over this same driver).
 // Sockets live here; the protocol/crypto stay in engine/net/novaworld (ClientSession).
-// Not a registered Godot class — a plain member of the two nodes.
+// Not a registered Godot class — a plain member of NovaWorldClient.
 
 #include <godot_cpp/classes/packet_peer_udp.hpp>
 #include <godot_cpp/variant/string.hpp>

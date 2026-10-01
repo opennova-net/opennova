@@ -208,6 +208,15 @@ struct ClientAuth {
 	uint32_t spn = 0;  // Source Port Number (retail omits the tag when 0)
 	std::string scrk;  // Client-side Session CRypto Key
 	std::vector<std::vector<uint8_t>> cu; // Custom/User blobs (raw bytes, unparsed)
+	// The reconnect trailer, each tag emitted only when nonzero: NF (the connection's byte
+	// flag at +0x7BC), DCNT (the client connection's counted disconnects, +0x734) and RCNT
+	// (the last 0x82's echo, +0x738). A first join carries none of them.
+	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20 — NF @0x620309..0x620329, DCNT
+	//  @0x62033d..0x620354, RCNT @0x620368..0x62037f; the server reads them in
+	//  NapiNPProtocol_HandleClientJoin @0x62b750 and stores DCNT / RCNT(+1) @0x62c28d..0x62c2a3]
+	uint32_t nf = 0;
+	uint32_t dcnt = 0;
+	uint32_t rcnt = 0;
 };
 
 bool parse_client_auth(const uint8_t *data, size_t len, ClientAuth &out);
@@ -430,6 +439,12 @@ struct ServerAuth {
 	std::string na;       // echo client.na
 	uint32_t rip = 0;     // Reflected IP (client's remote IP)
 	uint32_t rpn = 0;     // Reflected Port Number
+	// The server connection's reconnect count, emitted after RPN only when nonzero: the
+	// joining 0x42's RCNT + 1 when that 0x42 counted a disconnect (DCNT > 0). The client stores
+	// it (0 when absent) and echoes it on its next 0x42.
+	// [orig: CNapiNPConnection_SendSessionInit @0x620ef0 @0x62125d..0x62127c; the client's
+	//  store NapiNP_HandleServerJoinResponse @0x629840 @0x629e2e]
+	uint32_t rcnt = 0;
 
 	// Rejected-join fields. Retail can send these without SCRK when CR != 1;
 	// the packet is valid and should surface as a rejection, not malformed.

@@ -292,11 +292,13 @@ public:
 	// first three, the joiner's 62-frame block the exit below.
 	void set_novaworld_link(const hud::NovaWorldLinkFacts &facts) { novaworld_link_ = facts; }
 	const hud::NovaWorldLinkFacts &novaworld_link() const { return novaworld_link_; }
-	// g_MissionExitReason as the client's NovaWorld legs store it: the joiner's
-	// main-frame check, or the NWU session's own stop-playing / punt handlers
-	// (inmatch/novaworld_link.h); nonzero exits the mission.
+	// g_MissionExitReason as the client's legs store it: the joiner's main-frame
+	// NovaWorld check, the NWU session's own stop-playing / punt handlers
+	// (inmatch/novaworld_link.h), else what the in-match connection's latched
+	// disconnect record maps to (inmatch/mission_exit.h); nonzero exits the
+	// mission, and the post-mission router reads it.
 	void set_mission_exit_reason(int32_t reason) { mission_exit_reason_ = reason; }
-	int32_t mission_exit_reason() const { return mission_exit_reason_; }
+	int32_t mission_exit_reason() const;
 	uint32_t client_ping_ms() const { return joiner_ ? joiner_->client_ping_ms() : 0; }
 	uint32_t client_average_ping_ms() const {
 		return joiner_ ? joiner_->client_average_ping_ms() : 0;

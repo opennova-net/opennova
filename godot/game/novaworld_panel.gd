@@ -29,8 +29,8 @@ signal closed()
 # the typed dial target MainGame hands to GameWorld.load_mission_as_joiner
 # (the SAME entry the LAN browser + --lan-join launch use — one in-match joiner seam, ADR 0009).
 signal join_in_match_requested(target: JoinTarget)
-# Host a NovaWorld game. The panel supplies the gate (the server it's connected to); MainGame fills in
-# the mission + callsign and stands up a browsable listen host (SessionDrive::maybe_start_nw_host).
+# Host a NovaWorld game. The panel's session is already hosting (the service's ServerHostResult
+# landed), so MainGame loads the mission as a listen host and the session rides in with it.
 signal host_requested(config: HostSessionConfig)
 
 # The table's column titles, in NovaWorldServerBrowser.Column order (the
@@ -104,6 +104,8 @@ var _message_action: Callable
 var _browser_loading := false
 var _closing := false
 var _suppress_client_messages := false
+# The host request awaiting its ServerHostResult (start_hosting in flight).
+var _pending_host_config: HostSessionConfig
 
 
 func _ready() -> void:
@@ -266,19 +268,46 @@ func _create_client(start_now: bool = true) -> void:
 	_client.host = _resolved_host()
 	_client.gate_port = gate_port
 	_client.player_name = player_name
-	_client.state_changed.connect(_on_state_changed)
-	_client.connected.connect(_on_connected)
-	_client.disconnected.connect(_on_disconnected)
-	_client.error_occurred.connect(_on_error)
-	_client.server_list_updated.connect(_on_server_list_updated)
-	_client.server_list_failed.connect(_on_server_list_failed)
-	_client.server_pings_updated.connect(_on_server_pings_updated)
-	_client.login_succeeded.connect(_on_login_succeeded)
-	_client.login_failed.connect(_on_login_failed)
-	_client.join_failed.connect(_on_join_failed)
-	_client.joined_game.connect(_on_joined_game)
+	_client.gametext = Strings.get_table(Strings.TABLE_GAMETEXT)
+	_wire_client(_client)
 	if start_now:
 		_client.start()
+
+
+# The panel's handlers on its session's signals: wired while the panel holds the
+# session, cut when it hands the session to the match.
+func _client_handlers() -> Dictionary:
+	return {
+		"state_changed": _on_state_changed,
+		"connected": _on_connected,
+		"disconnected": _on_disconnected,
+		"error_occurred": _on_error,
+		"server_list_updated": _on_server_list_updated,
+		"server_list_failed": _on_server_list_failed,
+		"server_pings_updated": _on_server_pings_updated,
+		"login_succeeded": _on_login_succeeded,
+		"login_failed": _on_login_failed,
+		"join_failed": _on_join_failed,
+		"joined_game": _on_joined_game,
+		"hosting_started": _on_hosting_started,
+		"host_failed": _on_host_failed,
+	}
+
+
+func _wire_client(client: NovaWorldClient) -> void:
+	var handlers := _client_handlers()
+	for signal_name: String in handlers:
+		var handler: Callable = handlers[signal_name]
+		if not client.is_connected(signal_name, handler):
+			client.connect(signal_name, handler)
+
+
+func _unwire_client(client: NovaWorldClient) -> void:
+	var handlers := _client_handlers()
+	for signal_name: String in handlers:
+		var handler: Callable = handlers[signal_name]
+		if client.is_connected(signal_name, handler):
+			client.disconnect(signal_name, handler)
 
 
 # OpenNova uses the configured/injected server_host (dev: localhost). "Original
@@ -346,6 +375,8 @@ func _on_state_changed(state: int) -> void:
 			_set_status("Joining game...")       # NWJoin in flight
 		NovaWorldClient.STATE_IN_GAME_HELLO:
 			_set_status("Connecting to game host...")  # proto switched
+		NovaWorldClient.STATE_HOSTING_REQUESTED, NovaWorldClient.STATE_HOSTING:
+			_set_status("Starting host...")  # ClientHostRequest out / granted
 		_:
 			_set_status("Connection problem.")
 
@@ -669,14 +700,20 @@ func _on_join_failed(reason: String) -> void:
 	if not _logged_in or _suppress_client_messages:
 		return
 	_join_button.disabled = _selected_row() == null
-	# NWEC tags are keys in menutxt.bin; HTTP failures already carry prose.
-	var message := reason
+	_show_message(error_message(reason), "Back to Games", Callable(self, "_return_to_lobby"),
+			Screen.LOBBY)
+
+
+# The NovaWorld error dialog's text: NWEC / CV tags are keys in menutxt.bin
+# (the tag stays beside the text for diagnostics); HTTP failures already carry
+# prose (the nw_error.mnx dialog, docs/net/novaworld-net-re.md).
+static func error_message(reason: String) -> String:
 	var menutxt := Strings.get_table(Strings.TABLE_MENUTXT)
 	if menutxt != null and menutxt.has_string(reason):
 		var localized := menutxt.get_string(reason)
 		if not localized.is_empty() and localized != reason:
-			message = "%s\n\n(%s)" % [localized, reason]
-	_show_message(message, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
+			return "%s\n\n(%s)" % [localized, reason]
+	return reason
 
 
 # True only on the FIRST Join press for a row whose advertised expansion the
@@ -731,9 +768,10 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 	join_in_match_requested.emit(target)
 
 
-# Host a NovaWorld game: hand the gate (the server we're connected to) up to MainGame, which fills in
-# the mission + callsign and stands up a browsable listen host (SessionDrive::maybe_start_nw_host). We
-# register on the OpenNova gate only — never advertise a host on NovaLogic's live service.
+# Host a NovaWorld game on this logged-in session: the client sends ClientHostRequest and waits for
+# the service's ServerHostResult; only a hosting session hands the request up to MainGame, which
+# loads the mission as a listen host. We host on the OpenNova gate only — never advertise a host on
+# NovaLogic's live service.
 func _on_host_pressed() -> void:
 	if not _logged_in and start_client_on_ready:
 		return
@@ -750,11 +788,38 @@ func _on_host_pressed() -> void:
 	_set_status("Starting host...")
 	var config := HostSessionConfig.new()
 	config.channel = HostSessionConfig.CHANNEL_NOVAWORLD
-	config.nw_gate_host = _resolved_host()
-	config.nw_gate_port = gate_port
 	config.server_name = "%s's Game" % player_name
 	config.mission = mission
+	if resource_root != null:
+		config.expansion = String(resource_root.get_expansion())
+	_pending_host_config = config
+	if _host_start_button != null:
+		_host_start_button.disabled = true
+	if _client == null:
+		_on_host_failed("NWEC01")
+		return
+	_client.start_hosting(config.to_session_options())
+
+
+# The service accepted the hosting (the session is in state 6): the mission
+# starts now, with the session riding in.
+func _on_hosting_started() -> void:
+	var config := _pending_host_config
+	_pending_host_config = null
+	if _host_start_button != null:
+		_host_start_button.disabled = false
+	if config == null:
+		return
 	host_requested.emit(config)
+
+
+func _on_host_failed(reason: String) -> void:
+	_pending_host_config = null
+	if _host_start_button != null:
+		_host_start_button.disabled = false
+	if _suppress_client_messages:
+		return
+	host_failed(error_message(reason))
 
 
 # Populate the Map picker from the injected resource root. Empty (no root / no .bms) leaves the
@@ -777,9 +842,66 @@ func _populate_missions() -> void:
 func release_client() -> NovaWorldClient:
 	var client := _client
 	_client = null
-	if client != null and client.get_parent() == self:
+	if client == null:
+		return null
+	_unwire_client(client)
+	if client.get_parent() == self:
 		remove_child(client)
 	return client
+
+
+## The NovaWorld menu's re-entry after a match: the session comes back still
+## verified, leaves its hosting and its play (each statement only from its own
+## states), and the player lands back in the logged-in lobby with the list
+## refreshed -- no reconnect, no sign-in (UI_EnterNovaWorldMenu's chain short-circuits
+## on a live session; docs/net/novaworld-net-re.md).
+func adopt_client(client: NovaWorldClient) -> void:
+	if client == null:
+		return
+	_suppress_client_messages = true
+	if _client != null and _client != client:
+		_client.stop()
+		_client.queue_free()
+	_suppress_client_messages = false
+	_client = client
+	if client.get_parent() != self:
+		if client.get_parent() != null:
+			client.get_parent().remove_child(client)
+		add_child(client)
+	_can_login = true
+	_logged_in = client.is_authenticated()
+	_wire_client(client)
+	client.stop_hosting()
+	client.stop_playing()
+	_host_button.disabled = not _logged_in or _target == NovaWorldSettings.Target.REAL
+	_rows.clear()
+	_pings.clear()
+	_browser_loading = _logged_in
+	_rebuild_type_filter()
+	_rebuild_view()
+	if not _logged_in:
+		_return_to_login()
+		return
+	_set_status("Signed in.")
+	_set_screen(Screen.LOBBY)
+	client.refresh_servers()
+
+
+## A match that ended with an error text shows it in the NovaWorld error dialog
+## first. Its Back re-enters NovaWorld (a fresh connect: the session was reset)
+## when the player had left from the NovaWorld menu, else closes back to the
+## main menu (the menu shell's return and the dialog's BACK, docs/net/novaworld-net-re.md).
+func show_post_mission_error(reason: String, reenter_novaworld: bool) -> void:
+	_suppress_client_messages = true
+	if _client != null:
+		_client.stop()
+		_client.queue_free()
+		_client = null
+	_suppress_client_messages = false
+	var text := error_message(reason if not reason.is_empty() else "CVUNKNOWN")
+	var back := Callable(self, "_reconnect") if reenter_novaworld else Callable(self, "_on_close_pressed")
+	_set_status(text)
+	_show_message(text, "Back", back, Screen.CONNECTING)
 
 
 ## The wired client event source. Tests leave it unstarted and emit signals
@@ -907,6 +1029,9 @@ func _selected_mission() -> String:
 # Called by MainGame when a requested host could not start (no mission, load failed). Reports it on
 # the panel instead of leaving the stale "Starting..." status, and re-enables Host (REAL stays off).
 func host_failed(reason: String) -> void:
+	# A hosting the service granted but the shell could not start is left again.
+	if _client != null and _client.is_hosting():
+		_client.stop_hosting()
 	_set_status(reason)
 	_show_message(reason, "Back to Games", Callable(self, "_return_to_lobby"), Screen.LOBBY)
 	if _host_button != null:

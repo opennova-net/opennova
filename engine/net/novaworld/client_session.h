@@ -147,6 +147,14 @@ public:
 		int32_t glsvss_rims_ms = 0;
 		int32_t glsvss_agrms_ms = 0;
 
+		// The fresh CK and SCRK a reconnect's re-join mints. Unset, the engine's own random
+		// draws (make_random_session_u32 / make_dev_scrk) stand; the owner injects its
+		// generator, a test a deterministic one.
+		// [orig: CNapiNPConnection_InitFromSession @0x626320 — NapiNP_GenerateSessionKey
+		//  @0x6263fb (CK), CNapiNPConnection_GenerateTxKey @0x626401 (SCRK)]
+		std::function<uint32_t()> next_client_key;
+		std::function<std::string()> next_scrk;
+
 		// Preset for the in-match game session: the ClientHello the client sends
 		// to a host after NWJoin, which flips the connection protocol from the
 		// lobby (NOVAWORLDUDP) to the game (JOINTOPERATIONS). The complete
@@ -162,6 +170,10 @@ public:
 	//  @0x629840 (the overlay); CNapiNPConnection_HandleCSConfigUpdate @0x621940]
 	struct ConnectionSettings {
 		int32_t timeout_ms = 240000;           // CS field 0
+		// CS field 1: the teardown's disconnect-packet burst size (clamped 0..32, the first
+		// send always goes) [orig: InitNPConnection @0x4d3e2c (4); TeardownActiveConnection
+		//  @0x6253ef..0x625424]
+		int32_t recv_max_per_tick = 4;
 		int32_t idle_send_interval_ms = 60000; // CS field 4 — the empty keepalive leg
 		int32_t active_send_interval_ms = 1000;// CS field 5 — the queued-payload leg
 		int32_t packet_queue_interval_ms = -1; // CS field 6 — the missing-seq leg (off)
@@ -185,6 +197,12 @@ public:
 			Command,           // ServerCommand: `command`
 			GlsvssResults,     // ServerGLSVSSResults: `glsvss_results`
 			PlayerEnterResult, // ServerPlayerEnterResult: `player_enter`
+			// A reconnect's re-verify found the word hosting / playing and re-sent the
+			// request itself (ClientHostRequest CurrentlyHosting=1 with ReconnectCounter
+			// counted up / ClientPlayRequest CurrentlyPlaying=1); the reply lands as a
+			// HostResult / PlayResult. [orig: HandleConnectVerifyResponse @0x4d5961..0x4d599e]
+			Rehost,
+			Replay,
 		};
 		Kind kind = Kind::HostResult;
 		ServerResultFields fields;
@@ -234,13 +252,16 @@ public:
 	// of replying synchronously from handle_datagram().
 	void process_periodic_update(std::vector<std::vector<uint8_t>> &out);
 
-	// The connection's send-interval pump over the negotiated CS values: once the
-	// NP connection is up (Verifying/Verified), emits the header-only 0x43 when
-	// nothing is queued or retained and idle_send_interval_ms has elapsed since
-	// the last framed send, and reaps the connection (a latched CLNTTMOUT
-	// disconnect, state Closed) when timeout_ms of receive silence has passed.
-	// [orig: CNapiNPConnection_PumpSendIntervals @0x628fd0 @0x629041..0x629067;
-	//  PumpStateMachine @0x6292e0 case 5 @0x6295a2..0x62961c]
+	// The connection's pump over the negotiated CS values: once the NP connection is up
+	// (Verifying/Verified), emits the header-only 0x43 when nothing is queued or retained
+	// and idle_send_interval_ms has elapsed since the last framed send, and reaps the
+	// connection when timeout_ms of receive silence has passed (a latched CLNTTMOUT record,
+	// the 0x46 burst, state Closed). Once torn down with the hosting/playing word set, the
+	// same pump runs the reconnect: the 0x41 re-probe windows and the re-join's 0x42 leg
+	// (see reconnecting()).
+	// [orig: CNapiNPConnection_PumpFlags @0x629780 -> PumpEnumeratorAndSend @0x6290c0, then
+	//  PumpStateMachine @0x6292e0 (case 3 @0x629508, case 5 @0x6295a2..0x62961c, the
+	//  reconnect tail @0x629487..0x6296cb); PumpSendIntervals @0x628fd0 @0x629041..0x629067]
 	void pump_send_intervals(std::vector<std::vector<uint8_t>> &out);
 
 	// Build a keep-alive: a header-only 0x43 with no inner messages (advances
@@ -282,15 +303,21 @@ public:
 	HostState host_state() const { return host_state_; }
 	const ServerResultFields &host_result() const { return host_result_; }
 	// The GSID the successful ServerHostResult's HostCommands carried (128-char cap): the
-	// value the in-match host publishes as its 0x81 SUS1. Empty until Established.
-	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1]
+	// value the in-match host publishes as its 0x81 SUS1. Empty until Established, and again
+	// from a connection teardown until a re-host's ServerHostResult re-supplies it.
+	// [orig: HandleHostVerifyResponse @0x4d59d0 @0x4d5bd6..0x4d5c0f -> server_user_string1;
+	//  CNapiGameSession_OnDisconnect @0x4cfc3b..0x4cfc54 clears both]
 	const std::string &host_gsid() const { return host_gsid_; }
 	int host_requires_join_ticket() const { return host_requires_join_ticket_; }
 
 	// ---- the play leg -------------------------------------------------------
-	// ClientPlayRequest (state 4 -> 7) with the PlaySetup vars (make_play_setup_vars).
-	// [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 -> SendPlayRequest @0x4d3920]
-	std::vector<uint8_t> build_play_request(const std::vector<ClientVar> &play_setup);
+	// ClientPlayRequest (state 4 -> 7) with the PlaySetup vars (make_play_setup_vars); the
+	// session keeps them for a reconnect's replay. `currently_playing` is the reconnect flag
+	// (0 on the fresh path). [orig: CNapiGameSession_StartPlayingSession @0x4d45e0 ->
+	//  SendPlayRequest @0x4d3920; g_SessionConnectVarList filled by ConnectOrHost
+	//  @0x4d53bb..0x4d542b]
+	std::vector<uint8_t> build_play_request(const std::vector<ClientVar> &play_setup,
+	                                        int currently_playing = 0);
 	// ClientStopPlaying (states 7/8 -> 4). [orig: CGameSession_StopPlaying @0x4d0ec0]
 	std::vector<uint8_t> build_stop_playing();
 	PlayState play_state() const { return play_state_; }
@@ -322,6 +349,28 @@ public:
 	static constexpr int32_t kSessionRoleHosting = 2;
 	static constexpr int32_t kSessionRolePlaying = 3;
 	int32_t session_role() const { return session_role_; }
+
+	// ---- the reconnect ------------------------------------------------------
+	// Armed while the hosting/playing word is nonzero (the NP connection's +0x710 mirror of
+	// every word write). [orig: the word writers above; CNapiNPConnection_PumpStateMachine
+	//  @0x6294a5 reads it]
+	bool reconnect_armed() const { return session_role_ != kSessionRoleNone; }
+	// Torn down (the peer's goodbye or description record, the reap) while armed and not yet
+	// back up: the session owns the 0x41 re-probe and the 0x42 re-join from here (the owner's
+	// first-connect retransmits and deadlines stand down; retransmit_stage_datagram() is
+	// empty) until the re-join's 0x82 lands. [orig: the reconnect tail's guard
+	//  @0x629487..0x6294a5 — !conn_flag0 && conn_flag1 && is_client && +0x710]
+	bool reconnecting() const;
+	// The connection's counted disconnects (DCNT, +0x734) and the last 0x82's reconnect count
+	// (RCNT, +0x738): both ride the re-join's 0x42.
+	uint32_t disconnect_count() const { return dcnt_; }
+	uint32_t reconnect_count() const { return rcnt_; }
+	// The HostSetup ReconnectCounter (session+0x500): 0 on a fresh host request, one up per
+	// re-host.
+	int host_reconnect_counter() const { return reconnect_counter_; }
+	// The teardown's disconnect-packet burst: CS recv_max_per_tick clamped to 0..32, the first
+	// send always going. [orig: TeardownActiveConnection @0x6253ef..0x625424]
+	size_t disconnect_burst_count() const;
 	// The peer's / reap's latched disconnect record once the session Closed on it.
 	bool disconnected_by_peer() const { return disconnected_by_peer_; }
 	const DisconnectEvent &disconnect_event() const { return disconnect_event_; }
@@ -340,7 +389,9 @@ public:
 	// The NovaworldWebDomainNameAndPortNumber CU delivered in the ServerSessionInit
 	// (0x82), e.g. "207.178.209.204:80". On live NW the gate's startupurl carries a
 	// "[domainname]" placeholder; this is the real web host the client substitutes
-	// for the HTTP login/GSB/join legs. Empty until the SessionInit is parsed.
+	// for the HTTP login/GSB/join legs. Empty until the SessionInit is parsed; a connection
+	// teardown resets it to "???" and clears the NWUID until the next 0x82 re-supplies them
+	// [orig: CNapiGameSession_OnDisconnect @0x4cfb8e / @0x4cfbe3].
 	const std::string &server_web_domain() const { return server_web_domain_; }
 	const std::string &server_nwuid() const { return server_nwuid_; }
 	const std::string &sess_id_string() const { return sess_id_string_; }
@@ -365,15 +416,29 @@ private:
 	void on_server_hello(const std::vector<uint8_t> &body,
 	                     std::vector<std::vector<uint8_t>> &out);
 	void on_server_auth(const std::vector<uint8_t> &body);
-	void on_server_goodbye(const std::vector<uint8_t> &body);
+	void on_server_goodbye(const std::vector<uint8_t> &body,
+	                       std::vector<std::vector<uint8_t>> &out);
 	void on_server_protocol_message(const std::vector<uint8_t> &body,
 	                                std::vector<std::vector<uint8_t>> &out);
 	void dispatch_server_container(const NapiMessage &container,
 	                               std::vector<std::vector<uint8_t>> &out);
 	void apply_cs_config_update(const ProtocolMessage &pm);
 	void latch_disconnect(const DisconnectEvent &event);
-	// The connection's teardown callback: Closed, and the session state back to 0.
+	// CNapiNPConnection_TeardownActiveConnection over a connected connection: DCNT counted,
+	// the 0x46 burst echoing the latched record, the disconnect callback, and the reconnect
+	// schedule restarted.
+	void teardown_connection(std::vector<std::vector<uint8_t>> &out);
+	// The connection's teardown callback: Closed, the session state back to 0, and the
+	// session strings the callback clears.
 	void on_disconnected();
+	// The reconnect's halves of the pump: the enumerator's 0x41 re-announce, the 0x42 leg
+	// (case 3) and the schedule tail.
+	void pump_reconnect(std::vector<std::vector<uint8_t>> &out);
+	void grow_reconnect_gap();
+	// The host and play legs' requests over the session-owned lists. [orig:
+	//  CNapiGameSession_StartHostingSession @0x4d4540 / StartPlayingSession @0x4d45e0]
+	std::vector<uint8_t> send_host_request(int currently_hosting);
+	std::vector<uint8_t> send_play_request(int currently_playing);
 	void set_lobby_state(int state); // the CGameSession_SetState mirror (flags, GLSVSS arming)
 	void fail(std::string reason);
 
@@ -415,6 +480,35 @@ private:
 	int lobby_state_ = 0;                // the CGameSession state (session+0x11C)
 	uint32_t session_flags_ = 0;         // session+0x120
 	int32_t session_role_ = kSessionRoleNone; // session+0x128
+
+	// The session-owned var lists the host and play legs serialize: HostSetup (session+0x1CC),
+	// Host (+0x214), PlayerList (+0x25C) and the play leg's PlaySetup
+	// (g_SessionConnectVarList). A reconnect's re-request re-sends them whole.
+	// [orig: BuildHostVarLists @0x4d0b50; Server_PlayerAdd @0x51d421..0x51d4aa (the PlayerList
+	//  SetOrCreates); ConnectOrHost @0x4d53bb..0x4d542b (PlaySetup)]
+	std::vector<ClientVar> host_setup_;
+	std::vector<ClientVar> host_list_;
+	std::vector<ClientVar> player_list_;
+	std::vector<ClientVar> play_setup_;
+	int reconnect_counter_ = 0;          // session+0x500
+
+	// The NP connection's reconnect state. [orig: NapiNPConnection — conn_flag1 +0x29, the
+	//  enumerator's timer_active / timer_start_tick / last_send_tick, +0x72C gap, +0x730 next,
+	//  +0x5E0 the state-3 entry, +0x5E4 the last 0x42]
+	struct Reconnect {
+		bool was_connected = false;      // conn_flag1
+		bool probing = false;            // enumerator timer_active
+		uint32_t window_start_ms = 0;    // enumerator timer_start_tick
+		bool probe_sent = false;         // enumerator last_send_tick != 0
+		uint32_t last_probe_ms = 0;      // enumerator last_send_tick
+		uint32_t gap_ms = SESSION_RECONNECT_GAP_INITIAL_MS; // +0x72C
+		uint32_t next_ms = 0;            // +0x730
+		uint32_t join_started_ms = 0;    // +0x5E0
+		uint32_t join_last_send_ms = 0;  // +0x5E4
+	};
+	Reconnect reconnect_;
+	uint32_t dcnt_ = 0;                  // conn+0x734
+	uint32_t rcnt_ = 0;                  // conn+0x738
 
 	// The 0-default is deliberately preserved (start() resets it to 1 — see Risk #1 / capture frame 9739).
 	SessionSequencing seq_{0, 0}; // outbound seq + last inbound ack [ADR 0013 shared framing]

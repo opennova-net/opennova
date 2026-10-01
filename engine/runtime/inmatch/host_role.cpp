@@ -366,8 +366,7 @@ bool HostRole::session_lost(SessionError &error) const {
 	// The NovaWorld session's end exits the mission on either host kind.
 	if (ctx.mission_exit_reason != 0) {
 		error = {SessionErrorCode::SessionLost,
-				"the NovaWorld session ended (mission exit " +
-						std::to_string(ctx.mission_exit_reason) + ")"};
+				"mission exit " + std::to_string(ctx.mission_exit_reason)};
 		return true;
 	}
 	if (ctx.connection_mode != ConnectionMode::HostOnly) return false;
