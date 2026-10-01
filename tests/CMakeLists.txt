@@ -2920,6 +2920,13 @@ target_link_libraries(joi_parse_test PRIVATE opennova_net)
 target_include_directories(joi_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME joi_parse COMMAND joi_parse_test)
 
+# The service's NWJoin.dll / NWHost.dll relay leg selection: a stale tag cookie
+# never hijacks a fresh first call.
+add_executable(relay_request_test novaworld/relay_request_test.cpp)
+target_link_libraries(relay_request_test PRIVATE opennova_net)
+target_include_directories(relay_request_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME relay_request COMMAND relay_request_test)
+
 add_executable(join_identity_test novaworld/join_identity_test.cpp)
 target_link_libraries(join_identity_test PRIVATE opennova_net)
 target_include_directories(join_identity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
