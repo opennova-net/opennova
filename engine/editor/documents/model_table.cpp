@@ -1,29 +1,85 @@
-// The .3di property table (threedi_schema.h).
+// The model's table (model_document.h, ADR 0046 S10; S13 D10 made it rows of the one table shape,
+// model/table_shape.h, from the format's property table it was): the engine features of a model an
+// editor changes, named once by a dotted path per record, over the engine's own records
+// (Threedi3di3's ThreediMaterial, ThreediLight, ThreediUserPoint, ThreediPartAnimation, ...; ADR
+// 0027: the parsed struct is what an editor changes). The units are the `.o3d` scene text's
+// (docs/threedi/o3d-scene-format.md): mission axes, byte colours, raw PANM track words, 16.16
+// truncated as the exporter stores a point; a get is `scene`'s reading and a set is `build`'s, so the
+// editor and the Blender add-on agree. Each field names its unit where it has one and the row it
+// shares (a position's axes, a colour's channels, a frame's row), each member named by its component.
+// Geometry (vertices, strips, collision planes and faces' corners) is not here: it is authored in
+// Blender.
+//
+// A Set of the value a field already reads changes nothing, so a retail word that sits off the text's
+// grid survives a Set of every field to its own value. Only the words a field derives are derived
+// again when it changes (a light's axis and view_proj follow its position, direction, cone and reach,
+// never its colour).
+#include <editor/documents/model_document.h>
 
-#include <formats/threedi/threedi_schema.h>
-
+#include <algorithm>
 #include <climits>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
 
+#include <base/io/strutil.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <runtime/renderer/material_descriptor.h>
 
-namespace opennova::threedi {
+#include "model_document_internal.h"
+
+namespace opennova::editor {
 namespace {
 
-using Value = ThreediSchemaValue;
-using Shape = ThreediSchemaShape;
-using Type = ThreediSchemaType;
-using Ref = ThreediSchemaReference;
+using namespace threedi;
+
+// The records an entry describes, and the native struct behind each: Model ThreediHeader, Lod
+// ThreediLod, PartAnimation ThreediPartAnimation, Material ThreediMaterial, Texture
+// ThreediMaterialTexture, Light ThreediLight, UserPoint ThreediUserPoint, Register
+// ThreediControlRegister, Frame ThreediMatrix4x4 (an MTRX row), Section ThreediCollisionObject, Volume
+// ThreediBoundingVolume, Face ThreediCollisionFace, Occlusion ThreediOcclusionObject.
+enum class Shape {
+	Model, Lod, PartAnimation, Material, Texture, Light, UserPoint, Register, Frame, Section, Volume, Face, Occlusion,
+};
+
+enum class Type { Integer, Real, Text };
+
+// What a field names outside its record: a texture file, a CTRL register (by its index in the model's
+// table), a part (by its index in LOD 0), an MTRX frame (by its row).
+enum class Ref { None, Texture, Register, Part, Frame };
+
+struct Choice {
+	const char *name = "";
+	int64_t value = 0;
+	const char *label = ""; // "" = the name
+};
+
+struct Field {
+	const char *path = "";        // "position.x", "rgbgen.start.r", "rotx.style"
+	Type type = Type::Integer;
+	size_t width = 0;             // a text's capacity in bytes, the terminator included
+	int64_t min = 0, max = 0;     // an integer's range
+	bool read_only = false;       // shown, never set (geometry, derived words)
+	bool flags = false;           // the choices are bits of one integer
+	Ref reference = Ref::None;
+	std::vector<Choice> choices;
+	const char *label = "";       // "" = the path; a component's names it ("Position X")
+	const char *unit = "";        // what the value is in ("m", "deg"; "" = none)
+	const char *group = "";       // the row it shares with its neighbours of the group ("" = none)
+	bool channel = false;         // a colour's red, green or blue byte in a group of the three
+	// What the game makes of the value is not witnessed: shown as the file holds it, never set (the
+	// second-channel material words, a light's byte 34).
+	bool unverified = false;
+	const char *note = "";        // what the value is, where the label cannot say it
+};
 
 // One field: its description and how it reads and writes the native record. `arg`
 // is the field's own index where one accessor serves several (an axis, a colour
 // channel, a PANM track, a generator).
 struct Entry {
-	ThreediSchemaField field;
+	Field field;
 	Value (*get)(const void *record, int arg) = nullptr;
 	bool (*set)(void *record, const Value &value, int arg, std::string &error) = nullptr; // null: read-only
 	bool (*reads)(const void *record, int arg) = nullptr;                                 // null: always
@@ -71,8 +127,8 @@ bool set_texture_name(ThreediMaterialTexture &texture, const Value &v, std::stri
 // --- choices ----------------------------------------------------------------------
 
 // Every generator-style byte the catalog names (the kControlEntries table).
-std::vector<ThreediSchemaChoice> style_choices() {
-	std::vector<ThreediSchemaChoice> out;
+std::vector<Choice> style_choices() {
+	std::vector<Choice> out;
 	for (int code = 0; code < 256; ++code) {
 		const ThreediControlFuncInfo *info = threedi_control_func_info(static_cast<uint8_t>(code));
 		if (info != nullptr && info->name != nullptr) out.push_back({info->name, code, ""});
@@ -82,8 +138,8 @@ std::vector<ThreediSchemaChoice> style_choices() {
 
 // The collidable-type codes of a volume's name (docs/world/world-wac-ai-re.md §15;
 // the add-on's VOLUME_CODES).
-const std::vector<ThreediSchemaChoice> &volume_type_choices() {
-	static const std::vector<ThreediSchemaChoice> choices = {
+const std::vector<Choice> &volume_type_choices() {
+	static const std::vector<Choice> choices = {
 		{"CB", 1, ""}, {"CS", 2, ""}, {"CC", 3, ""}, {"CL", 4, "CL (ladder)"}, {"CV", 5, ""}, {"CA", 6, ""},
 		{"VC", 7, ""}, {"BB", 8, "BB (blink box)"}, {"CD", 9, ""}, {"CT", 10, ""}, {"CM", 11, ""}, {"VK", 12, ""},
 		{"CF", 13, ""}, {"LP", 14, ""}, {"DH", 16, ""}, {"DM", 17, ""}, {"DL", 18, ""}, {"CP", 19, ""},
@@ -147,9 +203,9 @@ void light_view_proj_again(ThreediLight &l) {
 
 // --- the tables -------------------------------------------------------------------------
 
-ThreediSchemaField integer(const char *path, int64_t min, int64_t max, const char *label = "",
-		std::vector<ThreediSchemaChoice> choices = {}, bool flags = false, Ref ref = Ref::None) {
-	ThreediSchemaField f;
+Field integer(const char *path, int64_t min, int64_t max, const char *label = "",
+		std::vector<Choice> choices = {}, bool flags = false, Ref ref = Ref::None) {
+	Field f;
 	f.path = path;
 	f.type = Type::Integer;
 	f.min = min;
@@ -160,16 +216,16 @@ ThreediSchemaField integer(const char *path, int64_t min, int64_t max, const cha
 	f.reference = ref;
 	return f;
 }
-ThreediSchemaField realf(const char *path, const char *label = "") {
-	ThreediSchemaField f;
+Field realf(const char *path, const char *label = "") {
+	Field f;
 	f.path = path;
 	f.type = Type::Real;
 	f.label = label;
 	return f;
 }
-ThreediSchemaField textf(const char *path, size_t width, const char *label = "", Ref ref = Ref::None,
-		std::vector<ThreediSchemaChoice> choices = {}) {
-	ThreediSchemaField f;
+Field textf(const char *path, size_t width, const char *label = "", Ref ref = Ref::None,
+		std::vector<Choice> choices = {}) {
+	Field f;
 	f.path = path;
 	f.type = Type::Text;
 	f.width = width;
@@ -178,23 +234,23 @@ ThreediSchemaField textf(const char *path, size_t width, const char *label = "",
 	f.choices = std::move(choices);
 	return f;
 }
-ThreediSchemaField fixed(ThreediSchemaField f) {
+Field fixed(Field f) {
 	f.read_only = true;
 	return f;
 }
 // A field with the unit its value is in.
-ThreediSchemaField in(ThreediSchemaField f, const char *unit) {
+Field in(Field f, const char *unit) {
 	f.unit = unit;
 	return f;
 }
 // A field on its group's row; a colour's red, green or blue byte.
-ThreediSchemaField on_row(ThreediSchemaField f, const char *group, bool channel = false) {
+Field on_row(Field f, const char *group, bool channel = false) {
 	f.group = group;
 	f.channel = channel;
 	return f;
 }
 // Shown as the file holds it, never set: what the game does with it is not witnessed.
-ThreediSchemaField unwitnessed(ThreediSchemaField f) {
+Field unwitnessed(Field f) {
 	f.read_only = true;
 	f.unverified = true;
 	f.note = "What the game does with this is not witnessed: shown as the file holds it.";
@@ -271,16 +327,16 @@ std::vector<Entry> panm_entries() {
 				[](const void *d, int) { return threedi_panm_frame_row(as<ThreediPartAnimation>(d)) > 0; }},
 	};
 	// The flag word's four bytes [threedi_panm.h's pack/unpack; PANM_SampleTrack @ 0x5B2270].
-	static const std::vector<ThreediSchemaChoice> scale = {{"none", 0, "None"}, {"uniform", 1, "Uniform (scalex)"},
+	static const std::vector<Choice> scale = {{"none", 0, "None"}, {"uniform", 1, "Uniform (scalex)"},
 			{"axes", 2, "Per axis"}};
-	static const std::vector<ThreediSchemaChoice> rotation = {{"none", 0, "None"}, {"spinner", 1, "Spinner"},
+	static const std::vector<Choice> rotation = {{"none", 0, "None"}, {"spinner", 1, "Spinner"},
 			{"tracks", 2, "Tracks (rotx roty rotz)"}, {"billboard", 3, "Billboard"}, {"upright", 4, "Upright billboard"}};
-	static const std::vector<ThreediSchemaChoice> reversed = {{"no", 0, ""}, {"yes", 1, ""}};
-	static const std::vector<ThreediSchemaChoice> axis = {{"none", 0, "None"}, {"x", 1, "X"}, {"y", 2, "Y"},
+	static const std::vector<Choice> reversed = {{"no", 0, ""}, {"yes", 1, ""}};
+	static const std::vector<Choice> axis = {{"none", 0, "None"}, {"x", 1, "X"}, {"y", 2, "Y"},
 			{"z", 3, "Z"}};
 	const char *const kFlagPaths[4] = {"flags.scale", "flags.rotation", "flags.reversed", "flags.trans_axis"};
 	const char *const kFlagLabels[4] = {"Scale", "Rotation", "Reversed", "Translation axis"};
-	const std::vector<ThreediSchemaChoice> *kFlagChoices[4] = {&scale, &rotation, &reversed, &axis};
+	const std::vector<Choice> *kFlagChoices[4] = {&scale, &rotation, &reversed, &axis};
 	for (int b = 0; b < 4; ++b)
 		out.push_back({integer(kFlagPaths[b], 0, 255, kFlagLabels[b], *kFlagChoices[b]),
 				[](const void *d, int byte) -> Value {
@@ -294,7 +350,7 @@ std::vector<Entry> panm_entries() {
 				nullptr, nullptr, b});
 	// The seven tracks: rotations in 1/16384 turn, the others 8.8, all int16 raw
 	// (the text's words); the parameter byte is a register above style 0x70.
-	static const std::vector<ThreediSchemaChoice> styles = style_choices();
+	static const std::vector<Choice> styles = style_choices();
 	static std::vector<std::string> paths;
 	if (paths.empty())
 		for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t)
@@ -336,7 +392,7 @@ std::vector<Entry> panm_entries() {
 }
 
 std::vector<Entry> material_entries() {
-	static const std::vector<ThreediSchemaChoice> styles = style_choices();
+	static const std::vector<Choice> styles = style_choices();
 	std::vector<Entry> out = {
 		{textf("shader", 33, "Shader"), [](const void *d, int) -> Value { return std::string(as<ThreediMaterial>(d).shader_name); },
 				[](void *d, const Value &v, int, std::string &e) {
@@ -481,7 +537,7 @@ std::vector<Entry> material_entries() {
 	// Its parameter names a register above style 0x70 as the first generator's does: the load swaps
 	// it through the model's CTRL table [orig: ThreediGp_LoadFromFile @ 0x5B5D0A..0x5B5D2A]. Shown,
 	// never set, as the generator's other words are.
-	ThreediSchemaField second_param =
+	Field second_param =
 			unwitnessed(integer("rgbgen2.param", 0, 255, "Phase (1/256) or register", {}, false, Ref::Register));
 	second_param.note = "The load swaps it through the model's CTRL table above style 0x70, as it does the first "
 	                    "generator's; what the game draws with the second generator is not witnessed: shown as "
@@ -565,7 +621,7 @@ std::vector<Entry> texture_entries() {
 bool light_is_spot(const void *d, int) { return (as<ThreediLight>(d).flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0; }
 
 std::vector<Entry> light_entries() {
-	static const std::vector<ThreediSchemaChoice> styles = style_choices();
+	static const std::vector<Choice> styles = style_choices();
 	std::vector<Entry> out = {
 		{integer("part", 0, 255, "Part", {}, false, Ref::Part),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediLight>(d).subobj_index); },
@@ -747,8 +803,8 @@ std::vector<Entry> user_point_entries() {
 }
 
 std::vector<Entry> register_entries() {
-	static const std::vector<ThreediSchemaChoice> names = [] {
-		std::vector<ThreediSchemaChoice> out;
+	static const std::vector<Choice> names = [] {
+		std::vector<Choice> out;
 		for (size_t i = 0;; ++i) {
 			const char *name = threedi_ctrl_register_name(i);
 			if (name == nullptr) break;
@@ -774,7 +830,7 @@ std::vector<Entry> frame_entries() {
 			"Row 3, column 3"};
 	static const char *const kRows[3] = {"Row 1", "Row 2", "Row 3"};
 	for (int k = 0; k < 9; ++k) {
-		ThreediSchemaField cell = on_row(realf(kCells[k], kCellLabels[k]), kRows[k / 3]);
+		Field cell = on_row(realf(kCells[k], kCellLabels[k]), kRows[k / 3]);
 		cell.note = "The frame's rotation, in mission axes.";
 		out.push_back({cell,
 				[](const void *d, int c) -> Value {
@@ -886,15 +942,9 @@ const std::vector<Entry> &entries(Shape shape) {
 	return tables[static_cast<size_t>(shape)];
 }
 
-const Entry *entry(Shape shape, const std::string &path) {
-	for (const Entry &e : entries(shape))
-		if (path == e.field.path) return &e;
-	return nullptr;
-}
-
 // The value in the field's own type: a whole Real reads as a number, a whole number
 // fills a Real; false when it does not fit.
-bool normalize(const ThreediSchemaField &f, const Value &in, Value &out, std::string &error) {
+bool normalize(const Field &f, const Value &in, Value &out, std::string &error) {
 	switch (f.type) {
 	case Type::Integer: {
 		int64_t v = 0;
@@ -921,7 +971,7 @@ bool normalize(const ThreediSchemaField &f, const Value &in, Value &out, std::st
 			error = "This field takes a number.";
 			return false;
 		}
-		out = v; // non-finite: refused unless the field already reads it (threedi_schema_set)
+		out = v; // non-finite: refused unless the field already reads it (set_entry)
 		return true;
 	}
 	case Type::Text: {
@@ -941,50 +991,83 @@ bool normalize(const ThreediSchemaField &f, const Value &in, Value &out, std::st
 	return false;
 }
 
-} // namespace
 
-const std::vector<ThreediSchemaField> &threedi_schema_fields(ThreediSchemaShape shape) {
-	static const std::vector<std::vector<ThreediSchemaField>> fields = [] {
-		std::vector<std::vector<ThreediSchemaField>> out;
-		for (int s = 0; s <= static_cast<int>(Shape::Occlusion); ++s) {
-			out.emplace_back();
-			for (const Entry &e : entries(static_cast<Shape>(s))) out.back().push_back(e.field);
-		}
-		return out;
-	}();
-	return fields[static_cast<size_t>(shape)];
+// --- the shape ------------------------------------------------------------------------------------
+
+// The heading a field's first step groups it under.
+const char *section_of(const std::string &path) {
+	static const struct {
+		const char *step, *label;
+	} kSections[] = {
+		{"position", "Position"}, {"direction", "Direction"}, {"start", "Start colour"}, {"end", "End colour"},
+		{"flags", "Flags"}, {"texanim", "Flipbook"}, {"reflect", "Reflection"}, {"rgbgen", "Colour generator"},
+		{"alphagen", "Alpha generator"}, {"ugen", "U generator"}, {"vgen", "V generator"}, {"offset", "Offset"},
+		{"rotx", "Rotation X track"}, {"roty", "Rotation Y track"}, {"rotz", "Rotation Z track"},
+		{"scalex", "Scale X track"}, {"scaley", "Scale Y track"}, {"scalez", "Scale Z track"},
+		{"trans", "Translation track"}, {"rgbgen2", "Second colour generator"}, {"reflect2", "Second reflection"},
+	};
+	const size_t dot = path.find('.');
+	if (dot == std::string::npos) return "";
+	const std::string step = path.substr(0, dot);
+	for (const auto &s : kSections)
+		if (step == s.step) return s.label;
+	return "";
 }
 
-const ThreediSchemaField *threedi_schema_field(ThreediSchemaShape shape, const std::string &path) {
-	for (const ThreediSchemaField &f : threedi_schema_fields(shape))
-		if (path == f.path) return &f;
-	return nullptr;
-}
-
-bool threedi_schema_get(const ThreediSchemaRecord &record, const std::string &path, ThreediSchemaValue &out) {
-	const Entry *e = record ? entry(record.shape, path) : nullptr;
-	if (e == nullptr) return false;
-	out = e->get(record.data, e->arg);
-	return true;
-}
-
-bool threedi_schema_set(const ThreediSchemaRecord &record, const std::string &path, const ThreediSchemaValue &value,
-		std::string &error) {
-	const Entry *e = record ? entry(record.shape, path) : nullptr;
-	if (e == nullptr) {
-		error = "Unknown field.";
-		return false;
+FieldSchema field_of(const Field &f) {
+	FieldSchema out;
+	out.id = f.path;
+	out.type = f.type == Type::Integer ? FieldType::Integer : f.type == Type::Real ? FieldType::Real : FieldType::Text;
+	out.width = f.width;
+	// What it may name outside its record: a texture's file; a CTRL register or an MTRX row of the
+	// model by its index, a Record reference (S13 D8), which the document keeps where the record's
+	// other fields make it one. A part of LOD 0 names no record (LOD 0's parts are the base's).
+	out.reference = f.reference == Ref::Texture    ? ReferenceKind::Texture
+	                : f.reference == Ref::Register ? ReferenceKind::ModelRegister
+	                : f.reference == Ref::Frame    ? ReferenceKind::ModelFrame
+	                                               : ReferenceKind::None;
+	for (const Choice &c : f.choices) out.choices.push_back({c.name, c.value, c.label});
+	out.flags = f.flags;
+	out.read_only = f.read_only;
+	out.unit = f.unit;
+	out.group = f.group;
+	out.description = f.note;
+	if (f.channel) out.color = FieldColor::Channel;
+	if (f.unverified) out.applies = Applicability::Unverified;
+	// A part of LOD 0 takes any other index typed beside the parts a record offers of its own
+	// (ModelDocument::record_choices).
+	if (f.reference == Ref::Part) out.open_choices = true;
+	// An integer keeps to the range its record's word holds (the set refuses past it).
+	if (f.type == Type::Integer && f.min < f.max) {
+		out.ranged = true;
+		out.min = double(f.min);
+		out.max = double(f.max);
 	}
-	if (e->set == nullptr) {
+	out.label = f.label; // the table's own ("" = the path, which field_title shows)
+	out.section = section_of(f.path);
+	return out;
+}
+
+// The shader tags the engine's table knows, as the shader field's choices.
+std::vector<FieldChoice> shader_choices() {
+	std::vector<FieldChoice> out;
+	for (size_t i = 0; i < renderer::kMaterialDescriptorTableCount; ++i)
+		out.push_back({renderer::kMaterialDescriptorTable[i].name, static_cast<int64_t>(i), ""});
+	return out;
+}
+
+// A value within the field's type, width and range; a Set of the value the field already reads changes
+// nothing (numbers compared bit for bit, so a NaN a retail word holds, US01's MTRX, matches itself); a
+// non-finite number is refused.
+bool set_entry(const Entry &e, void *native, const Value &value, std::string &error) {
+	if (e.set == nullptr) {
 		error = "This field is read-only: it is authored in Blender or derived.";
 		return false;
 	}
 	Value v;
-	if (!normalize(e->field, value, v, error)) return false;
+	if (!normalize(e.field, value, v, error)) return false;
 	// The value the field already reads: nothing changes, not even a derived word.
-	// Numbers compare bit for bit, so a NaN a retail word holds (US01's MTRX)
-	// matches itself.
-	const Value current = e->get(record.data, e->arg);
+	const Value current = e.get(native, e.arg);
 	const double *now = std::get_if<double>(&current);
 	const double *next = std::get_if<double>(&v);
 	if (now != nullptr && next != nullptr ? std::memcmp(now, next, sizeof(double)) == 0 : current == v) return true;
@@ -992,19 +1075,309 @@ bool threedi_schema_set(const ThreediSchemaRecord &record, const std::string &pa
 		error = "A finite number.";
 		return false;
 	}
-	return e->set(record.data, v, e->arg, error);
+	return e.set(native, v, e.arg, error);
 }
 
-bool threedi_schema_reads(const ThreediSchemaRecord &record, const std::string &path) {
-	const Entry *e = record ? entry(record.shape, path) : nullptr;
-	return e != nullptr && (e->reads == nullptr || e->reads(record.data, e->arg));
+// The native struct a kind's entries read: a model row's header, a LOD's ThreediLod, a material's
+// ThreediMaterial, every other record's own.
+void *native_of(Shape shape, const RecordHandle &record) {
+	switch (shape) {
+	case Shape::Model: return &record.as<ModelRow>().header;
+	case Shape::Lod: return &record.as<ModelLod>().lod;
+	case Shape::Material: return &record.as<ModelMaterial>().material;
+	default: return record.data;
+	}
 }
 
-ThreediSchemaReference threedi_schema_reference(const ThreediSchemaRecord &record, const std::string &path) {
-	const Entry *e = record ? entry(record.shape, path) : nullptr;
-	if (e == nullptr) return ThreediSchemaReference::None;
-	if (e->names != nullptr && !e->names(record.data, e->arg)) return ThreediSchemaReference::None;
-	return e->field.reference;
+// The records' kinds (ModelKind's order) and the entries each reads (the collision row: none).
+struct KindRow {
+	ModelKind kind;
+	const char *token;
+	const char *label;
+	Shape shape;
+	bool fields; // the collision row holds records, no fields
+};
+const KindRow kKinds[] = {
+	{ModelKind::Model, "model", "Model", Shape::Model, true},
+	{ModelKind::Collision, "collision", "Collision", Shape::Model, false},
+	{ModelKind::Lod, "lod", "LOD", Shape::Lod, true},
+	{ModelKind::PartAnimation, "part_animation", "Part animation", Shape::PartAnimation, true},
+	{ModelKind::Material, "material", "Material", Shape::Material, true},
+	{ModelKind::Texture, "texture", "Texture", Shape::Texture, true},
+	{ModelKind::Light, "light", "Light", Shape::Light, true},
+	{ModelKind::UserPoint, "user_point", "User point", Shape::UserPoint, true},
+	{ModelKind::Register, "register", "Register", Shape::Register, true},
+	{ModelKind::Frame, "frame", "Rotation frame", Shape::Frame, true},
+	{ModelKind::Section, "section", "Section", Shape::Section, true},
+	{ModelKind::Volume, "volume", "Volume", Shape::Volume, true},
+	{ModelKind::Face, "face", "Bullet face", Shape::Face, true},
+	{ModelKind::Occlusion, "occlusion", "Occlusion record", Shape::Occlusion, true},
+};
+
+// --- the lists ----------------------------------------------------------------------------------------
+
+ThreediMaterial fresh_material() {
+	ThreediBuildModel build;
+	build.add_material("FF_ST_OP", nullptr);
+	return build.materials.front();
 }
 
-} // namespace opennova::threedi
+ThreediLight fresh_light() {
+	ThreediBuildModel build;
+	const int white[3] = {255, 255, 255};
+	build.add_light(ThreediBuildVec3{0.0, 0.0, 0.0}, 1.0, 10.0, 0, 0, white, white);
+	return build.lights.front();
+}
+
+ThreediUserPoint fresh_user_point(const ModelRow &row) {
+	std::string name;
+	for (int n = 1;; ++n) {
+		char buf[16];
+		std::snprintf(buf, sizeof(buf), "POINT%02d", n);
+		bool taken = false;
+		for (const ThreediUserPoint &u : row.user_points) taken = taken || strutil::iequals(u.name, buf);
+		if (!taken) {
+			name = buf;
+			break;
+		}
+	}
+	ThreediBuildModel build;
+	build.add_user_point(name.c_str(), ThreediBuildVec3{0.0, 0.0, 0.0}, ThreediBuildVec3{1.0, 0.0, 0.0}, -1,
+	                     THREEDI_USER_POINT_GAMEPLAY);
+	return build.user_points.front();
+}
+
+ThreediControlRegister fresh_register() {
+	ThreediControlRegister made{};
+	std::snprintf(made.name, sizeof(made.name), "%s", "LOD_FRAC");
+	return made;
+}
+
+ThreediMatrix4x4 fresh_frame() {
+	ThreediMatrix4x4 identity;
+	threedi_mat4_identity(&identity);
+	return identity;
+}
+
+// A material's texture rows: the fixed table of 24 its MTRL record holds, the rows in use first (its
+// texture count) and the rest zero, as an edit leaves them. A new row is a diffuse one.
+constexpr size_t kTextureRows = 24;
+ListOps texture_list(NodeKind kind) {
+	const auto used = [](const ThreediMaterial &m) { return std::min<size_t>(m.texture_count, kTextureRows); };
+	ListOps ops;
+	ops.size = [used](const RecordHandle &owner) { return used(owner.as<ModelMaterial>().material); };
+	ops.at = [used, kind](const RecordHandle &owner, size_t index) {
+		ThreediMaterial &m = owner.as<ModelMaterial>().material;
+		return index < used(m) ? RecordHandle{kind, &m.textures[index]} : RecordHandle{};
+	};
+	ops.insert = [used, kind](const RecordHandle &owner, size_t index, const DetachedRecord *record, std::string &error) {
+		ThreediMaterial &m = owner.as<ModelMaterial>().material;
+		if (record && (!record->data || record->kind != kind)) {
+			error = "This list takes records of its own kind only.";
+			return false;
+		}
+		std::vector<ThreediMaterialTexture> rows(m.textures, m.textures + used(m));
+		if (rows.size() >= kTextureRows) {
+			error = "A material holds 24 texture rows.";
+			return false;
+		}
+		ThreediMaterialTexture made{};
+		if (record) made = *static_cast<const ThreediMaterialTexture *>(record->data.get());
+		else made.slot = static_cast<uint8_t>(THREEDI_TEX_SLOT_DIFFUSE);
+		rows.insert(rows.begin() + std::ptrdiff_t(std::min(index, rows.size())), made);
+		std::memset(m.textures, 0, sizeof(m.textures));
+		std::copy(rows.begin(), rows.end(), m.textures);
+		m.texture_count = static_cast<uint32_t>(rows.size());
+		return true;
+	};
+	ops.erase = [used](const RecordHandle &owner, size_t index) {
+		ThreediMaterial &m = owner.as<ModelMaterial>().material;
+		std::vector<ThreediMaterialTexture> rows(m.textures, m.textures + used(m));
+		if (index >= rows.size()) return false;
+		rows.erase(rows.begin() + std::ptrdiff_t(index));
+		std::memset(m.textures, 0, sizeof(m.textures));
+		std::copy(rows.begin(), rows.end(), m.textures);
+		m.texture_count = static_cast<uint32_t>(rows.size());
+		return true;
+	};
+	ops.copy = [used, kind](const RecordHandle &owner, size_t index) {
+		DetachedRecord out;
+		const ThreediMaterial &m = owner.as<ModelMaterial>().material;
+		if (index >= used(m)) return out;
+		out.kind = kind;
+		out.data = std::make_shared<ThreediMaterialTexture>(m.textures[index]);
+		return out;
+	};
+	return ops;
+}
+
+Document::CollectionSpec spec(ModelKind kind, const char *label, const char *name_field, bool fixed, size_t max = 0) {
+	Document::CollectionSpec s;
+	s.kind = node_kind(kind);
+	s.label = label;
+	s.name_field = name_field;
+	s.fixed = fixed;
+	s.max = max;
+	return s;
+}
+
+// The model row's lists (its LODs, materials, lights, user points, CTRL registers and MTRX rows, in
+// kModelLods's order, which model_table_test pins), a LOD's part animations and a material's texture
+// rows, and the collision row's sections, volumes, bullet faces and occlusion records.
+void add_lists(ModelKind kind, TableKind &table) {
+	switch (kind) {
+	case ModelKind::Model:
+		table.list({spec(ModelKind::Lod, "LODs", "", true),
+		            vector_list<ModelRow, ModelLod>(node_kind(ModelKind::Lod), [](ModelRow &r) -> std::vector<ModelLod> & { return r.lods; })});
+		table.list({spec(ModelKind::Material, "Materials", "shader", false),
+		            vector_list<ModelRow, ModelMaterial>(
+		                    node_kind(ModelKind::Material), [](ModelRow &r) -> std::vector<ModelMaterial> & { return r.materials; },
+		                    [](const ModelRow &, size_t) { return ModelMaterial{fresh_material(), -1}; })});
+		table.list({spec(ModelKind::Light, "Lights", "", false),
+		            vector_list<ModelRow, ThreediLight>(
+		                    node_kind(ModelKind::Light), [](ModelRow &r) -> std::vector<ThreediLight> & { return r.lights; },
+		                    [](const ModelRow &, size_t) { return fresh_light(); })});
+		table.list({spec(ModelKind::UserPoint, "User points", "name", false),
+		            vector_list<ModelRow, ThreediUserPoint>(
+		                    node_kind(ModelKind::UserPoint),
+		                    [](ModelRow &r) -> std::vector<ThreediUserPoint> & { return r.user_points; },
+		                    [](const ModelRow &r, size_t) { return fresh_user_point(r); })});
+		table.list({spec(ModelKind::Register, "CTRL registers", "name", false),
+		            vector_list<ModelRow, ThreediControlRegister>(
+		                    node_kind(ModelKind::Register),
+		                    [](ModelRow &r) -> std::vector<ThreediControlRegister> & { return r.registers; },
+		                    [](const ModelRow &, size_t) { return fresh_register(); })});
+		table.list({spec(ModelKind::Frame, "Rotation frames", "", false),
+		            vector_list<ModelRow, ThreediMatrix4x4>(
+		                    node_kind(ModelKind::Frame), [](ModelRow &r) -> std::vector<ThreediMatrix4x4> & { return r.frames; },
+		                    [](const ModelRow &, size_t) { return fresh_frame(); })});
+		break;
+	case ModelKind::Lod:
+		// Row i transforms part i, as every retail table does (threedi_o3d_read's rule): the next part's
+		// inert row, added at the end (ModelDocument::list_position).
+		table.list({spec(ModelKind::PartAnimation, "Part animations", "", false),
+		            vector_list<ModelLod, ThreediPartAnimation>(
+		                    node_kind(ModelKind::PartAnimation),
+		                    [](ModelLod &l) -> std::vector<ThreediPartAnimation> & { return l.panm; },
+		                    [](const ModelLod &l, size_t index) {
+			                    const int part = static_cast<int>(index);
+			                    const int parent = part < static_cast<int>(l.lod.render_object_count)
+			                                               ? l.lod.render_objects[part].parent_index
+			                                               : -1;
+			                    return threedi_build_inert_panm(part, parent);
+		                    })});
+		break;
+	case ModelKind::Material:
+		table.list({spec(ModelKind::Texture, "Textures", "name", false, kTextureRows), texture_list(node_kind(ModelKind::Texture))});
+		break;
+	case ModelKind::Collision:
+		table.list({spec(ModelKind::Section, "Sections", "", true),
+		            vector_list<CollisionRow, ThreediCollisionObject>(
+		                    node_kind(ModelKind::Section),
+		                    [](CollisionRow &r) -> std::vector<ThreediCollisionObject> & { return r.sections; })});
+		table.list({spec(ModelKind::Volume, "Volumes", "", true),
+		            vector_list<CollisionRow, ThreediBoundingVolume>(
+		                    node_kind(ModelKind::Volume),
+		                    [](CollisionRow &r) -> std::vector<ThreediBoundingVolume> & { return r.volumes; })});
+		table.list({spec(ModelKind::Face, "Bullet faces", "", true),
+		            vector_list<CollisionRow, ThreediCollisionFace>(
+		                    node_kind(ModelKind::Face), [](CollisionRow &r) -> std::vector<ThreediCollisionFace> & { return r.faces; })});
+		table.list({spec(ModelKind::Occlusion, "Occlusion records", "", true),
+		            vector_list<CollisionRow, ThreediOcclusionObject>(
+		                    node_kind(ModelKind::Occlusion),
+		                    [](CollisionRow &r) -> std::vector<ThreediOcclusionObject> & { return r.occlusion; })});
+		break;
+	default: break;
+	}
+}
+
+// What each kind's fields are to the model's own rules (model_document_detail::ModelField), by place.
+std::vector<std::vector<model_document_detail::ModelField>> &facts() {
+	static std::vector<std::vector<model_document_detail::ModelField>> table(std::size(kKinds));
+	return table;
+}
+
+model_document_detail::IndexReference index_kind(Ref reference) {
+	using I = model_document_detail::IndexReference;
+	switch (reference) {
+	case Ref::Texture: return I::Texture;
+	case Ref::Register: return I::Register;
+	case Ref::Part: return I::Part;
+	case Ref::Frame: return I::Frame;
+	default: return I::None;
+	}
+}
+
+RecordTable make_table() {
+	std::vector<TableKind> kinds;
+	for (const KindRow &row : kKinds) {
+		const NodeKind kind = node_kind(row.kind);
+		const bool top = row.kind == ModelKind::Model || row.kind == ModelKind::Collision;
+		TableKind table(RecordKindRow{kind, row.token, row.label, "", top});
+		std::vector<model_document_detail::ModelField> &own = facts()[size_t(kind)];
+		if (row.fields)
+			for (const Entry &entry : entries(row.shape)) {
+				const Entry *e = &entry;
+				const Shape shape = row.shape;
+				LabelledField field;
+				field.schema = field_of(e->field);
+				if (row.kind == ModelKind::Material && field.schema.id == "shader") field.schema.choices = shader_choices();
+				// A user point's name is what an item's particle slot looks it up by.
+				if (row.kind == ModelKind::UserPoint && field.schema.id == "name") field.schema.defines = ReferenceKind::UserPoint;
+				field.value.get = [e, shape](const RecordHandle &record, Value &out) {
+					out = e->get(native_of(shape, record), e->arg);
+					return true;
+				};
+				field.value.set = [e, shape](const RecordHandle &record, const Value &value, std::string &error) {
+					return set_entry(*e, native_of(shape, record), value, error);
+				};
+				// Whether the game reads it here (a generator's register only above style 0x70 and its phase
+				// only at or below [orig: ThreediGp_LoadCtrlRegisters @ 0x5B4640], a PANM track only when its
+				// flags make it present [orig: PANM_SampleTrack @ 0x5B2270], a spot light's axis); a field
+				// whose use the witness leaves open stays Unverified.
+				if (e->reads && !e->field.unverified)
+					field.applies = [e, shape](const RecordHandle &record, const RecordOwners &) {
+						return e->reads(native_of(shape, record), e->arg) ? Applicability::Reads : Applicability::Ignored;
+					};
+				// What it names here: a texture row's file, a register where its style makes the byte one.
+				if (e->names && e->field.reference != Ref::None) {
+					const ReferenceKind declared = field.schema.reference;
+					field.reference = [e, shape, declared](const RecordHandle &record, const RecordOwners &) {
+						return e->names(native_of(shape, record), e->arg) ? declared : ReferenceKind::None;
+					};
+				}
+				model_document_detail::ModelField fact;
+				fact.reference = index_kind(e->field.reference);
+				fact.unverified = e->field.unverified;
+				fact.reads = [e, shape](const RecordHandle &record) {
+					return e->reads == nullptr || e->reads(native_of(shape, record), e->arg);
+				};
+				fact.names = [e, shape](const RecordHandle &record) {
+					return e->names == nullptr || e->names(native_of(shape, record), e->arg);
+				};
+				own.push_back(std::move(fact));
+				table.field(std::move(field));
+			}
+		add_lists(row.kind, table);
+		kinds.push_back(std::move(table));
+	}
+	return RecordTable(std::move(kinds));
+}
+
+} // namespace
+
+const RecordTable &model_table() {
+	static const RecordTable table = make_table();
+	return table;
+}
+
+namespace model_document_detail {
+
+const ModelField &model_field(NodeKind kind, size_t place) {
+	model_table(); // the facts are made with the table
+	return facts()[size_t(kind)][place];
+}
+
+} // namespace model_document_detail
+
+} // namespace opennova::editor

@@ -11,7 +11,6 @@
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
 #include <formats/mns/mns.h>
-#include <formats/mnu/mnu_schema.h>
 
 namespace opennova::editor {
 
@@ -242,13 +241,11 @@ NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument
 	}
 	const NodeAddress owner{screen_row.id, node_kind(MenuKind::Window), window};
 	if (note.list.empty()) return owner;
-	const std::vector<mnu::SchemaList> &lists = mnu::schema_lists(mnu::SchemaShape::Window);
-	for (size_t list = 0; list < lists.size(); ++list) {
-		if (note.list != lists[list].path) continue;
+	const size_t list = menu_window_list(note.list);
+	if (list != SIZE_MAX) {
 		const NodeAddress record =
 		        document.record_at(screen_row, size_t(note.widget), list, size_t(std::max(note.record, 0)));
 		if (record.child) return record;
-		break;
 	}
 	if (field) field->clear();
 	return owner;

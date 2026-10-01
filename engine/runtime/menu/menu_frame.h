@@ -345,7 +345,8 @@ struct MenuFrameNote {
 	std::string subject; // the token, name, value or drawn prefix the note is about
 	// Where it sits: the window's list holding the record ("appearance", "items.item",
 	// "spinup"; "" = the window itself), that record's index (-1 = none) and the field, by
-	// the format's element paths (formats/mnu/mnu_schema.h: "position.right", "value").
+	// element path (the element names down from the window, lowercase, joined by '.':
+	// "position.right", "value"; mnu::WriteIssue::locator's names).
 	std::string list;
 	int record = -1;
 	std::string field;

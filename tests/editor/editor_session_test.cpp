@@ -457,7 +457,7 @@ static int test_import() {
 	TEST_EXPECT(session.outcome().done());
 	const auto &reimported = static_cast<const CatalogRow &>(
 	        *records_of(*session.view().documents.open[0])->rows()[0]);
-	TEST_EXPECT(std::get<opennova::def::DefItemDef>(reimported.data).hp == 30);
+	TEST_EXPECT(reimported.native.as<opennova::def::DefItemDef>().hp == 30);
 
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
 	const auto invalid = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}},
@@ -1335,7 +1335,7 @@ struct SaveProject {
 		request.edits[0].value = hp;
 		session.handle(request);
 	}
-	int64_t hp() const { return std::get<opennova::def::DefItemDef>(static_cast<const CatalogRow &>(*items->rows()[0]).data).hp; }
+	int64_t hp() const { return static_cast<const CatalogRow &>(*items->rows()[0]).native.as<opennova::def::DefItemDef>().hp; }
 	// A section added to the string table.
 	void add_section() {
 		EditorRequest request = request::edit_record(strings_path, Edit());
@@ -2392,7 +2392,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(fresh != nullptr && fresh->identity() != discarded && !fresh->dirty() && fresh->matches_file());
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "document.conflict"));
 	if (fresh && !fresh->rows().empty())
-		TEST_EXPECT(std::get<opennova::def::DefItemDef>(static_cast<const CatalogRow &>(*fresh->rows()[0]).data).hp == 50);
+		TEST_EXPECT(static_cast<const CatalogRow &>(*fresh->rows()[0]).native.as<opennova::def::DefItemDef>().hp == 50);
 	return 0;
 }
 

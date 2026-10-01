@@ -76,10 +76,13 @@ std::string token(const DefValue &v) {
 // quotes dropped [orig: Terrain_TokenizeConfigLine @0x53CB60, delimiters @0x53CC33..0x53CC4C,
 // ';' @0x53CC2A..0x53CC31, quote @0x53CC4E..0x53CC70]: a text holding one of them is written
 // quoted ("//" is refused before). The other families read a text value to the end of its
-// line.
+// line. powerup.def's lines go through the same tokenizer [orig: PowerUpDef_LoadFromFile @0x443350 over
+// File_ParseASCIIFile @0x53D8C7, Terrain_TokenizeConfigLine @0x53CB60].
 std::string written_word(DefRecordKind kind, const DefValue &v) {
 	const bool tokenized = kind == DefRecordKind::Weapon || kind == DefRecordKind::Action ||
-	                       kind == DefRecordKind::Sight || kind == DefRecordKind::Carry;
+	                       kind == DefRecordKind::Sight || kind == DefRecordKind::Carry ||
+	                       kind == DefRecordKind::Powerup || kind == DefRecordKind::PowerupAmmo ||
+	                       kind == DefRecordKind::PowerupAction;
 	const std::string t = token(v);
 	return tokenized && t.find_first_of(" ,\t;") != std::string::npos ? "\"" + t + "\"" : t;
 }
@@ -157,7 +160,7 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
             if (property.key == "deceleration" && item.acceleration) changed = true;
         }
         if (!changed && kind != DefRecordKind::Sight && kind != DefRecordKind::Attachment &&
-			kind != DefRecordKind::Effect && kind != DefRecordKind::Carry) continue;
+			kind != DefRecordKind::Effect && kind != DefRecordKind::Carry && kind != DefRecordKind::PowerupAmmo) continue;
 		const std::string &key = property.key;
 		auto n = [&](size_t i) { return integer(values.at(i)); };
 		// The encodings that write a line per flag or entry.
@@ -196,6 +199,14 @@ void DefRecordWriter::record(DefRecordKind kind, const void *value, const std::s
 			continue;
 		}
 		case DefEncoding::ItemParent: if (n(0)) line("attrib:", {"parent"}); continue;
+		// A key alone, which its parser reads as 1 [orig: PowerUpDef_ParseProperty @0x443220].
+		case DefEncoding::Switch: if (n(0)) line(key, {}); continue;
+		// `weapon all` (every weapon), else `weapon <name>` [orig: PowerUpDef_ParseProperty
+		// @0x4431A7..0x443216]: the name of a row that names every weapon is no part of the file.
+		case DefEncoding::PowerupWeapon:
+			if (n(1)) line(key, {"all"});
+			else if (!std::get<std::string>(values[0]).empty()) line(key, {written_word(kind, values[0])});
+			continue;
 		case DefEncoding::CharacterFilter: case DefEncoding::TeamFilter: {
 			const auto &weapon = *static_cast<const DefWeaponDef *>(value);
 			const size_t count = property.encoding == DefEncoding::CharacterFilter ? weapon.charfilter_count : weapon.teamfilter_count;
@@ -340,8 +351,9 @@ bool DefRecordWriter::property_args(DefRecordKind kind, const DefProperty &prope
 	}
 	case DefEncoding::WeaponFlags: case DefEncoding::AmmoFlags: case DefEncoding::ItemAttrib:
 	case DefEncoding::ItemAttrib2: case DefEncoding::ItemParent: case DefEncoding::CharacterFilter:
-	case DefEncoding::TeamFilter: case DefEncoding::ClassRounds:
-		return false; // a line per flag or entry: record writes them
+	case DefEncoding::TeamFilter: case DefEncoding::ClassRounds: case DefEncoding::Switch:
+	case DefEncoding::PowerupWeapon:
+		return false; // a line per flag or entry, or one record words itself: record writes them
 	default: for (const auto &v : values) args.push_back(word(v)); break;
 	}
 	return true;

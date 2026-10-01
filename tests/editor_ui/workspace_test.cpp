@@ -1588,7 +1588,7 @@ void test_preview_follows() {
 	if (!armory || !armory->model_row()) return;
 	CHECK(run.header_tooltip().find("Unsaved changes") == std::string::npos, "saved: no mark");
 	const ModelRow &row = *armory->model_row();
-	const NodeAddress point{row.id, node_kind(ModelKind::UserPoint), row.collections[3][0]};
+	const NodeAddress point{row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id};
 	Value x;
 	CHECK(armory->get(point, "position.x", x) && std::holds_alternative<double>(x), "the user point's x");
 	set_field(session, *armory, point, "position.x", std::get<double>(x) + 1.0);
@@ -1633,7 +1633,7 @@ void test_preview_model_gestures() {
 		return;
 	const ModelRow &row = *armory->model_row();
 	EditorRequest select = request::select_record(
-			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();
@@ -1726,7 +1726,7 @@ void test_preview_model_pane_input() {
 		return;
 	const ModelRow &row = *armory->model_row();
 	EditorRequest select = request::select_record(
-			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] });
+			armory->path(), { row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id });
 	session.handle(select);
 	ui.focus("Preview");
 	run.settle();

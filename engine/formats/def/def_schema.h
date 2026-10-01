@@ -8,9 +8,15 @@
 
 namespace opennova::def {
 
-enum class DefRecordKind { Item, Weapon, Ammo, Action, Sight, Attachment, Effect, Carry };
+// The records the tables describe: the item, weapon and ammo tables' rows and what they hold, a
+// weapon table's carry limits, and a powerup table's rows, their ammo rows and the action blocks a
+// row holds (pickup and respawn alike).
+enum class DefRecordKind {
+	Item, Weapon, Ammo, Action, Sight, Attachment, Effect, Carry, Powerup, PowerupAmmo, PowerupAction,
+};
+inline constexpr size_t kDefRecordKindCount = size_t(DefRecordKind::PowerupAction) + 1;
 enum class DefFieldType { Integer, Unsigned, Byte, Count, Real, Text };
-enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint };
+enum class DefReference { None, Model, AnimationMap, Ammo, Weapon, Item, Texture, Sound, Particle, AiProfile, GameText, OtherText, UserPoint, Powerup };
 using DefValue = std::variant<int64_t, double, std::string>;
 
 // A value a field takes by name: the token the file writes (or the number's name) and what
@@ -19,6 +25,9 @@ struct DefChoice { const char *name; int64_t value; const char *label = ""; };
 
 // A field addresses an actual native record member. The same description is used
 // for equality checks, serialization and authoring; no editor data model exists.
+// What a member is beyond its storage (derived, ranged, what it names, the tokens it
+// takes) comes from the rule rows beside the member inventory (def_schema.cpp), applied
+// in their order, each a family's line in a table: a new family adds rows, never a branch.
 struct DefField {
 	std::string id;
 	size_t offset = 0;
@@ -33,6 +42,11 @@ struct DefField {
 	// unit_type byte): a set outside it is refused (`ranged`, min..max inclusive).
 	bool ranged = false;
 	int64_t min = 0, max = 0;
+	// A text the member cannot hold, compared without case as its parser compares it: its line,
+	// written, reads back as another (a powerup's weapon named `all` is every weapon); a set of it
+	// is refused with `refused_why`. "" = none.
+	const char *refused = "";
+	const char *refused_why = "";
 };
 
 enum class DefEncoding {
@@ -45,6 +59,8 @@ enum class DefEncoding {
 	Percent,    // an integer percentage read with atoi, clamped 0..100, stored as float * 0.01f
 	ShotTiming, // a region's flag name plus two second counts in ticks; region 0 without a
 	            // name is what `particletesttime` authors
+	Switch,     // a key alone, its member 1 (powerup.def's `allammo`): written while it is not 0
+	PowerupWeapon, // powerup.def's `weapon <name>` or `weapon all`: a name, then the all flag
 };
 
 // A property describes one authored line (possibly repeated for flags/lists).
@@ -77,20 +93,44 @@ const DefProperty *def_member_property(DefRecordKind kind, const std::string &id
 // radius and fade, a shot timing's two times). A text member, a light's colour and every
 // other encoding have none (None): an editor shows them as they are stored.
 enum class DefAuthored { None, Integer, Real };
-DefAuthored def_authored(DefRecordKind kind, const std::string &id);
+
+// A member as the kind's tables describe it, found once by its id (def_member): its native field,
+// the property whose line writes it and its place on that line, the line's members in its order,
+// the number the line writes it as, and the line's present flag (null: always written). What an
+// editor keeps for a field, so a set of it looks nothing up again.
+struct DefMember {
+	DefRecordKind kind = DefRecordKind::Item;
+	const DefField *field = nullptr;
+	const DefProperty *property = nullptr;
+	size_t index = 0;
+	std::vector<const DefField *> line;
+	DefAuthored authored = DefAuthored::None;
+	const DefField *present = nullptr;
+	explicit operator bool() const { return field != nullptr; }
+};
+DefMember def_member(DefRecordKind kind, const std::string &id);
+
 // The member's number as the writer puts it on its line (the line written or not): an
-// integer or a real by def_authored. False for a member with none, and for a stored word the
-// line, written alone and read back, does not keep (an overflowed turn rate, an unset fade the
-// parser reads as 10 ticks): an editor shows that one as stored.
-bool def_authored_get(DefRecordKind kind, const void *record, const std::string &id, DefValue &out);
+// integer or a real by its authored type. False for a member with none, and for a stored word
+// the line, written alone and read back, does not keep (an overflowed turn rate, an unset fade
+// the parser reads as 10 ticks): an editor shows that one as stored.
+bool def_authored_get(const DefMember &member, const void *record, DefValue &out);
 // The member's number set as the file would write it: the record's line rewritten with the
 // new number (its shortest decimal; a whole number within the 32 bits the parser reads), read
 // back through the family's parser, and that line's members copied back, so what a line's
 // order decides (an acceleration's default deceleration) is the parser's; refused, the record
 // untouched, where the writer could not write the result back. A number the member already
 // writes changes nothing, as does, for a member shown as stored, its stored number.
-bool def_authored_set(DefRecordKind kind, void *record, const std::string &id, const DefValue &value,
-                      std::string &error);
+bool def_authored_set(const DefMember &member, void *record, const DefValue &value, std::string &error);
+// What the authored reads and sets of the calling thread have run the family's parser over so far: a
+// line written alone (def_authored_get's check that its line keeps the stored word) and a whole record
+// written (def_authored_set's two read-backs). What a keystroke in an authored member costs, which the
+// editor's tests count; a count, never a cache.
+struct DefAuthoredParses {
+	size_t lines = 0;
+	size_t records = 0;
+};
+DefAuthoredParses def_authored_parses();
 DefValue def_get(const void *record, const DefField &field);
 bool def_set(void *record, const DefField &field, const DefValue &value, std::string &error);
 void def_sync_derived(DefRecordKind kind, void *record, const std::string &field);

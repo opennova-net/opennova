@@ -1,7 +1,9 @@
 #include "def_write_record.h"
 
 #include <algorithm>
+#include <array>
 #include <cstring>
+#include <utility>
 
 namespace opennova::def {
 namespace {
@@ -169,6 +171,55 @@ DefWriteResult def_write_ammo(const DefAmmoFile &file) {
 			check_record(writer, DefRecordKind::Effect, &a.effects_table[j], &b.effects_table[j], a.name);
 	}
 	def_free_ammo(&parsed);
+	return finish(writer);
+}
+
+DefWriteResult def_write_powerup(const DefPowerupFile &file) {
+	DefRecordWriter writer;
+	writer.result.text = "// Powerup definitions\r\n\r\n";
+	incomplete(writer, file.unmodeled_count, "");
+	// The action blocks a row writes, by the name its `action` line gives each [orig:
+	// PowerUpDef_ParseProperty @0x443056..0x4430F4]: a block the row holds is written, one it does not
+	// is no part of the file.
+	const auto actions = [](const DefPowerupDef &row) {
+		return std::array<std::pair<const char *, const DefPowerupAction *>, 2>{
+		        {{"pickup", &row.pickup}, {"respawn", &row.respawn}}};
+	};
+	for (size_t i = 0; i < file.count; ++i) {
+		const DefPowerupDef &row = file.entries[i];
+		if (!header(writer, "powerup", row.name, sizeof(row.name), true)) continue;
+		writer.record(DefRecordKind::Powerup, &row, row.name);
+		for (size_t j = 0; j < row.ammo_count; ++j) writer.record(DefRecordKind::PowerupAmmo, &row.ammo[j], row.name);
+		for (const auto &[name, action] : actions(row)) {
+			if (!action->present) continue;
+			writer.result.text += std::string("\taction \"") + name + "\"\r\n";
+			writer.record(DefRecordKind::PowerupAction, action, row.name);
+			writer.result.text += "\tend\r\n";
+		}
+		writer.result.text += "end\r\n\r\n";
+	}
+	if (!writer.result.ok()) return finish(writer);
+	DefPowerupFile parsed{};
+	DefParseReport issues;
+	def_parse_powerup_memory(reinterpret_cast<const uint8_t *>(writer.result.text.data()), writer.result.text.size(),
+	                         &parsed, &issues);
+	for (const auto &issue : issues) writer.fail(issue.record, issue.field, "Generated property failed native input validation.");
+	if (file.count != parsed.count) writer.fail("", "", "Record count changed during serialization.");
+	for (size_t i = 0; i < std::min(file.count, parsed.count); ++i) {
+		const DefPowerupDef &a = file.entries[i], &b = parsed.entries[i];
+		check_record(writer, DefRecordKind::Powerup, &a, &b, a.name);
+		if (a.ammo_count != b.ammo_count) writer.fail(a.name, "ammo", "Ammo rows changed during serialization.");
+		for (size_t j = 0; j < std::min(a.ammo_count, b.ammo_count); ++j)
+			check_record(writer, DefRecordKind::PowerupAmmo, &a.ammo[j], &b.ammo[j], a.name);
+		const auto before = actions(a), after = actions(b);
+		for (size_t k = 0; k < before.size(); ++k) {
+			if (before[k].second->present != after[k].second->present)
+				writer.fail(a.name, before[k].first, "An action block changed during serialization.");
+			else if (before[k].second->present)
+				check_record(writer, DefRecordKind::PowerupAction, before[k].second, after[k].second, a.name);
+		}
+	}
+	def_free_powerup(&parsed);
 	return finish(writer);
 }
 

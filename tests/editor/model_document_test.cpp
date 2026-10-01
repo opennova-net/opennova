@@ -113,9 +113,9 @@ int edits() {
 	Diagnostic error;
 
 	// A light's colour and a user point's name, one undo step each.
-	const NodeAddress light{model, kLight, row->collections[2][0]};
+	const NodeAddress light{model, kLight, row->ids.lists[2][0].id};
 	TEST_EXPECT(document.apply(set(light, "start.r", int64_t(12)), error));
-	const NodeAddress point{model, kUserPoint, row->collections[3][0]};
+	const NodeAddress point{model, kUserPoint, row->ids.lists[3][0].id};
 	TEST_EXPECT(document.apply(set(point, "name", std::string("muzzle")), error));
 	Value value;
 	TEST_EXPECT(document.get(point, "name", value) && std::get<std::string>(value) == "muzzle");
@@ -124,7 +124,7 @@ int edits() {
 	// A material moved to the end: its strips draw with it at its new index.
 	row = document.model_row();
 	const std::string first_shader = row->materials[0].material.shader_name;
-	const NodeAddress first{model, kMaterial, row->collections[1][0]};
+	const NodeAddress first{model, kMaterial, row->ids.lists[1][0].id};
 	TEST_EXPECT(document.apply(op(EditOperation::Move, first, row->materials.size() - 1), error));
 	{
 		Threedi3di3 before{}, after{};
@@ -145,7 +145,7 @@ int edits() {
 
 	// A drawn material stays; a new one is added, given a texture row, and removed.
 	row = document.model_row();
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {model, kMaterial, row->collections[1][0]}), error));
+	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {model, kMaterial, row->ids.lists[1][0].id}), error));
 	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kMaterial, 0}), error));
 	const NodeId added = document.last_added();
 	TEST_EXPECT(document.apply(op(EditOperation::Add, {model, kTexture, 0}, SIZE_MAX, added), error));
@@ -167,7 +167,7 @@ int edits() {
 	// The fixed records: the collision's are the geometry's; a row stays.
 	const CollisionRow *collision = document.collision_row();
 	if (!collision->volumes.empty()) {
-		const NodeAddress volume{collision->id, kVolume, collision->collections[1][0]};
+		const NodeAddress volume{collision->id, kVolume, collision->ids.lists[1][0].id};
 		TEST_EXPECT(!document.apply(op(EditOperation::Remove, volume), error));
 		TEST_EXPECT(document.apply(set(volume, "flags", int64_t(0x4)), error));
 	}
@@ -194,7 +194,7 @@ int part_animations() {
 	const ModelRow *row = document.model_row();
 	TEST_EXPECT(row && !row->lods.empty());
 	const ModelLod &lod = row->lods[0];
-	const NodeId lod_id = row->collections[0][0];
+	const NodeId lod_id = row->ids.lists[0][0].id;
 	Diagnostic error;
 	if (lod.panm.size() < lod.lod.render_object_count) {
 		TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kPanm, 0}, SIZE_MAX, lod_id), error));
@@ -203,10 +203,10 @@ int part_animations() {
 		TEST_EXPECT(!document.apply(op(EditOperation::Add, {row->id, kPanm, 0}, SIZE_MAX, lod_id), error));
 	}
 	row = document.model_row();
-	const std::vector<NodeId> &ids = row->lods[0].panm_ids;
+	const std::vector<RecordIds> &ids = row->ids.lists[0][0].lists[0];
 	TEST_EXPECT(!ids.empty());
-	if (ids.size() > 1) TEST_EXPECT(!document.apply(op(EditOperation::Remove, {row->id, kPanm, ids.front()}), error));
-	const NodeAddress first{row->id, kPanm, ids.front()};
+	if (ids.size() > 1) TEST_EXPECT(!document.apply(op(EditOperation::Remove, {row->id, kPanm, ids.front().id}), error));
+	const NodeAddress first{row->id, kPanm, ids.front().id};
 	TEST_EXPECT(document.apply(set(first, "rotx.rate", int64_t(-300)), error));
 	Value value;
 	TEST_EXPECT(document.get(first, "rotx.rate", value) && std::get<int64_t>(value) == -300);
@@ -224,7 +224,7 @@ int changes_since_save() {
 	TEST_EXPECT(row && !row->lights.empty());
 	if (!row || row->lights.empty()) return 1;
 	const NodeAddress model{row->id, node_kind(ModelKind::Model), 0};
-	const NodeAddress light{row->id, kLight, row->collections[2][0]};
+	const NodeAddress light{row->id, kLight, row->ids.lists[2][0].id};
 	Value red;
 	TEST_EXPECT(document.get(light, "start.r", red));
 	const int64_t was = std::get<int64_t>(red);
@@ -254,7 +254,7 @@ int validation() {
 	const ModelRow *row = document.model_row();
 	Diagnostic error;
 	// A light on a part LOD 0 does not have, and nine seats.
-	const NodeAddress light{row->id, kLight, row->collections[2][0]};
+	const NodeAddress light{row->id, kLight, row->ids.lists[2][0].id};
 	TEST_EXPECT(document.apply(set(light, "part", int64_t(200)), error));
 	for (int i = 0; i < 9; ++i) {
 		TEST_EXPECT(document.apply(op(EditOperation::Add, {row->id, kUserPoint, 0}), error));
@@ -297,7 +297,7 @@ int frames_and_registers() {
 	while (document->model_row()->frames.size() < 2)
 		TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kFrame, 0}), error));
 	const int64_t frames = static_cast<int64_t>(document->model_row()->frames.size());
-	const NodeAddress panm{model, kPanm, document->model_row()->lods[0].panm_ids[0]};
+	const NodeAddress panm{model, kPanm, document->model_row()->ids.lists[0][0].lists[0][0].id};
 	const FieldSchema *matrix = nullptr;
 	for (const FieldSchema &field : document->fields(kPanm))
 		if (field.id == "matrix") matrix = &field;
@@ -328,7 +328,7 @@ int frames_and_registers() {
 	// lets the last row go.
 	TEST_EXPECT(document->apply(set(panm, "flags.rotation", int64_t(2)), error));
 	TEST_EXPECT(document->apply(set(panm, "matrix", frames - 1), error));
-	const NodeAddress last{model, kFrame, document->model_row()->collections[5].back()};
+	const NodeAddress last{model, kFrame, document->model_row()->ids.lists[5].back().id};
 	TEST_EXPECT(!document->apply(op(EditOperation::Remove, last), error));
 	TEST_EXPECT(document->apply(set(panm, "matrix", int64_t(255)), error));
 	TEST_EXPECT(document->apply(op(EditOperation::Remove, last), error));
@@ -338,7 +338,7 @@ int frames_and_registers() {
 	// the 96, an error), another style above 0x70 takes the index as its phase, a light's does
 	// not load, and a flipbook with no frames or a track the load does not copy names none.
 	TEST_EXPECT(document->model_row()->registers.empty());
-	const NodeAddress material{model, kMaterial, document->model_row()->collections[1][0]};
+	const NodeAddress material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
 	const auto set_all = [&](const NodeAddress &at, std::initializer_list<std::pair<const char *, int64_t>> fields) {
 		bool applied = true;
 		for (const auto &field : fields) applied = document->apply(set(at, field.first, field.second), error) && applied;
@@ -476,10 +476,10 @@ int record_references() {
 	            row->materials.size() == 2 && row->lights.size() == 1);
 	if (!row || row->registers.size() != 4 || row->frames.size() != 3 || row->lods[0].panm.size() != 2) return 1;
 	const NodeId model = row->id;
-	const NodeAddress light{model, kLight, row->collections[2][0]};
-	const NodeAddress glow{model, kMaterial, row->collections[1][1]};
-	const NodeAddress base{model, kPanm, row->lods[0].panm_ids[0]};
-	const NodeAddress arm{model, kPanm, row->lods[0].panm_ids[1]};
+	const NodeAddress light{model, kLight, row->ids.lists[2][0].id};
+	const NodeAddress glow{model, kMaterial, row->ids.lists[1][1].id};
+	const NodeAddress base{model, kPanm, row->ids.lists[0][0].lists[0][0].id};
+	const NodeAddress arm{model, kPanm, row->ids.lists[0][0].lists[0][1].id};
 	// What the validator finds of a register or a frame the model lacks.
 	const auto lacking = [&]() {
 		size_t found = 0;
@@ -488,8 +488,8 @@ int record_references() {
 		return found;
 	};
 	TEST_EXPECT(lacking() == 0);
-	const auto reg = [&](size_t i) { return NodeAddress{model, kRegister, document.model_row()->collections[4][i]}; };
-	const auto frame = [&](size_t i) { return NodeAddress{model, kFrame, document.model_row()->collections[5][i]}; };
+	const auto reg = [&](size_t i) { return NodeAddress{model, kRegister, document.model_row()->ids.lists[4][i].id}; };
+	const auto frame = [&](size_t i) { return NodeAddress{model, kFrame, document.model_row()->ids.lists[5][i].id}; };
 	const auto value_of = [&](const NodeAddress &at, const char *field) {
 		Value value;
 		return document.get(at, field, value) ? std::get<int64_t>(value) : int64_t(-1);
@@ -681,14 +681,14 @@ int record_references() {
 	// a Record reference all the same (its edge, its field's reference, read-only).
 	ModelDocument second;
 	TEST_EXPECT(second.load_bytes(rig_model::bytes(true), "rig.3di", AssetKind::Model, "jo", error));
-	const NodeAddress gunyaw{second.model_row()->id, kRegister, second.model_row()->collections[4][1]};
+	const NodeAddress gunyaw{second.model_row()->id, kRegister, second.model_row()->ids.lists[4][1].id};
 	TEST_EXPECT(!second.apply(op(EditOperation::Remove, gunyaw), error) &&
 	            error.message == "A material's second RGB generator names register 3, which the editor shows and "
 	                             "never sets: that register stays where it is.");
 	TEST_EXPECT(second.apply(op(EditOperation::Add, {second.model_row()->id, kRegister, 0}), error));
 	TEST_EXPECT(references(second).count("material rgbgen2.param") == 1 &&
 	            references(second).at("material rgbgen2.param") == "3");
-	const NodeAddress paint{second.model_row()->id, kMaterial, second.model_row()->collections[1][0]};
+	const NodeAddress paint{second.model_row()->id, kMaterial, second.model_row()->ids.lists[1][0].id};
 	for (const FieldSchema &field : second.fields(kMaterial))
 		if (field.id == "rgbgen2.param") {
 			const FieldUse use = second.field_on(paint, field);
@@ -859,7 +859,7 @@ int field_metadata() {
 	const size_t parts = row->base->lods[0].render_object_count;
 	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "Part 0");
 	// A part animation's parent: none (255) and the parts, its record's own choices.
-	const NodeAddress panm{model, kPanm, row->lods[0].panm_ids[0]};
+	const NodeAddress panm{model, kPanm, row->ids.lists[0][0].lists[0][0].id};
 	const FieldSchema parent = schema(panm, "parent");
 	TEST_EXPECT(parent.choices.size() == parts + 1 && parent.choices[0].value == 255 && parent.choices[0].label == "None");
 	while (document->model_row()->frames.size() < 3)
@@ -884,7 +884,7 @@ int field_metadata() {
 	// With no CTRL table the load leaves a material's and a track's register bytes as the global
 	// registers they number (no record of the model); a light's it swaps through the table it lacks.
 	TEST_EXPECT(document->model_row()->registers.empty());
-	const NodeAddress first_material{model, kMaterial, document->model_row()->collections[1][0]};
+	const NodeAddress first_material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
 	TEST_EXPECT(document->apply(
 	        {set(first_material, "rgbgen.style", int64_t(0x71)), set(light, "style", int64_t(0x71))}, error));
 	TEST_EXPECT(use_of(first_material, "rgbgen.param").reference == ReferenceKind::None &&
@@ -895,7 +895,7 @@ int field_metadata() {
 	TEST_EXPECT(document->apply(op(EditOperation::Add, {model, kRegister, 0}), error));
 	const NodeAddress reg{model, kRegister, document->last_added()};
 	TEST_EXPECT(document->apply(set(reg, "name", std::string("ENGINE_RPM")), error));
-	const NodeAddress material{model, kMaterial, document->model_row()->collections[1][0]};
+	const NodeAddress material{model, kMaterial, document->model_row()->ids.lists[1][0].id};
 	TEST_EXPECT(document->apply(set(material, "rgbgen.style", int64_t(0x71)), error));
 	const std::vector<ReferenceChoice> named = picker(material, "rgbgen.param");
 	TEST_EXPECT(use_of(material, "rgbgen.param").reference == ReferenceKind::ModelRegister &&
@@ -927,7 +927,7 @@ int field_metadata() {
 	}
 	TEST_EXPECT(schema(material, "rgbgen2.end.g").section == "Second colour generator");
 	// A frame's cells by row; the header's radius, derived, in metres.
-	const NodeAddress frame{model, kFrame, document->model_row()->collections[5][0]};
+	const NodeAddress frame{model, kFrame, document->model_row()->ids.lists[5][0].id};
 	TEST_EXPECT(schema(frame, "r12").label == "Row 2, column 3" && schema(frame, "r12").group == "Row 2");
 	const NodeAddress header{model, node_kind(ModelKind::Model), 0};
 	const FieldSchema radius = schema(header, "max_radius");

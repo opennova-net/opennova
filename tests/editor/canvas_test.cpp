@@ -997,7 +997,7 @@ int test_model_canvas() {
 	if (!model)
 		return 1;
 	const ModelRow &row = *document->model_row();
-	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
 	EditorRequest select = request::select_record(path, point);
 	session.handle(select);
 	ModelCanvas canvas;

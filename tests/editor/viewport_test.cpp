@@ -347,7 +347,7 @@ static int test_actions() {
 	devices.sync(session);
 	TEST_EXPECT(model->reads() == reads);
 	const ModelRow *row = document->model_row();
-	const NodeAddress point{ row->id, node_kind(ModelKind::UserPoint), row->collections[3][0] };
+	const NodeAddress point{ row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id };
 	Value value;
 	TEST_EXPECT(document->get(point, "position.x", value));
 	set(session, *document, point, "position.x", std::get<double>(value) + 1.0);
@@ -1008,10 +1008,10 @@ static int test_gestures() {
 	TEST_EXPECT(document && document->model_row());
 	if (!document || !document->model_row()) return 1;
 	const ModelRow &row = *document->model_row();
-	TEST_EXPECT(row.collections[3].size() >= 2);
-	if (row.collections[3].size() < 2) return 1;
-	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
-	const NodeAddress second{ row.id, node_kind(ModelKind::UserPoint), row.collections[3][1] };
+	TEST_EXPECT(row.ids.lists[3].size() >= 2);
+	if (row.ids.lists[3].size() < 2) return 1;
+	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
+	const NodeAddress second{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][1].id };
 	CanvasRig model_rig{ session, devices, "models/armory.3di", ViewportKind::Model };
 	const auto place = [&](const NodeAddress &record) {
 		std::vector<double> at;

@@ -326,6 +326,40 @@ const std::vector<DefProperty> kCarryProperties = {
 	{"ammoclass_max_carry", {"name", "max_carry"}, DefEncoding::Plain, 1.0, ""},
 };
 
+// powerup.def's row keys [orig: PowerUpDef_ParseProperty @0x442EE0: respawn_time @0x443103, max_respawns
+// @0x44312C, hp @0x443155, mana @0x44317E, weapon @0x4431A7..0x443216, allammo @0x443220].
+const char *const kRespawnTime = "Seconds, taken as 62 Hz ticks when the powerup is picked up.";
+const char *const kPowerupHp = "-1 raises the taker's health to its most; more than 0 adds that much.";
+const char *const kPowerupMana = "-1 refills ammo class 1; any other number is added.";
+const std::vector<DefProperty> kPowerupProperties = {
+	{"respawn_time", {"respawn_time"}, DefEncoding::Plain, 1.0, "", {}, "", {"s"}, kRespawnTime},
+	{"max_respawns", {"max_respawns"}},
+	{"hp", {"hp"}, DefEncoding::Plain, 1.0, "", {}, "", {}, kPowerupHp},
+	{"mana", {"mana"}, DefEncoding::Plain, 1.0, "", {}, "", {}, kPowerupMana},
+	{"weapon", {"weapon", "weapon_all"}, DefEncoding::PowerupWeapon, 1.0, "", {"", "Every weapon"}},
+	{"allammo", {"allammo"}, DefEncoding::Switch},
+};
+
+// `ammo <class> <count>` [orig: @0x443240..0x443277]: -1 fills the class, any other count is added.
+const std::vector<DefProperty> kPowerupAmmoProperties = {
+	{"ammo", {"class_name", "count"}, DefEncoding::Plain, 1.0, "", {"Ammo class", "Rounds"}},
+};
+
+// An action block's lines, the ActionDef keys the powerup handlers read [orig: ActionDef_ParseScriptLine
+// @0x4023C0 -- function @0x40296E, anim @0x402873, delaystart/delay/delayend @0x40279A/@0x402B2C].
+const std::vector<DefProperty> kPowerupActionProperties = {
+	{"function", {"function"}},
+	{"anim", {"anim"}},
+	{"soundset", {"soundset"}},
+	{"soundsetend", {"soundsetend"}},
+	{"particle", {"particle"}},
+	{"particleuserpoint", {"particleuserpoint"}},
+	{"texttoken", {"texttoken"}},
+	{"delaystart", {"delaystart"}, DefEncoding::Delay},
+	{"delayend", {"delayend"}, DefEncoding::Delay},
+	{"action_value", {"action_value"}},
+};
+
 } // namespace
 
 const std::vector<DefProperty> &def_properties(DefRecordKind kind) {
@@ -338,6 +372,9 @@ const std::vector<DefProperty> &def_properties(DefRecordKind kind) {
 	case DefRecordKind::Attachment: return kAttachmentProperties;
 	case DefRecordKind::Effect: return kEffectProperties;
 	case DefRecordKind::Carry: return kCarryProperties;
+	case DefRecordKind::Powerup: return kPowerupProperties;
+	case DefRecordKind::PowerupAmmo: return kPowerupAmmoProperties;
+	case DefRecordKind::PowerupAction: return kPowerupActionProperties;
 	}
 	return kItemProperties;
 }
