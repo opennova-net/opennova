@@ -146,10 +146,12 @@ ViewportContext viewport_context(const SessionView &view, const ViewportModel &m
 	for (const auto &open : view.documents.open)
 		if (open && open->path() == model.path()) document = open.get();
 	const ViewportState size = model.size();
+	// The device drawing it, where the Shell holds one: read, not used.
+	const ViewportDeviceSource *devices = view.documents.viewports ? view.documents.viewports->devices() : nullptr;
 	return ViewportContext{
 		ViewportInput{ view, view.documents.viewports ? view.documents.viewports->clock() : kStill, document,
 				ChangeClass::None },
-		size.width, size.height, snap, nullptr
+		size.width, size.height, snap, devices ? devices->peek(model.path(), model.kind()) : nullptr
 	};
 }
 

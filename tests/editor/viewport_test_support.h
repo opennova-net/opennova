@@ -4,6 +4,7 @@
 // asked, the device cache over such devices, and the requests a planner made, served through a
 // session. The Shell's devices are godot/src/authoring's; these stand in for them in a ctest.
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -39,7 +40,9 @@ using opennova::editor::ViewportAction;
 // with the picture. A menu's keeps its frame's clock as the Shell's applier does (S13 V8,
 // MenuViewportApplier::tick): the clock's time at each configure (a Rebuild, as V6's configure_ sets
 // it), set at a tick only where menu_frame_clock says the frame draws otherwise; the times it set, in
-// order, and the ticks it had.
+// order, and the ticks it had. A ground a test gives it (`ground`: the height at a point of the
+// viewport's space, z up; none: it has no surface) is what ground_at answers and surface_between
+// finds a segment's first crossing of; the names in `missing` are what it reports it did not find.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
@@ -63,6 +66,36 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	// What a model viewport's level option was as its last build ended (-2: none ended): the state
 	// the build applied.
 	int ended_lod = -2;
+	std::function<double(double x, double y)> ground;
+	std::vector<std::string> missing;
+	bool ground_at(double x, double y, double &height) const override {
+		if (!ground) return false;
+		height = ground(x, y);
+		return true;
+	}
+	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
+		if (!ground) return false;
+		const auto at = [&](double t, double out[3]) {
+			for (int i = 0; i < 3; ++i) out[i] = from[i] + (to[i] - from[i]) * t;
+			return out[2] - ground(out[0], out[1]);
+		};
+		double p[3];
+		if (at(0.0, p) < 0.0) return false; // it begins under the ground
+		// The first of the segment's steps at or under the ground, then the crossing between it and the
+		// step before, halved until it stands.
+		const int steps = 2048;
+		for (int i = 1; i <= steps; ++i) {
+			if (at(double(i) / steps, p) > 0.0) continue;
+			double low = double(i - 1) / steps, high = double(i) / steps;
+			for (int pass = 0; pass < 48; ++pass) {
+				const double middle = (low + high) * 0.5;
+				(at(middle, p) > 0.0 ? low : high) = middle;
+			}
+			at(high, point);
+			return true;
+		}
+		return false;
+	}
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
 		width = picture.width;
@@ -110,6 +143,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && canvas_sized;
+		report.missing = missing;
 		drawn = false;
 		if (!reads.empty() && view.findings.assets) {
 			opennova::editor::StampedFiles files(view.findings.assets);

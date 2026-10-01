@@ -22,7 +22,9 @@ struct SessionView;
 // hit tests and the handles read); the size its picture is now, in pixels, with whether a canvas drew
 // it this frame at a size of the canvas's own (a design picture fitted or scaled, a picture that
 // fills the canvas: the viewport's device size then set by no SetViewport) rather than the
-// viewport's; and its build (S13 V6: ViewportDevice::build(), which the device cache reads).
+// viewport's; its build (S13 V6: ViewportDevice::build(), which the device cache reads); and the
+// names its picture asked the project's files for and did not find (a mission's terrain texture, a
+// model an item names), each once, which its viewport notes.
 struct ViewportDeviceReport {
 	struct Rect {
 		bool placed = false; // the widget has a rect
@@ -37,6 +39,7 @@ struct ViewportDeviceReport {
 	int height = 0;
 	bool canvas_sized = false;
 	ViewportBuildReport build;
+	std::vector<std::string> missing;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas
@@ -87,6 +90,25 @@ public:
 		(void)point;
 		return false;
 	}
+	// Where the segment from `from` to `to` first meets the surface the picture draws (a mission's
+	// terrain), each a point of the viewport's space (a mission's frame, metres): what a planner's ray
+	// lands on, taken from the viewport's own camera rather than the device's last applied one (a
+	// SetViewport and a drag in one pump agree). False where the segment misses it, the device has no
+	// surface, or the surface is not built.
+	virtual bool surface_between(const double from[3], const double to[3], double point[3]) const {
+		(void)from;
+		(void)to;
+		(void)point;
+		return false;
+	}
+	// The surface's height at (x, y) of the viewport's space (a mission's ground under an entity: a move
+	// of several keeps each one's height over it); false as surface_between.
+	virtual bool ground_at(double x, double y, double &height) const {
+		(void)x;
+		(void)y;
+		(void)height;
+		return false;
+	}
 	// Each pump: what its viewport asks after a follow (`action`: its picture made again, its state
 	// applied again, or dropped), then what follows the state (the size it draws at, a camera placed,
 	// a level drawn, a rig bound, a clip posed at `clock`); what its picture read and placed reported
@@ -114,11 +136,14 @@ public:
 // Where a canvas finds the device of a viewport (the Shell's devices, ViewportDeviceCache; a test's):
 // the device drawing the viewport of `kind` over the document at `path`, used now (the cache gives
 // up the least recently used); null while none is made (the canvas draws nothing, and the cache makes
-// one at the next pump).
+// one at the next pump). And where a planner with no canvas finds it (the wire's drag and drop,
+// viewport_context): the device held for the viewport, read and not used (peek: its recency stands,
+// none is made).
 class ViewportDeviceSource {
 public:
 	virtual ~ViewportDeviceSource() = default;
 	virtual ViewportDevice *device(const std::string &path, ViewportKind kind) = 0;
+	virtual const ViewportDevice *peek(const std::string &path, ViewportKind kind) const = 0;
 };
 
 } // namespace opennova::editor

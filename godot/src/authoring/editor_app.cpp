@@ -18,6 +18,7 @@
 #include <runtime/devtools/imgui_pass.h>
 
 #include <editor/preview/viewport_device_cache.h>
+#include <editor/preview/viewports.h>
 #include <editor/run/launch_plan.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/request_factories.h>
@@ -153,6 +154,8 @@ void EditorApp::_ready() {
 						[this](const std::string &p_text) { post_device_notice_(p_text); } });
 	});
 	devices_->set_pin_all_targets(!is_available());
+	// A planner with no canvas (the wire's drag and drop) reads the device of its viewport there.
+	session_->viewports().set_devices(devices_.get());
 	if (is_available()) {
 #if OPENNOVA_EDITOR_UI
 		windows_->set_devices(devices_.get());
@@ -217,6 +220,7 @@ void EditorApp::_exit_tree() {
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
 #endif
+	if (session_) session_->viewports().set_devices(nullptr);
 	devices_.reset();
 	free_retired_();
 	if (picker_ != nullptr) {

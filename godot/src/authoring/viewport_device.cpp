@@ -82,6 +82,15 @@ bool ViewportDevice::surface_at(float x, float y, float point[3]) const {
 	return !keeps_last_() && applier_->surface_at(x, y, point);
 }
 
+bool ViewportDevice::surface_between(const double from[3], const double to[3], double point[3]) const {
+	// The applier's to answer: the layer that holds its surface may stand while it builds another.
+	return applier_->surface_between(from, to, point);
+}
+
+bool ViewportDevice::ground_at(double x, double y, double &height) const {
+	return applier_->ground_at(x, y, height);
+}
+
 void ViewportDevice::take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &clock,
 		opennova::editor::ViewportDeviceReport &report) {

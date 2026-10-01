@@ -73,6 +73,23 @@ public:
 		(void)point;
 		return false;
 	}
+	// Where the segment from `from` to `to` meets the surface the picture draws, and the surface's
+	// height at (x, y), in the viewport's space (opennova::editor::ViewportDevice's; a mission's
+	// terrain): answered by the applier while the layer that holds the surface stands, whatever else
+	// it builds meanwhile (an added model's units leave the ground as it was). None for a kind with no
+	// surface.
+	virtual bool surface_between(const double from[3], const double to[3], double point[3]) const {
+		(void)from;
+		(void)to;
+		(void)point;
+		return false;
+	}
+	virtual bool ground_at(double x, double y, double &height) const {
+		(void)x;
+		(void)y;
+		(void)height;
+		return false;
+	}
 };
 
 } // namespace godot

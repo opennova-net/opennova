@@ -88,7 +88,8 @@ struct ViewportInput {
 // What a viewport's planners read (a canvas's gestures, the MCP's drag and command): the input, the
 // size the canvas draws the picture at (pixels; the state's where no canvas draws), the grid a drag
 // snaps to (a menu's 8-unit grid where it is not 0, a model's grid in metres; 0 free), and the device
-// drawing it (null: none; what a drop lands on, ViewportDevice::surface_at).
+// drawing it (null: none; what a drop or a move lands on, ViewportDevice::surface_between and
+// ground_at).
 struct ViewportContext {
 	ViewportInput input;
 	int width = 0;
@@ -107,7 +108,8 @@ class ViewportModel;
 // What a planner reads of a viewport the session keeps, with no canvas drawing it (the viewport
 // query's hit, an EditInViewport's drag and command, a test): the view, the preview clock, the
 // document open at its path, as it followed (ChangeClass None), at the size its device draws at
-// (ViewportModel::size), snapped by `snap`, over no device.
+// (ViewportModel::size), snapped by `snap`, over the device the Shell holds for it (Viewports::devices,
+// read and not used; none in a session with no Shell).
 ViewportContext viewport_context(const SessionView &view, const ViewportModel &model, float snap = 0.0f);
 
 // How a canvas lays the picture out: a design picture `design_width` x `design_height` (a menu's

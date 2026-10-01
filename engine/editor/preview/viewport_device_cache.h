@@ -62,6 +62,10 @@ public:
 	// The device drawing the viewport of `kind` over `path`, now the most recently used and kept
 	// through the next sync; null while none is made, which the next sync makes.
 	ViewportDevice *device(const std::string &path, ViewportKind kind) override;
+	// The device held for (path, kind), its recency untouched and none asked for (null: none).
+	const ViewportDevice *peek(const std::string &path, ViewportKind kind) const override {
+		return held(path, kind);
+	}
 	// How many devices it holds, and the one of (path, kind) (null: none), its recency untouched.
 	size_t size() const { return slots_.size(); }
 	ViewportDevice *held(const std::string &path, ViewportKind kind) const;

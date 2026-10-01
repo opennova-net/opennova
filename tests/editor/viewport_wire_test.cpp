@@ -10,7 +10,8 @@
 // `to` over a selection; a model's drag that moves nothing writes nothing, its frame of a record that
 // is no marker refused, a frame beside any operation and a drag refused while one holds the
 // documents. The clock set with no document named, whatever is active. A model read at a size a
-// canvas set: its markers' pixels and its hit agree.
+// canvas set: its markers' pixels and its hit agree. ADR 0046 S14: the device a planner with no
+// canvas reads (Viewports::set_devices, a peek that uses nothing).
 
 #include <cmath>
 #include <cstdint>
@@ -646,7 +647,88 @@ static int test_canvas_sized_reads() {
 	return 0;
 }
 
+// The device in a planner's context with no canvas (the wire's): none while the session's viewports
+// are given no devices, or the Shell holds none for the viewport; the one it holds once they are, read
+// and not used (a peek keeps no device through the cache's next round and asks for none); and what a
+// planner asks of it: the surface a segment first meets, the ground's height at a point.
+static int test_device_in_the_wire_context() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_device", platform);
+	ProjectSession &session = wired.session;
+	const SessionView &view = session.view();
+	const std::string menu = wired.menu ? wired.menu->path() : std::string();
+	TEST_EXPECT(!menu.empty());
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	const std::string armory = "models/armory.3di";
+	std::string error;
+	const ViewportModel *model = session.viewports().resolve(view, armory, ViewportKind::Model, error);
+	const ViewportModel *screen = session.viewports().resolve(view, menu, ViewportKind::Menu, error);
+	TEST_EXPECT(model && screen);
+	if (!model || !screen) return 1;
+
+	// No devices given to the viewports: a planner's context has none, whatever a cache holds.
+	FakeDevices devices;
+	devices.sync(session);
+	TEST_EXPECT(devices.held(armory, ViewportKind::Model) != nullptr);
+	TEST_EXPECT(session.viewports().devices() == nullptr && viewport_context(view, *model).device == nullptr);
+	// Given them: the device the Shell holds for the viewport.
+	session.viewports().set_devices(&devices.cache);
+	TEST_EXPECT(viewport_context(view, *model).device == devices.held(armory, ViewportKind::Model));
+	TEST_EXPECT(viewport_context(view, *model, 4.0f).snap == 4.0f);
+
+	// What a planner asks of it: nothing of a device with no surface; a ground's height, and where a
+	// segment first meets it (z up: a slope rising east, met from above).
+	editor_test::FakeDevice *fake = devices.held(armory, ViewportKind::Model);
+	const ViewportDevice *device = viewport_context(view, *model).device;
+	double height = -1.0, point[3] = { 0.0, 0.0, 0.0 };
+	const double from[3] = { 10.0, 20.0, 100.0 }, to[3] = { 30.0, 20.0, -100.0 };
+	TEST_EXPECT(device && !device->ground_at(4.0, 2.0, height) && !device->surface_between(from, to, point));
+	fake->ground = [](double x, double) { return 0.5 * x; };
+	TEST_EXPECT(device->ground_at(4.0, 2.0, height) && height == 2.0);
+	// z = 100 - 10 (x - 10) meets z = x / 2 at x = 200 / 10.5.
+	TEST_EXPECT(device->surface_between(from, to, point) && std::fabs(point[0] - 200.0 / 10.5) < 1e-6 &&
+			point[1] == 20.0 && std::fabs(point[2] - 0.5 * point[0]) < 1e-6);
+	const double under[3] = { 10.0, 20.0, -5.0 };
+	TEST_EXPECT(!device->surface_between(under, to, point) && !device->surface_between(from, from, point));
+	session.viewports().set_devices(nullptr);
+	TEST_EXPECT(viewport_context(view, *model).device == nullptr);
+
+	// A peek reads: a cache of one device, the menu's; the model's asked for and the menu's peeked
+	// before the next round gives the menu's up for the model's (a use would have kept it, the model's
+	// waiting), and a peek of a viewport with no device asks for none.
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache one(
+			[&made](ViewportKind) {
+				auto fresh = std::make_unique<editor_test::FakeDevice>();
+				made.push_back(fresh.get());
+				return std::unique_ptr<ViewportDevice>(std::move(fresh));
+			},
+			1);
+	// A workspace whose Preview window shows no kind: a device only where one is asked for.
+	one.set_pin_all_targets(false);
+	SessionView unpinned = view;
+	unpinned.documents.preview_shown = ViewportKind::kCount;
+	session.viewports().set_devices(&one);
+	TEST_EXPECT(one.device(menu, ViewportKind::Menu) == nullptr);
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(one.size() == 1 && one.held(menu, ViewportKind::Menu) != nullptr);
+	TEST_EXPECT(viewport_context(view, *screen).device == one.held(menu, ViewportKind::Menu) &&
+			viewport_context(view, *model).device == nullptr);
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(made.size() == 1 && one.held(armory, ViewportKind::Model) == nullptr);
+	TEST_EXPECT(one.device(armory, ViewportKind::Model) == nullptr);
+	TEST_EXPECT(one.peek(menu, ViewportKind::Menu) == one.held(menu, ViewportKind::Menu));
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(made.size() == 2 && one.size() == 1 && one.held(armory, ViewportKind::Model) != nullptr &&
+			one.held(menu, ViewportKind::Menu) == nullptr);
+	session.viewports().set_devices(nullptr);
+	std::printf("test_device_in_the_wire_context passed\n");
+	return 0;
+}
+
 int main() {
+	TEST_EXPECT(test_device_in_the_wire_context() == 0);
 	TEST_EXPECT(test_edits_in_viewport() == 0);
 	TEST_EXPECT(test_wire_gestures() == 0);
 	TEST_EXPECT(test_gesture_lapses() == 0);
