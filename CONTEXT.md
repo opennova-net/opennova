@@ -572,13 +572,21 @@ The editor MCP reads it; the request's `ok` only says it parsed.
 _Avoid_: status (the one-line text the editor shows), result
 
 **Query**:
-What the editor MCP, the Shell or a test asks of the editor's session without changing it: a
-name, one row of the query table (`session/editor_queries`: the params it takes, the list it
-pages, the view concern whose revision its answer carries), and those params. The state is one,
-by section and since a revision; every list a query serves comes a page at a time (an offset, or
-a cursor for the output lines and the events, a limit, and the whole count); the `catalog` query
-lists every request kind, query, section and concern from the tables themselves.
+What the editor MCP, the Shell, the command line or a test asks of the editor's session without
+changing it: a name, one row of the query table (`session/editor_queries`: the params it takes,
+the list it pages, the view concern whose revision its answer carries), and those params. The
+state is one, by section and since a revision; every list a query serves comes a page at a time
+(an offset, or a cursor for the output lines and the events, a limit, and the whole count); the
+`catalog` query lists every request kind, query, section and concern from the tables themselves.
 _Avoid_: request (a request changes the session), view (what the windows draw from), getter
+
+**Verb**:
+What `opennova-project` is run to do (`new`, `status`, `validate`, `create-missing`, `import`,
+`reimport`, `build`, `request`, `query`): a row of the command line's verb table
+(`apps/project/cli_verbs`) naming the requests it sends the editor's session, run headless for
+that one run, and the query whose answer it prints, as text or with `--json` as the Shell's
+`query_json` gives it. The command line orchestrates nothing of its own (ADR 0046 S13 A7).
+_Avoid_: command (a request, a menu's COMMAND, a script's command), subcommand
 
 **Workspace**:
 The editor's windows (Files, Document, Preview, Inspector, Problems and Output, the menu bar
@@ -661,10 +669,14 @@ the game's own loader.
 _Avoid_: skeleton (the rig's bones alone), armature (Blender's)
 
 **Selection / primary**:
-The records selected in the active document, all inside one row. The primary is the last
-one selected: the inspector's form, the preview's handles and the place a new or pasted
-record goes follow it, and an arrange aligns the others to it. Several records of one kind
-share one form in the inspector, where a change sets every one of them in one undo step.
+The records selected in the active document, of any of its rows (a marquee over a mission's
+entities, windows of several screens). The primary is one of them, the one selected last or
+the one a marquee names: the inspector's form, the preview's handles and the place a new or
+pasted record goes follow it, and an arrange aligns the others to it. Several records of one
+kind share one form in the inspector, where a change sets every one of them in one undo step.
+Each open document keeps its own while another is active; every change of one, and every one put
+back, takes a serial no selection had before. A record the document does not hold is never
+selected, and the copies a Duplicate makes are selected with the primary's copy the primary.
 _Avoid_: focus (the keyboard's), active (the active document, not a record)
 
 **Arrange**:
@@ -738,19 +750,31 @@ _Avoid_: overlay (one shape drawn over the picture), view (a document's view in 
 window), picture (what the device renders, which the canvas shows)
 
 **Gesture**:
-The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held): they
-carry one token and fold into one undo step on their row until it ends (let go, or the canvas
-stops drawing it: one end, for the document it began in), and the Problems wait for that end.
+The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held, a gizmo
+over several entities): they carry one token and fold into one undo step over every row they
+change (each row's version before the gesture and its latest after) until it ends (let go, or the
+canvas stops drawing it: one end, for the document it began in); a batch of it that adds, removes
+or moves a row is a step of its own and ends it. The Problems wait for the end.
 _Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
 
 **Batch**:
-Several edits on one row applied as one undo step, each against the row as the ones before
-it left it, nothing committed when any is refused; a later edit may name a record an
-earlier one made (in the editor MCP, by the label its edit gave it), so one step adds a
-window and fills it in. A new name is its record's edit alone: what names the record keeps
-the old name until Rename everywhere rewrites it.
+Edits on any rows of one document applied as one undo step, each against the rows as the ones
+before it left them (each row an edit touches copied once), nothing committed when any is refused
+or the document's type refuses the step: records' fields, rows added, duplicated, removed, moved
+and pasted, and file-wide values together. A later edit may name a row or a record an earlier one
+made (in the editor MCP, by the label its edit gave it), so one step adds a window and fills it
+in; one naming a row an earlier edit removed is refused. A new name is its record's edit alone:
+what names the record keeps the old name until Rename everywhere rewrites it.
 _Avoid_: transaction (the rename's), gesture (edits folding one after another until an end),
 follow (the same-file rename S13 D5 removed)
+
+**Change set**:
+What changed in a document between a state a window or a preview last read and the state it is
+in, in the words of its kind: a record document's rows added, removed and changed, whether rows
+moved among one another and whether the file-wide state changed (a text's spans and a raster's
+regions later). When the document cannot say (it was read again, or its history no longer holds
+that state), everything changed.
+_Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
 
 **Build**:
 The one operation behind Play and Export: validate the project, route every asset into

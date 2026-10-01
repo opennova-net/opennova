@@ -21,16 +21,25 @@ inline EditorRequest of(EditorRequestKind kind) {
 
 // --- the project -------------------------------------------------------------------------------
 
-// A project made in `dir` (titled `title`, else New Game), then opened.
-inline EditorRequest new_project(std::string dir, std::string title = std::string()) {
+// A project made in `dir` (titled `title`, else the folder's name; of `game`, a gameprofile code,
+// else jo), then opened, with its import pass unless `import_pass` is false.
+inline EditorRequest new_project(std::string dir, std::string title = std::string(),
+		std::string game = std::string(), bool import_pass = true) {
 	EditorRequest request = of(EditorRequestKind::NewProject);
 	request.dir = std::move(dir);
 	request.title = std::move(title);
+	request.game = std::move(game);
+	request.import_pass = import_pass;
 	return request;
 }
-inline EditorRequest open_project(std::string dir) {
+// The project in `dir` opened, its import pass first unless `import_pass` is false (its files as
+// they are, no source imported), on `game_install` for the session alone when given.
+inline EditorRequest open_project(
+		std::string dir, bool import_pass = true, std::string game_install = std::string()) {
 	EditorRequest request = of(EditorRequestKind::OpenProject);
 	request.dir = std::move(dir);
+	request.import_pass = import_pass;
+	request.game_install = std::move(game_install);
 	return request;
 }
 inline EditorRequest close_project() {
@@ -107,8 +116,11 @@ inline EditorRequest preview_install_import(
 
 // --- the build and Play ------------------------------------------------------------------------
 
-inline EditorRequest build() {
-	return of(EditorRequestKind::Build);
+// The project packed into a build under `out_dir` ("" the project's .opennova/build/play).
+inline EditorRequest build(std::string out_dir = std::string()) {
+	EditorRequest request = of(EditorRequestKind::Build);
+	request.out_dir = std::move(out_dir);
+	return request;
 }
 inline EditorRequest play() {
 	return of(EditorRequestKind::Play);
@@ -182,15 +194,18 @@ inline EditorRequest reveal_path(std::string path) {
 
 // --- records -----------------------------------------------------------------------------------
 
-inline EditorRequest select_record(
-		std::string path, NodeAddress address, SelectMode mode = SelectMode::Replace) {
+// The record at `address` (the primary) and the `records` named with it (a marquee's, of any rows)
+// selected in the document at `path` as `mode` says.
+inline EditorRequest select_record(std::string path, NodeAddress address,
+		SelectMode mode = SelectMode::Replace, std::vector<NodeAddress> records = {}) {
 	EditorRequest request = of(EditorRequestKind::SelectRecord);
 	request.path = std::move(path);
 	request.address = address;
+	request.records = std::move(records);
 	request.mode = mode;
 	return request;
 }
-// A batch on one row of the document at `path`, one undo step; opened first when it is not and
+// A batch over any rows of the document at `path`, one undo step; opened first when it is not and
 // `open_first` (a fix's edit).
 inline EditorRequest edit_record(
 		std::string path, std::vector<Edit> edits, bool open_first = false) {

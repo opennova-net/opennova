@@ -23,15 +23,18 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
         "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
+    python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
     python scripts/mcp/editor_mcp.py call editor_menu_preview '{"op": "state"}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
 
-Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported isError, a
-`request` was not done (its outcome: refused, did not finish, or waits on the
-unsaved-changes prompt), or a build or play did not land; 3 a JSON-RPC error;
-6 stop: the process outlived the quit; 7 launch failed.
+Exit codes, as opennova-project's (1 not done, 2 not read): 0 ok; 1 a `request`
+was not done (its outcome: refused, did not finish, or waits on the
+unsaved-changes prompt), or a build or play did not land or did not end in
+time; 2 not read: a usage error, no endpoint answered, or the tool reported
+isError (a request or query the editor did not read); 3 a JSON-RPC error; 6
+stop: the process outlived the quit; 7 launch failed.
 """
 
 from __future__ import annotations
@@ -56,6 +59,11 @@ from game_mcp import (  # noqa: E402
 
 # 8975 is the game, 8976 a LAN joiner (docs/mcp.md); the editor takes the next one.
 DEFAULT_PORT = 8977
+# The exit codes opennova-project shares (its request verb): a request not done, one not read. The
+# shared client's usage and transport failures (game_mcp's 1) are this client's not read, so nothing
+# here raises GameMcpError with EXIT_NOT_DONE (main would read it as game_mcp's).
+EXIT_NOT_DONE = 1
+EXIT_NOT_READ = EXIT_TOOL_ERROR
 EDITOR_SCENE = "res://editor/editor_root.tscn"
 PROJECT_DIR = game_mcp.PROJECT_DIR
 
@@ -144,7 +152,7 @@ def cmd_call(args: argparse.Namespace) -> int:
     payload = client_of(args).call(args.tool, parse_json_arg(args.arguments, args.args_file),
                                    timeout=args.timeout)
     emit_payload(payload, args)
-    return EXIT_TOOL_ERROR if payload.get("isError") else EXIT_OK
+    return EXIT_NOT_READ if payload.get("isError") else EXIT_OK
 
 
 def print_json(value) -> None:
@@ -177,34 +185,34 @@ def cmd_query(args: argparse.Namespace) -> int:
     for pair in args.arg or []:
         name, sep, value = pair.partition("=")
         if not sep or not name:
-            raise GameMcpError(EXIT_USAGE, f"--arg takes NAME=VALUE, not {pair!r}")
+            raise GameMcpError(EXIT_NOT_READ, f"--arg takes NAME=VALUE, not {pair!r}")
         params[name] = parse_value(value)
     payload = client_of(args).call("editor_query", {"query": args.name, **params}, timeout=args.timeout)
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
-        return EXIT_TOOL_ERROR
+        return EXIT_NOT_READ
     print_json(payload.get("structuredContent", {}))
     return EXIT_OK
 
 
 def parse_list(text: str, flag: str, shape: str) -> list:
-    """--edits / --imports: a JSON array of objects."""
+    """--edits / --imports / --records: a JSON array of objects."""
     try:
         value = json.loads(text)
     except ValueError as error:
-        raise GameMcpError(EXIT_USAGE, f"{flag} is not JSON: {error}") from error
+        raise GameMcpError(EXIT_NOT_READ, f"{flag} is not JSON: {error}") from error
     if not isinstance(value, list) or not all(isinstance(item, dict) for item in value):
-        raise GameMcpError(EXIT_USAGE, f"{flag} must be a JSON array of {shape} objects")
+        raise GameMcpError(EXIT_NOT_READ, f"{flag} must be a JSON array of {shape} objects")
     return value
 
 
 # The request's fields (engine/editor/session/request_fields.cpp), one flag each: the text fields,
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
-REQUEST_TEXTS = ("dir", "title", "path", "locator", "field", "new_name", "role", "file_kind", "mode", "choice",
-                 "purpose")
+REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
+                 "out_dir", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
-REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first")
+REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -224,6 +232,8 @@ def request_of(args: argparse.Namespace) -> dict:
         request["imports"] = parse_list(args.imports, "--imports", "{path, entry?, install?, native?}")
     if args.edits:
         request["edits"] = parse_list(args.edits, "--edits", "edit")
+    if args.records:
+        request["records"] = parse_list(args.records, "--records", "{row, kind, child}")
     for field in ("address", "paste_at", "settings"):
         if getattr(args, field):
             request[field] = parse_json_arg(getattr(args, field), None)
@@ -234,12 +244,12 @@ def cmd_request(args: argparse.Namespace) -> int:
     payload = client_of(args).call("editor_request", request_of(args), timeout=args.timeout)
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
-        return EXIT_TOOL_ERROR
+        return EXIT_NOT_READ
     answer = payload.get("structuredContent", {})
     print_json(answer)
     # `ok` only says the request read; the outcome says whether it happened.
     outcome = answer.get("outcome", {})
-    return EXIT_OK if not outcome or outcome.get("done", False) else EXIT_TOOL_ERROR
+    return EXIT_OK if not outcome or outcome.get("done", False) else EXIT_NOT_DONE
 
 
 def progress_line(operation: dict) -> str:
@@ -249,13 +259,15 @@ def progress_line(operation: dict) -> str:
     return " ".join(part for part in (operation.get("kind", ""), amount, operation.get("label", "")) if part)
 
 
-def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, dict]:
-    """Raise `kind` (build, play) and wait on the operation its outcome names, polling `query
+def raise_and_wait(client: GameMcp, request: dict, timeout: float) -> tuple[dict, dict]:
+    """Raise `request` (a build, a play) and wait on the operation its outcome names, polling `query
     operation` while the editor steps it frame by frame (its progress on stderr): the outcome, and
-    what the operation came to (last_operation; {} when it was not the one to end, or none ran)."""
-    payload = client.call("editor_request", {"kind": kind}, timeout=60)
+    what the operation came to (last_operation; {} when it was not the one to end, or none ran; None
+    when it did not end within `timeout`, said on stderr)."""
+    kind = request["kind"]
+    payload = client.call("editor_request", request, timeout=60)
     if payload.get("isError"):
-        raise GameMcpError(EXIT_TOOL_ERROR, f"editor_request {kind} failed: {text_of(payload)}")
+        raise GameMcpError(EXIT_NOT_READ, f"editor_request {kind} failed: {text_of(payload)}")
     outcome = payload.get("structuredContent", {}).get("outcome", {})
     if not outcome.get("done", False):
         return outcome, {}
@@ -273,21 +285,27 @@ def raise_and_wait(client: GameMcp, kind: str, timeout: float) -> tuple[dict, di
             print(line, file=sys.stderr)
             shown = line
         if time.monotonic() >= deadline:
-            raise GameMcpError(EXIT_TOOL_ERROR, f"the {kind}'s operation {operation} did not end within {timeout:.0f} s "
-                                                f"(`request cancel_operation` stops it)")
+            print(f"editor_mcp: the {kind}'s operation {operation} did not end within {timeout:.0f} s "
+                  f"(`request cancel_operation` stops it)", file=sys.stderr)
+            return outcome, None
         time.sleep(0.2)
 
 
 def cmd_build(args: argparse.Namespace) -> int:
     client = client_of(args)
-    outcome, ended = raise_and_wait(client, "build", args.timeout)
+    request = {"kind": "build"}
+    if args.out_dir is not None:
+        request["out_dir"] = args.out_dir
+    outcome, ended = raise_and_wait(client, request, args.timeout)
+    if ended is None:
+        return EXIT_NOT_DONE
     if not outcome.get("done", False):
         print_json({"outcome": outcome})
-        return EXIT_TOOL_ERROR
+        return EXIT_NOT_DONE
     build = client.structured("editor_query", {"query": "operation"}).get("build", {})
     build["operation"] = ended
     print_json(build)
-    return EXIT_OK if ended.get("end") == "done" and build.get("ok") else EXIT_TOOL_ERROR
+    return EXIT_OK if ended.get("end") == "done" and build.get("ok") else EXIT_NOT_DONE
 
 
 def run_section(client: GameMcp) -> dict:
@@ -299,18 +317,20 @@ def cmd_play(args: argparse.Namespace) -> int:
     if args.op == "start":
         # Play builds first: its build's operation is waited on as `build` waits, then the run
         # section read (the game started on the poll the build landed).
-        outcome, ended = raise_and_wait(client, "play", args.timeout)
+        outcome, ended = raise_and_wait(client, {"kind": "play"}, args.timeout)
+        if ended is None:
+            return EXIT_NOT_DONE
         if not outcome.get("done", False):
             print_json({"outcome": outcome})
-            return EXIT_TOOL_ERROR
+            return EXIT_NOT_DONE
         run = run_section(client)
         run["operation"] = ended
         print_json(run)
-        return EXIT_OK if run.get("state") == "running" else EXIT_TOOL_ERROR
+        return EXIT_OK if run.get("state") == "running" else EXIT_NOT_DONE
     payload = client.call("editor_play", {"op": args.op}, timeout=args.timeout)
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
-        return EXIT_TOOL_ERROR
+        return EXIT_NOT_READ
     print_json(payload.get("structuredContent", {}))
     return EXIT_OK
 
@@ -321,10 +341,10 @@ def cmd_screenshot(args: argparse.Namespace) -> int:
         request["quality"] = args.quality
     payload = client_of(args).call("editor_screenshot", request, timeout=90)
     if payload.get("isError"):
-        raise GameMcpError(EXIT_TOOL_ERROR, f"editor_screenshot failed: {text_of(payload)}")
+        raise GameMcpError(EXIT_NOT_READ, f"editor_screenshot failed: {text_of(payload)}")
     images = images_of(payload)
     if not images:
-        raise GameMcpError(EXIT_TOOL_ERROR, "editor_screenshot returned no image block")
+        raise GameMcpError(EXIT_NOT_READ, "editor_screenshot returned no image block")
     target = Path(args.out)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(base64.b64decode(images[0]["data"]))
@@ -456,7 +476,11 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("kind", help="new_project, open_project, create_missing, edit_record, save_all, quit, ... "
                                       "(`query catalog` lists every kind with its fields)")
     request.add_argument("--dir", default=None, help="a project's directory (new_project, open_project, forget_recent)")
-    request.add_argument("--title", default=None, help="a new project's title")
+    request.add_argument("--title", default=None, help="a new project's title (the folder's name when left out)")
+    request.add_argument("--game", default=None, help="a new project's game, a gameprofile code (jo when left out)")
+    request.add_argument("--game-install", dest="game_install", default=None,
+                         help="open_project: a game install for the session alone, in place of the one the "
+                              "project's .opennova/local.json names (which stays as it is)")
     request.add_argument("--path", default=None, help="a file: a project file or open document ('' the active one)")
     request.add_argument("--locator", default=None, help="a record's locator (open_document, the renames)")
     request.add_argument("--field", default=None, help="a field of that record")
@@ -464,6 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
     request.add_argument("--role", default=None, help="a requirement's role (assign_requirement)")
     request.add_argument("--file-kind", dest="file_kind", default=None,
                          help="create_file: an asset kind token, for a name that cannot say its kind")
+    request.add_argument("--out-dir", dest="out_dir", default=None,
+                         help="build: where it lands, each build a directory under it (left out: the project's "
+                              ".opennova/build/play; relative: from the project's folder; refused inside the "
+                              "project but in its cache or export folder)")
     request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
     request.add_argument("--names", default=None, help="comma-separated: preview_install_import's files")
     request.add_argument("--paths", action="append", default=None,
@@ -473,8 +501,11 @@ def build_parser() -> argparse.ArgumentParser:
                               "{path, entry?, install?, native?} (query import_preview's rows carry each as source)")
     request.add_argument("--edits", default=None,
                          help="edit_record: the batch form as a JSON array of {op, id, parent, kind, field, value, "
-                              "position, as, ...}, one undo step; revert_to_saved: [{id, field}]")
+                              "position, as, ...} over any rows, one undo step; revert_to_saved: [{id, field}]")
     request.add_argument("--address", default=None, help="a record's address as a JSON object {row, kind, child}")
+    request.add_argument("--records", default=None,
+                         help="select_record: the records selected with --address (a marquee's, of any rows), "
+                              "a JSON array of {row, kind, child}")
     request.add_argument("--paste-at", dest="paste_at", default=None,
                          help="paste: where, as a JSON object {row, parent, position} (left out: after the selection)")
     request.add_argument("--mode", choices=("replace", "add", "toggle"), default=None,
@@ -496,11 +527,16 @@ def build_parser() -> argparse.ArgumentParser:
                          help="show_in_files, preview_rename: and ask the new name")
     request.add_argument("--open-first", dest="open_first", choices=switch, default=None,
                          help="edit_record: open the document first when it is not")
+    request.add_argument("--import-pass", dest="import_pass", choices=switch, default=None,
+                         help="open_project, new_project: false opens it on its files as they are, scanned and "
+                              "checked, no source imported")
     request.add_argument("--timeout", type=float, default=300.0)
     request.set_defaults(func=cmd_request)
 
     build = commands.add_parser("build", help="build the project and wait on its operation (progress on stderr)")
     add_endpoint_options(build)
+    build.add_argument("--out-dir", dest="out_dir", default=None,
+                       help="where it lands, each build a directory under it (as request build's --out-dir)")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
 
@@ -539,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except GameMcpError as error:
         print(f"editor_mcp: {error}", file=sys.stderr)
-        return error.code
+        return EXIT_NOT_READ if error.code == EXIT_USAGE else error.code
     except KeyboardInterrupt:
         return 130
 

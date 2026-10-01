@@ -11,6 +11,7 @@
 #include <editor/model/document.h>
 #include <editor/model/document_search.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/outcome_json.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/session_operation.h>
@@ -46,14 +47,14 @@ bool problem_grouping_from_token(const std::string &token, ProblemGrouping &out)
 std::vector<std::string> editor_request_kind_tokens();
 
 // Where a request's edits are named (S13 A5: the batch form, record_batch.h): the record document
-// the request acts on, and, read, the label each edit that makes a record gave
-// (RecordBatch::made_labels), which the request's outcome pairs with the records it made (`added`).
+// the request acts on, and, read, the label each edit gave by the edit's index
+// (RecordBatch::labels), which the request's outcome pairs with what each edit made (`made`).
 struct RequestNames {
 	const Document *document = nullptr;
-	std::vector<std::string> made_labels;
+	std::vector<std::string> labels;
 	// A first read, before the document the request asks to open first opens (open_first): its
 	// edits' records are read as identities and not looked for, what only the document knows (a
-	// replaced list's records, a duplicate's place) waits for the read after it opens, and their
+	// replaced list's records) waits for the read after it opens, and their
 	// kinds are named in a blank of the path's type. A request refused here opens nothing.
 	bool unresolved = false;
 };
@@ -121,11 +122,6 @@ io::JsonValue problem_fix_to_json(const ProblemFix &fix);
 // its first row among the shown), count, errors, warnings, infos}.
 io::JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		const JsonPage &page, ProblemFixCache &fixes);
-// What one request came to: {done, unsaved_prompt, operation, findings, added}; `done` is false
-// when it was refused or failed (an error among the findings) or waits on the unsaved prompt;
-// `operation` names the operation it started or joined (0: none); `added` the records its edits
-// made, in order (an edit_record's adds and duplicates, a paste's, a duplicate's copies).
-io::JsonValue action_outcome_to_json(const ActionOutcome &outcome);
 // A document: its lifecycle state and the source issues; for a record document (as_records) also
 // file_state_changed (its file-wide state differs from the saved baseline's), its row count, the
 // last record added and the kinds its outline adds, and, with a page of rows (`rows`: `count` the

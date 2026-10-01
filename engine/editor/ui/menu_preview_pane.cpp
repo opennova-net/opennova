@@ -285,8 +285,8 @@ void MenuPreviewPane::Impl::draw() {
 	// the window holding it, every selected window, and what the clipboard takes of it.
 	const bool active = view.documents.active == document.path();
 	const std::vector<NodeAddress> none;
-	menu_canvas_select(canvas, active ? view.documents.selection : NodeAddress(),
-			active ? view.documents.selected : none);
+	menu_canvas_select(canvas, active ? view.documents.selection.primary : NodeAddress(),
+			active ? view.documents.selection.records : none);
 	frame.clipboard = menu_canvas_clipboard(canvas, !view.documents.clipboard.empty());
 	follow_selection_(document, canvas.primary);
 	toolbar_(frame);
@@ -397,7 +397,7 @@ void MenuPreviewPane::Impl::draw_canvas_(const Frame &frame, float height) {
 		// what the selection can do.
 		if (canvas_.right_clicked() && !menu_canvas_.gesture().pressed()) {
 			const NodeAddress window = menu_window_at(canvas, in);
-			if (window.child && !holds(workspace_.view().documents.selected, window))
+			if (window.child && !workspace_.view().documents.selection.holds(window))
 				window_requests::select(workspace_, document, window);
 			ImGui::OpenPopup("canvas_menu");
 		}

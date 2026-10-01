@@ -55,7 +55,8 @@ void row_line(Workspace &workspace, const Document &document, const RecordReveal
 	const float x = ImGui::GetCursorScreenPos().x;
 	const std::string label = ui_kit::kChangeRoom + line.text;
 	const std::string shown = ui_kit::fit(label, ImGui::GetContentRegionAvail().x);
-	if (ImGui::Selectable((shown + id).c_str(), view.documents.selection.row == line.address.row))
+	const bool selected = view.documents.selection.primary.row == line.address.row;
+	if (ImGui::Selectable((shown + id).c_str(), selected))
 		select(workspace, document, line.address);
 	reveal.scroll_to(line.address, true);
 	const Document::RecordChange change = document.record_change(line.address);
@@ -150,7 +151,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX; // the selected record's row, its place in the file
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.documents.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.primary.row) index = i;
 	{
 		// Each kind's Add, then the selected record's tools, on a row that wraps.
 		ui_kit::WrapRow row;
@@ -272,7 +273,7 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		ImGui::PopID();
 	} else {
 		flags |= ImGuiTreeNodeFlags_OpenOnArrow;
-		if (holds(view.documents.selected, line.address)) flags |= ImGuiTreeNodeFlags_Selected;
+		if (view.documents.selection.holds(line.address)) flags |= ImGuiTreeNodeFlags_Selected;
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string label = ui_kit::kChangeRoom + line.text;
 		const NodeId id = line.address.child ? line.address.child : line.address.row;
@@ -294,7 +295,7 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 // them: a nested record's collection, or the rows of a kind the file adds (a collection's + adds a
 // nested one).
 void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document) {
-	const NodeAddress selection = workspace.view().documents.selection;
+	const NodeAddress selection = workspace.view().documents.selection.primary;
 	Document::Placement at;
 	const bool nested = selection.child != 0 && document.placement(selection, at);
 	size_t row_index = SIZE_MAX;
@@ -358,7 +359,7 @@ void OutlineView::draw_master_detail(Workspace &workspace, const Document &docum
 	ui_kit::tooltip(model_.every() ? "The filter lists what matches in every " + row_words + ". Untick for the selected one's."
 	                               : "Tick for the filter to list what matches in every " + row_words + ".");
 	ImGui::BeginDisabled(document.blocked());
-	const Node *master = document.row(view.documents.selection.row);
+	const Node *master = document.row(view.documents.selection.primary.row);
 	const NodeId master_id = master ? master->id : 0;
 	// The selection moved to a record: its line shown (a filter hiding it cleared) and scrolled to.
 	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path(), master_id) : SIZE_MAX;
@@ -389,7 +390,7 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 	const auto &rows = document.rows();
 	size_t index = SIZE_MAX;
 	for (size_t i = 0; i < rows.size(); ++i)
-		if (rows[i]->id == view.documents.selection.row) index = i;
+		if (rows[i]->id == view.documents.selection.primary.row) index = i;
 	ImGui::PushID("masters");
 	ui_kit::WrapRow row;
 	ui_kit::RowTools tools;
@@ -426,7 +427,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			if (collection.spec.kind == kind) ids = collection.ids;
 		size_t at = SIZE_MAX;
 		for (size_t i = 0; i < ids.size(); ++i)
-			if (view.documents.selection.row == master->id && view.documents.selection.child == ids[i]) at = i;
+			if (view.documents.selection.primary.row == master->id && view.documents.selection.primary.child == ids[i]) at = i;
 		ImGui::PushID("details");
 		ui_kit::WrapRow row;
 		ui_kit::RowTools tools;
@@ -480,7 +481,7 @@ void OutlineView::draw_details(Workspace &workspace, const Document &document, c
 			drawn = true; // the row just above what shows
 		if (!drawn && i != revealed && !(line.address == editing_)) continue;
 		ImGui::PushID(static_cast<int>(line.address.child));
-		const bool on = view.documents.selection.row == line.address.row && view.documents.selection.child == line.address.child;
+		const bool on = view.documents.selection.primary.row == line.address.row && view.documents.selection.primary.child == line.address.child;
 		if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg0, ImGui::GetColorU32(ImGuiCol_HeaderHovered, 0.35f));
 		ImGui::TableNextColumn();
 		const float x = ImGui::GetCursorScreenPos().x;

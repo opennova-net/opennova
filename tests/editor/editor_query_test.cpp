@@ -11,7 +11,9 @@
 // menu_findings and menu_render queries; its batch is edit_record's wire form: records by identity
 // or label, kinds by token, a list replaced, the outcome naming what each label made and every
 // record added, one undo step, refusals by the edit's place, nothing committed when the document
-// or an operation refuses it.
+// or an operation refuses it; over rows (S13 D7's second review): a screen's copy by its label a row
+// of its own, a copy naming no place right after its record as the edits before it left it, and
+// what a batch made and removed again neither added nor made.
 
 #include <cstdint>
 #include <cstdio>
@@ -36,6 +38,7 @@
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
+#include <formats/pff/pff.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -320,6 +323,46 @@ static int test_paging() {
 		cursor = next;
 	}
 	TEST_EXPECT(seen == held);
+	return 0;
+}
+
+// build_gate (S13 A7): what a build started now would be refused for, nothing built. With no
+// project open it is refused; a new project lacking its required files is blocked, each unmet
+// requirement blocking it; with them made nothing blocks it; an archive in the project blocks it by
+// the build's own check of the files, which no Problems row shows; and the build then refused, as
+// the gate said.
+static int test_build_gate() {
+	editor_test::TempProjectDir dir("opennova_editor_query_build_gate");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	TEST_EXPECT(refusal(session, "build_gate", "{}") == "query build_gate: no project is open.");
+	session.handle(request::new_project(dir.file("project"), "Gate"));
+	JsonValue gate = ask(session, "build_gate");
+	size_t missing = 0;
+	for (const JsonValue &finding : gate.get("blocking")->array)
+		missing += finding.get_string("code", "") == "requirement.missing" ? 1 : 0;
+	TEST_EXPECT(gate.get_bool("blocked", false) && missing > 0 &&
+			gate.get_number("count", 0.0) >= double(missing));
+	editor_test::create_missing_files(session);
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0 &&
+			gate.get("blocking")->array.empty());
+	// An archive in the project: blocked by the build's own check, no Problems row having it.
+	const uint8_t note[] = { 'x' };
+	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };
+	TEST_EXPECT(opennova::pff::pff_write_archive(dir.file("project/extra.pff").c_str(),
+						opennova::pff::PFF_FORMAT_PFF3, entries, 1) == opennova::pff::PFF_WRITE_OK);
+	session.handle(request::rescan());
+	gate = ask(session, "build_gate", R"({"limit": 1})");
+	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
+			gate.get("blocking")->array.size() == 1 &&
+			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		TEST_EXPECT(d.code() != "build.archive_in_project");
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
 	return 0;
 }
 
@@ -869,8 +912,8 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(menu->get(show, "target", value) && std::get<std::string>(value) == "TITLE");
 	TEST_EXPECT(menu->collections_of(hello).size() > 0);
 	// The selection is the two windows (their ACTIONs, SOUND and ITEM held by them).
-	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({ hello, choices }) &&
-			view.documents.selection == hello);
+	TEST_EXPECT(view.documents.selection.records == std::vector<NodeAddress>({ hello, choices }) &&
+			view.documents.selection.primary == hello);
 
 	// The tree now, pathless: the active document, the menu. The answer's own revision is the
 	// menu's, its view_revision the clock value at which what it reads last moved.
@@ -1209,15 +1252,94 @@ static int test_wire_edits() {
 	return 0;
 }
 
+// Rows on the wire (S13 D7's second review). A screen's copy by its label is a row of its own: a
+// Set naming the label names it, and a window added into it goes in it, one step. A duplicate
+// naming no place goes right after its record as the edits before it left the rows: STARTUP's
+// copy after a screen added at the top, and the added screen's copy right after it. A screen made
+// and removed by its batch is neither `added` nor `made` (the selection kept as the edit found
+// it); of two made, one removed, the other's label named alone.
+static int test_rows_on_the_wire() {
+	editor_test::TempProjectDir dir("opennova_editor_query_rows");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Rows"));
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
+	TEST_EXPECT(menu != nullptr && menu->rows().size() == 1);
+	if (!menu || menu->rows().size() != 1)
+		return 1;
+	const std::string startup = std::to_string(menu->rows()[0]->id);
+	const auto names = [&] {
+		std::vector<std::string> out;
+		for (const auto &row : menu->rows())
+			out.push_back(row->name());
+		return out;
+	};
+	const auto edit = [&](const std::string &edits) {
+		return send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": )" + edits + "}");
+	};
+	const auto made_of = [](const JsonValue &answer) {
+		const JsonValue *outcome = answer.get("outcome");
+		return outcome && outcome->get("made") ? *outcome->get("made") : JsonValue::make_object();
+	};
+	const auto added_count = [](const JsonValue &answer) {
+		const JsonValue *outcome = answer.get("outcome");
+		return outcome && outcome->get("added") ? outcome->get("added")->array.size() : size_t(99);
+	};
+
+	JsonValue answer = edit(R"([{"op": "duplicate", "id": )" + startup + R"(, "as": "copy"},
+		{"op": "set", "id": "copy", "field": "name", "value": "SECOND"},
+		{"op": "add", "kind": "window", "parent": "copy", "as": "w"},
+		{"op": "set", "id": "w", "field": "name", "value": "ADDED"}])");
+	TEST_EXPECT(done(answer) && names() == std::vector<std::string>({"STARTUP", "SECOND"}));
+	const NodeId second = menu->rows().size() == 2 ? menu->rows()[1]->id : 0;
+	TEST_EXPECT(id_of(made_of(answer), "copy") == second &&
+			menu->address_of(NodeId(id_of(made_of(answer), "w"))).row == second);
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(names() == std::vector<std::string>({"STARTUP"}));
+
+	answer = edit(R"([{"op": "add", "kind": "screen", "position": 0, "as": "top"},
+		{"op": "set", "id": "top", "field": "name", "value": "TOP"},
+		{"op": "duplicate", "id": )" + startup + R"(, "as": "again"},
+		{"op": "set", "id": "again", "field": "name", "value": "AGAIN"},
+		{"op": "duplicate", "id": "top", "as": "top2"},
+		{"op": "set", "id": "top2", "field": "name", "value": "TOP2"}])");
+	TEST_EXPECT(done(answer) &&
+			names() == std::vector<std::string>({"TOP", "TOP2", "STARTUP", "AGAIN"}));
+	session.handle(request::undo(menu->path()));
+
+	const NodeAddress selected = session.view().documents.selection.primary;
+	const uint64_t kept = menu->revision();
+	answer = edit(R"([{"op": "add", "kind": "screen", "as": "s"},
+		{"op": "remove", "id": "s"},
+		{"op": "set", "id": )" + startup + R"(, "field": "name", "value": "RENAMED"}])");
+	TEST_EXPECT(done(answer) && menu->revision() != kept && added_count(answer) == 0 &&
+			made_of(answer).object.empty());
+	TEST_EXPECT(names() == std::vector<std::string>({"RENAMED"}) &&
+			session.view().documents.selection.primary == selected);
+	session.handle(request::undo(menu->path()));
+	answer = edit(R"([{"op": "add", "kind": "screen", "as": "s"},
+		{"op": "add", "kind": "screen", "as": "t"},
+		{"op": "remove", "id": "s"}])");
+	TEST_EXPECT(done(answer) && added_count(answer) == 1 && made_of(answer).object.size() == 1 &&
+			menu->rows().size() == 2 && id_of(made_of(answer), "t") == menu->rows()[1]->id);
+	session.handle(request::undo(menu->path()));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paging();
 	failures += test_refusals();
+	failures += test_build_gate();
 	failures += test_problems_params();
 	failures += test_state_since();
 	failures += test_catalog();
 	failures += test_menu_reads_and_batches();
 	failures += test_wire_edits();
+	failures += test_rows_on_the_wire();
 	if (failures == 0)
 		std::printf("editor_query: all tests passed\n");
 	return failures == 0 ? 0 : 1;

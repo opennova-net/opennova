@@ -52,11 +52,14 @@
     records by (`record_batch`), the findings; `view_json`: the view by section), the view the
     windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
     the activity and the dialogs, and the events a request posts for one window to take once),
-    and the finding codes' lookup (S13 A6, `finding_codes`: a token's row over every table, the
-    tables, the columns' wire forms)), `model` (the
+    the selection (S13 D7: one document's records over any of its rows), and the finding codes'
+    lookup (S13 A6, `finding_codes`: a token's row over every table, the tables, the columns' wire
+    forms)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`, and the finding codes (S13 A6,
+    over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
+    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), the `ChangeSet` a
+    document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
     `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
     or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
     type), `documents` (the document types over the engine's own records: the def

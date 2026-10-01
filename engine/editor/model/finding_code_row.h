@@ -205,6 +205,7 @@ enum class CoreFinding {
 	BuildChanged,
 	BuildCopy,
 	BuildNameUnstorable,
+	BuildOutDirInProject,
 	BuildRead,
 	BuildVerify,
 	BuildWrite,

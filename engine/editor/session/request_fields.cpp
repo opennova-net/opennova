@@ -13,7 +13,14 @@ using J = RequestJson;
 // what it does with it (request_kinds.cpp).
 constexpr RequestField kFields[] = {
 	{ F::Dir, "dir", J::String, "A project's directory on disk." },
-	{ F::Title, "title", J::String, "A new project's title (New Game when left out)." },
+	{ F::Title, "title", J::String, "A new project's title (its folder's name when left out)." },
+	{ F::Game, "game", J::String,
+			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
+			"out)." },
+	{ F::GameInstall, "game_install", J::String,
+			"A game install the project opens with for the session alone, in place of the one its "
+			".opennova/local.json names, which stays as it is (a dry run's install); left out, its "
+			"own." },
 	{ F::Path, "path", J::String,
 			"A file: a project file or an open document by its project-relative path or its "
 			"logical "
@@ -29,6 +36,10 @@ constexpr RequestField kFields[] = {
 	{ F::Role, "role", J::String, "A requirement's role, as the requirements' rows name it." },
 	{ F::FileKind, "file_kind", J::String,
 			"An asset kind's token, for a file whose name cannot say its kind (a .bin)." },
+	{ F::OutDir, "out_dir", J::String,
+			"Where a build lands: a directory on disk, each build a directory under it named by "
+			"its id (left out, the project's .opennova/build/play; a relative one from the "
+			"project's folder; one inside the project refused but its cache or export folder)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
@@ -41,13 +52,17 @@ constexpr RequestField kFields[] = {
 			"(install: the path is the game install; native: a loose file copied as the game's "
 			"own)." },
 	{ F::Edits, "edits", J::Objects,
-			"Edits on one row in the batch form, one undo step: [{op, id, parent, kind, field, "
-			"value, position, as, coalesce, gesture}], op one of set, clear, write, add, "
-			"duplicate, remove, move, set_file_value or replace_list ({op, id, list, records}: the "
-			"list of that kind the record holds replaced by records, each {field: value}); a "
-			"record by its identity or by the label (as) an earlier add or duplicate of the batch "
-			"gave it, an add's kind by its token. revert_to_saved's: [{id, field}]." },
+			"Edits over any rows of one document in the batch form, one undo step: [{op, id, "
+			"parent, kind, field, value, position, as, coalesce, gesture}], op one of set, clear, "
+			"write, add, duplicate, remove, move, set_file_value or replace_list ({op, id, list, "
+			"records}: the list of that kind the record holds replaced by records, each {field: "
+			"value}); a record or a row by its identity or by the label (as) an earlier add or "
+			"duplicate of the batch gave it, an add's kind by its token. revert_to_saved's: [{id, "
+			"field}]." },
 	{ F::Address, "address", J::Object, "A record by its address, {row, kind, child}." },
+	{ F::Records, "records", J::Objects,
+			"Records by their addresses, [{row, kind, child}]: those a selection takes with the "
+			"address (of any rows of the document)." },
 	{ F::PasteAt, "paste_at", J::Object,
 			"Where a paste goes, {row, parent, position}: into the owner parent (0 = the row) at "
 			"position; left out, after the selection." },
@@ -69,6 +84,10 @@ constexpr RequestField kFields[] = {
 			"And asks the new name (Files' Rename..., the Rename everywhere dialog)." },
 	{ F::OpenFirst, "open_first", J::Boolean,
 			"The document opens first when it is not open (a fix's edit)." },
+	{ F::ImportPass, "import_pass", J::Boolean,
+			"The project opens with its import pass, the sources that changed imported first "
+			"(true when left out); false: it opens on its files as they are, scanned and checked, "
+			"no source imported (a dry run's read, a project made in a folder that holds sources)." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

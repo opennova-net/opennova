@@ -890,16 +890,16 @@ static int test_rename_keeps_the_active_document() {
 	const NodeAddress record{items->rows()[0]->id, items->rows()[0]->kind, 0};
 	select.address = record;
 	session.handle(select);
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 
 	// The rename reloads main.mnu: the catalog stays active with its selection.
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 	// An open file that is not active, renamed: the catalog still is.
 	session.handle(request::rename_asset("extra.mnu", "extra2.mnu"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 	const Document *renamed = session.document_for("extra2.mnu");
 	TEST_EXPECT(renamed != nullptr && !session.document_for("extra.mnu"));
 	// The active file renamed: its document follows it, with no stale selection (a menu read
@@ -909,7 +909,7 @@ static int test_rename_keeps_the_active_document() {
 	session.handle(request::rename_asset("extra2.mnu", "extra3.mnu"));
 	TEST_EXPECT(session.outcome().done());
 	const Document *moved = session.document_for("extra3.mnu");
-	TEST_EXPECT(moved && v.documents.active == moved->path() && v.documents.selection.row && v.documents.selection == first_row(moved));
+	TEST_EXPECT(moved && v.documents.active == moved->path() && v.documents.selection.primary.row && v.documents.selection.primary == first_row(moved));
 	// The active file is one the rename reloads: it stays active, and its selection
 	// (an id in the old records) is dropped for its first screen.
 	const Document *startup = session.document_for("main.mnu");
@@ -918,12 +918,12 @@ static int test_rename_keeps_the_active_document() {
 	const std::string menu_path = startup->path();
 	EditorRequest select_exit = request::select_record(menu_path, exit);
 	session.handle(select_exit);
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == exit);
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == exit);
 	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
 	TEST_EXPECT(session.outcome().done());
 	const Document *reread = session.document_for("main.mnu");
-	TEST_EXPECT(reread && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(reread) &&
-	            v.documents.selected == std::vector<NodeAddress>{first_row(reread)});
+	TEST_EXPECT(reread && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(reread) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{first_row(reread)});
 	return 0;
 }
 
@@ -1607,32 +1607,32 @@ static int test_selection_memory() {
 	};
 	const NodeAddress marker = project.marker();
 	select(project.items_path, marker);
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == marker);
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker);
 	select(project.strings_path, section(1));
 	select(project.strings_path, section(2));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(2));
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(2));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == marker &&
-	            v.documents.selected == std::vector<NodeAddress>{marker});
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker &&
+	            v.documents.selection.records == std::vector<NodeAddress>{marker});
 	session.handle(request::open_document("gametext.bin"));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(2) &&
-	            v.documents.selected == std::vector<NodeAddress>{section(2)});
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(2) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{section(2)});
 	// A record named (a Problems row, a Go to) wins over the one kept.
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(project.strings_path, section(4)));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(4));
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(4));
 	// Read again: forgotten (its records have new identities).
 	session.handle(request::reload_document(project.items_path));
 	session.handle(request::open_document(project.strings_path));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == NodeAddress() && v.documents.selected.empty());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	// Closed: forgotten; the document that becomes active takes back its own.
 	session.handle(request::open_document(project.strings_path));
-	TEST_EXPECT(v.documents.selection == section(4));
+	TEST_EXPECT(v.documents.selection.primary == section(4));
 	session.handle(request::close_document(project.strings_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == NodeAddress());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress());
 	session.handle(request::open_document("gametext.bin"));
-	TEST_EXPECT(v.documents.selection == NodeAddress() && v.documents.selected.empty());
+	TEST_EXPECT(v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	return 0;
 }
 
@@ -2146,8 +2146,8 @@ static int test_menu_first_screen() {
 	TEST_EXPECT(menu && !menu->rows().empty());
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == first_row(menu) &&
-	            v.documents.selected == std::vector<NodeAddress>{first_row(menu)});
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == first_row(menu) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{first_row(menu)});
 	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
 			v.documents.previews.menu.screen == first_row(menu).row);
 	const auto select = [&](const NodeAddress &address) {
@@ -2161,36 +2161,36 @@ static int test_menu_first_screen() {
 	session.handle(request::open_document(project.items_path));
 	TEST_EXPECT(v.documents.active == project.items_path);
 	session.handle(request::open_document(menu_path));
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == exit);
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == exit);
 	// Nothing selected, another document, back: the first screen again.
 	select(NodeAddress());
-	TEST_EXPECT(v.documents.selection == NodeAddress());
+	TEST_EXPECT(v.documents.selection.primary == NodeAddress());
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_document(menu_path));
-	TEST_EXPECT(v.documents.selection == first_row(menu));
+	TEST_EXPECT(v.documents.selection.primary == first_row(menu));
 	// A record named wins.
 	NodeAddress title;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(menu_path, title));
-	TEST_EXPECT(v.documents.selection == title);
+	TEST_EXPECT(v.documents.selection.primary == title);
 	// Read again (new records): its first screen, whatever was selected.
 	session.handle(request::reload_document(menu_path));
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
 	if (!menu) return 1;
 	// A rescan keeps it while its file is as it was read (the selection with it), and reads it
 	// again once the file changed outside the editor.
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
-	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection == title);
+	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection.primary == title);
 	std::string text, io_error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
 	return 0;
 }
 
@@ -2222,7 +2222,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	session.handle(request::save(project.items_path));
 	EditorRequest select = request::select_record(project.items_path, project.marker());
 	session.handle(select);
-	TEST_EXPECT(!items->dirty() && items->can_undo() && v.documents.selection == project.marker());
+	TEST_EXPECT(!items->dirty() && items->can_undo() && v.documents.selection.primary == project.marker());
 	// The menu changed on disk (a line end added by hand): read again, alone.
 	std::string text, error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, error) &&
@@ -2232,7 +2232,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->can_undo() && !items->dirty());
 	TEST_EXPECT(session.document_for(project.strings_path) == project.strings);
 	TEST_EXPECT(
-			v.documents.active == project.items_path && v.documents.selection == project.marker());
+			v.documents.active == project.items_path && v.documents.selection.primary == project.marker());
 	const Document *reread = session.document_for(menu_path);
 	TEST_EXPECT(reread != nullptr && reread != menu && reread->matches_file());
 	TEST_EXPECT(output_has(v, "Reloaded " + menu_path));
@@ -2495,7 +2495,7 @@ static int test_view_revisions() {
 		const ViewRevisions before = v.revisions;
 		EditorRequest select = request::select_record(items->path(), crate);
 		session.handle(select);
-		TEST_EXPECT(v.documents.selection == crate);
+		TEST_EXPECT(v.documents.selection.primary == crate);
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Selection}));
 	}
 
@@ -3154,7 +3154,7 @@ static int test_view_events() {
 	TEST_EXPECT(events.size() == 1 && events[0].kind == ViewEventKind::RevealRecord &&
 			events[0].path == menu->path() && events[0].address == window &&
 			events[0].field == "position.left" && !events[0].flag && events[0].tag == 0 &&
-			v.documents.selection == window);
+			v.documents.selection.primary == window);
 	// The same row clicked again: another event, the next seq.
 	const uint64_t first = events.empty() ? 0 : events[0].seq;
 	session.handle(row);
@@ -3164,7 +3164,7 @@ static int test_view_events() {
 	// A record named with no field: selected, nothing to show.
 	row.field.clear();
 	session.handle(row);
-	TEST_EXPECT(posted().empty() && v.documents.selection == window);
+	TEST_EXPECT(posted().empty() && v.documents.selection.primary == window);
 	// A Go to by locator, its defining field shown.
 	session.handle(request::open_document(menu->path(), "0/window:0", "name"));
 	events = posted();

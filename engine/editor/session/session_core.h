@@ -137,12 +137,20 @@ public:
 
 	// --- the project ------------------------------------------------------------------------
 
-	bool new_project(const std::string &dir, const std::string &title);
-	bool open_project(const std::string &dir);
+	// A project of `game` (a gameprofile code; "" the default, jo) made in `dir` (titled `title`,
+	// else the folder's name), then opened, with its import pass unless `import_pass` is false.
+	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
+	                 bool import_pass = true);
+	// The project in `dir` opened, its import pass first unless `import_pass` is false (its files
+	// read as they are, no source imported), on `game_install` for the session alone when given (its
+	// local.json kept as it is).
+	bool open_project(const std::string &dir, bool import_pass = true, const std::string &game_install = std::string());
 	// The open project closed, its operation cancelled first; false (refused, said why, nothing
 	// closed) when that operation cannot be cancelled.
 	bool close_project();
-	ImportRunResult refresh(bool force_import = false, const std::string &only = std::string());
+	// The files read again: the import pass (none when `import_pass` is false), the scan, the
+	// requirements, the validation.
+	ImportRunResult refresh(bool force_import = false, const std::string &only = std::string(), bool import_pass = true);
 	void apply_project_settings(const ProjectSettingsChange &change);
 	void create_missing(const std::vector<std::string> &roles);
 	// The recent project `root` dropped from the preferences (ForgetRecent).
@@ -165,8 +173,10 @@ public:
 
 	// --- the build ---------------------------------------------------------------------------
 
-	// The build as an operation (BuildOperation), `then_play` when a Play waits on it.
-	void start_build(bool then_play);
+	// The build as an operation (BuildOperation), `then_play` when a Play waits on it; each build a
+	// directory under `out_dir` ("" the project's .opennova/build/play; a relative one taken from
+	// the project's folder; one inside the project but in its cache or its export folder refused).
+	void start_build(bool then_play, const std::string &out_dir = std::string());
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
 	// the game started on it when a Play waits and it is good.
 	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, bool then_play);

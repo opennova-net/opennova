@@ -181,7 +181,7 @@ func _open(path: String) -> Dictionary:
 
 
 ## A record selected ("replace", "add" or "toggle", by its address as the record query gives
-## it): {ok, selected} after, as the selection section says.
+## it): {ok, records} after, as the selection section says.
 func _select(id: int, mode := "replace") -> Dictionary:
 	var record := await _record(id)
 	if record.has("_error"):
@@ -191,7 +191,13 @@ func _select(id: int, mode := "replace") -> Dictionary:
 					"child": int(record.get("child", 0))}}
 	var answer := await _call("editor_request", request)
 	var selection: Dictionary = (await _state(["selection"])).get("selection", {})
-	return {"ok": _done(answer), "selected": selection.get("selected", []), "primary": selection.get("primary", {})}
+	return {"ok": _done(answer), "records": selection.get("records", []), "primary": selection.get("primary", {})}
+
+
+## A record's address as the record query gives it: {row, kind, child}.
+func _address_of(id: int) -> Dictionary:
+	var record := await _record(id)
+	return {"row": int(record.get("row", 0)), "kind": int(record.get("kind", 0)), "child": int(record.get("child", 0))}
 
 
 ## A request on the active document (copy, cut, duplicate, undo, redo, end_edit, ...): its answer.
@@ -358,7 +364,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_true(String((await _call("editor_request", {"kind": "preview_retail_import"})).get("_error", "")).contains(
 			"Unknown request kind"), "the retail token names nothing")
 	assert_true(String((await _call("editor_request", {"kind": "build", "path": "x"})).get("_error", "")).contains(
-			"build takes no \"path\" (it takes nothing)"))
+			"build takes no \"path\" (it takes out_dir)"))
 	assert_true(String((await _call("editor_request", {"kind": "open_project"})).get("_error", "")).contains(
 			"needs \"dir\""))
 	for retired in ["text", "flag", "edit", "unsaved_choice"]:
@@ -574,7 +580,20 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	# The selection joins one record at a time; a clear leaves an edge out and a write puts it
 	# back; a batch is one step.
 	var joined := await _select(title, "add")
-	assert_eq(joined.get("selected", []).size(), 2, str(joined))
+	assert_eq(joined.get("records", []).size(), 2, str(joined))
+	# A marquee (S13 D7): the records named with the primary in one request, of any rows.
+	var later_address := await _address_of(later)
+	var title_address := await _address_of(title)
+	var marquee := await _call("editor_request", {"kind": "select_record", "address": later_address,
+			"records": [title_address]})
+	assert_true(_done(marquee), str(marquee))
+	var marqueed: Dictionary = (await _state(["selection"])).get("selection", {})
+	var marqueed_records: Array = marqueed.get("records", [])
+	assert_eq(marqueed_records.size(), 2, str(marqueed))
+	if marqueed_records.size() == 2:
+		assert_eq(int((marqueed_records[0] as Dictionary).get("child", 0)), int(title_address["child"]), str(marqueed))
+		assert_eq(int((marqueed_records[1] as Dictionary).get("child", 0)), int(later_address["child"]), str(marqueed))
+	assert_eq(int((marqueed.get("primary", {}) as Dictionary).get("child", 0)), int(later_address["child"]), str(marqueed))
 	var cleared := await _edit([{"op": "clear", "id": later, "field": "position.right"}])
 	assert_true(_done(cleared), str(cleared))
 	assert_eq(await _value(later, "position.right"), null, "an unset edge reads nil")
@@ -599,7 +618,7 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_gt(int((await _state(["selection"])).get("selection", {}).get("clipboard_bytes", 0)), 0)
 	var pasted := await _ask("paste", {"paste_at": {"parent": main}})
 	assert_true(_done(pasted), str(pasted))
-	assert_eq((await _state(["selection"])).get("selection", {}).get("selected", []).size(), 2, str(pasted))
+	assert_eq((await _state(["selection"])).get("selection", {}).get("records", []).size(), 2, str(pasted))
 	assert_gt(await _find("LATER2"), 0)
 	assert_true(_done(await _ask("undo")))
 	assert_true((await _query("record", {"symbol": "LATER2"})).has("_error"), "the paste undone")
@@ -1227,7 +1246,7 @@ func test_clipboard_across_screens_and_arrange() -> void:
 	assert_gt(int((await _state(["selection"])).get("selection", {}).get("clipboard_bytes", 0)), 0)
 	var pasted := await _ask("paste", {"paste_at": {"parent": second_main}})
 	assert_true(_done(pasted), str(pasted))
-	var selected: Array = (await _state(["selection"])).get("selection", {}).get("selected", [])
+	var selected: Array = (await _state(["selection"])).get("selection", {}).get("records", [])
 	assert_eq(selected.size(), 2, str(selected))
 	if selected.size() == 2:
 		var copy_id := int((selected[0] as Dictionary).get("child", 0))
@@ -1243,7 +1262,7 @@ func test_clipboard_across_screens_and_arrange() -> void:
 	assert_gt(extra_main, 0)
 	var into_extra := await _ask("paste", {"paste_at": {"parent": extra_main}})
 	assert_true(_done(into_extra), str(into_extra))
-	assert_eq((await _state(["selection"])).get("selection", {}).get("selected", []).size(), 2, str(into_extra))
+	assert_eq((await _state(["selection"])).get("selection", {}).get("records", []).size(), 2, str(into_extra))
 	assert_gt(await _find("EXIT"), 0)
 
 	# Back in main.mnu: the selection duplicated in one step, each copy after its original.
@@ -1252,7 +1271,7 @@ func test_clipboard_across_screens_and_arrange() -> void:
 	assert_true(bool((await _select(exit, "add")).get("ok", false)))
 	var duplicated := await _ask("duplicate")
 	assert_true(_done(duplicated), str(duplicated))
-	assert_eq((await _state(["selection"])).get("selection", {}).get("selected", []).size(), 2, str(duplicated))
+	assert_eq((await _state(["selection"])).get("selection", {}).get("records", []).size(), 2, str(duplicated))
 	assert_gt(await _find("EXIT2"), 0)
 	assert_true(_done(await _ask("undo")))
 	assert_true((await _query("record", {"symbol": "EXIT2"})).has("_error"), "the duplicate undone")

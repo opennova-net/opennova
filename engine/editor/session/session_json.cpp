@@ -393,26 +393,26 @@ bool texts_of(const JsonValue &json, const char *token, std::vector<std::string>
 	return true;
 }
 
-// A record's address: {row, kind, child}, each left out 0.
-bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error) {
+// A record's address: {row, kind, child}, each left out 0; `what` names it in a refusal.
+bool address_from_json(const JsonValue &json, NodeAddress &out, std::string &error,
+		const std::string &what = "address") {
 	if (!json.is_object()) {
-		error = "\"address\" must be an object {row, kind, child}.";
+		error = "\"" + what + "\" must be an object {row, kind, child}.";
 		return false;
 	}
-	if (!members_known(json, {"row", "kind", "child"}, "address", error)) return false;
+	if (!members_known(json, {"row", "kind", "child"}, what.c_str(), error)) return false;
+	// A member's value refused by its place ("address.row", "records[1].child").
+	const auto refuse = [&](const char *member, const char *must) {
+		error = "\"" + what + "." + member + "\" must be " + must + ".";
+		return false;
+	};
 	NodeAddress address;
-	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row)) {
-		error = "\"row\" must be a record identity.";
-		return false;
-	}
-	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind)) {
-		error = "\"kind\" must be a whole number.";
-		return false;
-	}
-	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child)) {
-		error = "\"child\" must be a record identity.";
-		return false;
-	}
+	if (const JsonValue *row = json.get("row"); row && !read_id(*row, address.row))
+		return refuse("row", "a record identity");
+	if (const JsonValue *kind = json.get("kind"); kind && !read_kind(*kind, address.kind))
+		return refuse("kind", "a whole number");
+	if (const JsonValue *child = json.get("child"); child && !read_id(*child, address.child))
+		return refuse("child", "a record identity");
 	out = address;
 	return true;
 }
@@ -486,12 +486,15 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	switch (id) {
 	case F::Dir: return text_of(json, token, request.dir, error);
 	case F::Title: return text_of(json, token, request.title, error);
+	case F::Game: return text_of(json, token, request.game, error);
+	case F::GameInstall: return text_of(json, token, request.game_install, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
 	case F::Field: return text_of(json, token, request.field, error);
 	case F::NewName: return name_of(json, token, request.new_name, error);
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
+	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::Roles: return texts_of(json, token, request.roles, error);
 	case F::Names: return texts_of(json, token, request.names, error);
 	case F::Paths: return texts_of(json, token, request.paths, error);
@@ -515,10 +518,25 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 					json, names, batch_form(request.kind), batch, error, !unresolved))
 			return false;
 		request.edits = std::move(batch.edits);
-		labels = std::move(batch.made_labels);
+		labels = std::move(batch.labels);
 		return true;
 	}
 	case F::Address: return address_from_json(json, request.address, error);
+	case F::Records: {
+		if (!json.is_array()) {
+			error = "\"records\" must be an array of addresses {row, kind, child}.";
+			return false;
+		}
+		std::vector<NodeAddress> records;
+		for (size_t i = 0; i < json.array.size(); ++i) {
+			NodeAddress address;
+			const std::string place = "records[" + std::to_string(i) + "]";
+			if (!address_from_json(json.array[i], address, error, place)) return false;
+			records.push_back(address);
+		}
+		request.records = std::move(records);
+		return true;
+	}
 	case F::PasteAt: return paste_at_from_json(json, request.paste_at, error);
 	case F::Mode:
 		if (json.is_string() && select_mode_from_token(json.string, request.mode)) return true;
@@ -538,6 +556,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Force: return flag_of(json, token, request.force, error);
 	case F::AskName: return flag_of(json, token, request.ask_name, error);
 	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
+	case F::ImportPass: return flag_of(json, token, request.import_pass, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -552,12 +571,15 @@ bool field_to_json(
 	switch (id) {
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
 	case F::Title: out = json_string(request.title); return !request.title.empty();
+	case F::Game: out = json_string(request.game); return !request.game.empty();
+	case F::GameInstall: out = json_string(request.game_install); return !request.game_install.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();
 	case F::Field: out = json_string(request.field); return !request.field.empty();
 	case F::NewName: out = json_string(request.new_name); return !request.new_name.empty();
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
+	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
 	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
 	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
 	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
@@ -571,6 +593,10 @@ bool field_to_json(
 	case F::Address:
 		out = address_to_json(request.address);
 		return request.address != NodeAddress();
+	case F::Records:
+		out = JsonValue::make_array();
+		for (const NodeAddress &address : request.records) out.push(address_to_json(address));
+		return !request.records.empty();
 	case F::PasteAt:
 		out = paste_at_to_json(request.paste_at);
 		return !(request.paste_at == PasteAt());
@@ -593,6 +619,8 @@ bool field_to_json(
 	case F::Force: out = boolean(request.force); return request.force;
 	case F::AskName: out = boolean(request.ask_name); return request.ask_name;
 	case F::OpenFirst: out = boolean(request.open_first); return request.open_first;
+	// Its default is true: the writer names it only when it is false.
+	case F::ImportPass: out = boolean(request.import_pass); return !request.import_pass;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
@@ -729,7 +757,7 @@ bool editor_request_from_json(
 		}
 	}
 	out = std::move(request);
-	if (names) names->made_labels = std::move(labels);
+	if (names) names->labels = std::move(labels);
 	return true;
 }
 
@@ -846,18 +874,6 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		problems.push(std::move(row));
 	}
 	out.set("problems", std::move(problems));
-	return out;
-}
-
-JsonValue action_outcome_to_json(const ActionOutcome &outcome) {
-	JsonValue out = JsonValue::make_object();
-	out.set("done", boolean(outcome.done()));
-	out.set("unsaved_prompt", boolean(outcome.unsaved_prompt));
-	out.set("operation", json_number(double(outcome.operation)));
-	out.set("findings", diagnostics_to_json(outcome.findings));
-	JsonValue added = JsonValue::make_array();
-	for (const NodeId id : outcome.added) added.push(json_number(double(id)));
-	out.set("added", std::move(added));
 	return out;
 }
 

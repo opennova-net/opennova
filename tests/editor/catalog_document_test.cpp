@@ -80,6 +80,20 @@ static int history_and_save() {
 	TEST_EXPECT(read_file_text(dir.file("items.def"), retained, message) && retained == external);
 	return 0;
 }
+// Two items added in one batch (S13 D7): each new item takes an id no row of the batch has, the
+// second skipping the first's (make_node reads the rows as the batch left them), one undo step.
+static int two_new_items() {
+	editor_test::TempProjectDir dir("opennova_catalog_two_new_items");
+	TEST_EXPECT(editor_test::write_text(dir.file("items.def"), "begin \"One\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	DefCatalogDocument document; Diagnostic error;
+	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
+	Edit add; add.operation = EditOperation::Add; add.address = {0, node_kind(DefRecordKind::Item), 0};
+	TEST_EXPECT(document.apply(std::vector<Edit>{add, add}, error) && document.rows().size() == 3);
+	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 1).data).id == 100000 &&
+	            std::get<DefItemDef>(row_at(document, 2).data).id == 100002);
+	document.undo(); TEST_EXPECT(document.rows().size() == 1 && !document.dirty());
+	return 0;
+}
 static int collections() {
 	editor_test::TempProjectDir dir("opennova_catalog_collections_test");
 	TEST_EXPECT(editor_test::write_text(dir.file("weapon.def"), "weapon \"WPN_ONE\"\nend\n"));
@@ -249,10 +263,10 @@ static int go_to_record() {
 	session.handle(request::open_document(item->file, item->locator, item->field));
 	items = session.document_for("items.def");
 	TEST_EXPECT(items && view.documents.active == items->path());
-	TEST_EXPECT(items && view.documents.selection.row == items->rows()[0]->id && view.documents.selection.kind == node_kind(DefRecordKind::Item));
+	TEST_EXPECT(items && view.documents.selection.primary.row == items->rows()[0]->id && view.documents.selection.primary.kind == node_kind(DefRecordKind::Item));
 	TEST_EXPECT(editor_test::revealed_field(view) == "id");
 	session.handle(request::open_document("weapon.def", "7"));
-	TEST_EXPECT(session.document_for("weapon.def") != nullptr && view.documents.selection.row == 0);
+	TEST_EXPECT(session.document_for("weapon.def") != nullptr && view.documents.selection.primary.row == 0);
 	return 0;
 }
 static int remove_last_item() {
@@ -489,7 +503,7 @@ static int witnessed_enums() {
 }
 
 int main() {
-	return history_and_save() || collections() || session_gate() || malformed() || ignored_input() ||
+	return history_and_save() || two_new_items() || collections() || session_gate() || malformed() || ignored_input() ||
 	       replaced_action_block() || go_to_record() || remove_last_item() || changes_since_save() || written_units() ||
 	       witnessed_enums();
 }

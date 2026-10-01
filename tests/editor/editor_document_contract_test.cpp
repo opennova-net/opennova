@@ -42,12 +42,22 @@
 // is not fixed (each owner kind and record kind once, a full one skipped; refused only by a rule of
 // the type's own), what serializes reading back with the record kept (a record the writer takes
 // only once filled in counted as waiting), a Remove giving the owner the records it held, and each
-// undo the bytes. S13 V9: where the type has a project check, over its file in a project of its
-// own, a second update with nothing changed says nothing moved and keeps its findings, and clear()
-// then an update makes the same findings again.
+// undo the bytes. S13 D7 adds the batch over several rows: every row's footprint at least its own
+// object (its row type's, which the contract names), and a row whose text field takes a longer
+// text larger by at least the text it gained (each writable text field of each record kind once);
+// a real change of two rows in one batch one step (the history holding its rows' bytes,
+// what changed since the state before it those two rows), undone to the bytes and redone to the
+// bytes it made, and the same two Sets as a gesture's two batches one step; and a batch mixing a
+// record's Set with the rows' own edits (a row of each kind the outline adds, the last row
+// duplicated, the last row moved to the top) one step, undone and redone byte for byte with
+// everything it made listed, or refused by a rule of the type's own with nothing committed. S13
+// V9: where the type has a project check, over its file in a project of its own, a second update
+// with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
+// the same findings again.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -61,9 +71,15 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
+#include <editor/documents/animation_document.h>
+#include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mns_document.h>
+#include <editor/documents/mnu_document.h>
+#include <editor/documents/model_document.h>
 #include <editor/documents/project_check.h>
+#include <editor/documents/strings_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
@@ -95,6 +111,9 @@ size_t g_records = 0, g_sets = 0, g_symbols = 0, g_other_scopes = 0;
 size_t g_presences = 0, g_kept = 0, g_changes = 0, g_coalesced = 0, g_pastes = 0, g_snapshots = 0;
 size_t g_foreign = 0, g_row_adds = 0, g_record_adds = 0, g_adds_waiting = 0, g_adds_refused = 0;
 size_t g_findings = 0;
+// S13 D7: files whose two rows took one batch and one gesture, and mixed batches taken and refused;
+// text fields whose longer text grew their row's footprint.
+size_t g_multi_rows = 0, g_mixed = 0, g_mixed_waiting = 0, g_mixed_refused = 0, g_grown = 0;
 size_t g_checked_again = 0; // files a type's project check was brought to twice, and after a clear
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 // Each type's record kinds over the files of every asset kind it opens: a kind's token by the kind.
@@ -105,8 +124,38 @@ std::map<std::string, std::map<NodeKind, std::string>> g_type_kinds;
 struct TypeCounts {
 	size_t optional = 0, presences = 0;
 	size_t findings = 0; // what validate_file made over the type's files
+	size_t multi_rows = 0, mixed = 0, mixed_refused = 0; // S13 D7's batches over several rows
+	size_t grown = 0; // text fields whose longer text grew their row's footprint
 	size_t check_findings = 0; // what the type's project check made over them
 };
+
+// Each row type and the size of its own object (S13 D7): a row's footprint is at least that. A row
+// of a type this table does not name fails, so a new document type names its rows here.
+struct RowObject {
+	const std::type_info *type;
+	size_t size;
+};
+const RowObject kRowObjects[] = {
+        {&typeid(CatalogRow), sizeof(CatalogRow)}, {&typeid(StringsSection), sizeof(StringsSection)},
+        {&typeid(MenuScreen), sizeof(MenuScreen)}, {&typeid(StyleRow), sizeof(StyleRow)},
+        {&typeid(ModelRow), sizeof(ModelRow)},     {&typeid(CollisionRow), sizeof(CollisionRow)},
+        {&typeid(ClipRow), sizeof(ClipRow)},       {&typeid(AnimationMapRow), sizeof(AnimationMapRow)},
+};
+// The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
+// clip's bone table, a def catalog's records): a longer text grows no row of theirs. Every other
+// type's rows hold their text as strings, which a longer text makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog"};
+bool fixed_text(const DocumentType &type) {
+	for (const char *name : kFixedText)
+		if (std::string(name) == type.name) return true;
+	return false;
+}
+
+size_t row_object(const Node &row) {
+	for (const RowObject &entry : kRowObjects)
+		if (*entry.type == typeid(row)) return entry.size;
+	return 0;
+}
 
 // What each type's files ask of the presence clause and what the type does, as ADR 0046 S13 D2
 // states them: every one left out and written again. A type not named has none. A change of a
@@ -956,6 +1005,151 @@ void check_adds(const DocumentType &type, const Fixture &fixture, Document &docu
 	}
 }
 
+// S13 D7: batches over several rows. A real change of each of two rows (the first Set of each that
+// changes the bytes) in one batch: one step, the history holding its rows' bytes, what changed
+// since the state before it exactly those two rows; undone to the bytes and redone to the bytes it
+// made; the same two Sets as two batches of one gesture: one step. A batch mixing a record's Set
+// with a row of each kind the outline adds, the last row duplicated and the last row moved to the
+// top: one step, everything it made listed, undone and redone byte for byte; or refused by a rule
+// of the type's own (a model's and a clip's fixed rows, a stylesheet's frozen lines), nothing
+// committed.
+void check_multi_row(const DocumentType &type, const Fixture &fixture, Document &document,
+                     const std::vector<NodeAddress> &records, const std::string &serialized, TypeCounts &counts) {
+	for (const auto &row : document.rows())
+		check(row_object(*row) && row->footprint() >= row_object(*row),
+		      where_of(fixture, document, {row->id, row->kind, 0}, ""),
+		      "a row's footprint is at least its own object, of a row type the contract names");
+	// A longer text grows its row's footprint by at least what it gained: each writable text field
+	// of each record kind once, set to the longest text its width takes where that is longer than
+	// what it holds (a field that refuses it, or keeps it otherwise, is passed over), undone after;
+	// but for a type whose rows keep their text in fixed-length records (kFixedText).
+	std::set<std::pair<NodeKind, std::string>> asked;
+	for (const NodeAddress &address : records)
+		for (const FieldSchema &schema : document.fields(address.kind)) {
+			if (fixed_text(type) || schema.type != FieldType::Text ||
+			    !asked.insert({address.kind, schema.id}).second)
+				continue;
+			Value before;
+			if (document.field_on(address, schema).read_only || !document.get(address, schema.id, before) ||
+			    !std::holds_alternative<std::string>(before))
+				continue;
+			const std::string longer(schema.width ? schema.width - 1 : 4096, 'W');
+			const size_t held = std::get<std::string>(before).size();
+			if (longer.size() <= held) continue;
+			const size_t was = document.row(address.row)->footprint();
+			Diagnostic error;
+			if (!document.apply(edit_of(EditOperation::Set, address, schema.id, longer), error)) continue;
+			Value now;
+			const bool kept = document.get(address, schema.id, now) && now == Value(longer);
+			const size_t is = document.row(address.row)->footprint();
+			while (document.can_undo()) document.undo();
+			if (!kept) continue;
+			check(is >= was + longer.size() - held, where_of(fixture, document, address, schema.id),
+			      "a row whose text grows has a footprint larger by at least the text it gained");
+			++g_grown;
+			++counts.grown;
+		}
+	check(document.serialize().text == serialized && !document.dirty(), fixture.name,
+	      "the longer texts undone give the bytes back");
+	std::map<NodeId, Edit> real_sets; // the first Set of each row that changes the bytes, by row
+	each_alternative(document, records, [&](const NodeAddress &address, const FieldSchema &schema,
+	                                        const std::vector<Value> &options) {
+		if (real_sets.count(address.row)) return false;
+		for (const Value &option : options) {
+			const Edit set = edit_of(EditOperation::Set, address, schema.id, option);
+			Diagnostic error;
+			if (!document.apply(set, error)) continue;
+			const SerializeResult after = document.serialize();
+			while (document.can_undo()) document.undo();
+			if (!after.ok() || after.text == serialized) continue;
+			real_sets.emplace(address.row, set);
+			break;
+		}
+		return real_sets.size() >= 2;
+	});
+	if (real_sets.size() >= 2) {
+		const Edit first = real_sets.begin()->second, second = std::next(real_sets.begin())->second;
+		const std::string where = fixture.name + " (" + document.record_path(first.address) + " ." + first.field + ", " +
+		                          document.record_path(second.address) + " ." + second.field + ")";
+		const uint64_t load = document.load_generation(), revision = document.revision();
+		Diagnostic error;
+		check(document.apply({first, second}, error), where + " (" + error.message + ")", "a batch over two rows is taken");
+		const std::string after = document.serialize().text;
+		ChangeSet changes;
+		const bool said = document.changes_since(load, revision, changes);
+		const RowChanges *rows = said ? std::get_if<RowChanges>(&changes) : nullptr;
+		check(rows && rows->changed == std::vector<NodeId>({first.address.row, second.address.row}) && rows->added.empty() &&
+		              rows->removed.empty() && !rows->reordered,
+		      where, "what changed since the batch's state before it is its two rows");
+		check(document.history_bytes() > 0, where, "the history holds the step's rows");
+		document.undo();
+		check(document.serialize().text == serialized && !document.can_undo() && !document.dirty(), where,
+		      "a batch over two rows is one step, undone to the bytes");
+		document.redo();
+		check(document.serialize().text == after, where, "and redone to the bytes it made");
+		document.undo();
+		Edit one = first, two = second;
+		one.gesture = two.gesture = next_edit_gesture();
+		check(document.apply(one, error) && document.apply(two, error) && document.serialize().text == after, where,
+		      "a gesture's two batches over two rows are taken");
+		document.undo();
+		check(document.serialize().text == serialized && !document.can_undo(), where,
+		      "a gesture over two rows is one step");
+		++g_multi_rows;
+		++counts.multi_rows;
+	}
+
+	std::vector<Edit> mixed;
+	size_t makes = 0;
+	if (!real_sets.empty()) mixed.push_back(real_sets.begin()->second);
+	for (const RecordKindRow &row : document.kinds())
+		if (*row.add_label) {
+			mixed.push_back(edit_of(EditOperation::Add, {0, row.kind, 0}, ""));
+			++makes;
+		}
+	if (document.rows().size() >= 2) {
+		const Node &last = *document.rows().back();
+		mixed.push_back(edit_of(EditOperation::Duplicate, {last.id, last.kind, 0}, ""));
+		++makes;
+		Edit move = edit_of(EditOperation::Move, {last.id, last.kind, 0}, "");
+		move.position = 0;
+		mixed.push_back(move);
+	}
+	if (mixed.size() < 2) return;
+	const std::string where = fixture.name + " (a batch of rows and records)";
+	const uint64_t revision = document.revision();
+	Diagnostic error;
+	if (!document.apply(mixed, error)) {
+		check(document.revision() == revision && document.serialize().text == serialized && !document.dirty(), where,
+		      "a refused batch commits nothing");
+		check((error.code() == "document.structure" || error.code() == "document.kind" || error.code() == "document.collection") &&
+		              error.message != "This document refuses that change." &&
+		              error.message != "This document cannot add that record.",
+		      where + " (" + error.code() + ": " + error.message + ")", "a batch of rows is refused only by a rule of the type's own");
+		++g_mixed_refused;
+		++counts.mixed_refused;
+		return;
+	}
+	const SerializeResult after = document.serialize();
+	check(document.last_added_records().size() == makes, where, "everything the batch made is listed");
+	if (after.ok()) {
+		std::unique_ptr<Document> read = records_of(type.make());
+		Diagnostic unread;
+		check(read->load_bytes(text_bytes(after.text), fixture.name, fixture.kind, "jo", unread) && !read->blocked(),
+		      where + " (" + unread.message + ")", "what the batch makes reads back");
+	} else {
+		++g_mixed_waiting;
+	}
+	document.undo();
+	check(document.serialize().text == serialized && !document.can_undo() && !document.dirty(), where,
+	      "a batch of rows and records is one step, undone to the bytes");
+	document.redo();
+	if (after.ok()) check(document.serialize().text == after.text, where, "and redone to the bytes it made");
+	document.undo();
+	++g_mixed;
+	++counts.mixed;
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	std::unique_ptr<DocumentBase> made = type.make();
 	check(made && made->as_records() == made.get() && records_of(*made) == made->as_records(),
@@ -996,6 +1190,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 	check_coalescing(fixture, *document, records, first.text);
 	check_copy_paste(type, fixture, *document, records, first.text);
 	check_snapshot(type, fixture, *document, records, first.text);
+	check_multi_row(type, fixture, *document, records, first.text, counts);
 }
 
 } // namespace
@@ -1038,8 +1233,12 @@ int main() {
 			if (std::string(pin.type) == type->name) pinned = pin;
 		check(counts.optional == pinned.optional && counts.presences == pinned.presences, type->name,
 		      "a type's optional fields asked and left out and written again are the ones pinned");
-		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings", type->name,
-		            counts.optional, counts.presences, counts.findings);
+		check(fixed_text(*type) || counts.grown > 0, type->name, "a longer text grows a row of the type");
+		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings; %zu files' two "
+		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule; %zu text fields' "
+		            "longer text grew their row",
+		            type->name, counts.optional, counts.presences, counts.findings, counts.multi_rows, counts.mixed,
+		            counts.mixed_refused, counts.grown);
 		if (type->project_check) std::printf(", %zu project check findings", counts.check_findings);
 		std::printf("\n");
 	}
@@ -1047,16 +1246,22 @@ int main() {
 		check(document_type_for(fixture.kind) != nullptr, fixture.name, "the file is of a registered type");
 	check(g_other_scopes > 0, "the files", "a name defined in two scopes is looked up in the other");
 	check(g_presences > 0 && g_pastes > 0, "the files", "an optional field is left out and written, a record pasted");
+	check(g_multi_rows > 0 && g_mixed > 0 && g_mixed_refused > 0, "the files",
+	      "two rows change in one batch, a batch of rows and records is taken, and one refused by a type's rule");
+	check(g_grown > 0, "the files", "a longer text grows its row's footprint");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
 		            "%zu optional fields left out and written again, %zu kept always written, %zu real changes "
 		            "undone and redone, %zu coalesced, %zu records pasted, %zu snapshots, %zu foreign "
 		            "changes refused, %zu rows and %zu records added (%zu waiting for values, "
-		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, "
+		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, %zu files' "
+		            "two rows in one batch and one gesture, %zu batches of rows and records taken (%zu waiting for "
+		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row, "
 		            "%zu files a project check was brought to again)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
 		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
-		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_checked_again);
+		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_multi_rows, g_mixed,
+		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again);
 	return g_failures == 0 ? 0 : 1;
 }

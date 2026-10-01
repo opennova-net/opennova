@@ -272,7 +272,7 @@ static int test_request_round_trip() {
 	            back.edits[0].field == "string.value" && std::get<std::string>(back.edits[0].value) == "Hello" &&
 	            back.edits[0].coalesce && back.edits[0].position == SIZE_MAX && back.edits[0].parent == 0 &&
 	            back.edits[0].gesture == 0);
-	TEST_EXPECT(names.made_labels.empty());
+	TEST_EXPECT(names.labels == std::vector<std::string>({""}));
 
 	// An owner, a gesture, a batch and a selection mode.
 	Edit move, left, clear;
@@ -331,7 +331,7 @@ static int test_request_round_trip() {
 	TEST_EXPECT(edits->array[4].get_string("op", "") == "set_file_value" && !edits->array[4].get("id") &&
 	            edits->array[4].get_string("field", "") == "encoding");
 	TEST_EXPECT(editor_request_from_json(labelled_json, back, error, &names) && back == labelled);
-	TEST_EXPECT(names.made_labels == std::vector<std::string>({"edit0", "", ""}));
+	TEST_EXPECT(names.labels == std::vector<std::string>({"edit0", "", "", "", ""}));
 	// A label given by a client: read as the edit it names, and the label kept for the outcome.
 	const std::string by_label = "{\"kind\":\"edit_record\",\"path\":\"" + path +
 	                             "\",\"edits\":[{\"op\":\"add\",\"kind\":\"window\",\"parent\":" +
@@ -339,7 +339,52 @@ static int test_request_round_trip() {
 	                                                               "\"field\":\"name\",\"value\":\"HELLO\"}]}";
 	TEST_EXPECT(parse(by_label.c_str(), parsed) && editor_request_from_json(parsed, back, error, &names));
 	TEST_EXPECT(back.edits.size() == 2 && back.edits[0] == add && back.edits[1] == named &&
-	            names.made_labels == std::vector<std::string>({"w"}));
+	            names.labels == std::vector<std::string>({"w", ""}));
+	// A row a batch makes (S13 D7): a screen added, named through its label as a row, a window put
+	// in it. The writer labels the add, whose row the later edits name; read back, the batch applies
+	// as one step making the screen and its window.
+	const NodeKind screen = menu.kind_from_name("screen");
+	Edit new_screen, name_screen, window_in;
+	new_screen.operation = EditOperation::Add;
+	new_screen.address = {0, screen, 0};
+	name_screen.address = {batch_made(0), screen, 0};
+	name_screen.field = "name";
+	name_screen.value = std::string("EXTRA");
+	window_in.operation = EditOperation::Add;
+	window_in.address = {batch_made(0), window, 0};
+	const JsonValue rows_json =
+	        editor_request_to_json(request::edit_record(path, std::vector<Edit>{new_screen, name_screen, window_in}), &menu);
+	const JsonValue *row_edits = rows_json.get("edits");
+	TEST_EXPECT(row_edits && row_edits->array.size() == 3 && row_edits->array[0].get_string("as", "") == "edit0" &&
+	            row_edits->array[1].get_string("id", "") == "edit0" &&
+	            row_edits->array[2].get_string("parent", "") == "edit0");
+	TEST_EXPECT(editor_request_from_json(rows_json, back, error, &names) && back.edits.size() == 3);
+	const size_t screens = menu.rows().size();
+	open.session.handle(back);
+	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 &&
+	            menu.rows().back()->name() == "EXTRA" && menu.last_added_records().size() == 2);
+	open.session.handle(request::undo(path));
+	TEST_EXPECT(menu.rows().size() == screens);
+	// A row's copy named by its label (S13 D7's second review): the copy is a row of its own, so a
+	// Set naming the label, written and read back as it was, applies to the copy; a duplicate naming
+	// no place reads back naming none, and the core puts the copy right after its record.
+	Edit copy_screen, name_copy;
+	copy_screen.operation = EditOperation::Duplicate;
+	copy_screen.address = {menu.rows()[0]->id, screen, 0};
+	name_copy.address = {0, screen, batch_made(0)};
+	name_copy.field = "name";
+	name_copy.value = std::string("COPIED");
+	const EditorRequest copy_request = request::edit_record(path, std::vector<Edit>{copy_screen, name_copy});
+	const JsonValue copy_json = editor_request_to_json(copy_request, &menu);
+	const JsonValue *copy_edits = copy_json.get("edits");
+	TEST_EXPECT(copy_edits && copy_edits->array.size() == 2 && !copy_edits->array[0].get("position") &&
+	            copy_edits->array[0].get_string("as", "") == "edit0" && copy_edits->array[1].get_string("id", "") == "edit0");
+	TEST_EXPECT(editor_request_from_json(copy_json, back, error, &names) && back == copy_request &&
+	            names.labels == std::vector<std::string>({"edit0", ""}));
+	open.session.handle(back);
+	TEST_EXPECT(open.session.outcome().done() && menu.rows().size() == screens + 1 && menu.rows()[1]->name() == "COPIED");
+	open.session.handle(request::undo(path));
+	TEST_EXPECT(menu.rows().size() == screens);
 	// A Paste has no batch form (the paste request carries the clipboard): written by its op, which
 	// the reader refuses.
 	Edit paste;
@@ -354,6 +399,22 @@ static int test_request_round_trip() {
 	const EditorRequest select = request::select_record(path, open.title, SelectMode::Toggle);
 	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(select)).c_str(), parsed));
 	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back.mode == SelectMode::Toggle && back.address == select.address);
+	// A marquee's records with its primary (S13 D7), of any rows; one that is no address is refused
+	// by its place, and records that are no list by their name.
+	const EditorRequest marquee =
+	        request::select_record("menus/main.mnu", {7, 1, 9}, SelectMode::Add, {{8, 0, 0}, {9, 1, 12}});
+	TEST_EXPECT(parse(opennova::io::json_write(editor_request_to_json(marquee)).c_str(), parsed));
+	TEST_EXPECT(editor_request_from_json(parsed, back, error) && back == marquee && back.records.size() == 2 &&
+	            back.records[1] == NodeAddress({9, 1, 12}));
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":[{\"row\":2},{\"rows\":3}]}", back)
+	                    .find("records[1]") != std::string::npos);
+	// A member's value refused by its place too (S13 D7's second review).
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":[{\"row\":2},{\"row\":\"x\"}]}", back) ==
+	            "\"records[1].row\" must be a record identity.");
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1,\"child\":-1}}", back) ==
+	            "\"address.child\" must be a record identity.");
+	TEST_EXPECT(request_error("{\"kind\":\"select_record\",\"address\":{\"row\":1},\"records\":{\"row\":2}}", back)
+	                    .find("records") != std::string::npos);
 	// A Paste's place: its row, its owner and its index; none named, after the selection.
 	TEST_EXPECT(request_error("{\"kind\":\"paste\",\"paste_at\":{\"parent\":4,\"position\":1}}", back).empty());
 	TEST_EXPECT(back.kind == EditorRequestKind::Paste && back.paste_at.parent == 4 && back.paste_at.position == 1 &&
@@ -485,13 +546,35 @@ static int test_request_round_trip() {
 	TEST_EXPECT(request_error("{\"kind\":\"resolve_unsaved\",\"unsaved_choice\":\"save\"}", back) ==
 			"Unknown request member \"unsaved_choice\" (resolve_unsaved takes choice).");
 	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"text\":\"T\"}", back) ==
-			"Unknown request member \"text\" (new_project takes dir, title).");
+			"Unknown request member \"text\" (new_project takes dir, title, game, import_pass).");
 	TEST_EXPECT(request_error("{\"kind\":\"build\",\"flagg\":true}", back) ==
-			"Unknown request member \"flagg\" (build takes nothing).");
-	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes nothing).");
+			"Unknown request member \"flagg\" (build takes out_dir).");
+	TEST_EXPECT(request_error("{\"kind\":\"build\",\"path\":\"x\"}", back) == "build takes no \"path\" (it takes out_dir).");
 	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"path\":\"C:/x\"}", back) ==
-	            "open_project takes no \"path\" (it takes dir).");
-	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) == "open_project needs \"dir\" (it takes dir).");
+	            "open_project takes no \"path\" (it takes dir, game_install, import_pass).");
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\"}", back) ==
+	            "open_project needs \"dir\" (it takes dir, game_install, import_pass).");
+	// S13 A7's fields: a new project's game, a build's out_dir, an open without its import pass or on
+	// a game install of the session's own; import_pass is true when left out and written only when
+	// false, game_install written only when set.
+	EditorRequest read;
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\"}", read).empty() && read.import_pass);
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"import_pass\":false}", read).empty() &&
+	            !read.import_pass && editor_request_to_json(read).get_bool("import_pass", true) == false);
+	TEST_EXPECT(!editor_request_to_json(request::open_project("C:/x")).get("import_pass"));
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"import_pass\":0}", read)
+	                    .find("import_pass") != std::string::npos);
+	TEST_EXPECT(request_error("{\"kind\":\"open_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/games/JO\"}", read)
+	                    .empty() &&
+	            read.game_install == "C:/games/JO" &&
+	            editor_request_to_json(read).get_string("game_install", "") == "C:/games/JO");
+	TEST_EXPECT(!editor_request_to_json(request::open_project("C:/x")).get("game_install"));
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"import_pass\":false}", read).empty() &&
+	            !read.import_pass && read.title.empty());
+	TEST_EXPECT(request_error("{\"kind\":\"new_project\",\"dir\":\"C:/x\",\"game_install\":\"C:/g\"}", read)
+	                    .find("game_install") != std::string::npos);
+	TEST_EXPECT(editor_request_to_json(request::new_project("C:/x", "T", "dfx")).get_string("game", "") == "dfx" &&
+	            editor_request_to_json(request::build("C:/out")).get_string("out_dir", "") == "C:/out");
 	TEST_EXPECT(request_error("{\"kind\":\"rename_asset\",\"path\":\"a.mnu\"}", back).find("needs \"new_name\"") !=
 	            std::string::npos);
 	TEST_EXPECT(request_error("{\"kind\":\"save\",\"path\":3}", back).find("path") != std::string::npos);
@@ -574,12 +657,15 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		switch (id) {
 		case F::Dir: out.dir = "C:/mods/Sample"; break;
 		case F::Title: out.title = "Sample"; break;
+		case F::Game: out.game = "dfx"; break;
+		case F::GameInstall: out.game_install = "C:/games/JO2"; break;
 		case F::Path: out.path = "menus/main.mnu"; break;
 		case F::Locator: out.locator = "0/window:1"; break;
 		case F::Field: out.field = "name"; break;
 		case F::NewName: out.new_name = "RENAMED"; break;
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
+		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
@@ -631,6 +717,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			break;
 		}
 		case F::Address: out.address = {7, 1, 9}; break;
+		case F::Records: out.records = {{7, 1, 9}, {8, 0, 0}}; break;
 		case F::PasteAt: out.paste_at = PasteAt{3, 4, 1}; break;
 		case F::Mode: out.mode = SelectMode::Toggle; break;
 		case F::Choice: out.choice = UnsavedChoice::Discard; break;
@@ -646,6 +733,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Force: out.force = true; break;
 		case F::AskName: out.ask_name = true; break;
 		case F::OpenFirst: out.open_first = true; break;
+		case F::ImportPass: out.import_pass = false; break; // its default is true
 		case F::kCount: break;
 		}
 	}
@@ -1181,7 +1269,7 @@ static int test_over_a_session() {
 	TEST_EXPECT(request_error(reveal.c_str(), request).empty() && session.handle(request));
 	std::vector<JsonValue> asked = reveals();
 	const JsonValue *asked_at = asked.size() == 1 ? asked[0].get("address") : nullptr;
-	TEST_EXPECT(view.documents.selection == title_address && asked.size() == 1 &&
+	TEST_EXPECT(view.documents.selection.primary == title_address && asked.size() == 1 &&
 			asked[0].get_string("path", "") == document->path() &&
 			asked[0].get_string("field", "") == "string.value" && asked[0].get("flag") == nullptr &&
 			asked[0].get("tag") == nullptr);
@@ -1252,9 +1340,24 @@ static int test_over_a_session() {
 	TEST_EXPECT(section(ViewSection::Documents).get_string("active", "") == document->path());
 	const JsonValue selection = section(ViewSection::Selection);
 	TEST_EXPECT(selection.get_string("document", "") == document->path() && selection.get("reveal_field") == nullptr);
-	TEST_EXPECT(selection.get("selected") && selection.get("selected")->array.size() == 2 &&
+	TEST_EXPECT(selection.get("records") && selection.get("records")->array.size() == 2 &&
 	            uint64_t(selection.get("primary")->get_number("child", 0)) == exit_address.child);
 	TEST_EXPECT(selection.get_int("clipboard_bytes", -1) == 0);
+	// A marquee through JSON (S13 D7): the records named with it, the primary the one named, the
+	// screen row with them (any rows of the document); the Selection concern moves.
+	const auto address_json = [](const NodeAddress &address) {
+		return "{\"row\":" + std::to_string(address.row) + ",\"kind\":" + std::to_string(address.kind) +
+		       ",\"child\":" + std::to_string(address.child) + "}";
+	};
+	const NodeAddress screen_row{title_address.row, 0, 0};
+	const std::string marquee_json = "{\"kind\":\"select_record\",\"address\":" + address_json(exit_address) +
+	                                 ",\"records\":[" + address_json(title_address) + "," + address_json(screen_row) + "]}";
+	const uint64_t selection_stamp = view.revisions.of(ViewConcern::Selection);
+	TEST_EXPECT(request_error(marquee_json.c_str(), request).empty() && session.handle(request));
+	const JsonValue marqueed = section(ViewSection::Selection);
+	TEST_EXPECT(marqueed.get("records") && marqueed.get("records")->array.size() == 3 &&
+	            uint64_t(marqueed.get("primary")->get_number("child", 0)) == exit_address.child &&
+	            view.revisions.of(ViewConcern::Selection) != selection_stamp);
 	const std::string clear = "{\"kind\":\"edit_record\",\"edits\":[{\"op\":\"clear\",\"id\":" + title_id +
 	                          ",\"field\":\"position.left\"}]}";
 	TEST_EXPECT(request_error_in(clear, document, request).empty() && session.handle(request) && session.last_edit_ok());
@@ -1461,6 +1564,7 @@ namespace {
 struct MetadataRow : Node {
 	std::shared_ptr<Node> clone() const override { return std::make_shared<MetadataRow>(*this); }
 	std::string name() const override { return "light"; }
+	size_t footprint() const override { return sizeof(MetadataRow); }
 };
 
 class MetadataDocument : public Document {
@@ -1530,7 +1634,8 @@ protected:
 		                           : Value(std::string("pilot"));
 		return true;
 	}
-	std::shared_ptr<Node> make_node(NodeKind, NodeId, std::string &error) override {
+	std::shared_ptr<Node> make_node(NodeKind, NodeId, const std::vector<std::shared_ptr<const Node>> &,
+	                                std::string &error) override {
 		error = "No records are added here.";
 		return nullptr;
 	}

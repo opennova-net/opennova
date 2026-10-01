@@ -86,9 +86,10 @@ enum class PickPurpose {
 // which pack the files on disk); Cancel runs nothing.
 enum class UnsavedChoice { Save, Discard, Cancel };
 
-// How SelectRecord changes the selection: Replace makes the record the only one; Add
-// joins it (the primary becomes it); Toggle joins it, or leaves it when it is selected.
-// A record in another row or document than the selection replaces it.
+// How SelectRecord changes the selection (Selection::select): Replace makes the records named the
+// selection; Add joins them (the primary becoming the one named); Toggle joins each that is not
+// selected and leaves each that is. Records of another document than the selection's replace it;
+// any rows of one document may be selected together (S13 D7).
 enum class SelectMode { Replace, Add, Toggle };
 
 // The settings ApplyProjectSettings sets, each one left out staying as it is: the
@@ -133,9 +134,12 @@ inline bool operator==(const PasteAt &a, const PasteAt &b) {
 // carry). A field a kind does not take stays as it was made.
 struct EditorRequest {
 	EditorRequestKind kind = EditorRequestKind::Rescan;
-	// A project's directory; a new project's title.
+	// A project's directory; a new project's title and game (a gameprofile code, "" the default);
+	// a game install a project opens with for the session alone ("" its own).
 	std::string dir;
 	std::string title;
+	std::string game;
+	std::string game_install;
 	// A file: a project file or open document ("" the active one where the kind names it), a
 	// source to import again, a path to reveal.
 	std::string path;
@@ -147,16 +151,20 @@ struct EditorRequest {
 	std::string new_name;
 	std::string role;
 	std::string file_kind;
+	// Where a build lands ("" the project's own place under its cache).
+	std::string out_dir;
 	// Requirements' roles; the game install's files by logical name; files on disk to import.
 	std::vector<std::string> roles;
 	std::vector<std::string> names;
 	std::vector<std::string> paths;
 	// Import sources, as the view's import rows carry them.
 	std::vector<ImportSource> imports;
-	// A batch on one row, one undo step.
+	// A batch over any rows of one document, one undo step.
 	std::vector<Edit> edits;
-	// A record by its address; where a Paste goes.
+	// A record by its address; the records a selection takes with it (SelectRecord); where a Paste
+	// goes.
 	NodeAddress address;
+	std::vector<NodeAddress> records;
 	PasteAt paste_at;
 	SelectMode mode = SelectMode::Replace;
 	UnsavedChoice choice = UnsavedChoice::Cancel;
@@ -164,24 +172,30 @@ struct EditorRequest {
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
-	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit).
+	// Rename..., Rename everywhere); the document opens first when it is not (a fix's edit); a
+	// project opens with its import pass (false: on its files as they are, scanned and checked, no
+	// source imported).
 	bool with_dependencies = false;
 	bool replace = false;
 	bool force = false;
 	bool ask_name = false;
 	bool open_first = false;
+	bool import_pass = true;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
-	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.path == b.path &&
-			a.locator == b.locator && a.field == b.field && a.new_name == b.new_name &&
-			a.role == b.role && a.file_kind == b.file_kind && a.roles == b.roles &&
+	return a.kind == b.kind && a.dir == b.dir && a.title == b.title && a.game == b.game &&
+			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
+			a.field == b.field &&
+			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
+			a.out_dir == b.out_dir && a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
-			a.edits == b.edits && a.address == b.address && a.paste_at == b.paste_at &&
+			a.edits == b.edits && a.address == b.address && a.records == b.records &&
+			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
 			a.purpose == b.purpose && a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
-			a.open_first == b.open_first;
+			a.open_first == b.open_first && a.import_pass == b.import_pass;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);
@@ -201,10 +215,17 @@ struct ActionOutcome {
 	uint64_t operation = 0;      // the operation it started or joined (the view's operation
 	                             // while it runs, its last_operation once it ends); 0 for none
 	std::vector<Diagnostic> findings;
-	// The records its edits made, in order (S13 A5): an EditRecord's adds and duplicates, a
-	// Paste's records, a Duplicate's copies (Document::last_added_records()); none for a request
-	// that made none.
-	std::vector<NodeId> added;
+	// The records its edits made and kept, in order (S13 A5): an EditRecord's adds and
+	// duplicates, a Paste's records, a Duplicate's copies (Document::last_added_records());
+	// none for a request that made none. And an EditRecord's by its edits' indexes
+	// (Document::last_made(): 0 for an edit that made nothing or whose record a later edit
+	// removed), which its labels name.
+	std::vector<NodeId> added, made;
+	// An import's files (S13 A7): those it wrote, project-relative, as published (a file the
+	// project held with the same bytes is neither), and, after a failure while publishing, those
+	// it did not reach, the one that failed first.
+	std::vector<std::string> imported;
+	std::vector<std::string> not_imported;
 	bool done() const { return !refused && !unsaved_prompt; }
 };
 

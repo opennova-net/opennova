@@ -77,6 +77,8 @@ struct ModelRow : Node {
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return header.name; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
+	// Its tables, part animations and places (the base is not its own).
+	size_t footprint() const override;
 };
 
 struct CollisionRow : Node {
@@ -84,13 +86,15 @@ struct CollisionRow : Node {
 	std::vector<threedi::ThreediBoundingVolume> volumes;
 	std::vector<threedi::ThreediCollisionFace> faces;
 	std::vector<threedi::ThreediOcclusionObject> occlusion;
-	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records.
+	// collections: 0 sections, 1 volumes, 2 faces, 3 occlusion records. Its places as a model
+	// row's.
 	std::shared_ptr<const ModelPlaces> places;
 
 	CollisionRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<CollisionRow>(*this); }
 	std::string name() const override { return "Collision"; }
 	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
+	size_t footprint() const override;
 };
 
 // The model as the writer takes it, composed from a document's rows: `model` points into
@@ -150,7 +154,9 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	// A field through the property table. A material's shader also sets the words the
 	// shader decides (glass, reflection, emissive: threedi_build_material_surface), and
 	// is refused when it would read tangents the model's vertices lack or move a drawn
@@ -164,8 +170,9 @@ protected:
 	// the collision records are fixed.
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
-	// A model keeps its two rows.
-	bool accept_change(const Change &change, std::string &error) const override;
+	// A model keeps its two rows: a step adding or removing a row is refused.
+	bool accept_step(const EditStep &step, const StagedRows &rows,
+	                 std::string &error) const override;
 };
 
 bool is_model_kind(AssetKind kind);

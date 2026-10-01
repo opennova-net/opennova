@@ -88,7 +88,7 @@ public:
 	virtual ~CanvasRequests() = default;
 	// `record` of the document at `path` selected, joining the selection as `join` says.
 	virtual void select(const std::string &path, const NodeAddress &record, CanvasJoin join) = 0;
-	// One batch on one row of the document at `path`: a step of a gesture (its edits carry the
+	// One batch of the document at `path` (over any rows): a step of a gesture (its edits carry the
 	// gesture's token) or an arrange.
 	virtual void edits(const std::string &path, std::vector<Edit> batch) = 0;
 	// The gesture's edits end (EndEdit): its steps are one undo step.
