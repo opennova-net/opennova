@@ -22,10 +22,11 @@ struct FileStamp {
 // list of its stamped files and its rig's model file and stamp apart.
 class FileStamps {
 public:
-	// `name` read at `stamp`; a name read before (in any case) keeps its first stamp.
-	void note(const std::string &name, uint64_t stamp);
-	// Every file `other` read, as note() takes each.
-	void add(const FileStamps &other);
+	// `name` read at `stamp`; a name read before (in any case) keeps its first stamp. True when it
+	// was not read before.
+	bool note(const std::string &name, uint64_t stamp);
+	// Every file `other` read, as note() takes each; true when one was not read before.
+	bool add(const FileStamps &other);
 	// True when a file read has another stamp in `files` now; moved_but: a file other than those
 	// `except` names (in any case).
 	bool moved(const FileSource &files) const;
@@ -99,7 +100,9 @@ public:
 	// follow in what the picture reads of it (its ChangeClass, viewport_model.h, as the kind reads
 	// it: a change set naming only what the picture does not read is no move, S13 V8). The stamps of
 	// the files its picture read are compared only when the file source's `generation` moved, which
-	// it does whenever a stamp may have.
+	// it does whenever a stamp may have, or when the device read a file since the last comparison
+	// (S13 V6: a build runs its units between two follows, so a file read after one comparison is
+	// compared at the next).
 	Found follow(const Key &key, bool moved, const FileSource &files, uint64_t generation);
 	// `key` is what it shows now (the files' generation as the caller read them); the files its
 	// picture read stand until built(), failed() or stop() replaces them (a picture that stands, a
@@ -113,17 +116,21 @@ public:
 	ViewportAction failed(FileStamps files = FileStamps());
 	// Nothing to show (no project, no document, no screen): the key forgotten. Clear.
 	ViewportAction stop();
-	// The device read `files` as it made the picture (its report: a model's textures).
-	void read(const FileStamps &files) { files_.add(files); }
+	// The device read `files` as it made the picture (its report: a model's textures, read by a
+	// build's units over the frames since the last report); one not read before is compared at the
+	// next follow, whatever the generation (it may have moved after it was read and before it was
+	// reported).
+	void read(const FileStamps &files) { unchecked_ = files_.add(files) || unchecked_; }
 	// What moved of the files its picture read leaves the picture as it is (a stylesheet variable
 	// the picture does not name, S13 V8): each takes the stamp it has now, so the move is not found
 	// again.
 	void restamp(const FileSource &files) { files_.restamp(files); }
 	// True when a file its picture read moved its stamp since the files' generation it last read
-	// (`generation` the source's now): what a caller making its state anew over a picture that
-	// stands asks before show(), a model's texture moved in the same follow as an edit of it.
+	// (`generation` the source's now), or since it was read when it was not compared yet: what a
+	// caller making its state anew over a picture that stands asks before show(), a model's texture
+	// moved in the same follow as an edit of it.
 	bool files_moved(const FileSource &files, uint64_t generation) const {
-		return shows_ && generation != generation_ && files_.moved(files);
+		return shows_ && (generation != generation_ || unchecked_) && files_.moved(files);
 	}
 	bool shows() const { return shows_; }
 	bool is_failed() const { return failed_; }
@@ -134,6 +141,7 @@ private:
 	bool failed_ = false;
 	Key key_;
 	uint64_t generation_ = 0;
+	bool unchecked_ = false; // a file read since the last comparison of the stamps
 	FileStamps files_;
 };
 

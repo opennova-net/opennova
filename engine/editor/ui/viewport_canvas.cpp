@@ -28,6 +28,10 @@ constexpr ImU32 kMarqueeFill = IM_COL32(140, 210, 255, 30);
 constexpr ImU32 kNoteColor = IM_COL32(255, 170, 40, 230);
 constexpr ImU32 kSquareEdge = IM_COL32(40, 40, 40, 255); // a handle's edge
 constexpr ImU32 kDotEdge = IM_COL32(20, 20, 20, 255); // a light's ring
+constexpr ImU32 kBadgeFill = IM_COL32(20, 20, 20, 200); // a badge's ground over the picture
+constexpr ImU32 kBadgeText = IM_COL32(235, 235, 235, 255);
+constexpr float kBadgeInset = 6.0f; // from the picture's corner
+constexpr float kBadgePad = 3.0f; // around its text
 
 // The next zoom step past `scale` in the wheel's direction (the last one at either end).
 float next_zoom(float scale, bool in) {
@@ -313,6 +317,20 @@ void ViewportCanvas::picture(const Device &device, const Tip &tip) {
 	ImGui::GetWindowDrawList()->AddRect(ImVec2(origin_.x - edge, origin_.y - edge),
 			ImVec2(origin_.x + float(input_.width) + edge, origin_.y + float(input_.height) + edge),
 			kFrameColor);
+}
+
+void ViewportCanvas::badge(const std::string &text) {
+	if (text.empty())
+		return;
+	ImDrawList &paint = *ImGui::GetWindowDrawList();
+	const ImVec2 at(origin_.x + kBadgeInset, origin_.y + kBadgeInset);
+	const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+	paint.PushClipRect(
+			ImVec2(surface_min_.x, surface_min_.y), ImVec2(surface_max_.x, surface_max_.y), true);
+	paint.AddRectFilled(ImVec2(at.x - kBadgePad, at.y - kBadgePad),
+			ImVec2(at.x + size.x + kBadgePad, at.y + size.y + kBadgePad), kBadgeFill);
+	paint.AddText(at, kBadgeText, text.c_str());
+	paint.PopClipRect();
 }
 
 void ViewportCanvas::draw(const OverlayList &shapes, CanvasCursor cursor) {

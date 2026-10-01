@@ -12,6 +12,19 @@
 
 namespace godot {
 
+namespace {
+
+opennova::editor::OperationProgress units_done(uint64_t units) {
+	opennova::editor::OperationProgress progress;
+	progress.done = units;
+	progress.total = units;
+	progress.unit = opennova::editor::OperationUnit::Steps;
+	progress.label = "configure";
+	return progress;
+}
+
+} // namespace
+
 MenuViewportApplier::MenuViewportApplier(SubViewport &viewport) {
 	frame_ = memnew(MenuFrame);
 	// The canvas picks through the viewport's compile; the frame takes no input of its own.
@@ -25,9 +38,64 @@ MenuViewportApplier::~MenuViewportApplier() {
 	if (MenuFrame *frame = Object::cast_to<MenuFrame>(ObjectDB::get_instance(frame_id_))) frame->clear_screen();
 }
 
-void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) {
+void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view,
+		const opennova::editor::PreviewClock &clock) {
+	// A configure in flight dropped (what it loaded ahead stays kept: the next configure finds it).
+	build_.reset();
 	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
 	if (!menu.image() || !menu.screen() || !view.findings.assets) {
+		clear();
+		return;
+	}
+	// What the screen names that the frame does not keep: the viewport's own compile of the same
+	// screen, over the same files, interned the same names.
+	const opennova::FileSource &files = *view.findings.assets;
+	const opennova::menu::MenuFrameAssets &kept = frame_->native_assets();
+	const opennova::menu::MenuFrameCompiler &compiled = menu.render().compiler();
+	auto build = std::make_unique<Build>();
+	for (const std::string &name : compiled.texture_names())
+		if (!kept.texture_kept(name, files)) build->textures.push_back(name);
+	if (build->textures.empty()) {
+		// Everything kept: configured now, as it is taken.
+		configure_(model, view.findings.assets, clock);
+		done_ = units_done(1);
+		return;
+	}
+	build->assets = view.findings.assets;
+	build_ = std::move(build);
+}
+
+ApplierStep MenuViewportApplier::step(const opennova::editor::ViewportModel &model,
+		const opennova::editor::PreviewClock &clock, std::string &) {
+	Build &build = *build_;
+	const size_t unit = build.next++;
+	if (unit < build.textures.size()) {
+		frame_->load_texture_ahead(build.textures[unit], *build.assets);
+		return ApplierStep::More;
+	}
+	// The configure, which decodes nothing it loaded ahead.
+	const std::shared_ptr<const opennova::editor::ProjectAssetSource> assets = build.assets;
+	done_ = units_done(build.units());
+	build_.reset();
+	configure_(model, assets, clock);
+	return ApplierStep::Built;
+}
+
+opennova::editor::OperationProgress MenuViewportApplier::progress() const {
+	if (!build_) return done_;
+	opennova::editor::OperationProgress progress;
+	progress.done = build_->next;
+	progress.total = build_->units();
+	progress.unit = opennova::editor::OperationUnit::Steps;
+	progress.label = build_->next < build_->textures.size() ? "textures" : "configure";
+	return progress;
+}
+
+void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &model,
+		const std::shared_ptr<const opennova::editor::ProjectAssetSource> &assets,
+		const opennova::editor::PreviewClock &clock) {
+	const auto &menu = static_cast<const opennova::editor::MenuViewport &>(model);
+	if (!menu.image() || !menu.screen() || !assets) {
 		clear();
 		return;
 	}
@@ -35,17 +103,20 @@ void MenuViewportApplier::rebuild(const opennova::editor::ViewportModel &model, 
 	// height here. The frame borrows the image's screen and the file source until its next
 	// configure: both held here as long.
 	frame_->reset_loads();
-	frame_->configure_screen(menu.image().get(), menu.screen(), *view.findings.assets, menu.style_vars(), nullptr);
+	frame_->configure_screen(menu.image().get(), menu.screen(), *assets, menu.style_vars(), nullptr);
 	image_ = menu.image();
-	assets_ = view.findings.assets;
+	assets_ = assets;
 	apply_options_(model);
+	// The frame's clock the preview clock's now (a configure ending frames after its Rebuild included).
+	frame_->set_time_ms(opennova::editor::menu_frame_time(clock));
 }
 
-void MenuViewportApplier::update(const opennova::editor::ViewportModel &model) {
+void MenuViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
 	apply_options_(model);
 }
 
 void MenuViewportApplier::clear() {
+	build_.reset();
 	frame_->clear_screen();
 	image_.reset();
 	assets_.reset();
@@ -58,9 +129,10 @@ void MenuViewportApplier::apply_options_(const opennova::editor::ViewportModel &
 	frame_->set_native_state(state);
 }
 
-void MenuViewportApplier::step(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &,
+void MenuViewportApplier::apply(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &,
 		opennova::editor::ViewportDeviceReport &report) {
-	if (!frame_->is_configured()) return;
+	// While a configure runs over the frames the frame holds the last screen: nothing of it reported.
+	if (build_ || !frame_->is_configured()) return;
 	// What the frame read, and where its compile placed each widget (design units).
 	for (const opennova::menu::MenuDependency &dependency : frame_->native_assets().dependencies())
 		report.files.note(dependency.name, dependency.stamp);

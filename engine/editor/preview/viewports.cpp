@@ -139,7 +139,13 @@ ViewportAction Viewports::take_action(const std::string &path, ViewportKind kind
 
 void Viewports::device_report(
 		const std::string &path, ViewportKind kind, const ViewportDeviceReport &report) {
-	if (ViewportModel *model = find(path, kind)) model->device_report(report);
+	ViewportModel *model = find(path, kind);
+	if (model && model->device_report(report) && on_derived_change_) on_derived_change_();
+}
+
+void Viewports::device_build(const std::string &path, ViewportKind kind, const ViewportBuildReport &build) {
+	ViewportModel *model = find(path, kind);
+	if (model && model->device_build(build) && on_derived_change_) on_derived_change_();
 }
 
 bool Viewports::addressed_(const SessionView &view, const std::string &path, ViewportKind named,

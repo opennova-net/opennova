@@ -654,7 +654,11 @@ changes, and, for a kind that holds for a gesture (the model's scene), a picture
 while a gesture is open in its document over one the device holds. Its device is the Shell's (an
 offscreen Godot viewport for one document and kind, four kept, the least recently used not drawn
 since the last pump given up and its viewport keeping its state), drawn only by the viewport's
-canvas, which owns the pointer and the keys and sizes the picture it draws. Headless, it answers as
+canvas, which owns the pointer and the keys and sizes the picture it draws. A device may make a
+picture over several of the Shell's frames, a little each frame (a model: its textures, its meshes,
+then its scene and its pose; a menu's screen shown the first time: its textures, then the screen);
+the viewport is loading meanwhile, its canvas drawing the last picture the device made, never a
+half-made one, and a change that asks for the picture again begins it anew. Headless, it answers as
 its envelope (JSON, the `viewport` query), and a client drags and commands through it as its canvas
 would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it moves, a
 command one request).
