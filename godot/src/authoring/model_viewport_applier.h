@@ -36,7 +36,7 @@ namespace godot {
 // level (presenter-driven, the mission placer's mode), so a level the camera's distance picks
 // afterwards swaps its rows in place rather than building the scene again. A Rebuild while one runs
 // drops the build's data and begins anew; what the device draws meanwhile is the last picture (the
-// device renders nothing while a build runs).
+// device renders nothing half built). No unit fails: a build is planned only over a model.
 class ModelViewportApplier final : public ViewportApplier {
 public:
 	explicit ModelViewportApplier(SubViewport &viewport);
@@ -46,7 +46,7 @@ public:
 			std::string &failure) override;
 	bool building() const override { return build_ != nullptr; }
 	opennova::editor::OperationProgress progress() const override;
-	void update(const opennova::editor::ViewportModel &model) override;
+	void update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void clear() override;
 	void apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;
@@ -89,7 +89,12 @@ private:
 	static void plan_(Build &build);
 	// The scene: the build's data swapped in with its rig.
 	void assemble_(Build &build);
-	// The CTRL registers the options hold (one let go reads 0 again).
+	// The viewport's state over the picture that stands, in one place: the pose unit as a build ends,
+	// an Update, and every pump after them (the rig bound again when it was loaded again, the
+	// registers, the clip at `clock`, the camera and the level), so an Update folded into a build
+	// applies as the build ends exactly as it would have.
+	void apply_state_(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock);
+	// The CTRL registers the options hold (one let go reads 0 again); nothing when they stand.
 	void apply_registers_(const opennova::editor::ViewportModel &model);
 	// The camera where the viewport's is, and the level it picks.
 	void place_camera_(const opennova::editor::ViewportModel &model);

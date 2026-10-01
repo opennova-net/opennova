@@ -274,6 +274,40 @@ static int test_loaded_ahead() {
 	files.put("logo.tga", texture(16, 16), 2);
 	TEST_EXPECT(!assets.texture_kept("logo.tga", files) && assets.texture_kept("fallback.tga", files));
 	TEST_EXPECT(assets.texture_loads("logo.tga", files, decoder) && assets.texture_kept("logo.tga", files));
+
+	// Every branch of the dispatch: what texture_kept says before a load is what the load does (it
+	// reads or decodes exactly when the name was not kept), and after it the name is kept (a second
+	// load reads nothing): a .tga there, a .tga only a .dds provides, a .tga neither provides, a .dds,
+	// a .pcx and a .png there, a .tga there that does not decode, an extension the dispatch reads
+	// nothing for (there or not), a name with no extension, a name kept under another case.
+	files.put("pic.dds", texture(8, 8), 1);
+	files.put("pic.pcx", texture(8, 8), 1);
+	files.put("pic.png", texture(8, 8), 1);
+	files.put("bad.tga", {1, 2, 3}, 1); // SizeDecoder takes two bytes only
+	files.put("plain", texture(8, 8), 1);
+	files.put("other.dds", texture(4, 4), 1);
+	struct Case {
+		const char *name;
+		bool kept; // before its load
+	};
+	const Case cases[] = {
+		{"logo.tga", true}, {"LOGO.TGA", true}, {"other.tga", false}, {"none.tga", true}, {"pic.dds", false},
+		{"pic.pcx", false}, {"pic.png", false}, {"bad.tga", false}, {"art.bmp", true}, {"gone.bmp", true},
+		{"plain", true},
+	};
+	for (const Case &c : cases) {
+		TEST_EXPECT(assets.texture_kept(c.name, files) == c.kept);
+		const int reads = files.total_reads();
+		const int decodes = decoder.decodes;
+		assets.texture_loads(c.name, files, decoder);
+		const bool touched = files.total_reads() != reads || decoder.decodes != decodes;
+		if (touched == c.kept) std::printf("  %s: kept %d, its load touched %d\n", c.name, int(c.kept), int(touched));
+		TEST_EXPECT(touched == !c.kept);
+		TEST_EXPECT(assets.texture_kept(c.name, files));
+		const int again = files.total_reads() + decoder.decodes;
+		assets.texture_loads(c.name, files, decoder);
+		TEST_EXPECT(files.total_reads() + decoder.decodes == again);
+	}
 	std::printf("test_loaded_ahead passed\n");
 	return 0;
 }

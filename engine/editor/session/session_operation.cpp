@@ -71,15 +71,6 @@ std::vector<const char *> holds_tokens(Holds holds) {
 	return tokens;
 }
 
-const char *operation_unit_token(OperationUnit unit) {
-	switch (unit) {
-	case OperationUnit::Bytes: return "bytes";
-	case OperationUnit::Files: return "files";
-	case OperationUnit::Steps: return "steps";
-	}
-	return "steps";
-}
-
 const char *operation_end_token(OperationEnd end) {
 	switch (end) {
 	case OperationEnd::Done: return "done";

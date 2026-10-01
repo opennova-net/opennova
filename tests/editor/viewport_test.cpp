@@ -1105,7 +1105,7 @@ static int test_gestures() {
 // with the state as it then is), one after it taken; a Clear while one runs dropping it with the
 // picture; a failure at a unit keeping the last picture (failed, its message), nothing asked again and
 // an Update folded until the document moves; the frame's budget (two units a frame), and two builds in
-// one frame each running a unit.
+// one frame sharing it, the most recently used device's first, one unit a frame in all.
 static int test_builds() {
 	editor_test::TempProjectDir dir("opennova_editor_viewport_builds");
 	NoProcess platform;
@@ -1152,9 +1152,9 @@ static int test_builds() {
 			TEST_EXPECT(model->picture_status() == ViewportStatus::Loading && json.get_string("status", "") == "loading" &&
 					json.get_string("reason", "") == "loading");
 			const JsonValue *progress = json.get("progress");
-			TEST_EXPECT(progress && progress->get_number("done", -1) == double(frame) &&
-					progress->get_number("total", -1) == 4.0 && progress->get_string("unit", "") == "steps" &&
-					progress->get_string("label", "") == "units");
+			TEST_EXPECT(progress && progress->get_number("generation", 0) == 1.0 &&
+					progress->get_number("done", -1) == double(frame) && progress->get_number("total", -1) == 4.0 &&
+					progress->get_string("unit", "") == "steps" && progress->get_string("label", "") == "units");
 			TEST_EXPECT(held->shown == 0 && json.get("device")->get("build")->get_bool("loading", false));
 		} else {
 			TEST_EXPECT(model->picture_status() == ViewportStatus::Ready && json.get_string("status", "") == "ready" &&
@@ -1187,6 +1187,9 @@ static int test_builds() {
 	devices.frame(session);
 	TEST_EXPECT(model->builds() == 3 && device->built.generation == 3 && device->built.progress.done == 1 &&
 			device->shown == 1 && model->picture_status() == ViewportStatus::Loading);
+	// The progress is the newer generation's, begun again (A1's never goes back within one).
+	TEST_EXPECT(envelope().get("progress")->get_number("generation", 0) == 3.0 &&
+			envelope().get("progress")->get_number("done", 0) == 1.0);
 	TEST_EXPECT(count(device->taken_building, ViewportAction::Rebuild) == 1);
 	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
 	TEST_EXPECT(device->shown == 3 && model->picture_status() == ViewportStatus::Ready &&
@@ -1238,10 +1241,12 @@ static int test_builds() {
 	devices.frame(session, 2);
 	TEST_EXPECT(device->shown == 7 && model->picture_status() == ViewportStatus::Ready);
 
-	// A Clear while one runs: the menu's device (three units a build) building after an edit, the menu
-	// made one the game could not read: the build dropped with the picture; undone, the next
-	// generation's picture. Two builds in one frame (the model's beside it) each run a unit, the
-	// budget spent by the first.
+	// Two builds in one frame share its budget, the most recently used device's first: one unit a
+	// frame in all, the model's (the pump uses the Preview's targets in kind order, the model's last);
+	// the menu's once a canvas asked for its device after the pump (as a Shell's draw does); four units
+	// end the model's build and give the menu's the unit left. A Clear while one runs: the menu's
+	// device (three units a build) building after an edit, the menu made one the game could not read:
+	// the build dropped with the picture; undone, the next generation's picture.
 	devices.units = 3;
 	session.handle(request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
@@ -1258,8 +1263,15 @@ static int test_builds() {
 	set(session, *menu, title, "position.left", int64_t(8));
 	set(session, *document, light, "start.r", int64_t(18));
 	devices.frame(session);
-	TEST_EXPECT(menu_device->built.loading && menu_device->built.progress.done == 1 && device->built.loading &&
+	TEST_EXPECT(menu_device->built.loading && menu_device->built.progress.done == 0 && device->built.loading &&
 			device->built.progress.done == 1);
+	devices.sync(session);
+	TEST_EXPECT(devices.cache.device(menu_path, ViewportKind::Menu) == menu_device);
+	int left = 1;
+	devices.cache.step(session.viewports(), [&left] { return --left > 0; });
+	TEST_EXPECT(menu_device->built.progress.done == 1 && device->built.progress.done == 1);
+	devices.frame(session, 4);
+	TEST_EXPECT(!device->built.loading && menu_device->built.loading && menu_device->built.progress.done == 2);
 	menu_device->taken_building.clear();
 	set(session, *menu, exit, "string.justify", std::string("CEN\"TER"));
 	devices.frame(session);

@@ -71,9 +71,10 @@ public:
 	// How much a poll steps the running operation: `p_ms` milliseconds of steps of `p_step_bytes`
 	// bytes each (0 ms: one step per poll). A test slows a build to read it mid-way.
 	void set_poll_budget(int p_ms, int64_t p_step_bytes);
-	// How long each frame steps the viewports' builds (S13 V6, ViewportDeviceCache::step): units while
-	// `p_ms` milliseconds have not passed since the frame's first, at least one unit of each build in
-	// flight (0 ms: exactly one a frame, a test's slow build). The editor's: kBuildBudgetMs.
+	// How long each frame steps the viewports' builds (S13 V6, ViewportDeviceCache::step; the
+	// `build_budget_ms` property): units while `p_ms` milliseconds have not passed since the frame's
+	// first, one unit a frame in all at least, shared by every build in flight (0 ms: exactly one a
+	// frame, a test's slow build). The editor's: kBuildBudgetMs.
 	static constexpr int kBuildBudgetMs = 4;
 	void set_build_budget_ms(int p_ms) { build_budget_ms_ = p_ms > 0 ? p_ms : 0; }
 	int get_build_budget_ms() const { return build_budget_ms_; }

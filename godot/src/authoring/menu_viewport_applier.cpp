@@ -107,7 +107,7 @@ void MenuViewportApplier::configure_(const opennova::editor::ViewportModel &mode
 	apply_options_(model);
 }
 
-void MenuViewportApplier::update(const opennova::editor::ViewportModel &model) {
+void MenuViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) {
 	apply_options_(model);
 }
 

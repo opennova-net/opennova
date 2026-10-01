@@ -15,6 +15,27 @@ std::string kept_key(const std::string &file, uint64_t stamp) {
 	return strutil::to_lower(file) + '#' + std::to_string(stamp);
 }
 
+// What retail's dispatch reads for a texture name now (menu_texture_source): the file and its
+// format; whether that file is not the name (a missing .tga's .dds, or no file at all for an
+// extension the dispatch reads nothing for), with the name's own stamp then; and the file's stamp
+// (0: the source lacks it, or there is no file). The one resolver of a load and of what is kept
+// (load_texture_, texture_kept), so what a configure would decode and what is known kept never part.
+struct TextureFile {
+	MenuTextureSource source;
+	bool renamed = false;
+	uint64_t name_stamp = 0;
+	uint64_t stamp = 0;
+};
+
+TextureFile resolve_texture(const std::string &name, const FileSource &files) {
+	TextureFile out;
+	out.source = menu_texture_source(name, [&files](const std::string &file) { return files.stamp(file) != 0; });
+	out.renamed = !strutil::iequals(out.source.file, name);
+	if (out.renamed) out.name_stamp = files.stamp(name);
+	if (out.source.format != MenuTextureFormat::None) out.stamp = files.stamp(out.source.file);
+	return out;
+}
+
 // Every FONT NAME a window tree authors (roots, children and parts), each once
 // (case-insensitive), in document order.
 void collect_font_names(const mnu::Window &w, std::vector<std::string> &names) {
@@ -87,27 +108,24 @@ MenuFrameAssets::LoadResult MenuFrameAssets::load_texture_(const std::string &na
 	*out = nullptr;
 	key.clear();
 	if (name.empty()) return LoadResult::Absent;
-	const MenuTextureSource source =
-	        menu_texture_source(name, [&files](const std::string &file) { return files.stamp(file) != 0; });
+	const TextureFile file = resolve_texture(name, files);
 	// A .tga the files lack loads its .dds: the .tga is a dependency too (it may appear).
 	// So is a name whose extension the dispatch reads nothing for (there or not, it
 	// does not load).
-	if (!strutil::iequals(source.file, name)) {
-		const uint64_t name_stamp = files.stamp(name);
-		dependencies_.push_back({name, name_stamp});
-		if (source.format == MenuTextureFormat::None)
-			return name_stamp != 0 ? LoadResult::Unreadable : LoadResult::Absent;
+	if (file.renamed) {
+		dependencies_.push_back({name, file.name_stamp});
+		if (file.source.format == MenuTextureFormat::None)
+			return file.name_stamp != 0 ? LoadResult::Unreadable : LoadResult::Absent;
 	}
-	const uint64_t stamp = files.stamp(source.file);
-	dependencies_.push_back({source.file, stamp});
-	if (stamp == 0) return LoadResult::Absent;
-	key = kept_key(source.file, stamp);
+	dependencies_.push_back({file.source.file, file.stamp});
+	if (file.stamp == 0) return LoadResult::Absent;
+	key = kept_key(file.source.file, file.stamp);
 	const auto found = textures_.find(key);
 	TextureEntry &entry = found != textures_.end() ? found->second : textures_[key];
 	if (found == textures_.end()) {
 		std::vector<uint8_t> bytes;
-		entry.ok = files.read(source.file, bytes) && !bytes.empty() &&
-		           decoder.decode(key, source.format, bytes, entry.width, entry.height) && entry.width > 0 &&
+		entry.ok = files.read(file.source.file, bytes) && !bytes.empty() &&
+		           decoder.decode(key, file.source.format, bytes, entry.width, entry.height) && entry.width > 0 &&
 		           entry.height > 0;
 	}
 	entry.used = generation_;
@@ -198,14 +216,13 @@ bool MenuFrameAssets::texture_loads(const std::string &name, const FileSource &f
 	return load_texture_(name, files, decoder, key, &entry) == LoadResult::Loaded;
 }
 
-// What load_texture_ would read for the name, kept or not: the dispatch's file at its stamp now.
+// What load_texture_ would read for the name, kept or not (the one resolver both take): nothing to
+// read (no file for its extension, or the source lacks it), or the file at its stamp now, kept.
 bool MenuFrameAssets::texture_kept(const std::string &name, const FileSource &files) const {
 	if (name.empty()) return true;
-	const MenuTextureSource source =
-	        menu_texture_source(name, [&files](const std::string &file) { return files.stamp(file) != 0; });
-	if (!strutil::iequals(source.file, name) && source.format == MenuTextureFormat::None) return true;
-	const uint64_t stamp = files.stamp(source.file);
-	return stamp == 0 || textures_.count(kept_key(source.file, stamp)) != 0;
+	const TextureFile file = resolve_texture(name, files);
+	if (file.source.format == MenuTextureFormat::None || file.stamp == 0) return true;
+	return textures_.count(kept_key(file.source.file, file.stamp)) != 0;
 }
 
 void MenuFrameAssets::sweep_(MenuTextureDecoder &decoder) {

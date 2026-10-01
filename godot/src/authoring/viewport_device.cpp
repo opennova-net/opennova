@@ -17,6 +17,11 @@ int64_t now_us() {
 	return int64_t(Time::get_singleton()->get_ticks_usec());
 }
 
+// The process frame now: a canvas's draw, the pump's take and the frame's steps read the same one.
+uint64_t frame_now() {
+	return Engine::get_singleton()->get_process_frames();
+}
+
 } // namespace
 
 ViewportDevice::ViewportDevice(Node &owner, const String &name,
@@ -53,15 +58,16 @@ void ViewportDevice::size_(int width, int height) {
 
 void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	// Its texture drawn through the ImGui pass as the canvas's current item: the size alone. While
-	// its picture is held (a build runs, or the last one failed) the texture is the last picture, drawn
-	// as it was: not rendered (half built), and not sized again once it holds one (its texture would be
-	// made anew, empty).
+	// it keeps its last picture (a build runs, or the last one failed) the texture is that picture,
+	// drawn as it was: not rendered (half built), and not sized again once it holds one (its texture
+	// would be made anew, empty).
 	drawn_ = 2;
 	canvas_sized_ = picture.canvas_sized;
-	if (!held_()) {
+	if (!keeps_last_()) {
 		size_(picture.width, picture.height);
 		viewport_->set_update_mode(SubViewport::UPDATE_ONCE);
 		rendered_ = true;
+		render_frame_ = frame_now();
 	} else if (!rendered_) {
 		size_(picture.width, picture.height);
 	}
@@ -73,7 +79,7 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 
 bool ViewportDevice::surface_at(float x, float y, float point[3]) const {
 	// Only over a picture it built: none while a build runs or after one failed.
-	return !held_() && applier_->surface_at(x, y, point);
+	return !keeps_last_() && applier_->surface_at(x, y, point);
 }
 
 void ViewportDevice::take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
@@ -81,7 +87,8 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 		opennova::editor::ViewportDeviceReport &report) {
 	// A whole frame no canvas drew it, the size its viewport's state says (the MCP's, a headless
 	// run's, its window hidden), unless it holds a picture a build or a failure keeps.
-	if (drawn_ == 0 && !(held_() && rendered_)) size_(model.state().width, model.state().height);
+	const uint64_t frame = frame_now();
+	if (drawn_ == 0 && !(keeps_last_() && rendered_)) size_(model.state().width, model.state().height);
 	switch (action) {
 	case opennova::editor::ViewportAction::Rebuild: {
 		// The build of the viewport's newest generation: one in flight dropped (the applier's rebuild
@@ -101,8 +108,8 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 	}
 	case opennova::editor::ViewportAction::Update:
 		// The viewport folds an Update that comes while a build runs into it (the build applies the
-		// state as it ends): one reaching a held picture has nothing of its generation to apply to.
-		if (!held_()) applier_->update(model);
+		// state as it ends): one reaching a kept picture has nothing of its generation to apply to.
+		if (!keeps_last_()) applier_->update(model, clock);
 		break;
 	case opennova::editor::ViewportAction::Clear:
 		applier_->clear();
@@ -112,9 +119,11 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 		break;
 	case opennova::editor::ViewportAction::Keep: break;
 	}
-	// A render a canvas's draw asked for earlier this frame does not happen while the picture is held:
-	// the build this take began runs its units after it, and the frame's render would show them.
-	if (held_()) viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+	// Nothing renders while it keeps its last picture, but for the render this frame's draw asked for
+	// before this take began a build: the scene is still the last complete one (a Rebuild plans the
+	// units, none has run), so the frame renders that, and no unit runs in it (step()). A canvas resized
+	// this frame gets its picture, and a build that ended last frame is shown before the next begins.
+	if (keeps_last_() && render_frame_ != frame) viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
 	applier_->apply(model, clock, report);
 	const Vector2i size = viewport_->get_size();
 	report.width = size.x;
@@ -132,6 +141,9 @@ void ViewportDevice::tick(const opennova::editor::ViewportModel &model, const op
 
 bool ViewportDevice::step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
 	if (!build_.loading || !applier_->building()) return false;
+	// The frame renders the last complete picture its draw asked for as it ends: its units wait for
+	// the next frame.
+	if (render_frame_ == frame_now()) return false;
 	const int64_t start = now_us();
 	std::string failure;
 	const ApplierStep result = applier_->step(model, clock, failure);

@@ -63,6 +63,7 @@ void EditorApp::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_poll_budget", "ms", "step_bytes"), &EditorApp::set_poll_budget);
 	ClassDB::bind_method(D_METHOD("set_build_budget_ms", "ms"), &EditorApp::set_build_budget_ms);
 	ClassDB::bind_method(D_METHOD("get_build_budget_ms"), &EditorApp::get_build_budget_ms);
+	ADD_PROPERTY(PropertyInfo(Variant::INT, "build_budget_ms"), "set_build_budget_ms", "get_build_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_menu_preview_json"), &EditorApp::get_menu_preview_json);
 	ClassDB::bind_method(D_METHOD("menu_preview_hit_json", "x", "y"), &EditorApp::menu_preview_hit_json);
 	ClassDB::bind_method(D_METHOD("set_menu_preview_options", "options"), &EditorApp::set_menu_preview_options);
@@ -250,8 +251,8 @@ void EditorApp::_process(double p_delta) {
 	// The one model runtime-frame driver in the editor (menu_shell.gd's for the game's menus): the
 	// preview clock runs, and the viewports' part animations, flipbooks, generators and clips run on
 	// it, whether a canvas draws them or not (pump() synced the devices). Then the devices' builds a
-	// unit further (S13 V6): at least one unit of each build in flight, the next while the frame's
-	// build budget lasts.
+	// unit further (S13 V6): one unit a frame in all, the most recently used device's first, the next
+	// while the frame's build budget lasts (shared by every build in flight).
 	if (devices_) {
 		session_->advance(p_delta);
 		devices_->tick(session_->viewports());

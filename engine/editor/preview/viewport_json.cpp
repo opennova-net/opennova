@@ -37,11 +37,13 @@ JsonValue envelope(const SessionView &view, const ViewportModel &model, const Pr
 	out.set("message", json_string(model.picture_message()));
 	out.set("detail", json_string(model.detail()));
 	// While its device builds the picture over the frames (S13 V6), how far, as an operation's
-	// progress reads (view_json's operation: done of total in its unit, what it works on).
+	// progress reads (view_json's operation: done of total in its unit, what it works on), of the
+	// build generation it names: a newer generation's begins again at 0.
 	JsonValue progress = JsonValue::make_null();
 	if (status == ViewportStatus::Loading) {
 		const OperationProgress &units = model.build().progress;
 		progress = JsonValue::make_object();
+		progress.set("generation", json_number(double(model.build().generation)));
 		progress.set("done", json_number(double(units.done)));
 		progress.set("total", json_number(double(units.total)));
 		progress.set("unit", json_string(operation_unit_token(units.unit)));

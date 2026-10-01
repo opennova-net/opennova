@@ -39,7 +39,7 @@ public:
 			std::string &failure) override;
 	bool building() const override { return build_ != nullptr; }
 	opennova::editor::OperationProgress progress() const override;
-	void update(const opennova::editor::ViewportModel &model) override;
+	void update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 	void clear() override;
 	void apply(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			opennova::editor::ViewportDeviceReport &report) override;

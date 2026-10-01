@@ -3,7 +3,7 @@
 #include <cstdint>
 #include <string>
 
-#include <editor/session/session_operation.h>
+#include <editor/session/operation_progress.h>
 
 namespace opennova::editor {
 class PreviewClock;
@@ -35,9 +35,9 @@ public:
 	// in flight dropped first, its partial work discarded), or the picture made whole here by a kind
 	// that builds in one step (building() then false).
 	virtual void rebuild(const opennova::editor::ViewportModel &model, const opennova::editor::SessionView &view) = 0;
-	// One unit of the build begun (S13 V6): More, Built once the picture is built (its state applied:
-	// the level, the registers, the rig, the clip at `clock`), or Failed with `failure` saying why (the
-	// last picture kept). Never called while building() is false.
+	// One unit of the build begun (S13 V6): More, Built once the picture is built (its state applied as
+	// update() applies it, at `clock`), or Failed with `failure` saying why (the last picture kept: the
+	// protocol's, which no applier here produces yet). Never called while building() is false.
 	virtual ApplierStep step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock,
 			std::string &failure) {
 		(void)model;
@@ -49,9 +49,10 @@ public:
 	virtual bool building() const { return false; }
 	// The build's units: done of total in steps, and what it works on (its label).
 	virtual opennova::editor::OperationProgress progress() const { return opennova::editor::OperationProgress(); }
-	// The viewport's state applied again over the picture that stands (a model's level, registers
-	// and rig); never asked while a build runs (the build applies the state as it ends).
-	virtual void update(const opennova::editor::ViewportModel &model) = 0;
+	// The viewport's state applied again over the picture that stands (a model's level, registers,
+	// rig and clip at `clock`; a menu's options); never asked while a build runs (the build applies
+	// the state as it ends, the same way: an Update folded into a build loses nothing).
+	virtual void update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) = 0;
 	// What it built dropped, a build in flight with it.
 	virtual void clear() = 0;
 	// Each pump, after the action: what follows the state continuously over a built picture (a

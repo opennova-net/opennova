@@ -161,6 +161,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/play_controller.cpp

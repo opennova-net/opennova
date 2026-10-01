@@ -33,6 +33,8 @@ private:
 
 	std::shared_ptr<const FileSource> files_;
 	mutable std::unordered_map<std::string, godot::Ref<godot::Texture2D>> cache_;
+	// A material row's chunk textures by type and file ("material-chunk:<type>:<file>").
+	mutable std::unordered_map<std::string, godot::Ref<godot::Texture>> chunks_;
 };
 
 } // namespace opennova

@@ -147,8 +147,8 @@ struct FakeDevices {
 	} };
 	// The Shell's pump after the session's poll.
 	void sync(opennova::editor::ProjectSession &session) { cache.sync(session.viewports(), session.view()); }
-	// A frame of the Shell's (S13 V6): its pump, then the builds stepped, `units` units a frame (the
-	// budget's: each build in flight runs at least one).
+	// A frame of the Shell's (S13 V6): its pump, then the builds stepped, `units` units a frame in all
+	// (the budget's, one at least, shared by the builds in flight, the most recently used first).
 	void frame(opennova::editor::ProjectSession &session, int units = 1) {
 		sync(session);
 		int left = units;

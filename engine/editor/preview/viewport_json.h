@@ -25,8 +25,10 @@ inline constexpr ConcernSet kViewportConcerns =
 // status ("ready", "empty", "failed", and S13 V6's "loading": its device builds the picture over
 // the frames, the last one drawn meanwhile; "failed" too when that build failed), reason (the kind's
 // token: no_menu, unserializable, no_rig, ...; "ready"; "loading", "build_failed"), message, detail,
-// progress (while loading, A1's operation progress: done of total in its unit, its label; null
-// otherwise), revision (the document's now, 0 none), shown_revision (the one its picture shows),
+// progress (while loading, A1's operation progress {generation, done, total, unit, label}: the build
+// generation it counts, done of total in its unit, its label; per generation, so a newer one's
+// begins again at 0; null otherwise), revision (the document's now, 0 none), shown_revision (the one
+// its picture shows),
 // current, builds (how many times its device was told to make its picture: the newest build
 // generation), units ("design": a menu's 800 x 600; "pixels": the picture's), device {attached,
 // width, height, canvas_sized, build} (the size its device draws at: a canvas's own where one sizes

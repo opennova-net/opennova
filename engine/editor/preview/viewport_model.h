@@ -9,7 +9,7 @@
 #include <editor/model/node.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/preview_clock.h>
-#include <editor/preview/viewport_device.h>
+#include <editor/preview/viewport_build_report.h>
 #include <editor/preview/viewport_follow.h>
 #include <editor/preview/viewport_kinds.h>
 
@@ -17,7 +17,9 @@ namespace opennova::editor {
 
 class CanvasHalf;
 class DocumentBase;
+class ViewportDevice;
 struct SessionView;
+struct ViewportDeviceReport;
 
 // What a viewport shows (ADR 0046 S13 V5): a picture of its document (Ready); nothing, there being
 // nothing to show (Empty: no project, no document of its kind, no screen selected, an animation no

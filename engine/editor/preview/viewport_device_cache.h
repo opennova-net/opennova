@@ -51,10 +51,11 @@ public:
 	void sync(Viewports &viewports, const SessionView &view);
 	// Every frame, after the clock ran (Viewports::advance): what the clock drives in each device.
 	void tick(const Viewports &viewports);
-	// Every frame after the tick (S13 V6): each device's build in flight a unit further, at least one
-	// unit each, then units while `more` says the frame's budget lasts (the Shell's: the milliseconds
-	// it gives the builds; a test's, a count), and what each build came to given to its viewport
-	// (Viewports::device_build).
+	// Every frame after the tick (S13 V6): the devices' builds in flight a unit further, the most
+	// recently used device's first: one unit a frame in all whatever the budget (the first build
+	// that has one), then units while `more`, asked after each, says the frame's budget lasts (the
+	// Shell's: the milliseconds it gives the builds, shared by every build; a test's, a count), and
+	// what each build came to given to its viewport (Viewports::device_build).
 	void step(Viewports &viewports, const std::function<bool()> &more);
 	// The device drawing the viewport of `kind` over `path`, now the most recently used and kept
 	// through the next sync; null while none is made, which the next sync makes.

@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
+#include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/basis.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -141,7 +142,7 @@ void ModelViewportApplier::rebuild(const opennova::editor::ViewportModel &viewpo
 }
 
 ApplierStep ModelViewportApplier::step(const opennova::editor::ViewportModel &viewport,
-		const opennova::editor::PreviewClock &clock, std::string &failure) {
+		const opennova::editor::PreviewClock &clock, std::string &) {
 	Build &build = *build_;
 	const Unit unit = build.units[build.next++];
 	switch (unit.kind) {
@@ -157,20 +158,15 @@ ApplierStep ModelViewportApplier::step(const opennova::editor::ViewportModel &vi
 		build.data->build_lod_submeshes(unit.lod, build.skeletal.is_valid(), build.bone_count, false);
 		break;
 	case Unit::Kind::Scene:
-		if (!build.data->has_document()) {
-			// The data refused the model: the last picture stands.
-			failure = "The model did not load: " + opennova::to_std(build.data->get_last_error()) + ".";
-			build_.reset();
-			return ApplierStep::Failed;
-		}
+		// rebuild() builds only over a model, which open_from_model always holds: no scene unit
+		// fails (the protocol's Failed waits for a unit that can).
+		DEV_ASSERT(build.data->has_document());
 		assemble_(build);
 		break;
 	case Unit::Kind::Pose:
-		// The state as it is now (an Update that came while the build ran is folded into this).
-		if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
-		apply_registers_(viewport);
-		play_clip_(viewport, clock);
-		place_camera_(viewport);
+		// The state as it is now, as an Update applies it (one that came while the build ran is
+		// folded into this).
+		apply_state_(viewport, clock);
 		break;
 	}
 	if (build.next < build.units.size()) return ApplierStep::More;
@@ -213,8 +209,16 @@ void ModelViewportApplier::assemble_(Build &build) {
 	applied_skeleton_ = build.skeleton_serial;
 }
 
-void ModelViewportApplier::update(const opennova::editor::ViewportModel &model) {
-	apply_registers_(model);
+void ModelViewportApplier::update(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
+	apply_state_(model, clock);
+}
+
+void ModelViewportApplier::apply_state_(const opennova::editor::ViewportModel &viewport,
+		const opennova::editor::PreviewClock &clock) {
+	if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
+	apply_registers_(viewport);
+	play_clip_(viewport, clock);
+	place_camera_(viewport);
 }
 
 void ModelViewportApplier::clear() {
@@ -226,9 +230,11 @@ void ModelViewportApplier::clear() {
 	applied_lod_ = -1;
 }
 
-// The CTRL registers the options hold (a register let go reads 0 again).
+// The CTRL registers the options hold (a register let go reads 0 again); nothing when the model holds
+// them already (every pump applies the state).
 void ModelViewportApplier::apply_registers_(const opennova::editor::ViewportModel &viewport) {
 	const std::map<std::string, int64_t> &held = model_of(viewport).options().ctrl;
+	if (held == applied_ctrl_) return;
 	object_->begin_ctrl_update();
 	for (const auto &entry : applied_ctrl_) {
 		if (held.find(entry.first) == held.end()) object_->clear_ctrl_value(opennova::to_gd(entry.first));
@@ -284,9 +290,7 @@ void ModelViewportApplier::apply(const opennova::editor::ViewportModel &viewport
 		report.files = build_->files->stamps();
 		return;
 	}
-	if (applied_skeleton_ != model_of(viewport).skeleton_serial()) bind_rig_(viewport);
-	play_clip_(viewport, clock);
-	place_camera_(viewport);
+	apply_state_(viewport, clock);
 	if (files_) report.files = files_->stamps();
 }
 

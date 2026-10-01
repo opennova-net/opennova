@@ -26,10 +26,13 @@ namespace godot {
 // A picture its kind builds over several frames (S13 V6, the model's) is built by the units the
 // Shell's frames step (step(), within the Shell's budget), the build of the viewport's newest
 // generation: a newer Rebuild drops the one in flight and begins anew, a Clear drops it with the
-// picture. Until the build ends the SubViewport is not rendered, nor sized again once it holds a
-// picture (its texture, the last picture, would be made anew empty), so a canvas draws the last
-// picture as it was, never a half-built one; a build that fails keeps that picture until a build of
-// a newer generation ends.
+// picture. While it keeps its last picture (a build runs, or the last one failed) three rules hold,
+// so a canvas draws the last picture as it was, never a half-built one: a draw renders nothing (and
+// sizes nothing once it holds a picture: its texture, the last picture, would be made anew empty);
+// a take sizes nothing either; and a frame renders only what its draw asked for before a take began
+// a build, the last complete picture then, its units waiting for the next frame (the draw comes
+// before the pump in the Shell's frame, and the units after it). A build that fails keeps that
+// picture until a build of a newer generation ends.
 // What each build cost (its frames, its longest frame's units, its longest unit) goes in its report.
 class ViewportDevice final : public opennova::editor::ViewportDevice {
 public:
@@ -56,8 +59,8 @@ public:
 
 private:
 	void size_(int width, int height);
-	// The picture stands as its last build left it: a build runs, or the last one failed.
-	bool held_() const { return build_.loading || build_.failed; }
+	// It keeps the last picture it built: a build runs, or the last one failed.
+	bool keeps_last_() const { return build_.loading || build_.failed; }
 
 	SubViewport *viewport_ = nullptr;
 	uint64_t viewport_id_ = 0; // its instance, checked as the device goes
@@ -71,6 +74,9 @@ private:
 	bool canvas_sized_ = false;
 	// It rendered a picture (a canvas drew it built): there is a last picture to keep.
 	bool rendered_ = false;
+	// The process frame whose draw asked for a render (UINT64_MAX: none yet): that frame renders
+	// what stands as it ends, so no unit runs in it.
+	uint64_t render_frame_ = UINT64_MAX;
 	// Its build (S13 V6): the generation it builds or built, where it stands, what it cost; and the
 	// microseconds its units ran this frame (-1 from the tick until one runs).
 	opennova::editor::ViewportBuildReport build_;

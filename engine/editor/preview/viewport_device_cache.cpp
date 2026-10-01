@@ -97,16 +97,26 @@ void ViewportDeviceCache::tick(const Viewports &viewports) {
 }
 
 void ViewportDeviceCache::step(Viewports &viewports, const std::function<bool()> &more) {
-	for (Slot &slot : slots_) {
-		const ViewportModel *model = viewports.find(slot.path, slot.kind);
+	// The most recently used first: the viewport a canvas drew or a view asked for last is the one
+	// looked at, and the frame's budget goes to it before an older (perhaps hidden) one.
+	std::vector<Slot *> order;
+	order.reserve(slots_.size());
+	for (Slot &slot : slots_) order.push_back(&slot);
+	std::sort(order.begin(), order.end(), [](const Slot *a, const Slot *b) { return a->used > b->used; });
+	// One unit a frame in all, whatever the budget: the first build that has one runs it; each unit
+	// after it, of that build or a later one, runs only while `more` says the budget lasts (asked once
+	// after each unit, so a budget of N units is N units however many builds share them).
+	bool may = true;
+	for (Slot *slot : order) {
+		if (!may) break;
+		const ViewportModel *model = viewports.find(slot->path, slot->kind);
 		if (!model) continue;
-		// At least one unit of a build in flight each frame; the next ones while the budget lasts.
 		bool stepped = false;
-		while (slot.device->step(*model, viewports.clock())) {
+		while (may && slot->device->step(*model, viewports.clock())) {
 			stepped = true;
-			if (!more || !more()) break;
+			may = more && more();
 		}
-		if (stepped) viewports.device_build(slot.path, slot.kind, slot.device->build());
+		if (stepped) viewports.device_build(slot->path, slot->kind, slot->device->build());
 	}
 }
 
