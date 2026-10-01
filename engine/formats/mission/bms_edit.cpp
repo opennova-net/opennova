@@ -91,9 +91,11 @@ void sync_counts(bms::File &file) {
 		loadout_chunk.push_back(0);
 		loadout_chunk.insert(loadout_chunk.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
 		loadout_chunk.push_back(0);
-		const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
-		loadout_chunk.insert(loadout_chunk.end(), flags.begin(), flags.end());
-		loadout_chunk.push_back(0);
+		if (entry.has_flags) { // a record that wrote three strings writes three (bms.h)
+			const std::string flags = entry.flags.empty() ? "-1" : entry.flags;
+			loadout_chunk.insert(loadout_chunk.end(), flags.begin(), flags.end());
+			loadout_chunk.push_back(0);
+		}
 	}
 	if (!loadout_chunk.empty()) {
 		loadout_chunk.push_back(0);
@@ -486,7 +488,7 @@ std::vector<WeaponLoadoutEntry> weapon_loadout(const bms::File &file) {
 	std::vector<WeaponLoadoutEntry> out;
 	out.reserve(file.loadout.entries.size());
 	for (const bms::WeaponLoadoutRecord &entry : file.loadout.entries) {
-		out.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary, entry.flags});
+		out.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary, entry.flags, entry.has_flags});
 	}
 	return out;
 }
@@ -508,7 +510,7 @@ bool set_weapon_loadout(bms::File &file, const std::vector<WeaponLoadoutEntry> &
 	for (const WeaponLoadoutEntry &entry : entries) {
 		// Names are guaranteed non-empty by the validation above.
 		records.push_back({entry.name, entry.ammo_primary, entry.ammo_secondary,
-		                   entry.flags.empty() ? "-1" : entry.flags});
+		                   entry.flags.empty() ? "-1" : entry.flags, entry.has_flags});
 	}
 	file.loadout.entries = std::move(records);
 	sync_counts(file);

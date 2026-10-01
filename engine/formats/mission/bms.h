@@ -733,8 +733,11 @@ struct Event {
 
 // [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
 // Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
-// docs/mission/bms-event-runtime-re.md (absorbed param-semantics notes). *IsWithinArea (sub 10): param2 = area-trigger ARRAY INDEX, param1 = tested
-// group/entity. Single distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
+// docs/mission/bms-event-runtime-re.md section 7 (as rows: formats/mission/mission_params.h).
+// *IsWithinArea (sub 10): param2 = the area trigger's ID in the file, which the game remaps to its
+// array index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]; param1 = the
+// tested group/entity. An entity parameter is the entity's SSN (its id), never an index. Single
+// distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
 struct Trigger {
     int32_t condition_flags;
     TriggerMainType main_type;
@@ -766,7 +769,9 @@ struct Trigger {
 // [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
 // Per-type param meaning in docs/mission/bms-event-runtime-re.md §7. MisvarChange (5): action_sub_type
 // 1=Set/2=Add/3=Sub/4=Inc/5=Dec on dword_C6B240[param1] with param2. ResetEvent (34): clears events[param1]
-// active flag. reserved0/reserved1 unused by the dispatcher.
+// active flag. AreaAiRed / AreaAiBlue (12, 13): param1 = the area trigger's ID in the file, remapped at
+// mission start [orig: EventTrigger_ResolveZoneActionRefs @0x453100]. reserved0/reserved1 unused by the
+// dispatcher.
 struct Action {
     int32_t reserved0;
     ActionType action_type;
@@ -792,11 +797,17 @@ struct BoundingBox {
 // load by AIProfile_SanitizeConfigData @ 0x40cfe0; net-re §5.63]: ammo_primary/ammo_secondary
 // are requested clip counts (-1 = the weapon's default fill), and flags is the per-ammo
 // damage-class request byte (1 = x0.9, 2 = x1.1, every other value neutral).
+// A record may write three strings alone: the sanitizer then inserts "-1" and leaves the
+// candidate as the next record's name [orig: AIProfile_SanitizeConfigData @ 0x40cfe0].
+// has_flags is whether the record wrote its fourth string (an optional field's presence,
+// ADR 0002): false reads flags as the "-1" the sanitizer inserts and writes three strings.
+// [corpus: 577 of the 838 shipped records write three]
 struct WeaponLoadoutRecord {
     std::string name;
     std::string ammo_primary;
     std::string ammo_secondary;
     std::string flags = "-1";
+    bool has_flags = true;
 };
 
 struct WeaponLoadout {

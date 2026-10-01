@@ -340,6 +340,20 @@ LabelledField labelled(const MissionField &field) {
 		out.value.set = [row](const RecordHandle &record, const Value &value, std::string &error) {
 			return fits(*row, value, error) && row->set(record.data, value, error);
 		};
+	// A loadout entry's fourth string, which a record may leave out (bms::WeaponLoadoutRecord::
+	// has_flags): left out it reads the "-1" the game's sanitizer inserts [orig:
+	// AIProfile_SanitizeConfigData @ 0x40cfe0], which is the value a Clear leaves it holding (what
+	// the file then says, so the record reads as its reload does), and a Set of it writes it.
+	if (field.record == MissionRecord::Loadout && same_text(field.key, "flags")) {
+		entry.optional = true;
+		out.value.present = [](const RecordHandle &record) { return record.as<bms::WeaponLoadoutRecord>().has_flags; };
+		out.value.set_present = [](const RecordHandle &record, bool present, std::string &) {
+			bms::WeaponLoadoutRecord &entry = record.as<bms::WeaponLoadoutRecord>();
+			entry.has_flags = present;
+			if (!present) entry.flags = "-1";
+			return true;
+		};
+	}
 	if (field.record == MissionRecord::Event)
 		for (const RunRow &run : kRuns) {
 			if (!same_text(field.key, run.first)) continue;

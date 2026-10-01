@@ -618,6 +618,9 @@ int set_to_itself(const std::vector<uint8_t> &bytes, const std::string &name,
 				}
 				++counts.fields;
 				if (!kind.value(place).set || field.read_only) continue;
+				// A field the file leaves out (a loadout entry's fourth string) is not set: a Set writes
+				// it, and the core never sets a field to the value it reads (Document::apply).
+				if (kind.value(place).present && !kind.value(place).present(record)) continue;
 				if (!kind.value(place).set(record, value, error)) {
 					std::fprintf(stderr, "%s: %s.%s refuses its own value: %s\n", name.c_str(), kind.row().token,
 					             field.id.c_str(), error.c_str());
