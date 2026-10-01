@@ -70,6 +70,11 @@ struct LobbyConnState {
 	// ServerAuth.SK. Retail echoes this as session_id on inbound SESSION
 	// packets. Was a hardcoded constant before G.2 (2026-04-28).
 	uint32_t server_sk = 0;
+	// The reconnect counters the 0x42 handed this connection: DCNT as sent and RCNT one past
+	// the client's when DCNT > 0, echoed in the 0x82.
+	// [orig: NapiNPProtocol_HandleClientJoin @0x62c28d..0x62c2a3; SendSessionInit @0x62125d]
+	uint32_t dcnt = 0;
+	uint32_t rcnt = 0;
 	// Inbound fragment reassembly state. Multi-packet messages
 	// (e.g. ClientRequestVerifyResult ~3.4 KB per
 	// docs/net/novaworld-net-re.md) carry FRAG_CONT (0x04) on
@@ -182,6 +187,17 @@ private:
 	// connections owned by other listeners.
 	std::unordered_set<PeerAddr, PeerAddrHash> lobby_peers_;
 	std::unordered_map<PeerAddr, LobbyConnState, PeerAddrHash> lobby_states_;
+	// A dropped connection's lobby identity, parked for its NWU reconnect: the client keeps its
+	// CI and address and re-joins with a fresh CK, counting the disconnect (DCNT > 0); that 0x42
+	// takes the parked state back, so its re-host (CurrentlyHosting=1) keeps its RID and GSID.
+	// Service policy (the retail service side has no witness); an entry lapses after
+	// kParkedLobbyTtlMs or on any fresh join from its address. Guarded by lobby_states_mu_.
+	struct ParkedLobbyState {
+		uint32_t client_ci = 0;
+		LobbyState lobby;
+		uint64_t parked_ms = 0;
+	};
+	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
 	opennova::db::Database *db_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;
 };

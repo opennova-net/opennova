@@ -43,7 +43,8 @@ const DEFAULT_MAX_PLAYERS := 32
 ## host could have configured.
 const SPECTATOR_PASSWORD_MAX_LENGTH := 17
 ## Which browser/lobby the session was requested from. The LAN channel never reads or
-## manufactures NovaWorld service configuration; the NovaWorld channel supplies the gate.
+## manufactures NovaWorld service configuration; a NovaWorld host is hosted by the
+## NovaWorld panel's logged-in session (NovaWorldClient.start_hosting).
 const CHANNEL_LAN := "LAN"
 const CHANNEL_NOVAWORLD := "NovaWorld"
 
@@ -70,10 +71,7 @@ func _init() -> void:
 	lan_mode = 1
 	bind_port = DEFAULT_LAN_PORT
 	custom_text = NetProtocol.custom_text_default()
-	nw_gate_host = ""
-	nw_gate_port = DEFAULT_GATE_PORT
-	region_index = 0   ## the gate row Region selector: 0/1/2 -> STRNOVA07/08/09
-	advertise = ""     ## explicit advertised-IP override for the gate row
+	region_index = 0   ## the hosted Host row Region selector: 0/1/2 -> STRNOVA07/08/09
 	respawn_time = NetProtocol.DEFAULT_RESPAWN_TIME
 	time_limit_minutes = NetProtocol.DEFAULT_TIME_LIMIT_MINUTES
 	replay_enabled = NetProtocol.DEFAULT_REPLAY_ENABLED

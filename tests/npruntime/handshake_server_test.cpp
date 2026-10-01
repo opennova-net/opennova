@@ -2459,6 +2459,50 @@ bool run_retransmit_0x42_keeps_keys() {
 	return true;
 }
 
+// The reconnect counters: a 0x42 hands the node DCNT as sent and RCNT one past the client's when
+// it counted a disconnect (DCNT > 0, a signed compare); the 0x82 echoes RCNT only when nonzero.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62c28d..0x62c2a3; SendSessionInit @0x62125d]
+bool run_reconnect_counters_echo_rcnt() {
+	struct Case {
+		uint32_t dcnt;
+		uint32_t rcnt;
+		uint32_t echoed;
+	};
+	const Case cases[] = {{0, 0, 0}, {1, 0, 1}, {1, 2, 3}, {0, 5, 5}, {0x80000000u, 2, 2}};
+	uint16_t port = 30900;
+	for (const Case &c : cases) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+		const PeerAddr peer{0x0100007Fu, port++};
+		ClientAuth auth = make_valid_client_auth(1, 0x24681357u, kHostKey, "Rejoiner",
+				"RECONNECTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCD");
+		auth.dcnt = c.dcnt;
+		auth.rcnt = c.rcnt;
+		const std::vector<uint8_t> bytes = client_auth_to_bytes(auth);
+		ClientAuth parsed;
+		if (!expect(parse_client_auth(bytes.data(), bytes.size(), parsed) && parsed.dcnt == c.dcnt &&
+		                    parsed.rcnt == c.rcnt,
+		            "the 0x42's DCNT/RCNT round-trip")) return false;
+		const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, bytes);
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!r.outbound.empty() &&
+		                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa),
+		            "the re-join draws a 0x82")) return false;
+		if (!expect(sa.rcnt == c.echoed, "the 0x82 echoes RCNT (the client's + 1 when DCNT > 0)")) return false;
+		const std::string rcnt_tag("RCNT", 5); // the TLV name with its NUL
+		const bool has_tag =
+				std::search(body.begin(), body.end(), rcnt_tag.begin(), rcnt_tag.end()) != body.end();
+		if (!expect(has_tag == (c.echoed != 0), "the 0x82 carries RCNT only when nonzero")) return false;
+		const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
+		if (!expect(conn.dcnt == c.dcnt && conn.rcnt == c.echoed, "the node keeps DCNT and RCNT")) return false;
+	}
+	return true;
+}
+
 // The join leg enforces capacity. A dedicated host with max_players == 2 admits two joiners; the third
 // 0x42 is rejected. [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0 — current_player_count >= max]
 // ClientAuth JSP is the submitted side/squad password; TR is the signed team
@@ -3575,6 +3619,7 @@ int main(int argc, char **argv) {
 	ok = run_full_player_info_is_recipient_scoped_lan_metadata() && ok;
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
+	ok = run_reconnect_counters_echo_rcnt() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
 	ok = run_character_join_vars_parsed() && ok;

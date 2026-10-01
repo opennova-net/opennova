@@ -1,6 +1,8 @@
 #include "network/novaworld_client.h"
 
+#include "network/host_session_options.h"
 #include "network/novaworld_identity.h"
+#include "rtxt/rtxt_string_file.h"
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
@@ -18,6 +20,7 @@
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
+#include <net/novaworld/connect_or_host.h>
 #include <net/novaworld/gate_response.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/http_flow.h>
@@ -58,6 +61,8 @@ const char *state_name(NovaWorldClient::State s) {
 	case NovaWorldClient::STATE_ERROR: return "error";
 	case NovaWorldClient::STATE_JOINING: return "joining";
 	case NovaWorldClient::STATE_IN_GAME_HELLO: return "in_game_hello";
+	case NovaWorldClient::STATE_HOSTING_REQUESTED: return "hosting_requested";
+	case NovaWorldClient::STATE_HOSTING: return "hosting";
 	}
 	return "unknown";
 }
@@ -65,7 +70,7 @@ const char *state_name(NovaWorldClient::State s) {
 } // namespace
 
 NovaWorldClient::NovaWorldClient() :
-		lobby_(make_lobby_hooks()) {}
+		lobby_(make_lobby_hooks()), host_role_(lobby_, make_host_hooks()) {}
 NovaWorldClient::~NovaWorldClient() = default;
 
 void NovaWorldClient::_bind_methods() {
@@ -75,6 +80,8 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_gate_port"), &NovaWorldClient::get_gate_port);
 	ClassDB::bind_method(D_METHOD("set_player_name", "name"), &NovaWorldClient::set_player_name);
 	ClassDB::bind_method(D_METHOD("get_player_name"), &NovaWorldClient::get_player_name);
+	ClassDB::bind_method(D_METHOD("set_gametext", "gametext"), &NovaWorldClient::set_gametext);
+	ClassDB::bind_method(D_METHOD("get_gametext"), &NovaWorldClient::get_gametext);
 
 	ClassDB::bind_method(D_METHOD("start"), &NovaWorldClient::start);
 	ClassDB::bind_method(D_METHOD("stop"), &NovaWorldClient::stop);
@@ -93,6 +100,10 @@ void NovaWorldClient::_bind_methods() {
 	                     &NovaWorldClient::apply_ping_results);
 	ClassDB::bind_method(D_METHOD("login", "username", "password"), &NovaWorldClient::login);
 	ClassDB::bind_method(D_METHOD("join", "rid"), &NovaWorldClient::join);
+	ClassDB::bind_method(D_METHOD("start_hosting", "options"), &NovaWorldClient::start_hosting);
+	ClassDB::bind_method(D_METHOD("is_hosting"), &NovaWorldClient::is_hosting);
+	ClassDB::bind_method(D_METHOD("stop_hosting"), &NovaWorldClient::stop_hosting);
+	ClassDB::bind_method(D_METHOD("stop_playing"), &NovaWorldClient::stop_playing);
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("get_join_proxy_node"), &NovaWorldClient::get_join_proxy_node);
 	ClassDB::bind_method(D_METHOD("get_join_proxy_cookie"), &NovaWorldClient::get_join_proxy_cookie);
@@ -112,6 +123,8 @@ void NovaWorldClient::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "host"),     "set_host", "get_host");
 	ADD_PROPERTY(PropertyInfo(Variant::INT,    "gate_port"), "set_gate_port", "get_gate_port");
 	ADD_PROPERTY(PropertyInfo(Variant::STRING, "player_name"), "set_player_name", "get_player_name");
+	ADD_PROPERTY(PropertyInfo(Variant::OBJECT, "gametext", PROPERTY_HINT_RESOURCE_TYPE, "RtxtStringFile"),
+	             "set_gametext", "get_gametext");
 
 	ADD_SIGNAL(MethodInfo("server_list_updated", PropertyInfo(Variant::ARRAY, "rows")));
 	ADD_SIGNAL(MethodInfo("server_list_failed", PropertyInfo(Variant::STRING, "reason")));
@@ -131,6 +144,26 @@ void NovaWorldClient::_bind_methods() {
 	// The service punted us (ServerLeaveNovaWorld): the MsgCode the menutxt
 	// ERR_PUNTEDFROMNOVAWORLD text substitutes for its [[$]].
 	ADD_SIGNAL(MethodInfo("punted", PropertyInfo(Variant::INT, "msg_code")));
+	// The host leg (start_hosting): the session is hosting (the shell loads the
+	// mission now), or the NWEC tag the NovaWorld error dialog shows.
+	ADD_SIGNAL(MethodInfo("hosting_started"));
+	ADD_SIGNAL(MethodInfo("host_failed", PropertyInfo(Variant::STRING, "reason")));
+	// The service stopped the hosting (ServerStopHosting): its message key.
+	ADD_SIGNAL(MethodInfo("hosting_stopped", PropertyInfo(Variant::STRING, "reason")));
+	// A ServerCommand from the service to the hosting session: the verb name, the
+	// target selector ("", "ByIndex", "ByIpAndPort", "ByName", "ByPCID") and the
+	// argument tokens.
+	ADD_SIGNAL(MethodInfo("server_command", PropertyInfo(Variant::STRING, "verb"),
+	                      PropertyInfo(Variant::STRING, "target"),
+	                      PropertyInfo(Variant::PACKED_STRING_ARRAY, "args")));
+	// The service's ServerPlayerEnterResult for a joiner the hosting session
+	// announced: the joiner's ConnectionId, Success, MsgCode, PlayerTicket and
+	// AccessCodeList.
+	ADD_SIGNAL(MethodInfo("player_enter_result", PropertyInfo(Variant::INT, "connection_id"),
+	                      PropertyInfo(Variant::INT, "success"),
+	                      PropertyInfo(Variant::INT, "msg_code"),
+	                      PropertyInfo(Variant::STRING, "player_ticket"),
+	                      PropertyInfo(Variant::STRING, "access_code_list")));
 
 	BIND_ENUM_CONSTANT(STATE_IDLE);
 	BIND_ENUM_CONSTANT(STATE_GATE_PROBING);
@@ -141,6 +174,8 @@ void NovaWorldClient::_bind_methods() {
 	BIND_ENUM_CONSTANT(STATE_ERROR);
 	BIND_ENUM_CONSTANT(STATE_JOINING);
 	BIND_ENUM_CONSTANT(STATE_IN_GAME_HELLO);
+	BIND_ENUM_CONSTANT(STATE_HOSTING_REQUESTED);
+	BIND_ENUM_CONSTANT(STATE_HOSTING);
 }
 
 void NovaWorldClient::set_host(const String &host) { host_ = host; }
@@ -149,6 +184,10 @@ void NovaWorldClient::set_gate_port(int port) { gate_port_ = port; }
 int NovaWorldClient::get_gate_port() const { return gate_port_; }
 void NovaWorldClient::set_player_name(const String &name) { player_name_ = name; }
 String NovaWorldClient::get_player_name() const { return player_name_; }
+void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
+	gametext_ = gametext;
+	host_role_.set_gametext(gametext);
+}
 
 Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
 
@@ -228,16 +267,27 @@ void NovaWorldClient::start() {
 
 void NovaWorldClient::stop() {
 	if (lobby_.session() && lobby_.sockets_open()) {
-		// A play in flight is cancelled the retail way (ClientStopPlaying, the
-		// ConnectOrHost escape/timeout leg), then the session leaves.
-		if (play_in_flight_) {
-			lobby_.send(lobby_.session()->build_stop_playing());
-			play_in_flight_ = false;
-		}
-		if (state_ == STATE_CONNECTED || state_ == STATE_SESSION_HELLO ||
-		    state_ == STATE_SESSION_JOIN || state_ == STATE_JOINING ||
-		    state_ == STATE_IN_GAME_HELLO) {
-			lobby_.send(lobby_.session()->build_goodbye());
+		// A play or a hosting in flight is cancelled the retail way
+		// (ClientStopPlaying / ClientStopHosting, the ConnectOrHost escape/timeout
+		// legs), and an established one leaves the same way the NovaWorld menu's
+		// re-entry after a match leaves it (each statement empty outside its own
+		// states); then the session goes.
+		const std::vector<uint8_t> stop_playing = lobby_.session()->build_stop_playing();
+		if (!stop_playing.empty()) lobby_.send(stop_playing);
+		play_in_flight_ = false;
+		host_role_.stop();
+		opennova::ClientSession *session = lobby_.session();
+		if (session->is_verified()) {
+			// The reset's teardown of a connected connection sends its disconnect burst.
+			const std::vector<uint8_t> goodbye = session->build_goodbye();
+			for (size_t i = 0; i < session->disconnect_burst_count(); ++i) {
+				lobby_.send(goodbye);
+			}
+		} else if (!session->reconnecting() &&
+		           (state_ == STATE_SESSION_HELLO || state_ == STATE_SESSION_JOIN)) {
+			// A first connect still in its handshake says goodbye once; a connection a
+			// reconnect is still re-establishing has nothing to tear down.
+			lobby_.send(session->build_goodbye());
 		}
 	}
 	if (browser_http_ != nullptr) {
@@ -272,6 +322,7 @@ void NovaWorldClient::_process(double delta) {
 	// progress arrives through the hooks (sync_session_state / traces).
 	lobby_.process(delta);
 	drain_session_notices();
+	host_role_.process(delta);
 
 	// The start-playing poll: the ServerPlayResult must land within the connect
 	// window (SESSION_CONNECT_TIMEOUT_MS), else the play is cancelled (NWEC02).
@@ -436,13 +487,18 @@ void NovaWorldClient::sync_session_state() {
 	const opennova::ClientSession *session = lobby_.session();
 	if (!session) return;
 	using S = opennova::ClientSession::State;
+	// A reconnect runs under the leg the session was in: a play or a hosting keeps
+	// its public state while the session re-probes, re-joins and re-verifies
+	// (ClientSession::reconnecting); a lobby session reads as connecting again.
+	const bool in_leg = state_ == STATE_JOINING || state_ == STATE_IN_GAME_HELLO ||
+			state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING;
 	switch (session->state()) {
 	case S::Hello:
-		enter_state(STATE_SESSION_HELLO);
+		if (!in_leg) enter_state(STATE_SESSION_HELLO);
 		break;
 	case S::Auth:
 	case S::Verifying:
-		if (state_ != STATE_SESSION_JOIN) {
+		if (!in_leg && state_ != STATE_SESSION_JOIN) {
 			enter_state(STATE_SESSION_JOIN);
 		}
 		break;
@@ -450,13 +506,16 @@ void NovaWorldClient::sync_session_state() {
 		// A verified lobby remains active while the separate HTTP join runs.
 		// Keep transactional public states from being overwritten by keepalives.
 		if (state_ != STATE_CONNECTED && state_ != STATE_JOINING &&
-		    state_ != STATE_IN_GAME_HELLO) {
+		    state_ != STATE_IN_GAME_HELLO && state_ != STATE_HOSTING_REQUESTED &&
+		    state_ != STATE_HOSTING) {
 			enter_state(STATE_CONNECTED);
 		}
 		break;
 	case S::Closed:
 		// The peer closed / punted us, or the receive-silence reap fired: the
-		// latched disconnect record's tag is the reason.
+		// latched disconnect record's tag is the reason -- unless the session is
+		// reconnecting, which it does on its own while its word is set.
+		if (session->reconnecting()) break;
 		if (session->disconnected_by_peer() && state_ != STATE_DISCONNECTED) {
 			play_in_flight_ = false;
 			enter_state(STATE_DISCONNECTED, opennova::to_gd(session->last_error()));
@@ -478,6 +537,7 @@ void NovaWorldClient::drain_session_notices() {
 	if (!session) return;
 	using Notice = opennova::ClientSession::Notice;
 	for (const Notice &notice : session->take_notices()) {
+		if (host_role_.handle_notice(notice)) continue;
 		switch (notice.kind) {
 		case Notice::Kind::PlayResult:
 			if (!play_in_flight_) break;
@@ -865,6 +925,90 @@ void NovaWorldClient::abort_playing(const String &tag) {
 	play_in_flight_ = false;
 	enter_state(STATE_CONNECTED);
 	emit_signal("join_failed", tag);
+}
+
+// The hosting half's outcomes, mapped onto our State + signals.
+NwuHostRole::Hooks NovaWorldClient::make_host_hooks() {
+	NwuHostRole::Hooks hooks;
+	hooks.on_hosting = [this]() {
+		enter_state(STATE_HOSTING);
+		emit_signal("hosting_started");
+	};
+	hooks.on_failed = [this](const String &tag) {
+		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
+			enter_state(STATE_CONNECTED);
+		}
+		emit_signal("host_failed", tag);
+	};
+	hooks.on_stopped = [this](const String &reason) {
+		if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
+			enter_state(STATE_CONNECTED);
+		}
+		emit_signal("hosting_stopped", reason);
+	};
+	hooks.on_command = [this](const String &verb, const String &target, const PackedStringArray &args) {
+		emit_signal("server_command", verb, target, args);
+	};
+	hooks.on_player_enter_result = [this](int64_t connection_id, int success, int msg_code,
+			const String &player_ticket, const String &access_code_list) {
+		emit_signal("player_enter_result", connection_id, success, msg_code, player_ticket,
+				access_code_list);
+	};
+	return hooks;
+}
+
+// The NovaWorld menu's Host, on this logged-in session: ConnectOrHost's
+// teamId != 0 leg (engine: net/novaworld/connect_or_host.h). Each failure
+// leaves its NWEC tag for the error dialog, and only a hosting session (state 6)
+// lets the shell start the mission.
+void NovaWorldClient::start_hosting(const Ref<HostSessionOptions> &options) {
+	opennova::ClientSession *session = lobby_.session();
+	const opennova::GateResponse &gate = lobby_.gate_response();
+	const bool set_up = options.is_valid() && session != nullptr && lobby_.sockets_open();
+	const char *refusal = opennova::host_leg_refusal(set_up,
+			set_up ? session->session_flags() : 0u, server_info_.is_valid(), gate.lobby_name);
+	if (refusal != nullptr) {
+		emit_signal("host_failed", String(refusal));
+		return;
+	}
+	opennova::HostRegistration cfg;
+	cfg.lobby_name = gate.lobby_name;
+	cfg.server_name = opennova::to_std(options->get_server_name());
+	cfg.max_players = opennova::host_leg_max_players(options->get_max_players(),
+			!options->get_serve_and_play());
+	cfg.password = !options->get_server_password().is_empty();
+	cfg.listen_host = options->get_serve_and_play();
+	cfg.lan_only = options->get_server_lan_only();
+	cfg.expansion = opennova::to_std(options->get_expansion());
+	cfg.region_index = options->get_region_index();
+	const String mission = options->get_mission_name().is_empty()
+			? options->get_mission_file().get_file().get_basename()
+			: options->get_mission_name();
+	cfg.mission_name = opennova::to_std(mission);
+	enter_state(STATE_HOSTING_REQUESTED);
+	host_role_.request(cfg);
+}
+
+// The NovaWorld menu's re-entry after a match leaves the hosting and the play
+// and keeps the verified session (CGameSession_StopHosting / StopPlaying, the
+// ClientSession statements).
+void NovaWorldClient::stop_hosting() {
+	host_role_.stop();
+	if (state_ == STATE_HOSTING_REQUESTED || state_ == STATE_HOSTING) {
+		enter_state(STATE_CONNECTED);
+	}
+}
+
+void NovaWorldClient::stop_playing() {
+	opennova::ClientSession *session = lobby_.session();
+	if (session != nullptr && lobby_.sockets_open()) {
+		const std::vector<uint8_t> dg = session->build_stop_playing();
+		if (!dg.empty()) lobby_.send(dg);
+	}
+	play_in_flight_ = false;
+	if (state_ == STATE_JOINING || state_ == STATE_IN_GAME_HELLO) {
+		enter_state(STATE_CONNECTED);
+	}
 }
 
 // The service admitted the play (state 8). Hand the in-match host:port off to the game layer

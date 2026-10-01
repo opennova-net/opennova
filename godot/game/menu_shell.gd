@@ -358,6 +358,7 @@ func _load_root_assets() -> void:
 	# the previous root's (null clears) instead of keeping its strings alive.
 	Strings.register_table(Strings.TABLE_MENUTXT, _text)
 	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
+	Strings.register_table(Strings.TABLE_GAMEERR, _load_text("gameerr.bin"))
 	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
 	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))

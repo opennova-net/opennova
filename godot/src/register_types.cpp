@@ -58,6 +58,7 @@
 #include "world/game_world.h"
 #include "world/load_timeline.h"
 #include "world/loading_screen_info.h"
+#include "world/post_mission_route.h"
 #include "world/resource_root_resolver.h"
 #include "world/runtime_perf_counters.h"
 #include "world/world_view.h"
@@ -149,7 +150,6 @@
 #include "network/host_session_options.h"
 #include "network/novaworld_server_row.h"
 #include "network/novaworld_gate_info.h"
-#include "network/novaworld_host.h"
 #include "network/udp_datagram.h"
 #include "network/udp_pump.h"
 #include "network/lan_session.h"
@@ -401,6 +401,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(LoadTimelineSpan);
 	GDREGISTER_CLASS(LoadTimeline);
 	GDREGISTER_CLASS(LoadingScreenInfo);
+	GDREGISTER_CLASS(PostMissionRoute);
 	GDREGISTER_CLASS(RuntimePerfCounters);
 	GDREGISTER_CLASS(WorldView);
 	GDREGISTER_CLASS(ArmoryWorldView);
@@ -449,7 +450,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NovaWorldServerRow);
 	GDREGISTER_CLASS(NovaWorldGateInfo);
 	GDREGISTER_CLASS(NovaWorldServerBrowser);
-	GDREGISTER_CLASS(NovaWorldHost);
 	GDREGISTER_CLASS(UdpDatagram);
 	GDREGISTER_CLASS(UdpPump);
 	GDREGISTER_CLASS(LanSession);
