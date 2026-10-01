@@ -64,6 +64,9 @@ public:
 	// A file of the origin as import_assets reads it (an archive's or the install's decoded),
 	// by the name `find` spells.
 	bool read(const std::string &name, std::vector<uint8_t> &out) const;
+	// The size of a file of the origin as it is stored there (a folder's file on the disk, an
+	// archive's entry), without reading it; 0 when the origin has no such file.
+	uint64_t size(const std::string &name) const;
 	// What a file of the origin is to the engine once copied as the game's own: its kind by its
 	// name, by its bytes where the name cannot tell (a .bin, a chunk container), a PNG a
 	// texture (it gets no import record); Unknown when the origin has no such file.
@@ -116,6 +119,9 @@ struct ImportPlanRow {
 	std::string destination; // project-relative, where import_assets writes it
 	std::string made_from;   // on a converter's output, its source's name ("" = the file itself)
 	std::string found_in;    // where it comes from, in words
+	// The file's bytes as it is stored where it comes from (a converter's output: as made); 0 for
+	// one not found. What the dialog sums before anything is copied.
+	uint64_t size = 0;
 	// The first reference that wanted it (empty for a selected source); not found, the first
 	// whose lookup nothing planned meets (two references to one name can want different files:
 	// a diffuse row takes a .dds the plan brings, a plain row does not).
@@ -159,15 +165,55 @@ struct ImportPlan {
 	// The cap on the files planned stopped the plan: files of the selection past it, or
 	// dependencies, are not in it.
 	bool truncated = false;
+
+	// The files the plan takes (every row but those not found) and their bytes as stored.
+	size_t file_count() const;
+	uint64_t total_bytes() const;
 };
 
-inline constexpr size_t kImportPlanFileCap = 1000;
+// A guard, not a limit a real import meets (ADR 0046 S14: a mission's closure is most of a game
+// install, 8,700 files of JO's 9,290): the walk stops there and says so.
+inline constexpr size_t kImportPlanFileCap = 50000;
+
+// The plan made a step at a time (ADR 0046 S14; S13 A3's rule for every long job): the game
+// install mounted where the plan looks there (unless the caller mounted it), then the chosen
+// sources taken, a few a step, then, with dependencies, the stylesheets and the walk, each queued
+// file read and its references followed within the step's bytes. A file's bytes are read when its
+// references are followed, never when it is queued, and a file the graph does not read is not
+// read at all (its kind from its name, its size from where it is stored). The project's paths,
+// document, scan and graph are the caller's and outlive the planner.
+class ImportPlanner {
+public:
+	ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
+	              const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
+	              std::string retail_directory, size_t file_cap = kImportPlanFileCap,
+	              std::shared_ptr<const ImportOrigin> install_mounted = nullptr);
+	~ImportPlanner();
+	ImportPlanner(const ImportPlanner &) = delete;
+	ImportPlanner &operator=(const ImportPlanner &) = delete;
+
+	// One step within `bytes` read (at least one source or file); true once the plan is whole.
+	bool step(uint64_t bytes);
+	bool done() const;
+	// Its progress: the files it knows of so far (those planned and the chosen sources not yet
+	// taken; the walk finds more as it reads, and the count never falls), and those done with (a
+	// planned file whose references were followed, or that has none to follow).
+	size_t files_known() const;
+	size_t files_done() const;
+	// The plan: whole once done (taken once; the planner holds none after).
+	ImportPlan take();
+
+private:
+	class Walk;
+	std::unique_ptr<Walk> walk_;
+};
 
 // The plan of importing `sources` into the project (its files `scan`, resolved by `graph`),
 // with the files they need when `with_dependencies`, looked for in the game install at
 // `retail_directory` too ("" for none), `file_cap` files at most. `install_mounted`: the game
 // install at `retail_directory` opened already (ImportOrigin::Kind::GameInstall), which a caller
 // stepping the plan mounts in a step of its own (S13 A3); null, the plan mounts it when it needs it.
+// An ImportPlanner run to its end.
 ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
                        const std::string &retail_directory, size_t file_cap = kImportPlanFileCap,

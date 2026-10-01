@@ -87,6 +87,18 @@ bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) cons
 	return read_file_bytes((fs::path(path_) / name).generic_string(), out, error);
 }
 
+uint64_t ImportOrigin::size(const std::string &name) const {
+	const std::string spelling = find(name);
+	if (spelling.empty()) return 0;
+	if (kind_ != Kind::Folder) {
+		uint64_t stored = 0;
+		return vfs_.file_size(spelling, stored) ? stored : 0;
+	}
+	std::error_code ec;
+	const auto on_disk = fs::file_size(fs::path(path_) / spelling, ec);
+	return ec ? 0 : static_cast<uint64_t>(on_disk);
+}
+
 AssetKind ImportOrigin::file_kind(const std::string &name) const {
 	const std::string spelling = find(name);
 	if (spelling.empty()) return AssetKind::Unknown;
@@ -144,21 +156,98 @@ bool same_file(const ImportChoice &a, const ImportChoice &b) {
 	return x.parent_path() == y.parent_path() && key(x.filename().string()) == key(y.filename().string());
 }
 
-// A file the walk reads the references of: its row, the place it came from, its bytes as
-// read (none for a file whose kind needs none read), and what they reference once read.
-struct Node {
+// A file the walk reads the references of: its row, the place it came from, its bytes when
+// they are in hand already (a loose source's, a converter's output: `loaded`; any other file's
+// are read when its references are followed), and what they reference once read.
+struct PlanNode {
 	size_t row = 0;
 	const ImportOrigin *origin = nullptr;
 	std::vector<uint8_t> bytes;
+	bool loaded = false;
 	enum class Read { Not, Done, Failed } read = Read::Not;
 	Extracted content;
 };
 
-class Planner {
+// What one source or file costs a step besides the bytes it reads: placing its row resolves its
+// destination on the disk (check_project_file_name), so a listing of an install's nine thousand
+// names, which reads none of them, still steps a few files at a time (16 to the editor's 64 KiB
+// step, as a scan's directory entries).
+constexpr uint64_t kItemCost = 4096;
+
+} // namespace
+
+class ImportPlanner::Walk {
 public:
-	Planner(ImportPlan &plan, const ProjectPaths &paths, const ProjectDocument &document, const AssetScan &scan,
-	        const AssetGraph &graph, size_t cap)
-	    : plan_(plan), paths_(paths), document_(document), scan_(scan), graph_(graph), cap_(cap) {}
+	Walk(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
+	     const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph, std::string retail_directory,
+	     size_t cap, std::shared_ptr<const ImportOrigin> install_mounted)
+	    : sources_(std::move(sources)),
+	      with_dependencies_(with_dependencies),
+	      retail_directory_(std::move(retail_directory)),
+	      paths_(paths),
+	      document_(document),
+	      scan_(scan),
+	      graph_(graph),
+	      cap_(cap) {
+		if (install_mounted && !retail_directory_.empty())
+			adopt(ImportOrigin::Kind::GameInstall, retail_directory_, std::move(install_mounted));
+	}
+
+	// One step (ImportPlanner::step): the install mounted, a step of its own; then sources and
+	// queued files while the step's bytes and items last.
+	bool step(uint64_t bytes) {
+		cost_ = 0;
+		for (size_t items = 0; phase_ != Phase::Done && (items == 0 || cost_ < bytes); ++items) {
+			cost_ += kItemCost;
+			switch (phase_) {
+			case Phase::Install:
+				if (with_dependencies_ && !retail_directory_.empty()) {
+					std::string error;
+					const ImportOrigin *install = origin(ImportOrigin::Kind::GameInstall, retail_directory_, error);
+					if (!install)
+						plan_.diagnostics.push_back(
+						        make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Warning,
+						                     error + " The files the import needs are not looked for there."));
+					set_install(install);
+				}
+				phase_ = Phase::Sources;
+				return false;
+			case Phase::Sources:
+				if (next_source_ < sources_.size() && !plan_.truncated) {
+					add_source(sources_[next_source_++], with_dependencies_);
+					break;
+				}
+				phase_ = with_dependencies_ && !plan_.truncated ? Phase::Stylesheets : Phase::Done;
+				break;
+			case Phase::Stylesheets:
+				read_stylesheets();
+				phase_ = Phase::Follow;
+				break;
+			case Phase::Follow:
+				if (!queue_.empty() && !plan_.truncated) {
+					PlanNode node = std::move(queue_.front());
+					queue_.pop_front();
+					follow(node);
+					break;
+				}
+				queue_.clear();
+				settle();
+				phase_ = Phase::Done;
+				break;
+			case Phase::Done: break;
+			}
+		}
+		known_ = std::max(known_, files_ + (sources_.size() - next_source_));
+		return phase_ == Phase::Done;
+	}
+
+	bool done() const { return phase_ == Phase::Done; }
+	size_t files_known() const { return known_; }
+	size_t files_done() const { return files_ - std::min(files_, queue_.size()); }
+	ImportPlan take() { return std::move(plan_); }
+
+private:
+	enum class Phase : uint8_t { Install, Sources, Stylesheets, Follow, Done };
 
 	// The place of a kind at a path, opened once; null (with `error`) when it does not open.
 	const ImportOrigin *origin(ImportOrigin::Kind kind, const std::string &path, std::string &error) {
@@ -179,9 +268,12 @@ public:
 		origins_[{kind, path}] = Opened{std::move(origin), std::string()};
 	}
 
-	// A selected source, read as import_assets reads it; what a converter makes of it, each
-	// output a row (the first file of a name only is walked). The cap stops it before it is
-	// read, and takes a converter's outputs whole or not at all.
+	// A selected source, as import_assets takes it; what a converter makes of it, each output a
+	// row (the first file of a name only is walked). A file of an archive or of the install is
+	// looked up in its listing and read only for a converter, which makes its outputs of the
+	// bytes (any other is read when its references are followed, and never when the graph does
+	// not read it); a loose file is read, as its kind and its importer are asked of its bytes.
+	// The cap stops it before it is read, and takes a converter's outputs whole or not at all.
 	void add_source(const ImportChoice &source, bool walk) {
 		if (files_ >= cap_) {
 			plan_.truncated = true;
@@ -191,20 +283,24 @@ public:
 		const auto fail = [&](CoreFinding code, const std::string &message) {
 			plan_.diagnostics.push_back(make_finding(code, DiagnosticSeverity::Error, message, name));
 		};
+		const Converter *converter = converter_for(name);
 		const ImportOrigin *from = nullptr;
 		std::string found_in, error;
 		std::vector<uint8_t> bytes;
+		bool loaded = false; // the source's bytes are in hand
 		if (source.install || !source.entry.empty()) {
 			from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive, source.path, error);
 			if (!from) {
 				fail(source.install ? CoreFinding::ImportInstall : CoreFinding::ImportArchive, error);
 				return;
 			}
-			if (!from->read(source.entry, bytes)) {
+			if (from->find(source.entry).empty() || (converter && !from->read(source.entry, bytes))) {
 				fail(CoreFinding::ImportRead, source.install ? "The game data has no file named " + name + "."
 				                                  : "Could not read " + name + " from " + source.path);
 				return;
 			}
+			loaded = converter != nullptr;
+			cost_ += bytes.size();
 			found_in = from->words();
 		} else {
 			std::string io_error;
@@ -212,6 +308,8 @@ public:
 				fail(CoreFinding::ImportRead, io_error);
 				return;
 			}
+			loaded = true;
+			cost_ += bytes.size();
 			// The folder it sits in (a bare name's is the working folder): where the files it
 			// names are looked for first.
 			std::string folder = fs::path(source.path).parent_path().generic_string();
@@ -232,7 +330,6 @@ public:
 		// A converter's outputs are made in memory: the textures an .o3d names are its model's
 		// references, followed like any other (a row found, or one not found).
 		std::vector<ImportOutput> outputs;
-		const Converter *converter = converter_for(name);
 		if (converter) {
 			ImportProduct product;
 			converter->run(name, bytes, product);
@@ -264,7 +361,9 @@ public:
 			// loads.
 			const bool authored = !source.install && source.entry.empty() && !source.native;
 			row.kind = authored && importer_for(output.name) ? AssetKind::ImportSource
-			                                                 : classify_asset(output.name, &output.bytes);
+			           : loaded                              ? classify_asset(output.name, &output.bytes)
+			                                                 : from->file_kind(source.entry);
+			row.size = loaded ? output.bytes.size() : from->size(source.entry);
 			row.made_from = converter ? name : std::string();
 			row.found_in = found_in;
 			const bool first = !provided_.count(key(output.name));
@@ -278,7 +377,7 @@ public:
 			++files_;
 			const size_t index = plan_.rows.size() - 1;
 			if (converter) made_[index] = std::make_shared<const std::vector<uint8_t>>(output.bytes);
-			if (walk && first) queue(index, from, std::move(output.bytes));
+			if (walk && first) queue(index, from, std::move(output.bytes), loaded);
 		}
 	}
 
@@ -298,17 +397,6 @@ public:
 		sheet_ = style.list.sheet();
 	}
 
-	void walk() {
-		while (!queue_.empty() && !plan_.truncated) {
-			Node node = std::move(queue_.front());
-			queue_.pop_front();
-			follow(node);
-		}
-		queue_.clear();
-		settle();
-	}
-
-private:
 	struct Opened {
 		std::shared_ptr<const ImportOrigin> origin;
 		std::string error;
@@ -325,11 +413,14 @@ private:
 		std::vector<ImportNeed> needs;
 	};
 
-	void queue(size_t row, const ImportOrigin *from, std::vector<uint8_t> bytes) {
-		Node node;
+	// A planned file whose references the walk follows: with its bytes when they are in hand
+	// (`loaded`), else read when its turn comes.
+	void queue(size_t row, const ImportOrigin *from, std::vector<uint8_t> bytes = {}, bool loaded = false) {
+		PlanNode node;
 		node.row = row;
 		node.origin = from;
 		node.bytes = std::move(bytes);
+		node.loaded = loaded;
 		queue_.push_back(std::move(node));
 	}
 
@@ -348,10 +439,11 @@ private:
 
 	// A stylesheet the shell reads by name, as the project holds it once the import is in: the
 	// selection's copy, else the project's file of the name.
-	bool stylesheet_bytes(const std::string &name, std::vector<uint8_t> &bytes) const {
-		for (const Node &node : queue_) {
+	bool stylesheet_bytes(const std::string &name, std::vector<uint8_t> &bytes) {
+		for (const PlanNode &node : queue_) {
 			const ImportPlanRow &row = plan_.rows[node.row];
 			if (row.state == ImportPlanRow::State::Selected && row.kind == AssetKind::MenuStyle && key(row.name) == key(name)) {
+				if (!node.loaded) return read_row(node.row, bytes);
 				bytes = node.bytes;
 				return true;
 			}
@@ -371,26 +463,36 @@ private:
 		}
 		const ImportChoice &source = plan_.rows[row].source;
 		std::string error;
-		if (!source.install && source.entry.empty()) return read_file_bytes(source.path, out, error);
-		const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
-		                                  source.path, error);
-		return from && from->read(source.entry, out);
+		bool read = false;
+		if (!source.install && source.entry.empty()) {
+			read = read_file_bytes(source.path, out, error);
+		} else {
+			const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
+			                                  source.path, error);
+			read = from && from->read(source.entry, out);
+		}
+		if (read) cost_ += out.size();
+		return read;
 	}
 
-	// A node's references and symbols, read once; false (with one warning) when they cannot be.
-	bool extract(Node &node) {
-		if (node.read != Node::Read::Not) return node.read == Node::Read::Done;
+	// A node's references and symbols, read once (its bytes read now when they were not in hand);
+	// false (with one warning) when they cannot be.
+	bool extract(PlanNode &node) {
+		if (node.read != PlanNode::Read::Not) return node.read == PlanNode::Read::Done;
 		const ImportPlanRow &row = plan_.rows[node.row];
 		Diagnostic error;
-		if (!extract_from_bytes(row.name, row.kind, node.bytes, document_.target_game, node.content, error)) {
-			node.read = Node::Read::Failed;
+		const bool have = node.loaded || read_row(node.row, node.bytes);
+		node.loaded = true;
+		if (!have) error.message = "The file could not be read";
+		if (!have || !extract_from_bytes(row.name, row.kind, node.bytes, document_.target_game, node.content, error)) {
+			node.read = PlanNode::Read::Failed;
 			std::string reason = error.message.empty() ? std::string("The file could not be read.") : error.message;
 			if (reason.back() != '.') reason += '.';
 			plan_.diagnostics.push_back(make_finding(CoreFinding::ImportUnreadable, DiagnosticSeverity::Warning,
 			                                         reason + " The files it names are not looked for.", row.name));
 			return false;
 		}
-		node.read = Node::Read::Done;
+		node.read = PlanNode::Read::Done;
 		return true;
 	}
 
@@ -455,7 +557,7 @@ private:
 	}
 
 	// A planned file's references (none read for a file the graph does not read).
-	void follow(Node &node) {
+	void follow(PlanNode &node) {
 		const std::string file = plan_.rows[node.row].name;
 		const AssetKind kind = plan_.rows[node.row].kind;
 		// What it names is not looked for: a file of a kind that names files the graph does not
@@ -474,7 +576,7 @@ private:
 	}
 
 	// One reference of a node's file, in the plan's order (import_plan.h).
-	void follow_edge(const Node &node, const std::string &file, const GraphEdge &edge) {
+	void follow_edge(const PlanNode &node, const std::string &file, const GraphEdge &edge) {
 		const AssetKind wanted = reference_row(edge.kind).file;
 		if (wanted == AssetKind::Unknown) {
 			note(edge.kind, AssetKind::Unknown, file); // a symbol, a sound: no file to look for
@@ -513,6 +615,7 @@ private:
 		row.source = from->source(spelling);
 		row.name = spelling;
 		row.kind = from->file_kind(spelling);
+		row.size = from->size(spelling);
 		row.found_in = from->words();
 		row.needed_by = need;
 		place(row);
@@ -522,10 +625,9 @@ private:
 		provided_[key(spelling)] = {index, plan_.rows[index].kind};
 		++files_;
 		if (!mine.empty() && !theirs.empty()) add_rival(index, install, theirs);
-		// The bytes are read when the walk reads the file's references.
-		std::vector<uint8_t> bytes;
-		if (graph_reads_file(plan_.rows[index].kind, spelling)) from->read(spelling, bytes);
-		queue(index, from, std::move(bytes));
+		// Its bytes are read when the walk reads its references (extract), never for a file the
+		// graph does not read.
+		queue(index, from);
 	}
 
 	// A lookup no place meets: one row per name, holding each distinct lookup of it.
@@ -571,15 +673,22 @@ private:
 		plan_.rows = std::move(rows);
 	}
 
-	ImportPlan &plan_;
+	ImportPlan plan_;
+	const std::vector<ImportChoice> sources_;
+	const bool with_dependencies_;
+	const std::string retail_directory_;
 	const ProjectPaths &paths_;
 	const ProjectDocument &document_;
 	const AssetScan &scan_;
 	const AssetGraph &graph_;
 	const size_t cap_;
+	Phase phase_ = Phase::Install;
+	size_t next_source_ = 0; // the next chosen source to take
+	uint64_t cost_ = 0;      // the bytes this step read
+	size_t known_ = 0;       // the most files known of at the end of a step
 	std::map<std::pair<ImportOrigin::Kind, std::string>, Opened> origins_;
 	const ImportOrigin *install_ = nullptr;
-	std::deque<Node> queue_;
+	std::deque<PlanNode> queue_;
 	std::map<std::string, Provided> provided_;                             // the files the plan takes
 	std::map<size_t, std::shared_ptr<const std::vector<uint8_t>>> made_; // a converter output's bytes, by row
 	std::map<std::string, Missing> missing_;                               // the names looked for in vain
@@ -587,32 +696,42 @@ private:
 	size_t files_ = 0;                                                     // the files the plan takes
 };
 
-} // namespace
+ImportPlanner::ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
+                             const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
+                             std::string retail_directory, size_t file_cap,
+                             std::shared_ptr<const ImportOrigin> install_mounted)
+    : walk_(std::make_unique<Walk>(std::move(sources), with_dependencies, paths, document, scan, graph,
+                                   std::move(retail_directory), file_cap, std::move(install_mounted))) {}
+
+ImportPlanner::~ImportPlanner() = default;
+
+bool ImportPlanner::step(uint64_t bytes) { return walk_->step(bytes); }
+bool ImportPlanner::done() const { return walk_->done(); }
+size_t ImportPlanner::files_known() const { return walk_->files_known(); }
+size_t ImportPlanner::files_done() const { return walk_->files_done(); }
+ImportPlan ImportPlanner::take() { return walk_->take(); }
 
 ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
                        const std::string &retail_directory, size_t file_cap,
                        std::shared_ptr<const ImportOrigin> install_mounted) {
-	ImportPlan plan;
-	Planner planner(plan, paths, document, scan, graph, file_cap);
-	if (install_mounted && !retail_directory.empty())
-		planner.adopt(ImportOrigin::Kind::GameInstall, retail_directory, std::move(install_mounted));
-	if (with_dependencies && !retail_directory.empty()) {
-		std::string error;
-		const ImportOrigin *install = planner.origin(ImportOrigin::Kind::GameInstall, retail_directory, error);
-		if (!install)
-			plan.diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Warning,
-			                                        error + " The files the import needs are not looked for there."));
-		planner.set_install(install);
+	ImportPlanner planner(sources, with_dependencies, paths, document, scan, graph, retail_directory, file_cap,
+	                      std::move(install_mounted));
+	while (!planner.step(UINT64_MAX)) {
 	}
-	for (const ImportChoice &source : sources) {
-		if (plan.truncated) break;
-		planner.add_source(source, with_dependencies);
-	}
-	if (!with_dependencies || plan.truncated) return plan;
-	planner.read_stylesheets();
-	planner.walk();
-	return plan;
+	return planner.take();
+}
+
+size_t ImportPlan::file_count() const {
+	size_t files = 0;
+	for (const ImportPlanRow &row : rows) files += row.state != ImportPlanRow::State::NotFound ? 1 : 0;
+	return files;
+}
+
+uint64_t ImportPlan::total_bytes() const {
+	uint64_t bytes = 0;
+	for (const ImportPlanRow &row : rows) bytes += row.state != ImportPlanRow::State::NotFound ? row.size : 0;
+	return bytes;
 }
 
 bool same_import(const ImportPlan &a, const ImportPlan &b) {

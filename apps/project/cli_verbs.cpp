@@ -1047,7 +1047,7 @@ constexpr VerbRow kRows[] = {
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
 	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
-	     "game install, 1000 files at most; an .o3d's textures come only with\n"
+	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --dry-run prints the plan and writes nothing (no import pass\n"
 	     "either; --install is that run's alone) (--json: the import_preview query, the plan)")
 	        .takes(kImportOptions)

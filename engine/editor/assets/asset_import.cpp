@@ -4,8 +4,10 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <system_error>
+#include <utility>
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
@@ -14,6 +16,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
@@ -104,16 +107,18 @@ std::string import_destination(const AssetScan &existing, const std::string &nam
 namespace {
 
 // One file the import writes: its logical name, what it is to the engine once copied (the
-// game's own PNG a texture), where it goes (project-relative), its bytes, the source it is
-// made from when a converter made it, and the importer whose import record goes beside it
-// (an author's loose file an importer converts, with no record there yet).
+// game's own PNG a texture), where it goes (project-relative), where it is staged and its
+// staged import record ("" for none), the source it is made from when a converter made it, and
+// the texture rows a converter's model names (report_textures_left). Its bytes are not kept: a
+// file is staged as it is checked.
 struct Output {
 	std::string name;
 	AssetKind kind = AssetKind::Unknown;
 	std::string relative;
-	std::vector<uint8_t> bytes;
+	std::string staged;
+	std::string staged_record;
 	std::string made_from;
-	const Importer *record = nullptr;
+	std::vector<GraphEdge> textures;
 };
 
 // The folders from `dir` up that do not exist yet, the outermost first: what making `dir`
@@ -135,8 +140,10 @@ std::vector<fs::path> missing_folders(fs::path dir) {
 // import stages there), and the destinations' folders the import made while they are empty.
 void remove_stage(const fs::path &stage, const std::vector<fs::path> &folders) {
 	std::error_code ec;
-	fs::remove_all(stage, ec);
-	fs::remove(stage.parent_path(), ec);
+	if (!stage.empty()) {
+		fs::remove_all(stage, ec);
+		fs::remove(stage.parent_path(), ec);
+	}
 	for (auto it = folders.rbegin(); it != folders.rend(); ++it) fs::remove(*it, ec);
 }
 
@@ -145,24 +152,18 @@ void remove_stage(const fs::path &stage, const std::vector<fs::path> &folders) {
 // .o3d's materials name come with it only through its plan (the import dialog's "Include
 // the files these need", the command line's --with-dependencies), so each is a warning
 // saying so. A row whose loader opens no file wants none.
-void report_textures_left(const std::vector<Output> &outputs, const AssetScan &existing, const ProjectDocument &document,
-                          std::vector<Diagnostic> &out) {
+void report_textures_left(const std::vector<Output> &outputs, const AssetScan &existing, std::vector<Diagnostic> &out) {
+	// The import's own files by name: what it brings.
+	std::map<std::string, AssetKind> brought;
+	for (const Output &output : outputs) brought.emplace(normalized_logical_name(output.name), output.kind);
 	for (const Output &output : outputs) {
-		if (output.made_from.empty() || output.kind != AssetKind::Model) continue;
-		Extracted content;
-		Diagnostic error;
-		if (!extract_from_bytes(output.name, output.kind, output.bytes, document.target_game, content, error)) continue;
 		std::set<std::string> told;
-		for (const GraphEdge &edge : content.edges) {
-			if (edge.kind != ReferenceKind::Texture) continue;
+		for (const GraphEdge &edge : output.textures) {
 			const auto exists = [&](const std::string &name) {
 				const AssetEntry *held = existing.find(name);
 				if (held && file_serves_reference(held->kind, edge.kind, edge.loader_arg)) return true;
-				for (const Output &other : outputs)
-					if (normalized_logical_name(other.name) == normalized_logical_name(name) &&
-					    file_serves_reference(other.kind, edge.kind, edge.loader_arg))
-						return true;
-				return false;
+				const auto other = brought.find(normalized_logical_name(name));
+				return other != brought.end() && file_serves_reference(other->second, edge.kind, edge.loader_arg);
 			};
 			const std::vector<std::string> candidates = reference_file_candidates(edge.kind, edge.value, edge.loader_arg, exists);
 			if (candidates.empty() || std::any_of(candidates.begin(), candidates.end(), exists)) continue;
@@ -181,90 +182,155 @@ void report_textures_left(const std::vector<Output> &outputs, const AssetScan &e
 	}
 }
 
+// What one source or file costs a step besides its bytes: its checks resolve its place on the
+// disk (check_project_file_name), a publish renames it.
+constexpr uint64_t kItemCost = 4096;
+
 } // namespace
 
-ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
-                           const ProjectDocument &document, bool replace_existing) {
-	ImportResult result;
-	// A staging folder a crash left behind (under the cache: never scanned, never packed) goes
-	// before this import stages its own.
-	std::error_code cleaned;
-	fs::remove_all(paths.staging_dir, cleaned);
-	const AssetScan existing = scan_project_assets(paths, document);
-	std::set<std::string> selected_names;
-	Vfs archive;
-	archive.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document.target_game.c_str()));
-	std::string archive_path;
-	Vfs retail;
-	std::string retail_root;
-	std::vector<Output> outputs;
-	bool refused = false;
-	const auto refuse = [&](CoreFinding code, const std::string &message, const std::string &name) {
-		result.diagnostics.push_back(make_finding(code, DiagnosticSeverity::Error, message, name));
-		refused = true;
-	};
+class AssetImport::Run {
+public:
+	Run(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document, bool replace_existing)
+	    : sources_(std::move(sources)), paths_(paths), document_(document), replace_existing_(replace_existing),
+	      walk_(paths_, document_) {
+		archive_.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(document_.target_game.c_str()));
+	}
+
+	bool step(uint64_t bytes) {
+		cost_ = 0;
+		for (size_t items = 0; phase_ != Phase::Done && (items == 0 || cost_ < bytes); ++items) {
+			cost_ += kItemCost;
+			switch (phase_) {
+			case Phase::Scan: {
+				// A staging folder a crash left behind (under the cache: never scanned, never packed)
+				// goes before this import stages its own.
+				if (!cleaned_) {
+					std::error_code cleaned;
+					fs::remove_all(paths_.staging_dir, cleaned);
+					cleaned_ = true;
+				}
+				// The project's files as they are now, the step's bytes its own.
+				if (!walk_.step(bytes)) return false;
+				existing_ = walk_.take();
+				phase_ = Phase::Check;
+				return false;
+			}
+			case Phase::Check:
+				if (next_source_ < sources_.size() && !failed_) {
+					check(sources_[next_source_++]);
+					break;
+				}
+				if (failed_) {
+					phase_ = Phase::Done;
+					break;
+				}
+				// A refusal writes nothing: what was staged before it goes, the folders made too.
+				if (refused_) {
+					remove_stage(stage_, folders_);
+					phase_ = Phase::Done;
+					break;
+				}
+				report_textures_left(outputs_, existing_, result_.diagnostics);
+				phase_ = Phase::Publish;
+				break;
+			case Phase::Publish:
+				if (next_output_ < outputs_.size()) {
+					publish(next_output_);
+					break;
+				}
+				remove_stage(stage_, folders_); // empty now; the folders made hold their files
+				phase_ = Phase::Done;
+				break;
+			case Phase::Done: break;
+			}
+		}
+		return phase_ == Phase::Done;
+	}
+
+	bool done() const { return phase_ == Phase::Done; }
+	bool publishing() const { return published_any_; }
+	void abandon() {
+		if (published_any_ || phase_ == Phase::Done) return;
+		remove_stage(stage_, folders_);
+		phase_ = Phase::Done;
+	}
+	size_t files_done() const { return next_source_ + next_output_; }
+	size_t files_total() const { return sources_.size() + outputs_.size(); }
+	ImportResult take() { return std::move(result_); }
+
+private:
+	enum class Phase : uint8_t { Scan, Check, Publish, Done };
+
+	void refuse(CoreFinding code, const std::string &message, const std::string &name) {
+		result_.diagnostics.push_back(make_finding(code, DiagnosticSeverity::Error, message, name));
+		refused_ = true;
+	}
 	// A name the project cannot take, as the import says it.
-	const auto name_refused = [](FileNameProblem problem) {
+	static CoreFinding name_refused(FileNameProblem problem) {
 		switch (problem) {
 		case FileNameProblem::Kind: return CoreFinding::ImportKind;
 		case FileNameProblem::Path: return CoreFinding::ImportPath;
 		default: return CoreFinding::ImportName;
 		}
-	};
-	// Every source read, and every file it makes checked, before anything is written.
-	for (const ImportChoice &source : sources) {
-		const std::string name = source.name();
-		FileNameProblem problem = FileNameProblem::None;
-		std::string message;
-		if (!check_project_file_name(paths.root, std::string(), name, AssetKind::Unknown, problem, message)) {
-			refuse(name_refused(problem), message, name);
-			continue;
-		}
-		const std::string key = normalized_logical_name(name);
-		if (!selected_names.insert(key).second) {
-			refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
-			continue;
-		}
-		const AssetEntry *old = existing.find(name);
-		if (old && !replace_existing) {
-			refuse(CoreFinding::ImportExists, name + " already exists; select Replace existing files to replace it.", name);
-			continue;
-		}
-		std::vector<uint8_t> bytes;
+	}
+
+	// A source's bytes as the import reads them: the install's or an archive's file as its game
+	// loader is served it, a loose file from the disk. False, refused, when it cannot be read.
+	bool read(const ImportChoice &source, const std::string &name, std::vector<uint8_t> &bytes) {
 		std::string io_error;
 		if (source.install) {
-			if (retail_root != source.path) {
-				retail_root.clear();
-				if (!mount_retail(retail, source.path, document)) {
+			if (retail_root_ != source.path) {
+				retail_root_.clear();
+				if (!mount_retail(retail_, source.path, document_)) {
 					refuse(CoreFinding::ImportInstall, "No game archives found under " + source.path + ".", name);
-					continue;
+					return false;
 				}
-				retail_root = source.path;
+				retail_root_ = source.path;
 			}
-			if (!read_served(retail, source.entry, bytes)) {
+			if (!read_served(retail_, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
-				continue;
+				return false;
 			}
 		} else if (source.entry.empty()) {
 			if (!read_file_bytes(source.path, bytes, io_error)) {
 				refuse(CoreFinding::ImportRead, io_error, name);
-				continue;
+				return false;
 			}
 		} else {
-			if (archive_path != source.path) {
-				archive.clear();
-				archive_path.clear();
-				if (!archive.set_primary_archive(source.path)) {
+			if (archive_path_ != source.path) {
+				archive_.clear();
+				archive_path_.clear();
+				if (!archive_.set_primary_archive(source.path)) {
 					refuse(CoreFinding::ImportArchive, "Could not open archive: " + source.path, name);
-					continue;
+					return false;
 				}
-				archive_path = source.path;
+				archive_path_ = source.path;
 			}
-			if (!read_served(archive, source.entry, bytes)) {
+			if (!read_served(archive_, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "Could not read " + name + " from " + source.path, name);
-				continue;
+				return false;
 			}
 		}
+		cost_ += bytes.size();
+		return true;
+	}
+
+	// One source read and every file it makes checked (its name, its kind, a clash with another
+	// selected file, a project file of the name, the place of its import record), then, while no
+	// source was refused, staged.
+	void check(const ImportChoice &source) {
+		const std::string name = source.name();
+		FileNameProblem problem = FileNameProblem::None;
+		std::string message, io_error;
+		if (!check_project_file_name(paths_.root, std::string(), name, AssetKind::Unknown, problem, message))
+			return refuse(name_refused(problem), message, name);
+		if (!selected_names_.insert(normalized_logical_name(name)).second)
+			return refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
+		const AssetEntry *old = existing_.find(name);
+		if (old && !replace_existing_)
+			return refuse(CoreFinding::ImportExists, name + " already exists; select Replace existing files to replace it.", name);
+		std::vector<uint8_t> bytes;
+		if (!read(source, name, bytes)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or
 		// the file itself.
 		std::vector<ImportOutput> made;
@@ -275,11 +341,11 @@ ImportResult import_assets(const std::vector<ImportChoice> &sources, const Proje
 			bool broken = false;
 			for (Diagnostic &d : product.diagnostics) {
 				broken = broken || d.severity == DiagnosticSeverity::Error;
-				result.diagnostics.push_back(std::move(d));
+				result_.diagnostics.push_back(std::move(d));
 			}
 			if (broken) {
-				refused = true;
-				continue;
+				refused_ = true;
+				return;
 			}
 			made = std::move(product.outputs);
 		} else {
@@ -290,11 +356,11 @@ ImportResult import_assets(const std::vector<ImportChoice> &sources, const Proje
 		const bool authored = !source.install && source.entry.empty() && !source.native;
 		for (ImportOutput &output : made) {
 			if (output.name != name) {
-				if (!check_project_file_name(paths.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {
+				if (!check_project_file_name(paths_.root, std::string(), output.name, AssetKind::Unknown, problem, message)) {
 					refuse(name_refused(problem), message, output.name);
 					continue;
 				}
-				if (!selected_names.insert(normalized_logical_name(output.name)).second) {
+				if (!selected_names_.insert(normalized_logical_name(output.name)).second) {
 					refuse(CoreFinding::ImportDuplicate, "More than one selected file makes " + output.name + ".", output.name);
 					continue;
 				}
@@ -310,18 +376,18 @@ ImportResult import_assets(const std::vector<ImportChoice> &sources, const Proje
 			}
 			// A file the project holds with the same bytes is left as it is unless the
 			// import replaces.
-			const AssetEntry *prior = existing.find(output.name);
-			if (prior && !replace_existing) {
+			const AssetEntry *prior = existing_.find(output.name);
+			if (prior && !replace_existing_) {
 				std::vector<uint8_t> held;
-				if (read_file_bytes((fs::path(paths.root) / prior->relative_path).generic_string(), held, io_error) &&
+				if (read_file_bytes((fs::path(paths_.root) / prior->relative_path).generic_string(), held, io_error) &&
 				    held == output.bytes)
 					continue;
 				refuse(CoreFinding::ImportExists, output.name + " already exists; select Replace existing files to replace it.",
 				       output.name);
 				continue;
 			}
-			const std::string relative = import_destination(existing, output.name, kind);
-			if (!check_project_file_name(paths.root, fs::path(relative).parent_path().generic_string(), output.name, kind,
+			const std::string relative = import_destination(existing_, output.name, kind);
+			if (!check_project_file_name(paths_.root, fs::path(relative).parent_path().generic_string(), output.name, kind,
 			                             problem, message)) {
 				refuse(name_refused(problem), message, output.name);
 				continue;
@@ -330,118 +396,168 @@ ImportResult import_assets(const std::vector<ImportChoice> &sources, const Proje
 			planned.name = output.name;
 			planned.kind = kind;
 			planned.relative = relative;
-			planned.bytes = std::move(output.bytes);
 			planned.made_from = converter ? name : std::string();
 			// An import source's record, from the importer's defaults, is written with it (a record
 			// there stays). Where the record goes must take a file.
+			const Importer *record = nullptr;
 			if (importer) {
-				const fs::path record = fs::path(paths.root) / (relative + kImportSidecarSuffix);
+				const fs::path at = fs::path(paths_.root) / (relative + kImportSidecarSuffix);
 				std::error_code ec;
-				if (fs::exists(record, ec) && !fs::is_regular_file(record, ec)) {
+				if (fs::exists(at, ec) && !fs::is_regular_file(at, ec)) {
 					refuse(CoreFinding::ImportRecord,
 					       relative + kImportSidecarSuffix + " is not a file: the import record of " + output.name +
 					               " cannot be written there.",
 					       output.name);
 					continue;
 				}
-				if (!fs::exists(record, ec)) planned.record = importer;
+				if (!fs::exists(at, ec)) record = importer;
 			}
-			outputs.push_back(std::move(planned));
+			// A converter's model: the textures it names, kept for what the import leaves out.
+			if (converter && kind == AssetKind::Model) {
+				Extracted content;
+				Diagnostic error;
+				if (extract_from_bytes(output.name, kind, output.bytes, document_.target_game, content, error))
+					for (GraphEdge &edge : content.edges)
+						if (edge.kind == ReferenceKind::Texture) planned.textures.push_back(std::move(edge));
+			}
+			// Staged now, its bytes dropped with this call: nothing once a source was refused (the
+			// import writes nothing then), and nothing after a write failed.
+			if (!refused_ && !failed_ && !stage(planned, output.bytes, record)) return;
+			outputs_.push_back(std::move(planned));
 		}
 	}
-	if (refused) return result;
-	report_textures_left(outputs, existing, document, result.diagnostics);
 
-	// Staged under the cache (an import's own folder, on the project's volume, so a publish is
-	// a rename), each import record with its file; the destinations' folders made. A failure
-	// takes every staged file and made folder back.
-	std::string io_error;
-	if (!ensure_project_cache_dir(paths, io_error)) {
-		result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
-		                                          io_error + ". Nothing was imported."));
-		return result;
+	// A write that failed while staging: every staged file and made folder goes; the import ends.
+	bool stage_failed(const std::string &what, const std::string &error, const std::string &name) {
+		remove_stage(stage_, folders_);
+		result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
+		                                          "Could not write " + what + ": " + error + ". Nothing was imported.", name));
+		failed_ = true;
+		return false;
 	}
-	const fs::path stage = fs::path(paths.staging_dir) /
-	                       std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-	std::vector<std::string> staged;  // the staged files, in the order they publish
-	std::vector<fs::path> folders;    // the destinations' folders the import made
-	std::vector<std::string> records; // each output's staged record ("" for none)
-	const auto stage_failed = [&](const std::string &what, const std::string &error, const std::string &name) {
-		remove_stage(stage, folders);
-		result.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
-		                                          "Could not write " + what + ": " + error + ". Nothing was imported.",
-		                                          name));
-	};
-	if (!ensure_directory(stage.generic_string(), io_error)) {
-		stage_failed(stage.generic_string(), io_error, std::string());
-		return result;
-	}
-	for (size_t i = 0; i < outputs.size(); ++i) {
-		const Output &output = outputs[i];
-		const fs::path destination = fs::path(paths.root) / output.relative;
-		for (fs::path &folder : missing_folders(destination.parent_path())) folders.push_back(std::move(folder));
-		const std::string file = (stage / std::to_string(i)).generic_string();
+
+	// One checked file staged under the cache (an import's own folder, on the project's volume, so
+	// a publish is a rename), its import record with it; its destination's folder made.
+	bool stage(Output &output, const std::vector<uint8_t> &bytes, const Importer *record) {
+		std::string io_error;
+		if (stage_.empty()) {
+			if (!ensure_project_cache_dir(paths_, io_error)) {
+				result_.diagnostics.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
+				                                          io_error + ". Nothing was imported."));
+				failed_ = true;
+				return false;
+			}
+			stage_ = fs::path(paths_.staging_dir) / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+			if (!ensure_directory(stage_.generic_string(), io_error))
+				return stage_failed(stage_.generic_string(), io_error, std::string());
+		}
+		const fs::path destination = fs::path(paths_.root) / output.relative;
+		for (fs::path &folder : missing_folders(destination.parent_path())) folders_.push_back(std::move(folder));
+		const std::string file = (stage_ / std::to_string(outputs_.size())).generic_string();
 		if (!ensure_directory(destination.parent_path().generic_string(), io_error) ||
-		    !write_file_atomic(file, output.bytes.data(), output.bytes.size(), io_error)) {
-			stage_failed(output.relative, io_error, output.name);
-			return result;
-		}
-		staged.push_back(file);
-		records.emplace_back();
-		if (output.record) {
+		    !write_file_atomic(file, bytes.data(), bytes.size(), io_error))
+			return stage_failed(output.relative, io_error, output.name);
+		cost_ += bytes.size();
+		output.staged = file;
+		if (record) {
 			ImportSidecar sidecar;
-			sidecar.importer = output.record->id;
-			sidecar.version = output.record->version;
-			sidecar.options = output.record->default_options;
-			const std::string record = file + kImportSidecarSuffix;
+			sidecar.importer = record->id;
+			sidecar.version = record->version;
+			sidecar.options = record->default_options;
+			const std::string staged_record = file + kImportSidecarSuffix;
 			Diagnostic error;
-			if (!save_import_sidecar(record, sidecar, error)) {
-				stage_failed(output.relative + kImportSidecarSuffix, error.message, output.name);
-				return result;
-			}
-			records.back() = record;
+			if (!save_import_sidecar(staged_record, sidecar, error))
+				return stage_failed(output.relative + kImportSidecarSuffix, error.message, output.name);
+			output.staged_record = staged_record;
 		}
+		return true;
 	}
 
-	// Published in order, each file after its import record, by replace_file (a rename tried again
-	// while a scanner holds the file, the last write moved past the one it replaces, so the caches
-	// that know a file by its size and last write never take it for the file it replaced: S13 A8).
-	// A failure stops it: the record of a file that did not publish goes with it (it was written for
+	// One file published, after its import record, by replace_file (a rename tried again while a
+	// scanner holds the file, the last write moved past the one it replaces, so the caches that know
+	// a file by its size and last write never take it for the file it replaced: S13 A8). A failure
+	// stops the import: the record of a file that did not publish goes with it (it was written for
 	// it), the rest is not published, each said.
-	for (size_t i = 0; i < outputs.size(); ++i) {
-		const Output &output = outputs[i];
-		const fs::path destination = fs::path(paths.root) / output.relative;
+	void publish(size_t i) {
+		const Output &output = outputs_[i];
+		const fs::path destination = fs::path(paths_.root) / output.relative;
 		const fs::path record = fs::path(destination.generic_string() + kImportSidecarSuffix);
 		std::string failed, why;
-		if (!records[i].empty() && !replace_file(records[i], record.generic_string(), why))
+		if (!output.staged_record.empty() && !replace_file(output.staged_record, record.generic_string(), why))
 			failed = output.relative + kImportSidecarSuffix;
-		if (failed.empty() && !replace_file(staged[i], destination.generic_string(), why)) {
+		if (failed.empty() && !replace_file(output.staged, destination.generic_string(), why)) {
 			failed = output.relative;
 			std::error_code ignored;
-			if (!records[i].empty()) fs::remove(record, ignored);
+			if (!output.staged_record.empty()) fs::remove(record, ignored);
 		}
 		if (failed.empty()) {
-			result.imported.push_back(output.relative);
-			continue;
+			result_.imported.push_back(output.relative);
+			published_any_ = true;
+			++next_output_;
+			return;
 		}
-		remove_stage(stage, folders);
-		result.diagnostics.push_back(make_finding(
+		remove_stage(stage_, folders_);
+		result_.diagnostics.push_back(make_finding(
 		        CoreFinding::ImportPublish, DiagnosticSeverity::Error,
-		        "Could not write " + failed + ": " + why + ". The import stopped there: " + std::to_string(i) +
-		                " of " + std::to_string(outputs.size()) + " files were imported.",
+		        "Could not write " + failed + ": " + why + ". The import stopped there: " + std::to_string(i) + " of " +
+		                std::to_string(outputs_.size()) + " files were imported.",
 		        output.name));
-		for (size_t rest = i; rest < outputs.size(); ++rest) {
-			result.not_imported.push_back(outputs[rest].relative);
+		for (size_t rest = i; rest < outputs_.size(); ++rest) {
+			result_.not_imported.push_back(outputs_[rest].relative);
 			if (rest > i)
-				result.diagnostics.push_back(make_finding(CoreFinding::ImportNotPublished, DiagnosticSeverity::Warning,
-				                                          outputs[rest].relative + " was not imported: the import stopped at " +
+				result_.diagnostics.push_back(make_finding(CoreFinding::ImportNotPublished, DiagnosticSeverity::Warning,
+				                                          outputs_[rest].relative + " was not imported: the import stopped at " +
 				                                                  output.relative + ".",
-				                                          outputs[rest].name));
+				                                          outputs_[rest].name));
 		}
-		return result;
+		phase_ = Phase::Done;
 	}
-	remove_stage(stage, folders); // empty now; the folders made hold their files
-	return result;
+
+	const std::vector<ImportChoice> sources_;
+	const ProjectPaths paths_;
+	const ProjectDocument document_;
+	const bool replace_existing_;
+	ProjectScan walk_;
+	AssetScan existing_;
+	Phase phase_ = Phase::Scan;
+	bool cleaned_ = false;
+	uint64_t cost_ = 0;      // the bytes this step read and wrote
+	size_t next_source_ = 0; // the next source to check
+	size_t next_output_ = 0; // the next file to publish
+	bool refused_ = false;   // a source was refused: nothing more is staged, nothing is published
+	bool failed_ = false;    // a write failed while staging: the import ended there
+	bool published_any_ = false;
+	std::set<std::string> selected_names_;
+	Vfs archive_;
+	std::string archive_path_;
+	Vfs retail_;
+	std::string retail_root_;
+	std::vector<Output> outputs_;
+	fs::path stage_;                // the import's staging folder, made with its first staged file
+	std::vector<fs::path> folders_; // the destinations' folders the import made
+	ImportResult result_;
+};
+
+AssetImport::AssetImport(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document,
+                         bool replace_existing)
+    : run_(std::make_unique<Run>(std::move(sources), paths, document, replace_existing)) {}
+
+AssetImport::~AssetImport() = default;
+
+bool AssetImport::step(uint64_t bytes) { return run_->step(bytes); }
+bool AssetImport::done() const { return run_->done(); }
+bool AssetImport::publishing() const { return run_->publishing(); }
+void AssetImport::abandon() { run_->abandon(); }
+size_t AssetImport::files_done() const { return run_->files_done(); }
+size_t AssetImport::files_total() const { return run_->files_total(); }
+ImportResult AssetImport::take() { return run_->take(); }
+
+ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
+                           const ProjectDocument &document, bool replace_existing) {
+	AssetImport run(sources, paths, document, replace_existing);
+	while (!run.step(UINT64_MAX)) {
+	}
+	return run.take();
 }
 
 } // namespace opennova::editor

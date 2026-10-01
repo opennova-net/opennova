@@ -614,8 +614,89 @@ static int test_plan_relative_path() {
 	return 0;
 }
 
+// ADR 0046 S14: the plan a step at a time (ImportPlanner) is the plan plan_import makes in one
+// call, row for row. A chain of eight menus in an archive, each naming a texture and the next
+// menu: stepped a byte a step, each step takes one source or one file, the counts of files known
+// and done only rise, and both end at the plan's files. Each row carries its size as its origin
+// stores it, a texture's without its bytes being read: a menu naming eight textures of a megabyte
+// each plans within one 64 KiB step, where reading them would take eight.
+static int test_plan_steps() {
+	Project project("opennova_editor_plan_steps");
+	const std::string archive = project.dir.file("mod/chain.pff");
+	std::vector<std::pair<std::string, std::string>> files;
+	uint64_t bytes = 0;
+	for (int i = 0; i < 8; ++i) {
+		const std::string n = std::to_string(i), next = std::to_string(i + 1);
+		const std::string menu = screen(("S" + n).c_str(), window("BUTTON", "GO",
+				image("t" + n + ".pcx") + (i < 7 ? go_to("m" + next + ".mnu", ("S" + next).c_str()) : std::string())));
+		files.push_back({"m" + n + ".mnu", menu});
+		files.push_back({"t" + n + ".pcx", std::string(size_t(100 + i), 'x')});
+		bytes += menu.size() + size_t(100 + i);
+	}
+	files.push_back({"unused.txt", "unused"});
+	TEST_EXPECT(write_pff(archive, files));
+	ImportChoice first;
+	first.path = archive;
+	first.entry = "m0.mnu";
+	const ImportPlan whole = project.plan({first});
+	TEST_EXPECT(whole.rows.size() == 16 && !whole.truncated && whole.diagnostics.empty());
+	TEST_EXPECT(whole.file_count() == 16 && whole.total_bytes() == bytes);
+	const ImportPlanRow *texture = row_named(whole, "t3.pcx");
+	const ImportPlanRow *menu = row_named(whole, "m3.mnu");
+	TEST_EXPECT(texture && texture->size == 103 && menu && menu->size == files[6].second.size());
+
+	const SessionView &v = project.view();
+	const ProjectPaths paths = ProjectPaths::for_root(v.project.root);
+	ImportPlanner planner({first}, true, paths, *v.project.document, *v.project.scan, *v.findings.graph, std::string());
+	size_t steps = 0, known = 0, done = 0;
+	TEST_EXPECT(!planner.done());
+	while (!planner.step(1)) {
+		++steps;
+		TEST_EXPECT(planner.files_known() >= known && planner.files_done() >= done &&
+				planner.files_done() <= planner.files_known());
+		known = planner.files_known();
+		done = planner.files_done();
+		TEST_EXPECT(steps < 1000);
+	}
+	// The install's step, the source, the stylesheets and a step for each file followed.
+	TEST_EXPECT(planner.done() && steps >= 16 + 2);
+	TEST_EXPECT(planner.files_known() == 16 && planner.files_done() == 16);
+	const ImportPlan stepped = planner.take();
+	TEST_EXPECT(same_import(whole, stepped) && stepped.total_bytes() == bytes);
+	for (size_t i = 0; i < whole.rows.size(); ++i)
+		TEST_EXPECT(whole.rows[i].size == stepped.rows[i].size && whole.rows[i].needed_by.file == stepped.rows[i].needed_by.file);
+	// A file of the selection the listing lacks is said without a read; one chosen with no
+	// dependencies is a row by its listing alone.
+	ImportChoice absent = first, alone = first;
+	absent.entry = "nowhere.mnu";
+	alone.entry = "t0.pcx";
+	const ImportPlan missing = project.plan({absent});
+	TEST_EXPECT(missing.rows.empty() && has_code(missing.diagnostics, "import.read"));
+	const ImportPlan single = project.plan({alone}, false);
+	TEST_EXPECT(single.rows.size() == 1 && single.rows[0].kind == AssetKind::Texture && single.rows[0].size == 100);
+
+	// A texture is never read: eight of a megabyte each cost their rows alone.
+	const std::string art = project.dir.file("art");
+	std::string windows;
+	for (int i = 0; i < 8; ++i) {
+		const std::string name = "big" + std::to_string(i) + ".tga";
+		windows += window("STATIC", ("W" + std::to_string(i)).c_str(), image(name));
+		TEST_EXPECT(editor_test::write_text(art + "/" + name, std::string(size_t(1) << 20, 't')));
+	}
+	TEST_EXPECT(editor_test::write_text(art + "/big.mnu", screen("BIG", windows)));
+	ImportPlanner big({{art + "/big.mnu", {}}}, true, paths, *v.project.document, *v.project.scan, *v.findings.graph,
+			std::string());
+	size_t big_steps = 1;
+	while (!big.step(uint64_t(64) << 10)) ++big_steps;
+	const ImportPlan big_plan = big.take();
+	TEST_EXPECT(big_plan.rows.size() == 9 && big_steps <= 4);
+	TEST_EXPECT(big_plan.total_bytes() > (uint64_t(8) << 20));
+	return 0;
+}
+
 int run_import_plan_tests() {
 	int failures = 0;
+	failures += test_plan_steps();
 	failures += test_plan_folder();
 	failures += test_plan_archive();
 	failures += test_plan_game_install();

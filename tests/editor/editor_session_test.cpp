@@ -2853,9 +2853,9 @@ static int test_view_revisions() {
 	return 0;
 }
 
-// S12: the import guard looks at every file the import writes, past the import plan's cap: a
-// replacement of more files than the cap, the last an edited catalog's, waits on the unsaved
-// prompt for that catalog, nothing written.
+// S12: the import guard looks at every file the import writes, however many (its plan has no cap,
+// where the dialog's stops at kImportPlanFileCap): a replacement of a thousand and one files, the
+// last an edited catalog's, waits on the unsaved prompt for that catalog, nothing written.
 static int test_import_guard_past_the_cap() {
 	editor_test::TempProjectDir dir("opennova_editor_session_import_cap");
 	FakePlatform platform;
@@ -2879,7 +2879,7 @@ static int test_import_guard_past_the_cap() {
 	session.handle(edit);
 	TEST_EXPECT(items->dirty());
 	std::vector<std::string> names;
-	for (size_t i = 0; i < kImportPlanFileCap; ++i) {
+	for (size_t i = 0; i < 1000; ++i) {
 		char name[16];
 		std::snprintf(name, sizeof(name), "t%04zu.txt", i);
 		names.push_back(name);

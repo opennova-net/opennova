@@ -422,11 +422,11 @@ static int test_scene_textures() {
 	return 0;
 }
 
-// The cap binds the command line as it binds the dialog: 1001 members of an archive with
-// --with-dependencies make a plan cut at 1000, and the command imports those the plan holds, not
-// the one past it, and says so.
-static int test_cap() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_cap");
+// ADR 0046 S14: the plan's cap is a guard (kImportPlanFileCap, fifty thousand), not a limit an
+// import meets: 1001 members of an archive with --with-dependencies plan whole, and the command
+// imports every one and says nothing of a stop.
+static int test_many() {
+	editor_test::TempProjectDir dir("opennova_editor_project_cli_many");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
 	std::vector<std::string> names;
@@ -447,9 +447,9 @@ static int test_cap() {
 		args.push_back(name);
 	}
 	std::string text;
-	TEST_EXPECT(run_list(dir.file("err.txt"), args, text) == 1);
-	TEST_EXPECT(text.find("the plan stopped at 1000 files") != std::string::npos);
-	TEST_EXPECT(fs::is_regular_file(root + "/t0999.txt") && !fs::exists(root + "/t1000.txt"));
+	TEST_EXPECT(run_list(dir.file("err.txt"), args, text) == 0);
+	TEST_EXPECT(text.find("the plan stopped at") == std::string::npos);
+	TEST_EXPECT(fs::is_regular_file(root + "/t0999.txt") && fs::is_regular_file(root + "/t1000.txt"));
 	return 0;
 }
 
@@ -658,7 +658,7 @@ int main() {
 	failures += test_import_with_dependencies();
 	failures += test_dry_run_writes_nothing();
 	failures += test_scene_textures();
-	failures += test_cap();
+	failures += test_many();
 	if (failures == 0) std::printf("project_cli: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

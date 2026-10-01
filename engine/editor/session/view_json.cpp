@@ -450,6 +450,7 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		return entry;
 	entry.set("source", source_to_json(row.source));
 	entry.set("destination", json_string(row.destination));
+	entry.set("size", json_number(double(row.size)));
 	if (!row.made_from.empty())
 		entry.set("made_from", json_string(row.made_from));
 	entry.set("found_in", json_string(row.found_in));
@@ -651,6 +652,8 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	// `count` the rows'; the page runs on while any list it covers has entries past it.
 	set_page(out, page, rows.size(),
 			std::max({ preview.choices.size(), preview.roots.size(), not_found.size() }));
+	// What the whole plan copies, whatever the page shows of it.
+	out.set("total_bytes", json_number(double(plan.total_bytes())));
 	JsonValue planned = JsonValue::make_array();
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));

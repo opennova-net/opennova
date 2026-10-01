@@ -1049,8 +1049,9 @@ constexpr EditorQueryRow kRows[] = {
 	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
 			concern_set({ C::Dialogs, C::Preferences, C::Files }),
 			"The import dialog's preview: open, with_dependencies, a page of its plan's rows in "
-			"its order, the chosen files first (state, name, kind, source, destination, "
-			"made_from, needed_by, found_in, selected, problem, rivals), by the same page what it "
+			"its order, the chosen files first (state, name, kind, source, destination, size, "
+			"made_from, needed_by, found_in, selected, problem, rivals), total_bytes (what the "
+			"whole plan copies), by the same page what it "
 			"offers and chose (choices, roots) and the files not found, each list with its own "
 			"count (next_offset runs to the end of the longest), then the kinds not followed, "
 			"truncated and the plan's findings.")

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -61,7 +63,42 @@ std::string import_destination(const AssetScan &existing, const std::string &nam
 // was. Then each file is renamed over its destination in order, after its record; a failure
 // there stops it (a record written for a file that did not publish goes with it), the files
 // published before it `imported`, it and the rest `not_imported`, each one a finding.
+// An AssetImport run to its end.
 ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
                            const ProjectDocument &document, bool replace_existing);
+
+// The import a step at a time (ADR 0046 S14: a mission's closure is thousands of files and
+// hundreds of megabytes; S13 A3's rule for every long job): the project scanned (ProjectScan),
+// then a source a step, read, checked as import_assets says and, while none was refused, staged
+// at once, its bytes dropped (one file is held at a time, never the selection); then, when none
+// was refused, a file published a step. A refusal stages nothing more and, once every source was
+// checked (each refusal said), removes the stage: the project is as it was. It can be abandoned
+// until it publishes its first file, not after.
+class AssetImport {
+public:
+	AssetImport(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document,
+	            bool replace_existing);
+	~AssetImport();
+	AssetImport(const AssetImport &) = delete;
+	AssetImport &operator=(const AssetImport &) = delete;
+
+	// One step within `bytes` read and written (at least one source or one file); true once done.
+	bool step(uint64_t bytes);
+	bool done() const;
+	// True from its first published file on: it runs to its end from there.
+	bool publishing() const;
+	// Stops before it publishes: what it staged is removed. Nothing after it publishes.
+	void abandon();
+	// Its progress in files: the sources checked and the files published, of the sources and the
+	// files they make (known as each is staged, so the total grows while it checks).
+	size_t files_done() const;
+	size_t files_total() const;
+	// What it came to, once done.
+	ImportResult take();
+
+private:
+	class Run;
+	std::unique_ptr<Run> run_;
+};
 
 } // namespace opennova::editor

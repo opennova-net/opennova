@@ -59,8 +59,15 @@ bool ImportPlanOperation::step(const StepBudget &budget) {
 		phase_ = Phase::Plan;
 		return false;
 	case Phase::Plan:
-		plan_ = plan_import(roots_, with_dependencies_, paths_, document_, scan_, *copy_, install_, kImportPlanFileCap,
-				mounted_);
+		// The plan a step at a time (ADR 0046 S14: a mission's closure is thousands of files): the
+		// chosen files taken, then each planned file's references followed within the step's bytes.
+		if (!planner_)
+			planner_ = std::make_unique<ImportPlanner>(roots_, with_dependencies_, paths_, document_, scan_, *copy_,
+					install_, kImportPlanFileCap, mounted_);
+		if (!planner_->step(budget.bytes)) return false;
+		plan_files_ = planner_->files_known();
+		plan_ = planner_->take();
+		planner_.reset();
 		copy_.reset();
 		mounted_.reset();
 		phase_ = Phase::Done;
@@ -73,17 +80,23 @@ bool ImportPlanOperation::step(const StepBudget &budget) {
 OperationProgress ImportPlanOperation::progress() const {
 	const uint64_t listed = walk_.files_listed();
 	const uint64_t after = phase_ == Phase::Graph ? 0 : phase_ == Phase::Mount ? 1 : phase_ == Phase::Plan ? 2 : 3;
+	// The plan's own files once it steps: those done with of those known so far (the walk finds
+	// more as it reads, so the total grows with it; neither count falls).
+	const uint64_t planned = planner_ ? planner_->files_done() : plan_files_;
+	const uint64_t known = planner_ ? planner_->files_known() : plan_files_;
 	OperationProgress progress;
 	progress.unit = OperationUnit::Files;
-	progress.total = walk_.listing() ? 0 : listed + kPlanSteps;
-	progress.done = walk_.listing() ? 0 : walk_.files_visited() + (phase_ == Phase::Scan ? 0 : after);
+	progress.total = walk_.listing() ? 0 : listed + kPlanSteps + known;
+	progress.done = walk_.listing() ? 0 : walk_.files_visited() + (phase_ == Phase::Scan ? 0 : after) + planned;
 	switch (phase_) {
 	case Phase::Validation: progress.label = "Validating the project first"; break;
 	case Phase::Scan: progress.label = walk_.listing() ? "Listing the project's files" : "Scanning " + walk_.current(); break;
 	case Phase::Graph: progress.label = "Reading what the project's files name"; break;
 	case Phase::Mount: progress.label = "Mounting the game install"; break;
 	case Phase::Plan:
-	case Phase::Done: progress.label = "Planning the import"; break;
+	case Phase::Done:
+		progress.label = planned > 0 ? "Planning the import: " + std::to_string(planned) + " files" : "Planning the import";
+		break;
 	}
 	return progress;
 }

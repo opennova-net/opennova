@@ -485,39 +485,204 @@ static int test_apply_record_with_its_file() {
 	return 0;
 }
 
-// A plan stopped by its cap holds a converter's files whole or not at all: 999 files chosen, then
-// a clip set making two, leave no room for the clip set, so the plan does not hold it, and an
-// Import naming it is refused with nothing written.
-static int test_apply_cap_keeps_groups() {
-	Project project("opennova_editor_apply_cap");
+// An Import names only what the open preview plans: two files chosen and planned, an Import of
+// those and of a clip set the preview never held is refused whole (import.not_planned names the
+// clip set), nothing written. (A plan stopped by its cap leaves a converter's files out whole the
+// same way: import_plan_test's test_plan_cycle_and_cap, the plan's own cap.)
+static int test_apply_refuses_unplanned() {
+	Project project("opennova_editor_apply_unplanned");
 	const std::string root = project.root();
 	const std::string art = project.dir.file("art");
-	std::vector<std::string> paths;
-	for (int i = 0; i < 999; ++i) {
-		char name[16];
-		std::snprintf(name, sizeof(name), "/t%03d.txt", i);
-		paths.push_back(art + name);
-		TEST_EXPECT(editor_test::write_text(paths.back(), "x"));
-	}
+	std::vector<std::string> paths = {art + "/t0.txt", art + "/t1.txt"};
+	for (const std::string &path : paths) TEST_EXPECT(editor_test::write_text(path, "x"));
 	TEST_EXPECT(editor_test::write_text(art + "/walk.o3a",
 	                                    "o3a 1\nadm CHECK.adm\nrow anim_reset \"walk\"\nclip walk\nfps 30\nflags 0x1\nframes 1\n"
 	                                    "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n k 0 0 0 1\n k 0 0 0 1\n"
 	                                    "event 0 0 0 0x0 0.9 1.7\nevent 0 0 0 0x0 0.9 1.7\n"));
-	paths.push_back(art + "/walk.o3a");
 	const SessionView &view = project.view();
 	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
 	project.session.handle(request);
 	project.session.run_operations();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
-	TEST_EXPECT(plan.truncated && plan.rows.size() == 999 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
+	TEST_EXPECT(!plan.truncated && plan.rows.size() == 2 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
 	std::vector<ImportChoice> every;
 	for (const std::string &path : paths) every.push_back({path, {}});
+	every.push_back({art + "/walk.o3a", {}});
 	const auto before = snapshot(root);
 	const ActionOutcome unplanned = import(project.session, every);
 	TEST_EXPECT(!unplanned.done() &&
 	            finding(unplanned, "import.not_planned", DiagnosticSeverity::Error, "walk.o3a"));
 	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/anims"));
+	return 0;
+}
+
+// ADR 0046 S14: the preview's plan steps with the polls (ImportPlanOperation's Plan phase over an
+// ImportPlanner). A menu chain of twelve in a folder, a poll a step: the plan takes more polls
+// than it has files, the operation's progress only rises and ends whole, the dialog shows no row
+// until the plan is made, and the plan made is the one a single call makes.
+static int test_apply_plan_steps() {
+	Project project("opennova_editor_apply_plan_steps");
+	const std::string art = project.dir.file("art");
+	for (int i = 0; i < 12; ++i) {
+		const std::string n = std::to_string(i), next = std::to_string(i + 1);
+		TEST_EXPECT(editor_test::write_text(art + "/m" + n + ".mnu",
+				screen(("S" + n).c_str(), window("BUTTON", "GO", image("t" + n + ".pcx") +
+						(i < 11 ? go_to("m" + next + ".mnu", ("S" + next).c_str()) : std::string())))));
+		TEST_EXPECT(editor_test::write_text(art + "/t" + n + ".pcx", "pcx"));
+	}
+	const SessionView &view = project.view();
+	const ImportPlan whole = project.plan({{art + "/m0.mnu", {}}});
+	TEST_EXPECT(whole.rows.size() == 24);
+	project.session.set_poll_budget({0, 1});
+	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
+	request.paths = {art + "/m0.mnu"};
+	request.with_dependencies = true;
+	project.session.handle(request);
+	TEST_EXPECT(view.activity.operation.running() && view.activity.operation.kind == OperationKind::ImportPlan);
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
+	size_t polls = 0;
+	uint64_t done = 0, total = 0;
+	bool planning = false;
+	while (view.activity.operation.running() && polls < 2000) {
+		project.session.poll();
+		++polls;
+		const OperationStatus &status = view.activity.operation;
+		if (!status.running()) break;
+		TEST_EXPECT(status.done >= done && status.done <= status.total);
+		if (status.total != 0) TEST_EXPECT(status.total >= total);
+		done = status.done;
+		total = status.total;
+		planning = planning || status.label.find("Planning the import") == 0;
+		if (planning && done < total) TEST_EXPECT(view.dialogs.import_preview.plan->rows.empty());
+	}
+	TEST_EXPECT(!view.activity.operation.running() && planning && polls > 24);
+	TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done);
+	TEST_EXPECT(same_import(whole, *view.dialogs.import_preview.plan));
+	project.session.set_poll_budget(kDefaultPollBudget);
+	return 0;
+}
+
+// ADR 0046 S14: the write a step at a time (AssetImport). Five files of a megabyte in total, a
+// byte a step: the project is scanned, each source is read, checked and staged in a step of its
+// own (nothing of the project written meanwhile, the staging folder holding what was staged), then
+// each file published in a step; the progress only rises and ends whole. A refusal at the last
+// source removes what the earlier ones staged and the folders made for them: the project is as it
+// was. An import abandoned while it stages leaves nothing; one that has published cannot be.
+static int test_apply_write_steps() {
+	Project project("opennova_editor_apply_write_steps");
+	const std::string root = project.root();
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string art = project.dir.file("art");
+	std::vector<ImportChoice> sources;
+	for (int i = 0; i < 5; ++i) {
+		const std::string path = art + "/f" + std::to_string(i) + ".fnt";
+		TEST_EXPECT(editor_test::write_text(path, std::string(size_t(200000), char('a' + i))));
+		sources.push_back({path, {}});
+	}
+	const SessionView &view = project.view();
+	const auto before = snapshot(root);
+	{
+		AssetImport run(sources, paths, *view.project.document, false);
+		size_t steps = 0, done = 0, total = 0;
+		bool staged_seen = false;
+		while (!run.step(1)) {
+			++steps;
+			TEST_EXPECT(run.files_done() >= done && run.files_total() >= total && run.files_done() <= run.files_total());
+			done = run.files_done();
+			total = run.files_total();
+			// While it stages, the project holds none of the files; the stage holds them.
+			if (!run.publishing()) {
+				TEST_EXPECT(!fs::exists(root + "/fonts/f0.fnt"));
+				staged_seen = staged_seen || staged_left(root);
+			}
+			TEST_EXPECT(steps < 200);
+		}
+		TEST_EXPECT(staged_seen && steps >= 10 && run.done() && run.publishing());
+		TEST_EXPECT(run.files_done() == 10 && run.files_total() == 10);
+		const ImportResult result = run.take();
+		TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 5 && result.not_imported.empty());
+		TEST_EXPECT(result.imported.front() == "fonts/f0.fnt" && result.imported.back() == "fonts/f4.fnt");
+		for (int i = 0; i < 5; ++i) TEST_EXPECT(fs::file_size(root + "/fonts/f" + std::to_string(i) + ".fnt") == 200000);
+		TEST_EXPECT(!staged_left(root));
+		// Published: abandoning it changes nothing.
+		run.abandon();
+		TEST_EXPECT(fs::exists(root + "/fonts/f0.fnt"));
+	}
+	// A refusal at the last source (a name the archives cannot store): what was staged goes.
+	const std::string art2 = project.dir.file("art2");
+	std::vector<ImportChoice> refused;
+	for (int i = 0; i < 3; ++i) {
+		const std::string path = art2 + "/m" + std::to_string(i) + ".mnu";
+		TEST_EXPECT(editor_test::write_text(path, screen("S", window("STATIC", "W", std::string()))));
+		refused.push_back({path, {}});
+	}
+	TEST_EXPECT(editor_test::write_text(art2 + "/a_name_far_too_long_for_an_archive.mnu", "x"));
+	refused.push_back({art2 + "/a_name_far_too_long_for_an_archive.mnu", {}});
+	const auto held = snapshot(root);
+	{
+		AssetImport run(refused, paths, *view.project.document, false);
+		bool staged_seen = false;
+		while (!run.step(1)) staged_seen = staged_seen || staged_left(root);
+		const ImportResult result = run.take();
+		TEST_EXPECT(staged_seen && !run.publishing());
+		TEST_EXPECT(has_code(result.diagnostics, "import.name") && result.imported.empty() && result.not_imported.empty());
+		TEST_EXPECT(snapshot(root) == held && !staged_left(root) && !fs::exists(root + "/menus"));
+	}
+	// Abandoned while it stages: nothing left, nothing written.
+	{
+		refused.pop_back();
+		AssetImport run(refused, paths, *view.project.document, false);
+		while (!staged_left(root) && !run.step(1)) {
+		}
+		TEST_EXPECT(staged_left(root) && !run.done() && !run.publishing());
+		run.abandon();
+		TEST_EXPECT(run.done() && snapshot(root) == held && !staged_left(root) && !fs::exists(root + "/menus"));
+		TEST_EXPECT(run.take().imported.empty());
+	}
+	// The one call is the stepped import run to its end.
+	const ImportResult whole = import_assets(refused, paths, *view.project.document, false);
+	TEST_EXPECT(whole.imported.size() == 3 && fs::exists(root + "/menus/m2.mnu"));
+	(void)before;
+	return 0;
+}
+
+// The session's Import steps its write with the polls (ImportOperation over AssetImport): a poll a
+// step, it can be cancelled while it stages (nothing written, the stage gone, the preview still
+// open), and once it publishes it cannot; left to run, it imports every file.
+static int test_apply_write_cancel() {
+	Project project("opennova_editor_apply_write_cancel");
+	const std::string root = project.root();
+	const std::string art = project.dir.file("art");
+	std::vector<ImportChoice> sources;
+	for (int i = 0; i < 6; ++i) {
+		const std::string path = art + "/n" + std::to_string(i) + ".txt";
+		TEST_EXPECT(editor_test::write_text(path, "notes"));
+		sources.push_back({path, {}});
+	}
+	const SessionView &view = project.view();
+	const auto before = snapshot(root);
+	project.session.set_poll_budget({0, 1});
+	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
+	request.imports = sources;
+	project.session.handle(request);
+	TEST_EXPECT(view.activity.operation.running() && view.activity.operation.kind == OperationKind::ImportApply);
+	// Polled until it has staged a file: cancellable, and cancelled.
+	for (int i = 0; i < 100 && !staged_left(root); ++i) project.session.poll();
+	TEST_EXPECT(staged_left(root) && view.activity.operation.running() && view.activity.operation.cancellable);
+	project.session.handle(request::cancel_operation());
+	TEST_EXPECT(!view.activity.operation.running() && view.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(snapshot(root) == before && !staged_left(root));
+	// Again, to its first published file: no longer cancellable; then to its end.
+	project.session.handle(request);
+	for (int i = 0; i < 200 && view.activity.operation.running() && !fs::exists(root + "/n0.txt"); ++i) project.session.poll();
+	TEST_EXPECT(fs::exists(root + "/n0.txt") && view.activity.operation.running() && !view.activity.operation.cancellable);
+	project.session.handle(request::cancel_operation());
+	TEST_EXPECT(view.activity.operation.running());
+	project.session.set_poll_budget(kDefaultPollBudget);
+	project.session.run_operations();
+	TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && view.activity.last_operation.imported.size() == 6);
+	for (int i = 0; i < 6; ++i) TEST_EXPECT(view.project.scan->find("n" + std::to_string(i) + ".txt"));
 	return 0;
 }
 
@@ -645,7 +810,10 @@ int run_import_apply_tests() {
 	failures += test_apply_reads_the_disk();
 	failures += test_apply_scene_textures();
 	failures += test_apply_record_with_its_file();
-	failures += test_apply_cap_keeps_groups();
+	failures += test_apply_refuses_unplanned();
+	failures += test_apply_plan_steps();
+	failures += test_apply_write_steps();
+	failures += test_apply_write_cancel();
 	failures += test_apply_staging_leftover();
 	failures += test_apply_guard_reads_the_shown_plan();
 	failures += test_apply_retail_menu();
