@@ -3973,11 +3973,12 @@ add_test(NAME editor_viewport COMMAND editor_viewport_test)
 # page's character stored, one it has none for refused); the keystroke burst; the gutter marks
 # from the findings; the compiler's words highlighted; through a real session, a burst served as one
 # undo step, the follow's actions, a Go to's span selected, a document held read only and the busy
-# gate, the envelope and a SetViewport.
+# gate, the envelope and a SetViewport; and the install's scripts (OPENNOVA_JO_DIR) as the retail
+# leg: their highlights tokens of their lines, their shown text's lines the documents'.
 add_executable(editor_script_viewport_test editor/script_viewport_test.cpp)
 target_link_libraries(editor_script_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_script_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_script_viewport COMMAND editor_script_viewport_test)
+opennova_add_mixed_test(editor_script_viewport COMMAND editor_script_viewport_test)
 
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.

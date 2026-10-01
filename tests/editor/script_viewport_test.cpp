@@ -14,13 +14,18 @@
 // served as one undo step; the follow's actions (an edit and an undo an Update, a reload a
 // Rebuild); a compile report a mark once the burst ends; a Go to's span selected (a reference's, a
 // keyword's, a caret alone); a credits file held read only and the busy gate refusing the planner;
-// the envelope; a SetViewport of its device's size.
+// the envelope; a SetViewport of its device's size. The retail leg (OPENNOVA_JO_DIR): every shipped
+// script's highlights tokens of their lines, its shown text's lines the document's.
 #include <cstdio>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include <base/io/json.h>
+#include <base/vfs/vfs.h>
+#include <editor/assets/asset_import.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/script_type.h>
 #include <editor/model/text_document.h>
@@ -39,6 +44,7 @@
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -541,9 +547,78 @@ int test_session() {
 	return 0;
 }
 
+// --- the retail leg ----------------------------------------------------------------------------------
+
+// The retail leg (OPENNOVA_JO_DIR): every script the install ships, as the editor reads it. Its
+// highlights each one token of its line (inside the line, no blank and no line end in it), in order
+// and apart; its text as the control shows it a line for each of the document's, each line's start
+// the document's byte for byte; the install's counts pinned.
+int test_retail() {
+	const std::string install = retail::install();
+	if (install.empty()) {
+		retail::skip_leg("OPENNOVA_JO_DIR (the install's scripts)");
+		return 0;
+	}
+	ProjectDocument project;
+	project.target_game = "jo";
+	opennova::Vfs mount;
+	TEST_EXPECT(mount_retail(mount, install, project));
+	size_t scripts = 0, keywords = 0, commands = 0, operands = 0, lines = 0;
+	for (const opennova::VfsFileLocation &location : mount.list_files()) {
+		const std::string &name = location.logical_name;
+		std::vector<uint8_t> bytes;
+		if (classify_asset(name, nullptr) != AssetKind::Script || !mount.read_file_raw(name, bytes)) continue;
+		const DocumentType *type = document_type_for(AssetKind::Script);
+		std::unique_ptr<DocumentBase> base = type->make();
+		Diagnostic error;
+		TEST_EXPECT(base->load_bytes(bytes, name, AssetKind::Script, "jo", error));
+		const TextDocument *text = text_of(*base);
+		if (!text) continue;
+		++scripts;
+		std::vector<TextHighlight> words;
+		type->highlights(*text, words);
+		const TextHighlight *last = nullptr;
+		for (const TextHighlight &word : words) {
+			keywords += word.kind == TextHighlightKind::Keyword;
+			commands += word.kind == TextHighlightKind::Command;
+			operands += word.kind == TextHighlightKind::Operand;
+			const std::string_view line = text->line(word.span.line);
+			const bool token = word.span.line >= 1 && word.span.line <= text->line_count() && word.span.column >= 1 &&
+			                   word.span.length > 0 && word.span.column - 1 + word.span.length <= line.size() &&
+			                   line.substr(word.span.column - 1, word.span.length).find_first_of(" \t\r\n") == std::string_view::npos;
+			if (!token)
+				std::fprintf(stderr, "retail: %s: the run at %zu:%zu (%zu) is no token of its line\n", name.c_str(), word.span.line,
+				             word.span.column, word.span.length);
+			TEST_EXPECT(token);
+			TEST_EXPECT(!last || last->span.line < word.span.line ||
+			            (last->span.line == word.span.line && last->span.column + last->span.length <= word.span.column));
+			last = &word;
+		}
+		// The control's lines the document's, each start where the document's line starts.
+		const ShownText shown(*text);
+		std::vector<size_t> starts{0};
+		for (size_t i = 0; i < shown.text().size(); ++i)
+			if (shown.text()[i] == U'\n') starts.push_back(i + 1);
+		TEST_EXPECT(starts.size() == text->line_count());
+		for (size_t line = 1; line <= starts.size() && line <= text->line_count(); ++line) {
+			size_t offset = 0;
+			TEST_EXPECT(text->offset_of(line, 1, offset) && shown.shown_at(offset) == starts[line - 1] &&
+			            shown.document_offset(starts[line - 1]) == offset);
+		}
+		lines += text->line_count();
+	}
+	std::printf("retail: %zu scripts, %zu lines; %zu keywords, %zu commands, %zu operands highlighted\n", scripts, lines,
+	            keywords, commands, operands);
+	// The install's counts, pinned (Joint Operations: Combined Arms): its operands the references
+	// editor_text_document's retail leg counts.
+	TEST_EXPECT(scripts == 23 && lines == 793 && keywords == 287 && commands == 209 && operands == 36);
+	return 0;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	int failures = 0;
 	failures += test_kind_table();
 	failures += test_span_diff();
@@ -552,6 +627,7 @@ int main() {
 	failures += test_marks();
 	failures += test_highlights();
 	failures += test_session();
+	failures += test_retail();
 	if (failures == 0) std::printf("editor_script_viewport: all passed\n");
 	return failures == 0 ? 0 : 1;
 }
