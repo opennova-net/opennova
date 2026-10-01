@@ -750,6 +750,41 @@ int main() {
 		expect(replacement.is_verified(),
 		       "genuinely new endpoint auth resets admitted sequencing");
 
+		// A stock client that dies without its goodbye and restarts within the reap
+		// window comes back on the SAME endpoint (its client port range starts at the
+		// same port) with the SAME CI and a fresh CK. Its Hello finds the still-Active
+		// row; its 0x42 is a new connection, not a retransmit, and must be answered:
+		// retail's join handler looks the connection up by address and replaces any
+		// node that is not the same CI+CK retransmit, with no Hello state required.
+		// [orig: NapiNPProtocol_HandleClientJoin @0x62beba..0x62bf06 (FindConnection,
+		//  the same-CI/CK SendSessionInit retransmit, else Destroy + Create)]
+		opennova::ClientSession::Config restarted_cfg = replacement_cfg;
+		restarted_cfg.client_key = 0x5EB007EDu;
+		opennova::ClientSession restarted(restarted_cfg);
+		send_retry(restarted.start());
+		inbound.clear();
+		out.clear();
+		const bool got_restarted_hello = receive_retry(inbound);
+		expect(got_restarted_hello, "restarted same-CI client receives ServerHello");
+		if (got_restarted_hello) {
+			expect(restarted.handle_datagram(inbound.data(), inbound.size(), out) &&
+			               out.size() == 1,
+			       "restarted ServerHello produces a fresh-CK ClientAuth");
+		}
+		if (out.size() == 1) send_retry(out.front());
+		std::vector<uint8_t> restarted_server_auth;
+		const bool got_restarted_auth = receive_retry(restarted_server_auth);
+		expect(got_restarted_auth,
+		       "a restarted same-CI client's ClientAuth replaces the Active row and is answered");
+		out.clear();
+		if (got_restarted_auth) {
+			expect(restarted.handle_datagram(restarted_server_auth.data(),
+			                                 restarted_server_auth.size(), out) &&
+			               restarted.state() == opennova::ClientSession::State::Verifying,
+			       "the restarted client installs fresh session material");
+		}
+
+		send_retry(restarted.build_goodbye());
 		send_retry(replacement.build_goodbye());
 		opennova::net::close_socket(retry_client);
 	}

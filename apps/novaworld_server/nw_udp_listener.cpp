@@ -545,8 +545,16 @@ void NwUdpListener::run_loop() {
 				break;
 			}
 
+			// The row this address's Hello owns may still be Active: a stock client
+			// that died without its goodbye restarts on the same endpoint with the
+			// same CI, and its Hello leaves the live row in place. A 0x42 that is
+			// not the cached retransmit is then a new connection that replaces the
+			// old one, as retail's join handler replaces any node that is not the
+			// same CI+CK retransmit (no Hello state is consulted).
+			// [orig: NapiNPProtocol_HandleClientJoin @0x62beba..0x62bf06]
 			if (!hello_identity_matches ||
-			    hello_owner->state != ConnectionState::Handshaking) {
+			    (hello_owner->state != ConnectionState::Handshaking &&
+			     hello_owner->state != ConnectionState::Active)) {
 				std::printf(
 						"[nwudp] AUTH without matching lobby Hello from %s"
 						" ci=0x%08x pn=%s; dropped\n",
