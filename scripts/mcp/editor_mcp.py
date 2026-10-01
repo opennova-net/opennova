@@ -23,16 +23,20 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
         "parent": 3, "as": "w"}, {"op": "set", "id": "w", "field": "name", "value": "HELLO"}]'   # one undo step
     python scripts/mcp/editor_mcp.py request apply_project_settings --settings '{"game_install": "C:/Games/JO"}'
     python scripts/mcp/editor_mcp.py request set_viewport --viewport '{"kind": "model", "camera": {"yaw": 1.2},
-        "clock": {"playing": false, "time_ms": 250}}'   # the Preview's model viewport (--path names another)
+        "clock": {"playing": false, "time_ms": 250}}'   # the active document's viewport (--path names another)
+    python scripts/mcp/editor_mcp.py viewport --op state --path main.mnu        # a document's viewport: its envelope
+    python scripts/mcp/editor_mcp.py viewport --op hit --x 400 --y 300          # what lies under a point
+    python scripts/mcp/editor_mcp.py viewport --op drag --id 5 --handle move --by=-8,4 --snap 1   # one undo step
+    python scripts/mcp/editor_mcp.py viewport --op command --name align_left --ids 5,7,9          # one request
     python scripts/mcp/editor_mcp.py build                # waits on the build's operation, its progress on stderr
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
-    python scripts/mcp/editor_mcp.py call editor_menu_preview '{"op": "state"}'
+    python scripts/mcp/editor_mcp.py call editor_viewport '{"op": "items", "limit": 20}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
 
 Exit codes, as opennova-project's (1 not done, 2 not read): 0 ok; 1 a `request`
-was not done (its outcome: refused, did not finish, or waits on the
+(or a `viewport` write) was not done (its outcome: refused, did not finish, or waits on the
 unsaved-changes prompt), or a build or play did not land or did not end in
 time; 2 not read: a usage error, no endpoint answered, or the tool reported
 isError (a request or query the editor did not read); 3 a JSON-RPC error; 6
@@ -614,7 +618,7 @@ def build_parser() -> argparse.ArgumentParser:
                               "multiplayer, game_install, runtime_executable, play_in_install; one left out stays)")
     request.add_argument("--viewport", default=None,
                          help="set_viewport: the change as a JSON object {kind, device, clock, options, camera} "
-                              "(without --path: the Preview's viewport of the kind; device only where no canvas "
+                              "(without --path: the active document's viewport; device only where no canvas "
                               "sizes the picture)")
     switch = ("true", "false")
     request.add_argument("--with-dependencies", dest="with_dependencies", choices=switch, default=None,

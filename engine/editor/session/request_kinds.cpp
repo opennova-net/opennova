@@ -720,6 +720,21 @@ constexpr bool params_hold() {
 }
 static_assert(params_hold(), "each row's params hold its other columns");
 
+// The viewport rows (S13 V7): a viewport's change and an edit in a viewport name the active
+// document's viewport when their path is left out, as every pathless request names the active
+// document; an edit in a viewport writes the documents, so an operation that holds them refuses it as
+// it refuses an edit_record's.
+constexpr bool viewport_rows_hold() {
+	for (const RequestKindRow &row : kRows) {
+		const bool edits = row.params.has(F::Drag) || row.params.has(F::Command);
+		if ((edits || row.params.has(F::Viewport)) && !row.names_active) return false;
+		if (edits && !holds_any(row.writes, HoldsDocuments)) return false;
+	}
+	return true;
+}
+static_assert(viewport_rows_hold(),
+		"a viewport row names the active document's viewport, and an edit in a viewport writes the documents");
+
 // --- the busy gate
 // --------------------------------------------------------------------------------
 

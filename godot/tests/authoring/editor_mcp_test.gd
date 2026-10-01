@@ -22,13 +22,16 @@ extends GutTest
 ## identity or by the label an earlier add gave, kinds by token, a list replaced), its outcome
 ## naming what it added and what each label made; the tool list and the request enum come from
 ## `editor_query catalog`, and editor_document, editor_graph, editor_problems and editor_menu
-## are gone.
+## are gone. S13 V7: one editor_viewport tool for every viewport, its reads the viewport query
+## (state, items, hit, notes, render) and its writes requests (options, camera and seek a
+## set_viewport, drag and command an edit_in_viewport); editor_menu_preview and
+## editor_model_preview are gone.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
 const CATALOG: Array[String] = [
-	"editor_state", "editor_request", "editor_query", "editor_build", "editor_play", "editor_menu_preview",
-	"editor_model_preview", "editor_screenshot", "editor_logs",
+	"editor_state", "editor_request", "editor_query", "editor_build", "editor_play", "editor_viewport",
+	"editor_screenshot", "editor_logs",
 ]
 
 var _dirs: Array[String] = []
@@ -299,8 +302,7 @@ static func _document_state(state: Dictionary, path: String) -> Dictionary:
 	return {}
 
 
-## A widget's absolute rect in an editor_menu_preview rects page, its items (all zero when it is not
-## there).
+## A widget's absolute rect in an editor_viewport answer's items (all zero when it is not there).
 func _rect_of(rects: Dictionary, name: String) -> Array:
 	for widget: Variant in rects.get("items", []):
 		if widget is Dictionary and String((widget as Dictionary).get("name", "")) == name:
@@ -330,11 +332,8 @@ func test_catalog_state_and_refusals_without_a_project() -> void:
 	assert_true((await _call("editor_build")).get("_error", "").contains("No project"))
 	assert_true((await _call("editor_play", {"op": "start"})).get("_error", "").contains("No project"))
 	assert_true((await _call("editor_screenshot")).get("_error", "").contains("headless"))
-	var preview := await _call("editor_menu_preview", {"op": "state"})
-	assert_eq(String(preview.get("reason", "")), "no_project", str(preview))
-	assert_eq(String(preview.get("status", "")), "empty", str(preview))
-	assert_eq(int(preview.get("count", -1)), 0)
-	assert_false(preview.has("items"), "the state leaves the items to op=rects")
+	assert_true((await _call("editor_viewport", {"op": "state"})).get("_error", "").contains("no document is open"),
+			"no project, no viewport")
 	assert_true((await _query("menu_tree")).get("_error", "").contains("no document is active"), "no project, no menu")
 	assert_true((await _query("nope")).get("_error", "").contains("Unknown query"), "an unknown query")
 	var logs := await _call("editor_logs")
@@ -361,12 +360,15 @@ func test_request_table_on_the_wire() -> void:
 	var kinds: Array = []
 	var queries: Array = []
 	var edit: Dictionary = {}
+	var viewport: Dictionary = {}
 	for tool in (listed as Dictionary).get("result", {}).get("tools", []):
 		if String(tool["name"]) == "editor_request":
 			kinds = tool["inputSchema"]["properties"]["kind"].get("enum", [])
 			edit = tool["inputSchema"]["properties"]["edits"].get("items", {})
 		if String(tool["name"]) == "editor_query":
 			queries = tool["inputSchema"]["properties"]["query"].get("enum", [])
+		if String(tool["name"]) == "editor_viewport":
+			viewport = tool
 	var catalog := await _query("catalog")
 	var served: Array = []
 	for row: Variant in catalog.get("requests", []):
@@ -377,6 +379,19 @@ func test_request_table_on_the_wire() -> void:
 	for row: Variant in catalog.get("queries", []):
 		named.append(String((row as Dictionary).get("name", "")))
 	assert_eq(queries, named, "the query enum is the catalog's queries")
+	# S13 V7: editor_viewport, made from the catalog: its op the viewport query's reads and the writes
+	# (set_viewport's and edit_in_viewport's), the query's params but op flat beside it, the objects
+	# the writes carry.
+	assert_true(served.has("set_viewport") and served.has("edit_in_viewport") and named.has("viewport"))
+	var properties: Dictionary = viewport.get("inputSchema", {}).get("properties", {})
+	assert_eq(properties.get("op", {}).get("enum", []),
+			["state", "items", "hit", "notes", "render", "options", "camera", "seek", "drag", "command"])
+	for key in ["path", "x", "y", "row", "offset", "limit", "options", "camera", "clock", "device", "drag", "command"]:
+		assert_true(properties.has(key), "editor_viewport takes %s" % key)
+	assert_eq(String(properties.get("x", {}).get("type", "")), "number", "a point is a number")
+	assert_eq(int(properties.get("limit", {}).get("maximum", 0)), int(catalog.get("page_max", -1)))
+	var description := String(viewport.get("description", ""))
+	assert_true(description.contains("set_viewport") and description.contains("edit_in_viewport"), description)
 	var batch: Dictionary = catalog.get("batch", {})
 	var ops: Array = []
 	for row: Variant in batch.get("ops", []):
@@ -554,15 +569,16 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	state = await _call("editor_state")
 	assert_eq(int(state["selection"]["primary"]["child"]), later)
 	assert_true(bool(state["documents"]["open"][0]["dirty"]))
-	# The preview (headless): the screen as the game would draw it, LATER where it was put
-	# and the title's new text; the game's hit test at LATER's centre finds it; the
-	# options hold it under the mouse.
-	var preview := await _call("editor_menu_preview", {"op": "state"})
+	# The viewport (headless, editor_viewport): the screen as the game would draw it, LATER where it
+	# was put and the title's new text; the game's hit test at LATER's centre finds it; the options
+	# hold it under the mouse (a set_viewport, the state after it its answer's viewport).
+	var preview := await _call("editor_viewport", {"op": "state"})
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
 	assert_eq(String(preview.get("kind", "")), "menu", str(preview))
 	assert_eq(String(preview.get("body", {}).get("screen", {}).get("name", "")), "STARTUP")
 	assert_gt(int(preview.get("count", 0)), 3)
-	var rects := await _call("editor_menu_preview", {"op": "rects"})
+	assert_gt(int(preview.get("view_revision", 0)), 0, "stamped by the viewport query")
+	var rects := await _call("editor_viewport", {"op": "items", "limit": 200})
 	var by_name := {}
 	for widget: Variant in rects.get("items", []):
 		by_name[String(widget["name"])] = widget
@@ -571,44 +587,66 @@ func test_john_smith_through_the_editor_mcp() -> void:
 	assert_eq(later_rect.size(), 4, str(rects))
 	if later_rect.size() == 4:
 		assert_eq(int(later_rect[0]), 340)
-		var hit := await _call("editor_menu_preview", {"op": "hit",
+		var hit := await _call("editor_viewport", {"op": "hit",
 				"x": (float(later_rect[0]) + float(later_rect[2])) / 2.0,
 				"y": (float(later_rect[1]) + float(later_rect[3])) / 2.0})
 		assert_eq(int(hit.get("id", 0)), later, str(hit))
-	var held := await _call("editor_menu_preview", {"op": "options", "force_id": later, "force_state": "mouseover"})
-	assert_eq(int(held.get("options", {}).get("force_id", 0)), later, str(held))
-	assert_eq(String(held.get("options", {}).get("force_state", "")), "mouseover", str(held))
-	# LATER dragged by its move handle onto the grid, then nudged a unit: two undo steps.
-	var dragged := await _call("editor_menu_preview", {"op": "drag", "id": later, "handle": "move", "dx": 13, "dy": 5})
-	assert_eq(String(dragged.get("status", "")), "ready", str(dragged))
-	assert_eq(int(_rect_of(await _call("editor_menu_preview", {"op": "rects", "limit": 200}), "LATER")[0]), 352)
-	var nudged := await _call("editor_menu_preview", {"op": "nudge", "id": later, "dx": 1, "dy": 0})
-	assert_eq(String(nudged.get("status", "")), "ready", str(nudged))
-	assert_eq(int(_rect_of(await _call("editor_menu_preview", {"op": "rects", "limit": 200}), "LATER")[0]), 353)
-	assert_true((await _call("editor_menu_preview", {"op": "drag", "id": later, "handle": "middle", "dx": 1, "dy": 1})).has("_error"),
-			"an unknown handle")
-	assert_true((await _call("editor_menu_preview", {"op": "nudge", "id": later})).has("_error"), "nudge needs dx and dy")
-	assert_true((await _call("editor_menu_preview", {"op": "drag", "id": 999999, "handle": "move", "dx": 1, "dy": 1})).has("_error"),
-			"a record the preview does not show")
+	var held := await _call("editor_viewport", {"op": "options", "options": {"force_id": later, "force_state": "mouseover"}})
+	assert_true(_done(held), str(held))
+	assert_eq(int(held.get("viewport", {}).get("options", {}).get("force_id", 0)), later, str(held))
+	assert_eq(String(held.get("viewport", {}).get("options", {}).get("force_state", "")), "mouseover", str(held))
+	# LATER dragged by its move handle onto the grid, then a unit more with no snap in two drags of
+	# one gesture (the first's answer names it; the second, which moves nothing, ends it): two undo
+	# steps.
+	var dragged := await _call("editor_viewport", {"op": "drag",
+			"drag": {"id": later, "handle": "move", "by": [13, 5], "snap": 1}})
+	assert_true(_done(dragged), str(dragged))
+	assert_gt(int(dragged.get("outcome", {}).get("gesture", 0)), 0, str(dragged))
+	assert_eq(int(_rect_of(dragged.get("viewport", {}), "LATER")[0]), 352, str(dragged))
+	var opened_gesture := await _call("editor_viewport", {"op": "drag",
+			"drag": {"id": later, "handle": "move", "by": [1, 0], "end": false}})
+	var gesture := int(opened_gesture.get("outcome", {}).get("gesture", 0))
+	assert_true(_done(opened_gesture) and gesture > 0, str(opened_gesture))
+	var nudged := await _call("editor_viewport", {"op": "drag",
+			"drag": {"id": later, "handle": "move", "by": [0, 0], "gesture": gesture}})
+	assert_true(_done(nudged), str(nudged))
+	assert_eq(int(nudged.get("outcome", {}).get("gesture", 0)), gesture, "the gesture it went on with")
+	assert_eq(int(_rect_of(await _call("editor_viewport", {"op": "items", "limit": 200}), "LATER")[0]), 353)
+	# Refused: by the viewport as it is served (an unknown handle, a record it does not show: read,
+	# not done), as the request is read (both by and to), by the tool (an op it has not, a member
+	# its op does not take, the one it needs).
+	var middle := await _call("editor_viewport", {"op": "drag", "drag": {"id": later, "handle": "middle", "by": [1, 1]}})
+	assert_true(bool(middle.get("ok", false)) and not _done(middle), "an unknown handle: " + str(middle))
+	assert_eq(String(middle.get("outcome", {}).get("findings", [{}])[0].get("code", "")), "viewport.refused", str(middle))
+	var unseen := await _call("editor_viewport", {"op": "drag", "drag": {"id": 999999, "handle": "move", "by": [1, 1]}})
+	assert_false(_done(unseen), "a record the viewport does not show: " + str(unseen))
+	assert_true((await _call("editor_viewport", {"op": "drag",
+			"drag": {"id": later, "handle": "move", "by": [1, 1], "to": [1, 1]}})).get("_error", "").contains("one of them"))
+	assert_true((await _call("editor_viewport", {"op": "zoom"})).get("_error", "").contains("no op 'zoom'"))
+	assert_true((await _call("editor_viewport", {"op": "options", "camera": {}})).get("_error", "").contains(
+			"takes no \"camera\""))
+	assert_true((await _call("editor_viewport", {"op": "drag"})).get("_error", "").contains("needs \"drag\""))
 	for _step in 2:
 		assert_true(_done(await _ask("undo")))
-	assert_eq(int(_rect_of(await _call("editor_menu_preview", {"op": "rects", "limit": 200}), "LATER")[0]), 340,
+	assert_eq(int(_rect_of(await _call("editor_viewport", {"op": "items", "limit": 200}), "LATER")[0]), 340,
 			"two undo steps put it back")
-	assert_true((await _call("editor_menu_preview", {"op": "hit"})).has("_error"), "hit needs x and y")
-	assert_true((await _call("editor_menu_preview", {"op": "nope"})).has("_error"))
-	# The frame compiler's notes on the preview, and the render check's headless render of
-	# the same screen (the menu_render query): the same windows.
-	var notes := await _call("editor_menu_preview", {"op": "notes"})
+	assert_true((await _call("editor_viewport", {"op": "hit"})).get("_error", "").contains("needs \"x\" and \"y\""))
+	assert_true((await _call("editor_viewport", {"op": "state", "x": 1})).get("_error", "").contains("takes no \"x\""))
+	# The frame compiler's notes on the screen, and the render check's headless render of the same
+	# screen (the viewport's render, the menu_render query's answer): the same windows.
+	var notes := await _call("editor_viewport", {"op": "notes"})
 	assert_eq(String(notes.get("status", "")), "ready", str(notes))
 	assert_eq(int(notes.get("count", -1)), (notes.get("notes", []) as Array).size(), str(notes))
-	var render := await _query("menu_render", {"path": String(preview.get("path", "")),
-			"screen": int(preview.get("body", {}).get("screen", {}).get("id", 0)), "limit": 200})
+	var screen_id := int(preview.get("body", {}).get("screen", {}).get("id", 0))
+	var render := await _call("editor_viewport", {"op": "render", "row": screen_id, "limit": 200})
 	assert_eq(String(render.get("status", "")), "ready", str(render))
 	assert_eq(int(render.get("widget_count", 0)), int(preview.get("count", -1)), str(render))
 	var render_names := {}
 	for widget: Variant in render.get("widgets", []):
 		render_names[String(widget["name"])] = widget
 	assert_true(render_names.has("LATER"), str(render))
+	var checked := await _query("menu_render", {"path": String(preview.get("path", "")), "screen": screen_id, "limit": 200})
+	assert_eq(int(checked.get("widget_count", -1)), int(render.get("widget_count", -2)), str(checked))
 	assert_true((await _query("menu_render", {"path": "main.mnu"})).has("_error"), "render needs a screen")
 	# The selection joins one record at a time; a clear leaves an edge out and a write puts it
 	# back; a batch is one step.
@@ -1272,8 +1310,8 @@ func test_import_with_dependencies_through_the_endpoint() -> void:
 
 ## S9k2 through the endpoint: TITLE and EXIT copied from STARTUP and pasted into a second
 ## screen's MAIN and into another menu file (their names free there), the selection
-## duplicated in one step and undone, the two arranged by editor_menu_preview op=arrange and
-## undone, and the refusals.
+## duplicated in one step and undone, the two arranged by editor_viewport op=command (one
+## request, one undo step) and undone, and the refusals.
 func test_clipboard_across_screens_and_arrange() -> void:
 	if _client == null:
 		return
@@ -1344,18 +1382,21 @@ func test_clipboard_across_screens_and_arrange() -> void:
 	assert_true(_done(await _ask("undo")))
 	assert_true((await _query("record", {"symbol": "EXIT2"})).has("_error"), "the duplicate undone")
 
-	# Arranged in the preview: EXIT's left edge to TITLE's, one undo step.
-	var arranged := await _call("editor_menu_preview", {"op": "arrange", "ids": [title, exit], "arrange": "align_left"})
-	assert_eq(String(arranged.get("status", "")), "ready", str(arranged))
-	var rects := await _call("editor_menu_preview", {"op": "rects", "limit": 200})
+	# Arranged in the viewport: EXIT's left edge to TITLE's, one request, one undo step.
+	var arranged := await _call("editor_viewport", {"op": "command", "command": {"name": "align_left", "ids": [title, exit]}})
+	assert_true(_done(arranged), str(arranged))
+	assert_false(arranged.get("outcome", {}).has("gesture"), "a command carries no gesture")
+	var rects: Dictionary = arranged.get("viewport", {})
 	assert_eq(int(_rect_of(rects, "EXIT")[0]), int(_rect_of(rects, "TITLE")[0]), str(rects))
 	assert_true(_done(await _ask("undo")))
-	rects = await _call("editor_menu_preview", {"op": "rects", "limit": 200})
+	rects = await _call("editor_viewport", {"op": "items", "limit": 200})
 	assert_eq(int(_rect_of(rects, "EXIT")[0]), 340, str(rects))
-	assert_true((await _call("editor_menu_preview", {"op": "arrange", "ids": [title], "arrange": "align_left"})).has("_error"),
+	assert_false(_done(await _call("editor_viewport", {"op": "command", "command": {"name": "align_left", "ids": [title]}})),
 			"one window cannot be aligned")
-	assert_true((await _call("editor_menu_preview", {"op": "arrange", "ids": [title, exit], "arrange": "sideways"})).has("_error"))
-	assert_true((await _call("editor_menu_preview", {"op": "arrange", "arrange": "align_left"})).has("_error"), "ids are required")
+	assert_false(_done(await _call("editor_viewport", {"op": "command",
+			"command": {"name": "sideways", "ids": [title, exit]}})))
+	assert_true((await _call("editor_viewport", {"op": "command", "command": {"ids": [title]}})).get("_error", "").contains(
+			"name"), "a command names itself")
 
 
 ## A window of a menu_tree answer by name (an empty Dictionary when it is not there).
@@ -1457,9 +1498,9 @@ func test_menu_tools_through_the_editor_mcp() -> void:
 		assert_eq(int(local[1]), 430)
 		assert_eq(int(local[2]), 460)
 	assert_eq(int((_tree_window(tree, "CHOICES").get("lists", {}) as Dictionary).get("items.item", 0)), 1, str(tree))
-	var preview := await _call("editor_menu_preview", {"op": "state"})
+	var preview := await _call("editor_viewport", {"op": "state"})
 	assert_eq(String(preview.get("status", "")), "ready", str(preview))
-	var rects := await _call("editor_menu_preview", {"op": "rects", "limit": 200})
+	var rects := await _call("editor_viewport", {"op": "items", "limit": 200})
 	var hello_rect := _rect_of(rects, "HELLO")
 	assert_eq(int(hello_rect[0]), 340, str(rects))
 	for widget: Variant in rects.get("items", []):
