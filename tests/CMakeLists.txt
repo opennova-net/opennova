@@ -3486,6 +3486,14 @@ add_executable(npruntime_session_resend_test npruntime/session_resend_test.cpp)
 target_link_libraries(npruntime_session_resend_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
 
+# The NP session layer soaked over an impaired link: a ClientRuntime joiner and the host owner
+# loop on a virtual clock, each direction through the seeded ImpairedDatagramSocket decorator
+# (2 % loss, reordering, duplication, 100 ms delay) under a 12-tick send holdoff. Asserts the
+# session survives in order, recovers every gap and never stalls past retail's recovery cadence.
+add_executable(npruntime_session_soak_test npruntime/session_soak_test.cpp)
+target_link_libraries(npruntime_session_soak_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_session_soak COMMAND npruntime_session_soak_test)
+
 # The host-initiated close (the connection-description record, settings flag + tag 3) pinned against
 # the 80 captured bytes of a live retail deploy-screen idle punt, plus the S2C 0x30/0x31 anti-cheat
 # CRC challenges a stock host streams at every joiner. [orig: Server_LogCRCMismatchPunt @0x517ed0 ->
