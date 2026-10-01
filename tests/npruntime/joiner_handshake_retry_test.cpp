@@ -59,6 +59,47 @@ bool is_resend_request(const std::vector<uint8_t> &datagram, uint8_t expected_op
 			requested == std::vector<uint32_t>{expected_sequence};
 }
 
+// D-NET-236: the EMPTY leg also waits while an out-of-order packet is held: retail tests the
+// connection's packet-queue count beside the retained count. A joiner holding S2C sequence 3
+// behind a missing 2 mints no keepalive; once the gap closes the leg runs again.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x629041..0x629065 — `cmp [esi+768h], 0`
+//  @0x62904b (retained), `cmp [esi+7A8h], 0` @0x629053 (the out-of-order queue)]
+bool run_idle_keepalive_waits_while_a_packet_is_held() {
+	constexpr uint64_t kIdleIntervalMs = 30000;
+	constexpr uint32_t kServerKey = 0x5A5A4321u;
+	constexpr uint32_t kClientKey = 1u;
+	const std::string client_scrk = "CLIENT-HELD-KEEPALIVE-SCRK";
+	const std::string server_scrk = "SERVER-HELD-KEEPALIVE-SCRK";
+	uint64_t now_ms = 1000;
+	inmatch::JoinerConnection joiner("HeldKeepalive", [&now_ms] { return now_ms; });
+	joiner.seed_in_match(kServerKey, kClientKey, client_scrk, server_scrk,
+	                     1, 0, 0x0001, 0x14B9);
+	(void)joiner.pump(0);
+	// S2C sequence 1 lands, sequence 2 is lost, sequence 3 is held.
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	std::vector<uint8_t> packets[3];
+	for (std::vector<uint8_t> &datagram : packets) {
+		std::vector<uint8_t> body;
+		if (!expect(frame_session_packet(server_tx, SessionCrypto{server_scrk, {}, kClientKey},
+					{}, body),
+				"frame an S2C header-only packet"))
+			return false;
+		datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+	}
+	joiner.handle_datagram(packets[0].data(), packets[0].size());
+	joiner.handle_datagram(packets[2].data(), packets[2].size());
+	if (!expect(joiner.inbound_gap_depth() == 1 && joiner.retained_outbound_depth() == 0,
+			"held: sequence 3 waits behind the lost 2, nothing retained"))
+		return false;
+	now_ms = 1000 + kIdleIntervalMs + 1;
+	if (!expect(joiner.pump(0).empty(),
+			"held: no keepalive while an out-of-order packet is queued"))
+		return false;
+	joiner.handle_datagram(packets[1].data(), packets[1].size());
+	return expect(joiner.inbound_gap_depth() == 0 && joiner.pump(0).size() == 1,
+			"held: the keepalive runs once the gap closes");
+}
+
 bool run_dropped_hello_and_auth_recover() {
 	// The capture-pinned 0x41 retransmit cadence — deliberately NOT the 10000-ms session
 	// active-send interval — and retail's connect-state 0x42 cadence: re-sent once MORE than
@@ -583,6 +624,7 @@ bool run_idle_keepalive_survives_a_quiet_session() {
 
 int main() {
 	if (!run_idle_keepalive_survives_a_quiet_session()) return 1;
+	if (!run_idle_keepalive_waits_while_a_packet_is_held()) return 1;
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;

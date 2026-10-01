@@ -2222,14 +2222,13 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	if (phase_ == Phase::Driving || phase_ == Phase::InMatch) {
 		if (conn_.seq.retained_outbound_message_count == 0) {
 			session_send_clock_armed_ = false;
-			// Nothing queued and nothing retained: the EMPTY interval keeps the
-			// connection alive. Without it a joiner that owes no reply (parked at the
-			// deploy pick, dead with the uplink gate shut, or idle) transmits nothing
-			// and a stock host drops it at its 120 s connection timeout.
+			// Nothing queued, retained or held out of order (+0x7A8 @0x629053, D-NET-236): the
+			// EMPTY interval keeps the connection alive. Without it a joiner that owes no reply
+			// (deploy pick, dead, idle) transmits nothing and a stock host drops it at 120 s.
 			const uint64_t now_ms = monotonic_milliseconds_();
 			const int32_t idle_interval = conn_.timeouts.idle_send_interval_ms;
 			if (idle_interval >= 0 && conn_.server_sk != 0 && session_last_send_ms_ != 0 &&
-			    now_ms >= session_last_send_ms_ &&
+			    conn_.seq.queued_inbound.empty() && now_ms >= session_last_send_ms_ &&
 			    now_ms - session_last_send_ms_ > static_cast<uint64_t>(idle_interval)) {
 				out.push_back(frame_session({}));
 			}

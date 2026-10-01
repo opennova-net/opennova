@@ -571,6 +571,36 @@ bool check_host_frames_under_the_negotiated_ceiling() {
 	              "three 300-byte records leave in two packets of at most 576 bytes");
 }
 
+// D-NET-236 (host): the EMPTY leg waits while an out-of-order C2S packet is held.
+// [orig: CNapiNPConnection_PumpSendIntervals `cmp [esi+7A8h], 0` @0x629053]
+bool check_host_keepalive_waits_while_a_packet_is_held() {
+	inmatch::HostOwner owner;
+	seed_host(owner.ctx);
+	inmatch::NapiNPConnection &conn = owner.ctx.np_protocol.connection_list[0];
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	ScriptedDatagramSocket sock;
+	// C2S sequence 2 arrives ahead of a lost 1 (header-only: it owes no ACK).
+	SessionSequencing client_tx{2, 0};
+	std::vector<uint8_t> future;
+	if (!expect(frame_test_session_datagram(client_tx, SessionCrypto{kClientScrk, {}, kServerKey},
+				SESSION_OPCODE_PROTOCOL_MESSAGE, {}, future),
+			"frame a future C2S packet"))
+		return false;
+	sock.inbound.emplace_back(kPeer, std::move(future));
+	// Well past the 30000 ms empty interval (62 host ticks a second).
+	for (int i = 0; i < 62 * 32; ++i) inmatch::host_session_pump(owner, sock);
+	std::size_t keepalives = 0;
+	for (const auto &datagram : sock.sent) {
+		uint8_t opcode = 0;
+		std::vector<uint8_t> body;
+		if (nw_decode_inbound(datagram.second.data(), datagram.second.size(), opcode, body) &&
+				opcode == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE)
+			++keepalives;
+	}
+	return expect(conn.seq.queued_inbound.size() == 1 && keepalives == 0,
+			"the host mints no keepalive while a C2S packet is held out of order");
+}
+
 bool check_c2s_loss_requests_0x84_and_joiner_reconstructs() {
 	inmatch::NapiNPServerCtx ctx;
 	seed_host(ctx);
@@ -863,6 +893,7 @@ int main() {
 	ok = check_host_flush_counter_ages_finite_records_per_tick() && ok;
 	ok = check_host_owes_an_ack_for_c2s_records() && ok;
 	ok = check_host_frames_under_the_negotiated_ceiling() && ok;
+	ok = check_host_keepalive_waits_while_a_packet_is_held() && ok;
 	ok = check_multi_sequence_resend_request_reconstructs_each() && ok;
 	ok = check_zero_only_and_key_only_resend_lists_do_not_arm_backoff() && ok;
 	ok = check_c2s_fragments_dispatch_once_after_final() && ok;

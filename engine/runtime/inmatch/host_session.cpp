@@ -504,6 +504,9 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 			if (c.last_session_send_tick == 0) {
 				c.last_session_send_tick = now;
 			} else if (c.seq.retained_outbound_message_count == 0 &&
+					// nor while an out-of-order C2S packet is held (D-NET-236)
+					// [orig: `cmp [esi+7A8h], 0` @0x629053, the packet-queue count]
+					c.seq.queued_inbound.empty() &&
 					pending_session_messages.find(c.peer) ==
 							pending_session_messages.end()) {
 				const uint64_t elapsed_ms = static_cast<uint64_t>(
