@@ -397,6 +397,14 @@ target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(mission_catalog_test PRIVATE cxx_std_17)
 add_test(NAME mission_catalog COMMAND mission_catalog_test)
 
+# The files the game finds by a mission's name (mission/mission_sidecars.h): the
+# six witnessed rows and the names they build.
+add_executable(mission_sidecars_test mission/mission_sidecars_test.cpp)
+target_link_libraries(mission_sidecars_test PRIVATE opennova_runtime)
+target_include_directories(mission_sidecars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_sidecars_test PRIVATE cxx_std_17)
+add_test(NAME mission_sidecars COMMAND mission_sidecars_test)
+
 # The mission load plan (mission/mission_load_plan.h): the stage order and the
 # witnessed loading-screen anchors the shell presents.
 add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
