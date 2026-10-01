@@ -10,6 +10,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/operation_progress.h>
 
 namespace opennova::editor {
 
@@ -105,18 +106,6 @@ struct PollBudget {
 // scan's directory entries or a few small files validated, a few milliseconds, where a step of
 // 1 MiB ran a poll on the JO install to 50 to 200 ms (S13 A3 review).
 inline constexpr PollBudget kDefaultPollBudget{10, uint64_t(64) << 10};
-
-enum class OperationUnit : uint8_t { Bytes, Files, Steps };
-const char *operation_unit_token(OperationUnit unit);
-
-// Where an operation stands: `done` of `total` (never more, never going back), in `unit`, and
-// what it works on now ("Packing localres.pff").
-struct OperationProgress {
-	uint64_t done = 0;
-	uint64_t total = 0;
-	OperationUnit unit = OperationUnit::Steps;
-	std::string label;
-};
 
 // How an operation ended: its work done, its work failed (a build refused or broken off: its
 // findings say why), or cancelled between two steps (its work discarded, never finished).

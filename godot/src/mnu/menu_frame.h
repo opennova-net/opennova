@@ -191,6 +191,10 @@ public:
 	// Whether a menu texture name loads through the configured file source
 	// (retail's dispatch, menu_assets.h): the marquee's image nodes ask.
 	bool texture_loads(const String &p_name);
+	// A texture the next configure over `p_files` names, decoded and kept ahead of it (C++ only:
+	// the editor's menu device spreads a screen's first configure over its steps, ADR 0046 S13 V6;
+	// native_assets().texture_kept says what is not kept yet).
+	bool load_texture_ahead(const std::string &p_name, const opennova::FileSource &p_files);
 
 	// Widget queries over the configured screen (design-space rects; the
 	// pre-order index space matches a document DFS of the same screen).

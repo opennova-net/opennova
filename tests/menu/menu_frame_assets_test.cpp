@@ -5,7 +5,8 @@
 // dispatch, a missing .tga through its .dds [orig: CTextureManager_LoadOrFindTexture
 // @ 0x654980]; what one configure loaded is found again by (file, stamp) with no read,
 // a moved stamp reloads that file alone, and what two configures in a row did not use is
-// let go; a name that did not load is told apart by whether the source has its file.
+// let go; a name that did not load is told apart by whether the source has its file; what a
+// configure would read is known before it, and what is loaded ahead of it is found again (S13 V6).
 
 #include <runtime/menu/menu_frame_assets.h>
 
@@ -239,10 +240,83 @@ static int test_absent_or_unreadable() {
 	return 0;
 }
 
+// S13 V6: what a configure would decode is known before it (texture_kept), and what is loaded
+// ahead of it (texture_loads) is found again by it, so the editor's menu device spreads a screen's
+// first configure over its steps. Nothing to decode (a file the source lacks, an extension the
+// dispatch reads nothing for) is kept; a moved stamp is not.
+static int test_loaded_ahead() {
+	opennova::mnu::Document doc;
+	TEST_EXPECT(parse(kScreen, doc));
+	FakeFileSource files;
+	files_for(files);
+	files.put("art.bmp", texture(4, 4), 1);
+	SizeDecoder decoder;
+	MenuFrameCompiler compiler;
+	const std::map<std::string, std::string> vars = {{"F", "main.fnt"}};
+	MenuFrameAssets assets;
+	TEST_EXPECT(!assets.texture_kept("logo.tga", files) && !assets.texture_kept("fallback.tga", files));
+	TEST_EXPECT(assets.texture_kept("none.tga", files) && assets.texture_kept("art.bmp", files) &&
+	            assets.texture_kept("", files));
+	TEST_EXPECT(files.total_reads() == 0 && decoder.decodes == 0);
+
+	// Loaded ahead, one at a time: each kept, then the configure reads and decodes none of them
+	// (it reads its font alone).
+	TEST_EXPECT(assets.texture_loads("logo.tga", files, decoder) && assets.texture_kept("logo.tga", files));
+	TEST_EXPECT(assets.texture_loads("fallback.tga", files, decoder) && assets.texture_kept("fallback.tga", files));
+	TEST_EXPECT(decoder.decodes == 2 && files.total_reads() == 2);
+	files.reads.clear();
+	decoder.decodes = 0;
+	TEST_EXPECT(assets.configure(compiler, &doc, &doc.screens[0], files, decoder, vars) == 1);
+	TEST_EXPECT(decoder.decodes == 0 && files.total_reads() == 1 && files.reads["main.fnt"] == 1);
+	for (const std::string &key : assets.slot_keys()) TEST_EXPECT(!key.empty());
+
+	// A moved stamp: no longer kept, until loaded again.
+	files.put("logo.tga", texture(16, 16), 2);
+	TEST_EXPECT(!assets.texture_kept("logo.tga", files) && assets.texture_kept("fallback.tga", files));
+	TEST_EXPECT(assets.texture_loads("logo.tga", files, decoder) && assets.texture_kept("logo.tga", files));
+
+	// Every branch of the dispatch: what texture_kept says before a load is what the load does (it
+	// reads or decodes exactly when the name was not kept), and after it the name is kept (a second
+	// load reads nothing): a .tga there, a .tga only a .dds provides, a .tga neither provides, a .dds,
+	// a .pcx and a .png there, a .tga there that does not decode, an extension the dispatch reads
+	// nothing for (there or not), a name with no extension, a name kept under another case.
+	files.put("pic.dds", texture(8, 8), 1);
+	files.put("pic.pcx", texture(8, 8), 1);
+	files.put("pic.png", texture(8, 8), 1);
+	files.put("bad.tga", {1, 2, 3}, 1); // SizeDecoder takes two bytes only
+	files.put("plain", texture(8, 8), 1);
+	files.put("other.dds", texture(4, 4), 1);
+	struct Case {
+		const char *name;
+		bool kept; // before its load
+	};
+	const Case cases[] = {
+		{"logo.tga", true}, {"LOGO.TGA", true}, {"other.tga", false}, {"none.tga", true}, {"pic.dds", false},
+		{"pic.pcx", false}, {"pic.png", false}, {"bad.tga", false}, {"art.bmp", true}, {"gone.bmp", true},
+		{"plain", true},
+	};
+	for (const Case &c : cases) {
+		TEST_EXPECT(assets.texture_kept(c.name, files) == c.kept);
+		const int reads = files.total_reads();
+		const int decodes = decoder.decodes;
+		assets.texture_loads(c.name, files, decoder);
+		const bool touched = files.total_reads() != reads || decoder.decodes != decodes;
+		if (touched == c.kept) std::printf("  %s: kept %d, its load touched %d\n", c.name, int(c.kept), int(touched));
+		TEST_EXPECT(touched == !c.kept);
+		TEST_EXPECT(assets.texture_kept(c.name, files));
+		const int again = files.total_reads() + decoder.decodes;
+		assets.texture_loads(c.name, files, decoder);
+		TEST_EXPECT(files.total_reads() + decoder.decodes == again);
+	}
+	std::printf("test_loaded_ahead passed\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_loads_and_no_default_font();
 	failures += test_kept_by_stamp_and_swept();
 	failures += test_absent_or_unreadable();
+	failures += test_loaded_ahead();
 	return failures == 0 ? 0 : 1;
 }

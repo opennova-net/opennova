@@ -50,7 +50,15 @@ Ref<Texture> TextureFiles::load_material_texture(const String &name, uint8_t typ
 	renderer::MaterialTextureSource source;
 	if (!name.is_empty())
 		source = renderer::material_texture_source(to_std(name), type, [this](const std::string &file) { return has_(file); });
-	if (source.reader == renderer::MaterialTextureReader::Chunk) return prepare_material_chunk(read_(to_gd(source.file)), type);
+	if (source.reader == renderer::MaterialTextureReader::Chunk) {
+		// A chunk decoded once per type and file (a model's build decodes its textures ahead of the
+		// scene, whose materials load them again).
+		const std::string key = "material-chunk:" + std::to_string(type) + ":" + to_std(to_gd(source.file).to_lower());
+		auto cached = chunks_.find(key);
+		if (cached == chunks_.end())
+			cached = chunks_.emplace(key, prepare_material_chunk(read_(to_gd(source.file)), type)).first;
+		return cached->second;
+	}
 	Ref<Texture2D> image;
 	if (source.reader != renderer::MaterialTextureReader::None) {
 		const std::string key = "material-image:" + std::to_string(static_cast<int>(source.reader)) + ":" +

@@ -65,6 +65,9 @@ public:
 	// shows), then the device's picture (`device` draws it where the picture lies, at its size, as the
 	// current item; the canvas's surface its clip) and its edge.
 	void picture(const Device &device, const Tip &tip);
+	// After picture(): a line over the picture's top left corner (S13 V6: how far its device's build
+	// is while the last picture shows, or why the build failed).
+	void badge(const std::string &text);
 	// The right button clicked on the canvas this frame (not while it pans).
 	bool right_clicked() const { return right_clicked_; }
 	void draw(const OverlayList &shapes, CanvasCursor cursor);

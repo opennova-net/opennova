@@ -3960,7 +3960,9 @@ add_test(NAME editor_project_asset_source COMMAND editor_project_asset_source_te
 # Clear) from the document's change, the files its picture read and the viewport's options; the
 # failure latch; the preview clock; two menus' own options; the device cache's four, its least
 # recently used given up and its viewport's camera kept; the envelope and its pages; a SetViewport,
-# a drag and a command through the session; one undo step per gesture.
+# a drag and a command through the session; one undo step per gesture; S13 V6's builds over frames
+# (loading then ready, a newer generation cancelling, an Update folded, a Clear and a failure
+# mid-build, the frame's budget).
 add_executable(editor_viewport_test editor/viewport_test.cpp)
 target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
