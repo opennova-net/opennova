@@ -594,19 +594,21 @@ constexpr RequestKindRow kRows[] = {
 	// own: each request its plan makes meets its own row's gate as it is served (an edit_record's
 	// waits for an operation that holds the documents; a frame's set_viewport runs beside any).
 	Request(K::EditInViewport, "edit_in_viewport", serve_edit_in_viewport,
-			"A drag or a command in the viewport over the document at path (left out, the active "
-			"one; of the kind the drag or the command names, else the Preview's kind that shows it, "
-			"else its Main view), planned as its canvas plans it and served, each request it plans "
+			"A drag, a command or a drop in the viewport over the document at path (left out, the "
+			"active one; of the kind the drag, the command or the drop names, else the Preview's kind "
+			"that shows it, else its Main view), planned as its canvas plans it and served, each "
+			"request it plans "
 			"meeting its own row's gate: drag, one batch of the edits under one gesture over every "
 			"selected record the drag moves (a gesture's samples, consecutive drags of one handle "
 			"on its document, one undo step, which end ends; the outcome's gesture names it); "
 			"command, one request (a menu's arrange of windows, a model's frame of its camera, which "
-			"runs beside any operation). Refused, nothing changed, naming a document not open, a "
+			"runs beside any operation); drop, one batch of what the thing dropped makes at the "
+			"point, one undo step. Refused, nothing changed, naming a document not open, a "
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
-			"command it has not, a gesture the document holds no open one of, or a drag that writes "
-			"nothing the session takes (viewport.refused); a planned edit the session refuses is "
-			"not done.")
-			.takes(request_params({}, { F::Path, F::Drag, F::Command }))
+			"command it has not, a gesture the document holds no open one of, a drag that writes "
+			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "
+			"planned edit the session refuses is not done.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop }))
 			.names_active()
 			.row,
 	Request(K::Quit, "quit", serve_quit,

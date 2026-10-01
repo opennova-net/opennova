@@ -191,13 +191,16 @@ constexpr QueryParam kViewportParams[] = {
 			"table), else its Main view." },
 	{ "op", J::String, true, nullptr,
 			"What is read: state (the envelope, a page of its items and by the same page its "
-			"notes), items or notes (a page of one), hit (what lies under x, y), render (one row of "
-			"the document as the kind renders it apart: a menu's screen, as the render check "
+			"notes), items or notes (a page of one), hit (what lies under x, y), box (what the box from "
+			"x, y to x2, y2 takes, as a marquee over it: a menu's windows it touches), render (one row "
+			"of the document as the kind renders it apart: a menu's screen, as the render check "
 			"compiled it)." },
 	{ "x", J::Number, false, nullptr,
-			"hit's point across, in the viewport's units (a menu's 800x600 design units, a model's "
-			"picture pixels): a number a float holds." },
+			"hit's point across (box's first corner), in the viewport's units (a menu's 800x600 "
+			"design units, a model's picture pixels): a number a float holds." },
 	{ "y", J::Number, false, nullptr, "hit's point down, as x." },
+	{ "x2", J::Number, false, nullptr, "box's other corner across, as x (x and y its first)." },
+	{ "y2", J::Number, false, nullptr, "box's other corner down, as x." },
 	{ "row", J::Integer, false, nullptr, "render's row, by its identity (a menu's screen)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
@@ -693,6 +696,16 @@ JsonValue viewport_hit(const ViewportReadContext &read, std::string &error) {
 			float(read.args.number("y")));
 	return viewport_hit_to_json(read.model, hit);
 }
+JsonValue viewport_box(const ViewportReadContext &read, std::string &error) {
+	if (!viewport_kind_row(read.model.kind()).canvas) {
+		error = std::string("a ") + viewport_kind_token(read.model.kind()) +
+				" viewport has no canvas: no box of it takes anything (op items reads what it lists).";
+		return JsonValue::make_null();
+	}
+	return viewport_box_to_json(read.view, read.model,
+			read.model.box(viewport_context(read.view, read.model), float(read.args.number("x")),
+					float(read.args.number("y")), float(read.args.number("x2")), float(read.args.number("y2"))));
+}
 JsonValue viewport_notes(const ViewportReadContext &read, std::string &) {
 	return viewport_notes_to_json(read.view, read.model, read.page);
 }
@@ -702,14 +715,15 @@ JsonValue viewport_render(const ViewportReadContext &read, std::string &error) {
 }
 
 // The ops by name, in their order on the wire.
-enum class ViewportOp : uint8_t { State, Items, Hit, Notes, Render, kCount };
+enum class ViewportOp : uint8_t { State, Items, Hit, Box, Notes, Render, kCount };
 
 // What an op takes beside the params every op takes (path, kind, op): a page (offset, limit), a point
-// of the picture (x, y), a row (row).
+// of the picture (x, y), a row (row), a box's other corner (x2, y2).
 enum ViewportTakes : uint8_t {
 	kViewportPage = 1u << 0,
 	kViewportPoint = 1u << 1,
 	kViewportRow = 1u << 2,
+	kViewportCorner = 1u << 3,
 };
 
 // One op: its token, what it takes and of that what it needs (each named, a point both its params),
@@ -726,6 +740,7 @@ constexpr ViewportOpRow kViewportOps[] = {
 	{ ViewportOp::State, "state", kViewportPage, 0, viewport_state },
 	{ ViewportOp::Items, "items", kViewportPage, 0, viewport_items },
 	{ ViewportOp::Hit, "hit", kViewportPoint, kViewportPoint, viewport_hit },
+	{ ViewportOp::Box, "box", kViewportPoint | kViewportCorner, kViewportPoint | kViewportCorner, viewport_box },
 	{ ViewportOp::Notes, "notes", kViewportPage, 0, viewport_notes },
 	{ ViewportOp::Render, "render", kViewportPage | kViewportRow, kViewportRow, viewport_render },
 };
@@ -736,6 +751,7 @@ constexpr uint8_t viewport_param_flag(const char *name) {
 	return same_text(name, "path") || same_text(name, "kind") || same_text(name, "op") ? 0
 			: same_text(name, "offset") || same_text(name, "limit")                    ? kViewportPage
 			: same_text(name, "x") || same_text(name, "y")                             ? kViewportPoint
+			: same_text(name, "x2") || same_text(name, "y2")                           ? kViewportCorner
 			: same_text(name, "row")                                                   ? kViewportRow
 																					   : 0xFF;
 }
@@ -775,6 +791,10 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 	if ((read->needs & kViewportPoint) && !(args.has("x") && args.has("y"))) {
 		error = "op " + op + " needs \"x\" and \"y\", the point in the viewport's units (a menu's design units, a "
 							 "model's picture pixels).";
+		return JsonValue::make_null();
+	}
+	if ((read->needs & kViewportCorner) && !(args.has("x2") && args.has("y2"))) {
+		error = "op " + op + " needs \"x2\" and \"y2\", the box's other corner in the viewport's units.";
 		return JsonValue::make_null();
 	}
 	if ((read->needs & kViewportRow) && !args.has("row")) {

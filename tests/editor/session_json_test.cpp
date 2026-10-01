@@ -753,6 +753,13 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.command.ids = {9, 11, 12};
 			out.command.kind = ViewportKind::Menu;
 			break;
+		case F::Drop:
+			out.drop.reference = "item";
+			out.drop.name = "100300";
+			out.drop.x = 320.5f;
+			out.drop.y = 200.0f;
+			out.drop.kind = ViewportKind::Model;
+			break;
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;
 		case F::Replace: out.replace = true; break;

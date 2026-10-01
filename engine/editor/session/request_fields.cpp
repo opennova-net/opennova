@@ -104,6 +104,13 @@ constexpr RequestField kFields[] = {
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
 			"send_to_back), or a model's frame (its camera on the marker of the first id, else on "
 			"the whole model); kind the viewport's (left out, the one the document shows in)." },
+	{ F::Drop, "drop", J::Object,
+			"A drop on a viewport's picture, {file | reference + name, at, kind?}: a project file by its "
+			"logical name (a Files row let go on the canvas), or a name of a reference kind (reference "
+			"its token, name the name as a field of that kind holds it), at the point [x, y] of the "
+			"picture in the viewport's units; kind the viewport's (left out, the one the document shows "
+			"in). The viewport plans what it makes, one batch, one undo step; one that takes no drop "
+			"refuses it (a menu's, a model's)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },

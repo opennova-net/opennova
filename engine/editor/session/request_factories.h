@@ -256,6 +256,14 @@ inline EditorRequest edit_in_viewport(std::string path, ViewportCommand command)
 	request.command = std::move(command);
 	return request;
 }
+// A drop on the picture of the viewport over the document at `path` ("" the active one), planned by
+// the viewport (S14: a Files row or a picked name let go on a mission's canvas).
+inline EditorRequest edit_in_viewport(std::string path, ViewportDrop drop) {
+	EditorRequest request = of(EditorRequestKind::EditInViewport);
+	request.path = std::move(path);
+	request.drop = std::move(drop);
+	return request;
+}
 inline EditorRequest copy(std::string path = std::string()) {
 	EditorRequest request = of(EditorRequestKind::Copy);
 	request.path = std::move(path);

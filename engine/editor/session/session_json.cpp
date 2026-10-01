@@ -585,6 +585,55 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 	return true;
 }
 
+// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], kind?}. What is dropped
+// is the viewport's kind to read (a model's file, an item's id), so the names are texts here.
+JsonValue drop_to_json(const ViewportDrop &drop) {
+	JsonValue out = JsonValue::make_object();
+	if (!drop.file.empty()) out.set("file", json_string(drop.file));
+	if (!drop.reference.empty()) out.set("reference", json_string(drop.reference));
+	if (!drop.name.empty()) out.set("name", json_string(drop.name));
+	JsonValue point = JsonValue::make_array();
+	point.push(json_number(drop.x));
+	point.push(json_number(drop.y));
+	out.set("at", std::move(point));
+	if (drop.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drop.kind)));
+	return out;
+}
+
+bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"drop\" must be an object {file | reference + name, at, kind}.";
+		return false;
+	}
+	if (!members_known(json, {"file", "reference", "name", "at", "kind"}, "drop", error)) return false;
+	const auto text = [&](const char *member, std::string &into) {
+		const JsonValue *value = json.get(member);
+		if (!value) return true;
+		if (!value->is_string() || value->string.empty()) {
+			error = std::string("\"drop.") + member + "\" must be a name.";
+			return false;
+		}
+		into = value->string;
+		return true;
+	};
+	ViewportDrop drop;
+	if (!text("file", drop.file) || !text("reference", drop.reference) || !text("name", drop.name)) return false;
+	// A file, or a reference kind's name: one of them, the kind and its name together.
+	if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
+		error = "\"drop\" names a file, or a reference kind and a name of it, one of them.";
+		return false;
+	}
+	const JsonValue *at = json.get("at");
+	if (!at || !at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], drop.x) ||
+			!io::json_float(at->array[1], drop.y)) {
+		error = "\"drop.at\" must be two numbers, [x, y].";
+		return false;
+	}
+	if (!viewport_kind_member(json, "drop", drop.kind, error)) return false;
+	out = std::move(drop);
+	return true;
+}
+
 // An import source: {path, entry?, install?, native?}.
 constexpr const char *kImportsShape =
         "\"imports\" must be an array of {path, entry, install, native}.";
@@ -689,6 +738,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	case F::Drag: return drag_from_json(json, request.drag, error);
 	case F::Command: return command_from_json(json, request.command, error);
+	case F::Drop: return drop_from_json(json, request.drop, error);
 	case F::Purpose:
 		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
 		error = "Unknown pick purpose \"" + shown + "\".";
@@ -764,6 +814,9 @@ bool field_to_json(
 	case F::Command:
 		out = command_to_json(request.command);
 		return request.command != ViewportCommand();
+	case F::Drop:
+		out = drop_to_json(request.drop);
+		return request.drop != ViewportDrop();
 	case F::Purpose:
 		out = json_string(pick_purpose_token(request.purpose));
 		return request.purpose != PickPurpose::None;

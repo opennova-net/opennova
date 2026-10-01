@@ -609,7 +609,8 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
 	} planned;
 	const ViewportDrag &asked = request.drag;
-	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand();
+	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand(),
+			   drop = request.drop != ViewportDrop();
 	const std::string at = request.path.empty() ? view_.documents.active : viewport_document(request.path);
 	// The gesture a drag names, its answer's whether the drag is refused or not.
 	if (drag) outcome_.gesture = asked.gesture;
@@ -617,8 +618,8 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// A sample naming a gesture goes on with one the wire opened in the document, of the same record's
 	// handle.
 	const WireDrag *going = nullptr;
-	if (drag == command) {
-		error = "edit_in_viewport names a drag or a command, one of them.";
+	if (int(drag) + int(command) + int(drop) != 1) {
+		error = "edit_in_viewport names a drag, a command or a drop, one of them.";
 	} else if (drag && asked.gesture && documents().document_for(at)) {
 		going = wire_drag(at);
 		if (!going || going->token != asked.gesture) {
@@ -639,11 +640,13 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	float x = asked.x, y = asked.y; // the point this sample takes the handle to
 	ViewportKind shown = ViewportKind::kCount;
 	if (error.empty()) {
-		const ViewportKind named = !drag ? request.command.kind : going ? going->kind : asked.kind;
+		const ViewportKind named = drop ? request.drop.kind : !drag ? request.command.kind : going ? going->kind : asked.kind;
 		if (const ViewportModel *viewport = viewports_->resolve(view_, at, named, error)) {
 			shown = viewport->kind();
 			const ViewportContext context = viewport_context(view_, *viewport, drag ? asked.snap : 0.0f);
-			if (!drag) {
+			if (drop) {
+				viewport->drop(context, request.drop, planned, error);
+			} else if (!drag) {
 				viewport->command(context, request.command.name, request.command.ids, planned, error);
 			} else {
 				if (going && asked.by) {

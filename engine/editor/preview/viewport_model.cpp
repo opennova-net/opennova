@@ -203,6 +203,15 @@ std::string ViewportModel::picture_message() const {
 	}
 }
 
+bool ViewportModel::drop(const ViewportContext &, const ViewportDrop &, CanvasRequests &, std::string &error) const {
+	error = std::string("A ") + viewport_kind_token(kind_) + " viewport takes no drop.";
+	return false;
+}
+
+std::vector<ViewportHit> ViewportModel::box(const ViewportContext &, float, float, float, float) const {
+	return {};
+}
+
 io::JsonValue ViewportModel::notes_json(const ViewportInput &) const {
 	return JsonValue::make_array();
 }

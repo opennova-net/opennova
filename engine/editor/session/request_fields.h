@@ -36,6 +36,7 @@ enum class RequestFieldId : uint8_t {
 	Viewport,
 	Drag,
 	Command,
+	Drop,
 	Purpose,
 	WithDependencies,
 	Replace,
@@ -54,7 +55,7 @@ enum class RequestJson : uint8_t {
 	String, // a string (a token for mode, choice and purpose)
 	Boolean, // true or false
 	Strings, // an array of strings
-	Object, // an object (address, paste_at, settings, viewport, drag, command)
+	Object, // an object (address, paste_at, settings, viewport, drag, command, drop)
 	Objects, // an array of objects (imports, edits, records)
 };
 

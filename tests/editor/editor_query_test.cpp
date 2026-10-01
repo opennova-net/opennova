@@ -1426,7 +1426,7 @@ static int test_viewport_query() {
 		kinds_named += (i ? ", " : "") + kind_tokens.back();
 	}
 	TEST_EXPECT(kind_tokens.size() >= 2 && kind_tokens[0] == "menu" && kind_tokens[1] == "model");
-	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, notes, render, not \"zoom\"."));
+	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, box, notes, render, not \"zoom\"."));
 	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})",
 			("\"kind\" is one of " + kinds_named + ", not \"map\".").c_str()));
 	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
@@ -1435,6 +1435,9 @@ static int test_viewport_query() {
 	TEST_EXPECT(says(R"({"op": "items", "row": 3})", "op items takes no \"row\""));
 	TEST_EXPECT(says(R"({"op": "hit", "x": 1})", "op hit needs \"x\" and \"y\""));
 	TEST_EXPECT(says(R"({"op": "render"})", "op render needs \"row\""));
+	TEST_EXPECT(says(R"({"op": "box", "x": 1, "y": 2})", "op box needs \"x2\" and \"y2\""));
+	TEST_EXPECT(says(R"({"op": "box", "x": 1, "y": 2, "x2": 3, "y2": 4, "row": 5})",
+			"op box takes no \"row\" (it takes path, kind, op, x, y, x2, y2)."));
 	TEST_EXPECT(says(R"({"op": "hit", "x": "1", "y": 2})", "\"x\" must be a number."));
 	TEST_EXPECT(says(R"({"op": "hit", "x": 1e300, "y": 2})", "\"x\" must be a number."));
 	TEST_EXPECT(says(R"({"op": "state", "path": "nope.mnu"})", "no open document nope.mnu."));
@@ -1453,11 +1456,12 @@ static int test_viewport_query() {
 				(param.get_string("name", "") == "op" ? ops : kinds).push_back(tokens->array[i].string);
 		}
 	}
-	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "notes", "render" }));
+	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "box", "notes", "render" }));
 	TEST_EXPECT(kinds == kind_tokens);
 	for (const std::string &op : ops) {
 		std::string args = R"({"op": ")" + op + "\"";
 		if (op == "hit") args += R"(, "x": 1, "y": 1)";
+		if (op == "box") args += R"(, "x": 1, "y": 1, "x2": 9, "y2": 9)";
 		if (op == "render") args += R"(, "row": )" + std::to_string(menu->rows()[0]->id);
 		const std::string error = refusal(session, "viewport", args + "}");
 		TEST_EXPECT(error.empty());

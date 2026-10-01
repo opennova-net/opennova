@@ -210,6 +210,19 @@ public:
 	// one it cannot plan.
 	virtual bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const = 0;
+	// A drop on the picture (S14, EditInViewport: session/editor_request.h's ViewportDrop: a project
+	// file or a reference kind's name let go at a point of it) planned into requests: what it makes
+	// there, one batch. False, with why: by default a kind takes no drop (a menu's, a model's), and
+	// one that does refuses a thing it cannot place, a picture that is not its document's own, a
+	// drop the session would not take.
+	virtual bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+			std::string &error) const;
+	// What a box of the picture selects (S14: a marquee's records, the viewport query's box): the
+	// items the box from (x0, y0) to (x1, y1) takes, in its units, as a canvas's marquee over it
+	// takes them (a menu's windows it touches, a mission's marks whose anchors lie in it), each as
+	// hit names one; none for a kind with no marquee (the default), or a picture that is not current.
+	virtual std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
+			float y1) const;
 
 	// --- the wire's (viewport_json.h) ----------------------------------------------------------------
 
