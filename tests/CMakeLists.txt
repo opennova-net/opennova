@@ -3641,8 +3641,9 @@ add_test(NAME editor_session COMMAND editor_session_test)
 # Per-file validation (S13 D4): each file's own findings kept in the validation cache by what
 # they were made from, a closed file read and let go; what other files make of what one defines
 # (graph/use_checks); the project's rows as the one pass makes them, the trunk's before the
-# split pinned over the fixtures. Retail leg (OPENNOVA_JO_DIR): the install's files a document
-# type opens validated, then an edit of one validating it alone.
+# split pinned over the fixtures; every finding composed carries a finding code's row (S13 A6).
+# Retail leg (OPENNOVA_JO_DIR): the install's files a document type opens validated, every
+# finding composed a row's, then an edit of one validating it alone.
 add_executable(editor_project_validation_test editor/project_validation_test.cpp)
 target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
 target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -3698,6 +3699,16 @@ target_link_libraries(editor_session_json_test PRIVATE opennova_editor)
 target_include_directories(editor_session_json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_session_json COMMAND editor_session_json_test)
 
+# The finding codes (S13 A6): every token its own across the editor's table and the document
+# types' as registered (a stand-in hiding none), each row found by its token, a type's rows its
+# group's family, the render check's a row per compiler note and the stylesheet reader's a row
+# per reader code, the columns deciding what the codes' spelling decided before (and the
+# spelling agreeing), a finding keeping its row, and its subject on the wire under the keys it had.
+add_executable(editor_finding_codes_test editor/finding_codes_test.cpp)
+target_link_libraries(editor_finding_codes_test PRIVATE opennova_editor)
+target_include_directories(editor_finding_codes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_finding_codes COMMAND editor_finding_codes_test)
+
 # The Problems core (S11b): the query the window and the editor MCP share (severities,
 # text, scope, only the fixable, grouping), the fixes for each finding and a Fix all
 # merged from them, where a finding takes Problems, and the findings by file and record
@@ -3726,8 +3737,9 @@ target_include_directories(editor_canvas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 add_test(NAME editor_canvas COMMAND editor_canvas_test)
 
 # The windows' models with no ImGui (S13 V1): what the Problems window lists, folds, proposes
-# and asks (ui/problems_list), and where the find bar is among a document's hits
-# (ui/find_cursor). Built with the windows (their sources are ui/'s).
+# and asks (ui/problems_list), where the find bar is among a document's hits (ui/find_cursor),
+# and what a document's outline lists (ui/outline_model, S13 V3). Built with the windows (their
+# sources are ui/'s).
 if(OPENNOVA_IMGUI)
     add_executable(editor_problems_list_test editor/problems_list_test.cpp)
     target_link_libraries(editor_problems_list_test PRIVATE opennova_editor)
@@ -3738,6 +3750,14 @@ if(OPENNOVA_IMGUI)
     target_link_libraries(editor_find_cursor_test PRIVATE opennova_editor)
     target_include_directories(editor_find_cursor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME editor_find_cursor COMMAND editor_find_cursor_test)
+
+    # A document's outline (S13 V3, ui/outline_model): its lines as a list, a tree and master and
+    # detail, what is open, the filter, the order, and the lines made again only when what they read
+    # moves.
+    add_executable(editor_outline_model_test editor/outline_model_test.cpp)
+    target_link_libraries(editor_outline_model_test PRIVATE opennova_editor)
+    target_include_directories(editor_outline_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_outline_model COMMAND editor_outline_model_test)
 endif()
 
 # The asset graph (S7): the extractors, the resolver the badges and Problems share,
@@ -3874,6 +3894,14 @@ if(OPENNOVA_IMGUI)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
     add_test(NAME editor_ui_groups COMMAND editor_ui_test --groups ${OPENNOVA_EDITOR_UI_GROUPS})
+
+    # The document views' contract (S13 V3, ui/document_views): every DocumentTypeId's view over a
+    # file of its type on the null backend, its row's role, no request raised by drawing, nothing
+    # wider than its tab, a RevealRecord held until it draws; two open documents a view each.
+    add_executable(editor_view_contract_test editor_ui/view_contract_test.cpp)
+    target_link_libraries(editor_view_contract_test PRIVATE opennova_editor opennova_imgui)
+    target_include_directories(editor_view_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_view_contract COMMAND editor_view_contract_test)
 endif()
 
 add_executable(project_cli_test editor/project_cli_test.cpp)

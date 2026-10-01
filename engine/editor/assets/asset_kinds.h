@@ -62,6 +62,12 @@ struct AssetKindRow {
 	// Its files name other files, or names other files define, that an import brings with them
 	// (import_plan's references_unread: those of a kind the graph does not read are not followed).
 	bool names_files = false;
+	// Where a file of the kind the editor makes goes inside the project tree, created or imported
+	// ("menus", "fonts"; "" for the root): organization only, the engine sees the flat name.
+	const char *folder = "";
+	// The name Files offers a new file of the kind (New > Menu...: "newmenu.mnu"); "" for a kind
+	// no New makes (its free-form blank factory's, blank_factory.cpp).
+	const char *new_name = "";
 };
 
 // A kind's row (asset_kinds.cpp holds one per kind, in the enum's order; static_asserts there

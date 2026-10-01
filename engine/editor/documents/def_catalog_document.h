@@ -33,6 +33,8 @@ struct CatalogRow : Node {
 
 	std::shared_ptr<Node> clone() const override { return std::make_shared<CatalogRow>(*this); }
 	std::string name() const override;
+	// The record and the arrays it owns (its attachments, actions, sights or effects).
+	size_t footprint() const override;
 	def::DefRecordKind record_kind() const { return def_kind(kind); }
 	void *record();
 	const void *record() const;
@@ -42,6 +44,7 @@ struct CatalogRow : Node {
 struct ItemsFileState : FileState {
 	std::vector<int> spawn_ids;
 	std::shared_ptr<FileState> clone() const override { return std::make_shared<ItemsFileState>(*this); }
+	size_t footprint() const override { return sizeof(ItemsFileState) + footprint_of(spawn_ids); }
 };
 
 class DefCatalogDocument : public Document {
@@ -57,7 +60,10 @@ public:
 	// limits (Add carry limit), rows of their own.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// An item's vehicle spawn slots: the bits of the file's registry, each named by its id.
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
@@ -84,7 +90,9 @@ protected:
 	                 std::string &error) override;
 	// The vehicle spawn registry: the same IDs in the same slots.
 	bool same_file_state(const FileState *a, const FileState *b) const override;
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,

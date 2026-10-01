@@ -200,12 +200,12 @@ static int test_scan_exclusions_and_diagnostics() {
 
 	int duplicates = 0, too_long = 0, unknown = 0, output_missing = 0, orphan = 0, other = 0;
 	for (const Diagnostic &d : scan.diagnostics) {
-		if (d.code == "asset.name.duplicate") ++duplicates;
-		else if (d.code == "asset.name.too_long" && d.asset == "textures/a_much_too_long_name.tga")
+		if (d.code() == "asset.name.duplicate") ++duplicates;
+		else if (d.code() == "asset.name.too_long" && d.asset == "textures/a_much_too_long_name.tga")
 			++too_long;
-		else if (d.code == "asset.kind.unknown") ++unknown;
-		else if (d.code == "import.output_missing" && d.asset == "ui/logo.png" && d.severity == DiagnosticSeverity::Warning) ++output_missing;
-		else if (d.code == "import.orphan_record" && d.asset == "ui/gone.png.import" && d.severity == DiagnosticSeverity::Warning) ++orphan;
+		else if (d.code() == "asset.kind.unknown") ++unknown;
+		else if (d.code() == "import.output_missing" && d.asset == "ui/logo.png" && d.severity == DiagnosticSeverity::Warning) ++output_missing;
+		else if (d.code() == "import.orphan_record" && d.asset == "ui/gone.png.import" && d.severity == DiagnosticSeverity::Warning) ++orphan;
 		else ++other;
 	}
 	TEST_EXPECT(duplicates == 1 && too_long == 1 && unknown == 1 && output_missing == 1 && orphan == 1 && other == 0);

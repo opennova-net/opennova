@@ -25,13 +25,16 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/create_missing.cpp
-    # model — the neutral editing core: the document lifecycle and the undo journal, what a field
-    # shows, and the find over a document's fields
+    # model — the neutral editing core: the document lifecycle and the undo journal, a batch's
+    # rows before it commits, what a field shows, the find over a document's fields, and the
+    # finding codes' rows (S13 A6: the tables' shape and the editor's own table)
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_base.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/document_search.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/edit_history.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
     # per type that has one, kept between validations
@@ -53,7 +56,8 @@ add_library(opennova_editor STATIC
     # graph — the asset graph: the extractors, the reference kinds' table, the per-file slots and
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
     # fields ask, the rename transaction; what other files make of what one defines (the use
-    # checks) and the one validation pass over the project's files
+    # checks, and what a stylesheet line's value is used as) and the one validation pass over the
+    # project's files
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
@@ -62,6 +66,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the game's PCX), the sidecars, the import pass, and
     # the plan of an import with the files it needs
@@ -123,12 +128,14 @@ add_library(opennova_editor STATIC
     # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
     # imports, renames, the unsaved guard, the preferences over their store), what Problems
     # shows of its findings and offers to do about them, the request and query tables (S13 A4,
-    # A5) and their wire forms (session_json, view_json)
+    # A5) and their wire forms (session_json, view_json), the selection (S13 D7), and the
+    # finding codes' lookup over every table (S13 A6)
     ${CMAKE_CURRENT_SOURCE_DIR}/session/build_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/document_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_preferences.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/editor_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/file_preferences_store.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/finding_codes.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/output_log.cpp
@@ -141,6 +148,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_fields.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/request_kinds.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/selection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
@@ -163,9 +171,8 @@ add_library(opennova_editor STATIC
 # consumer whether the windows exist in this build.
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/catalog_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_outline.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/editor_windows.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/field_widgets.cpp
@@ -177,6 +184,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_preview_pane.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_preview_pane.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/output_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/preview_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/problems_list.cpp
@@ -187,9 +196,8 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/record_tree.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/reference_picker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/rename_dialog.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/strings_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/ui/table_cells.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/viewport_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/welcome_view.cpp

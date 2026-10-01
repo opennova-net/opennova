@@ -13,6 +13,7 @@
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
@@ -50,8 +51,8 @@ bool still_as_read(const fs::path &path, uint64_t size, int64_t written) {
 }
 
 Diagnostic changed_while_packing(const std::string &name) {
-	return make_diagnostic(DiagnosticSeverity::Error, "build.changed",
-	                       "The file " + name + " changed while the build packed it: build again.", name);
+	return make_finding(CoreFinding::BuildChanged, DiagnosticSeverity::Error,
+	                    "The file " + name + " changed while the build packed it: build again.", name);
 }
 
 std::string archive_write_error(int rc) {
@@ -108,16 +109,16 @@ io::JsonValue build_record(const std::string &build_id, const std::map<std::stri
 bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
 	Vfs vfs;
 	if (!mount_install(vfs, dir, LaunchFlags())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "build.verify",
-		                        "The built archives do not mount: " + vfs.last_error());
+		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+		                     "The built archives do not mount: " + vfs.last_error());
 		return false;
 	}
 	for (const BuildArchive &archive : plan.archives) {
 		for (const BuildEntry &entry : archive.entries) {
 			if (!vfs.has_file(entry.logical_name)) {
-				error = make_diagnostic(DiagnosticSeverity::Error, "build.verify",
-				                        entry.logical_name + " is missing from the built " + archive.file_name,
-				                        entry.logical_name);
+				error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+				                     entry.logical_name + " is missing from the built " + archive.file_name,
+				                     entry.logical_name);
 				return false;
 			}
 		}
@@ -125,8 +126,8 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 	std::error_code ec;
 	for (const BuildEntry &entry : plan.loose) {
 		if (!fs::is_regular_file(fs::path(dir) / entry.logical_name, ec)) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "build.verify",
-			                        entry.logical_name + " is missing from the build directory", entry.logical_name);
+			error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
+			                     entry.logical_name + " is missing from the build directory", entry.logical_name);
 			return false;
 		}
 	}
@@ -363,8 +364,8 @@ bool BuildRun::step(uint64_t budget_bytes) {
 void BuildRun::prepare() {
 	if (!plan_.ok) {
 		report_.diagnostics = plan_.diagnostics;
-		report_.diagnostics.push_back(make_diagnostic(
-		        DiagnosticSeverity::Error, "build.blocked",
+		report_.diagnostics.push_back(make_finding(
+		        CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
 		        "The project has problems that would stop the game; fix them first."));
 		phase_ = Phase::Done;
 		return;
@@ -405,16 +406,16 @@ void BuildRun::hash(uint64_t budget) {
 			std::error_code ec;
 			const uint64_t size = fs::file_size(path, ec);
 			if (ec) {
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.read",
-				                            "cannot read " + entry.logical_name + ": " + ec.message(),
-				                            entry.logical_name));
+				return fail(make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
+				                         "cannot read " + entry.logical_name + ": " + ec.message(),
+				                         entry.logical_name));
 			}
 			if (size != entry.size_bytes) return fail(changed_while_packing(entry.logical_name));
 			stamp = {size, last_write_of(path)};
 			s.in.open(path, std::ios::binary);
 			if (!s.in) {
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.read",
-				                            "cannot open " + entry.logical_name, entry.logical_name));
+				return fail(make_finding(CoreFinding::BuildRead, DiagnosticSeverity::Error,
+				                         "cannot open " + entry.logical_name, entry.logical_name));
 			}
 			s.in_size = size;
 			s.in_done = 0;
@@ -444,7 +445,7 @@ void BuildRun::hash(uint64_t budget) {
 void BuildRun::settle() {
 	std::string io_error;
 	if (!ensure_directory(output_root_, io_error)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	const fs::path final_dir = fs::path(output_root_) / report_.build_id;
 	final_dir_ = final_dir.generic_string();
@@ -462,9 +463,9 @@ void BuildRun::settle() {
 			return;
 		}
 		if (!is_prunable_build_dir(final_dir)) {
-			return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
-			                            "cannot publish the build: " + final_dir_ +
-			                                    " exists and is not a build directory"));
+			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+			                         "cannot publish the build: " + final_dir_ +
+			                                 " exists and is not a build directory"));
 		}
 		fs::remove_all(final_dir, ec); // a damaged build is rebuilt
 	}
@@ -477,17 +478,17 @@ void BuildRun::settle() {
 
 	const fs::path tmp_dir = fs::path(output_root_) / (report_.build_id + kBuildStagingSuffix);
 	if (fs::exists(tmp_dir, ec) && !is_prunable_build_dir(tmp_dir)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
-		                            "cannot stage the build: " + tmp_dir.generic_string() +
-		                                    " exists and is not a build directory"));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+		                         "cannot stage the build: " + tmp_dir.generic_string() +
+		                                 " exists and is not a build directory"));
 	}
 	fs::remove_all(tmp_dir, ec);
 	if (!ensure_directory(tmp_dir.generic_string(), io_error)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	tmp_dir_ = tmp_dir.generic_string(); // from here a failure or a cancel removes it
 	if (!write_file_atomic((tmp_dir / kBuildStagingMarkerFileName).generic_string(), report_.build_id, io_error)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	phase_ = Phase::Archives;
 }
@@ -522,9 +523,9 @@ void BuildRun::pack(uint64_t budget) {
 				s.in_size = fs::file_size(previous, ec);
 				s.in_done = 0;
 				if (!s.in || !s.out || ec) {
-					return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-					                            "cannot copy " + archive.file_name + " from the last build",
-					                            archive.file_name));
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
 				}
 				label_ = "Copying " + archive.file_name + " from the last build";
 			} else {
@@ -544,8 +545,8 @@ void BuildRun::pack(uint64_t budget) {
 				const int rc = s.writer.open(target.generic_string().c_str(), kBuildArchiveFormat, entries.data(),
 				                             static_cast<uint32_t>(entries.size()), &Streams::read_chunk, &s);
 				if (rc != pff::PFF_WRITE_OK) {
-					return fail(make_diagnostic(DiagnosticSeverity::Error, "build.archive",
-					                            archive.file_name + ": " + archive_write_error(rc)));
+					return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
+					                         archive.file_name + ": " + archive_write_error(rc)));
 				}
 				label_ = "Packing " + archive.file_name;
 			}
@@ -558,9 +559,9 @@ void BuildRun::pack(uint64_t budget) {
 			const uint64_t want = std::min({left, s.in_size - s.in_done, kChunkBytes});
 			if (want > 0) {
 				if (!s.read(want) || !s.out.write(s.buffer.data(), static_cast<std::streamsize>(want))) {
-					return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-					                            "cannot copy " + archive.file_name + " from the last build",
-					                            archive.file_name));
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
 				}
 				moved = want;
 			}
@@ -569,9 +570,9 @@ void BuildRun::pack(uint64_t budget) {
 				s.in.clear();
 				s.out.close();
 				if (!s.out) {
-					return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-					                            "cannot copy " + archive.file_name + " from the last build",
-					                            archive.file_name));
+					return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+					                         "cannot copy " + archive.file_name + " from the last build",
+					                         archive.file_name));
 				}
 				s.out.clear();
 				report_.archives_reused.push_back(archive.file_name);
@@ -587,8 +588,8 @@ void BuildRun::pack(uint64_t budget) {
 			}
 			if (rc != pff::PFF_WRITE_OK) {
 				if (!s.failed_entry.empty()) return fail(changed_while_packing(s.failed_entry));
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.archive",
-				                            archive.file_name + ": " + archive_write_error(rc)));
+				return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
+				                         archive.file_name + ": " + archive_write_error(rc)));
 			}
 			if (finished) report_.archives_written.push_back(archive.file_name);
 		}
@@ -624,8 +625,8 @@ void BuildRun::copy_loose(uint64_t budget) {
 			if (!s.open_unchanged(entry.source_path, stamp)) return fail(changed_while_packing(entry.logical_name));
 			s.out.open(fs::path(tmp_dir_) / entry.logical_name, std::ios::binary | std::ios::trunc);
 			if (!s.out) {
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-				                            "cannot copy " + entry.logical_name, entry.logical_name));
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
 			label_ = "Copying " + entry.logical_name;
 			left -= std::min(left, kOpenCost);
@@ -634,8 +635,8 @@ void BuildRun::copy_loose(uint64_t budget) {
 		if (want > 0) {
 			if (!s.read(want)) return fail(changed_while_packing(entry.logical_name));
 			if (!s.out.write(s.buffer.data(), static_cast<std::streamsize>(want))) {
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-				                            "cannot copy " + entry.logical_name, entry.logical_name));
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
 			left -= want;
 			advance(want);
@@ -645,8 +646,8 @@ void BuildRun::copy_loose(uint64_t budget) {
 				return fail(changed_while_packing(entry.logical_name));
 			s.out.close();
 			if (!s.out) {
-				return fail(make_diagnostic(DiagnosticSeverity::Error, "build.copy",
-				                            "cannot copy " + entry.logical_name, entry.logical_name));
+				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
+				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
 			s.out.clear();
 			report_.loose_written.push_back(entry.logical_name);
@@ -666,19 +667,19 @@ void BuildRun::publish() {
 	std::string io_error;
 	if (!write_file_atomic((fs::path(tmp_dir_) / kBuildRecordFileName).generic_string(),
 	                       io::json_write(record), io_error)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	std::error_code ec;
 	fs::rename(tmp_dir_, final_dir_, ec);
 	if (ec) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write",
-		                            "cannot publish the build: " + ec.message()));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error,
+		                         "cannot publish the build: " + ec.message()));
 	}
 	tmp_dir_.clear(); // published: nothing left to clean up
 	fs::remove(fs::path(final_dir_) / kBuildStagingMarkerFileName, ec); // the record is its proof now
 	if (!write_file_atomic((fs::path(output_root_) / kLastGoodBuildFileName).generic_string(),
 	                       io::json_write(record), io_error)) {
-		return fail(make_diagnostic(DiagnosticSeverity::Error, "build.write", io_error));
+		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	// The directories games run from, asked now: a game started (or found alive) since the build
 	// began is as protected as one that ran when it started.

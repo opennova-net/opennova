@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <editor/graph/asset_graph.h>
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/request_factories.h>
@@ -42,8 +43,7 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	// (the renamed file's own document follows it to the new name). A reloaded document
 	// holds new records, so only an untouched one keeps its selection.
 	std::string active = view_.documents.active;
-	const NodeAddress selection = view_.documents.selection;
-	const std::vector<NodeAddress> selected = view_.documents.selected;
+	const Selection kept = view_.documents.selection;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	// A refused commit leaves the file where it was: its open document stays.
 	DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
@@ -64,8 +64,8 @@ void RenameController::rename_asset(const std::string &file, const std::string &
 	for (const auto &document : documents.documents()) active_open = active_open || document->path() == active;
 	if (active_open) {
 		documents.activate(active);
-		view_.documents.select_only(keep_selection ? selection : NodeAddress());
-		if (keep_selection) view_.documents.selected = selected;
+		if (keep_selection) view_.documents.selection.restore(kept);
+		else view_.documents.selection.select_only(active, NodeAddress());
 		documents.select_first_screen();
 	}
 	// Reported last: the refresh and the reloads above rebuild the Problems rows.
@@ -105,10 +105,10 @@ SymbolRenamePlan RenameController::plan_symbol(const EditorRequest &request) {
 		SymbolRenamePlan none;
 		none.file = request.path;
 		none.new_name = request.new_name;
-		none.refusals.push_back(make_diagnostic(DiagnosticSeverity::Error, "rename.unknown_symbol",
-		                                        request.path + " defines no name in field " + request.field +
-		                                                " of the record at " + request.locator + ".",
-		                                        request.path, request.field));
+		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
+		                                     request.path + " defines no name in field " + request.field +
+		                                             " of the record at " + request.locator + ".",
+		                                     request.path, request.field));
 		return none;
 	}
 	return plan_symbol_rename_project(*view_.project.scan, graph, *symbol, request.new_name);
@@ -187,18 +187,18 @@ void RenameController::rename_symbol(const EditorRequest &request) {
 	// The document the modder was in stays active; one read again holds new records, so only an
 	// untouched one keeps its selection.
 	const std::string active = view_.documents.active;
-	const NodeAddress selection = view_.documents.selection;
-	const std::vector<NodeAddress> selected = view_.documents.selected;
+	const Selection kept = view_.documents.selection;
 	const bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	core_.refresh();
 	for (const std::string &path : reload) documents.open_document(request::reload_document(path));
 	if (!active.empty() && documents.document_for(active)) {
 		documents.activate(active);
-		view_.documents.select_only(keep_selection ? selection : NodeAddress());
-		if (keep_selection) view_.documents.selected = selected;
+		if (keep_selection) view_.documents.selection.restore(kept);
+		else view_.documents.selection.select_only(active, NodeAddress());
 		// The renamed definition selected again where it was, its field shown.
 		if (!keep_selection && active == plan.file)
-			if (Document *defining = documents.records_for(active)) view_.documents.select_only(defining->address_at(plan.locator));
+			if (Document *defining = documents.records_for(active))
+				view_.documents.selection.select_only(active, defining->address_at(plan.locator));
 		documents.select_first_screen();
 	}
 	for (const Diagnostic &d : findings) core_.report(d);
@@ -221,25 +221,25 @@ void RenameController::assign_requirement(const std::string &role, const std::st
 	if (!view_.project.open) return;
 	const RequirementRow *row = core_.requirement_row(role);
 	if (!row) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.unknown", "No requirement has the role '" + role + "'."));
+		core_.report(make_finding(CoreFinding::RequirementUnknown, DiagnosticSeverity::Error, "No requirement has the role '" + role + "'."));
 		return;
 	}
 	// Nothing is renamed: a refusal, so whoever asked learns the assignment did not happen.
 	if (row->state == RequirementState::Present) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.assigned",
-		                             row->name + " is already in the project: nothing was assigned.", row->asset_path));
+		core_.report(make_finding(CoreFinding::RequirementAssigned, DiagnosticSeverity::Error,
+		                          row->name + " is already in the project: nothing was assigned.", row->asset_path));
 		return;
 	}
 	const AssetEntry *asset = core_.project_file(file);
 	if (!asset) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.unknown_file", "The project has no file named '" + file + "'.", file));
+		core_.report(make_finding(CoreFinding::RequirementUnknownFile, DiagnosticSeverity::Error, "The project has no file named '" + file + "'.", file));
 		return;
 	}
 	if (asset->kind != row->expected_kind) {
-		core_.report(make_diagnostic(DiagnosticSeverity::Error, "requirement.kind",
-		                             asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
-		                                     " must be " + asset_kind_label(row->expected_kind) + ".",
-		                             asset->relative_path));
+		core_.report(make_finding(CoreFinding::RequirementKind, DiagnosticSeverity::Error,
+		                          asset->logical_name + " is " + asset_kind_label(asset->kind) + ", and " + row->name +
+		                                  " must be " + asset_kind_label(row->expected_kind) + ".",
+		                          asset->relative_path));
 		return;
 	}
 	rename_asset(asset->relative_path, row->name);

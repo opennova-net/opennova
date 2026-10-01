@@ -169,9 +169,8 @@ SessionView seeded_view() {
 	editor_test::own(v.project.requirements).rows.push_back(missing);
 	editor_test::own(v.project.requirements).required_total = 2;
 	editor_test::own(v.project.requirements).required_missing = 1;
-	Diagnostic lacking = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
-	lacking.role = missing.role;
-	lacking.target = missing.name;
+	Diagnostic lacking = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", "Missing required file gametext.bin.");
+	lacking.subject = RequirementSubject{missing.role, missing.name};
 	v.findings.diagnostics.push_back(lacking);
 	v.activity.output.append("Opened My Game");
 	v.activity.output.append("Build started.");
@@ -261,7 +260,7 @@ void test_workspace_layout() {
 	editor_test::own(v.project.scan).index();
 	v.documents.open.push_back(catalog);
 	v.documents.active = catalog->path();
-	v.documents.selection = { catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item),
+	v.documents.selection.primary = { catalog->rows()[0]->id, node_kind(opennova::def::DefRecordKind::Item),
 		0 };
 	windows.set_view(&v);
 	for (uint64_t i = 9; i < 15; ++i) frame(windows, i);
@@ -506,7 +505,7 @@ void test_view_prompt_outlives_its_tab() {
 	CHECK(ask(reread), "asked about the menu read again");
 	v.documents.open = {b};
 	v.documents.active = b->path();
-	v.documents.select_only({});
+	v.documents.selection.select_only(v.documents.active, NodeAddress());
 	v.revisions.touch(ViewConcern::Documents);
 	v.revisions.touch(ViewConcern::Selection);
 	ui.frames(3);
@@ -908,12 +907,12 @@ void test_menu_bar_status() {
 	v.documents.open = {a, b, c};
 	for (int i = 0; i < 7; ++i)
 		v.findings.diagnostics.push_back(
-				make_diagnostic(DiagnosticSeverity::Error, "catalog.x", "An error."));
+				editor_test::finding_of(DiagnosticSeverity::Error, "catalog.name_empty", "An error."));
 	for (int i = 0; i < 5; ++i)
 		v.findings.diagnostics.push_back(
-				make_diagnostic(DiagnosticSeverity::Warning, "catalog.y", "A warning."));
+				editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "A warning."));
 	v.findings.diagnostics.push_back(
-			make_diagnostic(DiagnosticSeverity::Info, "catalog.z", "A note."));
+			editor_test::finding_of(DiagnosticSeverity::Info, "catalog.item_identity", "A note."));
 	v.activity.operation.id = 7;
 	v.activity.operation.kind = OperationKind::Build;
 	v.activity.operation.done = 3 * 1024 * 1024;
@@ -1063,10 +1062,10 @@ void test_files_window() {
 	editor_test::own(v.project.scan).index();
 	v.documents.open = {main_menu};
 	v.documents.active = main_menu->path();
-	v.findings.diagnostics = { make_diagnostic(DiagnosticSeverity::Error, "catalog.a", "One.",
+	v.findings.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Error, "catalog.name_empty", "One.",
 									   "defs/items.def"),
-		make_diagnostic(DiagnosticSeverity::Error, "catalog.b", "Two.", "defs/items.def"),
-		make_diagnostic(DiagnosticSeverity::Warning, "catalog.c", "Three.", "defs/items.def") };
+		editor_test::finding_of(DiagnosticSeverity::Error, "catalog.item_type", "Two.", "defs/items.def"),
+		editor_test::finding_of(DiagnosticSeverity::Warning, "catalog.name_duplicate", "Three.", "defs/items.def") };
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -1876,8 +1875,8 @@ void test_view_event_mailboxes() {
 	ui.frames(3);
 	CHECK(documents->held_events(b->path()) == 1, "held while b's view does not draw");
 	v.documents.active = b->path();
-	v.documents.selection = screen;
-	v.documents.selected = { screen };
+	v.documents.selection.primary = screen;
+	v.documents.selection.records = { screen };
 	v.revisions.touch(ViewConcern::ActiveDocument);
 	ui.frames(4);
 	CHECK(documents->held_events(b->path()) == 0, "taken as b's view draws");

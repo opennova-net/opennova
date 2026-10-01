@@ -3,7 +3,7 @@
 #include <string>
 #include <vector>
 
-#include <editor/ui/workspace.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/record_tree.h>
 
 namespace opennova::editor {
@@ -20,12 +20,17 @@ class MnuDocument;
 // windows (Ctrl+C / X / V / D). Each screen and window is marked when it was added or
 // changed since the last save; a window's tooltip names its type and how the file writes
 // it. A window's fields and lists are the inspector's; the picture is the preview window's.
-class MenuView {
+// S13 V3: one view per open menu (a DocumentView), what it keeps (the type a new window takes,
+// the tree, a range's anchor, the prompt's question) its own; a RevealRecord its document is sent
+// opens the selection's owners and scrolls to it again.
+class MenuView final : public DocumentView {
 public:
-	void draw(Workspace &workspace, const MnuDocument &document);
+	void draw(Workspace &workspace, const DocumentBase &document) override;
 	// The prompt Remove screen... asks, drawn by the workspace every frame (a tab not shown
-	// draws nothing, and a modal no frame draws would hold the input).
-	void draw_remove_prompt(Workspace &workspace);
+	// draws nothing, and a modal no frame draws would hold the input): by this view alone
+	// while it asks.
+	void draw_modals(Workspace &workspace) override;
+	void rebind(const DocumentBase &document) override;
 
 private:
 	const Node *draw_screens(Workspace &workspace, const MnuDocument &document);
@@ -39,7 +44,7 @@ private:
 	RecordTree tree_;
 	std::vector<std::string> lines_; // per tree entry: the name and the type's name, after the change dot's room
 	std::vector<std::string> tips_;  // per tree entry: the type's name and how the file writes it
-	uint64_t tree_document_ = 0, tree_revision_ = 0;
+	uint64_t tree_document_ = 0, tree_load_ = 0, tree_revision_ = 0;
 	NodeAddress revealed_;       // the selection the tree last opened its owners for
 	std::vector<NodeId> reveal_; // the windows to open this frame
 	NodeId scroll_to_ = 0;       // the window to scroll into view this frame

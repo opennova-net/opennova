@@ -13,7 +13,10 @@
 // open one takes a typed token; a colour is a swatch that opens a picker; the fields of a
 // group share one row. Each draws at the width the caller set and says what changed, which
 // the caller turns into the document's Set; the tooltips say what the schema says. A
-// control's id is "##value" (a group's members each under its own field id).
+// control's id is "##value" (a group's members each under its own field id). A text is edited
+// in a box over the value itself (ui/text_edit: a value longer than the field holds is never
+// cut); what is typed into an open list's box is the caller's (`typed`: one list is open at a
+// time, so one string per window, emptied as a list opens), the controls keeping nothing.
 namespace opennova::editor::field_widgets {
 
 // What a field's tooltip says of it: its name, its id and the key the file writes when that
@@ -40,9 +43,10 @@ Edited number(const FieldSchema &field, Value &value, bool unit = true);
 // tooltip; each item under its index among the choices, so two of one name are two) under a box
 // that narrows it by what is typed (a long list, an open field); an open field takes the typed
 // token itself (Enter, or its line at the top), written as typed.
-// `mixed`: no choice named. `value` a text field's token, a number's value.
+// `mixed`: no choice named. `value` a text field's token, a number's value; `typed` what the
+// list's box holds.
 Edited choice(const FieldSchema &field, const std::vector<FieldChoice> &choices, Value &value,
-		bool mixed = false);
+		std::string &typed, bool mixed = false);
 
 // A colour field's swatch (`color` the form the field holds a colour in, as it applies to its
 // record), a square as high as a control that opens a picker: a HexArgb text (none drawn for a
@@ -59,9 +63,10 @@ float swatch_width();
 // schema's, or the record's own: Document::choices_on), a text (a HexArgb one after its swatch),
 // a number (a PackedRgb one after its swatch). `compact`: a table cell (a text on one line, no
 // unit: its column's heading has it). `mixed`: the targets differ (a text shows empty with a
-// hint, a list names no choice, a number the primary's value).
+// hint, a list names no choice, a number the primary's value). `typed`: what an open list's box
+// holds (choice).
 Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Value &value,
-		bool compact, bool mixed = false);
+		bool compact, std::string &typed, bool mixed = false);
 
 // The fields of one group on one row (as they apply to the record), each at its share of the
 // width set (after a swatch for a Channel group), with its name and what it is in its tooltip.
@@ -69,8 +74,9 @@ Edited value(const FieldUse &field, const std::vector<FieldChoice> &choices, Val
 // where it has one), `values` their values, both in the order of `fields`; `mixed` which of them
 // differ across the records edited (empty: none). When one changed, `changed` is its index and
 // `values[changed]` its value; a swatch's pick changes every channel (`changed` SIZE_MAX).
+// `typed`: what an open list's box holds (choice).
 Edited group(const std::vector<FieldUse> &fields,
 		const std::vector<const std::vector<FieldChoice> *> &choices, std::vector<Value> &values,
-		size_t &changed, const std::vector<bool> &mixed = {});
+		size_t &changed, std::string &typed, const std::vector<bool> &mixed = {});
 
 } // namespace opennova::editor::field_widgets

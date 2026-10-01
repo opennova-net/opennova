@@ -84,6 +84,13 @@ adm::AdmEntry entry_of(const AnimationMapRow &row) {
 
 } // namespace
 
+size_t AnimationMapRow::footprint() const {
+	size_t bytes = sizeof(AnimationMapRow) + collections_footprint() + footprint_of(key) +
+	               footprint_of(clips);
+	for (const std::string &clip : clips) bytes += footprint_of(clip);
+	return bytes;
+}
+
 AnimationMapRow::AnimationMapRow() {
 	kind = kRow;
 	collections.resize(1);
@@ -124,7 +131,7 @@ std::vector<Document::Collection> AnimationMapDocument::collections(const Node &
 	return {{clips, row.collections[0]}};
 }
 
-const std::vector<FieldSchema> &AnimationMapDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &AnimationMapDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> row_fields = [] {
 		FieldSchema key;
 		key.id = "key";
@@ -198,13 +205,13 @@ SerializeResult AnimationMapDocument::serialize() const {
 bool AnimationMapDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                                  std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	if (!is_animation_map_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not an animation map.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not an animation map.", path());
 		return false;
 	}
 	adm::AdmFile file{};
 	std::vector<adm::AdmDroppedLine> dropped;
 	if (adm::adm_parse_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), &file, &dropped) != 0) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", "The animation map could not be read.", path());
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, "The animation map could not be read.", path());
 		return false;
 	}
 	// Each line whose input the table leaves out: what the game ignores is dropped on save; a
@@ -223,13 +230,15 @@ bool AnimationMapDocument::parse(const std::vector<uint8_t> &bytes, std::vector<
 	return true;
 }
 
-std::shared_ptr<Node> AnimationMapDocument::make_node(NodeKind kind, NodeId, std::string &error) {
+std::shared_ptr<Node> AnimationMapDocument::make_node(
+		NodeKind kind, NodeId, const std::vector<std::shared_ptr<const Node>> &rows,
+		std::string &error) {
 	if (kind != kRow) {
 		error = "A table adds rows at the top level.";
 		return nullptr;
 	}
 	auto row = std::make_shared<AnimationMapRow>();
-	row->key = has_reset(rows()) ? "anim_idle" : "anim_reset";
+	row->key = has_reset(rows) ? "anim_idle" : "anim_reset";
 	return row;
 }
 
@@ -294,6 +303,31 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 	}
 }
 
+namespace {
+
+constexpr FindingCodeEntry<AnimationMapFinding> kFindingEntries[] = {
+	{ AnimationMapFinding::InvalidInput, { "animation_map.invalid_input", FindingFix::None, nullptr, true } },
+	{ AnimationMapFinding::IgnoredInput, { "animation_map.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
+	{ AnimationMapFinding::NoReset, { "animation_map.no_reset", FindingFix::ResetRow } },
+	{ AnimationMapFinding::Row, { "animation_map.row" } },
+	{ AnimationMapFinding::KeyUnknown, { "animation_map.key_unknown" } },
+	{ AnimationMapFinding::SlotRepeated, { "animation_map.slot_repeated" } },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationMapFinding::kCount),
+		"every AnimationMapFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the animation map's rows follow AnimationMapFinding's order, each token its own");
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::AnimationMaps);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
+
+} // namespace
+
+const FindingCodeRow &finding_code(AnimationMapFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+FindingTable animation_map_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *table = dynamic_cast<const AnimationMapDocument *>(&document);
@@ -303,13 +337,14 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 	// game ignores is dropped on save (a warning, Rewrite drops it); a row the table cannot
 	// hold blocks the file (an error).
 	source_issue_findings(
-			*table, "animation_map.invalid_input", "animation_map.ignored_input", findings);
+			*table, finding_code(AnimationMapFinding::InvalidInput),
+			finding_code(AnimationMapFinding::IgnoredInput), findings);
 	if (document.blocked()) return findings;
 	if (!has_reset(table->rows())) {
 		// On the first row's key, where a row takes the name (its Add anim_reset row fix
 		// adds one instead).
-		Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "animation_map.no_reset",
-		                               "The table has no anim_reset row: the game cannot load it.", document.path(), "key");
+		Diagnostic d = make_finding(AnimationMapFinding::NoReset, DiagnosticSeverity::Error,
+		                            "The table has no anim_reset row: the game cannot load it.", document.path(), "key");
 		if (!table->rows().empty()) {
 			const Node &first = *table->rows().front();
 			d.row_id = first.id;
@@ -323,8 +358,8 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 	for (size_t i = 0; i < table->rows().size(); ++i) {
 		const Node *node = table->rows()[i].get();
 		const AnimationMapRow &r = row_of(*node);
-		const auto add = [&](DiagnosticSeverity severity, const char *code, const std::string &message) {
-			Diagnostic d = make_diagnostic(severity, code, message, document.path(), "key");
+		const auto add = [&](DiagnosticSeverity severity, AnimationMapFinding code, const std::string &message) {
+			Diagnostic d = make_finding(code, severity, message, document.path(), "key");
 			d.row_id = node->id;
 			d.record_kind = kRow;
 			d.record = r.key;
@@ -332,9 +367,9 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		};
 		const adm::AdmEntry e = entry_of(r);
 		const int slot = anim::adm_slot_index(r.key);
-		if (const char *problem = adm::adm_row_problem(e)) add(DiagnosticSeverity::Error, "animation_map.row", problem);
+		if (const char *problem = adm::adm_row_problem(e)) add(DiagnosticSeverity::Error, AnimationMapFinding::Row, problem);
 		else if (slot < 0)
-			add(DiagnosticSeverity::Warning, "animation_map.key_unknown",
+			add(DiagnosticSeverity::Warning, AnimationMapFinding::KeyUnknown,
 			    "'" + r.key + "' names none of the engine's animation slots: the game skips the row.");
 		if (slot < 0) continue;
 		const auto first = first_of_slot.emplace(slot, i);
@@ -346,7 +381,7 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 		// AnimMap_RegisterBoneNode @ 0x40C2D0, the ring insert @0x40C37F..0x40C385, slot 0's
 		// replace @0x40C38B..0x40C38F].
 		const std::string earlier = "row " + std::to_string(first.first->second + 1);
-		add(DiagnosticSeverity::Info, "animation_map.slot_repeated",
+		add(DiagnosticSeverity::Info, AnimationMapFinding::SlotRepeated,
 		    slot == 0 ? "'" + r.key + "' names the reset slot as " + earlier +
 		                        " does: the game keeps only the last reset clip it loads."
 		              : "'" + r.key + "' names the slot " + earlier +

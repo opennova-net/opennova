@@ -34,7 +34,7 @@ bool can_make_blank_texture(const std::string &logical_name, std::string &reason
 bool make_blank_texture(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	std::string reason;
 	if (!can_make_blank_texture(request.logical_name, reason)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.texture", reason, request.logical_name);
+		error = make_finding(CoreFinding::BlankTexture, DiagnosticSeverity::Error, reason, request.logical_name);
 		return false;
 	}
 	const std::vector<uint8_t> pixels = renderer::missing_material_texture_rgba();
@@ -55,8 +55,8 @@ bool make_blank_texture(const BlankRequest &request, std::vector<uint8_t> &out, 
 	}
 	if (!written) {
 		out.clear();
-		error = make_diagnostic(DiagnosticSeverity::Error, "blank.texture", "The placeholder texture could not be written: " + reason,
-		                        request.logical_name);
+		error = make_finding(CoreFinding::BlankTexture, DiagnosticSeverity::Error, "The placeholder texture could not be written: " + reason,
+		                     request.logical_name);
 	}
 	return written;
 }

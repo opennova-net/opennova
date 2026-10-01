@@ -1,13 +1,15 @@
 // Shared scaffolding for the editor_ui ctest (editor_windows_test.cpp, workspace_test.cpp,
 // markers_test.cpp, bounds_test.cpp, field_widgets_test.cpp, reference_picker_test.cpp,
-// find_test.cpp, rename_test.cpp, gate_test.cpp): the failure counter and CHECK, a null ImGui backend
+// find_test.cpp, rename_test.cpp, gate_test.cpp) and the view contract (view_contract_test.cpp):
+// the failure counter and CHECK, a null ImGui backend
 // (a display size and a built font atlas, no platform or renderer), the workspace driven
 // frame by frame with the mouse and the keys (Ui), the ids ImGui gives items, what a frame
-// writes as text, the requests a test looks for, the menu fixture the windows are driven
-// over, the preview devices a test stands in for the shell's, and a project with every
-// preview's files.
+// writes as text, what runs past the width that shows of it, the requests a test looks for, the
+// menu fixture the windows are driven over, the preview devices a test stands in for the shell's,
+// and a project with every preview's files.
 #pragma once
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -224,6 +226,47 @@ inline std::string logged_frame(EditorWindows &windows, uint64_t index) {
 }
 inline std::string logged_frame(Ui &ui) { return logged_frame(ui.windows, ++ui.index); }
 
+// Every window drawn in the last frame whose content is wider than what shows of it while it
+// does not scroll sideways (its content size against its content region), and every cell of
+// a table whose content runs past its column (a table that scrolls sideways moves its
+// columns, but each still clips its cells): by name, with the widths, for the failure to
+// list. A child ImGui makes for a widget is left to the widget (a multiline text box scrolls
+// its text itself; the child is named after its "##" label).
+inline std::vector<std::string> overflowing() {
+	std::vector<std::string> out;
+	ImGuiContext &g = *GImGui;
+	char line[320];
+	for (const ImGuiWindow *window : g.Windows) {
+		if (!window->Active || window->Hidden || window->SkipItems) continue;
+		if (window->Flags & (ImGuiWindowFlags_Tooltip | ImGuiWindowFlags_HorizontalScrollbar |
+		                     ImGuiWindowFlags_AlwaysHorizontalScrollbar))
+			continue;
+		const char *child = std::strrchr(window->Name, '/');
+		if ((window->Flags & ImGuiWindowFlags_ChildWindow) && child && std::strncmp(child + 1, "##", 2) == 0) continue;
+		const float visible = window->ContentRegionRect.GetWidth();
+		if (window->ContentSize.x > visible + 1.0f) {
+			std::snprintf(line, sizeof(line), "window %s: content %.0f wide in %.0f", window->Name, window->ContentSize.x, visible);
+			out.push_back(line);
+		}
+	}
+	for (int i = 0; i < g.Tables.GetMapSize(); ++i) {
+		const ImGuiTable *table = g.Tables.TryGetMapData(i);
+		if (!table || table->LastFrameActive != g.FrameCount) continue;
+		if (!table->OuterWindow || table->OuterWindow->SkipItems) continue;
+		for (int c = 0; c < table->ColumnsCount; ++c) {
+			const ImGuiTableColumn &column = table->Columns[c];
+			if (!column.IsEnabled || !column.IsVisibleX) continue;
+			const float content = std::max(column.ContentMaxXFrozen, column.ContentMaxXUnfrozen);
+			if (content > column.WorkMaxX + 1.0f) {
+				std::snprintf(line, sizeof(line), "table %08x in %s, column %d: content to %.0f, past %.0f", table->ID,
+				              table->OuterWindow->Name, c, content, column.WorkMaxX);
+				out.push_back(line);
+			}
+		}
+	}
+	return out;
+}
+
 // Whether `text` holds each of `parts`, in that order.
 inline bool in_order(const std::string &text, std::initializer_list<const char *> parts) {
 	size_t at = 0;
@@ -321,8 +364,8 @@ inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
 }
 
 inline void select_in(SessionView &v, const NodeAddress &address) {
-	v.documents.selection = address;
-	v.documents.selected = {address};
+	v.documents.selection.primary = address;
+	v.documents.selection.records = {address};
 	v.revisions.touch(ViewConcern::Selection);
 }
 
@@ -503,7 +546,7 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
 	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
 	plan.truncated = true;
-	plan.diagnostics = { make_diagnostic(DiagnosticSeverity::Warning, "import.unreadable",
+	plan.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read" + stretch + ". The files it names are not looked for.",
 			"broken.mnu") };
 	preview.plan = std::make_shared<const ImportPlan>(std::move(plan));

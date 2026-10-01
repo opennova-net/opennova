@@ -47,14 +47,14 @@ bool problem_grouping_from_token(const std::string &token, ProblemGrouping &out)
 std::vector<std::string> editor_request_kind_tokens();
 
 // Where a request's edits are named (S13 A5: the batch form, record_batch.h): the record document
-// the request acts on, and, read, the label each edit that makes a record gave
-// (RecordBatch::made_labels), which the request's outcome pairs with the records it made (`added`).
+// the request acts on, and, read, the label each edit gave by the edit's index
+// (RecordBatch::labels), which the request's outcome pairs with what each edit made (`made`).
 struct RequestNames {
 	const Document *document = nullptr;
-	std::vector<std::string> made_labels;
+	std::vector<std::string> labels;
 	// A first read, before the document the request asks to open first opens (open_first): its
 	// edits' records are read as identities and not looked for, what only the document knows (a
-	// replaced list's records, a duplicate's place) waits for the read after it opens, and their
+	// replaced list's records) waits for the read after it opens, and their
 	// kinds are named in a blank of the path's type. A request refused here opens nothing.
 	bool unresolved = false;
 };

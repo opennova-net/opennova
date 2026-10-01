@@ -50,7 +50,8 @@ Ref<MnsStyleSheet> MnsStyleSheet::from_shell_style(const opennova::menu::ShellSt
 		sheet->runtime_valid_ = false;
 		const bool hangs = read.read.status == opennova::mns::ReadStatus::Hangs;
 		sheet->evaluation_diagnostics_.push_back(opennova::mns::Diagnostic{
-		        read.stopped_line, opennova::mns::Severity::Error, hangs ? "hangs" : "stops",
+		        read.stopped_line, opennova::mns::Severity::Error,
+		        hangs ? opennova::mns::DiagnosticCode::Hangs : opennova::mns::DiagnosticCode::Stops,
 		        read.name + (hangs ? ": the game stops responding reading this line"
 		                           : ": the game stops reading the stylesheet on this line")});
 	}
@@ -168,7 +169,7 @@ Array MnsStyleSheet::get_diagnostics() const {
 		Dictionary row;
 		row["line"] = d.line;
 		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(d.code);
+		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
 		row["message"] = to_gd(d.message);
 		out.append(row);
 	}
@@ -181,7 +182,7 @@ Array MnsStyleSheet::get_evaluation_diagnostics() const {
 		Dictionary row;
 		row["line"] = d.line;
 		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(d.code);
+		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
 		row["message"] = to_gd(d.message);
 		out.append(row);
 	}

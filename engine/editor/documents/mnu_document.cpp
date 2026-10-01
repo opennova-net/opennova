@@ -6,7 +6,9 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
+#include <runtime/menu/menu_frame.h>
 #include <runtime/menu/menu_screen_inputs.h>
 #include <runtime/menu/menu_text_tables.h>
 
@@ -17,7 +19,105 @@
 #include <set>
 
 namespace opennova::editor {
+
 namespace {
+
+// A code the render check makes (preview/menu_render_check.h): a compiler note, a screen it could
+// not map.
+constexpr FindingCodeRow from_render_check(const char *token) {
+	FindingCodeRow row;
+	row.token = token;
+	row.source = FindingSource::RenderCheck;
+	return row;
+}
+
+constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
+	{ MenuFinding::InvalidInput, { "menu.invalid_input", FindingFix::None, nullptr, true } },
+	{ MenuFinding::IgnoredInput, { "menu.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
+	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
+	{ MenuFinding::DuplicateScreen, { "menu.duplicate_screen" } },
+	{ MenuFinding::DuplicateWindow, { "menu.duplicate_window" } },
+	{ MenuFinding::ActionInert, { "menu.action_inert" } },
+	{ MenuFinding::RenderMapping, from_render_check("menu.render.mapping") },
+};
+static_assert(std::size(kFindingEntries) == static_cast<size_t>(MenuFinding::kCount),
+		"every MenuFinding has exactly one row");
+static_assert(finding_entries_well_formed(kFindingEntries),
+		"the menu's own rows follow MenuFinding's order, each token its own");
+
+// A compiler note's row: the render check's, and whether a note of it is a Problems row and at what
+// severity (menu_note_problem reads it): a Warning, or an Info, for a consequence the author may
+// not mean; None for a note only the preview shows, a name the project lacks (the asset graph's
+// finding, reference.missing: a project check never repeats one) or a note that only explains the
+// picture.
+constexpr FindingCodeRow note_row(const char *token, FindingProblem problem) {
+	FindingCodeRow row = from_render_check(token);
+	row.problem = problem;
+	return row;
+}
+
+using Note = menu::MenuFrameNoteCode;
+using P = FindingProblem;
+constexpr FindingCodeEntry<Note> kNoteEntries[] = {
+	{ Note::AppearanceStateUnknown, note_row("menu.render.appearance_state_unknown", P::Warning) },
+	{ Note::AppearanceTypeUnknown, note_row("menu.render.appearance_type_unknown", P::Warning) },
+	{ Note::AppearanceCustom, note_row("menu.render.appearance_custom", P::None) },
+	{ Note::AppearanceReplaced, note_row("menu.render.appearance_replaced", P::Warning) },
+	{ Note::ColorUnparsed, note_row("menu.render.color_unparsed", P::Warning) },
+	{ Note::ColorTransparent, note_row("menu.render.color_transparent", P::Warning) },
+	{ Note::StyleVarUnresolved, note_row("menu.render.style_var_unresolved", P::None) },
+	{ Note::TypeUnknown, note_row("menu.render.type_unknown", P::Warning) },
+	{ Note::TypeInteriorDeferred, note_row("menu.render.type_interior_deferred", P::Info) },
+	{ Note::ItemKindNotDrawn, note_row("menu.render.item_kind_not_drawn", P::Info) },
+	{ Note::TableCellsDeferred, note_row("menu.render.table_cells_deferred", P::Info) },
+	{ Note::ScrollExtentDefault, note_row("menu.render.scroll_extent_default", P::None) },
+	{ Note::FontMissing, note_row("menu.render.font_missing", P::None) },
+	{ Note::FontUnreadable, note_row("menu.render.font_unreadable", P::Warning) },
+	{ Note::TextureMissing, note_row("menu.render.texture_missing", P::None) },
+	{ Note::TextureUnreadable, note_row("menu.render.texture_unreadable", P::Warning) },
+	{ Note::TextTableMissing, note_row("menu.render.text_table_missing", P::None) },
+	{ Note::TextTableUnreadable, note_row("menu.render.text_table_unreadable", P::Warning) },
+	{ Note::RectEmpty, note_row("menu.render.rect_empty", P::Warning) },
+	{ Note::TextTruncated, note_row("menu.render.text_truncated", P::Warning) },
+	{ Note::TextNoRoom, note_row("menu.render.text_no_room", P::Warning) },
+	{ Note::TextNoFont, note_row("menu.render.text_no_font", P::Warning) },
+	{ Note::TextIdMissing, note_row("menu.render.text_id_missing", P::None) },
+	{ Note::ImageBandEmpty, note_row("menu.render.image_band_empty", P::Warning) },
+	{ Note::ImageHeightShared, note_row("menu.render.image_height_shared", P::Info) },
+	{ Note::StateFallback, note_row("menu.render.state_fallback", P::None) },
+	{ Note::CheckedNoArt, note_row("menu.render.checked_no_art", P::Warning) },
+	{ Note::FrameAbsent, note_row("menu.render.frame_absent", P::Warning) },
+	{ Note::FrameStencilUnloaded, note_row("menu.render.frame_stencil_unloaded", P::None) },
+	{ Note::FrameNoStencil, note_row("menu.render.frame_no_stencil", P::Warning) },
+	{ Note::FrameTileZero, note_row("menu.render.frame_tile_zero", P::Warning) },
+	{ Note::SpinArrowEmpty, note_row("menu.render.spin_arrow_empty", P::Warning) },
+	{ Note::ListRowsClipped, note_row("menu.render.list_rows_clipped", P::Info) },
+	{ Note::TableNoColumns, note_row("menu.render.table_no_columns", P::None) },
+	{ Note::TableHeaderClipped, note_row("menu.render.table_header_clipped", P::Warning) },
+	{ Note::TableHeaderWidthZero, note_row("menu.render.table_header_width_zero", P::Warning) },
+	{ Note::MarqueeRuntimeContent, note_row("menu.render.marquee_runtime_content", P::None) },
+};
+static_assert(std::size(kNoteEntries) == static_cast<size_t>(menu::kMenuFrameNoteCodeCount),
+		"every compiler note has exactly one row");
+static_assert(finding_entries_well_formed(kNoteEntries),
+		"the render check's rows follow the note codes' order, each token its own");
+
+constexpr size_t kOwnFindings = static_cast<size_t>(MenuFinding::kCount);
+constexpr size_t kNoteFindings = std::size(kNoteEntries);
+
+// The menu's own rows, then the notes', every one the menu's group.
+constexpr std::array<FindingCodeRow, kOwnFindings + kNoteFindings> joined_findings() {
+	std::array<FindingCodeRow, kOwnFindings + kNoteFindings> rows{};
+	const auto own = finding_rows(kFindingEntries, FindingGroup::Menus);
+	const auto noted = finding_rows(kNoteEntries, FindingGroup::Menus);
+	for (size_t i = 0; i < kOwnFindings; ++i) rows[i] = own[i];
+	for (size_t i = 0; i < kNoteFindings; ++i) rows[kOwnFindings + i] = noted[i];
+	return rows;
+}
+constexpr std::array<FindingCodeRow, kOwnFindings + kNoteFindings> kFindingRows = joined_findings();
+static_assert(finding_rows_well_formed(kFindingRows),
+		"no note's token is one of the menu's own, every row the menu's group, and only the "
+		"render check's rows say whether a finding of theirs is a Problems row");
 
 using mnu::SchemaApplies;
 using mnu::SchemaRecord;
@@ -585,6 +685,139 @@ NodeKind menu_kind(const std::string &token) { return kind_of(token.c_str()); }
 
 MenuScreen::MenuScreen() { kind = kScreen; }
 
+namespace {
+
+// What a menu's records hold beyond their objects (MenuScreen::footprint): each word, and each
+// list's elements with what each holds. Declared first: an element holds elements, a window
+// windows.
+size_t content(const std::string &text) { return footprint_of(text); }
+size_t content(const mnu::Appearance &appearance);
+size_t content(const mnu::Sound &sound);
+size_t content(const mnu::Action &action);
+size_t content(const mnu::Item &item);
+size_t content(const mnu::TableRow &row);
+size_t content(const mnu::TableHeader &header);
+size_t content(const mnu::TableBody &body);
+size_t content(const mnu::TableSubst &substitution);
+size_t content(const mnu::Hotkey &hotkey);
+size_t content(const mnu::ElementAttribute &attribute);
+size_t content(const mnu::Element &element);
+size_t content(const mnu::Window &window);
+
+// A list's elements, and what each holds.
+template <class T> size_t list_content(const std::vector<T> &items) {
+	size_t bytes = footprint_of(items);
+	for (const T &item : items) bytes += content(item);
+	return bytes;
+}
+
+size_t content(const mnu::Appearance &appearance) {
+	return footprint_of(appearance.state) + footprint_of(appearance.type) +
+	       footprint_of(appearance.value) + footprint_of(appearance.flags);
+}
+
+size_t content(const mnu::Sound &sound) {
+	return footprint_of(sound.state) + footprint_of(sound.trigger) + footprint_of(sound.file);
+}
+
+size_t content(const mnu::Action &action) {
+	return footprint_of(action.type) + footprint_of(action.state) + footprint_of(action.file) +
+	       footprint_of(action.field) + footprint_of(action.field_attr) +
+	       footprint_of(action.test) + footprint_of(action.target);
+}
+
+size_t content(const mnu::Item &item) {
+	return footprint_of(item.type) + footprint_of(item.value) + footprint_of(item.text) +
+	       footprint_of(item.justify) + footprint_of(item.vjustify);
+}
+
+size_t content(const mnu::TableRow &row) { return list_content(row.cells); }
+
+size_t content(const mnu::TableHeader &header) {
+	return footprint_of(header.justify) + footprint_of(header.vjustify) +
+	       footprint_of(header.sort) + footprint_of(header.type) + footprint_of(header.text);
+}
+
+size_t content(const mnu::TableBody &body) {
+	return footprint_of(body.justify) + footprint_of(body.vjustify) + footprint_of(body.display) +
+	       footprint_of(body.bitmap_flags);
+}
+
+size_t content(const mnu::TableSubst &substitution) {
+	return footprint_of(substitution.value) + footprint_of(substitution.file);
+}
+
+size_t content(const mnu::Hotkey &hotkey) { return footprint_of(hotkey.value); }
+
+size_t content(const mnu::ElementAttribute &attribute) {
+	return footprint_of(attribute.name) + footprint_of(attribute.value);
+}
+
+size_t content(const mnu::Element &element) {
+	return footprint_of(element.tag) + list_content(element.attributes) +
+	       footprint_of(element.text) + list_content(element.children);
+}
+
+// A window: its words, its lists, its STRING, TOGGLE_STRING, FONT, FRAME, CURSOR, ITEMS and table,
+// its children and its parts (each window it holds counted whole).
+size_t content(const mnu::Window &window) {
+	size_t bytes = footprint_of(window.name) + footprint_of(window.type_token) +
+	               footprint_of(window.orientation) + footprint_of(window.text_rsrc) +
+	               footprint_of(window.private_data);
+	bytes += list_content(window.appearances) + list_content(window.sounds) +
+	         list_content(window.actions) + list_content(window.datasources) +
+	         list_content(window.hotkeys) + list_content(window.shuttle) +
+	         list_content(window.scrollup) + list_content(window.scrolldown) +
+	         list_content(window.extras) + list_content(window.extra_attributes) +
+	         list_content(window.children);
+	const mnu::String &label = window.string_data;
+	bytes += footprint_of(label.type) + footprint_of(label.justify) +
+	         footprint_of(label.vjustify) + footprint_of(label.value);
+	bytes += footprint_of(window.toggle_string.type) + footprint_of(window.toggle_string.value);
+	const mnu::Font &font = window.font;
+	for (const std::string *text :
+	     {&font.name, &font.default_fg, &font.default_bg, &font.mouseover_fg, &font.mouseover_bg,
+	      &font.selected_fg, &font.selected_bg, &font.disabled_fg, &font.disabled_bg})
+		bytes += footprint_of(*text);
+	bytes += footprint_of(window.frame.stencil) + footprint_of(window.frame.brush) +
+	         footprint_of(window.frame.monogram);
+	bytes += footprint_of(window.cursor.file) + footprint_of(window.cursor.flags);
+	const mnu::Items &items = window.items;
+	bytes += footprint_of(items.justify) + footprint_of(items.vjustify) +
+	         list_content(items.appearances) + list_content(items.items) +
+	         list_content(items.rows);
+	const mnu::TableColumn &column = window.table_data.column;
+	bytes += list_content(column.headers) + list_content(column.bodies) +
+	         list_content(column.substitutions) + footprint_of(column.primary_sort_token);
+	for (const mnu::WindowPart *part :
+	     {&window.list_box, &window.spinup, &window.spindown, &window.scrollbar})
+		if (const mnu::Window *held = part->latent())
+			bytes += sizeof(mnu::Window) + content(*held);
+	return bytes;
+}
+
+size_t ids_content(const RecordIds &ids) {
+	size_t bytes = footprint_of(ids.lists);
+	for (const std::vector<RecordIds> &list : ids.lists) {
+		bytes += footprint_of(list);
+		for (const RecordIds &item : list) bytes += ids_content(item);
+	}
+	return bytes;
+}
+
+} // namespace
+
+size_t MenuScreen::footprint() const {
+	size_t bytes = sizeof(MenuScreen) + collections_footprint() + footprint_of(screen.name) +
+	               list_content(screen.roots) + footprint_of(roots);
+	for (const RecordIds &root : roots) bytes += ids_content(root);
+	if (places_) {
+		bytes += footprint_of(*places_);
+		for (const auto &place : *places_) bytes += footprint_of(place.second);
+	}
+	return bytes;
+}
+
 // The clone shares the places (immutable, and right for the clone until a structural edit
 // or new identities make them again).
 std::shared_ptr<Node> MenuScreen::clone() const { return std::make_shared<MenuScreen>(*this); }
@@ -701,7 +934,7 @@ void MnuDocument::walk_records(const Node &row, const RecordVisitor &visit) cons
 	}
 }
 
-const std::vector<FieldSchema> &MnuDocument::fields(NodeKind kind) const {
+const std::vector<FieldSchema> &MnuDocument::schema(NodeKind kind) {
 	static const std::vector<FieldSchema> none;
 	if (kind < 0 || size_t(kind) >= kind_entries().size()) return none;
 	return fields_of(kind_entries()[size_t(kind)].shape);
@@ -1032,14 +1265,14 @@ std::string MnuDocument::copy(const std::vector<NodeAddress> &records) const {
 bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
                         std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues, Diagnostic &error) {
 	if (!is_menu_kind(kind())) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.kind", "This file is not a menu.", path());
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a menu.", path());
 		return false;
 	}
 	mnu::Document document;
 	std::string message;
 	std::vector<mnu::ParseNote> notes;
 	if (!(bytes.size() == 1 && bytes[0] == 0) && !mnu::parse(bytes.data(), bytes.size(), document, message, &notes)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "document.parse", message, path());
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, message, path());
 		return false;
 	}
 	auto encoding = std::make_shared<MenuFileState>();
@@ -1060,12 +1293,14 @@ bool MnuDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 	return true;
 }
 
-std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id, std::string &error) {
+std::shared_ptr<Node> MnuDocument::make_node(NodeKind kind, NodeId id,
+                                             const std::vector<std::shared_ptr<const Node>> &rows,
+                                             std::string &error) {
 	if (kind != kScreen) { error = "A menu adds screens at the top level; windows nest under a screen."; return nullptr; }
 	auto row = std::make_shared<MenuScreen>();
 	// A name no other screen has: the game finds the last of two screens of one name, so a
 	// new screen under an existing one's name would stand in for it (prepare_duplicate).
-	row->screen.name = unique_name(menu_screen_names(rows()), "SCREEN" + std::to_string(id));
+	row->screen.name = unique_name(menu_screen_names(rows), "SCREEN" + std::to_string(id));
 	mnu::Window main;
 	main.name = "MAIN";
 	main.type = mnu::WindowType::Window;
@@ -1277,15 +1512,19 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 // "the last of a name is the one found"), so a copy keeping the original's name would take
 // its place for every ACTION naming it: the copy is renamed, compared as the lookups
 // compare names.
-void MnuDocument::prepare_duplicate(Node &copy) const {
+void MnuDocument::prepare_duplicate(Node &copy,
+                                    const std::vector<std::shared_ptr<const Node>> &rows) const {
 	mnu::Screen &screen = screen_of(copy).screen;
-	screen.name = unique_name(menu_screen_names(rows()), screen.name);
+	screen.name = unique_name(menu_screen_names(rows), screen.name);
 }
 
 // An editor rule, as a screen keeps one root window: a menu with no screen has nothing
 // to show, so the last screen stays (the menu view's Remove waits for a second one).
-bool MnuDocument::accept_change(const Change &change, std::string &error) const {
-	if (change.before && !change.after && rows().size() == 1) {
+bool MnuDocument::accept_step(const EditStep &step, const StagedRows &rows,
+                              std::string &error) const {
+	if (rows.size() != 0) return true;
+	for (const RowSwap &swap : step.swaps) {
+		if (!swap.before || swap.after) continue;
 		error = "A menu keeps at least one screen.";
 		return false;
 	}
@@ -1295,9 +1534,9 @@ bool MnuDocument::accept_change(const Change &change, std::string &error) const 
 
 namespace {
 
-Diagnostic on_record(const MnuDocument &menu, const NodeAddress &address, DiagnosticSeverity severity, const char *code,
+Diagnostic on_record(const MnuDocument &menu, const NodeAddress &address, DiagnosticSeverity severity, MenuFinding code,
                      const std::string &message, const std::string &field) {
-	Diagnostic d = make_diagnostic(severity, code, message, menu.path(), field);
+	Diagnostic d = make_finding(code, severity, message, menu.path(), field);
 	d.record = menu.record_path(address);
 	d.row_id = address.row;
 	d.child_id = address.child;
@@ -1311,12 +1550,12 @@ Diagnostic on_record(const MnuDocument &menu, const NodeAddress &address, Diagno
 void name_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings) {
 	for (const MenuLookupName &name : menu.lookup_names()) {
 		if (name.found == MenuLookupName::Found::LaterScreen)
-			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, "menu.duplicate_screen",
+			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, MenuFinding::DuplicateScreen,
 			                             "A later screen of this menu is also named " + name.name +
 			                                     ": the game finds the last screen of a name, so no ACTION ever shows this one.",
 			                             "name"));
 		else if (name.found == MenuLookupName::Found::EarlierWindow)
-			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, "menu.duplicate_window",
+			findings.push_back(on_record(menu, name.address, DiagnosticSeverity::Warning, MenuFinding::DuplicateWindow,
 			                             "An earlier window of this screen is also named " + name.name +
 			                                     ": the game finds the first window of a name, so no ACTION and no "
 			                                     "shell control ever reaches this one by name.",
@@ -1337,18 +1576,18 @@ void action_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings)
 			Value owner_name, type, state;
 			if (at.owner.kind == kWindow && menu.get(at.owner, "name", owner_name) &&
 			    std::get<std::string>(owner_name).empty() && nameless.insert(at.owner.child).second)
-				findings.push_back(on_record(menu, at.owner, DiagnosticSeverity::Warning, "menu.action_inert",
+				findings.push_back(on_record(menu, at.owner, DiagnosticSeverity::Warning, MenuFinding::ActionInert,
 				                             "This window has no NAME: the game runs none of its ACTIONs.", "name"));
 			if (!menu.get(address, "type", type) || !menu.get(address, "state", state)) return true;
 			const std::string &verb = std::get<std::string>(type);
 			if (verb.empty()) return true; // no TYPE: a write issue (retail's parse faults on it)
 			if (!mnu::known_token(verb, mnu::kActionTypes))
-				findings.push_back(on_record(menu, address, DiagnosticSeverity::Warning, "menu.action_inert",
+				findings.push_back(on_record(menu, address, DiagnosticSeverity::Warning, MenuFinding::ActionInert,
 				                             "'" + verb + "' is none of the game's sixteen ACTION types: the game ignores this ACTION.",
 				                             "type"));
 			else if (strutil::iequals(verb, "WINDOW") &&
 			         !mnu::known_token(std::get<std::string>(state), mnu::kActionStates))
-				findings.push_back(on_record(menu, address, DiagnosticSeverity::Warning, "menu.action_inert",
+				findings.push_back(on_record(menu, address, DiagnosticSeverity::Warning, MenuFinding::ActionInert,
 				                             "A WINDOW ACTION changes its target only with the STATE HIDE, SHOW, ENABLE or "
 				                             "DISABLE: this one does nothing.",
 				                             "state"));
@@ -1359,6 +1598,16 @@ void action_findings(const MnuDocument &menu, std::vector<Diagnostic> &findings)
 
 } // namespace
 
+const FindingCodeRow &finding_code(MenuFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+const FindingCodeRow &finding_code(menu::MenuFrameNoteCode code) {
+	return kFindingRows[kOwnFindings + static_cast<size_t>(code)];
+}
+
+FindingTable menu_finding_codes() { return { kFindingRows.data(), kFindingRows.size() }; }
+
 std::vector<Diagnostic> validate_menu_file(const DocumentBase &document) {
 	std::vector<Diagnostic> findings;
 	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
@@ -1368,7 +1617,8 @@ std::vector<Diagnostic> validate_menu_file(const DocumentBase &document) {
 	// screen or window the reader found it in (its locator, in the file as loaded: wherever
 	// that record is now, source_address; gone since, the file), so Problems selects it,
 	// named by its path when the reader named none.
-	source_issue_findings(*menu, "menu.invalid_input", "menu.ignored_input", findings,
+	source_issue_findings(*menu, finding_code(MenuFinding::InvalidInput),
+			finding_code(MenuFinding::IgnoredInput), findings,
 			[&](Diagnostic &finding) {
 				if (finding.row_id && finding.record.empty())
 					finding.record = menu->record_path(
@@ -1378,8 +1628,8 @@ std::vector<Diagnostic> validate_menu_file(const DocumentBase &document) {
 	// On the record and the field that cause it, so the inspector shows it there and
 	// Problems selects it.
 	for (const SourceIssue &issue : menu->saved_serialization().issues) {
-		auto diagnostic = make_diagnostic(DiagnosticSeverity::Error, "menu.unserializable", issue.message,
-		                                  document.path(), issue.field);
+		auto diagnostic = make_finding(MenuFinding::Unserializable, DiagnosticSeverity::Error, issue.message,
+		                               document.path(), issue.field);
 		diagnostic.record = issue.record;
 		const NodeAddress address = issue.locator.empty() ? NodeAddress() : menu->address_at(issue.locator);
 		diagnostic.row_id = address.row;

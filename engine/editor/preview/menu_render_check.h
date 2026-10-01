@@ -24,14 +24,12 @@ class ProjectChecks;
 // "The game ..." for a witnessed rule; "OpenNova ..." for the port's own choice or a
 // known gap in it (docs/mnu/menu-re.md "Compiler notes").
 std::string menu_note_message(const menu::MenuFrameNote &note);
-// Whether a note is a Problems row and at what severity; false for the notes only the
-// preview shows: a missing reference is the asset graph's finding (a %VAR%, a string id,
-// a font, a texture or a string table the project lacks), and a few notes only explain
-// the picture (a CUSTOM hook, a state held, a frame whose stencil did not load, a table
-// or marquee filled at run time).
+// Whether a note is a Problems row and at what severity, as its row says (the menu type's
+// finding codes, finding_code(note).problem); false for the notes only the preview shows: a
+// missing reference is the asset graph's finding (a %VAR%, a string id, a font, a texture or a
+// string table the project lacks), and a few notes only explain the picture (a CUSTOM hook, a
+// state held, a frame whose stencil did not load, a table or marquee filled at run time).
 bool menu_note_problem(menu::MenuFrameNoteCode code, DiagnosticSeverity *severity);
-// "menu.render.<token>": a note's finding code.
-std::string menu_note_code(menu::MenuFrameNoteCode code);
 // Where a note sits in the document: the screen row, the window, or the record of the
 // window's list the note names (an empty field when that record is not there).
 NodeAddress menu_note_address(const menu::MenuFrameNote &note, const MnuDocument &document, const Node &screen_row,

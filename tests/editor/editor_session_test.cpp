@@ -56,13 +56,13 @@ static bool output_has(const SessionView &v, const std::string &needle) {
 
 static bool has_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code) return true;
+		if (d.code() == code) return true;
 	return false;
 }
 
 static size_t count_code(const std::vector<Diagnostic> &diagnostics, const char *code) {
 	size_t n = 0;
-	for (const Diagnostic &d : diagnostics) n += d.code == code ? 1 : 0;
+	for (const Diagnostic &d : diagnostics) n += d.code() == code ? 1 : 0;
 	return n;
 }
 
@@ -70,7 +70,7 @@ static size_t count_code(const std::vector<Diagnostic> &diagnostics, const char 
 static const Diagnostic *finding_about(const std::vector<Diagnostic> &diagnostics, const char *code,
                                        const std::string &target) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code && d.target == target) return &d;
+		if (d.code() == code && subject_target(d) == target) return &d;
 	return nullptr;
 }
 
@@ -82,7 +82,7 @@ static std::string boot_line(const std::string &name, const char *rest) {
 // The finding of `code` on the file `asset` (project-relative), or null.
 static const Diagnostic *finding_in(const std::vector<Diagnostic> &diagnostics, const char *code, const std::string &asset) {
 	for (const Diagnostic &d : diagnostics)
-		if (d.code == code && d.asset == asset) return &d;
+		if (d.code() == code && d.asset == asset) return &d;
 	return nullptr;
 }
 
@@ -95,7 +95,7 @@ static NodeAddress first_row(const Document *document) {
 // The fix labelled `label` of the first finding of `code` that offers it.
 static bool find_fix(const SessionView &v, const char *code, const std::string &label, ProblemFix &out) {
 	for (const Diagnostic &d : v.findings.diagnostics) {
-		if (d.code != code) continue;
+		if (d.code() != code) continue;
 		for (const ProblemFix &fix : fixes_for(d, v))
 			if (fix.label == label) {
 				out = fix;
@@ -194,7 +194,7 @@ static int test_lifecycle() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 0);
-	TEST_EXPECT(v.findings.diagnostics.back().code == "play.runtime_missing");
+	TEST_EXPECT(v.findings.diagnostics.back().code() == "play.runtime_missing");
 
 	// With a runtime the launcher names, Play builds (unchanged) and spawns on it.
 	const std::string runtime = dir.file("runtime/opennova.exe");
@@ -220,7 +220,7 @@ static int test_lifecycle() {
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 1);
-	TEST_EXPECT(v.findings.diagnostics.back().code == "play.already_running");
+	TEST_EXPECT(v.findings.diagnostics.back().code() == "play.already_running");
 	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\nhalf"));
 	session.poll();
 	TEST_EXPECT(output_has(v, "game: Godot Engine v4.6.1"));
@@ -246,7 +246,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.activity.boot_missing.size() == 1 && v.activity.boot_missing[0] == "MAIN.MNU");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 1);
 	const Diagnostic *boot = finding_about(v.findings.diagnostics, "play.boot_missing", "main.mnu");
-	TEST_EXPECT(boot && boot->asset.empty() && boot->role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(boot && boot->asset.empty() && editor_test::requirement_of(*boot).role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos && boot->message.find("Without it") != std::string::npos);
 	TEST_EXPECT(v.activity.missing_at_boot("main.mnu"));
 	{
@@ -389,7 +389,7 @@ static int test_import() {
 	TEST_EXPECT(editor_test::write_text(dir.file("project/custom/NOTE.TXT"), "authored"));
 	importing.imports = {{packed, "note.txt"}};
 	session.handle(importing);
-	TEST_EXPECT(session.view().findings.diagnostics.back().code == "import.exists");
+	TEST_EXPECT(session.view().findings.diagnostics.back().code() == "import.exists");
 	TEST_EXPECT(read_file_text(dir.file("project/custom/NOTE.TXT"), text, error) && text == "authored");
 	importing.replace = true;
 	session.handle(importing);
@@ -446,12 +446,12 @@ static int test_import() {
 	const auto invalid = import_assets({{packed, "../escape.txt"}, {packed, "absent.txt"}},
 	                                  paths, *session.view().project.document, false);
 	TEST_EXPECT(invalid.imported.empty() && invalid.diagnostics.size() == 2);
-	TEST_EXPECT(invalid.diagnostics[0].code == "import.name");
+	TEST_EXPECT(invalid.diagnostics[0].code() == "import.name");
 	TEST_EXPECT(!fs::exists(dir.file("escape.txt")));
 	// The whole selection or none of it: a file refused refuses the others.
 	const auto duplicates = import_assets({{loose, {}}, {loose, {}}}, paths, *session.view().project.document, true);
 	TEST_EXPECT(duplicates.imported.empty() && duplicates.diagnostics.size() == 1);
-	TEST_EXPECT(duplicates.diagnostics[0].code == "import.duplicate");
+	TEST_EXPECT(duplicates.diagnostics[0].code() == "import.duplicate");
 	// The archive's 16-byte name limit binds only what the build packs: a video is copied
 	// loose under any name, a texture is refused (and with it the video it came with).
 	const std::string video = dir.file("intro_cinematic.bik");
@@ -460,7 +460,7 @@ static int test_import() {
 	TEST_EXPECT(editor_test::write_text(texture, "tga"));
 	const auto long_names = import_assets({{video, {}}, {texture, {}}}, paths, *session.view().project.document, false);
 	TEST_EXPECT(long_names.imported.empty() && long_names.diagnostics.size() == 1);
-	TEST_EXPECT(!long_names.diagnostics.empty() && long_names.diagnostics[0].code == "import.name" &&
+	TEST_EXPECT(!long_names.diagnostics.empty() && long_names.diagnostics[0].code() == "import.name" &&
 	            long_names.diagnostics[0].asset == "a_long_texture_name.tga");
 	const auto video_alone =
 			import_assets({ { video, {} } }, paths, *session.view().project.document, false);
@@ -486,7 +486,7 @@ static int test_retail_play() {
 	editor_test::apply_settings(session, retail);
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code == "play.install_missing");
+	TEST_EXPECT(platform.spawns == 0 && session.view().findings.diagnostics.back().code() == "play.install_missing");
 
 	const std::string install = dir.file("retail install");
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "retail executable"));
@@ -560,7 +560,7 @@ static int test_retail_play() {
 	fs::create_directory(fs::path(built) / "binkw32.dll");
 	session.handle(request::play());
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 2 && session.view().findings.diagnostics.back().code == "play.install_copy");
+	TEST_EXPECT(platform.spawns == 2 && session.view().findings.diagnostics.back().code() == "play.install_copy");
 
 	retail.play_in_install = false;
 	editor_test::apply_settings(session, retail);
@@ -717,7 +717,7 @@ static int test_outcomes_and_refusals() {
 	for (const BadName &name : bad) {
 		session.handle(request::create_file(name.path, name.kind));
 		TEST_EXPECT(!session.outcome().done() && !session.outcome().findings.empty() &&
-		            session.outcome().findings.back().code == name.code);
+		            session.outcome().findings.back().code() == name.code);
 		TEST_EXPECT(has_code(v.findings.diagnostics, name.code));
 	}
 	// "../x.mnu" placed under menus/ would have landed at the project root.
@@ -814,7 +814,7 @@ static int test_requests_that_cannot_run() {
 	for (const Case &c : during_build) {
 		session.handle(c.request);
 		TEST_EXPECT(!session.outcome().done() && !session.outcome().unsaved_prompt);
-		TEST_EXPECT(session.outcome().findings.size() == 1 && session.outcome().findings[0].code == c.code &&
+		TEST_EXPECT(session.outcome().findings.size() == 1 && session.outcome().findings[0].code() == c.code &&
 		            session.outcome().findings[0].severity == DiagnosticSeverity::Warning);
 		TEST_EXPECT(has_code(v.findings.diagnostics, c.code));
 	}
@@ -836,7 +836,7 @@ static int test_requests_that_cannot_run() {
 	                                     request::redo("gametext.bin")}) {
 		session.handle(request);
 		TEST_EXPECT(!session.outcome().done());
-		TEST_EXPECT(session.outcome().findings.size() == 1 && session.outcome().findings[0].code == "document.not_open" &&
+		TEST_EXPECT(session.outcome().findings.size() == 1 && session.outcome().findings[0].code() == "document.not_open" &&
 		            session.outcome().findings[0].severity == DiagnosticSeverity::Warning);
 	}
 	TEST_EXPECT(!session.document_for("gametext.bin"));
@@ -847,7 +847,7 @@ static int test_requests_that_cannot_run() {
 	session.handle(request::play());
 	TEST_EXPECT(!session.view().activity.operation.running() && platform.spawns == spawns);
 	TEST_EXPECT(
-			!session.outcome().done() && v.findings.diagnostics.back().code == "play.unsupported");
+			!session.outcome().done() && v.findings.diagnostics.back().code() == "play.unsupported");
 	TEST_EXPECT(v.findings.diagnostics.back().message.find("Windows-only") != std::string::npos);
 	return 0;
 }
@@ -890,16 +890,16 @@ static int test_rename_keeps_the_active_document() {
 	const NodeAddress record{items->rows()[0]->id, items->rows()[0]->kind, 0};
 	select.address = record;
 	session.handle(select);
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 
 	// The rename reloads main.mnu: the catalog stays active with its selection.
 	session.handle(request::rename_asset("logo.tga", "logo2.tga"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 	// An open file that is not active, renamed: the catalog still is.
 	session.handle(request::rename_asset("extra.mnu", "extra2.mnu"));
 	TEST_EXPECT(session.outcome().done());
-	TEST_EXPECT(v.documents.active == items_path && v.documents.selection == record);
+	TEST_EXPECT(v.documents.active == items_path && v.documents.selection.primary == record);
 	const Document *renamed = session.document_for("extra2.mnu");
 	TEST_EXPECT(renamed != nullptr && !session.document_for("extra.mnu"));
 	// The active file renamed: its document follows it, with no stale selection (a menu read
@@ -909,7 +909,7 @@ static int test_rename_keeps_the_active_document() {
 	session.handle(request::rename_asset("extra2.mnu", "extra3.mnu"));
 	TEST_EXPECT(session.outcome().done());
 	const Document *moved = session.document_for("extra3.mnu");
-	TEST_EXPECT(moved && v.documents.active == moved->path() && v.documents.selection.row && v.documents.selection == first_row(moved));
+	TEST_EXPECT(moved && v.documents.active == moved->path() && v.documents.selection.primary.row && v.documents.selection.primary == first_row(moved));
 	// The active file is one the rename reloads: it stays active, and its selection
 	// (an id in the old records) is dropped for its first screen.
 	const Document *startup = session.document_for("main.mnu");
@@ -918,12 +918,12 @@ static int test_rename_keeps_the_active_document() {
 	const std::string menu_path = startup->path();
 	EditorRequest select_exit = request::select_record(menu_path, exit);
 	session.handle(select_exit);
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == exit);
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == exit);
 	session.handle(request::rename_asset("logo2.tga", "logo3.tga"));
 	TEST_EXPECT(session.outcome().done());
 	const Document *reread = session.document_for("main.mnu");
-	TEST_EXPECT(reread && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(reread) &&
-	            v.documents.selected == std::vector<NodeAddress>{first_row(reread)});
+	TEST_EXPECT(reread && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(reread) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{first_row(reread)});
 	return 0;
 }
 
@@ -1066,12 +1066,12 @@ static int test_validation_cost() {
 	set("no_such_field", int64_t(1));
 	TEST_EXPECT(stats.passes == passes);
 	TEST_EXPECT(!v.findings.diagnostics.empty() &&
-			v.findings.diagnostics.back().code == "document.value");
+			v.findings.diagnostics.back().code() == "document.value");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.value") == 2);
 	session.poll();
 	TEST_EXPECT(stats.passes == passes + 1);
 	TEST_EXPECT(!v.findings.diagnostics.empty() &&
-			v.findings.diagnostics.back().code == "document.value");
+			v.findings.diagnostics.back().code() == "document.value");
 	TEST_EXPECT(count_code(v.findings.diagnostics, "document.value") == 2);
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
 	// A Move to where the record already is changes nothing: nothing to validate.
@@ -1198,7 +1198,7 @@ static int test_validation_cost() {
 	session.run_operations();
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && finding_on(v.activity.last_build->diagnostics, menu) != nullptr);
 	TEST_EXPECT(session.document_for(menu) == kept && has_code(v.activity.last_build->diagnostics, "document.stale"));
-	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) != nullptr && finding_on(v.findings.diagnostics, menu)->code == "document.stale");
+	TEST_EXPECT(finding_on(v.findings.diagnostics, menu) != nullptr && finding_on(v.findings.diagnostics, menu)->code() == "document.stale");
 	TEST_EXPECT(editor_test::write_bytes(root + "/" + menu, original));
 	session.handle(request::build());
 	session.run_operations();
@@ -1607,32 +1607,32 @@ static int test_selection_memory() {
 	};
 	const NodeAddress marker = project.marker();
 	select(project.items_path, marker);
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == marker);
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker);
 	select(project.strings_path, section(1));
 	select(project.strings_path, section(2));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(2));
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(2));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == marker &&
-	            v.documents.selected == std::vector<NodeAddress>{marker});
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == marker &&
+	            v.documents.selection.records == std::vector<NodeAddress>{marker});
 	session.handle(request::open_document("gametext.bin"));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(2) &&
-	            v.documents.selected == std::vector<NodeAddress>{section(2)});
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(2) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{section(2)});
 	// A record named (a Problems row, a Go to) wins over the one kept.
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(project.strings_path, section(4)));
-	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection == section(4));
+	TEST_EXPECT(v.documents.active == project.strings_path && v.documents.selection.primary == section(4));
 	// Read again: forgotten (its records have new identities).
 	session.handle(request::reload_document(project.items_path));
 	session.handle(request::open_document(project.strings_path));
 	session.handle(request::open_document(project.items_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == NodeAddress() && v.documents.selected.empty());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	// Closed: forgotten; the document that becomes active takes back its own.
 	session.handle(request::open_document(project.strings_path));
-	TEST_EXPECT(v.documents.selection == section(4));
+	TEST_EXPECT(v.documents.selection.primary == section(4));
 	session.handle(request::close_document(project.strings_path));
-	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection == NodeAddress());
+	TEST_EXPECT(v.documents.active == project.items_path && v.documents.selection.primary == NodeAddress());
 	session.handle(request::open_document("gametext.bin"));
-	TEST_EXPECT(v.documents.selection == NodeAddress() && v.documents.selected.empty());
+	TEST_EXPECT(v.documents.selection.primary == NodeAddress() && v.documents.selection.records.empty());
 	return 0;
 }
 
@@ -1669,8 +1669,8 @@ static int test_boot_findings() {
 			finding_about(v.findings.diagnostics, "play.boot_missing", "gametext.bin");
 	const Diagnostic *mystery =
 			finding_about(v.findings.diagnostics, "play.boot_missing", "mystery.dat");
-	TEST_EXPECT(table && table->role == "gametext" && table->asset.empty());
-	TEST_EXPECT(mystery && mystery->role.empty() && mystery->message.find("Without it") == std::string::npos);
+	TEST_EXPECT(table && editor_test::requirement_of(*table).role == "gametext" && table->asset.empty());
+	TEST_EXPECT(mystery && editor_test::requirement_of(*mystery).role.empty() && mystery->message.find("Without it") == std::string::npos);
 	// An edit and its undo validate again, and so does a rescan: the rows stay, once each.
 	session.handle(request::open_document("items.def"));
 	Document *items = session.document_for("items.def");
@@ -1747,8 +1747,8 @@ static int test_optional_rows() {
 		lacking += !row.required && row.state == RequirementState::Missing ? 1 : 0;
 	TEST_EXPECT(lacking > 0 && count_code(v.findings.diagnostics, "requirement.optional_missing") == lacking);
 	for (const Diagnostic &d : v.findings.diagnostics)
-		if (d.code == "requirement.optional_missing")
-			TEST_EXPECT(d.severity == DiagnosticSeverity::Info && !d.role.empty() && !d.target.empty() && d.asset.empty());
+		if (d.code() == "requirement.optional_missing")
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Info && !editor_test::requirement_of(d).role.empty() && !subject_target(d).empty() && d.asset.empty());
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(v.activity.last_build->ok && !has_code(v.activity.last_build->diagnostics, "requirement.optional_missing"));
@@ -2048,7 +2048,7 @@ static int test_project_settings() {
 	change.game_install = install;
 	editor_test::apply_settings(session, change);
 	TEST_EXPECT(applied(1) && v.project.settings_result.failures.size() == 1 &&
-	            v.project.settings_result.failures[0].code == "project.none" && v.project.retail_directory == install);
+	            v.project.settings_result.failures[0].code() == "project.none" && v.project.retail_directory == install);
 	TEST_EXPECT(!session.outcome().done());
 	session.handle(request::new_project(dir.file("project"), "Armory"));
 	const std::string root = v.project.root;
@@ -2069,7 +2069,7 @@ static int test_project_settings() {
 	change.title = "";
 	editor_test::apply_settings(session, change);
 	TEST_EXPECT(applied(3) && v.project.settings_result.failures.size() == 1 &&
-	            v.project.settings_result.failures[0].code == "project.title_empty" && v.project.document->title == "Armory");
+	            v.project.settings_result.failures[0].code() == "project.title_empty" && v.project.document->title == "Armory");
 
 	// The project file cannot be written (a folder stands where it is written first): the
 	// missions feature stays off with its requirements, on every retry; writable again, on.
@@ -2083,7 +2083,7 @@ static int test_project_settings() {
 		change.serial = serial;
 		editor_test::apply_settings(session, change);
 		TEST_EXPECT(applied(serial) && v.project.settings_result.failures.size() == 1 &&
-		            v.project.settings_result.failures[0].code == "project.write" && !v.project.document->features.mission &&
+		            v.project.settings_result.failures[0].code() == "project.write" && !v.project.document->features.mission &&
 		            v.project.requirements->rows.size() == rows && has_code(v.findings.diagnostics, "project.write") && !session.outcome().done());
 	}
 	fs::remove_all(project_blocker, ec);
@@ -2103,7 +2103,7 @@ static int test_project_settings() {
 	change.runtime_executable = "C:/tools/opennova.exe";
 	editor_test::apply_settings(session, change);
 	TEST_EXPECT(applied(7) && v.project.settings_result.failures.size() == 1 &&
-	            v.project.settings_result.failures[0].code == "editor_settings.write");
+	            v.project.settings_result.failures[0].code() == "editor_settings.write");
 	TEST_EXPECT(v.project.document->title == "Harbor" && v.project.runtime_setting.empty());
 	TEST_EXPECT(::opennova::editor::open_project(root, on_disk, error) && on_disk.title == "Harbor");
 	change.serial = 8;
@@ -2146,8 +2146,8 @@ static int test_menu_first_screen() {
 	TEST_EXPECT(menu && !menu->rows().empty());
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == first_row(menu) &&
-	            v.documents.selected == std::vector<NodeAddress>{first_row(menu)});
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == first_row(menu) &&
+	            v.documents.selection.records == std::vector<NodeAddress>{first_row(menu)});
 	TEST_EXPECT(v.documents.previews.menu.path == menu_path &&
 			v.documents.previews.menu.screen == first_row(menu).row);
 	const auto select = [&](const NodeAddress &address) {
@@ -2161,36 +2161,36 @@ static int test_menu_first_screen() {
 	session.handle(request::open_document(project.items_path));
 	TEST_EXPECT(v.documents.active == project.items_path);
 	session.handle(request::open_document(menu_path));
-	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection == exit);
+	TEST_EXPECT(v.documents.active == menu_path && v.documents.selection.primary == exit);
 	// Nothing selected, another document, back: the first screen again.
 	select(NodeAddress());
-	TEST_EXPECT(v.documents.selection == NodeAddress());
+	TEST_EXPECT(v.documents.selection.primary == NodeAddress());
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_document(menu_path));
-	TEST_EXPECT(v.documents.selection == first_row(menu));
+	TEST_EXPECT(v.documents.selection.primary == first_row(menu));
 	// A record named wins.
 	NodeAddress title;
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	session.handle(request::open_document(project.items_path));
 	session.handle(request::open_record(menu_path, title));
-	TEST_EXPECT(v.documents.selection == title);
+	TEST_EXPECT(v.documents.selection.primary == title);
 	// Read again (new records): its first screen, whatever was selected.
 	session.handle(request::reload_document(menu_path));
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
 	if (!menu) return 1;
 	// A rescan keeps it while its file is as it was read (the selection with it), and reads it
 	// again once the file changed outside the editor.
 	TEST_EXPECT(find_definition(AssetGraph(), *menu, "TITLE", title));
 	select(title);
 	session.handle(request::rescan());
-	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection == title);
+	TEST_EXPECT(session.document_for(menu_path) == menu && v.documents.selection.primary == title);
 	std::string text, io_error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, io_error) &&
 	            editor_test::write_text(project.root + "/" + menu_path, text + "\r\n"));
 	session.handle(request::rescan());
 	menu = session.document_for(menu_path);
-	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.row && v.documents.selection == first_row(menu));
+	TEST_EXPECT(menu && v.documents.active == menu_path && v.documents.selection.primary.row && v.documents.selection.primary == first_row(menu));
 	return 0;
 }
 
@@ -2222,7 +2222,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	session.handle(request::save(project.items_path));
 	EditorRequest select = request::select_record(project.items_path, project.marker());
 	session.handle(select);
-	TEST_EXPECT(!items->dirty() && items->can_undo() && v.documents.selection == project.marker());
+	TEST_EXPECT(!items->dirty() && items->can_undo() && v.documents.selection.primary == project.marker());
 	// The menu changed on disk (a line end added by hand): read again, alone.
 	std::string text, error;
 	TEST_EXPECT(read_file_text(project.root + "/" + menu_path, text, error) &&
@@ -2232,7 +2232,7 @@ static int test_rescan_keeps_what_did_not_change() {
 	TEST_EXPECT(session.document_for(project.items_path) == items && items->can_undo() && !items->dirty());
 	TEST_EXPECT(session.document_for(project.strings_path) == project.strings);
 	TEST_EXPECT(
-			v.documents.active == project.items_path && v.documents.selection == project.marker());
+			v.documents.active == project.items_path && v.documents.selection.primary == project.marker());
 	const Document *reread = session.document_for(menu_path);
 	TEST_EXPECT(reread != nullptr && reread != menu && reread->matches_file());
 	TEST_EXPECT(output_has(v, "Reloaded " + menu_path));
@@ -2495,7 +2495,7 @@ static int test_view_revisions() {
 		const ViewRevisions before = v.revisions;
 		EditorRequest select = request::select_record(items->path(), crate);
 		session.handle(select);
-		TEST_EXPECT(v.documents.selection == crate);
+		TEST_EXPECT(v.documents.selection.primary == crate);
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Selection}));
 	}
 
@@ -3154,7 +3154,7 @@ static int test_view_events() {
 	TEST_EXPECT(events.size() == 1 && events[0].kind == ViewEventKind::RevealRecord &&
 			events[0].path == menu->path() && events[0].address == window &&
 			events[0].field == "position.left" && !events[0].flag && events[0].tag == 0 &&
-			v.documents.selection == window);
+			v.documents.selection.primary == window);
 	// The same row clicked again: another event, the next seq.
 	const uint64_t first = events.empty() ? 0 : events[0].seq;
 	session.handle(row);
@@ -3164,7 +3164,7 @@ static int test_view_events() {
 	// A record named with no field: selected, nothing to show.
 	row.field.clear();
 	session.handle(row);
-	TEST_EXPECT(posted().empty() && v.documents.selection == window);
+	TEST_EXPECT(posted().empty() && v.documents.selection.primary == window);
 	// A Go to by locator, its defining field shown.
 	session.handle(request::open_document(menu->path(), "0/window:0", "name"));
 	events = posted();

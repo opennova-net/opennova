@@ -43,16 +43,15 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind) {
 }
 
 Diagnostic missing_finding(const char *role, const char *name) {
-	Diagnostic d = make_diagnostic(DiagnosticSeverity::Error, "requirement.missing",
-	                               std::string("Missing required file ") + name + ".");
-	d.role = role;
-	d.target = name;
+	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing",
+	                                       std::string("Missing required file ") + name + ".");
+	d.subject = RequirementSubject{role, name};
 	return d;
 }
 
 Diagnostic finding(DiagnosticSeverity severity, const char *code, const char *message,
                    const char *file = "", const char *field = "") {
-	return make_diagnostic(severity, code, message, file, field);
+	return editor_test::finding_of(severity, code, message, file, field);
 }
 
 AssetEntry file_entry(const std::string &name, const std::string &path, AssetKind kind) {
@@ -228,8 +227,7 @@ int test_fix_changes() {
 	SessionView v = problems_view();
 	Diagnostic font = finding(DiagnosticSeverity::Error, "reference.missing",
 	                          "Kilo: the font is missing.", "menus/a.mnu", "font.name");
-	font.reference = ReferenceKind::Font;
-	font.target = "Custom.fnt";
+	font.subject = ReferenceSubject{ReferenceKind::Font, "Custom.fnt"};
 	v.findings.diagnostics.push_back(font);
 	const size_t kilo = v.findings.diagnostics.size() - 1;
 	ProblemsList list;
@@ -277,7 +275,7 @@ int test_folding() {
 	list.toggle_fold("menu");
 	list.refresh(v);
 	TEST_EXPECT(list.folded("menu"));
-	v.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.test",
+	v.findings.diagnostics.push_back(finding(DiagnosticSeverity::Warning, "menu.duplicate_screen",
 	                                "Echo: another warning.", "menus/a.mnu"));
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
@@ -353,13 +351,10 @@ int test_proposals() {
 	textures.project.root = "C:/mods/Placeholders";
 	Diagnostic skin = finding(DiagnosticSeverity::Error, "reference.missing",
 	                          "Golf: the texture 'skin.tga'.", "models/tank.3di", "name");
-	skin.reference = ReferenceKind::Texture;
-	skin.target = "skin.tga";
-	skin.loader_arg = 0;
+	skin.subject = ReferenceSubject{ReferenceKind::Texture, "skin.tga", std::string(), 0};
 	Diagnostic puff = finding(DiagnosticSeverity::Error, "reference.missing",
 	                          "Hotel: the texture 'puff.tga'.", "fx.ptl", "graphic1");
-	puff.reference = ReferenceKind::Texture;
-	puff.target = "puff.tga";
+	puff.subject = ReferenceSubject{ReferenceKind::Texture, "puff.tga"};
 	textures.findings.diagnostics = {skin, puff};
 	ProblemsList placeholders;
 	placeholders.refresh(textures);

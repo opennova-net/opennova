@@ -70,7 +70,7 @@ static int test_lifecycle() {
 	TEST_EXPECT(session.running_build_dir() == "/build/1");
 	TEST_EXPECT(platform.last_plan.working_dir == "/build/1");
 	TEST_EXPECT(!session.start(plan, error)); // one child at a time
-	TEST_EXPECT(error.code == "play.already_running");
+	TEST_EXPECT(error.code() == "play.already_running");
 	TEST_EXPECT(session.poll() == PlayState::Running);
 
 	// The child exits on its own: the session notices on the next poll, and reads the code
@@ -114,7 +114,7 @@ static int test_lifecycle() {
 
 	platform.spawn_fails = true;
 	TEST_EXPECT(!session.start(plan, error));
-	TEST_EXPECT(error.code == "play.spawn");
+	TEST_EXPECT(error.code() == "play.spawn");
 	TEST_EXPECT(session.state() == PlayState::Stopped);
 	TEST_EXPECT(std::string(play_state_label(PlayState::Stopping)) == "stopping");
 	return 0;

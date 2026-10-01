@@ -50,11 +50,17 @@
     documents, the records, a request with its edits in the batch form the editor MCP names
     records by (`record_batch`), the findings; `view_json`: the view by section), the view the
     windows read (`session/view`, S13 V4: sub-views of the project, the documents, the findings,
-    the activity and the dialogs, and the events a request posts for one window to take once)),
-    `model` (the
+    the activity and the dialogs, and the events a request posts for one window to take once),
+    the selection (S13 D7: one document's records over any of its rows), and the finding codes'
+    lookup (S13 A6, `finding_codes`: a token's row over every table, the tables, the columns' wire
+    forms)), `model` (the
     neutral editing core, ADR 0046 d9:
     `DocumentBase` (every document's lifecycle, S13 D6) and `Document` (the record document
-    over it), `Node`, `Edit`, `EditHistory`, `FieldSchema`; it names no format
+    over it), `Node`, `Edit`, `EditHistory` (steps of row swaps under a byte budget),
+    `StagedRows` (a batch's rows over any rows before it commits, S13 D7), the `ChangeSet` a
+    document answers since a state, `FieldSchema`, and the finding codes (S13 A6,
+    `finding_code_row`: every finding is made from a row, the editor's own `CoreFinding` table's
+    or its document type's `findings`, and keeps it, `Diagnostic::row`); it names no format
     type), `documents` (the document types over the engine's own records: the def
     catalogs, string tables, menus, stylesheets and models (a `.3di`'s engine features
     over an immutable parsed base, ADR 0046 S10); `document_types` is the registry the
@@ -67,7 +73,8 @@
     parsed records in a slot per file that an update patches, the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
     (a read-only dependency mount's), and the rename transaction; what other files make of what one
-    defines, one `use_checks` row per asset kind, and `project_validation`, the one pass over the
+    defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
+    (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
     project's files: the graph's update, each file's own findings, the use checks, the graph's
     findings), `import` (the importers: a PNG to the game's
     PCX, the `.import` sidecars, the import pass whose outputs the scan lists; and the
@@ -88,15 +95,18 @@
     (the Dear ImGui windows on the engine's pass, built only with `OPENNOVA_IMGUI`;
     the only tree besides `runtime/devtools` that may include an ImGui header; each window
     reaches the session through the `Workspace` seam, `ui/workspace.h`; the
-    inspector is generic, the per-type views in the Document window's tabs are not)).
+    inspector is generic, and a document's view in its Document tab is its type's row of
+    `ui/document_views` (S13 V3: an outline over `ui/outline_model` as a tree, a list or master
+    and detail, or a view of its own), one per open document)).
     STATIC `opennova_editor`, PUBLIC-linking `opennova_runtime` so its validators reuse
     the engine's own load paths; nothing under the four groups below may include or link it
     (`include_graph_check.py`, `link_graph_check.py`), and the game and the Play
     child never carry it. Inside it five libraries are ranked, model < documents < graph <
     session < ui (ADR 0046 S13 D3, `include_graph_check.py`'s editor rank): a ranked library
     includes only its own rank and below, `graph/reference_kinds.h` being a seam header any may
-    include; the upward includes the tree still makes are the lint's listed exceptions, each
-    naming the slice that removes it, and an exception the tree no longer makes fails the lint.
+    include; the upward includes the tree still makes are the lint's listed exceptions (none since
+    S13 V3), each naming the slice that removes it, and an exception the tree no longer makes fails
+    the lint.
     The other editor libraries stay unranked. Tooling, not a port: its sources sit in the citation
     allowlist by the `editor/` prefix. No directory under it may start with `build`
     (the lints skip such directories; the build lib is `project_build/`).

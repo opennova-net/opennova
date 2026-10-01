@@ -52,7 +52,7 @@ const DocumentType kBlobType{DocumentTypeId::Styles, "blob", make_blob, validate
 
 bool has_finding(const ActionOutcome &outcome, const char *code) {
 	for (const Diagnostic &d : outcome.findings)
-		if (d.code == code) return true;
+		if (d.code() == code) return true;
 	return false;
 }
 
@@ -106,7 +106,7 @@ static int test_non_record_type() {
 			cache.begin();
 			const std::vector<Diagnostic> findings = cache.file_findings(input, asset);
 			cache.end();
-			return findings.size() == 1 && findings.front().code == "document.no_records" &&
+			return findings.size() == 1 && findings.front().code() == "document.no_records" &&
 			       cache.stats().files_loaded == 0 && !cache.records_checked(path);
 		};
 		TEST_EXPECT(no_records());
@@ -132,7 +132,7 @@ static int test_non_record_type() {
 		std::vector<Diagnostic> refusals;
 		TEST_EXPECT(!check_symbol_rename(paths, *view.project.document, *view.project.scan,
 		                                 AssetGraph(), plan, open, refusals));
-		TEST_EXPECT(refusals.size() == 1 && refusals.front().code == "rename.site" &&
+		TEST_EXPECT(refusals.size() == 1 && refusals.front().code() == "rename.site" &&
 		            refusals.front().message.find("holds no records") != std::string::npos);
 
 		// Through a session: the lifecycle's callers find it, the rows' do not.
@@ -141,7 +141,7 @@ static int test_non_record_type() {
 		TEST_EXPECT(session.outcome().done());
 		DocumentBase *opened = session.document_base_for(path);
 		TEST_EXPECT(opened && !opened->as_records() && !session.document_for(path));
-		TEST_EXPECT(view.documents.active == path && !view.documents.selection.row);
+		TEST_EXPECT(view.documents.active == path && !view.documents.selection.primary.row);
 		TEST_EXPECT(!view.documents.open.empty() && !records_of(*view.documents.open.back()));
 		// An Apply of its type's payload is taken, undone and redone; a Set is not.
 		Edit replace;

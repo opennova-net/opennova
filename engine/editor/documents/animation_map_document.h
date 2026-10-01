@@ -6,6 +6,7 @@
 
 #include <editor/assets/asset_registry.h>
 #include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
 #include <formats/adm/adm.h>
 
 namespace opennova::editor {
@@ -34,6 +35,7 @@ struct AnimationMapRow : Node {
 	AnimationMapRow();
 	std::shared_ptr<Node> clone() const override { return std::make_shared<AnimationMapRow>(*this); }
 	std::string name() const override { return key; }
+	size_t footprint() const override;
 };
 
 class AnimationMapDocument : public Document {
@@ -41,7 +43,10 @@ public:
 	// A row, which the outline adds, and its clips.
 	const std::vector<RecordKindRow> &kinds() const override;
 	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
 	// A row by its slot's words (animation_key_title), a clip by its file.
 	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
@@ -56,8 +61,11 @@ protected:
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	// A new row: anim_reset when the table has none, else anim_idle, with no clip yet.
-	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, std::string &error) override;
+	// A new row: anim_reset when the table (`rows`, as its batch has left them) has none, else
+	// anim_idle, with no clip yet.
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
 	// A row's clips: add, duplicate, remove, move; at most 8.
@@ -82,5 +90,22 @@ std::string animation_key_title(const std::string &key);
 // clips into one ring, and keeps only the last reset clip). A clip the project lacks is the
 // asset graph's.
 std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document);
+
+// The animation map type's own finding codes (DocumentType::findings), each a row of its table
+// (animation_map_document.cpp, static_asserted into this order): input the reader leaves out,
+// which the game ignores and a rewrite drops, or which the table cannot hold (the file does not
+// serialize); a table with no anim_reset row (the fix adds one); a row the writer refuses; a key
+// naming none of the engine's slots; a slot an earlier row names.
+enum class AnimationMapFinding {
+	InvalidInput,
+	IgnoredInput,
+	NoReset,
+	Row,
+	KeyUnknown,
+	SlotRepeated,
+	kCount
+};
+const FindingCodeRow &finding_code(AnimationMapFinding code);
+FindingTable animation_map_finding_codes();
 
 } // namespace opennova::editor

@@ -11,6 +11,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -209,14 +210,21 @@ bool write_archive(const std::string &path, const char *member, const std::strin
 	       opennova::pff::PFF_WRITE_OK;
 }
 
+// The erring check's own finding code, its type's table (S13 A6: every finding is made from a
+// table's row). The registry's tables are read as registered, so none lists it.
+constexpr editor::FindingCodeRow kErringRows[] = { { "probe.error" } };
+editor::FindingTable erring_findings() {
+	return { kErringRows, std::size(kErringRows) };
+}
+
 // A test's project check (S13 V9's seam) that makes one Error at every validation: a Problems row
 // after the build's gate, which blocks no build.
 class ErringCheck : public editor::ProjectCheck {
 public:
 	bool update(const editor::ProjectCheckInput &) override {
 		const bool moved = findings_.empty();
-		findings_ = { editor::make_diagnostic(editor::DiagnosticSeverity::Error, "probe.error",
-		                                      "The probe's check found this.", "defs/items.def") };
+		findings_ = { editor::make_finding(kErringRows[0], editor::DiagnosticSeverity::Error,
+		                                   "The probe's check found this.", "defs/items.def") };
 		return moved;
 	}
 	const std::vector<editor::Diagnostic> &findings() const override { return findings_; }
@@ -236,6 +244,7 @@ const editor::DocumentType &erring_catalog_type() {
 	static const editor::DocumentType type = [] {
 		editor::DocumentType row = *editor::document_type(editor::DocumentTypeId::Catalog);
 		row.name = "catalog_erring";
+		row.findings = erring_findings;
 		row.project_check = make_erring_check;
 		return row;
 	}();
@@ -631,7 +640,7 @@ static int test_install() {
 	editor::LocalSettings local;
 	editor::Diagnostic finding;
 	TEST_EXPECT(editor::load_local_settings(editor::ProjectPaths::for_root(root), local, finding) &&
-	            local.game_install == install && finding.code.empty());
+	            local.game_install == install && finding.code().empty());
 	{
 		// As the editor reads it: a session with no install of its own opens the project on it.
 		Headless headless;

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include <editor/model/diagnostic.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/rename_controller.h>
@@ -71,7 +72,7 @@ bool UnsavedGuard::holds(const EditorRequest &request) {
 // prompt open over what waits, the failures reported: the modder saves again or cancels.
 std::optional<EditorRequest> UnsavedGuard::resolve(UnsavedChoice choice) {
 	if (!pending_) {
-		core_.refuse_now("unsaved.none", "No unsaved-changes prompt is open: nothing waits on an answer.");
+		core_.refuse_now(CoreFinding::UnsavedNone, "No unsaved-changes prompt is open: nothing waits on an answer.");
 		return std::nullopt;
 	}
 	if (choice == UnsavedChoice::Cancel) {
@@ -79,7 +80,7 @@ std::optional<EditorRequest> UnsavedGuard::resolve(UnsavedChoice choice) {
 		return std::nullopt;
 	}
 	if (choice == UnsavedChoice::Discard && !view_.dialogs.unsaved_prompt.can_discard) {
-		core_.refuse_now("unsaved.discard", "Build and Play pack the files on disk: save the edited files or cancel.");
+		core_.refuse_now(CoreFinding::UnsavedDiscard, "Build and Play pack the files on disk: save the edited files or cancel.");
 		core_.outcome().unsaved_prompt = true;
 		return std::nullopt;
 	}

@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
 
@@ -14,37 +15,10 @@ namespace opennova::editor {
 
 namespace {
 
-// The families of the finding codes Problems groups by kind, with their titles: a code's
-// first dotted segment, or a whole code the table names apart (an optional file the
-// project lacks is a note, not one of the files the game cannot start without).
-struct Family {
-	const char *key;
-	const char *title;
-};
-constexpr Family kFamilies[] = {
-	{"requirement.optional_missing", "Optional files"},
-	{"requirement", "Required files"},
-	{"reference", "Missing references"},
-	{"menu", "Menus"},
-	{"style", "Stylesheets"},
-	{"catalog", "Catalogs"},
-	{"strings", "String tables"},
-	{"model", "Models"},
-	{"animation", "Animations"},
-	{"animation_map", "Animation maps"},
-	{"import", "Imports"},
-	{"asset", "Project files"},
-	{"build", "Build"},
-	{"play", "Play"},
-	{"document", "Documents"},
-	{"graph", "Files not checked"},
-	{"project", "Project"},
-};
-
-std::string family_of(const std::string &code) {
-	for (const Family &row : kFamilies)
-		if (code == row.key) return code;
-	return code.substr(0, code.find('.'));
+// The group a finding shows under when Problems groups by kind: its row's (FindingGroup, its key
+// and title session/finding_codes.h's); none for a Diagnostic no finding was made into.
+FindingGroup group_of(const Diagnostic &d) {
+	return d.row() ? d.row()->group : FindingGroup::None;
 }
 
 void tally(DiagnosticSeverity severity, size_t &errors, size_t &warnings, size_t &infos) {
@@ -57,16 +31,16 @@ void tally(DiagnosticSeverity severity, size_t &errors, size_t &warnings, size_t
 
 bool matches_text(const Diagnostic &d, const std::string &needle) {
 	if (needle.empty()) return true;
-	for (const std::string *member : {&d.message, &d.asset, &d.record, &d.field, &d.code})
+	for (const std::string *member : {&d.message, &d.asset, &d.record, &d.field, &d.code()})
 		if (strutil::to_lower(*member).find(needle) != std::string::npos) return true;
 	return false;
 }
 
-// A finding about a file as a whole in the project, which Files shows and renames: its name
-// (it does not fit the archives, another file has it) or its place (an archive the build does
-// not pack).
-bool about_the_file(const std::string &code) {
-	return code.rfind("asset.name.", 0) == 0 || code == "build.name_unstorable" || code == "build.archive_in_project";
+// A finding about a file as a whole in the project, which Files shows and renames: its row places
+// it there (FindingPlace::File: its name, which does not fit the archives or another file has; its
+// place, an archive the build does not pack).
+bool about_the_file(const Diagnostic &d) {
+	return d.row() && d.row()->place == FindingPlace::File;
 }
 
 bool in_scope(const Diagnostic &d, ProblemScope scope, const SessionView &view) {
@@ -97,13 +71,6 @@ bool ProblemQuery::operator==(const ProblemQuery &other) const {
 	       scope == other.scope && fixable == other.fixable && grouping == other.grouping;
 }
 
-std::string problem_family_title(const std::string &code) {
-	const std::string family = family_of(code);
-	for (const Family &row : kFamilies)
-		if (family == row.key) return row.title;
-	return family;
-}
-
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view) {
 	ProblemAnswer answer;
 	answer.grouped = query.grouping != ProblemGrouping::None;
@@ -127,12 +94,12 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 	std::map<std::string, size_t> placed; // a key -> its group
 	for (const size_t i : answer.rows) {
 		const Diagnostic &d = findings[i];
-		const std::string key = query.grouping == ProblemGrouping::File ? d.asset : family_of(d.code);
+		const std::string key = query.grouping == ProblemGrouping::File ? d.asset : finding_group_key(group_of(d));
 		auto found = placed.find(key);
 		if (found == placed.end()) {
 			ProblemGroup group;
 			group.key = key;
-			group.title = query.grouping == ProblemGrouping::Kind ? problem_family_title(d.code)
+			group.title = query.grouping == ProblemGrouping::Kind ? finding_group_title(group_of(d))
 			              : key.empty()                           ? std::string("Project")
 			                                                      : key;
 			found = placed.emplace(key, answer.groups.size()).first;
@@ -174,7 +141,7 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 	const AssetEntry *entry = view.project.scan->at_path(diagnostic.asset);
 	if (!entry) return location;
 	location.path = entry->relative_path;
-	location.in_files = !is_editable_kind(entry->kind) || about_the_file(diagnostic.code);
+	location.in_files = !is_editable_kind(entry->kind) || about_the_file(diagnostic);
 	if (!location.in_files && diagnostic.row_id) {
 		location.record = {diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
 		location.field = diagnostic.field;

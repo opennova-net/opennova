@@ -11,10 +11,13 @@
 // menu_findings and menu_render queries; its batch is edit_record's wire form: records by identity
 // or label, kinds by token, a list replaced, the outcome naming what each label made and every
 // record added, one undo step, refusals by the edit's place, nothing committed when the document
-// or an operation refuses it.
+// or an operation refuses it; over rows (S13 D7's second review): a screen's copy by its label a row
+// of its own, a copy naming no place right after its record as the edits before it left it, and
+// what a batch made and removed again neither added nor made.
 
 #include <cstdint>
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -26,6 +29,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/editor_queries.h>
+#include <editor/session/finding_codes.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
@@ -355,7 +359,7 @@ static int test_build_gate() {
 			gate.get("blocking")->array.size() == 1 &&
 			gate.get("blocking")->array[0].get_string("code", "") == "build.archive_in_project");
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		TEST_EXPECT(d.code != "build.archive_in_project");
+		TEST_EXPECT(d.code() != "build.archive_in_project");
 	session.handle(request::build());
 	session.run_operations();
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Failed);
@@ -451,7 +455,7 @@ static int test_problems_params() {
 		std::vector<std::string> rows;
 		for (const size_t index : answer_problems(query, view).rows) {
 			const Diagnostic &d = view.findings.diagnostics[index];
-			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code + " " +
+			rows.push_back(std::string(diagnostic_severity_label(d.severity)) + " " + d.code() + " " +
 					d.asset);
 		}
 		return rows;
@@ -648,9 +652,15 @@ static int test_catalog() {
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
+	// Every finding code the session and the types know (S13 A6), before a project too, none held.
 	const JsonValue before_project = ask(session, "catalog");
-	TEST_EXPECT(before_project.get("finding_codes") &&
-			before_project.get("finding_codes")->array.empty());
+	const JsonValue *known = before_project.get("finding_codes");
+	size_t rows = 0;
+	for (const NamedFindingTable &table : finding_tables())
+		rows += table.rows.count;
+	TEST_EXPECT(known && known->array.size() == rows && rows > 0);
+	for (size_t i = 0; known && i < known->array.size(); ++i)
+		TEST_EXPECT(known->array[i].get_number("count", -1.0) == 0.0);
 	session.handle(request::new_project(dir.file("project"), "Catalog"));
 	const JsonValue catalog = ask(session, "catalog");
 	const JsonValue *requests = catalog.get("requests");
@@ -730,15 +740,48 @@ static int test_catalog() {
 	TEST_EXPECT(concerns && concerns->array.size() == kViewConcernCount);
 	for (size_t i = 0; concerns && i < concerns->array.size(); ++i)
 		TEST_EXPECT(concerns->array[i].string == kViewConcernRows[i].token);
-	// The codes of the findings the session holds, each once with its rows.
-	std::set<std::string> codes;
+	// Every code with its row's columns, in the tables' order (the editor's own, then each type's),
+	// each with how many of the findings the session holds carry it: every finding held is counted
+	// under the row it keeps, each a table's (none listed as table none).
+	std::map<const FindingCodeRow *, size_t> counts;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
-		codes.insert(d.code);
-	const JsonValue *held = catalog.get("finding_codes");
-	TEST_EXPECT(held && held->array.size() == codes.size() && !codes.empty());
-	for (size_t i = 0; held && i < held->array.size(); ++i)
-		TEST_EXPECT(codes.count(held->array[i].get_string("code", "")) == 1 &&
-				held->array[i].get_number("count", 0.0) > 0);
+		++counts[d.row()];
+	const JsonValue *codes = catalog.get("finding_codes");
+	TEST_EXPECT(codes && codes->array.size() == rows && !counts.empty());
+	size_t at = 0, held = 0;
+	for (const NamedFindingTable &table : finding_tables()) {
+		for (const FindingCodeRow &row : table.rows) {
+			if (!codes || at >= codes->array.size())
+				return 1;
+			const JsonValue &entry = codes->array[at++];
+			const auto count = counts.find(&row);
+			const size_t expected = count == counts.end() ? 0 : count->second;
+			held += expected;
+			TEST_EXPECT(entry.get_string("code", "") == row.token &&
+					entry.get_string("table", "") == table.owner &&
+					entry.get_string("fixes", "") == finding_fix_token(row.fixes) &&
+					(entry.get("rewrite_does") != nullptr) == (row.rewrite_does != nullptr) &&
+					entry.get_string("rewrite_does", "") ==
+							(row.rewrite_does ? row.rewrite_does : "") &&
+					entry.get_bool("blocks_save", !row.blocks_save) == row.blocks_save &&
+					entry.get_string("place", "") == finding_place_token(row.place) &&
+					entry.get_string("group", "") == finding_group_key(row.group) &&
+					entry.get_string("source", "") == finding_source_token(row) &&
+					(entry.get("problem") != nullptr) == (row.problem != FindingProblem::None) &&
+					entry.get_string("problem", "none") == finding_problem_token(row.problem) &&
+					entry.get_number("count", -1.0) == double(expected));
+		}
+	}
+	TEST_EXPECT(held == session.view().findings.diagnostics.size());
+	// The two sources that are not a group's: the graph's rows and the render check's.
+	for (size_t i = 0; codes && i < codes->array.size(); ++i) {
+		const JsonValue &entry = codes->array[i];
+		const std::string code = entry.get_string("code", "");
+		const std::string source = entry.get_string("source", "");
+		TEST_EXPECT((source == "graph") == (code == "reference.missing" || code == "graph.unreadable"));
+		TEST_EXPECT((source == "render") == (code.rfind("menu.render.", 0) == 0));
+		TEST_EXPECT(source == "graph" || source == "render" || source == entry.get_string("group", "-"));
+	}
 	TEST_EXPECT(catalog.get_number("page_max", 0.0) == double(kQueryPageMax));
 	return 0;
 }
@@ -869,8 +912,8 @@ static int test_menu_reads_and_batches() {
 	TEST_EXPECT(menu->get(show, "target", value) && std::get<std::string>(value) == "TITLE");
 	TEST_EXPECT(menu->collections_of(hello).size() > 0);
 	// The selection is the two windows (their ACTIONs, SOUND and ITEM held by them).
-	TEST_EXPECT(view.documents.selected == std::vector<NodeAddress>({ hello, choices }) &&
-			view.documents.selection == hello);
+	TEST_EXPECT(view.documents.selection.records == std::vector<NodeAddress>({ hello, choices }) &&
+			view.documents.selection.primary == hello);
 
 	// The tree now, pathless: the active document, the menu. The answer's own revision is the
 	// menu's, its view_revision the clock value at which what it reads last moved.
@@ -1209,6 +1252,83 @@ static int test_wire_edits() {
 	return 0;
 }
 
+// Rows on the wire (S13 D7's second review). A screen's copy by its label is a row of its own: a
+// Set naming the label names it, and a window added into it goes in it, one step. A duplicate
+// naming no place goes right after its record as the edits before it left the rows: STARTUP's
+// copy after a screen added at the top, and the added screen's copy right after it. A screen made
+// and removed by its batch is neither `added` nor `made` (the selection kept as the edit found
+// it); of two made, one removed, the other's label named alone.
+static int test_rows_on_the_wire() {
+	editor_test::TempProjectDir dir("opennova_editor_query_rows");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Rows"));
+	editor_test::create_missing_files(session);
+	session.handle(request::open_document("main.mnu"));
+	auto *menu = dynamic_cast<MnuDocument *>(session.document_for("main.mnu"));
+	TEST_EXPECT(menu != nullptr && menu->rows().size() == 1);
+	if (!menu || menu->rows().size() != 1)
+		return 1;
+	const std::string startup = std::to_string(menu->rows()[0]->id);
+	const auto names = [&] {
+		std::vector<std::string> out;
+		for (const auto &row : menu->rows())
+			out.push_back(row->name());
+		return out;
+	};
+	const auto edit = [&](const std::string &edits) {
+		return send(session, R"({"kind": "edit_record", "path": "main.mnu", "edits": )" + edits + "}");
+	};
+	const auto made_of = [](const JsonValue &answer) {
+		const JsonValue *outcome = answer.get("outcome");
+		return outcome && outcome->get("made") ? *outcome->get("made") : JsonValue::make_object();
+	};
+	const auto added_count = [](const JsonValue &answer) {
+		const JsonValue *outcome = answer.get("outcome");
+		return outcome && outcome->get("added") ? outcome->get("added")->array.size() : size_t(99);
+	};
+
+	JsonValue answer = edit(R"([{"op": "duplicate", "id": )" + startup + R"(, "as": "copy"},
+		{"op": "set", "id": "copy", "field": "name", "value": "SECOND"},
+		{"op": "add", "kind": "window", "parent": "copy", "as": "w"},
+		{"op": "set", "id": "w", "field": "name", "value": "ADDED"}])");
+	TEST_EXPECT(done(answer) && names() == std::vector<std::string>({"STARTUP", "SECOND"}));
+	const NodeId second = menu->rows().size() == 2 ? menu->rows()[1]->id : 0;
+	TEST_EXPECT(id_of(made_of(answer), "copy") == second &&
+			menu->address_of(NodeId(id_of(made_of(answer), "w"))).row == second);
+	session.handle(request::undo(menu->path()));
+	TEST_EXPECT(names() == std::vector<std::string>({"STARTUP"}));
+
+	answer = edit(R"([{"op": "add", "kind": "screen", "position": 0, "as": "top"},
+		{"op": "set", "id": "top", "field": "name", "value": "TOP"},
+		{"op": "duplicate", "id": )" + startup + R"(, "as": "again"},
+		{"op": "set", "id": "again", "field": "name", "value": "AGAIN"},
+		{"op": "duplicate", "id": "top", "as": "top2"},
+		{"op": "set", "id": "top2", "field": "name", "value": "TOP2"}])");
+	TEST_EXPECT(done(answer) &&
+			names() == std::vector<std::string>({"TOP", "TOP2", "STARTUP", "AGAIN"}));
+	session.handle(request::undo(menu->path()));
+
+	const NodeAddress selected = session.view().documents.selection.primary;
+	const uint64_t kept = menu->revision();
+	answer = edit(R"([{"op": "add", "kind": "screen", "as": "s"},
+		{"op": "remove", "id": "s"},
+		{"op": "set", "id": )" + startup + R"(, "field": "name", "value": "RENAMED"}])");
+	TEST_EXPECT(done(answer) && menu->revision() != kept && added_count(answer) == 0 &&
+			made_of(answer).object.empty());
+	TEST_EXPECT(names() == std::vector<std::string>({"RENAMED"}) &&
+			session.view().documents.selection.primary == selected);
+	session.handle(request::undo(menu->path()));
+	answer = edit(R"([{"op": "add", "kind": "screen", "as": "s"},
+		{"op": "add", "kind": "screen", "as": "t"},
+		{"op": "remove", "id": "s"}])");
+	TEST_EXPECT(done(answer) && added_count(answer) == 1 && made_of(answer).object.size() == 1 &&
+			menu->rows().size() == 2 && id_of(made_of(answer), "t") == menu->rows()[1]->id);
+	session.handle(request::undo(menu->path()));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paging();
@@ -1219,6 +1339,7 @@ int main() {
 	failures += test_catalog();
 	failures += test_menu_reads_and_batches();
 	failures += test_wire_edits();
+	failures += test_rows_on_the_wire();
 	if (failures == 0)
 		std::printf("editor_query: all tests passed\n");
 	return failures == 0 ? 0 : 1;

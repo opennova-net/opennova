@@ -29,22 +29,29 @@ std::unique_ptr<DocumentBase> make_animation_map() {
 }
 
 constexpr DocumentType kTypes[] = {
-	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file },
-	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file },
-	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, make_menu_render_check },
-	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file },
-	{ DocumentTypeId::Model, "model", make_model, validate_model_file },
-	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file },
+	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
+			DefCatalogDocument::schema, catalog_finding_codes },
+	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
+			StringsDocument::schema, strings_finding_codes },
+	{ DocumentTypeId::Menu, "menu", make_menu, validate_menu_file, MnuDocument::schema,
+			menu_finding_codes, make_menu_render_check },
+	{ DocumentTypeId::Styles, "styles", make_styles, validate_styles_file, MnsDocument::schema,
+			style_finding_codes },
+	{ DocumentTypeId::Model, "model", make_model, validate_model_file, ModelDocument::schema,
+			model_finding_codes },
+	{ DocumentTypeId::Animation, "animation", make_animation, validate_animation_file,
+			AnimationDocument::schema, animation_finding_codes },
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
-			validate_animation_map_file },
+			validate_animation_map_file, AnimationMapDocument::schema,
+			animation_map_finding_codes },
 };
 
-// One type per DocumentTypeId past None, in its order, each making its documents and validating
-// its files.
+// One type per DocumentTypeId past None, in its order, each making its documents, validating its
+// files, naming its records' fields and declaring its finding codes.
 constexpr bool types_in_order() {
 	for (size_t i = 0; i < kDocumentTypeCount; ++i)
 		if (static_cast<size_t>(kTypes[i].id) != i + 1 || !kTypes[i].make ||
-				!kTypes[i].validate_file)
+				!kTypes[i].validate_file || !kTypes[i].fields || !kTypes[i].findings)
 			return false;
 	return true;
 }
@@ -62,7 +69,8 @@ constexpr bool project_checks_own() {
 static_assert(sizeof(kTypes) / sizeof(kTypes[0]) == kDocumentTypeCount,
               "every DocumentTypeId has exactly one type");
 static_assert(types_in_order(),
-		"the types follow DocumentTypeId's order, each with its make and validate_file");
+		"the types follow DocumentTypeId's order, each with its make, validate_file, fields and "
+		"findings");
 static_assert(project_checks_own(),
 		"a type's project check is its own (a type may have none): no two rows name the same");
 
@@ -79,6 +87,10 @@ bool makes_records(const DocumentType &type) {
 const DocumentType *document_type(DocumentTypeId id) {
 	if (const DocumentType *stand_in = g_stand_in.load(); stand_in && stand_in->id == id)
 		return stand_in;
+	return registered_document_type(id);
+}
+
+const DocumentType *registered_document_type(DocumentTypeId id) {
 	const size_t index = static_cast<size_t>(id);
 	return index >= 1 && index <= kDocumentTypeCount ? &kTypes[index - 1] : nullptr;
 }

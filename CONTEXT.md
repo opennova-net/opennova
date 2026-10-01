@@ -603,6 +603,17 @@ its type makes (an Apply edit's payload).
 _Avoid_: file (what is on disk: an open document stands in for it until it is saved), asset (a
 project file by its logical name)
 
+**Document view**:
+What a document's tab in the Document window shows of it: its type's row of the editor's view
+table, one view per open document, which keeps its filter, its order and what it has open for as
+long as the document is open. Most types show their records as an outline (a tree of the rows and
+what they hold, a list of the rows, or master and detail: the rows beside the selected row's
+records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
+menu's screens and windows), and the mission's will be a viewport filling the tab with the outline
+and the Inspector beside it. The selected record's fields are the Inspector's, whatever the type.
+_Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
+generic form beside it)
+
 **View event**:
 A one-shot ask a request makes of one of the editor's windows, which the session's view keeps
 until the window it is for has had it: show a record's field (a Problems row, a Go to), show a
@@ -655,10 +666,14 @@ the game's own loader.
 _Avoid_: skeleton (the rig's bones alone), armature (Blender's)
 
 **Selection / primary**:
-The records selected in the active document, all inside one row. The primary is the last
-one selected: the inspector's form, the preview's handles and the place a new or pasted
-record goes follow it, and an arrange aligns the others to it. Several records of one kind
-share one form in the inspector, where a change sets every one of them in one undo step.
+The records selected in the active document, of any of its rows (a marquee over a mission's
+entities, windows of several screens). The primary is one of them, the one selected last or
+the one a marquee names: the inspector's form, the preview's handles and the place a new or
+pasted record goes follow it, and an arrange aligns the others to it. Several records of one
+kind share one form in the inspector, where a change sets every one of them in one undo step.
+Each open document keeps its own while another is active; every change of one, and every one put
+back, takes a serial no selection had before. A record the document does not hold is never
+selected, and the copies a Duplicate makes are selected with the primary's copy the primary.
 _Avoid_: focus (the keyboard's), active (the active document, not a record)
 
 **Arrange**:
@@ -707,6 +722,20 @@ it may block a build.
 _Avoid_: use check (in the gate, stateless, one per kind of file), validation (a file's own
 findings)
 
+**Finding code**:
+A finding's stable dotted token (`reference.missing`, `style.line_ending`) and the row it is made
+from, which the finding keeps: what Problems offers for it (its fixes; a Rewrite, with what writing
+the file again does), whether it says the file does not serialize (its Save refused, no Rewrite
+offered), where Problems takes it (the record and field in the file's document, or the file itself
+in Files), the group it shows under (its family), where it comes from (its own part, the asset
+graph, the render check) and, for a compiler note, whether it is a Problems row at all. The
+editor's own codes are one table and each document type declares its own, a family of its name
+(`menu.`, `style.`); every finding is made from a row, so a code no table declares cannot be made.
+The wire's `code` is the token.
+_Avoid_: error code (a finding may be a warning or a note), message id, diagnostic code (Diagnostic
+is the record's type, the code its row's token; a format reader's own codes, the stylesheet
+reader's `mns::DiagnosticCode`, are what its type keys rows by)
+
 **Canvas**:
 Where the editor shows a device's picture and takes the pointer and the keys over it: it tells
 a click from a drag (one gesture at a time), zooms and pans the picture, and draws over it the
@@ -718,19 +747,31 @@ _Avoid_: overlay (one shape drawn over the picture), view (a document's view in 
 window), picture (what the device renders, which the canvas shows)
 
 **Gesture**:
-The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held): they
-carry one token and fold into one undo step on their row until it ends (let go, or the canvas
-stops drawing it: one end, for the document it began in), and the Problems wait for that end.
+The edits one continuous action on a canvas makes (a drag of a handle, an arrow key held, a gizmo
+over several entities): they carry one token and fold into one undo step over every row they
+change (each row's version before the gesture and its latest after) until it ends (let go, or the
+canvas stops drawing it: one end, for the document it began in); a batch of it that adds, removes
+or moves a row is a step of its own and ends it. The Problems wait for the end.
 _Avoid_: transaction (the rename's), group (a coalesced typing burst of one field)
 
 **Batch**:
-Several edits on one row applied as one undo step, each against the row as the ones before
-it left it, nothing committed when any is refused; a later edit may name a record an
-earlier one made (in the editor MCP, by the label its edit gave it), so one step adds a
-window and fills it in. A new name is its record's edit alone: what names the record keeps
-the old name until Rename everywhere rewrites it.
+Edits on any rows of one document applied as one undo step, each against the rows as the ones
+before it left them (each row an edit touches copied once), nothing committed when any is refused
+or the document's type refuses the step: records' fields, rows added, duplicated, removed, moved
+and pasted, and file-wide values together. A later edit may name a row or a record an earlier one
+made (in the editor MCP, by the label its edit gave it), so one step adds a window and fills it
+in; one naming a row an earlier edit removed is refused. A new name is its record's edit alone:
+what names the record keeps the old name until Rename everywhere rewrites it.
 _Avoid_: transaction (the rename's), gesture (edits folding one after another until an end),
 follow (the same-file rename S13 D5 removed)
+
+**Change set**:
+What changed in a document between a state a window or a preview last read and the state it is
+in, in the words of its kind: a record document's rows added, removed and changed, whether rows
+moved among one another and whether the file-wide state changed (a text's spans and a raster's
+regions later). When the document cannot say (it was read again, or its history no longer holds
+that state), everything changed.
+_Avoid_: diff (of files on disk), delta, dirty (unsaved edits, against the saved file)
 
 **Build**:
 The one operation behind Play and Export: validate the project, route every asset into

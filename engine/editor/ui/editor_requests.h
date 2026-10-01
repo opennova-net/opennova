@@ -47,7 +47,7 @@ inline void edit(Workspace &workspace, const Document &document, const Edit &cha
 	workspace.request(request::edit_record(document.path(), change));
 }
 
-// A batch on one row, one undo step (a drag's step: the edges it writes).
+// A batch over any rows, one undo step (a drag's step: the edges it writes).
 inline void edits(Workspace &workspace, const Document &document, std::vector<Edit> batch) {
 	workspace.request(request::edit_record(document.path(), std::move(batch)));
 }

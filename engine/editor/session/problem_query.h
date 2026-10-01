@@ -33,9 +33,10 @@ struct ProblemQuery {
 };
 
 // A group of the findings shown: its key (a file's project-relative path, "" for the
-// project's own findings; a code's family, its first dotted segment, or the code itself for
-// one grouped apart: an optional file's note, requirement.optional_missing), a title in
-// plain words, its rows and how many of each severity they are.
+// project's own findings; grouped by kind, the key of the group its row names, its code's family,
+// the code's first dotted segment, or requirement.optional_missing for an optional file's note:
+// session/finding_codes.h's finding_group_key), a title in plain words, its rows and how many of
+// each severity they are.
 struct ProblemGroup {
 	std::string key;
 	std::string title;
@@ -62,11 +63,6 @@ struct ProblemAnswer {
 
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view);
 
-// The title of a finding code's family in plain words ("reference.missing": "Missing
-// references", "requirement.optional_missing": "Optional files"); the family itself for
-// one the table does not name.
-std::string problem_family_title(const std::string &code);
-
 // What an answer reads of a view, as a cache's key (view_revisions.h): the findings; which
 // document is active for the active file's scope (ActiveDocument), which are open for the open
 // files' (DocumentSet); for only the fixable, what their fixes read (problem_fix_key).
@@ -92,7 +88,7 @@ private:
 // Where a finding takes Problems: a project file the scan lists. One the editor opens is
 // opened, the record the finding names selected and its field shown; one the editor does not
 // open (a font, an environment, an archive), or a finding about the file itself rather than
-// what it holds (its name: asset.name.*, build.name_unstorable; its place:
+// what it holds (its row's place: its name, asset.name.* and build.name_unstorable; its place,
 // build.archive_in_project), is shown in Files (`in_files`). Empty when the finding names no
 // file of the project (a required file the project lacks): Problems then only selects its row.
 struct ProblemLocation {

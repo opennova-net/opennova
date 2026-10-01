@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <base/resource_index/boot_policy.h>
+#include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;
 
@@ -82,8 +83,8 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 	out = LaunchPlan();
 	std::error_code ec;
 	if (retail_directory.empty() || !fs::is_directory(retail_directory, ec)) {
-		error = make_diagnostic(DiagnosticSeverity::Error, "play.install_missing",
-		                        "Choose the game install folder in File > Project settings... first.");
+		error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
+		                     "Choose the game install folder in File > Project settings... first.");
 		return false;
 	}
 	const fs::path retail(retail_directory);
@@ -100,7 +101,7 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 			std::string message = "The game install has no " + source.generic_string();
 			if (source.filename() == "game.cfg")
 				message += ". Run the game once from its install folder to create game.cfg.";
-			error = make_diagnostic(DiagnosticSeverity::Error, "play.install_missing", message);
+			error = make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error, message);
 			return false;
 		}
 	}
@@ -110,8 +111,8 @@ bool prepare_retail_launch_plan(const std::string &retail_directory, const std::
 		if (i == 2 && has_config) continue; // keep authored or previously adjusted video settings
 		fs::copy_file(sources[i], build / names[i], fs::copy_options::overwrite_existing, ec);
 		if (ec) {
-			error = make_diagnostic(DiagnosticSeverity::Error, "play.install_copy",
-			                        "Could not stage " + sources[i].generic_string() + ": " + ec.message());
+			error = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+			                     "Could not stage " + sources[i].generic_string() + ": " + ec.message());
 			return false;
 		}
 	}

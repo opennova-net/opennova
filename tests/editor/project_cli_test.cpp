@@ -609,7 +609,7 @@ static int test_older_local_settings() {
 	session.handle(opennova::editor::request::open_project(root));
 	size_t warnings = 0;
 	for (const opennova::editor::Diagnostic &d : session.outcome().findings)
-		warnings += d.code == "local_settings.schema_version.unsupported" &&
+		warnings += d.code() == "local_settings.schema_version.unsupported" &&
 				d.severity == opennova::editor::DiagnosticSeverity::Warning;
 	TEST_EXPECT(session.project_open() && session.outcome().done() && warnings == 1 &&
 			session.view().project.retail_directory.empty());
