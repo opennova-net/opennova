@@ -198,9 +198,10 @@ public:
     // upper-body decay. Writes persistent aim, including the next input fold.
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
     void apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick);
-    // Preserve the retail process-global oscillators across a kernel replacement.
-    // Other local input, weapon and view state still belongs to the new mission.
-    void carry_scoped_aim_drift_from(const LocalPlayer &previous);
+    // Preserve the retail process globals across a kernel replacement: the
+    // scoped-aim oscillators and the input pack's analog hysteresis. Other
+    // local input, weapon and view state still belongs to the new mission.
+    void carry_process_globals_from(const LocalPlayer &previous);
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
     void run_local_view_tick();
@@ -250,6 +251,19 @@ private:
     };
     ScopedAimAxis scope_yaw_;
     ScopedAimAxis scope_pitch_;
+    // The input pack's analog hysteresis: written only by the pack, never
+    // reset. [orig: byte_B79442 (axes latch), byte_B79440 (throttle latch),
+    //  byte_B79445/44/43 (the last stored X/Y/Z), byte_B79441 (the last throttle)]
+    struct AnalogPackState {
+        bool axes_active = false;
+        bool throttle_active = false;
+        int8_t last_x = 0, last_y = 0, last_z = 0;
+        int8_t last_throttle = 0;
+    };
+    AnalogPackState analog_pack_;
+    // The pack's analog legs onto the local player's entity+0x130..+0x133.
+    // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+    void pack_analog_axes(Entity &entity, bool moving);
 };
 
 } // namespace opennova::world

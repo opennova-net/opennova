@@ -2236,7 +2236,7 @@ void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
     ScopedAimFixture previous;
     previous.sample(0, -214, -408);
     ScopedAimFixture replacement;
-    replacement.player.carry_scoped_aim_drift_from(previous.player);
+    replacement.player.carry_process_globals_from(previous.player);
     // A mission reset seeds new aim and PRNG, but not the oscillators. A
     // non-boundary scope raise continues the previous drift and direction.
     replacement.sample(1, -428, -816);
@@ -2349,6 +2349,60 @@ void test_pack_masks_movement_under_a_nomove_weapon() {
     m.player.apply_player_input_pre_tick(/*pack_input=*/true);
     CHECK(!m.player.move_order.moving);
     CHECK(m.player.view.scope_settled);
+}
+
+// The pack's analog legs: the forward/back key handlers also write the X axis
+// word (-1023 / +1023; back's row dispatches after forward's, so it wins when
+// both are held), shifted to a byte; a change of more than 32 latches the
+// axes on, a moving pack latches them off, and only a latched pack stores
+// them (else 0). The throttle has its own latch, a 0x14 deadzone, and drops
+// while a lean key is in the word. [orig: Input_HandleActionBinding_0 cases
+// 151/152 @0x4e0c6e..0x4e0cc5; Input_InitBindingSystem's row-order list;
+// Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+void test_pack_analog_axes_and_their_hysteresis() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    // Opposing keys: no movement, the X word is back's.
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.move_order.moving);
+    CHECK(f.entity().net_analog_x == 127);
+    CHECK(f.entity().net_analog_y == 0 && f.entity().net_analog_z == 0);
+    // Released: the latch holds, the axis follows to 0.
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.entity().net_analog_x == 0);
+    // Forward alone moves: the latch drops and the axes zero.
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.moving);
+    CHECK(f.entity().net_analog_x == 0);
+
+    // A set-up mortar masks the movement but not the X word.
+    ScopedAimFixture m;
+    m.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    m.player.set_movement_keys(true, false, false, false, false, false, false);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving);
+    CHECK(m.entity().net_analog_x == -128);
+
+    // The throttle: inside the deadzone it reads 0; past it the latch stores
+    // it; a lean key drops it.
+    ScopedAimFixture t;
+    t.player.weapon.def.flags = 0;
+    t.player.view.scope_engaged = false;
+    t.player.view.scope_settled = false;
+    t.player.input.analog_throttle = 0x13;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 0);
+    t.player.input.analog_throttle = 64;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 64);
+    t.player.set_movement_keys(false, false, false, false, true, false, false);
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 0);
 }
 
 void test_scoped_aim_body_input_camera_and_fired_round() {
@@ -2571,6 +2625,7 @@ int main() {
     test_pack_drops_the_binocular_toggle_on_movement();
     test_pack_owns_the_movement_latch_and_unscope();
     test_pack_masks_movement_under_a_nomove_weapon();
+    test_pack_analog_axes_and_their_hysteresis();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {

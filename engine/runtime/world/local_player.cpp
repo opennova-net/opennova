@@ -449,9 +449,64 @@ void LocalPlayer::apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick) {
 	body.inf.target_heading = io::bam_add(body.inf.target_heading, scope_yaw_.drift);
 }
 
-void LocalPlayer::carry_scoped_aim_drift_from(const LocalPlayer &previous) {
+void LocalPlayer::carry_process_globals_from(const LocalPlayer &previous) {
 	scope_yaw_ = previous.scope_yaw_;
 	scope_pitch_ = previous.scope_pitch_;
+	analog_pack_ = previous.analog_pack_;
+}
+
+void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
+	AnalogPackState &a = analog_pack_;
+	// The axis words, shifted to bytes. The keyboard's only writers are the
+	// forward and back handlers on the X word (-1023 / +1023); back's binding
+	// row follows forward's in the analog dispatch list, so it lands last when
+	// both are held. Y and Z have joystick writers only.
+	// [orig: Input_HandleActionBinding_0 case 151 `word_B3B750 = 1023`
+	//  @0x4e0c75, case 152 `= -1023` @0x4e0cc5; rows 2/3 of the binding table
+	//  @0x8159A8 enter g_InputAnalogBindingIndices in row order
+	//  (Input_InitBindingSystem @0x499b6a..); the shifts @0x4df79a..0x4df7cd]
+	const int16_t word_x = input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
+	const int8_t x = static_cast<int8_t>(word_x >> 3);
+	const int8_t y = 0;
+	const int8_t z = 0;
+	// The throttle byte, zeroed inside its 0x14 deadzone [orig: @0x4df7c2..0x4df7d5].
+	int8_t throttle = input.analog_throttle;
+	if (std::abs(static_cast<int32_t>(throttle)) < 0x14) throttle = 0;
+	// A change of more than 32 from the last stored value latches each group
+	// on; a moving pack latches both off. [orig: @0x4df7d7..0x4df84e]
+	if (std::abs(int32_t(x) - a.last_x) > 32 || std::abs(int32_t(y) - a.last_y) > 32 ||
+			std::abs(int32_t(z) - a.last_z) > 32)
+		a.axes_active = true;
+	if (std::abs(int32_t(throttle) - a.last_throttle) > 32) a.throttle_active = true;
+	if (moving) {
+		a.axes_active = false;
+		a.throttle_active = false;
+	}
+	// A lean key in the word drops the throttle latch; only a latched pack
+	// stores the throttle (and remembers it), else 0. [orig: `test g_InputFlags,
+	//  6000h` @0x4df855; @0x4df861..0x4df86e; @0x4df8bd..0x4df8d1]
+	if ((input_flags.flags & (w::kInputFlagLeanLeft | w::kInputFlagLeanRight)) != 0)
+		a.throttle_active = false;
+	if (a.throttle_active) {
+		entity.analog_throttle = throttle;
+		a.last_throttle = throttle;
+	} else {
+		entity.analog_throttle = 0;
+	}
+	// Only a latched pack stores the three axes (and remembers them), else 0.
+	// [orig: @0x4df875..0x4df8b5; @0x4df8d9..0x4df8f8]
+	if (a.axes_active) {
+		entity.net_analog_x = x;
+		entity.net_analog_y = y;
+		entity.net_analog_z = z;
+		a.last_x = x;
+		a.last_y = y;
+		a.last_z = z;
+	} else {
+		entity.net_analog_x = 0;
+		entity.net_analog_y = 0;
+		entity.net_analog_z = 0;
+	}
 }
 
 void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
@@ -520,7 +575,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 				w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
 		}
 		if (w::Entity *entity = world.registry.get(p->handle))
-			entity->analog_throttle = input.analog_throttle;
+			pack_analog_axes(*entity, move_order.moving);
 		input_flags.clear_after_pack();
 	}
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack

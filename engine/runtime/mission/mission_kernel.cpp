@@ -781,7 +781,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	seat_specs = std::move(previous.seat_specs);
 	mounted_graphics = std::move(previous.mounted_graphics);
 	local.look_settings = previous.local.look_settings;
-	local.carry_scoped_aim_drift_from(previous.local);
+	local.carry_process_globals_from(previous.local);
 	world.script.vars.carry_declared_from(previous.world.script.vars);
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]
