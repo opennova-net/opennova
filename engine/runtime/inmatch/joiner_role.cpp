@@ -1241,6 +1241,11 @@ void JoinerRole::spawn_and_arm_local_player() {
 		const world::PlayerSpawn spawn = spawn_from_self(sp);
 		const world::EntityHandle h = world::spawn_player(world, spawn);
 		local_spawned_ = h.valid();
+		// L is born after the boot's definition sweeps: bind its items.def row
+		// now, as the host's L was at boot (without it L kept the "default"
+		// sound profile, which authors no slots: no footsteps, foley, landings
+		// or death scream).
+		if (local_spawned_) kernel.bind_spawned_body(h);
 		// Arm L the way the host's own spawn does at Player_InitPlayer time: the
 		// shell applied the profile kit/class BEFORE L existed (the pre-spawn
 		// apply latched it into the inventory), so stamp the deferred class +

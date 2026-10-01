@@ -168,6 +168,19 @@ void MissionKernel::resweep_item_traits() {
 		mission::resolve_minefields(world, *items_table(), assets());
 }
 
+void MissionKernel::bind_spawned_body(w::EntityHandle handle) {
+	const opennova::def::DefItemsFile *items = items_table();
+	if (items == nullptr || !handle.valid()) return;
+	// The boot's own classifier until the embedder supplied its wire classes.
+	if (item_wire_class_)
+		mission::resolve_item_traits(world, *items, item_wire_class_, handle);
+	else
+		mission::resolve_item_traits(world, *items,
+				[](int32_t) -> uint8_t { return 0; }, handle);
+	mission::resolve_ai_weapons(world, *items, handle, &assets());
+	ensure_collision_instance(world, handle);
+}
+
 int MissionKernel::resolve_collision_instances() {
 	if (items_table() == nullptr) return 0;
 	collision_items_resolved_ = true;

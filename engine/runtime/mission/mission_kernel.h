@@ -157,6 +157,15 @@ public:
 	// Re-run the embedder's sweep with the retained classifier (a streamed
 	// topology change, the baseline restore); no-op before the embedder ran it.
 	void resweep_item_traits();
+	// Bind one body spawned after boot to its items.def row the way the boot's
+	// item_traits / ai_weapons / collision steps bound every body that existed
+	// then (the joiner's own L spawns on the in-match edge, long after boot):
+	// the trait row, the sound-profile pair, the organic weapon resolve and the
+	// collision instance. Retail binds a body at its own spawn [orig:
+	// Entity_InitFromItemDef @0x49e550; the def+0x268 profile binding
+	// @0x49fb0f..0x49fb64; Entity_InitOrganicAI @0x4BFCC0]. No-op without an
+	// item db.
+	void bind_spawned_body(world::EntityHandle handle);
 	// The embedder's world-object collision instance sweep (BVOL/BPLN) over
 	// items_table() [orig: the movement collision resolver @0x4b2bd0 + the
 	// query set; §15]; returns the attached count. refresh_collision_instances
