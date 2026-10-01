@@ -4,6 +4,7 @@
 // parameter; the witnessed rules and their citations are unchanged.
 #include <formats/mission/bms_edit.h>
 
+#include <formats/mission/mission_chains.h>
 #include <formats/mission/mission_field.h>
 
 #include "mission_detail.h"
@@ -29,9 +30,6 @@ const MissionField *settable(MissionRecord record, const std::string &key, Missi
 	const MissionField *field = find_mission_field(record, key);
 	return field && field->type == type && field->set ? field : nullptr;
 }
-
-// The chain-entry ceiling the insert guards enforce.
-constexpr int kMaxEventChainEntries = 20;
 
 // "G11.trn" -> "G11" (case-insensitive on the extension); a bare base passes through.
 std::string strip_reference_extension(std::string ref, const char *ext) {
@@ -74,6 +72,42 @@ void make_default(bms::File &file) {
 	header.magic[2] = 'S';
 	header.magic[3] = static_cast<char>(bms::kMinVersion);
 	sync_counts(file);
+}
+
+// What the original editor's new mission holds is not witnessed (dfx2med, D-MIS-3). The header values
+// here are the ones the shipped missions hold [corpus, of the 115 missions the install ships:
+// default_str "Default" and mission_type 1 in all 115; bonus_expiration 10 and max_saves 3 in 114;
+// map_zoom 0.5 in 86; minutes_per_day 1440 in 47 and start_time 3840 in 23, each the most common
+// value (none ships a day of no minutes); every win and lose condition 255, each slot's most common
+// value (56 to 66 of the 115; the others hold 0 or a directive's number)]. Every other member is zero:
+// no weather, water or fog override, no tile set (the terrain's own stands [orig:
+// Terrain_LoadEnvironmentConfig @0x6109C8]).
+bool make_blank(bms::File &file, const BlankMission &blank, std::string &error) {
+	const auto fits = [&error](const std::string &text, size_t slot, const char *what) {
+		if (text.size() <= slot) return true;
+		error = std::string("The mission's ") + what + " is longer than its " + std::to_string(slot) + " bytes.";
+		return false;
+	};
+	bms::Header header = {};
+	if (!fits(blank.name, sizeof(header.mission_name), "name") || !fits(blank.designer, sizeof(header.designer), "designer") ||
+	    !fits(blank.terrain, 16, "terrain") || !fits(blank.environment, sizeof(header.environment), "environment"))
+		return false;
+	make_default(file);
+	bms::Header &made = file.header;
+	copy_fixed_field(made.mission_name, sizeof(made.mission_name), blank.name);
+	copy_fixed_field(made.designer, sizeof(made.designer), blank.designer);
+	copy_fixed_field(made.terrain, 16, blank.terrain);
+	copy_fixed_field(made.environment, sizeof(made.environment), blank.environment);
+	copy_fixed_field(made.default_str, sizeof(made.default_str), "Default");
+	made.mission_type = bms::MissionType::NormalMission;
+	made.bonus_expiration = 10;
+	made.max_saves = 3;
+	made.map_zoom = 0.5f;
+	made.minutes_per_day = 1440;
+	made.start_time = 3840;
+	std::memset(made.win_conditions, 0xFF, sizeof(made.win_conditions));
+	std::memset(made.lose_conditions, 0xFF, sizeof(made.lose_conditions));
+	return true;
 }
 
 void sync_counts(bms::File &file) {
@@ -303,6 +337,41 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 	return true;
 }
 
+// What the original editor's new record holds is not witnessed (dfx2med's initializer, D-MIS-3). The
+// values here are the ones the shipped missions' item records hold most often, each by far [corpus:
+// mission_corpus's retail leg tallies every member of every shipped item record and holds each member
+// of a new record to the most common value; a member not set here is zero in most]. The map symbol is
+// 255, the more common of the two values the shipped records hold (255 and 0).
+bms::Entity new_entity(EntityKind kind, int item_id, int id) {
+	bms::Entity entity = {};
+	entity.type = to_bms_type(kind);
+	entity.type_id = item_id_to_bms_type_id(item_id);
+	entity.id = id;
+	entity.wp_distance = 10;
+	entity.perception2 = 100;
+	entity.perfectionist2 = 100;
+	entity.min_engagement_distance = 16;
+	entity.max_engagement_distance = 320;
+	entity.w_accuracy1 = 100;
+	entity.w_accuracy2 = 100;
+	entity.crouch_timer = 3;
+	entity.shoot_timer = 5;
+	entity.wp_adv_trigger = -1;
+	entity.attention = 30;
+	entity.obliqueness = 15;
+	entity.map_symbol = 255;
+	entity.advancetimer = 10;
+	entity.max_attack_distance = 16;
+	copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), "null");
+	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
+	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)
+	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
+	entity.mis_height_lock = 1;
+	return entity;
+}
+
+int next_entity_ssn(const bms::File &file) { return next_entity_id(file); }
+
 size_t add_entity(bms::File &file, EntityKind kind, int item_id, const EntityTransform &transform) {
 	std::vector<bms::Entity> *list = entities(file, kind);
 	list->push_back(make_default_entity(file, kind, item_id, transform));
@@ -457,26 +526,12 @@ bool remove_area_trigger(bms::File &file, size_t index, std::string &error) {
 		error = "Area trigger index out of range";
 		return false;
 	}
-	// Repair *IsWithinArea references. Phase-5 RE confirmed param2 is the area-trigger ARRAY INDEX
-	// (Entity_IsTeamInTriggerBounds @0x43c730: &unk_A32D10 + 32*param2), so removing a zone shifts every
-	// higher index down by one. A reference to the removed zone becomes -1 (dangling), which
-	// event_chain then flags. [orig: zone bounds consumers @0x43c730 / @0x43e510]
-	const int removed = static_cast<int>(index);
-	for (bms::Trigger &t : file.triggers) {
-		const bool is_area_trigger =
-				(t.main_type == bms::TriggerMainType::Group &&
-						t.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
-				(t.main_type == bms::TriggerMainType::Single &&
-						t.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
-		if (!is_area_trigger) {
-			continue;
-		}
-		if (t.param2 == removed) {
-			t.param2 = -1;  // the referenced zone is gone
-		} else if (t.param2 > removed) {
-			--t.param2;     // zones above the hole shifted down
-		}
-	}
+	// A trigger's or an action's zone parameter is the area trigger's ID in the file, which the game
+	// remaps to its array index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
+	// EventTrigger_ResolveZoneActionRefs @0x453100; docs/mission/bms-event-runtime-re.md section 7.3]:
+	// removing a zone moves no id, so nothing that names another zone is rewritten. What named the
+	// removed zone names none from then on: the load neuters such a trigger (it reads false, a negated
+	// one true) and zeroes such an action, which event_chain flags.
 	file.area_triggers.erase(file.area_triggers.begin() + static_cast<std::ptrdiff_t>(index));
 	sync_counts(file);
 	return true;
@@ -637,195 +692,137 @@ bool set_action(bms::File &file, size_t index, const MissionActionRecord &record
 	return true;
 }
 
-bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
-		const MissionTriggerRecord &record, std::string &error) {
+// An event's triggers and actions are records the event owns (mission_chains.h): each chain edit
+// splits the file's tables into the events' chains, edits one, and joins them back, so every run
+// stands where its event does and its first index is the running offset, an empty run's too [corpus:
+// 115 of 115 shipped missions]. A file whose tables the chains cannot hold (a record in two runs or in
+// none, a run past its table) is refused, nothing changed.
+namespace {
+
+std::string run_words(RunLayout layout, const char *table) {
+	switch (layout) {
+	case RunLayout::OutOfRange: return std::string("Mission event ") + table + " range is invalid";
+	case RunLayout::Shared: return std::string("Mission event ") + table + " runs share a record";
+	case RunLayout::Unowned: return std::string("A mission ") + table + " lies in no event's run";
+	default: return std::string();
+	}
+}
+
+bool split_for_edit(const bms::File &file, size_t event_index, std::vector<EventChain> &chains, std::string &error) {
 	if (event_index >= file.events.size()) {
 		error = "Mission event index out of range";
 		return false;
 	}
-	bms::Event &ev = file.events[event_index];
-	if (ev.trigger_count >= kMaxEventChainEntries) {
-		error = "Mission event trigger count exceeds 20";
+	RunReport report;
+	if (split_event_chains(file, chains, report)) return true;
+	error = run_words(report.triggers, "trigger");
+	if (error.empty()) error = run_words(report.actions, "action");
+	return false;
+}
+
+// One list of a chain edited: a record put in at `local_index`, the one there taken out, or moved by
+// `delta` within its chain.
+template <class Record>
+bool insert_into(std::vector<Record> &list, size_t local_index, const Record &record, const char *what, std::string &error) {
+	if (list.size() >= kMaxEventChainEntries) {
+		error = std::string("Mission event ") + what + " count exceeds 20";
 		return false;
 	}
-	if (local_index > ev.trigger_count) {
-		error = "Mission event trigger insert index out of range";
+	if (local_index > list.size()) {
+		error = std::string("Mission event ") + what + " insert index out of range";
 		return false;
 	}
-	if (ev.trigger_count > 0 && !valid_range(ev.trigger_index, ev.trigger_count, file.triggers.size())) {
-		error = "Mission event trigger range is invalid";
+	list.insert(list.begin() + static_cast<std::ptrdiff_t>(local_index), record);
+	return true;
+}
+
+template <class Record>
+bool erase_from(std::vector<Record> &list, size_t local_index, const char *what, std::string &error) {
+	if (local_index >= list.size()) {
+		error = std::string("Mission event ") + what + " index out of range";
 		return false;
 	}
-	const size_t global_index = ev.trigger_count == 0 ? file.triggers.size() : static_cast<size_t>(ev.trigger_index) + local_index;
-	file.triggers.insert(file.triggers.begin() + static_cast<std::ptrdiff_t>(global_index), trigger_from_record(record));
-	for (size_t i = 0; i < file.events.size(); ++i) {
-		if (i == event_index) {
-			continue;
-		}
-		bms::Event &other = file.events[i];
-		if (other.trigger_count > 0 && other.trigger_index >= static_cast<int32_t>(global_index)) {
-			other.trigger_index += 1;
-		}
+	list.erase(list.begin() + static_cast<std::ptrdiff_t>(local_index));
+	return true;
+}
+
+template <class Record>
+bool move_within(std::vector<Record> &list, size_t local_index, int delta, const char *what, std::string &error) {
+	const int next_local = static_cast<int>(local_index) + delta;
+	if (delta == 0 || local_index >= list.size() || next_local < 0 || next_local >= static_cast<int>(list.size())) {
+		error = std::string("Mission event ") + what + " move index out of range";
+		return false;
 	}
-	if (ev.trigger_count == 0) {
-		ev.trigger_index = static_cast<int32_t>(global_index);
-	}
-	ev.trigger_count = static_cast<uint8_t>(ev.trigger_count + 1);
+	std::swap(list[local_index], list[static_cast<size_t>(next_local)]);
+	return true;
+}
+
+} // namespace
+
+bool insert_event_trigger(bms::File &file, size_t event_index, size_t local_index,
+		const MissionTriggerRecord &record, std::string &error) {
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!insert_into(chains[event_index].triggers, local_index, trigger_from_record(record), "trigger", error)) return false;
+	join_event_chains(chains, file);
 	sync_counts(file);
 	return true;
 }
 
 bool remove_event_trigger(bms::File &file, size_t event_index, size_t local_index, std::string &error) {
-	if (event_index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
-	}
-	bms::Event &ev = file.events[event_index];
-	if (local_index >= ev.trigger_count) {
-		error = "Mission event trigger index out of range";
-		return false;
-	}
-	if (!valid_range(ev.trigger_index, ev.trigger_count, file.triggers.size())) {
-		error = "Mission event trigger range is invalid";
-		return false;
-	}
-	const size_t global_index = static_cast<size_t>(ev.trigger_index) + local_index;
-	file.triggers.erase(file.triggers.begin() + static_cast<std::ptrdiff_t>(global_index));
-	ev.trigger_count = static_cast<uint8_t>(ev.trigger_count - 1);
-	if (ev.trigger_count == 0) {
-		ev.trigger_index = 0;
-	}
-	for (size_t i = 0; i < file.events.size(); ++i) {
-		if (i == event_index) {
-			continue;
-		}
-		bms::Event &other = file.events[i];
-		if (other.trigger_count > 0 && other.trigger_index > static_cast<int32_t>(global_index)) {
-			other.trigger_index -= 1;
-		}
-	}
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!erase_from(chains[event_index].triggers, local_index, "trigger", error)) return false;
+	join_event_chains(chains, file);
 	sync_counts(file);
 	return true;
 }
 
 bool move_event_trigger(bms::File &file, size_t event_index, size_t local_index, int delta, std::string &error) {
-	if (event_index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
-	}
-	bms::Event &ev = file.events[event_index];
-	const int next_local = static_cast<int>(local_index) + delta;
-	if (delta == 0 || local_index >= ev.trigger_count || next_local < 0 || next_local >= ev.trigger_count) {
-		error = "Mission event trigger move index out of range";
-		return false;
-	}
-	if (!valid_range(ev.trigger_index, ev.trigger_count, file.triggers.size())) {
-		error = "Mission event trigger range is invalid";
-		return false;
-	}
-	const size_t first = static_cast<size_t>(ev.trigger_index);
-	std::swap(file.triggers[first + local_index], file.triggers[first + static_cast<size_t>(next_local)]);
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!move_within(chains[event_index].triggers, local_index, delta, "trigger", error)) return false;
+	join_event_chains(chains, file);
+	sync_counts(file);
 	return true;
 }
 
 bool insert_event_action(bms::File &file, size_t event_index, size_t local_index,
 		const MissionActionRecord &record, std::string &error) {
-	if (event_index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
-	}
-	bms::Event &ev = file.events[event_index];
-	if (ev.action_count >= kMaxEventChainEntries) {
-		error = "Mission event action count exceeds 20";
-		return false;
-	}
-	if (local_index > ev.action_count) {
-		error = "Mission event action insert index out of range";
-		return false;
-	}
-	if (ev.action_count > 0 && !valid_range(ev.action_index, ev.action_count, file.actions.size())) {
-		error = "Mission event action range is invalid";
-		return false;
-	}
-	const size_t global_index = ev.action_count == 0 ? file.actions.size() : static_cast<size_t>(ev.action_index) + local_index;
-	file.actions.insert(file.actions.begin() + static_cast<std::ptrdiff_t>(global_index), action_from_record(record));
-	for (size_t i = 0; i < file.events.size(); ++i) {
-		if (i == event_index) {
-			continue;
-		}
-		bms::Event &other = file.events[i];
-		if (other.action_count > 0 && other.action_index >= static_cast<int32_t>(global_index)) {
-			other.action_index += 1;
-		}
-	}
-	if (ev.action_count == 0) {
-		ev.action_index = static_cast<int32_t>(global_index);
-	}
-	ev.action_count = static_cast<uint8_t>(ev.action_count + 1);
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!insert_into(chains[event_index].actions, local_index, action_from_record(record), "action", error)) return false;
+	join_event_chains(chains, file);
 	sync_counts(file);
 	return true;
 }
 
 bool remove_event_action(bms::File &file, size_t event_index, size_t local_index, std::string &error) {
-	if (event_index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
-	}
-	bms::Event &ev = file.events[event_index];
-	if (local_index >= ev.action_count) {
-		error = "Mission event action index out of range";
-		return false;
-	}
-	if (!valid_range(ev.action_index, ev.action_count, file.actions.size())) {
-		error = "Mission event action range is invalid";
-		return false;
-	}
-	const size_t global_index = static_cast<size_t>(ev.action_index) + local_index;
-	file.actions.erase(file.actions.begin() + static_cast<std::ptrdiff_t>(global_index));
-	ev.action_count = static_cast<uint8_t>(ev.action_count - 1);
-	if (ev.action_count == 0) {
-		ev.action_index = 0;
-	}
-	for (size_t i = 0; i < file.events.size(); ++i) {
-		if (i == event_index) {
-			continue;
-		}
-		bms::Event &other = file.events[i];
-		if (other.action_count > 0 && other.action_index > static_cast<int32_t>(global_index)) {
-			other.action_index -= 1;
-		}
-	}
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!erase_from(chains[event_index].actions, local_index, "action", error)) return false;
+	join_event_chains(chains, file);
 	sync_counts(file);
 	return true;
 }
 
 bool move_event_action(bms::File &file, size_t event_index, size_t local_index, int delta, std::string &error) {
-	if (event_index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
-	}
-	bms::Event &ev = file.events[event_index];
-	const int next_local = static_cast<int>(local_index) + delta;
-	if (delta == 0 || local_index >= ev.action_count || next_local < 0 || next_local >= ev.action_count) {
-		error = "Mission event action move index out of range";
-		return false;
-	}
-	if (!valid_range(ev.action_index, ev.action_count, file.actions.size())) {
-		error = "Mission event action range is invalid";
-		return false;
-	}
-	const size_t first = static_cast<size_t>(ev.action_index);
-	std::swap(file.actions[first + local_index], file.actions[first + static_cast<size_t>(next_local)]);
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, event_index, chains, error)) return false;
+	if (!move_within(chains[event_index].actions, local_index, delta, "action", error)) return false;
+	join_event_chains(chains, file);
+	sync_counts(file);
 	return true;
 }
 
 size_t add_event(bms::File &file, const MissionEventRecord &record) {
 	bms::Event ev = {};
 	apply_event_record(ev, record);
-	// A fresh event owns no triggers/actions; the index/count fields stay zero until the caller adds
-	// entries via insert_event_trigger/insert_event_action (each assigns the global index on first add).
-	ev.trigger_index = 0;
-	ev.action_index = 0;
+	// A fresh event owns no triggers or actions. Its empty runs carry the running offset, which past
+	// the last event is each table's size [corpus: every shipped empty run, mission_chains.h]; the
+	// inserts above fill it.
+	ev.trigger_index = static_cast<int32_t>(file.triggers.size());
+	ev.action_index = static_cast<int32_t>(file.actions.size());
 	ev.trigger_count = 0;
 	ev.action_count = 0;
 	file.events.push_back(ev);
@@ -834,46 +831,26 @@ size_t add_event(bms::File &file, const MissionEventRecord &record) {
 }
 
 bool remove_event(bms::File &file, size_t index, std::string &error) {
-	if (index >= file.events.size()) {
-		error = "Mission event index out of range";
-		return false;
+	std::vector<EventChain> chains;
+	if (!split_for_edit(file, index, chains, error)) return false;
+	chains.erase(chains.begin() + static_cast<std::ptrdiff_t>(index));
+	// What names an event by its index (EVENT_REF, docs/mission/bms-event-runtime-re.md section 7.2): an
+	// Event trigger's param1 [orig: EventTrigger_EvaluateCondition @0x453620 cat 3 reads events[p1]] and
+	// a ResetEvent action's [orig: EventAction_Dispatch @0x4542e0 case 34 clears events[p1]'s latch].
+	// Events after the hole shift down by one; a reference to the removed event becomes -1 (dangling),
+	// which event_chain then flags as out of range. A zone parameter is an area trigger's id (section
+	// 7.3), no event's: removing an event moves none.
+	const auto repair = [index](int32_t &param) {
+		if (param > static_cast<int32_t>(index)) param -= 1;
+		else if (param == static_cast<int32_t>(index)) param = -1;
+	};
+	for (EventChain &chain : chains) {
+		for (bms::Trigger &trig : chain.triggers)
+			if (trig.main_type == bms::TriggerMainType::Event) repair(trig.param1);
+		for (bms::Action &act : chain.actions)
+			if (act.action_type == bms::ActionType::ResetEvent) repair(act.param1);
 	}
-	const bms::Event &ev = file.events[index];
-	if (!valid_range(ev.trigger_index, ev.trigger_count, file.triggers.size())) {
-		error = "Mission event trigger range is invalid";
-		return false;
-	}
-	if (!valid_range(ev.action_index, ev.action_count, file.actions.size())) {
-		error = "Mission event action range is invalid";
-		return false;
-	}
-	// Drain the event's triggers and actions through the single-element removers, which fix up every
-	// other event's trigger_index / action_index exactly as a normal trigger/action delete would. The
-	// ranges above are validated before the first mutation so malformed documents fail transactionally.
-	std::string drain_error;
-	while (file.events[index].trigger_count > 0) {
-		remove_event_trigger(file, index, 0, drain_error);
-	}
-	while (file.events[index].action_count > 0) {
-		remove_event_action(file, index, 0, drain_error);
-	}
-	// Repair ResetEvent action references (param1 = event index, the one proven cross-reference): events
-	// after the hole shift down by one; a reference to the removed event becomes dangling (-1), which
-	// event_chain then flags as out-of-range. A *IsWithinArea trigger's param2 is the area trigger's
-	// array index (ZONE_REF, docs/mission/bms-event-runtime-re.md section 7.3) [orig:
-	// Entity_IsTeamInTriggerBounds @0x43c730], no event's: removing an event moves no zone, so
-	// remove_area_trigger is what repairs those.
-	for (bms::Action &act : file.actions) {
-		if (act.action_type != bms::ActionType::ResetEvent) {
-			continue;
-		}
-		if (act.param1 > static_cast<int32_t>(index)) {
-			act.param1 -= 1;
-		} else if (act.param1 == static_cast<int32_t>(index)) {
-			act.param1 = -1;
-		}
-	}
-	file.events.erase(file.events.begin() + static_cast<std::ptrdiff_t>(index));
+	join_event_chains(chains, file);
 	sync_counts(file);
 	return true;
 }
@@ -896,7 +873,7 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 			MissionTriggerRecord trig = to_trigger_record(file.triggers[trigger_index], trigger_index);
 			out.triggers.push_back(trig);
 			out.references.push_back(logic_reference("event", static_cast<int>(index), "trigger", static_cast<int>(trigger_index), 0, static_cast<int>(trigger_index), "trigger", true));
-			add_trigger_area_reference(trig, file.area_triggers.size(), out);
+			add_trigger_area_reference(trig, file.area_triggers, out);
 		}
 	}
 	if (!valid_range(out.event.action_index, out.event.action_count, file.actions.size())) {

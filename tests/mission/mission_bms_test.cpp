@@ -226,6 +226,54 @@ int main() {
 	TEST_EXPECT(entity_count(document, EntityKind::Item) == original_item_count + 1);
 	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
 	TEST_EXPECT(document.items[added].type_id == 1291);
+	// A new record holds what the shipped records most often hold (new_entity; mission_corpus's
+	// retail leg holds each to the corpus), its SSN one past the file's largest.
+	{
+		const opennova::bms::Entity &made = document.items[added];
+		int largest = 0;
+		for (EntityKind kind : {EntityKind::Item, EntityKind::Building, EntityKind::Marker, EntityKind::Organic})
+			for (const opennova::bms::Entity &other : *entities(document, kind))
+				if (&other != &made) largest = std::max(largest, other.id);
+		TEST_EXPECT(made.id == largest + 1 && next_entity_ssn(document) == made.id + 1);
+		TEST_EXPECT(made.wp_distance == 10 && made.perception2 == 100 && made.perfectionist2 == 100);
+		TEST_EXPECT(made.min_engagement_distance == 16 && made.max_engagement_distance == 320 &&
+		            made.max_attack_distance == 16);
+		TEST_EXPECT(made.w_accuracy1 == 100 && made.w_accuracy2 == 100 && made.spawns == 0 && made.no_more_than == 0);
+		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
+		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 255);
+		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
+		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
+		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
+		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
+		            marker.x == 0 && marker.attention == 30);
+	}
+	// A blank mission: named, on its terrain and under its environment, the header values the shipped
+	// missions hold in common, no record of any pool; a name past its slot is refused, the file as it was.
+	{
+		opennova::bms::File blank;
+		std::string blank_error;
+		TEST_EXPECT(make_blank(blank, {"New mission", "A designer", "Tmap", "synth_full"}, blank_error));
+		const MissionInfo info = mission_info(blank);
+		TEST_EXPECT(info.mission_name == "New mission" && info.designer == "A designer" && info.terrain == "Tmap" &&
+		            info.environment == "synth_full" && info.tile_set.empty());
+		TEST_EXPECT(std::string(blank.header.default_str) == "Default" &&
+		            blank.header.mission_type == opennova::bms::MissionType::NormalMission);
+		TEST_EXPECT(blank.header.bonus_expiration == 10 && blank.header.max_saves == 3 && blank.header.map_zoom == 0.5f &&
+		            blank.header.minutes_per_day == 1440 && blank.header.start_time == 3840);
+		for (int i = 0; i < 8; ++i)
+			TEST_EXPECT(blank.header.win_conditions[i] == 255 && blank.header.lose_conditions[i] == 255);
+		TEST_EXPECT(blank.items.empty() && blank.buildings.empty() && blank.markers.empty() && blank.organics.empty() &&
+		            blank.area_triggers.empty() && blank.events.empty() && blank.loadout.entries.empty());
+		std::vector<uint8_t> blank_bytes;
+		opennova::bms::File blank_back;
+		TEST_EXPECT(write_document(blank, blank_bytes) && load_document(blank_bytes, blank_back) &&
+		            opennova::bms::equal(blank, blank_back));
+		const opennova::bms::File kept = blank;
+		TEST_EXPECT(!make_blank(blank, {"New mission", "", std::string(17, 't'), "synth_full"}, blank_error) &&
+		            !blank_error.empty() && opennova::bms::equal(blank, kept));
+		TEST_EXPECT(!make_blank(blank, {std::string(33, 'n'), "", "Tmap", "synth_full"}, blank_error) &&
+		            opennova::bms::equal(blank, kept));
+	}
 
 	std::vector<uint8_t> edited_bytes;
 	TEST_EXPECT(write_document(document, edited_bytes));
@@ -1284,6 +1332,55 @@ int main() {
 		TEST_EXPECT(reloaded.area_triggers.size() == original_zones);
 		TEST_EXPECT(!area_trigger(reloaded, zone_index, zone));
 		TEST_EXPECT(!remove_area_trigger(reloaded, 999999, error));
+	}
+
+	// A zone parameter is the area trigger's ID in the file, never its index (the game remaps it at
+	// mission start): removing an area trigger rewrites no parameter, the ones naming another zone
+	// keep naming it, and the ones naming the removed zone name none (flagged, as the game neuters
+	// them).
+	{
+		opennova::bms::File doc;
+		make_default(doc);
+		for (const int id : {7, 3, 9}) {
+			AreaTriggerRecord zone;
+			zone.wp_number = id;
+			zone.max_x = 10;
+			zone.max_y = 10;
+			add_area_trigger(doc, zone);
+		}
+		MissionEventRecord seed;
+		TEST_EXPECT(add_event(doc, seed) == 0);
+		MissionTriggerRecord within;
+		within.main_type = static_cast<int>(opennova::bms::TriggerMainType::Group);
+		within.sub_type = static_cast<int>(opennova::bms::GroupTriggerType::GroupIsWithinArea);
+		within.param1 = 5;
+		within.param2 = 3; // the zone whose id is 3 (at index 1)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 0, within, error));
+		MissionTriggerRecord satchel;
+		satchel.main_type = static_cast<int>(opennova::bms::TriggerMainType::Player);
+		satchel.sub_type = static_cast<int>(opennova::bms::PlayerTriggerType::PlayerSatchel);
+		satchel.param1 = 9; // the zone whose id is 9 (at index 2)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 1, satchel, error));
+		MissionActionRecord area_ai;
+		area_ai.action_type = static_cast<int>(opennova::bms::ActionType::AreaAiRed);
+		area_ai.param1 = 9;
+		TEST_EXPECT(insert_event_action(doc, 0, 0, area_ai, error));
+		MissionEventChain chain;
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty());
+		const auto area_of = [&chain](int slot) {
+			for (const MissionLogicReference &reference : chain.references)
+				if (reference.target_kind == "area_trigger" && reference.param_slot == slot) return reference.target_index;
+			return -99;
+		};
+		TEST_EXPECT(area_of(2) == 1 && area_of(1) == 2);
+		// The first area trigger (id 7) out: the others' indexes move, their ids and every parameter stay.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.area_triggers.size() == 2);
+		TEST_EXPECT(doc.triggers[0].param2 == 3 && doc.triggers[1].param1 == 9 && doc.actions[0].param1 == 9);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty() && area_of(2) == 0 && area_of(1) == 1);
+		// The zone a trigger names out: the trigger keeps its id and names none.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.triggers[0].param2 == 3);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.size() == 1 &&
+		            chain.diagnostics[0].code == "logic.area_reference_out_of_range" && area_of(2) == -1 && area_of(1) == 0);
 	}
 
 	// E1: entity-property inspection is portable. A group-only edit must

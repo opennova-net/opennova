@@ -424,6 +424,14 @@ target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_bms COMMAND mission_bms_test)
 
+# An event's runs split out of the file's tables and joined back
+# (formats/mission/mission_chains.h): the identity on a canonical file, a
+# reordered one joined canonical, the refusals, an empty run's running offset.
+add_executable(mission_chains_test mission/mission_chains_test.cpp)
+target_link_libraries(mission_chains_test PRIVATE opennova_formats)
+target_include_directories(mission_chains_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_chains COMMAND mission_chains_test)
+
 add_executable(mission_mis_test mission/mission_mis_test.cpp)
 target_link_libraries(mission_mis_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

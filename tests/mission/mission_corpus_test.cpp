@@ -16,14 +16,18 @@
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
+#include <map>
 #include <set>
 #include <string>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/mission/mission_field.h>
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_paths.h"
@@ -114,9 +118,52 @@ struct Counts {
 	std::vector<std::string> differing; // "NAME: section, section"
 };
 
+// What the shipped records hold: for each field of the header and of each pool's entities (the
+// format's field rows, formats/mission/mission_field.h), each value and how many records hold it.
+struct Tally {
+	using Values = std::map<std::string, size_t>; // a value as text -> the records holding it
+	std::map<std::string, Values> header, pools[4];
+	size_t missions = 0, records[4] = {0, 0, 0, 0};
+
+	static std::string text(const opennova::mission::MissionValue &value) {
+		if (const int64_t *number = std::get_if<int64_t>(&value)) return std::to_string(*number);
+		if (const double *real = std::get_if<double>(&value)) {
+			char buffer[40];
+			std::snprintf(buffer, sizeof(buffer), "%.10g", *real);
+			return buffer;
+		}
+		return std::get<std::string>(value);
+	}
+	template <class Record>
+	static void take_record(opennova::mission::MissionRecord kind, const Record &record, std::map<std::string, Values> &into) {
+		for (const opennova::mission::MissionField &field : opennova::mission::mission_fields(kind)) {
+			opennova::mission::MissionValue value;
+			if (field.get(&record, value)) ++into[field.key][text(value)];
+		}
+	}
+	void take(const bms::File &file) {
+		++missions;
+		take_record(opennova::mission::MissionRecord::Header, file.header, header);
+		const std::vector<bms::Entity> *lists[4] = {&file.items, &file.buildings, &file.markers, &file.organics};
+		for (int pool = 0; pool < 4; ++pool) {
+			records[pool] += lists[pool]->size();
+			for (const bms::Entity &entity : *lists[pool])
+				take_record(opennova::mission::MissionRecord::Entity, entity, pools[pool]);
+		}
+	}
+	// A field's most common value and how many records hold it.
+	static std::pair<std::string, size_t> most(const Values &values) {
+		std::pair<std::string, size_t> best;
+		for (const auto &entry : values)
+			if (entry.second > best.second) best = entry;
+		return best;
+	}
+};
+
 // One mission: parsed, written, compared with the bytes read; then the canonical fixed point. `damaged`
 // says the writer is known not to give this one's loadout chunk back.
-void check_mission(const std::string &name, const std::vector<uint8_t> &original, bool damaged, Counts &counts) {
+void check_mission(const std::string &name, const std::vector<uint8_t> &original, bool damaged, Counts &counts,
+                   Tally *tally = nullptr) {
 	++counts.missions;
 	const auto fail = [&](const std::string &why) {
 		std::fprintf(stderr, "  FAIL %s: %s\n", name.c_str(), why.c_str());
@@ -127,6 +174,7 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	if (!bms::is_bms(original.data(), original.size()) ||
 	    !bms::parse(original.data(), original.size(), parsed, error))
 		return fail("does not parse: " + error);
+	if (tally) tally->take(parsed);
 
 	// Pool vectors must match the header counts, and the fixed sections are always full-size.
 	if (parsed.items.size() != parsed.header.num_items || parsed.buildings.size() != parsed.header.num_buildings ||
@@ -179,6 +227,76 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 	if (!bms::equal(parsed, reparsed)) return fail("bms::equal(parsed, reparsed) is false");
 }
 
+// What a new record holds is what the shipped records most often hold (bms_edit's new_entity and
+// make_blank, which cite this leg): every member of a new entity but those an author always sets
+// (its item, its SSN, its position and yaw, its team) is the most common value of that member over
+// the shipped item records, over the building records and over the marker records; every member of a
+// blank mission's header but those that are the mission's own (its name and designer, its terrain,
+// tile set and environment, its game mode and option bits, the fog distance those gate) is the most
+// common value over the shipped missions. Returns the members that are not.
+int check_new_records(const Tally &tally) {
+	namespace mission = opennova::mission;
+	int failures = 0;
+	const char *const authored[] = {"item", "id", "x", "y", "z", "yaw", "team"};
+	const char *const pool_names[3] = {"items", "buildings", "markers"};
+	const mission::EntityKind kinds[3] = {mission::EntityKind::Item, mission::EntityKind::Building,
+	                                      mission::EntityKind::Marker};
+	size_t members = 0;
+	double least = 100.0;
+	for (int pool = 0; pool < 3; ++pool) {
+		if (!tally.records[pool]) continue;
+		const bms::Entity made = mission::new_entity(kinds[pool], 0, 1);
+		for (const mission::MissionField &field : mission::mission_fields(mission::MissionRecord::Entity)) {
+			bool skip = false;
+			for (const char *key : authored) skip = skip || std::string(key) == field.key;
+			mission::MissionValue value;
+			if (skip || !field.get(&made, value)) continue;
+			const auto found = tally.pools[pool].find(field.key);
+			if (found == tally.pools[pool].end()) continue;
+			const std::pair<std::string, size_t> best = Tally::most(found->second);
+			const double share = 100.0 * double(best.second) / double(tally.records[pool]);
+			if (Tally::text(value) != best.first) {
+				std::fprintf(stderr, "  FAIL a new entity's %s is '%s'; the shipped %s most often hold '%s' (%.1f%%)\n",
+				             field.key, Tally::text(value).c_str(), pool_names[pool], best.first.c_str(), share);
+				++failures;
+			}
+			++members;
+			least = std::min(least, share);
+		}
+	}
+	const char *const own[] = {"mission_name", "designer", "terrain", "terrain_tile", "environment", "attrib_flags",
+	                           "fog_override"};
+	bms::File blank;
+	std::string error;
+	if (!mission::make_blank(blank, {"Blank", "", "Tmap", "synth_full"}, error)) {
+		std::fprintf(stderr, "  FAIL make_blank: %s\n", error.c_str());
+		return failures + 1;
+	}
+	size_t header_members = 0;
+	size_t fewest = tally.missions;
+	for (const mission::MissionField &field : mission::mission_fields(mission::MissionRecord::Header)) {
+		bool skip = false;
+		for (const char *key : own) skip = skip || std::string(key) == field.key;
+		mission::MissionValue value;
+		if (skip || !field.get(&blank.header, value)) continue;
+		const auto found = tally.header.find(field.key);
+		if (found == tally.header.end()) continue;
+		const std::pair<std::string, size_t> best = Tally::most(found->second);
+		if (Tally::text(value) != best.first) {
+			std::fprintf(stderr, "  FAIL a blank mission's %s is '%s'; the shipped missions most often hold '%s' (%zu of %zu)\n",
+			             field.key, Tally::text(value).c_str(), best.first.c_str(), best.second, tally.missions);
+			++failures;
+		}
+		++header_members;
+		fewest = std::min(fewest, best.second);
+	}
+	std::printf("new records: %zu members of a new entity hold the shipped items', buildings' and markers' most common "
+	            "value (the least common of them the value of %.1f%% of its pool); %zu members of a blank mission's "
+	            "header the shipped missions' (the least common in %zu of %zu)\n",
+	            members, least, header_members, fewest, tally.missions);
+	return failures;
+}
+
 int test_minted() {
 	const std::vector<uint8_t> bytes =
 	        test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_dense.bms");
@@ -208,6 +326,7 @@ int test_retail() {
 	expansions.insert(expansions.begin(), std::string());
 	std::set<std::string> seen, met;
 	Counts counts;
+	Tally tally;
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
 		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
@@ -229,10 +348,11 @@ int test_retail() {
 			std::transform(stem.begin(), stem.end(), stem.begin(), [](unsigned char c) { return char(std::toupper(c)); });
 			const bool named = damaged.count(stem) != 0;
 			if (named) met.insert(stem);
-			check_mission(file.logical_name, bytes, named, counts);
+			check_mission(file.logical_name, bytes, named, counts, &tally);
 		}
 	}
 	if (counts.missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	if (check_new_records(tally) != 0) ++counts.failed;
 	for (const std::string &line : counts.differing) std::printf("  differs: %s\n", line.c_str());
 	std::printf("retail: %zu missions, %zu rewritten to their own bytes, %zu differing in the loadout chunk alone "
 	            "(%zu of the %zu named are in this install), %zu failed\n",
