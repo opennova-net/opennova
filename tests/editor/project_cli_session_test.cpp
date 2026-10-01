@@ -620,10 +620,11 @@ static int test_request_and_query_verbs() {
 
 // --install sets the project's game install as the editor's project settings set it: written to
 // its .opennova/local.json, which the editor then opens the project with; kept absolute from the
-// command line's working directory; on new, the new project's; and on import, the install whose
-// files --entry names. One that names no folder is refused before anything is sent, the project's
-// install kept; a dry run's is that run's alone (the plan reads it, the project's local.json keeps
-// its own).
+// command line's working directory and lexically normal, the folder checked the one kept (a `..`
+// over a folder that is not there folds on every platform); on new, the new project's; and on
+// import, the install whose files --entry names. One that names no folder is refused before
+// anything is sent, the project's install kept; a dry run's is that run's alone (the plan reads
+// it, the project's local.json keeps its own).
 static int test_install() {
 	struct WorkingDirectory {
 		fs::path saved = fs::current_path();
@@ -640,6 +641,10 @@ static int test_install() {
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Install" }).code == 0);
 	fs::current_path(dir.path, ec);
 	TEST_EXPECT(!ec);
+	// Through a folder that is not there: a POSIX lookup of the path as given fails at art/, where
+	// Windows folds the `..` first; the command checks the folder it keeps, so it names Joint Ops
+	// on both.
+	TEST_EXPECT(!fs::exists(dir.file("art")));
 	Ran ran = run(scratch, { "status", root, "--install", "art/../Joint Ops" });
 	TEST_EXPECT(ran.code == 0 && ran.out.find("game install: " + install + "\n") != std::string::npos);
 	editor::LocalSettings local;

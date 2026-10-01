@@ -81,6 +81,18 @@ struct CliArgs {
 	}
 };
 
+// A path given on the command line, taken from where the command runs: absolute and lexically
+// normal, the spelling the session keeps a game install in (absolute_install_path) and a build's
+// out_dir in. A `..` folds over the name before it whether that folder is there or not, on every
+// platform (a POSIX lookup of "art/../x" fails when art is not there, where Windows folds it
+// first), so the folder the command checks is the one it sends. "" (none given) stays "".
+std::string from_here(const std::string &path) {
+	if (path.empty()) return path;
+	std::error_code ec;
+	const std::filesystem::path full = std::filesystem::absolute(path, ec);
+	return (ec ? std::filesystem::path(path) : full).lexically_normal().generic_string();
+}
+
 // --- the session -------------------------------------------------------------------------------
 
 // One run of the command: the headless session it drives (a process seam with no processes, the
@@ -704,12 +716,7 @@ int run_reimport(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// --out is a path on the command line, taken from where the command runs (the request's
 	// out_dir, relative, would be taken from the project's folder).
-	std::string out = args.value("--out");
-	if (!out.empty()) {
-		std::error_code ec;
-		const std::filesystem::path full = std::filesystem::absolute(out, ec);
-		if (!ec) out = full.lexically_normal().generic_string();
-	}
+	const std::string out = from_here(args.value("--out"));
 	const JsonValue outcome = send(cli, editor::request::build(out));
 	JsonValue answer;
 	if (!answer_of(cli, row, answer)) return 2;
@@ -1211,13 +1218,16 @@ bool parse_args(const VerbRow &row, int argc, const char *const *argv, CliArgs &
 		}
 	}
 	// --install names a folder that is there: a typo never replaces a project's install, and
-	// nothing is sent.
-	if (out.has("--install")) {
+	// nothing is sent. The folder checked is the one sent, as the session keeps it (from_here).
+	for (auto &[name, value] : out.options) {
+		if (name != "--install") continue;
+		const std::string folder = from_here(value);
 		std::error_code ec;
-		if (!std::filesystem::is_directory(out.value("--install"), ec)) {
-			why = "--install names no folder: " + out.value("--install");
+		if (!std::filesystem::is_directory(folder, ec)) {
+			why = "--install names no folder: " + value;
 			return false;
 		}
+		value = folder;
 	}
 	return !row.check || row.check(out, why);
 }

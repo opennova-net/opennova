@@ -507,8 +507,10 @@ static int test_problems_params() {
 	ProblemQuery fixable;
 	fixable.fixable = true;
 	TEST_EXPECT(effect(R"({"fixable": true, "limit": 200})", fixable));
-	for (const JsonValue &row :
-			ask(session, "problems", R"({"fixable": true})").get("problems")->array)
+	// The answer held while its rows are read: a range-for over a member reached through a
+	// temporary's pointer (ask(...).get(...)->array) would read them after the answer is gone.
+	const JsonValue fixable_rows = ask(session, "problems", R"({"fixable": true})");
+	for (const JsonValue &row : fixable_rows.get("problems")->array)
 		TEST_EXPECT(!row.get("fixes")->array.empty());
 	// Grouped: the rows in the groups' order, each naming its group, and the groups of the page.
 	for (const auto &[token, grouping] :
