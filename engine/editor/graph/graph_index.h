@@ -100,8 +100,10 @@ public:
 	};
 	static constexpr uint32_t kNone = UINT32_MAX;
 
-	// The key of a name in a namespace: an edge's kind and target, a symbol's kind and name.
-	static std::string key_of(ReferenceKind kind, const std::string &name);
+	// The key of a name in a namespace: an edge's kind and target, a symbol's kind and name; for a
+	// Record kind (S13 D8) in its file too, the scope (every file numbers its own records from 0, so
+	// an index names a record of its own file alone), which no other kind's key reads.
+	static std::string key_of(ReferenceKind kind, const std::string &name, const std::string &scope);
 
 	// --- the slots ---
 	// The slot at a path; kNone for none.

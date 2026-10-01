@@ -1,5 +1,6 @@
 #include "inspector_window.h"
 
+#include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/findings_index.h>
@@ -14,6 +15,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <optional>
 #include <string>
 #include <vector>
 #include <imgui.h>
@@ -227,9 +229,14 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 	const ImVec4 colour = ui_kit::reference_color(status);
 	const char *word = ui_kit::reference_word(status);
 	const bool present = status == ReferenceStatus::Present;
-	std::string tip = present                              ? std::string("Found in the project.")
-	                  : status == ReferenceStatus::Missing ? "No project file or record is named '" + symbol + "'."
-	                                                       : std::string("The editor cannot check this kind of reference yet.");
+	// A record of this file by its index (a Record reference) is found in the file alone.
+	const ReferenceKindRow &kind = reference_row(value_reference(field, value));
+	const bool record = kind.resolution == ReferenceResolution::Record;
+	std::string tip = present ? std::string(record ? "Found in this file." : "Found in the project.")
+	                  : status == ReferenceStatus::Missing
+	                          ? (record ? "This file has no " + std::string(kind.label) + " " + symbol + "."
+	                                    : "No project file or record is named '" + symbol + "'.")
+	                          : std::string("The editor cannot check this kind of reference yet.");
 	if (compact) {
 		ImGui::SameLine();
 		const float frame = ImGui::GetFrameHeight();
@@ -252,12 +259,23 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 
 // A field that names something: its badge and its Go to, a number (an item id) as much as a
 // text, and a text whose whole %NAME% names the stylesheet variable (value_reference). A text
-// reference of the field's own is picked too (the picker's names are texts).
+// reference of the field's own is picked too (the picker's names are texts), and so is a record
+// of its file by its index (a Record reference, S13 D8: the picker's names are its collection's
+// indexes).
 bool is_reference(const FieldUse &field, const Value &value) {
 	return value_reference(field, value) != ReferenceKind::None;
 }
 bool picks_reference(const FieldUse &field) {
-	return field.reference != ReferenceKind::None && field.schema->type == FieldType::Text;
+	if (field.reference == ReferenceKind::None) return false;
+	return field.schema->type == FieldType::Text ||
+	       reference_row(field.reference).resolution == ReferenceResolution::Record;
+}
+// What a name picked sets the field to: the text, or the index a Record reference's name is (a
+// name that is no index stays the text, which the field refuses).
+Value picked_value(const FieldUse &field, const std::string &picked) {
+	if (field.schema->type == FieldType::Text) return picked;
+	const std::optional<int> index = strutil::parse_int(picked);
+	return index ? Value(int64_t(*index)) : Value(picked);
 }
 
 // The width a reference's tools take beside its value: Pick (a text's), the widest word and
@@ -280,7 +298,7 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 		else ImGui::SameLine();
 		std::string picked;
 		if (picker.draw(workspace, document, targets.front(), field, value, compact, picked))
-			set(workspace, document, targets, field.schema->id, picked, false);
+			set(workspace, document, targets, field.schema->id, picked_value(field, picked), false);
 	}
 	reference_status(workspace, field, value, compact, row);
 }

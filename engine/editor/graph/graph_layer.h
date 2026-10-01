@@ -24,8 +24,9 @@ struct LayerFile {
 // A base layer of the asset graph (ADR 0046 d10, S13 D3): the files of a read-only dependency
 // mount (a game install an expansion-type project builds on), read once through the same
 // extractors as the project's files, with the names each defines, and nothing else: no edges
-// (what the mount's files reference is the mount's business) and no findings (a file that does not
-// read leaves its names out). Immutable once built, so one layer may sit under several graphs
+// (what the mount's files reference is the mount's business), no record sets (a Record reference
+// resolves in its own file, S13 D8) and no findings (a file that does not read leaves its names
+// out). Immutable once built, so one layer may sit under several graphs
 // (AssetGraph::set_base, where the project's files win over the layer's of the same name).
 class GraphLayer {
 public:

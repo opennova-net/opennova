@@ -46,10 +46,9 @@ struct Node {
 	// The bytes this version of the row holds (ADR 0046 S13 D7): its own object and everything it
 	// holds (each word, each list and what each element of it holds), so what an undo step keeping
 	// it costs (EditHistory's budget). What every version of the row shares while the document
-	// holds it (a model's or a clip's parsed base) is not its own; an index of its records it keeps
-	// (made again by a structural edit, shared by a clone until then) is counted in each version
-	// that keeps it. An estimate from the sizes of what it holds (footprint_of); a committed row's
-	// never changes.
+	// holds it (a model's or a clip's parsed base) is not its own; where its records sit is the
+	// document's index of the row (Document::path_in, S13 D8), which no version keeps. An estimate
+	// from the sizes of what it holds (footprint_of); a committed row's never changes.
 	virtual size_t footprint() const = 0;
 
 protected:

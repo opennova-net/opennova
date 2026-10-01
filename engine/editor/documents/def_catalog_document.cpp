@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/model/diagnostic.h>
+#include <editor/model/id_list.h>
 #include <editor/project/project_files.h>
 #include <runtime/hud/game_text_lookup.h>
 
@@ -55,35 +56,17 @@ void *child_record(CatalogRow &row, const NodeAddress &address) {
 	return nullptr;
 }
 
+// A record's children of one kind, which the def table keeps as an array and its count, edited
+// through the one list edit (edit_id_list, a new child of the table's defaults) and put back as the
+// array the writer takes.
 template <class T>
 bool edit_children(T *&entries, size_t &count, std::vector<NodeId> &ids, const Edit &edit,
-                   const Document::IdAllocator &allocate, NodeId &added) {
-	size_t index = size_t(std::find(ids.begin(), ids.end(), edit.address.child) - ids.begin());
-	if (edit.operation != EditOperation::Add && index == count) return false;
+                   const Document::IdAllocator &allocate, NodeId &added, std::string &error) {
 	std::vector<T> values;
 	if (count) values.assign(entries, entries + count);
-	if (edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate) {
-		T row{};
-		if (edit.operation == EditOperation::Duplicate) row = values[index];
-		else def_init_record(def_kind(edit.address.kind), &row);
-		const size_t position = std::min(edit.position, count);
-		values.insert(values.begin() + static_cast<std::ptrdiff_t>(position), row);
-		added = allocate();
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(position), added);
-	} else if (edit.operation == EditOperation::Remove) {
-		values.erase(values.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-	} else if (edit.operation == EditOperation::Move) {
-		const size_t to = std::min(edit.position, count - 1);
-		const T row = values[index];
-		const NodeId id = ids[index];
-		values.erase(values.begin() + static_cast<std::ptrdiff_t>(index));
-		values.insert(values.begin() + static_cast<std::ptrdiff_t>(to), row);
-		ids.erase(ids.begin() + static_cast<std::ptrdiff_t>(index));
-		ids.insert(ids.begin() + static_cast<std::ptrdiff_t>(to), id);
-	} else {
-		return false;
-	}
+	T fresh{};
+	def_init_record(def_kind(edit.address.kind), &fresh);
+	if (!edit_id_list(values, ids, edit, fresh, allocate, added, error)) return false;
 	T *updated = copy(values.data(), values.size());
 	std::free(entries);
 	entries = updated;
@@ -439,17 +422,19 @@ bool DefCatalogDocument::edit_collection(Node &node, const Edit &edit, const IdA
 	const size_t slot = slot_of(kind);
 	if (slot >= row.collections.size()) { error = "This record has no such collection."; return false; }
 	auto &ids = row.collections[slot];
-	bool ok = false;
 	if (auto *p = std::get_if<DefItemDef>(&row.data); p && kind == DefRecordKind::Attachment)
-		ok = edit_children(p->emplacement_attachments, p->emplacement_attachments_count, ids, edit, allocate, added);
+		return edit_children(p->emplacement_attachments, p->emplacement_attachments_count, ids, edit, allocate,
+		                     added, error);
 	if (auto *p = std::get_if<DefWeaponDef>(&row.data)) {
-		if (kind == DefRecordKind::Action) ok = edit_children(p->actions, p->actions_count, ids, edit, allocate, added);
-		if (kind == DefRecordKind::Sight) ok = edit_children(p->sights, p->sights_count, ids, edit, allocate, added);
+		if (kind == DefRecordKind::Action)
+			return edit_children(p->actions, p->actions_count, ids, edit, allocate, added, error);
+		if (kind == DefRecordKind::Sight)
+			return edit_children(p->sights, p->sights_count, ids, edit, allocate, added, error);
 	}
 	if (auto *p = std::get_if<DefAmmoDef>(&row.data); p && kind == DefRecordKind::Effect)
-		ok = edit_children(p->effects_table, p->effects_table_count, ids, edit, allocate, added);
-	if (!ok) error = "This collection cannot accept that edit.";
-	return ok;
+		return edit_children(p->effects_table, p->effects_table_count, ids, edit, allocate, added, error);
+	error = "This collection cannot accept that edit.";
+	return false;
 }
 
 bool DefCatalogDocument::set_file_value(std::shared_ptr<const FileState> &state, const Edit &edit, Diagnostic &error) {
