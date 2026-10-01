@@ -2870,7 +2870,7 @@ static int test_record_references() {
 	const std::vector<std::shared_ptr<const DocumentBase>> open = {model};
 	graph.update(project.paths, project.document, project.scan, open);
 	const NodeAddress gunyaw{model->model_row()->id, node_kind(ModelKind::Register),
-	                         model->model_row()->collections[4][1]};
+	                         model->model_row()->ids.lists[4][1].id};
 	Edit remove;
 	remove.operation = EditOperation::Remove;
 	remove.address = gunyaw;

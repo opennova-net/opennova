@@ -10,12 +10,11 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
-#include <editor/documents/mnu_ids.h>
-#include <editor/model/document.h>
+#include <editor/documents/mnu_table.h>
 #include <editor/model/finding_code_row.h>
+#include <editor/model/table_document.h>
 #include <editor/project/project_document.h>
 #include <formats/mnu/mnu.h>
-#include <formats/mnu/mnu_schema.h>
 
 namespace opennova::menu {
 enum class MenuFrameNoteCode : uint16_t;
@@ -24,34 +23,30 @@ enum class MenuFrameNoteCode : uint16_t;
 namespace opennova::editor {
 
 // A menu file (ADR 0046 S6c, S9h): `mnu::Document`'s screens as rows, every record the
-// format holds a record here at its own depth, through the format's property table
-// (formats/mnu/mnu_schema.h). A screen holds its root windows; a window holds its lists
-// in the order the file writes them (its attributes, hotkeys, actions, appearances, scroll
+// format holds a record here at its own depth, through the menu's table (documents/mnu_table.h,
+// rows of the one table shape since S13 D10). A screen holds its root windows; a window holds its
+// lists in the order the file writes them (its attributes, hotkeys, actions, appearances, scroll
 // parts, data sources, sounds, ITEMS rows, parts, table rows, extra elements) and its child
 // windows last; a table row holds its cells, an extra element its attributes and elements.
 // The kinds are Screen, Window, and one kind per list, named by the list's element path
 // ("action", "items.item", "list_box", "column.header"). A field is named by its element
 // path ("position.left", "string.value", "font.default_fg"); which fields and lists a
-// window's type reads is the table's witnessed applicability. What retail's reader does
-// not read is a non-blocking source issue (the reader's notes); what the file cannot hold
-// is a blocking serialize issue on the record and field that cause it. Comments do not
-// survive: the parser drops them (D-MNU-22).
-
-enum class MenuKind : NodeKind { Screen = 0, Window = 1 };
-constexpr NodeKind node_kind(MenuKind kind) { return static_cast<NodeKind>(kind); }
-// The kind of a list's records by its element path ("action", "items.item"); -1 when none.
-NodeKind menu_kind(const std::string &token);
+// window's type reads is the format's witnessed applicability (formats/mnu/mnu_schema.h), which
+// the document applies where each record sits. What retail's reader does not read is a
+// non-blocking source issue (the reader's notes); what the file cannot hold is a blocking
+// serialize issue on the record and field that cause it. Comments do not survive: the parser
+// drops them (D-MNU-22).
 
 // A screen: its native screen, and the identities of its root windows and everything they hold
-// beside the native roots. Where a record sits (the root's index, then each list and index down to
-// it) is its path in the core's index of the row (Document::path_in, S13 D8), never the row's own.
-struct MenuScreen : Node {
+// (TableRow::ids, its one list the roots). Where a record sits (the root's index, then each list and
+// index down to it) is its path in the core's index of the row (Document::path_in, S13 D8), never
+// the row's own.
+struct MenuScreen : TableRow {
 	mnu::Screen screen;
-	std::vector<RecordIds> roots;
 	MenuScreen();
 	std::shared_ptr<Node> clone() const override;
 	std::string name() const override { return screen.name; }
-	void for_each_identity(const std::function<void(NodeId &)> &fn) override;
+	RecordHandle record() const override;
 	// The screen's windows, all they hold and their identities.
 	size_t footprint() const override;
 };
@@ -86,16 +81,12 @@ struct MenuFileState : FileState {
 	size_t footprint() const override { return sizeof(MenuFileState); }
 };
 
-class MnuDocument : public Document {
+class MnuDocument : public TableDocument {
 public:
-	// A screen, the file's row (Add screen), a window, then one kind per list by its element path.
-	const std::vector<RecordKindRow> &kinds() const override;
-	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
-	void walk_records(const Node &row, const RecordVisitor &visit) const override;
-	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	const RecordTable &table() const override { return menu_table(); }
 	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
 	// answers, the type's own for the process.
-	static const std::vector<FieldSchema> &schema(NodeKind kind);
+	static const std::vector<FieldSchema> &schema(NodeKind kind) { return menu_table().fields(kind); }
 	// A screen or window no by-name lookup returns (lookup_names) is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they
@@ -145,28 +136,26 @@ protected:
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
-	// A record located inside `row` (the screen) by its path there (path_in).
-	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
-	// A field: whether the file writes it. "": whether the record itself is written (not
-	// inside an absent ITEMS or a part left out).
-	bool read_present(const Node &row, const NodeAddress &address, const std::string &field) const override;
 	// A new screen, named as no screen of `rows` (the rows as its batch has left them) is.
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
 	                                const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
-	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
-	               std::string &error) override;
-	bool set_present(Node &row, const NodeAddress &address, const std::string &field, bool present,
-	                 std::string &error) override;
-	// Add: a new record of the list's kind inside the owner edit.parent (0 = the screen's
-	// roots) at position, a window named uniquely WINDOW<n> within its screen. Duplicate:
-	// the record with everything it holds, fresh identities, its windows' names made unique.
-	// Remove: the record with everything it holds (a screen keeps one root window). Move: to
-	// position in the same list of edit.parent (another window's: a reparent), with
-	// everything it holds; into a window, an attribute or an extra element only as the
-	// window keeps one.
-	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
-	                     std::string &error) override;
+	// Whether the window type a list's owner sits under reads the list (the format's per-type
+	// parse chains, formats/mnu/mnu_schema.h).
+	Applicability list_applies(const Node &row, const Located &owner, size_t list) const override;
+	// A name the reader would not keep where the record sits is refused: a window keeps only its
+	// PLAYERLIST and SERVERLIST attributes, which take no value, and only the extra elements its
+	// parses read at its top level.
+	bool set_value(Node &row, const Located &at, size_t field, const Value &value, std::string &error) override;
+	bool set_written(Node &row, const Located &at, size_t field, bool present, std::string &error) override;
+	// A screen keeps a root window (a Remove of its last, a Move of its last elsewhere); a part goes
+	// only where its window has none; a window takes an attribute or an extra element only as it
+	// keeps one (an element's own may be anything).
+	bool accept_list_edit(const Node &row, const ListChange &change, std::string &error) const override;
+	// A duplicated window and every window it holds take names no window of the screen has.
+	void prepare_record(const Node &row, const ListChange &change, DetachedRecord &record) const override;
+	// A new window is named uniquely WINDOW<n> within its screen.
+	void after_add(Node &row, const ListChange &change, const RecordHandle &made) override;
 	// The windows `copy` made, into the owner edit.parent (0 = the screen's roots) at
 	// position, fresh identities, names made unique within the screen.
 	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,

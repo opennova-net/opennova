@@ -36,9 +36,9 @@ static int history_and_save() {
 	TEST_EXPECT(document.dirty());
 	document.undo();
 	TEST_EXPECT(!document.dirty());
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 10);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 10);
 	document.redo();
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 25);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 25);
 	TEST_EXPECT(document.save(error));
 	TEST_EXPECT(!document.dirty());
 	document.undo(); TEST_EXPECT(document.dirty());
@@ -73,7 +73,7 @@ static int history_and_save() {
 
 	DefCatalogDocument reloaded;
 	TEST_EXPECT(reloaded.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(reloaded, 0).data).hp == 99);
+	TEST_EXPECT(row_at(reloaded, 0).native.as<DefItemDef>().hp == 99);
 	TEST_EXPECT(reloaded.apply(field(row, "hp", int64_t(7)), error));
 	std::filesystem::create_directory(dir.file("items.def.tmp"));
 	TEST_EXPECT(!reloaded.save(error) && error.code() == "document.write" && reloaded.dirty());
@@ -89,8 +89,8 @@ static int two_new_items() {
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	Edit add; add.operation = EditOperation::Add; add.address = {0, node_kind(DefRecordKind::Item), 0};
 	TEST_EXPECT(document.apply(std::vector<Edit>{add, add}, error) && document.rows().size() == 3);
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 1).data).id == 100000 &&
-	            std::get<DefItemDef>(row_at(document, 2).data).id == 100002);
+	TEST_EXPECT(row_at(document, 1).native.as<DefItemDef>().id == 100000 &&
+	            row_at(document, 2).native.as<DefItemDef>().id == 100002);
 	document.undo(); TEST_EXPECT(document.rows().size() == 1 && !document.dirty());
 	return 0;
 }
@@ -122,7 +122,7 @@ static int collections() {
 	TEST_EXPECT(document.apply(field(action, "ctrl_increment", int64_t(1)), error));
 	TEST_EXPECT(document.apply(field(action, "duplicate_sound_delay", int64_t(3)), error));
 	TEST_EXPECT(document.apply(field({parent, node_kind(DefRecordKind::Weapon), 0}, "weaponweight", 1.25), error));
-	TEST_EXPECT(std::get<DefWeaponDef>(row_at(document, 0).data).weaponweight_fp16 == 81920);
+	TEST_EXPECT(row_at(document, 0).native.as<DefWeaponDef>().weaponweight_fp16 == 81920);
     TEST_EXPECT(!document.apply(field(action, "function_args_count", int64_t(5)), error));
     TEST_EXPECT(document.apply(field(action, "function_args_count", int64_t(1)), error));
     TEST_EXPECT(static_cast<const DefWeaponAction *>(document.record(action))->function_args[1] == 0);
@@ -217,7 +217,7 @@ static int ignored_input() {
 	TEST_EXPECT(saved.find("nodie") != std::string::npos && saved.find("hp 20") != std::string::npos);
 	TEST_EXPECT(document.load(dir.file("items.def"), "items.def", AssetKind::ItemDefs, "jo", error));
 	TEST_EXPECT(document.ignored_lines() == 0 && document.issues().empty());
-	TEST_EXPECT((std::get<DefItemDef>(row_at(document, 0).data).attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
+	TEST_EXPECT((row_at(document, 0).native.as<DefItemDef>().attrib & DEF_ITEM_ATTRIB_NODIE) != 0);
 	return 0;
 }
 // A later action block of a name replaces the earlier one wholesale, as the game
@@ -254,7 +254,7 @@ static int go_to_record() {
 	session.handle(request::open_document("items.def"));
 	auto *items = session.document_for("items.def"); TEST_EXPECT(items && !items->rows().empty());
 	if (!items || items->rows().empty()) return 1;
-	const int id = std::get<DefItemDef>(row_at(*items, 0).data).id;
+	const int id = row_at(*items, 0).native.as<DefItemDef>().id;
 	session.handle(request::close_document(items->path()));
 	const GraphSymbol *item =
 			view.findings.graph->resolve_symbol(ReferenceKind::Item, std::to_string(id));
@@ -302,9 +302,9 @@ static int changes_since_save() {
 	const std::vector<Edit> back = document.revert_edits(row, "hp");
 	TEST_EXPECT(back.size() == 1 && back[0].operation == EditOperation::Set && std::get<int64_t>(back[0].value) == 10);
 	TEST_EXPECT(document.apply(back, error) && !document.field_changed(row, "hp"));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 10 && document.record_change(row) == Document::RecordChange::Unchanged);
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 10 && document.record_change(row) == Document::RecordChange::Unchanged);
 	document.undo();
-	TEST_EXPECT(std::get<DefItemDef>(row_at(document, 0).data).hp == 20 && document.field_changed(row, "hp"));
+	TEST_EXPECT(row_at(document, 0).native.as<DefItemDef>().hp == 20 && document.field_changed(row, "hp"));
 	Edit spawn; spawn.operation = EditOperation::SetFileValue; spawn.position = 0; spawn.value = int64_t(9);
 	TEST_EXPECT(!document.file_state_changed() && document.apply(spawn, error) && document.file_state_changed());
 	spawn.value = int64_t(8);
@@ -344,7 +344,7 @@ static int written_units() {
 	const FieldSchema transfer = schema(items, buggy, "light_transfer");
 	TEST_EXPECT(transfer.ranged && transfer.min == 0.0 && transfer.max == 100.0 && transfer.unit == "%");
 	TEST_EXPECT(items.apply(field(buggy, "player_speed", int64_t(45)), error));
-	TEST_EXPECT(std::get<DefItemDef>(row_at(items, 0).data).player_speed == 45 * 293);
+	TEST_EXPECT(row_at(items, 0).native.as<DefItemDef>().player_speed == 45 * 293);
 	TEST_EXPECT(items.serialize().text.find("\tplayer_speed 45\r\n") != std::string::npos);
 	// A Set of the number the line writes already is no edit (S12 Z2): no step.
 	const uint64_t at_45 = items.revision();

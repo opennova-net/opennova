@@ -303,10 +303,13 @@ struct PinnedRows {
 } // namespace
 
 // The rows the trunk's validators made, per project: validate_project makes the same (the item
-// projects less their cross-table rows, which the review dropped).
+// projects less their cross-table rows, which the review dropped). S13 D10 numbers a model's
+// records in the table shape's one order (RecordIds: a LOD's part animations right after the LOD,
+// where the model numbered every list first), which moved the fixtures' model rows' child ids and
+// nothing else (the same rows with the model's former order give the former digest, 57832e00).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
-		{ "fixtures", fixture_files, false, 238, 0x57832e00899f75e7ull },
+		{ "fixtures", fixture_files, false, 238, 0xc276a18f5cad4241ull },
 		{ "styles", style_files, false, 14, 0x8a3d7521d4f40d63ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
 		{ "open", style_and_item_files, true, 18, 0x626d6c867164ff5aull },

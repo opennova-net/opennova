@@ -1295,6 +1295,7 @@ typedef struct DefPowerupDef {
 typedef struct DefPowerupFile {
     DefPowerupDef *entries;
     size_t count;
+    size_t unmodeled_count; // Blocking file-level or incomplete-block findings.
 } DefPowerupFile;
 
 /* ========================================================================= */
@@ -1323,10 +1324,16 @@ int def_parse_weapons(const char *path, DefWeaponsFile *out, DefParseReport *rep
 int def_parse_weapons_memory(const uint8_t *data, size_t size, DefWeaponsFile *out, DefParseReport *report = nullptr);
 void def_free_weapons(DefWeaponsFile *f);
 
-int def_parse_powerup(const char *path, DefPowerupFile *out);
+int def_parse_powerup(const char *path, DefPowerupFile *out, DefParseReport *report = nullptr);
 /* Parse powerup.def from an in-memory buffer (e.g. a PFF/VFS entry). `out` is zeroed by
-   the call; free with def_free_powerup as usual. Returns 0 on success, -1 on bad input. */
-int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out);
+   the call; free with def_free_powerup as usual. Returns 0 on success, -1 on bad input.
+   `report` (an authoring tool's) receives the input the loader reads past, as the other
+   families report it: an unrecognized key, a line outside a block, an action of another
+   name, a second header while a block is open, an `end` with none open, the ActionDef keys
+   the powerup row keeps nothing of; and, blocking, a block the file ends inside (retail
+   registers a row only at its `end`). */
+int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out,
+                             DefParseReport *report = nullptr);
 void def_free_powerup(DefPowerupFile *f);
 
 int def_parse_items(const char *path, DefItemsFile *out, DefParseReport *report = nullptr);

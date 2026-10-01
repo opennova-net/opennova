@@ -298,7 +298,7 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 	int failures = 0;
 	const size_t size = def_record_size(kind);
 	for (const DefField &field : def_fields(kind)) {
-		const DefAuthored type = def_authored(kind, field.id);
+		const DefAuthored type = def_member(kind, field.id).authored;
 		if (type == DefAuthored::None) continue;
 		++counts.members;
 		size_t index = 0;
@@ -309,13 +309,13 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 		std::vector<std::string> args;
 		const bool written = !block.empty() && line_arguments(block, key, args);
 		DefValue shown;
-		if (!def_authored_get(kind, record, field.id, shown)) {
+		if (!def_authored_get(def_member(kind, field.id), record, shown)) {
 			// Shown as stored (its line, alone, does not keep the word): never a line the saved
 			// file writes, and a set of the stored number changes nothing.
 			std::vector<uint64_t> copy((size + 7) / 8);
 			std::memcpy(copy.data(), record, size);
 			std::string error;
-			if (written || !def_authored_set(kind, copy.data(), field.id, def_get(record, field), error) ||
+			if (written || !def_authored_set(def_member(kind, field.id), copy.data(), def_get(record, field), error) ||
 			    std::memcmp(copy.data(), record, size) != 0) {
 				std::printf("FAIL %s.%s: shown as stored, %s\n", name.c_str(), field.id.c_str(),
 				            written ? "yet the saved file writes its line" : "and a set of it changed the record");
@@ -341,7 +341,7 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 		std::vector<uint64_t> copy((size + 7) / 8);
 		std::memcpy(copy.data(), record, size);
 		std::string error;
-		if (!def_authored_set(kind, copy.data(), field.id, shown, error) || std::memcmp(copy.data(), record, size) != 0) {
+		if (!def_authored_set(def_member(kind, field.id), copy.data(), shown, error) || std::memcmp(copy.data(), record, size) != 0) {
 			std::printf("FAIL %s.%s: a set of the number it shows changed the record (%s)\n", name.c_str(), field.id.c_str(),
 			            error.c_str());
 			++failures;
@@ -350,11 +350,11 @@ int authored_record(DefRecordKind kind, const void *record, const std::string &b
 		if (!written) continue;
 		const DefValue other = type == DefAuthored::Integer ? DefValue(std::get<int64_t>(shown) + 1)
 		                                                    : DefValue(std::get<double>(shown) + 1.0);
-		if (!def_authored_set(kind, copy.data(), field.id, other, error)) {
+		if (!def_authored_set(def_member(kind, field.id), copy.data(), other, error)) {
 			++counts.refused;
 			continue;
 		}
-		if (!def_authored_set(kind, copy.data(), field.id, shown, error) || std::memcmp(copy.data(), record, size) != 0) {
+		if (!def_authored_set(def_member(kind, field.id), copy.data(), shown, error) || std::memcmp(copy.data(), record, size) != 0) {
 			std::printf("FAIL %s.%s: set back through its line, the record differs (%s)\n", name.c_str(), field.id.c_str(),
 			            error.c_str());
 			++failures;
@@ -420,7 +420,7 @@ int authored_units() {
 	DefItemDef &item = items.entries[0];
 	auto number = [&](DefRecordKind kind, const void *record, const char *id) -> DefValue {
 		DefValue out;
-		return def_authored_get(kind, record, id, out) ? out : DefValue(std::string("none"));
+		return def_authored_get(def_member(kind, id), record, out) ? out : DefValue(std::string("none"));
 	};
 	if (number(DefRecordKind::Item, &item, "player_speed") != DefValue(int64_t(30)) ||
 	    number(DefRecordKind::Item, &item, "turn_rate") != DefValue(int64_t(45)) ||
@@ -433,20 +433,20 @@ int authored_units() {
 		++failures;
 	}
 	std::string error;
-	if (!def_authored_set(DefRecordKind::Item, &item, "player_speed", DefValue(int64_t(50)), error) ||
+	if (!def_authored_set(def_member(DefRecordKind::Item, "player_speed"), &item, DefValue(int64_t(50)), error) ||
 	    item.player_speed != 50 * 293 ||
-	    !def_authored_set(DefRecordKind::Item, &item, "acceleration", DefValue(int64_t(7)), error) ||
+	    !def_authored_set(def_member(DefRecordKind::Item, "acceleration"), &item, DefValue(int64_t(7)), error) ||
 	    item.acceleration != 28 || item.deceleration != 40 ||
-	    !def_authored_set(DefRecordKind::Item, &item, "light_transfer", DefValue(int64_t(150)), error) ||
+	    !def_authored_set(def_member(DefRecordKind::Item, "light_transfer"), &item, DefValue(int64_t(150)), error) ||
 	    item.light_transfer != 1.0f) {
 		std::printf("FAIL item sets through the line (%s): speed %d, acceleration %d, deceleration %d, transfer %g\n",
 		            error.c_str(), item.player_speed, item.acceleration, item.deceleration, double(item.light_transfer));
 		++failures;
 	}
-	if (def_authored(DefRecordKind::Item, "id") != DefAuthored::None ||
-	    def_authored(DefRecordKind::Item, "light_move_color") != DefAuthored::None ||
-	    def_authored(DefRecordKind::Item, "dawnshot") != DefAuthored::None ||
-	    def_authored_set(DefRecordKind::Item, &item, "hp", DefValue(int64_t(5)), error)) {
+	if (def_member(DefRecordKind::Item, "id").authored != DefAuthored::None ||
+	    def_member(DefRecordKind::Item, "light_move_color").authored != DefAuthored::None ||
+	    def_member(DefRecordKind::Item, "dawnshot").authored != DefAuthored::None ||
+	    def_authored_set(def_member(DefRecordKind::Item, "hp"), &item, DefValue(int64_t(5)), error)) {
 		std::printf("FAIL a member with no number of its own\n");
 		++failures;
 	}
@@ -457,7 +457,7 @@ int authored_units() {
 	DefAmmoDef &round = ammo.entries[0];
 	if (number(DefRecordKind::Ammo, &round, "max_age_ticks") != DefValue(1.5) ||
 	    number(DefRecordKind::Ammo, &round, "kz_pieslice_bam") != DefValue(int64_t(180)) ||
-	    !def_authored_set(DefRecordKind::Ammo, &round, "light_impact_ticks", DefValue(0.5), error) ||
+	    !def_authored_set(def_member(DefRecordKind::Ammo, "light_impact_ticks"), &round, DefValue(0.5), error) ||
 	    round.light_impact_ticks != 31 || round.light_impact_color != ((10 << 16) | (20 << 8) | 30)) {
 		std::printf("FAIL ammo numbers in written units (%s): fade %d\n", error.c_str(), round.light_impact_ticks);
 		++failures;
@@ -474,11 +474,11 @@ int authored_units() {
 	DefAmmoDef &fastest = fast.entries[0];
 	const int32_t overflowed = fastest.turnrate_maxyaw;
 	DefValue shown;
-	if (def_authored_get(DefRecordKind::Ammo, &fastest, "turnrate_maxyaw", shown) ||
-	    !def_authored_set(DefRecordKind::Ammo, &fastest, "turnrate_maxyaw", DefValue(int64_t(overflowed)), error) ||
+	if (def_authored_get(def_member(DefRecordKind::Ammo, "turnrate_maxyaw"), &fastest, shown) ||
+	    !def_authored_set(def_member(DefRecordKind::Ammo, "turnrate_maxyaw"), &fastest, DefValue(int64_t(overflowed)), error) ||
 	    fastest.turnrate_maxyaw != overflowed ||
-	    !def_authored_set(DefRecordKind::Ammo, &fastest, "turnrate_maxyaw", DefValue(30.0), error) ||
-	    !def_authored_get(DefRecordKind::Ammo, &fastest, "turnrate_maxyaw", shown) || shown != DefValue(30.0)) {
+	    !def_authored_set(def_member(DefRecordKind::Ammo, "turnrate_maxyaw"), &fastest, DefValue(30.0), error) ||
+	    !def_authored_get(def_member(DefRecordKind::Ammo, "turnrate_maxyaw"), &fastest, shown) || shown != DefValue(30.0)) {
 		std::printf("FAIL an overflowed turn rate (%s): stored %d, now %d\n", error.c_str(), overflowed,
 		            fastest.turnrate_maxyaw);
 		++failures;
@@ -487,7 +487,7 @@ int authored_units() {
 	DefItemsFile bright{};
 	const char *bright_text = "begin \"Bright\"\nlight_transfer 35\nend\n";
 	def_parse_items_memory(reinterpret_cast<const uint8_t *>(bright_text), std::strlen(bright_text), &bright, nullptr);
-	if (def_authored_set(DefRecordKind::Item, &bright.entries[0], "light_transfer", DefValue(int64_t(2147483648LL)), error) ||
+	if (def_authored_set(def_member(DefRecordKind::Item, "light_transfer"), &bright.entries[0], DefValue(int64_t(2147483648LL)), error) ||
 	    bright.entries[0].light_transfer != 0.35f) {
 		std::printf("FAIL a whole number past 32 bits was taken\n");
 		++failures;

@@ -436,6 +436,41 @@ const std::vector<DefField> kCarryFields = {
 	FIELD(DefAmmoClassCarry, max_carry, Integer),
 };
 
+// A powerup row (powerup.def): its name, its scalars, its weapon (a name, or every weapon) and its
+// ammo switch; its ammo rows and its two action blocks are records of their own. The parser's line
+// numbers (open_line, end_line) are no member of the row.
+const std::vector<DefField> kPowerupFields = {
+	FIELD(DefPowerupDef, name, Text),
+	FIELD(DefPowerupDef, respawn_time, Integer),
+	FIELD(DefPowerupDef, max_respawns, Integer),
+	FIELD(DefPowerupDef, hp, Integer),
+	FIELD(DefPowerupDef, mana, Integer),
+	FIELD(DefPowerupDef, weapon, Text),
+	FIELD(DefPowerupDef, weapon_all, Integer),
+	FIELD(DefPowerupDef, allammo, Integer),
+	FIELD(DefPowerupDef, ammo_count, Count),
+};
+
+const std::vector<DefField> kPowerupAmmoFields = {
+	FIELD(DefPowerupAmmo, class_name, Text),
+	FIELD(DefPowerupAmmo, count, Integer),
+};
+
+// An action block's keys the powerup handlers read; whether the block is written is its place in its
+// row (the row's pickup or respawn, present or not), no member.
+const std::vector<DefField> kPowerupActionFields = {
+	FIELD(DefPowerupAction, function, Text),
+	FIELD(DefPowerupAction, anim, Text),
+	FIELD(DefPowerupAction, soundset, Text),
+	FIELD(DefPowerupAction, soundsetend, Text),
+	FIELD(DefPowerupAction, particle, Text),
+	FIELD(DefPowerupAction, particleuserpoint, Text),
+	FIELD(DefPowerupAction, texttoken, Text),
+	FIELD(DefPowerupAction, delaystart, Integer),
+	FIELD(DefPowerupAction, delayend, Integer),
+	FIELD(DefPowerupAction, action_value, Integer),
+};
+
 #undef FIELD
 } // namespace
 
@@ -449,6 +484,9 @@ const std::vector<DefField> &def_native_fields(DefRecordKind kind) {
 	case DefRecordKind::Attachment: return kAttachmentFields;
 	case DefRecordKind::Effect: return kEffectFields;
 	case DefRecordKind::Carry: return kCarryFields;
+	case DefRecordKind::Powerup: return kPowerupFields;
+	case DefRecordKind::PowerupAmmo: return kPowerupAmmoFields;
+	case DefRecordKind::PowerupAction: return kPowerupActionFields;
 	}
 	return kItemFields;
 }
@@ -463,6 +501,9 @@ size_t def_record_size(DefRecordKind kind) {
 	case DefRecordKind::Attachment: return sizeof(DefItemEmplacementAttachment);
 	case DefRecordKind::Effect: return sizeof(DefEffectTableEntry);
 	case DefRecordKind::Carry: return sizeof(DefAmmoClassCarry);
+	case DefRecordKind::Powerup: return sizeof(DefPowerupDef);
+	case DefRecordKind::PowerupAmmo: return sizeof(DefPowerupAmmo);
+	case DefRecordKind::PowerupAction: return sizeof(DefPowerupAction);
 	}
 	return 0;
 }

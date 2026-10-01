@@ -38,11 +38,12 @@ int parse_delay(const char *v) {
 
 // One in-ACTION line. The keys the two powerup handlers read land in the row;
 // the others the shared parser accepts (dupsound, ctrlreg, ctrlreginc) are
-// dropped, and an unknown key is ignored like the original's.
+// dropped, and an unknown key is ignored like the original's: false for a line
+// whose key lands nothing in the row (an authoring report's ignored input).
 // [orig: ActionDef_ParseScriptLine @0x4023C0 -- function @0x40296E, anim
 //  @0x402873, delaystart/delay/delayend @0x40279A/@0x402B2C, soundset/
 //  soundsetend/particle/particleuserpoint/texttoken/action_value stores]
-void parse_action_line(DefPowerupAction &action, const io::ConfigTokens &tokens) {
+bool parse_action_line(DefPowerupAction &action, const io::ConfigTokens &tokens) {
     const char *key = tokens.tokens[0];
     const char *v = tokens.token(1);
     const size_t vl = strlen(v);
@@ -66,10 +67,19 @@ void parse_action_line(DefPowerupAction &action, const io::ConfigTokens &tokens)
         safe_copy(action.texttoken, sizeof(action.texttoken), v, vl);
     } else if (key_is(key, "action_value")) {
         action.action_value = (int)strtol(v, nullptr, 10);
+    } else {
+        return false;
     }
+    return true;
 }
 
-int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) {
+// What the loader reads past without storing anything, reported to an authoring tool (the
+// other families' UnknownProperty): saving drops it, which the game reads the same.
+void ignored(DefPowerupFile *out, DefParseReport *report, size_t line, const char *record, const char *key) {
+    authoring_issue(out->unmodeled_count, report, line + 1, record, key, strlen(key));
+}
+
+int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefPowerupDef current;
     memset(&current, 0, sizeof(current));
@@ -96,6 +106,7 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
         // logs "definition missing end" and is dropped, the open block stays
         // current [orig: @0x442F02..0x442F49].
         if (key_is(key, "powerup")) {
+            if (in_block) ignored(out, report, line_index, current.name, key);
             if (!in_block) {
                 // The block was zeroed at the previous `end` (or is fresh);
                 // only the 16-byte name lands here [orig: strncpy @0x442F3F].
@@ -122,16 +133,21 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
                 memset(&current, 0, sizeof(current));
                 ammo_cap = 0;
                 in_block = false;
+            } else {
+                ignored(out, report, line_index, "", key);
             }
             return;
         }
 
         // Lines outside a block are ignored [orig: the dword_A89588 test @0x44302C].
-        if (!in_block) return;
+        if (!in_block) {
+            ignored(out, report, line_index, "", key);
+            return;
+        }
 
         // In-action lines go to the action-line parser [orig: @0x443039..0x44304F].
         if (in_action) {
-            if (action != nullptr) parse_action_line(*action, tokens);
+            if (action != nullptr && !parse_action_line(*action, tokens)) ignored(out, report, line_index, current.name, key);
             return;
         }
 
@@ -142,8 +158,10 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
                 action = &current.pickup;
             else if (key_is(v, "respawn"))
                 action = &current.respawn;
-            else
+            else {
+                ignored(out, report, line_index, current.name, key);
                 return;
+            }
             memset(action, 0, sizeof(*action));
             action->present = 1;
             in_action = true;
@@ -172,34 +190,40 @@ int parse_powerup_buffer(const char *buf, size_t file_len, DefPowerupFile *out) 
             safe_copy(row.class_name, sizeof(row.class_name), v, vl);
             row.count = (int)strtol(tokens.token(2), nullptr, 10);
             DA_PUSH(current.ammo, current.ammo_count, ammo_cap, row);
+        } else {
+            ignored(out, report, line_index, current.name, key); // "unrecognized token" [orig: @0x44328C]
         }
-        // else: "unrecognized token" [orig: @0x44328C]
     });
-    // An unterminated tail block is never registered (retail registers only at `end`).
+    // An unterminated tail block is never registered (retail registers only at `end`): a
+    // file the typed model cannot carry as written, which an authoring tool refuses to
+    // rewrite until it is closed or removed.
+    if (in_block)
+        authoring_issue(out->unmodeled_count, report, current.open_line + 1, current.name, "powerup", 7,
+                        DefIssueCode::MalformedBlock);
     if (current.ammo != nullptr) free(current.ammo);
     return 0;
 }
 
 } // namespace
 
-int def_parse_powerup(const char *path, DefPowerupFile *out) {
+int def_parse_powerup(const char *path, DefPowerupFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    const int rc = parse_powerup_buffer(buf, file_len, out);
+    const int rc = parse_powerup_buffer(buf, file_len, out, report);
     free(buf);
     return rc;
 }
 
-int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out) {
+int def_parse_powerup_memory(const uint8_t *data, size_t size, DefPowerupFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     char *buf = (char *)malloc(size + 1);
     if (!buf) return -1;
     memcpy(buf, data, size);
     buf[size] = '\0';
-    const int rc = parse_powerup_buffer(buf, size, out);
+    const int rc = parse_powerup_buffer(buf, size, out, report);
     free(buf);
     return rc;
 }

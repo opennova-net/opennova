@@ -322,13 +322,13 @@ bool defines_a_name(const Value &value) {
 // Whether a field carries the label the editor names it by. The one field that may go without:
 // a def member its line does not write as a number of its own, which keeps the def table's id
 // (the native member's name, the tooltip saying the key its file writes where the two differ);
-// a member written as a number of its own is labelled by its line (def_catalog_document's
+// a member written as a number of its own is labelled by its line (def_table.cpp's
 // describe: the table's name for it, else the key). field_title's fallback to the id is not a
 // label.
 bool labelled(const Document &document, const NodeAddress &address, const FieldSchema &field) {
 	if (!field.label.empty()) return true;
 	return dynamic_cast<const DefCatalogDocument *>(&document) &&
-	       opennova::def::def_authored(def_kind(address.kind), field.id) == opennova::def::DefAuthored::None;
+	       opennova::def::def_member(def_kind(address.kind), field.id).authored == opennova::def::DefAuthored::None;
 }
 
 // A record's field schema checks, as the record's field_on gives it.

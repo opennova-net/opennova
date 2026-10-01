@@ -325,7 +325,7 @@ int windows_at_depth() {
 	const std::vector<Document::Collection> top = document->collections_of(screen_address);
 	TEST_EXPECT(top.size() == 1 && !top[0].spec.fixed && top[0].ids == std::vector<NodeId>{root.child});
 	const std::vector<Document::Collection> lists = document->collections_of(root);
-	TEST_EXPECT(lists.size() == mnu::schema_lists(mnu::SchemaShape::Window).size());
+	TEST_EXPECT(lists.size() == menu_table().kind(kWindow)->lists().size());
 	TEST_EXPECT(std::string(document->kind_token(lists.back().spec.kind)) == "window" &&
 	            lists.back().ids == std::vector<NodeId>({title.child, exit.child}));
 	TEST_EXPECT(std::string(document->kind_token(lists[2].spec.kind)) == "action" && lists[2].spec.kind == menu_kind("action"));

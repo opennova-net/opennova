@@ -35,17 +35,20 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/model/field_text.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/finding_code_row.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/model/staged_rows.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/model/table_document.cpp
     # documents — the document types: the def catalogs, their symbol tables and validation;
     # the menu clipboard's one rule for the tree and the canvas; the types' project checks, one
     # per type that has one, kept between validations
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_catalog_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/def_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/strings_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_clipboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_document.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_ids.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp

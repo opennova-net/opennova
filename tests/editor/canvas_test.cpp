@@ -942,7 +942,7 @@ int test_model_canvas() {
 	const int width = 640, height = 480;
 	model.set_device_size(width, height);
 	const ModelRow &row = *document->model_row();
-	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.collections[3][0] };
+	const NodeAddress point{ row.id, node_kind(ModelKind::UserPoint), row.ids.lists[3][0].id };
 	EditorRequest select = request::select_record(document->path(), point);
 	session.handle(select);
 	ModelCanvas canvas;

@@ -49,10 +49,6 @@ add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 # The property table an editor sets a model's fields through: every field set to
 # its own value leaves the bytes (synthetic models; retail models as a SKIP-LEG
 # leg), derived words follow their fields.
-add_executable(threedi_schema_test threedi/schema_test.cpp)
-target_link_libraries(threedi_schema_test PRIVATE opennova_formats)
-target_include_directories(threedi_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(threedi_schema COMMAND threedi_schema_test)
 
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
@@ -1780,13 +1776,13 @@ target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
 
-# The property table (formats/mnu/mnu_schema, ADR 0046 S9h): every member reached by
-# exactly one field path or list, over a synthetic every-element menu and (a SKIP-LEG
-# without OPENNOVA_JO_ASSETS) the fifteen reference menus rebuilt through the table.
+# The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
+# window type reads what, what an ACTION's verb reads, the material flag tokens. The table
+# itself is the editor's (editor_menu_table, ADR 0046 S13 D10).
 add_executable(mnu_schema_test mnu/mnu_schema_test.cpp)
 target_link_libraries(mnu_schema_test PRIVATE opennova_formats)
 target_include_directories(mnu_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(mnu_schema COMMAND mnu_schema_test)
+add_test(NAME mnu_schema COMMAND mnu_schema_test)
 
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_formats)
@@ -4063,6 +4059,14 @@ add_test(NAME editor_strings COMMAND editor_strings_test)
 # The menu document (S6c), the edits that must not lose authored data (S9d) and the
 # retail sweep through it: a SKIP-LEG per root (OPENNOVA_JO_DIR's installed menus,
 # OPENNOVA_JO_ASSETS' fifteen revx02 fixtures).
+# The menu's table (editor/documents/mnu_table, ADR 0046 S13 D10): every member reached by
+# exactly one field path or list, over a synthetic every-element menu and (a SKIP-LEG without
+# OPENNOVA_JO_ASSETS) the fifteen reference menus rebuilt through the table.
+add_executable(editor_menu_table_test editor/menu_table_test.cpp)
+target_link_libraries(editor_menu_table_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_menu_table COMMAND editor_menu_table_test)
+
 add_executable(editor_menus_test editor/mnu_document_test.cpp)
 target_link_libraries(editor_menus_test PRIVATE opennova_editor)
 target_include_directories(editor_menus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4072,6 +4076,15 @@ opennova_add_mixed_test(editor_menus COMMAND editor_menus_test)
 # save and reload, the validator (S11h: frames and registers as the runtime reads them);
 # a SKIP-LEG per root: every retail model saved untouched (OPENNOVA_JO_ASSETS), every
 # model of the game install validated with no error (OPENNOVA_JO_DIR).
+# The model's table (editor/documents/model_table.cpp, ADR 0046 S13 D10; the format's
+# threedi_schema test it was): a Set of every field of every record to itself changes no
+# byte, over the synthetic models and (a SKIP-LEG without OPENNOVA_JO_DIR) every model the
+# game install ships; the derived words, the refusals, the lists, the rows.
+add_executable(editor_model_table_test editor/model_table_test.cpp)
+target_link_libraries(editor_model_table_test PRIVATE opennova_editor)
+target_include_directories(editor_model_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_table COMMAND editor_model_table_test)
+
 add_executable(editor_model_document_test editor/model_document_test.cpp)
 target_link_libraries(editor_model_document_test PRIVATE opennova_editor)
 target_include_directories(editor_model_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

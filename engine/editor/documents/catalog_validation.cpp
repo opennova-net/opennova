@@ -38,7 +38,7 @@ std::string repeated_name(DefRecordKind kind, const Node &earlier) {
 		// Both are kept (the load logs "Duplicate names", its strcmp @0x4a1ea4, and goes on)
 		// [orig: ItemDefs_LoadAndValidate @ 0x4a1da0]; the lookup by name returns the first
 		// [orig: ItemList_FindIndexByPrimaryName @ 0x49e010].
-		return "An earlier item has this name (id " + std::to_string(std::get<DefItemDef>(catalog_row(earlier).data).id) +
+		return "An earlier item has this name (id " + std::to_string(catalog_row(earlier).native.as<DefItemDef>().id) +
 		       "): the game keeps both, and a lookup by the name finds the earlier one.";
 	case DefRecordKind::Weapon:
 		// A weapon block of a name the table has reopens that row, reset to its defaults
@@ -81,10 +81,11 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 			for (const auto &row : catalog->rows()) {
 				by_name.emplace(row->name(), NodeAddress{row->id, row->kind, 0});
 				if (def_kind(row->kind) != DefRecordKind::Weapon) continue;
-				const auto &weapon = std::get<DefWeaponDef>(catalog_row(*row).data);
-				for (size_t i = 0; i < weapon.actions_count; ++i)
+				const auto &weapon = catalog_row(*row).native.as<DefWeaponDef>();
+				const std::vector<RecordIds> &actions = catalog_row(*row).ids.lists[0];
+				for (size_t i = 0; i < weapon.actions_count && i < actions.size(); ++i)
 					by_name.emplace(weapon.actions[i].name,
-					                NodeAddress{row->id, node_kind(DefRecordKind::Action), row->collections[0][i]});
+					                NodeAddress{row->id, node_kind(DefRecordKind::Action), actions[i].id});
 			}
 		}
 		const auto found = by_name.find(diagnostic.record);
@@ -122,7 +123,7 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 		const NodeAddress address{row->id, row->kind, 0};
 		// On the field that names the record (an item's display_name, a weapon's weapon_name).
 		const DefRecordKind kind = def_kind(row->kind);
-		const char *name_field = catalog_name_field(kind);
+		const char *name_field = catalog_name_field(row->kind);
 		if (row->name().empty()) {
 			add(DiagnosticSeverity::Error, CatalogFinding::NameEmpty, "Enter a name for this record.", name_field, address);
 		} else {
@@ -132,7 +133,7 @@ std::vector<Diagnostic> validate_catalog_file(const DocumentBase &document) {
 				    address);
 		}
 		if (kind == DefRecordKind::Item) {
-			const auto &item = std::get<DefItemDef>(catalog_row(*row).data);
+			const auto &item = catalog_row(*row).native.as<DefItemDef>();
 			const auto first = first_of_id.emplace(item.id, row.get());
 			if (!first.second)
 				add(DiagnosticSeverity::Warning, CatalogFinding::ItemIdentity,
