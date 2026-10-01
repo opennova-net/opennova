@@ -432,6 +432,14 @@ target_link_libraries(mission_chains_test PRIVATE opennova_formats)
 target_include_directories(mission_chains_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_chains COMMAND mission_chains_test)
 
+# What each trigger's and action's parameters are, as rows
+# (formats/mission/mission_params.h): a row per sub-type and action type, the
+# references they make, the sub-type names the typed views give.
+add_executable(mission_params_test mission/mission_params_test.cpp)
+target_link_libraries(mission_params_test PRIVATE opennova_formats)
+target_include_directories(mission_params_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_params COMMAND mission_params_test)
+
 add_executable(mission_mis_test mission/mission_mis_test.cpp)
 target_link_libraries(mission_mis_test PRIVATE opennova_formats)
 target_include_directories(mission_mis_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
