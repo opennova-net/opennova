@@ -168,10 +168,11 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
 - PR CI builds only the `template_debug` desktop GDExtension and packages debug-mode exports
   (`-ExportMode debug`); `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
-  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. Every PR also
-  compiles the wasm32 web side module (`build-gdextension-web`, `scripts/build_godot_web.sh`,
-  Emscripten 4.0.20 only; ADR 0049 d5: no exceptions as control flow, ILP32-safe layout
-  guards). The engine test job runs Ninja + sccache (the VS generator is local-only).
+  `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The web jobs
+  (`build-gdextension-web` in `ci.yml`, and `game-web.yml`'s push/PR triggers) are paused
+  while the web build is on hold; ADR 0049 d5's rules (no exceptions as control flow,
+  ILP32-safe layout guards) still apply, but no CI checks them. The engine test job runs
+  Ninja + sccache (the VS generator is local-only).
 
 ## Deeper docs
 
