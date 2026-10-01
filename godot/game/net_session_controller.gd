@@ -98,11 +98,32 @@ func maybe_launch_lan_from_flags() -> bool:
 	return false
 
 
+# --- The web build (ADR 0049) --------------------------------------------------
+
+# A browser opens no UDP socket, and every LAN and NovaWorld leg rides one: the
+# web build says so instead of starting a session that cannot bind. (The LAN
+# browser's own search already reports its failed bind.)
+func _refuse_on_web() -> bool:
+	if not OS.has_feature("web"):
+		return false
+	var notice := AcceptDialog.new()
+	notice.title = "OpenNova"
+	notice.dialog_text = ("Multiplayer needs the desktop build: a browser cannot open"
+			+ " the UDP sockets LAN and NovaWorld play use.")
+	notice.confirmed.connect(notice.queue_free)
+	notice.canceled.connect(notice.queue_free)
+	_panel_layer.add_child(notice)
+	notice.popup_centered()
+	return true
+
+
 # --- LAN co-op (mp.mnu) --------------------------------------------------------
 
 # Host a LAN co-op game: the same menu->world handoff as a single-player start, but the
 # world loads as a listen-server host (ADR 0011) configured from the mp.mnu host screen.
 func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
+	if _refuse_on_web():
+		return
 	# The callsign is part of the local game session. LAN does not inspect or inherit
 	# any NovaWorld service configuration; online registration is owned exclusively
 	# by _on_novaworld_host_requested and the config that panel supplies.
@@ -126,7 +147,7 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 ## the observed host_ip/port and browse-time server fields; the mission arrives
 ## after authentication in the normal S2C 0x7B session record.
 func join_lan_server(target: JoinTarget) -> void:
-	if target == null:
+	if target == null or _refuse_on_web():
 		return
 	# `--integrity-profile` is the operator opt-in for EVERY joiner entry (the
 	# NovaWorld browser included), not just the --lan-join launch. The default
@@ -416,7 +437,7 @@ func resolve_player_callsign() -> String:
 # unhandled-key path as well so Enter/Escape cannot activate controls behind
 # the compact overlay.
 func open_novaworld_panel() -> void:
-	if _novaworld_panel != null:
+	if _novaworld_panel != null or _refuse_on_web():
 		return
 	_capture_menu_behind_novaworld()
 	_novaworld_panel = NOVAWORLD_PANEL_SCENE.instantiate() as NovaWorldPanel

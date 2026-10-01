@@ -39,9 +39,10 @@ packs into PFF archives only when the user plays or exports. There is no proprie
 project database: the project file is plain text and every asset is a readable file.
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
-OpenNova ships the runtime and format libraries plus its own small bundled
+OpenNova ships the runtime and format libraries plus its own bundled
 `assets/` (authored from scratch: today the placeholder main menu whose PLAY
-RETAIL picks and remembers a retail install, ADR 0048); it never distributes
+RETAIL picks and remembers a retail install, ADR 0048, and a first-person
+carbine exported from the Blender sources in `art/`); it never distributes
 retail game data. Users point it at their own game-data directory, on the
 command line (`--resource-dir`, ADR 0045) or through that picker. The editor is
 a separate download and a separate application. Test-only synthetic fixtures

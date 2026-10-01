@@ -16,8 +16,9 @@
     0039: infrastructure like io/vfs, not a port, so it sits in the citation
     allowlist; the frame-stats board builds in every flavour, while Dear ImGui,
     the pass and the game's F3 windows build only with `OPENNOVA_DEVTOOLS` — off for
-    the release GDExtension flavour; ImGui headers never leave the group, the
-    shell hands the context over as plain pointers via `devtools/imgui_abi.h`).
+    the release GDExtension flavour and the web build; ImGui headers never leave
+    the group, the shell hands the context over as plain pointers via
+    `devtools/imgui_abi.h`).
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
     wire): novacrypto, napi, npwire (the in-game codec, the NWU session
     framing, capture decode, the LAN discovery codec, the datagram-socket
@@ -146,6 +147,12 @@
   style is `.clang-format` at the repo root (tabs, 4-wide, 100 columns,
   `NamespaceIndentation: None`) — config only until the whitespace-only
   reformat commits land; never reformat a file as part of another change.
+- Web-portable (ADR 0049 d5): the web build links this code (every group but `editor/`,
+  which only the editor variant links) into a wasm32 side module whose templates
+  abort on any throw, so nothing uses exceptions as control flow
+  (`strutil::parse_int` / `parse_ulong` / `parse_float`, never `try { std::stoi }`);
+  thread counts are the embedder's (the terrain composer's `Threads` budget,
+  `Threads::for_hardware()` being the desktop sizing); layout guards hold on ILP32.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits

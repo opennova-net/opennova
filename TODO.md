@@ -11,8 +11,9 @@ health. Divergences from the original engine belong in
       standing: the `infra/aws` downloads bucket + CloudFront + ACM cert + Cloudflare
       CNAME, the `launcher_ci` IAM user and its outputs, the unproxied `nw` record, the
       whole `infra/github` stack (it manages the expansion repos and regenerates
-      `backend/seed/0002_expansions.generated.sql`, which would now break server boot, so
-      drop that output first), `deploy/bin/on-deploy github`,
+      `backend/seed/0002_expansions.generated.sql`, whose inserts would now hit the table
+      migration 0007 dropped: logged as "seed FAILED" on every boot and failing the
+      `backend_schema` ctest, so drop that output first), `deploy/bin/on-deploy github`,
       `deploy/env/github.tfvars.json.tpl`, the `expansion_*` 1Password items, and
       `infra/github/expansion-publish-workflow.yml.example`. Empty the bucket before `apply`,
       and keep the expansion repos (`removed` blocks, not destroy).
@@ -35,7 +36,8 @@ health. Divergences from the original engine belong in
       tool would retire `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + the since-retired `diff_vs_golden.ps1` (ca1cef465) GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
-      every file under `engine/runtime/terrain` now carries an anchor, and the cpt/til/trn
+      every port under `engine/runtime/terrain` now carries an anchor (the row-stripe and
+      tile-composition-worker threading declare themselves infrastructure), and the cpt/til/trn
       resource formats moved to `engine/formats/` carrying theirs, so the gap is
       `godot/src/terrain/`, where the foliage def/map pair and the tile cache device/entry files carry
       none, `terrain_tile_info.cpp` carries only its foliage-block anchor and the
@@ -96,14 +98,14 @@ health. Divergences from the original engine belong in
 ## Project health follow-ups
 
 - [ ] Release-gate parity: make tag releases run the same required quality gates as PR/master CI, or reject release tags whose commit is not on `master`. Acceptance: an off-master tag cannot publish, and a valid release commit passes the shared maturity, native, and Godot gates.
-- [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): establish project-owned formatting settings, then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
+- [ ] Incremental conventional linting (vocabulary conventions already ride `scripts/lint/conventions_lint.py` as a CI gate; this row is formatting + per-language linters): the C++ `.clang-format` is committed CONFIG ONLY (ADR 0043 d14), with the per-group whitespace-only reformat commits and `.git-blame-ignore-revs` a separate follow-up PR; GDScript/Python have no project formatting settings yet. Then add per-language lint checks in advisory or changed-file mode before enforcing them. Acceptance: CI checks new changes without requiring a repository-wide reformat, with documented local commands for each enabled linter.
 - [ ] NovaWorld session-builder residue (PAR-NET): the 0x81/0x82 builders
       (`build_server_hello` / `build_server_auth`, `engine/net/npwire/session_hello.h` +
       `engine/net/npwire/session/session_hello.cpp`) were grilled and fixed 2026-06-27
-      (ROADMAP Wave 3); what remains is the host-specific seed values the golden byte-diff
-      still shows (the 0x81 `CI` host-node index, the 0x82 `MI` host dcb, the identity
-      strings) and the ~8 §5.2a initial-state serializers `log_deferred_once` skips
-      (`engine/runtime/inmatch/server_initial_state.cpp`, "emitted as nothing pending the
-      grill wave"), which stay unemitted-and-logged rather than faked. Witness each at the
-      addresses cited there -> `ingame_encode`, land the record via `re-doc`. Detail:
-      `engine/runtime/inmatch/ROADMAP.md`.
+      (ROADMAP Wave 3), the 0x82 `MI` is the assigned dcb (D-NET-105) and the §5.2a
+      initial-state serializers were ported by D-NET Wave 1 (`server_initial_state.cpp`
+      now defers only a 0x0B header it cannot encode). What remains is the host-specific
+      values the golden byte-diff still shows: the 0x81 `CI` (`build_server_hello` echoes
+      the client's CI where the retail LAN host sends its host-node index, 2) and the
+      identity strings. Witness each at the addresses cited there, port it, land the
+      record via `re-doc`. Detail: `engine/runtime/inmatch/ROADMAP.md`.
