@@ -1,5 +1,5 @@
-// The model document's structural edits, the renumbering of what names a CTRL register or an
-// MTRX row by its index, and its validator (model_document.h).
+// The model document's list rules, the renumbering of what names a CTRL register or an MTRX row by its
+// index, and its validator (model_document.h).
 
 #include <algorithm>
 #include <cctype>
@@ -11,7 +11,6 @@
 #include <base/io/strutil.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_kinds.h>
-#include <editor/model/id_list.h>
 #include <editor/model/staged_rows.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
@@ -27,50 +26,6 @@ using namespace model_document_detail;
 namespace {
 
 constexpr NodeKind kModel = node_kind(ModelKind::Model);
-
-ThreediMaterial fresh_material() {
-	ThreediBuildModel build;
-	build.add_material("FF_ST_OP", nullptr);
-	return build.materials.front();
-}
-
-ThreediLight fresh_light() {
-	ThreediBuildModel build;
-	const int white[3] = {255, 255, 255};
-	build.add_light(ThreediBuildVec3{0.0, 0.0, 0.0}, 1.0, 10.0, 0, 0, white, white);
-	return build.lights.front();
-}
-
-ThreediUserPoint fresh_user_point(const ModelRow &row) {
-	std::string name;
-	for (int n = 1;; ++n) {
-		char buf[16];
-		std::snprintf(buf, sizeof(buf), "POINT%02d", n);
-		bool taken = false;
-		for (const ThreediUserPoint &u : row.user_points) taken = taken || strutil::iequals(u.name, buf);
-		if (!taken) {
-			name = buf;
-			break;
-		}
-	}
-	ThreediBuildModel build;
-	build.add_user_point(name.c_str(), ThreediBuildVec3{0.0, 0.0, 0.0}, ThreediBuildVec3{1.0, 0.0, 0.0}, -1,
-	                     THREEDI_USER_POINT_GAMEPLAY);
-	return build.user_points.front();
-}
-
-ThreediControlRegister fresh_register() {
-	ThreediControlRegister made{};
-	std::snprintf(made.name, sizeof(made.name), "%s", "LOD_FRAC");
-	return made;
-}
-
-ThreediMatrix4x4 fresh_frame() {
-	ThreediMatrix4x4 identity;
-	threedi_mat4_identity(&identity);
-	return identity;
-}
-
 constexpr NodeKind kLight = node_kind(ModelKind::Light);
 
 } // namespace
@@ -85,15 +40,16 @@ bool ModelDocument::reads_register_byte(const Node &node, std::string &where, in
 	bool found = false;
 	walk_records(node, [&](const NodeAddress &record, const Placement &) {
 		if (record.kind == kLight) return true;
-		const ThreediSchemaRecord native = record_of(*this, const_cast<Node &>(node), record);
+		const RecordHandle native = record_in(node, record);
 		if (!native) return true;
-		for (const FieldSchema &field : schema(record.kind)) {
+		const TableKind &kind = *model_table().kind(record.kind);
+		for (size_t place = 0; place < kind.fields().size(); ++place) {
+			const FieldSchema &field = kind.fields()[place];
 			if (field.reference != ReferenceKind::ModelRegister ||
-			    model_document_detail::named_by_index(native, field.id) != ReferenceKind::ModelRegister ||
-			    !threedi_schema_reads(native, field.id))
+			    named_by_index(native, place) != ReferenceKind::ModelRegister || !model_field(record.kind, place).reads(native))
 				continue;
 			Value value;
-			if (!threedi_schema_get(native, field.id, value) || !std::holds_alternative<int64_t>(value)) continue;
+			if (!kind.value(place).get(native, value) || !std::holds_alternative<int64_t>(value)) continue;
 			where = record_path(record) + " " + field.id;
 			named = std::get<int64_t>(value);
 			found = true;
@@ -104,88 +60,29 @@ bool ModelDocument::reads_register_byte(const Node &node, std::string &where, in
 	return found;
 }
 
-bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAllocator &allocate, NodeId &added,
-                                    std::string &error) {
+bool ModelDocument::accept_list_edit(const Node &node, const ListChange &change, std::string &error) const {
 	if (node.kind != kModel) {
 		error = "The collision records are the model's geometry: export the model again from Blender to change them.";
 		return false;
 	}
-	ModelRow &row = static_cast<ModelRow &>(node);
-	const bool adding = edit.operation == EditOperation::Add;
-	// Where the record sits (its table's index, and its own index in a LOD's or a material's list),
-	// and the LOD or material an Add names (none: the row), by their paths in the row as the edit
-	// found it, read before anything changes.
-	uint32_t table = 0, own = 0, owner_table = 0, owner = 0;
-	bool owned = false;
-	if (!adding) {
-		const RecordPath at = path_in(row, edit.address.child);
-		if (at.empty()) {
-			error = "The record no longer exists.";
-			return false;
-		}
-		table = at[0].index;
-		own = at[at.size() - 1].index;
-	} else if (edit.parent != 0 && edit.parent != row.id) {
-		const RecordPath at = path_in(row, edit.parent);
-		if (at.size() != 1) {
-			error = "The owner no longer exists.";
-			return false;
-		}
-		owned = true;
-		owner_table = at[0].collection;
-		owner = at[0].index;
-	}
-	switch (static_cast<ModelKind>(edit.address.kind)) {
-	case ModelKind::Material: {
-		if (edit.operation == EditOperation::Remove && material_is_drawn(row, row.materials[table].source)) {
+	const ModelRow &row = static_cast<const ModelRow &>(node);
+	const NodeKind kind = model_table().kind(change.owner->record.kind)->lists()[change.list].spec.kind;
+	switch (static_cast<ModelKind>(kind)) {
+	case ModelKind::Material:
+		if (change.operation == EditOperation::Remove &&
+		    material_is_drawn(row, change.record->record.as<ModelMaterial>().source)) {
 			error = "Strips draw with this material: export the model again from Blender to take it off them.";
 			return false;
 		}
-		ModelMaterial fresh;
-		fresh.material = fresh_material();
-		if (!edit_id_list(row.materials, row.collections[kMaterials], edit, std::move(fresh), allocate, added, error))
-			return false;
-		// A copy is drawn by no strip, and its texture rows are its own.
-		if (edit.operation == EditOperation::Duplicate) {
-			ModelMaterial &copy = row.materials[std::min(edit.position, row.materials.size() - 1)];
-			copy.source = -1;
-			for (NodeId &id : copy.texture_ids) id = allocate();
-		}
 		return true;
-	}
-	case ModelKind::Texture: {
-		if (adding && (!owned || owner_table != kMaterials)) {
-			error = "A texture row belongs to a material.";
-			return false;
-		}
-		ModelMaterial &material = row.materials[adding ? owner : table];
-		std::vector<ThreediMaterialTexture> list(material.material.textures,
-		                                         material.material.textures + material.texture_ids.size());
-		if ((adding || edit.operation == EditOperation::Duplicate) && list.size() >= 24) {
-			error = "A material holds 24 texture rows.";
-			return false;
-		}
-		ThreediMaterialTexture fresh{};
-		fresh.slot = static_cast<uint8_t>(THREEDI_TEX_SLOT_DIFFUSE);
-		if (!edit_id_list(list, material.texture_ids, edit, fresh, allocate, added, error)) return false;
-		std::memset(material.material.textures, 0, sizeof(material.material.textures));
-		std::copy(list.begin(), list.end(), material.material.textures);
-		material.material.texture_count = static_cast<uint32_t>(list.size());
-		return true;
-	}
-	case ModelKind::Light:
-		return edit_id_list(row.lights, row.collections[kLights], edit, fresh_light(), allocate, added, error);
-	case ModelKind::UserPoint:
-		return edit_id_list(row.user_points, row.collections[kUserPoints], edit, fresh_user_point(row), allocate,
-		                    added, error);
 	case ModelKind::Register: {
 		// Named by its index: what names a register the core has the type renumber after the edit
 		// (renumber_references). The first register gives the model a CTRL table and the last takes
 		// it away, which changes what every material's and track's register byte names (a global
 		// register with no table, an entry of the table with one: reads_register_byte), so either is
 		// refused while the game reads such a byte.
-		const bool first = adding && row.registers.empty();
-		const bool last = edit.operation == EditOperation::Remove && row.registers.size() == 1;
+		const bool first = change.operation == EditOperation::Add && row.registers.empty();
+		const bool last = change.operation == EditOperation::Remove && row.registers.size() == 1;
 		std::string where;
 		int64_t named = 0;
 		if ((first || last) && reads_register_byte(row, where, named)) {
@@ -199,51 +96,48 @@ bool ModelDocument::edit_collection(Node &node, const Edit &edit, const IdAlloca
 			                        " of the table now. Point it at no register first.";
 			return false;
 		}
-		return edit_id_list(row.registers, row.collections[kRegisters], edit, fresh_register(), allocate, added, error);
+		return true;
 	}
-	case ModelKind::Frame:
-		// Named by its row as a register is by its index. A frame byte of 0 names no row (the pose
-		// reads one only above 0 [orig: Model_TransformBoneMatrices @ 0x58E3FE]), so row 0 is never
-		// read: no pin keeps it first, since the renumbering refuses any edit that would leave a frame
-		// byte the game reads naming row 0 or a row past 127 (record_index's none).
-		return edit_id_list(row.frames, row.collections[kFrames], edit, fresh_frame(), allocate, added, error);
 	case ModelKind::PartAnimation: {
-		if (adding && (!owned || owner_table != kLods)) {
-			error = "A part animation belongs to a LOD.";
-			return false;
-		}
-		ModelLod &lod = row.lods[adding ? owner : table];
 		// Row i transforms part i, as every retail table does (threedi_o3d_read's rule): the next
-		// part's inert row added at the end, the last removed.
-		if (adding) {
+		// part's inert row added at the end (list_position), the last removed.
+		const ModelLod &lod = change.owner->record.as<ModelLod>();
+		if (change.operation == EditOperation::Add) {
 			if (lod.panm.size() >= lod.lod.render_object_count) {
 				error = "Every part of this LOD has its part animation.";
 				return false;
 			}
-			const int part = static_cast<int>(lod.panm.size());
-			const int parent = part < static_cast<int>(lod.lod.render_object_count) ? lod.lod.render_objects[part].parent_index : -1;
-			Edit at_end = edit;
-			at_end.position = SIZE_MAX;
-			return edit_id_list(lod.panm, lod.panm_ids, at_end, threedi_build_inert_panm(part, parent), allocate,
-			                    added, error);
+			return true;
 		}
-		if (edit.operation != EditOperation::Remove || own + 1 != lod.panm.size()) {
-			error = "Part animations go in part order: add one at the end, or remove the last.";
-			return false;
-		}
-		return edit_id_list(lod.panm, lod.panm_ids, edit, ThreediPartAnimation{}, allocate, added, error);
-	}
-	default:
-		error = "LODs are the model's geometry: export the model again from Blender to change them.";
+		if (change.operation == EditOperation::Remove && change.record->step().index + 1 == lod.panm.size()) return true;
+		error = "Part animations go in part order: add one at the end, or remove the last.";
 		return false;
 	}
+	default:
+		// Named by its row as a register is by its index. A frame byte of 0 names no row (the pose
+		// reads one only above 0 [orig: Model_TransformBoneMatrices @ 0x58E3FE]), so row 0 is never
+		// read: no pin keeps it first, since the renumbering refuses any edit that would leave a frame
+		// byte the game reads naming row 0 or a row past 127 (record_index's none).
+		return true;
+	}
+}
+
+size_t ModelDocument::list_position(const Node &, const ListChange &change, size_t position) const {
+	const NodeKind kind = model_table().kind(change.owner->record.kind)->lists()[change.list].spec.kind;
+	return change.operation == EditOperation::Add && kind == node_kind(ModelKind::PartAnimation) ? SIZE_MAX : position;
+}
+
+void ModelDocument::prepare_record(const Node &, const ListChange &change, DetachedRecord &record) const {
+	// A copy is drawn by no strip, and its texture rows are its own (their identities fresh).
+	if (change.operation == EditOperation::Duplicate && record.kind == node_kind(ModelKind::Material))
+		static_cast<ModelMaterial *>(record.data.get())->source = -1;
 }
 
 bool ModelDocument::renumber_references(const StagedRows &rows, const RecordShift &shift,
                                         std::vector<Edit> &sites, std::string &error) const {
 	const bool registers = shift.reference == ReferenceKind::ModelRegister;
 	// A material's and a track's register byte is an entry of the CTRL table only while the model
-	// has one (reads_register_byte): an edit that gives or takes the table, which edit_collection
+	// has one (reads_register_byte): an edit that gives or takes the table, which accept_list_edit
 	// allows only while the game reads none of them, leaves their bytes as they are.
 	const bool table = !registers || (shift.before() > 0 && shift.after > 0);
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
@@ -267,20 +161,21 @@ bool ModelDocument::renumber_references(const StagedRows &rows, const RecordShif
 		bool ok = true;
 		walk_records(row, [&](const NodeAddress &record, const Placement &) {
 			if (registers && !table && record.kind != kLight) return true;
-			const ThreediSchemaRecord native = record_of(*this, const_cast<Node &>(*node), record);
+			const RecordHandle native = record_in(*node, record);
 			if (!native) return true;
-			for (const FieldSchema &field : schema(record.kind)) {
+			const TableKind &kind = *model_table().kind(record.kind);
+			for (size_t place = 0; place < kind.fields().size(); ++place) {
+				const FieldSchema &field = kind.fields()[place];
 				// A field whose value names the collection by index on this record, read by the game
 				// there or not (model_document_detail::named_by_index: a track the load does not copy,
 				// a frame byte on a row that turns through none), so it keeps naming its record should
 				// the game read it later. The second RGB generator's, read-only, is above.
 				if (field.reference != shift.reference || field.read_only ||
-				    model_document_detail::named_by_index(native, field.id) != shift.reference)
+				    named_by_index(native, place) != shift.reference)
 					continue;
 				Value value;
 				int64_t index = 0;
-				if (!threedi_schema_get(native, field.id, value) || !record_index(shift.reference, value, index))
-					continue;
+				if (!kind.value(place).get(native, value) || !record_index(shift.reference, value, index)) continue;
 				// Its record's place now, or one past the collection as far as before (RecordShift::now).
 				const size_t now = shift.now(index);
 				if (now == size_t(index)) continue;
@@ -289,7 +184,7 @@ bool ModelDocument::renumber_references(const StagedRows &rows, const RecordShif
 				                   record_index(shift.reference, int64_t(now), named);
 				if (!holds) {
 					// One the game does not read keeps its value; one it reads refuses the edit.
-					if (!threedi_schema_reads(native, field.id)) continue;
+					if (!model_field(record.kind, place).reads(native)) continue;
 					const std::string where = record_path(record) + " " + field.id;
 					if (now == RecordShift::kRemoved)
 						error = registers ? where + " reads this register: point it at another first."
@@ -353,8 +248,8 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 		Diagnostic d = make_finding(code, severity, message, document.path(), field);
 		d.row_id = row->id;
 		d.record_kind = node_kind(kind);
-		if (collection < row->collections.size() && index < row->collections[collection].size()) {
-			d.child_id = row->collections[collection][index];
+		if (collection < row->ids.lists.size() && index < row->ids.lists[collection].size()) {
+			d.child_id = row->ids.lists[collection][index].id;
 			d.record = model->record_path({row->id, node_kind(kind), d.child_id});
 		}
 		findings.push_back(std::move(d));
@@ -432,7 +327,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	// (threedi_flipbook_reads_register).
 	for (size_t m = 0; m < row->materials.size(); ++m) {
 		const ThreediMaterial &mt = row->materials[m].material;
-		// A generator's index is its parameter byte (generator_param in threedi_schema.cpp).
+		// A generator's index is its parameter byte (generator_param in model_table.cpp).
 		const auto generator = [&](ThreediGeneratorConsumer consumer, uint8_t style, int32_t reg, const char *field,
 		                           const char *whose) {
 			if (threedi_generator_names_register(style))
@@ -473,6 +368,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 			    ModelKind::Register, 4, i, "name");
 	for (size_t l = 0; l < row->lods.size(); ++l) {
 		const ModelLod &lod = row->lods[l];
+		const std::vector<RecordIds> &panm_ids = row->ids.lists[kModelLods][l].lists[kModelOwnList];
 		if (l > 0 && lod.lod.lod_threshold > row->lods[l - 1].lod.lod_threshold)
 			add(DiagnosticSeverity::Warning, ModelFinding::LodOrder,
 			    "LOD " + std::to_string(l) + " takes over at more pixels than LOD " + std::to_string(l - 1) + ".",
@@ -484,7 +380,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 				Diagnostic d = make_finding(code, severity, message, document.path(), field);
 				d.row_id = row->id;
 				d.record_kind = node_kind(ModelKind::PartAnimation);
-				d.child_id = lod.panm_ids[p];
+				d.child_id = panm_ids[p].id;
 				d.record = model->record_path({row->id, d.record_kind, d.child_id});
 				findings.push_back(std::move(d));
 			};

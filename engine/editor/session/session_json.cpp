@@ -275,10 +275,13 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 		if (collection.spec.max) entry.set("max", json_number(double(collection.spec.max)));
 		if (collection.spec.applies != Applicability::Reads) entry.set("applies", json_string(applicability_token(collection.spec.applies)));
 		JsonValue records = JsonValue::make_array();
-		for (const NodeId id : collection.ids) {
-			const NodeAddress address{owner.row, collection.spec.kind, id};
+		for (size_t i = 0; i < collection.ids.size(); ++i) {
+			const NodeId id = collection.ids[i];
+			const NodeAddress address{owner.row, collection.kind_at(i), id};
 			JsonValue record = JsonValue::make_object();
 			record.set("id", json_number(double(id)));
+			// A list of several kinds names each record's own.
+			if (!collection.kinds.empty()) record.set("kind_name", json_string(document.kind_token(address.kind)));
 			record.set("name", json_string(document.record_name(address)));
 			record.set("change", json_string(record_change_token(document.record_change(address))));
 			JsonValue nested = collections_to_json(document, address);

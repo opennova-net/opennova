@@ -263,8 +263,8 @@ std::string exit_screen(const char *name, const char *action) {
 	       action + "\n    </WINDOW>\n  </WINDOW>\n</SCREEN>\n";
 }
 
-// A file of every registered type's kinds: the repo's fixtures, a weapon and an ammo table
-// written here (the def fixture is an item table) with a record, a nested record and the
+// A file of every registered type's kinds: the repo's fixtures, a weapon, an ammo and a powerup
+// table written here (the def fixture is an item table) with a record, a nested record and the
 // written-unit, choice and reference fields the catalog shows, and a menu of two screens that
 // each name a window EXIT.
 std::vector<Fixture> fixtures(const std::string &repo) {
@@ -277,6 +277,12 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	                    "action \"FIRE\"\ndelayend 2\nend\nend\n")},
 	        {AssetKind::AmmoDefs, "ammo.def",
 	         text_bytes("ammo AT_CONTRACT\nmax_age 1.5\nvelocity 900\nturnrate_maxyaw 45\nlight_move 3 255 120 20\nend\n")},
+	        // The worked example of a def family added as rows (S13 D10): a powerup with its ammo rows
+	        // and both action blocks, the file's line ends CR LF as its reader cuts them.
+	        {AssetKind::PowerupDefs, "powerup.def",
+	         text_bytes("powerup \"PU_CONTRACT\"\r\nrespawn_time 30\r\nmax_respawns 2\r\nhp -1\r\nweapon WPN_CONTRACT\r\n"
+	                    "ammo AT_CONTRACT 2\r\naction pickup\r\nfunction powerup_med\r\nsoundset SND_PICK\r\n"
+	                    "delayend 10\r\nend\r\naction respawn\r\nparticle FX_BACK\r\nend\r\nend\r\n")},
 	        {AssetKind::Strings, "synth_game.bin", file("rtxt/synth_game.bin")},
 	        {AssetKind::Menu, "all_widgets.mnu", file("mnu/all_widgets.mnu")},
 	        {AssetKind::Menu, "two_screens.mnu",
@@ -391,13 +397,13 @@ bool defines_a_name(const Value &value) {
 // Whether a field carries the label the editor names it by. The one field that may go without:
 // a def member its line does not write as a number of its own, which keeps the def table's id
 // (the native member's name, the tooltip saying the key its file writes where the two differ);
-// a member written as a number of its own is labelled by its line (def_catalog_document's
+// a member written as a number of its own is labelled by its line (def_table.cpp's
 // describe: the table's name for it, else the key). field_title's fallback to the id is not a
 // label.
 bool labelled(const Document &document, const NodeAddress &address, const FieldSchema &field) {
 	if (!field.label.empty()) return true;
 	return dynamic_cast<const DefCatalogDocument *>(&document) &&
-	       opennova::def::def_authored(def_kind(address.kind), field.id) == opennova::def::DefAuthored::None;
+	       opennova::def::def_member(def_kind(address.kind), field.id).authored == opennova::def::DefAuthored::None;
 }
 
 // A record's field schema checks, as the record's field_on gives it.

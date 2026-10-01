@@ -285,6 +285,7 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 	Kind(AssetKind::PowerupDefs, "powerup_defs", "Powerup definitions", ArchiveSlot::Localres)
 	        .file("powerup.def")
+	        .edited_by(DocumentTypeId::Catalog)
 	        .names_files()
 	        .folder("defs")
 	        .row,

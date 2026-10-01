@@ -219,6 +219,10 @@ bool read_list(const JsonValue &json, const NodeAddress &holder, Reader &reader,
 	if (!collection)
 		return reader.refuse(
 				document.record_name(holder) + " holds no \"" + list->string + "\" list.");
+	// A list of several kinds is replaced record by record (each Add names its own kind).
+	if (collection->spec.kinds)
+		return reader.refuse("the \"" + list->string + "\" list of " + document.record_name(holder) +
+		                     " holds several kinds: add and remove its records one by one.");
 	for (const NodeId id : collection->ids) {
 		Edit remove;
 		remove.operation = EditOperation::Remove;

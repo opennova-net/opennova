@@ -666,6 +666,21 @@ reads still names a record it removes. An index past the set is the file's own f
 game makes of it), never a missing reference.
 _Avoid_: id (an id stays with its record; an index is its place), link, pointer
 
+**Table shape**:
+How a type of records tells the editor's core what its records are, in one form for every format: a
+table with a row per kind of record, each kind its labelled fields (what the editor shows of a field,
+how it reads and writes the record in the units its file writes, the values it takes by name, what the
+record and the records it lies in decide of it where they do) and the lists it holds (a list's records
+of one kind or of several in one order, how one goes in, comes out and is copied). The core answers
+the outline, the Inspector, every read and write and every add, copy, removal and move from the table,
+keeping each record's identity beside it; the type keeps its parse, its writer and the rules no row
+can say (a screen keeps a root window). A record owns what it holds: what one record names of another
+by its index is a Record reference, never a list reaching past its owner. A new kind of record, a new
+field or a new family of a catalog (a def table the editor did not open) is rows of tables, not code of
+a document.
+_Avoid_: schema (one kind's fields: the part of the table the Inspector reads), property table (the
+per-format tables the shape replaced), plugin (there are none: the tables are compiled in)
+
 **Menu preview**:
 The Preview window's menu pane: the editor's render of the previewed screen (the last
 menu screen selected) through the runtime's own menu frame, reading the project's files

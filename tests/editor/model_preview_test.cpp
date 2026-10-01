@@ -114,7 +114,7 @@ static int test_status_and_builds() {
 
 	// A user point moved: the overlays show it, nothing is built.
 	const ModelRow *row = document->model_row();
-	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->collections[3][0]};
+	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id};
 	const double x_before = points->array[0].get("position")->array[0].number;
 	const double z_before = points->array[0].get("position")->array[2].number;
 	Value value;
@@ -128,7 +128,7 @@ static int test_status_and_builds() {
 	            !near(moved.get("position")->array[2].number, z_before));
 
 	// A light's colour is drawn: it builds again.
-	const NodeAddress light{row->id, node_kind(ModelKind::Light), document->model_row()->collections[2][0]};
+	const NodeAddress light{row->id, node_kind(ModelKind::Light), document->model_row()->ids.lists[2][0].id};
 	set(session, document->path(), light, "start.r", int64_t(12));
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Rebuild && model.builds() == 2);
 
@@ -228,7 +228,7 @@ static int test_overlays() {
 	// The ground point moved off the axis the part turns about (the model's vertical): the
 	// turning part carries it.
 	const ModelRow *row = document->model_row();
-	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->collections[3][0]};
+	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[3][0].id};
 	set(session, document->path(), point, "position.x", 2.0);
 	TEST_EXPECT(model.follow(view) == ModelPreviewAction::Update);
 	const JsonValue at_zero = overlay(json(view, model), "user_point", 0);

@@ -6,7 +6,8 @@
 // sections define, one used by a def and the other by a menu (each renamed with its own use
 // only), the files with unsaved edits saved first through the unsaved prompt; a weapon's name
 // (a name the catalog has already, or one too long for the field, refused); an ammo's name; an
-// item id a mission names (refused, naming the mission); a model's user point (the same-named
+// item id a mission names (refused, naming the mission); a powerup row's name, the item that binds it
+// following and an item naming none found missing; a model's user point (the same-named
 // point of another model, and its use, stay). The D9 review: a saved use behind an unsaved edit
 // asks to save first; a style variable used as a menu's font; a name a document refuses writes
 // nothing; an item id compared as the number it is. The second review: the files written together
@@ -368,6 +369,34 @@ static int test_ammo_name() {
 	return 0;
 }
 
+// A powerup row's name (S13 D10): the item binding it follows; an item naming a row powerup.def lacks
+// is a reference.missing finding (the game destroys such an item as the mission starts).
+static int test_powerup_name() {
+	Project project("opennova_rename_powerup");
+	const std::string items = project.path("items.def");
+	TEST_EXPECT(project.write("defs/powerup.def", "powerup \"PU_MED\"\r\nhp -1\r\nend\r\n"));
+	TEST_EXPECT(project.write(items, "begin \"Med Pack\"\nid 100400\ntype powerup\npowerupdef PU_MED\nend\n"
+	                                 "begin \"Stray Pack\"\nid 100401\ntype powerup\npowerupdef PU_NONE\nend\n"));
+	project.rescan();
+	const std::string powerups = project.path("powerup.def");
+	const GraphSymbol *med = project.defined(ReferenceKind::Powerup, "PU_MED", powerups);
+	TEST_EXPECT(!powerups.empty() && med != nullptr);
+	if (!med) return 1;
+	bool missing = false;
+	for (const Diagnostic &d : project.view().findings.diagnostics)
+		missing = missing || (d.code() == "reference.missing" && d.asset == items && d.field == "powerup_def" &&
+		                      d.message.find("PU_NONE") != std::string::npos);
+	TEST_EXPECT(missing);
+	const DialogsView::RenamePreview &plan = project.preview(*med, "PU_HEAL");
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, items) == 1);
+	TEST_EXPECT(project.rename(*med, "PU_HEAL"));
+	const GraphEdge *used = edge_to(project.graph(), items, ReferenceKind::Powerup, "PU_HEAL");
+	TEST_EXPECT(used && project.graph().resolve(*used) == ReferenceStatus::Present);
+	TEST_EXPECT(project.read(items).find("PU_MED") == std::string::npos &&
+	            project.read(powerups).find("PU_HEAL") != std::string::npos);
+	return 0;
+}
+
 // An item id a mission places: the editor cannot rewrite the mission, so the rename is refused,
 // the finding naming it, and nothing is written.
 static int test_item_id_refused() {
@@ -671,6 +700,7 @@ int main() {
 	failures += test_string_key();
 	failures += test_weapon_name();
 	failures += test_ammo_name();
+	failures += test_powerup_name();
 	failures += test_item_id_refused();
 	failures += test_user_point();
 	if (failures == 0) std::printf("editor_symbol_rename: all tests passed\n");

@@ -383,13 +383,13 @@ static int test_plan_not_followed() {
 // dialog bank, the def tables beyond the catalogs and the avatar table) and the ones S13 D5 added
 // that name files (a face, a map project); a mission's .mis, which the graph does not read, where
 // its .bms is read. A script the graph reads since S13 D9 (its operands' names), but not its RUN,
-// which names another script: it stays not followed.
+// which names another script: it stays not followed. powerup.def left the list when the catalog
+// opened it (S13 D10): the graph reads it through the catalog's records.
 static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
 	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
-	        AssetKind::PowerupDefs, AssetKind::OtherDefs, AssetKind::FaceAnimation,
-	        AssetKind::MapProject};
+	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";

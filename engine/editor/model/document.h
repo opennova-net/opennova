@@ -142,7 +142,7 @@ public:
 	// --- what a document type declares about its records -------------------------
 	// A collection an owner holds: its records are of one kind, in order.
 	struct CollectionSpec {
-		NodeKind kind = 0;             // the records' kind
+		NodeKind kind = 0;             // the records' kind (of a list of several, the first it holds)
 		const char *label = "";        // "Actions"
 		const char *name_field = "";   // the field that names a record ("" = none)
 		// No Add, Duplicate, Remove or Move: the core refuses each (a model's LODs and collision
@@ -150,10 +150,25 @@ public:
 		bool fixed = false;
 		Applicability applies = Applicability::Reads; // does the game read this collection here
 		size_t max = 0; // the most records it holds (0 = any number; a menu window's part: 1)
+		// A list of several kinds in one order (a table document's: model/table_shape.h's
+		// TableList::kinds): every kind it holds, `kind` among them, in storage that outlives the
+		// document (the type's table); null: `kind` alone. An Add and a Move name their list by any
+		// kind it holds.
+		const NodeKind *kinds = nullptr;
+		size_t kind_count = 0;
+		bool holds(NodeKind of) const {
+			if (!kinds) return of == kind;
+			for (size_t i = 0; i < kind_count; ++i)
+				if (kinds[i] == of) return true;
+			return false;
+		}
 	};
 	struct Collection {
 		CollectionSpec spec;
 		std::vector<NodeId> ids; // index = position
+		// Each record's kind where the list holds several (index = position); empty: spec.kind each.
+		std::vector<NodeKind> kinds;
+		NodeKind kind_at(size_t i) const { return i < kinds.size() ? kinds[i] : spec.kind; }
 	};
 	// Where a nested record sits: its owner (owner.child == 0: the row itself), the
 	// collection and its index there, and the collection's place among what the owner holds (the
@@ -377,6 +392,10 @@ protected:
 		(void)address;
 		(void)use;
 	}
+	// The field `id` names among a kind's fields (null: none), which the core asks of a Clear, a
+	// Write, a field changed since the save, its saved value and its revert: a walk of fields(kind) by
+	// default; a type whose table indexes its fields answers by one probe (TableDocument).
+	virtual const FieldSchema *find_field(NodeKind kind, const std::string &id) const;
 	// Parse decoded bytes into rows (their identity stores sized, identities left to
 	// the base) and the file-wide state; report the source findings. Everything it makes
 	// goes out through its arguments: Save also parses the text it wrote, for its findings.
