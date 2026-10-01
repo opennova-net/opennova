@@ -38,6 +38,17 @@ void HudMapGridOrigin::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(HudMapGridOrigin, Variant::VECTOR3, position)
 }
 
+// --- HudMapOverlays ---------------------------------------------------------
+
+void HudMapOverlays::_bind_methods() {
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, pool_entity_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, location_name_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, name_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, tracked_ticks)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, player_slot_count)
+	OPENNOVA_RECORD_READ_ONLY(HudMapOverlays, Variant::INT, zone_score_delta)
+}
+
 // --- VehiclePanelView -------------------------------------------------------
 
 void VehiclePanelView::_bind_methods() {
@@ -110,7 +121,35 @@ PackedStringArray EndRoundStatistics::get_values() const {
 	return out;
 }
 
+Ref<EndRoundStatistics> EndRoundStatistics::epilog(
+		const opennova::hud::EndRoundStatisticsInput &p_in) {
+	opennova::hud::EndRoundStatisticsPanel panel;
+	for (const opennova::hud::EndRoundStatisticsRow &row : opennova::hud::epilog_score_lines(p_in))
+		panel.rows.push_back(row);
+	Ref<EndRoundStatistics> out;
+	out.instantiate();
+	out->assign(panel);
+	return out;
+}
+
+Ref<EndRoundStatistics> EndRoundStatistics::make_epilog(int p_subgoals_won,
+		int p_subgoals_defined, int p_enemy_kills, int p_enemy_unit_total,
+		int p_team_unit_kills, int p_friendly_unit_kills) {
+	opennova::hud::EndRoundStatisticsInput in;
+	in.subgoals_won = p_subgoals_won;
+	in.subgoals_defined = p_subgoals_defined;
+	in.enemy_kills = p_enemy_kills;
+	in.enemy_unit_total = p_enemy_unit_total;
+	in.team_unit_kills = p_team_unit_kills;
+	in.friendly_unit_kills = p_friendly_unit_kills;
+	return epilog(in);
+}
+
 void EndRoundStatistics::_bind_methods() {
+	ClassDB::bind_static_method("EndRoundStatistics",
+			D_METHOD("make_epilog", "subgoals_won", "subgoals_defined", "enemy_kills",
+					"enemy_unit_total", "team_unit_kills", "friendly_unit_kills"),
+			&EndRoundStatistics::make_epilog);
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::BOOL, raised)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, label_keys)
 	OPENNOVA_RECORD_READ_ONLY(EndRoundStatistics, Variant::PACKED_STRING_ARRAY, values)
@@ -118,18 +157,10 @@ void EndRoundStatistics::_bind_methods() {
 
 // --- RoundOutcome -----------------------------------------------------------
 
-Ref<RoundOutcome> RoundOutcome::make(bool p_ended, int p_winner_team, int p_enemy_kills,
-		int p_enemy_kills_by_others, int p_bluekills, int p_team_kills_by_others, int p_greenkills,
-		int p_friendly_kills_by_others) {
+Ref<RoundOutcome> RoundOutcome::make(bool p_ended, int p_winner_team) {
 	opennova::world::RoundOutcomeView v;
 	v.ended = p_ended;
 	v.winner_team = p_winner_team;
-	v.enemy_kills = p_enemy_kills;
-	v.enemy_kills_by_others = p_enemy_kills_by_others;
-	v.bluekills = p_bluekills;
-	v.team_kills_by_others = p_team_kills_by_others;
-	v.greenkills = p_greenkills;
-	v.friendly_kills_by_others = p_friendly_kills_by_others;
 	Ref<RoundOutcome> out;
 	out.instantiate();
 	out->assign(v);
@@ -137,10 +168,8 @@ Ref<RoundOutcome> RoundOutcome::make(bool p_ended, int p_winner_team, int p_enem
 }
 
 void RoundOutcome::_bind_methods() {
-	ClassDB::bind_static_method("RoundOutcome",
-			D_METHOD("make", "ended", "winner_team", "enemy_kills", "enemy_kills_by_others",
-					"bluekills", "team_kills_by_others", "greenkills", "friendly_kills_by_others"),
-			&RoundOutcome::make, DEFVAL(0), DEFVAL(0), DEFVAL(0), DEFVAL(0), DEFVAL(0), DEFVAL(0));
+	ClassDB::bind_static_method("RoundOutcome", D_METHOD("make", "ended", "winner_team"),
+			&RoundOutcome::make);
 	OPENNOVA_RECORD_READ_ONLY(RoundOutcome, Variant::BOOL, ended)
 	OPENNOVA_RECORD_READ_ONLY(RoundOutcome, Variant::INT, winner_team)
 	OPENNOVA_RECORD_READ_ONLY(RoundOutcome, Variant::INT, bluekills)

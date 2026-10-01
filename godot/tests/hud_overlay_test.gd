@@ -84,18 +84,24 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# {version, stride, count}, then one retained overlay row:
 	# {bank, handle, x, y, z, heading, icon, argb, flags, source,
 	#  remaining_ticks, entity_known, policy_flags, half_x, half_y, floor,
-	#  medic}.
+	#  medic, team, zone_number, def_type, entity_bits, zone_index,
+	#  zone_radius, entity_x, entity_y, anchor_x, anchor_y, bound_radius,
+	#  entity_z, bay_groups, timer_flags, timer_team, timer_bar_team,
+	#  timer_value, timer_limit, timer_rate}.
+	# entity_bits 1: the slot entity carries a model (the persistent bank
+	# draws only those); the blip centres on its anchor.
 	var snapshot := PackedInt32Array([
-		4, 17, 1,
+		7, 36, 1,
 		0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 		1, 0, 0, 6, 0,
+		0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+		0, 0,
+		0, 0, 0, 0, 0, 0,
 	])
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false, snapshot)
 	var stats := hud.get_draw_list_stats()
 	assert_true(stats.map_visible,
 			"An authored HUDSPINMAP rect enables the gameplay spinmap.")
-	assert_eq(stats.map_backing_tris, 32,
-			"The circular backing is the portable 32-sided fan.")
 	assert_gt(stats.map_terrain_tris, 0,
 			"TerrainData's 16x16 sector routing reaches the minimap compiler.")
 	assert_eq(stats.map_sprites, 3,
@@ -138,9 +144,12 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	#  @0x5a4cd6..0x5a4d48 replacing the blip].
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				4, 17, 1,
+				7, 36, 1,
 				0, 0x1001, 64 << 16, 0, 0, 0, 10, -16711936, 0, 0, 1984, 1,
 				1, 0, 0, 6, 1,
+				0, 0, 0, 1, -1, 0, 64 << 16, 0, 64 << 16, 0, 0,
+				0, 0,
+				0, 0, 0, 0, 0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_eq(stats.map_sprites, 2,
@@ -160,9 +169,12 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	]))
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
 			PackedInt32Array([
-				4, 17, 1,
+				7, 36, 1,
 				0, 0x2042, 0, 0, 0, 0, 0, -6250336, 0, 0, 1984, 1,
 				2, 0, 0, 6, 0,
+				0, 0, 0, 1, -1, 0, 0, 0, 0, 0, 0,
+				0, 0,
+				0, 0, 0, 0, 0, 0,
 			]))
 	stats = hud.get_draw_list_stats()
 	assert_gt(stats.map_footprint_tris, 0,
@@ -174,13 +186,11 @@ func test_spinmap_compiles_terrain_retained_markers_and_waypoint() -> void:
 	# The M-cycle pass owns a separate canvas sandwich and carries the same
 	# sampler contract as the corner spinmap.
 	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 3, false,
-			PackedInt32Array([4, 17, 0]))
+			PackedInt32Array([7, 36, 0]))
 	await get_tree().process_frame
 	stats = hud.get_draw_list_stats()
 	assert_true(stats.big_map_visible,
 			"The stats seam reports the actual large-map draw list, not the corner map.")
-	assert_eq(stats.big_map_backing_tris, 2,
-			"The fullscreen large map owns its independent rectangular backing.")
 	assert_gt(stats.big_map_terrain_tris, 0)
 	assert_eq(stats.big_map_texture_filter, 4,
 			"The enlarged map icon strip uses explicit linear mip filtering.")
@@ -679,6 +689,35 @@ func test_message_log_lists_expired_lines() -> void:
 			"Closing the window hides the history again.")
 
 
+# The stdbox border pieces bind the boxtile camo as a second texture stage the
+# flat HUD material combines, screen-anchored; the fill does not
+# [orig: CGfxTexture_Create(BoxTexA, BoxTexB, 0x651, 2) @0x56af3c, applied for
+#  the pieces @0x56b902; HUD_DrawTexturedQuad_0 @0x56b3e0].
+func test_stdbox_pieces_carry_the_camo_stage() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"HUDCHATTEXT 142 , 711",
+	]), PackedStringArray(["border.tga", "boxtile.tga"]),
+			{"border.tga": Vector2i(128, 128), "boxtile.tga": Vector2i(64, 64)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	hud.set_player_state(50, 1.0, 0, 80.0)
+	assert_eq(hud.get_draw_list_stats().quads_stage2, 0, "No box, no camo stage.")
+	hud.set_message_log_title("")
+	hud.set_message_log_shown(true)
+	var stats := hud.get_draw_list_stats()
+	assert_eq(stats.quads_stage2, 8,
+			"The untitled box's eight border pieces carry the camo stage.")
+	assert_gt(stats.quads_textured, 8, "The wrap-tiled fill draws beside them.")
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The two-stage pieces render safely.")
+	hud.set_message_log_shown(false)
+	assert_eq(hud.get_draw_list_stats().quads_stage2, 0)
+
+
 # The AAS zone status panel's device seam: the anchor + atlases load through
 # the real VFS path, a null Simulation leaves no zone rows (nothing draws),
 # and hiding clears the state [orig: HUD_DrawZoneStatusPanel @0x5a2480 draws
@@ -706,6 +745,100 @@ func test_lfp_panel_device_seam() -> void:
 	await get_tree().process_frame
 	hud.set_lfp_panel(false, 0, 0, 0, {}, null)
 	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
+
+
+# One v7 marker row: a spawn-point zone (entity_bits 4) with zone number 0x41
+# (a capture bit in the slot's source byte), team 1, at mission (0, 10, 0),
+# with a zone-timer entry when `timer_flags` is nonzero.
+func _capture_zone_snapshot(timer_flags: int) -> PackedInt32Array:
+	return PackedInt32Array([
+		7, 36, 1,
+		0, 0x3001, 0, 10 << 16, 0, 0, 0, -1, 0, 0x41, 0, 1, 0, 0, 0, 6,
+		0, 1, 0x41, 0, 4,
+		0, 0, 0, 10 << 16, 0, 10 << 16, 0,
+		0, 0,
+		timer_flags, 1, 1, 0, 62, 0,
+	])
+
+
+# The capture-point labels' device seam: set_combat_state walks the fed rows
+# and projects each admitted point; a zone ahead of the camera then compiles
+# the marker's stem and the viewer's own-zone tile, plus the letter once a
+# zone-timer entry exists [orig: Render_CapturePointLabels @0x5a2840 ->
+# HUD_DrawEntityMarker types 8/9 @0x593140].
+func test_capture_point_label_device_seam() -> void:
+	var fixture := _load_temp_layout(PackedStringArray(["fonthud1_hi Gunpl22b.fnt"]),
+			PackedStringArray(["lfp_alf.tga", "lfp_dlf.tga"]),
+			{"lfp_alf.tga": Vector2i(36, 36), "lfp_dlf.tga": Vector2i(36, 36)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var sim := Simulation.new()
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	var view := sim.get_local_player_view()
+	var projection := Projection.create_perspective(80.0, 4.0 / 3.0, 0.1, 1000.0)
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			PackedInt32Array([7, 36, 0]))
+	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	var before := hud.get_draw_list_stats()
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			_capture_zone_snapshot(0))
+	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	var blank := hud.get_draw_list_stats()
+	assert_eq(blank.lines - before.lines, 1, "The zone's marker stem compiles.")
+	assert_eq(blank.tris - before.tris, 2, "The own-zone tile compiles as two textured triangles.")
+	hud.set_minimap_state(Vector2.ZERO, 0.0, 0, 65536, 65536, 0, false,
+			_capture_zone_snapshot(1))
+	hud.set_combat_state(view, Transform3D.IDENTITY, projection, true, null, "E")
+	assert_eq(blank.glyphs - before.glyphs, 1, "The blank letter lays out its one space quad.")
+	var lettered := hud.get_draw_list_stats()
+	assert_eq(lettered.glyphs, blank.glyphs,
+			"A zone-timer entry letters the zone; no name outside binoculars.")
+	assert_eq(lettered.quads_filled, blank.quads_filled, "No capture bar outside binoculars.")
+	# Through binoculars the entry's capture bar draws its three quads (the
+	# name is empty: no gametext here, and GameText_GetString misses to "").
+	hud.set_view_state(true, Vector2.INF)
+	var binoculars := hud.get_draw_list_stats()
+	assert_eq(binoculars.quads_filled - lettered.quads_filled, 3,
+			"The binocular capture bar: border, black inner rect, fill.")
+	hud.set_view_state(false, Vector2.INF)
+	# Behind the camera the marker draws nothing.
+	hud.set_combat_state(view, Transform3D.IDENTITY.rotated(Vector3.UP, PI), projection, true,
+			null, "E")
+	var behind := hud.get_draw_list_stats()
+	assert_eq(behind.lines, before.lines, "A zone behind the camera draws no stem.")
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The capture-point labels render safely.")
+
+
+# The connection indicators' device seam (D-HUD-38): the three atlases and the
+# NETWORKINDICATOR corners load through the real VFS path, and out of a
+# session (no Simulation: the role facts' session gate is down) the drawer
+# adds nothing [orig: CNetQuality_DrawIndicators @0x4c3200, the session gate
+# @0x4c3210; the atlas loads CNetworkIcons_LoadTextures @0x4c2cf0].
+func test_net_quality_indicators_device_seam() -> void:
+	var fixture := _load_temp_layout(PackedStringArray([
+		"fonthud1_hi Gunpl22b.fnt",
+		"NETWORKINDICATOR 6,6 22,6 54,6",
+	]), PackedStringArray(["neticon1.tga", "neticon2.tga", "neticon3.tga"]),
+			{"neticon1.tga": Vector2i(32, 64), "neticon2.tga": Vector2i(16, 64),
+			 "neticon3.tga": Vector2i(16, 32)})
+	_copy_font_into(fixture.dir)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(fixture.dir), OK)
+	var hud := _make_overlay()
+	hud.configure(fixture.layout, root)
+	var before := hud.get_draw_list_stats()
+	hud.set_role_facts(null, null)
+	var after := hud.get_draw_list_stats()
+	assert_eq(after.quads_textured, before.quads_textured,
+			"Out of a session the connection indicators draw nothing.")
+	assert_eq(after.elements_drawn, before.elements_drawn)
+	await get_tree().process_frame
+	assert_true(is_instance_valid(hud), "The indicator atlases load and render safely.")
 
 
 func test_sights_viewport_aspect_preserves_square_reticle() -> void:

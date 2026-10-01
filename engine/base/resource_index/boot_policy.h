@@ -73,6 +73,7 @@ inline constexpr const char *kLaunchFlagCallsign = "--callsign";
 inline constexpr const char *kLaunchFlagIntegrityProfile = "--integrity-profile";
 inline constexpr const char *kLaunchFlagCapturePcap = "--capture-pcap";
 inline constexpr const char *kLaunchFlagMcpPort = "--mcp-port";
+inline constexpr const char *kLaunchFlagNoHud = "/NOHUD";
 
 struct LaunchFlags {
     bool loose_override = false;   // /d
@@ -95,6 +96,11 @@ struct LaunchFlags {
     std::string integrity_profile; // --integrity-profile <name>
     std::string capture_pcap;      // --capture-pcap <path>
     int mcp_port = 0;              // --mcp-port; 0 = no endpoint (1..65535 accepted)
+    // /NOHUD — the whole token, any case: clears the HUD overlay master word
+    // (runtime/hud/hud_frame.h hud_overlay_master) [orig:
+    // Game_ParseCommandLineAndInit @0x4a7310 — `_stricmp(token, "/NOHUD")`
+    // @0x4A79FC -> sub_58FF20(0) @0x4A7A09].
+    bool no_hud = false;
 };
 
 LaunchFlags parse_launch_flags(const std::vector<std::string> &args);

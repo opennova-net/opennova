@@ -4,13 +4,22 @@
 #include <runtime/inmatch/role_feeds.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/fixed.h>
+#include <runtime/replication/client_scoreboard_view.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/game_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
+#include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
+#include <runtime/hud/session_rules_text.h>
+#include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
 #include <runtime/replication/client_roster_tags.h>
 #include <runtime/replication/entity_wire_bridge.h> // entity_class_of
 #include <runtime/world/collision.h>
+#include <runtime/world/radar_contacts.h> // radar_hud_frame
+#include <runtime/world/radio_call.h> // capture_zone_max_coverage
+#include <runtime/world/user_waypoints.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -109,13 +118,172 @@ BreathBarFacts breath_bar_facts(const RoleView &view) {
 	if (view.runtime != nullptr) {
 		const replication::ClientState &cs = view.runtime->state();
 		out.samples = cs.breath_samples;             // word_A85B7C
-		out.spawn_success_gate = cs.end_round.header_known;
+		out.spawn_success_gate = cs.spawn_success_gate;
 		if (view.joiner) out.breath_time = cs.breathtime;
 	}
 	// The authority's frame carries no sub-block 1 to its own loopback, and
 	// its HUD reads the host's own named value [orig: g_WacVarBreathTime].
 	if (!view.joiner && view.kernel != nullptr)
 		out.breath_time = view.kernel->world.script.wac_values.breathtime;
+	return out;
+}
+
+namespace {
+
+// One F9 / F10 menu's title and rows over the local player (hud_role_facts'
+// doc carries the witness).
+void fill_voice_macro_menu(const RoleView &view, const world::Entity &local, bool radio,
+		hud::HudVoiceMacroMenuState &menu) {
+	const world::World &w = view.kernel->world;
+	const rtxt::File &macros = w.tables.voice_macros;
+	const auto lookup = [&macros](const std::string &key) -> const std::string * {
+		const rtxt::Entry *entry = macros.find_in_section("macrotext", key);
+		return entry != nullptr ? &entry->text : nullptr;
+	};
+	const std::string *title = lookup(radio ? "RADIO_TITLE" : "EMOTES_TITLE");
+	menu.title = title != nullptr ? *title : (radio ? "!Radio_Title" : "!EMOTES_Title");
+	const uint32_t game_type = view.runtime != nullptr ? view.runtime->game_type() : 0u;
+	const bool in_zone = game_type == 0x10010u && view.runtime != nullptr &&
+			in_active_radio_zone(w, local, *view.runtime);
+	const uint8_t flags = radio ? 6u : 0xCu;
+	for (int i = 1; i <= 10; ++i) {
+		const std::string key = world::radio_call_key(w, local, i, flags, game_type, in_zone);
+		const std::string *text = lookup(key);
+		menu.texts[static_cast<size_t>(i - 1)] = text != nullptr ? *text : key;
+	}
+}
+
+} // namespace
+
+HudRoleFacts hud_role_facts(const RoleView &view, uint32_t voice_menus) {
+	HudRoleFacts out;
+	out.breath = breath_bar_facts(view);
+	if (view.runtime != nullptr) out.squad_orders = view.runtime->state().squad_orders;
+	// The connection indicators: the role's replica runtime keeps g_NetQuality
+	// (the listen host's own client included); the N icon draws on a
+	// NovaWorld session whose NWU session is in use [orig:
+	// CNetQuality_DrawIndicators @0x4c33d4..0x4c33f0].
+	if (view.runtime != nullptr) {
+		out.net_quality.indicators = view.runtime->net_quality_indicators();
+		const hud::NovaWorldLinkFacts &nw = view.runtime->novaworld_link();
+		out.net_quality.novaworld_icon = nw.novaworld && nw.nwu_in_use;
+	}
+	if (view.kernel == nullptr) return out;
+	// The drawer's session gate, the same session bit as the MP lines below
+	// [orig: `cmp is_in_session, 0` @0x4c3210].
+	out.net_quality.in_session = view.kernel->world.rules.mp_session;
+	if (voice_menus != 0u) {
+		const world::World &vw = view.kernel->world;
+		if (const world::Entity *local = vw.registry.get(vw.cached.local_player)) {
+			if ((voice_menus & kHudVoiceMenuEmotes) != 0u) {
+				out.emotes_menu.shown = true;
+				fill_voice_macro_menu(view, *local, false, out.emotes_menu);
+			}
+			if ((voice_menus & kHudVoiceMenuRadio) != 0u) {
+				out.radio_menu.shown = true;
+				fill_voice_macro_menu(view, *local, true, out.radio_menu);
+			}
+		}
+	}
+	const world::World &w = view.kernel->world;
+	hud::HudSessionState &s = out.session;
+	// g_NapiNPCtx.is_in_session: the session bit the world carries (our SP
+	// runs a listen host, but retail's single player never sets it).
+	s.in_session = w.rules.mp_session;
+	s.game_type = view.runtime != nullptr ? view.runtime->game_type() : 0; // g_GameType
+	// g_RoundTimeRemaining, UNclamped — the -1 untimed seed is the timer's gate
+	// [orig: HUD_DrawGameTimer @0x593D99]: the authority's Match clock, a
+	// joiner's folded 0x0A copy.
+	s.round_time_remaining = view.joiner
+			? (view.runtime != nullptr ? view.runtime->state().round_time_remaining_ticks : -1)
+			: w.match.remaining_ticks();
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		const replication::ClientScoreboard &sb = cs.scoreboard;
+		s.permanent_death = cs.permanent_death;              // byte_A821EF
+		s.remaining_count = sb.alive_player_count;            // g_ScoreboardDeadRowCount
+		s.row_count = static_cast<int>(sb.rows.size());       // g_ScoreboardRowCount
+		s.spectator_count = sb.spectator_count;               // g_ScoreboardSpectatorCount
+		// Teams 1 and 2 of the 0x16 team table, score1 read signed like the
+		// movsx that stores it [orig: the team rows 0xA85AEC + 16t, the
+		// stores @0x42fe00..0x42fe42; read @0x59CDF4 / @0x59CEA8 / @0x59CF54].
+		for (size_t t = 0; t < 2; ++t) {
+			if (sb.teams.size() <= t + 1) break;
+			s.team_score1[t] = static_cast<int16_t>(sb.teams[t + 1].score1);
+			s.team_koth[t] = sb.teams[t + 1].koth_hold;
+		}
+		if (view.joiner) s.time_limit_minutes = cs.session_time_limit_minutes; // dword_A821C0
+	}
+	// The authority reads its own g_TimeLimitMinutes [orig: @0x59CCDB..0x59CCE3].
+	if (!view.joiner && view.host != nullptr)
+		s.time_limit_minutes = static_cast<int32_t>(view.host->config.time_limit_minutes);
+	const world::Entity *player = w.registry.get(w.cached.local_player);
+	if (player != nullptr) {
+		s.team = player->team; // hudInfo+0x176 = entity+0x162 [orig: @0x4B8464]
+		// [orig: CaptureZone_FindMaxProximityCoverage(&g_LocalPlayerEntity->boundRadius)
+		//  @0x59CDE8]
+		s.zone_coverage = world::capture_zone_max_coverage(w, *player);
+	}
+	// The death screen's spectate arm rebuilds the HUD info for the target and
+	// draws the health bar and the TEAMID line off it, then restores the local
+	// build: the team byte (+0x176 = entity+0x162), the health ratio and the
+	// name the line reads first. A joiner's target is a decoded row, the
+	// authority's a registry entity; the max is the def hp (a row's player
+	// def) without the difficulty term, as the friendly tags read it.
+	// [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c25 — the gate
+	//  `dword_A860F4 && dword_A860F0` @0x5a7bdb; HUD_BuildEntityInfo @0x5a7bf3
+	//  (team @0x4b8464, ratio @0x4b87a2..0x4b87d3); HUD_DrawTeamIdLine's name
+	//  @0x59ac3d]
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		if (cs.death_screen_active && cs.spectate_target != 0xFFFF &&
+				cs.death_screen_submode != 0) {
+			int64_t health = 0;
+			int64_t max_hp = 1;
+			bool found = false;
+			if (view.joiner) {
+				if (const replication::ClientEntityState *row = cs.find(cs.spectate_target)) {
+					found = true;
+					s.team = row->team_known ? row->team : 0;
+					s.spectated_name = row->display_name;
+					health = row->health_known ? static_cast<int16_t>(row->health_word) : 0;
+					max_hp = std::max<int32_t>(1, w.tables.player.item_hp);
+				}
+			} else if (const world::Entity *e =
+								w.registry.get(world::EntityHandle{cs.spectate_target})) {
+				found = true;
+				s.team = e->team;
+				s.spectated_name = e->display_name;
+				health = static_cast<int16_t>(e->health);
+				max_hp = std::max<int32_t>(1, e->health_max);
+			}
+			if (found) {
+				s.spectating = true;
+				// The signed Health word over the max, read back unsigned, so a
+				// negative Health caps to a full bar like any ratio past 1
+				// [orig: `idiv` @0x4b87c7, the unsigned cap @0x4b87d1..0x4b87d3].
+				uint32_t ratio = static_cast<uint32_t>(
+						static_cast<int32_t>((health * 65536) / max_hp));
+				if (ratio > 0x10000u) ratio = 0x10000u;
+				s.spectated_health_fraction = static_cast<float>(ratio) / 65536.0f;
+			}
+		}
+	}
+	s.attack_defend = view.kernel->local.attack_defend_role; // dword_B78FE8
+	// The HUDLS scan over the local slot table and each category's first
+	// def's slot-bar icon [orig: HUD_DrawWeaponSlotBar @0x599D0A..0x599D69;
+	// def+0x1B8 <- hud_loadout_select, WeaponDefs_ParseLineCallback @0x544A44].
+	if (view.kernel->local.inventory_valid) {
+		out.slot_bar = world::weapon_inventory_slot_bar_scan(w.tables.weapons,
+				view.kernel->local.inventory);
+		for (size_t c = 0; c < out.slot_bar.size(); ++c) {
+			const int16_t adm = out.slot_bar[c].adm_index;
+			if (adm < 0) continue;
+			if (const world::WeaponTableEntry *def =
+							w.tables.weapons.by_index(static_cast<uint8_t>(adm)))
+				out.slot_bar_icons[c] = def->hud_loadout_select;
+		}
+	}
 	return out;
 }
 
@@ -173,18 +341,23 @@ bool collect_friendly_tags(const RoleView &view, std::vector<world::FriendlyTagS
 			? view.runtime->view().mp_attributes()
 			: view.staged_mp_attributes;
 	ctx.rules_no_friendly_tags = (rules_word & GameConfig::kMpAttribNoFriendlyTag) != 0;
-	// The player walk's slot owner. On the authority the connection table IS
-	// the player-slot table: each link's owned entity, revive window, and
-	// medic-request latch (retail's PlayerSlot +0x24/+0x10/+0x2C).
-	const NapiNPServerCtx *host = view.host;
+	// The player walk's slot owner: the listen client's own S2C 0x4C table,
+	// each entry's slot (retail's PlayerSlot +0x24 entity, +0x10 revive
+	// seconds, +0x2C medic request, the +0x14 / +0x20 label) as its loopback
+	// folds it. [orig: HUD_DrawFriendlyTagsPass @0x5a4507..0x5a4597 over
+	//  g_PlayerSlotPtrTable]
+	const replication::ClientState *client =
+			view.runtime != nullptr ? &view.runtime->state() : nullptr;
 	const world::PlayerSlotLookup authority_slot_lookup =
-			[host](world::EntityHandle entity, world::PlayerSlotFacts &facts) {
-				if (host == nullptr) return false;
-				for (const NapiNPConnection &conn : host->np_protocol.connection_list) {
-					if (conn.link.owned_entity != entity) continue;
-					facts.revive_seconds = static_cast<uint8_t>(
-							std::min<uint32_t>(conn.link.downed_revive_seconds, 0xFFu));
-					facts.medic_request = conn.link.medic_request_active;
+			[client](world::EntityHandle entity, world::PlayerSlotFacts &facts) {
+				if (client == nullptr || entity.pool() != 0) return false;
+				for (const replication::ClientVisiblePlayer &entry : client->visible_players) {
+					const replication::ClientRosterSlot &slot = client->roster[entry.slot];
+					if (!slot.bound || slot.entity_slot != entity.slot()) continue;
+					facts.revive_seconds = slot.downed_revive_seconds;
+					facts.medic_request = slot.medic_request_active;
+					facts.label = replication::roster_tag_label(slot);
+					facts.squad_color = slot.squad_color;
 					return true;
 				}
 				return false;
@@ -351,6 +524,224 @@ bool collect_lfp_zones(const RoleView &view, const world::SpawnZoneRegistry &zon
 	return true;
 }
 
+namespace {
+
+// Math_FixedPointTransformPoint22: the 3x3 Q22 rotation with the +0x200000
+// rounding bias before each >> 22, then the translation column.
+// [orig: Math_FixedPointTransformPoint22 @0x615810]
+void transform_point22(const world::CollisionMatrix &m, const int32_t in[3], int32_t out[3]) {
+	for (int row = 0; row < 3; ++row) {
+		const int64_t sum = static_cast<int64_t>(in[0]) * m.m[row * 4 + 0] +
+				static_cast<int64_t>(in[1]) * m.m[row * 4 + 1] +
+				static_cast<int64_t>(in[2]) * m.m[row * 4 + 2] + 0x200000;
+		out[row] = static_cast<int32_t>(static_cast<uint32_t>(sum >> 22) +
+				static_cast<uint32_t>(m.m[row * 4 + 3]));
+	}
+}
+
+} // namespace
+
+bool death_map_facts(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		hud::DeathMapFacts &out) {
+	out = hud::DeathMapFacts{};
+	if (view.kernel == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	if (const world::Entity *player = w.registry.get(w.cached.local_player)) {
+		out.player_present = true;
+		out.player_x = io::float_to_fp16_16_sat(player->position.x);
+		out.player_y = io::float_to_fp16_16_sat(player->position.y);
+		out.player_z = io::float_to_fp16_16_sat(player->position.z);
+		out.player_team = player->team;
+	}
+	out.bounds_min_x = zones.min_x;
+	out.bounds_min_y = zones.min_y;
+	out.bounds_max_x = zones.max_x;
+	out.bounds_max_y = zones.max_y;
+	const ClientRuntime *runtime = view.runtime;
+	if (runtime != nullptr) {
+		const replication::ClientState &cs = runtime->state();
+		// [orig: g_DeployScreenActive @0xA860DC; dword_A85B68 (the 0x0A
+		//  sub-block-0 hold byte); g_GameType; word_A85BC0]
+		out.deploy_screen_active = cs.deploy_overlay_active;
+		out.hold_seconds = cs.spawn_hold_seconds;
+		out.game_type = runtime->game_type();
+		if (cs.spawn_waves.known) out.self_zone_handle = cs.spawn_waves.self_zone_handle;
+	}
+	// g_NapiNPCtx.is_in_session and the HUD info entity's team (the capture-
+	// point pick's gates [orig: Minimap_GetCapturePointInfo @0x5971ec /
+	// @0x597263]).
+	out.in_session = view.joiner ? (runtime != nullptr && runtime->in_session())
+			: w.rules.mp_session;
+	out.hud_team = out.player_team;
+	// The CMAP's placed-waypoint table: every non-null entry, read through
+	// its row whatever the row now holds (world::user_waypoint_row)
+	// [orig: CMapWindow_HandleEvent `if (entry)` @0x549dc8 / @0x549b7a, the
+	//  entity +4 read @0x549dd7 / @0x549ba0].
+	for (int i = 0; i < world::UserWaypointTable::kCapacity; ++i) {
+		const world::EntityHandle handle = w.user_waypoints.entries[static_cast<size_t>(i)].handle;
+		if (!handle.valid()) continue;
+		const world::UserWaypointRow row = world::user_waypoint_row(w, handle);
+		hud::DeathMapFacts::UserWaypoint &fact = out.user_waypoints[static_cast<size_t>(i)];
+		fact.live = true;
+		fact.x = row.x;
+		fact.y = row.y;
+		fact.name = row.name;
+	}
+	// The zone walk is the minimap banks' (banked_spawn_zones) [orig:
+	// MapOverlay_DrawView @0x5a5a4d..0x5a5d2c].
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked) {
+		const world::Entity *e = w.registry.get(handle);
+		if (e == nullptr) continue;
+		hud::DeathMapZone zone;
+		zone.handle = e->handle.packed;
+		zone.index = static_cast<int32_t>(world::spawn_zone_index_of(zones, handle));
+		zone.team = e->team;
+		if (runtime != nullptr) {
+			const auto live = runtime->zone_states().find(e->handle.packed);
+			if (live != runtime->zone_states().end() && live->second.has_value) {
+				zone.team = static_cast<uint8_t>(live->second.entry.mode_a);
+				zone.timer_ready = !(live->second.entry.value_target <
+						live->second.entry.value_limit);
+			}
+			// The S2C 0x53 mode_b lands at the zone entity's +0x223 and stays
+			// [orig: ZoneTimerList_SetEntryWindow @0x537DE0 via the 0x53
+			//  handler @0x428AE0].
+			if (live != runtime->zone_states().end() && live->second.has_window)
+				zone.capture_team = live->second.window.mode_b;
+			// The zone entity's +550 / +548 words keep the last 0x6E values
+			// (replication ClientZoneWaveCounts).
+			for (const replication::ClientZoneWaveCounts &c : runtime->state().zone_wave_counts) {
+				if (c.zone_handle != e->handle.packed) continue;
+				zone.queued = c.member_count;
+				zone.countdown = c.wave_countdown;
+			}
+		}
+		// sub_597FD0's entity reads (hud_map_view.h death_map_zone_blip).
+		zone.has_def = e->has_item_def;
+		zone.def_type = e->has_item_def ? e->item_type : 0u;
+		zone.def_attrib = e->has_item_def ? e->item_attrib : 0u;
+		zone.def_id = e->item_id;
+		const uint32_t eflags = e->flags | e->engine_flags;
+		zone.dead = (eflags & world::kEntityFlagDead) != 0;
+		zone.carried = (eflags & world::kEntityFlagCarried) != 0;
+		zone.local_player = e->handle == w.cached.local_player;
+		if (const world::Entity *parent = w.registry.get(e->ground_target))
+			zone.parent_item = parent->has_item_def && parent->item_type == 1;
+		zone.zone_number = e->zone_number;
+		if (const world::Entity *occupant = w.registry.get(e->primary_occupant)) {
+			zone.occupant_present = true;
+			zone.occupant_team = occupant->team;
+		}
+		// The anchor: the Euler matrix (no scale) about the position applied
+		// to the bbox centre [orig: sub_59C300 @0x59c311..0x59c327].
+		int32_t euler[3];
+		world::entity_live_euler_bam(*e, euler);
+		const int32_t position[3] = {io::float_to_fp16_16_sat(e->position.x),
+				io::float_to_fp16_16_sat(e->position.y),
+				io::float_to_fp16_16_sat(e->position.z)};
+		const world::CollisionMatrix m =
+				world::collision_matrix_from_euler(euler[0], euler[1], euler[2], position);
+		const int32_t centre[3] = {io::float_to_fp16_16_sat(e->bbox_center.x),
+				io::float_to_fp16_16_sat(e->bbox_center.y),
+				io::float_to_fp16_16_sat(e->bbox_center.z)};
+		int32_t anchor[3];
+		transform_point22(m, centre, anchor);
+		zone.anchor_x = anchor[0];
+		zone.anchor_y = anchor[1];
+		out.zones.push_back(zone);
+	}
+	return true;
+}
+
+void banked_spawn_zones(const RoleView &view, std::vector<world::EntityHandle> &out) {
+	out.clear();
+	if (view.kernel == nullptr || view.runtime == nullptr) return;
+	const world::World &w = view.kernel->world;
+	const replication::ClientMinimapState &banks = view.runtime->state().minimap;
+	auto walk = [&](const auto &bank) {
+		for (const replication::ClientMinimapOverlaySlot &slot : bank) {
+			if (slot.handle == 0xFFFFu || (slot.flags & 0x40u) != 0) continue;
+			const world::EntityHandle handle{slot.handle};
+			const world::Entity *e = w.registry.get(handle);
+			// The def (+32) and its spawn-zone attribute (+84 & 0x40000).
+			if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
+			out.push_back(handle);
+		}
+	};
+	walk(banks.transient);
+	walk(banks.persistent);
+	walk(banks.special);
+}
+
+bool command_map_roster(const RoleView &view, menu::CommandMapRoster &out) {
+	out = menu::CommandMapRoster{};
+	if (view.kernel == nullptr || view.runtime == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	const ClientRuntime &runtime = *view.runtime;
+	const replication::ClientState &cs = runtime.state();
+	const int local_slot = runtime.local_roster_slot();
+	out.local_slot = static_cast<uint8_t>(local_slot < 0 ? 0xFF : local_slot);
+	if (const world::Entity *player = w.registry.get(w.cached.local_player))
+		out.local_team = static_cast<int8_t>(player->team);
+	out.death_screen = local_death_screen_active(view);
+	out.in_session = view.joiner ? runtime.in_session() : w.rules.mp_session;
+	for (size_t i = 0; i < cs.roster.size(); ++i) {
+		const replication::ClientRosterSlot &slot = cs.roster[i];
+		if (!slot.bound) continue;
+		menu::CommandMapPlayer p;
+		p.slot = static_cast<uint8_t>(i);
+		p.team = slot.team;
+		p.name = slot.name;
+		p.has_entity = slot.entity_slot >= 0;
+		if (p.has_entity) {
+			if (const world::Entity *e = w.registry.get(world::EntityHandle::make(
+						0, static_cast<uint16_t>(slot.entity_slot))))
+				p.player_class = e->player_class;
+		}
+		p.spectator = slot.spectator;
+		p.leader = slot.squad_leader;
+		p.fireteam = slot.fireteam;
+		p.mute = slot.radio_mute_flags;
+		p.squad_color = slot.squad_color;
+		p.punt_mark = slot.punt_mark;
+		out.players.push_back(std::move(p));
+	}
+	return true;
+}
+
+bool command_map_locations(const RoleView &view, const world::SpawnZoneRegistry &zones,
+		menu::CommandMapLocations &out) {
+	out = menu::CommandMapLocations{};
+	if (view.kernel == nullptr) return false;
+	const world::World &w = view.kernel->world;
+	for (const world::UserWaypointTable::Entry &entry : w.user_waypoints.entries)
+		out.user_waypoints.push_back(world::user_waypoint_row(w, entry.handle).name);
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked)
+		out.zone_indices.push_back(world::spawn_zone_index_of(zones, handle));
+	if (view.runtime != nullptr && !view.runtime->state().location_names.empty())
+		out.location_names = view.runtime->state().location_names;
+	else if (view.host != nullptr)
+		out.location_names = view.host->mission_location_names;
+	return true;
+}
+
+bool death_shroud_revealed(const RoleView &view) {
+	if (view.kernel == nullptr) return false;
+	const bool deploy_active =
+			view.runtime != nullptr && view.runtime->state().deploy_overlay_active;
+	// The death stamp is the local player view's (world/local_player_view.cpp
+	// death_cam.start_tick, stamped on the local dead edge); the difference
+	// is retail's signed int.
+	const uint32_t now = view.kernel->world.logic_tick;
+	const int32_t since_death =
+			static_cast<int32_t>(now - view.kernel->local.view.death_cam.start_tick);
+	return world::death_shroud_revealed(deploy_active, since_death);
+}
+
 hud::HudMapGridOrigin hud_map_grid_origin(const RoleView &view) {
 	hud::HudMapGridOrigin v;
 	v.present = view.kernel != nullptr && view.kernel->world.tables.map_grid_origin_present;
@@ -384,9 +775,15 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 	const uint8_t team = runtime.assigned_team();
 	const replication::ClientState &cs = runtime.state();
 	const uint16_t self_handle = runtime.has_self_handle() ? runtime.self_handle() : 0xFFFFu;
-	for (size_t i = 0; i < zones.entries.size(); ++i) {
-		const world::Entity *e = w.registry.get(zones.entries[i]);
-		if (e == nullptr || !e->has_item_def || !e->is_spawn_point) continue;
+	// The zone walk is the minimap banks' (banked_spawn_zones): a zone the
+	// server never sent is not listed, the rows follow first arrival, and a
+	// banked zone outside the SpawnZoneList lists as index -1.
+	std::vector<world::EntityHandle> banked;
+	banked_spawn_zones(view, banked);
+	for (const world::EntityHandle handle : banked) {
+		const world::Entity *e = w.registry.get(handle);
+		if (e == nullptr) continue;
+		const int index = world::spawn_zone_index_of(zones, handle);
 		uint8_t effective_team = e->team;
 		int32_t effective_control = e->zone_control;
 		int32_t effective_limit = 0x10000;
@@ -404,10 +801,12 @@ bool deploy_zone_rows(const RoleView &view, const world::SpawnZoneRegistry &zone
 		}
 		if (effective_team != team) continue;
 		world::DeployZoneRow row;
-		row.index = static_cast<int>(i);
-		row.letter = static_cast<char>('A' + static_cast<int>(i));
+		// No -1 guard in the first loop: an unregistered zone lists as '@'
+		// with STRWPNAME000 and value 0 [orig: @0x553bd6..0x553c1f].
+		row.index = index;
+		row.letter = static_cast<char>('A' + index);
 		char name_key[32];
-		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", static_cast<int>(i) + 1);
+		std::snprintf(name_key, sizeof(name_key), "STRWPNAME%03d", index + 1);
 		row.name_key = name_key;
 		// The first-loop gate: a zone whose live timer entry sits below its limit
 		// is NOT listed; no entry (or level >= limit) lists it. There is no zone-
@@ -655,6 +1054,197 @@ void EntityLightingFeed::collect(const RoleView &view, const int32_t sun_step_q1
 			out.push_back(EntityLightingChange{ true, 0, handle, lighting });
 		}
 	}
+}
+
+namespace {
+
+// One entity's team, playerClass and name as retail's drawers read them off
+// the entity (+0x162, +0x294, +0xF4): the authority's own pools, or a
+// joiner's decoded row — its compact field-17 low nibble once a compact
+// landed (the client apply rewrites playerClass [orig:
+// Entity_SetHealthFromDifficultyByte @0x4AD580]), else the spawn's class.
+struct EntityReads {
+	bool found = false;
+	uint8_t team = 0;
+	uint8_t player_class = 0;
+	std::string name;
+};
+EntityReads entity_reads(const RoleView &view, uint16_t handle) {
+	EntityReads r;
+	if (view.joiner) {
+		const replication::ClientEntityState *row =
+				view.runtime != nullptr ? view.runtime->state().find(handle) : nullptr;
+		if (row == nullptr) return r;
+		r.found = true;
+		r.team = row->team_known ? row->team : 0;
+		r.player_class = row->net_has_compact
+				? static_cast<uint8_t>(row->health_class_byte & 0x0Fu)
+				: row->spawn_player_class;
+		r.name = row->display_name;
+		return r;
+	}
+	if (view.kernel == nullptr) return r;
+	const world::Entity *e = view.kernel->world.registry.get(world::EntityHandle{handle});
+	if (e == nullptr) return r;
+	r.found = true;
+	r.team = e->team;
+	r.player_class = e->player_class;
+	r.name = e->display_name;
+	return r;
+}
+
+} // namespace
+
+SessionVars scoreboard_session_vars(const RoleView &view) {
+	if (view.joiner)
+		return view.runtime != nullptr ? view.runtime->session_vars() : SessionVars{};
+	if (view.host == nullptr)
+		return {};
+	SessionVars vars = host_session_vars(view.host->config);
+	if (view.host->is_mp_session_peer != 0) {
+		const std::vector<uint8_t> stream = encode_session_vars(vars);
+		decode_session_vars(stream.data(), stream.size(), vars);
+	}
+	return vars;
+}
+
+bool command_map_rules_text(const RoleView &view, const hud::GameTextLookup &gametext,
+		std::string &out) {
+	if (view.runtime == nullptr || view.kernel == nullptr) return false;
+	const replication::ClientState &state = view.runtime->state();
+	world::World &w = view.kernel->world;
+	replication::ClientSessionStatus status;
+	hud::RulesBriefingInputs inputs;
+	if (view.joiner) {
+		status = state.session_status;
+		inputs.config_first = replication::server_config_first_text(state.server_config_strings);
+		inputs.config_second = replication::server_config_second_text(state.server_config_strings);
+	} else if (view.host != nullptr) {
+		const std::vector<uint8_t> body = serialize_session_status(view.host->config,
+				view.host->np_protocol.host_run_duration_ms, view.host->is_in_session != 0, &w);
+		SessionStatusBlock block;
+		(void)decode_session_status(body.data(), body.size(), block);
+		status = replication::fold_session_status(block, state.local_clock_ms);
+		inputs.authority = true;
+		// MissionText info/briefing3 and info/briefing2, else info/briefing
+		// [orig: HUD_BuildRulesAndBriefingText @0x5b92d0 — the authority arm].
+		inputs.briefing3 = view.host->mission_briefing3;
+		inputs.briefing2 = view.host->mission_briefing2;
+	} else {
+		return false;
+	}
+	hud::SessionStatusView sv;
+	sv.valid = status.valid;
+	sv.server_name = status.server_name;
+	sv.mission_name = status.mission_name;
+	sv.max_players = status.max_players;
+	sv.elapsed_ms = replication::session_status_elapsed_ms(status, state.local_clock_ms);
+	sv.stats = status.stats;
+	for (const replication::ClientSessionStatus::Option &o : status.options)
+		sv.options.emplace_back(o.key, o.value);
+	inputs.game_type = view.runtime->game_type();
+	// [orig: `g_LocalPlayerEntity ? ->Team (+0x162) : 0` @0x5b92de..0x5b92f1]
+	if (const world::Entity *local = w.registry.get(w.cached.local_player))
+		inputs.local_team = static_cast<int8_t>(local->team);
+	inputs.spawn_zones = w.zones.has_spawn_zone(); // sub_43B910
+	// [orig: g_ScoreboardInGameCount, the 0x16 trailer @0x42fe70]
+	return hud::build_end_game_stats_text(sv, state.scoreboard.in_game_count, inputs, gametext, out);
+}
+
+void scoreboard_feed(const RoleView &view, hud::HudScoreboardState &out) {
+	out.rows.clear();
+	out.team_count = 0;
+	out.teams = {};
+	out.flag_carrier = false;
+	out.flag_carrier_name.clear();
+	out.flag_carrier_team = 0;
+	out.local_team = -1;
+	if (view.runtime == nullptr) return;
+	const replication::ClientState &state = view.runtime->state();
+	replication::project_scoreboard(state, out.rows, [&view](uint16_t handle) {
+		const EntityReads r = entity_reads(view, handle);
+		replication::ScoreboardEntityFacts facts;
+		facts.found = r.found;
+		facts.team = r.team;
+		facts.player_class = r.player_class;
+		return facts;
+	});
+	// [orig: g_ScoreboardTeamCount @0x42fdda; the table 0xA85AEC + 16t]
+	out.team_count = static_cast<int>(state.scoreboard.team_count);
+	for (size_t t = 0; t < out.teams.size() && t < state.scoreboard.teams.size(); ++t) {
+		out.teams[t].score1 = state.scoreboard.teams[t].score1;
+		out.teams[t].ctf_flag = state.scoreboard.teams[t].ctf_flag;
+		out.teams[t].koth_hold = state.scoreboard.teams[t].koth_hold;
+	}
+	out.status_suffix = state.scoreboard_status_suffix != 0; // [orig: @0x423ef8]
+	out.timed = state.scoreboard.timed;                       // [orig: g_ScoreboardFlags & 2]
+	// [orig: `is_authority ? g_TimeLimitMinutes : dword_A821C0` @0x423a4b]
+	out.time_limit = !view.joiner && view.host != nullptr
+			? static_cast<int>(view.host->config.time_limit_minutes)
+			: static_cast<int>(state.session_time_limit_minutes);
+	// The local player's own entity team [orig: g_LocalPlayerEntity->Team
+	// @0x423d64].
+	if (view.joiner) {
+		if (view.runtime->has_self_handle()) {
+			const EntityReads self = entity_reads(view, view.runtime->self_handle());
+			if (self.found) out.local_team = self.team;
+		}
+	} else if (view.kernel != nullptr) {
+		if (const world::Entity *player = view.kernel->local.player()) out.local_team = player->team;
+	}
+	// The latched carrier [orig: dword_A860C4 @0x423944; +0x162 @0x42396f;
+	// +0xF4 @0x4239c3]. The latch stores whatever the attach handle names;
+	// the drawer's `if (dword_A860C4)` is the entity's presence.
+	if (state.flag_carrier_handle != 0xFFFFu) {
+		const EntityReads carrier = entity_reads(view, state.flag_carrier_handle);
+		if (carrier.found) {
+			out.flag_carrier = true;
+			out.flag_carrier_name = carrier.name;
+			out.flag_carrier_team = carrier.team;
+		}
+	}
+}
+
+hud::ChatEntryFacts chat_entry_facts(const RoleView &view, bool novaworld, uint32_t frame) {
+	hud::ChatEntryFacts f;
+	f.frame = frame;
+	f.novaworld = novaworld;
+	f.death_screen = local_death_screen_active(view); // [orig: g_DeathScreenActive]
+	if (view.runtime != nullptr) {
+		const replication::ClientState &state = view.runtime->state();
+		f.spawn_gate = state.spawn_success_gate;  // [orig: g_SpawnSuccessGate]
+		f.reset_hold = state.round_reset_hold;         // [orig: dword_24C195C]
+		f.team_game = (view.runtime->game_type() & 0x10000u) != 0u; // [orig: @0x49b9bf]
+	}
+	// [orig: g_NapiNPCtx.is_in_session / is_authority] — the authority's
+	// multiplayer session is the world's mp_session rule: the SP listen
+	// server runs its own replication loop but is never in a session.
+	f.in_session = view.joiner ? (view.runtime != nullptr && view.runtime->in_session())
+			: (view.kernel != nullptr && view.kernel->world.rules.mp_session);
+	f.authority = !view.joiner && view.host != nullptr;
+	f.mp_session_peer = f.in_session;
+	if (view.kernel != nullptr) {
+		const world::World &w = view.kernel->world;
+		if (const world::Entity *local = w.registry.get(w.cached.local_player)) {
+			f.has_local_player = true;
+			// [orig: Entity_FindChildByDefType(local, 1, 0) @0x49ba38 — the
+			// groundEntity walk for a def-type-1 link]
+			f.in_vehicle = world::friendly_tag_aboard_vehicle(w, local->ground_target);
+		}
+	}
+	return f;
+}
+
+void step_hud_radar(mission::MissionKernel &kernel, ClientRuntime *runtime, bool pass_runs,
+		bool map_site, bool menu_paused, hud::HudMinimapRadar &out) {
+	world::World &w = kernel.world;
+	// Retail's update reads g_CurrentTick [orig: @0x5a8176 / @0x5a7914].
+	const int32_t aged = world::radar_hud_frame(w, w.logic_tick, pass_runs, map_site,
+			menu_paused, out);
+	// [orig: Radar_UpdateContacts `test edi, edi; jz` @0x59a9c9 ->
+	//  MapOverlay_UpdateTimers @0x59a9ce]
+	if (aged != 0 && runtime != nullptr)
+		runtime->view().age_minimap_overlays(static_cast<uint32_t>(aged));
 }
 
 } // namespace opennova::inmatch

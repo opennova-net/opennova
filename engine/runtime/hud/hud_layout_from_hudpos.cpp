@@ -81,6 +81,25 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.weapon_name = pos_record4(hud.weapon_name_pos);
 	out.game_info = pos_record4(hud.game_info);
 	out.wpd_info = pos_record4(hud.wpd_info);
+	// The session-line anchors (hud_frame.h HudLayout carries the witnesses):
+	// HUDTIMECLOCK keeps x, y only; ZONEINFO's third field is its alignment.
+	out.time_clock = pos_record2(hud.time_clock[0], hud.time_clock[1]);
+	out.player_count = pos_record4(hud.player_count);
+	out.team_xy = pos_record4(hud.team_xy);
+	out.zone_info = pos_record2(hud.zone_info[0], hud.zone_info[1]);
+	out.zone_info.align = hud.zone_info[2];
+	// The HUDLS block [orig: dword_2723700..dword_272373C + 8*9].
+	out.hudls.system = hud.hudls_system;
+	out.hudls.key_ofst_x = hud.hudls_keyofst[0];
+	out.hudls.key_ofst_y = hud.hudls_keyofst[1];
+	out.hudls.moreav_dx = hud.hudls_moreav_off[0];
+	out.hudls.moreav_dy = hud.hudls_moreav_off[1];
+	for (size_t i = 0; i < out.hudls.slot_x.size(); ++i) {
+		out.hudls.slot_x[i] = hud.hudls_slot[i][0];
+		out.hudls.slot_y[i] = hud.hudls_slot[i][1];
+	}
+	assets.hudls_bracket = hud.hudls_bracket;
+	assets.hudls_moreav = hud.hudls_moreav;
 	out.chat_text = pos_record2(hud.chat_text[0], hud.chat_text[1]);
 	// The chat box's coordinate rows (the chat wrap width `x2 - (x1 - 4)`)
 	// are NOT the HUDCHATTEXT anchor: retail's g_HUDChatBoxCoords are written
@@ -92,6 +111,7 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
 	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
 	out.sys_text = pos_record2(hud.sys_text[0], hud.sys_text[1]);
+	out.squad_orders = pos_record2(hud.orders[0], hud.orders[1]);
 	// BREATHTIME x, y, align: three fields, no hidden dword; an unauthored
 	// line leaves the zero record (0, 0, left) the bar still draws at
 	// [orig: HUD_ParseHudposToken @0x59FB3B..0x59FB84 -> dword_2723810/14/18].
@@ -106,6 +126,25 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	out.veh_stance_pos = pos_record2(hud.veh_stance_pos[0], hud.veh_stance_pos[1]);
 	out.clip_pos = pos_record2(hud.clip_pos[0], hud.clip_pos[1]);
 	out.stance_pos = pos_record2(hud.stance_pos[0], hud.stance_pos[1]);
+	// PAUSEDPOS x, y [orig: @0x59FCB0 / @0x59FCC8 -> dword_272360C / 10].
+	out.paused_x = hud.paused_pos[0];
+	out.paused_y = hud.paused_pos[1];
+	// NETWORKINDICATOR: the connection indicators' three corners; unauthored,
+	// the layout keeps the CNetQuality reset's [orig: HUD_ParseHudposToken
+	// @0x59F9A8..0x59FA0C over the reset @0x4C5908..0x4C591E, which the mission
+	// start runs first @0x5243B4, before HUD_InitOverlaySystem @0x525733].
+	out.net_indicator_pos = kNetIndicatorResetPos;
+	if (hud.network_indicator_present) {
+		for (size_t i = 0; i < out.net_indicator_pos.size(); ++i)
+			out.net_indicator_pos[i] = hud.network_indicator[i];
+	}
+	// MRCLIPPYNORMAL / MRCLIPPYALTERNATE x, y, width pad, height pad
+	// [orig: HUD_ParseHudposToken @0x59fa15..0x59fa76 -> g_TipSystem +0x40..+0x4C,
+	//  @0x59fa7f..0x59fae0 -> +0x50..+0x5C].
+	for (size_t i = 0; i < 4; ++i) {
+		out.tip_normal[i] = hud.mrclippy_normal[i];
+		out.tip_alternate[i] = hud.mrclippy_alternate[i];
+	}
 
 	// The targeting and instrument anchors (hud_combat.h): the sprites' pixel
 	// sizes are the device's once it resolves the names below.

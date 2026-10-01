@@ -13,6 +13,13 @@ static func stage(test: GutTest, res_dir: String, targets: PackedStringArray) ->
 			"STATIC_MEDIC_MSG1", "STATIC_CALLMEDIC_MSG", "STATIC_INSTRUCTIONS_MSG",
 			"STATIC_INSTRUCTIONS2_MSG", "SWAP_TEAMS", "BUTTON_TEAMLIST"]:
 		body += MenuDriverFixture.wnd("static", name, 200)
+	# The custom-draw MAP window inside the DEATH_SHROUD window, as death.mnu
+	# nests them; placed right of the control column so it never covers a row.
+	body += ('<WINDOW type="window" name="DEATH_SHROUD"><POSITION><LEFT>300</LEFT>'
+			+ '<TOP>20</TOP><RIGHT>780</RIGHT><BOTTOM>545</BOTTOM></POSITION>'
+			+ '<WINDOW type="window" name="MAP"><APPEARANCE type="custom" state="default">'
+			+ '</APPEARANCE><POSITION><LEFT>10</LEFT><TOP>10</TOP><RIGHT>470</RIGHT>'
+			+ '<BOTTOM>470</BOTTOM></POSITION></WINDOW></WINDOW>')
 	var texts := RtxtStringFile.new()
 	texts.add_section("Overlays")
 	for key in ["STROVER_RESPAWN1", "STROVER_RESPAWN2"]:

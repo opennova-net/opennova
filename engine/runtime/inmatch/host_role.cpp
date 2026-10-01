@@ -92,6 +92,7 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 void HostRole::make_client_runtime(uint32_t game_type) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime = std::make_unique<inmatch::ClientRuntime>(state.host_loop);
+	state.host_owner.ctx.host_client = state.client_runtime.get();
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
@@ -161,6 +162,11 @@ void HostRole::drain_host_client_gameplay_requests() {
 		}
 	}
 	if (local == nullptr) return;
+	// The listen client's own roster slot (retail g_LocalPlayerSlotId): its S2C
+	// 0x4D fold tells its own slot's join notice from another's
+	// [orig: NapiNPClientMsg_HandleSpawnSlot @0x4317f0].
+	if (state.client_runtime)
+		state.client_runtime->view().set_local_player_slot(local->reply.player_slot);
 	replication::Datagram dg;
 	std::vector<replication::Datagram> deferred;
 	while (state.host_loop.host_recv(dg)) {
@@ -173,17 +179,54 @@ void HostRole::drain_host_client_gameplay_requests() {
 		//  push 16h @ 0x4E04E4) -> NapiNPServerMsg_HandleWeaponToggle @ 0x511A70;
 		//  Input_HandleActionBinding action 217 @ 0x49B4B4..0x49B50C (push 2Eh
 		//  @ 0x49B500)]
-		if (dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
+		// The host player's chat line rides the same queue (the talk senders
+		// are a session peer's QueueReliableMessage(0xD) too); its handler
+		// reads the server context [orig: NapiNPServer_HandleChatMessage
+		// @0x513760].
+		// The listen client's visible-players refreshes (the C2S 0x22 / 0x23
+		// pair its 0x0F / 0x4D / 0x50 handlers queue) and its emote request
+		// ride the same queue [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab;
+		//  NapiNPClientMsg_HandleSpawnSlot @0x43181d / @0x43183e;
+		//  NapiNPClientMsg_TeamAssign @0x431ae4 / @0x431b05;
+		//  NetPacket_SendEmoteRequest @0x42c14c]; its radio call too
+		// [orig: NetPacket_SendRadioCallRequest @0x42c17c].
+		// The host player's command-map sends ride it too: each squad /
+		// waypoint / punt sender is a bare QueueReliableMessage on the local
+		// client's connection, and the server handlers read the host
+		// context (server_squad.h).
+		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
+		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
+		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
+		//  NetPacket_SendWeaponAction @0x42dceb (0x45), NetPacket_SendTeamChange
+		//  @0x42dd19 (0x46), NetPacket_SendVoteKick @0x42dd69 (0x4B),
+		//  NetPacket_SendEntityUpdate @0x42de21 (0x4F),
+		//  CMap_HandlePlayerListCallback @0x5488b9 (0x3F) — every sender name
+		//  a misnomer; CNapiNetwork_QueueReliableMessage @0x4c4fa0 queues on
+		//  the local client connection (this+0xE60)]
+		const bool squad = dg.tag == c2s::WAYPOINT_SHARE || dg.tag == c2s::PUNT_VOTE ||
+				dg.tag == c2s::SQUAD_JOIN_REQUEST || dg.tag == c2s::SQUAD_ORDER_REQUEST ||
+				dg.tag == c2s::FIRETEAM_ASSIGN || dg.tag == c2s::SQUAD_RECRUIT ||
+				dg.tag == c2s::GO_CODE || dg.tag == c2s::WAYPOINT_DELETE;
+		if (!squad && dg.tag != c2s::WEAPON_RELOAD_REQUEST &&
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
-				dg.tag != c2s::MEDIC_REQUEST) {
+				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
+				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
+				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
+		// The chat handler, the snapshot builder, the radio call (its
+		// designation table and zone test) and the squad handlers read the
+		// host context.
+		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
+				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
+		inmatch::ServerDispatchInputs inputs;
+		if (reads_ctx) inputs.server_ctx = &state.host_owner.ctx;
 		std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
 				state.host_owner.ctx.config, *local, messages, state.host_owner.now_tick,
-				state.host_owner.ctx.np_protocol.connection_list, &kernel.world);
+				state.host_owner.ctx.np_protocol.connection_list, &kernel.world, inputs);
 		for (ProtocolMessage &reply : replies) state.host_loop.host_send(reply.tag, std::move(reply.payload));
 	}
 	for (replication::Datagram &preserved : deferred) state.host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));
@@ -215,7 +258,8 @@ void HostRole::run_tick(const TickInput &input) {
 	// the death camera): sampled pre-fold, exactly the value the old inline
 	// view tick consumed at this point in the frame.
 	kernel.local.view_session_inputs = view_session_inputs_for(
-			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead());
+			state.client_runtime.get(), /*joiner=*/false, kernel.local.local_player_dead(),
+			kernel.world.rules.mp_session);
 	// Server_SendRandomSeedSync's non-dedicated S2C 0x68 cursor wraps against
 	// the renderer viewport height [orig: Server_SendRandomSeedSync @0x511360];
 	// a missing viewport leaves the seam unset and inmatch suppresses 0x68
@@ -235,7 +279,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// [orig: Game_ProcessMainFrame -- the Sound_TickPendingSlots call
 	//  @0x526697 precedes the Server_TickUpdate call @0x5266B6 (its receive
 	//  pump @0x51D895)]
-	kernel.world.out.fire_sounds.tick();
+	kernel.world.tick_pending_sound_slots();
 	// The entity-update gate's exemption for a host that also plays: its own
 	// client's death-screen latch, folded at the end of the previous frame as
 	// retail's client receive sets it at the head of this one.
@@ -243,6 +287,10 @@ void HostRole::run_tick(const TickInput &input) {
 	//  `cmp g_DeathScreenActive,0` @0x526713]
 	kernel.world.cached.peer_death_screen = state.host_owner.ctx.is_mp_session_peer != 0 &&
 			state.client_runtime != nullptr && state.client_runtime->state().death_screen_active;
+	// The own client's spectate walk starts from and skips the host's player
+	// [orig: Spectator_CycleTarget_0 @0x52ac56 / @0x52ad09].
+	if (state.client_runtime != nullptr)
+		state.client_runtime->view().set_spectate_local_handle(kernel.world.cached.local_player.packed);
 	inmatch::host_session_pump(state.host_owner, socket, &before_server_tick, &kernel,
 			nullptr, nullptr);
 	// The frame tail after the server tick laps onto the stats board's
@@ -283,10 +331,20 @@ void HostRole::run_tick(const TickInput &input) {
 	// (host_loop -> ClientState). The S2C serialize/emit half rides inside
 	// host_session_pump, fused with the logic tick.
 	const int64_t net_start = static_cast<int64_t>(io::perf_now_us());
+	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	if (state.client_runtime) {
+		// The connection indicators on the authority: the level its send
+		// window buckets lands before the indicators step inside the client
+		// frame, and the server protocol's link-error callbacks of this tick
+		// after it, as retail's Server_TickUpdate runs after that step
+		// [orig: Game_ProcessMainFrame — CNetQuality_SetLevel @0x52659b,
+		//  CNetQuality_UpdateIndicators @0x52668d, Server_TickUpdate @0x5266b6].
+		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
+		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
 	}
+	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;
 	if (kernel.world.profile != nullptr)
 		kernel.world.profile->add(devtools::Slot::SIM_NET, last_net_us_);
@@ -295,6 +353,11 @@ void HostRole::run_tick(const TickInput &input) {
 void HostRole::observe_frame_rate(int32_t fps) {
 	Role::observe_frame_rate(fps);
 	state.host_owner.ctx.stats_avg_fps = fps;
+}
+
+void HostRole::observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) {
+	state.host_owner.ctx.stats_frames_last_second = frames_last_second;
+	state.host_owner.ctx.stats_cpu_percent = cpu_percent;
 }
 
 bool HostRole::session_lost(SessionError &error) const {

@@ -524,11 +524,11 @@ struct Located {
 	size_t index = 0;
 };
 
-bool locate(const MenuScreen &screen, NodeId id, Located &out) {
-	const auto &places = screen.places();
-	const auto found = places.find(id);
-	if (found == places.end() || found->second.empty()) return false;
-	const std::vector<MenuScreen::Step> &steps = found->second;
+// A nested record found by its path in the screen (Document::path_in): the root's index (the
+// screen's one collection), then each list and index down to it.
+bool locate_steps(const MenuScreen &screen, const Document::PathStep *steps, size_t size, Located &out) {
+	if (!size || steps[0].index >= screen.roots.size() || steps[0].index >= screen.screen.roots.size())
+		return false;
 	MenuScreen &mutable_screen = const_cast<MenuScreen &>(screen);
 	out = Located();
 	out.owner = mnu::schema_screen(mutable_screen.screen);
@@ -536,26 +536,33 @@ bool locate(const MenuScreen &screen, NodeId id, Located &out) {
 	out.record = root_record(screen, steps[0].index);
 	out.ids = &mutable_screen.roots[steps[0].index];
 	out.context = root_context(screen.screen.roots[steps[0].index]);
-	for (size_t i = 1; i < steps.size(); ++i) {
-		const SchemaRecord next = mnu::schema_list_at(out.record, steps[i].list, steps[i].index);
-		if (!next) return false;
+	for (size_t i = 1; i < size; ++i) {
+		const size_t list = steps[i].collection, index = steps[i].index;
+		const SchemaRecord next = mnu::schema_list_at(out.record, list, index);
+		if (!next || list >= out.ids->lists.size() || index >= out.ids->lists[list].size()) return false;
 		out.owner = out.record;
 		out.owner_ids = out.ids;
 		out.owner_context = out.context;
-		out.list = steps[i].list;
-		out.index = steps[i].index;
+		out.list = list;
+		out.index = index;
 		out.context = step_into(out.owner_context, out.owner, out.list, next);
 		out.record = next;
-		out.ids = &out.ids->lists[steps[i].list][steps[i].index];
+		out.ids = &out.ids->lists[list][index];
 	}
 	return true;
+}
+
+// A nested record of `screen` (a row `document` holds, or a batch's version of one) by identity.
+bool locate(const Document &document, const MenuScreen &screen, NodeId id, Located &out) {
+	const Document::RecordPath path = document.path_in(screen, id);
+	return locate_steps(screen, path.begin(), path.size(), out);
 }
 
 bool locate(const Document &document, const NodeAddress &address, Located &out) {
 	if (!address.child || address.kind == kScreen) return false;
 	const Node *node = document.row(address.row);
 	if (!node || node->kind != kScreen) return false;
-	return locate(screen_of(*node), address.child, out);
+	return locate(document, screen_of(*node), address.child, out);
 }
 
 // --- names -----------------------------------------------------------------------------
@@ -811,46 +818,13 @@ size_t MenuScreen::footprint() const {
 	size_t bytes = sizeof(MenuScreen) + collections_footprint() + footprint_of(screen.name) +
 	               list_content(screen.roots) + footprint_of(roots);
 	for (const RecordIds &root : roots) bytes += ids_content(root);
-	if (places_) {
-		bytes += footprint_of(*places_);
-		for (const auto &place : *places_) bytes += footprint_of(place.second);
-	}
 	return bytes;
 }
 
-// The clone shares the places (immutable, and right for the clone until a structural edit
-// or new identities make them again).
 std::shared_ptr<Node> MenuScreen::clone() const { return std::make_shared<MenuScreen>(*this); }
 
-// The callback may rewrite the identities (a new or duplicated row takes fresh ones), so the
-// places, keyed by identity, are made again after it.
 void MenuScreen::for_each_identity(const std::function<void(NodeId &)> &fn) {
 	for (RecordIds &root : roots) editor::for_each_identity(root, fn);
-	index_places();
-}
-
-const MenuScreen::Places &MenuScreen::places() const {
-	static const Places none;
-	return places_ ? *places_ : none;
-}
-
-void MenuScreen::index_places() {
-	auto built = std::make_shared<Places>();
-	std::vector<Step> path;
-	std::function<void(const RecordIds &)> visit = [&](const RecordIds &ids) {
-		(*built)[ids.id] = path;
-		for (size_t list = 0; list < ids.lists.size(); ++list)
-			for (size_t i = 0; i < ids.lists[list].size(); ++i) {
-				path.push_back({list, i});
-				visit(ids.lists[list][i]);
-				path.pop_back();
-			}
-	};
-	for (size_t i = 0; i < roots.size(); ++i) {
-		path.assign(1, Step{kRoots, i});
-		visit(roots[i]);
-	}
-	places_ = built;
 }
 
 bool is_menu_kind(AssetKind kind) {
@@ -894,7 +868,7 @@ std::vector<Document::Collection> MnuDocument::collections(const Node &row, cons
 		return {roots};
 	}
 	Located at;
-	if (!locate(screen, owner.child, at)) return {};
+	if (!locate(*this, screen, owner.child, at)) return {};
 	std::vector<Collection> out;
 	const std::vector<mnu::SchemaList> &lists = mnu::schema_lists(at.record.shape);
 	for (size_t list = 0; list < lists.size(); ++list) {
@@ -919,7 +893,7 @@ void MnuDocument::walk_records(const Node &row, const RecordVisitor &visit) cons
 				        if (!child) return false;
 				        const RecordIds &child_ids = ids.lists[list][i];
 				        const NodeAddress address{row.id, spec.kind, child_ids.id};
-				        if (!visit(address, Placement{self, spec, i})) return false;
+				        if (!visit(address, Placement{self, spec, i, list})) return false;
 				        if (!step(child, child_ids, address, step_into(context, record, list, child))) return false;
 			        }
 		        }
@@ -929,7 +903,7 @@ void MnuDocument::walk_records(const Node &row, const RecordVisitor &visit) cons
 	const CollectionSpec roots = roots_spec();
 	for (size_t i = 0; i < screen.roots.size() && i < screen.screen.roots.size(); ++i) {
 		const NodeAddress address{row.id, kWindow, screen.roots[i].id};
-		if (!visit(address, Placement{top, roots, i})) return;
+		if (!visit(address, Placement{top, roots, i, 0})) return;
 		if (!step(root_record(screen, i), screen.roots[i], address, root_context(screen.screen.roots[i]))) return;
 	}
 }
@@ -1015,7 +989,7 @@ bool MnuDocument::read_present(const Node &row, const NodeAddress &address, cons
 		return mnu::schema_present(mnu::schema_screen(const_cast<mnu::Screen &>(screen_of(row).screen)), field);
 	}
 	Located at;
-	if (address.kind == kScreen || !locate(screen_of(row), address.child, at)) return false;
+	if (address.kind == kScreen || !locate(*this, screen_of(row), address.child, at)) return false;
 	if (field.empty()) return at.context.present;
 	return mnu::schema_present(at.record, field);
 }
@@ -1027,7 +1001,8 @@ bool MnuDocument::read(const Node &row, const NodeAddress &address, const std::s
 		return mnu::schema_get(mnu::schema_screen(const_cast<mnu::Screen &>(screen_of(row).screen)), field, out);
 	}
 	Located at;
-	return address.kind != kScreen && locate(screen_of(row), address.child, at) && mnu::schema_get(at.record, field, out);
+	return address.kind != kScreen && locate(*this, screen_of(row), address.child, at) &&
+	       mnu::schema_get(at.record, field, out);
 }
 
 int MnuDocument::window_index(const NodeAddress &address) const {
@@ -1056,7 +1031,7 @@ NodeId MnuDocument::window_at(const Node &screen, size_t preorder) const {
 NodeAddress MnuDocument::record_at(const Node &screen, size_t preorder, size_t list, size_t index) const {
 	const NodeId window = window_at(screen, preorder);
 	Located at;
-	if (!window || !locate(screen_of(screen), window, at)) return {};
+	if (!window || !locate(*this, screen_of(screen), window, at)) return {};
 	if (list >= at.ids->lists.size() || index >= at.ids->lists[list].size()) return {};
 	const mnu::SchemaList &spec = mnu::schema_lists(at.record.shape)[list];
 	return {screen.id, kind_of(spec.path), at.ids->lists[list][index].id};
@@ -1317,7 +1292,7 @@ bool MnuDocument::set_field(Node &node, const NodeAddress &address, const std::s
 	MenuScreen &screen = screen_of(node);
 	if (!address.child) return mnu::schema_set(mnu::schema_screen(screen.screen), field, value, error);
 	Located at;
-	if (!locate(screen, address.child, at)) { error = "The record no longer exists."; return false; }
+	if (!locate(*this, screen, address.child, at)) { error = "The record no longer exists."; return false; }
 	// A name the reader would not keep here is refused: a window keeps only its PLAYERLIST
 	// and SERVERLIST attributes, and only the extra elements its parses read at its top level.
 	if (is_window_shape(at.owner.shape) && at.record.shape == SchemaShape::Attribute && field == "name") {
@@ -1348,7 +1323,7 @@ bool MnuDocument::set_present(Node &node, const NodeAddress &address, const std:
 	MenuScreen &screen = screen_of(node);
 	if (!address.child) return mnu::schema_set_present(mnu::schema_screen(screen.screen), field, present, error);
 	Located at;
-	if (!locate(screen, address.child, at)) { error = "The record no longer exists."; return false; }
+	if (!locate(*this, screen, address.child, at)) { error = "The record no longer exists."; return false; }
 	if (present && is_window_shape(at.owner.shape) && at.record.shape == SchemaShape::Attribute && field == "value") {
 		error = kFlagsTakeNoValue;
 		return false;
@@ -1360,28 +1335,34 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
                                   std::string &error) {
 	MenuScreen &screen = screen_of(node);
 	const SchemaRecord screen_record = mnu::schema_screen(screen.screen);
-	// The owner a record goes into (0: the screen's roots), and its list of `kind`.
-	auto owner_list = [&](NodeId parent, NodeKind kind, SchemaRecord &owner, std::vector<RecordIds> *&ids,
-	                      size_t &list) {
-		if (!parent) {
+	// The list of `kind` an owner holds: a located record's, or (null) the screen's roots.
+	auto list_of = [&](const Located *at, NodeKind kind, SchemaRecord &owner, std::vector<RecordIds> *&ids,
+	                   size_t &list) {
+		if (!at) {
 			if (kind != kWindow) { error = "A screen holds windows only."; return false; }
 			owner = screen_record;
 			ids = &screen.roots;
 			list = 0;
 			return true;
 		}
-		Located at;
-		if (!locate(screen, parent, at)) { error = "The record to add into no longer exists."; return false; }
-		const std::vector<mnu::SchemaList> &lists = mnu::schema_lists(at.record.shape);
+		const std::vector<mnu::SchemaList> &lists = mnu::schema_lists(at->record.shape);
 		for (size_t i = 0; i < lists.size(); ++i) {
 			if (kind_of(lists[i].path) != kind) continue;
-			owner = at.record;
-			ids = &at.ids->lists[i];
+			owner = at->record;
+			ids = &at->ids->lists[i];
 			list = i;
 			return true;
 		}
 		error = "This record holds no such records.";
 		return false;
+	};
+	// The owner a record goes into (0: the screen's roots), and its list of `kind`.
+	auto owner_list = [&](NodeId parent, NodeKind kind, SchemaRecord &owner, std::vector<RecordIds> *&ids,
+	                      size_t &list) {
+		if (!parent) return list_of(nullptr, kind, owner, ids, list);
+		Located at;
+		if (!locate(*this, screen, parent, at)) { error = "The record to add into no longer exists."; return false; }
+		return list_of(&at, kind, owner, ids, list);
 	};
 	SchemaRecord owner;
 	std::vector<RecordIds> *ids = nullptr;
@@ -1398,11 +1379,10 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 		}
 		insert_ids(*ids, position, made, allocate);
 		added = (*ids)[position].id;
-		screen.index_places();
 		return true;
 	}
 	Located at;
-	if (!locate(screen, edit.address.child, at)) { error = "The record no longer exists."; return false; }
+	if (!locate(*this, screen, edit.address.child, at)) { error = "The record no longer exists."; return false; }
 	std::vector<RecordIds> &source_ids = at.list == kRoots ? screen.roots : at.owner_ids->lists[at.list];
 	const size_t source_list = at.list == kRoots ? 0 : at.list;
 	switch (edit.operation) {
@@ -1417,14 +1397,12 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 		if (!mnu::schema_list_insert(at.owner, source_list, position, &copy, error)) return false;
 		insert_ids(source_ids, position, mnu::schema_list_at(at.owner, source_list, position), allocate);
 		added = source_ids[position].id;
-		screen.index_places();
 		return true;
 	}
 	case EditOperation::Remove:
 		if (at.list == kRoots && screen.screen.roots.size() == 1) { error = "A screen keeps at least one root window."; return false; }
 		mnu::schema_list_erase(at.owner, source_list, at.index);
 		source_ids.erase(source_ids.begin() + static_cast<std::ptrdiff_t>(at.index));
-		screen.index_places();
 		return true;
 	case EditOperation::Move: {
 		// The destination is checked before anything moves: a screen keeps a root window, a
@@ -1442,18 +1420,38 @@ bool MnuDocument::edit_collection(Node &node, const Edit &edit, const IdAllocato
 			return false;
 		}
 		if (is_window_shape(destination.shape) && !window_keeps(at.record, error)) return false;
-		// The record and its identities come out; the destination is found again by identity
-		// (its place may have shifted) and takes them at the position.
+		// The destination's path as the edit found it (path_in, the row as the batch has left it so
+		// far), then as the record's removal leaves it: a step through the list the record leaves,
+		// past the record's index, moves up one. The row's index answers for the row as the edit
+		// found it, so the place after the removal is worked out here.
+		std::vector<Document::PathStep> to;
+		if (edit.parent) {
+			const Document::RecordPath from = path_in(screen, edit.address.child);
+			const Document::RecordPath there = path_in(screen, edit.parent);
+			to.assign(there.begin(), there.end());
+			const size_t depth = from.size() - 1; // the record's own step
+			bool through = !from.empty() && to.size() > depth;
+			for (size_t d = 0; through && d < depth; ++d)
+				through = to[d].collection == from[d].collection && to[d].index == from[d].index;
+			if (through && to[depth].collection == from[depth].collection && to[depth].index > from[depth].index)
+				--to[depth].index;
+		}
+		// The record and its identities come out; the destination, found by that path, takes them
+		// at the position.
 		mnu::SchemaDetached moved = mnu::schema_list_copy(at.owner, source_list, at.index);
 		RecordIds moved_ids = std::move(source_ids[at.index]);
 		mnu::schema_list_erase(at.owner, source_list, at.index);
 		source_ids.erase(source_ids.begin() + static_cast<std::ptrdiff_t>(at.index));
-		screen.index_places();
-		if (!owner_list(edit.parent, edit.address.kind, destination, destination_ids, destination_list)) return false;
+		Located there;
+		if (edit.parent && !locate_steps(screen, to.data(), to.size(), there)) {
+			error = "The destination no longer exists.";
+			return false;
+		}
+		if (!list_of(edit.parent ? &there : nullptr, edit.address.kind, destination, destination_ids, destination_list))
+			return false;
 		const size_t position = std::min(edit.position, mnu::schema_list_size(destination, destination_list));
 		if (!mnu::schema_list_insert(destination, destination_list, position, &moved, error)) return false;
 		destination_ids->insert(destination_ids->begin() + static_cast<std::ptrdiff_t>(position), std::move(moved_ids));
-		screen.index_places();
 		return true;
 	}
 	default:
@@ -1489,7 +1487,10 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 		ids = &screen.roots;
 	} else {
 		Located at;
-		if (!locate(screen, edit.parent, at)) { error = "The record to paste into no longer exists."; return false; }
+		if (!locate(*this, screen, edit.parent, at)) {
+			error = "The record to paste into no longer exists.";
+			return false;
+		}
 		if (!window_list_of(at.record, list)) { error = "Windows go into a window or a screen."; return false; }
 		owner = at.record;
 		ids = &at.ids->lists[list];
@@ -1504,7 +1505,6 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 		added.push_back((*ids)[position].id);
 		++position;
 	}
-	screen.index_places();
 	return true;
 }
 

@@ -42,7 +42,8 @@ public:
 
 	String get_weapon_name() const { return weapon_name_; }
 	void set_weapon_name(const String &p_value) { weapon_name_ = p_value; }
-	// ammo key -- the clip-flash restamp proxy (D-HUD-5)
+	// the fired round's ammo.def name (the clip-flash key is the engine
+	// weapon view's ammo_bucket / ammo_class_id pair, D-HUD-5)
 	String get_round_type() const { return round_type_; }
 	void set_round_type(const String &p_value) { round_type_ = p_value; }
 	// magazine capacity; -1 = infinite (clip reads -1)

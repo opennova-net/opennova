@@ -5,7 +5,7 @@
   (installs GUT and the imgui-godot addon the `DevTools` node expects) and then
   `"$GODOT_BIN" --headless --path godot --import`, or engine classes appear missing.
   Headless runs never attach an ImGui context: `DevTools.is_available()` is false
-  there while its open state (F3, capture, input policy) still works and is tested.
+  there while its open state (the Insert toggle, capture, input policy) still works and is tested.
 - Collection: files ending `_test.gd` that extend `GutTest`, subdirs included.
 - `--suite core` unsets the retail roots; `--suite retail` requires both roots
   and rejects skipped compatibility tests. The default `--suite all` allows

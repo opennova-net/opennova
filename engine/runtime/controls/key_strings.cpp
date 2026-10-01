@@ -32,6 +32,17 @@ std::string marker_stripped(const char *fallback) {
   return std::string(fallback);
 }
 
+// The "Text" literals' leading "!" / "|" marker, removed.
+std::string text_marker_stripped(const char *fallback) {
+  if (fallback == nullptr) {
+    return std::string();
+  }
+  if (fallback[0] == '!' || fallback[0] == '|') {
+    return std::string(fallback + 1);
+  }
+  return marker_stripped(fallback);
+}
+
 }  // namespace
 
 void set_key_strings(rtxt::File table) {
@@ -59,6 +70,18 @@ std::string key_string(const char *key, const char *fallback) {
   const rtxt::Entry *entry = g_key_strings.find_in_section(kKeysSection, key);
   if (entry == nullptr) {
     return marker_stripped(fallback);
+  }
+  return entry->text;
+}
+
+std::string key_help_string(const char *section, const char *key, const char *fallback) {
+  // [orig: KeyHelp_GetStringWithFallback @0x51ed40], any section.
+  if (!g_key_strings_loaded || section == nullptr || key == nullptr) {
+    return text_marker_stripped(fallback);
+  }
+  const rtxt::Entry *entry = g_key_strings.find_in_section(section, key);
+  if (entry == nullptr) {
+    return text_marker_stripped(fallback);
   }
   return entry->text;
 }

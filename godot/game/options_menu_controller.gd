@@ -67,6 +67,8 @@ func _seed_player_options() -> void:
 	if color_id >= 0 and _driver.widget_kind_of(color_id) == MnuDocument.TYPE_SPINLIST:
 		_driver.select_row_by_value(color_id, str(state.crosshair_color), false)
 	_set_checked("XHAIR_SPREAD", state.crosshair_spread)
+	_set_checked("MR_CLIPPY_KEYBOARD", state.keyboard_tips)
+	_set_checked("MR_CLIPPY_HINTS", state.gameplay_tips)
 	var aspect_id := _driver.widget_id("16x9DISPLAY")
 	if aspect_id >= 0 and _driver.widget_kind_of(aspect_id) == MnuDocument.TYPE_SPINLIST:
 		_driver.select_row_by_value(aspect_id, str(state.aspect_mode), false)
@@ -158,6 +160,18 @@ func _on_widget_activated(id: int, widget_name: String) -> void:
 				return
 			var state := _options.current()
 			state.crosshair_spread = _driver.is_widget_checked(id)
+			_options.update(state)
+		"MR_CLIPPY_KEYBOARD":
+			if _options == null:
+				return
+			var state := _options.current()
+			state.keyboard_tips = _driver.is_widget_checked(id)
+			_options.update(state)
+		"MR_CLIPPY_HINTS":
+			if _options == null:
+				return
+			var state := _options.current()
+			state.gameplay_tips = _driver.is_widget_checked(id)
 			_options.update(state)
 	var effects := _driver.activate_options(ControlsBindings.model(), widget_name)
 	if effects & MenuDriver.OPTIONS_PERSIST_BINDINGS:

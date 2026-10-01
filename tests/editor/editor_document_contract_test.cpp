@@ -53,17 +53,20 @@
 // everything it made listed, or refused by a rule of the type's own with nothing committed. S13
 // V9: where the type has a project check, over its file in a project of its own, a second update
 // with nothing changed says nothing moved and keeps its findings, and clear() then an update makes
-// the same findings again. S13 D9: a text type's make gives a DocumentBase whose text document
-// (as_text) is itself and that holds no records; over its file: it loads unblocked and serializes
-// the bytes it was read from, parse, serialize, parse again the same bytes and text; its
-// validate_file's findings on its file alone, a second load validating to the same; a change of a
-// kind the type did not make, or an edit naming a record, refused with nothing committed; a span
-// replaced a real change (the bytes another, its undo giving them back, its redo the change, what
-// changed since the load that span), two coalesced replacements one step, a gesture's two batches
-// one step whose change set holds both spans; and a snapshot sharing its identity, load and
-// revision, serializing its bytes and refusing an edit, a save and a load. Every text type but the
-// text one (whose files the game reads through readers the editor does not model) makes a finding
-// over its files.
+// the same findings again. S13 D8: where the type's schema names a Record reference (an index into
+// a collection of its own file), every reference names a record of the file's record set, and a
+// record added where the first record named stands leaves each naming the record it named (the
+// type renumbering them in the same step), its removal and each undo giving the bytes back. S13 D9:
+// a text type's make gives a DocumentBase whose text document (as_text) is itself and that holds no
+// records; over its file: it loads unblocked and serializes the bytes it was read from, parse,
+// serialize, parse again the same bytes and text; its validate_file's findings on its file alone, a
+// second load validating to the same; a change of a kind the type did not make, or an edit naming a
+// record, refused with nothing committed; a span replaced a real change (the bytes another, its undo
+// giving them back, its redo the change, what changed since the load that span), two coalesced
+// replacements one step, a gesture's two batches one step whose change set holds both spans; and a
+// snapshot sharing its identity, load and revision, serializing its bytes and refusing an edit, a
+// save and a load. Every text type but the text one (whose files the game reads through readers the
+// editor does not model) makes a finding over its files.
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -71,6 +74,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <typeinfo>
@@ -130,6 +134,10 @@ size_t g_findings = 0;
 // text fields whose longer text grew their row's footprint.
 size_t g_multi_rows = 0, g_mixed = 0, g_mixed_waiting = 0, g_mixed_refused = 0, g_grown = 0;
 size_t g_checked_again = 0; // files a type's project check was brought to twice, and after a clear
+// S13 D8: Record references kept naming their records across an Add before them, a Move and a Remove
+// of what it added, the collections so renumbered, the Adds a type's own rule refused, and the
+// Removes of a record a reference names that a type's own rule refused.
+size_t g_record_references = 0, g_record_moves = 0, g_record_refused = 0, g_named_removes_refused = 0;
 std::set<std::string> g_kinds; // each type's record kinds, by the type and the token
 // Each type's record kinds over the files of every asset kind it opens: a kind's token by the kind.
 std::map<std::string, std::map<NodeKind, std::string>> g_type_kinds;
@@ -142,6 +150,9 @@ struct TypeCounts {
 	size_t multi_rows = 0, mixed = 0, mixed_refused = 0; // S13 D7's batches over several rows
 	size_t grown = 0; // text fields whose longer text grew their row's footprint
 	size_t check_findings = 0; // what the type's project check made over them
+	// S13 D8: the type's schema names a Record reference, and the references held across an Add.
+	bool declares_records = false;
+	size_t records = 0;
 };
 
 // Each row type and the size of its own object (S13 D7): a row's footprint is at least that. A row
@@ -499,6 +510,9 @@ void check_symbols(const Fixture &fixture, const Document &document, const std::
 		check(symbol.file == document.path() && symbol.locator == document.locator(symbol.address) &&
 		              document.address_at(symbol.locator) == symbol.address,
 		      where, "a symbol's locator names its defining record");
+		// A record of a record set goes by its index in its own file, no name find looks up
+		// (check_record_references holds it).
+		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) continue;
 		NodeAddress found;
 		if (symbol.inert) {
 			check(find(where, symbol.display, found, std::string()) &&
@@ -1346,6 +1360,118 @@ void check_text_fixture(const DocumentType &type, const Fixture &fixture, TypeCo
 	check(document.serialize().text == stored, fixture.name, "the document's undo gives the bytes back");
 }
 
+// S13 D8: the Record references a type's schema names (Document::targeted_collections: an index
+// into a collection of its own file). Every Record kind a field of the type names is one of its
+// targeted collections (a collection token that names none of its record kinds would leave the
+// references with no record set and no renumbering). What each reference names in the file's
+// extraction: the record of its record set at its index (by the record's identity; none past the
+// collection). For each collection a reference names, a record added where the first record named
+// stands (the core has the type renumber what names the collection): one step, every reference
+// naming the record it named; what serializes reads back with the record kept; the added record
+// moved to the collection's end, every reference naming its record again; removed again, the
+// same, the file's bytes back (renumbered the other way), and so with each undo. A type may refuse
+// the Add by a rule of its own (document.collection in its own words), counted. And the first
+// record named removed: refused by the type's own rule (a reference would name a record that is
+// gone), nothing committed.
+void check_record_references(const DocumentType &type, const Fixture &fixture, Document &document,
+                             const std::string &serialized, TypeCounts &counts) {
+	const std::vector<Document::TargetedCollection> targets = document.targeted_collections();
+	for (const RecordKindRow &kind : document.kinds())
+		for (const FieldSchema &field : document.fields(kind.kind)) {
+			if (reference_row(field.reference).resolution != ReferenceResolution::Record) continue;
+			bool targeted = false;
+			for (const Document::TargetedCollection &target : targets)
+				targeted = targeted || target.reference == field.reference;
+			check(targeted, fixture.name + " (" + kind.token + " " + field.id + ")",
+			      "a Record kind a field names is one of the type's targeted collections");
+		}
+	if (targets.empty()) return;
+	counts.declares_records = true;
+	// (the referring record, its field) -> the record its index names (0: none of the set).
+	using Named = std::map<std::pair<NodeId, std::string>, NodeId>;
+	const auto named = [&](ReferenceKind kind, NodeAddress *first) {
+		Extracted extracted;
+		extract_from_document(document, extracted);
+		std::map<std::string, NodeAddress> set;
+		for (const GraphSymbol &symbol : extracted.symbols)
+			if (symbol.kind == kind) set[symbol.name] = symbol.address;
+		Named out;
+		size_t lowest = SIZE_MAX;
+		for (const GraphEdge &edge : extracted.edges) {
+			if (edge.kind != kind) continue;
+			const auto found = set.find(edge.value);
+			const NodeAddress record = found == set.end() ? NodeAddress() : found->second;
+			out[{edge.address.child ? edge.address.child : edge.address.row, edge.field}] =
+			        record.child ? record.child : record.row;
+			const std::optional<int> index = opennova::strutil::parse_int(edge.value);
+			if (record.row && index && size_t(*index) < lowest) {
+				lowest = size_t(*index);
+				if (first) *first = record;
+			}
+		}
+		return out;
+	};
+	for (const Document::TargetedCollection &target : targets) {
+		const std::string where = fixture.name + " (" + reference_row(target.reference).token + ")";
+		NodeAddress first;
+		const Named before = named(target.reference, &first);
+		if (before.empty() || !first.row) continue;
+		Document::Placement at;
+		check(first.child && document.placement(first, at) && first.kind == target.kind, where,
+		      "a record a Record reference names is of its collection's kind");
+		if (!first.child || !document.placement(first, at)) continue;
+		Edit add = edit_of(EditOperation::Add, {first.row, target.kind, 0}, "");
+		add.parent = at.owner.child;
+		add.position = at.index;
+		Diagnostic error;
+		if (!document.apply(add, error)) {
+			check(error.code() == "document.collection" && error.message != "This collection cannot accept that edit.",
+			      where + " (" + error.code() + ": " + error.message + ")",
+			      "a record added before the records named is taken, or refused by a rule of the type's own");
+			check(document.serialize().text == serialized && !document.dirty(), where, "a refused Add commits nothing");
+			++g_record_refused;
+			continue;
+		}
+		const NodeId added = document.last_added();
+		check(document.can_undo() && named(target.reference, nullptr) == before, where,
+		      "a record added before the records named leaves every reference naming the record it named");
+		const SerializeResult text = document.serialize();
+		std::unique_ptr<Document> read = records_of(type.make());
+		check(text.ok() && read->load_bytes(text_bytes(text.text), fixture.name, fixture.kind, "jo", error) &&
+		              every_record(*read).size() == every_record(document).size(),
+		      where, "what the renumbering Add makes reads back");
+		// The added record moved to the end of its collection: the records it passes move back.
+		Edit move = edit_of(EditOperation::Move, document.address_of(added), "");
+		move.parent = at.owner.child;
+		move.position = SIZE_MAX;
+		check(document.apply(move, error) && named(target.reference, nullptr) == before,
+		      where + " (" + error.message + ")", "a Move of the added record leaves every reference naming its record");
+		document.undo();
+		check(document.serialize().text == text.text, where, "the Move is one step");
+		check(document.apply(edit_of(EditOperation::Remove, document.address_of(added), ""), error) &&
+		              named(target.reference, nullptr) == before && document.serialize().text == serialized,
+		      where + " (" + error.message + ")",
+		      "the record removed again leaves every reference naming its record, the bytes back");
+		document.undo();
+		check(document.serialize().text == text.text, where, "the Remove is one step");
+		document.undo();
+		check(document.serialize().text == serialized && !document.dirty(), where,
+		      "the renumbering Add is one step, undone to the bytes");
+		// The first record named removed: a reference would name a record that is gone, which the
+		// type refuses by its own rule, nothing committed.
+		const uint64_t revision = document.revision();
+		check(!document.apply(edit_of(EditOperation::Remove, first, ""), error) &&
+		              error.code() == "document.collection" &&
+		              error.message != "This collection cannot accept that edit." &&
+		              document.revision() == revision && document.serialize().text == serialized,
+		      where + " (" + error.message + ")", "a record a reference names is not removed from under it");
+		++g_named_removes_refused;
+		g_record_references += before.size();
+		counts.records += before.size();
+		++g_record_moves;
+	}
+}
+
 void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts &counts) {
 	if (document_content(type) == DocumentContent::Text) return check_text_fixture(type, fixture, counts);
 	std::unique_ptr<DocumentBase> made = type.make();
@@ -1388,6 +1514,7 @@ void check_fixture(const DocumentType &type, const Fixture &fixture, TypeCounts 
 	check_copy_paste(type, fixture, *document, records, first.text);
 	check_snapshot(type, fixture, *document, records, first.text);
 	check_multi_row(type, fixture, *document, records, first.text, counts);
+	check_record_references(type, fixture, *document, first.text, counts);
 }
 
 } // namespace
@@ -1435,6 +1562,9 @@ int main() {
 		      "a type's optional fields asked and left out and written again are the ones pinned");
 		check(fixed_text(*type) || document_content(*type) == DocumentContent::Text || counts.grown > 0, type->name,
 		      "a longer text grows a row of the type");
+		// S13 D8: a type whose schema names a Record reference renumbers one over its files.
+		check(!counts.declares_records || counts.records > 0, type->name,
+		      "a type whose records name others of their file by index keeps them named across an Add");
 		std::printf("  %s: %zu optional fields asked, %zu left out and written again, %zu findings; %zu files' two "
 		            "rows in one batch, %zu mixed batches taken, %zu refused by its rule; %zu text fields' "
 		            "longer text grew their row",
@@ -1450,6 +1580,8 @@ int main() {
 	check(g_multi_rows > 0 && g_mixed > 0 && g_mixed_refused > 0, "the files",
 	      "two rows change in one batch, a batch of rows and records is taken, and one refused by a type's rule");
 	check(g_grown > 0, "the files", "a longer text grows its row's footprint");
+	check(g_record_moves > 0 && g_named_removes_refused > 0, "the files",
+	      "a collection other records name by index is renumbered, and a record named is never removed");
 	if (g_failures == 0)
 		std::printf("editor_document_contract: all %zu document types keep the contract (%zu files, %zu records, "
 		            "%zu fields set to their own value, %zu symbols, %zu lookups in another scope of the name, "
@@ -1459,11 +1591,14 @@ int main() {
 		            "%zu Adds refused by a type's rule), %zu record kinds, %zu findings validate_file made, %zu files' "
 		            "two rows in one batch and one gesture, %zu batches of rows and records taken (%zu waiting for "
 		            "values) and %zu refused by a type's rule, %zu text fields whose longer text grew their row, "
-		            "%zu files a project check was brought to again; %zu text documents' files, %zu spans "
-		            "replaced, undone and redone)\n",
+		            "%zu files a project check was brought to again, %zu Record references kept naming their "
+		            "records across an Add, a Move and a Remove in %zu collections, %zu such Adds refused by a "
+		            "type's rule, %zu Removes of a record named refused by its rule; %zu text documents' files, "
+		            "%zu spans replaced, undone and redone)\n",
 		            types.size(), files.size(), g_records, g_sets, g_symbols, g_other_scopes, g_presences, g_kept,
 		            g_changes, g_coalesced, g_pastes, g_snapshots, g_foreign, g_row_adds,
 		            g_record_adds, g_adds_waiting, g_adds_refused, g_kinds.size(), g_findings, g_multi_rows, g_mixed,
-		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again, g_text_files, g_text_changes);
+		            g_mixed_waiting, g_mixed_refused, g_grown, g_checked_again, g_record_references,
+		            g_record_moves, g_record_refused, g_named_removes_refused, g_text_files, g_text_changes);
 	return g_failures == 0 ? 0 : 1;
 }

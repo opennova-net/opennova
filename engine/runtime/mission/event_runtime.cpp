@@ -676,13 +676,11 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             break;
         case bms::ActionType::SubGoalWon: {
             // The already-won guard skips the WHOLE case — no re-announce, no
-            // effect. Then the mask set + the STRWINMSG chat line, announce
-            // gated on the round still running. Effect fields: a = slot,
-            // b = the header WinConditions text id, c = announce. Deferred with
-            // cites: the win_scores[slot]*100 score add [orig: @0x454526 —
-            // byte_A763FB = header win_scores; the "Score_AccumulateBandwidth"
-            // callee name is a kong misnomer] and the header unknown5[2]-masked
-            // team-banner leg [orig: @0x45458d byte_A762D6].
+            // effect. Then the mask set, the score tally, and the STRWINMSG
+            // chat line, announce gated on the round still running. Effect
+            // fields: a = slot, b = the header WinConditions text id,
+            // c = announce. The header unknown5[2]-masked team-banner leg is a
+            // dead store [orig: @0x45458d byte_A762D6 -> GameMsg_SetTeamBannerText].
             // The announcement relays to the joiners as the key with team 1.
             // [orig: EventAction_Dispatch case 14 @0x454500 — shl @0x454508,
             //  guard @0x45450a, set @0x45451d, round-running gate @0x45453a,
@@ -691,6 +689,15 @@ void BmsEventSystem::dispatch_action(World &w, const bms::Action &a, int32_t eve
             const uint32_t bit = 1u << (a.param1 & 31);
             if ((w.script.subgoals.won & bit) != 0) break;
             w.script.subgoals.won |= bit;
+            // The tally, outside a session only (the event pass already runs
+            // only on the authority): the won count +1. Its bonus half
+            // (header win_scores[slot] * 100, difficulty-scaled, into
+            // g_SubGoalBonusScore) is not modeled: every reader of the bonus is
+            // retail dead code or a dead store (world.h MissionKillStats).
+            // [orig: the Score_TallySubGoalWon(byte_A763FB[slot] * 100) call
+            //  @0x454526..0x454532 -> Score_TallySubGoalWon @0x4fd100, the gate
+            //  @0x4fd110, the count @0x4fd117, the bonus @0x4fd121..0x4fd142]
+            if (!w.rules.mp_session) ++w.kill_stats.subgoals_won;
             const int32_t text_id = (a.param1 >= 1 && a.param1 <= 8)
                     ? w.script.subgoals.win_text_ids[a.param1] : 0;
             const int32_t announce = w.match.outcome().ended ? 0 : 1;

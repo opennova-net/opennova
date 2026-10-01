@@ -131,6 +131,15 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 	       " does not have among its first 16 user points: the effect attaches to none.";
 }
 
+// --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
+
+// A part animation's frame byte (the field holds 0 to 255) names no MTRX row at 0 and at 128 to
+// 255: the load sign-extends it [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx)] and the pose reads
+// a row only above zero [orig: Model_TransformBoneMatrices @ 0x58E3FE], so row 0 is never read
+// (threedi_panm_frame_row, the pose's rule; whether a row turns through a frame at all is its
+// field's use, ModelDocument's). Any value past the byte names none too.
+bool frame_none(int64_t value) { return value <= 0 || value > 127; }
+
 // --- the table -------------------------------------------------------------------------------
 
 // A row built up column by column, so each row names only what it sets.
@@ -167,6 +176,20 @@ struct Row {
 		out.row.name_case = name_case;
 		out.row.defined_in = defined_in;
 		out.row.missing_message = project_lacks;
+		return out;
+	}
+	// A record of the reference's own file, by its index among the file's records of the kind whose
+	// token is `collection`, compared as written; `none` the values that name none. The picker
+	// offers the file's records alone; the graph finds none missing (no missing_message: the file's
+	// own validation says what the game makes of an index past them).
+	constexpr Row record(const char *collection, RecordNone none = nullptr) const {
+		Row out = *this;
+		out.row.resolution = ReferenceResolution::Record;
+		out.row.collection = collection;
+		out.row.index_space = RecordIndexSpace::File;
+		out.row.none = none;
+		out.row.name_case = NameCase::Exact;
+		out.row.picker_scoped = true;
 		return out;
 	}
 	// A symbol found in the file its scope names, which the picker narrows to when `picker`.
@@ -273,6 +296,18 @@ constexpr ReferenceKindRow kRows[] = {
 	// ACTION's target), which a whole %NAME% of the stylesheets stands in for (a StyleVar edge's
 	// through: FieldUse::variable_through).
 	Row(ReferenceKind::MenuText, "menu_text", "the text", "text").row,
+	// A generator's, a track's or a light's parameter above style 0x70 names a CTRL register of its
+	// model by its index in the model's table, which the load swaps for the global register the
+	// entry names [orig: ThreediGp_LoadFromFile @ 0x5B5C7A..0x5B5DA2 (materials), @ 0x5B5E08..0x5B5EF6
+	// (part animations), @ 0x5B5F4D..0x5B5F62 (lights)]; every index names one.
+	Row(ReferenceKind::ModelRegister, "model_register", "the CTRL register", "CTRL register")
+	        .record("register")
+	        .row,
+	// A spinner's or an Euler row's frame byte names an MTRX row of its model (frame_none: 0, and
+	// 128 to 255, none).
+	Row(ReferenceKind::ModelFrame, "model_frame", "the rotation frame", "rotation frame")
+	        .record("frame", frame_none)
+	        .row,
 	// An item's particle slot naming no user point attaches its effect to none.
 	Row(ReferenceKind::UserPoint, "user_point", "the user point", "user point")
 	        .symbol(NameCase::NoCase)
@@ -299,8 +334,25 @@ constexpr bool rows_well_formed() {
 	return true;
 }
 
+// A Record row names its collection, no file to load and no message of a missing one (the graph
+// finds none missing), and counts its index across its file, the one space the core numbers; no
+// other row names a collection, what names none or an index space.
+constexpr bool records_well_formed() {
+	for (const ReferenceKindRow &row : kRows) {
+		const bool record = row.resolution == ReferenceResolution::Record;
+		if (record != (*row.collection != '\0')) return false;
+		if (record && (row.file != AssetKind::Unknown || row.missing_message)) return false;
+		if (record != (row.index_space == RecordIndexSpace::File)) return false;
+		if (!record && (row.none || row.index_space != RecordIndexSpace::None)) return false;
+	}
+	return true;
+}
+
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == kReferenceKindCount, "every ReferenceKind has exactly one row");
 static_assert(rows_well_formed(), "the rows follow ReferenceKind's order and their tokens are unique");
+static_assert(records_well_formed(),
+		"a Record row names its collection, no file and no missing message and counts across its file, "
+		"and only a Record row names a collection, the values naming none or an index space");
 
 } // namespace
 
@@ -316,6 +368,16 @@ bool reference_kind_from_token(const std::string &token, ReferenceKind &out) {
 			return true;
 		}
 	return false;
+}
+
+bool record_index(ReferenceKind kind, const Value &value, int64_t &index) {
+	const ReferenceKindRow &row = reference_row(kind);
+	const int64_t *number = std::get_if<int64_t>(&value);
+	if (row.resolution != ReferenceResolution::Record || !number || *number < 0 ||
+	    (row.none && row.none(*number)))
+		return false;
+	index = *number;
+	return true;
 }
 
 ReferenceKind style_value_reference(AssetKind file) {

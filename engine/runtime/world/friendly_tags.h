@@ -51,6 +51,12 @@ struct FriendlyTagSource {
     //  @0x5a3c1a]. The viewer half of the arm is
     // friendly_tag_radio_request_viewer below.
     bool radio_request = false;
+    // The player slot's squad colour index (slot+0x33), the good/middle tier
+    // override (hud_frame.h friendly_tag_squad_color), read off the slot
+    // (ClientRosterSlot::squad_color). Its only writer is the client-local
+    // CMAP entity click [orig: CMap_EntityWidgetHandler @0x5485E4], unported
+    // with the CMAP tabs, so it reads 0 (no override).
+    uint8_t squad_color_index = 0;
 };
 
 // Whether the groundEntity walk from `first` reaches a def-type-1 (vehicle)
@@ -72,10 +78,19 @@ bool friendly_tag_radio_request_viewer(const Entity &local);
 
 // The facts a player's connection slot contributes to its tag [orig: the
 // PlayerSlot bytes +0x10 (revive seconds) and +0x2C (medic request), written
-// by PlayerSlot_SetDownedState @0x4348d0 from S2C 0x54 / 0x46 bit 0x0008].
+// by PlayerSlot_SetDownedState @0x4348d0 from S2C 0x54 / 0x46 bit 0x0008],
+// and the label: a player's tag names its slot, not its entity — the slot
+// callsign (slot+0x14) with the registry tag (slot+0x20) wrapped in
+// <ch>..<co> when non-empty, within 64 bytes [orig: HUD_DrawEntityLabel
+// @0x5a3f29..0x5a3f86 — Napi_CopyString(.., 64) @0x5a3f43, String_AppendN
+// @0x5a3f63 / @0x5a3f70 / @0x5a3f81].
 struct PlayerSlotFacts {
     uint8_t revive_seconds = 0;
     bool medic_request = false;
+    std::string label;
+    // The slot's squad colour index (slot+0x33) [orig: HUD_DrawEntityLabel
+    // @0x5A3CBB..0x5A3DBC].
+    uint8_t squad_color = 0;
 };
 
 // Resolves the connection slot driving a pool-0 player entity. Returns false

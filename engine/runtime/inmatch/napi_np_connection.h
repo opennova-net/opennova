@@ -27,6 +27,19 @@ namespace opennova::inmatch {
 inline constexpr uint32_t kHostPlayerDcb = 2;
 inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 
+// The protocol callbacks that raise the connection indicators' link-error
+// flags (hud/net_quality_indicators.h), as a mask a connection latches for
+// its owner: a resend list that named a sequence (the peer missed ours: flag
+// 1, outgoing) and a missing-sequence request that named one (we missed the
+// peer's: flag 2, incoming). Zero-only and key-only lists raise nothing.
+// [orig: NapiNP_HandleResendList @0x6239ef..0x623a37 (cb_server_6 /
+//  cb_client_3); CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
+//  (cb_server_5 / cb_client_2); the callbacks CNapiNetwork_Init installs
+//  @0x4ca948..0x4ca9cd: sub_4C62A0 and Network_LogOutgoingPacketError raise
+//  flag 1, @0x4c4681 and Network_LogIncomingPacketError flag 2]
+inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
+inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
+
 // Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
 // time-sync validator compares only unsigned deltas, so a nonzero logical base
 // preserves its clock contract without introducing wall-time into native tests.
@@ -662,6 +675,27 @@ struct NapiNPConnection {
 	bool assigned_team_valid = false;
 	uint8_t assigned_team = 0;
 
+	// The command map's squad bytes on the player slot: its leader's slot
+	// (+100576; 0xFF none) and its fireteam (+100577), seeded 0xFF / 0 by the
+	// player add, and the slot it votes to punt (+100578). Retail's add
+	// leaves the punt byte at the row memset's 0, which names row 0, always
+	// the host's own local row (+5), so the tally skips it and a non-voter
+	// counts nothing; the port's slot 0 can be a joiner's (a dedicated host
+	// has no local slot), so the seed is 0xFF, the no-vote value the tally's
+	// reset writes. (server_squad.h)
+	// [orig: Server_PlayerAdd @0x51cd06 (the row memset), @0x51cf0a
+	//  (+0x188E0 = 0xFF, +0x188E1 = 0; the loop @0x51d4e0 an older cite named
+	//  fills slot+0x1708A's four 0xFFFF words, not the leader);
+	//  Server_InitNewRoundState @0x51ca31..0x51ca35 (g_LocalNetPlayer, the
+	//  table's row 0, active and local); Server_ProcessVoteKickResults
+	//  @0x5114dc (the +5 skip), @0x511551 (the 0xFF reset);
+	//  NetPacket_WritePlayerChainLink @0x5106d0;
+	//  NapiNPServerMsg_0x045_HandleTeamAssignment @0x510c00;
+	//  NapiNPServerMsg_VoteKick @0x518f10]
+	uint8_t squad_leader = 0xFF;
+	uint8_t fireteam = 0;
+	uint8_t punt_vote = 0xFF;
+
 	// Host-side per-weapon-slot fire/ammo state, by slot combo (WeaponSlotState above). Seeded
 	// lazily on the first 0x06 for a combo; refilled by the 0x25 relay. (D-NET-152)
 	std::map<uint16_t, WeaponSlotState> weapon_slots;
@@ -730,6 +764,19 @@ inline void reset_s2c_send_holdoff_counter(NapiNPConnection &conn) {
 // @0x517BF5..0x517C13; the outer filtered fan is NapiNPServer_SendFiltered @0x4C87E0]
 inline bool is_in_match(const NapiNPConnection &conn) {
 	return conn.burst.spawned && !conn.host_disconnect_sent;
+}
+
+// The player slot's active byte (+4): its player was added. Server_PlayerAdd
+// is its one setter, and only the row memsets clear it (the slot table's
+// allocation and the disconnect's), which the port's connection erase stands
+// for; no phase past PlayerAdded clears it (ConnectionPhase::Goodbye is never
+// stored). The pre-add table claim (player_slot_reserved) is not an added
+// player. [orig: Server_PlayerAdd `mov byte ptr [ebp+4], 1` @0x51cd14 /
+// @0x51cefe; Server_HandlePlayerDisconnect tests it @0x51b5dc and memsets the
+// row @0x51b87d; the readers PlayerState_GetByIndex @0x500850 and
+// Server_DrawStatusScreen's roster walk @0x50a44d]
+inline bool player_slot_active(const NapiNPConnection &conn) {
+	return conn.phase >= ConnectionPhase::PlayerAdded && !conn.reply.player_slot_reserved;
 }
 
 // NapiNPServer_SendFiltered's 0x80 arm accepts player-slot state 6 or 7. It

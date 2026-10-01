@@ -498,6 +498,40 @@ func test_joiner_receives_the_host_hud_relays_over_real_udp() -> void:
 			"the joiner received the SubGoalLost key from S2C 0x3F kind 1")
 
 
+func test_both_peers_fold_the_visible_players_table_over_real_udp() -> void:
+	# The join burst's C2S 0x23 and the host's 0x4D join fan drive the S2C 0x4C
+	# snapshot on both sides: in a co-op (team) game each peer's table lists the
+	# host's slot and the joiner's, and the map feed turns every entry into a
+	# bit-5 loop-1 row.
+	var mission := _two_organics()
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.game_type = 0x30020
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(mission))
+	var joiner := Simulation.new()
+	assert_true(joiner.enable_join(
+			"127.0.0.1", host.get_host_listen_port(), "SlotJoiner"))
+	assert_true(joiner.load_from_mission_data(mission))
+	assert_true(_drive_pair_to_match(host, joiner),
+			"joiner reached the real-UDP in-match seam")
+	if not joiner.is_joined_in_match():
+		return
+	var joiner_rows := 0
+	var host_rows := 0
+	for _i in range(600):
+		host.step()
+		joiner.step()
+		joiner_rows = joiner.get_hud_minimap_overlays(null).player_slot_count
+		host_rows = host.get_hud_minimap_overlays(null).player_slot_count
+		if joiner_rows >= 2 and host_rows >= 2:
+			break
+		OS.delay_msec(2)
+	assert_eq(joiner_rows, 2, "the joiner's table lists both players")
+	assert_eq(host_rows, 2, "the listen host's loopback table lists both players")
+
+
 func test_joiner_folds_the_phase2_environment_into_its_weather_home() -> void:
 	var mission := _two_organics()
 	var host := Simulation.new()

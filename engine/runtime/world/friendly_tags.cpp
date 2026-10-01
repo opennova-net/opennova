@@ -50,6 +50,8 @@ void push_tag(World &world, const Entity &e, const PlayerSlotFacts *slot,
         src.has_slot = true;
         src.revive_seconds = slot->revive_seconds;
         src.medic_request = slot->medic_request;
+        src.name = slot->label; // [orig: @0x5a3f29..0x5a3f86]
+        src.squad_color_index = slot->squad_color;
     }
     out.push_back(src);
 }
@@ -114,8 +116,9 @@ void collect_friendly_tags(World &world, const Entity &local,
     // Walk 2: the player-slot table — every active slot with an entity
     // [orig: @0x5a4507..0x5a4597 — slot+0x0D active, slot+0x24 entity,
     //  entity+0x162 team vs the local team, then HUD_DrawEntityLabel(entity,
-    //  slot)]. The slot owner is the embedder's connection table; an entity
-    // no slot owns is never visited (retail walks slots, not entities).
+    //  slot)]. The slot owner is the embedder's S2C 0x4C table; an entity
+    // no table slot drives is never visited (retail walks slots, not
+    // entities).
     if (ctx.slot_lookup == nullptr || !*ctx.slot_lookup) return;
     world.registry.for_each([&](const Entity &e) {
         if (e.kind != EntityKind::Organic) return;

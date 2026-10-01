@@ -91,13 +91,20 @@ int main() {
 		bms::Event event{};
 		event.flags = bms::EventFlags::PreMission;
 		event.action_index = 0;
-		event.action_count = 1;
+		event.action_count = 2;
 		bms::Action action{};
 		action.action_type = bms::ActionType::ChangeSteamAction;
 		action.param1 = 50;
 		action.param2 = 2;
+		// A PreMission SubGoalWon keeps its mask bit, but the SP score block
+		// zeroes after the pass, so its tally is gone [orig: Game_StartMission
+		// — the EventTrigger_UpdateAllWithFlag2 call @0x525B86, then the
+		// Server_ResetRoundCounters call @0x525B90 (memset @0x516C5E)].
+		bms::Action won{};
+		won.action_type = bms::ActionType::SubGoalWon;
+		won.param1 = 1;
 		m.events = {event};
-		m.actions = {action};
+		m.actions = {action, won};
 		std::map<std::string, std::string> files;
 		auto kernel = std::make_unique<ms::MissionKernel>();
 		kernel->open_document(std::move(m), "synth", source_over(&files));
@@ -110,6 +117,8 @@ int main() {
 		const w::Entity *placed = kernel->world.registry.get(w::EntityHandle::make(3, 0));
 		CHECK(zone != nullptr && zone->team == 2); // the PreMission action ran
 		CHECK(placed != nullptr && placed->vehicle_spawn_priority == 2);
+		CHECK(kernel->world.script.subgoals.won == (1u << 1));
+		CHECK(kernel->world.kill_stats.subgoals_won == 0);
 	}
 
 	// --- the ordering guards ---------------------------------------------------
@@ -149,6 +158,16 @@ int main() {
 		// re-seal it once the spawn and the eager WAC have settled (the
 		// kernel's complete_mission_start). Seal here, then mutate.
 		tick_no_net(kernel);
+		// The play-start SP score block and subgoal masks: a censused enemy
+		// (the organic, made team 2 with a unit class) and a PreMission-won
+		// slot whose tally the post-PreMission memset dropped.
+		if (w::Entity *npc = kernel.world.registry.by_net_id(31)) {
+			npc->team = 2;
+			npc->item_unit_type = 1;
+		}
+		w::count_mission_units(kernel.world);
+		CHECK(kernel.world.kill_stats.enemy_unit_total == 1);
+		kernel.world.script.subgoals.won = 1u << 2;
 		kernel.capture_baseline();
 		const w::Vec3 spawn_pos = kernel.local.player_position();
 		const int32_t spawn_health = kernel.local.player_health();
@@ -161,6 +180,11 @@ int main() {
 		kernel.local.teleport_local_player(w::Vec3{100.0f, 200.0f, 5.0f}, /*yaw_deg=*/90.0, /*pitch_deg=*/0.0);
 		kernel.world.commands.set_entity_health(player_h, 37);
 		kernel.world.script.vars.set_mission(3, 99);
+		kernel.world.kill_stats.subgoals_won = 3;
+		kernel.world.kill_stats.bluekills_by_player = 2;
+		kernel.world.kill_stats.enemy_unit_total = 9;
+		kernel.world.script.subgoals.won |= 1u << 5;
+		kernel.world.script.subgoals.show_win = 1u << 5;
 		CHECK(kernel.world.logic_tick == sealed_tick + 2);
 		CHECK(kernel.local.player_health() == 37);
 		CHECK(near_equal(kernel.local.player_position().x, 100.0f, 0.001f));
@@ -179,6 +203,15 @@ int main() {
 			CHECK(near_equal(body->pos[1] / 65536.0f, spawn_pos.y, 0.01f));
 		}
 		CHECK(kernel.world.script.vars.get_mission(3) == 0);
+		// The restart lands on the play-start score block and masks, the
+		// state retail's re-run of Game_StartMission rebuilds [orig:
+		// Game_RestartRoundSP @0x5263a0 -> EventSystem_FreeAll @0x453356..0x453368,
+		// Server_ResetRoundCounters @0x516c5e, the census @0x525d5d].
+		CHECK(kernel.world.kill_stats.subgoals_won == 0);
+		CHECK(kernel.world.kill_stats.bluekills_by_player == 0);
+		CHECK(kernel.world.kill_stats.enemy_unit_total == 1);
+		CHECK(kernel.world.script.subgoals.won == (1u << 2));
+		CHECK(kernel.world.script.subgoals.show_win == 0);
 		CHECK(kernel.world.registry.by_net_id(21) != nullptr);
 		CHECK(kernel.world.registry.by_net_id(31) != nullptr);
 		// The restored world ticks on from the sealed point.

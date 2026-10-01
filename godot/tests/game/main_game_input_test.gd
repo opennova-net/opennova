@@ -97,7 +97,7 @@ func _tap_with_shift(keycode: Key) -> void:
 	await get_tree().process_frame
 
 
-func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
+func test_friendly_tags_ride_the_showfriendly_row_while_n_reaches_nvg() -> void:
 	var shell := await _booted_in_world()
 	if shell == null:
 		return
@@ -106,13 +106,15 @@ func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
 	var tags_before := hud.friendly_tag_mode()
 	var nvg_before: bool = world.local_player_view().nvg_active
 
+	# F is retail's ToSpecial default (row 37), not a HUD key.
 	await _tap(KEY_F)
+	assert_eq(hud.friendly_tag_mode(), tags_before, "F does not cycle friendly tags")
+	# K is the ShowFriendly row's default (row 100, dispatch 30).
+	await _tap(KEY_K)
 	assert_eq(hud.friendly_tag_mode(), HudOverlay.next_friendly_tag_mode(tags_before),
-			"F cycles the retail friendly-tag mode")
-	# The shell consumes the friendly-tag key: the player router's own state
-	# (the NVG view it toggles on N) is untouched.
+			"K cycles the retail friendly-tag mode")
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
-			"the shell consumes the friendly-tag key")
+			"the friendly-tag row leaves the NVG view alone")
 
 	await _tap(KEY_N)
 	assert_eq(hud.friendly_tag_mode(), HudOverlay.next_friendly_tag_mode(tags_before),
@@ -121,10 +123,55 @@ func test_friendly_tags_use_f_while_n_reaches_the_nvg_router() -> void:
 			"N reaches the local-player router for NVG")
 
 
-func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
-	# Retail H is only the secondary `pause` binding (SP-only); there is no
+# F1 / F12 / I are keep-one HUD windows on their catalog rows; PgDn turns the
+# open help page; Esc closes one window per press before the in-game menu
+# [orig: dispatch 8 / 234 / 53; Input_HandleSpecialKeys @0x49caa6; the escape
+# chain case 18 @0x49b2b3..0x49b32d].
+func test_help_legend_and_briefing_windows() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F1)
+	assert_true(toggles.is_help_open(), "F1 opens the key-binding help")
+	var page := ControlsBindings.model().get_help_page_line()
+	await _tap(KEY_PAGEDOWN)
+	assert_ne(ControlsBindings.model().get_help_page_line(), page, "PgDn turns the help page")
+	await _tap(KEY_F12)
+	assert_true(toggles.is_map_legend_open(), "F12 opens the map legend")
+	assert_false(toggles.is_help_open(), "the legend's respawn init closes the help")
+	await _tap(KEY_I)
+	assert_eq(toggles.get_briefing_mode(), 2, "I opens the briefing")
+	assert_false(toggles.is_map_legend_open(), "the briefing closes the legend")
+	await _tap(KEY_ESCAPE)
+	assert_eq(toggles.get_briefing_mode(), 0, "Esc closes the open briefing first")
+	assert_true(shell.is_gameplay_input_active(), "closing a window does not open the menu")
+
+
+# ToggleServer (row 83, `\`) needs a session: a single-player shell never
+# brings the status view up, Tab stays dead and Esc never opens the quit
+# dialog [orig: case 11 @0x49aff1; case 102 @0x49bb2a; the escape tail
+# @0x49b377].
+func test_toggle_server_and_tab_are_dead_out_of_a_session() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	var toggles: HudToggles = hud.toggles()
+	await _tap(KEY_BACKSLASH)
+	assert_false(toggles.is_server_status_view(), "no status view out of a session")
+	assert_false(hud.get_game_hud().is_server_status_page_shown(), "the scene frame stays")
+	await _tap(KEY_TAB)
+	assert_false(toggles.is_scoreboard_open(), "the playerlist action does nothing out of a session")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_quit_dialog_open(), "no quit dialog without the view")
+
+
+func test_h_is_the_sp_pause_key_and_no_hud_key() -> void:
+	# Retail H is the secondary `pause` binding (SP-only): it flips the pause
+	# word, which pauses the session in place (no menu); there is no
 	# HUD-visibility toggle and no H color mapping.
-	# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520]
+	# [orig: catalog row 70 vk2 0x48; case 25 @0x49b520..0x49b52d]
 	var shell := await _booted_in_world()
 	if shell == null:
 		return
@@ -136,18 +183,84 @@ func test_h_is_not_a_hud_key_and_reaches_the_player_router() -> void:
 	var nvg_before: bool = world.local_player_view().nvg_active
 
 	await _tap(KEY_H)
-	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no HUD presenter action")
+	assert_true(hud.toggles().is_paused(), "H flips the SP pause word")
+	assert_eq(hud.friendly_tag_mode(), tags_before, "H drives no other HUD presenter action")
 	assert_eq(hud.hud_detail_level(), detail_before, "H is not a declutter key")
 	assert_eq(hud.hud_color_index(), color_before, "H has no color mapping")
-	# H falls through the shell to the player router, whose gameplay legs
-	# (B/N/+/-/Z/X/C) carry no H arm: the observable consequence is that no
-	# shell leg (pause, picker, tools, armory) claims the key either, so play
-	# continues untouched.
 	assert_eq(shell.shell_state_name(), "world",
-			"H falls through the shell to the player router")
-	assert_true(shell.is_gameplay_input_active(), "nothing on the shell pauses on H")
+			"the key pause keeps the world state: no in-game menu opens")
 	assert_eq(world.local_player_view().nvg_active, nvg_before,
 			"the router's NVG leg is N, not H")
+	await _tap(KEY_H)
+	assert_false(hud.toggles().is_paused(), "a second H clears the pause word")
+	assert_true(shell.is_gameplay_input_active(), "play continues after the unpause")
+
+
+# F9 / F10 open the emotes and radio menus (keep-one with each other); Esc
+# closes the pause word first, then one menu per press, before the in-game
+# menu [orig: dispatch 33 / 54 @0x49b6c9 / @0x49b6e2; the escape chain case 18
+# @0x49b24f, @0x49b267, @0x49b27a; case 25 @0x49b520].
+func test_voice_macro_menus_pause_and_escape() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F9)
+	assert_true(toggles.is_emotes_menu_open(), "F9 opens the emotes menu")
+	await _tap(KEY_F10)
+	assert_true(toggles.is_radio_menu_open(), "F10 opens the radio menu")
+	assert_false(toggles.is_emotes_menu_open(), "the radio menu's respawn init closes the emotes")
+	await _tap(KEY_PAUSE)
+	assert_true(toggles.is_paused(), "Pause flips the SP pause word")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_paused(), "Esc clears the pause word first")
+	assert_true(toggles.is_radio_menu_open(), "the pause clear consumed the key")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_radio_menu_open(), "the next Esc closes the radio menu")
+	assert_true(shell.is_gameplay_input_active(), "closing a menu does not open the in-game menu")
+
+
+# N raises the NVG tip (event 7, once); Esc fades a showing tip before it
+# opens the in-game menu [orig: case 41 CTipSystem_HandleEvent(7) @0x4e06ec;
+# the escape chain's tip leg @0x49b34d].
+func test_escape_fades_the_nvg_tip() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	var toggles: HudToggles = hud.toggles()
+	hud.set_tip_options(true, true)
+	await _tap(KEY_N)
+	await get_tree().process_frame
+	assert_eq(toggles.get_tip(), 7, "NVG on shows the KB_NVG tip")
+	assert_true(toggles.is_tip_showing(), "a fresh tip is showing")
+	await _tap(KEY_ESCAPE)
+	assert_false(toggles.is_tip_showing(), "Esc starts the tip's fade")
+	assert_lte(toggles.get_tip_countdown(), 64, "the fade clamps the countdown")
+	assert_true(shell.is_gameplay_input_active(), "the fade consumed the key")
+	await _tap(KEY_N)
+	await _tap(KEY_N)
+	await get_tree().process_frame
+	assert_false(toggles.is_tip_showing(), "the NVG tip shows once per process")
+
+
+# A digit while a menu is open is the menu's pick: it closes that menu (the
+# pick itself leaves as C2S 0x14 / 0x13) [orig: Input_HandleSpecialKeys
+# @0x49c731..0x49c75c (emotes), @0x49c783..0x49c7a8 (radio)].
+func test_a_digit_picks_from_the_open_voice_menu_and_closes_it() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var toggles: HudToggles = shell.get_hud_presenter().toggles()
+	await _tap(KEY_F9)
+	assert_true(toggles.is_emotes_menu_open(), "F9 opens the emotes menu")
+	await _tap(KEY_3)
+	assert_false(toggles.is_emotes_menu_open(), "a digit picks and closes the emotes menu")
+	await _tap(KEY_F10)
+	assert_true(toggles.is_radio_menu_open(), "F10 opens the radio menu")
+	await _tap(KEY_0)
+	assert_false(toggles.is_radio_menu_open(), "the 0 key picks 10 and closes the radio menu")
+	assert_true(shell.is_gameplay_input_active(), "a pick leaves gameplay input live")
 
 
 func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> void:
@@ -176,3 +289,24 @@ func test_plain_f6_reaches_the_binding_rows_while_shift_f6_is_debug_pick() -> vo
 			"a chorded press never cycles a HUD row")
 	assert_not_null(shell.find_child("PickToast", true, false),
 			"the chord landed on the debug picker (every attempt confirms with a toast)")
+
+
+# The talk rows (T/Ctrl+T/Y/Ctrl+Y/U/Enter) open no chat line out of a
+# session — the dispatch arms' is_in_session gate — so gameplay input stays
+# live and the shell routes no key to the editor; PgDn with no session board
+# still reaches the other windows (the help page).
+func test_talk_keys_stay_closed_out_of_a_session() -> void:
+	var shell := await _booted_in_world()
+	if shell == null:
+		return
+	var hud: GameHudPresenter = shell.get_hud_presenter()
+	await _tap(KEY_T)
+	assert_false(hud.is_chat_capturing(), "SP opens no chat line on T")
+	await _tap(KEY_ENTER)
+	assert_false(hud.is_chat_capturing(), "SP opens no chat line on Enter")
+	assert_true(shell.is_gameplay_input_active(), "gameplay input stays live")
+	await _tap(KEY_F1)
+	var page := ControlsBindings.model().get_help_page_line()
+	await _tap(KEY_PAGEDOWN)
+	assert_ne(ControlsBindings.model().get_help_page_line(), page,
+			"out of a session PgDn passes the board to the help page")

@@ -123,6 +123,40 @@ String ControlsModel::display_text_for_token(const String &p_token) const {
 	return opennova::to_gd(opennova::controls::format_display_string(*r));
 }
 
+String ControlsModel::display_text_for_action_code(int p_code) const {
+	const opennova::controls::ActionDef *def = opennova::controls::action_for_code(p_code);
+	if (def == nullptr) {
+		return opennova::to_gd(
+				opennova::controls::format_display_string(opennova::controls::BindingRecord{}));
+	}
+	const opennova::controls::BindingRecord *r = bindings_.record(bindings_.index_of_token(def->token));
+	if (r == nullptr) {
+		return String();
+	}
+	return opennova::to_gd(
+			opennova::controls::format_display_string(*r, (def->flags & 0x200u) != 0u));
+}
+
+void ControlsModel::build_help_screen() { help_screen_.build(bindings_); }
+void ControlsModel::cycle_help_page(bool p_forward) { help_screen_.cycle_page(p_forward); }
+String ControlsModel::get_help_title() const { return opennova::to_gd(help_screen_.title()); }
+String ControlsModel::get_help_page_line() const {
+	return opennova::to_gd(help_screen_.page_line());
+}
+PackedStringArray ControlsModel::get_help_keys() const {
+	PackedStringArray out;
+	for (const opennova::controls::HelpScreenRow &row : help_screen_.rows())
+		out.push_back(opennova::to_gd(row.key));
+	return out;
+}
+PackedStringArray ControlsModel::get_help_texts() const {
+	PackedStringArray out;
+	for (const opennova::controls::HelpScreenRow &row : help_screen_.rows())
+		out.push_back(opennova::to_gd(row.text));
+	return out;
+}
+String ControlsModel::help_footer() { return opennova::to_gd(opennova::controls::help_screen_footer()); }
+
 int ControlsModel::pressed_key_for_token(const String &p_token) const {
 	Input *input = Input::get_singleton();
 	if (input == nullptr) {
@@ -130,12 +164,27 @@ int ControlsModel::pressed_key_for_token(const String &p_token) const {
 	}
 	// The device's held state by VK (the engine rule reads it as retail's
 	// g_input_key_down_states[vk]).
-	const auto physical_vk_down = [input](int vk) {
-		const int key = godot_key_from_vk(vk);
-		return key != 0 && input->is_physical_key_pressed(static_cast<Key>(key));
-	};
+	const auto physical_vk_down = [this](int vk) { return vk_down_(vk); };
 	return bindings_.pressed_key(bindings_.index_of_token(p_token.utf8().get_data()),
 			physical_vk_down);
+}
+
+bool ControlsModel::vk_down_(int p_vk) const {
+	Input *input = Input::get_singleton();
+	const int key = godot_key_from_vk(p_vk);
+	const bool down = input != nullptr && key != 0 &&
+			input->is_physical_key_pressed(static_cast<Key>(key));
+	// A press the special-key handler took reads up until the key is
+	// released (consume_key_press).
+	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size()) && consumed_vks_[p_vk]) {
+		if (down) return false;
+		consumed_vks_[p_vk] = false;
+	}
+	return down;
+}
+
+void ControlsModel::consume_key_press(int p_vk) {
+	if (p_vk > 0 && p_vk < static_cast<int>(consumed_vks_.size())) consumed_vks_[p_vk] = true;
 }
 
 bool ControlsModel::is_token_pressed(const String &p_token) const {
@@ -155,10 +204,7 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_LEFT)) held |= opennova::controls::kMouseLeft;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_RIGHT)) held |= opennova::controls::kMouseRight;
     if (input->is_mouse_button_pressed(MOUSE_BUTTON_MIDDLE)) held |= opennova::controls::kMouseMiddle;
-    const auto key_down = [input](int vk) {
-        const int key = godot_key_from_vk(vk);
-        return key != 0 && input->is_physical_key_pressed(static_cast<Key>(key));
-    };
+    const auto key_down = [this](int vk) { return vk_down_(vk); };
     if (bindings_.pressed_mouse(index, held, key_down)) return true;
     if (r->joy_button != 0) {
         const auto devices = input->get_connected_joypads();
@@ -187,10 +233,7 @@ bool ControlsModel::is_token_pressed(const String &p_token) const {
 String ControlsModel::mouse_event_token(int p_button) const {
     Input *input = Input::get_singleton();
     if (input == nullptr) return String();
-    const auto key_down = [input](int vk) {
-        const int key = godot_key_from_vk(vk);
-        return key != 0 && input->is_physical_key_pressed(static_cast<Key>(key));
-    };
+    const auto key_down = [this](int vk) { return vk_down_(vk); };
     const int index = bindings_.mouse_event_action(mouse_mask_from_godot_button(p_button), key_down);
     std::size_t count = 0;
     const auto *cat = opennova::controls::catalog(&count);
@@ -315,11 +358,26 @@ void ControlsModel::_bind_methods() {
 			&ControlsModel::is_token_pressed);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
+	ClassDB::bind_method(D_METHOD("set_keyboard_captured", "captured"),
+			&ControlsModel::set_keyboard_captured);
+	ClassDB::bind_method(D_METHOD("is_keyboard_captured"), &ControlsModel::is_keyboard_captured);
+	ClassDB::bind_method(D_METHOD("build_help_screen"), &ControlsModel::build_help_screen);
+	ClassDB::bind_method(D_METHOD("cycle_help_page", "forward"), &ControlsModel::cycle_help_page);
+	ClassDB::bind_method(D_METHOD("get_help_title"), &ControlsModel::get_help_title);
+	ClassDB::bind_method(D_METHOD("get_help_page_line"), &ControlsModel::get_help_page_line);
+	ClassDB::bind_method(D_METHOD("get_help_keys"), &ControlsModel::get_help_keys);
+	ClassDB::bind_method(D_METHOD("get_help_texts"), &ControlsModel::get_help_texts);
+	ClassDB::bind_static_method("ControlsModel", D_METHOD("help_footer"), &ControlsModel::help_footer);
 	ClassDB::bind_method(D_METHOD("display_text_for_token", "token"),
 			&ControlsModel::display_text_for_token);
+	ClassDB::bind_method(D_METHOD("display_text_for_action_code", "code"),
+			&ControlsModel::display_text_for_action_code);
+	ClassDB::bind_method(D_METHOD("get_binding_revision"),
+			&ControlsModel::get_binding_revision);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("mouse_mask_from_godot_button", "button"),
 			&ControlsModel::mouse_mask_from_godot_button);
+	ClassDB::bind_method(D_METHOD("consume_key_press", "vk"), &ControlsModel::consume_key_press);
 	ClassDB::bind_static_method("ControlsModel",
 			D_METHOD("vk_from_godot_key", "key"),
 			&ControlsModel::vk_from_godot_key);

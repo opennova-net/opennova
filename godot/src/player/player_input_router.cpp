@@ -24,10 +24,17 @@ public:
 	int pressed_key(const char *p_token) const override {
 		return controls_.is_valid() ? controls_->pressed_key_for_token(p_token) : 0;
 	}
+	// A digit the special-key chain already took (the quit dialog's swallow)
+	// reads up here too, so it reaches neither the seat nor the menu picks.
 	bool digit_down(int p_digit) const override {
+		if (controls_.is_valid()) return controls_->is_vk_down(0x30 + p_digit);
 		Input *input = Input::get_singleton();
 		return input != nullptr &&
 				input->is_physical_key_pressed(static_cast<Key>(KEY_0 + p_digit));
+	}
+	bool shift_down() const override {
+		Input *input = Input::get_singleton();
+		return input != nullptr && input->is_physical_key_pressed(KEY_SHIFT);
 	}
 
 private:
@@ -51,6 +58,14 @@ void apply_player_action(Simulation &p_sim, const opennova::controls::PlayerActi
 		case Action::ScopeZero: p_sim.request_local_player_scope_zero(p_request.value); break;
 		case Action::RadarZoom: p_sim.request_hud_radar_zoom(p_request.value); break;
 		case Action::MapCycle: p_sim.request_hud_map_cycle(); break;
+		case Action::Binoculars: p_sim.request_local_player_binoculars_toggle(); break;
+		case Action::NightVision: p_sim.request_local_player_nvg_toggle(); break;
+		case Action::NvgGain: p_sim.request_local_player_nvg_gain(p_request.value); break;
+		case Action::WaypointCycle: p_sim.request_waypoint_cycle(p_request.value); break;
+		case Action::Spectate: p_sim.request_spectate_action(p_request.value); break;
+		// Sent over the session; the router closes the menu beside it.
+		case Action::EmotePick: p_sim.send_voice_menu_pick(false, p_request.value); break;
+		case Action::RadioPick: p_sim.send_voice_menu_pick(true, p_request.value); break;
 	}
 }
 
@@ -114,11 +129,15 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	if (tick_sim.is_valid() && tick_sim->is_local_spectator()) {
 		// A spectator owns no body motor. Submit the neutral frame while the
 		// existing FlyCamera consumes the viewport input; the world/session
-		// cadence continues through GameWorld.tick as normal.
+		// cadence continues through GameWorld.tick as normal. The death
+		// screen's own rows (the spectate sub-mode and target) still dispatch.
 		owner->set_fly_camera_locked(false);
 		release_mouse_capture();
 		owner->clear_models();
 		look_delta_ = Vector2();
+		for (const auto &request : actions_.poll_spectator(GodotActionSource(controls_),
+					 p_gameplay_input_active))
+			apply_player_action(*tick_sim.ptr(), request);
 		return frame_input;
 	}
 	owner->set_fly_camera_locked(true);
@@ -148,70 +167,30 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	frame_input->set_look_delta(p_gameplay_input_active ? look_delta_ : Vector2());
 	look_delta_ = Vector2();
 	const Ref<Simulation> action_sim = sim();
-	const auto actions = actions_.poll(GodotActionSource(controls_),
-			{p_gameplay_input_active, input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED,
-					action_sim.is_valid()});
+	opennova::controls::PlayerActionPoll gate;
+	gate.active = p_gameplay_input_active;
+	gate.captured = input->get_mouse_mode() == Input::MOUSE_MODE_CAPTURED;
+	gate.simulation_available = action_sim.is_valid();
+	gate.keyboard_captured = controls_.is_valid() && controls_->is_keyboard_captured();
+	gate.emotes_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_emotes_menu_open();
+	gate.radio_menu_open = hud_toggles_.is_valid() && hud_toggles_->is_radio_menu_open();
+	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
-	for (const auto &request : actions.requests) apply_player_action(*action_sim.ptr(), request);
+	for (const auto &request : actions.requests) {
+		// A menu pick closes its menu whether or not a session carries it
+		// (engine hud_toggles_close_voice_menu carries the witness).
+		const bool radio = request.action == opennova::controls::PlayerAction::RadioPick;
+		if ((request.action == opennova::controls::PlayerAction::EmotePick || radio) &&
+				hud_toggles_.is_valid())
+			hud_toggles_->close_voice_menu(radio);
+		if (action_sim.is_valid()) apply_player_action(*action_sim.ptr(), request);
+	}
 	return frame_input;
 }
 
 void PlayerInputRouter::consume_use_hold() {
 	actions_.consume_use_hold();
-}
-
-// Edge-triggered gameplay keys. No key here moves the camera: the view rows
-// (view1st F2 / viewwithgun F3 / viewchase F4) only write the chase
-// PREFERENCE and the FP-gun bit, and the sim's arbiter resolves the mode from
-// the preference and the seat -- GameHudPresenter polls those rows beside
-// its other HUD rows [orig: Input_HandleActionBinding cases 400/401/402
-// @0x49c073..0x49c107; the arbiter Render_ProcessMainSceneFrame @0x5ca1d2;
-// full 3P camera + torso-bend witness: docs/world/world-wac-ai-re.md §14
-// (D-INF-11), net-re §5.39]. Stance rows are polled by the native action table.
-// The keys below still read RAW keycodes rather than the binding table's rows
-// (binocular action 26 / NVG action 41 / gain actions 56/57): ported verbatim
-// from the GDScript router, a tracked divergence follow-up.
-bool PlayerInputRouter::handle_key_input(const Ref<InputEvent> &p_event, bool p_active) {
-	LocalPlayerPresenter *owner = presenter();
-	if (!p_active || owner == nullptr || !owner->has_player()) {
-		return false;
-	}
-	InputEventKey *key = Object::cast_to<InputEventKey>(p_event.ptr());
-	if (key == nullptr) {
-		return false;
-	}
-	if (!key->is_pressed() || key->is_echo()) {
-		return false;
-	}
-	const Key physical = key->get_physical_keycode() != KEY_NONE ? key->get_physical_keycode()
-																  : key->get_keycode();
-	const Ref<Simulation> key_sim = sim();
-	if (physical == KEY_B) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_binoculars_toggle();
-		}
-		return true;
-	}
-	if (physical == KEY_N) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_toggle();
-		}
-		return true;
-	}
-	if (physical == KEY_EQUAL || physical == KEY_PLUS || physical == KEY_KP_ADD) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_gain(1);
-		}
-		return true;
-	}
-	if (physical == KEY_MINUS || physical == KEY_KP_SUBTRACT) {
-		if (key_sim.is_valid()) {
-			key_sim->request_local_player_nvg_gain(-1);
-		}
-		return true;
-	}
-	return false;
 }
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline

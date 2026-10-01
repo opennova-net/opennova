@@ -316,7 +316,7 @@ def count_engine_stdout_prints() -> int:
 
 GD_PRINT = re.compile(r"(?:^|[^_a-zA-Z\"])(?:print|prints|printerr|print_rich|print_debug)\s*\(")
 # The shipping Godot layer routes diagnostics through push_error/push_warning,
-# print_verbose, or the dev tools (F3).
+# print_verbose, or the dev tools (Insert).
 CPP_CONSOLE = re.compile(
     r"UtilityFunctions::print(?!_verbose)\s*\(|UtilityFunctions::printerr\s*\("
     r"|UtilityFunctions::print_rich\s*\("

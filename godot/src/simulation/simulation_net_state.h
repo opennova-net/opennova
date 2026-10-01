@@ -14,6 +14,7 @@
 #include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
+#include <runtime/inmatch/napi_np_server_ctx.h>   // NetworkType
 #include <runtime/mission/mission_text.h>          // MissionText
 #include <runtime/world/spawn_select.h>           // SpawnZoneRegistry
 
@@ -97,6 +98,9 @@ struct SimulationNetState {
 	// The game-session APPID join token (decoded .joi CK) a NovaWorld host
 	// validates (reject code 9). "0" is the LAN default. Retained across rebuilds.
 	std::string app_id = "0";
+	// The joiner's network type (JoinTarget::network_type; retail's
+	// g_NapiNPCtx.transport_mode on the client). Retained across rebuilds.
+	opennova::inmatch::NetworkType join_network_type = opennova::inmatch::NetworkType::Lan;
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
 	// Empty for LAN. Retained across direct-load runtime rebuilds.
 	std::vector<uint8_t> join_cd_cookie;

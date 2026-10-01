@@ -293,25 +293,6 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack = tr
 //  @0x506C24, the identity pair @0x506C26..0x506C5C (zero @0x506C7C..0x506C9D)]
 std::vector<uint8_t> encode_team_change_confirm(uint16_t index, const TeamAssign &assign);
 
-// tag=0x71 SQUAD JOIN — `[u8 leader][u8 member]` (2 B): the member slot's squad link, 0xFF =
-// no squad. A team change clears the changed player's link and sends [0xFF][its slot] to its new
-// team. [orig: NetPacket_WritePlayerChainLink @0x5106D0 — the stores @0x510797 / @0x5107A4; client
-// NapiNPClientMsg_HandleSquadJoin @0x425600]
-struct SquadJoin {
-	uint8_t leader = 0xFF;
-	uint8_t member = 0;
-};
-std::vector<uint8_t> encode_squad_join(const SquadJoin &join);
-
-// tag=0x72 TEAM NAME — `[u8 index][cstr name]`; a team change sends [0][""] and [1][""] to the
-// changed player. [orig: NetPacket_WriteByteAndCString @0x5107B0; client NapiNPClientMsg_0x072
-// @0x425710]
-struct TeamName {
-	uint8_t index = 0;
-	std::string name;
-};
-std::vector<uint8_t> encode_team_name(const TeamName &name);
-
 // One 0x16 PLAYER-LIST entry (the host roster row the dispatcher extracts from the live connection list).
 struct PlayerListEntry {
 	uint8_t slot = 0;
@@ -404,6 +385,15 @@ std::vector<uint8_t> encode_medic_request(const MedicRequest &request);
 // byte1 @0x5047CE, the string copy @0x5047F9..0x50480A]
 std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat);
 
+// S2C 0x32 formatted game text, the inverse of decode_formatted_game_text:
+// [u8 subtype][cstr text], subtypes 1/2 then [u8 team]. Retail builds 1 inline
+// in Server_PlayerAdd and 2 through NetPacket_SerializeMinimapSlot_0 — the
+// same byte layout; 3/4/5 carry the text alone.
+// [orig: Server_PlayerAdd @0x51d21e..0x51d277; NetPacket_SerializeMinimapSlot_0
+//  @0x505a60 — the type byte @0x505a81, the name @0x505b6c..0x505b7a, the team
+//  byte @0x505b80..0x505b95, the name-only type 5 @0x505ac9..0x505ada]
+std::vector<uint8_t> encode_formatted_game_text(const FormattedGameText &text);
+
 std::vector<uint8_t> encode_auto_medic_preference(
 		const AutoMedicPreference &preference);
 
@@ -461,6 +451,25 @@ std::vector<uint8_t> encode_team_assign(const TeamAssign &assign);
 // [orig: NetPacket_WriteOverlayAction @0x505d50; fanned by
 //  Server_SendOverlayActionToAlive @0x50a1b0 with send_mask 128 (alive players)]
 std::vector<uint8_t> encode_play_sound(const PlaySoundCommand &cmd);
+
+// S2C 0x6D, the inverse of decode_tracked_player_voice: [u8 event][u8 the
+// caller's raw pool-0 index][i16 location-name index, -1 none] (4 B). The
+// host packs one dword: the low byte the radio call, byte 1 the index, the
+// high word the nearest location marker's +0x280 word.
+// [orig: NapiNPServerMsg_HandleRadioCall @0x514330 — the byte @0x5143b2,
+//  Pool_GetIndexFromPtr @0x5143c5, the 0xFFFF seed @0x51440f and the marker
+//  word @0x514488..0x51448f, SendFiltered(0x6D, .., 4) @0x5144c8 / @0x51480e]
+std::vector<uint8_t> encode_tracked_player_voice(const TrackedPlayerVoice &voice);
+
+// S2C 0x6B, the inverse of decode_minimap_overlay_batch: [u8 count] then
+// count x 12 B [u16 handle][s16 x][s16 y][s16 z][u16 seconds][u8 type]
+// [u8 height]. The host fills each record from one live designation
+// (world units = the Q16 value divided by 0x10000 toward zero, seconds = the
+// remaining ticks / 62 toward zero); a batch with no record is not sent.
+// [orig: NetPacket_SerializeDesignations @0x5116A0 (ex
+//  NetPacket_SerializeWeaponOverlaySlots) — the stores @0x51171b..0x51178a,
+//  the count byte @0x5117cf; Server_SendDesignationsToPlayer @0x517F70]
+std::vector<uint8_t> encode_minimap_overlay_batch(const MinimapOverlayBatch &batch);
 
 // The two water-crossing effect names retail fans through 0x34, both witnessed
 // in the Base Assault baseline capture (BODYWATER1 x24, SURFACE_WTR x15, all at

@@ -213,6 +213,10 @@ public:
 	// rect scaled by the frame's current size); zero when off-screen.
 	Rect2 widget_frame_rect(int p_id) const;
 	Vector2 design_scale() const;
+	// The widget's own design rect relative to its parent's origin
+	// (CWnd_GetRect), and its replacement (CWnd_SetRect).
+	Rect2 widget_local_rect(int p_id) const;
+	void set_widget_rect(int p_id, const Rect2i &p_rect);
 
 	void set_widget_shown(int p_id, bool p_shown);
 	bool is_widget_shown(int p_id) const;
@@ -235,6 +239,10 @@ public:
 			int p_value);
 	// Current standalone scroll state, or null until seeded.
 	Ref<MenuScrollRange> get_widget_scroll_range(int p_id) const;
+	// A row owner's first visible row (a list / table's, a multiline edit's
+	// first line; the multiline edit's SetText resets it to 0, docs/interface/
+	// hud-re.md "The windowed map views").
+	void set_scroll_row(int p_id, int p_row);
 
 	void table_add_row(int p_id, const PackedStringArray &p_cells);
 	void table_clear_rows(int p_id);
@@ -248,6 +256,21 @@ public:
 	// the first stat column, descending (inmatch stat_screen_feed.h).
 	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
 			const TypedArray<EndRoundRow> &p_rows);
+	// The CTableWnd operations (engine menu_table_row.h).
+	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
+			int p_insert_index);
+	void table_set_cell_text(int p_id, int p_row, int p_col, const String &p_text);
+	void table_set_cell_value(int p_id, int p_row, int p_col, int p_value);
+	int table_cell_value(int p_id, int p_row, int p_col) const;
+	void table_remove_row(int p_id, int p_row);
+	int table_row_state(int p_id, int p_row) const;
+	void table_set_row_selected(int p_id, int p_row, bool p_selected);
+	PackedInt32Array table_selected_rows(int p_id) const;
+	// CWnd_SetClipRect (absolute design units) and its removal.
+	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
+	void clear_widget_clip_rect(int p_id);
+	// The engine runtime, for native screen companions (C++ only).
+	opennova::menu::MenuRuntime &runtime() { return runtime_; }
 
 	// --- activation / actions ---
 	void activate(int p_id);
@@ -265,6 +288,8 @@ public:
 	void close_active_combo_popup();
 	bool is_combo_popup_open(int p_id) const;
 	int get_focused_widget() const;
+	// Give an edit the keyboard focus (UI_SetFocusWnd; read-only refuses).
+	void focus_widget(int p_id);
 
 	// Advance the blink/marquee clock; the shell's _process forwards its clock.
 	void tick(int64_t p_time_ms);

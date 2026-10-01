@@ -51,13 +51,14 @@ void table_push_sort_key(std::vector<int> &keys, int column, int column_count) {
 	}
 }
 
-std::vector<int> table_sort_order(const std::vector<std::vector<std::string>> &rows,
+std::vector<int> table_sort_order(const std::vector<MenuTableRow> &rows,
 		const std::vector<MenuTableColumn> &columns, const std::vector<int> &keys) {
 	std::vector<int> order(rows.size());
 	std::iota(order.begin(), order.end(), 0);
 	const size_t depth = std::min<size_t>(columns.size(), 20);
-	const auto compare = [&](const std::vector<std::string> &a,
-								 const std::vector<std::string> &b) -> int64_t {
+	const auto compare = [&](const MenuTableRow &ra, const MenuTableRow &rb) -> int64_t {
+		const std::vector<std::string> &a = ra.cells;
+		const std::vector<std::string> &b = rb.cells;
 		for (size_t i = 0; i < depth && i < keys.size(); ++i) {
 			const int key = keys[i];
 			if (key < 0 || key >= static_cast<int>(columns.size())) {

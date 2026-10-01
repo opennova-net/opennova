@@ -1030,7 +1030,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 				entry.set("saved", JsonValue::make_null());
 			}
 		}
-		// The choices it offers here: the schema's, or the record's own (a model's registers).
+		// The choices it offers here: the schema's, or the record's own (a model's LOD 0 parts).
 		const std::vector<FieldChoice> &offered = document.choices_on(address, field, own);
 		if (!offered.empty()) {
 			JsonValue choices = JsonValue::make_array();
@@ -1044,7 +1044,7 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 			entry.set("choices", std::move(choices));
 		}
 		// Open: any value typed, where the field offers choices, whether or not the record knows
-		// any of its own (a model with no registers).
+		// any of its own (a part index on a model whose LOD 0 has no parts).
 		if (schema.open_choices && (field.own_choices || !schema.choices.empty()))
 			entry.set("open_choices", boolean(true));
 		if (!field.scope.empty() && (field.reference != ReferenceKind::None || field.defines != ReferenceKind::None))
@@ -1144,6 +1144,7 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 		entry.set("kind", json_string(reference_row(choice.kind).token));
 		entry.set("file", json_string(choice.file));
 		if (!choice.record.empty()) entry.set("record", json_string(choice.record));
+		if (!choice.label.empty()) entry.set("label", json_string(choice.label));
 		entry.set("status", json_string(reference_status_token(choice.status)));
 		if (choice.inert) {
 			entry.set("inert", boolean(true));
