@@ -31,18 +31,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Retail's per-connection EMPTY send interval, host side (D-NET-173): with
-// NOTHING queued and NOTHING retained, the send pump still mints a packet
-// once this elapses, so a quiet peer (parked at the deploy pick, dead, or
-// idle) never reaches its 120 s connection reap. The ACTIVE retained-records
-// probe (10000 ms) is ported separately in tick_connections; the joiner legs
-// are the same template values in joiner_connection.cpp.
-// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 — empty_interval leg
-//  @0x629041..0x629067; idle_send_interval_ms = 30000 stored by
-//  CNapiNetwork_Init @0x4ca4a0 (@0x4caab5/@0x4cab88); the reaping
-//  timeout_ms = 120000 stored @0x4caa81/@0x4cab54]
-constexpr uint64_t kHostSessionIdleSendIntervalMilliseconds = 30000;
-
 uint32_t mint_nonzero_session_value() {
 	uint32_t value = 0;
 	while (value == 0) value = make_random_session_u32();
@@ -429,10 +417,98 @@ void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
 	flush_s2c_boundaries(owner, sock, owner.now_tick, /*force_open=*/true);
 }
 
+// BuildOutgoingPackets over this connection's queue: the packets framed
+// before this build (they own the lower sequence numbers) leave first, then
+// every queued semantic record, split at the connection's ceiling. Returns
+// whether a staged packet left; the caller compares sequences for the rest.
+static bool build_s2c_queue(HostOwner &owner, opennova::IDatagramSocket &sock,
+		NapiNPConnection &c, uint32_t now) {
+	auto &pending_session_messages = owner.pending_session_messages;
+	bool released = false;
+	auto pending_datagrams = owner.pending_session_datagrams.find(c.peer);
+	if (pending_datagrams != owner.pending_session_datagrams.end()) {
+		for (const std::vector<uint8_t> &datagram : pending_datagrams->second)
+			sock.send_to(c.peer, datagram.data(), datagram.size());
+		owner.pending_session_datagrams.erase(pending_datagrams);
+		c.last_session_send_tick = now;
+		released = true;
+	}
+	std::vector<ProtocolMessage> messages;
+	auto pending = pending_session_messages.find(c.peer);
+	if (pending != pending_session_messages.end()) {
+		messages = std::move(pending->second);
+		pending_session_messages.erase(pending);
+	}
+	std::vector<ProtocolMessage> retry =
+			send_session_batches(owner, sock, c, std::move(messages));
+	if (!retry.empty())
+		pending_session_messages[c.peer] = std::move(retry);
+	return released;
+}
+
+// One header-only packet carrying the current ACK (BuildOutgoingPackets with
+// has_pending_out set and no record queued @0x62847e).
+static void send_header_only(HostOwner &owner, opennova::IDatagramSocket &sock,
+		NapiNPConnection &c, uint32_t now) {
+	std::vector<uint8_t> packet;
+	if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, packet)) {
+		sock.send_to(c.peer, packet.data(), packet.size());
+		c.last_session_send_tick = now;
+	}
+}
+
+// PumpSendIntervals, the connected server node's arm of PumpStateMachine,
+// which the server send pump runs on EVERY Server_TickUpdate (flags 0x2E1, no
+// holdoff test), open boundary or not (D-NET-256). Both legs measure the time
+// since this connection last built a packet (+0x640, which BuildOutgoingPackets
+// and the legs stamp) against its cs_dir0 fields, a negative one disabling:
+//   ACTIVE (field 5): records are retained and MORE than the interval passed;
+//   EMPTY (field 4): nothing is retained, no out-of-order C2S packet is held,
+//   and MORE than the interval passed — the keepalive a stock client's 120 s
+//   reap requires (D-NET-173, D-NET-236).
+// A due leg forces has_pending_out and builds: every queued record leaves (a
+// closed window's queue included), or one header-only packet; the countdown is
+// not touched. The leg clock arms on the first tick it is read (0 = unarmed).
+// The JO template's intervals are 10000 / 30000 ms (CNapiNetwork_Init
+// @0x4caac5/@0x4cab98 and @0x4caab5/@0x4cab88); 1000 ms is the NOVAWORLDUDP
+// service template's active value @0x4d3e60, not the game session's.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 — the active leg
+//  @0x628ff1..0x629017 (`sub ebp,[esi+640h]; cmp; jbe` @0x62900c..0x629015), the
+//  empty leg @0x629041..0x629067 (`cmp [esi+7A8h], 0` @0x629053), the build
+//  has_pending_out @0x62906f -> BuildOutgoingPackets @0x62907b -> PrunePacketQueue
+//  @0x629082, the stamp @0x629089; BuildOutgoingPackets' own stamp @0x628605;
+//  PumpStateMachine case 1 @0x62933f; PumpFlags 0x40 @0x6297c8;
+//  CNapiNetwork_PumpServerProtocolSend @0x4c4f11 called @0x51e487]
+static bool pump_send_interval_legs(HostOwner &owner, opennova::IDatagramSocket &sock,
+		NapiNPConnection &c, uint32_t now) {
+	if (c.server_scrk.empty()) return false;
+	if (c.last_session_send_tick == 0) {
+		c.last_session_send_tick = now;
+		return false;
+	}
+	const uint64_t since_ms =
+			static_cast<uint64_t>(now - c.last_session_send_tick) * uint64_t(io::kTickMs);
+	const int32_t active_ms = c.timeouts.active_send_interval_ms;
+	const int32_t empty_ms = c.timeouts.idle_send_interval_ms;
+	const bool retained = c.seq.retained_outbound_message_count > 0;
+	const bool active_due =
+			active_ms >= 0 && retained && since_ms > static_cast<uint64_t>(active_ms);
+	const bool empty_due = !active_due && empty_ms >= 0 && !retained &&
+			c.seq.queued_inbound.empty() && since_ms > static_cast<uint64_t>(empty_ms);
+	if (!active_due && !empty_due) return false;
+	const uint32_t sequence_before = c.seq.next_outbound_seq;
+	const bool released = build_s2c_queue(owner, sock, c, now);
+	if (!released && c.seq.next_outbound_seq == sequence_before)
+		send_header_only(owner, sock, c, now);
+	c.last_session_send_tick = now;
+	return true;
+}
+
 // The pump's step (4). Drain each remote transport into the ordered pending
 // queue every tick; only an open boundary frames and sends it (force_open
-// ships regardless — the teardown's last flush). The host's own type-2 loopback
-// is consumed in-process and skipped here.
+// ships regardless — the teardown's last flush), then the send-interval legs
+// run whatever the boundary says. The host's own type-2 loopback is consumed
+// in-process and skipped here.
 static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &sock, uint32_t now,
 		bool force_open) {
 	auto &pending_session_messages = owner.pending_session_messages;
@@ -454,79 +530,35 @@ static void flush_s2c_boundaries(HostOwner &owner, opennova::IDatagramSocket &so
 				pending_session_messages[c.peer].push_back(std::move(message));
 			}
 		}
-		if (c.s2c_send_boundary_open || force_open) {
-			// Whether this boundary built anything: retail prunes only after a build
-			// (PumpEnumeratorAndSend builds and prunes when messages are pending or an
-			// ACK is owed @0x6292a9..0x6292bb; the send-interval legs build and prune
-			// themselves @0x62907b..0x629082).
-			const uint32_t sequence_before = c.seq.next_outbound_seq;
-			bool built = false;
-			// These packets were framed before this boundary and therefore carry
-			// lower sequence numbers than the semantic messages framed below.
-			auto pending_datagrams = owner.pending_session_datagrams.find(c.peer);
-			if (pending_datagrams != owner.pending_session_datagrams.end()) {
-				for (const std::vector<uint8_t> &datagram : pending_datagrams->second)
-					sock.send_to(c.peer, datagram.data(), datagram.size());
-				owner.pending_session_datagrams.erase(pending_datagrams);
-				c.last_session_send_tick = now;
-				built = true;
-			}
-			std::vector<ProtocolMessage> messages;
-			auto pending = pending_session_messages.find(c.peer);
-			if (pending != pending_session_messages.end()) {
-				messages = std::move(pending->second);
-				pending_session_messages.erase(pending);
-			}
-			std::vector<ProtocolMessage> retry =
-					send_session_batches(owner, sock, c, std::move(messages));
-			if (!retry.empty())
-				pending_session_messages[c.peer] = std::move(retry);
+		// Whether this tick built anything: retail prunes only after a build
+		// (PumpEnumeratorAndSend builds and prunes when messages are pending or an
+		// ACK is owed @0x6292a9..0x6292bb; the send-interval legs build and prune
+		// themselves @0x62907b..0x629082).
+		const uint32_t sequence_before = c.seq.next_outbound_seq;
+		bool built = false;
+		const bool open = c.s2c_send_boundary_open || force_open;
+		if (open) {
+			built = build_s2c_queue(owner, sock, c, now);
 			// The owed ACK (D-NET-233): a C2S packet with records arrived since the last
 			// build, and nothing above built a packet, so the boundary builds a header-only
 			// one carrying the current ACK.
 			// [orig: PumpEnumeratorAndSend `queued > 0 || has_pending_out` @0x6292a9 ->
 			//  BuildOutgoingPackets @0x6292b4 (one packet even with no records,
 			//  @0x62847e); the clear once the queue drained @0x628629]
-			if (c.session_ack_owed && !built && c.seq.next_outbound_seq == sequence_before) {
-				std::vector<uint8_t> ack;
-				if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, ack)) {
-					sock.send_to(c.peer, ack.data(), ack.size());
-					c.last_session_send_tick = now;
-				}
-			}
-			// The EMPTY send-interval leg (D-NET-173): retail's pump reads the
-			// per-connection last-send clock this boundary just updated, and with
-			// NOTHING queued and NOTHING retained still mints a header-only
-			// sequence once the interval elapses — the keepalive a stock client's
-			// 120 s reap requires. (The ACTIVE retained-records probe is
-			// tick_connections' append_active_probe.) Arm on the first open
-			// boundary. [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
-			if (c.last_session_send_tick == 0) {
-				c.last_session_send_tick = now;
-			} else if (c.seq.retained_outbound_message_count == 0 &&
-					// nor while an out-of-order C2S packet is held (D-NET-236)
-					// [orig: `cmp [esi+7A8h], 0` @0x629053, the packet-queue count]
-					c.seq.queued_inbound.empty() &&
-					pending_session_messages.find(c.peer) ==
-							pending_session_messages.end()) {
-				const uint64_t elapsed_ms = static_cast<uint64_t>(
-						now - c.last_session_send_tick) * 1000u / uint64_t(io::kTicksPerSecondInt);
-				if (elapsed_ms > kHostSessionIdleSendIntervalMilliseconds) {
-					std::vector<uint8_t> keepalive;
-					if (frame_in_match_s2c_batch(owner.ctx, c.peer, {}, keepalive)) {
-						sock.send_to(c.peer, keepalive.data(), keepalive.size());
-						c.last_session_send_tick = now;
-					}
-				}
-			}
-			// One OPEN host send boundary can contain preframed settings/resends,
-			// several MTU-split semantic packets, or no payload at all. Retail prunes
-			// the finite message nodes once, after all of them, at the counter they
-			// were built with. [orig: PrunePacketQueue @0x6292bb]
-			if (built || c.seq.next_outbound_seq != sequence_before) {
-				prune_session_send_boundary(c.seq);
-				c.session_ack_owed = false;
-			}
+			if (c.session_ack_owed && !built && c.seq.next_outbound_seq == sequence_before)
+				send_header_only(owner, sock, c, now);
+		}
+		// PumpFlags runs 0x40 (PumpStateMachine -> the legs) after the 0x20 build.
+		if (pump_send_interval_legs(owner, sock, c, now)) built = true;
+		// One build can contain preframed settings/resends, several MTU-split
+		// semantic packets, or no payload at all. Retail prunes the finite message
+		// nodes once, after all of them, at the counter they were built with.
+		// [orig: PrunePacketQueue @0x6292bb / @0x629082]
+		if (built || c.seq.next_outbound_seq != sequence_before) {
+			prune_session_send_boundary(c.seq);
+			c.session_ack_owed = false;
+		}
+		if (open) {
 			if (c.s2c_send_holdoff_dictated) {
 				c.s2c_send_holdoff_countdown = c.s2c_send_holdoff_ticks;
 				c.s2c_send_boundary_open = c.s2c_send_holdoff_ticks == 0;

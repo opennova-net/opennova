@@ -555,10 +555,11 @@ struct NapiNPConnection {
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
 	bool s2c_send_holdoff_dictated = false;
-	// Host tick of this connection's most recent framed session send — the
-	// per-connection "last send" clock retail's send-interval pump reads.
-	// Zero = not yet armed; the first open boundary arms it without sending.
-	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
+	// Host tick of this connection's most recent built session packet — the
+	// per-connection last-build clock (+0x640) both send-interval legs read.
+	// Zero = not yet armed; the first per-tick read arms it without sending.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 reads +0x640;
+	//  BuildOutgoingPackets stamps it @0x628605]
 	uint32_t last_session_send_tick = 0;
 	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
 	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
@@ -603,8 +604,6 @@ struct NapiNPConnection {
 	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
 	// connection. Only a completed semantic message may reach host dispatch.
 	ProtocolReassemblyState c2s_reassembly{};
-	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
-	                                     // framed S2C packet, ticked by tick_connections
 	// The host-clock millisecond at which the 0x42 join was accepted: the
 	// validation-phase deadline base (netPlayer+0xA4) that reaps a peer which
 	// keeps talking but never completes its admission.

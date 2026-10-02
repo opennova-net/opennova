@@ -39,16 +39,6 @@ namespace opennova::inmatch {
 
 namespace {
 
-// Retail's initialized JOINTOPERATIONS connection-template active-send interval:
-// cs_dir0/cs_dir1.active_send_interval_ms = 10000 (idle 30000). If reliable records remain
-// unacknowledged and no other packet was built for longer than this interval,
-// BuildOutgoingPackets mints a fresh header-only sequence. The induced gap asks the peer's
-// ordinary 0x44/0x84 machinery to reconstruct a lost semantic packet. (1000 ms is the
-// NOVAWORLDUDP service template's value @0x4d3e60, not the game session's.)
-// [orig: CNapiNetwork_Init @0x4ca4a0 stores @0x4caac5/@0x4cab98 -> read by
-// CNapiNPConnection_PumpSendIntervals @0x628FD0 -> BuildOutgoingPackets @0x628430]
-constexpr uint32_t kActiveSendIntervalMilliseconds = 10000;
-
 struct ParsedClientJoinRequest {
 	bool spectator = false;
 	std::string spectator_password;
@@ -408,7 +398,6 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 	                          body_out)) {
 		return {};
 	}
-	conn.active_send_elapsed_ms = 0;
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
@@ -1316,16 +1305,6 @@ std::vector<TickOut> tick_connections(
 		out.push_back(std::move(destroyed));
 	}
 
-	auto append_active_probe = [](NapiNPConnection &conn, TickOut &to) {
-		if (conn.type != NapiNPConnection::kTypeServerSide || conn.server_scrk.empty() ||
-		    conn.seq.retained_outbound_message_count == 0 ||
-		    conn.active_send_elapsed_ms <= kActiveSendIntervalMilliseconds) {
-			return;
-		}
-		std::vector<uint8_t> datagram = frame_session_replies(conn, {});
-		if (!datagram.empty()) to.outbound.push_back(std::move(datagram));
-	};
-
 	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
 	// second — the call sits inside Server_TickUpdate's g_PeriodicSecondTimer block,
 	// not on every tick — before walking the connections to advance their bursts. The
@@ -1335,23 +1314,6 @@ std::vector<TickOut> tick_connections(
 		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// Accumulate the active-send interval before application production, but defer minting its
-		// header probe until afterward. Any semantic packet framed below resets the timer and takes
-		// this sequence slot, matching BuildOutgoingPackets rather than inserting an empty packet
-		// immediately before queued data.
-		if (conn.type == NapiNPConnection::kTypeServerSide && !conn.server_scrk.empty()) {
-			if (conn.seq.retained_outbound_message_count == 0) {
-				conn.active_send_elapsed_ms = 0;
-			} else if (elapsed_ms > 0) {
-				const uint64_t total =
-						static_cast<uint64_t>(conn.active_send_elapsed_ms) +
-						static_cast<uint32_t>(elapsed_ms);
-				conn.active_send_elapsed_ms = static_cast<uint32_t>(
-						total < std::numeric_limits<uint32_t>::max()
-								? total
-								: std::numeric_limits<uint32_t>::max());
-			}
-		}
 		const bool send_boundary_closed =
 				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.s2c_send_boundary_open;
@@ -1373,7 +1335,6 @@ std::vector<TickOut> tick_connections(
 				if (!dg.empty()) to.outbound.push_back(std::move(dg));
 				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 			}
-			append_active_probe(conn, to);
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
@@ -1430,9 +1391,8 @@ std::vector<TickOut> tick_connections(
 			continue;
 		}
 		if (ctx.world == nullptr) {
-			// No World means no semantic burst, but reliable settings/handshake records still need
-			// the transport-level probe that induces the peer's missing-sequence request.
-			append_active_probe(conn, to);
+			// No World means no semantic burst (the retained-records probe is the send
+			// pump's ACTIVE leg, host_session.cpp's pump_send_interval_legs).
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
@@ -1489,7 +1449,6 @@ std::vector<TickOut> tick_connections(
 		// datagram-driven handle_client_session path — whichever observes the burst change first wins.
 		surface_burst_events(ctx, conn, to.events);
 
-		append_active_probe(conn, to);
 		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));
 	}

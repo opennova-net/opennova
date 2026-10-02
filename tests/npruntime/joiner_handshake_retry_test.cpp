@@ -4,6 +4,7 @@
 // request reconstruction of the retained semantic packet through 0x44/0x84.
 
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/napi_np_protocol.h>
 
 #include "host_test_setup.h"
@@ -14,8 +15,12 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
+#include <deque>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -535,57 +540,81 @@ bool run_client_active_probe_recovers_join() {
 			"server 0x84 reconstructs the retained JOIN at sequence 2");
 }
 
+// A scripted datagram socket for the host owner loop: datagrams queued in `inbound` drain through
+// recv_from in order, and every send_to lands in `sent`.
+class ScriptedDatagramSocket final : public IDatagramSocket {
+public:
+	std::deque<std::pair<PeerAddr, std::vector<uint8_t>>> inbound;
+	std::vector<std::vector<uint8_t>> sent;
+
+	int recv_from(uint8_t *buf, std::size_t cap, PeerAddr &from) override {
+		if (inbound.empty()) return 0;
+		const std::vector<uint8_t> datagram = std::move(inbound.front().second);
+		from = inbound.front().first;
+		inbound.pop_front();
+		if (datagram.size() > cap) return -1;
+		std::memcpy(buf, datagram.data(), datagram.size());
+		return static_cast<int>(datagram.size());
+	}
+	void send_to(const PeerAddr &, const uint8_t *data, std::size_t len) override {
+		sent.emplace_back(data, data + len);
+	}
+};
+
+// The host's retained settings packet is lost: its send pump's ACTIVE leg (every server tick,
+// D-NET-256) mints a header-only sequence once MORE than 10000 ms passed since that build, the
+// joiner sees the gap and asks with a 0x44, and the host's receive pump rebuilds sequence 1.
+// [orig: CNapiNPConnection_PumpSendIntervals @0x628ff1..0x629017 -> BuildOutgoingPackets
+//  @0x62907b; NapiNP_HandleResendList -> SendSessionPacket @0x6239b6]
 bool run_server_active_probe_recovers_settings() {
 	const PeerAddr peer{0x0100007Fu, 32769};
-	inmatch::NapiNPServerCtx host;
-	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+	inmatch::HostOwner owner;
+	inmatch::test::bring_up_host(owner.ctx, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E112u);
+	ScriptedDatagramSocket sock;
 	inmatch::ClientRuntime client("SettingsProbe");
 
-	const std::vector<uint8_t> hello = client.start();
-	const inmatch::HandleResult hello_result = inmatch::handle_server_datagram(
-			host, peer, hello.data(), hello.size(), 0);
-	if (!expect(hello_result.outbound.size() == 1,
-			"settings recovery host emits ServerHello")) {
+	sock.inbound.emplace_back(peer, client.start());
+	inmatch::host_session_pump(owner, sock); // tick 0
+	if (!expect(sock.sent.size() == 1, "settings recovery host emits ServerHello"))
 		return false;
-	}
-	client.receive(hello_result.outbound[0].data(), hello_result.outbound[0].size());
-	const std::vector<std::vector<uint8_t>> auth =
-			client.Client_ProcessNetworkFrame(0);
+	client.receive(sock.sent[0].data(), sock.sent[0].size());
+	sock.sent.clear();
+	const std::vector<std::vector<uint8_t>> auth = client.Client_ProcessNetworkFrame(0);
 	if (!expect(auth.size() == 1, "settings recovery client emits ClientAuth"))
 		return false;
-	const inmatch::HandleResult auth_result = inmatch::handle_server_datagram(
-			host, peer, auth[0].data(), auth[0].size(), 0);
-	if (!expect(auth_result.outbound.size() == 2 &&
-				is_opcode(auth_result.outbound[0], SESSION_OPCODE_SERVER_AUTH) &&
-				is_opcode(
-						auth_result.outbound[1],
-						SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE),
+	sock.inbound.emplace_back(peer, auth[0]);
+	inmatch::host_session_pump(owner, sock); // tick 1: the 0x82, then the settings build
+	if (!expect(sock.sent.size() == 2 &&
+				is_opcode(sock.sent[0], SESSION_OPCODE_SERVER_AUTH) &&
+				is_opcode(sock.sent[1], SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE),
 			"host emits ServerAuth followed by retained settings")) {
 		return false;
 	}
-	const std::vector<uint8_t> settings_datagram = auth_result.outbound[1];
-	client.receive(auth_result.outbound[0].data(), auth_result.outbound[0].size());
+	const std::vector<uint8_t> settings_datagram = sock.sent[1];
+	client.receive(sock.sent[0].data(), sock.sent[0].size());
+	sock.sent.clear();
 	if (!expect(client.Client_ProcessNetworkFrame(0).empty(),
 			"dropped settings leave the client waiting without ClientAuth retry")) {
 		return false;
 	}
 
-	if (!expect(inmatch::tick_connections(host, 10000, 0).empty(),
-			"server does not active-probe at exactly 10000 ms")) {
+	// 625 ticks of 16 ms after the build is exactly 10000 ms: not yet MORE.
+	for (int i = 0; i < 625; ++i) inmatch::host_session_pump(owner, sock);
+	if (!expect(sock.sent.empty(), "server does not active-probe at exactly 10000 ms")) {
 		return false;
 	}
-	const std::vector<inmatch::TickOut> ticks = inmatch::tick_connections(host, 1, 0);
-	if (!expect(ticks.size() == 1 && ticks[0].outbound.size() == 1,
+	inmatch::host_session_pump(owner, sock);
+	if (!expect(sock.sent.size() == 1,
 			"retained settings make the server active-probe after 10000 ms")) {
 		return false;
 	}
 	const inmatch::NapiNPConnection &connection =
-			host.np_protocol.connection_list.front();
+			owner.ctx.np_protocol.connection_list.front();
 	ProtocolPacketHeader probe_header;
 	std::vector<ProtocolMessage> probe_messages;
 	if (!expect(decode_session(
-				ticks[0].outbound[0],
+				sock.sent[0],
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
 				connection.server_scrk, probe_header, probe_messages) &&
 				probe_messages.empty() &&
@@ -595,7 +624,8 @@ bool run_server_active_probe_recovers_settings() {
 		return false;
 	}
 
-	client.receive(ticks[0].outbound[0].data(), ticks[0].outbound[0].size());
+	client.receive(sock.sent[0].data(), sock.sent[0].size());
+	sock.sent.clear();
 	const std::vector<std::vector<uint8_t>> missing =
 			client.Client_ProcessNetworkFrame(0);
 	if (!expect(missing.size() == 1 &&
@@ -605,16 +635,14 @@ bool run_server_active_probe_recovers_settings() {
 			"client requests missing server settings sequence 1")) {
 		return false;
 	}
-	const inmatch::HandleResult recovered = inmatch::handle_server_datagram(
-			host, peer, missing[0].data(), missing[0].size(), 0);
-	if (!expect(recovered.immediate_outbound.size() == 1 &&
-				recovered.immediate_outbound[0] == settings_datagram,
+	sock.inbound.emplace_back(peer, missing[0]);
+	inmatch::host_session_pump(owner, sock);
+	if (!expect(sock.sent.size() == 1 && sock.sent[0] == settings_datagram,
 			"client 0x44 reconstructs the retained settings at sequence 1")) {
 		return false;
 	}
 
-	client.receive(recovered.immediate_outbound[0].data(),
-			recovered.immediate_outbound[0].size());
+	client.receive(sock.sent[0].data(), sock.sent[0].size());
 	const std::vector<std::vector<uint8_t>> post_settings =
 			client.Client_ProcessNetworkFrame(0);
 	return expect(post_settings.size() == 2 &&
