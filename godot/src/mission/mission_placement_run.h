@@ -33,9 +33,12 @@ namespace godot {
 // entities, 398 animated, 1,037 statics over 133 graphics; headless, the template_debug library,
 // 2026-10-01): cold, place() took 1,882 ms (bucket 52 ms, static batches 753 ms, animated models
 // 1,073 ms); with every cache warm 458 ms (bucket 9 ms, static batches 65 ms, animated models 379
-// ms). So a static group is under 6 ms cold and under 1 ms warm; an animated model about 2.7 ms
-// cold and 1 ms warm, so eight of them stay near a frame's budget when warm; 512 rows of bucketing
-// are about 12 ms cold.
+// ms). Stepped as this run with eight models a unit (242 units), the longest unit warm was a
+// bucket's 1.8 ms, a static group's 2.6 ms and a models unit's 12.9 ms (16.8 ms on ASH_I1eA.bms:
+// over a frame's 16 ms), so the models go four a unit (about 6 to 8 ms warm); cold, the longest
+// were 20 ms, 30 ms (65 ms on ASH_I1eA) and 81 ms, a graphic's first load in each: the editor's
+// device loads and warms every graphic in units of its own before it begins the run, so the run it
+// steps is the warm one.
 class MissionPlacementRun : public RefCounted {
 	GDCLASS(MissionPlacementRun, RefCounted)
 
@@ -45,7 +48,7 @@ public:
 		STEP_DONE = 1,
 	};
 	static constexpr int kBucketRowsPerUnit = 512;
-	static constexpr int kAnimatedPerUnit = 8;
+	static constexpr int kAnimatedPerUnit = 4;
 
 	// The next unit run: STEP_MORE while units are left, STEP_DONE at the last (the census made) or
 	// once the run is done or cancelled.

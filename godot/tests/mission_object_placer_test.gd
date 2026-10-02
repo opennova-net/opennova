@@ -1545,7 +1545,7 @@ func test_warm_static_graphic_caches_the_batches() -> void:
 
 # ADR 0046 S14 (decision D5): the placement a unit at a time (MissionPlacementRun) comes to what
 # place() places whole, over the same walk: the rows bucketed, a unit per static group, the animated
-# models eight a unit, the finish; nothing is placed until its units ran, the census comes with the
+# models four a unit, the finish; nothing is placed until its units ran, the census comes with the
 # last; a run begun after it on the placer cancels it (its next step does nothing, no census).
 func test_a_stepped_placement_is_the_whole_placement() -> void:
 	var whole_parent := Node3D.new()
