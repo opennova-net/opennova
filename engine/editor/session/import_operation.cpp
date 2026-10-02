@@ -1,6 +1,8 @@
 #include <editor/session/import_operation.h>
 
 #include <algorithm>
+#include <set>
+#include <string>
 #include <utility>
 
 #include <editor/model/diagnostic.h>
@@ -34,10 +36,15 @@ bool ImportOperation::step(const StepBudget &budget) {
 			phase_ = Phase::Done;
 			return true;
 		}
+		// The sources the plan takes, looked up once (a mission's closure asks for thousands).
+		std::set<std::string> taken;
+		const auto key_of = [](const ImportChoice &source) {
+			return source.path + '\n' + source.entry + '\n' + (source.install ? '1' : '0') + (source.native ? '1' : '0');
+		};
+		for (const ImportPlanRow &row : new_plan_->rows)
+			if (row.state != ImportPlanRow::State::NotFound) taken.insert(key_of(row.source));
 		for (const ImportChoice &import : imports_) {
-			const bool planned = std::any_of(new_plan_->rows.begin(), new_plan_->rows.end(), [&import](const ImportPlanRow &row) {
-				return row.state != ImportPlanRow::State::NotFound && row.source == import;
-			});
+			const bool planned = taken.count(key_of(import)) > 0;
 			if (!planned) {
 				refusals_.push_back(make_finding(CoreFinding::ImportNotPlanned, DiagnosticSeverity::Error, import.name() + " is not in the import preview: plan it first.", import.name()));
 				phase_ = Phase::Done;
@@ -48,9 +55,15 @@ bool ImportOperation::step(const StepBudget &budget) {
 		return phase_ == Phase::Done;
 	}
 	case Phase::Write:
-		// Written the whole selection or none of it as far as the disk allows (import_assets); from
-		// here on the operation runs to its end.
-		result_ = import_assets(imports_, paths_, document_, replace_);
+		// Written the whole selection or none of it as far as the disk allows, a file a step
+		// (AssetImport: each source read, checked and staged, then each file published); once it
+		// publishes its first file the operation runs to its end.
+		if (!import_) import_ = std::make_unique<AssetImport>(imports_, paths_, document_, replace_);
+		if (!import_->step(budget.bytes)) return false;
+		write_done_ = import_->files_done();
+		write_total_ = import_->files_total();
+		result_ = import_->take();
+		import_.reset();
 		written_ = true;
 		if (result_.imported.empty()) {
 			phase_ = Phase::Done;
@@ -76,12 +89,26 @@ OperationProgress ImportOperation::progress() const {
 		progress.label = "Planning the import again: " + progress.label;
 		return progress;
 	}
-	// The plan's files (all of them, once it ended), the write, then the refresh's.
+	// The plan's files (all of them, once it ended), the write's (each source checked and each
+	// file published), then the refresh's.
 	const uint64_t planned = replan_ ? replan_->progress().total : 0;
-	progress.done = planned + (written_ ? 1 : 0) + (refresh_ ? refresh_->files_done() : 0);
-	progress.total = planned + 1 + (refresh_ ? refresh_->files_total() : 0);
-	progress.label = refresh_ ? refresh_->label() : "Importing the files";
+	const uint64_t write_done = import_ ? import_->files_done() : write_done_;
+	const uint64_t write_total = import_ ? import_->files_total() : written_ ? write_total_ : imports_.size();
+	progress.done = planned + write_done + (refresh_ ? refresh_->files_done() : 0);
+	progress.total = planned + std::max(write_total, write_done) + (refresh_ ? refresh_->files_total() : 0);
+	progress.label = refresh_         ? refresh_->label()
+	                 : write_done > 0 ? "Importing the files: " + std::to_string(write_done) + " of " + std::to_string(write_total)
+	                                  : "Importing the files";
 	return progress;
+}
+
+bool ImportOperation::cancellable() const {
+	return !written_ && !(import_ && import_->publishing());
+}
+
+void ImportOperation::cancel() {
+	// What it staged goes; nothing was published (cancellable says so).
+	if (import_) import_->abandon();
 }
 
 OperationOutcome ImportOperation::finish(SessionCore &core) {

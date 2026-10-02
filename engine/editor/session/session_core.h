@@ -26,6 +26,7 @@ class OpenOperation;
 class PlayController;
 class ProblemsService;
 class ProjectRefresh;
+struct PlayIntent;
 class RenameController;
 class UnsavedGuard;
 class Viewports;
@@ -227,14 +228,16 @@ public:
 
 	// --- the build ---------------------------------------------------------------------------
 
-	// The build as an operation (BuildOperation), `then_play` when a Play waits on it; each build a
-	// directory under `out_dir` ("" the project's .opennova/build/play; a relative one taken from
-	// the project's folder; one inside the project but in its cache or its export folder refused);
-	// `rehash`, every file read again, the build cache set aside (BuildPlan::rehash).
-	void start_build(bool then_play, const std::string &out_dir = std::string(), bool rehash = false);
+	// The build as an operation (BuildOperation), with the Play that waits on it (`intent`: whether
+	// one does, and the mission it starts the game in; refused before anything is built where Play
+	// cannot run, or the mission is no .bms of the project); each build a directory under `out_dir`
+	// ("" the project's .opennova/build/play; a relative one taken from the project's folder; one
+	// inside the project but in its cache or its export folder refused); `rehash`, every file read
+	// again, the build cache set aside (BuildPlan::rehash).
+	void start_build(const PlayIntent &intent, const std::string &out_dir = std::string(), bool rehash = false);
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
-	// the game started on it when a Play waits and it is good.
-	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, bool then_play);
+	// the game started on it, in the Play's mission, when a Play waits and it is good.
+	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent);
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active

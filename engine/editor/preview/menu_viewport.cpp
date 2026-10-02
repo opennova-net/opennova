@@ -493,6 +493,32 @@ ViewportHit MenuViewport::hit(const ViewportContext &context, float x, float y) 
 	return out;
 }
 
+std::vector<ViewportHit> MenuViewport::box(const ViewportContext &context, float x0, float y0, float x1,
+		float y1) const {
+	std::vector<ViewportHit> out;
+	const MenuCanvasFrame frame = canvas_frame(context);
+	if (!frame.current) return out;
+	const std::vector<NodeAddress> touched =
+			menu_marquee_windows(frame, CanvasPoint{ x0, y0 }, CanvasPoint{ x1, y1 });
+	const menu::MenuFrameCompiler &compiler = render_.compiler();
+	// Each as hit names one: its place in the compiled screen, its window, its name and type.
+	for (int index = 0; index < compiler.widget_count() && out.size() < touched.size(); ++index) {
+		const NodeId id = frame.document->window_at(*frame.screen, size_t(index));
+		bool taken = false;
+		for (const NodeAddress &window : touched) taken = taken || (id && window.child == id);
+		if (!taken) continue;
+		ViewportHit hit;
+		hit.current = true;
+		hit.index = index;
+		hit.id = id;
+		hit.name = compiler.widget_name(index);
+		const int type = compiler.widget_kind(index);
+		hit.kind = type >= 0 ? mnu::window_type_name(static_cast<mnu::WindowType>(type)) : "";
+		out.push_back(std::move(hit));
+	}
+	return out;
+}
+
 bool MenuViewport::handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
 		float &y, std::string &error) const {
 	const MenuCanvasFrame frame = canvas_frame(context);

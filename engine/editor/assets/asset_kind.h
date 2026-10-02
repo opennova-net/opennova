@@ -28,7 +28,8 @@ enum class AssetKind {
 	RawBin,         // .bin with neither magic (raw tables, exp_info style)
 	CountryCode,    // CC.BIN (the country code the boot reads loose)
 	Credits,        // .kda
-	Mission,        // .bms .mis
+	Mission,        // .bms
+	MissionText,    // .mis (the original mission editor's interchange text, which the game never reads)
 	MapProject,     // .npj .npz (the mission editor's project, the mission list's other scan)
 	Terrain,        // .trn
 	TerrainPolyData, // .cpt
