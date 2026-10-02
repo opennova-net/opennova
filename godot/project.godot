@@ -18,6 +18,9 @@ run/flush_stdout_on_print=true
 boot_splash/bg_color=Color(0.08, 0.09, 0.12, 1)
 boot_splash/show_image=false
 config/icon="res://icon.svg"
+run/main_scene.opennova_editor="res://editor/editor_root.tscn"
+config/use_custom_user_dir.opennova_editor=true
+config/custom_user_dir_name.opennova_editor="OpenNova Editor"
 
 [autoload]
 
