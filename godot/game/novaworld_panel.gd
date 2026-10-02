@@ -78,12 +78,10 @@ var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
 # The signed-in NovaWorld handle — the callsign every NW join uses (retail
 # parity: the service identity names the player, not the local profile).
 var _nw_callsign := ""
-# The rid whose first Join press drew the expansion warning; a second press on
-# the same row proceeds (the in-match 0x7B reconcile stays authoritative). The
-# rid is retail's signed %d splice and can legitimately be negative, so the
-# armed state is its own flag rather than a sentinel value.
-var _exp_warning_armed := false
-var _exp_warning_armed_rid := 0
+# The install's expansions, listed once per server-list fill (join_block_reason
+# reads it for every row the table draws).
+var _installed_expansions := PackedStringArray()
+var _installed_listed := false
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
@@ -416,7 +414,7 @@ func _on_error(message: String) -> void:
 func _refresh_servers() -> void:
 	_rows = []
 	_pings = {}
-	_exp_warning_armed = false
+	_installed_listed = false
 	if _client != null:
 		_rows = _client.get_server_rows()
 		_pings = _client_pings()
@@ -493,8 +491,16 @@ func _rebuild_view() -> void:
 		var cells := NovaWorldServerBrowser.row_cells(row, _ping_for(row))
 		for c in cells.size():
 			item.set_text(c, cells[c])
-		item.set_tooltip_text(NovaWorldServerBrowser.COLUMN_NAME,
-				NovaWorldServerBrowser.row_tooltip(row))
+		var tooltip := NovaWorldServerBrowser.row_tooltip(row)
+		var blocked := join_block_reason(row)
+		if not blocked.is_empty():
+			# A server this install cannot join reads greyed out, like a
+			# disabled control, and says why on hover.
+			var dim := _server_tree.get_theme_color("font_disabled_color", "Button")
+			for c in cells.size():
+				item.set_custom_color(c, dim)
+			tooltip = blocked + "\n" + tooltip
+		item.set_tooltip_text(NovaWorldServerBrowser.COLUMN_NAME, tooltip)
 		item.set_metadata(0, row)
 		if row.rid == selected_rid:
 			item.select(NovaWorldServerBrowser.COLUMN_NAME)
@@ -507,10 +513,10 @@ func _rebuild_view() -> void:
 	_server_tree.visible = not _view.is_empty()
 	if not reselected and first_item != null:
 		first_item.select(NovaWorldServerBrowser.COLUMN_NAME)
-		_join_button.disabled = false
+		_update_join_button(first_item.get_metadata(0))
 		_show_details(first_item.get_metadata(0))
 	elif not reselected:
-		_join_button.disabled = true
+		_update_join_button(null)
 		_show_details(null)
 	_update_column_titles()
 
@@ -587,8 +593,34 @@ func _selected_row() -> NovaWorldServerRow:
 
 func _on_server_selected() -> void:
 	var row := _selected_row()
-	_join_button.disabled = row == null
+	_update_join_button(row)
 	_show_details(row)
+
+
+# Join is live only for a selected row this install can join.
+func _update_join_button(row: NovaWorldServerRow) -> void:
+	_join_button.disabled = row == null or not join_block_reason(row).is_empty()
+
+
+## Why this install cannot join the row, or "" when it can: the row advertises
+## an expansion the install does not have, the decision the in-match 0x7B
+## reconcile would fail the load on (D-NET-178). A row with no expansion field
+## (base game, or absent GSB data) is always joinable.
+func join_block_reason(row: NovaWorldServerRow) -> String:
+	if row == null or resource_root == null:
+		return ""
+	var host_exp := row.exp.strip_edges()
+	if host_exp.is_empty():
+		return ""
+	if not _installed_listed:
+		_installed_expansions = resource_root.list_expansions(resource_root.get_root_dir())
+		_installed_listed = true
+	var action: int = NetSessionPolicy.new().decide_expansion(
+		host_exp, String(resource_root.get_expansion()), _installed_expansions)
+	if action != NetSessionPolicy.ACTION_FAIL:
+		return ""
+	return "Requires expansion '%s', which is not installed (installed: %s)." % [
+		host_exp, NetSessionPolicy.describe_installed(_installed_expansions)]
 
 
 # The details pane: the labeled facts plus the live player roster.
@@ -599,7 +631,11 @@ func _show_details(row: NovaWorldServerRow) -> void:
 		_details_label.text = "Select a server for details."
 		_roster_list.clear()
 		return
-	_details_label.text = "\n".join(NovaWorldServerBrowser.details_lines(row))
+	var lines := NovaWorldServerBrowser.details_lines(row)
+	var blocked := join_block_reason(row)
+	if not blocked.is_empty():
+		lines.insert(0, "Cannot join: " + blocked)
+	_details_label.text = "\n".join(lines)
 	_roster_list.clear()
 	var roster := row.player_names
 	for player in roster:
@@ -679,12 +715,11 @@ func _on_join_pressed() -> void:
 				Callable(self, "_return_to_lobby"), Screen.LOBBY)
 		return
 	var rid := row.rid
-	# Browse-time expansion advisory: warn BEFORE the join when the row's
-	# advertised expansion cannot be honored locally, instead of letting the
-	# in-match 0x7B reconcile abort the load minutes later (D-NET-178 stays the
-	# authoritative gate — a stale/absent GSB `exp` never blocks; pressing Join
-	# again proceeds anyway so the authoritative check has the last word).
-	if expansion_advisory_blocks_first_press(row, rid):
+	# A row this install cannot join never starts one (its Join is disabled;
+	# this guards the press path itself).
+	var blocked := join_block_reason(row)
+	if not blocked.is_empty():
+		_set_status(blocked)
 		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
 	_pending_mission = row.mission_name
@@ -701,7 +736,7 @@ func _on_join_pressed() -> void:
 func _on_join_failed(reason: String) -> void:
 	if not _logged_in or _suppress_client_messages:
 		return
-	_join_button.disabled = _selected_row() == null
+	_update_join_button(_selected_row())
 	_show_message(error_message(reason), "Back to Games", Callable(self, "_return_to_lobby"),
 			Screen.LOBBY)
 
@@ -720,30 +755,6 @@ static func error_message(reason: String) -> String:
 	if not mp_error.is_empty() and mp_error != reason:
 		return "%s\n\n(%s)" % [mp_error, reason]
 	return reason
-
-
-# True only on the FIRST Join press for a row whose advertised expansion the
-# local install cannot supply (the policy's FAIL decision); sets the warning
-# status and arms the second-press override.
-func expansion_advisory_blocks_first_press(row: NovaWorldServerRow, rid: int) -> bool:
-	var host_exp := row.exp.strip_edges()
-	if host_exp.is_empty() or resource_root == null:
-		return false
-	if _exp_warning_armed and _exp_warning_armed_rid == rid:
-		_exp_warning_armed = false
-		return false
-	var action: int = NetSessionPolicy.new().decide_expansion(
-		host_exp, String(resource_root.get_expansion()),
-		resource_root.list_expansions(resource_root.get_root_dir()))
-	if action != NetSessionPolicy.ACTION_FAIL:
-		return false
-	_exp_warning_armed = true
-	_exp_warning_armed_rid = rid
-	_set_status("This server runs expansion '%s' which is not installed (installed: %s). Press Join again to try anyway." % [
-		host_exp,
-		NetSessionPolicy.describe_installed(
-			resource_root.list_expansions(resource_root.get_root_dir()))])
-	return true
 
 
 # The NWJoin handshake resolved the host's in-match address. Hand it (with the
@@ -955,6 +966,24 @@ func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	if row < 0 or row >= _view.size():
 		return ""
 	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
+
+
+## Select a visible row through the table (the real selection signal path).
+func select_visible_row_for_test(index: int) -> void:
+	var item := _server_tree.get_root().get_child(index)
+	item.select(NovaWorldServerBrowser.COLUMN_NAME)
+	_on_server_selected()
+
+
+## True when the visible row is drawn greyed out (a row this install cannot join).
+func visible_row_dimmed(index: int) -> bool:
+	var item := _server_tree.get_root().get_child(index)
+	return item.get_custom_color(NovaWorldServerBrowser.COLUMN_NAME) \
+			== _server_tree.get_theme_color("font_disabled_color", "Button")
+
+
+func join_enabled() -> bool:
+	return _join_button != null and not _join_button.disabled
 
 
 ## Drive the filter bar (the controls, so the real signal path rebuilds).

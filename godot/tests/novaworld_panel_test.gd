@@ -390,23 +390,27 @@ func test_server_row_tooltip_lists_details() -> void:
 			"an advertised expansion shows in the row details")
 
 
-func test_expansion_advisory_warns_once_then_defers_to_the_join() -> void:
+func test_a_row_on_a_missing_expansion_is_greyed_and_unjoinable() -> void:
 	# The temp-dir root has no expansions installed, so a row advertising one
-	# takes the policy's FAIL decision: the FIRST Join press warns instead of
-	# joining, the SECOND proceeds (the in-match 0x7B reconcile stays the
-	# authoritative gate, D-NET-178).
+	# takes the join reconcile's FAIL decision (D-NET-178): the browser greys it
+	# out, says why, and keeps Join disabled while it is selected.
 	var panel := _make_panel(PackedStringArray())
-	var row := _row({"name": "EscalationHost", "exp": "JOE", "rid": 42})
-	assert_true(panel.expansion_advisory_blocks_first_press(row, 42),
-			"the first press on a not-installed expansion row is blocked")
-	assert_string_contains(panel.status_text(), "expansion 'JOE'",
-			"the warning names the host's expansion")
-	assert_string_contains(panel.status_text(), "Press Join again",
-			"the warning explains the second-press override")
-	assert_false(panel.expansion_advisory_blocks_first_press(row, 42),
-			"the second press on the same row proceeds")
-	assert_true(panel.expansion_advisory_blocks_first_press(row, 42),
-			"the override is one-shot — a later press warns again")
+	var rows: Array[NovaWorldServerRow] = [
+		_row({"name": "BaseGameHost", "rid": 7, "max_players": 16}),
+		_row({"name": "EscalationHost", "exp": "JOE", "rid": 42, "max_players": 16}),
+	]
+	panel.set_rows_for_test(rows)
+	assert_string_contains(panel.join_block_reason(rows[1]), "expansion 'JOE'",
+			"the reason names the host's expansion")
+	assert_false(panel.visible_row_dimmed(0), "a base-game row draws normally")
+	assert_true(panel.visible_row_dimmed(1), "the missing-expansion row draws greyed out")
+	assert_true(panel.join_enabled(), "the auto-selected base-game row can be joined")
+	panel.select_visible_row_for_test(1)
+	assert_false(panel.join_enabled(), "Join stays disabled on the unjoinable row")
+	assert_string_contains(panel.details_text(), "Cannot join: Requires expansion 'JOE'",
+			"the details pane leads with the reason")
+	panel.select_visible_row_for_test(0)
+	assert_true(panel.join_enabled(), "selecting a joinable row re-enables Join")
 
 
 # On NovaWorld the account handle IS the callsign: the host rosters the player
@@ -427,14 +431,12 @@ func test_nw_join_callsign_is_the_signed_in_handle() -> void:
 			"a blank handle cannot clobber the retained one")
 
 
-func test_expansion_advisory_ignores_rows_without_an_expansion() -> void:
+func test_rows_without_an_expansion_are_joinable() -> void:
 	var panel := _make_panel(PackedStringArray())
-	assert_false(panel.expansion_advisory_blocks_first_press(
-			_row({"name": "BaseGameHost", "exp": "", "rid": 7}), 7),
-			"a base-game row (empty exp) never warns")
-	assert_false(panel.expansion_advisory_blocks_first_press(
-			_row({"name": "NoExpField", "rid": 8}), 8),
-			"a row with no exp field never warns (stale/absent GSB data)")
+	assert_eq(panel.join_block_reason(_row({"name": "BaseGameHost", "exp": "", "rid": 7})), "",
+			"a base-game row (empty exp) is joinable")
+	assert_eq(panel.join_block_reason(_row({"name": "NoExpField", "rid": 8})), "",
+			"a row with no exp field is joinable (stale/absent GSB data)")
 
 
 func test_host_failed_reports_and_reenables() -> void:
