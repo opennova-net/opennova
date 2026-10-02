@@ -1541,3 +1541,97 @@ func test_warm_static_graphic_caches_the_batches() -> void:
 	}]))
 	assert_true(placer.warm_static_graphic("StaticCrate1", parent), "registered: warm")
 	assert_eq(parent.get_child_count(), 0, "a warm graphic harvests nothing under the parent")
+
+
+# ADR 0046 S14 (decision D5): the placement a unit at a time (MissionPlacementRun) comes to what
+# place() places whole, over the same walk: the rows bucketed, a unit per static group, the animated
+# models eight a unit, the finish; nothing is placed until its units ran, the census comes with the
+# last; a run begun after it on the placer cancels it (its next step does nothing, no census).
+func test_a_stepped_placement_is_the_whole_placement() -> void:
+	var whole_parent := Node3D.new()
+	add_child_autofree(whole_parent)
+	var whole := _dense_fixture(whole_parent, false)
+	var whole_stats: MissionPlacementStats = whole["stats"]
+	assert_eq(whole_stats.placed, 3, "the fixture places its three statics whole")
+
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var mission: MissionData = whole["mission"]
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var fine := BoxMesh.new()
+	fine.size = Vector3(4, 4, 4)
+	var coarse := BoxMesh.new()
+	coarse.size = Vector3(3, 3, 3)
+	assert_true(placer.register_resolved_static_graphic(
+			"StaticCrate1", ObjectData.new(), [{
+				"mesh": fine, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 0, "lod_index": 0,
+			}, {
+				"mesh": coarse, "material": null,
+				"offset": Transform3D.IDENTITY, "submesh": 1, "lod_index": 1,
+			}], {
+				"thresholds_q16": PackedInt32Array([20 << 16, 0]),
+				"sphere_radius": 2.0,
+			}))
+	var run := placer.begin_place(mission, parent)
+	assert_not_null(run)
+	assert_false(run.is_done(), "begun, not done")
+	assert_eq(run.get_steps_done(), 0)
+	assert_eq(run.get_step_label(), "bucket", "the rows bucketed first")
+	assert_eq(run.get_step_count(), 2, "one bucket unit and the finish, before the groups are known")
+	assert_null(run.get_stats(), "no census before the end")
+	var container: Node3D = parent.get_node_or_null("MissionObjects")
+	assert_not_null(container, "the container stands as the run begins")
+	var labels: Array = []
+	var step := MissionPlacementRun.STEP_MORE
+	while step == MissionPlacementRun.STEP_MORE:
+		labels.append(run.get_step_label())
+		step = run.step()
+	assert_eq(step, MissionPlacementRun.STEP_DONE)
+	assert_eq(labels, ["bucket", "statics", "finish"], "a unit per static group, no animated model")
+	assert_true(run.is_done())
+	assert_false(run.is_cancelled())
+	assert_eq(run.get_steps_done(), 3)
+	assert_eq(run.get_step_count(), 3)
+	assert_eq(run.get_step_label(), "")
+	assert_eq(run.step(), MissionPlacementRun.STEP_DONE, "done: nothing left to step")
+	# The same census, the same populations.
+	var stats := run.get_stats()
+	assert_not_null(stats)
+	for field in ["placed", "batched", "animated", "unresolved", "graphics", "batches", "markers",
+			"static_bins", "static_binned_batches", "static_global_batches",
+			"static_instances_retained", "static_lod_populations", "static_live_populations",
+			"static_shadow_batches"]:
+		assert_eq(stats.get(field), whole_stats.get(field), "%s as the whole placement's" % field)
+	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_0"))
+	assert_not_null(container.get_node_or_null("StaticPopulations/Batch_StaticCrate1_1"))
+	assert_eq(placer.get_static_live_population_count(), whole["placer"].get_static_live_population_count())
+	for bms_id in whole["bms"]:
+		assert_eq(placer.get_static_instance_lod(bms_id), whole["placer"].get_static_instance_lod(bms_id))
+
+	# A run begun after another cancels it: the older run's step does nothing and it is done with no
+	# census; the newer runs to its end.
+	var first := placer.begin_place(mission, parent)
+	assert_eq(first.step(), MissionPlacementRun.STEP_MORE)
+	var second := placer.begin_place(mission, parent)
+	assert_true(second.get_generation() > first.get_generation())
+	assert_eq(first.step(), MissionPlacementRun.STEP_DONE, "cancelled by the newer run")
+	assert_true(first.is_cancelled() and first.is_done())
+	assert_null(first.get_stats())
+	while second.step() == MissionPlacementRun.STEP_MORE:
+		pass
+	assert_false(second.is_cancelled())
+	assert_eq(second.get_stats().placed, 3)
+
+	# No mission: done at once with an empty census, no container made.
+	var bare_parent := Node3D.new()
+	add_child_autofree(bare_parent)
+	var empty := placer.begin_place(null, bare_parent)
+	assert_eq(empty.get_step_label(), "finish")
+	assert_eq(empty.step(), MissionPlacementRun.STEP_DONE)
+	assert_eq(empty.get_stats().placed, 0)
+	assert_null(bare_parent.get_node_or_null("MissionObjects"))

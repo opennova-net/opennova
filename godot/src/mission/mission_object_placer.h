@@ -35,6 +35,7 @@
 
 namespace godot {
 
+class MissionPlacementRun;
 
 // Placement of a mission's entities into the runtime 3D scene. Given a parsed
 // MissionData, a resource root, and an item database, it resolves each placed
@@ -141,6 +142,14 @@ public:
 			const Dictionary &p_options = Dictionary());
 	Ref<MissionPlacementStats> place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
 			const Dictionary &p_options);
+	// The same placement a unit at a time (mission/mission_placement_run.h; ADR 0046 S14): the run
+	// begun over the rows, which MissionPlacementRun::step runs unit by unit to the same census
+	// place_rows answers (place_rows is this run stepped to its end). A run begun here cancels the
+	// one begun before it. begin_place takes the mission document's entities as place does.
+	Ref<MissionPlacementRun> begin_place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
+			const Dictionary &p_options);
+	Ref<MissionPlacementRun> begin_place(const Ref<MissionData> &p_mission, Node3D *p_parent,
+			const Dictionary &p_options = Dictionary());
 
 	// Per-frame RLOD selection for every retained static instance, driven by
 	// GameWorld beside ObjectModel.update_authored_lods. Each instance's
@@ -487,6 +496,17 @@ private:
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
 	Node3D *_ensure_container(Node3D *p_parent);
+	// The mission document's own entities as placement rows, straight off the bms::File in the
+	// placement order (markers, items, buildings, organics).
+	static std::vector<PlacementRow> placement_rows_of(const Ref<MissionData> &p_mission);
+	// The placement's units (mission_placement_run.cpp): the rows from `p_first` bucketed, one static
+	// group placed, the animated models from `p_first` placed, the census made.
+	friend class MissionPlacementRun;
+	void _place_bucket(MissionPlacementRun &p_run, size_t p_first);
+	void _place_static_group(MissionPlacementRun &p_run, int p_group);
+	void _place_animated(MissionPlacementRun &p_run, int p_first);
+	void _place_finish(MissionPlacementRun &p_run);
+	Node3D *_place_populations_parent(MissionPlacementRun &p_run);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
@@ -515,6 +535,8 @@ private:
 	HashMap<String, bool> graphic_panm_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
+	// The placement run begun last (begin_place_rows): a run of an older generation is cancelled.
+	uint64_t placement_generation_ = 0;
 
 	// The retained static instances of the current placement (one per
 	// batched entity), the per-graphic profiles they select from, and the
