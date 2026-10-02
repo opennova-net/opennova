@@ -1262,6 +1262,46 @@ void test_files_window() {
 	CHECK(logged_frame(ui).find("Rename options.mnu to") != std::string::npos, "Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
 	ui.frames(2);
+
+	// S14: New > Mission... asks what its blank takes beside its name: a title, and its terrain and
+	// its environment among the project's files. With none in the project it says to import one;
+	// Create waits for both, then raises create_file with the values by their tokens.
+	type_into(ui, item_id(files, {"##filter"}), "");
+	ui.drain();
+	ui.activate(item_id(files, {"##new"}));
+	ui.activate(item_id(pushed(combo, factory_index("", AssetKind::Mission)), {"Mission..."}));
+	ui.frames(2);
+	CHECK(modal_open("New file") && ui.drain().empty(), "a mission's name asked first");
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"New file: Mission", "Title", "Terrain", "The project has no terrain: import one first",
+	                      "Environment", "The project has no environment: import one first", "Create"}),
+	      "the mission's title, terrain and environment asked; none to choose yet");
+	editor_test::own(v.project.scan).entries.push_back(file_entry("island.trn", "terrain/island.trn", AssetKind::Terrain));
+	editor_test::own(v.project.scan).entries.push_back(file_entry("day.env", "day.env", AssetKind::Environment));
+	editor_test::own(v.project.scan).index();
+	v.revisions.touch(ViewConcern::Files);
+	ui.frames(2);
+	type_into(ui, item_id(prompt, {"Name"}), "first.bms");
+	ui.activate(item_id(prompt, {"Create"}));
+	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for the terrain and the environment");
+	// A combo's list is a window of its own (the first combo open, whatever it is opened from).
+	ui.activate(item_id(pushed(prompt, 1), {"Terrain"}));
+	ui.activate(item_id(combo, {"island.trn"}));
+	ui.frames(2);
+	ui.activate(item_id(prompt, {"Create"}));
+	CHECK(ui.drain().empty() && modal_open("New file"), "Create still waits for the environment");
+	ui.activate(item_id(pushed(prompt, 2), {"Environment"}));
+	ui.activate(item_id(combo, {"day.env"}));
+	ui.frames(2);
+	type_into(ui, item_id(pushed(prompt, 0), {"Title"}), "The first");
+	ui.activate(item_id(prompt, {"Create"}));
+	requests = ui.drain();
+	ui.frames(2);
+	using Values = std::vector<std::pair<std::string, std::string>>;
+	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "first.bms" && requests[0].file_kind == "mission" &&
+	              requests[0].values == Values({{"title", "The first"}, {"terrain", "island.trn"}, {"environment", "day.env"}}) &&
+	              !modal_open("New file"),
+	      "Create: the mission's name and its values by their tokens");
 }
 
 // Whether `second` follows `first` in `text` on the same logged line.

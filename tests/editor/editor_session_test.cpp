@@ -40,8 +40,10 @@
 #include <editor/project/project_files.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pff/pff.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -2105,6 +2107,83 @@ static int test_play_mission() {
 	return 0;
 }
 
+// S14: New > Mission. create_file with the values its blank takes makes the mission (its header on
+// the terrain and under the environment named, files of the project) in missions/ and, beside the
+// string tables, the text table the game finds by its name (its title, an empty briefing), both in
+// the scan; a table of the name the project has already is left as it is. A value the blank does
+// not take, a required one left out, or a terrain the project lacks: refused (document.values),
+// nothing made. A new script is made in missions/ and opened.
+static int test_new_mission() {
+	editor_test::TempProjectDir dir("opennova_editor_session_new_mission");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "New mission"));
+	session.run_operations();
+	using Values = std::vector<std::pair<std::string, std::string>>;
+	const auto refused = [&](const EditorRequest &request, const char *words) {
+		session.handle(request);
+		const bool said = !session.outcome().done() && has_code(session.outcome().findings, "document.values") &&
+		                  session.outcome().findings.back().message.find(words) != std::string::npos;
+		return said && !fs::exists(root + "/missions/first.bms") && !fs::exists(root + "/strings/first.bin");
+	};
+	// The project has no terrain yet: a project is its own files.
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}),
+	                    "The project has no terrain named island"));
+	TEST_EXPECT(editor_test::write_text(root + "/terrain/island.trn", "trn") && editor_test::write_text(root + "/day.env", "env"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("island.trn") && v.project.scan->find("island.trn")->kind == AssetKind::Terrain &&
+	            v.project.scan->find("day.env") && v.project.scan->find("day.env")->kind == AssetKind::Environment);
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}}), "first.bms needs its environment."));
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "night"}}),
+	                    "The project has no environment named night"));
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "day"}, {"sky", "x"}}),
+	                    "takes no value \"sky\""));
+	TEST_EXPECT(refused(request::create_file("first.mnu", "", Values{{"title", "x"}}), "takes no value \"title\" (it takes none)"));
+
+	// The file names as the pickers give them (their extensions on), a title.
+	session.handle(request::create_file("first.bms", "", Values{{"terrain", "ISLAND.TRN"}, {"environment", "day.env"}, {"title", "The first"}}));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	const AssetEntry *mission = v.project.scan->find("first.bms");
+	const AssetEntry *text = v.project.scan->find("first.bin");
+	TEST_EXPECT(mission && mission->relative_path == "missions/first.bms" && mission->kind == AssetKind::Mission && text &&
+	            text->relative_path == "strings/first.bin" && text->kind == AssetKind::Strings);
+	TEST_EXPECT(output_has(v, "Created missions/first.bms") && output_has(v, "Created strings/first.bin"));
+	std::vector<uint8_t> bytes;
+	std::string error;
+	opennova::bms::File file;
+	TEST_EXPECT(read_file_bytes(root + "/missions/first.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error));
+	const opennova::mission::MissionInfo info = opennova::mission::mission_info(file);
+	TEST_EXPECT(info.mission_name == "The first" && info.terrain == "ISLAND" && info.environment == "day");
+	opennova::rtxt::File table;
+	TEST_EXPECT(read_file_bytes(root + "/strings/first.bin", bytes, error) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error) &&
+	            table.entries.size() == 2 && table.entries[0].key == "TITLE" && table.entries[0].text == "The first");
+	// Its terrain and its environment resolve: the mission names nothing the project lacks.
+	TEST_EXPECT(finding_in(v.findings.diagnostics, "reference.missing", "missions/first.bms") == nullptr);
+	// A mission whose text table the project holds already keeps that table.
+	TEST_EXPECT(editor_test::write_text(root + "/strings/second.bin", "mine"));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::create_file("second.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}));
+	session.run_operations();
+	std::string kept;
+	TEST_EXPECT(v.project.scan->find("second.bms") && read_file_text(root + "/strings/second.bin", kept, error) && kept == "mine");
+	TEST_EXPECT(read_file_bytes(root + "/missions/second.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error) &&
+	            opennova::mission::mission_info(file).mission_name == "second");
+
+	// A new script: made beside the missions and opened (the editor edits a script).
+	session.handle(request::create_file("patrol.wac"));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("patrol.wac") && v.project.scan->find("patrol.wac")->relative_path == "missions/patrol.wac" &&
+	            v.documents.active == "missions/patrol.wac");
+	return 0;
+}
+
 // S11b: an optional file the project lacks is a note naming its row, counted apart from the
 // required ones and never a build's gate; made by name (its fix), its note goes.
 static int test_optional_rows() {
@@ -3831,6 +3910,7 @@ int main() {
 	failures += test_build_findings_stay();
 	failures += test_boot_findings();
 	failures += test_play_mission();
+	failures += test_new_mission();
 	failures += test_optional_rows();
 	failures += test_create_missing_roles();
 	failures += test_rewrite_closed_file();

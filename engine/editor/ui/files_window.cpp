@@ -68,6 +68,7 @@ void NewFilePrompt::ask(AssetKind kind) {
 	ask_ = true;
 	kind_ = kind;
 	name_[0] = '\0';
+	values_.clear();
 }
 
 void NewFilePrompt::draw(Workspace &workspace) {
@@ -98,12 +99,50 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const bool taken = named && v.project.scan->find(name_) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
 	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name_);
-	const bool ready = fits && !taken && v.allows(EditorRequestKind::CreateFile);
+	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
+	// text, or one of the project's files its reference loads. A project is its own files, so a
+	// kind the project has no file of says to import one.
+	const BlankFactory *factory = find_blank_factory_for_kind(kind_);
+	const size_t params = factory ? factory->param_count : 0;
+	if (values_.size() != params) values_.assign(params, std::string());
+	bool given = true;
+	for (size_t i = 0; i < params; ++i) {
+		const BlankParam &param = factory->params[i];
+		ImGui::PushID(static_cast<int>(i));
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
+		if (param.reference == ReferenceKind::None) {
+			char text[64];
+			std::snprintf(text, sizeof(text), "%s", values_[i].c_str());
+			if (ImGui::InputText(param.label, text, sizeof(text))) values_[i] = text;
+		} else {
+			const AssetKind wanted = reference_row(param.reference).file;
+			size_t offered = 0;
+			if (ImGui::BeginCombo(param.label, values_[i].empty() ? "Choose..." : values_[i].c_str())) {
+				for (const AssetEntry &entry : v.project.scan->entries) {
+					if (entry.kind != wanted) continue;
+					++offered;
+					if (ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == values_[i]))
+						values_[i] = entry.logical_name;
+				}
+				ImGui::EndCombo();
+			} else {
+				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
+			}
+			if (offered == 0)
+				ImGui::TextColored(kRefusalColor, "The project has no %s: import one first (Files > Import).", param.token);
+		}
+		ImGui::PopID();
+		given = given && (!param.required || !values_[i].empty());
+	}
+	const bool ready = fits && !taken && given && v.allows(EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
 	if ((create || enter) && ready) {
-		workspace.request(request::create_file(name_, asset_kind_token(kind_)));
+		std::vector<std::pair<std::string, std::string>> values;
+		for (size_t i = 0; i < params; ++i)
+			if (!values_[i].empty()) values.emplace_back(factory->params[i].token, values_[i]);
+		workspace.request(request::create_file(name_, asset_kind_token(kind_), std::move(values)));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();

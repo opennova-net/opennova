@@ -390,9 +390,13 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::CreateFile, "create_file", serve_create_file,
 			"A blank file path made from its name's requirement factory, else its kind's free-form "
-			"one (file_kind where the name cannot say the kind); opened when the editor edits its "
-			"kind.")
-			.takes(request_params({ F::Path }, { F::FileKind }))
+			"one (file_kind where the name cannot say the kind), with the values its blank takes "
+			"(a mission's terrain and environment, files of the project, and its title: one it "
+			"does not take, a required one left out or a file the project lacks is refused, "
+			"document.values, nothing made); a new mission comes with its text table (<mission>.bin: "
+			"its title, an empty briefing) where the project has none of that name; opened when the "
+			"editor edits its kind.")
+			.takes(request_params({ F::Path }, { F::FileKind, F::Values }))
 			.holds(kFiles, kFilesAndDocuments)
 			.row,
 	Request(K::OpenDocument, "open_document", serve_open_document,

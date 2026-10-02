@@ -668,6 +668,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::FileKind: out.file_kind = "menu"; break;
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
 		case F::Mission: out.mission = "04TR.bms"; break;
+		// In its keys' order, as the wire keeps an object's members.
+		case F::Values: out.values = {{"environment", "day"}, {"terrain", "island"}, {"title", "My map"}}; break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;

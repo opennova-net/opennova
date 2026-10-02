@@ -154,11 +154,14 @@ inline EditorRequest cancel_operation() {
 
 // --- files and documents -----------------------------------------------------------------------
 
-// A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind.
-inline EditorRequest create_file(std::string path, std::string file_kind = std::string()) {
+// A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind;
+// `values`, what its blank takes (a mission's title, terrain and environment), by token.
+inline EditorRequest create_file(std::string path, std::string file_kind = std::string(),
+		std::vector<std::pair<std::string, std::string>> values = {}) {
 	EditorRequest request = of(EditorRequestKind::CreateFile);
 	request.path = std::move(path);
 	request.file_kind = std::move(file_kind);
+	request.values = std::move(values);
 	return request;
 }
 // The document at `path` opened (made active when it is open), the record at `locator` selected

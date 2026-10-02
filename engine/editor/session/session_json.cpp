@@ -677,6 +677,24 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
+	case F::Values: {
+		// An object of strings, kept in its keys' order (the writer's).
+		if (!json.is_object()) {
+			error = "\"values\" must be an object of strings.";
+			return false;
+		}
+		std::vector<std::pair<std::string, std::string>> values;
+		for (const io::JsonMember &member : json.object) {
+			if (!member.value.is_string()) {
+				error = "\"values\" must be an object of strings: \"" + member.key + "\" is none.";
+				return false;
+			}
+			values.emplace_back(member.key, member.value.string);
+		}
+		std::sort(values.begin(), values.end());
+		request.values = std::move(values);
+		return true;
+	}
 	case F::Roles: return texts_of(json, token, request.roles, error);
 	case F::Names: return texts_of(json, token, request.names, error);
 	case F::Paths: return texts_of(json, token, request.paths, error);
@@ -777,6 +795,10 @@ bool field_to_json(
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
+	case F::Values:
+		out = JsonValue::make_object();
+		for (const auto &entry : request.values) out.set(entry.first, json_string(entry.second));
+		return !request.values.empty();
 	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
 	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
 	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();

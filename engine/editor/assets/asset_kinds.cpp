@@ -171,6 +171,8 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Mission, "mission", "Mission", ArchiveSlot::Localres)
 	        .runtime("mission")
 	        .names_files()
+	        .folder("missions")
+	        .new_name("newmission.bms")
 	        .row,
 	// Where retail keeps its own (localres.pff holds ASP_G7.npz): its mission list's archive walk
 	// takes a .npj or .npz as it takes a .bms [orig: Mission_BuildMapListFromPFF @ 0x562910]
@@ -187,8 +189,10 @@ constexpr AssetKindRow kRows[] = {
 	     ArchiveSlot::Resource)
 	        .extensions(kTerrainPolyData)
 	        .row,
+	// Beside the missions: the game finds a mission's by its name (mission::sidecars).
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement", ArchiveSlot::Resource)
 	        .extensions(kTileInfo)
+	        .folder("missions")
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
@@ -225,6 +229,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::DialogBank, "dialog_bank", "Dialog bank", ArchiveSlot::Localres)
 	        .extensions(kDialogBank)
 	        .names_files()
+	        .folder("missions")
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
@@ -237,6 +242,8 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Script)
 	        .names_files()
 	        .names_unfollowed()
+	        .folder("missions")
+	        .new_name("newscript.wac")
 	        .row,
 	// The .def family by name: the runtime consumes each by its exact name, and browses only
 	// Avatars.def and hudpos.def.

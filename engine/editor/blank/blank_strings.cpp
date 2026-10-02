@@ -79,4 +79,12 @@ bool make_blank_menutxt(const BlankRequest &request, std::vector<uint8_t> &out, 
 	return write_table(table, request, out, error);
 }
 
+// A mission's text table (<mission>.bin): the two keys the mission list reads of it, its title
+// and its briefing [orig: MissionList_ScanAndBuildFromFiles @ 0x563170], the briefing empty.
+bool make_blank_mission_text(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
+	File table;
+	add_section(table, "Info", {{"TITLE", blank_mission_title(request)}, {"BRIEFING", std::string()}});
+	return write_table(table, request, out, error);
+}
+
 } // namespace opennova::editor
