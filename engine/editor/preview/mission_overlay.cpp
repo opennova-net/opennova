@@ -35,6 +35,9 @@ bool selected_row(const MissionOverlayInput &in, NodeId row) {
 } // namespace
 
 uint32_t mission_team_rgb(int team) {
+	// NEEDS-RE: the original editor's team colours are not witnessed; team 1 blue and team 2 red is
+	// the game's HUD convention assumed here, and which team number is which side is to be
+	// confirmed against the editor's own ring colours (ADR 0046 S14, the view design's open note).
 	switch (team) {
 	case 1: return kMissionBlueRgb;
 	case 2: return kMissionRedRgb;
