@@ -280,6 +280,13 @@ struct LocalWeaponReloadWire {
     uint16_t reload_param = 0;
 };
 
+// The C2S 0x25 body a local reload request ships: the addressed entity (the
+// UseGun seat's parentEntity, else the actor named by `actor_wire_handle`)
+// and the reload parameter. [orig: WeaponAction_Reload @0x5430DB..0x543103;
+//  NetPacket_SendEntityDeathNotification @0x432930]
+LocalWeaponReloadWire local_reload_request_wire(const World &world,
+		uint16_t actor_wire_handle, uint16_t param);
+
 struct LocalWeaponPumpIO {
 	int8_t map_command = 0; // authored scope/holster map callback for the local HUD
     PlayerViewState *view = nullptr;      // required
