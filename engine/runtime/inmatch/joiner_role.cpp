@@ -419,7 +419,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	kernel.resweep_item_traits();
 	auto refresh_seats = [&](const std::vector<world::EntityLifetime> &rows) {
 		for (const world::EntityLifetime lifetime : rows) {
-			if (lifetime.handle.pool() != 1) continue;
+			if (!mission::pool_takes_item_seat_spec(lifetime.handle.pool())) continue;
 			if (world::Entity *entity = kernel.world.registry.get(lifetime))
 				mission::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
 						kernel.wire_header_world);
