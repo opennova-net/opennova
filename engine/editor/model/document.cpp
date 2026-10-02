@@ -724,9 +724,12 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			std::vector<std::shared_ptr<Node>> pasted;
 			if (!paste_rows(edit, staged.rows(), pasted, message))
 				return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
-			// Each pasted row where the type's order puts it, the next after it where that order
-			// keeps the position asked.
-			size_t at = std::min(edit.position, staged.size());
+			// Each pasted row where the type's order puts it: the next right after it where the order
+			// kept it where it was asked to go, else at the place asked again (a mission's rows of
+			// several bands each land in their band nearest that place, in their order), which moves
+			// past every row put in before it.
+			size_t asked = std::min(edit.position, staged.size());
+			size_t at = asked;
 			for (auto &row : pasted) {
 				const NodeId id = allocate_id();
 				row->id = id;
@@ -735,7 +738,8 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				added.push_back(id);
 				const size_t position = row_position(*row, staged.rows(), at);
 				staged.insert(std::move(row), position);
-				at = position + 1;
+				if (position <= asked) ++asked;
+				at = position == at ? position + 1 : asked;
 			}
 			return true;
 		}

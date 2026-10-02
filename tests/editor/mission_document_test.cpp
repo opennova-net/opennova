@@ -380,6 +380,97 @@ int test_edits() {
 	return 0;
 }
 
+// The clipboard (mission_clipboard.cpp, S14): rows of the three kinds copied together as a mission
+// fragment and pasted as rows, each in its band, an SSN or a zone id a row there holds given a fresh
+// one with the copies' parameters following it, an event index naming a copied event naming the copy
+// wherever the copies land; a nested kind's records pasted into one owner, never another kind's.
+int test_clipboard() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	const std::string original = bytes_of(*document);
+	Diagnostic error;
+	const MissionDocument &m = as_mission(*document);
+	// The walker (SSN 11, which the first event's trigger names), zone 20 (which it names too) and
+	// both events (the first's ResetEvent names the second, the second's Event trigger the first),
+	// copied together: a payload of rows.
+	const NodeAddress walker = row_at(*document, MissionKind::Organic, 0);
+	const NodeAddress zone = row_at(*document, MissionKind::Area, 0);
+	const NodeAddress event0 = row_at(*document, MissionKind::Event, 0), event1 = row_at(*document, MissionKind::Event, 1);
+	const std::string rows_payload = document->copy({walker, zone, event0, event1});
+	TEST_EXPECT(!rows_payload.empty() && document->pastes_rows(rows_payload));
+	// A path is never copied; a nested record's payload is no payload of rows.
+	TEST_EXPECT(document->copy({walker, row_at(*document, MissionKind::WaypointPath, 1)}).empty());
+	const std::string trigger_payload = document->copy({first_child(*document, event0, MissionKind::Trigger)});
+	TEST_EXPECT(!trigger_payload.empty() && !document->pastes_rows(trigger_payload));
+	// Pasted at the end: the organic after the organics with the next SSN, the area with the lowest
+	// free zone id, the events after the events; the copies' parameters follow the fresh ids and the
+	// copied events' places.
+	Edit paste = edit_of(EditOperation::Paste, {0, 0, 0}, "", rows_payload);
+	paste.position = SIZE_MAX;
+	TEST_EXPECT(document->apply(paste, error));
+	TEST_EXPECT(m.rows_of(MissionKind::Organic).size() == 3 && m.rows_of(MissionKind::Area).size() == 3 &&
+	            m.rows_of(MissionKind::Event).size() == 4 && document->rows().size() == 149);
+	{
+		const EntityRow &copy = static_cast<const EntityRow &>(*m.rows_of(MissionKind::Organic)[2]);
+		const AreaRow &area = static_cast<const AreaRow &>(*m.rows_of(MissionKind::Area)[2]);
+		const EventRow &first = static_cast<const EventRow &>(*m.rows_of(MissionKind::Event)[2]);
+		const EventRow &second = static_cast<const EventRow &>(*m.rows_of(MissionKind::Event)[3]);
+		TEST_EXPECT(copy.native.id == 13 && mission::entity_item_id(copy.native) == 106102 && area.native.id == 1);
+		TEST_EXPECT(first.native.triggers.size() == 1 && first.native.triggers[0].param1 == 13 && first.native.triggers[0].param2 == 1);
+		TEST_EXPECT(first.native.actions.size() == 1 && first.native.actions[0].param1 == 3);
+		TEST_EXPECT(second.native.triggers.size() == 1 && second.native.triggers[0].param1 == 2);
+		bms::File composed;
+		TEST_EXPECT(m.compose(composed) && composed.organics.size() == 3 && composed.area_triggers.size() == 3 &&
+		            composed.events.size() == 4 && composed.triggers.size() == 4);
+	}
+	document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+	// Pasted before the second event: the copies land between the two, naming each other where they
+	// landed, and the first event's ResetEvent follows the second event to its new place.
+	paste.position = document->rows().size() - 1;
+	TEST_EXPECT(document->apply(paste, error));
+	{
+		const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+		TEST_EXPECT(events.size() == 4 && events[3]->id == event1.row && events[0]->id == event0.row);
+		const EventRow &kept0 = static_cast<const EventRow &>(*events[0]);
+		const EventRow &first = static_cast<const EventRow &>(*events[1]);
+		const EventRow &second = static_cast<const EventRow &>(*events[2]);
+		const EventRow &kept1 = static_cast<const EventRow &>(*events[3]);
+		TEST_EXPECT(kept0.native.actions[0].param1 == 3 && kept1.native.triggers[0].param1 == 0);
+		TEST_EXPECT(first.native.actions[0].param1 == 2 && second.native.triggers[0].param1 == 1);
+	}
+	document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+	// A trigger pasted into the other event (its one owner), a stop pasted into an empty path; the
+	// trigger refused by a path, the stop by an event.
+	Edit into = edit_of(EditOperation::Paste, {event1.row, k(MissionKind::Trigger), 0}, "", trigger_payload);
+	into.position = SIZE_MAX;
+	TEST_EXPECT(document->apply(into, error));
+	{
+		const EventRow &event = static_cast<const EventRow &>(*document->row(event1.row));
+		TEST_EXPECT(event.native.triggers.size() == 2 && event.native.triggers[1].main_type == bms::TriggerMainType::Single &&
+		            event.native.triggers[1].param1 == 11 && document->last_added_records().size() == 1);
+	}
+	const NodeAddress path1 = row_at(*document, MissionKind::WaypointPath, 1), path2 = row_at(*document, MissionKind::WaypointPath, 2);
+	const std::string stop_payload = document->copy({first_child(*document, path1, MissionKind::Stop)});
+	TEST_EXPECT(!stop_payload.empty());
+	Edit stop = edit_of(EditOperation::Paste, {path2.row, k(MissionKind::Stop), 0}, "", stop_payload);
+	stop.position = SIZE_MAX;
+	TEST_EXPECT(document->apply(stop, error));
+	{
+		const PathRow &path = static_cast<const PathRow &>(*document->row(path2.row));
+		TEST_EXPECT(path.native.record.waypoint_numbers == std::vector<uint32_t>({0}) && path.native.record.marker_count == 1);
+	}
+	Edit wrong = edit_of(EditOperation::Paste, {path2.row, k(MissionKind::Stop), 0}, "", trigger_payload);
+	TEST_EXPECT(!document->apply(wrong, error) && error.code() == "document.paste");
+	wrong = edit_of(EditOperation::Paste, {event1.row, k(MissionKind::Trigger), 0}, "", stop_payload);
+	TEST_EXPECT(!document->apply(wrong, error) && error.code() == "document.paste");
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+	std::printf("clipboard: rows told apart and placed, a nested kind into its owner\n");
+	return 0;
+}
+
 int test_parse_findings() {
 	const DocumentType &type = *document_type_for(AssetKind::Mission);
 	const std::vector<uint8_t> bytes = fixture_bytes();
@@ -776,6 +867,7 @@ int main(int argc, char **argv) {
 	if (test_rows() != 0) return 1;
 	if (test_references() != 0) return 1;
 	if (test_edits() != 0) return 1;
+	if (test_clipboard() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

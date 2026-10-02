@@ -51,6 +51,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_clipboard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp

@@ -560,6 +560,21 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		edit.value = int64_t(now);
 		sites.push_back(std::move(edit));
 	};
+	// The events the edit put in, by the index each stands at now, in order: the copies of a paste,
+	// which a pasted parameter names by its place among them (kPastedEventIndex, paste_rows).
+	std::vector<size_t> put;
+	if (!markers) {
+		std::vector<bool> found(shift.after, false);
+		for (const size_t to : shift.to)
+			if (to != RecordShift::kRemoved && to < shift.after) found[to] = true;
+		for (size_t i = 0; i < shift.after; ++i)
+			if (!found[i]) put.push_back(i);
+	}
+	const auto event_now = [&](int32_t held) {
+		if (held < kPastedEventIndex) return shift.now(held);
+		const size_t copy = size_t(held - kPastedEventIndex);
+		return copy < put.size() ? put[copy] : RecordShift::kRemoved;
+	};
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
 		if (markers && node->kind == k(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*node);
@@ -581,7 +596,7 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 			const EventRow &event = static_cast<const EventRow &>(*node);
 			if (event.ids.lists.size() < 2) continue;
 			const auto renumber = [&](NodeKind kind, size_t list, size_t i, int32_t held, const char *what) {
-				const size_t now = shift.now(held);
+				const size_t now = event_now(held);
 				if (now == size_t(held)) return true;
 				if (now == RecordShift::kRemoved) {
 					error = "Event " + std::to_string(index_among(rows.rows(), node.get()) + 1) + "'s " + what + " " +

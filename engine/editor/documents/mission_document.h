@@ -79,6 +79,15 @@ public:
 	// own.
 	bool removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,
 	                   std::string &error) const override;
+	// Records copied as a mission fragment the writer writes and the parser reads back (what the
+	// format cannot carry is no payload): rows together (entities of any pools, area triggers and
+	// events, in the rows' order; the mission row and a path are the file's own, never copied), or
+	// records of one nested kind from one owner (loadout entries, availability rules, bounding boxes,
+	// a path's stops, an event's triggers or its actions), in their list's order. "" for any other
+	// selection.
+	std::string copy(const std::vector<NodeAddress> &records) const override;
+	// Whether a payload holds rows (pasted at the top level, each into its band).
+	bool pastes_rows(const std::string &payload) const override;
 
 	// The mission row (null before a load); the rows of each kind in their band's order.
 	const MissionRow *mission_row() const;
@@ -122,12 +131,29 @@ protected:
 	// the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
+	// A payload of rows as rows of the file, told apart from the rows there: an SSN a row there
+	// holds given the next free one, a zone id taken the lowest free one, every parameter and rider
+	// of the copies that named the old value following it; a copied event's index naming another
+	// copied event naming that copy (kPastedEventIndex, which renumber_references resolves once the
+	// rows are placed), one naming an event that was not copied naming the event of that index here.
+	bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
+	                std::vector<std::shared_ptr<Node>> &out, std::string &error) override;
+	// A payload of a nested kind's records into the owner edit.parent names (0 = the row), which
+	// must hold that kind, at edit.position; the type's own list rule holds (accept_list_edit).
+	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
+	                   std::string &error) override;
 
 private:
 	std::vector<MissionFinding> issue_codes_;
 };
 
 bool is_mission_kind(AssetKind kind);
+
+// What a pasted event's parameter holds while it names another event of the same paste: this plus
+// the copy's place among the pasted events, until the step that puts the rows in renumbers it to the
+// copy's index (MissionDocument::paste_rows, renumber_references). No file holds it: an event index
+// is below the event count, which the format's 32-bit count bounds far below this.
+inline constexpr int32_t kPastedEventIndex = 1 << 28;
 
 // The file a mission's rows make, as the writer takes it (MissionDocument::compose over any rows of
 // the mission's kinds: a batch's, a copied fragment's): the mission row's file with each band's
