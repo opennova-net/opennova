@@ -527,7 +527,10 @@ the project or the import does; and for a mission its **mission sidecars** and e
 game opens by a fixed name at boot, at the menu, at mission start (the required-resources
 manifest) and while a mission runs. It is planned before anything is written, a file a step (the **import plan**: each
 file, where it comes from, what wanted it and its size, the files by kind, what is found
-nowhere, the names no place defines), then written whole or not at all, a file a step too. A
+nowhere, the names no place defines), then written a file a step: every file checked and staged
+before any is published, so a file that cannot be read or converted writes nothing (a failure while
+publishing can leave the files published before it). The player's own files (a save, a
+configuration, the scores, the stored credentials) are never taken. A
 project is its own files: nothing is mounted under it, so a mission plays, previews and builds
 from what its project holds, and a shipped JO mission's closure is some 7,300 files (650 MB:
 most of the game, its sounds included). Importing the whole game install is the one action that
@@ -539,9 +542,10 @@ bundle
 A file the game finds by a mission's name rather than by a reference in it, each skipped when
 absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading
 image, else `loadscrn.pcx`), `.til` (its tiles), `.dbf` (its dialog bank) and that bank's sounds
-(`.lwf`, else `.pwf`). One witnessed table (`mission::sidecars`), which the runtime's loaders and
-the editor's Play mission read, and of which the editor's mission document makes the mission's own
-edges (its file set), which the graph, Rename and the import follow.
+(`.lwf`, else `.pwf`, read only when the `.dbf` exists), each by the mission's name to its first
+dot. One witnessed table (`mission::sidecars`), which the mission text's loader and the editor's
+Play mission read (the other loaders come to on touch), and of which the editor's mission document
+makes the mission's own edges (its file set), which the graph, Rename and the import follow.
 _Avoid_: companion (the members of a mission set a rename takes with the mission), attachment,
 import sidecar (a source's `.import` record)
 

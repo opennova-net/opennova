@@ -5,7 +5,8 @@ A new project on a game install; a shipped mission imported with its dependencie
 closure: ADR 0046 S14), or the whole install with --whole-install; the mission opened, an
 entity moved, the move undone and redone; saved, built; Play started in the mission; the
 game's own endpoint read until the mission is loaded and the moved entity stands where it
-was put. Every process it starts is stopped before it returns, whatever the outcome.
+was put. Every process it starts is asked to stop before it returns, whatever the outcome, and
+ended (the editor with its tree) when it does not: only the pids this run recorded.
 
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations"
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --mission ASH_I1gA.bms --windowed
@@ -22,7 +23,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -32,7 +36,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import editor_mcp  # noqa: E402
 from editor_mcp import EXIT_NOT_DONE, EXIT_NOT_READ, raise_and_wait  # noqa: E402
-from game_mcp import EXIT_OK, GameMcp, GameMcpError, port_open, text_of  # noqa: E402
+from game_mcp import EXIT_OK, GameMcp, GameMcpError, pid_alive, port_open, text_of  # noqa: E402
 
 
 class StepFailed(Exception):
@@ -145,14 +149,48 @@ def nearest(rows: list, point: tuple[float, float, float]) -> float:
     return best
 
 
-def run(args: argparse.Namespace, project: Path, pid_file: Path) -> None:
+def read_pid(pid_file: Path) -> int:
+    try:
+        return int(pid_file.read_text(encoding="utf-8").strip() or "0")
+    except (OSError, ValueError):
+        return 0
+
+
+def terminate(pid: int, what: str) -> None:
+    """Ends a process this run started that asking did not stop (its tree on Windows: the
+    editor's Play child with it). Only ever a pid this run recorded."""
+    if pid <= 0 or not pid_alive(pid):
+        return
+    say(f"   ending the {what} (pid {pid}), which did not stop when asked")
+    if os.name == "nt":
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, check=False)
+    else:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            return
+    deadline = time.monotonic() + 15.0
+    while pid_alive(pid) and time.monotonic() < deadline:
+        time.sleep(0.25)
+    if pid_alive(pid) and os.name != "nt":
+        try:
+            os.kill(pid, signal.SIGKILL)
+        except OSError:
+            pass
+
+
+def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: dict) -> None:
     install = str(Path(args.install).resolve())
     launch = argparse.Namespace(
         port=args.port, editor=args.editor, godot=args.godot, project_dir=str(editor_mcp.PROJECT_DIR),
         headless=not args.windowed, windowed=args.windowed, resolution=None, log_file=None, open=None,
         stdout_log=None, pid_file=str(pid_file), timeout=240.0)
     say("1. launching the editor")
-    code = editor_mcp.cmd_launch(launch)
+    try:
+        code = editor_mcp.cmd_launch(launch)
+    finally:
+        # Written as the process starts, whether or not its endpoint ever answers.
+        started_pids["editor"] = read_pid(pid_file)
     expect(code == EXIT_OK, f"the editor did not launch (exit {code})")
     client = GameMcp.for_port(args.port)
 
@@ -219,6 +257,7 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path) -> None:
     outcome, ended = raise_and_wait(client, {"kind": "play", "mission": args.mission}, args.timeout)
     expect(bool(ended) and ended.get("end") == "done", f"Play's build did not land: {json.dumps(outcome)}")
     run_section = client.structured("editor_state", {"sections": ["run"]}).get("run", {})
+    started_pids["game"] = int(run_section.get("pid", 0) or 0)
     expect(run_section.get("state") == "running", f"the game is not running: {json.dumps(run_section)}")
     expect(run_section.get("mission", "").lower() == args.mission.lower(),
            f"the game was not started in {args.mission}: {json.dumps(run_section)}")
@@ -291,8 +330,9 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_NOT_READ
     pid_file = (holder if holder else project.parent) / "editor_mission_e2e.pid"
     code = EXIT_OK
+    started_pids: dict = {}
     try:
-        run(args, project, pid_file)
+        run(args, project, pid_file, started_pids)
     except StepFailed as failure:
         print(f"editor_mission_e2e: FAILED: {failure}", file=sys.stderr)
         code = EXIT_NOT_DONE
@@ -300,12 +340,21 @@ def main(argv: list[str] | None = None) -> int:
         print(f"editor_mission_e2e: {error}", file=sys.stderr)
         code = error.code if error.code != EXIT_NOT_DONE else EXIT_NOT_READ
     finally:
-        # The game, then the editor: nothing it started is left running.
+        # The game, then the editor, asked to stop; what does not is ended: nothing it started is
+        # left running, whatever the exit path (an editor still starting when the launch gave up
+        # has no endpoint to ask).
+        editor_pid = started_pids.get("editor") or read_pid(pid_file)
         try:
-            editor_mcp.cmd_stop(argparse.Namespace(port=args.port, url=None, pid=0, pid_file=str(pid_file), timeout=60.0))
+            editor_mcp.cmd_stop(argparse.Namespace(port=args.port, url=None, pid=editor_pid, pid_file=str(pid_file),
+                                                   timeout=60.0))
         except GameMcpError as error:
             print(f"editor_mission_e2e: stopping the editor: {error}", file=sys.stderr)
             code = code or error.code
+            terminate(editor_pid, "editor")
+        except KeyboardInterrupt:
+            terminate(editor_pid, "editor")
+            raise
+        terminate(started_pids.get("game", 0), "game")
         if made_temp and not args.keep:
             shutil.rmtree(holder, ignore_errors=True)
         elif made_temp:
