@@ -142,6 +142,9 @@ public:
     bool has_file(const std::string &name) const;
     bool read_file(const std::string &name, std::vector<uint8_t> &out) const;      // + SCR/BFC1 decode
     bool read_file_raw(const std::string &name, std::vector<uint8_t> &out) const;  // stored bytes only
+    // The stored size of the file a flat name resolves to (an archive entry's, a loose file's
+    // on disk), without reading it: what read_file_raw would hand back. False for no such file.
+    bool file_size(const std::string &name, uint64_t &out) const;
 
     // --- Retail per-query resolution ---
     // The full relative query is used for loose probes and archive comparison. Policy changes

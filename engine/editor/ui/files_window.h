@@ -19,8 +19,11 @@ struct GraphEdge;
 struct SessionView;
 
 // The name a new file of a free-form kind takes (Files' New: a string table, a menu, a
-// font), asked in a modal the workspace draws every frame: the name, checked as it is
-// typed by the project's name rules, then Create, which raises CreateFile for it.
+// font, a mission), asked in a modal the workspace draws every frame: the name, checked as it
+// is typed by the project's name rules, then what the kind's blank takes beside it (ADR 0046
+// S14, BlankFactory::params: a mission's title, and its terrain and environment, each chosen
+// among the project's files of that kind), then Create, which raises CreateFile for it once every
+// required value is given.
 class NewFilePrompt {
 public:
 	// Asks on the next draw for a new file of `kind`.
@@ -31,6 +34,7 @@ private:
 	bool ask_ = false;
 	AssetKind kind_ = AssetKind::Unknown;
 	char name_[64]{};
+	std::vector<std::string> values_; // per param of the kind's blank: the text typed, the file chosen
 };
 
 // The project's files (ADR 0046 d6, S11d): the scan as a tree of its folders, each open

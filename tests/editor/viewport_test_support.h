@@ -4,6 +4,7 @@
 // asked, the device cache over such devices, and the requests a planner made, served through a
 // session. The Shell's devices are godot/src/authoring's; these stand in for them in a ctest.
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -23,6 +24,8 @@
 #include <editor/session/project_session.h>
 #include <editor/session/view/session_view.h>
 
+#include "editor/editor_test_support.h"
+
 namespace editor_test {
 
 using opennova::editor::ViewportAction;
@@ -39,7 +42,9 @@ using opennova::editor::ViewportAction;
 // with the picture. A menu's keeps its frame's clock as the Shell's applier does (S13 V8,
 // MenuViewportApplier::tick): the clock's time at each configure (a Rebuild, as V6's configure_ sets
 // it), set at a tick only where menu_frame_clock says the frame draws otherwise; the times it set, in
-// order, and the ticks it had.
+// order, and the ticks it had. A ground a test gives it (`ground`: the height at a point of the
+// viewport's space, z up; none: it has no surface) is what ground_at answers and surface_between
+// finds a segment's first crossing of; the names in `missing` are what it reports it did not find.
 struct FakeDevice final : opennova::editor::ViewportDevice {
 	std::vector<ViewportAction> taken;
 	std::vector<std::string> reads;
@@ -63,6 +68,36 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	// What a model viewport's level option was as its last build ended (-2: none ended): the state
 	// the build applied.
 	int ended_lod = -2;
+	std::function<double(double x, double y)> ground;
+	std::vector<std::string> missing;
+	// E13: its scene state, whether its draw asked to render this frame (a test says), the frame it
+	// last rendered (the test's `frame` at its present), and what the arbitration did to it.
+	uint64_t state = 0;
+	bool asked = false;
+	uint64_t frame = 0;
+	uint64_t rendered = 0;
+	int withheld = 0, published = 0, presented = 0;
+	uint64_t scene_state() const override { return state; }
+	bool render_asked() const override { return asked; }
+	uint64_t rendered_frame() const override { return rendered; }
+	void withhold_render() override {
+		++withheld;
+		asked = false;
+	}
+	void publish_scene_state() override { ++published; }
+	void present(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {
+		++presented;
+		asked = false;
+		rendered = frame;
+	}
+	bool ground_at(double x, double y, double &height) const override {
+		if (!ground) return false;
+		height = ground(x, y);
+		return true;
+	}
+	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
+		return ground && editor_test::ground_crossing(ground, from, to, point);
+	}
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
 		width = picture.width;
@@ -71,6 +106,8 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		canvas_sized = picture.canvas_sized;
 	}
 	opennova::editor::ViewportBuildReport build() const override { return built; }
+	// A picture to draw once a build ended (whole, or by its last unit): the generation it draws.
+	bool holds_picture() const override { return shown != 0; }
 	bool step(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &) override {
 		if (!built.loading) return false;
 		++steps;
@@ -110,6 +147,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && canvas_sized;
+		report.missing = missing;
 		drawn = false;
 		if (!reads.empty() && view.findings.assets) {
 			opennova::editor::StampedFiles files(view.findings.assets);

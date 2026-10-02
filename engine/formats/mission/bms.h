@@ -733,11 +733,12 @@ struct Event {
 
 // [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
 // Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
-// docs/mission/bms-event-runtime-re.md section 7. *IsWithinArea (sub 10): param2 = the area trigger's ID
-// in the file, which the game remaps to its array index at mission start [orig:
-// EventTrigger_ResolveZoneTriggerRefs @0x453000]; param1 = the tested group/entity. PlayerSatchel (main 7
-// sub 37): param1 = an area trigger's ID likewise. Event (main 3): param1 = an event's index. Single
-// distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
+// docs/mission/bms-event-runtime-re.md section 7 (as rows: formats/mission/mission_params.h).
+// *IsWithinArea (sub 10): param2 = the area trigger's ID in the file, which the game remaps to its
+// array index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]; param1 = the
+// tested group/entity. PlayerSatchel (main 7 sub 37): param1 = an area trigger's ID likewise. Event
+// (main 3): param1 = an event's index. An entity parameter is the entity's SSN (its id), never an
+// index. Single distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
 struct Trigger {
     int32_t condition_flags;
     TriggerMainType main_type;
@@ -894,6 +895,13 @@ bool parse_file(const std::string& path, File& out, std::string& error);
 
 // Write a BMS file to a byte buffer.
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
+
+// Whether the weapon loadout chunk the writer writes for `loadout` reads back as the same records:
+// the reader takes a fourth string as the record's damage class only when it is a nonzero number or
+// holds no letter, else as the next record's name, which every later record then shifts by
+// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]. False with the first record that does not (or
+// the one the writer refuses) in `first`.
+bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first);
 
 // Write the canonical 616-byte BMS header used by authored-file output. Chunk
 // lengths are recomputed from the modeled loadout and item-availability data.

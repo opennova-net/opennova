@@ -190,9 +190,13 @@ public:
 			async_diagnostics;
 	mutable opennova::terrain::TerrainStaticShadowPlannerDiagnostics
 			async_epoch_diagnostics;
-	std::unordered_map<uint64_t, std::shared_ptr<
-			const opennova::terrain::TerrainStaticShadowResolvedGeometry>>
-			geometry_cache;
+	// A caster graphic's resolved geometry, by its graphic, its document and that document's
+	// revision; the document's id kept so an entry whose document is gone is dropped.
+	struct CachedGeometry {
+		ObjectID data;
+		std::shared_ptr<const opennova::terrain::TerrainStaticShadowResolvedGeometry> geometry;
+	};
+	std::unordered_map<uint64_t, CachedGeometry> geometry_cache;
 	uint64_t observed_source_revision = 0;
 	uint64_t observed_terrain_revision = 0;
 	uint64_t observed_object_global_counter = 0;
@@ -205,7 +209,7 @@ public:
 				static_cast<uint64_t>(p_data->get_instance_id()));
 		lookup = opennova::io::fnv1a64_value(lookup, p_data->get_change_revision());
 		const auto cached = geometry_cache.find(lookup);
-		if (cached != geometry_cache.end()) return cached->second;
+		if (cached != geometry_cache.end()) return cached->second.geometry;
 		const CharString graphic_bytes = p_graphic.to_lower().utf8();
 		ObjectDataTextureProvider provider(p_data);
 		std::shared_ptr<const opennova::terrain::
@@ -216,12 +220,27 @@ public:
 								static_cast<std::size_t>(
 										graphic_bytes.length())),
 						provider);
-		if (resolved != nullptr) geometry_cache[lookup] = resolved;
+		if (resolved != nullptr) {
+			CachedGeometry entry;
+			entry.data = ObjectID(p_data->get_instance_id());
+			entry.geometry = resolved;
+			geometry_cache[lookup] = std::move(entry);
+		}
 		return resolved;
+	}
+
+	// The entries whose document was freed (a placer dropped with its models): no source can name
+	// them again, so the cache never grows with each new placer.
+	void prune_geometry() {
+		for (auto it = geometry_cache.begin(); it != geometry_cache.end();) {
+			if (ObjectDB::get_instance(it->second.data) == nullptr) it = geometry_cache.erase(it);
+			else ++it;
+		}
 	}
 
 	// Marshal the placer's typed sources into planner caster records.
 	void rebuild_snapshot() {
+		prune_geometry();
 		observed_object_global_counter =
 				ObjectData::get_global_change_counter();
 		std::vector<opennova::terrain::TerrainStaticShadowPlannerCaster>
@@ -318,6 +337,11 @@ void TerrainStaticShadowRasterizer::set_mission_object_placer(
 		const Ref<MissionObjectPlacer> &p_placer) {
 	impl_->placer = p_placer;
 	impl_->rebuild_snapshot();
+}
+
+bool TerrainStaticShadowRasterizer::prepare_caster_geometry(const String &p_graphic,
+		const Ref<ObjectData> &p_data) {
+	return impl_->geometry_for(p_graphic, p_data) != nullptr;
 }
 
 void TerrainStaticShadowRasterizer::set_enabled(bool p_enabled) {

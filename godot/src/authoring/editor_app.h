@@ -14,6 +14,7 @@
 
 #include "authoring/child_process.h"
 #include "devtools/imgui_pass_node.h"
+#include "mission/mission_object_placer.h"
 
 #if OPENNOVA_EDITOR_UI
 #include <editor/ui/editor_windows.h>
@@ -67,10 +68,16 @@ public:
 	// How long each frame steps the viewports' builds (S13 V6, ViewportDeviceCache::step; the
 	// `build_budget_ms` property): units while `p_ms` milliseconds have not passed since the frame's
 	// first, one unit a frame in all at least, shared by every build in flight (0 ms: exactly one a
-	// frame, a test's slow build). The editor's: kBuildBudgetMs.
+	// frame, a test's slow build). The editor's: kBuildBudgetMs; and while the most recently used
+	// device holds no picture yet (ADR 0046 S14: a Main viewport's first picture builds with nothing
+	// to look at), kFirstPictureBudgetMs instead (the `first_picture_budget_ms` property; a build
+	// budget of 0 keeps its one unit a frame whatever the device holds).
 	static constexpr int kBuildBudgetMs = 4;
+	static constexpr int kFirstPictureBudgetMs = 12;
 	void set_build_budget_ms(int p_ms) { build_budget_ms_ = p_ms > 0 ? p_ms : 0; }
 	int get_build_budget_ms() const { return build_budget_ms_; }
+	void set_first_picture_budget_ms(int p_ms) { first_picture_budget_ms_ = p_ms > 0 ? p_ms : 0; }
+	int get_first_picture_budget_ms() const { return first_picture_budget_ms_; }
 
 	// The wire seam (ADR 0046 d10, S13 A5): a request and a query as JSON text, read and answered
 	// by the portable session (ProjectSession::handle_json and query), so the transport is a pump
@@ -91,6 +98,14 @@ public:
 	// viewport is read through query_json's `viewport` and changed through request_json's
 	// set_viewport and edit_in_viewport (S13 V7).
 	SubViewport *get_viewport_device(const String &p_path, const String &p_kind) const;
+	// The mission device over the mission at `p_path` (ADR 0046 S14), for its parity tests alone: its
+	// MissionObjectPlacer (null before its item table is read, or no device); a count by name
+	// ("placements": the whole placements run; "placed", "lifted", "hidden": its entities;
+	// "place_us": the last placement's cost), -1 while the Shell holds no mission device for it; the
+	// placer's key of the entity whose row is `p_row` (0: lifted, none, or no device).
+	Ref<MissionObjectPlacer> get_mission_placer(const String &p_path) const;
+	int64_t get_mission_device_count(const String &p_path, const String &p_what) const;
+	int get_mission_entity_key(const String &p_path, int64_t p_row) const;
 	// The editor's own MCP endpoint (the transport under res://editor/mcp/), started
 	// by `--mcp-port <n>` at boot or by a test; the bound port, or 0 when it failed.
 	int start_mcp_endpoint(int p_port);
@@ -162,6 +177,7 @@ private:
 	std::unique_ptr<opennova::editor::ViewportDeviceCache> devices_;
 	// The milliseconds each frame gives the devices' builds (S13 V6).
 	int build_budget_ms_ = kBuildBudgetMs;
+	int first_picture_budget_ms_ = kFirstPictureBudgetMs;
 	String settings_path_ = "user://editor_settings.json";
 	PackedStringArray play_engine_args_;
 	FileDialog *picker_ = nullptr;
