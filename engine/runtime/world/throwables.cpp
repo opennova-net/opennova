@@ -14,6 +14,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/fire_sound.h> // play_round_impact_sound
 #include <runtime/world/round_sim.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -192,10 +193,9 @@ int32_t speed3_q16(const MotorFrame &f) {
     return static_cast<int32_t>(m);
 }
 
-void push_motor_effect(RoundSim &sim, const LiveRound &r, int tag,
+void push_motor_effect(World &world, RoundSim &sim, const LiveRound &r, int tag,
                        const Vec3 &at, uint32_t tick,
                        bool present_effect = true, bool present_sound = true) {
-    if (sim.impacts.size() >= RoundSim::kMaxPendingImpacts) return;
     RoundImpact imp;
     imp.position = at;
     imp.direction = Vec3{0.0f, 0.0f, 1.0f};
@@ -205,6 +205,11 @@ void push_motor_effect(RoundSim &sim, const LiveRound &r, int tag,
     imp.present_sound = present_sound;
     imp.tick = tick;
     imp.source_order = sim.next_impact_order++;
+    // The motors' impact-effect calls play the row's sound at once, whatever
+    // the presentation queue holds [orig: AmmoDef_ProcessImpactEffect @0x40a216
+    //  from Entity_UpdateGrenadePhysics / the device thinks].
+    play_round_impact_sound(world, imp);
+    if (sim.impacts.size() >= RoundSim::kMaxPendingImpacts) return;
     sim.impacts.push_back(imp);
 }
 
@@ -397,7 +402,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     if (f.prev_z >= water) {
         if (f.pz <= water && f.prev_z > water && horiz != 0) {
             // entering the water: splash + 0.25 damp on the horizontal
-            push_motor_effect(sim, r, 11, Vec3{static_cast<float>(from_fixed(f.px)),
+            push_motor_effect(world, sim, r, 11, Vec3{static_cast<float>(from_fixed(f.px)),
                                                static_cast<float>(from_fixed(f.py)),
                                                static_cast<float>(from_fixed(water))},
                               world.logic_tick);
@@ -483,7 +488,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     // particle here; that same particle is also authored on the fuse's obj row.
     if (ground_hit && ground_surface != 0 && f.pz >= water &&
         r.bounce_count <= 5) {
-        push_motor_effect(sim, r, ground_surface + 4,
+        push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},
@@ -497,7 +502,7 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     // ARM: the obj effect fires once when elapsed == arm_age (the smoke-pour
     // start) [orig: @ 0x444908 — initial(+676) - remaining(+684) == arm_age].
     if (ammo.arm_age_ticks > 0 && elapsed == ammo.arm_age_ticks)
-        push_motor_effect(sim, r, 4, r.pos, world.logic_tick);
+        push_motor_effect(world, sim, r, 4, r.pos, world.logic_tick);
 
     // FUSE: two ticks before expiry [orig: @ 0x444976 — above water arms the
     // detonate-at-expiry flag (0x1000); submerged detonates NOW with the
@@ -518,10 +523,10 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
             //  restored @0x4449EE for @0x4449F2 (25)].
             const Vec3 surface{r.pos.x, r.pos.y, static_cast<float>(from_fixed(water))};
             if (depth > 3.0) {
-                push_motor_effect(sim, r, 27, surface, world.logic_tick);
-                push_motor_effect(sim, r, 25, r.pos, world.logic_tick);
+                push_motor_effect(world, sim, r, 27, surface, world.logic_tick);
+                push_motor_effect(world, sim, r, 25, r.pos, world.logic_tick);
             } else {
-                push_motor_effect(sim, r, 26, surface, world.logic_tick);
+                push_motor_effect(world, sim, r, 26, surface, world.logic_tick);
             }
             if (allow_consequences) detonate_round(world, r, r.pos, ammo);
             r.det_at_expiry = false;
@@ -577,7 +582,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
     // 0.94 vel, clym velXY * 0.5].
     if (f.pz <= water) {
         if (f.prev_z > water)
-            push_motor_effect(sim, r, 11, Vec3{static_cast<float>(from_fixed(f.px)),
+            push_motor_effect(world, sim, r, 11, Vec3{static_cast<float>(from_fixed(f.px)),
                                                static_cast<float>(from_fixed(f.py)),
                                                static_cast<float>(from_fixed(water))},
                               world.logic_tick);
@@ -656,7 +661,7 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         }
     }
     if (ground_hit && ground_surface != 0 && f.pz >= water)
-        push_motor_effect(sim, r, ground_surface + 4,
+        push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},

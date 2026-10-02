@@ -1529,6 +1529,72 @@ int main() {
 		world.round_sim.impacts.clear();
 	}
 
+	// --- The impact's sound plays where the impact is produced, through the
+	// distance-attenuated play: past 30 units it waits (62 * dist / 330) >> 2
+	// ticks in a pending slot, inside 30 units it is ready at once, and with
+	// no listener (a dedicated host) nothing plays.
+	// [orig: AmmoDef_ProcessImpactEffect @ 0x40a216 ->
+	//  Sound_PlayWithDistanceAttenuation @ 0x528e40, the delay @ 0x528ef2] ---
+	{
+		std::vector<uint16_t> flat_hm(512 * 512, 0);
+		std::vector<int> flat_grid(256, 1);
+		opennova::terrain::TerrainHeightField field;
+		field.heightmap = flat_hm.data();
+		field.dim = 512;
+		field.layout.sector_grid = flat_grid.data();
+		field.layout.origin_x = 0;
+		field.layout.origin_y = 0;
+		const std::string saved_sound = world.tables.ammo.entries[1].impact_effects[5].sound;
+		world.tables.ammo.entries[1].impact_effects[5].sound = "IMP_TEST_DIRT";
+		const auto land_round = [&]() -> w::Vec3 {
+			w::RoundSpawnParams params;
+			params.origin = {0.0f, 50.0f, 5.0f};
+			params.dir_yaw_bam = 0;
+			params.dir_pitch_bam = int32_t(0xE0000000);
+			params.ammo_index = 1;
+			world.round_sim.spawn(world, params);
+			world.out.fire_sounds.clear(); // the spawn's own fire leg is not the subject
+			(void)world.out.fire_sounds.drain();
+			for (int i = 0; i < 4 && world.round_sim.active_count > 0; ++i)
+				world.round_sim.tick(world, &field, nullptr);
+			const w::Vec3 at = world.round_sim.impacts.empty() ? w::Vec3{}
+					: world.round_sim.impacts[0].position;
+			world.round_sim.impacts.clear();
+			return at;
+		};
+		// Far: the listener 400 units off.
+		const w::Vec3 far_listener{0.0f, 50.0f, 400.0f};
+		world.out.fire_sounds.set_listener(far_listener);
+		const w::Vec3 at = land_round();
+		const double dx = double(at.x - far_listener.x), dy = double(at.y - far_listener.y),
+				dz = double(at.z - far_listener.z);
+		int32_t countdown = (62 * int32_t(std::sqrt(dx * dx + dy * dy + dz * dz)) / 330) >> 2;
+		if (countdown == 0) countdown = 1;
+		if (!expect(world.out.fire_sounds.drain().empty() &&
+		                world.out.fire_sounds.pending_count() == 1,
+		            "a far impact's sound waits in one pending slot"))
+			return 1;
+		for (int i = 0; i + 1 < countdown; ++i) world.out.fire_sounds.tick();
+		if (!expect(world.out.fire_sounds.drain().empty(),
+		            "the far impact stays silent until its travel delay runs out"))
+			return 1;
+		world.out.fire_sounds.tick();
+		const auto far_ready = world.out.fire_sounds.drain();
+		if (!expect(far_ready.size() == 1 && far_ready[0].set_name == "IMP_TEST_DIRT" &&
+		                far_ready[0].pos.x == at.x && far_ready[0].pos.z == at.z,
+		            "the far impact plays its surface row at the impact after the delay"))
+			return 1;
+		// Near: the listener 10 units over the impact.
+		world.out.fire_sounds.set_listener(w::Vec3{at.x, at.y, at.z + 10.0f});
+		(void)land_round();
+		const auto near_ready = world.out.fire_sounds.drain();
+		if (!expect(near_ready.size() == 1 && near_ready[0].set_name == "IMP_TEST_DIRT" &&
+		                world.out.fire_sounds.pending_count() == 0,
+		            "a near impact's sound is ready the tick it lands"))
+			return 1;
+		world.tables.ammo.entries[1].impact_effects[5].sound = saved_sound;
+	}
+
 	// The processed hit also writes the sticky SHOT relations (players carry
 	// group 0, so only the single rows land; rows outside the retail < 0x80
 	// guard are no-ops) [orig: Projectile_ProcessDamageOnTarget

@@ -220,6 +220,20 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
         world.script.waypoints.select_nearest_enemy_base(world.registry, local, game_type);
 }
 
+void play_round_impact_sound(World &world, const RoundImpact &impact, bool full_volume) {
+    if (!impact.present_sound) return; // the record's sign-bit gate [orig: @0x40a20d]
+    const AmmoTableEntry *ammo = world.tables.ammo.by_index(impact.ammo_index);
+    if (ammo == nullptr || impact.effect_tag < 0 || impact.effect_tag >= kImpactEffectTagCount)
+        return;
+    const std::string &sound = ammo->impact_effects[impact.effect_tag].sound;
+    if (sound.empty()) return; // the row's null sound id [orig: @0x40a204]
+    // The play carries no entity [orig: `push 0` @0x40a20f / @0x449607].
+    if (full_volume)
+        world.out.fire_sounds.play_immediate(sound.c_str(), impact.position, 0);
+    else
+        world.out.fire_sounds.play_with_distance_delay(sound.c_str(), impact.position, 0);
+}
+
 void play_zone_event_sound(World &world, uint8_t event, const Entity &local,
         uint8_t team_index) {
     const char *cue = nullptr;

@@ -47,6 +47,8 @@ struct RoundImpactPresentation {
     Vec3 position;
     Vec3 direction;
     std::string effect;
+    // The impact's selected soundset, for observers only: the engine plays it
+    // where the impact is produced (play_round_impact_sound), never the shell.
     std::string sound;
     uint32_t age_ticks = 0;
     uint32_t source_tick = 0;
