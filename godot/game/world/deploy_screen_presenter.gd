@@ -187,23 +187,28 @@ func close() -> void:
 		closed.emit()
 
 
-# Retail's initial deploy-screen keys X and SPACE select the default spawn.
-# Closing just the local dialog leaves a spawn-zone host respawn-pending.
-# [orig: Input_HandleActionBinding @0x49AD40, case 12 @0x49B0C5..0x49B17B]
+# The deploy keys (X, SPACE, a team zone's letter) queue the pick while the
+# player is dead or the overlay is up: the engine's rule picks the event-12
+# parameter (Simulation.deploy_key_pick). Like a list select, the initial
+# overlay closes on the send and a death re-pick keeps the screen until the
+# host releases the hold.
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
 	var key := event as InputEventKey
 	if key == null or not key.pressed or key.echo:
 		return
-	if key.keycode != KEY_X and key.keycode != KEY_SPACE:
-		return
 	var sim: Simulation = _view.sim() if _view != null else null
-	if sim == null or bool(sim.is_join_deploy_pick_pending()):
+	if sim == null:
 		return
-	if sim.send_deployment_pick(0):
+	# The handler compares Windows VK codes, which follow the key's label.
+	var param := int(sim.deploy_key_pick(ControlsModel.vk_from_godot_key(key.keycode)))
+	if param < 0:
+		return
+	var initial_overlay := not bool(sim.is_join_deploy_pick_pending())
+	if sim.send_deployment_pick(param) and initial_overlay:
 		close()
-		get_viewport().set_input_as_handled()
+	get_viewport().set_input_as_handled()
 
 
 func teardown() -> void:

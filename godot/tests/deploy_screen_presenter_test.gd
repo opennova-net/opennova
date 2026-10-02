@@ -357,7 +357,8 @@ func test_initial_overlay_row_selection_releases_authority_deployment() -> void:
 
 
 # The initial overlay's default-spawn key must send the same request as a row
-# click. Existing death-pick keyboard handling remains list-driven.
+# click; with a pick owed, a key pick keeps the screen until the host releases
+# (the engine's deploy-key rule, hud::hud_deploy_key_pick).
 func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	var pair := _join_pair_with_pending_pick()
 	var presenter := _make_presenter(pair.joiner)
@@ -370,7 +371,7 @@ func test_initial_overlay_space_sends_default_spawn_selection() -> void:
 	presenter.get_viewport().push_input(key)
 	await get_tree().process_frame
 	assert_true(presenter.is_open(),
-			"X stays inert while the pick flow owns the screen")
+			"with a pick owed, X never closes the screen ahead of the host's release")
 
 	var pair2 := _join_pair_in_match()
 	var overlay := false

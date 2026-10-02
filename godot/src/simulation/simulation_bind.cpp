@@ -118,6 +118,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("take_score_feedback"), &Simulation::take_score_feedback);
 	ClassDB::bind_method(D_METHOD("take_tip_events"), &Simulation::take_tip_events);
 	ClassDB::bind_method(D_METHOD("take_hud_detail_blank"), &Simulation::take_hud_detail_blank);
+	ClassDB::bind_method(D_METHOD("deploy_key_pick", "vk"), &Simulation::deploy_key_pick);
 	ClassDB::bind_method(D_METHOD("get_join_mission_header"), &Simulation::get_join_mission_header);
 	ClassDB::bind_method(D_METHOD("get_join_terrain_til_state"),
 	                     &Simulation::get_join_terrain_til_state);

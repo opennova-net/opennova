@@ -11,6 +11,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
 #include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
+#include <runtime/hud/hud_toggles.h> // hud_deploy_key_pick
 #include <runtime/hud/session_rules_text.h>
 #include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
@@ -33,6 +34,29 @@ bool local_death_screen_active(const RoleView &view) {
 bool local_player_dead(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr && view.runtime->local_player_dead();
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
+}
+
+int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk) {
+	if (view.kernel == nullptr) return -1;
+	const world::World &w = view.kernel->world;
+	hud::HudDeployKeyInput in;
+	in.vk = vk;
+	in.in_session = w.rules.mp_session; // g_NapiNPCtx.is_in_session
+	in.single_player_respawn =
+			(w.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) != 0;
+	in.local_dead = local_player_dead(view);
+	in.deploy_overlay = view.runtime != nullptr && view.runtime->state().deploy_overlay_active;
+	if (const world::Entity *player = w.registry.get(w.cached.local_player))
+		in.local_team = player->team;
+	std::vector<int16_t> teams;
+	teams.reserve(zones.entries.size());
+	for (const world::EntityHandle handle : zones.entries) {
+		const world::Entity *zone = w.registry.get(handle);
+		teams.push_back(zone != nullptr ? static_cast<int16_t>(zone->team) : int16_t{-1});
+	}
+	in.zone_teams = teams.data();
+	in.zone_count = teams.size();
+	return hud::hud_deploy_key_pick(in);
 }
 
 namespace {

@@ -357,6 +357,35 @@ uint32_t hud_toggles_quit_dialog_key(HudToggleState &state, const HudQuitDialogK
 bool hud_toggles_server_status_page_key(const HudToggleState &state, int vk, bool in_session,
 		bool authority, bool mp_session_peer);
 
+// The special-key handler's deploy leg: in a session (or a mission with the
+// SinglePlayerRespawn attribute 0x40), with the local player dead or the
+// deploy-map overlay up, 'X' queues input event 12 with parameter 0 (the
+// 0x0E's 0xFFFF), SPACE with 0xFFFE (the auto-team pick), and a letter A..Z
+// the 1-based index of the spawn-zone list entry it names when that zone's
+// team byte is the local player's; the overlay alone opens the leg out of a
+// session. The key is consumed whenever a pick is queued. Returns the event
+// parameter, or -1 when the key is not taken.
+// [orig: Input_HandleSpecialKeys @0x49c9c9..0x49ca73 — `cmp is_in_session`
+//  @0x49c9c9, `test g_BmsAttribFlags, 40h` @0x49c9d1, `cmp
+//  g_DeployScreenActive` @0x49c9da / @0x49c9f1, `test [player+24h], 2`
+//  @0x49c9eb; 'X' @0x49c9fd -> @0x49c658, SPACE @0x49ca06 -> 0xFFFE
+//  @0x49ca0d, the letter walk SpawnZoneList_GetCount / _GetByIndex and the
+//  +0x162 team compare @0x49ca37..0x49ca69; Input_QueueEvent(12, ...)]
+struct HudDeployKeyInput {
+	int vk = 0;
+	bool in_session = false;
+	bool single_player_respawn = false; // g_BmsAttribFlags & 0x40
+	bool local_dead = false;            // the local player's Flags & 2
+	bool deploy_overlay = false;        // g_DeployScreenActive
+	uint8_t local_team = 0;             // the local player's team byte (+0x162)
+	// The spawn-zone list in list order: each entry's team byte, -1 for an
+	// entry that resolves no entity.
+	const int16_t *zone_teams = nullptr;
+	size_t zone_count = 0;
+};
+inline constexpr int kHudDeployKeyAutoTeam = 0xFFFE;
+int hud_deploy_key_pick(const HudDeployKeyInput &input);
+
 // The tip producers' events, in the order they were raised
 // [orig: CTipSystem_HandleEvent @0x5b6ad0 per call site].
 void hud_toggles_tip_events(HudToggleState &state, const uint8_t *events, size_t count);

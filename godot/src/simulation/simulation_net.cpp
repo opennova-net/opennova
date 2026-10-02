@@ -994,6 +994,11 @@ const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 	return net_.deploy_zone_registry;
 }
 
+int Simulation::deploy_key_pick(int p_vk) {
+	if (!kernel_) return -1;
+	return opennova::inmatch::deploy_key_pick(role_view(), deploy_zone_registry(), p_vk);
+}
+
 std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {
 	// The DEATH screen's zone rows (inmatch/role_feeds.h carries the witnesses).
 	std::vector<opennova::world::DeployZoneRow> rows;
