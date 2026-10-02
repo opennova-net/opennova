@@ -46,4 +46,20 @@ std::string encode_pub_value(const std::string &plaintext,
 std::vector<uint8_t> decode_pub_value(const std::string &encoded,
                                       const std::string &pcid_key);
 
+// The same codec over a key chain, the keys separated by ':' ("jop:2:oyez",
+// gt.ssc's): encoding takes the keys left to right, each a CRC appended and
+// the four-phase permutation under it, then the A-P pack
+// [orig: NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0, the multi-key loop
+// @ 0x619074..0x6190c4]; decoding reads the A-P characters among the
+// printable ones (any other byte skipped: a line end), then takes the keys
+// right to left, each a permutation undone and its CRC checked
+// [orig: NapiNP_DecodeEncryptedString @ 0x619130, the isprint scan
+// @ 0x6191c1, the key loop @ 0x619294..0x619302]. The decode never throws:
+// false where the original returns -1 (a printable character outside A-P,
+// an odd count of them, too few bytes for the keys' CRCs, a CRC that does
+// not match).
+std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::string &key_chain);
+bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
+                      std::vector<uint8_t> &plaintext);
+
 } // namespace opennova

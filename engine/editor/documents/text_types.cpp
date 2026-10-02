@@ -3,7 +3,10 @@
 #include <iterator>
 #include <utility>
 
+#include <base/io/strutil.h>
+#include <editor/project/project_files.h>
 #include <formats/scr/scr.h>
+#include <net/novacrypto/pubcrypto.h>
 
 namespace opennova::editor {
 
@@ -42,7 +45,7 @@ private:
 	bool plain_;
 };
 
-bool decode_shader(const std::vector<uint8_t> &stored, std::string &text,
+bool decode_shader(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
 	(void)issues;
@@ -65,6 +68,50 @@ bool decode_shader(const std::vector<uint8_t> &stored, std::string &text,
 	if (nul) payload.pop_back();
 	text = std::move(payload);
 	encoding = std::make_shared<ShaderEncoding>(nul, false);
+	return true;
+}
+
+// gt.ssc, the gate tag the game reads encoded by its name alone [orig: Mission_LoadEncryptedConfig @
+// 0x4cdcd0: the name @ 0x7cbb50, the file read whole, at most 0x1FFF bytes, and decoded under the key
+// chain @ 0x7cbb44 by NapiNP_DecodeEncryptedString @ 0x4cdd65; one that does not decode is skipped].
+constexpr const char *kGateTagFile = "gt.ssc";
+constexpr const char *kGateTagKeys = "jop:2:oyez";
+
+// The gate tag written back in the form the game decodes, with what followed the encoded text in the
+// file (its line end: the decode reads printable characters alone), so the tag as it was read writes
+// the bytes it was read from.
+class GateTagEncoding : public TextEncoding {
+public:
+	explicit GateTagEncoding(std::string tail) : tail_(std::move(tail)) {}
+	bool encode(const std::string &text, std::string &stored, std::vector<SourceIssue> &issues) const override {
+		(void)issues;
+		stored = encode_key_chain(std::vector<uint8_t>(text.begin(), text.end()), kGateTagKeys) + tail_;
+		return true;
+	}
+
+private:
+	std::string tail_;
+};
+
+// A configuration as the game reads it: the file is its text, but gt.ssc, shown decoded (the tag the
+// game reads) and written back encoded. A gt.ssc that does not decode, which the game skips, is shown
+// as stored and written in the form by Save.
+bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, std::string &text,
+		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues, std::string &error) {
+	(void)issues;
+	(void)error;
+	text.assign(stored.begin(), stored.end());
+	if (!strutil::iequals(basename_of(path), kGateTagFile)) return true;
+	std::vector<uint8_t> tag;
+	if (!decode_key_chain(text, kGateTagKeys, tag)) {
+		encoding = std::make_shared<GateTagEncoding>(std::string());
+		return true;
+	}
+	size_t end = text.size();
+	while (end > 0 && !(static_cast<unsigned char>(text[end - 1]) >= 0x20 && static_cast<unsigned char>(text[end - 1]) <= 0x7E))
+		--end;
+	encoding = std::make_shared<GateTagEncoding>(text.substr(end));
+	text.assign(tag.begin(), tag.end());
 	return true;
 }
 
@@ -97,7 +144,7 @@ Diagnostic text_finding(const FindingCodeRow &row, DiagnosticSeverity severity, 
 }
 
 std::unique_ptr<DocumentBase> make_text_document() {
-	return std::make_unique<TextDocument>();
+	return std::make_unique<TextDocument>(decode_config);
 }
 
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document) {
