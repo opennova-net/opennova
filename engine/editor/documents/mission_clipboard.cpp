@@ -250,49 +250,42 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 	bms::File &fragment = clip.fragment;
 	// Told apart from the rows there: an SSN a row carries, a zone id taken, each given a fresh one,
 	// the fragment's own references following.
-	std::set<int32_t> ssns;
-	bool zones[100] = {};
+	std::set<int32_t> ssns, zones;
 	for (const auto &row : rows) {
 		if (is_entity_kind(row->kind)) ssns.insert(static_cast<const EntityRow &>(*row).native.id);
-		if (row->kind == k(K::Area)) {
-			const int32_t id = static_cast<const AreaRow &>(*row).native.id;
-			if (id >= 1 && id <= 99) zones[id] = true;
-		}
+		if (row->kind == k(K::Area)) zones.insert(static_cast<const AreaRow &>(*row).native.id);
 	}
-	int32_t next_ssn = ssns.empty() ? 1 : *ssns.rbegin() + 1;
+	int32_t next_ssn = next_free_ssn(rows);
 	// Every SSN of the fragment first: a fresh one given to one copy is none another copy holds, so a
-	// later copy's own SSN is never taken for it (follow_id follows by value).
+	// later copy's own SSN is never taken for it (follow_id follows by value). The player's 10000 is
+	// never given.
 	std::set<int32_t> held;
 	for (const std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (const bms::Entity &entity : *pool) held.insert(entity.id);
 	for (std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (bms::Entity &entity : *pool) {
 			if (ssns.insert(entity.id).second) continue;
-			while (ssns.count(next_ssn) || held.count(next_ssn)) ++next_ssn;
+			while (ssns.count(next_ssn) || held.count(next_ssn) || next_ssn == 10000) ++next_ssn;
 			const int32_t fresh = next_ssn++;
 			follow_id(fragment, ParamKind::Entity, entity.id, fresh);
 			entity.id = fresh;
 			ssns.insert(fresh);
 		}
-	bool copied_zones[100] = {};
-	for (const bms::AreaTrigger &area : fragment.area_triggers)
-		if (area.id >= 1 && area.id <= 99) copied_zones[area.id] = true;
+	// A zone id a row holds, in 1..99 or not, gives the copy the lowest free one in 1..99.
+	std::set<int32_t> copied_zones;
+	for (const bms::AreaTrigger &area : fragment.area_triggers) copied_zones.insert(area.id);
 	for (bms::AreaTrigger &area : fragment.area_triggers) {
-		if (area.id < 1 || area.id > 99) continue;
-		if (!zones[area.id]) {
-			zones[area.id] = true;
-			continue;
-		}
+		if (zones.insert(area.id).second) continue;
 		int fresh = 0;
 		for (int id = 1; id <= 99 && !fresh; ++id)
-			if (!zones[id] && !copied_zones[id]) fresh = id;
+			if (!zones.count(id) && !copied_zones.count(id)) fresh = id;
 		if (!fresh) {
 			error = "Every zone id 1 to 99 is taken: the pasted area trigger has none to take.";
 			return false;
 		}
 		follow_id(fragment, ParamKind::Zone, area.id, fresh);
 		area.id = fresh;
-		zones[fresh] = true;
+		zones.insert(fresh);
 	}
 	std::vector<EventChain> chains;
 	RunReport report;
@@ -300,23 +293,25 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 		error = "The clipboard's events cannot be read.";
 		return false;
 	}
-	// An event index naming a copied event names that copy: written as its place among the copies
-	// past kPastedEventIndex, which renumber_references makes the copy's index wherever the rows put
-	// the copies (the step that puts them in renumbers, the events having grown). One naming an event
-	// that was not copied names the event of that index here, which the same step moves as it moves
-	// that event.
-	const auto follow_event = [&](int32_t &value) {
+	// An event index naming a copied event names that copy: an EventLink to its place among the
+	// copies, which renumber_references reads once the step has put them in (the events grew), the
+	// copies standing in their order wherever they landed. One naming an event that was not copied
+	// names the event of that index here, which the same step moves as it moves that event.
+	const auto copy_named = [&](int32_t value) -> int64_t {
 		for (size_t i = 0; i < clip.events.size() && i < chains.size(); ++i)
-			if (value >= 0 && size_t(value) == clip.events[i]) {
-				value = kPastedEventIndex + int32_t(i);
-				return;
-			}
+			if (value >= 0 && size_t(value) == clip.events[i]) return int64_t(i);
+		return -1;
 	};
-	for (EventChain &chain : chains) {
-		for (bms::Trigger &trigger : chain.triggers)
-			if (trigger_param_kind(trigger, 0) == ParamKind::Event) follow_event(trigger.param1);
-		for (bms::Action &action : chain.actions)
-			if (action_param_kind(action, 0) == ParamKind::Event) follow_event(action.param1);
+	std::vector<std::vector<EventLink>> links(chains.size());
+	for (size_t c = 0; c < chains.size(); ++c) {
+		for (size_t i = 0; i < chains[c].triggers.size(); ++i)
+			if (trigger_param_kind(chains[c].triggers[i], 0) == ParamKind::Event)
+				if (const int64_t copy = copy_named(chains[c].triggers[i].param1); copy >= 0)
+					links[c].push_back({0, uint32_t(i), uint32_t(copy)});
+		for (size_t i = 0; i < chains[c].actions.size(); ++i)
+			if (action_param_kind(chains[c].actions[i], 0) == ParamKind::Event)
+				if (const int64_t copy = copy_named(chains[c].actions[i].param1); copy >= 0)
+					links[c].push_back({1, uint32_t(i), uint32_t(copy)});
 	}
 	// The rows, in band order (the base puts each where its band is, row_position).
 	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
@@ -335,8 +330,9 @@ bool MissionDocument::paste_rows(const Edit &edit, const std::vector<std::shared
 		shape(*row);
 		out.push_back(row);
 	}
-	for (EventChain &chain : chains) {
-		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chain));
+	for (size_t c = 0; c < chains.size(); ++c) {
+		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chains[c]));
+		row->links = std::move(links[c]);
 		shape(*row);
 		out.push_back(row);
 	}

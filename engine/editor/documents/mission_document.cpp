@@ -66,15 +66,6 @@ const char *path_command_name(int number) {
 	}
 }
 
-// The SSN a new or duplicated entity takes beside the rows as a batch has left them: one past the
-// largest any entity row holds (bms_edit's next_entity_ssn, over the rows).
-int next_ssn_over(const std::vector<std::shared_ptr<const Node>> &rows) {
-	int largest = 0;
-	for (const auto &row : rows)
-		if (is_entity_kind(row->kind)) largest = std::max(largest, static_cast<const EntityRow &>(*row).native.id);
-	return largest + 1;
-}
-
 // The lowest zone id in 1..99 no area trigger row holds [orig editor: dfx2med
 // Med_AreaTriggerDialogProc @0x40f400 lists zones 1..99]; 0 with none free.
 int free_zone_id(const std::vector<std::shared_ptr<const Node>> &rows) {
@@ -166,7 +157,7 @@ template <> std::string PathRow::name() const {
 	return std::to_string(native.number);
 }
 template <> std::string AreaRow::name() const { return "Zone " + std::to_string(native.id); }
-template <> std::string EventRow::name() const { return std::string(); }
+template <> std::string MissionRecordRow<mission::EventChain>::name() const { return std::string(); }
 
 template <> size_t MissionRow::footprint() const {
 	size_t bytes = sizeof(MissionRow) + ids_footprint() + footprint_of(native.loadout.entries) +
@@ -184,11 +175,19 @@ template <> size_t PathRow::footprint() const {
 	       footprint_of(native.record.padding);
 }
 template <> size_t AreaRow::footprint() const { return sizeof(AreaRow) + ids_footprint(); }
-template <> size_t EventRow::footprint() const {
+template <> size_t MissionRecordRow<mission::EventChain>::footprint() const {
 	return sizeof(EventRow) + ids_footprint() + footprint_of(native.triggers) + footprint_of(native.actions);
 }
 
 bool is_mission_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Mission; }
+
+int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows) {
+	int32_t largest = 0;
+	for (const auto &row : rows)
+		if (is_entity_kind(row->kind)) largest = std::max(largest, static_cast<const EntityRow &>(*row).native.id);
+	const int32_t next = largest + 1;
+	return next == int32_t(kPlayerSsn) ? next + 1 : next;
+}
 
 std::string mission_scope(const DocumentBase &document) { return strutil::to_upper(basename_of(document.path())); }
 
@@ -372,7 +371,7 @@ std::shared_ptr<Node> MissionDocument::make_node(NodeKind kind, NodeId,
                                                  std::string &error) {
 	if (is_entity_kind(kind)) {
 		// The item is the Add's field (Edit::field "item"); until it is set the record names item 0.
-		auto row = std::make_shared<EntityRow>(kind, new_entity(pool_of(kind), kItemIdOffset, next_ssn_over(rows)));
+		auto row = std::make_shared<EntityRow>(kind, new_entity(pool_of(kind), kItemIdOffset, next_free_ssn(rows)));
 		shape(*row);
 		return row;
 	}
@@ -412,10 +411,26 @@ size_t MissionDocument::row_position(const Node &row, const std::vector<std::sha
 	return std::min(std::max(position, first), last);
 }
 
-void MissionDocument::prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
-	if (is_entity_kind(copy.kind)) static_cast<EntityRow &>(copy).native.id = next_ssn_over(rows);
+void MissionDocument::prepare_duplicate(Node &copy, const Node &original,
+                                        const std::vector<std::shared_ptr<const Node>> &rows) const {
+	if (is_entity_kind(copy.kind)) static_cast<EntityRow &>(copy).native.id = next_free_ssn(rows);
+	// With none free the copy keeps the id, and accept_step refuses the step.
 	if (copy.kind == k(K::Area))
 		if (const int id = free_zone_id(rows)) static_cast<AreaRow &>(copy).native.id = id;
+	if (copy.kind == k(K::Event)) {
+		// A parameter naming the event it is in (a ResetEvent that re-arms its own event) names the
+		// copy: the one event the step puts in. One naming another event names that event still.
+		EventRow &event = static_cast<EventRow &>(copy);
+		const size_t self = index_among(rows, &original);
+		for (size_t i = 0; i < event.native.triggers.size(); ++i)
+			if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Event &&
+			    size_t(event.native.triggers[i].param1) == self)
+				event.links.push_back({0, uint32_t(i), 0});
+		for (size_t i = 0; i < event.native.actions.size(); ++i)
+			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Event &&
+			    size_t(event.native.actions[i].param1) == self)
+				event.links.push_back({1, uint32_t(i), 0});
+	}
 }
 
 bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change, std::string &error) const {
@@ -434,8 +449,20 @@ bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change
 	return true;
 }
 
-bool MissionDocument::accept_step(const EditStep &step, const StagedRows &, std::string &error) const {
+bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
 	for (const RowSwap &swap : step.swaps) {
+		// An area trigger the step puts in (a Duplicate with every zone id 1 to 99 taken keeps its
+		// original's) never shares a zone id: the resolver would find one of the two for both.
+		if (!swap.before && swap.after && swap.after->kind == k(K::Area)) {
+			const int32_t id = static_cast<const AreaRow &>(*swap.after).native.id;
+			for (const auto &other : rows.rows())
+				if (other.get() != swap.after.get() && other->kind == k(K::Area) &&
+				    static_cast<const AreaRow &>(*other).native.id == id) {
+					error = "Every zone id 1 to 99 is taken: the new area trigger has none of its own. Remove an "
+					        "area trigger first.";
+					return false;
+				}
+		}
 		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
 		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
 		error = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
@@ -560,21 +587,22 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		edit.value = int64_t(now);
 		sites.push_back(std::move(edit));
 	};
-	// The events the edit put in, by the index each stands at now, in order: the copies of a paste,
-	// which a pasted parameter names by its place among them (kPastedEventIndex, paste_rows).
+	// The events the edit put in, by the index each stands at now, in order (the copies of a paste,
+	// a duplicate): what an EventLink of one of them names.
 	std::vector<size_t> put;
+	std::vector<bool> fresh;
 	if (!markers) {
 		std::vector<bool> found(shift.after, false);
 		for (const size_t to : shift.to)
 			if (to != RecordShift::kRemoved && to < shift.after) found[to] = true;
+		fresh.assign(shift.after, false);
 		for (size_t i = 0; i < shift.after; ++i)
-			if (!found[i]) put.push_back(i);
+			if (!found[i]) {
+				put.push_back(i);
+				fresh[i] = true;
+			}
 	}
-	const auto event_now = [&](int32_t held) {
-		if (held < kPastedEventIndex) return shift.now(held);
-		const size_t copy = size_t(held - kPastedEventIndex);
-		return copy < put.size() ? put[copy] : RecordShift::kRemoved;
-	};
+	size_t event_index = 0;
 	for (const std::shared_ptr<const Node> &node : rows.rows()) {
 		if (markers && node->kind == k(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*node);
@@ -594,9 +622,15 @@ bool MissionDocument::renumber_references(const StagedRows &rows, const RecordSh
 		}
 		if (!markers && node->kind == k(K::Event)) {
 			const EventRow &event = static_cast<const EventRow &>(*node);
+			// Its links are read only by the step that put it in.
+			const bool linked = event_index < fresh.size() && fresh[event_index] && !event.links.empty();
+			++event_index;
 			if (event.ids.lists.size() < 2) continue;
 			const auto renumber = [&](NodeKind kind, size_t list, size_t i, int32_t held, const char *what) {
-				const size_t now = event_now(held);
+				size_t now = shift.now(held);
+				if (linked)
+					for (const EventLink &link : event.links)
+						if (link.list == list && link.index == i) now = link.put < put.size() ? put[link.put] : RecordShift::kRemoved;
 				if (now == size_t(held)) return true;
 				if (now == RecordShift::kRemoved) {
 					error = "Event " + std::to_string(index_among(rows.rows(), node.get()) + 1) + "'s " + what + " " +
@@ -650,16 +684,16 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 			}
 		}
 		if (node->kind == k(K::Event)) {
-			// What names the event by its index goes first where the removal takes its event too; a
-			// namer the removal leaves refuses it with its site (S13 D8's convention).
+			// What names the event by its index goes first where the removal takes it too, itself or
+			// with its event, whatever the order the records were named in; a namer the removal leaves
+			// refuses it with its site (S13 D8's convention).
 			for (const auto &other : rows()) {
 				if (other->kind != k(K::Event)) continue;
 				const EventRow &event = static_cast<const EventRow &>(*other);
 				if (event.ids.lists.size() < 2) continue;
 				const auto namer = [&](NodeKind kind, size_t list, size_t i, const char *what) {
 					const NodeId id = event.ids.lists[list][i].id;
-					if (removed.count(id)) return true;
-					if (!removed.count(other->id)) {
+					if (!removed.count(id) && !removed.count(other->id)) {
 						error = "Event " + std::to_string(index_among(rows(), other.get()) + 1) + "'s " + what + " " +
 						        std::to_string(i + 1) + " names this event: remove that " + what + " first.";
 						return false;

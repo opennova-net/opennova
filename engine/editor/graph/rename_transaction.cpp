@@ -119,11 +119,6 @@ bool site_value(const FieldSchema &field, const std::string &text, Value &out) {
 	return true;
 }
 
-// Where a companion renamed with its mission goes: its own folder, its new name.
-std::string companion_path(const RenameOutput &companion) {
-	return (fs::path(companion.path).parent_path() / companion.new_name).generic_string();
-}
-
 // Where a site is, in a finding's words.
 std::string site_where(const RenameSite &site) {
 	return site.record.empty() ? site.file : "'" + site.record + "' in " + site.file;
@@ -137,6 +132,10 @@ std::string value_text(const Value &value) {
 }
 
 } // namespace
+
+std::string companion_path(const RenameOutput &companion) {
+	return (fs::path(companion.path).parent_path() / companion.new_name).generic_string();
+}
 
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
                        const std::string &new_name) {
@@ -230,12 +229,20 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 	};
 	plan_sites(*asset, new_name);
 	// A mission takes the files the game finds by its name that the project has (ADR 0046 S14): each
-	// to the new base name with its own extension, held to the file name rules and a free name, its
-	// sites planned (its mission's own, derived from the name, pass).
+	// to the new base name with its own extension, held to the file name rules, its sites planned (its
+	// mission's own, derived from the name, pass). An import's output goes only with its source (the
+	// next import pass makes it again under the old name). A file the game would find by the new name
+	// already (one of no mission, which the renamed mission would take as its own) refuses the rename.
 	if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
 		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, new_name)) {
 			const AssetEntry *entry = find_asset(scan, member.path);
 			if (!entry) continue;
+			if (!entry->imported_from.empty()) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameImported, entry->logical_name + " goes with the mission, and is imported from " +
+				                                                                     entry->imported_from + ": rename the source first.",
+				                                entry->relative_path));
+				continue;
+			}
 			const std::string member_dir = fs::path(entry->relative_path).parent_path().generic_string();
 			FileNameProblem member_problem = FileNameProblem::None;
 			std::string why;
@@ -244,13 +251,21 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 				                                                                 why, entry->relative_path));
 				continue;
 			}
-			if (const AssetEntry *taken = scan.find(member.new_name); taken && taken != entry) {
-				plan.refusals.push_back(refusal(CoreFinding::RenameExists, entry->logical_name + " goes with the mission, and the project already has a file named '" +
-				                                                                   member.new_name + "'.", taken->relative_path));
-				continue;
-			}
 			plan_sites(*entry, member.new_name, asset->relative_path);
 			plan.companions.push_back({entry->relative_path, entry->logical_name, member.new_name});
+		}
+		for (const MissionFileSetMember &stale : mission_file_set_members(scan, new_name, new_name)) {
+			// A name its case alone changes finds the mission's own files.
+			if (std::any_of(plan.companions.begin(), plan.companions.end(),
+			                [&](const RenameOutput &companion) { return companion.path == stale.path; }))
+				continue;
+			const MissionFileSetRow *row = mission_file_set_row(stale.role);
+			std::string what = row ? row->words : "file";
+			if (what.rfind("its ", 0) == 0) what.erase(0, 4);
+			plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+			                                "The project already has " + stale.old_name + ", which the game would take as " + new_name +
+			                                        "'s " + what + ": rename or remove it first.",
+			                                stale.path));
 		}
 	}
 	// An import source takes its record and the outputs its importer names after it

@@ -74,18 +74,30 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 	std::string active = kept.active;
 	bool keep_selection = std::find(reload.begin(), reload.end(), active) == reload.end();
 	bool files_read = false;
-	if (!operation.symbol()) {
+	if (!operation.symbol() && ok) {
 		const RenamePlan &plan = operation.file_plan();
-		// A refused commit leaves the file where it was: its open document stays.
-		DocumentBase *renamed = ok ? documents.document_for(plan.path) : nullptr;
-		if (renamed) {
-			const std::string renamed_path = renamed->path();
-			const bool was_active = renamed_path == active;
-			documents.close_document(renamed_path);
+		// The renamed file and a mission's companions moved with it (a refused commit leaves them
+		// where they were, their open documents too): each open document closed (the unsaved prompt
+		// saved its edits first), the files read again, each opened again at its new path; the active
+		// one stays active there.
+		std::vector<std::pair<std::string, std::string>> moved{{plan.path, plan.new_path}};
+		for (const RenameOutput &companion : plan.companions) moved.emplace_back(companion.path, companion_path(companion));
+		std::vector<std::string> reopen;
+		std::string active_now;
+		for (const auto &[from, to] : moved) {
+			DocumentBase *open = documents.document_for(from);
+			if (!open) continue;
+			const std::string open_path = open->path();
+			if (open_path == active) active_now = to;
+			documents.close_document(open_path);
+			reopen.push_back(to);
+		}
+		if (!reopen.empty()) {
 			read_files();
 			files_read = true;
-			documents.open_document(request::open_document(plan.new_path));
-			if (was_active) {
+			for (const std::string &to : reopen) documents.open_document(request::open_document(to));
+			if (!active_now.empty()) {
+				documents.open_document(request::open_document(active_now));
 				active = view_.documents.active;
 				keep_selection = false;
 			}
@@ -322,10 +334,10 @@ bool RenameController::unsaved_while_due(std::vector<std::string> &files) {
 }
 
 // The documents with unsaved edits a rename of `file` to `new_name` would rewrite (its
-// plan's sites) or leave behind on the old name (the file's own), in the order they were
-// opened; none when the plan is refused anyway (the rename then says why, with nothing to
-// save first). The plan reads the graph, which holds every edit when no validation is due
-// (else unsaved_while_due).
+// plan's sites) or leave behind on the old name (the file's own, a mission's companions moved
+// with it), in the order they were opened; none when the plan is refused anyway (the rename then
+// says why, with nothing to save first). The plan reads the graph, which holds every edit when no
+// validation is due (else unsaved_while_due).
 void RenameController::rename_unsaved(const std::string &file, const std::string &new_name, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
 	if (!view_.project.open || !documents.documents_dirty()) return;
@@ -335,8 +347,10 @@ void RenameController::rename_unsaved(const std::string &file, const std::string
 	for (const auto &document : documents.documents()) {
 		if (!document->dirty()) continue;
 		const std::string &path = document->path();
-		if (path == plan.path || std::any_of(plan.sites.begin(), plan.sites.end(),
-		                                     [&path](const RenameSite &site) { return site.file == path; }))
+		if (path == plan.path ||
+		    std::any_of(plan.sites.begin(), plan.sites.end(), [&path](const RenameSite &site) { return site.file == path; }) ||
+		    std::any_of(plan.companions.begin(), plan.companions.end(),
+		                [&path](const RenameOutput &companion) { return companion.path == path; }))
 			files.push_back(path);
 	}
 }

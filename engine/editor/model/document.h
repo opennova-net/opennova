@@ -505,13 +505,14 @@ protected:
 	// is built here or when the row is made, never inside a const query (the thread
 	// confinement above).
 	virtual void after_edit(Node &row) { (void)row; }
-	// A row a Duplicate made, before it goes in beside the original (`rows`, the rows as its batch
-	// has left them, still hold the original): the type may tell the copy apart (a menu names the
-	// screen anew, since the game finds the last of two screens of one name). The default keeps it
-	// as is.
-	virtual void prepare_duplicate(Node &copy,
+	// A row a Duplicate made of `original`, before it goes in beside it (`rows`, the rows as its
+	// batch has left them, still hold the original): the type may tell the copy apart (a menu names
+	// the screen anew, since the game finds the last of two screens of one name; a mission's event
+	// naming itself names its copy). The default keeps it as is.
+	virtual void prepare_duplicate(Node &copy, const Node &original,
 	                               const std::vector<std::shared_ptr<const Node>> &rows) const {
 		(void)copy;
+		(void)original;
 		(void)rows;
 	}
 	// The veto on a batch's step before it commits (S13 D7, which replaced S9's accept_change of

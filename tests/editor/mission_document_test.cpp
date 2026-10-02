@@ -38,6 +38,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/model/text_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -342,6 +343,14 @@ int test_edits() {
 	TEST_EXPECT(as_mission(*document).compose(composed) && composed.events.empty() && composed.triggers.empty());
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
+	// The event and the one trigger naming it, the event named first: the trigger still goes first.
+	removal.clear();
+	const NodeAddress namer = first_child(*document, event1, MissionKind::Trigger);
+	TEST_EXPECT(document->removal_edits({event0, namer}, removal, why) && removal.size() == 2 &&
+	            removal[0].address == namer && removal[1].address == event0);
+	TEST_EXPECT(document->apply(removal, error) && as_mission(*document).rows_of(MissionKind::Event).size() == 1);
+	document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
 	// A trigger added to an event and the event's first moved after it (a chain edit: the writer lays
 	// the run out again); a 21st refused. (A Move into another event's chain is a Move across rows,
 	// which the core applies inside one row: the clipboard carries a trigger between events.)
@@ -441,6 +450,25 @@ int test_clipboard() {
 	}
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
+	// Pasted with an item selected (the session's Paste asks for the place after it, in the items'
+	// band): each row lands in its band nearest that place, the copies of a band in their order, so
+	// the events go first among the events, the first copy before the second, each naming the other.
+	paste.position = 2; // after the mission row and the first item
+	TEST_EXPECT(document->apply(paste, error));
+	{
+		const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+		TEST_EXPECT(events.size() == 4 && events[2]->id == event0.row && events[3]->id == event1.row);
+		const EventRow &first = static_cast<const EventRow &>(*events[0]);
+		const EventRow &second = static_cast<const EventRow &>(*events[1]);
+		const EventRow &kept0 = static_cast<const EventRow &>(*events[2]);
+		const EventRow &kept1 = static_cast<const EventRow &>(*events[3]);
+		TEST_EXPECT(first.native.actions[0].param1 == 1 && second.native.triggers[0].param1 == 0);
+		TEST_EXPECT(kept0.native.actions[0].param1 == 3 && kept1.native.triggers[0].param1 == 2);
+		const std::vector<const Node *> organics = m.rows_of(MissionKind::Organic);
+		TEST_EXPECT(organics.size() == 3 && static_cast<const EntityRow &>(*organics[0]).native.id == 13);
+	}
+	document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
 	// A trigger pasted into the other event (its one owner), a stop pasted into an empty path; the
 	// trigger refused by a path, the stop by an event.
 	Edit into = edit_of(EditOperation::Paste, {event1.row, k(MissionKind::Trigger), 0}, "", trigger_payload);
@@ -465,6 +493,60 @@ int test_clipboard() {
 	TEST_EXPECT(!document->apply(wrong, error) && error.code() == "document.paste");
 	wrong = edit_of(EditOperation::Paste, {event1.row, k(MissionKind::Trigger), 0}, "", stop_payload);
 	TEST_EXPECT(!document->apply(wrong, error) && error.code() == "document.paste");
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+
+	// A Duplicate of an event that re-arms itself: the copy re-arms the copy, the original itself,
+	// and the second event's trigger names the first where it is.
+	const NodeAddress reset = first_child(*document, event0, MissionKind::Action);
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, reset, "param1", int64_t(0)), error));
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Duplicate, event0), error));
+	{
+		const std::vector<const Node *> events = m.rows_of(MissionKind::Event);
+		TEST_EXPECT(events.size() == 3 && events[0]->id == event0.row && events[2]->id == event1.row);
+		TEST_EXPECT(static_cast<const EventRow &>(*events[0]).native.actions[0].param1 == 0 &&
+		            static_cast<const EventRow &>(*events[1]).native.actions[0].param1 == 1 &&
+		            static_cast<const EventRow &>(*events[2]).native.triggers[0].param1 == 0);
+	}
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+
+	// An event index a file holds is never read as anything but an index: one far past the events
+	// stays past them across an Add (it names none still), never the new event.
+	{
+		bms::File file;
+		std::string message;
+		const std::vector<uint8_t> bytes = fixture_bytes();
+		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+		std::vector<mission::EventChain> chains;
+		mission::RunReport report;
+		TEST_EXPECT(mission::split_event_chains(file, chains, report) && chains.size() == 2);
+		chains[0].actions[0].param1 = 0x10000000;
+		mission::join_event_chains(chains, file);
+		std::vector<uint8_t> far;
+		TEST_EXPECT(bms::write(file, far, message));
+		std::unique_ptr<Document> past = open(far, "far.bms");
+		TEST_EXPECT(past && !past->blocked());
+		TEST_EXPECT(past->apply(edit_of(EditOperation::Add, {0, k(MissionKind::Event), 0}), error));
+		const EventRow &held = static_cast<const EventRow &>(*as_mission(*past).rows_of(MissionKind::Event)[0]);
+		TEST_EXPECT(held.native.actions[0].param1 == 0x10000001);
+	}
+
+	// Ninety-nine area triggers hold every zone id: a Duplicate of one is refused (its copy would
+	// share the id), as an Add is.
+	{
+		std::vector<Edit> adds;
+		for (int i = 0; i < 97; ++i) adds.push_back(edit_of(EditOperation::Add, {0, k(MissionKind::Area), 0}));
+		TEST_EXPECT(document->apply(adds, error) && m.rows_of(MissionKind::Area).size() == 99);
+		TEST_EXPECT(!document->apply(edit_of(EditOperation::Add, {0, k(MissionKind::Area), 0}), error));
+		TEST_EXPECT(!document->apply(edit_of(EditOperation::Duplicate, zone), error) &&
+		            error.message.find("Every zone id 1 to 99 is taken") != std::string::npos);
+		while (document->can_undo()) document->undo();
+	}
+	// The player's SSN is never given: after an entity of SSN 9999, an Add takes 10001.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, walker, "id", int64_t(9999)), error));
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Add, {0, k(MissionKind::Item), 0}), error) &&
+	            static_cast<const EntityRow *>(document->row(document->last_added()))->native.id == 10001);
 	while (document->can_undo()) document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
 	std::printf("clipboard: rows told apart and placed, a nested kind into its owner\n");
@@ -761,12 +843,33 @@ int test_rename_companions() {
 	TEST_EXPECT(plan.ok() && plan.companions.size() == 2 && plan.companions[0].old_name == "walk.bin" &&
 	            plan.companions[0].new_name == "run.bin" && plan.companions[1].new_name == "run.wac");
 	TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, graph, "walk.bms", "a_name_far_too_long.bms").ok());
-	editor_test::handle_to_end(session, request::rename_asset("walk.bms", "run.bms"));
+	// A file the game would find by the new name, of no mission (a stale script), refuses the rename:
+	// the renamed mission would take it as its own.
+	TEST_EXPECT(editor_test::write_text(root + "/missions/jog.wac", "; a stale one\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	{
+		const RenamePlan stale = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "walk.bms", "jog.bms");
+		TEST_EXPECT(!stale.ok() && stale.refusals.size() == 1 && stale.refusals[0].code() == "rename.exists" &&
+		            stale.refusals[0].message.find("jog.wac") != std::string::npos);
+	}
+	// The mission's script open with unsaved edits: the rename waits on the unsaved prompt, which lists
+	// it (the commit moves its file); saved there, the rename moves it and the document follows to the
+	// new name, active, its edit in the file.
+	editor_test::handle_to_end(session, request::open_document("walk.wac"));
+	editor_test::handle_to_end(session, request::edit_record("missions/walk.wac", {TextDocument::replace(TextSpan{1, 1, 0}, "X")}));
+	TEST_EXPECT(session.document_base_for("missions/walk.wac") && session.document_base_for("missions/walk.wac")->dirty());
+	session.handle(request::rename_asset("walk.bms", "run.bms"));
+	TEST_EXPECT(session.outcome().unsaved_prompt &&
+	            view.dialogs.unsaved_prompt.files == std::vector<std::string>({"missions/walk.wac"}));
+	editor_test::handle_to_end(session, request::resolve_unsaved(UnsavedChoice::Save));
 	namespace fs = std::filesystem;
 	TEST_EXPECT(fs::exists(root + "/missions/run.bms") && fs::exists(root + "/missions/run.bin") && fs::exists(root + "/missions/run.wac"));
 	TEST_EXPECT(!fs::exists(root + "/missions/walk.bms") && !fs::exists(root + "/missions/walk.bin") && !fs::exists(root + "/missions/walk.wac"));
-	const GraphEdge *renamed = edge_to_file(graph, "missions/run.bms", ReferenceKind::MissionStrings);
-	TEST_EXPECT(renamed && renamed->value == "run.bin" && graph.resolve(*renamed) == ReferenceStatus::Present);
+	TEST_EXPECT(!session.document_base_for("missions/walk.wac") && session.document_base_for("missions/run.wac") &&
+	            !session.document_base_for("missions/run.wac")->dirty() && view.documents.active == "missions/run.wac");
+	TEST_EXPECT(test_io::read_file_text(root + "/missions/run.wac") == "X; the walk\r\n");
+	const GraphEdge *renamed = edge_to_file(*view.findings.graph, "missions/run.bms", ReferenceKind::MissionStrings);
+	TEST_EXPECT(renamed && renamed->value == "run.bin" && view.findings.graph->resolve(*renamed) == ReferenceStatus::Present);
 	return 0;
 }
 

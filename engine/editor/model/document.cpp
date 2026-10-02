@@ -724,22 +724,25 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 			std::vector<std::shared_ptr<Node>> pasted;
 			if (!paste_rows(edit, staged.rows(), pasted, message))
 				return refuse(C::DocumentPaste, said("These records cannot be pasted here."));
-			// Each pasted row where the type's order puts it: the next right after it where the order
-			// kept it where it was asked to go, else at the place asked again (a mission's rows of
-			// several bands each land in their band nearest that place, in their order), which moves
-			// past every row put in before it.
+			// Each pasted row where the type's order puts it: one of the kind the row before it was
+			// right after that row, the first of a kind at the place asked (a mission's rows of several
+			// bands each land in their band nearest that place, the rows of a band in their order),
+			// which moves past every row put in before it.
 			size_t asked = std::min(edit.position, staged.size());
-			size_t at = asked;
+			size_t after = asked;
+			NodeKind last = -1;
 			for (auto &row : pasted) {
 				const NodeId id = allocate_id();
 				row->id = id;
 				assign_ids(*row);
 				if (!made[i].id) made[i] = {id, id};
 				added.push_back(id);
-				const size_t position = row_position(*row, staged.rows(), at);
+				const NodeKind kind = row->kind;
+				const size_t position = row_position(*row, staged.rows(), kind == last ? after : asked);
 				staged.insert(std::move(row), position);
 				if (position <= asked) ++asked;
-				at = position == at ? position + 1 : asked;
+				after = position + 1;
+				last = kind;
 			}
 			return true;
 		}
@@ -766,7 +769,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 				std::shared_ptr<Node> copy = current->clone();
 				copy->id = allocate_id();
 				assign_ids(*copy);
-				prepare_duplicate(*copy, staged.rows());
+				prepare_duplicate(*copy, *current, staged.rows());
 				const NodeId id = copy->id;
 				// Right after the row as the batch has left it, where the edit names no place; where
 				// the type's order puts it (row_position).

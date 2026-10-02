@@ -86,6 +86,8 @@ struct RenamePlan {
 // instead).
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
                        const std::string &new_name);
+// Where a companion renamed with its mission goes: its own folder, its new name.
+std::string companion_path(const RenameOutput &companion);
 
 // Commit a plan that is ok, to its end (RenameTransaction below steps it a file at a time): every
 // referencing document is read and rewritten through its type in memory, then the file (and an

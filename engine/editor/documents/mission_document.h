@@ -51,11 +51,43 @@ template <class Native> struct MissionRecordRow : TableRow {
 	RecordHandle record() const override { return {kind, const_cast<Native *>(&native)}; }
 	size_t footprint() const override;
 };
+// Each kind's name and footprint, defined beside the document ([temp.expl.spec]: declared before
+// any use).
+template <> std::string MissionRecordRow<bms::File>::name() const;
+template <> std::string MissionRecordRow<bms::Entity>::name() const;
+template <> std::string MissionRecordRow<MissionPath>::name() const;
+template <> std::string MissionRecordRow<bms::AreaTrigger>::name() const;
+template <> std::string MissionRecordRow<mission::EventChain>::name() const;
+template <> size_t MissionRecordRow<bms::File>::footprint() const;
+template <> size_t MissionRecordRow<bms::Entity>::footprint() const;
+template <> size_t MissionRecordRow<MissionPath>::footprint() const;
+template <> size_t MissionRecordRow<bms::AreaTrigger>::footprint() const;
+template <> size_t MissionRecordRow<mission::EventChain>::footprint() const;
 using MissionRow = MissionRecordRow<bms::File>;
 using EntityRow = MissionRecordRow<bms::Entity>;
 using PathRow = MissionRecordRow<MissionPath>;
 using AreaRow = MissionRecordRow<bms::AreaTrigger>;
-using EventRow = MissionRecordRow<mission::EventChain>;
+
+// An event row's parameter that names an event the same step puts in (a pasted event naming
+// another copy of its paste, a duplicated event naming itself): its list (0 the triggers, 1 the
+// actions), the record's index there and the new event's place among the events the step puts in,
+// in their order. The step that puts the row in reads it (renumber_references), the parameter then
+// naming that event wherever the rows landed; no other step does, and a copy of the row carries none.
+// Kept beside the value, never in it: any index a parameter holds is one a file can hold.
+struct EventLink {
+	uint8_t list = 0;
+	uint32_t index = 0;
+	uint32_t put = 0;
+};
+struct EventRow : MissionRecordRow<mission::EventChain> {
+	using MissionRecordRow::MissionRecordRow;
+	std::vector<EventLink> links;
+	std::shared_ptr<Node> clone() const override {
+		auto copy = std::make_shared<EventRow>(*this);
+		copy->links.clear();
+		return copy;
+	}
+};
 
 class MissionDocument : public TableDocument {
 public:
@@ -117,25 +149,29 @@ protected:
 	// mission row and the paths stay where the file puts them.
 	size_t row_position(const Node &row, const std::vector<std::shared_ptr<const Node>> &rows,
 	                    size_t position) const override;
-	// A duplicated entity takes a fresh SSN, a duplicated area trigger a fresh zone id.
-	void prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const override;
+	// A duplicated entity takes a fresh SSN (never the player's 10000), a duplicated area trigger a
+	// fresh zone id (accept_step refuses the step when 1..99 hold none), a duplicated event naming
+	// itself names its copy (an EventLink).
+	void prepare_duplicate(Node &copy, const Node &original,
+	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	// A stop put into or taken out of a path whose stored count exceeds its 32 slots is refused
 	// (D-MIS-6: the original editor's count for such a path is not witnessed); a chain holds 20
 	// records at most (the table's lists say so).
 	bool accept_list_edit(const Node &row, const ListChange &change, std::string &error) const override;
-	// The mission row and the 128 paths are never added, removed or moved: a step that changes
-	// them is refused.
+	// The mission row and the 128 paths are never added, removed or moved, and an area trigger the
+	// step puts in never takes a zone id another holds: a step that would is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const override;
 	// The markers or the events moved: every stop's marker, every Event trigger's and ResetEvent
-	// action's event renumbered (RecordShift::now); a reference to a record the edit removed refuses
-	// the edit with its site.
+	// action's event renumbered (RecordShift::now), an event the step put in naming another it put in
+	// by its EventLink; a reference to a record the edit removed refuses the edit with its site.
 	bool renumber_references(const StagedRows &rows, const RecordShift &shift,
 	                         std::vector<Edit> &sites, std::string &error) const override;
 	// A payload of rows as rows of the file, told apart from the rows there: an SSN a row there
-	// holds given the next free one, a zone id taken the lowest free one, every parameter and rider
-	// of the copies that named the old value following it; a copied event's index naming another
-	// copied event naming that copy (kPastedEventIndex, which renumber_references resolves once the
-	// rows are placed), one naming an event that was not copied naming the event of that index here.
+	// holds given the next free one (never 10000), a zone id a row holds the lowest free one in 1..99,
+	// every parameter and rider of the copies that named the old value following it; a copied event's
+	// index naming another copied event naming that copy (an EventLink, which renumber_references
+	// reads once the rows are placed), one naming an event that was not copied naming the event of
+	// that index here.
 	bool paste_rows(const Edit &edit, const std::vector<std::shared_ptr<const Node>> &rows,
 	                std::vector<std::shared_ptr<Node>> &out, std::string &error) override;
 	// A payload of a nested kind's records into the owner edit.parent names (0 = the row), which
@@ -149,11 +185,10 @@ private:
 
 bool is_mission_kind(AssetKind kind);
 
-// What a pasted event's parameter holds while it names another event of the same paste: this plus
-// the copy's place among the pasted events, until the step that puts the rows in renumbers it to the
-// copy's index (MissionDocument::paste_rows, renumber_references). No file holds it: an event index
-// is below the event count, which the format's 32-bit count bounds far below this.
-inline constexpr int32_t kPastedEventIndex = 1 << 28;
+// The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past
+// the largest the rows hold, never the player's 10000 [bms-event-runtime-re.md 7.3: the single-player
+// lookups take 10000 for the player].
+int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
 
 // The file a mission's rows make, as the writer takes it (MissionDocument::compose over any rows of
 // the mission's kinds: a batch's, a copied fragment's): the mission row's file with each band's
