@@ -16,6 +16,7 @@
 #include <cstdint>
 #include <array>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -202,6 +203,14 @@ public:
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
+	                                                             uint32_t now_tick = 0);
+	// The uplink BUILT at the send block, after this frame's receive fold, as
+	// the writer runs there: the builder fills the body (false = none this
+	// frame) and is called only when the deployed send block opens.
+	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
+	//  ahead of Player_BuildTag0CInputBody @0x42C482]
+	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &)>;
+	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
 	                                                             uint32_t now_tick = 0);
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
@@ -711,10 +720,10 @@ public:
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 
 private:
-	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
-	// frame.
+	// Shared body for the Client_ProcessNetworkFrame overloads. `build_uplink` is nullptr for a
+	// no-uplink frame.
 	std::vector<std::vector<uint8_t>> run_frame(
-			const PlayerExtendedUplink *uplink, uint32_t now_tick);
+			const UplinkBuilder *build_uplink, uint32_t now_tick);
 	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);

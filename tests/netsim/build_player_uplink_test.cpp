@@ -826,6 +826,89 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 // acquisition's wire row; the lock and a live head-look target win over it.
 // [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825; Entity_UpdateInfantryPlayerBody
 //  headLookTarget @0x4b4f75 / @0x4b5036]
+// The uplink is written after the frame's receive: when that receive folded
+// the joiner's own record, its apply has already re-pointed the ground link
+// the writer reads. A record that seats the player names the seat's own
+// ground link -- none on open ground (0xFFFF and the world pose), the deck a
+// vehicle stands on otherwise (that deck's frame). An unmounted joiner's
+// uplink is unchanged by the echo.
+// [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
+//  @0x4C1329, `groundEntity = parentEntity ? parentEntity->groundEntity :
+//  carrier` @0x4C1346..0x4C1358; case 3 `mov ecx, [edi+28h]` @0x4C141D;
+//  Client_ProcessNetworkFrame -- the receive pump @0x42C228 ahead of the
+//  send block @0x42C3DD..0x42C4BC]
+bool run_mounted_echo_names_the_seat_ground_link() {
+	bool ok = true;
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::Entity deck_seed;
+	deck_seed.kind = w::EntityKind::Item;
+	deck_seed.position = {500.0f, 100.0f, 0.0f};
+	deck_seed.yaw = 30;
+	const w::EntityHandle deck = world.registry.spawn(1, deck_seed);
+	w::Entity vehicle_seed;
+	vehicle_seed.kind = w::EntityKind::Item;
+	vehicle_seed.position = {85.0f, -20.0f, 7.0f};
+	vehicle_seed.yaw = -35;
+	const w::EntityHandle vehicle = world.registry.spawn(1, vehicle_seed);
+	w::Entity self_seed;
+	self_seed.kind = w::EntityKind::Organic;
+	self_seed.mounted = true;
+	self_seed.mount_target = vehicle;
+	self_seed.mount_type = w::SeatType::Driver;
+	const w::EntityHandle self = world.registry.spawn(0, self_seed);
+	w::AiEntity body{};
+	body.pos[0] = w::to_fixed(86.0);
+	body.pos[1] = w::to_fixed(-19.0);
+	body.pos[2] = w::to_fixed(8.0);
+	body.heading = 0x61230000;
+	ns::ClientEntityState echo;
+	echo.handle = 0x0002;
+	echo.cls = nw::EntityClass::Player;
+	echo.carrier_handle = vehicle.packed;
+	echo.mount_bone = 3;
+	ns::UplinkClientInputs inputs;
+	const nw::PlayerExtendedUplink no_echo =
+			ns::build_player_uplink(world, *world.registry.get(self), body, inputs);
+	ok &= expect(no_echo.carrier_handle == vehicle.packed,
+			"a frame without the echo names the seat");
+	inputs.self_echo = &echo;
+	const nw::PlayerExtendedUplink open_ground =
+			ns::build_player_uplink(world, *world.registry.get(self), body, inputs);
+	ok &= expect(open_ground.carrier_handle == 0xFFFF && open_ground.pos_x == body.pos[0] &&
+			open_ground.pos_y == body.pos[1] && open_ground.pos_z == body.pos[2] &&
+			open_ground.heading == static_cast<int16_t>(body.heading >> 16),
+			"an echo frame on open ground uplinks no carrier and the world pose");
+	// A vehicle standing on a deck: the echo names the deck, in its frame,
+	// exactly as a player standing on that deck would.
+	world.registry.get(vehicle)->ground_target = deck;
+	const nw::PlayerExtendedUplink on_deck =
+			ns::build_player_uplink(world, *world.registry.get(self), body, inputs);
+	w::Entity standing = *world.registry.get(self);
+	standing.mounted = false;
+	standing.mount_target = {};
+	standing.ground_target = deck;
+	const nw::PlayerExtendedUplink deck_frame =
+			ns::build_player_uplink(world, standing, body, ns::UplinkClientInputs{});
+	ok &= expect(on_deck.carrier_handle == deck.packed && on_deck.pos_x == deck_frame.pos_x &&
+			on_deck.pos_y == deck_frame.pos_y && on_deck.pos_z == deck_frame.pos_z &&
+			on_deck.heading == deck_frame.heading,
+			"an echo frame on a deck uplinks the deck and its frame");
+	// An unmounted joiner: the echo changes nothing.
+	ns::ClientEntityState standing_echo = echo;
+	standing_echo.carrier_handle = deck.packed;
+	standing_echo.mount_bone = 0;
+	ns::UplinkClientInputs standing_inputs;
+	standing_inputs.self_echo = &standing_echo;
+	const nw::PlayerExtendedUplink standing_up =
+			ns::build_player_uplink(world, standing, body, standing_inputs);
+	ok &= expect(standing_up.carrier_handle == deck_frame.carrier_handle &&
+			standing_up.pos_x == deck_frame.pos_x && standing_up.heading == deck_frame.heading,
+			"an unmounted joiner's uplink is unchanged by the echo");
+	return ok;
+}
+
 bool run_hud_cursor_names_a_remote_person() {
 	bool ok = true;
 	w::World world;
@@ -868,6 +951,7 @@ int main() {
 	ok = run_scope_flag_reaches_host() && ok;
 	ok = run_equipped_adm_ingest_gate() && ok;
 	ok = run_hud_cursor_names_a_remote_person() && ok;
+	ok = run_mounted_echo_names_the_seat_ground_link() && ok;
 	ok = run_interest_person_los_takes_the_entity_leg() && ok;
 	return ok ? 0 : 1;
 }

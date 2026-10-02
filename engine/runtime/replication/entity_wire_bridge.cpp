@@ -1163,7 +1163,22 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	//  parentEntity`; Entity_TransformWorldToLocal @0x43BB50; heading
 	//  subtraction @0x43bb7b]
 	world::EntityHandle carrier_handle;
-	if (e.mounted && e.mount_target.valid())
+	// A receive that folded the player's own record ahead of this send block
+	// re-pointed the link first: the record's seat leaves the seat's own
+	// ground link (a vehicle on open ground has none). The seat resolves to
+	// its materialized row; a record whose seat has no row was dropped before
+	// that store, so the link stands. The standing record's carrier store
+	// (@0x4C1358) is not modeled: an unmounted player keeps its own link.
+	// [orig: NetPacket_SerializePlayerState case 2 -- the carrier resolve and
+	//  its no-itemDef drop @0x4C105E..0x4C10C7, Entity_TryAttachOrDetach
+	//  @0x4C1329, `parentEntity->groundEntity` @0x4C1346..0x4C1353]
+	const world::Entity *echo_seat = nullptr;
+	if (interest.self_echo != nullptr && interest.self_echo->mount_bone != 0 &&
+			interest.self_echo->carrier_handle != wire_handle::kInvalid)
+		echo_seat = world.registry.get(world::EntityHandle{interest.self_echo->carrier_handle});
+	if (echo_seat != nullptr)
+		carrier_handle = echo_seat->ground_target;
+	else if (e.mounted && e.mount_target.valid())
 		carrier_handle = e.mount_target;
 	else if (e.ground_target.valid())
 		carrier_handle = e.ground_target;

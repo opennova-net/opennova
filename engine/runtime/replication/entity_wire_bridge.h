@@ -13,6 +13,7 @@
 namespace opennova::replication {
 
 struct ClientState; // runtime/replication/client_state.h
+struct ClientEntityState;
 
 // The single deliberate bridge between the engine/runtime/world runtime entity model
 // (world::Entity / EntityRegistry) and the engine/net/novaworld wire model
@@ -122,6 +123,14 @@ struct UplinkClientInputs {
 	// CServerLog_WritePositionRecord @0x4e1b6d]
 	int32_t avg_fps = 0;
 	int32_t cpu_percent = 0;
+	// The uplinking player's own compact record, when this frame's receive
+	// folded one ahead of the send block (null otherwise). Its apply re-points
+	// the player's ground link, which the writer reads: a record that seats
+	// the player names the seat's own ground link.
+	// [orig: NetPacket_SerializePlayerState case 2 -- Entity_TryAttachOrDetach
+	//  @0x4C1329, then `groundEntity = parentEntity ? parentEntity->groundEntity
+	//  : carrier` @0x4C1346..0x4C1358; case 3 reads +0x28 @0x4C141D]
+	const ClientEntityState *self_echo = nullptr;
 };
 
 // The JOINER-side inverse of apply_player_intent: synthesize the C2S 0x0C extended

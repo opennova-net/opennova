@@ -1171,16 +1171,26 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		// row sits at its own; L answers to its self handle).
 		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
 		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
-		replication::UplinkClientInputs interest;
-		interest.replica = &rt.state();
-		interest.self_wire_handle = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
-		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
-				world, *ae, interest.self_wire_handle, kernel.local.aim_wire_person());
-		interest.avg_fps = uplink_avg_fps_;
-		interest.cpu_percent = uplink_cpu_percent_;
-		const PlayerExtendedUplink up =
-				replication::build_player_uplink(world, *e, *ae, interest);
-		outs = rt.Client_ProcessNetworkFrame(up, now);
+		// It is built at the send block, after this frame's receive, whose fold
+		// of L's own record (its compact revision moved) re-points L's ground
+		// link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
+		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+		const replication::ClientEntityState *self_row = rt.state().find(self);
+		const uint32_t self_revision = self_row != nullptr ? self_row->compact_revision : 0;
+		outs = rt.Client_ProcessNetworkFrame([&](PlayerExtendedUplink &up) {
+			replication::UplinkClientInputs interest;
+			interest.replica = &rt.state();
+			interest.self_wire_handle = self;
+			interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
+					world, *ae, self, kernel.local.aim_wire_person());
+			interest.avg_fps = uplink_avg_fps_;
+			interest.cpu_percent = uplink_cpu_percent_;
+			self_row = rt.state().find(self);
+			if (self_row != nullptr && self_row->compact_revision != self_revision)
+				interest.self_echo = self_row;
+			up = replication::build_player_uplink(world, *e, *ae, interest);
+			return true;
+		}, now);
 	} else {
 		outs = rt.Client_ProcessNetworkFrame(now);
 	}
