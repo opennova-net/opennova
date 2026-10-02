@@ -559,8 +559,10 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var audio := world.get_mission_audio()
 	assert_eq(effects.live_group_count(), 0, "the load-time warm leaves no live group behind")
 
-	# The listener far above the lane: the impact's sound has to travel.
-	var far_listener := Vector3(16, 2000, -16)
+	# The listener far above the lane: the impact's sound has to travel. It
+	# stays well inside the staged set's 2000-unit cull range, past which the
+	# one-shot is not played at all.
+	var far_listener := Vector3(16, 700, -16)
 	var sim := world.get_sim()
 	assert_gte(int(sim.debug_spawn_round(
 			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0,
