@@ -834,7 +834,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// Session loss is a terminal owner state, not only a receive-side event. A
 	// prior host description (or the silence reap below) must stop the next frame
 	// before its tick/housekeeping producers can mint fresh C2S traffic.
-	if (joiner_ != nullptr && joiner_->poll_session_loss()) {
+	if (joiner_ != nullptr && joiner_->session_lost()) {
 		recv_fifo_.clear();
 		gameplay_send_queue_.clear();
 		framed_send_queue_.clear();
@@ -947,7 +947,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// @0x6239ef..0x623a37 -> cb_client_3 = Network_LogOutgoingPacketError
 			// @0x4c4920 -> flag 1].
 			apply_net_quality_link_errors(joiner_->take_net_quality_link_errors());
-			if (joiner_->poll_session_loss()) {
+			if (joiner_->session_lost()) {
 				// Host teardown sends its keyed goodbye burst synchronously, then
 				// destroys both pending and outgoing semantic queues. It does not
 				// wait for the normal field-3 send boundary, and nothing queued

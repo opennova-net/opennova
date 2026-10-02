@@ -82,7 +82,7 @@ LoadoutSubmit build_retail_default_loadout_submit(uint8_t team, bool alternate) 
 } // namespace
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
-	if (poll_session_loss() || phase_ == Phase::Error) return {};
+	if (session_lost() || phase_ == Phase::Error) return {};
 	// Joiner C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK
 	// (ServerAuth.sk, the peer's local_key). Shared seq/ack framing (ADR 0013).
 	std::vector<uint8_t> body;
@@ -99,7 +99,7 @@ std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolM
 JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 		const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
 	FrameMessagesResult result;
-	if (poll_session_loss() || phase_ == Phase::Error) return result;
+	if (session_lost() || phase_ == Phase::Error) return result;
 	if (max_packet_bytes <= PROTOCOL_DATAGRAM_OVERHEAD) { result.frame_failed = true; return result; }
 	max_packet_bytes = std::max<std::size_t>(26, max_packet_bytes);
 	std::size_t available = session_outbound_message_prefix_count(conn_.seq,
@@ -206,7 +206,7 @@ std::vector<uint8_t> JoinerConnection::frame_retained_session(uint32_t sequence)
 //  @0x629032; the CS senders NapiNPServer_UpdateHoldoffTicks @0x4c5f5e (mask 8) and
 //  NapiNPServer_HandleNewConnection @0x4c81bd (mask 0x2000)]
 std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
-	if (poll_session_loss() || phase_ == Phase::Error) return {};
+	if (session_lost() || phase_ == Phase::Error) return {};
 	if (!conn_.seq.missing_request_pending) return {};
 	conn_.seq.missing_request_pending = false;
 	if (conn_.seq.queued_inbound.empty()) return {};
@@ -224,7 +224,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
-	if (poll_session_loss() || phase_ == Phase::Error) return out;
+	if (session_lost() || phase_ == Phase::Error) return out;
 	// [orig: NetClient_HandleGameEnd @0x424752 increments @0xA822A4 once per client net pump]
 	++net_frame_counter_;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
@@ -271,6 +271,9 @@ std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) 
 	// preceding semantic sequence observes the gap and requests it through 0x44/0x84; the existing
 	// retained-record path then reconstructs that old sequence with the current ACK.
 	if (phase_ == Phase::Driving || phase_ == Phase::InMatch) {
+		// The connected state's reap runs first and ends the pump when it fires
+		// (D-NET-255) [orig: PumpStateMachine case 5 @0x6295a2..0x62940f].
+		if (reap_silent_session()) return out;
 		if (conn_.seq.retained_outbound_message_count == 0) {
 			session_send_clock_armed_ = false;
 			// Nothing queued, retained or held out of order (+0x7A8 @0x629053, D-NET-236): the

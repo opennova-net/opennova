@@ -943,6 +943,7 @@ bool run_redeployment_session_loss() {
 			"loss: redeployment remains healthy exactly at the timeout boundary"))
 		return false;
 	++now_ms;
+	(void)joiner.pump(0); // the send pump runs the reap (PumpStateMachine case 5)
 	if (!expect(joiner.session_lost() &&
 	                      !joiner.session_loss_reason().empty(),
 			"loss: host silence reaps an established joiner after the redeploy timeout"))
@@ -965,6 +966,53 @@ bool run_redeployment_session_loss() {
 				joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
 				joiner.milliseconds_since_last_receive() == terminal_silence,
 			"loss: a late valid datagram cannot refresh or revive a timed-out joiner");
+}
+
+// The client reap is PumpStateMachine's case 5, which runs only inside the
+// send pump (PumpFlags 0x40), and the in-match frame calls that pump only when
+// the holdoff countdown is out. Under a NovaWorld host's 12-tick holdoff a
+// silence past the window is therefore reaped at the next open boundary, and a
+// datagram that lands before that boundary refreshes the clock and saves the
+// connection.
+// [orig: CNapiNPConnection_PumpStateMachine case 5 @0x6295a2..0x62961c ahead of
+//  PumpSendIntervals @0x629628; CNapiNPConnection_PumpFlags 0x40 @0x6297c8;
+//  PumpClientProtocolSend (flags 738) behind `cmp [conn+648h],0` @0x42c3dd]
+bool run_in_match_reap_waits_for_the_send_boundary() {
+	const ProtocolMessage holdoff_12 = make_protocol_message(
+			0x00, {0x01, 0x08, 0x00, 0x00, 0x00, 12, 0x00, 0x00, 0x00}, 0xA0);
+	for (const bool rescued : {false, true}) {
+		uint64_t now_ms = 1000;
+		inmatch::ClientRuntime client("GatedReapJoiner", [&now_ms] { return now_ms; });
+		client.seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+		                    1, 0, 0x0005, w::kPlayerInfantryTypeId);
+		SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+		const std::vector<uint8_t> dictation = frame_server_session(server_tx, {holdoff_12});
+		client.receive(dictation.data(), dictation.size());
+		(void)client.Client_ProcessNetworkFrame(1);
+		if (!expect(client.send_holdoff_countdown() == 12,
+				"gated reap: the open boundary arms the dictated twelve-tick period"))
+			return false;
+
+		now_ms += inmatch::JO_GAME_SESSION_TIMEOUT_MS + 1;
+		uint32_t tick = 2;
+		for (; tick <= 12; ++tick) {
+			if (rescued && tick == 6) {
+				const std::vector<uint8_t> dg = frame_server_session(
+						server_tx, {make_protocol_message(0x03, {0, 0, 0, 0})});
+				client.receive(dg.data(), dg.size());
+			}
+			(void)client.Client_ProcessNetworkFrame(tick);
+			if (!expect(!client.session_lost(),
+					"gated reap: a held frame past the window does not reap"))
+				return false;
+		}
+		(void)client.Client_ProcessNetworkFrame(tick);
+		if (!expect(client.session_lost() == !rescued,
+				rescued ? "gated reap: a datagram before the boundary saves the connection"
+				        : "gated reap: the next open boundary reaps the silent connection"))
+			return false;
+	}
+	return true;
 }
 
 // A HOST-role runtime has no session to lose (there is no peer reaping it).
@@ -992,6 +1040,7 @@ int main() {
 	if (!run_host_answers_the_sweep_request()) return 1;
 	if (!run_in_match_session_loss()) return 1;
 	if (!run_redeployment_session_loss()) return 1;
+	if (!run_in_match_reap_waits_for_the_send_boundary()) return 1;
 	if (!run_host_client_never_reports_loss()) return 1;
 	std::printf("OK\n");
 	return 0;

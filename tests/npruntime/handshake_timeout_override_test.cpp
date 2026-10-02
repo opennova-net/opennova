@@ -125,6 +125,9 @@ bool check_joiner_overlays_the_host_cs_block() {
 		if (!expect(!joiner.session_lost(), "120000 ms after acceptance is still inside the window"))
 			return false;
 		now_ms += 1;
+		if (!expect(!joiner.session_lost(), "the reap waits for the send pump that runs it"))
+			return false;
+		(void)joiner.pump(0);
 		if (!expect(joiner.session_lost() &&
 						joiner.session_loss_reason().find("120 seconds") != std::string::npos,
 				"120001 ms of silence after acceptance reaps, before any gameplay"))
@@ -153,7 +156,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 		now_ms += 30000;
 		if (!expect(!joiner.session_lost(), "30000 ms is inside a 30 s window")) return false;
 		now_ms += 1;
-		(void)joiner.pump(0); // the owner pump latches the reap (poll_session_loss)
+		(void)joiner.pump(0); // the send pump runs the reap (PumpStateMachine case 5)
 		return expect(joiner.session_lost() &&
 						joiner.session_loss_reason().find("30 seconds") != std::string::npos &&
 						joiner.has_disconnect_event() &&

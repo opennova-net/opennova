@@ -506,7 +506,7 @@ JoinerConnection::PollResult JoinerConnection::handle_datagram(const uint8_t *ra
 	} transition_trace{*this, phase_, post_auth_stage_, mission_known_};
 
 	PollResult out;
-	if (poll_session_loss() || phase_ == Phase::Error) return out;
+	if (session_lost() || phase_ == Phase::Error) return out;
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	if (!nw_decode_inbound(raw, len, opcode, body)) {

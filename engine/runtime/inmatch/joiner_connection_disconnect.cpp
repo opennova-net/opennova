@@ -118,36 +118,36 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 //  @0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @0x4c63d0, which clears the
 //  session strings and maps the disconnect code onto g_MissionExitReason]
 bool JoinerConnection::session_lost() const {
-	// An explicit close is terminal at any stage; the silence reap runs for the whole
-	// accepted-0x82 state (Driving = every join/deploy stage, InMatch) with no gameplay gate,
-	// and a negative timeout (the host's `_NSTMOUT.TXT` NEVER) disables it.
-	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 case 5 @0x6295a2..0x62961c —
-	//  `timeout_ms >= 0` @0x6295a2, elapsed = now - conn+0x5E8 @0x6295b2, strictly `>`]
+	// An explicit close is terminal at any stage, and so is a silence the reap latched.
 	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
 	// A self-initiated teardown (the pool-overflow MSGCRE) is terminal with its record latched.
-	if (phase_ == Phase::Error && disconnect_event_set_) return true;
+	return phase_ == Phase::Error && disconnect_event_set_;
+}
+
+// The silence reap is the connected state's arm of PumpStateMachine, which only the send
+// pump runs (PumpFlags 0x40): it is evaluated when the send pump is, ahead of the
+// send-interval legs, never on its own. It runs for the whole accepted-0x82 state (Driving =
+// every join/deploy stage, InMatch) with no gameplay gate, and a negative timeout (the host's
+// `_NSTMOUT.TXT` NEVER) disables it. The reap's own record is latched before the teardown so
+// a later leave burst carries it.
+// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 case 5 — `timeout_ms >= 0` @0x6295a2,
+//  elapsed = now - conn+0x5E8 @0x6295b2, strictly `>`, the record {role, 3, elapsed, timeout,
+//  "", 0, "NP.C:PT:CLNTTMOUT"} @0x629605..0x62961c, latch-if-invalid @0x6293f4..0x629406,
+//  RequestDisconnect @0x62940a and return before PumpSendIntervals @0x629628;
+//  CNapiNPConnection_PumpFlags 0x40 @0x6297c8]
+bool JoinerConnection::reap_silent_session() {
 	if (!receive_clock_armed_ || conn_.timeouts.timeout_ms < 0 ||
 	    (phase_ != Phase::Driving && phase_ != Phase::InMatch)) {
 		return false;
 	}
-	return milliseconds_since_last_receive() >
-			static_cast<uint64_t>(static_cast<uint32_t>(conn_.timeouts.timeout_ms));
-}
-
-bool JoinerConnection::poll_session_loss() {
-	if (!session_lost()) return false;
-	if (phase_ != Phase::Error) {
-		const std::string reason = session_loss_reason();
-		// The reap's own record, latched before the teardown so a later leave burst
-		// carries it. [orig: {role, 3, elapsed, timeout, "", 0, "NP.C:PT:CLNTTMOUT"}
-		//  @0x629605..0x62961c, latch-if-invalid @0x6293f4..0x629406]
-		latch_disconnect_event(make_disconnect_event(2, 3,
-				static_cast<uint32_t>(milliseconds_since_last_receive()),
-				static_cast<uint32_t>(conn_.timeouts.timeout_ms), "", 0,
-				"NP.C:PT:CLNTTMOUT"), 2);
-		silence_timeout_latched_ = true;
-		fail(reason);
-	}
+	const uint64_t elapsed = milliseconds_since_last_receive();
+	if (elapsed <= static_cast<uint64_t>(static_cast<uint32_t>(conn_.timeouts.timeout_ms)))
+		return false;
+	latch_disconnect_event(make_disconnect_event(2, 3, static_cast<uint32_t>(elapsed),
+			static_cast<uint32_t>(conn_.timeouts.timeout_ms), "", 0,
+			"NP.C:PT:CLNTTMOUT"), 2);
+	silence_timeout_latched_ = true;
+	fail(session_loss_reason());
 	return true;
 }
 

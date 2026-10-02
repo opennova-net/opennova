@@ -579,7 +579,8 @@ public:
 	// that vanishes without a goodbye. Armed from the accepted 0x82 (retail state 5) onward
 	// with no gameplay gate: the join stages, the world stream, the deploy screen and the
 	// in-match phases all reap the same way; the shell's 60 s admission watchdogs merely
-	// run alongside it. (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
+	// run alongside it. The reap is evaluated by the send pump (pump()), so in match it
+	// fires at the first open send boundary past the window (reap_silent_session). (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
 	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//
 	// Neither raises an in-world dialog in retail: the disconnect handler clears the
@@ -592,10 +593,6 @@ public:
 	//  the cs_dir0.timeout_ms reap @0x4ca4a0 (stores @0x4caa81/@0x4cab54); both land in
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
 	bool session_lost() const;
-	// Owner-pump form of session_lost(): once the silence predicate trips,
-	// latch it and enter Phase::Error so no later input or producer can revive
-	// the connection. Explicit host closes have already made that transition.
-	bool poll_session_loss();
 	// Empty while healthy; a player-facing reason once lost — the decoded reason code, class
 	// and strings for an explicit close, the silence window for the reap.
 	std::string session_loss_reason() const;
@@ -751,6 +748,9 @@ private:
 	// Store `event` (with `role` as DS) as the connection's disconnect record only while none is
 	// latched — retail's store-if-!valid slot. The 128/32-byte record caps apply.
 	void latch_disconnect_event(const DisconnectEvent &event, uint32_t role);
+	// The send pump's silence reap (PumpStateMachine case 5): past the window it latches the
+	// CLNTTMOUT record, enters Phase::Error and returns true (joiner_connection_disconnect.cpp).
+	bool reap_silent_session();
 	void retain_mission_metadata_chunk(const FileTransferChunk &chunk);
 	// Accumulate the S2C 0x60 server-info transfer and, at its final chunk,
 	// walk the `[key\0][u32 len][bytes]` VarList for EXP_FANFARE.
