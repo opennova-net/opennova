@@ -361,7 +361,8 @@ static int test_use_check_table() {
 		TEST_EXPECT(row->kind == static_cast<AssetKind>(k) && row->check &&
 				document_type_for(row->kind));
 	}
-	TEST_EXPECT(rows == 1 && use_check(AssetKind::MenuStyle) && !use_check(AssetKind::ItemDefs));
+	// The stylesheet's unused-variable check and the mission's pool check (S14).
+	TEST_EXPECT(rows == 2 && use_check(AssetKind::MenuStyle) && use_check(AssetKind::Mission) && !use_check(AssetKind::ItemDefs));
 	return 0;
 }
 

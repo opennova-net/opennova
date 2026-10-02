@@ -4235,12 +4235,14 @@ opennova_add_mixed_test(editor_mission_table COMMAND editor_mission_table_test)
 
 # The mission document (editor/documents/mission_document.h, ADR 0046 S14) over the minted
 # synth_logic mission: the rows in bands, every reference as a graph edge of its kind, the
-# edits and their cascades, the parse's findings, the picture's reads, an item's TYPE on its
-# symbol.
+# edits and their cascades, the parse's findings, the validator's findings and the mission's
+# use check, the picture's reads, an item's TYPE on its symbol; and (a SKIP-LEG without
+# OPENNOVA_JO_DIR) every shipped mission opened, its references counted and its findings by
+# code.
 add_executable(editor_mission_document_test editor/mission_document_test.cpp)
 target_link_libraries(editor_mission_document_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_mission_document COMMAND editor_mission_document_test)
+opennova_add_mixed_test(editor_mission_document COMMAND editor_mission_document_test)
 
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the

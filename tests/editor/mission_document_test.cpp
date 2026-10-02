@@ -18,10 +18,17 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <map>
 #include <memory>
+#include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
+#include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
@@ -29,13 +36,20 @@
 #include <editor/documents/mission_validation.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/session/preferences_store.h>
+#include <editor/session/project_session.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
+#include "editor/test_platform.h"
 
 using namespace opennova::editor;
 namespace bms = opennova::bms;
@@ -457,13 +471,232 @@ int test_item_type_on_symbol() {
 	return 0;
 }
 
+// The validator's record findings (mission_validation.h), each made by one edit of the minted
+// mission: the code on the record it concerns, at its severity; the minted mission itself makes
+// none. The pool limit is left to the retail leg (no shipped mission crosses it either).
+int test_validation() {
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document && type.validate_file(*document).empty());
+	Diagnostic error;
+	const auto one = [&](const Edit &edit, const char *code, DiagnosticSeverity severity, const NodeAddress &on,
+	                     const char *field) {
+		if (!document->apply(edit, error)) {
+			std::fprintf(stderr, "%s: the edit is refused: %s\n", code, error.message.c_str());
+			return false;
+		}
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		document->undo();
+		if (findings.size() != 1 || findings[0].code() != code || findings[0].severity != severity ||
+		    findings[0].row_id != on.row || findings[0].child_id != on.child || findings[0].field != field) {
+			std::fprintf(stderr, "%s: %zu finding(s)%s%s\n", code, findings.size(), findings.empty() ? "" : ", the first ",
+			             findings.empty() ? "" : findings[0].code().c_str());
+			return false;
+		}
+		return true;
+	};
+	const NodeAddress item0 = row_at(*document, MissionKind::Item, 0), organic0 = row_at(*document, MissionKind::Organic, 0);
+	const NodeAddress area0 = row_at(*document, MissionKind::Area, 0), area1 = row_at(*document, MissionKind::Area, 1);
+	const NodeAddress event0 = row_at(*document, MissionKind::Event, 0), event1 = row_at(*document, MissionKind::Event, 1);
+	const NodeAddress trigger0 = first_child(*document, event0, MissionKind::Trigger);
+	const NodeAddress action0 = first_child(*document, event0, MissionKind::Action);
+	const NodeAddress action1 = first_child(*document, event1, MissionKind::Action);
+	const NodeAddress mission = row_at(*document, MissionKind::Mission, 0);
+	const NodeAddress path1 = row_at(*document, MissionKind::WaypointPath, 1);
+	const NodeAddress stop0 = first_child(*document, path1, MissionKind::Stop);
+	const int walker_ssn = static_cast<const EntityRow *>(document->row(organic0.row))->native.id;
+	// An SSN a second record carries: the one the lookups find (the organic) stands, the item is noted.
+	TEST_EXPECT(one(edit_of(EditOperation::Set, item0, "id", int64_t(walker_ssn)), "mission.ssn_duplicate",
+	                DiagnosticSeverity::Warning, item0, "id"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, area1, "id", int64_t(20)), "mission.zone_duplicate", DiagnosticSeverity::Warning,
+	                area1, "id"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, area0, "x_max", -150.0), "mission.zone_degenerate", DiagnosticSeverity::Warning,
+	                area0, ""));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, area1, "id", int64_t(100)), "mission.zone_id", DiagnosticSeverity::Info, area1, "id"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, action0, "param1", int64_t(5)), "mission.event_missing", DiagnosticSeverity::Error,
+	                action0, "param1"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, stop0, "marker", int64_t(9)), "mission.marker_missing", DiagnosticSeverity::Warning,
+	                stop0, "marker"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, organic0, "waypoint_id", int64_t(2)), "mission.path_empty", DiagnosticSeverity::Info,
+	                organic0, "waypoint_id"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, organic0, "wp_number", int64_t(4)), "mission.path_start", DiagnosticSeverity::Warning,
+	                organic0, "wp_number"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, organic0, "group", int64_t(70)), "mission.group_range", DiagnosticSeverity::Error,
+	                organic0, "group"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, action1, "param1", int64_t(64)), "mission.group_range", DiagnosticSeverity::Error,
+	                action1, "param1"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, mission, "attrib_flags",
+	                        int64_t(uint32_t(bms::AttribFlags::Coop) | uint32_t(bms::AttribFlags::Deathmatch))),
+	                "mission.game_mode", DiagnosticSeverity::Warning, mission, "attrib_flags"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, trigger0, "main_type", int64_t(9)), "mission.trigger_type", DiagnosticSeverity::Warning,
+	                trigger0, "main_type"));
+	TEST_EXPECT(one(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(99)), "mission.trigger_type", DiagnosticSeverity::Warning,
+	                trigger0, "sub_type"));
+	// A path of one stop; a path counted past its slots; a bounding box with a corner past the other:
+	// through the file's bytes (a count is never set, a box never made).
+	{
+		const std::vector<uint8_t> bytes = fixture_bytes();
+		bms::File file;
+		std::string message;
+		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+		// A count past the slots stands only over full slots (mission_detail's resize keeps a shipped
+		// over-count that way, as CP19.bms ships one): path 1 filled, then counted 39.
+		file.waypoint_records[1].waypoint_numbers.assign(mission::kMaxWaypointPathMarkers, 0);
+		file.waypoint_records[1].marker_count = 39;
+		file.waypoint_records[2].waypoint_numbers = {0};
+		file.waypoint_records[2].marker_count = 1;
+		file.bounding_boxes.push_back(bms::BoundingBox{bms::to_fixed_16_16(10.0), 0, 0, 0, 0, 0, 1, -1, 0});
+		mission::sync_counts(file);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(file, out, message));
+		std::unique_ptr<Document> flawed = open(out, "flawed.bms");
+		TEST_EXPECT(flawed);
+		std::map<std::string, size_t> codes;
+		for (const Diagnostic &d : type.validate_file(*flawed)) ++codes[d.code()];
+		TEST_EXPECT(codes.size() == 3 && codes["mission.path_count"] == 1 && codes["mission.path_one_shot"] == 1 &&
+		            codes["mission.bounding_box"] == 1);
+	}
+	std::printf("validation: each record finding on its record\n");
+	return 0;
+}
+
+// The mission's use check (graph/use_checks.cpp, mission.pool): in a project holding the catalog and
+// the minted mission, an entity in another pool than its item's TYPE places it in is a warning on the
+// record, read through the graph (the item symbol's value, its TYPE).
+int test_pool_check() {
+	editor_test::TempProjectDir dir("opennova_mission_pool_check");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Pools"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	const std::string repo = test_paths_repo_root(__FILE__);
+	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")));
+	// The minted mission with the armory (a building) placed among the items.
+	{
+		const std::vector<uint8_t> bytes = fixture_bytes();
+		bms::File file;
+		std::string message;
+		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+		file.items[0].type_id = 106101 - mission::kItemIdOffset;
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(file, out, message));
+		TEST_EXPECT(editor_test::write_bytes(root + "/missions/pools.bms", out));
+	}
+	editor_test::handle_to_end(session, request::rescan());
+	size_t pool = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics) {
+		if (d.code() != "mission.pool") continue;
+		++pool;
+		TEST_EXPECT(d.asset == "missions/pools.bms" && d.severity == DiagnosticSeverity::Warning && d.field == "item" &&
+		            d.record_kind == k(MissionKind::Item) && d.message.find("building") != std::string::npos);
+	}
+	TEST_EXPECT(pool == 1);
+	return 0;
+}
+
+// What the shipped missions reference (OPENNOVA_JO_DIR, base and each expansion through the VFS): each
+// opened as a document, unblocked, its runs canonical (the five with a damaged loadout chunk noted,
+// mission_corpus's); the references counted: the entity parameters and those naming no SSN of their
+// mission, the zone parameters and those naming no zone, the event references and those past the
+// table, the stops and those past the markers, the text keys; and the findings the validator makes
+// over the install, by code.
+int test_retail() {
+	const std::string root = retail::install();
+	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission as a document)");
+	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
+	expansions.insert(expansions.begin(), std::string());
+	std::set<std::string> seen;
+	size_t missions = 0, differing = 0;
+	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
+	       stops = 0, stops_past = 0, text_refs = 0;
+	std::map<std::string, size_t> findings_by_code;
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	for (const std::string &expansion : expansions) {
+		opennova::Vfs game;
+		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
+		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
+		for (const opennova::VfsFileLocation &file : game.list_files()) {
+			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
+			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
+			std::vector<uint8_t> bytes;
+			TEST_EXPECT(game.read_file(file.logical_name, bytes));
+			std::unique_ptr<Document> document = open(bytes, file.logical_name.c_str());
+			TEST_EXPECT(document && !document->blocked());
+			if (!document) continue;
+			++missions;
+			const MissionDocument &m = as_mission(*document);
+			for (const MissionFinding code : m.issue_codes()) {
+				TEST_EXPECT(code == MissionFinding::RewriteDiffers); // every shipped mission's runs canonical
+				++differing;
+			}
+			std::set<int32_t> ssns, zones;
+			for (const MissionEntityRead &entity : mission_entities(m)) ssns.insert(entity.ssn);
+			for (const MissionAreaRead &area : mission_areas(m)) zones.insert(area.id);
+			const size_t events = m.rows_of(MissionKind::Event).size(), markers = m.rows_of(MissionKind::Marker).size();
+			Extracted extracted;
+			extract_from_document(*document, extracted);
+			for (const GraphEdge &edge : extracted.edges) {
+				const std::optional<int> number = opennova::strutil::parse_int(edge.value);
+				switch (edge.kind) {
+				case ReferenceKind::MissionEntity:
+					++entity_refs;
+					entity_missing += number && !ssns.count(*number);
+					break;
+				case ReferenceKind::MissionZone:
+					++zone_refs;
+					zone_missing += number && !zones.count(*number);
+					break;
+				case ReferenceKind::MissionEvent:
+					++event_refs;
+					event_past += number && size_t(*number) >= events;
+					break;
+				case ReferenceKind::MissionMarker:
+					++stops;
+					stops_past += number && size_t(*number) >= markers;
+					break;
+				case ReferenceKind::TextId: ++text_refs; break;
+				default: break;
+				}
+			}
+			for (const Diagnostic &d : type.validate_file(*document)) ++findings_by_code[d.code()];
+		}
+	}
+	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	std::printf("retail: %zu missions opened, %zu with a chunk the writer writes otherwise; %zu entity parameters (%zu naming "
+	            "no SSN), %zu zone parameters (%zu naming no zone), %zu event references (%zu past the table), %zu stops (%zu "
+	            "past the markers), %zu text keys\n",
+	            missions, differing, entity_refs, entity_missing, zone_refs, zone_missing, event_refs, event_past, stops,
+	            stops_past, text_refs);
+	for (const auto &[code, count] : findings_by_code) std::printf("  %s: %zu\n", code.c_str(), count);
+	// What the install holds, measured by this document (the design's emulation counted 3,272 entity
+	// parameters with 140 missing, before the waypoint riders and the Redirect actions' entity slot
+	// were parameters of that kind; the rest as it counted): no event reference past its table, no
+	// stop past the markers, and the findings the validator makes over the shipped missions, one
+	// path counted past its slots (CP19), 36 SSNs carried twice, every mission with an entity on an
+	// empty path.
+	TEST_EXPECT(missions == 115 && differing == 5);
+	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
+	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 1428);
+	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},  {"mission.path_empty", 115},
+	                                                {"mission.path_one_shot", 72}, {"mission.path_start", 95},
+	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36}};
+	TEST_EXPECT(findings_by_code == expected);
+	return 0;
+}
+
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	if (test_rows() != 0) return 1;
 	if (test_references() != 0) return 1;
 	if (test_edits() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
-	return test_item_type_on_symbol();
+	if (test_item_type_on_symbol() != 0) return 1;
+	if (test_validation() != 0) return 1;
+	if (test_pool_check() != 0) return 1;
+	return test_retail();
 }

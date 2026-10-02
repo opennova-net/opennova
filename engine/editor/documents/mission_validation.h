@@ -16,7 +16,8 @@ namespace opennova::editor {
 // its slots, a one-stop path, an entity on an empty path or starting past its count, a group past
 // the 64 the tables hold, a pool past the game's limits, two game mode bits, a trigger type the
 // evaluator lacks, a bounding box with a corner past the other. References to other files are the
-// asset graph's.
+// asset graph's; what an entity's pool makes of its item's TYPE is the mission's use check
+// (graph/use_checks.cpp, mission.pool), which reads the item through the graph.
 std::vector<Diagnostic> validate_mission_file(const DocumentBase &document);
 
 // The mission type's own finding codes (DocumentType::findings), each a row of its table
@@ -40,6 +41,7 @@ enum class MissionFinding {
 	GameMode,
 	TriggerType,
 	BoundingBox,
+	Pool, // an entity in another pool than its item's TYPE places it in (the mission's use check)
 	kCount
 };
 const FindingCodeRow &finding_code(MissionFinding code);
