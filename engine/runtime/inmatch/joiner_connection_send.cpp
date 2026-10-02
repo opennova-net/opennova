@@ -83,6 +83,16 @@ LoadoutSubmit build_retail_default_loadout_submit(uint8_t team, bool alternate) 
 
 std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolMessage> &messages) {
 	if (session_lost() || phase_ == Phase::Error) return {};
+	// The first in-flight deploy pick's release must ACK the packet that carries it:
+	// bind its sequence when that packet is built, wherever the queue placed it.
+	if (deployment_pick_sequence_unbound_) {
+		for (const ProtocolMessage &message : messages) {
+			if (message.tag != c2s::RESPAWN_REQUEST) continue;
+			deployment_pick_sequence_ = conn_.seq.next_outbound_seq;
+			deployment_pick_sequence_unbound_ = false;
+			break;
+		}
+	}
 	// Joiner C2S direction: encrypt with our client_scrk, stamp session_id = the server's SK
 	// (ServerAuth.sk, the peer's local_key). Shared seq/ack framing (ADR 0013).
 	std::vector<uint8_t> body;
@@ -485,8 +495,12 @@ bool JoinerConnection::prepare_deployment_pick(
 	    post_auth_stage_ != PostAuthStage::AwaitDeployRelease) {
 		return false;
 	}
-	if (initial_overlay || !deployment_pick_sent_)
-		deployment_pick_sequence_ = conn_.seq.next_outbound_seq;
+	// The pick is queued now and framed at a later boundary, in queue order; until
+	// its packet is built no ACK can cover it (frame_session binds the sequence).
+	if (initial_overlay || !deployment_pick_sent_) {
+		deployment_pick_sequence_ = std::numeric_limits<uint32_t>::max();
+		deployment_pick_sequence_unbound_ = true;
+	}
 	message_out = make_protocol_message(
 			0x0E, {static_cast<uint8_t>(wire_value & 0xFFu),
 			       static_cast<uint8_t>((wire_value >> 8) & 0xFFu)});
@@ -507,6 +521,7 @@ bool JoinerConnection::begin_redeployment() {
 	post_auth_stage_ = PostAuthStage::AwaitDeployPick;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
+	deployment_pick_sequence_unbound_ = false;
 	deployment_reply_seen_ = false;
 	return true;
 }

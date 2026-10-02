@@ -881,6 +881,7 @@ private:
 	bool initial_admission_complete_ = false;
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
+	bool deployment_pick_sequence_unbound_ = false; // queued, its packet not yet built
 	bool deployment_reply_seen_ = false; // applicable spawn release seen; pairs with self H
 	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
 	// S2C 0x19 supplies dword 0 of the post-world C2S 0x28 request. Retail clears

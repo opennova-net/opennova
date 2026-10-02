@@ -451,10 +451,13 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
-	// Queue the armory-ACCEPT loadout re-submission; the next frame's send boundary emits
-	// one C2S 0x2F from the current kit seam (see JoinerConnection::frame_loadout_resubmit).
+	// Queue the armory-ACCEPT loadout re-submission: one C2S 0x2F from the current kit seam,
+	// queued now as NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the
+	// next open boundary in queue order [orig: @0x42d085] (JoinerConnection::prepare_loadout_resubmit).
 	void queue_loadout_resubmit() {
-		if (joiner_) pending_loadout_resubmit_ = true;
+		ProtocolMessage resubmit;
+		if (joiner_ && joiner_->prepare_loadout_resubmit(resubmit))
+			send_queue_.push_back(std::move(resubmit));
 	}
 
 	bool deployment_pick_pending() const {
@@ -499,9 +502,10 @@ public:
 	}
 	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
 	// Accept the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a
-	// spawn-target handle). Input case 12 closes retail's gameplay dword now;
-	// framing waits for the next open send boundary. Re-picks while awaiting the
-	// release are allowed. False means the deployment UI/state cannot accept a pick.
+	// spawn-target handle). Input case 12 closes retail's gameplay dword and queues
+	// the 0x0E now [orig: @0x49b17b]; framing waits for the next open send boundary,
+	// in queue order. Re-picks while awaiting the release are allowed. False means
+	// the deployment UI/state cannot accept a pick.
 	bool queue_deployment_pick(uint16_t wire_value) {
 		if (!joiner_) return false;
 		// Initial admission may finish while the authority still holds the
@@ -511,8 +515,9 @@ public:
 		const bool initial_overlay = joiner_->in_match() &&
 				joiner_->initial_admission_complete() && view_.state().deploy_overlay_active;
 		if (!joiner_->deployment_pick_pending() && !initial_overlay) return false;
-		pending_deployment_pick_ = wire_value;
-		pending_deployment_pick_set_ = true;
+		ProtocolMessage pick;
+		if (!joiner_->prepare_deployment_pick(wire_value, pick)) return false;
+		send_queue_.push_back(std::move(pick));
 		deployed_ = false;
 		return true;
 	}
@@ -748,17 +753,20 @@ private:
 	replication::ClientReplicaPipeline view_;
 	replication::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
-	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
 	// The handshake/admission receive handlers allocate exact wire packets immediately to keep
 	// their retail grouping. They still belong to PumpClientProtocolSend, so hold the already-framed
 	// datagrams behind the same field-3 gate and flush them before any later sequence allocated at
 	// the open boundary. (A 0x84 reconstruction and a 0x45 pong are not held: retail transmits them
 	// from the receive pump, PollResult::immediate_outbound.)
 	std::deque<std::vector<uint8_t>> framed_send_queue_;
-	// 0x34/0x4C, semantic receive replies and the input-side one-shots (the 0x1D stance change, the
-	// medic call, chat, squad sends) are queued before retail reaches the holdoff-gated send pump.
-	// Keep them across held frames, then batch them at the first open boundary beside gameplay.
-	std::deque<ProtocolMessage> pre_send_queue_;
+	// The connection's one C2S queue: every producer (the 0x34 keepalive, the receive handlers'
+	// replies, the 0x4C report, the input-side one-shots, the deploy pick, the loadout
+	// re-submit, the fire / reload / mount gameplay records) appends at the moment it runs, as
+	// each retail producer calls QueueReliableMessage; the next open send boundary frames the
+	// whole queue in that order, then the 0x2C and 0x0C it builds itself.
+	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
+	//  @0x628640, one outgoing list per connection]
+	std::deque<ProtocolMessage> send_queue_;
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.
@@ -777,9 +785,6 @@ private:
 	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
-	bool pending_loadout_resubmit_ = false;     // one-shot: armory-ACCEPT 0x2F re-send
-	bool pending_deployment_pick_set_ = false;  // one-shot: the player's 0x0E pick below
-	uint16_t pending_deployment_pick_ = 0xFFFF;
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT

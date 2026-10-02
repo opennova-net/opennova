@@ -4878,13 +4878,14 @@ bool run_live_frame_uses_wall_clock_and_batches_mount_requests() {
 	                    messages.size() == 3,
 			"decode batched attach frame"))
 		return false;
-	if (!expect(messages[0].tag == 0x2F,
-			"armory ACCEPT loadout re-submit shares the live send boundary"))
-		return false;
-	if (!expect(messages[1].tag == 0x26 &&
-	                    messages[1].payload ==
+	// One queue in producer order: the attach was queued before the armory ACCEPT.
+	if (!expect(messages[0].tag == 0x26 &&
+	                    messages[0].payload ==
 	                            std::vector<uint8_t>({0x02, 0x00, 0x07, 0x10, 0x06, 0x00}),
 			"C2S 0x26 carries self, vehicle, one-based model bone and pad"))
+		return false;
+	if (!expect(messages[1].tag == 0x2F,
+			"armory ACCEPT loadout re-submit shares the live send boundary, after the attach"))
 		return false;
 	if (!expect(messages[2].tag == 0x2C &&
 	                    messages[2].payload ==
@@ -5381,6 +5382,77 @@ bool run_queued_stance_waits_for_the_send_boundary() {
 	                      client.retained_outbound_depth() == 2 &&
 	                      client.send_holdoff_countdown() == 12,
 			"stance-queue: the boundary ages once and retains both reliable records");
+}
+
+// Every C2S producer calls CNapiNetwork_QueueReliableMessage onto ONE connection queue at
+// the moment it runs, so a send boundary's records leave in the order they were queued,
+// whatever kind of producer queued them: the fire action, the stance key, the reload, the
+// armory's loadout re-submit (queued at the ACCEPT, not at the boundary), the door callback;
+// the deploy pick is queued by input case 12 itself, so a medic call queued before it leads.
+// Only the 0x2C and 0x0C are built inside the send block, after everything queued earlier.
+// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
+//  @0x628640 (one list per connection); Input_HandleActionBinding case 12 queues the 0x0E
+//  @0x49b17b; NetPacket_SendLoadoutSubmit queues the 0x2F @0x42d085; the 0x2C @0x42c44a and
+//  0x0C @0x42c4a3 inside the gate]
+bool run_c2s_producers_share_one_chronological_queue() {
+	constexpr uint32_t kServerKey = 0x51554555u;
+	const std::string client_scrk = "CLIENT-ONE-QUEUE-SCRK";
+	const std::string server_scrk = "SERVER-ONE-QUEUE-SCRK";
+	auto boundary_tags = [&](const std::vector<std::vector<uint8_t>> &sent,
+			std::vector<uint8_t> &tags) {
+		tags.clear();
+		for (const std::vector<uint8_t> &datagram : sent) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_client_session(datagram, client_scrk, header, messages)) return false;
+			for (const ProtocolMessage &m : messages) tags.push_back(m.tag);
+		}
+		return true;
+	};
+	{
+		inmatch::ClientRuntime client("OneQueue", [] { return uint64_t{0x41424344u}; });
+		client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+				1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+		ClientFiredRound fire;
+		fire.shooter_handle = 0x0002;
+		WeaponReload reload;
+		reload.entity_handle = 0x0002;
+		reload.reload_param = 1;
+		if (!expect(client.queue_fired_round(fire) && client.queue_stance_change(0xA9) &&
+		                    client.queue_reload_request(reload),
+				"one-queue: the producers accept"))
+			return false;
+		client.queue_loadout_resubmit();
+		if (!expect(client.queue_door_request(0x1005, 1, 0), "one-queue: the door request queues"))
+			return false;
+		std::vector<uint8_t> tags;
+		if (!expect(boundary_tags(client.Client_ProcessNetworkFrame(1), tags) &&
+		                    tags == std::vector<uint8_t>({c2s::FIRED_ROUND, c2s::STANCE_CHANGE,
+		                            c2s::WEAPON_RELOAD_REQUEST, c2s::LOADOUT_SUBMIT,
+		                            c2s::DOOR_SLOT_REQUEST, c2s::RTT_CONSUMED}),
+				"one-queue: the boundary carries the records in the order they were queued"))
+			return false;
+	}
+	inmatch::ClientRuntime client("OneQueuePick", [] { return uint64_t{0x41424345u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	FrameUpdate death;
+	death.mount_handle = 0xFFFF;
+	death.health = 0;
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> death_datagram = frame_server_session(
+			server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(death))});
+	client.receive(death_datagram.data(), death_datagram.size());
+	(void)client.Client_ProcessNetworkFrame(1);
+	if (!expect(client.deployment_pick_pending() && client.queue_medic_request() &&
+	                    client.queue_deployment_pick(0xFFFF),
+			"one-queue: a dead player queues a medic call, then picks"))
+		return false;
+	std::vector<uint8_t> tags;
+	return expect(boundary_tags(client.Client_ProcessNetworkFrame(2), tags) &&
+	                      tags == std::vector<uint8_t>({c2s::MEDIC_REQUEST, c2s::RESPAWN_REQUEST}),
+			"one-queue: the pick input case 12 queued after the medic call leaves after it");
 }
 
 bool run_settings_update_preserves_active_holdoff_countdown() {
@@ -6984,6 +7056,7 @@ int main() {
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
 	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
 	                run_queued_stance_waits_for_the_send_boundary() &&
+	                run_c2s_producers_share_one_chronological_queue() &&
 	                run_settings_update_preserves_active_holdoff_countdown() &&
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&

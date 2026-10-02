@@ -394,8 +394,8 @@ void ClientRuntime::drain_visible_refreshes() {
 			continue;
 		}
 		if (joiner_ == nullptr) continue;
-		pre_send_queue_.push_back(make_protocol_message(c2s::PLAYER_SYNC_REQUEST, std::move(sync)));
-		pre_send_queue_.push_back(make_protocol_message(c2s::VISIBLE_PLAYERS_REQUEST, {}));
+		send_queue_.push_back(make_protocol_message(c2s::PLAYER_SYNC_REQUEST, std::move(sync)));
+		send_queue_.push_back(make_protocol_message(c2s::VISIBLE_PLAYERS_REQUEST, {}));
 	}
 	pending.clear();
 }
@@ -408,9 +408,8 @@ std::vector<uint8_t> ClientRuntime::start() {
 	// queued datagrams/actions must not authenticate under the new keys, and
 	// authoritative/UI state must not leak into the next world.
 	recv_fifo_.clear();
-	gameplay_send_queue_.clear();
 	framed_send_queue_.clear();
-	pre_send_queue_.clear();
+	send_queue_.clear();
 	pending_reload_notifications_.clear();
 	zone_states_.clear();
 	tracked_window_ = TrackedCaptureWindow{};
@@ -424,9 +423,6 @@ std::vector<uint8_t> ClientRuntime::start() {
 	authoritative_spawn_release_revision_ = 0;
 	self_team_revision_ = 0;
 	cleared_player_slots_.clear();
-	pending_loadout_resubmit_ = false;
-	pending_deployment_pick_set_ = false;
-	pending_deployment_pick_ = 0xFFFFu;
 	current_tick_ = 0;
 	slot_refresh_frames_ = 0;
 	last_keepalive_tick_ = 0;
@@ -493,7 +489,7 @@ bool ClientRuntime::queue_fired_round(const ClientFiredRound &round) {
 	//  Entity_FireWeaponAndSendPacket @0x42bd80; the deadline
 	//  send_flush_counter + userParam - 1 in BuildOutgoingPackets @0x628430].
 	fire.retention_flushes = 62;
-	gameplay_send_queue_.push_back(std::move(fire));
+	send_queue_.push_back(std::move(fire));
 	return true;
 }
 
@@ -502,7 +498,7 @@ bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 	    !is_deployed() || !joiner_->has_self_handle() ||
 	    wire_handle::is_batch_end_sentinel(reload.entity_handle))
 		return false;
-	gameplay_send_queue_.push_back(
+	send_queue_.push_back(
 			make_protocol_message(c2s::WEAPON_RELOAD_REQUEST, encode_weapon_reload(reload)));
 	return true;
 }
@@ -522,7 +518,7 @@ bool ClientRuntime::queue_medic_request() {
 	// A 310-flush (~5 s) finite lifetime like the 0x4C quality report
 	// [orig: CNapiNetwork_QueueReliableMessage(ctx, 0x2E, 310, ...)].
 	medic.retention_flushes = 310;
-	pre_send_queue_.push_back(std::move(medic));
+	send_queue_.push_back(std::move(medic));
 	return true;
 }
 
@@ -546,7 +542,7 @@ bool ClientRuntime::queue_stance_change(uint16_t action_id) {
 		return false;
 	std::vector<uint8_t> body;
 	io::append_u16_le(body, action_id);
-	pre_send_queue_.push_back(make_protocol_message(c2s::STANCE_CHANGE, std::move(body)));
+	send_queue_.push_back(make_protocol_message(c2s::STANCE_CHANGE, std::move(body)));
 	return true;
 }
 
@@ -556,7 +552,7 @@ bool ClientRuntime::queue_door_request(uint16_t handle, int16_t state, uint8_t s
 	request.entity_handle = handle;
 	request.state = state;
 	request.number = section;
-	pre_send_queue_.push_back(make_protocol_message(c2s::DOOR_SLOT_REQUEST,
+	send_queue_.push_back(make_protocol_message(c2s::DOOR_SLOT_REQUEST,
 			encode_door_slot_action(request)));
 	return true;
 }
@@ -622,7 +618,7 @@ hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::stri
 	// the 0x4C report and the medic call carry; the senders run outside the
 	// client net frame, so the line rides the held one-shot queue.
 	chat.retention_flushes = 310;
-	pre_send_queue_.push_back(std::move(chat));
+	send_queue_.push_back(std::move(chat));
 	return Result::Sent;
 }
 
@@ -637,7 +633,7 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
 	ProtocolMessage pick = make_protocol_message(tag, std::move(body));
 	pick.retention_flushes = 1; // the user param [orig: `push 1` @0x42c12c / @0x42c15c]
-	pre_send_queue_.push_back(std::move(pick));
+	send_queue_.push_back(std::move(pick));
 	return true;
 }
 
@@ -726,7 +722,7 @@ bool ClientRuntime::queue_mounted_weapon_slot_selection(bool use_parent_slot) {
 		return false;
 	MountedWeaponSlotSelection selection;
 	selection.use_parent_slot = use_parent_slot;
-	gameplay_send_queue_.push_back(make_protocol_message(
+	send_queue_.push_back(make_protocol_message(
 			c2s::MOUNTED_WEAPON_SLOT_SELECT,
 			encode_mounted_weapon_slot_selection(selection)));
 	return true;
@@ -739,7 +735,7 @@ bool ClientRuntime::queue_vehicle_attach(
 	    vehicle_handle == 0xFFFFu || model_bone_index == 0)
 		return false;
 	const uint16_t self = joiner_->self_handle();
-	gameplay_send_queue_.push_back(make_protocol_message(
+	send_queue_.push_back(make_protocol_message(
 			0x26,
 			{
 					static_cast<uint8_t>(self),
@@ -757,7 +753,7 @@ bool ClientRuntime::queue_vehicle_detach(uint16_t vehicle_handle) {
 	    !is_deployed() || !joiner_->has_self_handle() || vehicle_handle == 0xFFFFu)
 		return false;
 	const uint16_t self = joiner_->self_handle();
-	gameplay_send_queue_.push_back(make_protocol_message(
+	send_queue_.push_back(make_protocol_message(
 			0x27,
 			{
 					static_cast<uint8_t>(self),
@@ -854,12 +850,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// before its tick/housekeeping producers can mint fresh C2S traffic.
 	if (joiner_ != nullptr && joiner_->session_lost()) {
 		recv_fifo_.clear();
-		gameplay_send_queue_.clear();
 		framed_send_queue_.clear();
-		pre_send_queue_.clear();
+		send_queue_.clear();
 		pending_reload_notifications_.clear();
-		pending_loadout_resubmit_ = false;
-		pending_deployment_pick_set_ = false;
 		return outbound;
 	}
 
@@ -893,7 +886,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// golden-replay mode.
 	if (joiner_ != nullptr && !replay_mode_ && current_tick_ != 0 &&
 	    current_tick_ - last_keepalive_tick_ > kKeepaliveInterval) {
-		pre_send_queue_.push_back(
+		send_queue_.push_back(
 				make_protocol_message(c2s::KEEPALIVE, le32(current_tick_)));
 		last_keepalive_tick_ = current_tick_;
 	}
@@ -975,12 +968,9 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				//  NapiNPDSPQueue_ClearPendingList @0x62556B;
 				//  NapiNPDSPQueue_ClearOutgoing @0x625574]
 				recv_fifo_.clear();
-				gameplay_send_queue_.clear();
 				framed_send_queue_.clear();
-				pre_send_queue_.clear();
+				send_queue_.clear();
 				pending_reload_notifications_.clear();
-				pending_loadout_resubmit_ = false;
-				pending_deployment_pick_set_ = false;
 				for (std::vector<uint8_t> &goodbye : pr.outbound)
 					outbound.push_back(std::move(goodbye));
 				return outbound;
@@ -1040,7 +1030,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			std::vector<uint8_t> &sync_retries =
 					view_.state().scoreboard.pending_sync_requests;
 			for (const uint8_t slot : sync_retries) {
-				pre_send_queue_.push_back(make_protocol_message(
+				send_queue_.push_back(make_protocol_message(
 						c2s::PLAYER_SYNC_REQUEST, std::vector<uint8_t>{slot, 0xF7, 0x1C}));
 			}
 			sync_retries.clear();
@@ -1054,7 +1044,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			for (const uint32_t net_id : clan_walk) {
 				ClanRosterWalkRequest request;
 				request.after_account_id = net_id;
-				pre_send_queue_.push_back(make_protocol_message(
+				send_queue_.push_back(make_protocol_message(
 						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request)));
 			}
 			clan_walk.clear();
@@ -1133,7 +1123,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// gate. In particular, C2S 0x3D already pages the renderer-finalized loaded-model
 			// snapshot; decoded S2C entity records must never rebuild or mutate that domain.
 			for (ProtocolMessage &reply : pr.queued_send_messages) {
-				pre_send_queue_.push_back(std::move(reply));
+				send_queue_.push_back(std::move(reply));
 			}
 		}
 		// The receive pump ends with the connection's missing-sequence check: a future S2C
@@ -1231,7 +1221,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// userParam=310 and ages it in open logical send boundaries.
 			// [orig: QueueReliableMessage @0x42C279 -> user_param1 310]
 			quality.retention_flushes = kNetQualityInterval;
-			pre_send_queue_.push_back(std::move(quality));
+			send_queue_.push_back(std::move(quality));
 		}
 	}
 
@@ -1272,53 +1262,26 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			framed_send_queue_.pop_front();
 			++packets_built;
 		}
-		// Input case 12 queues the deployment pick before Client_ProcessNetworkFrame.
-		// Keep it first at this send boundary: prepare_deployment_pick records the
-		// connection's next sequence, so the 0x0E must occupy that first packet even
-		// when held challenge replies force the batch to split at the MTU.
-		if (pending_deployment_pick_set_) {
-			pending_deployment_pick_set_ = false;
-			ProtocolMessage pick;
-			if (joiner_->prepare_deployment_pick(
-						pending_deployment_pick_, pick)) {
-				send_messages.push_back(std::move(pick));
-			}
-		}
-		// The periodic producers above execute before this gate in retail, but
-		// PumpClientProtocolSend is inside it. Preserve that queued-vs-sent
-		// distinction: held housekeeping flushes on the first open boundary.
-		while (!pre_send_queue_.empty()) {
-			send_messages.push_back(
-					std::move(pre_send_queue_.front()));
-			pre_send_queue_.pop_front();
-		}
-		// The armory-ACCEPT loadout re-submission is another binding-queued
-		// one-shot framed at this shared boundary.
-		if (pending_loadout_resubmit_) {
-			pending_loadout_resubmit_ = false;
-			ProtocolMessage resubmit;
-			if (joiner_->prepare_loadout_resubmit(resubmit))
-				send_messages.push_back(std::move(resubmit));
+		// The connection's one queue, in the order its producers ran: the housekeeping,
+		// the receive handlers' replies, the input one-shots, the deploy pick (input case
+		// 12 queues it @0x49b17b), the armory's loadout re-submit (@0x42d085) and the
+		// gameplay records. Once queued they leave at this boundary whatever the deploy
+		// gate now says (D-NET-235): each producer gated itself when it queued, only the
+		// 0x2C and 0x0C builds below sit behind the gate, and nothing drains the list on
+		// death.
+		// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
+		//  @0x628640; Client_ProcessNetworkFrame tail @0x42c4b1 -> PumpClientProtocolSend
+		//  @0x42c4bc in every branch; DrainMessageQueues @0x625600 runs only at join
+		//  and destroy]
+		while (!send_queue_.empty()) {
+			send_messages.push_back(std::move(send_queue_.front()));
+			send_queue_.pop_front();
 		}
 		// The witnessed deploy gate the 0x2C RTT ping and the 0x0C uplink share: is_in_session &&
 		// !is_authority && !dword_81474C && !g_SpawnSuccessGate. A Joiner is always !is_authority;
 		// deployed_ and authoritative_spawn_released_ model those two independent gates.
 		const bool deployed_joiner =
 				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();
-
-		// Weapon actions queue typed gameplay before Client_ProcessNetworkFrame;
-		// PumpClientProtocolSend flushes them through this same sequenced 0x43 path.
-		// Once queued they leave at this boundary whatever the deploy gate now says
-		// (D-NET-235): each producer gated itself when it queued, only the 0x2C and
-		// 0x0C builds below sit behind the gate, and nothing drains the list on death.
-		// [orig: Client_ProcessNetworkFrame tail @0x42c4b1 -> PumpClientProtocolSend
-		//  @0x42c4bc in every branch; DrainMessageQueues @0x625600 runs only at join
-		//  and destroy]
-		while (!gameplay_send_queue_.empty()) {
-			ProtocolMessage msg = std::move(gameplay_send_queue_.front());
-			gameplay_send_queue_.pop_front();
-			send_messages.push_back(std::move(msg));
-		}
 
 		// (0x2C) RTT timestamp ping — Joiner only. [orig @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
 		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). Retail uses
@@ -1373,11 +1336,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// by this runtime and is retried ahead of later producers.
 			for (std::size_t i = framed.framed_count;
 			     i < framed.admitted_count; ++i) {
-				pre_send_queue_.push_back(std::move(send_messages[i]));
+				send_queue_.push_back(std::move(send_messages[i]));
 			}
 		}
 		for (auto it = framed.unbuilt.rbegin(); it != framed.unbuilt.rend(); ++it)
-			pre_send_queue_.push_front(std::move(*it));
+			send_queue_.push_front(std::move(*it));
 		// Connection send boundary: advance the pre-spawn drive, emit retained-message
 		// active probes, and flush an ACK only if no substantive C2S producer above
 		// already carried it. Retail places this pump inside the same field-3 gate

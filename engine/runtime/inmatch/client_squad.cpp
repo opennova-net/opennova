@@ -60,7 +60,7 @@ bool ClientRuntime::queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> bo
 	if (!joiner_path) return false;
 	// QueueReliableMessage(tag, 1, 0): reliable, no finite lifetime; sent
 	// outside the client net frame, so it rides the held one-shot queue.
-	pre_send_queue_.push_back(make_protocol_message(c2s_tag, std::move(body)));
+	send_queue_.push_back(make_protocol_message(c2s_tag, std::move(body)));
 	return true;
 }
 

@@ -274,6 +274,7 @@ std::vector<uint8_t> JoinerConnection::start() {
 	initial_admission_complete_ = false;
 	deployment_pick_sent_ = false;
 	deployment_pick_sequence_ = 0;
+	deployment_pick_sequence_unbound_ = false;
 	deployment_reply_seen_ = false;
 	has_self_handle_ = false;
 	self_handle_ = 0;
