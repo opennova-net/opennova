@@ -534,12 +534,12 @@ bool MissionAudio::play_dialog(int p_wav_id) {
 	if (bank_.is_null() || !root_attached_) {
 		return false;
 	}
-	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
-	if (sets.empty()) {
+	const std::vector<opennova::audio::DialogLineRef> lines = _resolve_dialog_lines(p_wav_id);
+	if (lines.empty()) {
 		UtilityFunctions::push_warning(vformat("MissionAudio: unresolved dialog id %d", p_wav_id));
 		return false;
 	}
-	dialog_queue_.enqueue(sets);
+	dialog_queue_.enqueue(lines);
 	_pump_dialog_queue();
 	return true;
 }
@@ -567,21 +567,29 @@ bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
 }
 
 String MissionAudio::resolve_dialog_set(int p_wav_id) {
-	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
-	return sets.empty() ? String() : opennova::to_gd(sets.front());
+	for (const opennova::audio::DialogLineRef &line : _resolve_dialog_lines(p_wav_id)) {
+		if (!line.set_name.empty()) {
+			return opennova::to_gd(line.set_name);
+		}
+	}
+	return String();
 }
 
-std::vector<std::string> MissionAudio::_resolve_dialog_sets(int p_wav_id) const {
+std::vector<opennova::audio::DialogLineRef> MissionAudio::_resolve_dialog_lines(
+		int p_wav_id) const {
 	if (bank_.is_null()) {
 		return {};
 	}
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
-	return opennova::audio::resolve_dialog_sets(dialog_bank, bank_->set_index(), p_wav_id);
+	return opennova::audio::resolve_dialog_lines(dialog_bank, bank_->set_index(), p_wav_id);
 }
 
-// Start the next queued dialog line if nothing is currently playing. A line that
-// fails to actually spawn is skipped so the queue never stalls.
+// Start the next queued dialog line if nothing is currently playing. Every line
+// the queue hands out is reported to the host's co-op broadcast first (engine:
+// Simulation::broadcast_dialog_line -> Server_BroadcastDialogLine), its clip or
+// not; a line without a clip, or one that fails to spawn, is skipped so the
+// queue never stalls.
 void MissionAudio::_pump_dialog_queue() {
 	if (_dialog_voice_node() != nullptr) {
 		return; // a line is still playing; _on_dialog_finished pumps the next
@@ -591,9 +599,18 @@ void MissionAudio::_pump_dialog_queue() {
 	if (bank_.is_null()) {
 		return;
 	}
-	std::string set_name;
-	while (dialog_queue_.take_next(set_name)) {
-		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(set_name),
+	opennova::audio::DialogLineRef line;
+	while (dialog_queue_.take_next(line)) {
+		if (line.line >= 0) {
+			const Ref<Simulation> sim = _simulation();
+			if (sim.is_valid()) {
+				sim->broadcast_dialog_line(line.dialog_name, line.line);
+			}
+		}
+		if (line.set_name.empty()) {
+			continue;
+		}
+		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
 				StringName(kVoiceBus));
 		if (voice != nullptr) {
 			dialog_voice_id_ = ObjectID(voice->get_instance_id());

@@ -158,7 +158,7 @@ public:
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
-	// resolution (runtime/audio/dialog_queue resolve_dialog_sets) then the
+	// resolution (runtime/audio/dialog_queue resolve_dialog_lines) then the
 	// serialized queue, pumped here by spawning one voice at a time. Returns
 	// true if the id resolved to at least one playable set.
 	bool play_dialog(int p_wav_id);
@@ -227,7 +227,7 @@ private:
             int32_t p_bearing, const Transform3D &p_camera_xform);
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
-	std::vector<std::string> _resolve_dialog_sets(int p_wav_id) const;
+	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
 	void _pump_dialog_queue();
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;

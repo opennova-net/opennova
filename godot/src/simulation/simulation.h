@@ -1324,8 +1324,8 @@ public:
 	// The rtxt "Server" formats for the host's broadcasts (STRSRV_MEDREQ, C2Blue, C2Red).
 	void set_server_text(const String &p_medic, const String &p_to_blue, const String &p_to_red);
 	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
-	// The one role-agnostic read of the local player's dead bit.
-	bool local_player_dead() const;
+	bool local_player_dead() const; // the one role-agnostic read of the local player's dead bit
+	void broadcast_dialog_line(const std::string &p_dialog, int p_line); // Server_BroadcastDialogLine
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)

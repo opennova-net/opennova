@@ -6,30 +6,40 @@
 
 namespace opennova::audio {
 
-std::vector<std::string> resolve_dialog_sets(const dbf::File *dialog_bank,
+std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const SoundSetIndex &sets, int wav_id) {
-	std::vector<std::string> out;
+	std::vector<DialogLineRef> out;
 	char dlg_id[32];
 	std::snprintf(dlg_id, sizeof(dlg_id), "dlg%03d", wav_id);
+	bool carried = false;
 	if (dialog_bank != nullptr) {
 		if (const dbf::Group *group = dbf::find_group(*dialog_bank, dlg_id)) {
-			for (const dbf::Line &line : group->lines) {
+			for (size_t i = 0; i < group->lines.size(); ++i) {
+				const dbf::Line &line = group->lines[i];
+				DialogLineRef ref;
+				ref.dialog_name = group->group_name;
+				ref.line = static_cast<int>(i);
 				if (!line.def_id_name.empty() && sets.has(line.def_id_name)) {
-					out.push_back(line.def_id_name);
+					ref.set_name = line.def_id_name;
+					carried = true;
 				}
+				out.push_back(std::move(ref));
 			}
 		}
 	}
-	if (!out.empty()) {
+	if (carried) {
 		return out;
 	}
+	out.clear();
 	char upper_id[32];
 	std::snprintf(upper_id, sizeof(upper_id), "DLG%03d", wav_id);
 	char bare_id[32];
 	std::snprintf(bare_id, sizeof(bare_id), "%d", wav_id);
 	for (const char *candidate : { upper_id, dlg_id, bare_id }) {
 		if (sets.has(candidate)) {
-			out.emplace_back(candidate);
+			DialogLineRef ref;
+			ref.set_name = candidate;
+			out.push_back(std::move(ref));
 			return out;
 		}
 	}
@@ -80,19 +90,19 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const Sound
 }
 
 // [orig: Dialog_Register @ 0x44d980 queues the line behind whatever plays]
-void DialogQueue::enqueue(const std::vector<std::string> &set_names) {
-	for (const std::string &name : set_names) {
-		pending_.push_back(name);
+void DialogQueue::enqueue(const std::vector<DialogLineRef> &lines) {
+	for (const DialogLineRef &line : lines) {
+		pending_.push_back(line);
 	}
 }
 
 // [orig: Dialog_UpdatePlayback @ 0x44e470 only loads the next clip once the
 //  active channel frees]
-bool DialogQueue::take_next(std::string &r_set_name) {
+bool DialogQueue::take_next(DialogLineRef &r_line) {
 	if (line_active_ || pending_.empty()) {
 		return false;
 	}
-	r_set_name = std::move(pending_.front());
+	r_line = std::move(pending_.front());
 	pending_.pop_front();
 	return true;
 }

@@ -20,17 +20,28 @@
 
 namespace opennova::audio {
 
-// Resolve a PlayWavList dialog id (param1) to the ordered set name(s) it
-// should play. Faithful first: dialog id "dlg%03d" -> the co-named .DBF ->
-// the group's def_id set name(s) (played in sequence, one per dialog "line"
-// as the engine advances entry index in Dialog_UpdatePlayback), each kept
-// only when the loaded banks carry it; without a .DBF (or with no carried
-// line), the first direct set-name form the banks contain: "DLG%03d",
-// "dlg%03d", then the bare number. Empty when nothing resolves.
+// One queued dialog line: the clip the banks carry for it (empty when none
+// does) and, for a .DBF line, its dialog's name and its entry index in the
+// group, which the authority reports on the wire as the line loads (-1 for a
+// direct set-name form, which no dialog names).
+struct DialogLineRef {
+	std::string set_name;
+	std::string dialog_name;
+	int line = -1;
+};
+
+// Resolve a PlayWavList dialog id (param1) to the ordered lines it plays.
+// Faithful first: dialog id "dlg%03d" -> the co-named .DBF -> every line of
+// the group in entry order (played in sequence as the engine advances the
+// entry index in Dialog_UpdatePlayback), each with its def_id set name when
+// the loaded banks carry it; without a .DBF (or with no carried line), the
+// first direct set-name form the banks contain: "DLG%03d", "dlg%03d", then
+// the bare number. Empty when nothing resolves.
 // [orig: Dialog_PlayByIndex @ 0x527ae0 -> Dialog_PlayByName @ 0x44d9f0 ->
 //  Dialog_Register @ 0x44d980 queue; Dialog_UpdatePlayback @ 0x44e470
-//  advances only when the active channel frees]
-std::vector<std::string> resolve_dialog_sets(const dbf::File *dialog_bank,
+//  advances only when the active channel frees, and reports each line it
+//  loads (Server_SendEntityStateToAll @0x44e5a5)]
+std::vector<DialogLineRef> resolve_dialog_lines(const dbf::File *dialog_bank,
 		const SoundSetIndex &sets, int wav_id);
 
 // A co-op dialog line a client plays on S2C 0x28 (the effect pass's
@@ -61,18 +72,17 @@ DialogLinePlayback resolve_dialog_line(const dbf::File *dialog_bank, const Sound
 		const rtxt::File *mission_text, const std::string &dialog_name, int line,
 		int player_class);
 
-// The one-channel dialog playback state machine: a FIFO of resolved line
-// set-names behind the line the shell's channel is playing.
+// The one-channel dialog playback state machine: a FIFO of resolved lines
+// behind the line the shell's channel is playing.
 class DialogQueue {
 public:
-	// Queue resolved line set-names behind whatever plays (the Dialog_Register
-	// leg).
-	void enqueue(const std::vector<std::string> &set_names);
+	// Queue resolved lines behind whatever plays (the Dialog_Register leg).
+	void enqueue(const std::vector<DialogLineRef> &lines);
 	// The Dialog_UpdatePlayback advance: while no line is active, hand out the
-	// next queued name for the shell to start (a line that fails to spawn is
-	// simply skipped by asking again, so the queue never stalls). False when a
-	// line is still playing or nothing is queued.
-	bool take_next(std::string &r_set_name);
+	// next queued line for the shell to start (a line without a clip, or one
+	// that fails to spawn, is simply skipped by asking again, so the queue
+	// never stalls). False when a line is still playing or nothing is queued.
+	bool take_next(DialogLineRef &r_line);
 	// The shell's channel took the line it was handed.
 	void line_started();
 	// The active channel freed.
@@ -87,7 +97,7 @@ public:
     void discard_pending() { pending_.clear(); }
 
 private:
-	std::deque<std::string> pending_;
+	std::deque<DialogLineRef> pending_;
 	bool line_active_ = false;
 };
 

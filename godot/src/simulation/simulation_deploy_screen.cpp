@@ -9,6 +9,7 @@
 #include "simulation/deploy_rows.h" // the compiled SPAWNPOINTS_LIST row
 
 #include <runtime/inmatch/napi_np_server_ctx.h>
+#include <runtime/inmatch/server_chat.h> // Server_BroadcastDialogLine
 #include "rtxt/rtxt_string_file.h"
 #include "util/string_convert.h"
 
@@ -52,6 +53,12 @@ void Simulation::set_server_text(const String &p_medic_request_format,
 
 bool Simulation::send_team_change_request() {
 	return runtime_ != nullptr && runtime_->queue_team_change_request();
+}
+
+void Simulation::broadcast_dialog_line(const std::string &p_dialog, int p_line) {
+	// The authority's co-op dialog line; a joiner has no host context.
+	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx())
+		opennova::inmatch::Server_BroadcastDialogLine(*ctx, p_dialog, static_cast<int16_t>(p_line));
 }
 
 Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gametext,
