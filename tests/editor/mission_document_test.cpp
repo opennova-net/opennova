@@ -17,6 +17,7 @@
 // picture reads (mission_reads.h); a second record of an SSN or a zone id inert; and an item's TYPE on
 // its symbol (the def catalog's refine_symbol).
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
@@ -755,7 +756,12 @@ int test_reads_and_symbols() {
 	for (const GraphSymbol &symbol : zones.symbols)
 		if (symbol.kind == ReferenceKind::MissionZone)
 			TEST_EXPECT(symbol.inert == (symbol.address == row_at(*document, MissionKind::Area, 1)));
+	// Undone, each state's first holders made again (MissionDocument::first_holders, per revision): none.
 	while (document->can_undo()) document->undo();
+	Extracted undone;
+	extract_from_document(*document, undone);
+	for (const GraphSymbol &symbol : undone.symbols)
+		if (symbol.kind == ReferenceKind::MissionEntity || symbol.kind == ReferenceKind::MissionZone) TEST_EXPECT(!symbol.inert);
 	// A snapshot serializes the document's bytes and refuses an edit.
 	const std::unique_ptr<DocumentBase> snapshot = document->snapshot();
 	TEST_EXPECT(snapshot && snapshot->serialize().text == bytes_of(*document) && !snapshot->apply(edit_of(EditOperation::Set, item2, "id", int64_t(5)), error));
@@ -922,11 +928,13 @@ int test_pool_check() {
 	const std::string repo = test_paths_repo_root(__FILE__);
 	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")));
 	// The minted mission with the armory (a building) placed among the items.
+	int64_t own_item = 0;
 	{
 		const std::vector<uint8_t> bytes = fixture_bytes();
 		bms::File file;
 		std::string message;
 		TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+		own_item = mission::kItemIdOffset + file.items[0].type_id;
 		file.items[0].type_id = 106101 - mission::kItemIdOffset;
 		std::vector<uint8_t> out;
 		TEST_EXPECT(bms::write(file, out, message));
@@ -941,6 +949,23 @@ int test_pool_check() {
 		            d.record_kind == k(MissionKind::Item) && d.message.find("building") != std::string::npos);
 	}
 	TEST_EXPECT(pool == 1);
+	// The record set back to its own item: the finding goes with the graph's next state and comes back
+	// with the undo (the check's findings are made once per state of the graph, not per composition).
+	editor_test::handle_to_end(session, request::open_document("missions/pools.bms"));
+	Document *mission = session.document_for("missions/pools.bms");
+	TEST_EXPECT(mission);
+	if (!mission) return 1;
+	const auto pools = [&]() {
+		size_t n = 0;
+		for (const Diagnostic &d : session.view().findings.diagnostics) n += d.code() == "mission.pool" ? 1 : 0;
+		return n;
+	};
+	editor_test::handle_to_end(session, request::edit_record(mission->path(), edit_of(EditOperation::Set,
+	                                                                                  row_at(*mission, MissionKind::Item, 0),
+	                                                                                  "item", own_item)));
+	TEST_EXPECT(session.last_edit_ok() && pools() == 0);
+	editor_test::handle_to_end(session, request::undo(mission->path()));
+	TEST_EXPECT(pools() == 1);
 	return 0;
 }
 
@@ -1025,6 +1050,9 @@ int test_retail() {
 	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
 	       stops = 0, stops_past = 0, text_refs = 0;
 	std::map<std::string, size_t> findings_by_code, text_by_key;
+	// What the extractions took (timed, not held to a bound): all of them, and the slowest with its rows.
+	double extraction_ms = 0, slowest_ms = 0;
+	size_t slowest_rows = 0;
 	const DocumentType &type = *document_type_for(AssetKind::Mission);
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
@@ -1049,7 +1077,14 @@ int test_retail() {
 			for (const MissionAreaRead &area : mission_areas(m)) zones.insert(area.id);
 			const size_t events = m.rows_of(MissionKind::Event).size(), markers = m.rows_of(MissionKind::Marker).size();
 			Extracted extracted;
+			const auto started = std::chrono::steady_clock::now();
 			extract_from_document(*document, extracted);
+			const double took = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+			extraction_ms += took;
+			if (took > slowest_ms) {
+				slowest_ms = took;
+				slowest_rows = document->rows().size();
+			}
 			for (const GraphEdge &edge : extracted.edges) {
 				const std::optional<int> number = opennova::strutil::parse_int(edge.value);
 				switch (edge.kind) {
@@ -1089,6 +1124,8 @@ int test_retail() {
 	            "past the markers), %zu text keys\n",
 	            missions, differing, entity_refs, entity_missing, zone_refs, zone_missing, event_refs, event_past, stops,
 	            stops_past, text_refs);
+	std::printf("retail: the %zu extractions took %.1f ms, the slowest %.1f ms (%zu rows)\n", missions, extraction_ms,
+	            slowest_ms, slowest_rows);
 	for (const auto &[key, count] : text_by_key) std::printf("  %s%%03i: %zu\n", key.c_str(), count);
 	for (const auto &[code, count] : findings_by_code) std::printf("  %s: %zu\n", code.c_str(), count);
 	// What the install holds, measured by this document (the design's emulation counted 3,272 entity

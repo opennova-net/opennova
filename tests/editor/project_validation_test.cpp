@@ -581,6 +581,23 @@ static int test_retail_validation() {
 			stats.files_reused, stats.files_loaded, again);
 	TEST_EXPECT(stats.files_validated == 0 && stats.files_loaded == 0 &&
 			stats.files_reused == files && graph.stats().files_extracted == 0);
+	// The rows composed again while nothing moved (the use checks among them; the editor composes
+	// them after every edit that validates a file), timed, not held to a bound.
+	{
+		size_t missions = 0;
+		for (const AssetEntry &asset : project.scan.entries) missions += asset.kind == AssetKind::Mission ? 1 : 0;
+		const auto start = std::chrono::steady_clock::now();
+		const size_t composed = project_rows({ project.paths, project.document, project.scan, open }, graph, cache).size();
+		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+		std::vector<Diagnostic> uses;
+		const auto checks_start = std::chrono::steady_clock::now();
+		run_use_checks(graph, cache, uses);
+		std::printf("retail: the rows composed again over %zu missions, nothing moved: %zu in %.2f ms, the use checks' "
+				"%zu in %.2f ms\n",
+				missions, composed, ms, uses.size(),
+				std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - checks_start).count());
+		TEST_EXPECT(composed == rows);
+	}
 	// S13 A6: every finding the install's files make, composed as the editor composes them (the
 	// project checks' among them, the render check's notes over the install's menus), keeps a
 	// table's row.

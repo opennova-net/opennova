@@ -1,8 +1,10 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <editor/assets/asset_kinds.h>
@@ -180,7 +182,19 @@ protected:
 	                   std::string &error) override;
 
 private:
+	// The first record of each SSN in the lookups' pool order and of each zone id in file order, over
+	// the rows of one state (its load generation and revision): what refine_symbol reads, made once
+	// per state rather than a walk of the rows per symbol (a memo filled inside a const query, the
+	// thread confinement of model/document.h).
+	struct FirstHolders {
+		bool made = false;
+		uint64_t load_generation = 0, revision = 0;
+		std::unordered_map<int32_t, NodeId> ssns, zones;
+	};
+	const FirstHolders &first_holders() const;
+
 	std::vector<MissionFinding> issue_codes_;
+	mutable FirstHolders first_holders_;
 };
 
 bool is_mission_kind(AssetKind kind);

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include <base/io/strutil.h>
@@ -556,41 +557,56 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 		// The lookups by SSN scan the pools in order and take the first row of the SSN [orig:
 		// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0]: a later one is
 		// found by none of them (the graph resolves to the first).
-		bool before = true;
-		for (const auto &other : rows()) {
-			if (other.get() == node) {
-				before = false;
-				continue;
-			}
-			if (!is_entity_kind(other->kind) || static_cast<const EntityRow &>(*other).native.id != entity.native.id)
-				continue;
-			const int theirs = lookup_order(other->kind), mine = lookup_order(node->kind);
-			if (theirs < mine || (theirs == mine && before)) {
-				facts.inert = true;
-				// An area check tests every organic and item of the SSN [orig: Entity_IsBmsRefInTriggerBounds
-				// @0x43e510]: this one too.
-				facts.inert_reason = node->kind == k(K::Organic) || node->kind == k(K::Item)
-				                             ? "another entity has this SSN, and the game's lookups by SSN find the first in "
-				                               "pool order (organics, items, buildings, markers); an area check tests this one too"
-				                             : "another entity has this SSN, and the game's lookups by SSN find the first in "
-				                               "pool order (organics, items, buildings, markers)";
-				return;
-			}
+		const FirstHolders &first = first_holders();
+		const auto found = first.ssns.find(entity.native.id);
+		if (found != first.ssns.end() && found->second != node->id) {
+			facts.inert = true;
+			// An area check tests every organic and item of the SSN [orig: Entity_IsBmsRefInTriggerBounds
+			// @0x43e510]: this one too.
+			facts.inert_reason = node->kind == k(K::Organic) || node->kind == k(K::Item)
+			                             ? "another entity has this SSN, and the game's lookups by SSN find the first in "
+			                               "pool order (organics, items, buildings, markers); an area check tests this one too"
+			                             : "another entity has this SSN, and the game's lookups by SSN find the first in "
+			                               "pool order (organics, items, buildings, markers)";
 		}
 		return;
 	}
 	if (node->kind == k(K::Area)) {
-		const AreaRow &area = static_cast<const AreaRow &>(*node);
-		for (const auto &other : rows()) {
-			if (other.get() == node) break;
-			if (other->kind != k(K::Area) || static_cast<const AreaRow &>(*other).native.id != area.native.id) continue;
-			// The resolver scans the table for the id [orig: EventTrigger_ResolveZoneTriggerRefs
-			// @0x453000]; which of two it takes is not read (D-MIS-5): the later is the one marked.
+		// The resolver scans the table for the id [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000];
+		// which of two it takes is not read (D-MIS-5): the later is the one marked.
+		const FirstHolders &first = first_holders();
+		const auto found = first.zones.find(static_cast<const AreaRow &>(*node).native.id);
+		if (found != first.zones.end() && found->second != node->id) {
 			facts.inert = true;
 			facts.inert_reason = "another area trigger has this zone id";
-			return;
 		}
 	}
+}
+
+const MissionDocument::FirstHolders &MissionDocument::first_holders() const {
+	if (first_holders_.made && first_holders_.load_generation == load_generation() && first_holders_.revision == revision())
+		return first_holders_;
+	FirstHolders made;
+	std::unordered_map<int32_t, int> order; // the pool order of each SSN's first holder so far
+	for (const auto &row : rows()) {
+		if (!row) continue;
+		if (is_entity_kind(row->kind)) {
+			const int32_t ssn = static_cast<const EntityRow &>(*row).native.id;
+			const int mine = lookup_order(row->kind);
+			const auto held = order.find(ssn);
+			if (held == order.end() || mine < held->second) {
+				order[ssn] = mine;
+				made.ssns[ssn] = row->id;
+			}
+		} else if (row->kind == k(K::Area)) {
+			made.zones.emplace(static_cast<const AreaRow &>(*row).native.id, row->id);
+		}
+	}
+	made.made = true;
+	made.load_generation = load_generation();
+	made.revision = revision();
+	first_holders_ = std::move(made);
+	return first_holders_;
 }
 
 // --- the references between the rows ------------------------------------------------------------------
