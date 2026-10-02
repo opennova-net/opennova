@@ -65,7 +65,11 @@ std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, b
 	if (strutil::to_lower(fs::path(name).filename().string()) == "avatars.def") {
 		return "avatar";
 	}
-	if (extension == ".bms" || extension == ".mis") {
+	// The game's one mission file [orig: Mission_LoadBMSFile @ 0x40f4e0; the mission list scans
+	// *.bms, *.npj and *.npz, MissionList_ScanAndBuildFromFiles @ 0x563170]. A `.mis` is the
+	// original mission editor's text, which the game never reads (no literal of it in the
+	// image): no kind here.
+	if (extension == ".bms") {
 		return "mission";
 	}
 	if (extension == ".trn") {
@@ -130,7 +134,7 @@ std::string normalize_kind(const std::string &kind) {
 	if (key.empty() || key == "*" || key == "all") {
 		return "";
 	}
-	if (key == "bms" || key == "mis") {
+	if (key == "bms") {
 		return "mission";
 	}
 	if (key == "trn") {
