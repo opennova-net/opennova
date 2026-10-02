@@ -96,6 +96,9 @@ public:
 	// pans.
 	void set_place(int64_t item) { place_ = item; }
 	int64_t place() const { return place_; }
+	// The Turn snap (the toolbar's): a turned entity's heading snaps to this, degrees (0: whole
+	// degrees; Alt turns freely); negative, the frame's own (15 while the snap is on, else 0).
+	void set_turn(float degrees) { turn_ = degrees; }
 
 private:
 	void keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
@@ -115,6 +118,7 @@ private:
 	std::vector<NodeAddress> nudged_;
 	double nudge_east_ = 0.0, nudge_north_ = 0.0, nudge_up_ = 0.0;
 	int64_t place_ = 0;
+	float turn_ = -1.0f;
 };
 
 } // namespace opennova::editor

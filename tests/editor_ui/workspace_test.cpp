@@ -1786,7 +1786,6 @@ void test_preview_model_gestures() {
 			"the menu made active mid-drag: the drag's one end, for the model");
 	ui.mouse(at.x + 60.0f, at.y + 20.0f);
 	ui.button(false);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
 	run.settle();
 	CHECK(run.take().empty(), "letting go raises nothing");
 }
@@ -1865,8 +1864,8 @@ void test_preview_model_pane_input() {
 }
 
 // The mission's view in the Document window over a real session, its devices the Shell's (ADR 0046
-// S14): the toolbar's Frame and Top raise SetViewports of the camera and nothing else; a marquee over
-// the picture (the areas' marks off) is one SelectRecord of every entity in the box, across the
+// S14): the toolbar's Frame and Top each raise one EditInViewport (the session plans the camera's
+// SetViewport over its own context, as for Ground) and nothing else; a marquee over the picture (the areas' marks off) is one SelectRecord of every entity in the box, across the
 // pools, which the session holds and the Inspector shows as their shared form (E9), where a change
 // of Team is one batch over every one of them, ended once.
 void test_mission_view_input() {
@@ -1913,15 +1912,14 @@ void test_mission_view_input() {
 	};
 	run.camera(path, R"({"kind": "mission", "camera": {"distance": 5000}})");
 	std::vector<EditorRequest> raised = press("Frame");
-	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size() &&
-	              viewport->camera().distance < 5000.0f,
-	      "Frame: SetViewports of the camera alone, the entities framed");
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport && viewport->camera().distance < 5000.0f,
+	      "Frame: one EditInViewport the session plans (a SetViewport of the camera), the entities framed");
 	raised = press("Top");
-	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size() &&
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport &&
 	              viewport->camera().pitch >= kOrbitPitchLimit - 1e-4f,
-	      "Top: a SetViewport, the camera straight down");
+	      "Top: one EditInViewport, the camera straight down");
 	raised = press("Frame");
-	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size(), "framed again");
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport, "framed again");
 	// The areas' marks off: a box over the whole picture takes the entities alone.
 	run.camera(path, R"({"kind": "mission", "options": {"marks": {"areas": false}}})");
 	run.settle();
@@ -1970,6 +1968,104 @@ void test_mission_view_input() {
 		teams = teams && batch->edits[i].field == "team" && v.documents.selection.holds(batch->edits[i].address);
 	CHECK(batch && teams && count_of_kind(raised, EditorRequestKind::EndEdit) >= 1 && mission->dirty(),
 	      "a change of Team: one batch over every selected record, ended, applied");
+}
+
+// The mission's view over a device that answers a ground (z = 3 + x / 10; S14 review M2, M8), the
+// session's viewports given the same devices: the canvas reads the device from its first frame, so a
+// drag of an entity with Stick on (the default) keeps its height over that ground where it goes, and
+// an area's mark stands on the ground, where a click selects it; the toolbar's Ground, an entity
+// selected and lifted off the ground, is one EditInViewport the session plans over its own context,
+// the entity set down on the ground.
+void test_mission_view_ground() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_ground");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(device != nullptr, "the mission's device");
+	if (!device) return;
+	const auto ground = [](double x, double) { return 3.0 + x / 10.0; };
+	device->ground = ground;
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	CHECK(viewport && viewport->ground() && device->width > 0, "the device's ground reported, the picture drawn");
+	if (!viewport) return;
+	const auto over = [&](const MissionEntityMark &entity) { return entity.z - ground(entity.x, entity.y); };
+	// An item's mark the canvas takes at its pixel (the marks as the device's ground places them).
+	std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
+	int item = -1;
+	for (size_t i = 0; i < marks.size() && item < 0; ++i)
+		if (marks[i].shown && std::string(marks[i].kind) == "item" && pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+			item = int(i);
+	CHECK(item >= 0, "an item's mark on the picture");
+	if (item < 0) return;
+	const NodeAddress record = marks[size_t(item)].record;
+	const double clearance = over(*viewport->scene().entity(record.row)), x0 = viewport->scene().entity(record.row)->x;
+	// Dragged 60 pixels across, Stick on.
+	const ImVec2 from(device->origin.x + marks[size_t(item)].x, device->origin.y + marks[size_t(item)].y);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	ui.mouse(from.x + 20.0f, from.y);
+	ui.mouse(from.x + 40.0f, from.y);
+	ui.mouse(from.x + 60.0f, from.y);
+	ui.button(false);
+	run.settle();
+	run.take();
+	const MissionEntityMark *moved = viewport->scene().entity(record.row);
+	CHECK(moved && std::fabs(moved->x - x0) > 1.0 && std::fabs(over(*moved) - clearance) < 1e-3,
+	      "a drag with Stick: the entity's height over the device's ground kept where it went");
+	// An area's mark on the ground at its middle: a click there selects it.
+	marks = viewport->marks(device->width, device->height, device);
+	bool area = false;
+	for (size_t i = 0; i < marks.size() && !area; ++i) {
+		if (marks[i].area < 0 || !marks[i].shown || pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		ui.mouse(device->origin.x + marks[i].x, device->origin.y + marks[i].y);
+		ui.button(true);
+		ui.button(false);
+		run.settle();
+		run.take();
+		CHECK(v.documents.selection.primary == marks[i].record, "a click at the area's mark on the ground selects it");
+		area = true;
+	}
+	CHECK(area, "an area's mark on the picture");
+	// Ground: the item selected and lifted 25 m, the toolbar's Ground sets it down.
+	session.handle(request::select_record(path, record));
+	set_field(session, *mission, record, "z", 25.0 + ground(moved->x, moved->y));
+	run.settle();
+	run.take();
+	const ImGuiWindow *column = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+	CHECK(column != nullptr, "the viewport column beside the outline, drawn");
+	if (!column) return;
+	ui.activate(item_id(column->ID, { "Ground" }));
+	run.settle();
+	const std::vector<EditorRequest> raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::EditInViewport) == 1, "Ground: one EditInViewport");
+	const MissionEntityMark *grounded = viewport->scene().entity(record.row);
+	CHECK(grounded && std::fabs(grounded->z - ground(grounded->x, grounded->y)) < 1e-3, "the entity set down on the ground");
 }
 
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
@@ -2386,6 +2482,7 @@ void run_workspace_tests() {
 	test_preview_model_gestures();
 	test_preview_model_pane_input();
 	test_mission_view_input();
+	test_mission_view_ground();
 	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();

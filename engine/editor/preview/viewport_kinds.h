@@ -32,7 +32,7 @@ struct ViewportFeed {
 // the asset kinds' tables are): where it is drawn; whether it shows the document as the game would
 // read it were it saved now (its bytes written and read back, so a document that cannot be written
 // shows nothing: the menu's and the model's) or the document as it stands (a text's in the script
-// device, S13 V10; the mission's rows, to come); whether it shows one row of its document, the
+// device, S13 V10; the mission's rows, S14); whether it shows one row of its document, the
 // selection's (a menu's screen: its target moves only when a row of the document is selected and goes
 // with that row); whether its picture made again waits for a gesture open in its document to end (S13
 // V8: a scene built anew, the model's, which the device keeps while the overlays follow the drag; a

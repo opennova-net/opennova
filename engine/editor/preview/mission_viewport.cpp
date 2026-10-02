@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_map>
 #include <variant>
 
 #include <base/io/bam.h>
@@ -298,10 +299,10 @@ void MissionViewport::report_(const ViewportDeviceReport &report) {
 	ground_ = report.surface;
 }
 
-int MissionViewport::mark_of_(const std::vector<MissionMark> &marks, NodeId id) {
-	for (size_t i = 0; i < marks.size(); ++i)
-		if (marks[i].record.row == id) return int(i);
-	return -1;
+int MissionViewport::mark_of_(const std::vector<MissionMark> &marks, NodeId id) const {
+	// The marks are made in the scene's order (mission_marks): a row's index through the scene's maps.
+	const int index = scene_.mark_index(id);
+	return index >= 0 && size_t(index) < marks.size() && marks[size_t(index)].record.row == id ? index : -1;
 }
 
 MissionCanvasFrame MissionViewport::canvas_frame(const ViewportContext &context) const {
@@ -630,6 +631,8 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 			return false;
 		}
 		std::vector<Edit> edits;
+		// Each item's anchor read once (its model parsed once), however many entities draw it.
+		std::unordered_map<int64_t, double> anchors;
 		for (const NodeId row : rows) {
 			const MissionEntityMark *entity = scene_.entity(row);
 			if (!entity) {
@@ -641,10 +644,14 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 				error = "The picture has no ground under record " + std::to_string(row) + " (no terrain built there).";
 				return false;
 			}
-			MissionItemFacts facts;
-			std::string ignored;
-			mission_item_facts(context.input.view, entity->item, facts, ignored);
-			const double z = ground - facts.anchor[2];
+			auto anchor = anchors.find(entity->item);
+			if (anchor == anchors.end()) {
+				MissionItemFacts facts;
+				std::string ignored;
+				mission_item_facts(context.input.view, entity->item, facts, ignored);
+				anchor = anchors.emplace(entity->item, facts.anchor[2]).first;
+			}
+			const double z = ground - anchor->second;
 			// Where its 16.16 word moves.
 			if (bms::to_fixed_16_16(z) != bms::to_fixed_16_16(entity->z))
 				edits.push_back(set_of(NodeAddress{ row, entity->kind, 0 }, "z", z));

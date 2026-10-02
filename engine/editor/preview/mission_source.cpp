@@ -31,6 +31,8 @@ MissionEntityMark mark_of(const MissionEntityRead &read) {
 	mark.yaw = read.yaw;
 	mark.roll = read.roll;
 	mark.team = read.team;
+	mark.group = read.group;
+	mark.attributes = read.attributes;
 	return mark;
 }
 

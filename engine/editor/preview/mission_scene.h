@@ -36,9 +36,18 @@ struct MissionEntityMark {
 	double x = 0.0, y = 0.0, z = 0.0;
 	int pitch = 0, yaw = 0, roll = 0;
 	int team = 0;
+	// What the placement reads of it beside its item: its group and its attributes (bmsi_attributes:
+	// NoShadow, Reflective, ... [orig: Entity_SpawnFromBMSRecord @ 0x40e9f0]).
+	int group = 0;
+	uint32_t attributes = 0;
 	PreviewVec3 at; // its position in the presentation frame (the camera's)
-	uint32_t stamp = 0; // moves when its transform or its item does (the scene's serial then)
+	uint32_t stamp = 0; // moves when its transform, its item, its group or its attributes do (the scene's serial then)
 };
+// Whether two reads of an entity place alike beside the transform: the same item, group and
+// attributes (a difference is placed again, as another item is).
+inline bool mission_entity_places_alike(const MissionEntityMark &a, const MissionEntityMark &b) {
+	return a.item == b.item && a.group == b.group && a.attributes == b.attributes;
+}
 struct MissionAreaMark {
 	NodeId row = 0;
 	NodeKind kind = 0;
@@ -70,7 +79,7 @@ bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b);
 inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b) { return !(a == b); }
 
 // What a patch found changed, in the picture's terms: a header field the device reads; an entity
-// added, removed or with another item (the device places again what differs); an entity's
+// added, removed or with another item, group or attributes (the device places again what differs); an entity's
 // transform (the device moves it in place); an area, a path, a team, a name (the overlays alone).
 struct MissionSceneDelta {
 	bool header = false;
@@ -115,6 +124,9 @@ public:
 	const MissionEntityMark *entity(NodeId row) const;
 	const MissionAreaMark *area(NodeId row) const;
 	const MissionPathMark *path(NodeId row) const;
+	// A row's mark among mission_marks' (every entity in the scene's order, then every area): an
+	// entity's its index, an area's the entities' count plus its own; -1 for neither.
+	int mark_index(NodeId row) const;
 	// How many entities of each pool.
 	size_t count(MissionPool pool) const;
 	// Moves with every change the scene took.

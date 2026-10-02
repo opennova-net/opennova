@@ -56,10 +56,12 @@ struct Source final : MissionSceneSource {
 		for (const MissionPathMark &path : path_rows)
 			if (!path.stops.empty()) out.push_back(path);
 	}
+	// One row's read, as the document's is: it knows no place in a pool (its index 0).
 	bool entity(NodeId row, MissionEntityMark &out) const override {
 		for (const MissionEntityMark &each : entity_rows)
 			if (each.row == row) {
 				out = each;
+				out.index = 0;
 				return true;
 			}
 		return false;
@@ -68,6 +70,7 @@ struct Source final : MissionSceneSource {
 		for (const MissionAreaMark &each : area_rows)
 			if (each.row == row) {
 				out = each;
+				out.index = 0;
 				return true;
 			}
 		return false;
@@ -110,14 +113,15 @@ Source make_source() {
 	source.head.start_time = 720;
 	source.entity_rows = {
 		entity_of(10, kItemKind, MissionPool::Item, 0, 100300, 0.0, 0.0, 0.0, 0, 1),
-		entity_of(11, kBuildingKind, MissionPool::Building, 0, 105004, 100.0, 0.0, 0.0, 90, 0),
+		entity_of(11, kBuildingKind, MissionPool::Building, 7, 105004, 100.0, 0.0, 0.0, 90, 0),
 		entity_of(12, kMarkerKind, MissionPool::Marker, 0, 4093, 0.0, 100.0, 0.0, 0, 2),
-		entity_of(13, kOrganicKind, MissionPool::Organic, 0, 110001, -50.0, -50.0, 2.0, 180, 2),
+		entity_of(13, kOrganicKind, MissionPool::Organic, 2, 110001, -50.0, -50.0, 2.0, 180, 2),
 	};
 	MissionAreaMark area;
 	area.row = 20;
 	area.kind = kAreaKind;
 	area.zone = 5;
+	area.index = 3;
 	area.min[0] = 10.0;
 	area.max[0] = 30.0;
 	area.min[1] = 10.0;
@@ -190,6 +194,16 @@ int test_scene() {
 	source.entity_at(10)->team = 2;
 	delta = scene.patch(changed({ 10 }), source);
 	TEST_EXPECT(delta.overlays && !delta.moved && !delta.reshaped && scene.entity(10)->stamp == 1 && scene.rows_read() == 10);
+	// Its attributes or its group (what the placement reads beside the item): a reshape, its stamp
+	// moved. A row's read keeps its place in its pool (the whole read's: a one-row read knows none).
+	source.entity_at(11)->attributes = 0x01000000u; // NoShadow
+	delta = scene.patch(changed({ 11 }), source);
+	TEST_EXPECT(delta.reshaped && !delta.moved && scene.entity(11)->attributes == 0x01000000u && scene.entity(11)->stamp == 5);
+	source.entity_at(11)->group = 3;
+	delta = scene.patch(changed({ 11 }), source);
+	TEST_EXPECT(delta.reshaped && scene.entity(11)->group == 3 && scene.entity(11)->stamp == 6);
+	TEST_EXPECT(scene.entity(11)->index == 7 && scene.entity(13)->index == 2);
+	TEST_EXPECT(scene.mark_index(11) == 1 && scene.mark_index(20) == 4 && scene.mark_index(30) == -1);
 	const size_t read = scene.rows_read();
 	const uint64_t serial = scene.serial();
 	delta = scene.patch(changed({ kEventRow }), source);
@@ -204,7 +218,7 @@ int test_scene() {
 	// listed path losing its stops is dropped.
 	source.area_rows[0].max[0] = 40.0;
 	delta = scene.patch(changed({ 20 }), source);
-	TEST_EXPECT(delta.overlays && !delta.moved && scene.area(20)->max[0] == 40.0);
+	TEST_EXPECT(delta.overlays && !delta.moved && scene.area(20)->max[0] == 40.0 && scene.area(20)->index == 3);
 	source.path_rows[1].stops = { 13 };
 	delta = scene.patch(changed({ 31 }), source);
 	TEST_EXPECT(delta.overlays && scene.paths().size() == 2 && scene.path(31) && scene.paths()[1].index == 4);

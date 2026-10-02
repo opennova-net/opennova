@@ -148,6 +148,7 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 
 void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext &context, CanvasRequests &out) {
 	frame_ = static_cast<const MissionViewport &>(viewport).canvas_frame(context);
+	if (turn_ >= 0.0f) frame_.turn_snap = turn_;
 	gesture_.frame(subject_of(frame_), out);
 	// A nudge is of the selection it began on.
 	if (gesture_.nudging() && nudged_ != frame_.records) gesture_.end(out);
@@ -344,6 +345,9 @@ void MissionCanvas::release_(CanvasRequests &out) {
 			drop.kind = ViewportKind::Mission;
 			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(drop)));
 		}
+	} else if (!gesture_.dragging() && grab_.what == MissionGrab::What::Handle && grab_.pick < 0) {
+		// A tap on the primary's yaw, height or edge handle (no mark under it): nothing changes, the
+		// selection and its handles stand.
 	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current) {
 		// A click: the mark under it selected, joined as the keys say; on nothing, nothing selected.
 		if (grab_.pick >= 0 && size_t(grab_.pick) < frame_.marks.size())

@@ -57,6 +57,7 @@
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
+#include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewport_overlay.h>
 #include <editor/preview/viewports.h>
@@ -1294,8 +1295,29 @@ int test_camera_ray_and_text() {
 
 // --- the mission's canvas over a real session (ADR 0046 S14) ------------------------------------
 
+// A device that answers a ground (the height at a mission point) and draws nothing: what a mission
+// canvas reads of its device.
+struct GroundDevice final : ViewportDevice {
+	std::function<double(double x, double y)> ground;
+	void draw(const ViewportPicture &) override {}
+	void take(ViewportAction, const ViewportModel &, const SessionView &, const PreviewClock &,
+			ViewportDeviceReport &report) override {
+		report.surface = bool(ground);
+	}
+	void tick(const ViewportModel &, const PreviewClock &) override {}
+	bool ground_at(double x, double y, double &height) const override {
+		if (!ground) return false;
+		height = ground(x, y);
+		return true;
+	}
+	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
+		return ground && editor_test::ground_crossing(ground, from, to, point);
+	}
+};
+
 // A session over a project holding the minted mission, the mission open and its viewport drawn at
 // 640 x 480, every request the canvas raises served through the session as the windows serve them.
+// `device` (null: none) is the device its context carries, as the view's carries the Shell's.
 struct MissionRig {
 	editor_test::TempProjectDir dir{ "opennova_editor_canvas_mission" };
 	NoProcess platform;
@@ -1307,6 +1329,7 @@ struct MissionRig {
 	static constexpr int width = 640, height = 480;
 	MissionCanvas canvas;
 	Recorder out;
+	ViewportDevice *device = nullptr;
 
 	bool open() {
 		session.handle(request::new_project(dir.file("project"), "Canvas Mission"));
@@ -1335,7 +1358,7 @@ struct MissionRig {
 	}
 	ViewportContext context() {
 		return ViewportContext{ ViewportInput{ view, session.viewports().clock(), document, ChangeClass::None }, width,
-			height, 0.0f, nullptr };
+			height, 0.0f, device };
 	}
 	static CanvasInput at(float x, float y, CanvasKeys keys = CanvasKeys()) {
 		CanvasInput in;
@@ -1348,7 +1371,7 @@ struct MissionRig {
 		return in;
 	}
 	// The marks as the picture shows them now.
-	std::vector<MissionMark> marks() { return follow()->marks(width, height, nullptr); }
+	std::vector<MissionMark> marks() { return follow()->marks(width, height, device); }
 	// The shown entity marks a press at their own pixel takes (the front-most there), in order.
 	std::vector<int> pickable() {
 		const std::vector<MissionMark> shown = marks();
@@ -1797,6 +1820,99 @@ int test_mission_place() {
 	return 0;
 }
 
+// The primary's handles (S14 review m10, m1): a tap on its yaw handle (no travel, no mark under it)
+// changes nothing, the selection and its handles standing; with the Turn snap set to 90 a drag of the
+// yaw handle round to the other side lands the yaw on a multiple of 90.
+int test_mission_handle_tap_and_turn() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open());
+	const Selection &selection = rig.view.documents.selection;
+	// An entity whose yaw handle stands over no mark.
+	const MissionViewport *viewport = rig.follow();
+	float hx = 0.0f, hy = 0.0f;
+	MissionMark held;
+	bool found = false;
+	for (const int pick : rig.pickable()) {
+		const MissionMark mark = rig.marks()[size_t(pick)];
+		TEST_EXPECT(rig.serve(rig.click(mark.x, mark.y)) == 1 && selection.primary == mark.record);
+		PreviewVec3 at;
+		const std::vector<MissionMark> marks = rig.marks();
+		if (!viewport->handle_at(marks[size_t(pick)], MissionHandle::Yaw, at) ||
+				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) ||
+				pick_mission_mark(marks, hx, hy) >= 0 || hx < 1.0f || hy < 1.0f || hx > MissionRig::width - 1.0f ||
+				hy > MissionRig::height - 1.0f)
+			continue;
+		held = mark;
+		found = true;
+		break;
+	}
+	TEST_EXPECT(found);
+	if (!found) return 1;
+	TEST_EXPECT(rig.click(hx, hy).empty() && selection.primary == held.record && selection.records.size() == 1);
+	// Turned to the other side of its anchor, the Turn snap 90.
+	rig.canvas.set_turn(90.0f);
+	const std::vector<Request> requests =
+			rig.drag(CanvasPoint{ hx, hy }, CanvasPoint{ 2.0f * held.x - hx, 2.0f * held.y - hy }, 3);
+	uint64_t gesture = 0;
+	size_t count = 0;
+	const std::vector<Edit> last = batches(requests, gesture, count);
+	TEST_EXPECT(count >= 1 && last.size() == 1 && last[0].field == "yaw");
+	if (last.size() == 1 && std::holds_alternative<int64_t>(last[0].value))
+		TEST_EXPECT(std::get<int64_t>(last[0].value) % 90 == 0);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_handle_tap_and_turn passed\n");
+	return 0;
+}
+
+// Over a device that answers a ground (z = 3 + x / 10; S14 review M2): a move of an entity with
+// Stick keeps its height over that ground where it goes, the arrows' nudge too, and an area's mark
+// stands on the ground at its middle (not at its z_min), where a click selects it.
+int test_mission_ground_on_canvas() {
+	GroundDevice ground;
+	ground.ground = [](double x, double) { return 3.0 + x / 10.0; };
+	MissionRig rig;
+	rig.device = &ground;
+	TEST_EXPECT(rig.open());
+	const auto over = [&](const MissionEntityMark &entity) { return entity.z - ground.ground(entity.x, entity.y); };
+	std::vector<int> picks = rig.pickable();
+	TEST_EXPECT(!picks.empty());
+	if (picks.empty()) return 1;
+	MissionMark mark = rig.marks()[size_t(picks[0])];
+	const double clearance = over(*rig.entity(mark.record)), x0 = rig.entity(mark.record)->x;
+	CanvasKeys alt;
+	alt.alt = true;
+	std::vector<Request> requests = rig.drag(CanvasPoint{ mark.x, mark.y }, CanvasPoint{ mark.x + 60.0f, mark.y }, 3, alt);
+	TEST_EXPECT(rig.serve(requests) == requests.size());
+	const MissionEntityMark *moved = rig.entity(mark.record);
+	TEST_EXPECT(moved && std::fabs(moved->x - x0) > 1.0 && std::fabs(over(*moved) - clearance) < 1e-3);
+	// The arrows: a metre east (or along the camera's axis), its height over the ground kept.
+	const double before = over(*rig.entity(mark.record));
+	rig.step(MissionRig::keys_at(1, 0, true));
+	rig.step(MissionRig::keys_at(0, 0, false));
+	TEST_EXPECT(rig.serve(rig.out.take()) >= 1 && std::fabs(over(*rig.entity(mark.record)) - before) < 1e-3);
+	// An area's mark on the ground at its middle: a click there selects it (where nothing stands in
+	// front of it).
+	const std::vector<MissionMark> marks = rig.marks();
+	bool area = false;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		if (marks[i].area < 0 || !marks[i].shown) continue;
+		const MissionAreaMark &held = rig.follow()->scene().areas()[size_t(marks[i].area)];
+		const double mx = (held.min[0] + held.max[0]) * 0.5, my = (held.min[1] + held.max[1]) * 0.5;
+		double anchor[3];
+		preview_to_mission(marks[i].at, anchor);
+		TEST_EXPECT(std::fabs(anchor[2] - ground.ground(mx, my)) < 1e-3);
+		if (pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		requests = rig.click(marks[i].x, marks[i].y);
+		TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && requests[0].record == marks[i].record);
+		area = true;
+		break;
+	}
+	TEST_EXPECT(area);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_ground_on_canvas passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -1821,6 +1937,10 @@ int main() {
 	if (test_model_canvas() != 0)
 		return 1;
 	if (test_mission_canvas() != 0)
+		return 1;
+	if (test_mission_handle_tap_and_turn() != 0)
+		return 1;
+	if (test_mission_ground_on_canvas() != 0)
 		return 1;
 	if (test_mission_marquee() != 0)
 		return 1;

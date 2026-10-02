@@ -143,8 +143,8 @@ private:
 	// The mission document a planner works over: the one at its path while the picture is current;
 	// null, with why, otherwise.
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
-	// The mark of the record whose row is `id` (-1: none shown).
-	static int mark_of_(const std::vector<MissionMark> &marks, NodeId id);
+	// The mark of the record whose row is `id` among `marks` (made from the scene now; -1: none).
+	int mark_of_(const std::vector<MissionMark> &marks, NodeId id) const;
 	// The records a drag of `record` by `handle` takes with it, as pressed: the selected entities (and
 	// areas, for a move) when it is selected, itself alone when not; `grabbed` its place among them.
 	std::vector<MissionPressed> taken_(const ViewportContext &context, const Document &document,

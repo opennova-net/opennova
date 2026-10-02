@@ -1,8 +1,8 @@
 #pragma once
 
-// STAGED, NOT WIRED: the mission's picture (the view lane's preview/mission_scene, ViewportKind::
-// Mission) is this header's live owner, reading each entity, area and path through it and writing a
-// drag back through the field ids below; until it lands, editor_mission_document reads it.
+// The mission's picture (preview/mission_scene, read through preview/mission_source; ViewportKind::
+// Mission) reads each entity, area and path through this header and writes a drag back through the
+// field ids below.
 
 #include <cstdint>
 #include <string>
@@ -14,7 +14,8 @@
 namespace opennova::editor {
 
 // What the mission's picture reads of a mission document (ADR 0046 S14), typed and read only: each
-// entity with its address, pool, item, SSN, position and eulers; each area trigger with its box; each
+// entity with its address, pool, item, SSN, position and eulers, its group, team and attributes (which
+// the placement reads); each area trigger with its box; each
 // used waypoint path with its stops as the addresses of the markers they name. A gizmo writes back
 // through the field ids below (Sets under one gesture); nothing else is asked of the document.
 
@@ -40,6 +41,7 @@ struct MissionEntityRead {
 	int waypoint_id = 0;                  // the path's number (0 none, 123..127 a command)
 	int wp_number = 0;
 	int team = 0;
+	uint32_t attributes = 0; // the record's bmsi_attributes (NoShadow, Reflective, ...)
 };
 
 struct MissionAreaRead {

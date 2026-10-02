@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <unordered_set>
 
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
@@ -26,10 +27,6 @@ uint32_t pool_rgb(MissionPool pool) {
 	case MissionPool::Organic: return kMissionOrganicRgb;
 	}
 	return kMissionItemRgb;
-}
-
-bool selected_row(const MissionOverlayInput &in, NodeId row) {
-	return in.selected_rows && std::find(in.selected_rows->begin(), in.selected_rows->end(), row) != in.selected_rows->end();
 }
 
 } // namespace
@@ -98,10 +95,17 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 	const OrbitCamera &camera = *in.camera;
 	const MissionScene &scene = *in.scene;
 	const std::vector<MissionMark> &marks = *in.marks;
-	const auto is_selected = [&](int mark) {
-		return mark == in.primary ||
-				(in.selected && std::find(in.selected->begin(), in.selected->end(), mark) != in.selected->end());
-	};
+	// Each mark's selection and each selected row, looked up once (a selection of thousands is drawn
+	// every frame).
+	std::vector<char> selected_marks(marks.size(), 0);
+	if (in.primary >= 0 && size_t(in.primary) < marks.size()) selected_marks[size_t(in.primary)] = 1;
+	if (in.selected)
+		for (const int mark : *in.selected)
+			if (mark >= 0 && size_t(mark) < marks.size()) selected_marks[size_t(mark)] = 1;
+	const auto is_selected = [&](int mark) { return mark >= 0 && size_t(mark) < marks.size() && selected_marks[size_t(mark)]; };
+	std::unordered_set<NodeId> selected_rows;
+	if (in.selected_rows) selected_rows.insert(in.selected_rows->begin(), in.selected_rows->end());
+	const auto selected_row = [&](NodeId row) { return selected_rows.count(row) != 0; };
 	const auto line = [&](const PreviewVec3 &a, const PreviewVec3 &b, uint32_t rgb, float thickness) {
 		CanvasPoint from, to;
 		if (mission_project_segment(camera, in.width, in.height, a, b, from, to)) list.line(from, to, rgb, thickness);
@@ -111,12 +115,12 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 	if (in.options->paths) {
 		for (const MissionPathMark &path : scene.paths()) {
 			std::vector<PreviewVec3> stops;
-			bool selected = selected_row(in, path.row);
+			bool selected = selected_row(path.row);
 			for (const NodeId stop : path.stops) {
 				const MissionEntityMark *marker = stop ? scene.entity(stop) : nullptr;
 				if (!marker) continue;
 				stops.push_back(marker->at);
-				selected = selected || selected_row(in, marker->row);
+				selected = selected || selected_row(marker->row);
 			}
 			if (stops.size() < 2) continue;
 			const uint32_t rgb = (path.flags & uint32_t(bms::WaypointFlags::BlueTeam)) ? kMissionBlueRgb

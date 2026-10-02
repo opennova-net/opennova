@@ -104,7 +104,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 				continue;
 			}
 			const MissionEntityMark &was = *found->second;
-			if (was.item != mark.item) delta.reshaped = true;
+			if (!mission_entity_places_alike(was, mark)) delta.reshaped = true;
 			else if (!same_transform(was, mark)) delta.moved = true;
 			else mark.stamp = was.stamp; // as it was: its stamp stands
 			if (was.team != mark.team) delta.overlays = true;
@@ -135,9 +135,12 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			if (!source.entity(row, read)) continue;
 			++rows_read_;
 			MissionEntityMark &held = entities_[found->second];
-			const bool item = held.item != read.item, moved = !same_transform(held, read), team = held.team != read.team;
+			const bool item = !mission_entity_places_alike(held, read), moved = !same_transform(held, read),
+					   team = held.team != read.team;
 			read.at = mission_scene_point(read.x, read.y, read.z);
 			read.stamp = item || moved ? uint32_t(serial_ + 1) : held.stamp;
+			// Its place in its pool is the whole read's (a row's read alone does not know it).
+			read.index = held.index;
 			held = read;
 			delta.reshaped = delta.reshaped || item;
 			delta.moved = delta.moved || moved;
@@ -147,6 +150,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			MissionAreaMark read;
 			if (!source.area(row, read)) continue;
 			++rows_read_;
+			read.index = areas_[area_found->second].index;
 			areas_[area_found->second] = read;
 			delta.overlays = true;
 			touched = true;
@@ -201,6 +205,12 @@ const MissionAreaMark *MissionScene::area(NodeId row) const {
 const MissionPathMark *MissionScene::path(NodeId row) const {
 	const auto found = path_rows_.find(row);
 	return found == path_rows_.end() ? nullptr : &paths_[found->second];
+}
+
+int MissionScene::mark_index(NodeId row) const {
+	if (const auto found = entity_rows_.find(row); found != entity_rows_.end()) return int(found->second);
+	if (const auto found = area_rows_.find(row); found != area_rows_.end()) return int(entities_.size() + found->second);
+	return -1;
 }
 
 size_t MissionScene::count(MissionPool pool) const {

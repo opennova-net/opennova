@@ -31,12 +31,14 @@ void set_options(Workspace &workspace, const MissionViewport &mission, const Mis
 			mission.path(), viewport_change(ViewportKind::Mission, "options", mission_options_to_json(options))));
 }
 
-// A camera command (frame, top) over the selection, through the viewport's planner.
-void camera_command(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
-		const char *name) {
-	CanvasWindowRequests requests(workspace);
-	std::string error;
-	mission.command(context, name, {}, requests, error);
+// A command (frame, top, ground) over the selection, as an EditInViewport the session plans over its
+// own context (the viewport's device, the selection): a refusal is the request's outcome, which the
+// editor reports, never dropped here.
+void viewport_command(Workspace &workspace, const MissionViewport &mission, const char *name) {
+	ViewportCommand command;
+	command.name = name;
+	command.kind = ViewportKind::Mission;
+	workspace.request(request::edit_in_viewport(mission.path(), std::move(command)));
 }
 
 } // namespace
@@ -66,7 +68,11 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	tools_->toolbar(workspace, mission, context);
 	snap = kMissionSnaps[std::clamp(tools_->snap, 0, 4)];
 	context.snap = snap;
-	if (CanvasHalf *canvas_half = half()) static_cast<MissionCanvas *>(canvas_half)->set_place(tools_->place);
+	if (CanvasHalf *canvas_half = half()) {
+		auto *canvas = static_cast<MissionCanvas *>(canvas_half);
+		canvas->set_place(tools_->place);
+		canvas->set_turn(kMissionTurns[std::clamp(tools_->turn, 0, 4)]);
+	}
 	// The notes under the canvas: a line while the picture lacks a file.
 	const float notes = mission.missing().empty() ? 0.0f : ImGui::GetFrameHeightWithSpacing();
 	// A Files row let go over the picture: a drop of the file there (a model; the viewport finds its
@@ -162,9 +168,9 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		ImGui::EndPopup();
 	}
 	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, a double click)."))
-		camera_command(workspace, mission, context, "frame");
+		viewport_command(workspace, mission, "frame");
 	if (ui_kit::tool(row, "Top", true, "Look straight down over the camera's target, north up."))
-		camera_command(workspace, mission, context, "top");
+		viewport_command(workspace, mission, "top");
 	// The Place tool: an item picked, then each click on the picture places one of it there.
 	const bool edits = context.editable();
 	if (place == 0) {
@@ -188,7 +194,7 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 				!edits ? context.not_editable()
 				: mission.ground() ? std::string("Set each selected entity down on the ground under it.")
 								   : std::string("The picture has no ground yet (its terrain is not built).")))
-		camera_command(workspace, mission, context, "ground");
+		viewport_command(workspace, mission, "ground");
 	// Play mission: the build, then the game started in this mission (the session's own rule for
 	// the active document, play_mission_for: Ctrl+F5 is the same request).
 	const SessionView &view = workspace.view();
@@ -229,9 +235,11 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 
 void MissionViewportView::Tools::time_popup(MissionViewportOptions &options, const MissionViewport &mission) {
 	bool own = options.time < 0.0;
+	// The header's start time is hours in 8.8 fixed point (the game shifts it into its 8.24 clock
+	// [orig: Game_StartMission @ 0x525371]): 0x0C80 is 12:30.
 	const int start = mission.scene().header().start_time;
 	char label[64];
-	std::snprintf(label, sizeof(label), "The mission's start time (%02d:%02d)", (start >> 8) & 0xFF, start & 0xFF);
+	std::snprintf(label, sizeof(label), "The mission's start time (%02d:%02d)", (start >> 8) & 0xFF, ((start & 0xFF) * 60) >> 8);
 	if (ImGui::Checkbox(label, &own)) options.time = own ? -1.0 : 12.0;
 	ImGui::BeginDisabled(own);
 	float hour = options.time < 0.0 ? 12.0f : float(options.time);

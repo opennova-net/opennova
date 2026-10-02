@@ -431,6 +431,17 @@ struct DrawnDevice final : ViewportDevice {
 	bool drawn = false; // a canvas drew it since the last pump
 	ViewportPicture last;
 	std::vector<ViewportAction> taken;
+	// A ground a test gives it (the height at a point of the viewport's space, z up; none: no
+	// surface): what ground_at answers and surface_between finds, and its report's surface.
+	std::function<double(double x, double y)> ground;
+	bool ground_at(double x, double y, double &height) const override {
+		if (!ground) return false;
+		height = ground(x, y);
+		return true;
+	}
+	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
+		return ground && editor_test::ground_crossing(ground, from, to, point);
+	}
 	void draw(const ViewportPicture &picture) override {
 		drawn = true;
 		last = picture;
@@ -454,6 +465,7 @@ struct DrawnDevice final : ViewportDevice {
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && last.canvas_sized;
+		report.surface = bool(ground);
 		drawn = false;
 	}
 	void tick(const ViewportModel &, const PreviewClock &) override {}

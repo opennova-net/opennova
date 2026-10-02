@@ -33,6 +33,7 @@ MissionEntityRead read_entity(const EntityRow &row) {
 	out.waypoint_id = e.waypoint_id;
 	out.wp_number = e.wp_number;
 	out.team = e.team;
+	out.attributes = e.bmsi_attributes;
 	return out;
 }
 

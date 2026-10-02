@@ -24,6 +24,8 @@
 #include <editor/session/project_session.h>
 #include <editor/session/view/session_view.h>
 
+#include "editor/editor_test_support.h"
+
 namespace editor_test {
 
 using opennova::editor::ViewportAction;
@@ -94,27 +96,7 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 		return true;
 	}
 	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
-		if (!ground) return false;
-		const auto at = [&](double t, double out[3]) {
-			for (int i = 0; i < 3; ++i) out[i] = from[i] + (to[i] - from[i]) * t;
-			return out[2] - ground(out[0], out[1]);
-		};
-		double p[3];
-		if (at(0.0, p) < 0.0) return false; // it begins under the ground
-		// The first of the segment's steps at or under the ground, then the crossing between it and the
-		// step before, halved until it stands.
-		const int steps = 2048;
-		for (int i = 1; i <= steps; ++i) {
-			if (at(double(i) / steps, p) > 0.0) continue;
-			double low = double(i - 1) / steps, high = double(i) / steps;
-			for (int pass = 0; pass < 48; ++pass) {
-				const double middle = (low + high) * 0.5;
-				(at(middle, p) > 0.0 ? low : high) = middle;
-			}
-			at(high, point);
-			return true;
-		}
-		return false;
+		return ground && editor_test::ground_crossing(ground, from, to, point);
 	}
 	void draw(const opennova::editor::ViewportPicture &picture) override {
 		++draws;
