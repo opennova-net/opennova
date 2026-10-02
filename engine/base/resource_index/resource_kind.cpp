@@ -1,11 +1,9 @@
 #include <base/resource_index/resource_kind.h>
 
 #include <cstring>
-#include <filesystem>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
-
-namespace fs = std::filesystem;
 
 namespace opennova {
 
@@ -21,8 +19,12 @@ bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
 
 } // namespace
 
+// The names are UTF-8 strings (the VFS's), taken apart as strings: a std::filesystem
+// round trip reads them in the ANSI code page on Windows (base/io/os_path.h).
 std::string resource_extension_for_name(const std::string &name) {
-	return strutil::to_lower(fs::path(name).extension().string());
+	const std::string file = io::utf8_file_name(name);
+	const size_t dot = file.rfind('.');
+	return (dot == std::string::npos || dot == 0) ? std::string() : strutil::to_lower(file.substr(dot));
 }
 
 bool resource_bin_has_rtxt_magic(const std::vector<uint8_t> &bytes) {
@@ -87,7 +89,7 @@ const std::vector<ResourceKindRule> &resource_kind_rules() {
 std::string resource_kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin,
                                              bool is_scr_bin) {
 	const std::string extension = resource_extension_for_name(name);
-	const std::string basename = strutil::to_lower(fs::path(name).filename().string());
+	const std::string basename = strutil::to_lower(io::utf8_file_name(name));
 	for (const ResourceKindRule &rule : resource_kind_rules()) {
 		if (*rule.name) {
 			if (basename == rule.name) {

@@ -11,6 +11,7 @@
 #include <system_error>
 
 #include <base/io/file_time.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace fs = std::filesystem;
@@ -78,9 +79,10 @@ bool is_music_kind(const std::string &kind) {
 }
 
 std::string display_name_from_name(const std::string &name) {
-	const fs::path path(name);
-	const std::string stem = path.stem().string();
-	return stem.empty() ? path.filename().string() : stem;
+	const std::string file = io::utf8_file_name(name);
+	const size_t dot = file.rfind('.');
+	const std::string stem = (dot == std::string::npos || dot == 0) ? file : file.substr(0, dot);
+	return stem.empty() ? file : stem;
 }
 
 } // namespace
@@ -181,12 +183,12 @@ void ResourceIndex::index_mounted() {
 		entry.relative_path = loc.logical_name;
 		if (loc.source == VfsSource::LooseDir) {
 			entry.source_type = "file";
-			// generic_string() (not string()) so the joined path uses forward slashes on
-			// every platform. Godot paths are always '/'-separated and consumers compare
-			// these against String.path_join() output (also '/'); native '\' on Windows
-			// breaks those equality checks and yields non-portable object paths.
-			const fs::path loose_path = fs::path(loc.source_path) / loc.logical_name;
-			entry.path = loose_path.generic_string();
+			// '/'-separated (utf8_generic_path) on every platform. Godot paths are always
+			// '/'-separated and consumers compare these against String.path_join() output
+			// (also '/'); native '\' on Windows breaks those equality checks and yields
+			// non-portable object paths.
+			const fs::path loose_path = io::os_path(io::utf8_join(loc.source_path, loc.logical_name));
+			entry.path = io::utf8_generic_path(loose_path);
 			std::error_code size_ec;
 			const auto size = fs::file_size(loose_path, size_ec);
 			if (!size_ec) {

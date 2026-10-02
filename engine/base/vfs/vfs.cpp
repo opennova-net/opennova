@@ -15,11 +15,17 @@
 #include <unordered_map>
 
 #include <base/io/crc32_mpeg2.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 using namespace opennova::pff;
 
 namespace fs = std::filesystem;
+
+// Paths are UTF-8 strings here (what the mount is given and what it reports); every OS
+// call takes io::os_path(...) of one, and a name the system enumerates comes back
+// through io::utf8_path, so a root past MAX_PATH or outside the ANSI code page mounts
+// and nothing throws on a name the code page cannot hold (base/io/os_path.h).
 
 namespace opennova {
 namespace {
@@ -29,7 +35,7 @@ using opennova::strutil::to_lower;
 // Flat, lowercased lookup key from a possibly path-qualified name (matches the engine's
 // basename-for-archive behavior and the existing flat asset model).
 std::string flat_key(const std::string &name) {
-    std::string fn = fs::path(name).filename().string();
+    std::string fn = io::utf8_file_name(name);
     if (fn.empty()) fn = name;
     return to_lower(fn);
 }
@@ -96,23 +102,21 @@ bool split_retail_query(const std::string &name, std::vector<std::string> &compo
     return !components.empty();
 }
 
+// Whether `candidate` is `root` or below it, both canonical, compared component-wise as
+// UTF-8 ('/' separators, any \\?\ prefix dropped).
 bool path_is_within(const fs::path &root, const fs::path &candidate) {
-    auto root_it = root.begin();
-    auto candidate_it = candidate.begin();
-    for (; root_it != root.end(); ++root_it, ++candidate_it) {
-        if (candidate_it == candidate.end()) return false;
+    std::string r = io::utf8_generic_path(root);
+    const std::string c = io::utf8_generic_path(candidate);
+    while (r.size() > 1 && r.back() == '/') r.pop_back();
+    if (c.size() < r.size()) return false;
 #ifdef _WIN32
-        const bool same_component = strutil::iequals(root_it->string(), candidate_it->string());
+    const bool same_prefix = strutil::iequals(c.substr(0, r.size()), r);
 #else
-        // Canonical POSIX paths are case-sensitive. Treating sibling roots that differ only
-        // by case as equal would let an in-root symlink bypass the containment check.
-        const bool same_component = root_it->string() == candidate_it->string();
+    // Canonical POSIX paths are case-sensitive. Treating sibling roots that differ only
+    // by case as equal would let an in-root symlink bypass the containment check.
+    const bool same_prefix = c.compare(0, r.size(), r) == 0;
 #endif
-        if (!same_component) {
-            return false;
-        }
-    }
-    return true;
+    return same_prefix && (c.size() == r.size() || r.back() == '/' || c[r.size()] == '/');
 }
 
 // FileSystem_OpenFile passes the complete query to each loose probe; the basename-strip
@@ -123,8 +127,10 @@ bool resolve_retail_loose_file(const std::string &search_root,
                                const std::vector<std::string> &components,
                                fs::path &resolved_file) {
     std::error_code ec;
-    const fs::path canonical_root = fs::canonical(fs::path(search_root), ec);
-    if (ec || !fs::is_directory(canonical_root, ec)) return false;
+    fs::path canonical_root = fs::canonical(io::os_path(search_root), ec);
+    if (ec) return false;
+    canonical_root = io::os_path(canonical_root);
+    if (!fs::is_directory(canonical_root, ec)) return false;
 
     fs::path current = canonical_root;
     for (size_t component_index = 0; component_index < components.size(); ++component_index) {
@@ -133,7 +139,7 @@ bool resolve_retail_loose_file(const std::string &search_root,
 
         // Prefer the exact spelling (and let Windows perform its native case-insensitive
         // probe); the directory walk supplies the same ASCII-insensitive behavior elsewhere.
-        const fs::path direct = current / fs::path(wanted);
+        const fs::path direct = io::os_path(current / io::os_path(wanted));
         const fs::file_status direct_status = fs::symlink_status(direct, ec);
         if (!ec && fs::exists(direct_status)) selected = direct;
         ec.clear();
@@ -144,7 +150,7 @@ bool resolve_retail_loose_file(const std::string &search_root,
             if (ec) return false;
             for (; it != end; it.increment(ec)) {
                 if (ec) return false;
-                if (strutil::iequals(it->path().filename().string(), wanted)) {
+                if (strutil::iequals(io::utf8_path(it->path().filename()), wanted)) {
                     selected = it->path();
                     break;
                 }
@@ -154,7 +160,9 @@ bool resolve_retail_loose_file(const std::string &search_root,
         if (selected.empty()) return false;
 
         current = fs::canonical(selected, ec);
-        if (ec || !path_is_within(canonical_root, current)) return false;
+        if (ec) return false;
+        current = io::os_path(current);
+        if (!path_is_within(canonical_root, current)) return false;
         if (component_index + 1 < components.size() && !fs::is_directory(current, ec)) {
             return false;
         }
@@ -165,9 +173,9 @@ bool resolve_retail_loose_file(const std::string &search_root,
     return true;
 }
 
-bool read_whole_file(const fs::path &path, std::vector<uint8_t> &out) {
+bool read_whole_file(const std::string &path, std::vector<uint8_t> &out) {
     out.clear();
-    std::ifstream f(path, std::ios::binary | std::ios::ate);
+    std::ifstream f(io::os_path(path), std::ios::binary | std::ios::ate);
     if (!f) return false;
     const std::streamoff sz = f.tellg();
     if (sz < 0) return false;
@@ -178,8 +186,8 @@ bool read_whole_file(const fs::path &path, std::vector<uint8_t> &out) {
     return static_cast<size_t>(f.gcount()) == out.size();
 }
 
-bool has_pff_ext(const fs::path &p) {
-    return to_lower(p.extension().string()) == ".pff";
+bool has_pff_ext(const std::string &file_name) {
+    return file_name.size() > 4 && to_lower(file_name.substr(file_name.size() - 4)) == ".pff";
 }
 
 } // namespace
@@ -249,12 +257,13 @@ struct Vfs::Impl {
 
     void scan_loose(const std::string &dir, int precedence) const {
         std::error_code ec;
-        if (!fs::is_directory(dir, ec)) return;
+        const fs::path os_dir = io::os_path(dir);
+        if (!fs::is_directory(os_dir, ec)) return;
         for (const fs::directory_entry &de :
-             fs::directory_iterator(dir, fs::directory_options::skip_permission_denied, ec)) {
+             fs::directory_iterator(os_dir, fs::directory_options::skip_permission_denied, ec)) {
             if (ec) break;
             if (!de.is_regular_file(ec)) continue;
-            const std::string fn = de.path().filename().string();
+            const std::string fn = io::utf8_path(de.path().filename());
             const std::string key = to_lower(fn);
             if (key.empty() || index.count(key)) continue; // higher precedence already won
             ResolvedEntry e;
@@ -262,7 +271,7 @@ struct Vfs::Impl {
             e.logical_name = fn;
             e.source_path = dir;
             e.precedence = precedence;
-            e.loose_full_path = de.path().string();
+            e.loose_full_path = io::utf8_join(dir, fn);
             index.emplace(key, std::move(e));
         }
     }
@@ -320,10 +329,10 @@ struct Vfs::Impl {
             if (resolve_retail_loose_file(dir, components, loose_file)) {
                 resolved = ResolvedEntry{};
                 resolved.source = VfsSource::LooseDir;
-                resolved.logical_name = loose_file.filename().string();
+                resolved.logical_name = io::utf8_path(loose_file.filename());
                 resolved.source_path = dir;
                 resolved.precedence = precedence;
-                resolved.loose_full_path = loose_file.string();
+                resolved.loose_full_path = io::utf8_path(loose_file);
                 return true;
             }
             ++precedence;
@@ -424,29 +433,29 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     clear();
 
     std::error_code ec;
-    const fs::path root(game_root);
+    const fs::path root = io::os_path(game_root);
     if (game_root.empty() || !fs::is_directory(root, ec)) {
         impl_->last_error = "Game root is not a directory: " + game_root;
         return false;
     }
-    impl_->game_root = root.string();
+    impl_->game_root = game_root;
     impl_->session_mount_mode = mode;
 
     const bool mount_loose = mode != VfsMountMode::Packed;
     const bool mount_archives = mode != VfsMountMode::LooseOnly;
-    const auto retain_loose_probe = [&](const fs::path &dir) {
+    const auto retain_loose_probe = [&](const std::string &dir) {
         if (mount_loose) {
-            add_search_path(dir.string());
+            add_search_path(dir);
         } else {
-            impl_->retail_loose_probe_paths.push_back(dir.string());
+            impl_->retail_loose_probe_paths.push_back(dir);
         }
     };
 
     bool have_expansion = false;
-    fs::path exp_dir;
+    std::string exp_dir;
     if (!expansion.empty()) {
-        exp_dir = root / "expansion" / expansion;
-        if (fs::exists(exp_dir / (expansion + ".pff"), ec)) {
+        exp_dir = io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
+        if (fs::exists(io::os_path(io::utf8_join(exp_dir, expansion + ".pff")), ec)) {
             have_expansion = true;
             // Record what actually mounted so callers can tell a real expansion mount from
             // the fallback below without re-deriving the predicate (D-NET-178).
@@ -457,14 +466,14 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
 
     if (have_expansion) {
         retain_loose_probe(exp_dir);                    // loose expansion files: highest
-        retain_loose_probe(root);                       // engine CWD probe: base loose files
+        retain_loose_probe(game_root);                  // engine CWD probe: base loose files
         if (mount_archives) {
-            const fs::path local = exp_dir / (expansion + "L.pff");
-            if (fs::exists(local, ec)) set_primary_archive(local.string());
-            add_secondary_archive((exp_dir / (expansion + ".pff")).string());
+            const std::string local = io::utf8_join(exp_dir, expansion + "L.pff");
+            if (fs::exists(io::os_path(local), ec)) set_primary_archive(local);
+            add_secondary_archive(io::utf8_join(exp_dir, expansion + ".pff"));
         }
     } else {
-        retain_loose_probe(root);
+        retain_loose_probe(game_root);
     }
 
     if (!mount_archives) {
@@ -476,16 +485,17 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
         // determinism. A deliberate divergence from the retail table so
         // arbitrary mod archives are indexable
         // (docs/vfs/vfs-pff-mount-re.md D-VFS-2 records the decision).
-        std::vector<fs::path> base_pffs;
+        std::vector<std::string> base_pffs;
         for (const fs::directory_entry &de :
              fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
             if (ec) break;
-            if (de.is_regular_file(ec) && has_pff_ext(de.path())) base_pffs.push_back(de.path());
+            const std::string name = io::utf8_path(de.path().filename());
+            if (de.is_regular_file(ec) && has_pff_ext(name)) base_pffs.push_back(name);
         }
-        std::sort(base_pffs.begin(), base_pffs.end(), [](const fs::path &a, const fs::path &b) {
-            return to_lower(a.filename().string()) < to_lower(b.filename().string());
+        std::sort(base_pffs.begin(), base_pffs.end(), [](const std::string &a, const std::string &b) {
+            return to_lower(a) < to_lower(b);
         });
-        for (const fs::path &p : base_pffs) add_secondary_archive(p.string());
+        for (const std::string &name : base_pffs) add_secondary_archive(io::utf8_join(game_root, name));
         return true;
     }
 
@@ -495,17 +505,18 @@ bool Vfs::mount_game(const std::string &game_root, const std::string &expansion,
     // just leaves its slot empty — only the all-missing case is fatal at the
     // caller (required-resources.md).
     for (const char *slot_name : kBootArchiveTable) {
-        fs::path direct = root / slot_name;
-        if (fs::exists(direct, ec)) {
-            add_secondary_archive(direct.string());
+        const std::string direct = io::utf8_join(game_root, slot_name);
+        if (fs::exists(io::os_path(direct), ec)) {
+            add_secondary_archive(direct);
             continue;
         }
         // Case-insensitive probe for case-sensitive filesystems.
         for (const fs::directory_entry &de :
              fs::directory_iterator(root, fs::directory_options::skip_permission_denied, ec)) {
             if (ec) break;
-            if (de.is_regular_file(ec) && to_lower(de.path().filename().string()) == slot_name) {
-                add_secondary_archive(de.path().string());
+            const std::string name = io::utf8_path(de.path().filename());
+            if (de.is_regular_file(ec) && to_lower(name) == slot_name) {
+                add_secondary_archive(io::utf8_join(game_root, name));
                 break;
             }
         }
@@ -579,7 +590,7 @@ bool Vfs::file_size(const std::string &name, uint64_t &out) const {
         return true;
     }
     std::error_code ec;
-    const auto size = fs::file_size(fs::path(e->loose_full_path), ec);
+    const auto size = fs::file_size(io::os_path(e->loose_full_path), ec);
     if (ec) return false;
     out = static_cast<uint64_t>(size);
     return true;
@@ -659,14 +670,16 @@ const std::string &Vfs::last_error() const { return impl_->last_error; }
 std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
     std::vector<std::string> out;
     std::error_code ec;
-    const fs::path exp_root = fs::path(game_root) / "expansion";
-    if (!fs::is_directory(exp_root, ec)) return out;
+    const std::string exp_root = io::utf8_join(game_root, "expansion");
+    const fs::path os_exp_root = io::os_path(exp_root);
+    if (!fs::is_directory(os_exp_root, ec)) return out;
     for (const fs::directory_entry &de :
-         fs::directory_iterator(exp_root, fs::directory_options::skip_permission_denied, ec)) {
+         fs::directory_iterator(os_exp_root, fs::directory_options::skip_permission_denied, ec)) {
         if (ec) break;
         if (!de.is_directory(ec)) continue;
-        const std::string name = de.path().filename().string();
-        if (fs::exists(de.path() / (name + ".pff"), ec)) out.push_back(name);
+        const std::string name = io::utf8_path(de.path().filename());
+        if (fs::exists(io::os_path(io::utf8_join(io::utf8_join(exp_root, name), name + ".pff")), ec))
+            out.push_back(name);
     }
     std::sort(out.begin(), out.end());
     return out;
@@ -675,11 +688,11 @@ std::vector<std::string> vfs_list_expansions(const std::string &game_root) {
 namespace {
 
 // <n>.bin's bytes the way the scan resolves them (loose, then <n>L.pff, then <n>.pff).
-bool read_expansion_text_bytes(const fs::path &exp_dir, const std::string &expansion,
+bool read_expansion_text_bytes(const std::string &exp_dir, const std::string &expansion,
                                std::vector<uint8_t> &out) {
     const std::string bin_name = expansion + ".bin";
     std::error_code ec;
-    const fs::path loose = exp_dir / bin_name;
+    const fs::path loose = io::os_path(io::utf8_join(exp_dir, bin_name));
     if (fs::is_regular_file(loose, ec)) {
         std::ifstream in(loose, std::ios::binary);
         out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
@@ -687,7 +700,7 @@ bool read_expansion_text_bytes(const fs::path &exp_dir, const std::string &expan
     }
     for (const std::string &archive : {expansion + "L.pff", expansion + ".pff"}) {
         PffArchive ar{};
-        if (pff_open(&ar, (exp_dir / archive).string().c_str()) != 0) continue;
+        if (pff_open(&ar, io::utf8_join(exp_dir, archive).c_str()) != 0) continue;
         const PffEntry *entry = pff_find(&ar, bin_name.c_str());
         bool ok = false;
         if (entry != nullptr) {
@@ -722,7 +735,7 @@ const rtxt::Entry *find_in_section(const rtxt::File &file, const char *section,
 ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion) {
     ExpansionInfo info{kExpansionUnnamed, kExpansionNoDescription};
     if (expansion.empty()) return info;
-    const fs::path exp_dir = fs::path(game_root) / "expansion" / expansion;
+    const std::string exp_dir = io::utf8_join(io::utf8_join(game_root, "expansion"), expansion);
     std::vector<uint8_t> bytes;
     if (!read_expansion_text_bytes(exp_dir, expansion, bytes)) return info;  // @ 0x4a4664
     rtxt::File file;
@@ -749,9 +762,9 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
     // [orig: Expansion_LoadAssets — g_ExpansionChecksum = 0 @ 0x4a4781; only a
     //  live expansion probes the loose file @ 0x4a4787..0x4a488a]
     if (game_root.empty() || expansion.empty()) return 0;
-    const fs::path path =
-            fs::path(game_root) / "expansion" / expansion / "version.txt";
-    std::ifstream file(path, std::ios::binary);
+    const std::string path = io::utf8_join(
+            io::utf8_join(io::utf8_join(game_root, "expansion"), expansion), "version.txt");
+    std::ifstream file(io::os_path(path), std::ios::binary);
     if (!file) return 0; // [orig: the File_LoadEntireFile -1 gate @ 0x4a487b]
     std::vector<uint8_t> bytes(
             (std::istreambuf_iterator<char>(file)),

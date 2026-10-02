@@ -155,10 +155,11 @@ io::JsonValue build_record(const std::string &build_id, const std::map<std::stri
 
 // Every planned name must resolve through the engine's own mount of the staged
 // directory: the one a stock launch boots with (mount_install: the fixed boot table,
-// archive-only), handed the directory's system path, so a deep one mounts as well.
+// archive-only), handed the directory's UTF-8 path as the game is handed its own, which it
+// opens past MAX_PATH itself (base/io/os_path.h).
 bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
 	Vfs vfs;
-	if (!mount_install(vfs, system_path(dir).string(), LaunchFlags())) {
+	if (!mount_install(vfs, dir, LaunchFlags())) {
 		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 		                     "The built archives do not mount: " + vfs.last_error());
 		return false;

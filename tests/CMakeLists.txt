@@ -840,6 +840,14 @@ target_include_directories(vfs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(vfs_test PRIVATE cxx_std_17)
 add_test(NAME vfs COMMAND vfs_test)
 
+# An install root deeper than MAX_PATH under a non-ASCII name: the VFS, the resource
+# index and the session's _NSTMOUT.TXT read through base/io/os_path.h.
+add_executable(vfs_long_path_test vfs/vfs_long_path_test.cpp)
+target_link_libraries(vfs_long_path_test PRIVATE opennova_base opennova_formats)
+target_include_directories(vfs_long_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(vfs_long_path_test PRIVATE cxx_std_17)
+add_test(NAME vfs_long_path COMMAND vfs_long_path_test)
+
 add_executable(vfs_mus_decode_test vfs/vfs_mus_decode_test.cpp)
 target_link_libraries(vfs_mus_decode_test PRIVATE opennova_base)
 target_include_directories(vfs_mus_decode_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
