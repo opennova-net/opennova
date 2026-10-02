@@ -5,6 +5,11 @@
 
 namespace opennova::renderer {
 
+// The rings' two textures [orig: WaterRing_LoadResources @ 0x5DDC90, wake5.tga @ 0x5ddc9c,
+// wakegrad.tga @ 0x5ddcb2].
+inline constexpr const char *kWakeTexture = "wake5.tga";
+inline constexpr const char *kWakeGradientTexture = "wakegrad.tga";
+
 // The bounded surface-ring bank. Coordinates are mission-frame Q16.
 // [orig: sub_5DDC60 @ 0x5DDC60 (the bank allocation); WaterRing_InitSlot
 //  @ 0x5DDD80 (it initialises one surface-ring row); WaterRing_LoadResources

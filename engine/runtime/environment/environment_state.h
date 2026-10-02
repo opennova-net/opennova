@@ -26,6 +26,11 @@
 
 namespace opennova::env {
 
+// The overcast keyframes' file, parsed after the terrain's on every time-of-day load where it
+// exists [orig: Environment_LoadTimeOfDayConfig @ 0x57db30, the name @ 0x57dc0c, the exists check
+// @ 0x57dc23].
+inline constexpr const char *kOvercastFile = "overcast.def";
+
 // The world lighting/fog record stamped onto lit materials — the engine
 // mirror of the shell's EnvLightValues (ADR 0017 typed record)
 // [orig: Render_SetupEntityLightingAndShaderConstants @ 0x5d98a0;

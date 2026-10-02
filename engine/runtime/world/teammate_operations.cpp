@@ -131,7 +131,7 @@ void announce_pickup(World &world) {
         const int32_t d = int32_t(std::min(distance(world, *local, entity), 2147418112.0));
         if (d < best_distance) { best = entity.handle; best_distance = d; }
     });
-    if (best.valid()) world.script.voice.ssn_wave(world, best, "DltB086C.wav", 100, false);
+    if (best.valid()) world.script.voice.ssn_wave(world, best, kPickupCallWave, 100, false);
 }
 } // namespace
 

@@ -9,6 +9,10 @@
 namespace opennova::world {
 class World;
 
+// The call the nearest teammate makes when a pickup lands, a wave played by its name [orig:
+// HeliLift_SpawnPickup @0x4525e0, the name @0x4526fe].
+inline constexpr const char *kPickupCallWave = "DltB086C.wav";
+
 // Asset-backed allocation is supplied by MissionKernel. The operation owns
 // the exact item, identity and pose; the mission owns DEF/3DI/ADM/AIP loading.
 struct TeammateSpawn {

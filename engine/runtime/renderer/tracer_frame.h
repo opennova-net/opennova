@@ -21,6 +21,11 @@
 
 namespace opennova::renderer {
 
+// The pool's one texture, smoktest.pcx, read with its palette-luminance alpha [orig:
+// CEffectEmitterPool_CreateShaders @ 0x5DC8F0 -> Texture_LoadFromArchive("smoktest.pcx",
+// "smoktest.pcx") @ 0x58B980, the name @ 0x5dc909].
+inline constexpr const char *kEmitterPoolTexture = "smoktest.pcx";
+
 // The material a ribbon draw binds [orig: CEffectChannel_Init @ 0x5DB130 —
 // channel+0x20 is the normal-pass shader, channel+0x24 the distortion shader;
 // the shaders are built by CEffectEmitterPool_CreateShaders @ 0x5DC8F0].

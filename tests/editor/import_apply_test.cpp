@@ -895,6 +895,12 @@ static int test_apply_retail_mission_closure() {
 		}
 		// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
 		TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
+		// The HUD's fixed names a running mission opens (review F4): the compass ring, the map's
+		// icons and the first crosshair style, each for the game.
+		for (const char *fixed : {"compring.tga", "TSDicon.tga", "cross01.tga"}) {
+			const ImportPlanRow *row = row_called(fixed);
+			TEST_EXPECT(row && row->state == State::Found && row->needed_by.field.find("the game, for ") == 0);
+		}
 		for (const ImportNotFollowed &entry : plan.not_followed)
 			TEST_EXPECT(entry.reference == ReferenceKind::None ||
 			            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);

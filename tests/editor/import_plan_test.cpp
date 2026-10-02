@@ -31,6 +31,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/blank/blank_factory.h>
 #include <editor/import/import_plan.h>
+#include <editor/import/mission_fixed_files.h>
 #include <editor/import/sidecar.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/session/project_session.h>
@@ -42,6 +43,7 @@
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
 #include <formats/pff/pff.h>
+#include <runtime/hud/hud_texture_names.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -823,6 +825,8 @@ static int test_plan_mission_closure() {
 	                       {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
 	                       // Two of the fixed names a running mission opens that the manifest does not list.
 	                       {"overcast.def", "; overcast\r\n"}, {"eraindrp.tga", "tga"},
+                       // And the HUD's, a crosshair style's, a view effect's and an impact scar's (review F4).
+                       {"compring.tga", "tga"}, {"cross03.tga", "tga"}, {"BNumbers.tga", "tga"}, {"scorch1.tga", "tga"},
 	                       {"m.til", "til"},
 	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
 	                       // loads a file a frame named from the graphic's and never the graphic's own name.
@@ -928,6 +932,11 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(overcast && overcast->needed_by.file == "m.bms" && overcast->needed_by.field == "the game, for the overcast sky" &&
 	            rain && rain->kind == AssetKind::Texture && rain->needed_by.field == "the game, for rain");
 	TEST_EXPECT(!row_named(plan, "jsnwflk.tga") && !row_named(plan, "helo1.aip"));
+	const ImportPlanRow *ring = found("compring.tga"), *cross = found("cross03.tga"), *digits = found("BNumbers.tga"),
+	                    *scar = found("scorch1.tga");
+	TEST_EXPECT(ring && ring->needed_by.field == "the game, for the HUD" && cross &&
+	            cross->needed_by.field == "the game, for a crosshair style" && digits && scar &&
+	            scar->needed_by.field == "the game, for an impact scar" && !row_named(plan, "cross01.tga"));
 	// The ammo no place defines, counted; the weapon M4 defined by the planned weapon.def is not.
 	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Ammo &&
 	            plan.undefined[0].count == 1 && plan.undefined[0].first == "weapon.def");
@@ -978,8 +987,36 @@ static int test_plan_mission_closure() {
 	return 0;
 }
 
+// The fixed names a running mission opens (review F4): each set the runtime opens, by the runtime's
+// own constants, every name once; the HUD's table one name a slot.
+static int test_mission_fixed_files() {
+	namespace hud = opennova::hud;
+	std::map<std::string, std::string> what;
+	for (const MissionFixedFile &file : mission_fixed_files())
+		TEST_EXPECT(what.emplace(normalized_logical_name(file.name), file.what).second && !file.what.empty());
+	const auto has = [&what](const std::string &name) { return what.count(normalized_logical_name(name)) == 1; };
+	std::set<int32_t> slots;
+	for (const hud::HudFixedTexture &texture : hud::kHudFixedTextures)
+		TEST_EXPECT(slots.insert(texture.slot).second && has(texture.name) &&
+		            std::string(hud::hud_fixed_texture_name(texture.slot)) == texture.name);
+	TEST_EXPECT(!hud::hud_fixed_texture_name(hud::kHudTexCrosshair) && !hud::hud_fixed_texture_name(hud::kHudTexFrame));
+	for (int style = hud::kHudCrosshairStyleMin; style <= hud::kHudCrosshairStyleMax; ++style)
+		TEST_EXPECT(has(hud::hud_crosshair_texture_name(style)));
+	TEST_EXPECT(hud::hud_crosshair_texture_name(0) == "cross01.tga" && hud::hud_crosshair_texture_name(24) == "cross25.tga");
+	for (const char *name : {"compring.tga", "TSDicon.tga", "WPIndctr.tga", "dmgslice.tga", "JO_LFP.tga", "dirguide.tga",
+	                         "border.tga", "neticon2.tga", "k_tip.tga", "H_flag.tga", "H_docmnt.tga", "Binoculr.tga",
+	                         "BNumbers.tga", "NVGScale.tga", "vignette.tga", "eraindrp.tga", "jsnwflk.tga", "smoktest.pcx",
+	                         "wake5.tga", "wakegrad.tga", "scorch1.tga", "scorch4.tga", "bhole1.tga", "trscrch1.tga",
+	                         "qburn01.tga", "overcast.def", "helo1.aip", "H_BHawkN.aip", "default.adm", "DltB086C.wav"})
+		TEST_EXPECT(has(name));
+	// The sets the port does not open stay out: the MFD, the glass and the 3rd-person models.
+	for (const char *name : {"MFD1.PCX", "brkglsa.tga", "scopexh.tga", "comacent.tga"}) TEST_EXPECT(!has(name));
+	return 0;
+}
+
 int run_import_plan_tests() {
 	int failures = 0;
+	failures += test_mission_fixed_files();
 	failures += test_plan_mission_closure();
 	failures += test_plan_steps();
 	failures += test_plan_folder();

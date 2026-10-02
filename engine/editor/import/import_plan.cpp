@@ -21,6 +21,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
+#include <editor/import/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
@@ -35,41 +36,6 @@ using graph_names::is_style_reference;
 using graph_names::key;
 using graph_names::style_variable;
 using graph_names::symbol_name;
-
-namespace {
-
-// The files the engine opens by a fixed name once a mission runs that the manifest does not list
-// (docs/required-resources.md names them as the hardcoded sets beside its mission rows): a planned
-// mission brings each its origin or the install has, and none is ever "not found" (the game goes
-// on without each).
-struct MissionLiteral {
-	const char *name;
-	const char *what; // what the game opens it for, after "the game, "
-};
-constexpr MissionLiteral kMissionLiterals[] = {
-	// The overcast keyframes, parsed after the terrain's on every time-of-day load [orig:
-	// Environment_LoadTimeOfDayConfig @0x57db30].
-	{"overcast.def", "for the overcast sky"},
-	// [orig: WeatherParticle_LoadTextures @0x5de840]
-	{"eraindrp.tga", "for rain"},
-	{"jsnwflk.tga", "for snow"},
-	// [orig: Terrain_LoadScorchTextures @0x604CE0]
-	{"trscrch1.tga", "for a scorch mark"},
-	{"trscrch2.tga", "for a scorch mark"},
-	{"trscrch3.tga", "for a scorch mark"},
-	{"qburn01.tga", "for a scorch mark"},
-	// A placed vehicle whose record and whose item name no profile [orig:
-	// Entity_InitHelicopterAIFromDef @0x4683C0, the "helo1.aip" arm @0x4684c9;
-	// Entity_InitVehicleAIFromDef @0x4686C0, "helo1" @0x4687d3].
-	{"helo1.aip", "for a vehicle that names no AI profile"},
-	// The teammates' helicopter [orig: Entity_SpawnHelicopter @0x4521A0].
-	{"H_BHawkN.aip", "for the teammates' helicopter"},
-	// A weapon whose animation map the files lack loads this one in its place [orig:
-	// AnimMap_LoadAdmFile @0x40CC40, the FileExists miss @0x40CD00 -> default.adm @0x40CD0C].
-	{"default.adm", "for a weapon whose animation map is missing"},
-};
-
-} // namespace
 
 bool references_unread(AssetKind kind) {
 	return asset_kind_row(kind).names_files && !graph_reads_kind(kind);
@@ -538,8 +504,8 @@ private:
 
 	// The files the game opens by a fixed literal on the way into a mission, once whatever the
 	// missions' number (ADR 0046 S14): the manifest's boot, menu and mission rows (a Required one
-	// found nowhere is not found, an optional one no row), then kMissionLiterals, the fixed names a
-	// running mission opens. Each found is followed like any other file. The files the game finds by
+	// found nowhere is not found, an optional one no row), then mission_fixed_files(), the fixed names a
+	// running mission opens, none ever not found (the game goes on without each). Each found is followed like any other file. The files the game finds by
 	// the mission's own name are its edges (documents/mission_file_set.h), which the walk follows.
 	void add_mission_files(const std::pair<size_t, const ImportOrigin *> &mission) {
 		const std::string file = plan_.rows[mission.first].name;
@@ -561,10 +527,9 @@ private:
 				if (plan_.truncated) return;
 				if (resource->severity != RES_OPTIONAL) not_found(need, expected_asset_kind_for_required_name(resource->name));
 			}
-			for (const MissionLiteral &literal : kMissionLiterals) {
-				const ImportNeed need{file, std::string(), std::string("the game, ") + literal.what, ReferenceKind::None,
-				                      literal.name, -1};
-				bring(own, literal.name, need);
+			for (const MissionFixedFile &fixed : mission_fixed_files()) {
+				const ImportNeed need{file, std::string(), "the game, " + fixed.what, ReferenceKind::None, fixed.name, -1};
+				bring(own, fixed.name, need);
 				if (plan_.truncated) return;
 			}
 		}

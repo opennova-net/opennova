@@ -116,14 +116,17 @@ func _build_damage_feedback_quads() -> void:
 
 func set_resource_root(root: ResourceRoot) -> void:
 	_root = root
-	_binocular_mask = _load_texture("Binoculr.tga")
-	_binocular_crosshair = _load_texture("BinoCH.tga")
-	_binocular_numbers = _load_texture("BNumbers.tga")
-	_nvg_mask = _load_texture("NVG.tga")
-	_nvg_scale = _load_texture("Nvgscale.tga")
+	# The names are the engine's (HudPos.view_effect_texture).
+	_binocular_mask = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_MASK))
+	_binocular_crosshair = _load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_CROSSHAIR))
+	_binocular_numbers = _load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_DIGITS))
+	_nvg_mask = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_NVG_MASK))
+	_nvg_scale = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_NVG_SCALE))
 	# The red damage vignette's texture; retail loads it once into the material
 	# behind the quad's mode-3 pass.
-	_vignette = _load_texture("vignette.tga")
+	_vignette = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_VIGNETTE))
 	if _red_vignette != null:
 		_red_vignette.texture = _vignette
 	queue_redraw()
