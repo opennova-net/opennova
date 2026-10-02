@@ -90,6 +90,13 @@ Gotchas:
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s
   mission-load regression hid here; do not call it casually. `list_files()` is
   kind-curated: load known filenames via `read_file`/`has_file`; don't expect them listed.
+- The editor's mission device (`authoring/mission_viewport_applier`, ADR 0046 S14) draws with
+  the game's process-wide render state (the environment's shader globals, the water plane: last
+  writer wins, and a conflict is sticky), so a device says the scene state its picture renders
+  with and the frame's arbitration renders one state at a time; such a global is written again in
+  `publish_scene_state` each turn, never once at build. Its bytes are the project's alone
+  (`ResourceRoot::mount_files` over the session's file source); a container it drops is renamed
+  and `queue_free`d, never `remove_child`ed mid-frame.
 - Bind native C++ engine APIs directly. Do not introduce a parallel flat FFI surface.
 - Net bindings (`network/novaworld_client`, `network/lan_session`) are thin pumps
   over the wire-compatible codecs — `engine/net/npwire` for the in-game codec + capture decode

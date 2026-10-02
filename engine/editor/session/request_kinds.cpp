@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/project/project_files.h>
+#include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/play_controller.h>
@@ -74,11 +75,11 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(false, request.out_dir, request.rehash);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash);
 }
-void serve_play(SessionCore &core, const EditorRequest &) {
+void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(true);
+		core.start_build(PlayIntent{ true, request.mission });
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -326,13 +327,14 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::WithDependencies }))
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
-			"The import dialog's rows kept, imports, copied into the project, every file checked "
+			"The import dialog's rows kept, imports (or, with planned, the open preview's rows as its "
+			"plan has them, each the project can take), copied into the project, every file checked "
 			"and "
 			"staged before any is published (replace: over the project's files of the names), then "
 			"the project's files read again, an operation (the outcome names it; it can be cancelled "
 			"until it writes); with a preview open the files are planned again first, and nothing is "
 			"written when that is not the plan shown (import.changed).")
-			.takes(request_params({ F::Imports }, { F::Replace }))
+			.takes(request_params({}, { F::Imports, F::Replace, F::Planned }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
@@ -368,8 +370,13 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::Play, "play", serve_play,
-			"A build, then the game run on it once it lands; a build running already serves it and "
-			"starts the game when it lands.")
+			"A build, then the game run on it once it lands, at its menu, or in mission (a .bms of "
+			"the project by its logical name; one the project does not hold is refused before "
+			"anything is built, play.mission.unknown; Play in the game install starts at its menu "
+			"all the same); a build running already serves it and starts the game when it lands, in "
+			"the mission the last Play named. A mission that does not load is a Problems row "
+			"(play.mission.failed) until the next Play.")
+			.takes(request_params({}, { F::Mission }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -383,9 +390,13 @@ constexpr RequestKindRow kRows[] = {
 			.row,
 	Request(K::CreateFile, "create_file", serve_create_file,
 			"A blank file path made from its name's requirement factory, else its kind's free-form "
-			"one (file_kind where the name cannot say the kind); opened when the editor edits its "
-			"kind.")
-			.takes(request_params({ F::Path }, { F::FileKind }))
+			"one (file_kind where the name cannot say the kind), with the values its blank takes "
+			"(a mission's terrain and environment, files of the project, and its title: one it "
+			"does not take, a required one left out or a file the project lacks is refused, "
+			"document.values, nothing made); a new mission comes with its text table (<mission>.bin: "
+			"its title, an empty briefing) where the project has none of that name; opened when the "
+			"editor edits its kind.")
+			.takes(request_params({ F::Path }, { F::FileKind, F::Values }))
 			.holds(kFiles, kFilesAndDocuments)
 			.row,
 	Request(K::OpenDocument, "open_document", serve_open_document,
@@ -570,8 +581,10 @@ constexpr RequestKindRow kRows[] = {
 			"The import dialog on the game install's files: the names alone, chosen, or with none "
 			"every file listed to choose from, with the files they need when with_dependencies "
 			"(their "
-			"sources carry install: true); planned as preview_import plans.")
-			.takes(request_params({}, { F::Names, F::WithDependencies }))
+			"sources carry install: true); planned as preview_import plans. With all, every file "
+			"chosen at once (the archives' and the loose files the game ships beside them), with no "
+			"walk: import_files with planned then takes them.")
+			.takes(request_params({}, { F::Names, F::WithDependencies, F::All }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
 			.ends_edit_groups()
 			.row,
@@ -594,19 +607,21 @@ constexpr RequestKindRow kRows[] = {
 	// own: each request its plan makes meets its own row's gate as it is served (an edit_record's
 	// waits for an operation that holds the documents; a frame's set_viewport runs beside any).
 	Request(K::EditInViewport, "edit_in_viewport", serve_edit_in_viewport,
-			"A drag or a command in the viewport over the document at path (left out, the active "
-			"one; of the kind the drag or the command names, else the Preview's kind that shows it, "
-			"else its Main view), planned as its canvas plans it and served, each request it plans "
+			"A drag, a command or a drop in the viewport over the document at path (left out, the "
+			"active one; of the kind the drag, the command or the drop names, else the Preview's kind "
+			"that shows it, else its Main view), planned as its canvas plans it and served, each "
+			"request it plans "
 			"meeting its own row's gate: drag, one batch of the edits under one gesture over every "
 			"selected record the drag moves (a gesture's samples, consecutive drags of one handle "
 			"on its document, one undo step, which end ends; the outcome's gesture names it); "
 			"command, one request (a menu's arrange of windows, a model's frame of its camera, which "
-			"runs beside any operation). Refused, nothing changed, naming a document not open, a "
+			"runs beside any operation); drop, one batch of what the thing dropped makes at the "
+			"point, one undo step. Refused, nothing changed, naming a document not open, a "
 			"viewport that does not show it as it is now, a record or a handle it does not show, a "
-			"command it has not, a gesture the document holds no open one of, or a drag that writes "
-			"nothing the session takes (viewport.refused); a planned edit the session refuses is "
-			"not done.")
-			.takes(request_params({}, { F::Path, F::Drag, F::Command }))
+			"command it has not, a gesture the document holds no open one of, a drag that writes "
+			"nothing the session takes, or a drop the viewport does not take (viewport.refused); a "
+			"planned edit the session refuses is not done.")
+			.takes(request_params({}, { F::Path, F::Drag, F::Command, F::Drop }))
 			.names_active()
 			.row,
 	Request(K::Quit, "quit", serve_quit,
@@ -745,10 +760,10 @@ static_assert(viewport_rows_hold(),
 // --------------------------------------------------------------------------------
 
 // A Build or a Play onto the running build: the build serves it (a Play refused before it could,
-// as it would be before any build: no spawn here, or a game running). The outcome names the
-// operation joined.
+// as it would be before any build: no spawn here, a game running, or a mission the project does
+// not hold). The outcome names the operation joined.
 void join_operation(SessionCore &core, const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && core.play().refused())
+	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission))
 		return;
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;

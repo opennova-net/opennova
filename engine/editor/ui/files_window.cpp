@@ -33,13 +33,7 @@ namespace {
 const ImVec4 kOpenColor(0.55f, 0.78f, 1.0f, 1.0f);
 const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 
-std::string size_text(uint64_t bytes) {
-	char text[32];
-	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
-	else if (bytes < 1024 * 1024) std::snprintf(text, sizeof(text), "%.1f KB", static_cast<double>(bytes) / 1024.0);
-	else std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
-	return text;
-}
+using ui_kit::size_text;
 
 // What a blank factory makes, as its menu entry's tooltip.
 std::string makes(const BlankFactory &factory) { return std::string("Makes ") + factory.summary + "."; }
@@ -74,6 +68,7 @@ void NewFilePrompt::ask(AssetKind kind) {
 	ask_ = true;
 	kind_ = kind;
 	name_[0] = '\0';
+	values_.clear();
 }
 
 void NewFilePrompt::draw(Workspace &workspace) {
@@ -104,12 +99,50 @@ void NewFilePrompt::draw(Workspace &workspace) {
 	const bool taken = named && v.project.scan->find(name_) != nullptr;
 	if (named && !fits) ImGui::TextColored(kRefusalColor, "%s", message.c_str());
 	else if (taken) ImGui::TextColored(kRefusalColor, "The project has a file named %s already.", name_);
-	const bool ready = fits && !taken && v.allows(EditorRequestKind::CreateFile);
+	// What the kind's blank takes beside its name (a mission's title, terrain and environment): a
+	// text, or one of the project's files its reference loads. A project is its own files, so a
+	// kind the project has no file of says to import one.
+	const BlankFactory *factory = find_blank_factory_for_kind(kind_);
+	const size_t params = factory ? factory->param_count : 0;
+	if (values_.size() != params) values_.assign(params, std::string());
+	bool given = true;
+	for (size_t i = 0; i < params; ++i) {
+		const BlankParam &param = factory->params[i];
+		ImGui::PushID(static_cast<int>(i));
+		ImGui::SetNextItemWidth(ImGui::GetFontSize() * 21.0f);
+		if (param.reference == ReferenceKind::None) {
+			char text[64];
+			std::snprintf(text, sizeof(text), "%s", values_[i].c_str());
+			if (ImGui::InputText(param.label, text, sizeof(text))) values_[i] = text;
+		} else {
+			const AssetKind wanted = reference_row(param.reference).file;
+			size_t offered = 0;
+			if (ImGui::BeginCombo(param.label, values_[i].empty() ? "Choose..." : values_[i].c_str())) {
+				for (const AssetEntry &entry : v.project.scan->entries) {
+					if (entry.kind != wanted) continue;
+					++offered;
+					if (ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == values_[i]))
+						values_[i] = entry.logical_name;
+				}
+				ImGui::EndCombo();
+			} else {
+				for (const AssetEntry &entry : v.project.scan->entries) offered += entry.kind == wanted ? 1 : 0;
+			}
+			if (offered == 0)
+				ImGui::TextColored(kRefusalColor, "The project has no %s: import one first (Files > Import).", param.token);
+		}
+		ImGui::PopID();
+		given = given && (!param.required || !values_[i].empty());
+	}
+	const bool ready = fits && !taken && given && v.allows(EditorRequestKind::CreateFile);
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create");
 	ImGui::EndDisabled();
 	if ((create || enter) && ready) {
-		workspace.request(request::create_file(name_, asset_kind_token(kind_)));
+		std::vector<std::pair<std::string, std::string>> values;
+		for (size_t i = 0; i < params; ++i)
+			if (!values_[i].empty()) values.emplace_back(factory->params[i].token, values_[i]);
+		workspace.request(request::create_file(name_, asset_kind_token(kind_), std::move(values)));
 		ImGui::CloseCurrentPopup();
 	}
 	ImGui::SameLine();
@@ -283,6 +316,19 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
 		const bool game_data =
 		        !view.project.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
+		// A project that holds missions is offered the whole game install first (ADR 0046 S14).
+		const bool missions = view.project.document && view.project.document->features.mission;
+		const auto whole_install = [&] {
+			ImGui::BeginDisabled(!game_data);
+			if (ImGui::Selectable("The whole game install...") && game_data)
+				workspace_.request(request::import_whole_install());
+			ImGui::EndDisabled();
+			ui_kit::tooltip(!view.project.retail_directory.empty()
+			                        ? "Every file of the game install, copied into the project: what a mission project needs to "
+			                          "play, build and resolve every name."
+			                        : "Choose the game install folder in File > Project settings... first.");
+		};
+		if (missions) whole_install();
 		ImGui::BeginDisabled(!game_data);
 		if (ImGui::Selectable("From the game data...") && game_data)
 			workspace_.request(
@@ -290,6 +336,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
+		if (!missions) whole_install();
 		const bool reimports =
 				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);

@@ -32,7 +32,7 @@ struct ViewportFeed {
 // the asset kinds' tables are): where it is drawn; whether it shows the document as the game would
 // read it were it saved now (its bytes written and read back, so a document that cannot be written
 // shows nothing: the menu's and the model's) or the document as it stands (a text's in the script
-// device, S13 V10; the mission's rows, to come); whether it shows one row of its document, the
+// device, S13 V10; the mission's rows, S14); whether it shows one row of its document, the
 // selection's (a menu's screen: its target moves only when a row of the document is selected and goes
 // with that row); whether its picture made again waits for a gesture open in its document to end (S13
 // V8: a scene built anew, the model's, which the device keeps while the overlays follow the drag; a
@@ -42,8 +42,10 @@ struct ViewportFeed {
 // canvas draws it, which owns the pointer over its picture (a menu's, a model's: so a point of it
 // names a record, a drag moves one, a command acts on some) or a Control of the Shell's owns it (the
 // script device's, S13 V10: no point of it names anything, nothing is dragged or commanded in it, and
-// the wire refuses a hit on it). A type is shown by one Main-role kind at most and fed by one
-// Preview-role kind at most (static_asserted).
+// the wire refuses a hit on it); and how many devices of the kind the Shell keeps at once (ADR 0046
+// S14, viewport_device_cache.h: a mission's device holds a terrain and the mission's models, so two
+// at most; 0, no limit of the kind's own beside the cache's). A type is shown by one Main-role kind
+// at most and fed by one Preview-role kind at most (static_asserted).
 struct ViewportKindRow {
 	ViewportKind kind = ViewportKind::kCount;
 	ViewportRole role = ViewportRole::Preview;
@@ -54,6 +56,7 @@ struct ViewportKindRow {
 	size_t feed_count = 0;
 	std::unique_ptr<ViewportModel> (*make)(const std::string &path) = nullptr;
 	bool canvas = true;
+	size_t devices = 0;
 };
 
 // A kind's row; Menu's for a value past the last kind.

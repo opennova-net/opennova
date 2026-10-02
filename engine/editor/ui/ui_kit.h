@@ -42,7 +42,8 @@ float text_width(const char *text);
 
 // A button of a row of tools, on `row`: pressed only while `enabled` (a disabled one never
 // acts, however it is activated), its tooltip what it does, or while it cannot act, why
-// not. Small: the tools of a list inside a panel (the inspector's, the outline's).
+// not. Small: the tools of a list inside a panel (the inspector's, the outline's). A label
+// wider than the row's whole line is cut to it ("..."), the button then found by "###label".
 bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip, bool small = false);
 
 // The tools of a list's selected record: Add, Duplicate, Remove, Up and Down, each disabled
@@ -77,6 +78,8 @@ RowTool row_tools(WrapRow &row, const RowTools &tools);
 bool filter_box(const char *id, char *text, size_t size, const char *hint, float width = 0.0f,
                 const char *tip = nullptr, bool ctrl_f = true);
 
+// A number of bytes as a list's cell says it: "512 B", "3.4 KB", "12.0 MB".
+std::string size_text(uint64_t bytes);
 // The first line of `text`, cut to `width` with "..." where it is cut (narrower than the
 // "...", what fits of the text alone).
 std::string fit(const std::string &text, float width);
