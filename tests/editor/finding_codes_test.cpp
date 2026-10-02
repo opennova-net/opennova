@@ -16,6 +16,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/session/finding_codes.h>
@@ -306,6 +307,20 @@ static int test_columns() {
 	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
 	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
 	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
+	// Review F3: where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
+	// missing reference gates; one of any other kind does not. A file of the name of the wrong kind
+	// is its own code, which gates.
+	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");
+	terrain.subject = ReferenceSubject{ ReferenceKind::Terrain, "nowhere.trn", "", -1 };
+	Diagnostic sound = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no sound");
+	sound.subject = ReferenceSubject{ ReferenceKind::Sound, "nothing.wav", "", -1 };
+	TEST_EXPECT(blocks_build(terrain) && !blocks_build(sound));
+	TEST_EXPECT(blocks_build(make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind")));
+	std::vector<std::string> gating_kinds;
+	for (size_t k = 0; k < kReferenceKindCount; ++k)
+		if (reference_row(static_cast<ReferenceKind>(k)).gates_when_missing)
+			gating_kinds.push_back(reference_row(static_cast<ReferenceKind>(k)).token);
+	TEST_EXPECT(gating_kinds == std::vector<std::string>({ "terrain" }));
 	std::set<std::string> keys, titles;
 	for (size_t g = 1; g < kFindingGroupCount; ++g) {
 		const auto group = static_cast<FindingGroup>(g);
@@ -326,7 +341,7 @@ static int test_columns() {
 		}
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::Graph; }) ==
-	            Tokens({ "graph.unreadable", "reference.missing" }));
+	            Tokens({ "graph.unreadable", "reference.missing", "reference.wrong_kind" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::RenderCheck; }) ==
 	            tokens_where([](const FindingCodeRow &row) { return starts_with(row.token, "menu.render."); }));
 	TEST_EXPECT(std::string(finding_group_key(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==

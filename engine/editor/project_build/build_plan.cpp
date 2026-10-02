@@ -4,6 +4,7 @@
 #include <filesystem>
 
 #include <editor/assets/player_files.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;

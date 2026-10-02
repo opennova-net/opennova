@@ -175,6 +175,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// for one would assert a failure no one has witnessed. What the game cannot start without is
 	// the witnessed manifest's (requirement.missing), which gates.
 	{ C::ReferenceMissing, listed(from_graph(code("reference.missing", G::MissingReferences, F::Reference))) },
+	// A file of the name the project holds, of a kind the reference's loader does not load: the game
+	// opens it and reads it as what it is not. It gates (review F3).
+	{ C::ReferenceWrongKind, from_graph(code("reference.wrong_kind", G::MissingReferences)) },
 	{ C::RenameConflict, code("rename.conflict", G::Renames) },
 	{ C::RenameCopy, code("rename.copy", G::Renames) },
 	{ C::RenameExists, code("rename.exists", G::Renames) },

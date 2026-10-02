@@ -124,6 +124,10 @@ std::string window_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	                 : ", which no window of screen " + screen + " is named: the ACTION does nothing.";
 }
 
+std::string terrain_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game refuses to start the mission.";
+}
+
 std::string bank_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which the project does not have: the game plays no sound for it.";
 }
@@ -264,6 +268,14 @@ struct Row {
 		out.row.picker_scoped = picker;
 		return out;
 	}
+	// The game refuses what names a name of the kind that finds nothing, by the witness given: a
+	// missing reference of it refuses a build (blocks_build).
+	constexpr Row fatal(const char *orig, ReferenceMissingMessage message) const {
+		Row out = *this;
+		out.row.gates_when_missing = orig;
+		out.row.missing_message = message;
+		return out;
+	}
 	// The game tolerates the name missing: a warning, saying what the game does instead.
 	constexpr Row tolerated(ReferenceMissingMessage message) const {
 		Row out = *this;
@@ -319,7 +331,15 @@ constexpr ReferenceKindRow kRows[] = {
 	        .variable()
 	        .tolerated(style_missing)
 	        .row,
-	Row(ReferenceKind::Terrain, "terrain", "the terrain", "terrain").loads(AssetKind::Terrain, kTerrain).row,
+	// A mission's terrain that does not load leaves the terrain config cleared, which the loader's tail
+	// refuses; the mission does not start (ADR 0046 S14: witnessed, so a missing one refuses a build).
+	Row(ReferenceKind::Terrain, "terrain", "the terrain", "terrain")
+	        .loads(AssetKind::Terrain, kTerrain)
+	        .fatal("[orig: Game_StartMission @ 0x524b26 -> Game_LoadTerrainDuringConnect @ 0x520710 -> "
+	               "Terrain_LoadEnvironmentConfig @ 0x610940, the empty colour map refused @ 0x610a2a; the start "
+	               "failing @ 0x524b30]",
+	               terrain_missing)
+	        .row,
 	Row(ReferenceKind::Environment, "environment", "the environment", "environment")
 	        .loads(AssetKind::Environment, kEnvironment)
 	        .row,
@@ -379,8 +399,11 @@ constexpr ReferenceKindRow kRows[] = {
 	        .scoped(true)
 	        .tolerated(user_point_missing)
 	        .row,
-	// A terrain's height data, opened by the name its .trn gives; a terrain with none is refused
-	// [orig: Terrain_LoadEnvironmentConfig @0x610940, the admission gate at its tail].
+	// A terrain's height data, opened by the name its .trn gives. A .trn that names none is refused
+	// [orig: Terrain_LoadEnvironmentConfig @0x610940, the empty polydata name @0x610a3e] (a terrain the
+	// graph cannot read); a named file the files lack is opened later with its result unread [orig:
+	// Terrain_Init @0x60fbe0 -> PolyTrn_LoadTerrainConfig @0x60e3d0, @0x60fd2d], so what the game makes
+	// of it is not witnessed: listed, not gating (ADR 0046 S14).
 	Row(ReferenceKind::TerrainData, "terrain_data", "the terrain height data", "terrain height data")
 	        .loads(AssetKind::TerrainPolyData, nullptr)
 	        .row,
@@ -481,7 +504,17 @@ constexpr bool records_well_formed() {
 	return true;
 }
 
+// A kind whose missing name refuses a build is one the graph finds missing, at an error's severity.
+constexpr bool gates_well_formed() {
+	for (const ReferenceKindRow &row : kRows)
+		if (row.gates_when_missing &&
+		    (!*row.gates_when_missing || !row.missing_message || row.severity_when_missing != DiagnosticSeverity::Error))
+			return false;
+	return true;
+}
+
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == kReferenceKindCount, "every ReferenceKind has exactly one row");
+static_assert(gates_well_formed(), "a kind that gates when missing is found missing as an error, with its witness");
 static_assert(rows_well_formed(), "the rows follow ReferenceKind's order and their tokens are unique");
 static_assert(records_well_formed(),
 		"a Record row names its collection, no file and no missing message and counts across its file, "
@@ -526,6 +559,20 @@ StyleVariableUse style_variable_use(ReferenceKind through) {
 	case ReferenceKind::MenuTexture: return StyleVariableUse::Image;
 	default: return StyleVariableUse::Other;
 	}
+}
+
+bool blocks_build(const Diagnostic &d) {
+	if (d.severity != DiagnosticSeverity::Error) return false;
+	if (!d.row() || d.row()->gates_build) return true;
+	// A code listed and not gating (a missing reference) gates where its kind's refusal is witnessed.
+	const ReferenceSubject *reference = reference_subject(d);
+	return reference && reference_row(reference->kind).gates_when_missing != nullptr;
+}
+
+bool diagnostics_block_build(const std::vector<Diagnostic> &items) {
+	for (const Diagnostic &d : items)
+		if (blocks_build(d)) return true;
+	return false;
 }
 
 } // namespace opennova::editor

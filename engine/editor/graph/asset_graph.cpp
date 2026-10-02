@@ -1173,10 +1173,22 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	// what the game shrugs off is a warning).
 	const ReferenceKindRow &row = reference_row(edge.kind);
 	const std::string who = edge.record.empty() ? edge.source : "'" + edge.record + "' in " + edge.source;
-	const std::string message = who + " names " + row.phrase + " '" + edge.value + "'" +
-	                            (row.missing_message ? row.missing_message(*this, edge)
-	                                                 : std::string(", which the project does not have."));
-	Diagnostic d = make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
+	// A file of a name its loader opens that the project holds, of another kind: no name missing, a
+	// file the game reads as what it is not (review F3), an error that gates.
+	const GraphSlot *other = nullptr;
+	if (row.resolution == ReferenceResolution::File)
+		for (const std::string &candidate :
+		     reference_file_candidates(edge.kind, resolve_style(edge.value), edge.loader_arg,
+		                               [this](const std::string &name) { return file_named(key(name)) != nullptr; }))
+			if ((other = file_named(key(candidate))) != nullptr) break;
+	const std::string message =
+	        who + " names " + row.phrase + " '" + edge.value + "'" +
+	        (other ? ", but the project's " + other->logical_name + " is " + asset_kind_label(other->kind) +
+	                         ", which the game does not load as " + row.phrase + "."
+	         : row.missing_message ? row.missing_message(*this, edge)
+	                               : std::string(", which the project does not have."));
+	Diagnostic d = other ? make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, message, edge.source, edge.field)
+	                     : make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
 	// A text's reference: its place, where Problems opens the document.
 	d.line = edge.span.line;

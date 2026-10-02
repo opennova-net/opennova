@@ -101,9 +101,10 @@ enum class FindingProblem { None, Info, Warning };
 // under; `source` what made it, when not its group's own part; `problem`, on a render check's row
 // alone, whether a finding of it is a Problems row and at what severity; `gates_build` whether an
 // error of the code, among the rows a build reads, refuses the build (blocks_build,
-// model/diagnostic.h): false on a row whose findings are listed and block nothing (ADR 0046 S14:
-// a missing reference, which the shipped game's own files carry and run with; what the game
-// cannot start without is the requirements' rows).
+// graph/reference_kinds.h): false on a row whose findings are listed and block nothing (ADR 0046
+// S14: a missing reference, which the shipped game's own files carry and run with, but where its
+// kind's row cites the game's refusal, ReferenceKindRow::gates_when_missing; what the game cannot
+// start without is the requirements' rows).
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -321,6 +322,7 @@ enum class CoreFinding {
 	ProjectTitleEmpty,
 	ProjectWrite,
 	ReferenceMissing,
+	ReferenceWrongKind,
 	RenameConflict,
 	RenameCopy,
 	RenameExists,
