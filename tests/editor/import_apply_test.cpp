@@ -929,15 +929,19 @@ static int test_apply_retail_mission_closure() {
 				            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());
 			}
 		TEST_EXPECT(references > 1000 && unplanned == 0);
-		// With the Missions feature on, the checklist: every Required file of the three phases is in
-		// (the install has each), so "create every missing file" has none to make.
+		// With the Missions feature on, the checklist: every Required file of the three phases the
+		// install has is in; one the project lacks is one the plan listed as not found (an install
+		// without its NovaWorld table), which "create every missing file" then makes.
 		editor_test::set_missions(project.session, true);
 		project.session.run_operations();
-		const size_t required_missing = view.project.requirements->required_missing + view.project.requirements->required_wrong_kind;
-		for (const RequirementRow &row : view.project.requirements->rows)
-			if (row.required && row.state != RequirementState::Present)
-				std::printf("editor_import retail closure %s: the required %s is not in the project\n", name, row.name.c_str());
-		TEST_EXPECT(required_missing == 0);
+		for (const RequirementRow &row : view.project.requirements->rows) {
+			if (!row.required || row.state == RequirementState::Present) continue;
+			std::printf("editor_import retail closure %s: the required %s is not in the project\n", name, row.name.c_str());
+			TEST_EXPECT(row.state == RequirementState::Missing && lacking.count(normalized_logical_name(row.name)));
+		}
+		editor_test::create_missing_files(project.session);
+		project.session.run_operations();
+		TEST_EXPECT(view.project.requirements->required_missing + view.project.requirements->required_wrong_kind == 0);
 		// The findings a build gates on: each a reference the shipped game's own files leave
 		// unresolved (a name the install lacks, an effect no particle file of it defines), never a
 		// file the import left behind. They gate the build all the same (printed: the number a
