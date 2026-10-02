@@ -82,7 +82,9 @@ constexpr MissionChoice kTeammateActionSubTypes[] = {
 };
 // The three sub-types SpecialSubType (28) acts on, by what each does: every other one returns
 // [orig: EventAction_HandleSpecialTypes @0x4535a0: 37 the HUD item flash (the AI sub-type table's
-// HUDITEM), 38 clears g_InputActionBits @0x4535c2, 39 stores (param1 == 0) @0x4535bc].
+// HUDITEM), 38 clears g_InputActionBits @0x4535c2, 39 stores (param1 == 0) @0x4535bc]. The original
+// editor marks action 28 unused and names none of them (bms-event-runtime-re.md 8.2): HudItem is the
+// AI table's token for the same arm, the other two are this table's own names for what they do.
 constexpr MissionChoice kSpecialSubTypes[] = {{"Null", 0}, {"HudItem", 37}, {"ClearInputActions", 38}, {"StoreIsZero", 39}};
 
 // Each list's values are bms.h's.
@@ -230,11 +232,18 @@ constexpr ParamRow kActionRows[] = {
 	{a(A::ShowLoseSubgoal), kAnySubType, {K::SubGoal, K::Bool, U, U}, {nullptr, "Show"}},
 	{a(A::AttachToEmplaced), kAnySubType, {K::Entity, U, U, U}, {}},
 	{a(A::SetLightState), kAnySubType, {K::LightChannel, K::Bool, U, U}, {}},
-	{a(A::Teammates), kAnySubType, {K::Raw, K::Raw, U, U}, {}},
+	// The medevac (1) and the flyover (2) take the patient by its SSN (the first pool-0 row of it) and
+	// the destination by the wp_number of a pool-3 type-6088 marker; any other sub-type has no arm and
+	// reads nothing [orig: EventAction_Dispatch case 39 @0x4549DC..0x454A15 -> HeliLift_SpawnPickup
+	// @0x4525E0, HeliLift_SpawnFlyover @0x452730; docs/world/world-wac-ai-re.md 33.32;
+	// runtime/world/teammate_operations.cpp TeammateOperations::start].
+	{a(A::Teammates), kAnySubType, {U, U, U, U}, {}},
+	{a(A::Teammates), 1, {K::Entity, K::WpNumber, U, U}, {"Patient", "Marker number"}},
+	{a(A::Teammates), 2, {K::Entity, K::WpNumber, U, U}, {"Patient", "Marker number"}},
 	{a(A::ShowWaypoints), kAnySubType, {K::Bool, U, U, U}, {"Show"}},
-	// The dispatcher has no case 41 [orig: EventAction_Dispatch @0x4542E0]: what reads its
-	// parameters, if anything, is not witnessed.
-	{a(A::ExecuteWac), kAnySubType, {K::Raw, K::Raw, K::Raw, K::Raw}, {}},
+	// The dispatcher has no case 41: the default returns, reading none of its parameters [orig:
+	// EventAction_Dispatch @0x4542E0; runtime/mission/event_runtime.cpp].
+	{a(A::ExecuteWac), kAnySubType, {U, U, U, U}, {}},
 	{a(A::SsnTargetSsnPri), kAnySubType, {K::Entity, K::Entity, U, U}, {nullptr, "Target entity"}},
 	{a(A::SsnTargetSsnExc), kAnySubType, {K::Entity, K::Entity, U, U}, {nullptr, "Target entity"}},
 	{a(A::SsnTargetGroupPri), kAnySubType, {K::Entity, K::Group, U, U}, {nullptr, "Target group"}},

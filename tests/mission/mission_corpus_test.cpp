@@ -230,7 +230,8 @@ void check_mission(const std::string &name, const std::vector<uint8_t> &original
 // What a new record holds is what the shipped records most often hold (bms_edit's new_entity and
 // make_blank, which cite this leg): every member of a new entity but those an author always sets
 // (its item, its SSN, its position and yaw, its team) is the most common value of that member over
-// the shipped item records, over the building records and over the marker records; every member of a
+// the shipped item records, over the building records, over the marker records and over the organic
+// records (each pool its own: bms_edit's new_entity by its kind); every member of a
 // blank mission's header but those that are the mission's own (its name and designer, its terrain,
 // tile set and environment, its game mode and option bits, the fog distance those gate) is the most
 // common value over the shipped missions. Returns the members that are not.
@@ -238,12 +239,12 @@ int check_new_records(const Tally &tally) {
 	namespace mission = opennova::mission;
 	int failures = 0;
 	const char *const authored[] = {"item", "id", "x", "y", "z", "yaw", "team"};
-	const char *const pool_names[3] = {"items", "buildings", "markers"};
-	const mission::EntityKind kinds[3] = {mission::EntityKind::Item, mission::EntityKind::Building,
-	                                      mission::EntityKind::Marker};
+	const char *const pool_names[4] = {"items", "buildings", "markers", "organics"};
+	const mission::EntityKind kinds[4] = {mission::EntityKind::Item, mission::EntityKind::Building,
+	                                      mission::EntityKind::Marker, mission::EntityKind::Organic};
 	size_t members = 0;
 	double least = 100.0;
-	for (int pool = 0; pool < 3; ++pool) {
+	for (int pool = 0; pool < 4; ++pool) {
 		if (!tally.records[pool]) continue;
 		const bms::Entity made = mission::new_entity(kinds[pool], 0, 1);
 		for (const mission::MissionField &field : mission::mission_fields(mission::MissionRecord::Entity)) {
@@ -290,7 +291,7 @@ int check_new_records(const Tally &tally) {
 		++header_members;
 		fewest = std::min(fewest, best.second);
 	}
-	std::printf("new records: %zu members of a new entity hold the shipped items', buildings' and markers' most common "
+	std::printf("new records: %zu members of a new entity hold the shipped items', buildings', markers' and organics' most common "
 	            "value (the least common of them the value of %.1f%% of its pool); %zu members of a blank mission's "
 	            "header the shipped missions' (the least common in %zu of %zu)\n",
 	            members, least, header_members, fewest, tally.missions);

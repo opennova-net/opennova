@@ -451,6 +451,21 @@ bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change
 
 bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, std::string &error) const {
 	for (const RowSwap &swap : step.swaps) {
+		// The weapon loadout as the writer would write it must read back as the same entries (Save
+		// writes it from scratch; the game's reader takes a fourth string as an entry's damage class
+		// only when it is a nonzero number or holds no letter, else as the next entry's name [orig:
+		// AIProfile_SanitizeConfigData @0x40cfe0]).
+		if (swap.after && swap.after->kind == k(K::Mission)) {
+			size_t first = 0;
+			if (!bms::loadout_reads_back(static_cast<const MissionRow &>(*swap.after).native.loadout, first)) {
+				error = "Weapon loadout entry " + std::to_string(first + 1) +
+				        " would read back as another: the game reads an entry's fourth string as its damage class only "
+				        "when it is a nonzero number or holds no letter (else as the next entry's name, every later entry "
+				        "shifting), and a three-string entry before a name of that form as the same. Give the damage class "
+				        "a number.";
+				return false;
+			}
+		}
 		// An area trigger the step puts in (a Duplicate with every zone id 1 to 99 taken keeps its
 		// original's) never shares a zone id: the resolver would find one of the two for both.
 		if (!swap.before && swap.after && swap.after->kind == k(K::Area)) {

@@ -895,6 +895,13 @@ bool parse_file(const std::string& path, File& out, std::string& error);
 // Write a BMS file to a byte buffer.
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
 
+// Whether the weapon loadout chunk the writer writes for `loadout` reads back as the same records:
+// the reader takes a fourth string as the record's damage class only when it is a nonzero number or
+// holds no letter, else as the next record's name, which every later record then shifts by
+// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]. False with the first record that does not (or
+// the one the writer refuses) in `first`.
+bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first);
+
 // Write the canonical 616-byte BMS header used by authored-file output. Chunk
 // lengths are recomputed from the modeled loadout and item-availability data.
 bool encode_header_blob(const File& file, std::vector<uint8_t>& out, std::string& error);

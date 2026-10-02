@@ -3,7 +3,8 @@
 // Display names for the BMS event-logic enums, each read from the rows that hold it: the main types
 // and the action types from the field rows (mission_field.cpp), the sub-types from the parameter rows
 // (mission_params.cpp). One copy of each name, the original editor's tokens [orig: dfx2med
-// Med_TriggerConditionName @0x446330, Med_ActionSubTypeName @0x445EE0].
+// Med_TriggerConditionName @0x446330, Med_ActionSubTypeName @0x445EE0] where it gives one; a
+// sub-type it names none of (SpecialSubType's, which it marks unused) is named for what it does.
 
 #include "mission_detail.h"
 

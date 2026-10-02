@@ -389,6 +389,57 @@ int test_edits() {
 	return 0;
 }
 
+// The weapon loadout as Save writes it reads back as the same entries (the game's reader takes a
+// fourth string as the damage class only when it is a nonzero number or holds no letter): an edit
+// that would make it read otherwise is refused; one that keeps it is written and read back the same.
+// The fourth string left out (Clear) and written again (Write) round-trips too.
+int test_loadout() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	const std::string original = bytes_of(*document);
+	Diagnostic error;
+	const NodeAddress mission = row_at(*document, MissionKind::Mission, 0);
+	std::vector<NodeId> entries;
+	for (const Document::Collection &collection : document->collections_of(mission))
+		if (collection.spec.kind == k(MissionKind::Loadout)) entries = collection.ids;
+	TEST_EXPECT(entries.size() == 4);
+	if (entries.size() != 4) return 1;
+	const auto entry = [&](size_t i) { return NodeAddress{mission.row, k(MissionKind::Loadout), entries[i]}; };
+	const auto reads_back = [&](const char *what) {
+		const SerializeResult written = document->serialize();
+		std::unique_ptr<Document> again = open(std::vector<uint8_t>(written.text.begin(), written.text.end()), "again.bms");
+		bms::File mine, theirs;
+		const bool same = written.ok() && again && as_mission(*document).compose(mine) && as_mission(*again).compose(theirs) &&
+		                  mine.loadout.entries.size() == theirs.loadout.entries.size();
+		for (size_t i = 0; same && i < mine.loadout.entries.size(); ++i) {
+			const bms::WeaponLoadoutRecord &a = mine.loadout.entries[i], &b = theirs.loadout.entries[i];
+			if (a.name != b.name || a.has_flags != b.has_flags || (a.has_flags && a.flags != b.flags)) {
+				std::fprintf(stderr, "loadout: %s: entry %zu reads back otherwise\n", what, i + 1);
+				return false;
+			}
+		}
+		return same;
+	};
+	// A damage class with a letter would read as the next entry's name: refused, named.
+	TEST_EXPECT(!document->apply(edit_of(EditOperation::Set, entry(0), "flags", std::string("abc")), error) &&
+	            error.message.find("Weapon loadout entry 1") != std::string::npos);
+	TEST_EXPECT(bytes_of(*document) == original);
+	// A number is a damage class: written, read back the same.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, entry(0), "flags", std::string("2")), error) && reads_back("a number"));
+	// Left out, the entry writes three strings and reads back so; written again, four.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Clear, entry(1), "flags"), error) && reads_back("left out"));
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Write, entry(1), "flags"), error) && reads_back("written again"));
+	// A three-string entry before a name the reader would take for a damage class (a nonzero number):
+	// refused, whichever edit makes it.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Clear, entry(1), "flags"), error));
+	TEST_EXPECT(!document->apply(edit_of(EditOperation::Set, entry(2), "name", std::string("7")), error) &&
+	            error.message.find("Weapon loadout entry 2") != std::string::npos);
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == original);
+	std::printf("loadout: an entry that would read back as another refused, the rest written and read back the same\n");
+	return 0;
+}
+
 // The clipboard (mission_clipboard.cpp, S14): rows of the three kinds copied together as a mission
 // fragment and pasted as rows, each in its band, an SSN or a zone id a row there holds given a fresh
 // one with the copies' parameters following it, an event index naming a copied event naming the copy
@@ -970,6 +1021,7 @@ int main(int argc, char **argv) {
 	if (test_rows() != 0) return 1;
 	if (test_references() != 0) return 1;
 	if (test_edits() != 0) return 1;
+	if (test_loadout() != 0) return 1;
 	if (test_clipboard() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;

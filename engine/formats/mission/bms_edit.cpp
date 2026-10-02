@@ -338,10 +338,12 @@ bool set_entity_transform(bms::File &file, EntityKind kind, size_t index,
 }
 
 // What the original editor's new record holds is not witnessed (dfx2med's initializer, D-MIS-3). The
-// values here are the ones the shipped missions' item records hold most often, each by far [corpus:
-// mission_corpus's retail leg tallies every member of every shipped item record and holds each member
-// of a new record to the most common value; a member not set here is zero in most]. The map symbol is
-// 255, the more common of the two values the shipped records hold (255 and 0).
+// values here are the ones the shipped missions' records of the kind's pool hold most often [corpus:
+// mission_corpus's retail leg tallies every member of every shipped item, building, marker and
+// organic record and holds each member of a new record of that pool to its pool's most common value;
+// a member not set here is zero in most]. The map symbol is 255, the more common of the two values the
+// shipped records hold (255 and 0). An organic's two distances are its pool's own, and the weakest of
+// the modes (13.2% of the shipped organics each; the people's distances spread wide).
 bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	bms::Entity entity = {};
 	entity.type = to_bms_type(kind);
@@ -362,6 +364,10 @@ bms::Entity new_entity(EntityKind kind, int item_id, int id) {
 	entity.map_symbol = 255;
 	entity.advancetimer = 10;
 	entity.max_attack_distance = 16;
+	if (kind == EntityKind::Organic) {
+		entity.max_engagement_distance = 100;
+		entity.max_attack_distance = 150;
+	}
 	copy_fixed_field(entity.gen_string, sizeof(entity.gen_string), "null");
 	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
 	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)

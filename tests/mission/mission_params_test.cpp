@@ -115,6 +115,20 @@ int test_actions() {
 	TEST_EXPECT(kinds(action_params(type(A::MisvarChange), 4), K::MissionVar, K::Unused, K::Unused, K::Unused));
 	TEST_EXPECT(kinds(action_params(type(A::GroupTargetSsnPri), 0), K::Group, K::Entity, K::Unused, K::Unused));
 	TEST_EXPECT(kinds(action_params(type(A::SsnTargetGroupExc), 0), K::Entity, K::Group, K::Unused, K::Unused));
+	// The teammate operations: the patient's SSN and the marker's number for the medevac and the
+	// flyover, nothing read under any other sub-type; ExecuteWac, which the dispatcher has no arm for,
+	// reads nothing.
+	TEST_EXPECT(kinds(action_params(type(A::Teammates), 1), K::Entity, K::WpNumber, K::Unused, K::Unused));
+	TEST_EXPECT(kinds(action_params(type(A::Teammates), 2), K::Entity, K::WpNumber, K::Unused, K::Unused));
+	TEST_EXPECT(kinds(action_params(type(A::Teammates), 3), K::Unused, K::Unused, K::Unused, K::Unused));
+	TEST_EXPECT(kinds(action_params(type(A::ExecuteWac), 0), K::Unused, K::Unused, K::Unused, K::Unused));
+	{
+		bms::Action medevac = {};
+		medevac.action_type = A::Teammates;
+		medevac.action_sub_type = 1;
+		TEST_EXPECT(std::string(action_param_label(medevac, 0)) == "Patient" &&
+		            std::string(action_param_label(medevac, 1)) == "Marker number");
+	}
 
 	// A Redirect's third parameter: a stop's number, or the entity to go to where the waypoint list is
 	// a command 123..125.
