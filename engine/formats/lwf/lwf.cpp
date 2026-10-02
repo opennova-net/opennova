@@ -69,6 +69,8 @@ struct DiskSndparm {
 };
 #pragma pack(pop)
 
+static_assert(sizeof(TriggerRecord) == 12, "a trigger record is 12 bytes on disk");
+
 template <typename T>
 bool read_struct(const std::vector<uint8_t> &buf, size_t offset, T &out) {
   if (offset + sizeof(T) > buf.size()) {
@@ -112,18 +114,9 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     error = "unexpected header size";
     return false;
   }
-  if (raw_header.magic != kMagic) {
-    error = "bad magic (expected 'LWF1')";
-    return false;
-  }
-  if (raw_header.trigger_count != 0) {
-    // The engine reads 12 * trigger_count bytes of trigger records after the
-    // singles table [orig: SoundBank_OpenFile @ 0x75cb63]; no JO-era bank uses
-    // them and this parser does not model the table, so re-encoding would drop
-    // it. Reject loudly instead of corrupting.
-    error = "trigger table not supported (header dword 3 nonzero)";
-    return false;
-  }
+  // No magic is refused: the engine compares it only to gate the filename table
+  // [orig: SoundBank_LoadTriggerSets @ 0x75c671] (below, the singles' paths).
+  const bool has_filenames = raw_header.magic == kMagic;
 
   const size_t file_size = buffer.size();
   const size_t singles_off = raw_header.header_size;
@@ -131,6 +124,19 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
   if (singles_off + singles_size > file_size) {
     error = "singles table overruns file";
     return false;
+  }
+  // The trigger records follow the singles: read, kept, never interpreted
+  // [orig: SoundBank_OpenFile @ 0x75cb63 / 0x75cb7a].
+  const size_t triggers_off = singles_off + singles_size;
+  const size_t triggers_size = static_cast<size_t>(raw_header.trigger_count) * sizeof(TriggerRecord);
+  if (triggers_off + triggers_size > file_size) {
+    error = "trigger table overruns file";
+    return false;
+  }
+  out.triggers.resize(raw_header.trigger_count);
+  for (uint32_t i = 0; i < raw_header.trigger_count; ++i) {
+    std::memcpy(out.triggers[i].data(), buffer.data() + triggers_off + i * sizeof(TriggerRecord),
+                sizeof(TriggerRecord));
   }
 
   DiskMultiHeader raw_multi_header{};
@@ -193,9 +199,10 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
   }
   out.string_pool.assign(buffer.begin() + string_pool_off, buffer.end());
 
-  // Validate expected string pool size (builder used 0x100 bytes per single).
+  // Validate expected string pool size (builder used 0x100 bytes per single); a bank
+  // without the filename table is never read for one.
   const size_t expected_pool = static_cast<size_t>(raw_header.single_count) * 0x100;
-  if (out.string_pool.size() < expected_pool) {
+  if (has_filenames && out.string_pool.size() < expected_pool) {
     // Not fatal, but worth noting to the caller.
     error = "string pool shorter than expected 0x100 per single";
     return false;
@@ -224,6 +231,11 @@ bool parse_lwf_buffer(const uint8_t *data, size_t size, File &out, std::string &
     s.pad0 = ds.pad0;
     s.reserved0 = {ds.reserved0[0], ds.reserved0[1], ds.reserved0[2]};
 
+    if (!has_filenames) {
+      // No filename table: the single names no file [orig: @ 0x75c671].
+      out.singles.push_back(std::move(s));
+      continue;
+    }
     size_t path_abs = static_cast<size_t>(ds.path_offset);
     if (path_abs >= file_size) {
       error = "path offset out of range";
@@ -368,7 +380,9 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
 
   // Calculate offsets.
   const uint32_t singles_off = header_size;
-  const uint32_t multi_header_off = singles_off + single_count * single_entry_size;
+  const uint32_t trigger_count = static_cast<uint32_t>(file.triggers.size());
+  const uint32_t triggers_off = singles_off + single_count * single_entry_size;
+  const uint32_t multi_header_off = triggers_off + trigger_count * static_cast<uint32_t>(sizeof(TriggerRecord));
   const uint32_t multi_table_off = multi_header_off + multi_header_size;
   const uint32_t playlists_off = multi_table_off + multi_count * multi_entry_size;
   const uint32_t sndparms_off = playlists_off + playlist_count * playlist_entry_size;
@@ -393,9 +407,9 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
   // Write header (preserve original reserved fields for byte-perfect round-trip).
   DiskHeader hdr{};
   hdr.header_size = header_size;
-  hdr.magic = kMagic;
+  hdr.magic = file.header.magic;  // as read: the engine refuses none (lwf.h)
   hdr.single_count = single_count;
-  hdr.trigger_count = file.header.trigger_count;
+  hdr.trigger_count = trigger_count;
   hdr.multi_header_off = multi_header_off;
   hdr.string_pool_off = string_pool_off;
   hdr.reserved1 = file.header.reserved1;
@@ -420,6 +434,11 @@ bool encode_lwf(const File &file, std::vector<uint8_t> &out, std::string &error)
     ds.reserved0[2] = s.reserved0[2];
     ds.path_offset = string_pool_off + i * 0x100;
     write_val(out, ds);
+  }
+
+  // Write the trigger records (after the singles, before the multi header).
+  for (const TriggerRecord &record : file.triggers) {
+    write_val(out, record);
   }
 
   // Write multi header (preserve original reserved fields for byte-perfect round-trip).
