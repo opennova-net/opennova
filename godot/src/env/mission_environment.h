@@ -224,6 +224,18 @@ public:
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).
 	void write_shader_globals();
+	// Every global this environment renders with written again whether or not
+	// its generation moved (ADR 0046 S14, E13: another picture published its
+	// own state over the process-wide globals since; this one renders next).
+	void republish_shader_globals();
+	// The shipped defaults written over the process-wide globals: the retail
+	// noon lighting block (no environment the writer), and the unloaded
+	// state's sun, sky and fog, as a process has them before any mission
+	// publishes. What a picture of no environment (a model's) renders under
+	// after a mission's picture published its own (E13).
+	static void publish_shipped_defaults();
+	// Whether this environment's lighting block is the one the globals hold.
+	bool is_lighting_block_writer() const { return lighting_block_writer_ == this; }
 
 
 	void _ready() override;
@@ -255,6 +267,9 @@ private:
 	// witness). One write per env change; process-wide, so the last writer
 	// restores the shipped noon defaults when it leaves the tree.
 	void _write_lighting_block_globals(const Ref<EnvLightValues> &p_values);
+	// The block's globals alone, whoever writes them.
+	static void _write_lighting_block(const Ref<EnvLightValues> &p_values);
+	static void _write_globals(const opennova::env::EnvShaderGlobals &p_globals);
 	// The writer leaving the tree or dying puts the noon register back and
 	// forgets its publication generation, so re-entering republishes.
 	void _release_lighting_block();

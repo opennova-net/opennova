@@ -83,6 +83,16 @@ public:
 	void set_mission_water_height_override(float p_value);
 	// Disable retained runtime rendering while no world is loaded.
 	void set_world_rendering_enabled(bool p_value);
+	// The mirror pass on or off, the surface drawn either way: an editor device renders its mirror
+	// only in the frames it presents (ADR 0046 S14, E13), so a picture no canvas draws this frame
+	// spends no mirror pass. On in the game, always.
+	void set_mirror_enabled(bool p_value);
+	bool is_mirror_enabled() const { return mirror_enabled_; }
+	// The water's process-wide globals as a process has them with no water (the
+	// active flag, the height, the shader cache's plane): what a picture with no
+	// water (a model's) renders under after a mission's picture published its
+	// own (ADR 0046 S14, E13).
+	static void publish_absent();
 	// Irreversibly drop the retained water renderer graph during process
 	// exit. Normal world unload deliberately keeps this graph warm for the
 	// next mission; SceneTree teardown is too late because shell-owned
@@ -199,6 +209,7 @@ private:
 	// The world retains this node across unload/reload, while a standalone
 	// water node starts enabled.
 	bool world_rendering_enabled_ = true;
+	bool mirror_enabled_ = true;
 	float terrain_water_height_ = 0.0f;
 	bool terrain_bounds_valid_ = false;
 	float terrain_min_height_ = 0.0f;

@@ -9,6 +9,9 @@
 
 #include <editor/preview/viewport_model.h>
 
+#include "env/mission_environment.h"
+#include "env/water.h"
+
 namespace godot {
 
 namespace {
@@ -76,6 +79,17 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	if (engine->has_singleton("ImGuiGD")) {
 		engine->get_singleton("ImGuiGD")->call("SubViewport", viewport_);
 	}
+}
+
+void ViewportDevice::publish_scene_state() {
+	if (applier_->scene_state() != 0) {
+		applier_->publish_scene_state();
+		return;
+	}
+	// The shipped defaults: the retail noon the environment globals have before any mission
+	// publishes, and no water.
+	MissionEnvironment::publish_shipped_defaults();
+	Water::publish_absent();
 }
 
 void ViewportDevice::withhold_render() {

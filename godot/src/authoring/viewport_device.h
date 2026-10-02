@@ -64,7 +64,10 @@ public:
 	bool render_asked() const override { return render_asked_; }
 	uint64_t rendered_frame() const override { return rendered_frame_; }
 	void withhold_render() override;
-	void publish_scene_state() override { applier_->publish_scene_state(); }
+	// A state of the applier's own is its to publish; the shipped defaults (state 0: a menu's, a
+	// model's) are written back over the process-wide globals here, since no applier of them writes
+	// any.
+	void publish_scene_state() override;
 	void present(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 
 	ViewportApplier &applier() { return *applier_; }

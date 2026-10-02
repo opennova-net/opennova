@@ -53,6 +53,8 @@ void Water::_bind_methods() {
 			&Water::set_mission_water_height_override);
 	ClassDB::bind_method(D_METHOD("set_world_rendering_enabled", "value"),
 			&Water::set_world_rendering_enabled);
+	ClassDB::bind_method(D_METHOD("set_mirror_enabled", "value"), &Water::set_mirror_enabled);
+	ClassDB::bind_method(D_METHOD("is_mirror_enabled"), &Water::is_mirror_enabled);
 	ClassDB::bind_method(D_METHOD("release_runtime_renderer_resources"),
 			&Water::release_runtime_renderer_resources);
 	ClassDB::bind_method(D_METHOD("is_water_active"), &Water::is_water_active);
@@ -159,6 +161,20 @@ void Water::set_mission_water_height_override(float p_value) {
 void Water::set_world_rendering_enabled(bool p_value) {
 	world_rendering_enabled_ = p_value;
 	_sync_render_activity();
+}
+
+void Water::set_mirror_enabled(bool p_value) {
+	if (mirror_enabled_ == p_value) {
+		return;
+	}
+	mirror_enabled_ = p_value;
+	_sync_render_activity();
+}
+
+void Water::publish_absent() {
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_active", false);
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_height", 0.0f);
+	ObjectShaderCache::get_singleton()->clear_water_plane();
 }
 
 void Water::release_runtime_renderer_resources() {
@@ -289,7 +305,7 @@ void Water::_sync_render_activity() {
 	// off-screen surface. The strip march re-arms this after it produces
 	// rows.
 	const bool reflection_active = world_active && has_drawable_surface_ &&
-			cached_cam_id_.is_valid();
+			cached_cam_id_.is_valid() && mirror_enabled_;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(reflection_active
 						? SubViewport::UPDATE_ALWAYS

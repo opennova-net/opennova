@@ -18,6 +18,8 @@ MissionEnvironment::MissionEnvironment() {
 }
 
 void MissionEnvironment::_bind_methods() {
+	ClassDB::bind_method(D_METHOD("is_lighting_block_writer"),
+			&MissionEnvironment::is_lighting_block_writer);
 	ClassDB::bind_method(D_METHOD("set_environment_data", "value"),
 			&MissionEnvironment::set_environment_data);
 	ClassDB::bind_method(D_METHOD("get_environment_data"),
@@ -325,6 +327,11 @@ void MissionEnvironment::_write_lighting_block_globals(
 	if (p_values.is_null()) {
 		return;
 	}
+	_write_lighting_block(p_values);
+	lighting_block_writer_ = this;
+}
+
+void MissionEnvironment::_write_lighting_block(const Ref<EnvLightValues> &p_values) {
 	const EnvLightValues &v = **p_values;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_light_block_dir", v.dir);
@@ -344,7 +351,21 @@ void MissionEnvironment::_write_lighting_block_globals(
 	// enable, which a loaded world always carries.
 	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
 	rs->global_shader_parameter_set("opennova_thermal_view", v.thermal_view);
-	lighting_block_writer_ = this;
+}
+
+void MissionEnvironment::republish_shader_globals() {
+	// The generation gate stands down for this one write: the globals hold
+	// another picture's state, not this environment's last publication.
+	last_published_generation_ = -1;
+	flush_publication(true);
+	write_shader_globals();
+}
+
+void MissionEnvironment::publish_shipped_defaults() {
+	_write_lighting_block(EnvLightValues::retail_noon_defaults());
+	lighting_block_writer_ = nullptr;
+	opennova::env::EnvironmentState unloaded;
+	_write_globals(unloaded.build_shader_globals(false));
 }
 
 void MissionEnvironment::_release_lighting_block() {
@@ -410,9 +431,11 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 }
 
 void MissionEnvironment::write_shader_globals() {
+	_write_globals(state_.build_shader_globals(underwater_view_));
+}
+
+void MissionEnvironment::_write_globals(const opennova::env::EnvShaderGlobals &globals) {
 	RenderingServer *rs = RenderingServer::get_singleton();
-	const opennova::env::EnvShaderGlobals globals =
-			state_.build_shader_globals(underwater_view_);
 	rs->global_shader_parameter_set("opennova_sun_light",
 			to_vector3(globals.sun_light));
 	rs->global_shader_parameter_set("opennova_sky_ambient",
