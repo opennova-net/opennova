@@ -641,7 +641,7 @@ bool ClientRuntime::queue_team_change_request() {
 	if (role_ == Role::HostClient && loopback_ != nullptr) {
 		loopback_->client_send(c2s::TEAM_CHANGE_REQUEST, {});
 	} else if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session()) {
-		pre_send_queue_.push_back(make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {}));
+		send_queue_.push_back(make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {}));
 	} else {
 		return false;
 	}
@@ -1202,10 +1202,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		//  CNapiNPManager_SendTo `addr == 0` @0x61ec59 -> NapiFifo_WritePacketAtomic
 		//  @0x61eccd; CNapiGameSession_CreateSession @0x4c9b9c..0x4c9c67 sets no
 		//  address; Game_ProcessMainFrame -> CNapiNetwork_PumpManagerReceive @0x526528]
-		while (!pre_send_queue_.empty()) {
-			ProtocolMessage &held = pre_send_queue_.front();
+		while (!send_queue_.empty()) {
+			ProtocolMessage &held = send_queue_.front();
 			loopback_->client_send(held.tag, std::move(held.payload));
-			pre_send_queue_.pop_front();
+			send_queue_.pop_front();
 		}
 		return outbound;
 	}
