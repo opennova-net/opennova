@@ -257,19 +257,9 @@ void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
 			}
 		}
 	}
-	// A table's bitmap and custom cells and its SUBST images (D-MNU-13).
-	if (w.type == mnu::WindowType::Table) {
-		const mnu::TableColumn &column = w.table_data.column;
-		for (size_t i = 0; i < column.bodies.size(); ++i) {
-			if (!column.bodies[i].display.empty()) {
-				note_(Code::TableCellsDeferred, column.bodies[i].display, "column.body", static_cast<int>(i),
-						"display");
-			}
-		}
-		for (size_t i = 0; i < column.substitutions.size(); ++i) {
-			note_(Code::TableCellsDeferred, "SUBST", "column.subst", static_cast<int>(i), "");
-		}
-	}
+	// A table's bitmap, bitmap-and-text and custom cells and its SUBST images are drawn
+	// (menu_frame_table.cpp, emit_table): only an ITEMS IMAGEROW row stays deferred, noted where
+	// its appearance row is read (note_appearance_row_).
 }
 
 // A part node (a spin arrow, or a window inside one) is its list's SPINUP or SPINDOWN

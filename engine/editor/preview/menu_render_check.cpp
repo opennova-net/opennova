@@ -78,7 +78,7 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 		return "OpenNova draws only the text rows of a list or a combo box yet (D-MNU-5), so this " + s +
 		       " row is not drawn.";
 	case Code::TableCellsDeferred:
-		return "OpenNova does not draw a table's " + s + " cells yet (D-MNU-13).";
+		return "OpenNova does not draw a table's " + s + " row images yet (D-MNU-13).";
 	case Code::ScrollExtentDefault:
 		return "No HEIGHT or WIDTH sets this scroll bar's arrow length, so the game makes each arrow " + s +
 		       " long along the bar.";
