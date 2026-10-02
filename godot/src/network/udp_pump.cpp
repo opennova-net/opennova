@@ -2,6 +2,8 @@
 #include "network/udp_datagram.h"
 #include "util/string_convert.h"
 
+#include <net/npwire/net_ports.h> // lan_client_bind_ports
+
 #include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 
@@ -93,7 +95,14 @@ int UdpPump::dial(const String &host, int port) {
 	if (resolved_host.is_empty()) return static_cast<int>(ERR_CANT_RESOLVE);
 
 	socket_.instantiate();
-	const Error err = socket_->bind(0, "0.0.0.0");
+	// The client arm of the socket open scans the authored client port range
+	// from its min, as retail's does; every bind failing leaves no transport
+	// (net_ports.h lan_client_bind_ports, D-NET-294).
+	Error err = ERR_CANT_OPEN;
+	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
+		err = socket_->bind(candidate, "0.0.0.0");
+		if (err == OK) break;
+	}
 	if (err != OK) {
 		socket_.unref();
 		return static_cast<int>(err);

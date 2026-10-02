@@ -49,6 +49,28 @@ inline std::vector<uint16_t> lan_host_bind_ports(uint32_t min_port,
 	return ports;
 }
 
+// The client arm of the same socket open (D-NET-294): a non-authority LAN
+// session (and the direct-address type 3) reads mplanclientportmin / max /
+// delta / random, a NovaWorld session mpnovaworldportmin / max / delta / random;
+// the shipped cfg defaults of both quads are 32768 / 65535 / 1 / 0. It binds
+// the configured address (mpipaddressstring, "0.0.0.0") and scans exactly as
+// the host does, from min while random is 0; every bind failing resets the
+// transport to none. The one socket serves the browse, the NWU session and the
+// join.
+// [orig: CNapiNetwork_OpenTransportSocket @ 0x4c6a40 — the LAN non-authority arm
+//  @ 0x4c6ad9..0x4c6af0 (+0x250/+0x254/+0x258/+0x25C), the type-3 arm
+//  @ 0x4c6aba..0x4c6acc, the NovaWorld arm @ 0x4c6af6..0x4c6b08
+//  (+0x228..+0x234), the bind address @ 0x4c6b13; the cfg table's defaults
+//  @ 0x8331d0..0x833218 and @ 0x8330e0..0x833128; NapiUdpSocket_CreateAndBind
+//  @ 0x62d2a0; the failed open's reset to mode 0 @ 0x4c879d..0x4c87a3]
+inline constexpr uint16_t kRetailLanClientPortMin = 32768;
+inline constexpr uint16_t kRetailLanClientPortMax = 65535;
+inline constexpr uint16_t kRetailLanClientPortDelta = 1;
+inline std::vector<uint16_t> lan_client_bind_ports() {
+	return lan_host_bind_ports(kRetailLanClientPortMin, kRetailLanClientPortMax,
+			kRetailLanClientPortDelta);
+}
+
 // The NovaWorld gate's UDP port (novaworld_gate; the same value as
 // engine/net/novaworld gate_probe.h GATE_DEFAULT_PORT, which stays the service-side
 // canonical — novaworld layers ON npwire, so the wire lib carries its own).

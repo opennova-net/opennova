@@ -79,7 +79,13 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	}
 
 	socket_.instantiate();
-	const Error bind_error = socket_->bind(0, "0.0.0.0");
+	// The browse socket is the client arm's: the authored client port range,
+	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294).
+	Error bind_error = ERR_CANT_OPEN;
+	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
+		bind_error = socket_->bind(candidate, "0.0.0.0");
+		if (bind_error == OK) break;
+	}
 	if (bind_error != OK) {
 		socket_.unref();
 		browser_.stop();
