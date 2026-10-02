@@ -4441,9 +4441,10 @@ bool run_chat_uplink_api() {
 }
 
 // The listen host's own client is a session peer too: its talk line rides
-// its loopback to its own server as the same C2S 0x0D [orig: the senders'
-// QueueReliableMessage(0xD) over transport mode 1]; the local and crew keys
-// refuse on the death screen alone.
+// its loopback to its own server as the same C2S 0x0D, leaving at its client
+// frame [orig: the senders' QueueReliableMessage(0xD) on the local connection,
+// sent by PumpClientProtocolSend @0x42c4bc]; the local and crew keys refuse on
+// the death screen alone.
 bool run_host_chat_uplink() {
 	using Result = hud::ChatSendResult;
 	ns::LoopbackChannel host_loop;
@@ -4452,6 +4453,9 @@ bool run_host_chat_uplink() {
 	if (!expect(host.queue_chat_message(13, line, 50) == Result::Sent,
 			"the host's local line is sent"))
 		return false;
+	if (!expect(host_loop.c2s_pending() == 0, "the line waits for the client frame"))
+		return false;
+	host.Client_ProcessNetworkFrame();
 	ns::Datagram dg;
 	if (!expect(host_loop.host_recv(dg) && dg.tag == c2s::CHAT_MESSAGE, "it lands on the loopback"))
 		return false;
@@ -6598,15 +6602,19 @@ bool run_emote_and_local_chat_track_the_speaker(bool replica_only) {
 // [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab; NapiNPClientMsg_HandleSpawnSlot
 //  @0x4317B0; Client_ProcessNetworkFrame @0x42C27E..0x42C2DA]
 // The Emotes / Radio menu picks leave the listen client over its loopback as
-// C2S 0x14 / 0x13 [i16 value]; a joiner with no session queues nothing.
+// C2S 0x14 / 0x13 [i16 value], at its client frame; a joiner with no session
+// queues nothing.
 // [orig: NetPacket_SendEmoteRequest @0x42C120; NetPacket_SendRadioCallRequest
-//  @0x42C150]
+//  @0x42C150; Client_ProcessNetworkFrame -> PumpClientProtocolSend @0x42c4bc]
 bool run_voice_menu_picks_ride_the_session() {
     ns::LoopbackChannel host_loop;
     inmatch::ClientRuntime host_view(host_loop);
     if (!expect(host_view.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3) &&
             host_view.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 10),
             "the listen client queues both picks")) return false;
+    if (!expect(host_loop.c2s_pending() == 0, "the picks wait for the client frame"))
+        return false;
+    host_view.Client_ProcessNetworkFrame();
     std::vector<ns::Datagram> out;
     ns::Datagram dg;
     while (host_loop.host_recv(dg)) out.push_back(dg);

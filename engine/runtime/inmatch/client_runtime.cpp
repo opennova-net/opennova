@@ -607,13 +607,16 @@ hud::ChatSendResult ClientRuntime::queue_chat_message(uint8_t channel, std::stri
 	body.push_back(channel);
 	body.insert(body.end(), stripped.begin(), stripped.end());
 	body.push_back(0);
+	ProtocolMessage chat = make_protocol_message(c2s::CHAT_MESSAGE, std::move(body));
 	if (host_path) {
-		// The listen host's client half queues it on its loopback — retail's
-		// same QueueReliableMessage over transport mode 1 — to its own server.
-		loopback_->client_send(c2s::CHAT_MESSAGE, std::move(body));
+		// The listen host's client half queues it on its own local connection
+		// like a joiner's: its client frame sends it and the next frame's
+		// server tick dispatches it, the 0x1D's path (queue_stance_change).
+		// [orig: Chat_SendTeamMessage `cmp is_mp_session_peer` @0x49a980 ->
+		//  CNapiNetwork_QueueReliableMessage(0xD) @0x49a9b4]
+		send_queue_.push_back(std::move(chat));
 		return Result::Sent;
 	}
-	ProtocolMessage chat = make_protocol_message(c2s::CHAT_MESSAGE, std::move(body));
 	// QueueReliableMessage(0xD, 1, 310): the same 310-flush finite lifetime
 	// the 0x4C report and the medic call carry; the senders run outside the
 	// client net frame, so the line rides the held one-shot queue.
@@ -626,12 +629,14 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 	if (tag != c2s::EMOTE_REQUEST && tag != c2s::RADIO_CALL_REQUEST) return false;
 	std::vector<uint8_t> body;
 	io::append_i16_le(body, value); // [orig: @0x42c137 / @0x42c167]
+	ProtocolMessage pick = make_protocol_message(tag, std::move(body));
 	if (role_ == Role::HostClient && loopback_ != nullptr) {
-		loopback_->client_send(tag, std::move(body));
+		// The host's pick takes its local connection too, sent by its client
+		// frame [orig: the unconditional QueueReliableMessage @0x42c147 / @0x42c177].
+		send_queue_.push_back(std::move(pick));
 		return true;
 	}
 	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
-	ProtocolMessage pick = make_protocol_message(tag, std::move(body));
 	pick.retention_flushes = 1; // the user param [orig: `push 1` @0x42c12c / @0x42c15c]
 	send_queue_.push_back(std::move(pick));
 	return true;

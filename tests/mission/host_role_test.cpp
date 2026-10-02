@@ -662,6 +662,22 @@ int main() {
 		role.run_tick(tick_input(0));
 		CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
 		CHECK(body_stance() == w::InfantryState::Stance::kStand);
+		// The host's chat line, emote and radio call take the same path as
+		// its 0x1D: queued on its own client connection at the press, sent by
+		// that frame's client frame, dispatched by the next frame's server
+		// tick. [orig: Chat_SendTeamMessage QueueReliableMessage(0xD) @0x49a9b4;
+		//  NetPacket_SendEmoteRequest @0x42c147 (0x14); NetPacket_SendRadioCallRequest
+		//  @0x42c177 (0x13); the manager FIFO drained @0x526528]
+		inmatch::ClientRuntime &own = *host.client_runtime;
+		std::string line = "on me";
+		CHECK(own.queue_chat_message(1, line, 0) == hud::ChatSendResult::Sent);
+		CHECK(own.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3));
+		CHECK(own.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 5));
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 3);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 0);
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");
