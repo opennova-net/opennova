@@ -7,6 +7,8 @@
   "files": {
     "scripts/*.sh": ["GODOT_BIN", "HOME", "APPDATA", "XDG_DATA_HOME"],
     "scripts/godot_bin.sh": ["GODOT_BIN"],
+    "scripts/build.sh": ["MSYS2_ENV_CONV_EXCL"],
+    "scripts/build_godot.sh": ["MSYS2_ENV_CONV_EXCL"],
     "scripts/net/*.ps1": ["GODOT_BIN", "ProgramFiles", "ProgramFiles(x86)", "SystemRoot"],
     "scripts/mcp/*.py": ["GODOT_BIN"],
     "scripts/render/*.ps1": ["GODOT_BIN"],

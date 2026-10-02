@@ -52,6 +52,14 @@ case "$flavor" in
     Release) config="Release" ;;
 esac
 
+# MSVC reads extra compiler options from CL (e.g. CL=/MP16). Git Bash rewrites an
+# environment value that looks like a POSIX path when it starts a Windows program,
+# so /MP16 would reach cl.exe as "C:/Program Files/Git/MP16" and fail every
+# compile (CMake cannot even identify the compiler). Exclude CL from that
+# conversion: MSYS2_ENV_CONV_EXCL is a ';' list of variable names, and means
+# nothing outside MSYS, so other hosts are unaffected.
+export MSYS2_ENV_CONV_EXCL="CL${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+
 echo "Building Godot GDExtension ($flavor -> CMake config $config)..."
 # CMAKE_BUILD_TYPE drives single-config generators (Linux/macOS Makefiles or
 # Ninja); --config drives multi-config generators (Visual Studio). Passing both

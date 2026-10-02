@@ -37,6 +37,10 @@ case "$suite" in
     *) echo "$usage" >&2; exit 2 ;;
 esac
 
+# Keep a CL=/MP16 (MSVC's extra-options variable) intact through Git Bash's
+# POSIX-path rewrite of the environment (scripts/build_godot.sh says why).
+export MSYS2_ENV_CONV_EXCL="CL${MSYS2_ENV_CONV_EXCL:+;$MSYS2_ENV_CONV_EXCL}"
+
 # The Godot addons (GUT, imgui-godot) are project assets for the GDExtension
 # flavour, not a dependency of the C++ targets: the Godot-free path skips the
 # bootstrap.
