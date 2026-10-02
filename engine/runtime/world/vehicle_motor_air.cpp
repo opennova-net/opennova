@@ -320,10 +320,10 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 			const uint32_t move_order = claimant->net_move_input;
 			const int dir = static_cast<int>(move_order & Entity::kMoveOrderDirMask);
 			if (int(claimant->net_analog_z) + claimant->net_analog_y + claimant->net_analog_x != 0)
-				claimant->net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
+				merge_occupant_free_look(world, *claimant);
 			if ((move_order & Entity::kMoveOrderMoving) != 0 && traits.weathervane != 0 &&
 					(dir & 1) != 0) {
-				claimant->net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
+				merge_occupant_free_look(world, *claimant);
 				if ((veh.flags & kEntityFlagInAir) != 0)
 					m.yaw_bam = io::bam_add(m.yaw_bam, bam_mul_wrap(traits.weathervane,
 							dir == 1 || dir == 5 ? kAnalogSteerScale : -kAnalogSteerScale));

@@ -88,10 +88,13 @@ public:
     PlayerInputFlags input_flags;
     // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
     // it. It persists between packs: the motor, the keyboard look rotation and
-    // the wire mirror read it every tick, and only a pack rewrites it.
+    // the wire mirror read it every tick, and only a pack rewrites it; a
+    // vehicle mover's free-look merge ORs into it meanwhile
+    // (merge_occupant_free_look).
     // [orig: Player_PackInputStateToEntity @0x4df68f..0x4df790 -- the sole
     //  writer of the local player's movement bits; Entity_ApplyFreeLookRotation
-    //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick]
+    //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick;
+    //  the merges @0x48b897 / @0x490d6d]
     PlayerBodyInput move_order;
     // One frame of movement keys: stores the keys plus the sim-owned stance
     // latch onto `input` and refreshes the view aggregates, whose binocular
