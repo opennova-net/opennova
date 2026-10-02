@@ -78,7 +78,7 @@ inline const MsgCatalogEntry *ingame_message_catalog(size_t *count) {
 		{'S', s2c::LOADOUT_CRC_REQ,           "loadout-crc-req",         MsgCoverage::Decoded,     "§5.35 decode_loadout_crc_request (3 B ammo-def CRC request → C2S 0x21 @0x4311E0)"},
 		{'S', s2c::PLAY_SOUND,                "play-sound",              MsgCoverage::Decoded,     "§5.50 decode_play_sound (profile name + optional 3D pos)"},
 		{'S', s2c::CHARATTR_CRC_CHALLENGE,    "charattr-crc-challenge",  MsgCoverage::Decoded,     "§5.34 decode_u32_scalar (seed -> C2S 0x1C)"},
-		{'S', s2c::ACK_STUB,                  "ack-stub",                MsgCoverage::PrinterOnly, "ack-style stub @0x4226D0"},
+		{'S', s2c::MAP_OVERLAY_RESET,         "map-overlay-reset",       MsgCoverage::PrinterOnly, "empty body; clears the 1160 map-overlay slots and the 251 linked rows, sent last in the host's join tail [orig: NapiNPClientMsg_0x03E @0x4226D0 -> sub_5BE8D0 @0x5BE8D0; Server_OnPlayerJoin @0x51aaee]"},
 		{'S', s2c::CAPTURE_ZONE_STATE,        "capture-zone-state",      MsgCoverage::Decoded,     "§5.19 decode_capture_zone_overlay"},
 		{'S', s2c::CHARATTR_PROPERTY_CLEAR,   "charattr-property-clear", MsgCoverage::PrinterOnly, "[u8 propertyId] clears that property across the retained g_CharAttr[16] table (short body -> property 0); IDB NapiNPClientMsg_ClearAnimSlot @0x4254C0 is a MISNOMER -> AnimMap_SetSlotProperty @0x412890"},
 		{'S', s2c::INPUT_STATE_FLAGS,         "input-state-flags",       MsgCoverage::Decoded,     "§5.35 decode_input_state_flags"},

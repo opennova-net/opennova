@@ -137,6 +137,10 @@ public:
 	// known from the decoded entity, mirroring retail's draw-time pool read.
 	// [orig: Render_MinimapSlotBlip @0x5be4ac]
 	void refresh_minimap_live_markers();
+	// S2C 0x3E (empty): every overlay slot and every linked row cleared, the
+	// last message of the host's join tail [orig: NapiNPClientMsg_0x03E
+	// @0x4226D0 -> sub_5BE8D0 @0x5BE8D0; Server_OnPlayerJoin @0x51aaee].
+	void reset_minimap_overlays();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.

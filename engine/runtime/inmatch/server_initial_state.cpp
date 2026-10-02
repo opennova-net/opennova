@@ -561,7 +561,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
 			step.messages.push_back(InitialStateMessage{
 					0x61, Server_RerollPlayerTickSeed(conn)}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
-			step.messages.push_back(InitialStateMessage{0x3E, {}}); // terminator
+			// The last of the tail: the joiner clears its map-overlay banks
+			// [orig: Server_OnPlayerJoin @0x51aaee -> NapiNPClientMsg_0x03E @0x4226D0].
+			step.messages.push_back(InitialStateMessage{s2c::MAP_OVERLAY_RESET, {}});
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy",
 			             wsl_sz);

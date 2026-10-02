@@ -289,6 +289,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::MAP_OVERLAY_RESET: // the body is never read
+		reset_minimap_overlays();
+		break;
 	case s2c::END_ROUND_HEADER:
 		apply_end_round_header(body);
 		break;
