@@ -64,7 +64,7 @@ std::vector<uint8_t> player_frame(uint8_t anim_state) {
 }
 
 int main() {
-	const auto dir = std::filesystem::path(test_paths_temp_dir()) / "opennova_adm_playback";
+	const auto dir = std::filesystem::path(test_paths_temp_dir()) / test_paths_unique("opennova_adm_playback");
 	std::filesystem::create_directories(dir);
 	write_clip(dir / "once.bad", 30, false);
 	write_clip(dir / "slow.bad", 24, true);

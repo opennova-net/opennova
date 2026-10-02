@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include <formats/mission/bms.h>
 #include <runtime/mission/mission_catalog.h>
 #include <base/resource_index/resource_index.h>
@@ -133,7 +134,7 @@ int main() {
 	using opennova::bms::AttribFlags;
 	namespace catalog = opennova::mission_catalog;
 
-	const fs::path root = fs::temp_directory_path() / "opennova_mission_catalog_test";
+	const fs::path root = fs::temp_directory_path() / test_paths_unique("opennova_mission_catalog_test");
 	fs::remove_all(root);
 	fs::create_directories(root);
 

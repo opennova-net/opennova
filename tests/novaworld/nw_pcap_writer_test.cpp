@@ -33,7 +33,7 @@ int failures = 0;
 	} while (0)
 
 std::string temp_path(const char *stem) {
-	return std::string(test_paths_temp_dir()) + "/" + stem;
+	return std::string(test_paths_temp_dir()) + "/" + std::to_string(test_paths_pid()) + "_" + stem;
 }
 
 // Three datagrams both directions, varied sizes including an empty-ish one.

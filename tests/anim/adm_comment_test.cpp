@@ -18,7 +18,7 @@ int main(void) {
         "anim_jump\t\t\"JumpAnim.bad\"\r\n";
 
     char temp_path[4096];
-    snprintf(temp_path, sizeof(temp_path), "%s/adm_comment_test.adm", test_paths_temp_dir());
+    snprintf(temp_path, sizeof(temp_path), "%s/adm_comment_test_%ld.adm", test_paths_temp_dir(), test_paths_pid());
     FILE *f = fopen(temp_path, "wb");
     if (!f) {
         fprintf(stderr, "FAIL: could not create temp file\n");

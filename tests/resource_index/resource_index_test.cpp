@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include <base/resource_index/resource_index.h>
 
 namespace {
@@ -90,7 +91,7 @@ std::string as_string(const std::vector<uint8_t> &bytes) {
 } // namespace
 
 int main() {
-	const fs::path root = fs::temp_directory_path() / "opennova_resource_index_test";
+	const fs::path root = fs::temp_directory_path() / test_paths_unique("opennova_resource_index_test");
 	fs::remove_all(root);
 	fs::create_directories(root);
 
@@ -251,7 +252,7 @@ int main() {
 
 	// --- expansion override: scan(root, expansion) mounts loose expansion + L.pff + main.pff
 	// ahead of the base archives (matches the engine). ---
-	const fs::path game = fs::temp_directory_path() / "opennova_resource_index_exp";
+	const fs::path game = fs::temp_directory_path() / test_paths_unique("opennova_resource_index_exp");
 	fs::remove_all(game);
 	fs::create_directories(game / "expansion" / "jox01");
 	write_pff(game / "resource.pff", {{"shared.env", "base env"}, {"baseonly.trn", "base trn"}});
@@ -341,7 +342,7 @@ int main() {
 	// [orig: CEffectSystem_Init @ 0x5f6070 matches ".ptl" OR the selected extension
 	//  @0x5f64f3; Game_LoadConfig @ 0x5514e8..0x5514fa sets the selector byte.]
 	{
-		const fs::path gore = fs::temp_directory_path() / "opennova_gore_index_test";
+		const fs::path gore = fs::temp_directory_path() / test_paths_unique("opennova_gore_index_test");
 		fs::remove_all(gore);
 		write_file(gore / "joammohit.ptl", "ptl");
 		write_file(gore / "us_blood.ptu", "ptu");

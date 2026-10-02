@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "common/test_expect.h"
+#include "common/test_paths.h"
 #include "pff/pff_test_writer.h"
 #include <base/io/os_path.h>
 #include <base/resource_index/resource_index.h>
@@ -74,11 +75,11 @@ int main() {
 	std::error_code ec;
 	const fs::path temp = fs::temp_directory_path(ec);
 	TEST_EXPECT(!ec);
-	const std::string scratch = (temp / "opennova_vfs_long_path_scratch").string();
+	const std::string scratch = (temp / test_paths_unique("opennova_vfs_long_path_scratch")).string();
 	fs::remove_all(scratch, ec);
 	fs::create_directories(scratch, ec);
 	// The base as UTF-8: the temp directory itself may hold a name outside the code page.
-	const std::string base = io::utf8_generic_path(temp) + "/opennova_vfs_long_path";
+	const std::string base = io::utf8_generic_path(temp) + "/" + test_paths_unique("opennova_vfs_long_path");
 	remove_tree(base);
 	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 

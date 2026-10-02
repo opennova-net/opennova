@@ -115,7 +115,7 @@ int main() {
     // [orig: AnimMap_ParseConfigLine @0x40cb60 registers every token on the slot;
     //  AnimMap_PlayAnimBySlot @0x40bda0 serves the head and advances it]
     {
-        const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_rm_ring";
+        const std::string dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_rm_ring");
 #ifdef _WIN32
         _mkdir(dir.c_str());
 #else

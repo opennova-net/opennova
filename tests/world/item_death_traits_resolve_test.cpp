@@ -78,8 +78,8 @@ struct TempRoot {
     std::string dir;
     explicit TempRoot(const char *tag) {
         static int serial = 0;
-        dir = std::string(test_paths_temp_dir()) + "/opennova_death_traits_" + tag + "_" +
-              std::to_string(++serial);
+        dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_death_traits") + "_" +
+              tag + "_" + std::to_string(++serial);
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
         std::filesystem::create_directories(dir, ec);

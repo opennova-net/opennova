@@ -57,7 +57,7 @@ bool write_clip(const fs::path &path, uint32_t fps, uint32_t frames, bool loop) 
 } // namespace
 
 int main() {
-	const fs::path dir = fs::path(test_paths_temp_dir()) / "opennova_adm_ring_table";
+	const fs::path dir = fs::path(test_paths_temp_dir()) / test_paths_unique("opennova_adm_ring_table");
 	std::error_code ignored;
 	fs::remove_all(dir, ignored);
 	fs::create_directories(dir);

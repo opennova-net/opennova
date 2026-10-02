@@ -10,6 +10,7 @@
 #include <runtime/world/world.h>
 
 #include "common/file_io.h"
+#include "common/test_paths.h"
 
 #include <algorithm>
 #include <cctype>
@@ -44,7 +45,7 @@ public:
 		const uint64_t stamp = static_cast<uint64_t>(
 				std::chrono::steady_clock::now().time_since_epoch().count());
 		path = std::filesystem::temp_directory_path() /
-				("opennova-wac-layered-" + std::to_string(stamp) + "-" +
+				(test_paths_unique("opennova-wac-layered") + "-" + std::to_string(stamp) + "-" +
 				 std::to_string(++sequence));
 		std::error_code error;
 		std::filesystem::create_directories(path, error);

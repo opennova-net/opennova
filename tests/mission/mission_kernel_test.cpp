@@ -449,7 +449,7 @@ static void test_initial_wac_binds_the_preopened_music_context() {
 //  @0x456980; Entity_ProcessSectionDamageTransition @0x43F496..0x43F501]
 static void test_board_walk_reaches_a_kernel_named_point() {
 	namespace fs = std::filesystem;
-	const std::string root = std::string(test_paths_temp_dir()) + "/opennova_kernel_named_points";
+	const std::string root = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_kernel_named_points");
 	std::error_code ec;
 	fs::remove_all(root, ec);
 	fs::create_directories(root, ec);

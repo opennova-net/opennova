@@ -281,7 +281,7 @@ int main(int argc, char **argv) {
 
 	// --- Tmap.cpt (written through the CDEP/POLY writer, then compared as bytes) ---
 	const CptFile cpt = make_cpt();
-	const std::string cpt_tmp = std::string(test_paths_temp_dir()) + "/minimal_terrain_gen_tmap.cpt";
+	const std::string cpt_tmp = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("minimal_terrain_gen_tmap", ".cpt");
 	cpt.write(cpt_tmp);
 	std::vector<uint8_t> cpt_bytes;
 	failures += !expect(test_io::read_file(cpt_tmp, cpt_bytes), "read the written Tmap.cpt");

@@ -16,7 +16,8 @@
 namespace {
 
 std::string temp_path(const char *name) {
-	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/build/test-output";
+	const std::string dir = std::string(test_paths_repo_root(__FILE__)) + "/build/test-output/" +
+			std::to_string(test_paths_pid());
 	std::filesystem::create_directories(dir);
 	return dir + "/" + name;
 }

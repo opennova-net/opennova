@@ -33,7 +33,7 @@ int main() {
     }
 
     fs::path tmp_path =
-        fs::path(test_paths_temp_dir()) / "cdep_roundtrip.cpt";
+        fs::path(test_paths_temp_dir()) / test_paths_unique("cdep_roundtrip", ".cpt");
 
     opennova::CptFile cpt_out;
     cpt_out.header.magic = opennova::CptFile::MAGIC;

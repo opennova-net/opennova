@@ -187,7 +187,7 @@ int main() {
     }
 
     // ---- stage the temp rig: reset.bad (byte copy of BINOC), twist.bad (the fixture) ----
-    const std::string dir = std::string(test_paths_temp_dir()) + "/opennova_wpnch_test";
+    const std::string dir = std::string(test_paths_temp_dir()) + "/" + test_paths_unique("opennova_wpnch_test");
 #ifdef _WIN32
     _mkdir(dir.c_str());
 #else

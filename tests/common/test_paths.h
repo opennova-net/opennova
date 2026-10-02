@@ -10,6 +10,7 @@
 
 #ifdef _WIN32
 #include <direct.h>
+#include <process.h>
 #define TEST_PATHS_GETCWD _getcwd
 #define TEST_PATHS_SEP '\\'
 #else
@@ -122,3 +123,23 @@ static const char *test_paths_temp_dir(void) {
     return "/tmp";
 #endif
 }
+
+// This process's id. A scratch name under the shared temp directory carries it, so two
+// runs at once (parallel ctest legs, two worktrees on one machine) never write over or
+// delete each other's files: a fixed name did, with exit-1s and access violations.
+static long test_paths_pid(void) {
+#ifdef _WIN32
+    return (long)_getpid();
+#else
+    return (long)getpid();
+#endif
+}
+
+#ifdef __cplusplus
+#include <string>
+// `stem` made this run's own: "<stem>_<pid>" (a file name keeps its extension when given
+// as `stem` and `ext`: "<stem>_<pid><ext>").
+inline std::string test_paths_unique(const char *stem, const char *ext = "") {
+    return std::string(stem) + "_" + std::to_string(test_paths_pid()) + ext;
+}
+#endif

@@ -1,6 +1,7 @@
 #include <net/novaworld/db/sqlite.h>
 
 #include "../common/test_expect.h"
+#include "../common/test_paths.h"
 
 #include <cstdio>
 #include <filesystem>
@@ -16,7 +17,7 @@ namespace {
 
 // Generate a unique temp dir under the system temp for test isolation.
 std::filesystem::path scratch_dir() {
-	auto base = std::filesystem::temp_directory_path() / "opennova_sqlite_test";
+	auto base = std::filesystem::temp_directory_path() / test_paths_unique("opennova_sqlite_test");
 	std::random_device rd;
 	std::mt19937_64 gen(rd());
 	auto dir = base / std::to_string(gen());

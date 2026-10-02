@@ -1,6 +1,8 @@
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>
 
+#include "common/test_paths.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -213,7 +215,7 @@ bool check_poly_roundtrip(const std::filesystem::path &out_path) {
 } // namespace
 
 int main() {
-	const std::filesystem::path out_path = std::filesystem::temp_directory_path() / "opennova_cpt_roundtrip_test.cpt";
+	const std::filesystem::path out_path = std::filesystem::temp_directory_path() / test_paths_unique("opennova_cpt_roundtrip_test", ".cpt");
 
 	if (!check_malformed_guards()) return 1;
 	if (!check_poly_roundtrip(out_path)) return 1;
