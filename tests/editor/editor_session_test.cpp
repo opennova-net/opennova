@@ -1245,8 +1245,9 @@ static int test_validation_cost() {
 	            items->dirty() == dirty_now);
 
 	// An unsaved edit that errs: Build waits on the unsaved prompt (the edit's finding listed at
-	// the poll); the prompt's Save writes the file and builds, and the plan gates on the session's
-	// own findings.
+	// the poll); the prompt's Save writes the file and builds over the session's own findings, which
+	// gate where the game refuses: an item of type 0 is the editor's own rule (listed, S14, the build
+	// follows retail), so the build lands with it listed.
 	set("type", int64_t(0));
 	session.handle(request::build());
 	TEST_EXPECT(!session.view().activity.operation.running() && v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::Build);
@@ -1260,12 +1261,12 @@ static int test_validation_cost() {
 	TEST_EXPECT(!items->dirty() && !v.dialogs.unsaved_prompt.open &&
 			session.view().activity.operation.running());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && has_code(v.findings.diagnostics, "catalog.item_type"));
 	set("type", int64_t(4));
 	session.handle(request::save());
 	session.handle(request::build());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !has_code(v.findings.diagnostics, "catalog.item_type"));
 
 	// A closed file changed on disk (another size) is read again at the next refresh,
 	// alone; a file that does not load keeps its finding while it stays as it is.
@@ -1313,7 +1314,8 @@ static int test_validation_cost() {
 			stats.files_reused == editable - 1);
 
 	// Build packs the files on disk: a clean open document whose file changed outside the
-	// editor is read again before the gate, so the gate sees what the build packs.
+	// editor is read again before the gate, so the gate sees what the build packs (here an item of
+	// type 0, the editor's own rule: listed, S14, so the build lands with its finding read).
 	Document *held = session.document_for("items.def");
 	TEST_EXPECT(held != nullptr && !held->dirty() && !held->rows().empty());
 	if (!held || held->rows().empty()) return 1;
@@ -1334,7 +1336,7 @@ static int test_validation_cost() {
 	TEST_EXPECT(!held->matches_file() && !has_code(v.findings.diagnostics, "catalog.item_type"));
 	session.handle(request::build());
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.item_type"));
 	held = session.document_for("items.def"); // read again: a new document
 	TEST_EXPECT(held != nullptr && !held->dirty() && held->matches_file());
@@ -2943,44 +2945,51 @@ static int test_build_findings_stay() {
 			!has_code(v.findings.diagnostics, "build.blocked"));
 
 	// The build's own findings are those its report adds to the rows it was gated on, not to
-	// the rows when it ends: an item type of zero, saved, blocks the build; corrected while it
-	// packs, the old blocker is not kept (and not listed twice once it is back).
-	const AssetEntry *items_entry = v.project.scan->find("items.def");
-	TEST_EXPECT(items_entry != nullptr);
-	if (!items_entry) return 1;
-	const std::string items_path = items_entry->relative_path;
-	TEST_EXPECT(editor_test::write_text(v.project.root + "/" + items_path, "begin \"Marker\"\nid 100001\ntype marker\nhp 10\nend\n"));
+	// the rows when it ends: a mission's terrain naming nothing, saved, blocks the build (the game
+	// refuses to start the mission, and the build follows retail, S14); corrected while it packs, the
+	// old blocker is not kept (and not listed twice once it is back).
+	TEST_EXPECT(editor_test::write_text(v.project.root + "/terrain/island.trn", "trn") &&
+	            editor_test::write_text(v.project.root + "/day.env", "env"));
 	session.handle(request::rescan());
 	session.run_operations();
-	session.handle(request::open_document(items_path));
-	const Document *items = session.document_for(items_path);
-	TEST_EXPECT(items != nullptr && !items->rows().empty());
-	if (!items || items->rows().empty()) return 1;
-	const auto set_type = [&](int64_t type) {
-		EditorRequest edit = request::edit_record(items->path(), Edit());
-		edit.edits[0].address = {items->rows()[0]->id, items->rows()[0]->kind, 0};
-		edit.edits[0].field = "type";
-		edit.edits[0].value = type;
+	session.handle(request::create_file("gate.bms", "", { { "terrain", "island" }, { "environment", "day" } }));
+	session.run_operations();
+	const Document *mission = session.document_for("gate.bms");
+	TEST_EXPECT(mission != nullptr && !mission->rows().empty());
+	if (!mission || mission->rows().empty()) return 1;
+	const auto terrain_missing = [](const std::vector<Diagnostic> &rows) {
+		size_t found = 0;
+		for (const Diagnostic &d : rows) {
+			const ReferenceSubject *subject = reference_subject(d);
+			found += d.code() == "reference.missing" && subject && subject->kind == ReferenceKind::Terrain ? 1 : 0;
+		}
+		return found;
+	};
+	const auto set_terrain = [&](const char *name) {
+		EditorRequest edit = request::edit_record(mission->path(), Edit());
+		edit.edits[0].address = {mission->rows()[0]->id, mission->rows()[0]->kind, 0};
+		edit.edits[0].field = "terrain";
+		edit.edits[0].value = std::string(name);
 		session.handle(edit);
 	};
-	set_type(0);
-	session.handle(request::save(items->path()));
+	set_terrain("nowhere");
+	session.handle(request::save(mission->path()));
 	session.run_operations(); // the validation the save left due
-	TEST_EXPECT(!items->dirty() && count_code(v.findings.diagnostics, "catalog.item_type") == 1);
+	TEST_EXPECT(!mission->dirty() && terrain_missing(v.findings.diagnostics) == 1);
 	session.handle(request::build());
 	TEST_EXPECT(session.view().activity.operation.running());
-	set_type(4);
+	set_terrain("island");
 	// The polls validate the edit while the build packs (S13 A3: no request runs it).
 	while (v.activity.validation.running) session.poll();
-	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.item_type"));
+	TEST_EXPECT(terrain_missing(v.findings.diagnostics) == 0);
 	session.run_operations();
-	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && has_code(v.activity.last_build->diagnostics, "catalog.item_type"));
-	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && !has_code(v.findings.diagnostics, "catalog.item_type"));
-	set_type(0);
+	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok && terrain_missing(v.activity.last_build->diagnostics) == 1);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "build.blocked") == 1 && terrain_missing(v.findings.diagnostics) == 0);
+	set_terrain("nowhere");
 	while (v.activity.validation.running) session.poll();
-	TEST_EXPECT(count_code(v.findings.diagnostics, "catalog.item_type") == 1 && count_code(v.findings.diagnostics, "build.blocked") == 1);
-	session.handle(request::undo(items->path()));
-	session.handle(request::undo(items->path()));
+	TEST_EXPECT(terrain_missing(v.findings.diagnostics) == 1 && count_code(v.findings.diagnostics, "build.blocked") == 1);
+	session.handle(request::undo(mission->path()));
+	session.handle(request::undo(mission->path()));
 
 	// A build still packing when another project opens is cancelled (S13 A1: a project switch
 	// cancels the running operation), and nothing of it reaches the new project: no build, none

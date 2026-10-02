@@ -2,6 +2,7 @@
 
 #include <cstdint>
 
+#include <base/gameprofile/required_resources.h>
 #include <base/resource_index/texture_candidates.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/project/project_files.h>
@@ -564,9 +565,21 @@ StyleVariableUse style_variable_use(ReferenceKind through) {
 bool blocks_build(const Diagnostic &d) {
 	if (d.severity != DiagnosticSeverity::Error) return false;
 	if (!d.row() || d.row()->gates_build) return true;
-	// A code listed and not gating (a missing reference) gates where its kind's refusal is witnessed.
-	const ReferenceSubject *reference = reference_subject(d);
-	return reference && reference_row(reference->kind).gates_when_missing != nullptr;
+	// A listed code gates where its subject names the game's refusal: a reference (missing, or naming
+	// a file its loader does not load) of a kind whose row cites it; a required file whose manifest
+	// row is the boot's refusal [orig: Game_InitSubsystems @ 0x4a6fed, the string tables' MessageBox and
+	// exit; Menu_InitShellResources @ 0x552651, the main menu's dead end], missing, or holding a file of
+	// another kind, which the boot reads as its table with no check (its header's offsets made
+	// pointers unchecked [orig: TextResource_FixupPointers @ 0x75d050]).
+	if (const ReferenceSubject *reference = reference_subject(d))
+		return reference_row(reference->kind).gates_when_missing != nullptr;
+	if (const RequirementSubject *requirement = requirement_subject(d)) {
+		const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_by_role(requirement->role.c_str());
+		return (d.row() == &finding_code(CoreFinding::RequirementMissing) ||
+		        d.row() == &finding_code(CoreFinding::RequirementWrongKind)) &&
+		       row && row->severity == gameprofile::RES_FATAL;
+	}
+	return false;
 }
 
 bool diagnostics_block_build(const std::vector<Diagnostic> &items) {

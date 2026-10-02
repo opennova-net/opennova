@@ -1835,8 +1835,9 @@ static int test_model_texture_references() {
 	// No other texture takes a material chunk: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
 	// A file of the name that holds no chunk is of no kind the game knows: it serves no row, and the
-	// game opening it reads no chunk, which is its own finding (review F3: reference.wrong_kind, an
-	// error that gates), not a name the project lacks.
+	// game opening it reads no chunk, which is its own finding (review F3: reference.wrong_kind), not a
+	// name the project lacks; an error that gates where a texture's missing name does, nowhere (the
+	// build follows retail, S14).
 	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
@@ -1844,7 +1845,7 @@ static int test_model_texture_references() {
 	const Diagnostic *wrong_kind = nullptr;
 	for (const Diagnostic &d : view.findings.diagnostics)
 		if (d.code() == "reference.wrong_kind" && d.asset == model && subject_target(d) == "field.nq8") wrong_kind = &d;
-	TEST_EXPECT(wrong_kind && wrong_kind->severity == DiagnosticSeverity::Error && blocks_build(*wrong_kind) &&
+	TEST_EXPECT(wrong_kind && wrong_kind->severity == DiagnosticSeverity::Error && !blocks_build(*wrong_kind) &&
 	            wrong_kind->message.find("field.nq8 is ") != std::string::npos);
 	textures({"wall.tga", "wall.dds", "plain.tga", "plain.dds", "bump.tga", "bump.dds", "ready.mdt", "field.nq8"});
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.

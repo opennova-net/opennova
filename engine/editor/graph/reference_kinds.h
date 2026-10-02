@@ -145,10 +145,12 @@ bool record_index(ReferenceKind kind, const Value &value, int64_t &index);
 // there checks that and that the tokens are unique).
 const ReferenceKindRow &reference_row(ReferenceKind kind);
 
-// Whether a finding among the rows a build reads refuses it (ADR 0046 S14): an error whose code
-// gates (FindingCodeRow::gates_build), an error made from no row, or a missing reference whose kind
-// the game refuses when the name finds nothing (ReferenceKindRow::gates_when_missing). A missing
-// reference of any other kind is listed and blocks nothing.
+// Whether a finding among the rows a build reads refuses it (ADR 0046 S14, the build follows
+// retail): an error whose code gates (FindingCodeRow::gates_build), an error made from no row, or an
+// error of a listed code whose subject names the game's refusal: a reference (missing, or naming a
+// file of another kind) of a kind the game refuses when the name loads nothing
+// (ReferenceKindRow::gates_when_missing), a required file the project lacks whose manifest row is
+// the game's refusal to boot (RES_FATAL). Any other listed error blocks nothing.
 bool blocks_build(const Diagnostic &d);
 bool diagnostics_block_build(const std::vector<Diagnostic> &items);
 // The kind a token names; false for none.

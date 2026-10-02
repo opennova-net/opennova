@@ -115,9 +115,11 @@ bool decode_config(const std::string &path, const std::vector<uint8_t> &stored, 
 	return true;
 }
 
+// A shader the loader rejects is one it does not load, as a missing one, and the game runs: listed
+// (the gate follows retail, ADR 0046 S14); Save writes the form.
 constexpr FindingCodeEntry<ShaderFinding> kShaderEntries[] = {
 	{ ShaderFinding::Form,
-			{ "shader.form", FindingFix::Rewrite, "in the SCR form the game's shader loader takes" } },
+			listed_code("shader.form", FindingFix::Rewrite, "in the SCR form the game's shader loader takes") },
 };
 static_assert(std::size(kShaderEntries) == static_cast<size_t>(ShaderFinding::kCount),
 		"every ShaderFinding has exactly one row");

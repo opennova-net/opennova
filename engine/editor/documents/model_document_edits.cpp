@@ -215,13 +215,19 @@ constexpr FindingCodeEntry<ModelFinding> kFindingEntries[] = {
 	{ ModelFinding::Seats, { "model.seats" } },
 	{ ModelFinding::UserPointDuplicate, { "model.user_point_duplicate" } },
 	{ ModelFinding::UserPoints, { "model.user_points" } },
-	{ ModelFinding::RegisterMissing, { "model.register_missing" } },
+	// Read past the model's or the engine's registers, no refusal witnessed (the gate follows retail,
+	// ADR 0046 S14): listed.
+	{ ModelFinding::RegisterMissing, listed_code("model.register_missing") },
 	{ ModelFinding::ShaderUnknown, { "model.shader_unknown" } },
 	{ ModelFinding::MaterialUnused, { "model.material_unused" } },
-	{ ModelFinding::LightPart, { "model.light_part" } },
+	// A light on a part LOD 0 lacks, a frame past the MTRX table: no refusal witnessed, listed.
+	{ ModelFinding::LightPart, listed_code("model.light_part") },
 	{ ModelFinding::RegisterUnknown, { "model.register_unknown" } },
 	{ ModelFinding::LodOrder, { "model.lod_order" } },
-	{ ModelFinding::FrameMissing, { "model.frame_missing" } },
+	{ ModelFinding::FrameMissing, listed_code("model.frame_missing") },
+	// The load's light swap reads through the CTRL table the model lacks: it crashes [orig:
+	// ThreediGp_LoadFromFile @ 0x5B5F55, the table pointer loaded unchecked, read @ 0x5B5F5E]. It gates.
+	{ ModelFinding::LightNoRegisters, { "model.light_no_registers" } },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(ModelFinding::kCount),
 		"every ModelFinding has exactly one row");
@@ -291,8 +297,9 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	// and reads through the table it lacks: an error. `whose` names the reference in a
 	// finding with no field of its own to show it.
 	const auto register_finding = [&](int64_t index, bool reads_register, bool light, const char *whose,
-	                                  DiagnosticSeverity &severity, std::string &message) {
+	                                  DiagnosticSeverity &severity, std::string &message, ModelFinding &code) {
 		const std::string reference = std::string(whose) + "register " + std::to_string(index);
+		code = ModelFinding::RegisterMissing;
 		if (!row->registers.empty()) {
 			if (index < static_cast<int64_t>(row->registers.size())) return false;
 			severity = DiagnosticSeverity::Error;
@@ -303,6 +310,7 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 		}
 		if (light) {
 			severity = DiagnosticSeverity::Error;
+			code = ModelFinding::LightNoRegisters;
 			message = "The model has no CTRL registers, and the game crashes loading a light that names one.";
 			return true;
 		}
@@ -319,8 +327,9 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 	                                const char *field, const char *whose) {
 		DiagnosticSeverity severity;
 		std::string message;
-		if (register_finding(index, reads_register, kind == ModelKind::Light, whose, severity, message))
-			add(severity, ModelFinding::RegisterMissing, message, kind, collection, at, field);
+		ModelFinding code;
+		if (register_finding(index, reads_register, kind == ModelKind::Light, whose, severity, message, code))
+			add(severity, code, message, kind, collection, at, field);
 	};
 	// Which styles read the register they name is their consumer's rule
 	// (threedi_generator_reads_register); a flipbook names one only when it reads it
@@ -397,12 +406,12 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document) {
 				const ThreediTransform &tr = *threedi_panm_tracks(pa)[t];
 				DiagnosticSeverity severity;
 				std::string message;
+				ModelFinding code;
 				if (threedi_panm_track_loaded(pa, t) && threedi_generator_names_register(tr.control) &&
 				    register_finding(tr.control_param,
 				                     threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_PANM, tr.control),
-				                     false, "", severity, message))
-					on_row(severity, ModelFinding::RegisterMissing, message,
-					       std::string(threedi_panm_track_label(t)) + ".param");
+				                     false, "", severity, message, code))
+					on_row(severity, code, message, std::string(threedi_panm_track_label(t)) + ".param");
 			}
 		}
 	}
