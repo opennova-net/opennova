@@ -2322,6 +2322,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity forever (the retail-join DBuggy-host-player + ~1000/session C 0x0F flood).
 				// An in-capacity EMPTY slot still replies: retail serializes the empty pool slot
 				// (itemDef null -> type 0), which the client answers by clearing its stale entity.
+				// The requester must already be an added player: retail reads the
+				// connection's session player (conn+0x160) and its server player
+				// slot (+0xC0, bound by Server_PlayerAdd @0x51CD51) and drops the
+				// query when either is null [orig: @0x514191..0x5141A8]; our
+				// analogue of the bound slot is the PlayerAdded phase.
+				if (conn.phase < ConnectionPhase::PlayerAdded) break;
 				const uint16_t handle =
 						msg.payload.size() >= 2
 								? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))

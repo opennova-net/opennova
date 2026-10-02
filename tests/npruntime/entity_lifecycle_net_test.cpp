@@ -765,6 +765,48 @@ inmatch::NapiNPConnection make_in_match_conn(uint32_t id, int type, ns::ISession
 
 // The host leg: C2S 0x32 -> ONE S2C 0x5D listing exactly the empty pool-0 indices, to
 // the requester only, and nothing at all once the round is over.
+// C2S 0x0F is answered only for a requester whose player the host has
+// added: before Server_PlayerAdd binds the session player's slot the query
+// is dropped; after it the host replies S2C 0x18 to the requester.
+// [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514191..0x5141A8 (the
+//  conn+0x160 -> +0xC0 tests); Server_PlayerAdd @0x51CD51 (the +0xC0 bind)]
+bool run_host_answers_entity_query_only_after_player_add() {
+	w::World world;
+	world.registry.configure_pool(0, 16);
+	world.registry.configure_pool(1, 16);
+	w::PlayerSpawn spawn;
+	spawn.position = {0, 0, 0};
+	const w::EntityHandle a = w::spawn_player(world, spawn);
+	if (!expect(a.valid(), "entity-query: a pool-0 player")) return false;
+
+	ns::UdpSessionTransport udp_requester(ns::UdpSessionTransport::Role::Host);
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_in_match_conn(3, 1, &udp_requester, ns::TransportMode::Client,
+			w::EntityHandle{}));
+	roster[0].phase = inmatch::ConnectionPhase::PendingSpawn;
+	roster[0].burst.spawned = false;
+	roster[0].spawned_announced = false;
+	const std::vector<ProtocolMessage> request{make_protocol_message(0x0F,
+			{static_cast<uint8_t>(a.packed & 0xFF), static_cast<uint8_t>(a.packed >> 8)})};
+	const auto answers = [&](uint32_t tick) {
+		int n = 0;
+		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
+					inmatch::GameConfig{}, roster[0], request, tick, roster, &world))
+			if (m.tag == 0x18) ++n;
+		return n;
+	};
+	if (!expect(answers(100) == 0,
+			"entity-query: a requester not yet added gets no 0x18"))
+		return false;
+	roster[0].phase = inmatch::ConnectionPhase::PlayerAdded;
+	return expect(answers(101) == 1,
+			"entity-query: an added player's query is answered with one 0x18");
+}
+
 bool run_host_answers_the_sweep_request() {
 	w::World world;
 	world.registry.configure_pool(0, 16);
@@ -1038,6 +1080,7 @@ int main() {
 	if (!run_entity_death_notify_reaches_the_sim()) return 1;
 	if (!run_player_sync_removal_keeps_the_entity()) return 1;
 	if (!run_host_answers_the_sweep_request()) return 1;
+	if (!run_host_answers_entity_query_only_after_player_add()) return 1;
 	if (!run_in_match_session_loss()) return 1;
 	if (!run_redeployment_session_loss()) return 1;
 	if (!run_in_match_reap_waits_for_the_send_boundary()) return 1;
