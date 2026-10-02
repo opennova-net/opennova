@@ -28,6 +28,24 @@
 // cap on the files planned stops the plan, the selection's files included, the files one
 // converter source makes taken whole or not at all (truncated). The plan reads the sources
 // and the places it looks, and writes nothing.
+//
+// The closure of a mission (ADR 0046 S14, plan R4: a project is its own files, and an import
+// brings everything the game would open for what it imports). Beyond the file references:
+// a reference to a SYMBOL (an item id, a weapon, an ammo, a powerup, a particle effect, a
+// string id, a screen, a window, a user point, a style variable) is followed to the file that
+// defines it, where no file of the project or the plan does: the file its scope names where
+// the kind's row says so (a string id's table, a screen's menu, a user point's model), else
+// the first file of the kind the row says defines it (ReferenceKindRow::defined_in: the
+// catalogs, the particle files, the shell's stylesheets) in the places that has a definition;
+// one no place defines is counted (ImportPlan::undefined). A file reference with a fallback (a
+// mission's text table, else medmssn.bin) brings the fallback where no place has the name, and
+// one the game runs without (GraphEdge::optional: a mission's script, its dialog bank) found
+// nowhere is no row. The files the game finds by a mission's name are the mission's edges
+// (documents/mission_file_set.h), followed as any other. A planned MISSION brings every file the
+// game opens by a fixed literal at boot, at the menu, at mission start (gameprofile's
+// required-resource manifest; a Required one found nowhere is not found, an optional one no row)
+// and while a mission runs. A stylesheet the walk brings is read for the %NAME%s the menus
+// followed so far expand through, and those menus are followed again.
 
 #include <cstddef>
 #include <cstdint>
@@ -49,8 +67,9 @@ namespace opennova::editor {
 
 // A place the files of an import come from and its dependencies are looked for: the folder
 // a loose source sits in (listed once), the archive a member comes from, or the game install
-// (mounted as a stock launch mounts it: mount_retail). Names compare as the scan's logical
-// names do, without case (normalized_logical_name).
+// (mounted as a stock launch mounts it: mount_retail, with the loose files the game ships beside
+// its archives and reads from there, list_install_loose_files, where no archive has the name).
+// Names compare as the scan's logical names do, without case (normalized_logical_name).
 class ImportOrigin {
 public:
 	enum class Kind { Folder, Archive, GameInstall };
@@ -64,6 +83,13 @@ public:
 	// A file of the origin as import_assets reads it (an archive's or the install's decoded),
 	// by the name `find` spells.
 	bool read(const std::string &name, std::vector<uint8_t> &out) const;
+	// The size of a file of the origin as it is stored there (a folder's file on the disk, an
+	// archive's entry), without reading it; 0 when the origin has no such file.
+	uint64_t size(const std::string &name) const;
+	// The origin's files a name alone makes of `kind` (classify_asset with no bytes: a kind of a
+	// file name or an extension, never one its bytes decide), in the origin's order, each as it
+	// spells it.
+	std::vector<std::string> files_of_kind(AssetKind kind) const;
 	// What a file of the origin is to the engine once copied as the game's own: its kind by its
 	// name, by its bytes where the name cannot tell (a .bin, a chunk container), a PNG a
 	// texture (it gets no import record); Unknown when the origin has no such file.
@@ -116,28 +142,33 @@ struct ImportPlanRow {
 	std::string destination; // project-relative, where import_assets writes it
 	std::string made_from;   // on a converter's output, its source's name ("" = the file itself)
 	std::string found_in;    // where it comes from, in words
+	// The file's bytes as it is stored where it comes from (a converter's output: as made); 0 for
+	// one not found. What the dialog sums before anything is copied.
+	uint64_t size = 0;
 	// The first reference that wanted it (empty for a selected source); not found, the first
 	// whose lookup nothing planned meets (two references to one name can want different files:
 	// a diffuse row takes a .dds the plan brings, a plain row does not).
 	ImportNeed needed_by;
 	// What the import takes: the selected sources (one with a problem is refused when the import
-	// runs), and each dependency found that the project can take (one with a problem is listed,
-	// not taken).
+	// runs; one the project holds is not, `held`), and each dependency found that the project can
+	// take (one with a problem is listed, not taken).
 	bool selected = false;
+	// A chosen file of a name the project holds already (ADR 0046 S14: the whole game install over a
+	// project with files of its own): the import leaves the project's file as it is unless it is
+	// asked to replace it (the row checked in the dialog, or Replace existing files: import_files'
+	// `replace`). Not selected.
+	bool held = false;
 	// Why the project cannot take the file as it is (check_project_file_name; a kind the game
 	// does not use; a second selected file of the name), "" when it can.
 	std::string problem;
 	std::vector<ImportRival> rivals;
 };
 
-// Whether what a file names goes unread: its kind names files (AssetKindRow::names_files) and
-// the graph does not read the file (graph_reads_file: a kind it has no record type or
-// extractor for, a terrain, the sound banks, the def tables beyond the catalogs and the avatar
-// table, a face; or a mission's .mis), or reads it but not the files it names
-// (AssetKindRow::names_unfollowed: a script, whose RUN names a script the graph makes no edge of
-// yet). An import takes such a file and lists it as not followed (a script's other references,
-// which the graph reads, followed still).
-bool references_unread(AssetKind kind, const std::string &file);
+// Whether what a file of a kind names goes unread: the kind names files
+// (AssetKindRow::names_files) and the graph does not read it (graph_reads_kind: a kind it has no
+// record type or extractor for: a dialog bank, the def tables beyond the catalogs, the avatar
+// table, a face, a mission text). An import takes such a file and lists it as not followed.
+bool references_unread(AssetKind kind);
 
 // What the walk does not follow, once per kind: references of a kind that names no file (a
 // symbol, a def's sound), with how many the planned files hold; or the planned files whose
@@ -149,9 +180,27 @@ struct ImportNotFollowed {
 	std::string first;
 };
 
+// The files a plan takes of one kind: how many, and their bytes as stored where they come from.
+struct ImportPlanKind {
+	AssetKind kind = AssetKind::Unknown;
+	size_t files = 0;
+	uint64_t bytes = 0;
+};
+
 struct ImportPlan {
 	std::vector<ImportPlanRow> rows; // in the walk's order, the selected sources first
 	std::vector<ImportNotFollowed> not_followed;
+	// The symbols followed to no file (ADR 0046 S14): references to a name no place defines (a
+	// string id no table of the project, the plan or the places has; an item id of no items.def
+	// anywhere), once per reference kind, with how many and where the first was met. What the
+	// game would show the id of, or leave out.
+	std::vector<ImportNotFollowed> undefined;
+	// The symbols a place's copy of a file defines where the project's own copy of that file, the one
+	// the game reads, does not (an edited items.def without an item a mission places): the import
+	// keeps the project's file unless asked to replace it, so the place's copy is not brought and the
+	// names stay undefined in the project (review F6); once per reference kind (`kind` the defining
+	// file's), with how many and where the first was met.
+	std::vector<ImportNotFollowed> shadowed;
 	// A source that cannot be read or converted (as import_assets reports it), a file whose
 	// references could not be read, a folder that cannot be listed, a game install that does
 	// not mount.
@@ -159,15 +208,59 @@ struct ImportPlan {
 	// The cap on the files planned stopped the plan: files of the selection past it, or
 	// dependencies, are not in it.
 	bool truncated = false;
+
+	// The files the plan takes (every row but those not found) and their bytes as stored.
+	size_t file_count() const;
+	uint64_t total_bytes() const;
+	// Those files by kind, the largest kind first (by bytes, then by files, then by the kind's
+	// token): the dialog's summary line and the wire's `summary` (ADR 0046 S14: a mission's closure
+	// is thousands of rows, read by kind before one by one).
+	std::vector<ImportPlanKind> by_kind() const;
 };
 
-inline constexpr size_t kImportPlanFileCap = 1000;
+// A guard, not a limit a real import meets (ADR 0046 S14: a mission's closure is most of a game
+// install, 8,700 files of JO's 9,290): the walk stops there and says so.
+inline constexpr size_t kImportPlanFileCap = 50000;
+
+// The plan made a step at a time (ADR 0046 S14; S13 A3's rule for every long job): the game
+// install mounted where the plan looks there (unless the caller mounted it), then the chosen
+// sources taken, a few a step, then, with dependencies, the stylesheets and the walk, each queued
+// file read and its references followed within the step's bytes. A file's bytes are read when its
+// references are followed, never when it is queued, and a file the graph does not read is not
+// read at all (its kind from its name, its size from where it is stored). The project's scan and
+// graph are the caller's and outlive the planner (its paths and document it copies).
+class ImportPlanner {
+public:
+	ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,
+	              const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
+	              std::string retail_directory, size_t file_cap = kImportPlanFileCap,
+	              std::shared_ptr<const ImportOrigin> install_mounted = nullptr);
+	~ImportPlanner();
+	ImportPlanner(const ImportPlanner &) = delete;
+	ImportPlanner &operator=(const ImportPlanner &) = delete;
+
+	// One step within `bytes` read (at least one source or file); true once the plan is whole.
+	bool step(uint64_t bytes);
+	bool done() const;
+	// Its progress: the files it knows of so far (those planned and the chosen sources not yet
+	// taken; the walk finds more as it reads, and the count never falls), and those done with (a
+	// planned file whose references were followed, or that has none to follow).
+	size_t files_known() const;
+	size_t files_done() const;
+	// The plan: whole once done (taken once; the planner holds none after).
+	ImportPlan take();
+
+private:
+	class Walk;
+	std::unique_ptr<Walk> walk_;
+};
 
 // The plan of importing `sources` into the project (its files `scan`, resolved by `graph`),
 // with the files they need when `with_dependencies`, looked for in the game install at
 // `retail_directory` too ("" for none), `file_cap` files at most. `install_mounted`: the game
 // install at `retail_directory` opened already (ImportOrigin::Kind::GameInstall), which a caller
 // stepping the plan mounts in a step of its own (S13 A3); null, the plan mounts it when it needs it.
+// An ImportPlanner run to its end.
 ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_dependencies, const ProjectPaths &paths,
                        const ProjectDocument &document, const AssetScan &scan, const AssetGraph &graph,
                        const std::string &retail_directory, size_t file_cap = kImportPlanFileCap,
@@ -176,7 +269,7 @@ ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_depen
 // Whether two plans come to the same import (an import checks the plan it shows against the
 // one it makes again before it writes): the same rows in the same order, each the same file
 // from the same place (its source) to the same destination, of the same kind, found or not
-// found alike, with the same problem; and both stopped by the cap, or neither. What wanted a
+// found alike, taken or held alike, with the same problem; and both stopped by the cap, or neither. What wanted a
 // file first, where else it was found and the findings do not decide what is written.
 bool same_import(const ImportPlan &a, const ImportPlan &b);
 

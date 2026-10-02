@@ -27,6 +27,7 @@
 #include "env/celestial.h"
 #include "env/environment_cube_capture.h"
 #include "mission/mission_object_placer.h"
+#include "mission/mission_placement_run.h"
 #include "mission/mission_placement_stats.h"
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
@@ -235,6 +236,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Celestial);
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
+	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);

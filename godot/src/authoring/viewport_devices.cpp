@@ -3,6 +3,7 @@
 #include <iterator>
 
 #include "authoring/menu_viewport_applier.h"
+#include "authoring/mission_viewport_applier.h"
 #include "authoring/model_viewport_applier.h"
 #include "authoring/script_device.h"
 #include "authoring/viewport_device.h"
@@ -22,11 +23,15 @@ std::unique_ptr<ViewportApplier> make_model_applier(SubViewport &viewport) {
 std::unique_ptr<opennova::editor::ViewportDevice> make_script_device(Node &owner, ViewportDeviceSink sink) {
 	return std::make_unique<ScriptDevice>(owner, std::move(sink));
 }
+std::unique_ptr<ViewportApplier> make_mission_applier(SubViewport &viewport) {
+	return std::make_unique<MissionViewportApplier>(viewport);
+}
 
 constexpr ViewportDeviceRow kDevices[] = {
 	{ ViewportKind::Menu, make_menu_applier, nullptr },
 	{ ViewportKind::Model, make_model_applier, nullptr },
 	{ ViewportKind::Script, nullptr, make_script_device },
+	{ ViewportKind::Mission, make_mission_applier, nullptr },
 };
 
 constexpr bool devices_in_order() {

@@ -37,7 +37,8 @@ public:
 	// PlanImport: the files chosen, planned again, the list kept.
 	void plan(const EditorRequest &request);
 	// PreviewInstallImport: the game install's files, those named alone and chosen, or every one
-	// listed to choose from.
+	// listed to choose from; with `all`, every one chosen at once and none to choose from, planned
+	// with no walk (ADR 0046 S14: the closure of everything is everything).
 	void preview_install(const EditorRequest &request);
 	void set_dependencies(bool with_dependencies);
 	void cancel();
@@ -61,7 +62,12 @@ public:
 	OperationOutcome absorb_import(ImportOperation &operation);
 
 private:
-	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots, bool with_dependencies);
+	void preview(std::vector<ImportChoice> choices, std::vector<ImportChoice> roots, bool with_dependencies,
+	             bool all = false);
+	// What an ImportFiles takes: its imports, or with `planned` the open preview's rows as its plan
+	// has them (each the project can take, once per source); false, said why, with planned and no
+	// preview open.
+	bool sources_of(const EditorRequest &request, std::vector<ImportChoice> &imports);
 	// The open preview planned again as an operation (ImportPlanOperation): the dialog shows its
 	// files at once and the plan once it is made; a plan that runs gives way to the new one (the
 	// rows' Supersede).

@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <utility>
 
 namespace opennova::editor {
 
@@ -117,10 +118,28 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 	return kept;
 }
 
+bool kinds_alike(const Document &document, NodeKind a, NodeKind b) {
+	if (a == b) return true;
+	const std::vector<FieldSchema> &left = document.fields(a);
+	const std::vector<FieldSchema> &right = document.fields(b);
+	if (&left == &right) return true;
+	if (left.size() != right.size()) return false;
+	for (size_t i = 0; i < left.size(); ++i)
+		if (left[i].type != right[i].type || left[i].id != right[i].id) return false;
+	return true;
+}
+
 std::vector<InspectorSection> plan_shared_inspector(const Document &document, const std::vector<NodeAddress> &records,
                                                     const std::string &filter) {
 	if (records.empty()) return {};
 	const NodeAddress &primary = records.front();
+	// The kinds among them, each with its own fields (the primary's first), or none where one is not
+	// alike the primary's.
+	std::map<NodeKind, const std::vector<FieldSchema> *> kinds;
+	for (const NodeAddress &record : records) {
+		if (kinds.count(record.kind)) continue;
+		kinds.emplace(record.kind, kinds_alike(document, record.kind, primary.kind) ? &document.fields(record.kind) : nullptr);
+	}
 	std::string name_field;
 	Document::Placement at;
 	if (document.placement(primary, at)) name_field = at.spec.name_field;
@@ -131,17 +150,21 @@ std::vector<InspectorSection> plan_shared_inspector(const Document &document, co
 
 	std::vector<InspectorSection> out(1);
 	std::map<std::string, size_t> placed;
-	for (const FieldSchema &schema : fields) {
+	for (size_t index = 0; index < fields.size(); ++index) {
+		const FieldSchema &schema = fields[index];
 		if (schema.read_only || schema.id == name_field) continue;
 		bool shared = true;
 		for (const NodeAddress &record : records) {
 			Value value;
-			if (record.kind != primary.kind || !document.get(record, schema.id, value)) {
+			const std::vector<FieldSchema> *own = kinds[record.kind];
+			if (!own || !document.get(record, schema.id, value)) {
 				shared = false;
 				break;
 			}
-			const FieldUse on = document.field_on(record, schema);
-			shared = on.applies != Applicability::Ignored || written(document, record, schema);
+			// The field as the record's own kind declares it (the same place in a list alike).
+			const FieldSchema &mine = (*own)[index];
+			const FieldUse on = document.field_on(record, mine);
+			shared = on.applies != Applicability::Ignored || written(document, record, mine);
 			if (!shared) break;
 		}
 		if (!shared) continue;
@@ -170,6 +193,22 @@ std::vector<InspectorSection> plan_shared_inspector(const Document &document, co
 		kept.push_back(std::move(section));
 	}
 	return kept;
+}
+
+std::string selected_words(const Document &document, const std::vector<NodeAddress> &records) {
+	std::vector<std::pair<NodeKind, size_t>> counts;
+	for (const NodeAddress &record : records) {
+		auto found = counts.begin();
+		while (found != counts.end() && found->first != record.kind) ++found;
+		if (found == counts.end()) counts.emplace_back(record.kind, 1);
+		else ++found->second;
+	}
+	if (counts.size() == 1)
+		return std::to_string(records.size()) + " " + document.kind_label(counts.front().first) + " records selected";
+	std::string words = std::to_string(records.size()) + " records selected (";
+	for (size_t i = 0; i < counts.size(); ++i)
+		words += std::string(i ? ", " : "") + std::to_string(counts[i].second) + " " + document.kind_label(counts[i].first);
+	return words + ")";
 }
 
 bool field_mixed(const Document &document, const std::vector<NodeAddress> &records, const std::string &field) {
