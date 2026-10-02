@@ -32,6 +32,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
+#include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
@@ -136,6 +137,7 @@ struct Harness {
 	static constexpr uint32_t kServerKey = 0x0C0FFEE1u;
 	uint64_t now_ms = 100000;
 	uint32_t tick = 1;
+	uint32_t dictation_tick = 0; // the frame that received the holdoff dictation
 	inmatch::ClientRuntime client{"LoadingPump", [this] { return now_ms; }};
 	std::string server_scrk = "SERVER-LOADING-PUMP-SCRK";
 	ClientAuth auth;
@@ -372,12 +374,114 @@ bool run_timed_loops_pace_an_undictated_connection() {
 	return expect(h.one_packet(h.frame(), {0x33}), "the 0x33 leaves at the pace");
 }
 
+// Run frames until one sends something (at most `limit`); the sent datagrams.
+std::vector<std::vector<uint8_t>> frame_until_sent(Harness &h, int limit) {
+	for (int i = 0; i < limit; ++i) {
+		std::vector<std::vector<uint8_t>> sent = h.frame();
+		if (!sent.empty()) return sent;
+	}
+	return {};
+}
+
+// Drive the admission under a dictated `period` to the final wait for S2C 0x0F, then let the
+// host release the player early: its self record and a first 0x5A grant (the in-match release
+// that precedes the 0x0F on an OpenNova host).
+bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
+	if (!h.handshake()) return false;
+	(void)h.frame({settings_record(0), settings_record(1)});
+	(void)h.frame({make_protocol_message(0x00, {})});
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	(void)h.frame({make_protocol_message(0x02, probe)});
+	(void)h.frame({holdoff_record(period), make_protocol_message(0x03, {0x01})});
+	h.dictation_tick = h.tick - 1;
+	(void)h.frame({make_protocol_message(0x05, {0x01}),
+			make_protocol_message(0x04, slot_assignment(0x02)),
+			make_protocol_message(0x7B, full_player_info())});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+	(void)h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 180, 0x5A))});
+	(void)h.frame({make_protocol_message(0x16, player_list({{0, 1}, {1, 2}}))});
+	(void)frame_until_sent(h, 16);
+	(void)h.frame({make_protocol_message(0x11, {})});
+	(void)h.frame({make_protocol_message(0x1A, {})});
+	OrganicSpawnBatch batch;
+	batch.entity_count = 1;
+	OrganicSpawnRecord self;
+	self.slot_id = 0x00C6;
+	self.has_body = true;
+	self.item_type_id = 0x14B9;
+	self.owner_connection_id = 4; // the 0x82's MI
+	self.minimap_flags = 0x100;
+	self.entity_name = "LoadingPump";
+	self.team = 2;
+	self.net_id = 7;
+	batch.records.push_back(self);
+	(void)h.frame({make_protocol_message(0x0C, encode_organic_spawn_batch(batch)),
+			make_protocol_message(0x5A, {0x08, 0x03, 0x0A, 0xFF, 0x00, 0xFF})});
+	return expect(h.client.in_match() &&
+	                      std::string(h.client.admission_stage_name()) ==
+	                              std::string("awaiting the loadout grants"),
+			"early release: the joiner is in the match inside the final wait for the 0x0F");
+}
+
+// A joiner the host released into the match early (its self record and a first 0x5A inside
+// the final wait for the 0x0F) already runs our in-match frame: its uplink and input pack ride
+// that frame's send gate. Its sends therefore keep the per-frame countdown gate, so the frames
+// whose pack precondition holds are exactly the frames that build, once per dictated period,
+// and under no holdoff every frame builds and a one-shot queued before a frame leaves in it.
+// [orig: Client_ProcessNetworkFrame @0x42c3dd -> Player_PackInputStateToEntity @0x42c3e9 ->
+//  PumpClientProtocolSend @0x42c4bc]
+bool run_an_in_match_joiner_keeps_the_frame_gate() {
+	{
+		Harness h;
+		if (!drive_to_an_early_in_match_release(h, 6)) return false;
+		int opened_frames = 0;
+		for (int i = 0; i < 18; ++i) {
+			const bool pack_frame = h.client.send_block_opens_this_frame();
+			const uint32_t flushes = h.client.send_flush_counter();
+			(void)h.frame();
+			const bool opened = h.client.send_flush_counter() != flushes;
+			if (!expect(opened == pack_frame,
+					"in match: the send block opens exactly on the input pack's frames"))
+				return false;
+			// The countdown kept its frame cycle through the loading loops: the in-match
+			// boundaries fall on the dictation frame's cycle.
+			if (!expect(opened == ((h.tick - 1 - h.dictation_tick) % 6 == 0),
+					"in match: the boundaries continue the countdown's cycle from the dictation"))
+				return false;
+			if (opened) ++opened_frames;
+		}
+		if (!expect(opened_frames == 3, "in match: one send boundary per dictated period of 6"))
+			return false;
+	}
+	Harness h;
+	if (!drive_to_an_early_in_match_release(h, 0)) return false;
+	for (int i = 0; i < 4; ++i) {
+		if (!expect(h.client.send_block_opens_this_frame(),
+				"in match, no holdoff: every frame opens"))
+			return false;
+		if (!expect(h.client.queue_stance_change(0xA9), "in match: the stance key queues a 0x1D"))
+			return false;
+		std::vector<std::vector<uint8_t>> sent = h.frame();
+		bool carried = false;
+		std::vector<uint8_t> tags;
+		for (const std::vector<uint8_t> &dg : sent)
+			if (h.tags_of(dg, tags))
+				for (uint8_t tag : tags) carried = carried || tag == 0x1D;
+		if (!expect(carried, "in match, no holdoff: a one-shot queued before a frame leaves in it"))
+			return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
+	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;
 }

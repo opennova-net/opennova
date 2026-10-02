@@ -262,6 +262,10 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 //  set by NapiNPClientMsg_0x01A @0x425ecb), the final loop @0x52628d..0x5262df (send @0x5262da,
 //  exits on dword_A8236C, set by NapiNPClientMsg_0x00F @0x42e2cd)]
 JoinerConnection::SendPumpLoop JoinerConnection::send_pump_loop() const {
+	// A joiner the host already released into the match runs our in-match frame (its
+	// uplink and input pack ride that frame's gate), whatever admission stage remains: an
+	// OpenNova host's first 0x5A can precede the 0x0F that ends the final wait.
+	if (phase_ == Phase::InMatch) return SendPumpLoop::NetworkFrame;
 	switch (post_auth_stage_) {
 	case PostAuthStage::AwaitServerInfo:
 		return SendPumpLoop::ServerInfoWait;

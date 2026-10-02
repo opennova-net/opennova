@@ -1388,10 +1388,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// against that same value, then increments it exactly once. MTU splits
 		// therefore remain one flush, and held frames never age finite records.
 		joiner_->complete_send_flush();
-		// Re-arm the countdown from the stored dictated period [orig: the
-		// PumpFlags 0x200 reload-when-0 @0x629802] — the boundary reopens
-		// every send_holdoff_ticks_ ticks (0 = per-tick).
-		send_holdoff_countdown_ = send_holdoff_ticks_;
+		// (step_send_pump_loop re-armed the countdown from the stored dictated
+		// period when it counted out [orig: the PumpFlags 0x200 reload-when-0
+		// @0x629802]: the in-match boundary reopens every send_holdoff_ticks_
+		// ticks, 0 = per-tick.)
 	}
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
@@ -1411,7 +1411,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 //     template holdoff 0); after that its passes run the countdown out and the
 //     send pump is called, and builds, once MORE than the pace passed since its
 //     last call, measured like retail on the 32-bit tick (signed difference).
-// An open frame reloads the dictated period at the send block's end.
+// The countdown itself keeps the frame cycle in every loop: it reloads the
+// dictated period whenever it counts out [orig: PumpFlags 0x200 reload-when-0
+// @0x6297f3..0x629802]. Its value when loading ends depends on how many passes
+// the loops ran, which no frame model can know; the frame cycle is the
+// deterministic choice, and the one the in-match gate then continues.
 // [orig: SaveFile_SendAndWaitForServerAck @0x5204b0 (stamp, entry pump, `> 50`);
 //  NapiClient_WaitForDisconnect @0x42cb20 (stamp @0x42cb70, entry pump @0x42cb4d,
 //  `> 100` @0x42cbb5); CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0 and
@@ -1419,6 +1423,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 bool ClientRuntime::step_send_pump_loop() {
 	const bool counted_out = send_holdoff_countdown_ <= 1;
 	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
+	if (counted_out) send_holdoff_countdown_ = send_holdoff_ticks_;
 	if (joiner_ == nullptr) return counted_out;
 	const JoinerConnection::SendPumpLoop loop = joiner_->send_pump_loop();
 	const bool entered = loop != send_pump_loop_;
@@ -1431,7 +1436,6 @@ bool ClientRuntime::step_send_pump_loop() {
 		send_pump_loop_last_ms_ = now_ms;
 		return counted_out;
 	}
-	send_holdoff_countdown_ = 0;
 	if (static_cast<int32_t>(now_ms - send_pump_loop_last_ms_) <= pace_ms) return false;
 	send_pump_loop_last_ms_ = now_ms;
 	return true;
