@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <base/vfs/file_source.h>
 #include <base/vfs/vfs.h>
 
 namespace opennova {
@@ -68,6 +69,20 @@ public:
 	// code's key, the archives alone unless /d puts the loose files first). Replaces the
 	// mount as scan() does.
 	InstallScan scan_install(const std::string &root_dir, const LaunchFlags &flags);
+	// Mount an embedder's own file set in place of an install (the editor's project files, the
+	// documents it has open standing in for theirs: base/vfs/file_source.h), replacing the mount as
+	// scan() does. One flat namespace, the source's own lookup: has_file is a name the source
+	// resolves (its stamp is not 0), read_file its read; a lookup policy changes nothing (there is
+	// no archive under a loose file), no file is preferred loose, nothing is indexed by kind
+	// (resource_files answers none: a consumer reads the names it knows), and root_dir() is
+	// kSourceRootDir, a label and no directory. The index reads the source as it stands at each
+	// call; a holder that caches what it read asks the source for the name's stamp. False, the
+	// index left cleared, for no source.
+	static constexpr const char *kSourceRootDir = "source:";
+	bool mount_source(std::shared_ptr<const FileSource> files);
+	// The mounted files changed where the index cannot see it (a file source one of whose stamps
+	// moved): the revision moves, so a holder of what it parsed from the index parses it again.
+	void mark_changed() { ++revision_; }
 	void clear();
 	// Mount/decode revision, including failed scans.
 	uint64_t revision() const { return revision_; }

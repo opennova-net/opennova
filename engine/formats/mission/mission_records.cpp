@@ -6,6 +6,7 @@
 #include "mission_detail.h"
 #include "mission_names.h"
 
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
 
 #include <algorithm>
@@ -255,23 +256,7 @@ bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,
                                 int item_id,
                                 const EntityTransform &transform) {
-	bms::Entity entity = {};
-	entity.type = to_bms_type(kind);
-	entity.type_id = item_id_to_bms_type_id(item_id);
-	entity.id = next_entity_id(file);
-	entity.perception2 = 100;
-	entity.perfectionist2 = 100;
-	entity.min_engagement_distance = 20;
-	entity.max_engagement_distance = 200;
-	entity.w_accuracy1 = 50;
-	entity.w_accuracy2 = 50;
-	entity.spawns = 1;
-	entity.no_more_than = 1;
-	entity.max_attack_distance = 100;
-	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
-	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)
-	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
-	entity.mis_height_lock = 1;
+	bms::Entity entity = mission::new_entity(kind, item_id, next_entity_id(file));
 	apply_transform(entity, transform);
 	return entity;
 }

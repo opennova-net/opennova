@@ -2,6 +2,7 @@
 // translations of the shell resolvers they replace; each carries its witness.
 // The boot ORDER is MissionKernel::boot (ADR 0043 slice E9).
 #include <runtime/mission/runtime_boot.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 
@@ -35,15 +36,17 @@ MissionTextSource resolve_mission_text(const BootFileSource &files,
 	// Preserve the original fallback [orig: TextResource_LoadMissionTextBin
 	// @ 0x51ed90]: medmssn.bin is used only when <mission>.bin does not
 	// exist; a present but malformed table is passed through and rejected
-	// downstream without fallback.
+	// downstream without fallback. The extension and the fallback are the
+	// by-name table's text row (mission_sidecars.h).
+	const Sidecar &text = *sidecar_for_role("text");
 	if (!mission_file_basename.empty()) {
-		const std::string mission_bin = mission_file_basename + ".bin";
+		const std::string mission_bin = mission_file_basename + text.extension;
 		if (files.has_file(mission_bin)) {
 			(void)files.read_file(mission_bin, out);
 			return MissionTextSource::kMission;
 		}
 	}
-	if (files.read_file("medmssn.bin", out) && !out.empty())
+	if (files.read_file(text.fallback, out) && !out.empty())
 		return MissionTextSource::kFallback;
 	out.clear();
 	return MissionTextSource::kNone;

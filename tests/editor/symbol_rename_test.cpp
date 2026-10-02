@@ -397,9 +397,9 @@ static int test_powerup_name() {
 	return 0;
 }
 
-// An item id a mission places: the editor cannot rewrite the mission, so the rename is refused,
-// the finding naming it, and nothing is written.
-static int test_item_id_refused() {
+// An item id a mission places: the mission is a document (S14), so Rename everywhere rewrites
+// the record placing it with the catalog's definition; a new id that is not a number is refused.
+static int test_item_id_in_mission() {
 	Project project("opennova_rename_item");
 	const std::string items = project.path("items.def");
 	TEST_EXPECT(project.write(items, "begin \"Placed\"\nid 100300\ntype building\nend\n"));
@@ -417,17 +417,14 @@ static int test_item_id_refused() {
 	TEST_EXPECT(item != nullptr);
 	if (!item) return 1;
 	const DialogsView::RenamePreview &plan = project.preview(*item, "100301");
-	TEST_EXPECT(refused(plan, "rename.site", "missions/place.bms"));
+	TEST_EXPECT(plan.refusals.empty() && plan.sites->size() == 2 && sites_in(plan, items) == 1 &&
+	            sites_in(plan, "missions/place.bms") == 1);
 	TEST_EXPECT(refused(project.preview(*item, "not a number"), "rename.name", items));
-	const std::string before = project.read(items);
-	TEST_EXPECT(!project.rename(*item, "100301"));
-	TEST_EXPECT(project.read(items) == before);
-	// What the rename's operation came to: its plan, made once the validation it joined had
-	// ended, refused (S13 A3).
-	bool reported = false;
-	for (const Diagnostic &d : project.session.view().activity.last_operation.findings)
-		reported = reported || (d.code() == "rename.site" && d.asset == "missions/place.bms");
-	TEST_EXPECT(reported);
+	TEST_EXPECT(project.rename(*item, "100301"));
+	TEST_EXPECT(project.read(items).find("id 100301") != std::string::npos);
+	const GraphEdge *placed = edge_to(project.graph(), "missions/place.bms", ReferenceKind::Item, "100301");
+	TEST_EXPECT(placed && project.graph().resolve(*placed) == ReferenceStatus::Present &&
+	            !edge_to(project.graph(), "missions/place.bms", ReferenceKind::Item, "100300"));
 	return 0;
 }
 
@@ -701,7 +698,7 @@ int main() {
 	failures += test_weapon_name();
 	failures += test_ammo_name();
 	failures += test_powerup_name();
-	failures += test_item_id_refused();
+	failures += test_item_id_in_mission();
 	failures += test_user_point();
 	if (failures == 0) std::printf("editor_symbol_rename: all tests passed\n");
 	return failures == 0 ? 0 : 1;

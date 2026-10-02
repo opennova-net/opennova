@@ -20,6 +20,7 @@
 namespace godot {
 
 class MissionObjectPlacer;
+class ObjectData;
 class TerrainData;
 
 class TerrainStaticShadowRasterizer final :
@@ -31,6 +32,11 @@ public:
 	void set_terrain_data(const Ref<TerrainData> &p_data);
 	void set_mission_object_placer(
 			const Ref<MissionObjectPlacer> &p_placer);
+	// A caster graphic's shadow geometry resolved and cached ahead of the
+	// snapshot that will name it (the editor's mission device resolves each in
+	// a unit of its own); true when it resolves. A cached geometry whose
+	// document is freed is dropped at the next snapshot.
+	bool prepare_caster_geometry(const String &p_graphic, const Ref<ObjectData> &p_data);
 	void set_enabled(bool p_enabled);
 	bool is_enabled() const noexcept;
 	void set_suppressed_bms_ids(const PackedInt32Array &p_bms_ids);

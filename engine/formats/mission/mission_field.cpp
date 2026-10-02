@@ -803,11 +803,13 @@ bool set_loadout_name(void *record, const MissionValue &value, std::string &erro
 }
 
 // The per-ammo damage-class request [orig: g_SpawnLoadoutBuffer @ 0x24D4E00, sanitized on SP load by
-// AIProfile_SanitizeConfigData @ 0x40cfe0]: an empty one is written as "-1", the neutral default.
+// AIProfile_SanitizeConfigData @ 0x40cfe0]: an empty one is written as "-1", the neutral default. A
+// record that wrote three strings (has_flags false, bms.h) writes its fourth once it is set.
 bool set_loadout_flags(void *record, const MissionValue &value, std::string &error) {
 	const std::string *text = nullptr;
 	if (!loadout_text(value, text, error)) return false;
 	as<O>(record).flags = text->empty() ? std::string("-1") : *text;
+	as<O>(record).has_flags = true;
 	return true;
 }
 

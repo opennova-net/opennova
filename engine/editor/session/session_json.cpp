@@ -585,6 +585,55 @@ bool command_from_json(const JsonValue &json, ViewportCommand &out, std::string 
 	return true;
 }
 
+// A drop on a viewport's picture (S14): {file | reference + name, at: [x, y], kind?}. What is dropped
+// is the viewport's kind to read (a model's file, an item's id), so the names are texts here.
+JsonValue drop_to_json(const ViewportDrop &drop) {
+	JsonValue out = JsonValue::make_object();
+	if (!drop.file.empty()) out.set("file", json_string(drop.file));
+	if (!drop.reference.empty()) out.set("reference", json_string(drop.reference));
+	if (!drop.name.empty()) out.set("name", json_string(drop.name));
+	JsonValue point = JsonValue::make_array();
+	point.push(json_number(drop.x));
+	point.push(json_number(drop.y));
+	out.set("at", std::move(point));
+	if (drop.kind != ViewportKind::kCount) out.set("kind", json_string(viewport_kind_token(drop.kind)));
+	return out;
+}
+
+bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error) {
+	if (!json.is_object()) {
+		error = "\"drop\" must be an object {file | reference + name, at, kind}.";
+		return false;
+	}
+	if (!members_known(json, {"file", "reference", "name", "at", "kind"}, "drop", error)) return false;
+	const auto text = [&](const char *member, std::string &into) {
+		const JsonValue *value = json.get(member);
+		if (!value) return true;
+		if (!value->is_string() || value->string.empty()) {
+			error = std::string("\"drop.") + member + "\" must be a name.";
+			return false;
+		}
+		into = value->string;
+		return true;
+	};
+	ViewportDrop drop;
+	if (!text("file", drop.file) || !text("reference", drop.reference) || !text("name", drop.name)) return false;
+	// A file, or a reference kind's name: one of them, the kind and its name together.
+	if (drop.file.empty() == drop.reference.empty() || drop.reference.empty() != drop.name.empty()) {
+		error = "\"drop\" names a file, or a reference kind and a name of it, one of them.";
+		return false;
+	}
+	const JsonValue *at = json.get("at");
+	if (!at || !at->is_array() || at->array.size() != 2 || !io::json_float(at->array[0], drop.x) ||
+			!io::json_float(at->array[1], drop.y)) {
+		error = "\"drop.at\" must be two numbers, [x, y].";
+		return false;
+	}
+	if (!viewport_kind_member(json, "drop", drop.kind, error)) return false;
+	out = std::move(drop);
+	return true;
+}
+
 // An import source: {path, entry?, install?, native?}.
 constexpr const char *kImportsShape =
         "\"imports\" must be an array of {path, entry, install, native}.";
@@ -627,6 +676,26 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
+	case F::Mission: return text_of(json, token, request.mission, error);
+	case F::Values: {
+		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
+		// is the keys', and request::create_file sorts them the same way (review F10).
+		if (!json.is_object()) {
+			error = "\"values\" must be an object of strings.";
+			return false;
+		}
+		std::vector<std::pair<std::string, std::string>> values;
+		for (const io::JsonMember &member : json.object) {
+			if (!member.value.is_string()) {
+				error = "\"values\" must be an object of strings: \"" + member.key + "\" is none.";
+				return false;
+			}
+			values.emplace_back(member.key, member.value.string);
+		}
+		std::sort(values.begin(), values.end());
+		request.values = std::move(values);
+		return true;
+	}
 	case F::Roles: return texts_of(json, token, request.roles, error);
 	case F::Names: return texts_of(json, token, request.names, error);
 	case F::Paths: return texts_of(json, token, request.paths, error);
@@ -689,6 +758,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 		return true;
 	case F::Drag: return drag_from_json(json, request.drag, error);
 	case F::Command: return command_from_json(json, request.command, error);
+	case F::Drop: return drop_from_json(json, request.drop, error);
 	case F::Purpose:
 		if (json.is_string() && pick_purpose_from_token(json.string, request.purpose)) return true;
 		error = "Unknown pick purpose \"" + shown + "\".";
@@ -700,6 +770,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
 	case F::ImportPass: return flag_of(json, token, request.import_pass, error);
 	case F::Rehash: return flag_of(json, token, request.rehash, error);
+	case F::All: return flag_of(json, token, request.all, error);
+	case F::Planned: return flag_of(json, token, request.planned, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -723,6 +795,11 @@ bool field_to_json(
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
+	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
+	case F::Values:
+		out = JsonValue::make_object();
+		for (const auto &entry : request.values) out.set(entry.first, json_string(entry.second));
+		return !request.values.empty();
 	case F::Roles: out = strings_to_json(request.roles); return !request.roles.empty();
 	case F::Names: out = strings_to_json(request.names); return !request.names.empty();
 	case F::Paths: out = strings_to_json(request.paths); return !request.paths.empty();
@@ -764,6 +841,9 @@ bool field_to_json(
 	case F::Command:
 		out = command_to_json(request.command);
 		return request.command != ViewportCommand();
+	case F::Drop:
+		out = drop_to_json(request.drop);
+		return request.drop != ViewportDrop();
 	case F::Purpose:
 		out = json_string(pick_purpose_token(request.purpose));
 		return request.purpose != PickPurpose::None;
@@ -777,6 +857,8 @@ bool field_to_json(
 	// Its default is true: the writer names it only when it is false.
 	case F::ImportPass: out = boolean(request.import_pass); return !request.import_pass;
 	case F::Rehash: out = boolean(request.rehash); return request.rehash;
+	case F::All: out = boolean(request.all); return request.all;
+	case F::Planned: out = boolean(request.planned); return request.planned;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();
@@ -1138,7 +1220,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		const FieldUse field = document.field_on(address, schema);
 		JsonValue entry = JsonValue::make_object();
 		entry.set("id", json_string(schema.id));
-		if (!schema.label.empty()) entry.set("label", json_string(schema.label));
+		// What the record calls it (FieldUse::label: a trigger's parameter by its type), else the
+		// schema's.
+		if (field.label) entry.set("label", json_string(field.label));
+		else if (!schema.label.empty()) entry.set("label", json_string(schema.label));
 		if (!schema.section.empty()) entry.set("section", json_string(schema.section));
 		if (!schema.group.empty()) entry.set("group", json_string(schema.group));
 		entry.set("type", json_string(field_type_token(schema.type)));
@@ -1240,7 +1325,16 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!edge.fallback.empty()) out.set("fallback", json_string(written(edge.fallback)));
 	out.set("target", json_string(written(edge.target)));
 	if (!edge.scope.empty()) out.set("scope", json_string(edge.scope));
-	out.set("rewritable", boolean(edge.rewritable));
+	if (!edge.scopes_after.empty()) {
+		JsonValue after = JsonValue::make_array();
+		for (const std::string &scope : edge.scopes_after) after.push(json_string(scope));
+		out.set("scopes_after", std::move(after));
+	}
+	if (!edge.scope_alternate.empty()) out.set("scope_alternate", json_string(edge.scope_alternate));
+	if (!edge.scope_owner.empty()) out.set("scope_owner", json_string(edge.scope_owner));
+	if (edge.optional) out.set("optional", boolean(true));
+	if (!edge.needs.empty()) out.set("needs", json_string(edge.needs));
+	out.set("rewritable", boolean(graph.rewrites(edge)));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
 	if (edge.loader_arg >= 0) out.set("loader_arg", json_number(double(edge.loader_arg)));
 	std::string file;

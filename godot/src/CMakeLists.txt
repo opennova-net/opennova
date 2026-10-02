@@ -112,6 +112,7 @@ add_library(opennova_bindings OBJECT
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
     mission/mission_placement_stats.cpp
+    mission/mission_placement_run.cpp
     mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
@@ -392,6 +393,7 @@ if(OPENNOVA_EDITOR)
         authoring/child_process.cpp
         authoring/editor_app.cpp
         authoring/menu_viewport_applier.cpp
+        authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
         authoring/script_device.cpp
         authoring/script_edit.cpp

@@ -287,13 +287,14 @@ int validation() {
 	TEST_EXPECT(edit({set(action, "file", std::string("other.mnu"))}));
 	TEST_EXPECT(!reference_choices(*view.findings.graph, font_use).empty()); // the project's fonts
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
-	// then builds, blocked by the missing texture.
+	// then builds: the missing texture, string id and menu are listed and gate nothing (S14).
 	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(view.dialogs.unsaved_prompt.open && !view.dialogs.unsaved_prompt.can_discard && !session.view().activity.operation.running() &&
 	            view.dialogs.unsaved_prompt.files == std::vector<std::string>{document->path()});
 	EditorRequest save = request::resolve_unsaved(UnsavedChoice::Save);
 	editor_test::handle_to_end(session, save);
-	TEST_EXPECT(!document->dirty() && !view.dialogs.unsaved_prompt.open && view.activity.has_build && !view.activity.last_build->ok);
+	TEST_EXPECT(!document->dirty() && !view.dialogs.unsaved_prompt.open && view.activity.has_build && view.activity.last_build->ok &&
+	            has_code(view.findings.diagnostics, "reference.missing"));
 	// A new menu by name and kind.
 	editor_test::handle_to_end(session, request::create_file("extra.mnu", asset_kind_token(AssetKind::Menu)));
 	auto *extra = session.document_for("extra.mnu");

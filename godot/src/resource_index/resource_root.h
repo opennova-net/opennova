@@ -12,10 +12,12 @@
 #include <godot_cpp/variant/string.hpp>
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <unordered_map>
 
 #include <base/resource_index/resource_index.h>
+#include <base/vfs/file_source.h>
 #include <runtime/assets/asset_store.h>
 #include <runtime/renderer/texture_load_rules.h>
 
@@ -56,6 +58,7 @@ private:
 		None,
 		Loose,
 		Runtime,
+		Source,
 	};
 
 	String root_dir_;
@@ -134,6 +137,18 @@ public:
 	// Mods screen and the LAN joiner both perform.
 	Error mount_runtime(const String &path, const String &expansion = String(),
 	                    bool allow_loose_override = false, const String &game_code = "jo");
+	// C++ siblings only (not bound; the OpenNova Editor's devices): an embedder's own file set mounted
+	// in place of a directory (ResourceIndex::mount_source: the editor's project files, its open
+	// documents standing in for theirs), replacing the mount as the entry points above do. Every flat
+	// name the source resolves is a file of this root (has_file, read_file, load_texture,
+	// load_material_texture, load_font through its bytes); a lookup policy changes nothing; nothing is
+	// listed (list_files, list_file_entries) and no name resolves to a path on disk (resolve_file);
+	// get_root_dir() is ResourceIndex::kSourceRootDir, a label and no directory, so every "is a root
+	// mounted" test answers yes. The source is read as it stands at each call; a mount drops what
+	// this root cached, never the global cache epoch: another root's holders keep theirs (another
+	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
+	// placer among them).
+	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
 	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an
@@ -217,6 +232,9 @@ public:
 	// The text the boot report's line puts before a missing file's name, the one the editor's
 	// Play reads the name back by (gameprofile::kBootResourceMissingMarker).
 	static String boot_resource_missing_marker();
+	// The text the launch mission's report puts before the mission's file name and the reason it
+	// did not load (gameprofile::kLaunchMissionFailedMarker), which the editor's Play reads back.
+	static String launch_mission_failed_marker();
 
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.

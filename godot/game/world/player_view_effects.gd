@@ -116,17 +116,26 @@ func _build_damage_feedback_quads() -> void:
 
 func set_resource_root(root: ResourceRoot) -> void:
 	_root = root
-	# Each through its retail loader: the masks through the stage loader, the
-	# digits and the NVG scale through the file loader, the vignette through
-	# the archive loader (docs/render/render-material-re.md "Texture loaders").
-	_binocular_mask = _load_texture("Binoculr.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
-	_binocular_crosshair = _load_texture("BinoCH.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
-	_binocular_numbers = _load_texture("BNumbers.tga", ResourceRoot.TEXTURE_LOADER_FILE)
-	_nvg_mask = _load_texture("NVG.tga", ResourceRoot.TEXTURE_LOADER_STAGE)
-	_nvg_scale = _load_texture("Nvgscale.tga", ResourceRoot.TEXTURE_LOADER_FILE)
+	# The names are the engine's (HudPos.view_effect_texture), each through its
+	# retail loader: the masks through the stage loader, the digits and the NVG
+	# scale through the file loader, the vignette through the archive loader
+	# (docs/render/render-material-re.md "Texture loaders").
+	_binocular_mask = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_MASK),
+			ResourceRoot.TEXTURE_LOADER_STAGE)
+	_binocular_crosshair = _load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_CROSSHAIR),
+			ResourceRoot.TEXTURE_LOADER_STAGE)
+	_binocular_numbers = _load_texture(
+			HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_BINOCULAR_DIGITS),
+			ResourceRoot.TEXTURE_LOADER_FILE)
+	_nvg_mask = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_NVG_MASK),
+			ResourceRoot.TEXTURE_LOADER_STAGE)
+	_nvg_scale = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_NVG_SCALE),
+			ResourceRoot.TEXTURE_LOADER_FILE)
 	# The red damage vignette's texture; retail loads it once into the material
 	# behind the quad's mode-3 pass.
-	_vignette = _load_texture("vignette.tga", ResourceRoot.TEXTURE_LOADER_ARCHIVE)
+	_vignette = _load_texture(HudPos.view_effect_texture(HudPos.VIEW_TEXTURE_VIGNETTE),
+			ResourceRoot.TEXTURE_LOADER_ARCHIVE)
 	if _red_vignette != null:
 		_red_vignette.texture = _vignette
 	queue_redraw()

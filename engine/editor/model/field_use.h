@@ -28,6 +28,9 @@ struct FieldUse {
 	ReferenceKind variable_through = ReferenceKind::None;
 	// The namespace the name it references or defines lives in ("" = any).
 	std::string scope;
+	// What the record calls the field where its record's type names it otherwise than the schema (a
+	// mission trigger's parameter: "Zone", "Waypoint list"); null: the schema's label (field_title).
+	const char *label = nullptr;
 	// What the reference's loader picks the file by, as its kind's row reads it (a model's
 	// texture row: the row's type, reference_file_candidates; another texture: the game's loader
 	// of it, texture_loader_arg); -1 for none.

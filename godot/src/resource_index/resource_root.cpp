@@ -94,6 +94,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("boot_resource_missing_marker"),
 			&ResourceRoot::boot_resource_missing_marker);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("launch_mission_failed_marker"),
+			&ResourceRoot::launch_mission_failed_marker);
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
@@ -141,6 +143,10 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 
 String ResourceRoot::boot_resource_missing_marker() {
 	return String::utf8(kBootResourceMissingMarker);
+}
+
+String ResourceRoot::launch_mission_failed_marker() {
+	return String::utf8(kLaunchMissionFailedMarker);
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {
@@ -317,6 +323,27 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 	return OK;
 }
 
+Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
+	expansion_ = String();
+	expansion_override_table_ = PackedByteArray();
+	mount_kind_ = MountKind::None;
+	// This root's caches keyed to the old mount dropped; the global epoch stands, so another root's
+	// holders keep theirs (the mounting device makes afresh whatever read a moved file).
+	opennova::clear_texture_resolver_caches();
+	texture_cache_.clear();
+	resolve_memo_built_ = false;
+	assets_.invalidate();
+	if (!index_.mount_source(std::move(files))) {
+		root_dir_ = String();
+		last_error_ = String(index_.last_error().c_str());
+		return ERR_INVALID_PARAMETER;
+	}
+	root_dir_ = String(opennova::ResourceIndex::kSourceRootDir);
+	last_error_ = String();
+	mount_kind_ = MountKind::Source;
+	return OK;
+}
+
 Error ResourceRoot::begin_mount(const String &path, String &r_clean) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// a new or re-scanned resource directory is read fresh. The epoch bump tells
@@ -423,6 +450,10 @@ String ResourceRoot::resolve_file(const String &name) {
 	}
 	if (!is_flat_filename(name.strip_edges())) {
 		last_error_ = "Resource lookup requires a flat filename: " + name;
+		return String();
+	}
+	if (mount_kind_ == MountKind::Source) {
+		last_error_ = "A file source has no directory to resolve a file in: " + file;
 		return String();
 	}
 	const String wanted = file.to_lower();
@@ -580,7 +611,11 @@ PackedByteArray ResourceRoot::read_texture_attempt_(const opennova::renderer::Te
 		LookupPolicy policy) const {
 	if (load.source == opennova::renderer::TextureFileSource::ParticleTextureDir) {
 		// The particle manager's own folder, "<game directory>\tga\", opened directly
-		// (renderer::TextureFileSource::ParticleTextureDir); raw bytes, as fopen reads.
+		// (renderer::TextureFileSource::ParticleTextureDir); raw bytes, as fopen reads. A file
+		// source (mount_files) has no game directory, so no such folder.
+		if (mount_kind_ == MountKind::Source) {
+			return PackedByteArray();
+		}
 		const String tga_dir = root_dir_.path_join("tga");
 		const String file = opennova::to_gd(load.file).replace("\\", "/");
 		const String path = file.contains("/")
@@ -691,6 +726,10 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 		if (font->load_from_bytes(bytes) == OK) {
 			return font;
 		}
+	}
+	// A CBIN font is found by walking the root's directory: a file source has none.
+	if (mount_kind_ == MountKind::Source) {
+		return Ref<Resource>();
 	}
 	return cbin_internal::find_font_by_name(file, root_dir_);
 }

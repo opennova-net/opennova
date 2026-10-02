@@ -25,6 +25,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_layout_from_hudpos.h> // HudLayoutAssets (the names the fill hands back)
 #include <runtime/hud/hud_map_view.h> // the DEATH window pass seam
+#include <runtime/hud/hud_texture_names.h> // the crosshair styles
 
 #include "hud/hud_map_pass_renderer.h"
 #include "resource_index/resource_root.h"
@@ -64,13 +65,13 @@ class HudOverlay : public Control {
 	GDCLASS(HudOverlay, Control)
 
 public:
-	// The user crosshair-style range; retail loads "cross%02d.tga" (style + 1)
-	// from the player config. The colour default / mask and the spread default
+	// The user crosshair-style range and its texture names are the engine's
+	// (hud_texture_names.h). The colour default / mask and the spread default
 	// are the engine's (HudLayout, Config_SetDefaults), re-exported so the
 	// options model has one home for them.
 	enum {
-		MIN_CROSSHAIR_STYLE = 0,
-		MAX_CROSSHAIR_STYLE = 24,
+		MIN_CROSSHAIR_STYLE = opennova::hud::kHudCrosshairStyleMin,
+		MAX_CROSSHAIR_STYLE = opennova::hud::kHudCrosshairStyleMax,
 		DEFAULT_CROSSHAIR_COLOR =
 				static_cast<int>(opennova::hud::HudLayout::kCrosshairColorDefault),
 		CROSSHAIR_COLOR_MASK =
