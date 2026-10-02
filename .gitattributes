@@ -32,6 +32,7 @@ fixtures/**/*.ptl -text -eol filter= diff= merge=
 fixtures/**/*.ptu -text -eol filter= diff= merge=
 fixtures/**/*.trn -text -eol filter= diff= merge=
 fixtures/**/*.txt -text -eol filter= diff= merge=
+fixtures/**/*.wac -text -eol filter= diff= merge= whitespace=cr-at-eol
 
 # assets/ is the game's own bundled data (ADR 0048), shipped beside
 # opennova.exe and stored byte-for-byte. Small hand-written or minted files

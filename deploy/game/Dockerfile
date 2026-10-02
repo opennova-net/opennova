@@ -28,8 +28,9 @@ COPY scripts/build_godot_web.sh scripts/
 RUN scripts/build_godot_web.sh --release --build-dir /build
 
 # --- the exporting editor's own extension -------------------------------------
-# The headless editor that exports loads the Linux build so the engine's classes
-# resolve while it imports the project.
+# The headless editor that exports is a source run: it loads the plain linux.debug
+# row of opennova.gdextension, the editor-enabled library (the superset, ADR 0046
+# d4), so every script's classes resolve while it imports the project.
 FROM ubuntu:24.04 AS native
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -42,7 +43,7 @@ COPY godot/src/ godot/src/
 COPY godot/bin/opennova.gdextension godot/bin/
 RUN cmake -S godot/src -B /build -G Ninja \
         -DGODOTCPP_TARGET=template_debug -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build /build --target opennova
+    && cmake --build /build --target opennova_editor_gdext
 
 # --- the export ---------------------------------------------------------------
 FROM native AS export
