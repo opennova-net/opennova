@@ -12,8 +12,10 @@
 namespace opennova::editor {
 
 // The name the editor shows for a field (its label, else its id) and for a choice (its label,
-// else the value as the file writes it).
+// else the value as the file writes it); on a record, what the record calls the field where its
+// type does (FieldUse::label), else the schema's.
 std::string field_title(const FieldSchema &field);
+std::string field_title(const FieldUse &field);
 const std::string &choice_title(const FieldChoice &choice);
 // The choice a value names among a field's choices (a text compared as the game compares
 // tokens, ignoring case), or null: the schema's, or the choices a record offers of its own

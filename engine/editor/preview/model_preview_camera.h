@@ -44,6 +44,9 @@ struct OrbitCamera {
 	// A point on the device (pixels from its top left) and its depth in front of the eye;
 	// false behind the near plane.
 	bool project(const PreviewVec3 &point, int width, int height, float &x, float &y, float *depth = nullptr) const;
+	// The ray through device pixel (x, y): from the eye, along `direction` (not normalized: one
+	// unit of it is one unit ahead of the eye); false for a device with no size.
+	bool ray(float x, float y, int width, int height, PreviewVec3 &from, PreviewVec3 &direction) const;
 	// The point under device pixel (x, y) on the plane through `through` that faces the eye
 	// (a dragged marker keeps its depth); false when the ray misses it.
 	bool on_view_plane(float x, float y, int width, int height, const PreviewVec3 &through, PreviewVec3 &out) const;

@@ -22,6 +22,7 @@ constexpr const char *kAiProfile[] = {".aip", nullptr};
 // import record packs as it is (one with its record is an ImportSource: scan_project_assets).
 constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", ".png", nullptr};
 constexpr const char *kRawBin[] = {".bin", nullptr};
+constexpr const char *kMissionText[] = {".mis", nullptr};
 constexpr const char *kMapProject[] = {".npj", ".npz", nullptr};
 constexpr const char *kTerrainPolyData[] = {".cpt", nullptr};
 constexpr const char *kTileInfo[] = {".til", nullptr};
@@ -87,11 +88,6 @@ struct Kind {
 	constexpr Kind scr(ScrForm form) const {
 		Kind out = *this;
 		out.row.scr = form;
-		return out;
-	}
-	constexpr Kind names_unfollowed() const {
-		Kind out = *this;
-		out.row.names_unfollowed = true;
 		return out;
 	}
 };
@@ -171,6 +167,18 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Mission, "mission", "Mission", ArchiveSlot::Localres)
 	        .runtime("mission")
 	        .names_files()
+	        .edited_by(DocumentTypeId::Mission)
+	        .folder("missions")
+	        .new_name("newmission.bms")
+	        .row,
+	// The original mission editor's interchange text (dfx2med.exe, docs/mission/mis-format-re.md): the
+	// image holds no `.mis` literal and no reader of one, so the game never asks for it and the build
+	// leaves it out. It names files (a terrain, items, weapons) no reader of the editor follows: an
+	// import takes it and lists it as not followed.
+	Kind(AssetKind::MissionText, "mission_text", "Mission text", ArchiveSlot::None)
+	        .extensions(kMissionText)
+	        .names_files()
+	        .folder("missions")
 	        .row,
 	// Where retail keeps its own (localres.pff holds ASP_G7.npz): its mission list's archive walk
 	// takes a .npj or .npz as it takes a .bms [orig: Mission_BuildMapListFromPFF @ 0x562910]
@@ -187,8 +195,10 @@ constexpr AssetKindRow kRows[] = {
 	     ArchiveSlot::Resource)
 	        .extensions(kTerrainPolyData)
 	        .row,
+	// Beside the missions: the game finds a mission's by its name (mission::sidecars).
 	Kind(AssetKind::TileInfo, "tile_info", "Tile placement", ArchiveSlot::Resource)
 	        .extensions(kTileInfo)
+	        .folder("missions")
 	        .row,
 	Kind(AssetKind::Environment, "environment", "Environment", ArchiveSlot::Resource)
 	        .runtime("environment")
@@ -207,12 +217,13 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("menus")
 	        .row,
-	// Streamed by path, never through the archives (ArchiveSlot).
+	// Streamed by path, never through the archives (ArchiveSlot). It names no file: its entries are
+	// its own chunks of audio (formats/sbf).
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank", ArchiveSlot::Loose)
 	        .runtime("sbf")
-	        .names_files()
 	        .row,
-	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves.
+	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves
+	// (the graph's extract_sound_bank).
 	Kind(AssetKind::SoundBank, "sound_bank", "Sound bank", ArchiveSlot::Resource)
 	        .runtime("sound")
 	        .names_files()
@@ -225,18 +236,20 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::DialogBank, "dialog_bank", "Dialog bank", ArchiveSlot::Localres)
 	        .extensions(kDialogBank)
 	        .names_files()
+	        .folder("missions")
 	        .row,
 	Kind(AssetKind::Particles, "particles", "Particle effects", ArchiveSlot::Resource)
 	        .runtime("particle")
 	        .names_files()
 	        .row,
-	// A RUN names another script [orig: Script_LoadAndCompileFile @ 0x4EE660], which the graph
-	// makes no edge of yet (S13 D9): an import does not follow it.
+	// Its operands' names (S13 D9), the script a RUN names [orig: Script_LoadAndCompileFile @
+	// 0x4EE660] and the waves it plays (S14), each an edge the graph reads (documents/script_type).
 	Kind(AssetKind::Script, "script", "Script", ArchiveSlot::Localres)
 	        .extensions(kScript)
 	        .edited_by(DocumentTypeId::Script)
 	        .names_files()
-	        .names_unfollowed()
+	        .folder("missions")
+	        .new_name("newscript.wac")
 	        .row,
 	// The .def family by name: the runtime consumes each by its exact name, and browses only
 	// Avatars.def and hudpos.def.
@@ -380,7 +393,7 @@ constexpr bool rows_well_formed() {
 		const AssetKindRow &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
-		                      row.kind == AssetKind::Unknown;
+		                      row.kind == AssetKind::Unknown || row.kind == AssetKind::MissionText;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
 		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;

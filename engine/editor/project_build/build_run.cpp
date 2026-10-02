@@ -461,6 +461,10 @@ void BuildRun::prepare() {
 		phase_ = Phase::Done;
 		return;
 	}
+	// What the plan itself says of the files and blocks nothing (a player's own file it leaves out,
+	// ADR 0046 S14) is the build's to report; the Problems rows it was gated on are not.
+	for (const Diagnostic &d : plan_.diagnostics)
+		if (d.row() && d.row()->group == FindingGroup::Build) report_.diagnostics.push_back(d);
 	pass_began_ = io::file_clock_now_ticks();
 	load_cache();
 	label_ = "Hashing the project's files";

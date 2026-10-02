@@ -106,12 +106,20 @@
     viewport plans), and the device seam (`viewport_device`; S13 V6: a device may build its picture
     over the Shell's frames, a unit a step within the Shell's budget, the viewport loading meanwhile
     and a newer build generation cancelling one in flight) with its least-recently-used cache of four
-    (`viewport_device_cache`); the Shell's devices are `godot/src/authoring`'s over the runtime's
-    `MenuFrame` and `ObjectModel`. The menu's viewport (`menu_viewport`): its screen compiled
+    (`viewport_device_cache`; a kind's row may hold fewer of its own, the mission's two, and the
+    devices drawn in a frame arbitrate the scene state they render with, S14 E13); the Shell's
+    devices are `godot/src/authoring`'s over the runtime's `MenuFrame` and `ObjectModel` and, for a
+    mission, the game's own environment, sky, water, terrain and placer. The menu's viewport (`menu_viewport`): its screen compiled
     headless, the options it holds, what a drag of a window's handles or of several windows
     writes, and what arranging several windows (align, distribute, drawing order) writes; the
     model's (`model_viewport`): its orbit camera and the level the game draws, what it shows and
-    when the device builds again, a clip on its rig; and the render check, the menu type's project check:
+    when the device builds again, a clip on its rig; the mission's (`mission_viewport`, S14, the
+    Document tab's Main view): its scene over the document's typed reads (`mission_scene`), its
+    camera flown and orbited in the mission's terms (`mission_camera`), its options, its marks
+    picked by their anchors, its overlays (`mission_overlay`), what a drag of a mark's handles
+    writes (`mission_handle_edit`: a move on the ground the device answers, height, yaw, an area's
+    edges), the commands frame, top and ground, and a drop of an item or a model (`mission_items`:
+    an item's pool, model and ground anchor through the graph); and the render check, the menu type's project check:
     every menu screen compiled headless, its compiler notes as Problems rows, a menu rendered
     again only when it, a file it read or a variable it names changes; a menu's tree, its
     findings and a screen as the render check compiled it, as the menu_tree, menu_findings and
