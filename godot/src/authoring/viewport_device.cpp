@@ -9,6 +9,9 @@
 
 #include <editor/preview/viewport_model.h>
 
+#include "env/mission_environment.h"
+#include "env/water.h"
+
 namespace godot {
 
 namespace {
@@ -68,6 +71,7 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 		viewport_->set_update_mode(SubViewport::UPDATE_ONCE);
 		rendered_ = true;
 		render_frame_ = frame_now();
+		render_asked_ = true;
 	} else if (!rendered_) {
 		size_(picture.width, picture.height);
 	}
@@ -77,9 +81,48 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	}
 }
 
+void ViewportDevice::publish_scene_state() {
+	if (applier_->scene_state() != 0) {
+		applier_->publish_scene_state();
+		return;
+	}
+	// The shipped defaults: the retail noon the environment globals have before any mission
+	// publishes, and no water.
+	MissionEnvironment::publish_shipped_defaults();
+	Water::publish_absent();
+}
+
+void ViewportDevice::withhold_render() {
+	// The frame's render dropped: the last picture stands, and the frame is no render frame of its
+	// (its units may run).
+	viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+	render_asked_ = false;
+	render_frame_ = UINT64_MAX;
+}
+
+void ViewportDevice::present(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
+	(void)model;
+	// The clock's seconds since the last present (none, or a paused clock: 0).
+	const double ms = double(clock.ms());
+	const double dt = presented_ms_ < 0.0 || ms < presented_ms_ ? 0.0 : (ms - presented_ms_) / 1000.0;
+	presented_ms_ = ms;
+	render_asked_ = false;
+	rendered_frame_ = frame_now();
+	applier_->present(dt);
+}
+
 bool ViewportDevice::surface_at(float x, float y, float point[3]) const {
 	// Only over a picture it built: none while a build runs or after one failed.
 	return !keeps_last_() && applier_->surface_at(x, y, point);
+}
+
+bool ViewportDevice::surface_between(const double from[3], const double to[3], double point[3]) const {
+	// The applier's to answer: the layer that holds its surface may stand while it builds another.
+	return applier_->surface_between(from, to, point);
+}
+
+bool ViewportDevice::ground_at(double x, double y, double &height) const {
+	return applier_->ground_at(x, y, height);
 }
 
 void ViewportDevice::take(opennova::editor::ViewportAction action, const opennova::editor::ViewportModel &model,
@@ -103,6 +146,7 @@ void ViewportDevice::take(opennova::editor::ViewportAction action, const opennov
 			// Made whole as it was taken: one unit on one frame.
 			build_.frames = 1;
 			build_.frame_us = build_.unit_us = build_.total_us = now_us() - start;
+			built_once_ = true;
 		}
 		break;
 	}
@@ -162,6 +206,7 @@ bool ViewportDevice::step(const opennova::editor::ViewportModel &model, const op
 	case ApplierStep::Built:
 		build_.loading = false;
 		build_.progress.done = build_.progress.total;
+		built_once_ = true;
 		break;
 	case ApplierStep::Failed:
 		build_.loading = false;

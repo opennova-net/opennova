@@ -66,10 +66,20 @@ enum class ReferenceKind {
 	ModelRegister, // a model's CTRL register by its index in the model's table (a generator's, a track's, a light's)
 	ModelFrame,    // a model's rotation frame by its MTRX row (a part animation's)
 	UserPoint,   // a model's user point by name, on the model file the scope names (an item's particle slot)
+	TerrainData, // a terrain's height data, a .cpt by the name as written (a .trn's polytrn_polydata)
+	Wave,        // a .wav by the file name of the path a sound bank's single holds
 	Powerup,        // a powerup.def row by name (an item's powerupdef)
 	MissionMarker,  // a mission's marker by its index in the file's markers (a waypoint path's stop)
-	MissionTrigger, // a mission's trigger by its index in the file's trigger table (an event's first trigger)
-	MissionAction,  // a mission's action by its index in the file's action table (an event's first action)
+	MissionEvent,   // a mission's event by its index in the file's event table (an Event trigger's, a ResetEvent action's)
+	MissionGroup,   // a mission's group by its index in the file's 64 (an entity's, a parameter's), 0 none
+	MissionPath,    // a mission's waypoint path by its number among the file's 128, 0 none and 123..127 commands
+	MissionEntity,  // a mission's entity by its SSN, in the mission file the scope names (a parameter's)
+	MissionZone,    // a mission's area trigger by its zone id, in the mission file the scope names (a parameter's)
+	Script,         // a .wac by the name as written (a mission's own script, a RUN's)
+	LoadingImage,   // a mission's loading image, a .pcx by its name (else loadscrn.pcx)
+	TilePlacement,  // a mission's tile placement, a .til by its name
+	DialogBank,     // a mission's dialog bank, a .dbf by its name (a dialog a record plays)
+	MissionStrings, // a mission's own string table, a .bin by its name (else medmssn.bin)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

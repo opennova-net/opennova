@@ -70,7 +70,7 @@ protected:
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 	// A duplicated section is named anew: under its original's name no lookup would find it.
-	void prepare_duplicate(Node &copy,
+	void prepare_duplicate(Node &copy, const Node &original,
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 
 private:

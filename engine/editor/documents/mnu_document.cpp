@@ -866,7 +866,7 @@ bool MnuDocument::paste_records(Node &node, const Edit &edit, const IdAllocator 
 	}
 	return true;
 }
-void MnuDocument::prepare_duplicate(Node &copy,
+void MnuDocument::prepare_duplicate(Node &copy, const Node &,
                                     const std::vector<std::shared_ptr<const Node>> &rows) const {
 	mnu::Screen &screen = screen_of(copy).screen;
 	screen.name = unique_name(menu_screen_names(rows), screen.name);

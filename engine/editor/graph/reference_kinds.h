@@ -122,6 +122,11 @@ struct ReferenceKindRow {
 	// The kind of file a symbol goes in when no file of the project defines one yet (the
 	// Problems row's Open fix); Unknown for one the file its scope names holds.
 	AssetKind defined_in = AssetKind::Unknown;
+	// The witness that the game refuses what names a name of the kind that finds nothing, null where
+	// none is witnessed (ADR 0046 S14, the start of severities from witnessed behaviour): a missing
+	// reference of a kind with one refuses a build (blocks_build); every other missing reference is
+	// listed and gates nothing.
+	const char *gates_when_missing = nullptr;
 
 	// A name some file defines, as a symbol or a style variable, or a record of a file's record set
 	// (a symbol of the kind named by its index).
@@ -139,9 +144,14 @@ struct ReferenceKindRow {
 // back; false for a model row's type and for none.
 int32_t texture_loader_arg(renderer::TextureLoader loader);
 bool texture_loader_of(int32_t loader_arg, renderer::TextureLoader &loader);
+// A mission's tile set (its header's terrain_tile): the atlas the terrain draws its tiles from,
+// the name with everything from its first '.' replaced by ".TGA" (formats/trn
+// trn_mission_tilestrip) through the TGA reader [orig: Terrain_LoadEnvironmentConfig @ 0x610940
+// -> Path_ReplaceOrAppendExtension @ 0x53C780]. Below every texture_loader_arg.
+inline constexpr int32_t kTileSetTextureArg = -100;
 
-// The number of reference kinds: MissionAction is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::MissionAction) + 1;
+// The number of reference kinds: MissionStrings is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::MissionStrings) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is
@@ -152,6 +162,13 @@ bool record_index(ReferenceKind kind, const Value &value, int64_t &index);
 // A kind's row (reference_kinds.cpp holds one per kind, in the enum's order; a static_assert
 // there checks that and that the tokens are unique).
 const ReferenceKindRow &reference_row(ReferenceKind kind);
+
+// Whether a finding among the rows a build reads refuses it (ADR 0046 S14): an error whose code
+// gates (FindingCodeRow::gates_build), an error made from no row, or a missing reference whose kind
+// the game refuses when the name finds nothing (ReferenceKindRow::gates_when_missing). A missing
+// reference of any other kind is listed and blocks nothing.
+bool blocks_build(const Diagnostic &d);
+bool diagnostics_block_build(const std::vector<Diagnostic> &items);
 // The kind a token names; false for none.
 bool reference_kind_from_token(const std::string &token, ReferenceKind &out);
 // The reference a stylesheet value naming a file of `file`'s kind makes where the game reads it
