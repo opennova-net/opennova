@@ -139,5 +139,42 @@ int main(void) {
     ok &= expect_near("spinner_t250_m4", at_quarter.m[4], -1.0f);
     ok &= expect_near("spinner_t250_m5", at_quarter.m[5], 0.0f);
 
+    // The PSP flagpole: node 0 names ITSELF as its parent and scales Y about
+    // its pivot (11.5 up) by the LFP_CAMPPERCENT register; node 1, the flag,
+    // rides it from 15.3 up. Output slot 0 receives its input before node 0
+    // is built, so the self-parent carry restores the pivot: full control is
+    // the bind pose, zero control drops the flag to the pole's base.
+    // [orig: Model_TransformBoneMatrices @0x58e451..0x58e46b]
+    ThreediPartAnimation pole[2];
+    ThreediVec3 pole_pivots[2] = {{0.0f, 11.5f, 0.0f}, {0.0f, 15.3f, 0.0f}};
+    ThreediMatrix4x4 pole_in[2], pole_out[2];
+    memset(pole, 0, sizeof(pole));
+    pole[0].subobject_index = 0;
+    pole[0].parent_subobject = 0;
+    pole[0].flags = 2u; // per-axis scale
+    pole[0].scale_y.control = 113;
+    pole[0].scale_y.control_param = 7;
+    pole[0].scale_y.end = 256;
+    pole[1].subobject_index = 1;
+    pole[1].parent_subobject = 0;
+    for (int i = 0; i < 2; ++i) {
+        threedi_mat4_identity(&pole_in[i]);
+        pole_in[i].m[13] = pole_pivots[i].y; // the cache's inputs carry each part's pivot
+        memset(&pole_out[i], 0xCD, sizeof(pole_out[i])); // an unwritten output slot
+    }
+    memset(ctrl, 0, sizeof(ctrl));
+    ctrl[7] = 0x10000;
+    ok &= expect_eq("pole_full_rc", threedi_panm_build_node_matrices(
+        pole, 2, pole_pivots, NULL, NULL, pole_in, NULL, 0, ctrl, pole_out), 0);
+    ok &= expect_near("pole_full_sy", pole_out[0].m[5], 1.0f);
+    ok &= expect_near("pole_full_ty", pole_out[0].m[13], 0.0f);
+    ok &= expect_near("flag_full_ty", pole_out[1].m[13], 0.0f);
+    ctrl[7] = 0;
+    ok &= expect_eq("pole_down_rc", threedi_panm_build_node_matrices(
+        pole, 2, pole_pivots, NULL, NULL, pole_in, NULL, 0, ctrl, pole_out), 0);
+    ok &= expect_near("pole_down_sy", pole_out[0].m[5], 0.0f);
+    ok &= expect_near("pole_down_ty", pole_out[0].m[13], 11.5f);
+    ok &= expect_near("flag_down_ty", pole_out[1].m[13], 11.5f - 15.3f);
+
     return ok ? 0 : 1;
 }
