@@ -1,0 +1,42 @@
+#include <editor/project/project_refresh.h>
+
+#include <utility>
+
+namespace opennova::editor {
+
+ProjectRefresh::ProjectRefresh(const ProjectPaths &paths, const ProjectDocument &doc, bool force_import,
+		const std::string &only, bool import_pass) :
+		import_pass_(import_pass), pass_(paths, doc, force_import, only), walk_(paths, doc) {}
+
+bool ProjectRefresh::step(uint64_t budget) {
+	if (done_) return true;
+	// The import pass first: the scan lists what the importers made.
+	if (import_pass_ && !pass_.done()) {
+		if (!pass_.step(budget)) return false;
+		imports_ = pass_.take();
+		return false;
+	}
+	if (!walk_.step(budget)) return false;
+	scan_ = walk_.take();
+	scan_.set_import_findings(imports_.diagnostics);
+	done_ = true;
+	return true;
+}
+
+uint64_t ProjectRefresh::files_done() const {
+	return (import_pass_ ? pass_.sources_done() : 0) + walk_.files_visited();
+}
+
+uint64_t ProjectRefresh::files_total() const {
+	return (import_pass_ ? pass_.sources_listed() : 0) + walk_.files_listed();
+}
+
+std::string ProjectRefresh::label() const {
+	if (done_) return "Checking the required files";
+	if (import_pass_ && !pass_.done())
+		return pass_.listing() ? "Listing the import sources" : "Importing " + pass_.current();
+	if (walk_.listing()) return "Listing the project's files";
+	return "Scanning " + walk_.current();
+}
+
+} // namespace opennova::editor
