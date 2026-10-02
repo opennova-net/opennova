@@ -35,6 +35,8 @@ class ResourceRoot;
 class RtxtStringFile;
 class AvatarDatabase;
 class AvatarComboRow;
+class EndRoundColumn;
+class EndRoundRow;
 class WeaponDatabase;
 class WeaponDef;
 
@@ -64,10 +66,10 @@ public:
 // routing — is the engine's opennova::menu::MenuRuntime
 // (engine/runtime/menu/menu_runtime.h carries the witnesses); this class is
 // its device half: it implements the frame seam over the MenuFrame node,
-// resolves the screen's text table and marquee data through the resource
-// root, mounts the credits scrollers, plays the widget sound edges, pushes
-// the screen MUSICVAR and relays the runtime's events as signals. Widgets go
-// by stable MnuDocument id, valid across screens.
+// reads the marquee data through the resource root, mounts the credits
+// scrollers, plays the widget sound edges, pushes the screen MUSICVAR and
+// relays the runtime's events as signals. Widgets go by stable MnuDocument id,
+// valid across screens.
 class MenuDriver : public RefCounted {
 	GDCLASS(MenuDriver, RefCounted)
 
@@ -87,9 +89,8 @@ class MenuDriver : public RefCounted {
 	Ref<MnuDocument> doc_;
 	Ref<ResourceRoot> root_;
 	Ref<MnsStyleSheet> style_;
-	Ref<RtxtStringFile> text_;
-	// Per-screen RTXT text tables (TEXT_RSRC), cached by lowercased filename.
-	HashMap<String, Ref<RtxtStringFile>> text_rsrc_cache_;
+	// The expansion's string table every menu lookup tries first.
+	Ref<RtxtStringFile> override_text_;
 	// CBIN credits scrollers mounted over marquee widgets of the current
 	// screen. The overlays are frame CHILDREN, outside the compiled draw walk,
 	// so the driver re-applies the walk's shown gate whenever widget
@@ -104,8 +105,6 @@ class MenuDriver : public RefCounted {
 	MenuAudio *audio_() const;
 	MusicDirector *music_director_() const;
 	void on_runtime_event_(const opennova::menu::MenuEvent &p_event);
-	void fill_screen_text_lookup_(Dictionary &r_out);
-	Ref<RtxtStringFile> load_text_rsrc_(const String &p_file);
 	void seed_marquee_widgets_();
 	void clear_credits_();
 	void sync_credits_();
@@ -196,8 +195,11 @@ public:
 
 	// Bind a parsed document and show `target_screen` (empty = the first
 	// screen). Rebuilds every per-document cache; runtime widget state is dropped.
+	// Every string table a screen reads is its windows' TEXT_RSRC (the frame
+	// loads them); `override_text` is the expansion's table tried first (null:
+	// none; the lookup order is the engine's, menu_text_tables.h).
 	bool open_document(const Ref<MnuDocument> &p_doc, const Ref<ResourceRoot> &p_root,
-			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_text,
+			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text,
 			const String &p_menu_file, const String &p_target_screen);
 	Ref<MnuDocument> document() const { return doc_; }
 	PackedStringArray get_screen_names() const;
@@ -272,6 +274,13 @@ public:
 	int table_row_count(int p_id) const;
 	String table_cell_text(int p_id, int p_row, int p_col) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
+	int table_sort_column(int p_id) const;
+	// The end-of-round stat table (StatScreen_PopulateStatResultsList, witnessed in
+	// inmatch stat_screen_feed.h): the engine's column set installed (the RESULTLIST authors no HEADER), the
+	// rows with their team colours, the local row selected, then the sort on
+	// the first stat column, descending (inmatch stat_screen_feed.h).
+	void fill_stat_results(int p_id, const TypedArray<EndRoundColumn> &p_columns,
+			const TypedArray<EndRoundRow> &p_rows);
 	// The CTableWnd operations (engine menu_table_row.h).
 	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
 			int p_insert_index);
@@ -292,6 +301,7 @@ public:
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
+	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
 	bool dispatch_action_row(const Ref<MnuActionRow> &p_action);
 	// Direct play seam (voice preview etc.); emits sound_requested always.
 	void play_widget_sound(const String &p_trigger, const String &p_file);

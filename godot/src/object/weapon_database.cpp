@@ -157,7 +157,7 @@ Error WeaponDatabase::load_from_resource_root(const Ref<ResourceRoot> &p_resourc
 			},
 			p_resource_root.ptr()};
 	if (def_parse_weapons_memory(bytes.ptr(), static_cast<size_t>(bytes.size()), &weapons_file_,
-				&probe) != 0) {
+				nullptr, &probe) != 0) {
 		last_error = String("def_parse_weapons_memory failed for ") + file_name;
 		return ERR_CANT_OPEN;
 	}

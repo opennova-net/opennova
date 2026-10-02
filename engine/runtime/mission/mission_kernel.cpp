@@ -485,7 +485,7 @@ bool MissionKernel::load_weapon_table(const BootFileSource &files,
 				return static_cast<const BootFileSource *>(ctx)->has_file(name);
 			},
 			&files};
-	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, &probe) != 0) return false;
+	if (def_parse_weapons_memory(bytes.data(), bytes.size(), &file, nullptr, &probe) != 0) return false;
 	world.tables.weapons = w::build_weapon_table(file,
 			table_assets != nullptr ? table_assets : &assets());
 	if (weapon_defs_ok) def_free_weapons(&weapon_defs);

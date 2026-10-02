@@ -24,7 +24,7 @@ fixtures/**/*.env -text -eol filter= diff= merge=
 fixtures/**/*.grm -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.hexcap -text -eol filter= diff= merge=
 fixtures/**/*.ini -text -eol filter= diff= merge=
-fixtures/**/*.mns -text -eol filter= diff= merge=
+fixtures/**/*.mns -text -eol filter= diff= merge= whitespace=cr-at-eol
 fixtures/**/*.mnu -text -eol filter= diff= merge=
 fixtures/**/*.nwmsg -text -eol filter= diff= merge=
 fixtures/**/*.o3d -text -eol filter= diff= merge=

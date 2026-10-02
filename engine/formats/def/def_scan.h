@@ -14,6 +14,7 @@
 // TUs pull it in wholesale, so no call site changes.
 
 #include <formats/def/def.h>
+#include <formats/def/def_schema.h>
 
 #include <base/io/ascii_config.h>
 
@@ -50,6 +51,39 @@ typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEnt
     (raw_count)++; \
 } while(0)
 
+// Records a finding. A blocking code (def_issue_blocks) also counts against the
+// record or file even when the caller collects no details, and the writers refuse
+// what it counts; an ignored-input or reinterpreted-value finding is reported only.
+// Diagnostics never carry replayable source text; `detail` names the one token concerned
+// (the value the game reads, for a reinterpreted one), if any.
+void authoring_issue(size_t &count, opennova::def::DefParseReport *report,
+                     size_t line, const char *record, const char *key, size_t key_len,
+                     opennova::def::DefIssueCode code = opennova::def::DefIssueCode::UnknownProperty,
+                     const char *detail = nullptr);
+
+// A line as the parser read it, for the authoring checks below: its tokens joined by
+// single spaces, a token holding a delimiter or a comment mark quoted again, and a token
+// the comment cut left running bounded at the cut. The checks so see the key and values
+// the parser bound, whatever delimiters the text used (`DELAYEND,7`,
+// `"ammoclass_max_carry" X 40`, `pos 1 2 3 0 0 0// hip`).
+std::string line_as_read(const io::ConfigTokens &tokens);
+
+// A block header as the parser read it (line_as_read): its keyword and its name are the
+// line's first two tokens as the retail tokenizer cuts them, so a comma or a quote ends
+// the keyword as a space does (`ACTION,SCOPEUP` and `ACTION"SCOPEUP"` read as `ACTION
+// SCOPEUP`), and every family reads the name from token 1, quoted or not. A header the
+// writer could not give back (no name, a token after it) is a malformed block; a name past
+// the `cut` characters the reader copies reads as its first `cut` (a reinterpreted value).
+void validate_header(const char *line, size_t length, size_t key_length, size_t cut,
+                     size_t &issues, opennova::def::DefParseReport *report, size_t number, const char *record);
+// The checks of one property line (line_as_read) against the kind's property table: input
+// that cannot be saved as the record holds it.
+void validate_property(opennova::def::DefRecordKind kind, const char *line, size_t length,
+                       size_t &issues, opennova::def::DefParseReport *report,
+                       size_t number, const char *record);
+const FlagEntry *weapon_flag_at(size_t index);
+const char *death_piece_keyword(size_t index);
+
 char *read_file(const char *path, size_t *out_len);
 
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len);
@@ -63,6 +97,9 @@ int signed_i16_value(int value);
 float parse_float_n(const char *s, size_t len);
 
 int death_piece_type_index(const char *name, size_t len);
+
+/* The table row for a piece name, or -1 when the name is not a row (row 0 is HULL). */
+int death_piece_type_lookup(const char *name, size_t len);
 
 // The value tokens a family parser reads off one line: every token the
 // tokenizer keeps past the key, 29 of its 30. The tokenizer stops at its 30th

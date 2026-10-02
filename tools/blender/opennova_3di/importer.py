@@ -21,8 +21,9 @@
 #                      their helpers under their own LOD root, naming their
 #                      part (`_05 hit`).
 #
-# Textures load from the files `opennova-3di` resolved beside the .3di by the
-# runtime's candidate order (`texfile` records). What the scene cannot carry
+# Textures load from the files `opennova-3di` resolved beside the .3di, the
+# one file each row's loader opens by the row's name and type (`texfile`
+# records). What the scene cannot carry
 # is reported as a note, never stashed; a file that fails leaves nothing of
 # itself behind.
 
@@ -72,10 +73,11 @@ def read_o3d(path):
         for raw in f:
             raw = raw.rstrip("\r\n")
             if raw.startswith("texfile "):
-                t = tokens(raw[8:].split(" ", 1)[0] if not raw[8:].startswith('"') else raw[8:])
-                name = t[0]
-                rest = raw[8:][len(name) + (2 if raw[8:].startswith('"') else 0):].strip()
-                sc["texfiles"][name] = None if rest == "-" else rest
+                body = raw[8:]
+                quoted = body.startswith('"')
+                name = tokens(body if quoted else body.split(" ", 1)[0])[0]
+                typ, _, path = body[len(name) + (2 if quoted else 0):].strip().partition(" ")
+                sc["texfiles"][(name, int(typ))] = None if path == "-" else path
                 continue
             t = tokens(strip_comment(raw))
             if not t:

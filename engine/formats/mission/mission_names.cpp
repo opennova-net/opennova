@@ -6,19 +6,14 @@
 #include "mission_detail.h"
 
 #include <formats/mission/bms.h>
+#include <formats/mission/mission_field.h>
 
 namespace opennova::mission::detail {
 
+// The main types are the rows the editor offers them by (mission_field.cpp).
 std::string trigger_main_type_name(int value) {
-	switch (static_cast<bms::TriggerMainType>(value)) {
-		case bms::TriggerMainType::Group: return "Group";
-		case bms::TriggerMainType::Single: return "Single";
-		case bms::TriggerMainType::Event: return "Event";
-		case bms::TriggerMainType::MissionVariable: return "MissionVariable";
-		case bms::TriggerMainType::SecondTimeThrough: return "SecondTimeThrough";
-		case bms::TriggerMainType::Teammate: return "Teammate";
-		case bms::TriggerMainType::Player: return "Player";
-	}
+	const MissionChoices types = trigger_main_types();
+	if (const char *name = mission_choice_name(types.rows, types.count, value)) return name;
 	return unknown_label("Unknown", value);
 }
 
@@ -131,58 +126,10 @@ std::string trigger_sub_type_name(int main_type, int sub_type) {
 	return unknown_label("Unknown", sub_type);
 }
 
+// The action types are the rows the editor offers them by (mission_field.cpp).
 std::string action_type_name(int value) {
-	switch (static_cast<bms::ActionType>(value)) {
-		case bms::ActionType::Null: return "Null";
-		case bms::ActionType::RedirectGroupTo: return "RedirectGroupTo";
-		case bms::ActionType::KillGroup: return "KillGroup";
-		case bms::ActionType::ChangeGroupAI: return "ChangeGroupAI";
-		case bms::ActionType::VaporizeGroup: return "VaporizeGroup";
-		case bms::ActionType::MisvarChange: return "MisvarChange";
-		case bms::ActionType::OutputText: return "OutputText";
-		case bms::ActionType::PlayWavList: return "PlayWavList";
-		case bms::ActionType::BlueWin: return "BlueWin";
-		case bms::ActionType::RedWin: return "RedWin";
-		case bms::ActionType::GreenWin: return "GreenWin";
-		case bms::ActionType::GroupVelocity: return "GroupVelocity";
-		case bms::ActionType::AreaAiRed: return "AreaAiRed";
-		case bms::ActionType::AreaAiBlue: return "AreaAiBlue";
-		case bms::ActionType::SubGoalWon: return "SubGoalWon";
-		case bms::ActionType::SubGoalLost: return "SubGoalLost";
-		case bms::ActionType::ChangeGTeamAction: return "ChangeGTeamAction";
-		case bms::ActionType::ChangeGroupAction: return "ChangeGroupAction";
-		case bms::ActionType::GroupTeleportAction: return "GroupTeleportAction";
-		case bms::ActionType::RedirectSingleTo: return "RedirectSingleTo";
-		case bms::ActionType::KillSingle: return "KillSingle";
-		case bms::ActionType::ChangeSingleAI: return "ChangeSingleAI";
-		case bms::ActionType::VaporizeSingle: return "VaporizeSingle";
-		case bms::ActionType::SingleVelocity: return "SingleVelocity";
-		case bms::ActionType::ChangeSteamAction: return "ChangeSteamAction";
-		case bms::ActionType::SingleChangeGroup: return "SingleChangeGroup";
-		case bms::ActionType::SingleTeleportAction: return "SingleTeleportAction";
-		case bms::ActionType::ParticleEffectAction: return "ParticleEffectAction";
-		case bms::ActionType::SpecialSubType: return "SpecialSubType";
-		case bms::ActionType::GroupOpenDoorAction: return "GroupOpenDoorAction";
-		case bms::ActionType::GroupCloseDoorAction: return "GroupCloseDoorAction";
-		case bms::ActionType::GroupResetHasVisited: return "GroupResetHasVisited";
-		case bms::ActionType::SingleResetHasVisited: return "SingleResetHasVisited";
-		case bms::ActionType::ResetEvent: return "ResetEvent";
-		case bms::ActionType::ShowWinSubgoal: return "ShowWinSubgoal";
-		case bms::ActionType::ShowLoseSubgoal: return "ShowLoseSubgoal";
-		case bms::ActionType::AttachToEmplaced: return "AttachToEmplaced";
-		case bms::ActionType::SetLightState: return "SetLightState";
-		case bms::ActionType::Teammates: return "Teammates";
-		case bms::ActionType::ShowWaypoints: return "ShowWaypoints";
-		case bms::ActionType::ExecuteWac: return "ExecuteWac";
-		case bms::ActionType::SsnTargetSsnPri: return "SsnTargetSsnPri";
-		case bms::ActionType::SsnTargetSsnExc: return "SsnTargetSsnExc";
-		case bms::ActionType::SsnTargetGroupPri: return "SsnTargetGroupPri";
-		case bms::ActionType::SsnTargetGroupExc: return "SsnTargetGroupExc";
-		case bms::ActionType::GroupTargetSsnPri: return "GroupTargetSsnPri";
-		case bms::ActionType::GroupTargetSsnExc: return "GroupTargetSsnExc";
-		case bms::ActionType::GroupTargetGroupPri: return "GroupTargetGroupPri";
-		case bms::ActionType::GroupTargetGroupExc: return "GroupTargetGroupExc";
-	}
+	const MissionChoices types = action_types();
+	if (const char *name = mission_choice_name(types.rows, types.count, value)) return name;
 	return unknown_label("Unknown", value);
 }
 

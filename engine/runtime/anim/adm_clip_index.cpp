@@ -60,7 +60,8 @@ int AdmClipIndex::load(const opennova::assets::AssetStore *assets,
 			if (value == nullptr || value[0] == '\0') {
 				continue;
 			}
-			const auto file = assets->bone_animation(value);
+			// A token whose .bad does not load registers failsafe.bad, else nothing.
+			const auto file = adm_token_clip(*assets, value);
 			if (!file) continue;
 			const BadFile &bf = *file;
 			AdmClipFacts facts;

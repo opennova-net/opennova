@@ -16,10 +16,10 @@
 
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
+#include <formats/threedi/scene_text.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/player_view.h>
 
-#include "scene_text.h"
 #include "threedi_cli.h"
 
 namespace opennova::threedi_cli {
@@ -29,6 +29,9 @@ namespace {
 using namespace opennova::world;
 namespace wa = opennova::world::weapon_action;
 namespace io = opennova::io;
+using opennova::threedi::SceneLine;
+using opennova::threedi::SceneNumbers;
+using opennova::threedi::strip_comment;
 
 // A clip's channel advances fps/62/frames a tick, so one clip second is 62
 // ticks of pose; DELAYEND and the firing period count 62.5 Hz logic ticks.

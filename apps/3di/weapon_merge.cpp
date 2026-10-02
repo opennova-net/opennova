@@ -18,8 +18,8 @@
 #include <base/io/ascii_config.h>
 #include <base/io/strutil.h>
 #include <formats/def/def.h>
+#include <formats/threedi/scene_text.h>
 
-#include "scene_text.h"
 #include "threedi_cli.h"
 
 namespace opennova::threedi_cli {
@@ -29,6 +29,9 @@ namespace {
 using namespace opennova::world;
 namespace wa = opennova::world::weapon_action;
 namespace strutil = opennova::strutil;
+using opennova::threedi::SceneLine;
+using opennova::threedi::SceneNumbers;
+using opennova::threedi::strip_comment;
 
 bool fail(std::string &error, const std::string &why) {
 	error = why;

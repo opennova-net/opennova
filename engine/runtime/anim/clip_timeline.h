@@ -40,7 +40,18 @@ public:
 	// and took one away, which is where the slot's ring serves its next variant.
 	// [orig: AnimChannel_AdvancePlayback @0x40B165 (t >= 1), @0x40B199 (t -= 1)]
 	bool wrapped_at(int32_t ticks) const;
-	double frame_at(int32_t ticks) const;
+	// The playhead in frames at `ticks` (armed_boundary as for normalized_at): the
+	// keyframe below it plus the fraction toward the next, which the channel lerps
+	// [orig: AnimChannel_InterpolateKeyframe @0x40B230, rec[i]..rec[i+1]].
+	double frame_at(int32_t ticks, int32_t armed_boundary = -1) const;
+	// The keyframe below the playhead: the frame whose record a channel reads unlerped
+	// (the trigger word) at `ticks`.
+	int32_t frame_index_at(int32_t ticks, int32_t armed_boundary = -1) const;
+	// Per frame, the first tick the running channel is on it, from a start at tick 0, in
+	// one pass over the clock: -1 where it never is (a step passes over the frame, or a
+	// one-shot stops before it; its stopped tick samples the parked end but reads no
+	// trigger). A loop answers for its first pass.
+	std::vector<int32_t> first_ticks() const;
 	double seconds_at(int32_t ticks) const;
 	// seconds_at with the armed-wrap park: on the armed boundary tick a loop
 	// samples 0.99999 (its last frame) [orig: AnimChannel_AdvancePlayback
@@ -53,6 +64,7 @@ public:
 
 private:
 	bool step(float &time) const;
+	double frame_of(float time) const;
 	void extend_to(int32_t ticks) const;
 	uint32_t fps_ = 0;
 	uint32_t frames_ = 0;

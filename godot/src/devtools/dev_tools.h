@@ -1,6 +1,5 @@
 #pragma once
 
-#include <godot_cpp/classes/node.hpp>
 #include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
@@ -15,6 +14,7 @@
 
 #include "devtools/debug_control_table.h"
 #include "devtools/frame_stats.h"
+#include "devtools/imgui_pass_node.h"
 
 #if OPENNOVA_DEVTOOLS
 #include <runtime/devtools/game_dev_tools.h>
@@ -46,27 +46,20 @@ class SubViewport;
 // Release flavour (OPENNOVA_DEVTOOLS=0): the class still registers so scripts
 // keep parsing, but window controls are inert and is_available() is false.
 // The shared debug-control table and engine log remain available; the game's
-// release export strips the addon.
-class DevTools : public Node
+// release export strips the addon. The context hand-off and the frame bracket
+// are the shared ImGuiPassNode's (the editor's EditorApp rides the same base).
+class DevTools : public ImGuiPassNode
 #if OPENNOVA_DEVTOOLS
 		, private opennova::devtools::GameViewport
 #endif
 {
-	GDCLASS(DevTools, Node)
+	GDCLASS(DevTools, ImGuiPassNode)
 
 public:
 	DevTools();
 	~DevTools() override;
 
-	void _ready() override;
 	void _exit_tree() override;
-	void _process(double p_delta) override;
-
-	bool is_available() const;
-	// Undocked tool windows are disabled before entering fullscreen, where
-	// imgui-godot cannot present them alongside the main viewport.
-	void set_platform_windows_allowed(bool p_allowed);
-	bool are_platform_windows_allowed() const { return platform_windows_allowed_; }
 
 	bool is_open() const;
 	void set_open(bool p_open);
@@ -165,18 +158,14 @@ public:
 
 protected:
 	static void _bind_methods();
+	opennova::devtools::ImGuiPass *engine_pass() override;
+	void before_layout(double p_delta) override;
+	void after_layout(uint64_t p_frame_index, bool p_drew, int64_t p_layout_us) override;
 
 private:
 	Ref<FrameStats> frame_stats_;
 	Ref<DebugControlTable> control_table_;
-	bool platform_windows_allowed_ = true;
 #if OPENNOVA_DEVTOOLS
-	bool attach_imgui();
-	bool window_allows_platform_windows() const;
-	void set_layer_visible(bool p_visible);
-	void sync_layer_visible();
-	bool layer_visible_ = false;
-
 	bool draw(int p_requested_width, int p_requested_height) override;
 	void apply_game_requests();
 	void sync_game_spectator_state();
@@ -263,6 +252,7 @@ private:
 	double frame_ms_sum_ = 0.0;
 	double frame_ms_peak_ = 0.0;
 	int64_t frame_ms_count_ = 0;
+	int64_t tools_start_us_ = 0; // before_layout's clock: the F3 row times the whole tools pass
 	SubViewport *game_viewport_ = nullptr;
 	Vector2i rendered_game_viewport_size_;
 	bool game_play_available_ = false;

@@ -84,6 +84,9 @@ inline float threedi_q16f(double v) { return static_cast<float>(threedi_q16(v)) 
 inline float threedi_q14f(double v) { return static_cast<float>(std::lround(v * io::kFp14One)) / io::kFp14One; }
 inline float threedi_q8f(double v) { return static_cast<float>(std::lround(v * 256.0)) / 256.0f; }
 inline float threedi_byte_unit(int c) { return static_cast<float>(c) / 255.0f; }
+// A colour channel (0..1) as the byte it was authored as: threedi_byte_unit's
+// inverse.
+inline int threedi_build_byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 // The quantizers of the collision fields the retired OED writer derives: it
 // truncates toward zero where the helpers above round (CVRT 8.8, BPLN Q14,
 // and the 16.16 CFAC, BPLN, BVOL, COBJ and CMDL values) [orig: WriteCVRT @
@@ -219,6 +222,23 @@ void threedi_build_light_view_proj(ThreediLight &light, float falloff);
 // through the D3DX degree constant the exporter converts with (the retired
 // port's deg_to_rad).
 float threedi_build_light_cone_cos(float falloff);
+
+// A spot light's cone half-angle (degrees) as the float build re-derives the
+// record from: its byte (wrapped), the cosine and the view_proj all follow from
+// it. The float nearest the angle the cosine holds rarely gives back the same
+// cosine, and a small cone leaves thousands of floats with one cosine, so the
+// floats around it are tried for one that reproduces the byte, the cosine and
+// the view_proj, then the byte and the cosine (a retail record whose view_proj
+// another tool built), else the angle itself.
+float threedi_build_light_cone_half_angle(const ThreediLight &light);
+
+// A material's glass, reflection and emissive words from its shader's
+// capabilities, by the OED rule WriteMTRL applies (it holds for every material
+// of the 958 JO models; 5fc5b4f6a^:engine/formats/oed/export_3di.cpp): a GLASS
+// shader reflects 0x80 grey unless another colour is set, and is glass while it
+// reflects; an EMISSIVE one is emissive type 2; any other is neither. The
+// shader table is the renderer's, so the caller says which the shader is.
+void threedi_build_material_surface(ThreediMaterial &material, bool glass_shader, bool emissive_shader);
 
 ThreediTransform threedi_build_track(uint8_t control, uint8_t param, int16_t rate, int16_t start, int16_t end);
 

@@ -1114,7 +1114,7 @@ void test_compose_camera_third_person() {
 // @0x437B1F..0x437B4B, the ease @0x437C56..0x437C79, the distance
 // @0x438121..0x438136, the quarter yaw @0x438138..0x43814A, the pitch
 // @0x438150, the clearances @0x438409..0x438456, the slope march
-// @0x43846E..0x438619, the watercraft drop @0x43861D..0x43864C].
+// @0x43846E..0x438619, the aircraft drop @0x43861D..0x43864C].
 PlayerViewState mounted_state(float bound_radius, float carrier_z = 10.0f) {
     PlayerViewState v;
     v.third_person = true;
@@ -1211,15 +1211,15 @@ void test_compose_camera_mounted() {
     CHECK(near_eq(pose.eye[0], 7.0f * std::sin(ten) * std::cos(p), 0.002f));
     CHECK(pose.yaw_deg > 350.0f && pose.yaw_deg < 359.5f);
 
-    // The WATERCRAFT drop: half the radius off the eye.
-    PlayerViewState boat = mounted_state(4.0f);
-    boat.mount.watercraft = true;
-    PlayerCameraPose boat_pose;
-    player_view_compose_camera(boat, position, no_anchor, false, nullptr, false,
-            0.0f, 0.0f, 0, 0, 0, false, 0.0f, boat_pose);
+    // The AIRCRAFT drop: half the radius off the eye.
+    PlayerViewState air = mounted_state(4.0f);
+    air.mount.aircraft = true;
+    PlayerCameraPose air_pose;
+    player_view_compose_camera(air, position, no_anchor, false, nullptr, false,
+            0.0f, 0.0f, 0, 0, 0, false, 0.0f, air_pose);
     player_view_compose_camera(v, position, no_anchor, false, nullptr, false,
             0.0f, 0.0f, 0, 0, 0, false, 0.0f, pose);
-    CHECK(near_eq(boat_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
+    CHECK(near_eq(air_pose.eye[2], pose.eye[2] - 2.0f, 0.001f));
 
     // The water floor's polarity: with the water at 100 an entity ABOVE it
     // (position z 200) gets the eye raised to 100.25, a submerged one keeps

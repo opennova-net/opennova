@@ -189,10 +189,10 @@ world::WeaponTable build_weapon_table(
 	// as the parser read them from the tokens (the class, abs(atol) of the value)
 	// [orig: parse @0x5437FE..0x543873 -> the cap table @0x24E7DE0; clamp use
 	// @0x540b26].
-	for (size_t i = 0; i < weapons.ammo_class_carries_count; ++i) {
-		const DefAmmoClassCarry &carry = weapons.ammo_class_carries[i];
+	for (size_t i = 0; i < weapons.ammo_classes_count; ++i) {
+		const def::DefAmmoClassCarry &carry = weapons.ammo_classes[i];
 		const int id = ammo_class_register(carry.name);
-		table.ammo_class_caps[static_cast<size_t>(id)] = carry.cap;
+		table.ammo_class_caps[static_cast<size_t>(id)] = carry.max_carry;
 	}
 
 	// Entry 0: the engine-created "null" def — AnimDef_InitAll wipes the 255-entry table and

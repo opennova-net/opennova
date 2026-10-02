@@ -44,9 +44,10 @@ means adding it to this table.
   starts. Every visitor downloads all of it first, so the unreferenced
   `on_ar15`/`on_arms` art stays out of the site until the game uses it (drop
   it from the script's excludes and `game-web.yml`'s LFS pull then).
-- `PLAY_RETAIL` and `CHANGE_FOLDER` are wired by control name in
-  `godot/game/bundled_menu_companion.gd`. `MainGame` mounts the picked install,
+- `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT` are wired by control name in
+  `godot/game/bundled_menu_companion.gd` (retail wires its own `EXIT` by name
+  too; its menus have no quit `ACTION`). `MainGame` mounts the picked install,
   saves it as `[resources] retail_dir` in `user://opennova.cfg`, and switches
-  to that install's own menus. `EXIT` quits through the document's own action.
+  to that install's own menus; `EXIT` quits.
   On the web build the page's `WebRetailPicker` stages the pick, which is never
   saved, and `EXIT` does nothing (ADR 0049).

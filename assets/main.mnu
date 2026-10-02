@@ -1,9 +1,10 @@
 <!-- OpenNova's placeholder main menu (ADR 0048), authored from scratch. The
-     shell opens main.mnu's first screen; PLAY_RETAIL and CHANGE_FOLDER are
-     wired by name (godot/game/bundled_menu_companion.gd), EXIT quits through
-     its own action. Literal strings, hex colors and one named font, so the
-     menu needs no string table or stylesheet. The font is uppercase-only, and
-     its comma reads as a period at menu size, so the text avoids commas. -->
+     shell opens main.mnu's first screen; PLAY_RETAIL, CHANGE_FOLDER and EXIT
+     are wired by name (godot/game/bundled_menu_companion.gd), EXIT the way
+     retail wires its EXIT control. Literal strings, hex colors and one named
+     font, so the menu needs no string table or stylesheet. The font is
+     uppercase-only, and its comma reads as a period at menu size, so the text
+     avoids commas. -->
 <SCREEN>
 	<NAME>STARTUP</NAME>
 	<WINDOW type="window" name="MAIN">
@@ -84,7 +85,6 @@
 			<STRING justify="CENTER" vjustify="CENTER">CHANGE FOLDER</STRING>
 		</WINDOW>
 		<WINDOW type="button" name="EXIT">
-			<ACTION type="quit">EXIT</ACTION>
 			<APPEARANCE type="outline" state="default">FF3A4550</APPEARANCE>
 			<APPEARANCE type="outline" state="mouseover">FFFFC040</APPEARANCE>
 			<POSITION>

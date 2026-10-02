@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util/cp1252.h"
+#include <base/io/cp1252.h>
 
 #include <godot_cpp/variant/string.hpp>
 

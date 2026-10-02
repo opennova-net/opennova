@@ -4,46 +4,33 @@
 // (info.cpp) prints a model, `compare` (compare.cpp) tells whether two models
 // are the same model, and `catalog` (main.cpp) prints the engine's tables a
 // front end offers: the CTRL registers, the generator styles, the shader tags,
-// the anim slot keys and the event trigger bits. The `anim` commands keep
-// their own surface (anim_cli.h).
+// the anim slot keys, the weapon actions and the event trigger bits. The
+// `anim` commands keep their own surface (anim_cli.h), and the `weapon`
+// commands theirs (weapon_timing.h).
 #pragma once
 
-#include <array>
-#include <cmath>
 #include <cstddef>
 #include <cstdio>
 #include <filesystem>
 #include <string>
 #include <system_error>
+#include <vector>
 
-#include <formats/threedi/threedi_3di3.h>
+#include <formats/threedi/scene_text.h>
 
 namespace opennova::threedi_cli {
 
-// The seven PANM tracks in on-disk order and their .o3d target names.
-inline constexpr int kTrackCount = 7;
-inline const char *track_label(int t) {
-	static const char *const kNames[kTrackCount] = {"rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans"};
-	return t >= 0 && t < kTrackCount ? kNames[t] : "?";
+// A scene reader's findings on stderr as `path:line: message` (`path: message`
+// for the whole file), notes marked `note:`. True when none is an error.
+inline bool print_findings(const char *path, const std::vector<opennova::threedi::SceneFinding> &findings) {
+	bool clean = true;
+	for (const opennova::threedi::SceneFinding &f : findings) {
+		clean = clean && !f.error;
+		if (f.line > 0) std::fprintf(stderr, "%s:%d: %s%s\n", path, f.line, f.error ? "" : "note: ", f.message.c_str());
+		else std::fprintf(stderr, "%s: %s%s\n", path, f.error ? "" : "note: ", f.message.c_str());
+	}
+	return clean;
 }
-inline int track_index(const std::string &name) {
-	for (int i = 0; i < kTrackCount; ++i)
-		if (name == track_label(i)) return i;
-	return -1;
-}
-// A PANM row's tracks in that order.
-inline std::array<opennova::threedi::ThreediTransform *, kTrackCount> panm_tracks(
-		opennova::threedi::ThreediPartAnimation &pa) {
-	return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z, &pa.translation};
-}
-inline std::array<const opennova::threedi::ThreediTransform *, kTrackCount> panm_tracks(
-		const opennova::threedi::ThreediPartAnimation &pa) {
-	return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z, &pa.translation};
-}
-
-// A colour channel (0..1) as the byte it was authored as: the inverse of the
-// builder's threedi_byte_unit.
-inline int byte_of(float unit) { return static_cast<int>(std::lround(unit * 255.0f)); }
 
 // Write `size` bytes to `path` whole or not at all: into `path`.part, checked
 // through fclose, then renamed over `path`. A full disk, a crash or a refused

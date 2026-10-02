@@ -1,0 +1,513 @@
+#include "def_schema.h"
+#include "def.h"
+
+#include <cstddef>
+
+namespace opennova::def {
+namespace {
+
+// Member inventory of the engine records. Format property syntax lives beside it
+// in def_schema_properties.cpp; derived fields remain visible to equivalence checks.
+#define FIELD(T, M, K) DefField{#M, offsetof(T, M), sizeof(((T *)nullptr)->M), DefFieldType::K}
+// A text the reader cuts to W - 1 characters (DefField::cut), whatever the member's storage.
+#define FIELD_CUT(T, M, W) [] { DefField f{#M, offsetof(T, M), W, DefFieldType::Text}; f.cut = true; return f; }()
+const std::vector<DefField> kItemFields = {
+    FIELD(DefItemDef, powerup_def, Text),
+    FIELD(DefItemDef, score, Integer),
+    FIELD(DefItemDef, graphic_enemy, Text),
+    FIELD(DefItemDef, text_id, Text),
+	FIELD_CUT(DefItemDef, display_name, 47), // the 46-character cut [orig: ItemDef_ParseProperty @0x49EBFB]
+	FIELD(DefItemDef, id, Integer),
+	FIELD_CUT(DefItemDef, sid, 16), // strncpy(.., 15) [orig: @0x49EC69..0x49EC8D]
+	FIELD(DefItemDef, type, Integer),
+	FIELD(DefItemDef, graphic, Text),
+	FIELD(DefItemDef, anim_def, Text),
+	FIELD(DefItemDef, husk, Text),
+	FIELD(DefItemDef, hp, Integer),
+	FIELD(DefItemDef, sound_profile, Text),
+	FIELD(DefItemDef, default_aip, Text),
+	FIELD(DefItemDef, sound_profile_female, Text),
+	FIELD_CUT(DefItemDef, soundloops[0], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[1], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[2], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[3], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[4], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[5], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, soundloops[6], 25), // strncpy(.., 0x18) [orig: @0x49FF08]
+	FIELD_CUT(DefItemDef, nightshot, 25), // strncpy(.., 0x18) [orig: @0x49FDEE]
+	FIELD_CUT(DefItemDef, dawnshot, 25), // strncpy(.., 0x18) [orig: @0x49FC36]
+	FIELD_CUT(DefItemDef, duskshot, 25), // strncpy(.., 0x18) [orig: @0x49FD5B]
+	FIELD_CUT(DefItemDef, dayshot, 25), // strncpy(.., 0x18) [orig: @0x49FCC8]
+	FIELD(DefItemDef, shot_delay_ticks[0][0], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[0][1], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[1][0], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[1][1], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[2][0], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[2][1], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[3][0], Integer),
+	FIELD(DefItemDef, shot_delay_ticks[3][1], Integer),
+	FIELD(DefItemDef, destroy_timing_ticks[0], Integer),
+	FIELD(DefItemDef, destroy_timing_ticks[1], Integer),
+	FIELD(DefItemDef, destroy_timing_ticks[2], Integer),
+	FIELD(DefItemDef, ai_function, Text),
+	FIELD(DefItemDef, move_function, Text),
+	FIELD(DefItemDef, render_function, Text),
+	FIELD(DefItemDef, disk_function, Text),
+	FIELD(DefItemDef, input_function, Text),
+	FIELD(DefItemDef, virtual_display, Text),
+	FIELD(DefItemDef, virtual_display_userpoint, Text),
+	FIELD(DefItemDef, attrib, Unsigned),
+	FIELD(DefItemDef, attrib2, Unsigned),
+	FIELD(DefItemDef, physics, Integer),
+	FIELD(DefItemDef, acceleration, Integer),
+	FIELD(DefItemDef, deceleration, Integer),
+	FIELD(DefItemDef, player_speed, Integer),
+	FIELD(DefItemDef, water_speed, Integer),
+	FIELD(DefItemDef, slip_speed, Integer),
+	FIELD(DefItemDef, max_slope, Integer),
+	FIELD(DefItemDef, slip_slope, Integer),
+	FIELD(DefItemDef, climb_speed, Integer),
+	FIELD(DefItemDef, turn_roll, Integer),
+	FIELD(DefItemDef, speed_pitch, Integer),
+	FIELD(DefItemDef, turn_rate, Integer),
+	FIELD(DefItemDef, turn_rate2, Integer),
+	FIELD(DefItemDef, torque, Integer),
+	FIELD(DefItemDef, mass, Integer),
+	FIELD(DefItemDef, weathervane, Integer),
+	FIELD(DefItemDef, min_ai, Integer),
+	FIELD(DefItemDef, lean, Integer),
+	FIELD(DefItemDef, lean_velocity, Integer),
+	FIELD(DefItemDef, pitch, Integer),
+	FIELD(DefItemDef, pitch_velocity, Integer),
+	FIELD(DefItemDef, bob, Integer),
+	FIELD(DefItemDef, flip, Integer),
+	FIELD(DefItemDef, hand_brake, Integer),
+	FIELD(DefItemDef, tire_slip, Integer),
+	FIELD(DefItemDef, spring, Integer),
+	FIELD(DefItemDef, spring_comp, Integer),
+	FIELD(DefItemDef, shock, Integer),
+	FIELD(DefItemDef, top_heavy, Integer),
+	FIELD(DefItemDef, critical_hp, Integer),
+	FIELD(DefItemDef, critical_drain, Integer),
+	FIELD(DefItemDef, non_critical_regen, Integer),
+	FIELD(DefItemDef, radar_sig, Integer),
+	FIELD(DefItemDef, heat_sig, Integer),
+	FIELD(DefItemDef, hud_image, Text),
+	FIELD(DefItemDef, unit_type, Integer),
+	FIELD(DefItemDef, particlefx.effect, Text),
+	FIELD(DefItemDef, particlefx.userpoint, Text),
+	FIELD(DefItemDef, particlefx.secondary_effect, Text),
+	FIELD(DefItemDef, particlefxs.effect, Text),
+	FIELD(DefItemDef, particlefxs.userpoint, Text),
+	FIELD(DefItemDef, particlefxs.secondary_effect, Text),
+	FIELD(DefItemDef, particlefxw1.effect, Text),
+	FIELD(DefItemDef, particlefxw1.userpoint, Text),
+	FIELD(DefItemDef, particlefxw1.secondary_effect, Text),
+	FIELD(DefItemDef, particlefxw2.effect, Text),
+	FIELD(DefItemDef, particlefxw2.userpoint, Text),
+	FIELD(DefItemDef, particlefxw2.secondary_effect, Text),
+	FIELD(DefItemDef, particlefxw3.effect, Text),
+	FIELD(DefItemDef, particlefxw3.userpoint, Text),
+	FIELD(DefItemDef, particlefxw3.secondary_effect, Text),
+	FIELD(DefItemDef, particlefxw4.effect, Text),
+	FIELD(DefItemDef, particlefxw4.userpoint, Text),
+	FIELD(DefItemDef, particlefxw4.secondary_effect, Text),
+	FIELD(DefItemDef, particledeath, Text),
+	FIELD(DefItemDef, particleh2odeath, Text),
+	FIELD(DefItemDef, particlefire, Text),
+	FIELD(DefItemDef, particleother, Text),
+	FIELD(DefItemDef, particlefinale, Text),
+	FIELD(DefItemDef, particlespawn, Text),
+	FIELD(DefItemDef, ammo_closeattack, Text),
+	FIELD(DefItemDef, ammo_marker3, Text),
+	FIELD(DefItemDef, ammo_easyrocket, Text),
+	FIELD(DefItemDef, ammo_advancedrocket, Text),
+	FIELD(DefItemDef, launchups_closeattack, Text),
+	FIELD(DefItemDef, launchups_rocket, Text),
+	FIELD(DefItemDef, launchups_marker3, Text),
+	FIELD(DefItemDef, weapon_userpoints[0], Text),
+	FIELD(DefItemDef, weapon_userpoints[1], Text),
+	FIELD(DefItemDef, weapon_userpoints[2], Text),
+	FIELD(DefItemDef, weapon_userpoints[3], Text),
+	FIELD(DefItemDef, weapon_userpoints[4], Text),
+	FIELD(DefItemDef, weapon_userpoints[5], Text),
+	FIELD(DefItemDef, weapon_userpoints[6], Text),
+	FIELD(DefItemDef, weapon_userpoints[7], Text),
+	FIELD(DefItemDef, weapon_userpoints[8], Text),
+	FIELD(DefItemDef, weapon_userpoints[9], Text),
+	FIELD(DefItemDef, weapon_userpoints[10], Text),
+	FIELD(DefItemDef, weapon_userpoints[11], Text),
+	FIELD(DefItemDef, clipsize, Integer),
+	FIELD(DefItemDef, deathtime_ticks, Integer),
+	FIELD(DefItemDef, primary_weapon, Text),
+	FIELD(DefItemDef, huskfinal, Text),
+	FIELD_CUT(DefItemDef, sounddeath, 25), // strncpy(.., 0x18) [orig: @0x49FE81]
+	FIELD(DefItemDef, armor_impact, Integer),
+	FIELD(DefItemDef, armor_blast, Integer),
+	FIELD(DefItemDef, kz, Real),
+	FIELD(DefItemDef, husk_swap_at, Real),
+	FIELD(DefItemDef, husk_swap_at_sec, Real),
+	FIELD(DefItemDef, scale_q16, Integer),
+	FIELD(DefItemDef, debris_scale, Real),
+	FIELD(DefItemDef, husk_sub_parts, Integer),
+	FIELD(DefItemDef, husk_sub_part_types[0], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[1], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[2], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[3], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[4], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[5], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[6], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[7], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[8], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[9], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[10], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[11], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[12], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[13], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[14], Byte),
+	FIELD(DefItemDef, husk_sub_part_types[15], Byte),
+	FIELD(DefItemDef, phrase_set, Integer),
+	FIELD(DefItemDef, phrase_set_valid, Integer),
+	FIELD(DefItemDef, damage_reduc_pp, Real),
+	FIELD(DefItemDef, damage_reduc_max, Real),
+	FIELD(DefItemDef, armor_kz, Integer),
+	FIELD(DefItemDef, emplacement_attachments_count, Count),
+	FIELD(DefItemDef, emplacement_g_slot, Integer),
+	FIELD(DefItemDef, emplacement_c_slot, Integer),
+	FIELD(DefItemDef, light_transfer, Real),
+	FIELD(DefItemDef, reverb, Integer),
+	FIELD(DefItemDef, shadow_texture, Text),
+	FIELD(DefItemDef, shadow_width, Real),
+	FIELD(DefItemDef, shadow_length, Real),
+	FIELD(DefItemDef, shadow_offset_x, Real),
+	FIELD(DefItemDef, shadow_offset_y, Real),
+	FIELD(DefItemDef, vehicle_spawn_mask, Unsigned),
+	FIELD(DefItemDef, music_location, Integer),
+	FIELD(DefItemDef, mana, Integer),
+	FIELD(DefItemDef, door_type, Unsigned),
+	FIELD(DefItemDef, door_open_rate_q16, Integer),
+	FIELD(DefItemDef, door_max_angle_bam, Integer),
+	FIELD_CUT(DefItemDef, door_open_sound, 25), // strncpy(.., 0x18) [orig: @0x49FBB4]
+	FIELD_CUT(DefItemDef, door_close_sound, 25), // strncpy(.., 0x18) [orig: @0x49FBF5]
+	FIELD(DefItemDef, attrib_parent, Byte),
+};
+
+const std::vector<DefField> kWeaponFields = {
+	FIELD_CUT(DefWeaponDef, weapon_name, 33), // strncpy(.., 0x20) [orig: @0x543737]
+	FIELD(DefWeaponDef, category, Integer),
+	FIELD(DefWeaponDef, rank, Integer),
+	FIELD(DefWeaponDef, clipsize, Integer),
+	FIELD(DefWeaponDef, startrounds, Integer),
+	FIELD(DefWeaponDef, targetyawrange, Integer),
+	FIELD(DefWeaponDef, targetpitchmax, Integer),
+	FIELD(DefWeaponDef, targetpitchmin, Integer),
+	FIELD(DefWeaponDef, statid, Integer),
+	FIELD(DefWeaponDef, maxclips, Integer),
+	FIELD(DefWeaponDef, ammobucket, Integer),
+	FIELD(DefWeaponDef, ammo_class, Text),
+	FIELD(DefWeaponDef, ammo_class_count, Integer),
+	FIELD(DefWeaponDef, charfilter[0], Text),
+	FIELD(DefWeaponDef, charfilter[1], Text),
+	FIELD(DefWeaponDef, charfilter[2], Text),
+	FIELD(DefWeaponDef, charfilter[3], Text),
+	FIELD(DefWeaponDef, charfilter[4], Text),
+	FIELD(DefWeaponDef, charfilter[5], Text),
+	FIELD(DefWeaponDef, charfilter[6], Text),
+	FIELD(DefWeaponDef, charfilter[7], Text),
+	FIELD(DefWeaponDef, charfilter_count, Count),
+	FIELD(DefWeaponDef, teamfilter[0], Text),
+	FIELD(DefWeaponDef, teamfilter[1], Text),
+	FIELD(DefWeaponDef, teamfilter[2], Text),
+	FIELD(DefWeaponDef, teamfilter[3], Text),
+	FIELD(DefWeaponDef, teamfilter_count, Count),
+	FIELD(DefWeaponDef, loadout_selectable, Integer),
+	FIELD(DefWeaponDef, loadout_subclasses, Integer),
+	FIELD(DefWeaponDef, weapon_class, Text),
+	FIELD(DefWeaponDef, round_type, Text),
+	FIELD(DefWeaponDef, animadm, Text),
+	FIELD(DefWeaponDef, soundfireloop, Text),
+	FIELD(DefWeaponDef, soundtrailoff, Text),
+	FIELD(DefWeaponDef, soundhead, Text),
+	FIELD(DefWeaponDef, vmacrotoken, Text),
+	FIELD(DefWeaponDef, soundlockedtone, Text),
+	FIELD(DefWeaponDef, launch_user_point, Text),
+	FIELD(DefWeaponDef, gfx1, Text),
+	FIELD(DefWeaponDef, gfx1a, Text),
+	FIELD(DefWeaponDef, gfx1b, Text),
+	FIELD(DefWeaponDef, gfx3, Text),
+	FIELD(DefWeaponDef, crosshair, Text),
+	FIELD(DefWeaponDef, crosshair_secondary, Text),
+	FIELD(DefWeaponDef, splash, Integer),
+	FIELD(DefWeaponDef, commanders_x, Text),
+	FIELD(DefWeaponDef, hud_loadout_select, Text),
+	FIELD(DefWeaponDef, hudicon, Text),
+	FIELD(DefWeaponDef, hudclipgfx_texture, Text),
+	FIELD(DefWeaponDef, hudclipgfx_offset[0], Integer),
+	FIELD(DefWeaponDef, hudclipgfx_offset[1], Integer),
+	FIELD(DefWeaponDef, hudrndgfx_texture, Text),
+	FIELD(DefWeaponDef, hudrndgfx_offset[0], Integer),
+	FIELD(DefWeaponDef, hudrndgfx_offset[1], Integer),
+	FIELD(DefWeaponDef, hudrndgfx_layout[0], Integer),
+	FIELD(DefWeaponDef, hudrndgfx_layout[1], Integer),
+	FIELD(DefWeaponDef, hudrndgfx_layout[2], Integer),
+	FIELD(DefWeaponDef, actions_count, Count),
+	FIELD(DefWeaponDef, flags, Integer),
+	FIELD(DefWeaponDef, error[0], Real),
+	FIELD(DefWeaponDef, error[1], Real),
+	FIELD(DefWeaponDef, error[2], Real),
+	FIELD(DefWeaponDef, error[3], Real),
+	FIELD(DefWeaponDef, error[4], Real),
+	FIELD(DefWeaponDef, error[5], Real),
+	FIELD(DefWeaponDef, pos[0], Real),
+	FIELD(DefWeaponDef, pos[1], Real),
+	FIELD(DefWeaponDef, pos[2], Real),
+	FIELD(DefWeaponDef, pos_rotation_deg_q16[0], Integer),
+	FIELD(DefWeaponDef, pos_rotation_deg_q16[1], Integer),
+	FIELD(DefWeaponDef, pos_rotation_deg_q16[2], Integer),
+	FIELD(DefWeaponDef, tpos[0], Real),
+	FIELD(DefWeaponDef, tpos[1], Real),
+	FIELD(DefWeaponDef, tpos[2], Real),
+	FIELD(DefWeaponDef, tpos_rotation_deg_q16[0], Integer),
+	FIELD(DefWeaponDef, tpos_rotation_deg_q16[1], Integer),
+	FIELD(DefWeaponDef, tpos_rotation_deg_q16[2], Integer),
+	FIELD(DefWeaponDef, sights_count, Count),
+	FIELD(DefWeaponDef, loadout_menu_textid, Text),
+	FIELD(DefWeaponDef, loadout_menu_ttdesc, Text),
+	FIELD(DefWeaponDef, loadout_menu_icon, Text),
+	FIELD(DefWeaponDef, weapon_class_slot, Integer),
+	FIELD(DefWeaponDef, teamfilter_mask, Integer),
+	FIELD(DefWeaponDef, charfilter_mask, Integer),
+	FIELD(DefWeaponDef, weaponweight, Real),
+	FIELD(DefWeaponDef, clipweight, Real),
+	FIELD(DefWeaponDef, renderfov, Real),
+	FIELD(DefWeaponDef, scope_max_mag, Real),
+	FIELD(DefWeaponDef, special_hold, Integer),
+	FIELD(DefWeaponDef, attack_anim, Integer),
+	FIELD(DefWeaponDef, flags2, Integer),
+	FIELD(DefWeaponDef, run_anim, Integer),
+	FIELD(DefWeaponDef, attach_text_id, Text),
+	FIELD(DefWeaponDef, classrounds[0], Integer),
+	FIELD(DefWeaponDef, classrounds[1], Integer),
+	FIELD(DefWeaponDef, classrounds[2], Integer),
+	FIELD(DefWeaponDef, classrounds[3], Integer),
+	FIELD(DefWeaponDef, classrounds[4], Integer),
+	FIELD(DefWeaponDef, classrounds[5], Integer),
+	FIELD(DefWeaponDef, classrounds[6], Integer),
+	FIELD(DefWeaponDef, switchcategory, Integer),
+	FIELD(DefWeaponDef, has_switchcategory, Integer),
+	FIELD(DefWeaponDef, heat_per_shot, Integer),
+	FIELD(DefWeaponDef, heat_decay_per_tick, Integer),
+	FIELD(DefWeaponDef, heat_glow_threshold, Integer),
+	FIELD(DefWeaponDef, heat_effect, Text),
+	FIELD(DefWeaponDef, heat_sound, Text),
+	FIELD(DefWeaponDef, error_fp16[0], Integer),
+	FIELD(DefWeaponDef, error_fp16[1], Integer),
+	FIELD(DefWeaponDef, error_fp16[2], Integer),
+	FIELD(DefWeaponDef, error_fp16[3], Integer),
+	FIELD(DefWeaponDef, error_fp16[4], Integer),
+	FIELD(DefWeaponDef, error_fp16[5], Integer),
+	FIELD(DefWeaponDef, error_hip_theta_fp16, Integer),
+	FIELD(DefWeaponDef, error_up_theta_fp16, Integer),
+	FIELD(DefWeaponDef, weaponweight_fp16, Integer),
+	FIELD(DefWeaponDef, clipweight_fp16, Integer),
+	FIELD(DefWeaponDef, stability_fp16[0], Integer),
+	FIELD(DefWeaponDef, stability_fp16[1], Integer),
+	FIELD(DefWeaponDef, stability_fp16[2], Integer),
+	FIELD(DefWeaponDef, scope_max_zero_steps, Integer),
+	FIELD(DefWeaponDef, scope_zero_step, Integer),
+	FIELD(DefWeaponDef, scope_zero_default, Integer),
+	FIELD(DefWeaponDef, scope_zero_extra, Integer),
+	FIELD(DefWeaponDef, scope_paralax_distance_fp16, Integer),
+	FIELD(DefWeaponDef, scope_max_mag_arg2, Integer),
+	FIELD(DefWeaponDef, scope_min_mag, Integer),
+	FIELD(DefWeaponDef, emplacedstance, Integer),
+};
+
+const std::vector<DefField> kAmmoFields = {
+    FIELD(DefAmmoDef, doppler_divisor, Byte),
+    FIELD(DefAmmoDef, kz_sound, Text),
+    FIELD(DefAmmoDef, secondary_effect, Text),
+	FIELD_CUT(DefAmmoDef, name, 32), // 31 characters [orig: AmmoDef_AllocateSlot @0x409B01..0x409B24]
+	FIELD(DefAmmoDef, velocity, Integer),
+	FIELD(DefAmmoDef, heat_det_range, Integer),
+	FIELD(DefAmmoDef, boresight_maxang, Integer),
+	FIELD(DefAmmoDef, min_damage, Integer),
+	FIELD(DefAmmoDef, max_damage, Integer),
+	FIELD(DefAmmoDef, penetration_impact, Integer),
+	FIELD(DefAmmoDef, penetration_kz, Integer),
+	FIELD(DefAmmoDef, armor_density[0], Integer),
+	FIELD(DefAmmoDef, armor_density[1], Integer),
+	FIELD(DefAmmoDef, armor_density[2], Integer),
+	FIELD(DefAmmoDef, secondary_anim, Integer),
+	FIELD(DefAmmoDef, kz_physics, Integer),
+	FIELD(DefAmmoDef, recoil[0], Integer),
+	FIELD(DefAmmoDef, recoil[1], Integer),
+	FIELD(DefAmmoDef, recoil[2], Integer),
+	FIELD(DefAmmoDef, flags, Unsigned),
+	FIELD(DefAmmoDef, max_age_ticks, Integer),
+	FIELD(DefAmmoDef, arm_age_ticks, Integer),
+	FIELD(DefAmmoDef, error_fp16, Integer),
+	FIELD(DefAmmoDef, drag_fp16, Integer),
+	FIELD(DefAmmoDef, bullet_radius_fp16, Integer),
+	FIELD(DefAmmoDef, spread_count, Integer),
+	FIELD(DefAmmoDef, kztype, Integer),
+	FIELD(DefAmmoDef, kz_damage, Integer),
+	FIELD(DefAmmoDef, weight_in_grains, Integer),
+	FIELD(DefAmmoDef, min_stable_velocity, Integer),
+	FIELD(DefAmmoDef, tumble_error_fp16, Integer),
+	FIELD(DefAmmoDef, tracer_rate, Integer),
+	FIELD(DefAmmoDef, notarmmed_ammo, Text),
+	FIELD(DefAmmoDef, ai_launch, Text),
+	FIELD(DefAmmoDef, ai_launcheffect, Text),
+	FIELD(DefAmmoDef, mf_light, Integer),
+	FIELD(DefAmmoDef, mf_light_value, Integer),
+	FIELD(DefAmmoDef, tracer_type_friendly, Integer),
+	FIELD(DefAmmoDef, tracer_type_enemy, Integer),
+	FIELD(DefAmmoDef, frndly_trcr_type_id, Integer),
+	FIELD(DefAmmoDef, foe_trcr_type_id, Integer),
+	FIELD(DefAmmoDef, light_move_radius_fp16, Integer),
+	FIELD(DefAmmoDef, light_move_color, Integer),
+	FIELD(DefAmmoDef, turnrate_maxpit, Integer),
+	FIELD(DefAmmoDef, turnrate_maxyaw, Integer),
+	FIELD(DefAmmoDef, effects_table_count, Count),
+	FIELD(DefAmmoDef, kz_minradius_fp16, Integer),
+	FIELD(DefAmmoDef, kz_maxradius_fp16, Integer),
+	FIELD(DefAmmoDef, kz_pieslice_bam, Integer),
+	FIELD(DefAmmoDef, light_impact_radius_fp16, Integer),
+	FIELD(DefAmmoDef, light_impact_color, Integer),
+	FIELD(DefAmmoDef, light_impact_ticks, Integer),
+	FIELD(DefAmmoDef, scorch_id, Integer),
+	FIELD(DefAmmoDef, scar_type, Integer),
+};
+
+const std::vector<DefField> kActionFields = {
+	FIELD(DefWeaponAction, name, Text),
+	FIELD(DefWeaponAction, anim, Text),
+	FIELD(DefWeaponAction, function, Text),
+	FIELD(DefWeaponAction, delaystart, Integer),
+	FIELD(DefWeaponAction, delayend, Integer),
+	FIELD(DefWeaponAction, soundset, Text),
+	FIELD(DefWeaponAction, soundsetend, Text),
+	FIELD(DefWeaponAction, particle, Text),
+	FIELD(DefWeaponAction, particleuserpoint, Text),
+	FIELD(DefWeaponAction, action_value, Integer),
+	FIELD(DefWeaponAction, ctrl_register, Text),
+	FIELD(DefWeaponAction, ctrl_increment, Integer),
+	FIELD(DefWeaponAction, duplicate_sound_count, Integer),
+	FIELD(DefWeaponAction, duplicate_sound_delay, Integer),
+	FIELD(DefWeaponAction, text_token, Text),
+	FIELD(DefWeaponAction, function_args[0], Integer),
+	FIELD(DefWeaponAction, function_args[1], Integer),
+	FIELD(DefWeaponAction, function_args[2], Integer),
+	FIELD(DefWeaponAction, function_args[3], Integer),
+	FIELD(DefWeaponAction, function_args_count, Count),
+};
+
+const std::vector<DefField> kSightFields = {
+	FIELD(DefSightEntry, texture, Text),
+	FIELD(DefSightEntry, x1, Integer),
+	FIELD(DefSightEntry, y1, Integer),
+	FIELD(DefSightEntry, x2, Integer),
+	FIELD(DefSightEntry, y2, Integer),
+	FIELD(DefSightEntry, blend, Integer),
+	FIELD(DefSightEntry, scale, Integer),
+	FIELD(DefSightEntry, slide, Integer),
+	FIELD(DefSightEntry, slide_frames, Integer),
+};
+
+const std::vector<DefField> kAttachmentFields = {
+	FIELD(DefItemEmplacementAttachment, userpoint, Text),
+	FIELD(DefItemEmplacementAttachment, item_id, Integer),
+	FIELD(DefItemEmplacementAttachment, down_angle, Integer),
+	FIELD(DefItemEmplacementAttachment, up_angle, Integer),
+	FIELD(DefItemEmplacementAttachment, right_angle, Integer),
+	FIELD(DefItemEmplacementAttachment, left_angle, Integer),
+	FIELD(DefItemEmplacementAttachment, angle_count, Integer),
+	FIELD(DefItemEmplacementAttachment, kind, Integer),
+};
+
+const std::vector<DefField> kEffectFields = {
+	FIELD(DefEffectTableEntry, surface_type, Text),
+	FIELD(DefEffectTableEntry, hit_effect, Text),
+	FIELD(DefEffectTableEntry, impact_sound, Text),
+	FIELD(DefEffectTableEntry, value, Integer),
+};
+
+const std::vector<DefField> kCarryFields = {
+	FIELD(DefAmmoClassCarry, name, Text),
+	FIELD(DefAmmoClassCarry, max_carry, Integer),
+};
+
+// A powerup row (powerup.def): its name, its scalars, its weapon (a name, or every weapon) and its
+// ammo switch; its ammo rows and its two action blocks are records of their own. The parser's line
+// numbers (open_line, end_line) are no member of the row.
+const std::vector<DefField> kPowerupFields = {
+	FIELD_CUT(DefPowerupDef, name, 17), // strncpy(.., 16) [orig: @0x442F3F]
+	FIELD(DefPowerupDef, respawn_time, Integer),
+	FIELD(DefPowerupDef, max_respawns, Integer),
+	FIELD(DefPowerupDef, hp, Integer),
+	FIELD(DefPowerupDef, mana, Integer),
+	FIELD(DefPowerupDef, weapon, Text),
+	FIELD(DefPowerupDef, weapon_all, Integer),
+	FIELD(DefPowerupDef, allammo, Integer),
+	FIELD(DefPowerupDef, ammo_count, Count),
+};
+
+const std::vector<DefField> kPowerupAmmoFields = {
+	FIELD(DefPowerupAmmo, class_name, Text),
+	FIELD(DefPowerupAmmo, count, Integer),
+};
+
+// An action block's keys the powerup handlers read; whether the block is written is its place in its
+// row (the row's pickup or respawn, present or not), no member.
+const std::vector<DefField> kPowerupActionFields = {
+	FIELD(DefPowerupAction, function, Text),
+	FIELD(DefPowerupAction, anim, Text),
+	FIELD(DefPowerupAction, soundset, Text),
+	FIELD(DefPowerupAction, soundsetend, Text),
+	FIELD(DefPowerupAction, particle, Text),
+	FIELD(DefPowerupAction, particleuserpoint, Text),
+	FIELD(DefPowerupAction, texttoken, Text),
+	FIELD(DefPowerupAction, delaystart, Integer),
+	FIELD(DefPowerupAction, delayend, Integer),
+	FIELD(DefPowerupAction, action_value, Integer),
+};
+
+#undef FIELD
+} // namespace
+
+const std::vector<DefField> &def_native_fields(DefRecordKind kind) {
+	switch (kind) {
+	case DefRecordKind::Item: return kItemFields;
+	case DefRecordKind::Weapon: return kWeaponFields;
+	case DefRecordKind::Ammo: return kAmmoFields;
+	case DefRecordKind::Action: return kActionFields;
+	case DefRecordKind::Sight: return kSightFields;
+	case DefRecordKind::Attachment: return kAttachmentFields;
+	case DefRecordKind::Effect: return kEffectFields;
+	case DefRecordKind::Carry: return kCarryFields;
+	case DefRecordKind::Powerup: return kPowerupFields;
+	case DefRecordKind::PowerupAmmo: return kPowerupAmmoFields;
+	case DefRecordKind::PowerupAction: return kPowerupActionFields;
+	}
+	return kItemFields;
+}
+
+size_t def_record_size(DefRecordKind kind) {
+	switch (kind) {
+	case DefRecordKind::Item: return sizeof(DefItemDef);
+	case DefRecordKind::Weapon: return sizeof(DefWeaponDef);
+	case DefRecordKind::Ammo: return sizeof(DefAmmoDef);
+	case DefRecordKind::Action: return sizeof(DefWeaponAction);
+	case DefRecordKind::Sight: return sizeof(DefSightEntry);
+	case DefRecordKind::Attachment: return sizeof(DefItemEmplacementAttachment);
+	case DefRecordKind::Effect: return sizeof(DefEffectTableEntry);
+	case DefRecordKind::Carry: return sizeof(DefAmmoClassCarry);
+	case DefRecordKind::Powerup: return sizeof(DefPowerupDef);
+	case DefRecordKind::PowerupAmmo: return sizeof(DefPowerupAmmo);
+	case DefRecordKind::PowerupAction: return sizeof(DefPowerupAction);
+	}
+	return 0;
+}
+
+} // namespace opennova::def

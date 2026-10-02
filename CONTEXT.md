@@ -47,6 +47,13 @@ device fact, written as typed Godot code beside its owner.
 A mounted collection of files, with one lookup policy deciding which loose or
 archived file supplies a name.
 
+**File source**:
+Whole files by flat logical name with a stamp that moves whenever a read may answer
+differently (`engine/base/vfs/file_source.h`): the game's mounted root, or the editor's
+project files with its open documents standing in. A menu's inputs are loaded through
+one and kept by name and stamp.
+_Avoid_: mount (a resource source's layering), cache key (the stamp is the source's)
+
 **Asset**:
 Reusable model or animation content shared by the entities that use it.
 An entity's position, animation playhead and damage belong to that entity,
@@ -69,6 +76,39 @@ _Avoid_: page, view (when you mean the whole canvas)
 Any node in a screen's widget tree, container or leaf (the format element is `<WINDOW>`). A Window is either a grouping container or an interactive widget.
 _Avoid_: panel, control (when you mean the tree node)
 
+**Root window**:
+A Window directly under a screen. A screen holds any number of them, in document order:
+retail draws them in that order, hit-tests the last first, and takes the screen's text
+table and default cursor from them (a SCREEN itself reads only its NAME, MUSICVAR and
+windows).
+_Avoid_: screen window, main window (`MAIN` is only the usual name)
+
+**Part**:
+A Window an owner parses from one of its own elements with an embedded widget: a
+combo's LIST_BOX, a spin list's SPINUP and SPINDOWN, a list's, table's or multi-line
+edit's SCROLLBAR. An owner holds one of each at most; the owner's field of the same name
+leaves it out of the file or writes it again, its content kept. Retail attaches a part to
+its owner as a child but names it itself when it creates it (`LISTBOX_WND`,
+`SPINLISTWND_UP` / `_DOWN`, `LISTWND_SCROLL`, `TABLEWND_SCROLL`, `MEDITWND_SCROLL`), so a
+lookup by the part's authored NAME never reaches it; the windows a part holds keep theirs.
+_Avoid_: sub-window, child (a part is not in the children list)
+
+**Element path**:
+The name a menu field or list goes by in the format's property table
+(`formats/mnu/mnu_schema`), the editor, the MCP and the findings: the format's element
+and attribute names from the record down, lower-cased and dotted (`position.left`,
+`string.value`, `font.default_fg`, `items.item`, `column.header`).
+_Avoid_: field alias (the flat `image_default`, `action_file`, `text` names are gone)
+
+**Parse note**:
+What the menu reader leaves out because retail's reader does not read it (an attribute
+retail ignores, a window retail never creates), with its line and path. The editor
+lists it as a warning; a save writes the menu without it, which retail reads the same.
+A fatal parse note names input retail crashes or hangs on (an empty value it
+tokenizes, the text ending inside a tag): the editor blocks that menu and the build
+until the file is corrected.
+_Avoid_: parse error (the file still loads)
+
 **Widget**:
 A Window of a specific interactive/visual type (button, combobox, table, spinlist...). Use Widget for the typed sense, Window for the raw tree node.
 _Avoid_: control, element
@@ -85,8 +125,22 @@ _Avoid_: command, event, handler
 Behavior supplied by the Menu Shell by matching a widget's **name**, rather than
 written as an `<ACTION>` (start a mission, apply video settings, quit, commit a
 loadout). An Action may also delegate work to the shell; the distinction is whether
-the behavior is authored in the Menu or bound externally by name.
+the behavior is authored in the Menu or bound externally by name. A widget's Actions
+run before its Commands, as retail runs its callbacks after the ACTION rows.
 _Avoid_: action (reserve that strictly for the `<ACTION>` element)
+
+**Hotkey**:
+A key a screen's table binds to a Window: an authored `<HOTKEY>` (`VK_RETURN`,
+`VK_ESCAPE`, `VK_SPACE`, or a character) or a label's `{hot}` letter. Pressing it
+clicks the first Window of the table bound to it that is visible and enabled, unless
+some Window has the keyboard focus.
+_Avoid_: shortcut, accelerator (except when quoting retail names)
+
+**Popup**:
+The one shown MODAL Window that has the input: while it is open only it and its
+descendants take the mouse and the hotkeys. A combo's open list is a dropdown, not a
+popup.
+_Avoid_: dialog (for the input sense), modal (the attribute)
 
 **Menu Shell**:
 The runtime front-end that loads a menu set, drives a live interactive menu, plays its audio, and supplies Commands by control name. The menu counterpart to the world runtime.
@@ -95,6 +149,10 @@ _Avoid_: menu host (retired 2026-07), menu manager, controller
 **Tab**:
 A Window shown or hidden by a sibling button's `window` Action (e.g. the Options panels). Not a widget type, just an authored convention: one button per panel, each `<ACTION type="window">` hiding the siblings and showing its own.
 _Avoid_: page, panel (when you mean the toggling mechanism)
+
+**Stylesheet / Style variable**:
+A `.mns` file of `NAME value` lines whose names the menus use as `%NAME%` (a font, a colour, an image). The game reads two, the **shell's stylesheets**: `menu_style.mns`, then `brand.mns` onto the same list, a later definition winning; a `.mns` by any other name is never read. A **style variable** is one name in that list; the one the game reads is the last definition of the last sheet that has it.
+_Avoid_: style file, theme, macro (except when quoting the shipped header)
 
 ## World & NovaWorld
 

@@ -165,8 +165,9 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	_activation_handlers["ACCEPT"] = _on_accept   # [orig: @0x5671f6 arg 0]
 	_activation_handlers["CANCEL"] = _on_cancel   # [orig: @0x567214 arg 1 skips the apply]
 	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
-	# debounce [orig: CUIWidget_ResetScreenHotkeys/AddScreenHotkey @0x567483..
-	# 0x5674c0; g_WeaponScreenOpenDebounce = 1 @0x4e0b21].
+	# debounce [orig: the calls of CUIWidget_ResetScreenHotkeys @0x649ce0 and
+	# CUIWidget_AddScreenHotkey @0x649e20 @0x567483..0x5674c0;
+	# g_WeaponScreenOpenDebounce = 1 @0x4e0b21].
 	_accept_hotkey_armed = false
 	_update_weight()
 
@@ -448,7 +449,8 @@ func _on_accept() -> void:
 ## registers the USE-ITEM binding row's runtime keys on the ACCEPT control, so the
 ## armory-opener key doubles as ACCEPT while the screen is up
 ## [orig: UI_InitTeamClassSelection @0x567370 — control "ACCEPT" gains
-##  g_UseItemBindingKey0/1 via CUIWidget_AddScreenHotkey @0x5674a8/@0x5674c0].
+##  g_UseItemBindingKey0/1 via CUIWidget_AddScreenHotkey @0x649e20, called
+##  @0x5674a8/@0x5674c0].
 ## Same collect + apply as clicking the button.
 func trigger_accept() -> void:
 	_on_accept()

@@ -12,8 +12,8 @@ extends Control
 #
 # The driver owns intra-.mnu navigation, widget interaction, sounds, and the
 # per-screen MUSICVAR push. The shell services the policy the driver leaves to
-# it: cross-.mnu file jumps (menu_requested), quit (quit_requested), and the
-# gameplay launch. Shipped JO menus carry no "launch" action verb; the engine
+# it: cross-.mnu file jumps (menu_requested) and their history (pop_requested),
+# the named back/quit Command, and the gameplay launch. Shipped JO menus carry no "launch" action verb; the engine
 # wires those by well-known control NAME (START_GAME, ACCEPT, EXIT, ...), so
 # the shell resolves those names against the loaded document and routes the
 # driver's activation signal. The control-name sets are exported so a
@@ -47,12 +47,6 @@ var _expansion_descriptions: Dictionary = {}  # folder name -> MOD_DESC text
 # [orig: the menu boot loads "game.bin" @0x552510 -> the menu resource @0x25510F8 —
 # a SEPARATE table from g_TextGameText; the two were conflated pre-#226].
 @export var menu_ui_text_file := "Game.bin"
-# The menu stylesheet has a fixed canonical name the original engine looks for
-# ("named menu_style.mns for the game to find it"). It is usually PFF-archived;
-# .mns is indexed as the "menu_style" kind (so list_files and the editor's
-# browsers surface it), but the engine contract stays the canonical NAME loaded
-# through the VFS. A blank value falls back to the first .mns found.
-@export var menu_stylesheet_file := "menu_style.mns"
 # Interactive music: the engine hardcodes two bank+script pairs -- MENUMUS.SBF/.BIN
 # (menu) and GAMEMUS.SBF/.BIN (game), renamed to M<n>/G<n> forms when expansion <n>
 # is active [orig: Expansion_LoadAssets @ 0x4a4798]. Blank = that witnessed
@@ -348,7 +342,7 @@ func _assemble_assets() -> void:
 	# these aggregate signals survive).
 	_driver.screen_changed.connect(_on_screen_changed)
 	_driver.menu_requested.connect(_on_menu_requested)
-	_driver.quit_requested.connect(_on_quit_requested)
+	_driver.pop_requested.connect(_on_pop_requested)
 	_driver.widget_value_changed.connect(_on_widget_value_changed)
 	_driver.url_requested.connect(_on_url_requested)
 	_driver.widget_activated.connect(_on_widget_activated)
@@ -379,7 +373,11 @@ func _load_root_assets() -> void:
 	Strings.register_table(Strings.TABLE_GAMETEXT, _load_text(game_text_file))
 	Strings.register_table(Strings.TABLE_GAMEERR, _load_text("gameerr.bin"))
 	Strings.register_table(Strings.TABLE_GAMEUI, _load_text(menu_ui_text_file))
-	_style = _load_style(_discover_name(menu_stylesheet_file, ".mns", ""))
+	# The shell's stylesheets by their fixed names, usually PFF-archived:
+	# menu_style.mns, then brand.mns onto it, as the game loads them (the port
+	# and its witnesses: engine/runtime/menu/menu_style.h); null when neither is
+	# there, so every %VAR% stays literal.
+	_style = MnsStyleSheet.load_shell(_root) if _root != null else null
 	_sound_profile = _load_sound_profile(_discover_name(menu_sound_profile_file, ".lwf", "menu"))
 	_audio.set_resource_root(_root)
 	_audio.set_sound_profile(_sound_profile)
@@ -436,8 +434,8 @@ func open_menu(file: String, target_screen: String) -> bool:
 	# Shipped same-file screen jumps name their own file (mp.mnu does); the
 	# driver routes them as in-menu navigation by comparing against this
 	# basename.
-	if not _driver.open_document(doc, _root, _style, _text, file.get_file(),
-			target_screen):
+	if not _driver.open_document(doc, _root, _style, Strings.get_override_table(),
+			file.get_file(), target_screen):
 		push_warning("MenuShell: menu '%s' has no screens" % file)
 		# The driver may already have swapped its document: nothing parked on
 		# the shared frame by the previous companion can be rebuilt now.
@@ -471,7 +469,7 @@ func release_runtime_renderer_resources() -> void:
 		_underlay.stop()
 	if _frame != null:
 		# configure(null) wipes the retained texture/font sets.
-		_frame.configure(null, "", null, null, {})
+		_frame.configure(null, "", null, null, null)
 
 
 # Marks that the menu is now the in-game/pause overlay (a kept-loaded world sits
@@ -569,8 +567,7 @@ func _wire_named_controls() -> void:
 	_connect_named(back_control_names, _on_quit_requested)
 
 
-const _LIST_KINDS := [MnuDocument.TYPE_LIST, MnuDocument.TYPE_MULTI,
-	MnuDocument.TYPE_LAN_LIST]
+const _LIST_KINDS := [MnuDocument.TYPE_LIST, MnuDocument.TYPE_LAN_LIST]
 
 
 func _connect_named(names: PackedStringArray, handler: Callable) -> void:
@@ -728,6 +725,25 @@ func _on_menu_requested(file: String, target_screen: String) -> void:
 		_driver.push_screen_history(previous_file, previous_screen)
 
 
+func _doc_has_screen(doc: MnuDocument, screen_name: String) -> bool:
+	for screen_id in doc.get_screen_ids():
+		if doc.get_screen_name(screen_id).nocasecmp_to(screen_name) == 0:
+			return true
+	return false
+
+
+# POP_SCREEN with the document's own history empty: the previous file's screen,
+# the one history retail keeps across every loaded file; with none, nothing
+# happens (retail pops only a non-empty history; docs/mnu/menu-re.md).
+func _on_pop_requested() -> void:
+	if _menu_stack.is_empty():
+		return
+	var prev: MenuStackEntry = _menu_stack.pop_back()
+	open_menu(prev.file if not prev.file.is_empty() else main_menu_file, prev.screen)
+
+
+# The named back/quit Command (HIDDEN_BACK, the retail per-control callback):
+# cross-.mnu back first, then resume (in-game) or exit to the desktop.
 func _on_quit_requested() -> void:
 	# Top-level back/quit. Cross-.mnu back first; then it means resume (in-game)
 	# or exit-to-desktop (main menu). In a mission the history's top is the mark
@@ -749,11 +765,13 @@ func _on_widget_value_changed(widget_name: String, kind: String, index: int, val
 		_update_mod_desc(value)
 
 
-func _on_url_requested(url: String) -> void:
+func _on_url_requested(url: String, external: bool) -> void:
 	# Shipped menus open website/marketing links (e.g. the splash PREORDER button)
-	# via <ACTION type="URL">. Hand them to the OS browser, adding a scheme if the
-	# authored link is bare (e.g. "www.novalogic.com/...").
-	if url.is_empty():
+	# via <ACTION type="URL" EXTERNAL_BROWSER>. Hand them to the OS browser, adding
+	# a scheme if the authored link is bare (e.g. "www.novalogic.com/..."). A URL
+	# without the external browser is retail's in-game page fetch (docs/mnu/
+	# menu-re.md), which the shell does not host: it opens nothing.
+	if url.is_empty() or not external:
 		return
 	var target := url
 	if not (target.begins_with("http://") or target.begins_with("https://")):
@@ -868,12 +886,6 @@ func _load_text(file: String) -> RtxtStringFile:
 	if file.is_empty():
 		return null
 	return Strings.load_rtxt(_root, file)
-
-
-func _load_style(file: String) -> MnsStyleSheet:
-	if _root == null or file.is_empty():
-		return null
-	return MenuFrameSurface.load_style(_root, file)
 
 
 # The menu SFX profile (menu.lwf) loads by name through the VFS so it resolves

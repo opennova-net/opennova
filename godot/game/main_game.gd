@@ -77,7 +77,7 @@ var _frame_stats := FrameStats.new()
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
-var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
+var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _web_retail_picking := false  # the web page's picker is open (ADR 0049)
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
@@ -791,6 +791,7 @@ func _wire_shell() -> void:
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
+	_bundled_companion.exit_requested.connect(_on_exit_to_desktop)
 	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
@@ -827,8 +828,8 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 func refresh_local_profile_for_mount() -> void:
 	if _root == null:
 		return
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
+	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
 	if profile_root_key != _profile_root_key:
 		_chosen_avatar = PlayerProfile.load_character_profile(_root)
 		_profile_root_key = profile_root_key

@@ -9,18 +9,6 @@
 namespace opennova::assets {
 namespace {
 
-std::string file_name(const std::string &name, const char *extension, bool replace = false) {
-	std::string key = name.substr(name.find_last_of("/\\") + 1);
-	if (key.empty()) return {};
-	if (replace) {
-		const auto dot = key.find_last_of('.');
-		if (dot != std::string::npos) key.resize(dot);
-	}
-	if (key.empty()) return {};
-	if (!strutil::ends_with_icase(key, extension)) key += extension;
-	return strutil::to_lower(key);
-}
-
 template<class T, void (*Free)(T *)>
 std::shared_ptr<T> parsed_owner() {
 	return std::shared_ptr<T>(new T{}, [](T *value) { Free(value); delete value; });
@@ -80,51 +68,39 @@ void AssetStore::sync_source() const {
 
 Model AssetStore::model(const std::string &graphic) const {
 	sync_source();
-	const std::string key = file_name(graphic, ".3di", true);
+	const std::string key = asset_file_name(graphic, ".3di", true);
 	if (key.empty() || !impl_->index) return {};
 	const auto found = impl_->models.find(key);
 	if (found != impl_->models.end()) return found->second;
 	Model result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) {
-		auto parsed = parsed_owner<threedi::Threedi3di3, threedi::threedi_3di3_free>();
-		if (threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), parsed.get()) == 0)
-			result = std::move(parsed);
-	}
+	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_model(bytes.data(), bytes.size());
 	impl_->models.emplace(key, result);
 	return result;
 }
 
 AnimationMap AssetStore::animation_map(const std::string &name) const {
 	sync_source();
-	const std::string key = file_name(name, ".adm");
+	const std::string key = asset_file_name(name, ".adm");
 	if (key.empty() || !impl_->index) return {};
 	const auto found = impl_->maps.find(key);
 	if (found != impl_->maps.end()) return found->second;
 	AnimationMap result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) {
-		auto parsed = parsed_owner<adm::AdmFile, adm::adm_free>();
-		if (adm::adm_parse_buffer(reinterpret_cast<const char *>(bytes.data()), bytes.size(), parsed.get()) == 0)
-			result = std::move(parsed);
-	}
+	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_animation_map(bytes.data(), bytes.size());
 	impl_->maps.emplace(key, result);
 	return result;
 }
 
 BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 	sync_source();
-	const std::string key = file_name(name, ".bad");
+	const std::string key = asset_file_name(name, ".bad");
 	if (key.empty() || !impl_->index) return {};
 	const auto found = impl_->animations.find(key);
 	if (found != impl_->animations.end()) return found->second;
 	BoneAnimation result;
 	std::vector<uint8_t> bytes;
-	if (impl_->index->read_file(key, bytes) && !bytes.empty()) {
-		auto parsed = parsed_owner<bad::BadFile, bad::bad_free>();
-		if (bad::bad_parse_buffer(bytes.data(), bytes.size(), parsed.get()) == 0)
-			result = std::move(parsed);
-	}
+	if (impl_->index->read_file(key, bytes) && !bytes.empty()) result = parse_bone_animation(bytes.data(), bytes.size());
 	impl_->animations.emplace(key, result);
 	return result;
 }
@@ -132,7 +108,7 @@ BoneAnimation AssetStore::bone_animation(const std::string &name) const {
 SkeletalRig AssetStore::skeletal_rig(const std::string &adm_name,
 		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
 	sync_source();
-	const auto name = file_name(adm_name, ".adm");
+	const auto name = asset_file_name(adm_name, ".adm");
 	if (name.empty() || !impl_->index) return {};
 	std::string key = "adm:";
 	key_part(key, name);
@@ -150,14 +126,14 @@ SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clips,
 		const std::vector<anim::Vec3> &origins, const std::vector<int> &parents) const {
 	sync_source();
-	const auto name = file_name(skeleton_bad, ".bad");
+	const auto name = asset_file_name(skeleton_bad, ".bad");
 	if (name.empty() || !impl_->index) return {};
 	std::string key = "files:";
 	key_part(key, name);
 	key_part(key, std::to_string(clips.size()));
 	for (const auto &clip : clips) {
 		key_part(key, clip.first); // diagnostic keys preserve authored spelling
-		key_part(key, file_name(clip.second, ".bad"));
+		key_part(key, asset_file_name(clip.second, ".bad"));
 	}
 	rig_bones_key(key, origins, parents);
 	const auto found = impl_->rigs.find(key);
@@ -169,9 +145,39 @@ SkeletalRig AssetStore::skeletal_rig_from_files(const std::string &skeleton_bad,
 	return result;
 }
 
+std::string asset_file_name(const std::string &name, const char *extension, bool replace) {
+	std::string key = name.substr(name.find_last_of("/\\") + 1);
+	if (key.empty()) return {};
+	if (replace) {
+		const auto dot = key.find_last_of('.');
+		if (dot != std::string::npos) key.resize(dot);
+	}
+	if (key.empty()) return {};
+	if (!strutil::ends_with_icase(key, extension)) key += extension;
+	return strutil::to_lower(key);
+}
+
 Model read_model_file(const std::string &path) {
 	auto parsed = parsed_owner<threedi::Threedi3di3, threedi::threedi_3di3_free>();
 	if (threedi::threedi_3di3_read(path.c_str(), parsed.get()) != 0) return {};
+	return parsed;
+}
+
+Model parse_model(const uint8_t *data, size_t size) {
+	auto parsed = parsed_owner<threedi::Threedi3di3, threedi::threedi_3di3_free>();
+	if (threedi::threedi_3di3_read_memory(data, size, parsed.get()) != 0) return {};
+	return parsed;
+}
+
+AnimationMap parse_animation_map(const uint8_t *data, size_t size) {
+	auto parsed = parsed_owner<adm::AdmFile, adm::adm_free>();
+	if (adm::adm_parse_buffer(reinterpret_cast<const char *>(data), size, parsed.get()) != 0) return {};
+	return parsed;
+}
+
+BoneAnimation parse_bone_animation(const uint8_t *data, size_t size) {
+	auto parsed = parsed_owner<bad::BadFile, bad::bad_free>();
+	if (bad::bad_parse_buffer(data, size, parsed.get()) != 0) return {};
 	return parsed;
 }
 

@@ -150,6 +150,7 @@ add_library(${TARGET_NAME} SHARED
     object/model_light.cpp
     object/model_user_point.cpp
     object/weapon_database.cpp
+    object/ammo_database.cpp
     object/weapon_def.cpp
     object/avatar_database.cpp
     object/avatar_records.cpp
@@ -187,6 +188,7 @@ add_library(${TARGET_NAME} SHARED
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
+    devtools/imgui_pass_node.cpp
     devtools/dev_tools_overlay.cpp
     devtools/dev_tools_windows.cpp
     devtools/debug_arg_spec.cpp
@@ -264,8 +266,10 @@ add_library(${TARGET_NAME} SHARED
     util/data_format.cpp
     util/paths.cpp
     util/pcx_texture_bridge.cpp
+    util/texture_files.cpp
     util/texture_path_resolver.cpp
     resource_index/resource_root.cpp
+    resource_index/resource_root_file_source.cpp
     resource_index/launch_flags.cpp
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
@@ -294,6 +298,14 @@ add_library(${TARGET_NAME} SHARED
     player/player_viewmodel_rig.cpp
     player/player_weapon_effects.cpp
 )
+
+# The ImGui pass node (devtools/imgui_pass_node.cpp) attaches only when the
+# game's dev tools are compiled in.
+if(OPENNOVA_DEVTOOLS)
+    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=1)
+else()
+    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=0)
+endif()
 
 target_include_directories(${TARGET_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

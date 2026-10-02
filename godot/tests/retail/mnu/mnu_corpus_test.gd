@@ -40,7 +40,7 @@ func test_all_shipped_menu_screens_compile() -> void:
 		frame.size = Vector2(800, 600)
 		for screen_id in doc.get_screen_ids():
 			var screen_name := doc.get_screen_name(screen_id)
-			assert_true(frame.configure(doc, screen_name, null, null, {}),
+			assert_true(frame.configure(doc, screen_name, null, null, null),
 					"%s/%s configures" % [menu_name, screen_name])
 			var stats := frame.get_draw_list_stats()
 			assert_gt(stats.widgets_drawn, 0,

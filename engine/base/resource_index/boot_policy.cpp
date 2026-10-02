@@ -2,7 +2,9 @@
 
 #include <base/resource_index/boot_policy.h>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 
 #include <cerrno>
 #include <cstdlib>
@@ -18,11 +20,16 @@ bool has_flag(const std::vector<std::string> &args, const char *flag) {
     return false;
 }
 
-// The token following `flag`, stripped, or "" when absent/empty.
+// The token following `flag`, stripped, or "" when absent/empty; a flag given
+// twice takes its last value, as the game's one walk over its command line
+// copies each `/exp` value over the one before
+// [orig: Game_ParseCommandLineAndInit @ 0x4a7310, "/exp" @ 0x4a76a6, the next
+//  token @ 0x4a76b8..0x4a76c3 copied to g_ExpansionName @ 0x4a76cf].
 std::string value_after(const std::vector<std::string> &args, const char *flag) {
+    std::string value;
     for (std::size_t i = 0; i + 1 < args.size(); ++i)
-        if (strutil::iequals(args[i], flag)) return strutil::trim(args[i + 1]);
-    return std::string();
+        if (strutil::iequals(args[i], flag)) value = strutil::trim(args[i + 1]);
+    return value;
 }
 
 // `/mod` and `/exp` share one arm of the game's walk [orig:
@@ -139,6 +146,14 @@ std::string boot_path_join(const std::string &dir, const std::string &name) {
     const char last = dir.back();
     if (last == '/' || last == '\\') return dir + name;
     return dir + "/" + name;
+}
+
+bool mount_install(Vfs &vfs, const std::string &root, const LaunchFlags &flags) {
+    vfs.set_scr_policy(gameprofile::gameprofile_scr_policy_for_code(launch_game(flags, std::string()).c_str()));
+    const VfsMountMode mode =
+            flags.loose_override ? VfsMountMode::PackedWithLooseOverride : VfsMountMode::Packed;
+    return vfs.mount_game(root, flags.expansion, mode, VfsArchiveDiscovery::RetailTable) &&
+           vfs.has_mounted_archive();
 }
 
 } // namespace opennova

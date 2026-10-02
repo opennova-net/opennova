@@ -53,6 +53,20 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
+# Every retail model through the reader and the writer the editor saves by:
+# byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
+add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
+target_link_libraries(threedi_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(threedi_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(threedi_retail_rewrite COMMAND threedi_retail_rewrite_test)
+
+# Every retail .bad and .adm through the reader and the writer the editor
+# saves by: field-equal and a fixed point (OPENNOVA_JO_ASSETS).
+add_executable(anim_retail_rewrite_test anim/retail_rewrite_test.cpp)
+target_link_libraries(anim_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(anim_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(anim_retail_rewrite COMMAND anim_retail_rewrite_test)
+
 add_executable(threedi_compare_test threedi/compare_test.cpp threedi/threedi_compare.cpp)
 target_link_libraries(threedi_compare_test PRIVATE opennova_formats)
 target_include_directories(threedi_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -622,6 +636,13 @@ target_link_libraries(pff_unit_test PRIVATE opennova_formats)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# The resumable PFF writer (S13 A1): byte for byte the pre-stream writer's archives at write
+# budgets of 1, 7 and the whole, through the single-call forms too.
+add_executable(pff_stream_writer_test pff/pff_stream_writer_test.cpp)
+target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
+target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
+
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
@@ -906,6 +927,14 @@ target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(boot_policy_test PRIVATE cxx_std_17)
 add_test(NAME boot_policy COMMAND boot_policy_test)
 
+# opennova-extract mounts an install as a launch with its flags does (apps/extract).
+add_executable(extract_cli_test resource_index/extract_cli_test.cpp)
+target_link_libraries(extract_cli_test PRIVATE opennova_formats)
+target_include_directories(extract_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(extract_cli_test PRIVATE cxx_std_17)
+add_dependencies(extract_cli_test opennova_extract)
+add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
+
 # The texture candidate order the Godot resolvers and opennova-3di share
 # (base/resource_index/texture_candidates.h).
 add_executable(texture_candidates_test resource_index/texture_candidates_test.cpp)
@@ -1040,6 +1069,19 @@ add_executable(tga_read_test tga/tga_read_test.cpp)
 target_link_libraries(tga_read_test PRIVATE opennova_formats)
 target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_read COMMAND tga_read_test)
+
+# The texture writers the editor's placeholder textures go through (S11h): every header
+# byte and the pixels' order, each read back as the game's readers read the file; and the
+# header size readers the editor measures textures with (S12 A3).
+add_executable(tga_write_test tga/tga_write_test.cpp)
+target_link_libraries(tga_write_test PRIVATE opennova_formats)
+target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_write COMMAND tga_write_test)
+
+add_executable(dds_write_test dds/dds_write_test.cpp)
+target_link_libraries(dds_write_test PRIVATE opennova_formats)
+target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dds_write COMMAND dds_write_test)
 
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
@@ -1572,6 +1614,31 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
+add_executable(menu_frame_parity_test menu/menu_frame_parity_test.cpp)
+target_link_libraries(menu_frame_parity_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_parity COMMAND menu_frame_parity_test)
+
+# The compiler's notes (ADR 0046 S9j2): one screen per code, the loader's notes, the notes
+# only observe (the same draw list before and after them), solve_local_rect.
+add_executable(menu_frame_notes_test menu/menu_frame_notes_test.cpp)
+target_link_libraries(menu_frame_notes_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_notes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_notes COMMAND menu_frame_notes_test)
+
+# Every shipped screen through the frame compiler: the reference fixture menus
+# (gated) and every .mnu the packed install serves, with its assets (SKIP-LEG).
+add_executable(menu_render_corpus_test menu/menu_render_corpus_test.cpp)
+target_link_libraries(menu_render_corpus_test PRIVATE opennova_runtime)
+target_include_directories(menu_render_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(menu_render_corpus COMMAND menu_render_corpus_test)
+
+# The runtime's keyboard over the grill's census corpus (the .mnu at the
+# OPENNOVA_JO_ASSETS root with menutxt.bin): the shipped hotkey cases (gated).
+add_executable(menu_runtime_corpus_test menu/menu_runtime_corpus_test.cpp)
+target_link_libraries(menu_runtime_corpus_test PRIVATE opennova_runtime)
+target_include_directories(menu_runtime_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(menu_runtime_corpus COMMAND menu_runtime_corpus_test)
 
 add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
 target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
@@ -1581,6 +1648,26 @@ add_test(NAME vehicle_collision_damage COMMAND vehicle_collision_damage_test)
 # The menu backdrop movie policy (engine/runtime/menu/menu_video): the
 # witnessed three-slot table, the STARTUP/strips draw gate, and the
 # expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
+# The shell's stylesheets: menu_style.mns then brand.mns into one list (menu/menu_style.h).
+add_executable(menu_style_test menu/menu_style_test.cpp)
+target_link_libraries(menu_style_test PRIVATE opennova_runtime)
+target_include_directories(menu_style_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_style COMMAND menu_style_test)
+
+# A screen's string tables and the shell's style through a file source, kept by (name,
+# stamp) (menu/menu_screen_inputs.h).
+add_executable(menu_screen_inputs_test menu/menu_screen_inputs_test.cpp)
+target_link_libraries(menu_screen_inputs_test PRIVATE opennova_runtime)
+target_include_directories(menu_screen_inputs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_screen_inputs COMMAND menu_screen_inputs_test)
+
+# A screen's fonts and textures through a file source, kept by (file, stamp), the
+# two-configure sweep (menu/menu_frame_assets.h).
+add_executable(menu_frame_assets_test menu/menu_frame_assets_test.cpp)
+target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
+
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
 target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1753,6 +1840,14 @@ add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
+
+# The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
+# window type reads what, what an ACTION's verb reads, the material flag tokens. The table
+# itself is the editor's (editor_menu_table, ADR 0046 S13 D10).
+add_executable(mnu_schema_test mnu/mnu_schema_test.cpp)
+target_link_libraries(mnu_schema_test PRIVATE opennova_formats)
+target_include_directories(mnu_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_schema COMMAND mnu_schema_test)
 
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_formats)
@@ -3993,6 +4088,18 @@ add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
 target_compile_features(hud_combat_test PRIVATE cxx_std_17)
 add_test(NAME hud_combat COMMAND hud_combat_test)
+
+# The strict JSON reader/writer behind the editor's project files (ADR 0046 d6).
+add_executable(json_test io/json_test.cpp)
+target_link_libraries(json_test PRIVATE opennova_io)
+target_compile_features(json_test PRIVATE cxx_std_17)
+target_include_directories(json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME json COMMAND json_test)
+
+add_executable(def_write_test def/def_write_test.cpp)
+target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write COMMAND def_write_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)

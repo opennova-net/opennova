@@ -4,7 +4,7 @@
 #include <runtime/controls/key_strings.h> // the process-wide "Keys" binding-label table
 #include <runtime/mission/runtime_boot.h>
 
-#include "util/cp1252.h"
+#include <base/io/cp1252.h>
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
@@ -27,39 +27,10 @@ namespace {
 // to retail files keep the game-readable encoding. Unedited entries never pass
 // through String at all — parse/write preserve their bytes exactly.
 
-bool is_valid_utf8(const std::string &s) {
-	size_t i = 0;
-	while (i < s.size()) {
-		const unsigned char c = static_cast<unsigned char>(s[i]);
-		size_t len = 0;
-		if (c < 0x80) {
-			len = 1;
-		} else if ((c & 0xE0) == 0xC0 && c >= 0xC2) {
-			len = 2;
-		} else if ((c & 0xF0) == 0xE0) {
-			len = 3;
-		} else if ((c & 0xF8) == 0xF0 && c <= 0xF4) {
-			len = 4;
-		} else {
-			return false;
-		}
-		if (i + len > s.size()) {
-			return false;
-		}
-		for (size_t k = 1; k < len; ++k) {
-			if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) {
-				return false;
-			}
-		}
-		i += len;
-	}
-	return true;
-}
-
 // NOT util/string_convert.h's to_gd/to_std: these two are cp1252-aware (the
 // retail text falls back to the single-byte codepage), a different contract.
 String std_to_gd(const std::string &s) {
-	if (is_valid_utf8(s)) {
+	if (opennova::is_valid_utf8(s)) {
 		return String::utf8(s.c_str(), static_cast<int>(s.length()));
 	}
 	String out;

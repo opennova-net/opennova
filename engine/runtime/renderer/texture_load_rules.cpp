@@ -137,15 +137,28 @@ std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string
 	return {load};
 }
 
-// [orig: Texture_LoadByNameWithChannel @ 0x58B470 — material_image_source]
+// [orig: Texture_LoadByNameWithChannel @ 0x58B470 — material_texture_source's runtime
+//  types 0, 2 and 8, whose only file tests are the query's loose-first hit and its DDS
+//  sibling's existence]
 TextureLoad stage_texture_load(std::string_view query, bool loose_first_hit, bool dds_exists) {
-	const MaterialImageSource source = material_image_source(query, loose_first_hit, dds_exists);
+	const MaterialTextureSource source = material_texture_source(query, 0,
+			[dds_exists](const std::string &) { return dds_exists; },
+			[loose_first_hit](const std::string &) { return loose_first_hit; });
+	return material_texture_load(source, 0);
+}
+
+// [orig: Material_LoadStageTexture @ 0x5B16F0 — the loader per runtime type
+//  (material_texture_source); a type-1 row through Texture_LoadAndRegister @ 0x58B790,
+//  plain_texture_load's mask]
+TextureLoad material_texture_load(const MaterialTextureSource &source, uint8_t type) {
+	if (type == 1) return plain_texture_load(source.file);
 	TextureLoad load;
-	switch (source.decoder) {
-		case MaterialImageDecoder::Dds: load.reader = TextureReader::Dds; break;
-		case MaterialImageDecoder::Tga: load.reader = TextureReader::Tga; break;
-		case MaterialImageDecoder::Pcx: load.reader = TextureReader::Pcx; break;
-		case MaterialImageDecoder::None: return load;
+	switch (source.reader) {
+		case MaterialTextureReader::Dds: load.reader = TextureReader::Dds; break;
+		case MaterialTextureReader::Tga: load.reader = TextureReader::Tga; break;
+		case MaterialTextureReader::Pcx: load.reader = TextureReader::Pcx; break;
+		case MaterialTextureReader::Chunk:
+		case MaterialTextureReader::None: return load;
 	}
 	load.file = source.file;
 	return load;

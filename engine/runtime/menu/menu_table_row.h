@@ -35,35 +35,6 @@ inline constexpr uint32_t kTableRowFlagState1Color = 0x1u;
 inline constexpr uint32_t kTableRowFlagColor = 0x4u;
 inline constexpr uint32_t kTableRowHiddenMask = 0xAu;
 
-// One column record a populate sets up at runtime: the column count first
-// (the table's vtable +0x6C), then CTableWnd_InitRow(column, 0, width, label,
-// justify, vjustify) per column.
-// - `kept`: the record is the one the table had at this index (the authored
-//   column, as the XML set it up), which a count that does not grow the table
-//   leaves in place; a count that grows it starts every record over, zeroed
-//   (no label, width 0: not drawn, text cells, no SUBST rows, no cell
-//   offsets), the authored ones included. [orig: CTableWnd_ResizeColumnCount
-//   @0x63f6c0 (ex resize_column_count): the shrink path @0x63f870 keeps the
-//   array and frees the dropped records; the grow path zeroes the new array
-//   @0x63f710 and copies the old COUNT in bytes, not its 180-byte records,
-//   @0x63f724 (only record 0's first bytes survive, its label pointer, under
-//   a width that stays 0), then frees the old @0x63f737]
-// - `defined`: an init set the record up. It writes the label, the width and
-//   the header justification (-1 takes 1 / 16), which the cells' copy, with
-//   the sort compare and direction this model does not carry; the draw kind,
-//   the cell offsets, the SUBST list and the bitmap scale stay the record's.
-//   [orig: CTableWnd_InitRow @0x63f9c0 — the label @+0, width +0x7C, header
-//   justify +0x80 / vjustify +0x84 (-1 -> 1 / 0x10) copied to the cells'
-//   +0x90 / +0x94 @0x63fbdf..0x63fc03; no write to +108 or +152..+172]
-struct MenuTableColumnDef {
-	bool kept = false;
-	bool defined = false;
-	int width = 0;
-	std::string label;
-	int justify = -1;
-	int vjustify = -1;
-};
-
 struct MenuTableRow {
 	std::vector<std::string> cells;
 	std::vector<int32_t> values;

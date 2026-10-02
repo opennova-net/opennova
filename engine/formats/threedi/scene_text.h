@@ -1,18 +1,28 @@
-// opennova-3di scene text: the tokenizer, field readers and printers the two
-// scene grammars share, the `.o3d` model text (build.cpp reads it, scene.cpp
-// writes it; docs/threedi/o3d-scene-format.md) and the `.o3a` clip-set text
-// (anim_build.cpp, anim_scene.cpp; docs/anim/o3a-scene-format.md), so what one
-// writes the other reads by the same rules. What differs between the two is a
+// The scene text the model and clip-set grammars share: the tokenizer, field
+// readers and printers of the `.o3d` model text (threedi_o3d_read.h reads it,
+// opennova-3di `scene` writes it; docs/threedi/o3d-scene-format.md) and the
+// `.o3a` clip-set text (formats/bad/bad_o3a_read.h reads it, opennova-3di
+// `anim scene` writes it; docs/anim/o3a-scene-format.md), so what one writes
+// the other reads by the same rules. What differs between the two is a
 // parameter: the `.o3d` reader takes nan and inf, which retail models carry
 // (J_bsh1's vertex normals, ChmLFP1's occlusion planes), and the `.o3a` reader
-// refuses every number that is not finite (a clip holds none).
+// refuses every number that is not finite (a clip holds none). Authoring text
+// with no retail counterpart: nothing here is a port.
 #pragma once
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-namespace opennova::threedi_cli {
+namespace opennova::threedi {
+
+// One thing a scene reader reports: an error (nothing is built) or a note (it
+// builds; the author may want to know). `line` is 1-based; 0 is the whole text.
+struct SceneFinding {
+	int line = 0;
+	bool error = true;
+	std::string message;
+};
 
 // Which numbers a text's reader takes.
 enum class SceneNumbers {
@@ -85,4 +95,4 @@ std::string name_field(SceneWriter &w, const std::string &name) {
 	return field;
 }
 
-} // namespace opennova::threedi_cli
+} // namespace opennova::threedi

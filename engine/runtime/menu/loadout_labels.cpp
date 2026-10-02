@@ -17,7 +17,7 @@ namespace opennova::menu {
 
 std::string weapon_label(const DefWeaponDef &w, const hud::GameTextLookup &gametext) {
 	if (w.loadout_menu_textid[0] == '\0') return w.weapon_name;
-	return hud::game_text(gametext, "WepDes", w.loadout_menu_textid, w.weapon_name);
+	return hud::game_text(gametext, hud::kGameTextWepDes, w.loadout_menu_textid, w.weapon_name);
 }
 
 std::string ammo_row_label(const DefWeaponDef *w, int clips, const hud::GameTextLookup &gametext) {
@@ -27,7 +27,7 @@ std::string ammo_row_label(const DefWeaponDef *w, int clips, const hud::GameText
 		return out;
 	}
 	const std::string round_label = w->round_type[0] != '\0'
-			? hud::game_text(gametext, "WepDes", w->round_type, w->round_type)
+			? hud::game_text(gametext, hud::kGameTextWepDes, w->round_type, w->round_type)
 			: std::string();
 	std::snprintf(out, sizeof(out), "%d - %s", clips * w->clipsize, round_label.c_str());
 	return out;

@@ -1,7 +1,6 @@
-// opennova-3di scene text: the shared tokenizer, readers and printers
-// (scene_text.h).
+// The shared scene-text tokenizer, readers and printers (scene_text.h).
 
-#include "scene_text.h"
+#include <formats/threedi/scene_text.h>
 
 #include <algorithm>
 #include <cctype>
@@ -12,7 +11,7 @@
 #include <cstring>
 #include <limits>
 
-namespace opennova::threedi_cli {
+namespace opennova::threedi {
 
 SceneLine::SceneLine(const std::string &text, SceneNumbers numbers) : numbers_(numbers) {
 	const auto space = [](char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\v' || c == '\f'; };
@@ -124,4 +123,4 @@ std::string name_field(const std::string &name, std::string &kept) {
 	return plain ? kept : "\"" + kept + "\"";
 }
 
-} // namespace opennova::threedi_cli
+} // namespace opennova::threedi

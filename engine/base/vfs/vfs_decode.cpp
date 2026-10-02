@@ -1,5 +1,6 @@
 #include <base/vfs/vfs_decode.h>
 
+#include <base/io/strutil.h>
 #include <formats/bfc1/bfc1.h>
 #include <formats/scr/scr.h>
 
@@ -75,6 +76,10 @@ bool vfs_decode_payload(std::vector<uint8_t> &data, int scr_policy) {
     if (!decode_scr(data, scr_policy)) return false; // SCR container first
     if (!decode_bfc1(data)) return false;            // then BFC1 (possibly over the decrypted bytes)
     return true;
+}
+
+bool vfs_loader_takes_stored(const std::string &name) {
+    return strutil::ends_with_icase(name, ".fx");
 }
 
 } // namespace opennova

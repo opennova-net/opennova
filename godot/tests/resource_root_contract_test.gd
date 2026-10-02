@@ -92,6 +92,24 @@ func test_runtime_mount_rejects_loose_only_root_even_with_dev_override() -> void
 	assert_false(resources.has_file("Alpha.TRN", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
 
 
+func test_runtime_mount_refuses_a_corrupt_sole_archive_as_no_archives() -> void:
+	# A root whose only boot-table archive does not open, beside usable loose files, is the
+	# boot's no-archives refusal (the partial mount cleared), not an unmountable root: the
+	# --loose-root fallback (BootRootMount.mount) then mounts the loose files.
+	var root := _make_flat_root("runtime_corrupt_archive")
+	TestFs.write_text(self, root.path_join("Alpha.TRN"), "loose trn")
+	TestFs.write_text(self, root.path_join("resource.pff"), "not an archive")
+
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root, "", true), ERR_FILE_NOT_FOUND)
+	assert_eq(resources.get_root_dir(), "", "A failed runtime mount must clear the partial loose state.")
+	assert_eq(resources.get_last_error(), "No game data archives could be opened")
+	assert_false(resources.is_runtime_mount())
+	assert_false(resources.has_file("Alpha.TRN", ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST))
+	assert_eq(resources.set_root_dir(root), OK, "the loose-root fallback mounts the loose files")
+	assert_eq(resources.read_file("Alpha.trn").get_string_from_utf8(), "loose trn")
+
+
 func test_packed_runtime_caller_can_force_loose_first() -> void:
 	var root := _make_flat_root("packed_force_loose")
 	TestFs.write_text(self, root.path_join("Shared.dat"), "loose")
@@ -561,6 +579,10 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 		# An MDT is a TGA the TGA reader decodes (a DDS payload under the
 		# name would decode as TGA garbage, as in retail).
 		{"name": "ready.mdt", "bytes": TestFs.tga_bytes(Vector2i(4, 4), Color8(50, 70, 121, 128))},
+		{"name": "packed.mdt", "bytes": source.save_dds_to_buffer()},
+		{"name": "relief.tga.pcx", "bytes": _normal_test_tga(77)},
+		{"name": "w.tga.dds", "bytes": source.save_dds_to_buffer()},
+		{"name": "plate.dds", "bytes": _normal_test_tga(99)},
 	])
 	TestFs.write_bytes(self, root.path_join("brick.tga"), _normal_test_tga(233))
 	var resources := ResourceRoot.new()
@@ -569,6 +591,26 @@ func test_material_normals_choose_exact_sources_and_preserve_blue_as_alpha() -> 
 	assert_not_null(packed)
 	assert_eq(packed.get_image().get_pixel(0, 0), Color8(127, 127, 255, 121))
 	assert_eq(resources.load_material_texture("ready.mdt", 4).get_image().get_pixel(0, 0), Color8(50, 70, 121, 128))
+	# The row's loader picks the reader by the name, never by the bytes or the
+	# last extension (renderer::material_texture_source): an .mdt goes to the
+	# TGA reader, which fails on DDS bytes, and relief.tga.pcx holds .TGA, so
+	# the TGA reader decodes it.
+	assert_eq(resources.load_material_texture("packed.mdt", 4).get_width(), 128,
+			"an .mdt holding DDS bytes is a failed load, the checkerboard")
+	assert_eq(resources.load_material_texture("relief.tga.pcx", 5).get_image().get_pixel(0, 0),
+			Color8(127, 127, 255, 77), "a normal map's .TGA name is read as a TGA whatever follows it")
+	# One file, two readers: w.tga.tga's sibling w.tga.dds is a DDS to a normal
+	# map, while a plain row naming w.tga.dds reads it through the TGA reader
+	# (its name holds .TGA), so the reader is part of the cache key.
+	assert_eq(resources.load_material_texture("w.tga.tga", 4).get_image().get_pixel(0, 0),
+			Color8(127, 127, 255, 121), "the normal map's DDS sibling through the DDS reader")
+	assert_eq(resources.load_material_texture("w.tga.dds", 1).get_width(), 128,
+			"the same file through the TGA reader fails: no DDS image reused from the cache")
+	# The DDS reader hands its file whole to D3DX, which takes an image by its
+	# content (renderer::dds_reader_format): plate.tga's sibling plate.dds holds
+	# a TGA, and the normal map is made from it.
+	assert_eq(resources.load_material_texture("plate.tga", 4).get_image().get_pixel(0, 0),
+			Color8(127, 127, 255, 99), "a TGA under the DDS sibling's name decodes")
 	# A missing MDT is the port's BOUNDED fallback, not the witnessed retail
 	# result: retail walks the null-data kernel for the absent file (jz
 	# @0x58c586), D3DX corrects the 0x0 request to 1x1 (@0x690a2b / @0x690a37)

@@ -59,8 +59,35 @@ bool ClipTimeline::wrapped_at(int32_t ticks) const {
 	return step(time);
 }
 
-double ClipTimeline::frame_at(int32_t ticks) const {
-	return double(normalized_at(ticks)) * frames_;
+double ClipTimeline::frame_of(float time) const {
+	return std::clamp(double(time) * frames_, 0.0, double(frames_));
+}
+
+double ClipTimeline::frame_at(int32_t ticks, int32_t armed_boundary) const {
+	return frame_of(normalized_at(ticks, armed_boundary));
+}
+
+int32_t ClipTimeline::frame_index_at(int32_t ticks, int32_t armed_boundary) const {
+	return static_cast<int32_t>(frame_at(ticks, armed_boundary));
+}
+
+std::vector<int32_t> ClipTimeline::first_ticks() const {
+	std::vector<int32_t> out(frames_, -1);
+	if (frames_ == 0) return out;
+	// A zero step holds frame 0 without stopping.
+	if (delta_ <= 0.0f) {
+		out[0] = 0;
+		return out;
+	}
+	// The clock stepped from tick 0 as normalized_at steps it, up to the tick it stops
+	// (a one-shot) or wraps (a loop): the first pass, where the frame only rises.
+	float time = 0.0f;
+	for (int32_t tick = 0; tick < std::numeric_limits<int32_t>::max(); ++tick) {
+		const auto at = static_cast<uint32_t>(frame_of(time));
+		if (at < frames_ && out[at] < 0) out[at] = tick;
+		if (step(time)) break;
+	}
+	return out;
 }
 
 double ClipTimeline::seconds_at(int32_t ticks) const {

@@ -13,7 +13,7 @@
 #include <runtime/hud/hud_math.h>
 #include <runtime/hud/hud_server_status.h>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <cmath>
 #include <cstdio>
@@ -315,7 +315,7 @@ void test_page_compile(const fnt_font_t *font) {
 } // namespace
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_throttle();
 	test_grid_cells_and_codes();
 	test_score_rows();

@@ -269,7 +269,7 @@ Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_va
 		}
 		// The loader fixup below rewrites the phase byte, so evaluate a copy.
 		ThreediLight runtime_light = light;
-		if (runtime_light.style > 0x70) {
+		if (threedi_generator_names_register(runtime_light.style)) {
 			const char *name = nullptr;
 			const size_t local_ordinal = runtime_light.phase;
 			if (native_model().ctrl.registers != nullptr &&
@@ -292,10 +292,10 @@ Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_va
 		};
 		int32_t ctrl_value = 0;
 		// Light RgbGen shares the material RGB evaluator: only 113/114 read
-		// the resolved global CTRL slot.
+		// the resolved global CTRL slot (threedi_generator_reads_register).
 		// [orig: Light_GetPointLightParams @ 0x5A9180;
 		//  RgbGen_EvaluateColor @ 0x5B23D0]
-		if (runtime_light.style == 113 || runtime_light.style == 114) {
+		if (threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, runtime_light.style)) {
 			ctrl_value = ctrl_values[runtime_light.phase];
 		}
 		const opennova::renderer::LightRuntime runtime = opennova::renderer::eval_light_runtime(

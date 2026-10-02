@@ -54,8 +54,20 @@ add_library(opennova_runtime STATIC
     # menu — the .mnu screen draw-list compiler (ADR 0033 R2; witness:
     # docs/mnu/menu-re.md "Widget render dispatch")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_marquee.cpp # the marquee credits roll
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_notes.cpp # the compiler notes (build, loader, layout)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_queries.cpp # the widget queries and hit geometry
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_scrollbar.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_wrap.cpp # the wrapped-text drawer and the multiline edit
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_style.cpp # the shell's stylesheets, menu_style.mns then brand.mns
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/config_text.cpp # a ConfigFile's text form, as the engine reads it
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_credits.cpp # a marquee DATASOURCE's credits
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_text_tables.cpp # the menu string tables
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_screen_inputs.cpp # a screen's string tables and the shell's style, through a file source
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_assets.cpp # a screen's fonts and textures, kept by (file, stamp)
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
