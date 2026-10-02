@@ -34,6 +34,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/powerup.h>       // powerup_pickup_by (a remote player's pickup)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <runtime/world/vehicle_mount.h> // resolve_mounted_ammo_slot (phase-8 route)
@@ -238,13 +239,8 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	result.health = result.max_health = item->hp;
 	if (rider->cls == EntityClass::Player && rider->net_has_compact) {
 		// The compact's health/class byte reconstructs a tier midpoint, not
-		// an exact health fraction. Preserve retail's two rounded products.
-		// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580..0x4AD68C]
-		const int32_t upper = static_cast<int32_t>((int64_t(49152) * item->hp + 0x8000) >> 16);
-		const int32_t lower = static_cast<int32_t>((int64_t(28671) * item->hp + 0x8000) >> 16);
-		const uint8_t tier = (rider->health_class_byte >> 4) & 3u;
-		result.health = tier == 2 ? (upper + item->hp) >> 1
-				: tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+		// an exact health fraction (replication::replica_tier_health).
+		result.health = replication::replica_tier_health(rider->health_class_byte, item->hp);
 	}
 	return result;
 }
@@ -1039,6 +1035,9 @@ void JoinerRole::wire_frame_providers() {
 						replica_peer_scratch_tick_ = q.tick;
 					}
 					world::EntityHandle ground;
+					const world::Vec3 resolve_pos{opennova::io::fp16_16_to_float(q.pos[0]),
+							opennova::io::fp16_16_to_float(q.pos[1]),
+							opennova::io::fp16_16_to_float(q.pos[2])};
 					const int32_t clearance = col->resolve_replica(
 							*world_, st, q.pos, q.vel_xy, q.vel_z,
 							q.capsule_bottom, q.capsule_top,
@@ -1046,6 +1045,36 @@ void JoinerRole::wire_frame_providers() {
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
 							q.row_handle, &q.entity_flags, &ground);
+					// A remote player's powerup contact runs the pickup on this
+					// peer's copy of the row, for a transient copy of the body at
+					// the pose the resolve read (its integrated position): the
+					// def hp until the first compact, the class byte's tier after,
+					// zero once dead. The pickup's sound plays there and the row
+					// hides or is destroyed here, as on every peer.
+					// [orig: Entity_MovementCollisionResolver @0x4B2FB8..0x4B2FCC
+					//  (no authority gate) -> PowerupAction_Pickup @0x4428A0;
+					//  Entity_InitFromItemDef @0x49E550; the dead zero @0x4C10FB]
+					const auto pickups = col->take_replica_powerup_contacts();
+					if (!pickups.empty()) {
+						const replication::ClientEntityState *row =
+								runtime->state().find(q.row_handle);
+						world::Entity picker;
+						picker.has_item_def = true;
+						picker.item_id = q.type_id;
+						picker.position = resolve_pos;
+						picker.health_max = world_->tables.player.item_hp;
+						picker.health = picker.health_max;
+						if (row != nullptr && row->net_health_zero) picker.health = 0;
+						else if (row != nullptr && row->net_has_compact)
+							picker.health = replication::replica_tier_health(
+									row->health_class_byte, picker.health_max);
+						world::TickContext ctx;
+						ctx.world = world_;
+						ctx.logic_tick = world_->logic_tick;
+						ctx.is_authority = false;
+						for (const auto &contact : pickups)
+							world::powerup_pickup_by(*world_, contact.target, picker, ctx);
+					}
 					q.out_ground = ground.valid() ? ground.packed
 					                              : world::EntityHandle::kInvalid;
 					return clearance;

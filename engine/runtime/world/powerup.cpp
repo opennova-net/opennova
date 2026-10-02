@@ -96,9 +96,13 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
     grant.picker = picker.handle;
     bool grant_needed = false;
     // Retail's non-local pool arm is the authority's per-connection table
-    // (Entity_ValidatePtr @0x540AC5); a non-authority peer only ever resolves
-    // its own body here. Retail writes that table inline, arm by arm, so a
-    // grant staged by an earlier arm survives a later arm's return.
+    // (Entity_ValidatePtr @0x540AC5). Retail writes that table inline, arm by
+    // arm, so a grant staged by an earlier arm survives a later arm's return.
+    // A non-authority peer also runs this for a REMOTE body (the joiner's
+    // wire-replica picker): there retail's class arm adds to the LOCAL pools
+    // whoever picked (`g_LocalAmmoPools` @0x540B20), a leg no shipped table
+    // reaches (none authors `ammo`), so it stays unported, and `allammo`
+    // touches only the local player (@0x4DC3F0).
     const bool remote_pools = inv == nullptr && ctx.is_authority;
     auto publish_grant = [&]() {
         if (grant_needed) world.out.powerup_grants.push_back(std::move(grant));
@@ -327,14 +331,20 @@ void powerup_bind_entities(World &world, const def::DefItemsFile &items) {
 
 void powerup_pickup(World &world, EntityHandle powerup, EntityHandle picker,
                     const TickContext &ctx) {
-    Entity *row = world.registry.get(powerup);
     Entity *body = world.registry.get(picker);
-    if (row == nullptr || body == nullptr) return; // @0x4428A6 / @0x4428B2
+    if (body == nullptr) return; // @0x4428A6
+    powerup_pickup_by(world, powerup, *body, ctx);
+}
+
+void powerup_pickup_by(World &world, EntityHandle powerup, Entity &picker,
+                       const TickContext &ctx) {
+    Entity *row = world.registry.get(powerup);
+    if (row == nullptr) return; // @0x4428B2
     // The row's +0x2B8 callback is its def's pickup action; an unbound row has
     // none [orig: Entity_InvokeCollisionCallback @0x442358..0x44236B]
     const PowerupDef *def = world.tables.powerups.by_index(row->powerup_def_index);
     if (def == nullptr) return;
-    run_action(world, *def, def->pickup, *row, *body, ctx);
+    run_action(world, *def, def->pickup, *row, picker, ctx);
 }
 
 void powerup_process_contacts(World &world, const TickContext &ctx) {

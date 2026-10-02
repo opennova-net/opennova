@@ -684,6 +684,7 @@ void CollisionWorld::build_tick_tables(World &world) {
     change_team_contacts_.clear();
     movement_callback_contacts_.clear();
     powerup_contacts_.clear();
+    replica_powerup_contacts_.clear();
     build_tables(world, true);
 }
 
@@ -704,6 +705,13 @@ CollisionWorld::take_movement_callback_contacts() {
 std::vector<CollisionWorld::GameplayContact> CollisionWorld::take_powerup_contacts() {
     std::vector<GameplayContact> contacts;
     contacts.swap(powerup_contacts_);
+    return contacts;
+}
+
+std::vector<CollisionWorld::ReplicaPowerupContact>
+CollisionWorld::take_replica_powerup_contacts() {
+    std::vector<ReplicaPowerupContact> contacts;
+    contacts.swap(replica_powerup_contacts_);
     return contacts;
 }
 

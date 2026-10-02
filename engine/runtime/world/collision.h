@@ -1340,6 +1340,17 @@ public:
     //  @0x4B2FBD, Entity_InvokeCollisionCallback @0x4B2FCC]
     std::vector<GameplayContact> take_powerup_contacts();
 
+    // The same Powerup contacts a wire-replica resolve (resolve_replica) made:
+    // the source is the decoded row's wire handle, which names no registry
+    // entity, so the embedder runs the pickup for its transient copy of the
+    // body. [orig: the same branch; a client's resolver moves its remote
+    // bodies through the org2 tail call @0x4B7CF4]
+    struct ReplicaPowerupContact {
+        uint16_t wire_handle = 0xFFFF;
+        EntityHandle target;
+    };
+    std::vector<ReplicaPowerupContact> take_replica_powerup_contacts();
+
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
         bool prev_valid = false;
@@ -1601,6 +1612,7 @@ private:
     std::vector<GameplayContact> change_team_contacts_;
     std::vector<GameplayContact> movement_callback_contacts_;
     std::vector<GameplayContact> powerup_contacts_;
+    std::vector<ReplicaPowerupContact> replica_powerup_contacts_;
 
     struct Instance {
         int32_t model_id = -1;

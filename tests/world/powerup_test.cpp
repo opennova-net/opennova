@@ -262,6 +262,36 @@ void test_med_pack_one_shot() {
     CHECK(rig.world.out.powerup_grants.empty());
 }
 
+// A client's copy of a REMOTE player's pickup (the joiner's wire-replica
+// body, a transient picker with no registry entity): the pack's sound plays
+// at the remote body and this peer's copy of the row is consumed; the local
+// player's inventory and health are untouched and no grant is staged.
+// [orig: PowerupAction_Pickup @0x4428A0 (the soundset at the picker
+//  @0x442AA6, the consume @0x442AC0..0x442B35), reached from a client's
+//  resolver for a remote body]
+void test_remote_body_pickup_on_a_client() {
+    Rig rig;
+    const EntityHandle med = rig.spawn_powerup(1);
+    powerup_bind_entities(rig.world, rig.items);
+    Entity remote;
+    remote.has_item_def = true;
+    remote.health_max = 100;
+    remote.health = 87; // a tier-2 class byte's midpoint
+    remote.position = {9.0f, 5.0f, 0.0f};
+    const int32_t local_pool = rig.local->inventory.pools[11];
+    powerup_pickup_by(rig.world, med, remote, rig.ctx(false));
+    CHECK(rig.get(med) == nullptr); // FULLHP is a one-shot: the copy is destroyed
+    const auto sounds = rig.world.out.fire_sounds.drain();
+    CHECK(sounds.size() == 1);
+    if (!sounds.empty()) {
+        CHECK(std::string(sounds[0].set_name) == "HEALTH_UP");
+        CHECK(sounds[0].pos.x == 9.0f);
+    }
+    CHECK(rig.get(rig.picker)->health == 60);
+    CHECK(rig.local->inventory.pools[11] == local_pool);
+    CHECK(rig.world.out.powerup_grants.empty());
+}
+
 // FULLHP at full health: nothing happens, the row stays, no sound.
 void test_med_pack_refuses_when_full() {
     Rig rig;
@@ -535,6 +565,7 @@ int main() {
     test_bind_without_table();
     test_med_pack_one_shot();
     test_med_pack_refuses_when_full();
+    test_remote_body_pickup_on_a_client();
     test_infinite_med_pack_respawns();
     test_counted_respawns();
     test_hp_add();

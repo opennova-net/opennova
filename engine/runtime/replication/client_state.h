@@ -736,6 +736,18 @@ struct ClientEntityState {
 	bool net_seat_valid = false;
 };
 
+// The Health a client keeps for a remote player from its compact's
+// health/class byte: the tier midpoint of two rounded products of the def hp
+// (tier 2 between 0.75 hp and hp, tier 1 between 0.4375 hp and 0.75 hp, else
+// half of 0.4375 hp), never the exact fraction.
+// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580..0x4AD68C]
+inline int32_t replica_tier_health(uint8_t health_class_byte, int32_t item_hp) {
+	const int32_t upper = static_cast<int32_t>((int64_t(49152) * item_hp + 0x8000) >> 16);
+	const int32_t lower = static_cast<int32_t>((int64_t(28671) * item_hp + 0x8000) >> 16);
+	const uint8_t tier = (health_class_byte >> 4) & 3u;
+	return tier == 2 ? (upper + item_hp) >> 1 : tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+}
+
 // The carrier a compact-less (no-callback) child's pose follows: its 0x0D
 // TARGET (groundEntity, +0x28) when streamed, else a parent outside pool 0.
 // A pool-0 parent is the occupantEntity (+0x170) back-reference of a gunner

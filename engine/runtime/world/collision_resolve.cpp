@@ -1257,7 +1257,17 @@ void CollisionWorld::record_movement_callback_contact(EntityHandle source,
 }
 
 void CollisionWorld::record_powerup_contact(EntityHandle source, EntityHandle target) {
-    if (!source.valid() || !target.valid()) return;
+    if (!target.valid()) return;
+    // A wire-replica resolve's source is the unallocated replica key; the
+    // contact belongs to the row the resolve is for.
+    if (!source.valid() && replica_exclude_handle_ != 0xFFFF) {
+        for (const ReplicaPowerupContact &contact : replica_powerup_contacts_)
+            if (contact.wire_handle == replica_exclude_handle_ && contact.target == target)
+                return;
+        replica_powerup_contacts_.push_back({replica_exclude_handle_, target});
+        return;
+    }
+    if (!source.valid()) return;
     for (const GameplayContact &contact : powerup_contacts_) {
         if (contact.source == source && contact.target == target) return;
     }
