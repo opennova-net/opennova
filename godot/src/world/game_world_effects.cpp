@@ -39,6 +39,12 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 			if (audio != nullptr) {
 				audio->play_dialog(eff->get_a());
 			}
+		} else if (kind == "dialog_line") {
+			// A co-op host's dialog line: name in the text, line in a, the local
+			// player's class in b (engine: client_effects / resolve_dialog_line).
+			if (audio != nullptr) {
+				audio->play_dialog_line(eff->get_text(), eff->get_a(), eff->get_b());
+			}
 		} else if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {

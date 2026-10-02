@@ -544,6 +544,28 @@ bool MissionAudio::play_dialog(int p_wav_id) {
 	return true;
 }
 
+bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
+		int p_player_class) {
+	if (bank_.is_null() || !root_attached_) {
+		return false;
+	}
+	const opennova::dbf::File *dialog_bank =
+			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
+	const opennova::audio::DialogLinePlayback line = opennova::audio::resolve_dialog_line(
+			dialog_bank, bank_->set_index(), nullptr, opennova::to_std(p_dialog_name), p_line,
+			p_player_class);
+	if (line.set_name.empty()) {
+		return false;
+	}
+	AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
+			StringName(kVoiceBus));
+	if (voice == nullptr) {
+		return false;
+	}
+	voice->connect("finished", Callable(voice, "queue_free"));
+	return true;
+}
+
 String MissionAudio::resolve_dialog_set(int p_wav_id) {
 	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
 	return sets.empty() ? String() : opennova::to_gd(sets.front());

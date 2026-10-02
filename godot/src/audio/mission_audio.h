@@ -162,6 +162,11 @@ public:
 	// serialized queue, pumped here by spawning one voice at a time. Returns
 	// true if the id resolved to at least one playable set.
 	bool play_dialog(int p_wav_id);
+	// A co-op dialog line the host sent (the "dialog_line" effect): the
+	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
+	// picks the clip, which plays at once on a voice of its own, outside the
+	// queue. Returns true when a clip spawned.
+	bool play_dialog_line(const String &p_dialog_name, int p_line, int p_player_class);
     void reset_dialog_queue() { dialog_queue_.discard_pending(); }
 	// Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
 	// maps to that the loaded banks actually contain, or "" if none.

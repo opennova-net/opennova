@@ -102,12 +102,65 @@ int test_queue_advances_only_when_the_channel_frees() {
 	return 0;
 }
 
+// D-NET-285, the joiner's S2C 0x28 line: the dialog by exact name, the
+// class-prefixed clip before the bare one, the [Mission Dialog] subtitle by
+// the def name, else the flat text entry the sequence suffix names.
+// [orig: Dialog_PlayByNameAndSlot @0x44E3F0; Dialog_LoadAudioClipLocalized
+//  @0x44DEF0]
+int test_client_line_resolution() {
+	const lwf::File bank = bank_with({ "SynR100", "3SynR101", "SynR101" });
+	SoundSetIndex sets;
+	sets.add_bank(0, bank);
+	dbf::File dialogs = dialog_bank();
+	dialogs.groups[0].lines[0].sequence = "_00000";
+	dialogs.groups[0].lines[1].sequence = "line_7";
+	dialogs.groups[0].lines[2].sequence = "_00002";
+	rtxt::File text;
+	text.sections.push_back(rtxt::Section{"Info", 2});
+	text.sections.push_back(rtxt::Section{"Mission Dialog", 1});
+	rtxt::Entry e0;
+	e0.key = "title";
+	e0.text = "Mission title";
+	rtxt::Entry e1;
+	e1.key = "briefing";
+	e1.text = "Briefing";
+	rtxt::Entry e2;
+	e2.key = "SynR101";
+	e2.text = "Move out!";
+	e2.section_index = 1;
+	text.entries = { e0, e1, e2 };
+
+	// Class 3: the "3SynR101" variant wins; the subtitle is the def name's.
+	DialogLinePlayback line = resolve_dialog_line(&dialogs, sets, &text, "dlg001", 2, 3);
+	TEST_EXPECT(line.line_found && line.def_id_name == "SynR101");
+	TEST_EXPECT(line.set_name == "3SynR101" && line.text == "Move out!");
+	// Class 1 has no variant: the bare clip.
+	line = resolve_dialog_line(&dialogs, sets, &text, "dlg001", 2, 1);
+	TEST_EXPECT(line.set_name == "SynR101");
+	// No [Mission Dialog] entry: the flat entry the sequence suffix names.
+	line = resolve_dialog_line(&dialogs, sets, &text, "dlg001", 0, 1);
+	TEST_EXPECT(line.set_name == "SynR100" && line.text == "Mission title");
+	// A carried-by-nobody line resolves its subtitle but no clip; a suffix
+	// past the table names no entry.
+	line = resolve_dialog_line(&dialogs, sets, &text, "dlg001", 1, 1);
+	TEST_EXPECT(line.line_found && line.set_name.empty() && line.text.empty());
+	// The name is matched exactly, and a line past the table resolves nothing.
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, sets, &text, "DLG001", 0, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(&dialogs, sets, &text, "dlg001", 3, 1).line_found);
+	TEST_EXPECT(!resolve_dialog_line(nullptr, sets, &text, "dlg001", 0, 1).line_found);
+	// No mission text: the clip alone.
+	line = resolve_dialog_line(&dialogs, sets, nullptr, "dlg001", 2, 3);
+	TEST_EXPECT(line.set_name == "3SynR101" && line.text.empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failed = 0;
 	failed |= test_resolution_prefers_the_dbf_lines_the_banks_carry();
 	failed |= test_queue_advances_only_when_the_channel_frees();
+	failed |= test_client_line_resolution();
 	if (failed) {
 		return 1;
 	}
