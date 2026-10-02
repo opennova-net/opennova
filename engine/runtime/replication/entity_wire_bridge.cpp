@@ -1169,6 +1169,13 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
 	// over: the original does not mask on the write side, and the receiver already does.
 	// [orig: NetPacket_SerializePlayerState case 3 @0x4c1b17 `mov cl, [edi+24h]`]
 	up.state_flags_byte = static_cast<uint8_t>(e.flags & 0xFFu);
+	// The self-check byte ahead of the movement-input byte starts from the
+	// scope bit (Flags 0x10) moved to 0x80; the rotating debugger / hook /
+	// movement probes the same byte ORs in stay clear here. A retail host
+	// skips the byte on read. [orig: NetPacket_SerializePlayerState case 3
+	//  `movsx ebx, cl; and ebx, 10h` + three `add ebx, ebx` @0x4C1432..0x4C1447,
+	//  the probe switch @0x4C145E.., stored @0x4C1AF0; case 4 advances past it]
+	up.anticheat_flags = static_cast<uint8_t>((e.flags & 0x10u) << 3);
 	// Preserve the signed control bytes as wire bit patterns. The authority
 	// consumes these for analog throttle and steering. Dropping them loses
 	// controls that may already have affected local vehicle prediction.

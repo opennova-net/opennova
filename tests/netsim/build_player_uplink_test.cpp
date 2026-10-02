@@ -112,6 +112,17 @@ bool run_field_mapping() {
 	if (!expect(up.state_flags_byte == 0x38u,
 	            "state flags = the RAW entity+0x24 low byte, unmasked on the write side"))
 		return false;
+	// The self-check byte starts from the scope bit moved to 0x80; the
+	// rotating probes stay clear. [orig: NetPacket_SerializePlayerState case 3
+	//  `movsx ebx, cl; and ebx, 10h` + three `add ebx, ebx` @0x4C1432..0x4C1447,
+	//  stored @0x4C1AF0]
+	if (!expect(up.anticheat_flags == 0x80u, "the scoped bit rides the self-check byte as 0x80"))
+		return false;
+	src_e.flags = 0x28u;
+	if (!expect(ns::build_player_uplink(source_world, src_e, src_ae).anticheat_flags == 0,
+	            "unscoped: the self-check byte is clear"))
+		return false;
+	src_e.flags = 0x10u | 0x08u | 0x20u;
 	// No decoded entities: retail's list builder fills every unused pair with
 	// (0xFFFF, 0) -- handle 0 would name pool-0 slot 0 to the host's
 	// tracked-slot walk. [orig: Server_BuildEntityPriorityListForPlayer
