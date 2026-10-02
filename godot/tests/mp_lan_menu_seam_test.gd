@@ -479,6 +479,7 @@ func test_lan_join_emits_selected_server() -> void:
 	mp.set_lan_session(session)
 	var biggy := LanServerRow.make("biggy", "192.168.1.10", 32768)
 	biggy.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD
+	biggy.expansion = "jox01"
 	session.servers_changed.emit([biggy])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
@@ -494,6 +495,12 @@ func test_lan_join_emits_selected_server() -> void:
 	assert_true(target.allows_spectators(),
 			"the selected row carries ServerHello.P2 into the typed join target")
 	assert_true(target.spectator_password_required())
+	# The row's 0x81 SUS2 names the host's expansion, which the join switches to
+	# before it dials (retail switches before it connects).
+	assert_eq(target.expansion, "jox01", "the row's expansion rides the join target")
+	assert_true(target.expansion_known, "a discovered row's expansion is known")
+	assert_false(JoinTarget.new().expansion_known,
+			"a bare target (--lan-join) knows no expansion and keeps the mount")
 
 
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:

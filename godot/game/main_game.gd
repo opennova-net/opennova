@@ -622,11 +622,7 @@ func _enter_menu(dir: String) -> bool:
 		if root == null:
 			return false
 		_root = root
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
-	if profile_root_key != _profile_root_key:
-		_chosen_avatar = PlayerProfile.load_character_profile(_root)
-		_profile_root_key = profile_root_key
+	refresh_local_profile_for_mount()
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
@@ -796,6 +792,20 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 		if save_error != OK:
 			push_warning("MainGame: could not save PLAYER_INFO profile (error %d)"
 					% save_error)
+
+
+## Re-read the local player's character profile (weapon.sav) when the mounted
+## root or its expansion changed. The menu entry and a join's pre-dial switch to
+## the host's expansion both land here, so the next spawn kit and the join's
+## character vars come from the mounted expansion's profile.
+func refresh_local_profile_for_mount() -> void:
+	if _root == null:
+		return
+	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower()]
+	if profile_root_key != _profile_root_key:
+		_chosen_avatar = PlayerProfile.load_character_profile(_root)
+		_profile_root_key = profile_root_key
 
 
 # Install the in-memory local-player profile used by the next mission spawn.

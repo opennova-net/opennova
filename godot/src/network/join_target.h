@@ -81,7 +81,15 @@ public:
 	// ordinary dial uses. Empty = no proxy (LAN, or a .joi without them).
 	JOIN_TARGET_TEXT(proxy_node)
 	JOIN_TARGET_TEXT(proxy_relay)
+	// The host's expansion as the browse row advertised it (the 0x81 SUS2 a
+	// LAN or preflight row carries, the GSB Exp of a NovaWorld row; "" = base
+	// game). Meaningful only when `expansion_known`: the shell switches the
+	// mount to it BEFORE the dial so the join vars come from that expansion's
+	// profile, as retail switches before it connects.
+	JOIN_TARGET_TEXT(expansion)
 #undef JOIN_TARGET_TEXT
+	bool get_expansion_known() const { return expansion_known_; }
+	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
 
 	int get_port() const { return port_; }
 	void set_port(int p_port) { port_ = p_port; }
@@ -176,6 +184,8 @@ private:
 	String spectator_password_;
 	String server_password_;
 	String join_password_;
+	String expansion_;
+	bool expansion_known_ = false;
 	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
 	String proxy_node_;

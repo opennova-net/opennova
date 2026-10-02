@@ -208,6 +208,11 @@ public:
 	// the wire-header world load; S2C 0x7B supplies the mission identity).
 	// Returns the same codes as load_mission.
 	int load_mission_as_joiner(const Ref<JoinTarget> &p_target);
+	// Switch the mounted root to a join's host expansion BEFORE the dial, so the
+	// profile the join vars come from is the host expansion's
+	// (SessionDrive::switch_join_expansion). Returns the failure text, empty on
+	// success; the post-auth reconcile remains the authoritative check.
+	String mount_join_expansion(const String &p_expansion);
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with
 	// a NovaWorld join or host: the world keeps it playing or hosting through
 	// the match (SessionDrive::adopt_nw_client). A normal exit back to the

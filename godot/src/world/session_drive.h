@@ -131,6 +131,11 @@ public:
 	// The post-mission router's verdict for an exit reason (inmatch::route_mission_exit) on
 	// this world's session; a NovaWorld network type rides an adopted NovaWorld session.
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// Switch `p_root` in place to the host's expansion (keep / remount / fail,
+	// inmatch::decide_join_expansion): the post-auth reconcile and the pre-dial
+	// leg (GameWorld::mount_join_expansion) share it. Returns the failure text,
+	// empty on success.
+	String switch_join_expansion(const Ref<ResourceRoot> &p_root, const String &p_host_expansion);
 
 	// The bound signal targets of the hosting session (the world forwards).
 	// A ServerCommand from the NovaWorld service: run it on the in-match host,

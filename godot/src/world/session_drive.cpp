@@ -265,11 +265,29 @@ void SessionDrive::step_preload() {
 // keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this
 // executes it against the live mount.
 bool SessionDrive::reconcile_join_expansion() {
-	Ref<ResourceRoot> resource_root = join_preload_root_;
+	const Ref<ResourceRoot> resource_root = join_preload_root_;
 	if (resource_root.is_null()) {
 		return true;
 	}
-	const int action = policy_->decide_expansion(join_preload_sim_->get_join_expansion(),
+	const String error = switch_join_expansion(resource_root, join_preload_sim_->get_join_expansion());
+	if (!error.is_empty()) {
+		fail_join_preload(error);
+		return false;
+	}
+	return true;
+}
+
+// The switch itself, shared by the pre-dial leg (the browse row's expansion,
+// GameWorld::mount_join_expansion) and the post-auth reconcile above. Returns
+// the failure text, or an empty string when the root holds the host's
+// expansion (or is a loose authoring root that cannot switch).
+String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
+		const String &p_host_expansion) {
+	Ref<ResourceRoot> resource_root = p_root;
+	if (resource_root.is_null()) {
+		return String();
+	}
+	const int action = policy_->decide_expansion(p_host_expansion,
 			resource_root->get_expansion(),
 			resource_root->list_expansions(resource_root->get_root_dir()));
 	String decision_name = "keep";
@@ -285,9 +303,9 @@ bool SessionDrive::reconcile_join_expansion() {
 	}
 	UtilityFunctions::print_verbose(vformat(
 			"SessionDrive: join expansion: host='%s' mounted='%s' decision=%s",
-			join_preload_sim_->get_join_expansion(), resource_root->get_expansion(), decision_name));
+			p_host_expansion, resource_root->get_expansion(), decision_name));
 	if (action == NetSessionPolicy::ACTION_KEEP) {
-		return true;
+		return String();
 	}
 	// Only a runtime mount layers expansion archives at all. A loose authoring
 	// root (an explicit --loose-root run mounts the loose game-data tree;
@@ -302,8 +320,8 @@ bool SessionDrive::reconcile_join_expansion() {
 	if (!resource_root->is_runtime_mount()) {
 		UtilityFunctions::push_warning(vformat(
 				"SessionDrive: host expansion '%s' differs from the loose root's '%s'; the authoring mount stands",
-				join_preload_sim_->get_join_expansion(), resource_root->get_expansion()));
-		return true;
+				p_host_expansion, resource_root->get_expansion()));
+		return String();
 	}
 	// A runtime mount that cannot supply the host's expansion aborts the join.
 	// Retail's switch is a no-op when expansion\<name>\<name>.pff is missing
@@ -312,8 +330,7 @@ bool SessionDrive::reconcile_join_expansion() {
 	// index-space corruption D-NET-178 records, so we refuse the join instead
 	// (tracked divergence).
 	if (action == NetSessionPolicy::ACTION_FAIL) {
-		fail_join_preload(policy_->decision_error());
-		return false;
+		return policy_->decision_error();
 	}
 	const String target_expansion = policy_->decided_expansion();
 	const String dir = resource_root->get_root_dir();
@@ -336,9 +353,8 @@ bool SessionDrive::reconcile_join_expansion() {
 		// load_failed, so the live session is torn down too.
 		const String mount_error = resource_root->get_last_error();
 		resource_root->mount_runtime(dir, previous, LaunchFlags::loose_override_enabled(), game_code);
-		fail_join_preload(vformat("join: could not mount host expansion '%s' from %s: %s",
-				target_expansion, dir, mount_error));
-		return false;
+		return vformat("join: could not mount host expansion '%s' from %s: %s",
+				target_expansion, dir, mount_error);
 	}
 	// mount_runtime succeeds even when the expansion never layered
 	// (opennova::Vfs::mount_game falls back to base game silently), so read
@@ -351,12 +367,11 @@ bool SessionDrive::reconcile_join_expansion() {
 		// decision leg uses ("none -- base game only" when empty), so both
 		// abort reasons read identically (one impl -- engine/runtime/inmatch
 		// join_session_policy).
-		fail_join_preload(vformat("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)",
+		return vformat("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)",
 				target_expansion, dir, resource_root->get_expansion(),
-				NetSessionPolicy::describe_installed(resource_root->list_expansions(dir))));
-		return false;
+				NetSessionPolicy::describe_installed(resource_root->list_expansions(dir)));
 	}
-	return true;
+	return String();
 }
 
 // The per-frame admission/deploy/loss observer: read the joiner state,

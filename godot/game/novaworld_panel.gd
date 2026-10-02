@@ -74,6 +74,7 @@ var _logged_in := false
 # (the joiner must know the host's mission to load it) and pair them when the join resolves.
 var _pending_mission := ""
 var _pending_player := ""
+var _pending_expansion := ""  # the joined row's GSB Exp: the host's expansion
 # The signed-in NovaWorld handle — the callsign every NW join uses (retail
 # parity: the service identity names the player, not the local profile).
 var _nw_callsign := ""
@@ -687,6 +688,7 @@ func _on_join_pressed() -> void:
 		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
 	_pending_mission = row.mission_name
+	_pending_expansion = row.exp.strip_edges()
 	# The NW handle when signed in (retail: your account name is your callsign
 	# in NovaWorld games — see set_signed_in_handle); the local callsign otherwise.
 	_pending_player = join_callsign()
@@ -753,6 +755,10 @@ func _on_joined_game(host: String, port: int, app_id: String, cd_cookie: PackedB
 	target.port = port
 	target.mission = _pending_mission
 	target.player_name = _pending_player
+	# The host registered its expansion as the GSB Exp; the join switches to it
+	# before it dials (the enumeration's SUS2 refines it when it answers).
+	target.expansion = _pending_expansion
+	target.expansion_known = true
 	# The APPID join token (decoded .joi CK) the host validates (code 9), and the
 	# CD identity cookie (packed PUB* blob) it validates in the 0x00 JOIN (code 23).
 	target.app_id = app_id

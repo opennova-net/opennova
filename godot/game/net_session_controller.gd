@@ -192,6 +192,18 @@ func _start_lan_join(target: JoinTarget) -> void:
 	# (docs/interface/loading-screen-re.md, the load-flow case matrix).
 	if target.player_name.is_empty():
 		target.player_name = resolve_player_callsign()
+	# The join switches to the host's expansion (the discovered row's) before it
+	# dials and re-reads the local profile from that expansion, so the character
+	# vars the join uploads and the spawn kit come from the host's data set. The
+	# post-auth reconcile on the session record stays the authoritative check; a
+	# failed switch here leaves it to fail the join there.
+	if target.expansion_known and _world != null:
+		var switch_error := _world.mount_join_expansion(target.expansion)
+		if switch_error.is_empty():
+			if _shell != null:
+				_shell.refresh_local_profile_for_mount()
+		else:
+			push_warning("NetSessionController: pre-dial expansion switch: %s" % switch_error)
 	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
 			target.game_type, "")
 	_adopt_held_novaworld_client()
@@ -266,6 +278,9 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 		return
 	if row != null:
 		target.server_flags = row.server_flags
+		# The enumerated 0x81's SUS2 names the host's expansion.
+		target.expansion = row.expansion
+		target.expansion_known = true
 		if target.server_name.is_empty():
 			target.server_name = row.server_name
 		if target.game_type < 0:
