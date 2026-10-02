@@ -3541,10 +3541,12 @@ add_executable(npruntime_session_resend_test npruntime/session_resend_test.cpp)
 target_link_libraries(npruntime_session_resend_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
 
-# The NP session layer soaked over an impaired link: a ClientRuntime joiner and the host owner
+# The NP session layer soaked over an impaired link: ClientRuntime joiners and the host owner
 # loop on a virtual clock, each direction through the seeded ImpairedDatagramSocket decorator
-# (2 % loss, reordering, duplication, 100 ms delay) under a 12-tick send holdoff. Asserts the
-# session survives in order, recovers every gap and never stalls past retail's recovery cadence.
+# (2 % loss, reordering, duplication, 100 ms delay) under a 12-tick send holdoff; plus a 20 %-loss
+# join over a 120-marker world, three joiners admitted at once, and three through the 20 % join
+# over a 400-marker world. Asserts every session survives in order, recovers every gap and (at
+# 2 %) never stalls past retail's recovery cadence.
 add_executable(npruntime_session_soak_test npruntime/session_soak_test.cpp)
 target_link_libraries(npruntime_session_soak_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_session_soak COMMAND npruntime_session_soak_test)
