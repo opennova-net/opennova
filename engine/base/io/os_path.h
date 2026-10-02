@@ -97,8 +97,33 @@ inline std::string narrow_utf8(std::wstring_view in) {
 	return out;
 }
 
+inline bool is_separator(wchar_t c) { return c == L'\\' || c == L'/'; }
+
+// \\?\ or \\.\, either separator spelled (//?/ names what \\?\ does once the system
+// normalizes it).
 inline bool has_long_prefix(const std::wstring &p) {
-	return p.size() >= 4 && p[0] == L'\\' && p[1] == L'\\' && (p[2] == L'?' || p[2] == L'.') && p[3] == L'\\';
+	return p.size() >= 4 && is_separator(p[0]) && is_separator(p[1]) && (p[2] == L'?' || p[2] == L'.') &&
+	       is_separator(p[3]);
+}
+
+// A prefixed path the way the system would have normalized it without the prefix,
+// which turns that normalization off (a '/' is then a name character, "." and ".."
+// are names): the prefix spelled with '\', the rest '\'-separated with repeated
+// separators, "." and ".." resolved; \\?\UNC\server\share keeps its server and share.
+inline std::filesystem::path normal_prefixed(const std::wstring &text) {
+	const std::wstring prefix = {L'\\', L'\\', text[2], L'\\'};
+	std::wstring rest = text.substr(4);
+	const bool unc = rest.size() >= 4 && (rest[0] == L'U' || rest[0] == L'u') && (rest[1] == L'N' || rest[1] == L'n') &&
+	                 (rest[2] == L'C' || rest[2] == L'c') && is_separator(rest[3]);
+	if (unc) rest = L"\\\\" + rest.substr(4);
+	std::wstring normal = std::filesystem::path(rest).lexically_normal().native();
+	for (wchar_t &c : normal) {
+		if (c == L'/') c = L'\\';
+	}
+	if (unc && normal.size() >= 2 && normal[0] == L'\\' && normal[1] == L'\\') {
+		return std::filesystem::path(prefix + L"UNC\\" + normal.substr(2));
+	}
+	return std::filesystem::path(prefix + normal);
 }
 
 // The length past which a path needs the prefix: MAX_PATH less the 12 characters a
@@ -110,11 +135,13 @@ constexpr size_t kLongPathThreshold = 248;
 
 // `native` with the \\?\ prefix when it is long: made absolute and lexically normal
 // first (the prefix turns off the system's own normalization), "\\server\share" as
-// "\\?\UNC\server\share". A short path, or one already prefixed, comes back as is.
+// "\\?\UNC\server\share". A path already prefixed comes back normalized the same way
+// (normal_prefixed); a short one comes back as is.
 inline std::filesystem::path os_path(const std::filesystem::path &native) {
 	using namespace os_path_detail;
 	const std::wstring &text = native.native();
-	if (text.size() < kLongPathThreshold || has_long_prefix(text)) return native;
+	if (has_long_prefix(text)) return normal_prefixed(text);
+	if (text.size() < kLongPathThreshold) return native;
 	std::error_code ec;
 	std::filesystem::path absolute = native.is_absolute() ? native : std::filesystem::absolute(native, ec);
 	if (ec) return native;

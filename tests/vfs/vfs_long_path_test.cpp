@@ -154,6 +154,25 @@ int main() {
 	// The session's connection template reads the install's _NSTMOUT.TXT.
 	TEST_EXPECT(opennova::inmatch::load_session_timeout_config(root).timeout_ms == -1);
 
+#ifdef _WIN32
+	// A path that already carries a prefix: the system normalizes none of it (a '/' is a
+	// name character there, "." and ".." are names), so os_path does, for each prefix form.
+	TEST_EXPECT(io::os_path("\\\\?\\C:/a//b/./c/../d").native() == L"\\\\?\\C:\\a\\b\\d");
+	TEST_EXPECT(io::os_path("\\\\.\\C:/a/b").native() == L"\\\\.\\C:\\a\\b");
+	TEST_EXPECT(io::os_path("\\\\?\\UNC\\server/share/x").native() == L"\\\\?\\UNC\\server\\share\\x");
+	TEST_EXPECT(io::os_path("//?/C:/a/b").native() == L"\\\\?\\C:\\a\\b");
+	// A prefixed directory, short and long, joined with '/': the file opens.
+	for (const std::string &dir : {scratch, root}) {
+		const std::string prefixed = "\\\\?\\" + io::utf8_path(fs::absolute(io::os_path(dir), ec));
+		TEST_EXPECT(!ec);
+		fs::create_directories(io::os_path(io::utf8_join(prefixed, "joined/sub")), ec);
+		TEST_EXPECT(!ec && fs::is_directory(io::os_path(dir + "/joined/sub"), ec));
+		TEST_EXPECT(write_bytes(io::utf8_join(prefixed, "joined/sub/file.txt"), "JOINED"));
+		std::ifstream in(io::os_path(dir + "/joined/sub/file.txt"), std::ios::binary);
+		TEST_EXPECT(std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>()) == "JOINED");
+	}
+#endif
+
 	remove_tree(base);
 	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 	fs::remove_all(scratch, ec);
