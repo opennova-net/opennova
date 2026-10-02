@@ -363,8 +363,6 @@ func _apply_team_service_buttons(shown: bool) -> void:
 
 # SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
 # ClientRuntime::queue_team_change_request carries the witness).
-# [orig: UI_RegisterDeathScreenCallbacks @0x554683 -> DeathScreen_OnSwapTeams
-#  @0x5535B0]
 func _on_widget_activated(_id: int, widget_name: String) -> void:
 	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
 		return
