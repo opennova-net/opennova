@@ -434,6 +434,8 @@ std::vector<uint8_t> ClientRuntime::start() {
 	tag2c_send_cooldown_ = 0;
 	send_holdoff_countdown_ = 0;
 	send_holdoff_ticks_ = 0;
+	send_pump_loop_ = JoinerConnection::SendPumpLoop::NetworkFrame;
+	send_pump_loop_last_ms_ = 0;
 	replay_mode_ = false;
 	view_.state() = replication::ClientState{};
 	// The client connection start resets the quality object [orig:
@@ -1251,8 +1253,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// NovaWorld host dictates 12 → ~5.2 Hz; LAN lanmode 2/3/4 → 6/4/3; an
 	// unconfigured connection stays 0 = per-tick). A joiner that forgot the
 	// period after one skip flooded retail hosts at 12x their expected rate.
-	const bool send_block_open = send_block_opens_this_frame();
-	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
+	// Until mission loading ends the joiner is not in this frame at all but in
+	// the loading loop of its admission stage, which calls the send pump its own
+	// way (step_send_pump_loop, D-NET-254).
+	const bool send_block_open = step_send_pump_loop();
 	if (send_block_open) {
 		// These packets already own the connection's earliest allocated
 		// sequences. Preserve wire/retention fidelity by releasing them unchanged
@@ -1391,6 +1395,46 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	}
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
+}
+
+// One frame of the joiner's send cadence. The frame's receive pump steps a
+// running countdown first [orig: PumpFlags 0x10 @0x6297ac via
+// PumpClientProtocolRecv flags=26]; what follows depends on the loop the
+// admission stage waits in (JoinerConnection::send_pump_loop):
+//   - a frame loop calls the send pump once, and its build needs the countdown
+//     at zero: the in-match gate `cmp [conn+648h],0; ja` skips the call, the
+//     join state machine's UI frames call it and PumpEnumeratorAndSend skips
+//     the build, the same cadence [orig: @0x42c3dd; the `!+0x648` test @0x62927b];
+//   - a busy spin passes receive + send every few microseconds, so a running
+//     countdown is out before the next datagram and every frame builds;
+//   - a timed loop's entry pump builds only on a countdown already at zero (the
+//     template holdoff 0); after that its passes run the countdown out and the
+//     send pump is called, and builds, once MORE than the pace passed since its
+//     last call, measured like retail on the 32-bit tick (signed difference).
+// An open frame reloads the dictated period at the send block's end.
+// [orig: SaveFile_SendAndWaitForServerAck @0x5204b0 (stamp, entry pump, `> 50`);
+//  NapiClient_WaitForDisconnect @0x42cb20 (stamp @0x42cb70, entry pump @0x42cb4d,
+//  `> 100` @0x42cbb5); CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0 and
+//  NapiClient_WaitForGameStart @0x42cc10 (send every pass)]
+bool ClientRuntime::step_send_pump_loop() {
+	const bool counted_out = send_holdoff_countdown_ <= 1;
+	if (send_holdoff_countdown_ > 0) --send_holdoff_countdown_;
+	if (joiner_ == nullptr) return counted_out;
+	const JoinerConnection::SendPumpLoop loop = joiner_->send_pump_loop();
+	const bool entered = loop != send_pump_loop_;
+	send_pump_loop_ = loop;
+	const int32_t pace_ms = JoinerConnection::send_pump_loop_pace_ms(loop);
+	if (loop == JoinerConnection::SendPumpLoop::NetworkFrame) return counted_out;
+	if (pace_ms == 0) return true; // a busy spin
+	const uint32_t now_ms = joiner_->monotonic_milliseconds32();
+	if (entered) {
+		send_pump_loop_last_ms_ = now_ms;
+		return counted_out;
+	}
+	send_holdoff_countdown_ = 0;
+	if (static_cast<int32_t>(now_ms - send_pump_loop_last_ms_) <= pace_ms) return false;
+	send_pump_loop_last_ms_ = now_ms;
+	return true;
 }
 
 std::vector<std::vector<uint8_t>>

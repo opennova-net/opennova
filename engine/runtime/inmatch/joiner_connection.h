@@ -228,6 +228,30 @@ public:
 	//  @0x62376d; the latch is set by NapiNPProtocol_HandleSessionPacket @0x626c3a]
 	std::vector<uint8_t> finish_receive_pump();
 
+	// The retail loop whose passes call this connection's send pump at the current admission
+	// stage. A stock client reaches its holdoff-gated Client_ProcessNetworkFrame only when
+	// mission loading ends; until then each stage waits inside its own loop, and each loop
+	// calls PumpClientProtocolSend (flags 738, whose build still needs the holdoff countdown at
+	// zero) its own way. NetworkFrame is one receive + one send per frame (the join state
+	// machine's UI frames, then the in-match frame); the busy spins pass receive + send every
+	// few microseconds, so a running countdown is out before the next datagram; the timed
+	// loops call the send pump only once MORE than their pace passed since the last call.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 5/6 (@0x56a5dd, sub_424740
+	//  @0x424767); SaveFile_SendAndWaitForServerAck @0x5204b0; InitRandomSeedOrRequest
+	//  @0x51e8f0; NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
+	//  Game_StartMission's 0x0F wait @0x52628d..0x5262df; Client_ProcessNetworkFrame @0x42c3dd]
+	enum class SendPumpLoop : uint8_t {
+		NetworkFrame,    // a send per frame behind the countdown (UI frames, the in-match frame)
+		ServerInfoWait,  // SaveFile_SendAndWaitForServerAck: the send after > 50 ms
+		MissionDataWait, // CNapiGameSession_InitRandomSeedOrRequest: a busy spin
+		SyncTailWait,    // NapiClient_WaitForDisconnect: the send after > 100 ms
+		WorldStreamWait, // NapiClient_WaitForGameStart: a busy spin
+		WorldStateWait,  // Game_StartMission's final wait for S2C 0x0F: a busy spin
+	};
+	SendPumpLoop send_pump_loop() const;
+	// A timed loop's pace in GetTickCount milliseconds (strictly more must pass); 0 otherwise.
+	static int32_t send_pump_loop_pace_ms(SendPumpLoop loop);
+
 	// Frame the retail leave: a burst of identical 0x46 ClientGoodBye datagrams for the owner to
 	// ship before dropping the socket (the host's only non-timeout teardown trigger). Empty until
 	// ServerAuth assigns the session key, and idempotent — a second call returns nothing. The

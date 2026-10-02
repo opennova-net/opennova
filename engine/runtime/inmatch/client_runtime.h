@@ -809,6 +809,13 @@ private:
 	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
 	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
 	uint32_t send_holdoff_ticks_ = 0;
+	// The retail loop the joiner's last frame ran in (a change is that loop's entry) and the
+	// GetTickCount stamp of a timed loop's last send-pump call (step_send_pump_loop).
+	JoinerConnection::SendPumpLoop send_pump_loop_ = JoinerConnection::SendPumpLoop::NetworkFrame;
+	uint32_t send_pump_loop_last_ms_ = 0;
+	// The receive pump's countdown step plus whether this frame's send pump call builds,
+	// per the loop the joiner's admission stage runs in.
+	bool step_send_pump_loop();
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

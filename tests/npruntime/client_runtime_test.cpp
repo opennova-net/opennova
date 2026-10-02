@@ -2514,7 +2514,14 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	const w::EntityHandle host_h = w::spawn_player(world, player_spawn({0, 0, 0}, 0, 0xFFF0));
 	if (!expect(host_h.valid(), "zones: host player spawned")) return false;
 
-	inmatch::ClientRuntime client(kName);
+	// The client's own wall clock advances one 16 ms frame per client frame: its
+	// timed loading loops (D-NET-254) send on that clock, not on the host's ticks.
+	uint64_t client_now_ms = 1000;
+	inmatch::ClientRuntime client(kName, [&client_now_ms] { return client_now_ms; });
+	auto client_frame = [&client, &client_now_ms](uint32_t now_tick) {
+		client_now_ms += 16;
+		return client.Client_ProcessNetworkFrame(now_tick);
+	};
 	client.set_world_ready(false);
 	// The binding seam under test alongside the zones flow: the shell's applied kit
 	// replaces the capture-default 0x2F pair content (D-NET-168). The wire team byte
@@ -2596,12 +2603,12 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 
 	pump_host(client.start());
 	for (int f = 0; f < 20 && !client.mission_known(); ++f)
-		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 	if (!expect(client.mission_known(), "zones: joiner learned the mission")) return false;
 	client.set_world_ready(true);
 
 	for (int f = 0; f < 120 && !spawned; ++f) {
-		for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick)) pump_host(std::move(d));
+		for (std::vector<uint8_t> &d : client_frame(tick)) pump_host(std::move(d));
 		for (int k = 0; k < 6; ++k) {
 			// The spawn pump admits on the match's periodic second [orig: @0x51DBFD].
 			world.match.advance_tick(world);
@@ -2641,7 +2648,7 @@ bool run_roundtrip_with_spawn_zones(bool under_send_holdoff) {
 	// grants complete admission, and the joiner enters the match through the host's spawn.
 	auto drive_frames = [&](int frames, auto until) {
 		for (int f = 0; f < frames && !until(); ++f) {
-			for (std::vector<uint8_t> &d : client.Client_ProcessNetworkFrame(tick))
+			for (std::vector<uint8_t> &d : client_frame(tick))
 				pump_host(std::move(d));
 			for (inmatch::TickOut &t : inmatch::tick_connections(ctx, 300, tick++)) {
 				for (const inmatch::HostAcceptEvent &e : t.events) note_event(e);
