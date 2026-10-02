@@ -537,14 +537,16 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 	}
 	// A hosting NovaWorld session follows the hosted match: one PlayerList slot
 	// per admitted player, the live round clock the TimeLeft column reads at
-	// every refresh, and the session's GSID as the in-match host's 0x81 SUS1
-	// (cleared when its connection tears down, re-supplied by a re-host).
+	// every refresh, the session's GSID as the in-match host's 0x81 SUS1
+	// (cleared when its connection tears down, re-supplied by a re-host), and
+	// the cookie-key ring as it advances.
 	NovaWorldClient *client = nw_client();
 	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
 		NwuHostRole &host = client->host_role();
 		sync_nw_host_roster(host, sim);
 		host.set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
-		sim->set_novaworld_registration(host.gsid(), host.app_id());
+		sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+				opennova::to_gd(client->get_login_pcid()));
 	}
 	sync_nwu_session(sim);
 }
@@ -572,10 +574,9 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
 // added and sends ClientHostPlayerAdded / Removed on each roster change. The
-// PlayerPCID (the joiner's NovaWorld PCID) and PlayerType (the player type id)
-// have no in-match source on this seam: the join's CD identity pairs carry the
-// PCID only as the service-encrypted PUBPCID cookie, which the in-match host
-// does not decrypt, so they ride as the retail-shaped empty string and "0".
+// PlayerPCID is the joiner's decrypted PUBPCID (the in-match host's account
+// fields) [orig: CNapiGameSession_SendPlayerAdded @0x4d006c]; PlayerType (the
+// player type id) has no in-match source on this seam and rides as "0".
 // The ClientPlayerEnterRequest is NOT sent from here: the in-match host's
 // join-phase watchdog announces a validating joiner itself (the hook bound in
 // bind_nw_host), before the player is ever added to this roster.
@@ -583,7 +584,8 @@ void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation
 	std::map<int, std::string> live;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
 		const std::string signature = opennova::to_std(slot.player_name) + "|" +
-				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.team);
+				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.pcid) + "|" +
+				opennova::to_std(slot.team);
 		live[slot.slot] = signature;
 		auto sent = nw_roster_sent_.find(slot.slot);
 		if (sent != nw_roster_sent_.end() && sent->second == signature) {
@@ -593,6 +595,7 @@ void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation
 		player.slot = slot.slot;
 		player.player_name = opennova::to_std(slot.player_name);
 		player.ip_and_port = opennova::to_std(slot.ip_and_port);
+		player.pcid = opennova::to_std(slot.pcid);
 		player.team = opennova::to_std(slot.team);
 		player.type = "0";
 		p_host.set_player_slot(player);
@@ -712,7 +715,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	}
 	NwuHostRole &host = client->host_role();
 	nw_host_bound_ = true;
-	sim->set_novaworld_registration(host.gsid(), host.app_id());
+	const std::string login_pcid = client->get_login_pcid();
+	sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+			opennova::to_gd(login_pcid));
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds
 	// the player until on_nw_host_player_enter_result answers. The hook resolves
@@ -737,6 +742,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		self.slot = 0;
 		self.player_name = opennova::to_std(p_opts->get_player_name());
 		self.ip_and_port = ":" + std::to_string(sim->get_host_listen_port());
+		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		self.team = "0";
 		self.type = "0";
 		host.set_player_slot(self);
@@ -754,7 +760,7 @@ void SessionDrive::unbind_nw_host() {
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
-		sim->set_novaworld_registration(String(), 0);
+		sim->set_novaworld_registration(String(), 0, opennova::SessionIdRing{}, String());
 	}
 }
 

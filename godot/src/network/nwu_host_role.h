@@ -96,6 +96,9 @@ public:
 	// The registration's ServerHostResult asked for join tickets.
 	bool requires_join_ticket() const;
 	int app_id() const { return static_cast<int>(cfg_.app_id); }
+	// The cookie-key table the in-match host decrypts the joiners' CD cookies
+	// under: the ring whose current key the Host list advertises as PCIDKey.
+	const opennova::SessionIdRing &cookie_keys() const { return pcid_ring_; }
 	// ClientPlayerEnterRequest for a joiner the in-match host is validating.
 	void request_player_enter(uint32_t connection_id, uint32_t ip_address, uint32_t port,
 			const std::string &join_ticket);

@@ -188,6 +188,10 @@ public:
 	// in-match dial targets the LAN-discovered endpoint instead of the NK relay,
 	// and the play leg reports it as the "Lan" session var.
 	int get_join_lobby_number() const { return pending_join_.ln; }
+	// The login's PCID cookie ("" before a login): a NovaWorld host's own
+	// player carries it as its PCID [orig: NapiNPServer_HandleNewConnection
+	// @0x4c8288 reads the "PCID" cookie].
+	std::string get_login_pcid() const;
 
 	// Engine hooks.
 	void _ready() override;

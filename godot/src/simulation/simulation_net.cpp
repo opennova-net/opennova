@@ -283,10 +283,13 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id) {
+void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id,
+		const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
 		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
+		opennova::inmatch::set_novaworld_account_facts(*ctx, p_cookie_keys,
+				opennova::to_std(p_login_pcid));
 	}
 }
 
@@ -327,6 +330,7 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		s.slot = c.reply.player_slot;
 		s.player_name = opennova::to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
+		s.pcid = opennova::to_gd(c.account.pcid);
 		if (c.assigned_team_valid) s.team = String::num_int64(c.assigned_team);
 		out.push_back(std::move(s));
 	}
@@ -363,10 +367,6 @@ void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return;
 	ctx->novaworld_join_tickets_armed = p_armed;
-	// The prefix of the JOINTICKET key the watchdog looks up in the joiner's CD
-	// identity pairs (the engine owns the witnessed constant).
-	ctx->host_local_address =
-			p_armed ? opennova::inmatch::NapiNPServerCtx::kNovaWorldLocalAddress : "";
 	if (!p_hook) {
 		ctx->on_player_enter_request = nullptr;
 		return;

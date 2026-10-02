@@ -328,8 +328,6 @@ struct GameConfig {
 	// installs with the same expansion name can carry different patched data.
 	std::string integrity_profile;
 	std::string player_name = "DevUser";                    // host identity/roster name; remote 0x7B uses recipient ClientAuth.NA
-	std::string pcid;                                       // [orig entity+592] PCID (0x7A body / 0x7B field 2);
-	                                                        // empty on a dev host -> the 0x7A body is a single NUL
 	uint32_t spawn_x = 0xfe56f854u;
 	uint32_t spawn_y = 0x0049f5f0u;
 	uint32_t spawn_z = 0x003a5e6au;

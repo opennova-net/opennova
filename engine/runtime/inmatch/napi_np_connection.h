@@ -14,6 +14,7 @@
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
+#include <net/novaworld/join_identity.h> // JoinCookiePairs / JoinAccount (the CD cookie and its account fields)
 
 namespace opennova::inmatch {
 
@@ -623,7 +624,15 @@ struct NapiNPConnection {
 	// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies. Empty on LAN.
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 "CD" -> the cookie
 	//  buffer; KeyValueBuffer_FindValue @0x4C2A30 walks it by key]
-	std::vector<std::pair<std::string, std::string>> join_identity_pairs;
+	JoinCookiePairs join_identity_pairs;
+	// The NovaWorld account fields of this player's net config: a remote joiner's
+	// decrypted PCID / SQUADINFO cookies (load_join_account_from_cookie), the
+	// host's own loopback its login PCID. Read by the 0x7A / 0x7B PCID, the 0x46
+	// fields 0x0010 / 0x0800 and the NovaWorld PlayerList's PlayerPCID.
+	// [orig: NapiNPPlayer+0xCC NapiNetConfig — NetPacket_WritePCID @0x5076e0,
+	//  NapiNPMsg_0x7B_BuildPayload @0x5077ac, NetPacket_SerializePlayerSync0x46
+	//  @0x506070 / @0x506257, CNapiGameSession_SendPlayerAdded @0x4d006c]
+	JoinAccount account;
 	// NetPlayer game state 4 (the NovaWorld ticket wait): the
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
 	// success (state 6), and the spawn pump holds the player until then. The

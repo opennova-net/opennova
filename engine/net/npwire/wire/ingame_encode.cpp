@@ -731,14 +731,14 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
 	if (field_flags & kPlayerSyncHasTeamString)
 		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
-	if (field_flags & kPlayerSyncHasVehicleName)
-		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
+	if (field_flags & kPlayerSyncHasPcid)
+		w.cstr_capped(ctx.account_pcid, 32); // the NovaWorld PCID [orig: player+0x250 @0x506070; "" for an inactive slot @0x50601f]
 	if (field_flags & kPlayerSyncHasTeamByte)
 		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
 	if (field_flags & kPlayerSyncHasDownedState)
 		w.u8(ctx.downed_state);
 	if (field_flags & kPlayerSyncHasVehicleScore)
-		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
+		w.u8(0);        // NapiNPPlayer+0x9C, only ever zeroed [orig: @0x50613b..0x50618b]
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
 		w.u8(ctx.spectator_in_game); // spectator in game [orig: slot+4 && slot+100567 && !slot+100579 @0x506197..0x5061cc]
 	if (field_flags & kPlayerSyncHasSquad)
@@ -748,9 +748,8 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(ctx.quality); // quality [orig: slot+418 @0x506213; client clamps <=4 @0x431370]
 	if (field_flags & kPlayerSyncHasAccountId)
-		w.u32(0);       // NovaWorld account netId [orig: the slot connection's napi_player_data+420
-		                //  @0x506257, else 0 @0x506246] — 0 = a LAN account (no clan-roster node);
-		                // the NovaWorld-account value rides with the host clan-roster port
+		w.u32(ctx.account_squad_id); // the NovaWorld squad id [orig: player+0x270 @0x506257,
+		                             //  else 0 @0x506246] — 0 on LAN (no clan-roster node)
 
 	return out;
 }

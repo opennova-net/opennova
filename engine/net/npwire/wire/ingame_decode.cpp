@@ -397,7 +397,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, account netId.
 	if (m & kPlayerSyncHasName) out.name = c.cstr();
 	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
-	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
+	if (m & kPlayerSyncHasPcid) out.id_label = c.cstr();
 	if (m & kPlayerSyncHasTeamByte) out.team = c.u8();
 	if (m & kPlayerSyncHasDownedState) out.downed_state = c.u8();
 	if (m & kPlayerSyncHasVehicleScore) out.field_0020 = c.u8();

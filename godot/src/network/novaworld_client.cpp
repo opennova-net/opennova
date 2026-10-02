@@ -204,6 +204,11 @@ String NovaWorldClient::get_join_proxy_relay() const {
 	       String::num_int64(static_cast<int64_t>(join_proxy_.relay_port));
 }
 
+std::string NovaWorldClient::get_login_pcid() const {
+	const std::string *pcid = flow_.cookies().find("PCID");
+	return pcid != nullptr ? *pcid : std::string();
+}
+
 void NovaWorldClient::trace(const String &line) {
 	UtilityFunctions::print_verbose(line);
 }

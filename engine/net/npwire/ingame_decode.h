@@ -523,16 +523,23 @@ inline constexpr uint16_t kPlayerSyncHasName         = 0x0001; // cstr
 inline constexpr uint16_t kPlayerSyncHasTeamString   = 0x0002; // cstr; retail always "" (@0x505ff7)
 inline constexpr uint16_t kPlayerSyncHasTeamByte     = 0x0004;
 inline constexpr uint16_t kPlayerSyncHasDownedState  = 0x0008; // revive seconds low7 | medic-request bit7
-inline constexpr uint16_t kPlayerSyncHasVehicleName  = 0x0010; // cstr (§5.21 "id" label)
+// cstr: the slot's player's NovaWorld PCID (net config +0x184; "" on LAN)
+// [orig: @0x506046..0x5060ac]. The old "vehicle name" label misread slot+28,
+// the slot's NapiNPPlayer.
+inline constexpr uint16_t kPlayerSyncHasPcid         = 0x0010;
+// u8: NapiNPPlayer+0x9C inside a NovaWorld session while dword_24D21A4 is -1,
+// else 0; the only writers found zero it (NapiNPPlayer_Create @0x4c7a01,
+// CNetPlayer_ResetSendState @0x500b5e). [orig: @0x50613b..0x50618b]
 inline constexpr uint16_t kPlayerSyncHasVehicleScore = 0x0020;
 inline constexpr uint16_t kPlayerSyncHasSquad        = 0x0040;
 inline constexpr uint16_t kPlayerSyncHasSide         = 0x0080;
 inline constexpr uint16_t kPlayerSyncHasQuality      = 0x0400;
-// u32 NovaWorld ACCOUNT netId: the serializer reads the slot connection's
-// napi_player_data +420 (0 without a connection, so 0 on LAN) @0x506257/@0x506246;
-// the client stores it in slot dword 15 and keys PlayerSlot_SetName on it
-// (@0x431736 -> @0x43173d) to pull the clan-roster TAG into the Tab row. The
-// old "vehicle timer" / §5.21 "entityRef" labels were misreads of that offset.
+// u32 NovaWorld squad id: the serializer reads the slot's player's net config
+// squad_id (+0x1A4, the SQUADINFO cookie's leading dword; 0 on LAN)
+// @0x506257/@0x506246; the client stores it in slot dword 15 and keys
+// PlayerSlot_SetName on it (@0x431736 -> @0x43173d) to pull the clan-roster TAG
+// into the Tab row. The old "vehicle timer" / §5.21 "entityRef" labels were
+// misreads of that offset.
 inline constexpr uint16_t kPlayerSyncHasAccountId    = 0x0800;
 inline constexpr uint16_t kPlayerSyncHasLateJoinFlag = 0x1000;
 inline constexpr uint16_t kPlayerSyncAck             = 0x4000; // roster-walk ack; no body
@@ -542,7 +549,7 @@ inline constexpr uint16_t kPlayerSyncRemoval         = 0x8000; // removal; no bo
 // and the client's roster-walk request mask (the same set + the ack bit).
 inline constexpr uint16_t kPlayerSyncJoinBroadcastFields =
 		kPlayerSyncHasName | kPlayerSyncHasTeamString | kPlayerSyncHasTeamByte |
-		kPlayerSyncHasVehicleName | kPlayerSyncHasVehicleScore |
+		kPlayerSyncHasPcid | kPlayerSyncHasVehicleScore |
 		kPlayerSyncHasSquad | kPlayerSyncHasSide | kPlayerSyncHasQuality |
 		kPlayerSyncHasAccountId | kPlayerSyncHasLateJoinFlag;
 static_assert(kPlayerSyncJoinBroadcastFields == 0x1CF7,
@@ -562,7 +569,7 @@ struct PlayerSync {
 	uint8_t  entity_slot_id = 0;     // present when !removal; pool-0 → handle (0<<12)|slot
 	std::string name;                // 0x0001
 	std::string clan;                // 0x0002
-	std::string id_label;            // 0x0010
+	std::string id_label;            // 0x0010 the player's NovaWorld PCID
 	uint8_t  team = 0;               // 0x0004
 	uint8_t  downed_state = 0;       // 0x0008 (revive seconds = v & 0x7F; medic request = v >> 7)
 	uint8_t  field_0020 = 0;         // 0x0020
@@ -570,7 +577,7 @@ struct PlayerSync {
 	uint8_t  field_0040 = 0;         // 0x0040
 	uint8_t  field_0080 = 0;         // 0x0080
 	uint8_t  quality = 0;            // 0x0400 (clamp 4)
-	uint32_t account_id = 0;         // 0x0800 NovaWorld account netId -> slot dword 15, the clan-roster key (0 on LAN)
+	uint32_t account_id = 0;         // 0x0800 NovaWorld squad id -> slot dword 15, the clan-roster key (0 on LAN)
 	bool     queue_ack = false;      // 0x4000 — no body byte; client queues a C2S 0x22 ack
 };
 bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out);

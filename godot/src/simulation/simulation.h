@@ -1033,8 +1033,10 @@ public:
 	}
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The gate registration's GSID (0x81 SUS1) and AppId (the status page's key); LAN: empty / 0.
-	void set_novaworld_registration(const String &p_gsid, int p_app_id);
+	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
+	// joiners' CD cookie decrypt) and login PCID (the host's own player's); LAN: empty / 0.
+	void set_novaworld_registration(const String &p_gsid, int p_app_id,
+			const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid);
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
@@ -1042,8 +1044,7 @@ public:
 	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
 	struct HostPeerSlot {
 		int slot = 0;
-		String player_name;
-		String ip_and_port;         // "a.b.c.d:port"
+		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
 		String team;                // "%ld" of the assigned team; empty until assigned
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
@@ -1061,11 +1062,9 @@ public:
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
-	// The NovaWorld join-ticket flow of a gate-registered host. `armed` arms the
-	// in-match watchdog's ClientPlayerEnterRequest leg (a registration whose
-	// ServerHostResult carried HostRequiresJoinTicket); the hook receives each
-	// request (the joiner's ConnectionId, its endpoint as the inet_addr dword +
-	// port, and its JOINTICKET) and an empty hook unbinds. The service's answer
+	// The NovaWorld join-ticket flow: `armed` arms the in-match watchdog's ClientPlayerEnterRequest
+	// leg (ServerHostResult HostRequiresJoinTicket); the hook gets each request (the ConnectionId,
+	// the inet_addr dword + port, the JOINTICKET), an empty hook unbinds, and the service's answer
 	// returns through apply_player_enter_result. All three no-op without a host role.
 	using PlayerEnterRequestHook = std::function<void(uint32_t p_connection_id,
 			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;

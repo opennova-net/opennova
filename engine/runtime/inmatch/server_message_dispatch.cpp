@@ -296,11 +296,12 @@ std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	return payload;
 }
 
-// tag=0x7A: the player's PCID string (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
-// copies player+0x250]. Empty on a dev host -> a single NUL (golden frame 134 = len 1, body 00).
-std::vector<uint8_t> build_tag7a_pcid(const GameConfig &cfg) {
+// tag=0x7A: the recipient's own PCID (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
+// copies player+0x250, the 0x002 handler's target player @0x5130c2]. Empty on a LAN host -> a
+// single NUL (golden frame 134 = len 1, body 00).
+std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
-	append_cstr(payload, cfg.pcid);
+	append_cstr(payload, conn.account.pcid);
 	return payload;
 }
 
@@ -320,7 +321,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 					: cfg.mission_name;
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
-	append_cstr(payload, cfg.pcid);        // [orig entity+592] PCID
+	append_cstr(payload, conn.account.pcid); // [orig player+0x250 @0x5077ac] the recipient's PCID
 	append_cstr(payload, cfg.server_name); // [orig g_ServerNameStr]
 	append_cstr(payload, advertised_mission);
 	append_cstr(payload, cfg.mission_file);// [orig g_MapFileName]
@@ -594,6 +595,8 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
 		ctx.quality = conn.reply.client_quality;
+		ctx.account_pcid = conn.account.pcid;         // field 0x0010 [orig: player+0x250 @0x506070]
+		ctx.account_squad_id = conn.account.squad_id; // field 0x0800 [orig: player+0x270 @0x506257]
 		ctx.squad_leader = conn.squad_leader; // +100576 (field 0x0040)
 		ctx.fireteam = conn.fireteam;         // +100577 (field 0x0080)
 		// Field 0x1000: the spectator latch of a slot past its load, the
@@ -715,7 +718,7 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(configured_holdoff);
 	reset_s2c_send_holdoff_counter(conn);
 	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(cfg)));
+	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
 	out.push_back(make_protocol_message(
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
@@ -1104,6 +1107,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the local loopback bypasses the complete remote validator.
 				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
 				// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
+				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
+				// connection on a NovaWorld session decrypts before the validator.
+				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
+				if (inputs.server_ctx != nullptr) load_join_account_from_cookie(*inputs.server_ctx, conn);
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
 					uint32_t reject_dpc = validate_join_environment(conn.join_environment);

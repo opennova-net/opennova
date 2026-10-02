@@ -884,8 +884,9 @@ void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
 //  String_ConcatTwoSafe(localAddress, "JOINTICKET") then
 //  KeyValueBuffer_FindValue @0x4C2A30; a failed lookup rides an empty ticket].
 std::string join_ticket_for(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
-	if (ctx.host_local_address.empty()) return {};
-	const std::string key = ctx.host_local_address + "JOINTICKET";
+	std::string local_address;
+	if (!get_local_address(ctx, local_address)) return {};
+	const std::string key = local_address + "JOINTICKET";
 	for (const auto &pair : conn.join_identity_pairs) {
 		if (strutil::iequals(pair.first, key)) return pair.second;
 	}
