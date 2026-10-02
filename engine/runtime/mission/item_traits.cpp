@@ -489,6 +489,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.climb_speed = def->climb_speed;
                 vt.turn_roll = def->turn_roll;
                 vt.speed_pitch = def->speed_pitch;
+                vt.weathervane = def->weathervane;
                 // The platform slope thresholds + tuning block. The def parser's
                 // "pitch"/"pitch_velocity" tokens are the traits' bow-lift pair
                 // (pitch_lift/pitch_lift_vel) — speed_pitch above is the distinct
