@@ -62,9 +62,20 @@ static void test_userpoint_fractional_fixed_point() {
     check(approx(position[2], 1.5f), "fractional forward axis decodes");
 }
 
+// A `sitex` seat is a case-insensitive prefix from byte zero; the seat scan
+// binds 8 of them.
+static void test_userpoint_sitex_seats() {
+    check(THREEDI_SITEX_SEAT_LIMIT == 8, "the seat scan binds 8 sitex seats");
+    for (const char *name : {"sitex", "sitex00d", "SiteX12a", "SITEX"})
+        check(threedi_user_point_is_sitex(name), name);
+    for (const char *name : {"", "sit", "sitx00", " sitex01", "xsitex", "ctrlx00", "drvrx01", "UseGun"})
+        check(!threedi_user_point_is_sitex(name), name);
+}
+
 int main() {
     test_userpoint_side_axis_is_mirrored();
     test_userpoint_fractional_fixed_point();
+    test_userpoint_sitex_seats();
 
     if (failures == 0) {
         std::printf("userpoint_test: OK\n");

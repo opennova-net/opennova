@@ -6,6 +6,7 @@
 #include "object/entity_ref.h"
 #include "util/string_convert.h"
 
+#include <base/io/hash.h>
 #include <formats/env/env.h> // bms_env_overrides_from_header
 
 #include <formats/mission/bms.h>         // AttribFlags / AreaTrigger / Trigger bit names, parse / write
@@ -727,14 +728,8 @@ int64_t MissionData::object_records_revision() const {
 	// documents with byte-identical object records share a revision and any change moves
 	// it -- far cheaper than marshalling ~every entity into a Dictionary to hash it.
 	const bms::File &file = file_;
-	uint64_t h = 1469598103934665603ull; // FNV-1a 64-bit offset basis
-	const auto mix = [&h](const void *data, size_t size) {
-		const unsigned char *p = static_cast<const unsigned char *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			h ^= p[i];
-			h *= 1099511628211ull; // FNV-1a 64-bit prime
-		}
-	};
+	uint64_t h = opennova::io::kFnv1a64Offset;
+	const auto mix = [&h](const void *data, size_t size) { h = opennova::io::fnv1a64_bytes(h, data, size); };
 	const auto mix_entities = [&](const std::vector<bms::Entity> &v) {
 		const uint64_t count = v.size();
 		mix(&count, sizeof(count)); // a count change moves the revision even at a byte realignment

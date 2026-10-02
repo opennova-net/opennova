@@ -22,10 +22,13 @@
 #include <base/io/strutil.h>
 #include <formats/bad/bad_build.h>
 
-#include "scene_text.h"
+#include <formats/threedi/scene_text.h>
 #include "threedi_cli.h"
 
 using namespace opennova::bad;
+using opennova::threedi::f17;
+using opennova::threedi::f9;
+using opennova::threedi::name_field;
 
 namespace threedi_cli {
 

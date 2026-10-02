@@ -127,30 +127,30 @@ bool File::has(const std::string &key) const {
   return lookup_.find(strutil::to_upper(key)) != lookup_.end();
 }
 
+size_t File::section_index(const std::string &name) const {
+  for (size_t i = 0; i < sections.size(); ++i)
+    if (strutil::iequals(sections[i].name, name)) return i;
+  return std::string::npos;
+}
+
 const Entry *File::find_in_section(const std::string &section_name,
                                    const std::string &key) const {
   // [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250] — walk sections in
-  // order, first name match wins, accumulating preceding string_counts to find
-  // the section's first entry index. The engine never consults the entry's own
-  // section_index field; neither do we, so behaviour matches even on files
-  // that violate the grouping invariant.
-  std::string upper_section = strutil::to_upper(section_name);
+  // order, first name match wins (section_index), accumulating preceding
+  // string_counts to find the section's first entry index. The engine never
+  // consults the entry's own section_index field; neither do we, so behaviour
+  // matches even on files that violate the grouping invariant.
+  const size_t found = section_index(section_name);
+  if (found == std::string::npos) return nullptr;
   size_t start_index = 0;
-  for (const auto &section : sections) {
-    if (strutil::to_upper(section.name) == upper_section) {
-      // [orig: TextResource_FindKeyInSection @ 0x75D1E0] — bounded key walk,
-      // first match wins, index validated against the header entry count.
-      std::string upper_key = strutil::to_upper(key);
-      for (uint32_t i = 0; i < section.string_count; ++i) {
-        size_t index = start_index + i;
-        if (index >= entries.size()) return nullptr;
-        if (strutil::to_upper(entries[index].key) == upper_key) {
-          return &entries[index];
-        }
-      }
-      return nullptr;
-    }
-    start_index += section.string_count;
+  for (size_t s = 0; s < found; ++s) start_index += sections[s].string_count;
+  // [orig: TextResource_FindKeyInSection @ 0x75D1E0] — bounded key walk,
+  // first match wins, index validated against the header entry count.
+  const std::string upper_key = strutil::to_upper(key);
+  for (uint32_t i = 0; i < sections[found].string_count; ++i) {
+    const size_t index = start_index + i;
+    if (index >= entries.size()) return nullptr;
+    if (strutil::to_upper(entries[index].key) == upper_key) return &entries[index];
   }
   return nullptr;
 }

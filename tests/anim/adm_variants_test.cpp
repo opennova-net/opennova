@@ -66,8 +66,22 @@ int main(void) {
         "anim_emote_10\r\n"
         "anim_crouch // \"a.bad\"\r\n"
         "anim_prone \"a.bad\",\"b.bad\"\r\n";
-    CHECK(adm_parse_buffer(commented, strlen(commented), &adm) == 0);
+    std::vector<AdmDroppedLine> dropped;
+    CHECK(adm_parse_buffer(commented, strlen(commented), &adm, &dropped) == 0);
     CHECK(adm.count == 6);
+    // Each line whose input the table leaves out, on the row it keeps: the comments after
+    // clips (lines 1, 2, 3, 5), the rest after BIRD1's /no (line 4), and the rows that
+    // register nothing (lines 6, 7, 8). The last line leaves nothing out; none blocks.
+    CHECK(dropped.size() == 8);
+    if (dropped.size() == 8) {
+        const size_t rows[8] = {0, 1, 2, 3, 4, SIZE_MAX, SIZE_MAX, SIZE_MAX};
+        for (size_t i = 0; i < 8; ++i) {
+            CHECK(dropped[i].line == i + 1 && dropped[i].row == rows[i] && !dropped[i].blocks);
+        }
+        CHECK(dropped[0].key == "anim_walk_forward" && dropped[0].what.find("comment") != std::string::npos);
+        CHECK(dropped[3].what.find("'/no'") != std::string::npos);
+        CHECK(dropped[5].key == "anim_stop" && dropped[7].key == "anim_crouch");
+    }
     if (adm.count == 6) {
         CHECK(strcmp(adm.entries[0].key, "anim_walk_forward") == 0);
         CHECK(adm.entries[0].variant_count == 1);
@@ -117,6 +131,32 @@ int main(void) {
         CHECK(!adm_key_names_slot(adm.entries[1].key, "reset"));
     }
     CHECK(adm_slot_key("reset").empty() && adm_slot_key("anim_").empty());
+    adm_free(&adm);
+
+    // The lines the walk never hands the row parser: a "//" or ';' comment, a first
+    // token that starts with '/', a line of delimiters alone; a blank line holds
+    // nothing and is not reported. A row naming ten clips keeps 8 and blocks: the
+    // game registers every one. [orig: File_ParseASCIIFile @0x53D915, @0x53D91E;
+    // AnimMap_ParseConfigLine @0x40CBAE..0x40CC05]
+    const char *skipped =
+        "// header\r\n"
+        "  ; a note\r\n"
+        "/x y\r\n"
+        "   \r\n"
+        ", ,\r\n"
+        "anim_idle a b c d e f g h i j\r\n";
+    dropped.clear();
+    CHECK(adm_parse_buffer(skipped, strlen(skipped), &adm, &dropped) == 0);
+    CHECK(adm.count == 1 && dropped.size() == 5);
+    if (adm.count == 1) CHECK(adm.entries[0].variant_count == ADM_MAX_VARIANTS);
+    if (dropped.size() == 5) {
+        CHECK(dropped[0].line == 1 && dropped[0].what.find("comment") != std::string::npos);
+        CHECK(dropped[1].line == 2 && dropped[1].what.find("comment") != std::string::npos);
+        CHECK(dropped[2].line == 3 && dropped[2].key == "/x");
+        CHECK(dropped[3].line == 5 && dropped[3].row == SIZE_MAX && !dropped[3].blocks);
+        CHECK(dropped[4].line == 6 && dropped[4].row == 0 && dropped[4].blocks &&
+              dropped[4].what.find("10 clips") != std::string::npos);
+    }
     adm_free(&adm);
 
     if (failures == 0) printf("adm_variants_test: all passed\n");

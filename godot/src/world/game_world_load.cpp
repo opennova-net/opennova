@@ -1101,12 +1101,19 @@ void GameWorld::load_player_weapon_profile() {
 	if (sim.is_null()) {
 		return;
 	}
-	// The mount root joined with the engine's expansion-scoped relpath (the
-	// shell's PlayerProfile.weapon_profile_path computes the same path).
-	if (resource_root_.is_null() || resource_root_->get_root_dir().is_empty()) {
+	// The working directory joined with the engine's expansion-scoped relpath, as
+	// retail builds it [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, path build
+	// @0x54f68c-0x54f6b7]: never the mount root, a build the editor's Play runs from
+	// (ADR 0046 S13 A8). The shell's PlayerProfile.weapon_profile_path computes the
+	// same path.
+	if (resource_root_.is_null()) {
 		return;
 	}
-	const String path = resource_root_->get_root_dir().path_join(
+	const String dir = LaunchFlags::working_dir();
+	if (dir.is_empty()) {
+		return;
+	}
+	const String path = dir.path_join(
 			Simulation::weapon_profile_relpath(resource_root_->get_expansion()));
 	if (path.is_empty()) {
 		return;

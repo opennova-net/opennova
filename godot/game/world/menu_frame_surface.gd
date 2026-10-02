@@ -7,13 +7,9 @@ extends RefCounted
 ## MenuDriver stack over a foreign HUD parent, open the document), hiding the
 ## frame on close, fitting the MenuFrame to its layout source, forwarding the
 ## frame's gui input to the MenuDriver, wiring the resize source, and loading
-## the .mns style. Pure static helpers over the presenter's own typed members;
-## the armory and deploy presenters keep a 1-line _recompute_fit so their resize
-## signals have a bound Callable.
-
-## The canonical menu stylesheet name the original engine looks for
-## (MenuShell's default).
-const STYLESHEET_FILE := "menu_style.mns"
+## the shell's stylesheets. Pure static helpers over the presenter's own typed
+## members; the armory and deploy presenters keep a 1-line _recompute_fit so
+## their resize signals have a bound Callable.
 
 
 ## One built stack: the two nodes parented under the ui parent and the
@@ -111,14 +107,14 @@ static func build(root: ResourceRoot, ui_parent: Node, layout_control: Control,
 	return surface
 
 
-## Open the parsed document on a built driver with the canonical stylesheet
-## and the registered menutxt table. False (with a warning) when the document
-## has no screens.
+## Open the parsed document on a built driver with the shell's stylesheets
+## (menu_style.mns then brand.mns, as the game loads them) and the expansion's
+## string table (the screen's own tables are its windows' TEXT_RSRC, which the
+## frame loads). False (with a warning) when the document has no screens.
 static func open_document(driver: MenuDriver, doc: MnuDocument, root: ResourceRoot,
 		menu_file: String, screen: String, owner_name: String) -> bool:
-	var style := load_style(root, STYLESHEET_FILE)
-	var menu_text: RtxtStringFile = Strings.get_table(Strings.TABLE_MENUTXT)
-	if driver.open_document(doc, root, style, menu_text, menu_file, screen):
+	var style: MnsStyleSheet = MnsStyleSheet.load_shell(root)
+	if driver.open_document(doc, root, style, Strings.get_override_table(), menu_file, screen):
 		return true
 	push_warning("%s: %s has no screens" % [owner_name, menu_file])
 	return false
@@ -168,12 +164,3 @@ static func connect_layout_source(layout_control: Control, ui_parent: Node,
 	var viewport := ui_parent.get_viewport() if ui_parent != null else null
 	if viewport != null and not viewport.size_changed.is_connected(on_resize):
 		viewport.size_changed.connect(on_resize)
-
-
-## The runtime-valid .mns style sheet from the resource root, else null.
-static func load_style(root: ResourceRoot, stylesheet_file: String) -> MnsStyleSheet:
-	var bytes := root.read_file(stylesheet_file)
-	if bytes.is_empty():
-		return null
-	var s := MnsStyleSheet.new()
-	return s if s.load_from_bytes(bytes) == OK and s.is_runtime_valid() else null

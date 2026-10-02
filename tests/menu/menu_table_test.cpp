@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 using namespace opennova::fnt;
 using namespace opennova::menu;
@@ -122,7 +122,8 @@ struct RecordingCanvas : MenuTableCellCanvas {
 void test_subst_images_and_custom_events(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t chk0 = slot_of(c, "alphachk0.tga");
 	const int32_t chk1 = slot_of(c, "alphachk1.tga");
 	CHECK(chk0 >= 0 && chk1 >= 0, "configure interns the SUBST FILE images");
@@ -179,7 +180,8 @@ void test_subst_images_and_custom_events(const fnt_font_t *font) {
 void test_draw_cell_rect_and_passes(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t chk1 = slot_of(c, "alphachk1.tga");
 	c.set_texture_size(chk1, 16, 16);
 	const int table = c.widget_index("LIST");
@@ -220,7 +222,8 @@ void test_draw_cell_rect_and_passes(const fnt_font_t *font) {
 void test_text_alignment_color_and_hidden_rows(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int table = c.widget_index("LIST");
 	MenuWidgetState ws;
 	ws.index = table;
@@ -254,7 +257,8 @@ void test_text_alignment_color_and_hidden_rows(const fnt_font_t *font) {
 void test_hit_test(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int table = c.widget_index("LIST");
 	MenuWidgetState ws;
 	ws.index = table;
@@ -292,7 +296,8 @@ void test_clip_viewport(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t tex = slot_of(c, "close.tga");
 	c.set_texture_size(tex, 16, 16);
 	MenuWidgetState ws;
@@ -337,7 +342,8 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	MenuFrameState state;
 	state.custom_slot_index = c.widget_index("CHAT_MSGS");
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -365,7 +371,7 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 } // namespace
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_subst_images_and_custom_events(&font);
 	test_draw_cell_rect_and_passes(&font);
 	test_text_alignment_color_and_hidden_rows(&font);

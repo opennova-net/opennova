@@ -238,6 +238,9 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 	const String texture_name = from_native(row.name);
 	// The dispatcher reads the loader's runtime type, not the authored byte.
 	const uint8_t type = opennova::renderer::material_texture_runtime_type(row.type);
+	if (texture_files_) {
+		return texture_files_->load_material_texture(texture_name, type);
+	}
 	return resource_root.is_valid()
 			? resource_root->load_material_texture(texture_name, type)
 			: opennova::load_material_texture_from_dir(source_dir, texture_name, type);
@@ -246,6 +249,9 @@ Ref<Texture> ObjectData::load_material_texture(int p_material_index, int p_textu
 Ref<Texture2D> ObjectData::load_texture_name(const String &p_texture_name) const {
 	if (!source_model_ || p_texture_name.is_empty()) {
 		return Ref<Texture2D>();
+	}
+	if (texture_files_) {
+		return texture_files_->load_texture(p_texture_name);
 	}
 	if (resource_root.is_valid()) {
 		return resource_root->load_texture(p_texture_name);

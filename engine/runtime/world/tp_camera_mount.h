@@ -15,7 +15,7 @@ namespace opennova::world {
 // consumes these constants; player_view_tick integrates the mounted anchor.
 // [orig: ThirdPersonCamera_Update @0x437AF0 (the anchor); Camera_ComputeThirdPersonView
 //  @0x437D10 (the eye) — the clearances @0x438409..0x438456, the mounted slope
-//  march @0x43846E..0x438619, the watercraft drop @0x43861D..0x43864C]
+//  march @0x43846E..0x438619, the aircraft drop @0x43861D..0x43864C]
 //
 // Camera_RaycastCollisionOffset @0x4378B0 is deliberately NOT here: its only
 // callers sit in Camera_ComputeThirdPersonPositions @0x438B80, the mode-4
@@ -95,18 +95,19 @@ inline int32_t mount_look_yaw_bam(int32_t vehicle_yaw, int32_t look_yaw) {
 // @0x438150 = -0x08000000 BAM] — a vehicle is looked down on, not level with.
 inline constexpr float kMountPitchDeg = -11.25f;
 
-// A WATERCRAFT drops its eye by half the carrier's radius
+// An AIRCRAFT drops its eye by half the carrier's radius
 // [orig: @0x43861D..0x43864C — `itemDef+0x196 - 3 <= 1` (unit_type 3 or 4)
 //  gates `carrierRadius >> 1` off both the eye z and the look-at z].
-// unit_type 3/4 are the watercraft classes — Entity_ClassifyForMinimap
-// @0x50FA70 maps 3/4 to the boat icon (11) and 5..8 to the helicopter icon
-// (15); the earlier "aircraft drop" reading was a misnomer.
-inline constexpr float kWatercraftEyeDropScale = 0.5f;
-inline bool vehicle_unit_type_is_watercraft(int unit_type) {
+// unit_type 3/4 are the air classes (3 the helicopter): the game's vehicle
+// class reads 3/4 as aircraft (1), 1/2/12 as land (2) and 5..8 as boats (3)
+// [orig: Entity_GetVehicleClass @0x4f9e27], and Entity_ClassifyForMinimap
+// @0x50FA70 gives 3/4 icon 11 and 5..8 icon 15.
+inline constexpr float kAircraftEyeDropScale = 0.5f;
+inline bool vehicle_unit_type_is_aircraft(int unit_type) {
 	return unit_type == 3 || unit_type == 4;
 }
-inline float watercraft_eye_drop(float carrier_radius) {
-	return carrier_radius * kWatercraftEyeDropScale;
+inline float aircraft_eye_drop(float carrier_radius) {
+	return carrier_radius * kAircraftEyeDropScale;
 }
 
 // THE LOOK-AHEAD. Mounted (parent && slot 2/5) the look-at target is the

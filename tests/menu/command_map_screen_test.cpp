@@ -48,6 +48,7 @@ struct Frame : MenuFrameSeam {
 	void set_widget_scroll_range(int, int, int, int, int) override {}
 	void set_widget_selected_set(int, const std::vector<int> &) override {}
 	void set_widget_table_rows(int, const std::vector<MenuTableRow> &) override {}
+	void set_widget_table_columns(int, bool, const std::vector<MenuTableColumn> &, int) override {}
 	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
 	void set_widget_hover_item(int, int) override {}
 	void set_widget_popup_open(int, bool) override {}
@@ -70,7 +71,10 @@ struct Frame : MenuFrameSeam {
 	bool is_widget_disabled(int) const override { return false; }
 	MenuRectF widget_rect(int) const override { return {}; }
 	void design_scale(float &sx, float &sy) const override { sx = sy = 1.0f; }
-	int process_mouse(float, float, bool) override { return -1; }
+	int process_mouse(float, float, bool, bool &owned) override {
+		owned = false;
+		return -1;
+	}
 	bool process_popup_mouse(int, float, float, bool) override { return false; }
 	bool process_mouse_wheel(float, float, int) override { return false; }
 	void set_cursor_state(bool, float, float) override {}
@@ -85,7 +89,8 @@ struct Frame : MenuFrameSeam {
 		*c = -1;
 		return false;
 	}
-	int hotkey_widget(const std::string &, bool) const override { return -1; }
+	std::string widget_mnemonic(int) const override { return std::string(); }
+	void set_open_popup(int) override {}
 	bool edit_char(int, int) override { return false; }
 	int edit_key(int, int, bool) override { return 0; }
 };
@@ -109,11 +114,12 @@ mnu::Document cmap_document() {
 	mnu::Document doc;
 	mnu::Screen s;
 	s.name = "CMAP";
-	s.root_window = widget("MAIN", mnu::WindowType::Window);
-	s.root_window.children = {table("TEAMLIST", 10, true), table("PLAYERLIST", 7, true),
+	mnu::Window main = widget("MAIN", mnu::WindowType::Window);
+	main.children = {table("TEAMLIST", 10, true), table("PLAYERLIST", 7, true),
 		table("CURRENT_ORDERS", 2, false), widget("GROUP", mnu::WindowType::Combo),
 		widget("COMMAND_ORDER", mnu::WindowType::Combo), widget("LOCATION", mnu::WindowType::Combo),
 		widget("DIRECTIONAL", mnu::WindowType::Combo), widget("WAITFOR", mnu::WindowType::Combo)};
+	s.roots = {main};
 	doc.screens = {s};
 	return doc;
 }

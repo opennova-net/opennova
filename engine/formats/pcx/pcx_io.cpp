@@ -212,6 +212,107 @@ bool decode_pcx_luminance_alpha(const uint8_t *data, size_t size, RgbaImage &out
 	return true;
 }
 
+// [orig: load_pcx_to_argb @ 0x664cc0 — the header read (0x46 bytes), the BPP check
+// (returns 3), width/height from the window, then the 8-bit path (Seek(-768, 2), the
+// 0xFF000000 | rgb palette, the RLE loop to BytesPerLine) or the NPlanes == 3 path]
+bool decode_pcx_menu_rgba(const uint8_t *data, size_t size, RgbaImage &out, std::string &error) {
+	out = RgbaImage{};
+	if (size < 0x46) {
+		error = "PCX header truncated";
+		return false;
+	}
+	if (data[3] != 8) {
+		error = "PCX is not 8 bits per pixel";
+		return false;
+	}
+	const int16_t xmin = static_cast<int16_t>(data[4] | (data[5] << 8));
+	const int16_t ymin = static_cast<int16_t>(data[6] | (data[7] << 8));
+	const int16_t xmax = static_cast<int16_t>(data[8] | (data[9] << 8));
+	const int16_t ymax = static_cast<int16_t>(data[10] | (data[11] << 8));
+	const int16_t width = static_cast<int16_t>(xmax - xmin + 1);
+	const int16_t height = static_cast<int16_t>(ymax - ymin + 1);
+	const int planes = data[0x41];
+	const int bytes_per_line = data[0x42] | (data[0x43] << 8);
+	if (width <= 0 || height <= 0) {
+		error = "PCX dimensions out of range";
+		return false;
+	}
+	const size_t pixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+	// ARGB words; the 8-bit path's row writes run to BytesPerLine (plus a run's
+	// overshoot), so the scratch holds one row more than the image.
+	std::vector<uint32_t> argb(pixels + static_cast<size_t>(bytes_per_line) + 64u, 0u);
+	const auto byte_at = [&](size_t offset) -> uint8_t { return offset < size ? data[offset] : 0; };
+	if (planes != 3) {
+		uint32_t palette[256];
+		const size_t palette_at = size >= 768 ? size - 768 : 0;
+		for (int i = 0; i < 256; ++i) {
+			palette[i] = 0xFF000000u | (static_cast<uint32_t>(byte_at(palette_at + 3u * i)) << 16) |
+					(static_cast<uint32_t>(byte_at(palette_at + 3u * i + 1u)) << 8) |
+					static_cast<uint32_t>(byte_at(palette_at + 3u * i + 2u));
+		}
+		const size_t data_end = size >= 896 ? 128 + (size - 896) : 128;
+		size_t pos = 128;
+		const auto next = [&]() -> uint8_t { return pos < data_end ? data[pos++] : (++pos, 0); };
+		for (int row = 0; row < height; ++row) {
+			const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
+			int col = 0;
+			if (bytes_per_line == 0) continue;
+			do {
+				const uint8_t byte = next();
+				if ((byte & 0xC0) == 0xC0) {
+					const int run = byte & 0x3F;
+					const uint32_t color = palette[next()];
+					for (int n = 0; n < run; ++n, ++col) {
+						const size_t at = row_base + static_cast<size_t>(col);
+						if (at < argb.size()) argb[at] = color;
+					}
+				} else {
+					const size_t at = row_base + static_cast<size_t>(col++);
+					if (at < argb.size()) argb[at] = palette[byte];
+				}
+			} while (col < bytes_per_line);
+		}
+	} else {
+		std::vector<uint8_t> scanline(static_cast<size_t>(3 * bytes_per_line) + 64u, 0);
+		size_t pos = 128;
+		const auto next = [&]() -> uint8_t { return pos < size ? data[pos++] : (++pos, 0); };
+		for (int row = 0; row < height; ++row) {
+			int col = 0;
+			while (col < 3 * bytes_per_line) {
+				const uint8_t byte = next();
+				if ((byte & 0xC0) == 0xC0) {
+					const int run = byte & 0x3F;
+					const uint8_t value = next();
+					for (int n = 0; n < run; ++n, ++col)
+						if (static_cast<size_t>(col) < scanline.size()) scanline[static_cast<size_t>(col)] = value;
+				} else {
+					if (static_cast<size_t>(col) < scanline.size()) scanline[static_cast<size_t>(col)] = byte;
+					++col;
+				}
+			}
+			const size_t row_base = static_cast<size_t>(row) * static_cast<size_t>(width);
+			for (int i = 0; i < width; ++i) {
+				const auto plane = [&](int p) -> uint32_t {
+					const size_t at = static_cast<size_t>(p) * static_cast<size_t>(width) + static_cast<size_t>(i);
+					return at < scanline.size() ? scanline[at] : 0u;
+				};
+				argb[row_base + static_cast<size_t>(i)] = 0xFF000000u | (plane(0) << 16) | (plane(1) << 8) | plane(2);
+			}
+		}
+	}
+	out.width = width;
+	out.height = height;
+	out.pixels.resize(pixels * 4u);
+	for (size_t i = 0; i < pixels; ++i) {
+		const uint32_t c = argb[i];
+		out.pixels[4 * i + 0] = static_cast<uint8_t>(c >> 16);
+		out.pixels[4 * i + 1] = static_cast<uint8_t>(c >> 8);
+		out.pixels[4 * i + 2] = static_cast<uint8_t>(c);
+		out.pixels[4 * i + 3] = static_cast<uint8_t>(c >> 24);
+	}
+	return true;
+}
+
 bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, std::string &error) {
 	out.clear();
 

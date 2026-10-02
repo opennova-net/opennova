@@ -5,10 +5,13 @@
    tests/anim/root_motion_test.cpp; this pins the registry/resolution/advance
    plumbing of the ported source. */
 
+#include <chrono>
 #include <climits>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #ifdef _WIN32
@@ -22,7 +25,9 @@
 
 #include <base/resource_index/resource_index.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/anim/adm_clip_index.h>
 #include <runtime/anim/adm_root_motion.h>
+#include <runtime/anim/skeletal_clips.h>
 #include <runtime/world/infantry.h>
 
 int main() {
@@ -225,6 +230,91 @@ int main() {
         TEST_EXPECT(slots.has_clip(sid, kWalkForward));
         TEST_EXPECT(slots.variant_count(sid, kIdle) == 2);
         TEST_EXPECT(slots.clip_length_ticks(sid, kIdle, 1) == walk_len);
+    }
+
+    // A token whose .bad does not load registers failsafe.bad in its place when the
+    // mount has one, in each of the three .adm readers (the ring keeps its places),
+    // and nothing without one; a lost reset clip binds the failsafe; a clip named
+    // outside a table takes none.
+    // [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindOrLoadBoneFile @0x40c030,
+    //  the failsafe entry @0x40c25b..0x40c2a1, none @0x40c260; AnimMap_Init @0x40be40,
+    //  the load @0x40be96..0x40bead]
+    {
+        namespace fs = std::filesystem;
+        using opennova::world::anim_state::kIdle;
+        using opennova::world::anim_state::kWalkForward;
+        const fs::path dir = fs::path(test_paths_temp_dir()) /
+                ("opennova_rm_failsafe_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+        struct TempRoot {
+            fs::path path;
+            ~TempRoot() {
+                std::error_code ignored;
+                fs::remove_all(path, ignored);
+            }
+        } const cleanup{dir};
+        std::error_code ec;
+        fs::create_directories(dir, ec);
+        auto put = [&](const char *from, const char *to) {
+            std::vector<uint8_t> bytes;
+            if (!index.read_file(from, bytes)) return false;
+            std::ofstream f((dir / to).string(), std::ios::binary);
+            f.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
+            return static_cast<bool>(f);
+        };
+        TEST_EXPECT(put("idle.bad", "idle.bad") && put("walk.bad", "walk.bad") && put("walk.bad", "failsafe.bad"));
+        std::ofstream((dir / "gap.adm").string(), std::ios::binary)
+                << "anim_reset \"idle\"\r\nanim_idle \"idle\" \"absent\" \"idle\"\r\nanim_walk_forward \"walk\"\r\n";
+        std::ofstream((dir / "lost_reset.adm").string(), std::ios::binary)
+                << "anim_reset \"absent\"\r\nanim_idle \"idle\"\r\n";
+
+        opennova::ResourceIndex fs_index;
+        opennova::assets::AssetStore fs_assets{&fs_index};
+        TEST_EXPECT(fs_index.scan(dir.string()));
+        AdmRootMotion motion;
+        const int gap = motion.register_adm(&fs_assets, "gap.adm");
+        TEST_EXPECT(gap >= 0 && motion.variant_count(gap, kIdle) == 3);
+        TEST_EXPECT(motion.clip_length_ticks(gap, kIdle, 1) == motion.clip_length_ticks(gap, kWalkForward, 0));
+        // The failsafe here is walk's bytes: its variant travels, idle's do not.
+        auto travel = [&](int state, int variant) {
+            int32_t phase = -1, sum = 0;
+            for (int i = 0; i < 8; ++i) {
+                RootMotionFrame fr{};
+                if (!motion.advance_variant(gap, state, variant, phase, fr)) return INT32_MIN;
+                sum += fr.dx;
+            }
+            return sum;
+        };
+        TEST_EXPECT(travel(kIdle, 1) == travel(kWalkForward, 0) && travel(kIdle, 1) != travel(kIdle, 0));
+        uint32_t served_words[8] = {}, walk_words[8] = {};
+        const int n_served = motion.scan_triggers(gap, kIdle, -1, 7, served_words, 8, 1);
+        TEST_EXPECT(n_served == motion.scan_triggers(gap, kWalkForward, -1, 7, walk_words, 8, 0));
+        for (int i = 0; i < n_served; ++i) TEST_EXPECT(served_words[i] == walk_words[i]);
+        opennova::anim::AdmClipIndex facts;
+        TEST_EXPECT(facts.load(&fs_assets, "gap.adm") > 0 && facts.clips_for("anim_idle") &&
+                    facts.clips_for("anim_idle")->size() == 3);
+        opennova::anim::SkeletalClips rig;
+        TEST_EXPECT(rig.load_from_adm(&fs_assets, "gap.adm", {}, {}));
+        const opennova::anim::SkeletalClips::ClipSource *served = rig.find_clip_source("anim_idle", 1);
+        TEST_EXPECT(served && served->file == "failsafe.bad" && served->entry == 1 && served->token == 1);
+        std::string key;
+        TEST_EXPECT(rig.variant_of(1, 2, key) == 2 && key == "anim_idle");
+        TEST_EXPECT(rig.load_from_adm(&fs_assets, "lost_reset.adm", {}, {}));
+        TEST_EXPECT(rig.find_clip("anim_reset") && rig.find_clip("anim_reset")->source.file == "failsafe.bad");
+        TEST_EXPECT(rig.load_from_files(&fs_assets, "idle.bad", {{"anim_idle", "idle.bad"}, {"anim_run", "absent.bad"}}));
+        TEST_EXPECT(rig.find_clip("anim_run") == nullptr);
+
+        // Without failsafe.bad the token registers nothing and the ring closes up.
+        TEST_EXPECT(fs::remove(dir / "failsafe.bad", ec));
+        opennova::ResourceIndex bare_index;
+        opennova::assets::AssetStore bare_assets{&bare_index};
+        TEST_EXPECT(bare_index.scan(dir.string()));
+        AdmRootMotion bare;
+        const int bare_gap = bare.register_adm(&bare_assets, "gap.adm");
+        TEST_EXPECT(bare_gap >= 0 && bare.variant_count(bare_gap, kIdle) == 2);
+        TEST_EXPECT(facts.load(&bare_assets, "gap.adm") > 0 && facts.clips_for("anim_idle")->size() == 2);
+        TEST_EXPECT(rig.load_from_adm(&bare_assets, "gap.adm", {}, {}));
+        TEST_EXPECT(rig.variant_of(1, 1, key) == -1 && rig.variant_of(1, 2, key) == 1);
+        TEST_EXPECT(!rig.load_from_adm(&bare_assets, "lost_reset.adm", {}, {}));
     }
 
     // THE CROSSED-FRAME TRIGGER SCAN — one entry per authored frame entered,

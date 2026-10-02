@@ -118,14 +118,14 @@
       "test_cross_mnu_jump_and_back_stack",
       "test_failed_cross_mnu_jump_does_not_change_back_stack",
       "test_hidden_menu_suspends_shell_frame_processing",
-      "test_in_game_back_requests_resume",
       "test_ingame_hidden_back_button_resumes",
       "test_missing_assets_degrade_without_crashing",
       "test_multiple_companions_first_owner_drives_menu",
+      "test_pop_screen_with_no_history_does_nothing",
       "test_start_emits_selected_mission",
       "test_start_without_selection_is_a_no_op",
       "test_startup_drives_music_var",
-      "test_top_level_quit_requests_exit"
+      "test_top_level_exit_control_requests_exit"
     ],
     "retail_script": "godot/tests/retail/game/menu_shell_test.gd",
     "retail_methods": [

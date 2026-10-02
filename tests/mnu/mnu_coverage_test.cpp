@@ -3,158 +3,53 @@
    parse-dropped key is absent on both sides of parse->serialize->parse, so the
    test stays green while authored data is lost. See ADR 0002.
 
-   For each committed real menu we extract a multiset of path-qualified element
-   and attribute occurrences directly from the original bytes, and again from
-   serialize(parse(original)). Exact multiset equality is required after the one
-   documented spelling normalization. This catches both dropped constructs and
-   unexpected additions; an attribute can no longer be masked by a same-named
-   tag elsewhere in the file. */
+   For each shipped menu we take the multiset of path-qualified element and
+   attribute occurrences in the tree retail's reader builds from the original
+   bytes (mnu_xml, the structural translation of NapiXML_ParseElementTree
+   @ 0x769d70) and in the tree it builds from serialize(parse(original)). The
+   written menu may hold nothing the original did not, and every occurrence it
+   lacks must be one mnu::parse reported as left out (a ParseNote whose key is
+   that occurrence or an element holding it): retail does not read it, so the
+   model does not keep it. The notes are printed per menu. */
 
-#include <cctype>
 #include <cstdio>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
 
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_xml.h>
 
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 
-static std::string upper(std::string s) {
-  for (char &c : s) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-  return s;
-}
-
 using Occurrences = std::map<std::string, int>;
 
-static std::string path_for(const std::vector<std::string> &stack,
-                            const std::string &leaf) {
-  std::string path;
-  for (const auto &part : stack) path += "/" + part;
-  return path + "/" + leaf;
+static bool occurrences(const std::string &bytes, Occurrences &out, std::string &error) {
+  opennova::mnu::SourceEncoding encoding;
+  std::u32string text;
+  opennova::mnu::decode_source(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size(), encoding, text);
+  opennova::mnu_xml::Document xml;
+  if (!opennova::mnu_xml::parse(text, xml, error)) return false;
+  std::function<void(const opennova::mnu_xml::Node &)> visit = [&](const opennova::mnu_xml::Node &node) {
+    ++out[opennova::mnu_xml::path_key(node)];
+    for (const auto &a : node.attributes) {
+      if (a.name.empty() && !a.has_value) continue; // whitespace before '>': no attribute anyone reads
+      ++out[opennova::mnu_xml::path_key(node, &a)];
+    }
+    for (const auto &child : node.children) visit(*child);
+  };
+  for (const auto &root : xml.roots) visit(*root);
+  return true;
 }
 
-static std::string normalize_attr(std::string key) {
-  key = upper(std::move(key));
-  // The writer canonicalizes retail's two accepted disabled spellings.
-  if (key == "DISABLE") return "DISABLED";
-  return key;
-}
-
-// Parser-independent, quote-aware structural scanner. Keys are:
-//   /SCREEN/WINDOW/ITEMS                   (element occurrence)
-//   /SCREEN/WINDOW/ITEMS@MULTISELECT       (attribute occurrence)
-static Occurrences extract_occurrences(const std::string &c) {
-  Occurrences found;
-  std::vector<std::string> stack;
-  int screen_index = 0;
-  size_t i = 0, n = c.size();
-  while (i < n) {
-    if (c[i] != '<') {
-      ++i;
-      continue;
-    }
-    if (c.compare(i, 4, "<!--") == 0) {  // comment (covers 3-dash <!--- too)
-      size_t e = c.find("-->", i + 4);
-      i = (e == std::string::npos) ? n : e + 3;
-      continue;
-    }
-    size_t j = i + 1;
-    if (j < n && c[j] == '/') {
-      size_t e = c.find('>', j);
-      size_t name_start = j + 1;
-      while (name_start < e &&
-             isspace(static_cast<unsigned char>(c[name_start])))
-        ++name_start;
-      size_t name_end = name_start;
-      while (name_end < e &&
-             !isspace(static_cast<unsigned char>(c[name_end])) &&
-             c[name_end] != '>')
-        ++name_end;
-      // Retail fixtures contain known mismatched closers such as
-      // <SCROLLUP>...</APPEARANCE>. The lenient parser closes the current node
-      // on any end tag, so mirror that nesting rule while keeping the opening
-      // tag's own qualified identity.
-      if (!stack.empty()) stack.pop_back();
-      i = (e == std::string::npos) ? n : e + 1;
-      continue;
-    }
-    if (j < n && (c[j] == '?' || c[j] == '!')) {
-      size_t e = c.find('>', j);
-      i = (e == std::string::npos) ? n : e + 1;
-      continue;
-    }
-    // Retail fixtures include one malformed attribute with an unmatched quote
-    // before the element terminator. The game still terminates the tag at '>',
-    // so this structural scanner must do the same.
-    size_t e = c.find('>', j);
-    if (e >= n) break;
-    std::string inside = c.substr(j, e - j);
-    while (!inside.empty() &&
-           isspace(static_cast<unsigned char>(inside.back())))
-      inside.pop_back();
-    const bool self_closing = !inside.empty() && inside.back() == '/';
-    if (self_closing) {
-      inside.pop_back();
-      while (!inside.empty() &&
-             isspace(static_cast<unsigned char>(inside.back())))
-        inside.pop_back();
-    }
-    // Tokenize on whitespace, respecting quotes.
-    std::vector<std::string> toks;
-    std::string cur;
-    char tq = 0;
-    for (char ch : inside) {
-      if (tq) {
-        if (ch == tq)
-          tq = 0;
-        else
-          cur += ch;
-      } else if (ch == '"' || ch == '\'') {
-        tq = ch;
-      } else if (isspace(static_cast<unsigned char>(ch))) {
-        if (!cur.empty()) {
-          toks.push_back(cur);
-          cur.clear();
-        }
-      } else {
-        cur += ch;
-      }
-    }
-    if (!cur.empty()) toks.push_back(cur);
-    if (!toks.empty()) {
-      const std::string tag = upper(toks[0]);
-      std::string component = tag;
-      // SCREEN is the only retail document root. Reset defensively because
-      // malformed nested close spellings in one Screen must not qualify the
-      // next root beneath it.
-      if (tag == "SCREEN") {
-        stack.clear();
-        component += "[" + std::to_string(screen_index++) + "]";
-      } else if (tag == "WINDOW") {
-        for (size_t k = 1; k < toks.size(); ++k) {
-          const size_t eq = toks[k].find('=');
-          if (eq == std::string::npos) continue;
-          if (upper(toks[k].substr(0, eq)) == "NAME") {
-            component += "[" + upper(toks[k].substr(eq + 1)) + "]";
-            break;
-          }
-        }
-      }
-      const std::string path = path_for(stack, component);
-      ++found[path];
-      for (size_t k = 1; k < toks.size(); ++k) {
-        std::string key = toks[k];
-        const size_t eq = key.find('=');
-        if (eq != std::string::npos) key = key.substr(0, eq);
-        if (!key.empty()) ++found[path + "@" + normalize_attr(key)];
-      }
-      if (!self_closing) stack.push_back(component);
-    }
-    i = e + 1;
+static bool covered(const std::string &key, const std::vector<opennova::mnu::ParseNote> &notes) {
+  for (const auto &note : notes) {
+    if (note.key.empty() || key.compare(0, note.key.size(), note.key) != 0) continue;
+    if (key.size() == note.key.size() || key[note.key.size()] == '/' || key[note.key.size()] == '@') return true;
   }
-  return found;
+  return false;
 }
 
 static int check_menu(const char *path) {
@@ -165,47 +60,48 @@ static int check_menu(const char *path) {
   }
   opennova::mnu::Document doc;
   std::string err;
-  if (!opennova::mnu::parse(src, doc, err)) {
+  std::vector<opennova::mnu::ParseNote> notes;
+  if (!opennova::mnu::parse(src, doc, err, &notes)) {
     printf("  FAIL %s (parse: %s)\n", path, err.c_str());
     return 0;
   }
   const std::string ser = opennova::mnu::serialize(doc, true, 2);
-  const Occurrences authored = extract_occurrences(src);
-  const Occurrences written = extract_occurrences(ser);
+  Occurrences authored, written;
+  if (!occurrences(src, authored, err) || !occurrences(ser, written, err)) {
+    printf("  FAIL %s (read: %s)\n", path, err.c_str());
+    return 0;
+  }
   std::vector<std::string> differences;
+  for (const auto &row : written) {
+    const auto it = authored.find(row.first);
+    const int had = it == authored.end() ? 0 : it->second;
+    if (row.second > had)
+      differences.push_back(row.first + " written " + std::to_string(row.second) + " authored " + std::to_string(had));
+  }
   for (const auto &row : authored) {
     const auto it = written.find(row.first);
-    const int actual = it == written.end() ? 0 : it->second;
-    if (actual != row.second) {
-      differences.push_back(row.first + " expected=" +
-                            std::to_string(row.second) + " actual=" +
-                            std::to_string(actual));
-    }
+    const int kept = it == written.end() ? 0 : it->second;
+    if (kept < row.second && !covered(row.first, notes))
+      differences.push_back(row.first + " authored " + std::to_string(row.second) + " written " +
+                            std::to_string(kept) + " with no note");
   }
-  for (const auto &row : written) {
-    if (!authored.count(row.first)) {
-      differences.push_back(row.first + " expected=0 actual=" +
-                            std::to_string(row.second));
-    }
-  }
+  for (const auto &note : notes)
+    printf("       note %s line %zu %s: %s\n", path, note.line, note.key.c_str(), note.message.c_str());
   if (!differences.empty()) {
-    printf("  FAIL %s has %zu structural difference(s):\n", path,
-           differences.size());
-    for (const auto &difference : differences)
-      printf("       %s\n", difference.c_str());
+    printf("  FAIL %s has %zu structural difference(s):\n", path, differences.size());
+    for (const auto &difference : differences) printf("       %s\n", difference.c_str());
     return 0;
   }
   int total = 0;
   for (const auto &row : authored) total += row.second;
-  printf("  OK   %s (%d path-qualified occurrences preserved)\n", path,
-         total);
+  printf("  OK   %s (%d path-qualified occurrences; %zu reported left out)\n", path, total, notes.size());
   return 1;
 }
 
 int main(void) {
   // The full shipped revx02 JO-family menu set (15 files) from the reference
   // fixture set (the whole test is gated on it). Every one must round-trip
-  // without losing an authored key.
+  // without losing an authored key retail reads.
   static const char *const kMenus[] = {
       "jo_main", "jo_sp", "jo_mp", "jo_options", "jo_game", "jo_player", "jo_weapon", "jo_loadout",
       "jo_color", "jo_cmap", "jo_stat", "jo_death", "jo_vehicle", "jo_item_db", "jo_splash",
@@ -224,6 +120,6 @@ int main(void) {
     fprintf(stderr, "\n%d MNU fixture(s) lost keys on round-trip\n", fail);
     return 1;
   }
-  printf("\nAll %zu menus preserved every authored key.\n", paths.size());
+  printf("\nAll %zu menus kept every authored key retail reads.\n", paths.size());
   return 0;
 }

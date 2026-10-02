@@ -160,6 +160,39 @@ void threedi_build_occ_sphere(const ThreediOcclusionVertex *vertices, size_t cou
 
 float threedi_build_light_cone_cos(float falloff) { return std::cos(falloff * kDegreeToRadian); }
 
+float threedi_build_light_cone_half_angle(const ThreediLight &l) {
+	const double cosine = std::max(-1.0, std::min(1.0, static_cast<double>(l.rotation[3])));
+	const float estimate = static_cast<float>(std::acos(cosine) * 57.29577951308232);
+	const auto same_cone = [&l](float falloff, bool with_view_proj) {
+		if (static_cast<uint8_t>(static_cast<int32_t>(falloff) & 0xFF) != l.falloff_byte) return false;
+		const float c = threedi_build_light_cone_cos(falloff);
+		if (std::memcmp(&c, &l.rotation[3], sizeof(c)) != 0) return false;
+		if (!with_view_proj) return true;
+		ThreediLight rebuilt = l;
+		threedi_build_light_view_proj(rebuilt, falloff);
+		return std::memcmp(rebuilt.view_proj, l.view_proj, sizeof(l.view_proj)) == 0;
+	};
+	for (const bool with_view_proj : {true, false}) {
+		if (same_cone(static_cast<float>(l.falloff_byte), with_view_proj)) return static_cast<float>(l.falloff_byte);
+		float up = estimate, down = estimate;
+		for (int step = 0; step < 16384; ++step) {
+			if (same_cone(up, with_view_proj)) return up;
+			if (same_cone(down, with_view_proj)) return down;
+			up = std::nextafter(up, 1000.0f);
+			down = std::nextafter(down, -1000.0f);
+		}
+	}
+	return estimate;
+}
+
+void threedi_build_material_surface(ThreediMaterial &m, bool glass_shader, bool emissive_shader) {
+	float *reflect = m.reflect_color;
+	if (glass_shader && reflect[0] == 0.0f && reflect[1] == 0.0f && reflect[2] == 0.0f && reflect[3] == 0.0f)
+		for (int k = 0; k < 3; ++k) reflect[k] = threedi_byte_unit(128);
+	m.is_glass = glass_shader && (reflect[0] != 0.0f || reflect[1] != 0.0f || reflect[2] != 0.0f) ? 1 : 0;
+	m.emissive_type = static_cast<uint8_t>(emissive_shader ? THREEDI_EMISSIVE_FULL : THREEDI_EMISSIVE_NONE);
+}
+
 ThreediPartAnimation threedi_build_inert_panm(int part, int parent) {
 	ThreediPartAnimation row{};
 	row.parent_subobject = static_cast<uint8_t>(parent);
@@ -1018,7 +1051,7 @@ void ThreediBuildModel::set_rgb_gen(int material, uint8_t style, int reg, double
 		const int end_rgb[3]) {
 	ThreediRgbGen &g = materials[material].rgb_gen;
 	g.style = style;
-	g.reg = style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1;
+	g.reg = threedi_generator_names_register(style) ? reg : -1;
 	g.phase = 0.0f;
 	g.rate = threedi_q8f(rate);
 	for (int k = 0; k < 3; ++k) {

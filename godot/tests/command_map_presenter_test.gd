@@ -132,8 +132,11 @@ func test_zoom_buttons_toggles_and_ok() -> void:
 	driver.activate(driver.widget_id("ZOOMOUT"))
 	assert_almost_eq(map_window.get_zoom(), 4.0, 0.0001, "ZOOMOUT steps x1/0.85")
 	var grid := driver.widget_id("GRID")
-	driver.set_widget_checked(grid, false)
+	# A click is the activation: the checkbox's own class step (CCheckboxWnd's
+	# toggle) clears the box that opened checked, then the callback stores the
+	# control's state.
 	driver.activate(grid)
+	assert_false(driver.is_widget_checked(grid), "the click clears the open GRID")
 	assert_false(map_window.get_command_toggle(MapViewWindow.COMMAND_TOGGLE_GRID),
 			"GRID stores its control's state")
 	assert_false(driver.is_widget_checked(driver.widget_id("ORDERS_GRID")),

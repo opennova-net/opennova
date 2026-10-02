@@ -78,6 +78,12 @@ struct File {
   // Check if a key exists (case-insensitive).
   bool has(const std::string &key) const;
 
+  // The section a lookup finds by `name`: the first whose name matches without
+  // case, a later one of the same name never [orig: TextResource_FindEntryBySectionAndKey
+  // @ 0x75D250, the stricmp walk @0x75D2B0; TextResource_GetSectionStringCount
+  // @ 0x75D300, @0x75D351]. npos when none matches.
+  size_t section_index(const std::string &name) const;
+
   // Engine-faithful section-scoped lookup [orig: TextResource_FindEntryBySectionAndKey
   // @ 0x75D250]: finds the first section whose name matches (case-insensitive),
   // then scans that section's contiguous entry range (derived from accumulated

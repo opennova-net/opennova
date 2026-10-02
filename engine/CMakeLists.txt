@@ -15,11 +15,16 @@
 #                                          and replication (ADR 0043 d4)
 #   opennova_novaworld_service  STATIC     the novaworld service leg — the ONLY
 #                                          target that links opennova_sqlite
+#   opennova_editor             STATIC     editor/* — the OpenNova Editor's portable
+#                                          core (ADR 0046 d3): project, assets,
+#                                          requirements, and the later slices
 #
 # PUBLIC link chain: formats -> io; base -> formats; net -> base;
-# runtime -> net; novaworld_service -> net (+ sqlite PRIVATE). base sits ABOVE
-# formats deliberately: vfs consumes pff/scr/bfc1; only io is at the bottom.
-# net is wire only and never links runtime (ADR 0043 d4).
+# runtime -> net; novaworld_service -> net (+ sqlite PRIVATE); editor -> runtime.
+# base sits ABOVE formats deliberately: vfs consumes pff/scr/bfc1; only io is at
+# the bottom. net is wire only and never links runtime (ADR 0043 d4). Nothing
+# below editor links or includes it: the game and the Play child never carry
+# editor code (ADR 0046 d2/d3).
 #
 # Both CMake roots (the repo root and godot/src) add this directory; the
 # including root must have defined opennova_sqlite (third_party/sqlite) first —
@@ -31,3 +36,4 @@ add_subdirectory(formats)
 add_subdirectory(base)
 add_subdirectory(net)
 add_subdirectory(runtime)
+add_subdirectory(editor)

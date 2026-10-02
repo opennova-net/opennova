@@ -6,6 +6,8 @@
 //  (PAR-R5, D-CBIN), MATCHING.]
 #include <formats/cbin/cbin.h>
 
+#include <formats/cbin/binary_config.h>
+
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 
@@ -19,28 +21,8 @@ namespace opennova::cbin {
 
 namespace {
 
-// Rotate left 32-bit
-inline uint32_t rol32(uint32_t value, unsigned int count) {
-    count &= 31;
-    return (value << count) | (value >> (32 - count));
-}
-
 uint32_t read_le_u32(const uint8_t* data) {
     return io::read_u32_le(data);
-}
-
-// Encode a buffer using ROL32 + XOR cipher [orig: cipher loop @ 0x75e348 —
-// `mov ebx,[key]; rol ebx,7; mov [key],ebx; mov al,[key]; xor [blob],al`].
-void encode_buffer(std::vector<uint8_t>& data, uint32_t key) {
-    for (size_t i = 0; i < data.size(); i++) {
-        key = rol32(key, 7);
-        data[i] ^= (key & 0xFF);
-    }
-}
-
-// Decode a buffer using ROL32 + XOR cipher (same as encode - XOR is symmetric)
-void decode_buffer(std::vector<uint8_t>& data, uint32_t key) {
-    encode_buffer(data, key);  // XOR is its own inverse
 }
 
 // Parse a hex color from ~Crrggbb format
@@ -183,7 +165,7 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     size_t encoded_length = string_offset + blob_length - kHeaderSize;
 
     std::vector<uint8_t> decoded(data + kHeaderSize, data + kHeaderSize + encoded_length);
-    decode_buffer(decoded, xor_key);
+    apply_cipher(decoded.data(), decoded.size(), xor_key);
 
     // String table starts at (string_offset - kHeaderSize) within decoded buffer
     size_t string_table_offset = string_offset - kHeaderSize;
@@ -696,7 +678,7 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
     encoded_data.insert(encoded_data.end(), string_blob.begin(), string_blob.end());
 
     // Encode with XOR cipher
-    encode_buffer(encoded_data, xor_key);
+    apply_cipher(encoded_data.data(), encoded_data.size(), xor_key);
 
     // Build final output
     // Header

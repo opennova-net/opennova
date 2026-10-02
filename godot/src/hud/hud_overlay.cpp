@@ -41,6 +41,7 @@
 
 using namespace godot;
 
+#include <runtime/hud/game_text_lookup.h> // the game-text section names
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
 #include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
@@ -981,8 +982,8 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         const auto text = [&](const char *section, const char *key) -> std::string {
             return opennova::to_std(p_gametext->get_string_in_section(section, key));
         };
-        scope.range_format = text("Overlays", "STROVER_DIST");
-        scope.range_over_1km = text("Overlays", "STROVER_DIST1KM");
+        scope.range_format = text(opennova::hud::kGameTextOverlays, "STROVER_DIST");
+        scope.range_over_1km = text(opennova::hud::kGameTextOverlays, "STROVER_DIST1KM");
         scope.zero_format = text("hud", "hud_scope_zero");
         scope.zero_auto = text("hud", "hud_scope_zero_auto");
         scope.zero_none = text("hud", "hud_scope_zero_none");
@@ -1245,8 +1246,8 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 		const String &p_fallback) {
 	if (p_gametext.is_valid() &&
-			p_gametext->has_string_in_section("Overlays", StringName(p_key))) {
-		return p_gametext->get_string_in_section("Overlays", StringName(p_key));
+			p_gametext->has_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key))) {
+		return p_gametext->get_string_in_section(opennova::hud::kGameTextOverlays, StringName(p_key));
 	}
 	return p_fallback;
 }

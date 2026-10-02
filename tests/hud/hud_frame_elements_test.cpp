@@ -12,7 +12,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_math.h>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <cstdio>
 #include <cstring>
@@ -585,7 +585,7 @@ void test_squad_orders(const fnt_font_t *font) {
 }
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_game_info(&font);
 	test_clock(&font);
 	test_team_id_line(&font);

@@ -77,7 +77,7 @@ var _frame_stats := FrameStats.new()
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
-var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
+var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _web_retail_picking := false  # the web page's picker is open (ADR 0049)
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
@@ -622,8 +622,8 @@ func _enter_menu(dir: String) -> bool:
 		if root == null:
 			return false
 		_root = root
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
+	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
 	if profile_root_key != _profile_root_key:
 		_chosen_avatar = PlayerProfile.load_character_profile(_root)
 		_profile_root_key = profile_root_key
@@ -642,6 +642,14 @@ func _enter_menu(dir: String) -> bool:
 	# keyhelp.bin off the mounted root; null when the root carries none or it
 	# does not parse (every binding label then renders its literal fallback).
 	Strings.register_table(Strings.TABLE_KEYHELP, Strings.load_rtxt(_root, "keyhelp.bin"))
+	# The mounted expansion's own text bin (<exp>.bin, e.g. jox01.bin) is the
+	# override table every string lookup tries first, the menu strings
+	# included; with no expansion there is none. Retail's expansion load
+	# installs it the same way (docs/interface/rtxt-strings-re.md, the override
+	# row; docs/mnu/menu-re.md "Menu strings").
+	var expansion := String(_root.get_expansion())
+	Strings.set_override_table(
+			Strings.load_rtxt(_root, expansion + ".bin") if not expansion.is_empty() else null)
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)"
 				% _menu_shell.main_menu_file)
@@ -769,6 +777,7 @@ func _wire_shell() -> void:
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
+	_bundled_companion.exit_requested.connect(_on_exit_to_desktop)
 	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
