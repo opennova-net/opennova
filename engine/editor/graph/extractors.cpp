@@ -6,9 +6,10 @@
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
 // makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
-// avatar table, a particle file, a mission) read their parsed structs.
+// avatar table, a particle file) read their parsed structs.
 #include <editor/graph/asset_graph.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <sstream>
 #include <variant>
@@ -21,10 +22,12 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
+#include <formats/def/def.h>
+#include <formats/lwf/lwf.h>
 #include <formats/env/env.h>
-#include <formats/mission/bms.h>
-#include <formats/mission/bms_edit.h>
 #include <formats/particle/parser.h>
+#include <formats/trn/trn_io.h>
+#include <runtime/renderer/particle_atlas.h>
 
 namespace opennova::editor {
 
@@ -66,6 +69,16 @@ std::string value_name(const Value &value) {
 	return std::string();
 }
 
+// The same as the name of a reference or a definition of `kind`: a mission's zone id of 0 is a name
+// too (an area trigger may hold it, and a parameter holding it where none does names an area the
+// load does not find, the trigger then neutered [orig: EventTrigger_ResolveZoneTriggerRefs
+// @0x453000]); no witness makes 0 a zone id that names none.
+std::string value_name(ReferenceKind kind, const Value &value) {
+	if (kind == ReferenceKind::MissionZone)
+		if (const auto *number = std::get_if<int64_t>(&value)) return std::to_string(*number);
+	return value_name(value);
+}
+
 // A record's references and the symbols it defines, each field as it applies to that record
 // (Document::field_on: a menu STRING's value is a string id when its TYPE says so, an
 // APPEARANCE's value a texture or a colour by its TYPE, an ACTION's target a screen or a
@@ -92,7 +105,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		if (field.applies == Applicability::Ignored || !document.present(address, schema.id)) continue;
 		Value value;
 		if (!document.get(address, schema.id, value)) continue;
-		const std::string defined = field.defines == ReferenceKind::None ? std::string() : value_name(value);
+		const std::string defined = field.defines == ReferenceKind::None ? std::string() : value_name(field.defines, value);
 		if (!defined.empty()) {
 			place();
 			GraphSymbol symbol = symbol_of(field.defines, defined, document.path(), record, field.scope);
@@ -153,6 +166,94 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 	return true;
 }
 
+// The HUD layout (hudpos.def, ADR 0046 S14): the two fonts the HUD draws its text with, each
+// stance's icon, the static frames, the two status icons, the weapon bar's two textures and each
+// vehicle panel's three, by the names the HUD's loaders are handed [orig: HUD_ParseHudposToken
+// @0x59F370].
+bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	def::DefHudPosFile file{};
+	if (def::def_parse_hudpos_memory(bytes.data(), bytes.size(), &file) != 0) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The HUD layout could not be read.", name);
+		return false;
+	}
+	const def::DefHudPosDef &hud = file.hud;
+	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const char *value) {
+		if (value && *value) out.edges.push_back(edge_of(name, record, field, kind, value));
+	};
+	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, hud.font_hi);
+	edge(std::string(), "fonthud1_lo", ReferenceKind::Font, hud.font_lo);
+	// A stance's icon is its slot's (ids 0 to 5), the last record of an id the one read; the static
+	// frame is the last line authored (runtime/hud/hud_frame.h, hud_static_frame_index).
+	for (int id = 0; id < 6; ++id) {
+		const def::DefHudStance *read = nullptr;
+		for (size_t i = 0; i < hud.stances_count; ++i)
+			if (hud.stances[i].id == id) read = &hud.stances[i];
+		if (read) edge("HUDSTANCE " + std::to_string(id), "texture", ReferenceKind::Texture, read->texture);
+	}
+	if (hud.static_frames_count > 0)
+		edge("StaticFrame", "texture", ReferenceKind::Texture, hud.static_frames[hud.static_frames_count - 1].texture);
+	edge(std::string(), "parachute_icon", ReferenceKind::Texture, hud.parachute_icon.texture);
+	edge(std::string(), "armor_icon", ReferenceKind::Texture, hud.armor_icon.texture);
+	edge(std::string(), "hudls_bracket", ReferenceKind::Texture, hud.hudls_bracket);
+	edge(std::string(), "hudls_moreav", ReferenceKind::Texture, hud.hudls_moreav);
+	for (size_t i = 0; i < hud.vehicle_huds_count; ++i) {
+		const def::DefVehicleHudBlock &vehicle = hud.vehicle_huds[i];
+		const std::string record = std::string("VEHICLE_HUD ") + vehicle.sid;
+		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
+		edge(record, "interface", ReferenceKind::Texture, vehicle.interface_texture);
+		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
+	}
+	def::def_free_hudpos(&file);
+	return true;
+}
+
+// A terrain (.trn, ADR 0046 S14): its height data, the maps and detail textures its keys name, its
+// tile atlas and each foliage block's model [orig: Terrain_ParseConfigCallback @0x60f330]. A config
+// the game refuses (load_trn's admission gate) is one the graph does not read. Two files a terrain
+// has no edge to: the atlas's .TSD twin, optional and in no shipped game (formats/til/til_tsd.h),
+// and its tile placement, which the game finds by the mission's name (mission::sidecars).
+bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	std::istringstream input(std::string(bytes.begin(), bytes.end()));
+	TrnConfig config;
+	std::string message;
+	if (!load_trn(input, config, message)) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
+		return false;
+	}
+	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const std::string &value) {
+		if (!value.empty()) out.edges.push_back(edge_of(name, record, field, kind, value));
+	};
+	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
+	edge(std::string(), "polytrn_colormap", ReferenceKind::Texture, config.colormap);
+	edge(std::string(), "polytrn_detailmap", ReferenceKind::Texture, config.detailmap);
+	edge(std::string(), "polytrn_detailmap_c1", ReferenceKind::Texture, config.detailmap_c1);
+	edge(std::string(), "polytrn_detailmap_c2", ReferenceKind::Texture, config.detailmap_c2);
+	edge(std::string(), "polytrn_detailmap_c3", ReferenceKind::Texture, config.detailmap_c3);
+	edge(std::string(), "polytrn_detailmap2", ReferenceKind::Texture, config.detailmap2);
+	edge(std::string(), "polytrn_detailmapdist", ReferenceKind::Texture, config.detailmapdist);
+	edge(std::string(), "polytrn_detailmapdist2", ReferenceKind::Texture, config.detailmapdist2);
+	edge(std::string(), "polytrn_detailblendmap", ReferenceKind::Texture, config.detailblendmap);
+	edge(std::string(), "polytrn_tilestrip", ReferenceKind::Texture, config.tilestrip);
+	edge(std::string(), "polytrn_charmap", ReferenceKind::Texture, config.charmap);
+	edge(std::string(), "polytrn_foliagemap", ReferenceKind::Texture, config.foliagemap);
+	for (size_t i = 0; i < config.foliage_defs.size(); ++i)
+		edge("foliage " + std::to_string(i + 1), "graphic", ReferenceKind::Model, config.foliage_defs[i].graphic);
+	return true;
+}
+
+// A sound bank (.lwf, ADR 0046 S14): the wave each of its singles names (formats/lwf).
+bool extract_sound_bank(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	lwf::File bank;
+	std::string message;
+	if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, message)) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
+		return false;
+	}
+	for (const lwf::Single &single : bank.singles)
+		if (!single.path.empty()) out.edges.push_back(edge_of(name, single.name, "wave", ReferenceKind::Wave, single.path));
+	return true;
+}
+
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
@@ -187,32 +288,20 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
 			if (!layer.present || layer.texture.empty()) continue;
-			out.edges.push_back(edge_of(name, definition.id, "graphic" + std::to_string(g + 1), ReferenceKind::Texture,
-			                            layer.texture));
-		}
-	}
-	return true;
-}
-
-bool extract_mission(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	bms::File file;
-	std::string message;
-	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	if (!file.get_terrain().empty())
-		out.edges.push_back(edge_of(name, std::string(), "terrain", ReferenceKind::Terrain, file.get_terrain()));
-	if (!file.get_environment().empty())
-		out.edges.push_back(edge_of(name, std::string(), "environment", ReferenceKind::Environment, file.get_environment()));
-	struct Pool { const char *label; const std::vector<bms::Entity> *entities; };
-	const Pool pools[] = {{"item", &file.items}, {"building", &file.buildings}, {"marker", &file.markers}, {"organic", &file.organics}};
-	for (const Pool &pool : pools) {
-		for (size_t i = 0; i < pool.entities->size(); ++i) {
-			const int id = mission::entity_item_id((*pool.entities)[i]);
-			if (id <= 0) continue;
-			out.edges.push_back(edge_of(name, std::string(pool.label) + "[" + std::to_string(i) + "]", "item_id",
-			                            ReferenceKind::Item, std::to_string(id)));
+			const std::string field = "graphic" + std::to_string(g + 1);
+			// A flipbook layer loads a file a frame, named from the graphic's (its stem, lower case,
+			// and the frame's number), and never the graphic's own name [orig:
+			// CParticleDef_ReloadGraphicFrameTextures @0x5e4bb0]: each frame is a reference of its
+			// own (ADR 0046 S14).
+			const int frames = std::clamp(layer.flip_frames, 1, particle::kMaxParticleFlipFrames);
+			if (frames <= 1) {
+				out.edges.push_back(edge_of(name, definition.id, field, ReferenceKind::Texture, layer.texture));
+				continue;
+			}
+			for (int frame = 1; frame <= frames; ++frame)
+				out.edges.push_back(edge_of(name, definition.id, field + "[" + std::to_string(frame) + "]",
+				                            ReferenceKind::Texture,
+				                            renderer::retail_particle_frame_name(layer.texture, frames, frame)));
 		}
 	}
 	return true;
@@ -226,10 +315,12 @@ struct NativeKind {
 	NativeExtractor extract;
 };
 constexpr NativeKind kNativeKinds[] = {
+	{AssetKind::HudPosDefs, extract_hudpos},
+	{AssetKind::Terrain, extract_terrain},
+	{AssetKind::SoundBank, extract_sound_bank},
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
-	{AssetKind::Mission, extract_mission},
 };
 
 NativeExtractor native_extractor(AssetKind kind) {
@@ -261,7 +352,7 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 		scope = field.scope;
 		return true;
 	}
-	name = value_name(value);
+	name = value_name(kind, value);
 	// A text's whole %NAME% names the variable, which has no scope (the field's is what it defines).
 	if (field.reference == ReferenceKind::None) return true;
 	if (name.empty()) return false;
@@ -286,6 +377,9 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		edge.locator = TextDocument::locator(reference.span.line, reference.span.column);
 		edge.span = reference.span;
 		edge.fallback = std::move(reference.fallback);
+		edge.scopes_after = std::move(reference.scopes_after);
+		edge.scope_alternate = std::move(reference.scope_alternate);
+		edge.scope_owner = std::move(reference.scope_owner);
 		out.edges.push_back(std::move(edge));
 	}
 }
@@ -299,6 +393,9 @@ void extract_from_document(const Document &document, Extracted &out) {
 			return true;
 		});
 	}
+	// The type's references that no field's value is (DocumentType::record_references, S14).
+	if (const DocumentType *type = document_type_for(document.kind()); type && type->record_references)
+		type->record_references(document, out);
 	// The record sets (S13 D8): each record of a collection another record names by index, a symbol
 	// of the Record kind named by its index in the file (Document::record_sets, the file's order),
 	// scoped to the file and defined by no field, its value the record's own name (a register's
@@ -330,17 +427,9 @@ bool graph_reads_kind(AssetKind kind) {
 	return native_extractor(kind) != nullptr;
 }
 
-bool graph_reads_file(AssetKind kind, const std::string &name) {
-	// A .mis is a mission too, the mission editors' text form (docs/mission/mis-format-re.md),
-	// which no BMS parse reads.
-	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms"))
-		return false;
-	return graph_reads_kind(kind);
-}
-
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error) {
-	if (!graph_reads_file(kind, name))
+	if (!graph_reads_kind(kind))
 		return true;
 	// A record type's document, its records extracted; a text type's, its text's references; a type
 	// of another kind falls through to a native extractor, or gives nothing.

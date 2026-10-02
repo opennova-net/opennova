@@ -16,6 +16,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 
 #include <formats/def/def.h>
+#include <runtime/hud/hud_texture_names.h>
 
 namespace godot {
 
@@ -86,6 +87,13 @@ public:
 		// the rangefinder digit advance and the 16px digit-strip cell.
 		BINOCULAR_DIGIT_STEP = 10,
 		VIEW_DIGIT_CELL = 16,
+		// The view effects' textures (view_effect_texture; hud/hud_texture_names.h).
+		VIEW_TEXTURE_BINOCULAR_MASK = opennova::hud::kViewTexBinocularMask,
+		VIEW_TEXTURE_BINOCULAR_CROSSHAIR = opennova::hud::kViewTexBinocularCrosshair,
+		VIEW_TEXTURE_BINOCULAR_DIGITS = opennova::hud::kViewTexBinocularDigits,
+		VIEW_TEXTURE_NVG_MASK = opennova::hud::kViewTexNvgMask,
+		VIEW_TEXTURE_NVG_SCALE = opennova::hud::kViewTexNvgScale,
+		VIEW_TEXTURE_VIGNETTE = opennova::hud::kViewTexVignette,
 	};
 	// kPercentToAlpha (2.55 — authored percent -> 0..255 alpha), bound as a
 	// method because class constants are integer-only.
@@ -197,6 +205,9 @@ public:
 	static Rect2 nvg_scale_rect();
 	static Color nvg_scale_modulate();
 	static int binocular_range_step(int p_current, int p_target);
+	// The view effects' texture names, by VIEW_TEXTURE_* (hud/hud_texture_names.h carries
+	// the names and witnesses); "" past them.
+	static String view_effect_texture(int p_which);
 
 	// The scoped-view circle mask (runtime/hud/scope_circle_mask.h carries the
 	// geometry and the witnesses). One batch per call, in VIEWPORT PIXELS and

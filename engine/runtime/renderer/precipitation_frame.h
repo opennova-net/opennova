@@ -30,6 +30,11 @@
 
 namespace opennova::renderer {
 
+// The drops' textures [orig: WeatherParticle_LoadTextures @ 0x5de840, eraindrp.tga @ 0x5de847,
+// jsnwflk.tga @ 0x5de889].
+inline constexpr const char *kRainTexture = "eraindrp.tga";
+inline constexpr const char *kSnowTexture = "jsnwflk.tga";
+
 // The camera-side inputs in the RENDER (Godot) frame: mission (x, y, z)
 // 16.16 maps to (x, z, -y) / 65536 [orig: Math_FixedPointToFloat3_YNegated
 // @ 0x611210 — the same axis swap under the D3D basis].

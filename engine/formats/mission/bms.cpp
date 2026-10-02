@@ -610,7 +610,7 @@ bool loadout_has_fourth_field(const std::string& value) {
 
 void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& out) {
     out.entries.clear();
-    // A damaged chunk can end inside a record (three shipped missions do).
+    // A damaged chunk can end inside a record (shipped missions do: mission_corpus names them).
     // Bound those reads to this chunk: missing string bytes read as NUL, like
     // the other format fields, instead of retail's read beyond raw_loadout.
     // Documented boundary: docs/mission/bms-event-runtime-re.md (D-EVT-7).
@@ -634,6 +634,7 @@ void parse_weapon_loadout_chunk(const std::vector<uint8_t>& raw, WeaponLoadout& 
             pos = next;
         } else {
             entry.flags = "-1";
+            entry.has_flags = false;
         }
         out.entries.push_back(std::move(entry));
     }
@@ -658,8 +659,11 @@ bool write_weapon_loadout_chunk(const WeaponLoadout& loadout, std::vector<uint8_
         out.push_back(0);
         out.insert(out.end(), entry.ammo_secondary.begin(), entry.ammo_secondary.end());
         out.push_back(0);
-        out.insert(out.end(), flags.begin(), flags.end());
-        out.push_back(0);
+        // A record that wrote three strings writes three (bms.h, has_flags).
+        if (entry.has_flags) {
+            out.insert(out.end(), flags.begin(), flags.end());
+            out.push_back(0);
+        }
     }
     if (!out.empty()) {
         out.push_back(0);
@@ -734,6 +738,28 @@ bool write_item_availability_chunk(const std::vector<ItemAvailabilityEntry>& ent
 // ============================================================================
 // Public API
 // ============================================================================
+
+bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first) {
+    first = 0;
+    std::vector<uint8_t> chunk;
+    std::string error;
+    if (!write_weapon_loadout_chunk(loadout, chunk, error)) return false;
+    WeaponLoadout back;
+    parse_weapon_loadout_chunk(chunk, back);
+    for (; first < loadout.entries.size(); ++first) {
+        if (first >= back.entries.size()) return false;
+        const WeaponLoadoutRecord& written = loadout.entries[first];
+        const WeaponLoadoutRecord& read = back.entries[first];
+        // A record left without its fourth string reads with the sanitizer's "-1", whatever its
+        // latent value.
+        const std::string flags = written.flags.empty() ? "-1" : written.flags;
+        if (read.name != written.name || read.ammo_primary != written.ammo_primary ||
+            read.ammo_secondary != written.ammo_secondary || read.has_flags != written.has_flags ||
+            (written.has_flags && read.flags != flags))
+            return false;
+    }
+    return back.entries.size() == loadout.entries.size();
+}
 
 bool is_bms(const uint8_t* data, size_t size) {
     if (size < 4) return false;
@@ -1170,7 +1196,8 @@ bool weapon_loadout_equal(const WeaponLoadout& a, const WeaponLoadout& b) {
         if (a.entries[i].name != b.entries[i].name ||
             a.entries[i].ammo_primary != b.entries[i].ammo_primary ||
             a.entries[i].ammo_secondary != b.entries[i].ammo_secondary ||
-            a.entries[i].flags != b.entries[i].flags) {
+            a.entries[i].flags != b.entries[i].flags ||
+            a.entries[i].has_flags != b.entries[i].has_flags) {
             return false;
         }
     }

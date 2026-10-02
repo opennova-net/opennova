@@ -3,6 +3,7 @@
 #include <iterator>
 
 #include <editor/ui/menu_viewport_view.h>
+#include <editor/ui/mission_viewport_view.h>
 #include <editor/ui/model_viewport_view.h>
 #include <editor/ui/script_viewport_view.h>
 
@@ -13,11 +14,13 @@ namespace {
 std::unique_ptr<ViewportView> make_menu_view() { return std::make_unique<MenuViewportView>(); }
 std::unique_ptr<ViewportView> make_model_view() { return std::make_unique<ModelViewportView>(); }
 std::unique_ptr<ViewportView> make_script_view() { return std::make_unique<ScriptViewportView>(); }
+std::unique_ptr<ViewportView> make_mission_view() { return std::make_unique<MissionViewportView>(); }
 
 constexpr ViewportViewRow kViews[] = {
 	{ ViewportKind::Menu, make_menu_view },
 	{ ViewportKind::Model, make_model_view },
 	{ ViewportKind::Script, make_script_view },
+	{ ViewportKind::Mission, make_mission_view },
 };
 
 constexpr bool views_in_order() {

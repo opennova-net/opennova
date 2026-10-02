@@ -111,6 +111,18 @@ static int test_known_row_lookups(void) {
     const RequiredResource *scan = gameprofile_required_resource_find("*.npj/*.npz");
     CHECK(scan != NULL && (scan->flags & RES_F_PATTERN) != 0,
           "the mission-list wildcard scan is a pattern row");
+    /* The player's and this machine's own files carry RES_F_PLAYER_FILE, and only they. */
+    static const char *const player_names[] = {"game.cfg", "assets.cd", "filter.txt", "gt.ssc", "hiscore.txt",
+                                               "admin.cfg", "player.sav", "weapon.sav", "epass.bin", "passgen.bin"};
+    int players = 0;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i)
+        players += (gameprofile_required_resource_at(i)->flags & RES_F_PLAYER_FILE) != 0;
+    CHECK(players == 10, "exactly the ten player-file rows");
+    for (const char *name : player_names)
+        CHECK(gameprofile_required_resource_find(name)->flags & RES_F_PLAYER_FILE, "a player's own file is flagged");
+    CHECK((gameprofile_required_resource_find("CC.BIN")->flags & RES_F_PLAYER_FILE) == 0 &&
+              (gameprofile_required_resource_find("items.def")->flags & RES_F_PLAYER_FILE) == 0,
+          "a resource the game ships is not");
     return 1;
 }
 

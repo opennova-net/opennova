@@ -191,13 +191,16 @@ constexpr QueryParam kViewportParams[] = {
 			"table), else its Main view." },
 	{ "op", J::String, true, nullptr,
 			"What is read: state (the envelope, a page of its items and by the same page its "
-			"notes), items or notes (a page of one), hit (what lies under x, y), render (one row of "
-			"the document as the kind renders it apart: a menu's screen, as the render check "
+			"notes), items or notes (a page of one), hit (what lies under x, y), box (what the box from "
+			"x, y to x2, y2 takes, as a marquee over it: a menu's windows it touches), render (one row "
+			"of the document as the kind renders it apart: a menu's screen, as the render check "
 			"compiled it)." },
 	{ "x", J::Number, false, nullptr,
-			"hit's point across, in the viewport's units (a menu's 800x600 design units, a model's "
-			"picture pixels): a number a float holds." },
+			"hit's point across (box's first corner), in the viewport's units (a menu's 800x600 "
+			"design units, a model's picture pixels): a number a float holds." },
 	{ "y", J::Number, false, nullptr, "hit's point down, as x." },
+	{ "x2", J::Number, false, nullptr, "box's other corner across, as x (x and y its first)." },
+	{ "y2", J::Number, false, nullptr, "box's other corner down, as x." },
 	{ "row", J::Integer, false, nullptr, "render's row, by its identity (a menu's screen)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
@@ -206,6 +209,14 @@ constexpr QueryParam kViewportParams[] = {
 constexpr QueryParam kCursorParams[] = {
 	{ "cursor", J::Integer, false, "0", kCursorDoc },
 	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+constexpr QueryParam kImportPreviewParams[] = {
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+	{ "kind", J::String, false, nullptr,
+			"An asset kind's token (the summary's): the page holds the plan's rows of that kind alone, "
+			"count theirs; every kind when left out." },
 };
 
 // --- helpers -------------------------------------------------------------------------------------
@@ -693,6 +704,16 @@ JsonValue viewport_hit(const ViewportReadContext &read, std::string &error) {
 			float(read.args.number("y")));
 	return viewport_hit_to_json(read.model, hit);
 }
+JsonValue viewport_box(const ViewportReadContext &read, std::string &error) {
+	if (!viewport_kind_row(read.model.kind()).canvas) {
+		error = std::string("a ") + viewport_kind_token(read.model.kind()) +
+				" viewport has no canvas: no box of it takes anything (op items reads what it lists).";
+		return JsonValue::make_null();
+	}
+	return viewport_box_to_json(read.view, read.model,
+			read.model.box(viewport_context(read.view, read.model), float(read.args.number("x")),
+					float(read.args.number("y")), float(read.args.number("x2")), float(read.args.number("y2"))));
+}
 JsonValue viewport_notes(const ViewportReadContext &read, std::string &) {
 	return viewport_notes_to_json(read.view, read.model, read.page);
 }
@@ -702,14 +723,15 @@ JsonValue viewport_render(const ViewportReadContext &read, std::string &error) {
 }
 
 // The ops by name, in their order on the wire.
-enum class ViewportOp : uint8_t { State, Items, Hit, Notes, Render, kCount };
+enum class ViewportOp : uint8_t { State, Items, Hit, Box, Notes, Render, kCount };
 
 // What an op takes beside the params every op takes (path, kind, op): a page (offset, limit), a point
-// of the picture (x, y), a row (row).
+// of the picture (x, y), a row (row), a box's other corner (x2, y2).
 enum ViewportTakes : uint8_t {
 	kViewportPage = 1u << 0,
 	kViewportPoint = 1u << 1,
 	kViewportRow = 1u << 2,
+	kViewportCorner = 1u << 3,
 };
 
 // One op: its token, what it takes and of that what it needs (each named, a point both its params),
@@ -726,6 +748,7 @@ constexpr ViewportOpRow kViewportOps[] = {
 	{ ViewportOp::State, "state", kViewportPage, 0, viewport_state },
 	{ ViewportOp::Items, "items", kViewportPage, 0, viewport_items },
 	{ ViewportOp::Hit, "hit", kViewportPoint, kViewportPoint, viewport_hit },
+	{ ViewportOp::Box, "box", kViewportPoint | kViewportCorner, kViewportPoint | kViewportCorner, viewport_box },
 	{ ViewportOp::Notes, "notes", kViewportPage, 0, viewport_notes },
 	{ ViewportOp::Render, "render", kViewportPage | kViewportRow, kViewportRow, viewport_render },
 };
@@ -736,6 +759,7 @@ constexpr uint8_t viewport_param_flag(const char *name) {
 	return same_text(name, "path") || same_text(name, "kind") || same_text(name, "op") ? 0
 			: same_text(name, "offset") || same_text(name, "limit")                    ? kViewportPage
 			: same_text(name, "x") || same_text(name, "y")                             ? kViewportPoint
+			: same_text(name, "x2") || same_text(name, "y2")                           ? kViewportCorner
 			: same_text(name, "row")                                                   ? kViewportRow
 																					   : 0xFF;
 }
@@ -777,6 +801,10 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 							 "model's picture pixels).";
 		return JsonValue::make_null();
 	}
+	if ((read->needs & kViewportCorner) && !(args.has("x2") && args.has("y2"))) {
+		error = "op " + op + " needs \"x2\" and \"y2\", the box's other corner in the viewport's units.";
+		return JsonValue::make_null();
+	}
 	if ((read->needs & kViewportRow) && !args.has("row")) {
 		error = "op " + op + " needs \"row\", the row by its identity (a menu's screen).";
 		return JsonValue::make_null();
@@ -793,8 +821,16 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 	return read->answer(ViewportReadContext{ core.view(), *model, args, page_of(args) }, error);
 }
 
-JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return import_preview_to_json(context.core.view(), page_of(args));
+JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	AssetKind kind = AssetKind::kCount;
+	if (args.has("kind")) {
+		kind = asset_kind_from_token(args.text("kind"));
+		if (kind == AssetKind::Unknown && args.text("kind") != asset_kind_token(AssetKind::Unknown)) {
+			error = "no asset kind \"" + args.text("kind") + "\".";
+			return JsonValue::make_null();
+		}
+	}
+	return import_preview_to_json(context.core.view(), page_of(args), kind);
 }
 
 JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &) {
@@ -807,7 +843,8 @@ JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::
 
 // What a build would be refused for, nothing built (S13 A7): the build's own plan
 // (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
-// rows the build gates on; `blocked` exactly when that plan would not pack. start_build reads the
+// rows the build gates on (an error whose code gates: blocks_build); `blocked` exactly when that
+// plan would not pack. start_build reads the
 // changed documents again and refreshes first, and a build request joins a running build and waits
 // on unsaved edits: the gate says none of that.
 JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, std::string &error) {
@@ -824,7 +861,7 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 			core.problems().gate_findings());
 	std::vector<const Diagnostic *> blocking;
 	for (const Diagnostic &d : plan.diagnostics)
-		if (d.severity == DiagnosticSeverity::Error)
+		if (blocks_build(d))
 			blocking.push_back(&d);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
@@ -1046,14 +1083,19 @@ constexpr EditorQueryRow kRows[] = {
 			.pages("items, notes or render's widgets")
 			.chooses(kViewportChoices)
 			.row,
-	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
+	Query(K::ImportPreview, "import_preview", answer_import_preview, kImportPreviewParams,
 			concern_set({ C::Dialogs, C::Preferences, C::Files }),
-			"The import dialog's preview: open, with_dependencies, a page of its plan's rows in "
-			"its order, the chosen files first (state, name, kind, source, destination, "
-			"made_from, needed_by, found_in, selected, problem, rivals), by the same page what it "
-			"offers and chose (choices, roots) and the files not found, each list with its own "
-			"count (next_offset runs to the end of the longest), then the kinds not followed, "
-			"truncated and the plan's findings.")
+			"The import dialog's preview: open, with_dependencies, all (every file of the game "
+			"install chosen, with no walk), a page of its plan's rows in "
+			"its order, the chosen files first (state, name, kind, source, destination, size, "
+			"made_from, needed_by, found_in, selected, held (a chosen file the project has, kept "
+			"unless the import replaces), problem, rivals; those of one kind alone "
+			"with kind, count theirs), total_bytes (what the whole plan copies) and summary (the "
+			"whole plan's files by kind, the largest first: kind, files, bytes), by the same page "
+			"what it offers and chose (choices, roots) and the files not found, each list with its "
+			"own count (next_offset runs to the end of the longest), then the kinds not followed, "
+			"the symbols no place defines (undefined), those only a place's copy of a file the "
+			"project has defines, its own being kept (shadowed), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
 	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),
@@ -1074,10 +1116,14 @@ constexpr EditorQueryRow kRows[] = {
 			concern_set({ C::Project, C::Files, C::Findings }),
 			"What a build would be refused for over the files as last scanned, nothing built: "
 			"blocked (a build would not pack) and a page of the findings that block it, the errors "
-			"among the Problems rows the build gates on, the scan's and the requirements', and the "
+			"among the Problems rows the build gates on whose code gates (the catalog's "
+			"gates_build), the scan's and the requirements', and the "
 			"build's own checks of the files (an archive in the project, a name no archive can "
 			"store). A Problems row the build does not gate on (a project check's: the render "
-			"check's) blocks nothing. The query runs the validation left due to its end first, so "
+			"check's) blocks nothing, nor does a missing reference (reference.missing: listed and "
+			"fixable) but of a kind the game is witnessed refusing without its file (the reference "
+			"kinds' gates_when_missing: a mission's terrain); a file of the name the game does not "
+			"load as the kind (reference.wrong_kind) blocks. The query runs the validation left due to its end first, so "
 			"the rows it reads are the files' as they stand. A build request reads changed files "
 			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
 			"not weigh.")
@@ -1104,7 +1150,10 @@ constexpr EditorQueryRow kRows[] = {
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
 			"name), the fixes Problems offers, what a Rewrite does, whether the finding says the "
-			"file does not serialize (blocks_save), where Problems takes it (content or file), the "
+			"file does not serialize (blocks_save), whether an error of it refuses a build "
+			"(gates_build: false for a missing reference, which is listed and blocks nothing but "
+			"where its kind's row cites the game's refusal, a mission's terrain), "
+			"where Problems takes it (content or file), the "
 			"group it shows under (its key), where it comes from (source), for a render check's note "
 			"that is a Problems row its severity (problem: info or warning, left out for none) and "
 			"how many of the findings held now carry it (count); a row a held finding carries that "
@@ -1461,6 +1510,7 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		if (row.rewrite_does)
 			entry.set("rewrite_does", json_string(row.rewrite_does));
 		entry.set("blocks_save", JsonValue::make_bool(row.blocks_save));
+		entry.set("gates_build", JsonValue::make_bool(row.gates_build));
 		entry.set("place", json_string(finding_place_token(row.place)));
 		entry.set("group", json_string(finding_group_key(row.group)));
 		entry.set("source", json_string(finding_source_token(row)));

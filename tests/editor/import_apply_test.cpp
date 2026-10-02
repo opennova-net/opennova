@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/assets/player_files.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
@@ -32,10 +33,13 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -111,6 +115,14 @@ bool staged_left(const std::string &root) {
 	return fs::exists(ProjectPaths::for_root(root).staging_dir, ec);
 }
 
+// What wanted a file, in a line.
+std::string need_words_of(const ImportNeed &need) {
+	std::string out = need.file;
+	if (!need.record.empty()) out += ": " + need.record;
+	if (!need.field.empty()) out += (need.record.empty() ? ": " : " ") + need.field;
+	return out;
+}
+
 bool has_warning(const std::vector<Diagnostic> &findings, const char *code, const std::string &asset) {
 	for (const Diagnostic &d : findings)
 		if (d.code() == code && d.severity == DiagnosticSeverity::Warning && d.asset == asset) return true;
@@ -120,7 +132,7 @@ bool has_warning(const std::vector<Diagnostic> &findings, const char *code, cons
 } // namespace
 
 // A folder's menu previewed with the files it needs: the plan holds the known closure, gone.tga
-// not found (with what wants it) and the screen reference not followed; Import with the rows it
+// not found (with what wants it) and the screen reference followed to b.mnu; Import with the rows it
 // takes writes those five files, the preview closes, and every reference of the two menus to a
 // file resolves but gone.tga's, which stays missing.
 static int test_apply_closure() {
@@ -144,8 +156,8 @@ static int test_apply_closure() {
 	const ImportPlanRow *gone = row_named(plan, "gone.tga");
 	TEST_EXPECT(gone && gone->state == State::NotFound && !gone->selected && gone->needed_by.file == "a.mnu" &&
 	            gone->needed_by.record == "A/KEEP/Appearance 1" && gone->needed_by.reference == ReferenceKind::MenuTexture);
-	const ImportNotFollowed *screens = not_followed(plan, ReferenceKind::MenuScreen);
-	TEST_EXPECT(screens && screens->count == 1 && screens->first == "a.mnu" && plan.not_followed.size() == 1);
+	// The screen B of b.mnu, a symbol the planned b.mnu defines (S14): followed to nothing.
+	TEST_EXPECT(plan.not_followed.empty() && plan.undefined.empty());
 
 	const std::vector<ImportChoice> kept = selected_sources(plan);
 	TEST_EXPECT(kept.size() == 5);
@@ -368,9 +380,11 @@ static int test_apply_guard_reads_the_shown_plan() {
 	TEST_EXPECT(editor_test::write_text(loose, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
 	preview(project.session, {loose});
 	const ImportPlanRow *row = row_named(*view.dialogs.import_preview.plan, "items.def");
-	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected &&
+	// The project holds items.def: the row is held, the import asked to replace it.
+	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected && row->held && !row->selected &&
 	            row->destination == "defs/items.def");
-	const std::vector<ImportChoice> shown = selected_sources(*view.dialogs.import_preview.plan);
+	if (!row) return 1;
+	const std::vector<ImportChoice> shown = {row->source};
 	std::error_code ec;
 	fs::remove(loose, ec);
 	TEST_EXPECT(!ec);
@@ -485,39 +499,204 @@ static int test_apply_record_with_its_file() {
 	return 0;
 }
 
-// A plan stopped by its cap holds a converter's files whole or not at all: 999 files chosen, then
-// a clip set making two, leave no room for the clip set, so the plan does not hold it, and an
-// Import naming it is refused with nothing written.
-static int test_apply_cap_keeps_groups() {
-	Project project("opennova_editor_apply_cap");
+// An Import names only what the open preview plans: two files chosen and planned, an Import of
+// those and of a clip set the preview never held is refused whole (import.not_planned names the
+// clip set), nothing written. (A plan stopped by its cap leaves a converter's files out whole the
+// same way: import_plan_test's test_plan_cycle_and_cap, the plan's own cap.)
+static int test_apply_refuses_unplanned() {
+	Project project("opennova_editor_apply_unplanned");
 	const std::string root = project.root();
 	const std::string art = project.dir.file("art");
-	std::vector<std::string> paths;
-	for (int i = 0; i < 999; ++i) {
-		char name[16];
-		std::snprintf(name, sizeof(name), "/t%03d.txt", i);
-		paths.push_back(art + name);
-		TEST_EXPECT(editor_test::write_text(paths.back(), "x"));
-	}
+	std::vector<std::string> paths = {art + "/t0.txt", art + "/t1.txt"};
+	for (const std::string &path : paths) TEST_EXPECT(editor_test::write_text(path, "x"));
 	TEST_EXPECT(editor_test::write_text(art + "/walk.o3a",
 	                                    "o3a 1\nadm CHECK.adm\nrow anim_reset \"walk\"\nclip walk\nfps 30\nflags 0x1\nframes 1\n"
 	                                    "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n k 0 0 0 1\n k 0 0 0 1\n"
 	                                    "event 0 0 0 0x0 0.9 1.7\nevent 0 0 0 0x0 0.9 1.7\n"));
-	paths.push_back(art + "/walk.o3a");
 	const SessionView &view = project.view();
 	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
 	request.paths = paths;
 	project.session.handle(request);
 	project.session.run_operations();
 	const ImportPlan &plan = *view.dialogs.import_preview.plan;
-	TEST_EXPECT(plan.truncated && plan.rows.size() == 999 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
+	TEST_EXPECT(!plan.truncated && plan.rows.size() == 2 && !row_named(plan, "CHECK.adm") && !row_named(plan, "walk.bad"));
 	std::vector<ImportChoice> every;
 	for (const std::string &path : paths) every.push_back({path, {}});
+	every.push_back({art + "/walk.o3a", {}});
 	const auto before = snapshot(root);
 	const ActionOutcome unplanned = import(project.session, every);
 	TEST_EXPECT(!unplanned.done() &&
 	            finding(unplanned, "import.not_planned", DiagnosticSeverity::Error, "walk.o3a"));
 	TEST_EXPECT(snapshot(root) == before && !fs::exists(root + "/anims"));
+	return 0;
+}
+
+// ADR 0046 S14: the preview's plan steps with the polls (ImportPlanOperation's Plan phase over an
+// ImportPlanner). A menu chain of twelve in a folder, a poll a step: the plan takes more polls
+// than it has files, the operation's progress only rises and ends whole, the dialog shows no row
+// until the plan is made, and the plan made is the one a single call makes.
+static int test_apply_plan_steps() {
+	Project project("opennova_editor_apply_plan_steps");
+	const std::string art = project.dir.file("art");
+	for (int i = 0; i < 12; ++i) {
+		const std::string n = std::to_string(i), next = std::to_string(i + 1);
+		TEST_EXPECT(editor_test::write_text(art + "/m" + n + ".mnu",
+				screen(("S" + n).c_str(), window("BUTTON", "GO", image("t" + n + ".pcx") +
+						(i < 11 ? go_to("m" + next + ".mnu", ("S" + next).c_str()) : std::string())))));
+		TEST_EXPECT(editor_test::write_text(art + "/t" + n + ".pcx", "pcx"));
+	}
+	const SessionView &view = project.view();
+	const ImportPlan whole = project.plan({{art + "/m0.mnu", {}}});
+	TEST_EXPECT(whole.rows.size() == 24);
+	project.session.set_poll_budget({0, 1});
+	EditorRequest request = request::of(EditorRequestKind::PreviewImport);
+	request.paths = {art + "/m0.mnu"};
+	request.with_dependencies = true;
+	project.session.handle(request);
+	TEST_EXPECT(view.activity.operation.running() && view.activity.operation.kind == OperationKind::ImportPlan);
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.plan->rows.empty());
+	size_t polls = 0;
+	uint64_t done = 0, total = 0;
+	bool planning = false;
+	while (view.activity.operation.running() && polls < 2000) {
+		project.session.poll();
+		++polls;
+		const OperationStatus &status = view.activity.operation;
+		if (!status.running()) break;
+		TEST_EXPECT(status.done >= done && status.done <= status.total);
+		if (status.total != 0) TEST_EXPECT(status.total >= total);
+		done = status.done;
+		total = status.total;
+		planning = planning || status.label.find("Planning the import") == 0;
+		if (planning && done < total) TEST_EXPECT(view.dialogs.import_preview.plan->rows.empty());
+	}
+	TEST_EXPECT(!view.activity.operation.running() && planning && polls > 24);
+	TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done);
+	TEST_EXPECT(same_import(whole, *view.dialogs.import_preview.plan));
+	project.session.set_poll_budget(kDefaultPollBudget);
+	return 0;
+}
+
+// ADR 0046 S14: the write a step at a time (AssetImport). Five files of a megabyte in total, a
+// byte a step: the project is scanned, each source is read, checked and staged in a step of its
+// own (nothing of the project written meanwhile, the staging folder holding what was staged), then
+// each file published in a step; the progress only rises and ends whole. A refusal at the last
+// source removes what the earlier ones staged and the folders made for them: the project is as it
+// was. An import abandoned while it stages leaves nothing; one that has published cannot be.
+static int test_apply_write_steps() {
+	Project project("opennova_editor_apply_write_steps");
+	const std::string root = project.root();
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string art = project.dir.file("art");
+	std::vector<ImportChoice> sources;
+	for (int i = 0; i < 5; ++i) {
+		const std::string path = art + "/f" + std::to_string(i) + ".fnt";
+		TEST_EXPECT(editor_test::write_text(path, std::string(size_t(200000), char('a' + i))));
+		sources.push_back({path, {}});
+	}
+	const SessionView &view = project.view();
+	const auto before = snapshot(root);
+	{
+		AssetImport run(sources, paths, *view.project.document, false);
+		size_t steps = 0, done = 0, total = 0;
+		bool staged_seen = false;
+		while (!run.step(1)) {
+			++steps;
+			TEST_EXPECT(run.files_done() >= done && run.files_total() >= total && run.files_done() <= run.files_total());
+			done = run.files_done();
+			total = run.files_total();
+			// While it stages, the project holds none of the files; the stage holds them.
+			if (!run.publishing()) {
+				TEST_EXPECT(!fs::exists(root + "/fonts/f0.fnt"));
+				staged_seen = staged_seen || staged_left(root);
+			}
+			TEST_EXPECT(steps < 200);
+		}
+		TEST_EXPECT(staged_seen && steps >= 10 && run.done() && run.publishing());
+		TEST_EXPECT(run.files_done() == 10 && run.files_total() == 10);
+		const ImportResult result = run.take();
+		TEST_EXPECT(!has_error(result.diagnostics) && result.imported.size() == 5 && result.not_imported.empty());
+		TEST_EXPECT(result.imported.front() == "fonts/f0.fnt" && result.imported.back() == "fonts/f4.fnt");
+		for (int i = 0; i < 5; ++i) TEST_EXPECT(fs::file_size(root + "/fonts/f" + std::to_string(i) + ".fnt") == 200000);
+		TEST_EXPECT(!staged_left(root));
+		// Published: abandoning it changes nothing.
+		run.abandon();
+		TEST_EXPECT(fs::exists(root + "/fonts/f0.fnt"));
+	}
+	// A refusal at the last source (a name the archives cannot store): what was staged goes.
+	const std::string art2 = project.dir.file("art2");
+	std::vector<ImportChoice> refused;
+	for (int i = 0; i < 3; ++i) {
+		const std::string path = art2 + "/m" + std::to_string(i) + ".mnu";
+		TEST_EXPECT(editor_test::write_text(path, screen("S", window("STATIC", "W", std::string()))));
+		refused.push_back({path, {}});
+	}
+	TEST_EXPECT(editor_test::write_text(art2 + "/a_name_far_too_long_for_an_archive.mnu", "x"));
+	refused.push_back({art2 + "/a_name_far_too_long_for_an_archive.mnu", {}});
+	const auto held = snapshot(root);
+	{
+		AssetImport run(refused, paths, *view.project.document, false);
+		bool staged_seen = false;
+		while (!run.step(1)) staged_seen = staged_seen || staged_left(root);
+		const ImportResult result = run.take();
+		TEST_EXPECT(staged_seen && !run.publishing());
+		TEST_EXPECT(has_code(result.diagnostics, "import.name") && result.imported.empty() && result.not_imported.empty());
+		TEST_EXPECT(snapshot(root) == held && !staged_left(root) && !fs::exists(root + "/menus"));
+	}
+	// Abandoned while it stages: nothing left, nothing written.
+	{
+		refused.pop_back();
+		AssetImport run(refused, paths, *view.project.document, false);
+		while (!staged_left(root) && !run.step(1)) {
+		}
+		TEST_EXPECT(staged_left(root) && !run.done() && !run.publishing());
+		run.abandon();
+		TEST_EXPECT(run.done() && snapshot(root) == held && !staged_left(root) && !fs::exists(root + "/menus"));
+		TEST_EXPECT(run.take().imported.empty());
+	}
+	// The one call is the stepped import run to its end.
+	const ImportResult whole = import_assets(refused, paths, *view.project.document, false);
+	TEST_EXPECT(whole.imported.size() == 3 && fs::exists(root + "/menus/m2.mnu"));
+	(void)before;
+	return 0;
+}
+
+// The session's Import steps its write with the polls (ImportOperation over AssetImport): a poll a
+// step, it can be cancelled while it stages (nothing written, the stage gone, the preview still
+// open), and once it publishes it cannot; left to run, it imports every file.
+static int test_apply_write_cancel() {
+	Project project("opennova_editor_apply_write_cancel");
+	const std::string root = project.root();
+	const std::string art = project.dir.file("art");
+	std::vector<ImportChoice> sources;
+	for (int i = 0; i < 6; ++i) {
+		const std::string path = art + "/n" + std::to_string(i) + ".txt";
+		TEST_EXPECT(editor_test::write_text(path, "notes"));
+		sources.push_back({path, {}});
+	}
+	const SessionView &view = project.view();
+	const auto before = snapshot(root);
+	project.session.set_poll_budget({0, 1});
+	EditorRequest request = request::of(EditorRequestKind::ImportFiles);
+	request.imports = sources;
+	project.session.handle(request);
+	TEST_EXPECT(view.activity.operation.running() && view.activity.operation.kind == OperationKind::ImportApply);
+	// Polled until it has staged a file: cancellable, and cancelled.
+	for (int i = 0; i < 100 && !staged_left(root); ++i) project.session.poll();
+	TEST_EXPECT(staged_left(root) && view.activity.operation.running() && view.activity.operation.cancellable);
+	project.session.handle(request::cancel_operation());
+	TEST_EXPECT(!view.activity.operation.running() && view.activity.last_operation.end == OperationEnd::Cancelled);
+	TEST_EXPECT(snapshot(root) == before && !staged_left(root));
+	// Again, to its first published file: no longer cancellable; then to its end.
+	project.session.handle(request);
+	for (int i = 0; i < 200 && view.activity.operation.running() && !fs::exists(root + "/n0.txt"); ++i) project.session.poll();
+	TEST_EXPECT(fs::exists(root + "/n0.txt") && view.activity.operation.running() && !view.activity.operation.cancellable);
+	project.session.handle(request::cancel_operation());
+	TEST_EXPECT(view.activity.operation.running());
+	project.session.set_poll_budget(kDefaultPollBudget);
+	project.session.run_operations();
+	TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && view.activity.last_operation.imported.size() == 6);
+	for (int i = 0; i < 6; ++i) TEST_EXPECT(view.project.scan->find("n" + std::to_string(i) + ".txt"));
 	return 0;
 }
 
@@ -547,9 +726,8 @@ static int test_apply_staging_leftover() {
 // What is known without the planner: the shipped game loads this menu and its stylesheet with
 // every file they name, so the plan finds each of them (none not found, none the project cannot
 // take) and, once imported, every reference of every file imported to a file resolves; and a
-// shell menu's style variables, SCREEN and WINDOW targets and string ids name no file, and its
-// sound bank (menu.lwf) is a file whose own references are not read: exactly those five kinds
-// are not followed.
+// shell menu's style variables, SCREEN and WINDOW targets and string ids are followed to the
+// files defining them and its sound bank (menu.lwf) to its waves (S14): nothing is not followed.
 static int test_apply_retail_menu() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a retail menu imported with the files it needs)");
@@ -573,11 +751,22 @@ static int test_apply_retail_menu() {
 		found += row.state == State::Found ? 1 : 0;
 	}
 	TEST_EXPECT(found > 0);
+	// S14: the symbols are followed to their files (the string ids to the tables their windows
+	// name, the screens and windows to their menus, the variables to the stylesheet) and the menu's
+	// sound bank to its waves (the graph reads a bank's singles), so nothing is not followed; what
+	// no place defines is counted apart and printed.
 	std::set<std::string> skipped;
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		skipped.insert(entry.reference != ReferenceKind::None ? reference_row(entry.reference).token
 		                                                      : asset_kind_token(entry.kind));
-	TEST_EXPECT(skipped == std::set<std::string>({"style_var", "menu_screen", "menu_window", "text_id", "sound_bank"}));
+	TEST_EXPECT(skipped.empty());
+	size_t waves = 0;
+	for (const ImportPlanRow &row : plan.rows)
+		waves += row.kind == AssetKind::Wave && normalized_logical_name(row.needed_by.file) == normalized_logical_name("menu.lwf") ? 1 : 0;
+	TEST_EXPECT(waves > 0);
+	for (const ImportNotFollowed &entry : plan.undefined)
+		std::printf("editor_import retail: %zu %s reference(s) no place defines, the first in %s\n", entry.count,
+		            reference_row(entry.reference).token, entry.first.c_str());
 	const ActionOutcome imported = import(project.session, selected_sources(plan));
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	size_t references = 0;
@@ -635,8 +824,243 @@ static int test_apply_retail_menu() {
 	return 0;
 }
 
+// ADR 0046 S14, the retail leg: the smallest and the largest shipped JO mission (04TR.bms, 140 KB;
+// ASH_I1gA.bms, 398 KB) each planned from the install with their dependencies into a fresh project.
+// The plan is the mission's closure: every file found by its name the install has, its terrain,
+// its environment, the catalogs and the game's manifest, nothing of a kind the graph reads left
+// unfollowed, no Required manifest file not found; the rows and the bytes printed (the numbers
+// the design estimated at 8,700 files and 515 MB from the archives' listing). The smaller one is
+// then imported, checked (every file reference resolves or names what the install itself lacks;
+// the checklist is met; the only errors are the shipped files' own unresolved references, which
+// gate nothing) and built by the session's own build.
+static int test_apply_retail_mission_closure() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
+	for (const char *name : {"04TR.bms", "ASH_I1gA.bms"}) {
+		Project project("opennova_editor_apply_retail_closure");
+		editor_test::set_game_install(project.session, install);
+		const SessionView &view = project.view();
+		EditorRequest listed = request::preview_install_import();
+		listed.names = {name};
+		listed.with_dependencies = true;
+		const auto started = std::chrono::steady_clock::now();
+		project.session.handle(listed);
+		project.session.run_operations();
+		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+		const ImportPlan &plan = *view.dialogs.import_preview.plan;
+		TEST_EXPECT(project.session.outcome().done() && view.dialogs.import_preview.open);
+		TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
+		size_t found = 0, missing = 0, problems = 0;
+		std::map<std::string, std::pair<size_t, uint64_t>> by_kind;
+		for (const ImportPlanRow &row : plan.rows) {
+			if (row.state == State::NotFound) {
+				++missing;
+				std::printf("editor_import retail closure %s: %s (%s) not found, needed by %s\n", name, row.name.c_str(),
+				            asset_kind_token(row.kind), need_words_of(row.needed_by).c_str());
+				continue;
+			}
+			found += row.state == State::Found ? 1 : 0;
+			if (!row.problem.empty()) {
+				++problems;
+				std::printf("editor_import retail closure %s: %s cannot be taken: %s\n", name, row.name.c_str(), row.problem.c_str());
+			}
+			auto &kind = by_kind[asset_kind_token(row.kind)];
+			++kind.first;
+			kind.second += row.size;
+		}
+		std::printf("editor_import retail closure %s: %zu files (%zu found), %.1f MB, %zu not found, %zu the project cannot "
+		            "take, planned in %.1f s\n",
+		            name, plan.file_count(), found, plan.total_bytes() / 1e6, missing, problems, seconds);
+		for (const auto &entry : by_kind)
+			std::printf("  %-20s %5zu %8.1f MB\n", entry.first.c_str(), entry.second.first, entry.second.second / 1e6);
+		for (const ImportNotFollowed &entry : plan.not_followed)
+			std::printf("  not followed: %s (%zu, the first %s)\n",
+			            entry.reference != ReferenceKind::None ? reference_row(entry.reference).token : asset_kind_token(entry.kind),
+			            entry.count, entry.first.c_str());
+		for (const ImportNotFollowed &entry : plan.undefined)
+			std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count,
+			            entry.first.c_str());
+		// The mission's own set (as the install spells each): the install has a .bin, a .til and a
+		// .pcx for every shipped mission, each needed by the mission.
+		const auto row_called = [&plan](const std::string &wanted) -> const ImportPlanRow * {
+			for (const ImportPlanRow &row : plan.rows)
+				if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
+			return nullptr;
+		};
+		for (const char *extension : {".bin", ".til", ".pcx"}) {
+			const std::string own = std::string(name).substr(0, std::string(name).size() - 4) + extension;
+			const ImportPlanRow *row = row_called(own);
+			TEST_EXPECT(row && row->state == State::Found &&
+			            normalized_logical_name(row->needed_by.file) == normalized_logical_name(name));
+		}
+		// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
+		TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
+		// The HUD's fixed names a running mission opens (review F4): the compass ring, the map's
+		// icons and the first crosshair style, each for the game.
+		for (const char *fixed : {"compring.tga", "TSDicon.tga", "cross01.tga"}) {
+			const ImportPlanRow *row = row_called(fixed);
+			TEST_EXPECT(row && row->state == State::Found && row->needed_by.field.find("the game, for ") == 0);
+		}
+		for (const ImportNotFollowed &entry : plan.not_followed)
+			TEST_EXPECT(entry.reference == ReferenceKind::None ||
+			            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
+		TEST_EXPECT(found > 100 && plan.total_bytes() > (uint64_t(100) << 20) && problems == 0);
+		// The terrain and the banks are read (S14): the height data and the waves come.
+		TEST_EXPECT(by_kind.count("terrain_polydata") && by_kind["wave"].first > 1000 &&
+		            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
+		            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank));
+		if (std::string(name) != "04TR.bms") continue;
+
+		// The smaller mission's closure imported (the menu's videos and the music banks left
+		// unchecked: 236 MB a mission starts without). What the plan did not find is what the
+		// shipped game itself lacks: once imported, every reference to a file, of every file the
+		// project holds, resolves or names one of those.
+		std::set<std::string> lacking;
+		std::vector<ImportChoice> sources;
+		for (const ImportPlanRow &row : plan.rows) {
+			if (row.state == State::NotFound) lacking.insert(normalized_logical_name(row.name));
+			else if (row.selected && row.problem.empty() && row.kind != AssetKind::Video && row.kind != AssetKind::MusicBank)
+				sources.push_back(row.source);
+		}
+		const size_t planned = sources.size();
+		const auto import_started = std::chrono::steady_clock::now();
+		const ActionOutcome imported = import(project.session, sources);
+		const double import_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - import_started).count();
+		TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
+		size_t references = 0, unresolved = 0, unplanned = 0;
+		for (const AssetEntry &entry : view.project.scan->entries)
+			for (const GraphEdge *edge : view.findings.graph->references_of(entry.relative_path)) {
+				if (reference_row(edge->kind).resolution != ReferenceResolution::File) continue;
+				++references;
+				if (view.findings.graph->resolve(*edge) == ReferenceStatus::Present) continue;
+				++unresolved;
+				if (lacking.count(normalized_logical_name(edge->value))) continue;
+				++unplanned;
+				std::printf("editor_import retail closure %s: %s: %s %s names %s, which the plan neither brought nor listed\n", name,
+				            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());
+			}
+		TEST_EXPECT(references > 1000 && unplanned == 0);
+		// With the Missions feature on, the checklist: every Required file of the three phases the
+		// install has is in; one the project lacks is one the plan listed as not found (an install
+		// without its NovaWorld table), which "create every missing file" then makes.
+		editor_test::set_missions(project.session, true);
+		project.session.run_operations();
+		for (const RequirementRow &row : view.project.requirements->rows) {
+			if (!row.required || row.state == RequirementState::Present) continue;
+			std::printf("editor_import retail closure %s: the required %s is not in the project\n", name, row.name.c_str());
+			TEST_EXPECT(row.state == RequirementState::Missing && lacking.count(normalized_logical_name(row.name)));
+		}
+		editor_test::create_missing_files(project.session);
+		project.session.run_operations();
+		TEST_EXPECT(view.project.requirements->required_missing + view.project.requirements->required_wrong_kind == 0);
+		// The project's errors: each a reference the shipped game's own files leave unresolved (a
+		// name the install lacks, an effect no particle file of it defines), never a file the import
+		// left behind. They are listed and gate nothing (S14: the game ships them and runs), so no
+		// finding blocks a build.
+		std::map<std::string, size_t> errors;
+		size_t errors_listed = 0, gating = 0;
+		for (const Diagnostic &d : view.findings.diagnostics) {
+			if (d.severity != DiagnosticSeverity::Error) continue;
+			++errors[d.code()];
+			++errors_listed;
+			gating += blocks_build(d) ? 1 : 0;
+		}
+		for (const auto &entry : errors)
+			std::printf("editor_import retail closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
+		TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing") && gating == 0);
+		// The session's own build, gated on the Problems rows as they are, packs it.
+		const auto build_started = std::chrono::steady_clock::now();
+		editor_test::handle_to_end(project.session, request::build(project.dir.file("builds")));
+		const double build_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_started).count();
+		TEST_EXPECT(view.activity.has_build);
+		const BuildReport &built = *view.activity.last_build;
+		for (const Diagnostic &d : built.diagnostics)
+			std::printf("editor_import retail closure build: %s: %s\n", d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && built.ok && built.files_hashed >= planned);
+		std::printf("editor_import retail closure %s: %zu files imported in %.1f s; %zu references to files, %zu unresolved (each a "
+		            "name the install lacks); %zu error(s) listed, none gating; built %zu files (%.1f MB) in %.1f s\n",
+		            name, planned, import_seconds, references, unresolved, errors_listed, built.files_hashed, built.bytes_hashed / 1e6,
+		            build_seconds);
+	}
+	return 0;
+}
+
+// ADR 0046 S14 (review F1): a mission found loose in a game's folder sits beside the player's and
+// this machine's own files. Planned with what it needs, a resource the manifest names comes from
+// that folder and none of the player's files does (every row of player_files(), a save, a
+// screenshot); each picked by hand is a row the project cannot take, the import refuses it, and the
+// game install's listing never holds one. A project that holds them anyway builds without packing
+// one, each said.
+static int test_apply_never_player_files() {
+	Project project("opennova_editor_apply_player_files");
+	const std::string game = project.dir.file("game");
+	std::vector<uint8_t> bms;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, bms, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(game + "/m.bms", bms) && editor_test::write_text(game + "/menu_style.mns", "X 1\r\n"));
+	std::vector<std::string> players;
+	for (const PlayerFile &file : player_files()) players.push_back(file.name);
+	players.push_back("extra.sav");
+	players.push_back("SS00001.tga");
+	for (const std::string &name : players) TEST_EXPECT(editor_test::write_text(game + "/" + name, "the player's"));
+	TEST_EXPECT(players.size() >= 18 && is_player_file("PLAYER.SAV") && is_player_file("dir/SS12345.bmp") &&
+	            !is_player_file("SS1234.tga") && !is_player_file("items.def") && !is_player_file("cc.bin"));
+	const ImportPlan plan = project.plan({{game + "/m.bms", {}}});
+	const ImportPlanRow *sheet = row_named(plan, "menu_style.mns");
+	TEST_EXPECT(sheet && sheet->state == State::Found && sheet->selected);
+	for (const std::string &name : players) {
+		if (row_named(plan, name)) std::printf("player file %s planned\n", name.c_str());
+		TEST_EXPECT(!row_named(plan, name));
+	}
+	std::vector<ImportChoice> picked;
+	for (const std::string &name : players) picked.push_back({game + "/" + name, {}});
+	const ImportPlan chosen = project.plan(picked, false);
+	for (const std::string &name : players) {
+		const ImportPlanRow *row = row_named(chosen, name);
+		TEST_EXPECT(row && row->problem.find("never takes the player's own files") != std::string::npos);
+	}
+	const ActionOutcome refused = import(project.session, {{game + "/player.sav", {}}, {game + "/epass.bin", {}}});
+	TEST_EXPECT(!refused.done() && !project.view().project.scan->find("player.sav") && !project.view().project.scan->find("epass.bin"));
+	bool said = false;
+	for (const Diagnostic &d : project.view().activity.last_operation.findings) said = said || d.code() == "import.player_file";
+	TEST_EXPECT(said);
+	// The game install's listing: its loose files the game ships, never one of the player's.
+	TEST_EXPECT(editor_test::write_text(game + "/menumus.sbf", "music"));
+	const uint8_t member[] = {'x'};
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", member, sizeof(member), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive((game + "/localres.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	std::vector<Diagnostic> listing_findings;
+	const std::vector<ImportChoice> listed = list_retail_import_choices(game, *project.view().project.document, listing_findings);
+	bool music = false;
+	for (const ImportChoice &choice : listed) {
+		music = music || choice.entry == "menumus.sbf";
+		TEST_EXPECT(!is_player_file(choice.entry));
+	}
+	TEST_EXPECT(music && listed.size() == 2);
+	// Held by the project anyway (copied by hand): the build leaves each out and says so.
+	editor_test::create_missing_files(project.session);
+	for (const std::string &name : players) TEST_EXPECT(editor_test::write_text(project.root() + "/" + name, "the player's"));
+	editor_test::handle_to_end(project.session, request::rescan());
+	const SessionView &view = project.view();
+	const BuildPlan build = plan_build(ProjectPaths::for_root(project.root()), *view.project.scan, *view.project.requirements, {});
+	size_t told = 0;
+	for (const Diagnostic &d : build.diagnostics) told += d.code() == "build.player_file" && d.severity == DiagnosticSeverity::Warning;
+	TEST_EXPECT(build.ok && told == players.size());
+	for (const BuildEntry &entry : build.loose) TEST_EXPECT(!is_player_file(entry.logical_name));
+	for (const BuildArchive &archive : build.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(!is_player_file(entry.logical_name));
+	return 0;
+}
+
 int run_import_apply_tests() {
 	int failures = 0;
+	failures += test_apply_never_player_files();
+	failures += test_apply_retail_mission_closure();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();
 	failures += test_apply_changed();
@@ -645,7 +1069,10 @@ int run_import_apply_tests() {
 	failures += test_apply_reads_the_disk();
 	failures += test_apply_scene_textures();
 	failures += test_apply_record_with_its_file();
-	failures += test_apply_cap_keeps_groups();
+	failures += test_apply_refuses_unplanned();
+	failures += test_apply_plan_steps();
+	failures += test_apply_write_steps();
+	failures += test_apply_write_cancel();
 	failures += test_apply_staging_leftover();
 	failures += test_apply_guard_reads_the_shown_plan();
 	failures += test_apply_retail_menu();

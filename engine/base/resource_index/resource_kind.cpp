@@ -48,8 +48,10 @@ const std::vector<ResourceKindRule> &resource_kind_rules() {
 	        // share .def and are consumed at runtime by name). Only hudpos.def is a browsable kind,
 	        // for the HUD layout catalog; the rest stay unclassified.
 	        {"hudpos.def", ".def", "", "hudpos"},
+	        // The game's one mission file [orig: Mission_LoadBMSFile @ 0x40f4e0]. A `.mis` is the
+	        // original mission editor's text, which the game never reads (no literal of it in the
+	        // image): no kind here.
 	        {"", ".bms", "", "mission"},
-	        {"", ".mis", "", "mission"},
 	        {"", ".trn", "", "terrain"},
 	        {"", ".env", "", "environment"},
 	        {"", ".3di", "", "object_model"},

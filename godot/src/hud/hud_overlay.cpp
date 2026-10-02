@@ -45,6 +45,7 @@ using namespace godot;
 #include <runtime/hud/hud_minimap_feed.h> // the marker feed layout (decode)
 #include <runtime/hud/hud_game_text.h> // hud_session_text (the session lines' strings)
 #include <runtime/hud/hud_layout_from_hudpos.h> // the hudpos.def parse applied to the layout
+#include <runtime/hud/hud_texture_names.h> // the fixed texture names
 #include <runtime/world/friendly_tags.h> // FriendlyTagSource (the D-HUD-20 gather)
 #include <runtime/world/vehicle_attach.h> // AttachLabel (the seat/armory label scan)
 
@@ -562,10 +563,9 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name,
 }
 
 void HudOverlay::load_crosshair_texture_() {
-	// Retail's "cross%02d.tga" (style + 1) selection; witness in hud-re.md.
-	char name[16];
-	std::snprintf(name, sizeof(name), "cross%02d.tga", crosshair_style_ + 1);
-	const Ref<Texture2D> tex = load_hud_texture_(String(name));
+	// The style's texture by the engine's name (hud_texture_names.h carries the witness).
+	const Ref<Texture2D> tex = load_hud_texture_(
+			String(opennova::hud::hud_crosshair_texture_name(crosshair_style_).c_str()));
 	textures_[opennova::hud::kHudTexCrosshair] = tex;
 	layout_.crosshair_texture_valid = tex.is_valid();
 	layout_.crosshair_tex_w = tex.is_valid() ? tex->get_width() : 0;
@@ -630,13 +630,13 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// secondary texture (the combined material rec+0x30 gates the whole
 		// drawer) [orig: the combine @0x56af3c, the null gate @0x56b71f,
 		// see docs/interface/hud-re.md].
-		const Ref<Texture2D> border = load_hud_texture_("border.tga");
-		const Ref<Texture2D> brush = load_hud_texture_("boxtile.tga");
+		const Ref<Texture2D> border = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxBorder));
+		const Ref<Texture2D> brush = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexBoxTile));
 		// The camo's own dims divide the pieces' screen-anchored second UV
 		// (HudLayout::box_tile_w/h carries the witness).
 		layout_.box_tile_w = brush.is_valid() ? brush->get_width() : 0;
 		layout_.box_tile_h = brush.is_valid() ? brush->get_height() : 0;
-		const Ref<Texture2D> icon = load_hud_texture_("neticon2.tga");
+		const Ref<Texture2D> icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetIcon));
 		textures_[opennova::hud::kHudTexBoxBorder] = border;
 		textures_[opennova::hud::kHudTexBoxTile] = brush;
 		textures_[opennova::hud::kHudTexNetIcon] = icon;
@@ -648,16 +648,16 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// The connection indicators' other two atlases: the T/R link-error
 		// pair and the NovaWorld N (hud_frame.h kHudTexNetLinkIcon carries the
 		// load witness). Absent files leave that icon undrawn.
-		const Ref<Texture2D> link_icon = load_hud_texture_("neticon1.tga");
-		const Ref<Texture2D> novaworld_icon = load_hud_texture_("neticon3.tga");
+		const Ref<Texture2D> link_icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetLinkIcon));
+		const Ref<Texture2D> novaworld_icon = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexNetNovaWorldIcon));
 		textures_[opennova::hud::kHudTexNetLinkIcon] = link_icon;
 		textures_[opennova::hud::kHudTexNetNovaWorldIcon] = novaworld_icon;
 		layout_.net_link_icon_texture_valid = link_icon.is_valid();
 		layout_.net_novaworld_icon_texture_valid = novaworld_icon.is_valid();
 		// The tip panel's own box atlas (no second stage) and its two icons.
-		const Ref<Texture2D> tip_box = load_hud_texture_("border3.tga");
-		const Ref<Texture2D> tip_keyboard = load_hud_texture_("k_tip.tga");
-		const Ref<Texture2D> tip_gameplay = load_hud_texture_("g_tip.tga");
+		const Ref<Texture2D> tip_box = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipBox));
+		const Ref<Texture2D> tip_keyboard = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipKeyboard));
+		const Ref<Texture2D> tip_gameplay = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexTipGameplay));
 		textures_[opennova::hud::kHudTexTipBox] = tip_box;
 		textures_[opennova::hud::kHudTexTipKeyboard] = tip_keyboard;
 		textures_[opennova::hud::kHudTexTipGameplay] = tip_gameplay;
@@ -673,11 +673,11 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		// everyone else's zones -> 0x27239C0 @0x59e104/@0x59e10e, lfp_dlf.tga
 		// the tile for the viewer's OWN zones -> 0x27239D0 (textureId +4 =
 		// 0x27239D4) @0x59e11a/@0x59e11f, see docs/interface/hud-re.md].
-		const Ref<Texture2D> team1 = load_hud_texture_("JO_LFP.tga");
-		const Ref<Texture2D> team2 = load_hud_texture_("R_LFP.tga");
-		const Ref<Texture2D> neutral = load_hud_texture_("N_LFP.tga");
-		const Ref<Texture2D> tile_own = load_hud_texture_("lfp_dlf.tga");
-		const Ref<Texture2D> tile_other = load_hud_texture_("lfp_alf.tga");
+		const Ref<Texture2D> team1 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam1));
+		const Ref<Texture2D> team2 = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTeam2));
+		const Ref<Texture2D> neutral = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpNeutral));
+		const Ref<Texture2D> tile_own = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOwn));
+		const Ref<Texture2D> tile_other = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexLfpTileOther));
 		textures_[opennova::hud::kHudTexLfpTeam1] = team1;
 		textures_[opennova::hud::kHudTexLfpTeam2] = team2;
 		textures_[opennova::hud::kHudTexLfpNeutral] = neutral;
@@ -724,7 +724,7 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// armory "A". The compiler's half-texel cell insets ride the PHYSICAL
 	// dimensions of whatever strip this install mounts (stock 16x480,
 	// RevX02 64x1920), so stamp the measured size.
-	const Ref<Texture2D> map_icons = load_hud_texture_("TSDicon.tga", true);
+	const Ref<Texture2D> map_icons = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapIcons), true);
 	textures_[opennova::hud::kHudTexMapIcons] = map_icons;
 	if (map_icons.is_valid()) {
 		state_.minimap.icon_strip_w_px =
@@ -742,18 +742,18 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	// is exactly a pre-doubled texture (the retail capture's band/letters
 	// read ~2x ours before this). RGB doubles with saturation; alpha stays.
 	textures_[opennova::hud::kHudTexMapCompass] =
-			double_saturate_texture_(load_hud_texture_("compring.tga"));
+			double_saturate_texture_(load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapCompass)));
 	// The radar sector-slice marks load like the compass ring; their
 	// MODULATE2X stage runs on the device (map_modulate2x_material), so the
 	// textures stay raw. The marks draw only while both loaded
 	// (HudMinimapInput::radar_slices_loaded carries the witness).
-	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_("dmgslice.tga");
-	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_("dmgslc_n.tga");
+	textures_[opennova::hud::kHudTexMapRadar] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadar));
+	textures_[opennova::hud::kHudTexMapRadarNarrow] = load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapRadarNarrow));
 	state_.minimap.radar_slices_loaded =
 			textures_[opennova::hud::kHudTexMapRadar].is_valid() &&
 			textures_[opennova::hud::kHudTexMapRadarNarrow].is_valid();
 	textures_[opennova::hud::kHudTexMapWpIndicator] =
-			load_hud_texture_("WPIndctr.tga");
+			load_hud_texture_(opennova::hud::hud_fixed_texture_name(opennova::hud::kHudTexMapWpIndicator));
 
 	// The two hudpos font names; the width pick and the load ride
 	// ensure_label_fonts_, which runs on the first draw and on every width-tier

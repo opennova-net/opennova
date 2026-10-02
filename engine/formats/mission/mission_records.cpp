@@ -6,6 +6,7 @@
 #include "mission_detail.h"
 #include "mission_names.h"
 
+#include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_field.h>
 
 #include <algorithm>
@@ -189,24 +190,35 @@ MissionLogicReference logic_reference(const std::string &source_kind,
 	return reference;
 }
 
+// A zone parameter is the area trigger's ID in the file: the game scans the area table for the record
+// whose first word is that id and rewrites the parameter to its index at mission start, neutering a
+// trigger whose id no record has [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000: main 1 / 2 sub
+// 10 -> param2, main 7 sub 37 -> param1; docs/mission/bms-event-runtime-re.md section 7.3].
 void add_trigger_area_reference(const MissionTriggerRecord &trigger,
-                                size_t area_count,
+                                const std::vector<bms::AreaTrigger> &areas,
                                 MissionEventChain &chain) {
-	const bool area_trigger =
+	const bool within_area =
 			(trigger.main_type == static_cast<int>(bms::TriggerMainType::Group) &&
 					trigger.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
 			(trigger.main_type == static_cast<int>(bms::TriggerMainType::Single) &&
 					trigger.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
-	if (!area_trigger) {
+	const bool satchel = trigger.main_type == static_cast<int>(bms::TriggerMainType::Player) &&
+			trigger.sub_type == static_cast<int>(bms::PlayerTriggerType::PlayerSatchel);
+	if (!within_area && !satchel) {
 		return;
 	}
-	const int area_index = trigger.param2;
-	const bool valid = area_index >= 0 && static_cast<size_t>(area_index) < area_count;
-	chain.references.push_back(logic_reference("trigger", static_cast<int>(trigger.index), "area_trigger", area_index, 2, trigger.param2, "area", valid));
+	const int slot = within_area ? 2 : 1;
+	const int id = within_area ? trigger.param2 : trigger.param1;
+	int area_index = -1;
+	for (size_t i = 0; i < areas.size() && area_index < 0; ++i) {
+		if (areas[i].id == id) area_index = static_cast<int>(i);
+	}
+	const bool valid = area_index >= 0;
+	chain.references.push_back(logic_reference("trigger", static_cast<int>(trigger.index), "area_trigger", area_index, slot, id, "area", valid));
 	if (!valid) {
 		chain.diagnostics.push_back(logic_diagnostic(
 				"logic.area_reference_out_of_range",
-				"Trigger references an area trigger index outside the mission area table.",
+				"Trigger names a zone id no area trigger of the mission has.",
 				"trigger",
 				static_cast<int>(trigger.index)));
 	}
@@ -239,23 +251,7 @@ bms::Entity make_default_entity(const bms::File &file,
                                 EntityKind kind,
                                 int item_id,
                                 const EntityTransform &transform) {
-	bms::Entity entity = {};
-	entity.type = to_bms_type(kind);
-	entity.type_id = item_id_to_bms_type_id(item_id);
-	entity.id = next_entity_id(file);
-	entity.perception2 = 100;
-	entity.perfectionist2 = 100;
-	entity.min_engagement_distance = 20;
-	entity.max_engagement_distance = 200;
-	entity.w_accuracy1 = 50;
-	entity.w_accuracy2 = 50;
-	entity.spawns = 1;
-	entity.no_more_than = 1;
-	entity.max_attack_distance = 100;
-	// Editor-authored entities are placed at absolute z (BMS semantics), so a .mis export must
-	// declare the height locked, same as the .bms parse path (see bms.cpp parse_entity)
-	// [orig: MisLdr_WriteNileProjectXml @ 0x10004930, misldr.dll].
-	entity.mis_height_lock = 1;
+	bms::Entity entity = mission::new_entity(kind, item_id, next_entity_id(file));
 	apply_transform(entity, transform);
 	return entity;
 }

@@ -130,6 +130,7 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_rect"), &HudPos::nvg_scale_rect);
 	ClassDB::bind_static_method("HudPos", D_METHOD("nvg_scale_modulate"), &HudPos::nvg_scale_modulate);
 	ClassDB::bind_static_method("HudPos", D_METHOD("binocular_range_step", "current", "target"), &HudPos::binocular_range_step);
+	ClassDB::bind_static_method("HudPos", D_METHOD("view_effect_texture", "which"), &HudPos::view_effect_texture);
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_points", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_points, DEFVAL(-1), DEFVAL(false));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_colors", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_colors, DEFVAL(-1), DEFVAL(false));
 	ClassDB::bind_static_method("HudPos", D_METHOD("scope_mask_indices", "surface", "screen_width", "draw_crosshair", "batch", "aspect_mode", "nvg_lens"), &HudPos::scope_mask_indices, DEFVAL(-1), DEFVAL(false));
@@ -164,6 +165,12 @@ void HudPos::_bind_methods() {
 	BIND_CONSTANT(SPLASH_FONT_SCALE_BASE_W);
 	BIND_CONSTANT(BINOCULAR_DIGIT_STEP);
 	BIND_CONSTANT(VIEW_DIGIT_CELL);
+	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_MASK);
+	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_CROSSHAIR);
+	BIND_CONSTANT(VIEW_TEXTURE_BINOCULAR_DIGITS);
+	BIND_CONSTANT(VIEW_TEXTURE_NVG_MASK);
+	BIND_CONSTANT(VIEW_TEXTURE_NVG_SCALE);
+	BIND_CONSTANT(VIEW_TEXTURE_VIGNETTE);
 	BIND_CONSTANT(SCOPE_MASK_RING);
 	BIND_CONSTANT(SCOPE_MASK_CROSS);
 	BIND_CONSTANT(SCOPE_MASK_GRID);
@@ -601,6 +608,13 @@ Color HudPos::nvg_scale_modulate() {
 
 int HudPos::binocular_range_step(int p_current, int p_target) {
 	return opennova::hud::binocular_range_step(p_current, p_target);
+}
+
+String HudPos::view_effect_texture(int p_which) {
+	if (p_which < 0 || p_which >= opennova::hud::kViewTexCount) {
+		return String();
+	}
+	return String(opennova::hud::kViewEffectTextureNames[p_which]);
 }
 
 namespace {

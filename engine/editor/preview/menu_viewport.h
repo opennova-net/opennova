@@ -142,6 +142,10 @@ public:
 	ViewportLayout layout() const override;
 	std::unique_ptr<CanvasHalf> make_canvas() const override;
 	ViewportHit hit(const ViewportContext &context, float x, float y) const override;
+	// The windows a marquee's box touches (menu_marquee_windows: every shown window of the screen but
+	// its root windows), in the compiled screen's order.
+	std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
+			float y1) const override;
 	bool handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x, float &y,
 			std::string &error) const override;
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,

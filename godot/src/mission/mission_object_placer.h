@@ -35,6 +35,7 @@
 
 namespace godot {
 
+class MissionPlacementRun;
 
 // Placement of a mission's entities into the runtime 3D scene. Given a parsed
 // MissionData, a resource root, and an item database, it resolves each placed
@@ -141,6 +142,14 @@ public:
 			const Dictionary &p_options = Dictionary());
 	Ref<MissionPlacementStats> place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
 			const Dictionary &p_options);
+	// The same placement a unit at a time (mission/mission_placement_run.h; ADR 0046 S14): the run
+	// begun over the rows, which MissionPlacementRun::step runs unit by unit to the same census
+	// place_rows answers (place_rows is this run stepped to its end). A run begun here cancels the
+	// one begun before it. begin_place takes the mission document's entities as place does.
+	Ref<MissionPlacementRun> begin_place_rows(const std::vector<PlacementRow> &p_rows, Node3D *p_parent,
+			const Dictionary &p_options);
+	Ref<MissionPlacementRun> begin_place(const Ref<MissionData> &p_mission, Node3D *p_parent,
+			const Dictionary &p_options = Dictionary());
 
 	// Per-frame RLOD selection for every retained static instance, driven by
 	// GameWorld beside ObjectModel.update_authored_lods. Each instance's
@@ -287,6 +296,48 @@ public:
 			bool p_active);
 	bool clear_static_terrain_shadow_replacement(int p_bms_id);
 
+	// --- the editor's moves (ADR 0046 S14) --------------------------------
+	// A retained static entity moved to `p_xform` (its entity transform, as
+	// entity_transform makes it): every row it occupies rewritten in place
+	// across its populations (the level's, the shadow twin's, the view twins'),
+	// its level's bound sphere moved with it, and the bounds of every population
+	// it may draw in grown to hold it (live or not: a later level switch or a
+	// show appends it there). It keeps the 512-unit bin it was placed in: the
+	// cull stays right, the batching degrades for a far move until the next
+	// placement. Its terrain shadow source and its static instance record do not
+	// follow here: the editor moves them at the gesture's end
+	// (update_static_terrain_shadow_source_transform); its effect and light-draw
+	// source rows stay where it was placed until the next placement (the
+	// editor's picture draws no effect or light from them). False for a bms id
+	// that is no retained static.
+	bool move_static_instance(int p_bms_id, const Transform3D &p_xform);
+	// The entity transform a retained static's rows draw at now (null for a
+	// bms id that is no retained static): the move's read-back.
+	Variant get_static_instance_transform(int p_bms_id) const;
+	// The transform a placement draws an entity of the item at: its entity
+	// transform with the item's model scale (items.def `scale`), what a move
+	// hands move_static_instance or an individual model's node.
+	Transform3D item_entity_transform(const Vector3 &p_position,
+			const Vector3 &p_rotation_deg, int p_item_id) const;
+	// The graphic's static batches harvested and cached (the template model's
+	// one-off harvest under `p_tree_parent`), so a placement that names it
+	// later finds them warm; true when the graphic resolves to batches.
+	bool warm_static_graphic(const String &p_graphic, Node *p_tree_parent);
+	// Whether a placement draws an entity of the item as a row of its
+	// graphic's static populations (else as an individual model: the item
+	// needs a node of its own, or its graphic a live PANM).
+	bool item_places_static(int p_item_id);
+	// One entity's individual model built as the placement's animated walk
+	// builds one (its graphic, scale, shadow, lighting, rig, muzzle, authored
+	// levels and occluders, the water mirror's wave, the mirror flag from the
+	// entity's attributes and its item, the thermal wave, its static shadow
+	// siblings, its EntityRef and its terrain shadow source keyed by the row's
+	// kind and index and its bms id) under `p_parent`, whatever the item would
+	// be in a whole placement; null for a marker, an item no graphic names or
+	// a model that does not load. The editor's lifted entities (ADR 0046 S14),
+	// which no whole placement has taken in yet.
+	ObjectModel *build_entity_model(const PlacementRow &p_row, Node3D *p_parent, const String &p_name);
+
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
 	// (including asset-free tests). Each batch row may carry "lod_index"
@@ -371,6 +422,7 @@ private:
 		int row = -1;
 		int lod_index = 0;
 		Transform3D live_xform; // the row's transform while the level is live
+		Transform3D offset; // the batch's own, which live_xform composes after the entity's
 		Color custom_data; // the light-atlas row (visible populations)
 		bool shadow_only = false; // the filtered shadow twin
 		bool casts = true; // whether the slot is ever live in a shadow twin
@@ -381,6 +433,7 @@ private:
 	struct StaticLodInstance {
 		int profile = -1;
 		int bms_id = 0;
+		Transform3D xform; // the entity transform its rows draw at
 		Vector3 origin;
 		int32_t radius_q16 = 0;
 		opennova::renderer::ObjectProjectionSphere local_projection_sphere;
@@ -465,6 +518,32 @@ private:
 			const String &p_graphic, const Transform3D &p_local_xform,
 			const String &p_suffix);
 	Node3D *_ensure_container(Node3D *p_parent);
+	// The mission document's own entities as placement rows, straight off the bms::File in the
+	// placement order (markers, items, buildings, organics).
+	static std::vector<PlacementRow> placement_rows_of(const Ref<MissionData> &p_mission);
+	// The placement's units (mission_placement_run.cpp): the rows from `p_first` bucketed, one static
+	// group placed, the animated models from `p_first` placed, the census made.
+	friend class MissionPlacementRun;
+	void _place_bucket(MissionPlacementRun &p_run, size_t p_first);
+	void _place_static_group(MissionPlacementRun &p_run, int p_group);
+	void _place_animated(MissionPlacementRun &p_run, int p_first);
+	// One entity as the animated walk builds it: what build_entity_model and _place_animated share.
+	struct EntityModelSpec {
+		String graphic;
+		int item_id = 0;
+		int kind = -1;
+		int index = -1;
+		int bms_id = 0;
+		int group = -1;
+		int team = -1;
+		uint32_t ai_flags = 0;
+		Vector3 position;
+		Transform3D xform;
+	};
+	ObjectModel *_build_entity_model(const EntityModelSpec &p_spec, const Ref<ObjectData> &p_data,
+			Node3D *p_container, const String &p_name, const String &p_shadow_tag);
+	void _place_finish(MissionPlacementRun &p_run);
+	Node3D *_place_populations_parent(MissionPlacementRun &p_run);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,
 			int p_bms_id, int p_item_id, const String &p_graphic,
 			const Transform3D &p_xform);
@@ -493,6 +572,8 @@ private:
 	HashMap<String, bool> graphic_panm_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
 	uint64_t built_epoch_ = 0;
+	// The placement run begun last (begin_place_rows): a run of an older generation is cancelled.
+	uint64_t placement_generation_ = 0;
 
 	// The retained static instances of the current placement (one per
 	// batched entity), the per-graphic profiles they select from, and the

@@ -146,10 +146,12 @@ ViewportContext viewport_context(const SessionView &view, const ViewportModel &m
 	for (const auto &open : view.documents.open)
 		if (open && open->path() == model.path()) document = open.get();
 	const ViewportState size = model.size();
+	// The device drawing it, where the Shell holds one: read, not used.
+	const ViewportDeviceSource *devices = view.documents.viewports ? view.documents.viewports->devices() : nullptr;
 	return ViewportContext{
 		ViewportInput{ view, view.documents.viewports ? view.documents.viewports->clock() : kStill, document,
 				ChangeClass::None },
-		size.width, size.height, snap, nullptr
+		size.width, size.height, snap, devices ? devices->peek(model.path(), model.kind()) : nullptr
 	};
 }
 
@@ -199,6 +201,15 @@ std::string ViewportModel::picture_message() const {
 		return build_.message.empty() ? std::string("The picture did not build.") : build_.message;
 	default: return message();
 	}
+}
+
+bool ViewportModel::drop(const ViewportContext &, const ViewportDrop &, CanvasRequests &, std::string &error) const {
+	error = std::string("A ") + viewport_kind_token(kind_) + " viewport takes no drop.";
+	return false;
+}
+
+std::vector<ViewportHit> ViewportModel::box(const ViewportContext &, float, float, float, float) const {
+	return {};
 }
 
 io::JsonValue ViewportModel::notes_json(const ViewportInput &) const {
