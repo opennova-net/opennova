@@ -1,6 +1,7 @@
 #include <editor/ui/main_viewport_view.h>
 
 #include <algorithm>
+#include <cfloat>
 
 #include <editor/model/document_base.h>
 #include <editor/session/view/session_view.h>
@@ -25,7 +26,14 @@ void MainViewportView::draw(Workspace &workspace, const DocumentBase &document) 
 	// (S13 A3), as the Document window holds back a view of records; the canvas beside it is not. The
 	// columns' ids are their own: a view of records drawn in the same tab before (the document read
 	// again as another type) leaves an `outline` child whose width a resizable column would keep.
-	const float column = std::max(ImGui::GetFontSize() * 12.0f, ImGui::GetContentRegionAvail().x * 0.3f);
+	// The column keeps the width it was dragged to, within the tab: never narrower than a few words,
+	// never so wide that the viewport beside it loses its own least width (a tab narrowed since, a
+	// window docked smaller than it first drew at; a viewport's toolbar wraps and narrows its
+	// controls down to that width).
+	const float avail = ImGui::GetContentRegionAvail().x;
+	const float least = ImGui::GetFontSize() * 6.0f;
+	const float column = std::max(ImGui::GetFontSize() * 12.0f, avail * 0.3f);
+	ImGui::SetNextWindowSizeConstraints(ImVec2(least, 0.0f), ImVec2(std::max(least, avail - least), FLT_MAX));
 	ImGui::BeginDisabled(!workspace.view().allows(EditorRequestKind::EditRecord));
 	if (ImGui::BeginChild("outline_column", ImVec2(column, 0.0f), ImGuiChildFlags_ResizeX | ImGuiChildFlags_Borders))
 		outline_->draw(workspace, document);

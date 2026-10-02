@@ -682,7 +682,7 @@ static int test_install() {
 	const std::string another = dir.file("Other Ops");
 	fs::create_directories(another, ec);
 	TEST_EXPECT(write_archive(another + "/resource.pff", "arial88.fnt", "fnt"));
-	ran = run(scratch, { "import", root, "--dry-run", "--install", another, "--entry", "arial88.fnt" });
+	ran = run(scratch, { "import", root, "--dry-run", "--rows", "--install", another, "--entry", "arial88.fnt" });
 	TEST_EXPECT(ran.code == 0 &&
 	            ran.out.find("take arial88.fnt (font) -> fonts/arial88.fnt, chosen, from the game install") !=
 	                    std::string::npos);

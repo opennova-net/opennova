@@ -42,7 +42,7 @@ struct EdgeResolution {
 
 // One file of the project (ADR 0046 S13 D3), or of a base layer: its row in the scan, what the
 // graph read from it (its extraction, and what that was read from) and how each of its edges
-// resolves. A file the graph does not read (a texture, a mission's .mis) holds no extraction; its
+// resolves. A file the graph does not read (a texture, a mission text) holds no extraction; its
 // row still counts (the file set).
 struct GraphSlot {
 	std::string path;         // project-relative; a base layer's file: its logical name

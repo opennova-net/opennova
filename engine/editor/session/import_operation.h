@@ -16,10 +16,11 @@ namespace opennova::editor {
 // An import written as the session's operation (ADR 0046 S13 A3). With the import dialog open, the
 // import is planned again first (an ImportPlanOperation's steps, over the files as they are now),
 // and nothing is written when that is not the plan the dialog showed (same_import) or a row asked
-// for is not in it; then the import (import_assets: every file checked and staged before any is
-// published, one step), then, when it imported a file, the project's files read again
+// for is not in it; then the import (AssetImport: every file checked and staged before any is
+// published, a file a step), then, when it imported a file, the project's files read again
 // (ProjectRefresh: the import pass makes what the files written need, the scan lists them). It can
-// be cancelled until it writes, not after. finish() shows the new plan, or closes the dialog, reads
+// be cancelled until it publishes its first file (what it staged goes), not after. finish() shows
+// the new plan, or closes the dialog, reads
 // again the open documents whose files the import replaced and takes the refresh into the view
 // (ImportController::absorb_import).
 class ImportOperation : public SessionOperation {
@@ -31,8 +32,8 @@ public:
 	OperationKind kind() const override { return OperationKind::ImportApply; }
 	bool step(const StepBudget &budget) override;
 	OperationProgress progress() const override;
-	bool cancellable() const override { return !written_; }
-	void cancel() override {}
+	bool cancellable() const override;
+	void cancel() override;
 	OperationOutcome finish(SessionCore &core) override;
 
 	// What the import dialog showed and what planning it again made (none with no dialog open).
@@ -62,6 +63,8 @@ private:
 	std::shared_ptr<const ImportPlan> new_plan_;
 	bool changed_ = false;
 	std::vector<Diagnostic> refusals_;
+	std::unique_ptr<AssetImport> import_; // the write under way
+	uint64_t write_done_ = 0, write_total_ = 0; // its files once it ended
 	ImportResult result_;
 	bool written_ = false;
 	std::unique_ptr<ProjectRefresh> refresh_;

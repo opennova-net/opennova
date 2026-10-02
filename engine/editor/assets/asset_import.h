@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -35,12 +37,27 @@ bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocume
 // SCR form under a key of its own and unwraps it itself (a shader: AssetKindRow::scr, ScrForm::Shader),
 // the bytes as stored. What an import copies into the project and what its plan reads.
 bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out);
-// Every effective file of a game install, mounted as a stock launch mounts it
-// (mount_retail): the "Import from game data" list.
+// The kinds the game ships loose in its install root and reads from there, never through the
+// archives (ArchiveSlot::Loose; ADR 0046 S14): a music bank, a video, the country code, the
+// NovaWorld string table and its screens. What an import of the game install may take beside its
+// archives' files; never the player's saves, configuration or score table, nor a text beside the
+// game.
+bool install_loose_kind(AssetKind kind);
+// The loose files of those kinds in a game install's root, each as the disk spells it, sorted by
+// their normalized names; none for a root that cannot be listed.
+std::vector<std::string> list_install_loose_files(const std::string &retail_root);
+// A file of a game install as the game is served it: its archives' member decoded (read_served),
+// else, for a name of a kind the game ships loose (install_loose_kind), the root's loose file of
+// that name (compared without case, as the game compares names). False for any other name.
+bool read_install_file(const Vfs &game, const std::string &retail_root, const std::string &name,
+                       std::vector<uint8_t> &out);
+// Every effective file of a game install, mounted as a stock launch mounts it (mount_retail),
+// and the loose files the game ships beside its archives (list_install_loose_files) where no
+// archive has the name: the "Import from game data" list.
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics);
-// The logical names a game install resolves, sorted by their normalized form (the
-// Problems Import fixes).
+// The logical names a game install resolves, its loose files included, sorted by their normalized
+// form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder
@@ -61,7 +78,42 @@ std::string import_destination(const AssetScan &existing, const std::string &nam
 // was. Then each file is renamed over its destination in order, after its record; a failure
 // there stops it (a record written for a file that did not publish goes with it), the files
 // published before it `imported`, it and the rest `not_imported`, each one a finding.
+// An AssetImport run to its end.
 ImportResult import_assets(const std::vector<ImportChoice> &sources, const ProjectPaths &paths,
                            const ProjectDocument &document, bool replace_existing);
+
+// The import a step at a time (ADR 0046 S14: a mission's closure is thousands of files and
+// hundreds of megabytes; S13 A3's rule for every long job): the project scanned (ProjectScan),
+// then a source a step, read, checked as import_assets says and, while none was refused, staged
+// at once, its bytes dropped (one file is held at a time, never the selection); then, when none
+// was refused, a file published a step. A refusal stages nothing more and, once every source was
+// checked (each refusal said), removes the stage: the project is as it was. It can be abandoned
+// until it publishes its first file, not after.
+class AssetImport {
+public:
+	AssetImport(std::vector<ImportChoice> sources, const ProjectPaths &paths, const ProjectDocument &document,
+	            bool replace_existing);
+	~AssetImport();
+	AssetImport(const AssetImport &) = delete;
+	AssetImport &operator=(const AssetImport &) = delete;
+
+	// One step within `bytes` read and written (at least one source or one file); true once done.
+	bool step(uint64_t bytes);
+	bool done() const;
+	// True from its first published file on: it runs to its end from there.
+	bool publishing() const;
+	// Stops before it publishes: what it staged is removed. Nothing after it publishes.
+	void abandon();
+	// Its progress in files: the sources checked and the files published, of the sources and the
+	// files they make (known as each is staged, so the total grows while it checks).
+	size_t files_done() const;
+	size_t files_total() const;
+	// What it came to, once done.
+	ImportResult take();
+
+private:
+	class Run;
+	std::unique_ptr<Run> run_;
+};
 
 } // namespace opennova::editor

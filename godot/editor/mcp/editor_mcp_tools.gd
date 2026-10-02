@@ -136,8 +136,12 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 			if String(_run().get("state", "")) != "stopped":
 				return McpToolResult.error("The game is already running; editor_play op=stop first.")
 			# Play builds first: its build's operation is awaited as editor_build awaits it, and the
-			# game starts on the poll the build lands.
-			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify({"kind": "play"}))))
+			# game starts on the poll the build lands, in `mission` when one is named (S14).
+			var play := {"kind": "play"}
+			var mission := String(args.get("mission", ""))
+			if not mission.is_empty():
+				play["mission"] = mission
+			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
 			var failed := _outcome_error(answer, "editor_play op=start")
 			if failed != null:
 				return failed
@@ -163,8 +167,8 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 ## editor_viewport (S13 V7): a document's viewport, `op` dispatched to the session's two seams. A read
 ## (the viewport query's ops, as the catalog lists them) is the viewport query, its params flat beside
 ## op as the query takes them; a write is a request (EditorMcpCatalog.VIEWPORT_WRITES: options and
-## camera a set_viewport of the viewport's state, seek a set_viewport of the clock alone, drag and
-## command an edit_in_viewport; `kind` the member of the request that names the viewport's kind),
+## camera a set_viewport of the viewport's state, seek a set_viewport of the clock alone, drag,
+## command and drop an edit_in_viewport; `kind` the member of the request that names the viewport's kind),
 ## answered as editor_request answers it (a request that did not read a tool error, one refused ok with
 ## its outcome not done) with the viewport's state after it as `viewport`.
 func _tool_editor_viewport(args: Dictionary, _ctx: McpToolContext) -> Variant:

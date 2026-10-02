@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -95,6 +96,13 @@ inline EditorRequest import_files(std::vector<ImportChoice> imports, bool replac
 	request.replace = replace;
 	return request;
 }
+// The open import preview's rows imported as its plan has them (each the project can take).
+inline EditorRequest import_planned(bool replace = false) {
+	EditorRequest request = of(EditorRequestKind::ImportFiles);
+	request.planned = true;
+	request.replace = replace;
+	return request;
+}
 inline EditorRequest cancel_import() {
 	return of(EditorRequestKind::CancelImport);
 }
@@ -113,6 +121,13 @@ inline EditorRequest preview_install_import(
 	request.with_dependencies = with_dependencies;
 	return request;
 }
+// The import dialog on every file of the game install, chosen at once, with no walk (ADR 0046
+// S14: the closure of everything is everything).
+inline EditorRequest import_whole_install() {
+	EditorRequest request = of(EditorRequestKind::PreviewInstallImport);
+	request.all = true;
+	return request;
+}
 
 // --- the build and Play ------------------------------------------------------------------------
 
@@ -124,8 +139,12 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	request.rehash = rehash;
 	return request;
 }
-inline EditorRequest play() {
-	return of(EditorRequestKind::Play);
+// A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
+// logical name; S14).
+inline EditorRequest play(std::string mission = std::string()) {
+	EditorRequest request = of(EditorRequestKind::Play);
+	request.mission = std::move(mission);
+	return request;
 }
 inline EditorRequest stop_play() {
 	return of(EditorRequestKind::StopPlay);
@@ -136,11 +155,17 @@ inline EditorRequest cancel_operation() {
 
 // --- files and documents -----------------------------------------------------------------------
 
-// A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind.
-inline EditorRequest create_file(std::string path, std::string file_kind = std::string()) {
+// A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind;
+// `values`, what its blank takes (a mission's title, terrain and environment), by token, sorted by
+// it as the wire reads them (an object's keys are written sorted), so a request equals its round
+// trip whatever order its prompt gave them (review F10).
+inline EditorRequest create_file(std::string path, std::string file_kind = std::string(),
+		std::vector<std::pair<std::string, std::string>> values = {}) {
 	EditorRequest request = of(EditorRequestKind::CreateFile);
 	request.path = std::move(path);
 	request.file_kind = std::move(file_kind);
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
 	return request;
 }
 // The document at `path` opened (made active when it is open), the record at `locator` selected
@@ -254,6 +279,14 @@ inline EditorRequest edit_in_viewport(std::string path, ViewportCommand command)
 	EditorRequest request = of(EditorRequestKind::EditInViewport);
 	request.path = std::move(path);
 	request.command = std::move(command);
+	return request;
+}
+// A drop on the picture of the viewport over the document at `path` ("" the active one), planned by
+// the viewport (S14: a Files row or a picked name let go on a mission's canvas).
+inline EditorRequest edit_in_viewport(std::string path, ViewportDrop drop) {
+	EditorRequest request = of(EditorRequestKind::EditInViewport);
+	request.path = std::move(path);
+	request.drop = std::move(drop);
 	return request;
 }
 inline EditorRequest copy(std::string path = std::string()) {
