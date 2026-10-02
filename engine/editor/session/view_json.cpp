@@ -153,6 +153,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("state", json_string(play_state_label(activity.play_state)));
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
+	out.set("mission", json_string(activity.play_mission));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
@@ -177,6 +178,7 @@ JsonValue import_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
+	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
 	size_t rows = 0, not_found = 0;
@@ -260,6 +262,7 @@ JsonValue dialogs_section(const SessionView &view) {
 			sites.push(std::move(entry));
 		}
 		preview.set("sites", std::move(sites));
+		preview.set("companions", strings_to_json(rename.companions));
 		preview.set("refusals", diagnostics_to_json(rename.refusals));
 		preview.set("ok", boolean(rename.refusals.empty()));
 		out.set("rename_preview", std::move(preview));
@@ -360,7 +363,8 @@ constexpr ViewSectionRow kSections[] = {
 			"files done of total: the problems are the last composed until it ends) and the last "
 			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
-			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
+			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
+			"it was started in (\"\" at its menu), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), the files it reported missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },
@@ -450,10 +454,13 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		return entry;
 	entry.set("source", source_to_json(row.source));
 	entry.set("destination", json_string(row.destination));
+	entry.set("size", json_number(double(row.size)));
 	if (!row.made_from.empty())
 		entry.set("made_from", json_string(row.made_from));
 	entry.set("found_in", json_string(row.found_in));
 	entry.set("selected", boolean(row.selected));
+	if (row.held)
+		entry.set("held", boolean(true));
 	if (!row.problem.empty())
 		entry.set("problem", json_string(row.problem));
 	if (!row.rivals.empty()) {
@@ -636,21 +643,38 @@ JsonValue events_page_to_json(const ViewEvents &events, uint64_t cursor, size_t 
 	return out;
 }
 
-JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) {
+JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, AssetKind kind) {
 	const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 	const ImportPlan &plan = *preview.plan;
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
+	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
-	// The plan's importable rows (the paged list) and the rows not found, apart, in plan order.
+	// The plan's importable rows (the paged list; those of one kind when one is asked) and the
+	// rows not found, apart, in plan order.
+	const bool one_kind = kind != AssetKind::kCount;
+	if (one_kind) out.set("kind", json_string(asset_kind_token(kind)));
 	std::vector<const ImportPlanRow *> rows, not_found;
-	for (const ImportPlanRow &row : plan.rows)
-		(row.state == ImportPlanRow::State::NotFound ? not_found : rows).push_back(&row);
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == ImportPlanRow::State::NotFound) not_found.push_back(&row);
+		else if (!one_kind || row.kind == kind) rows.push_back(&row);
+	}
 	// `count` the rows'; the page runs on while any list it covers has entries past it.
 	set_page(out, page, rows.size(),
 			std::max({ preview.choices.size(), preview.roots.size(), not_found.size() }));
+	// What the whole plan copies, whatever the page shows of it: in all, and by kind.
+	out.set("total_bytes", json_number(double(plan.total_bytes())));
+	JsonValue summary = JsonValue::make_array();
+	for (const ImportPlanKind &entry : plan.by_kind()) {
+		JsonValue line = JsonValue::make_object();
+		line.set("kind", json_string(asset_kind_token(entry.kind)));
+		line.set("files", json_number(double(entry.files)));
+		line.set("bytes", json_number(double(entry.bytes)));
+		summary.push(std::move(line));
+	}
+	out.set("summary", std::move(summary));
 	JsonValue planned = JsonValue::make_array();
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));
@@ -670,18 +694,23 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 		missing.push(plan_row_to_json(*not_found[i]));
 	out.set("not_found_count", json_number(double(not_found.size())));
 	out.set("not_found", std::move(missing));
-	JsonValue not_followed = JsonValue::make_array();
-	for (const ImportNotFollowed &kind : plan.not_followed) {
-		JsonValue entry = JsonValue::make_object();
-		if (kind.reference != ReferenceKind::None)
-			entry.set("reference", json_string(reference_row(kind.reference).token));
-		else
-			entry.set("kind", json_string(asset_kind_token(kind.kind)));
-		entry.set("count", json_number(double(kind.count)));
-		entry.set("first", json_string(kind.first));
-		not_followed.push(std::move(entry));
-	}
-	out.set("not_followed", std::move(not_followed));
+	const auto counted = [](const std::vector<ImportNotFollowed> &entries) {
+		JsonValue list = JsonValue::make_array();
+		for (const ImportNotFollowed &kind : entries) {
+			JsonValue entry = JsonValue::make_object();
+			if (kind.reference != ReferenceKind::None)
+				entry.set("reference", json_string(reference_row(kind.reference).token));
+			else
+				entry.set("kind", json_string(asset_kind_token(kind.kind)));
+			entry.set("count", json_number(double(kind.count)));
+			entry.set("first", json_string(kind.first));
+			list.push(std::move(entry));
+		}
+		return list;
+	};
+	out.set("not_followed", counted(plan.not_followed));
+	out.set("undefined", counted(plan.undefined));
+	out.set("shadowed", counted(plan.shadowed));
 	out.set("truncated", boolean(plan.truncated));
 	out.set("diagnostics", diagnostics_to_json(plan.diagnostics));
 	return out;

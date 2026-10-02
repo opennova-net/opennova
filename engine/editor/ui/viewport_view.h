@@ -24,7 +24,7 @@ struct ViewportContext;
 // SelectRecord for a click. One per (document, kind), made from the kind's row of ui/viewport_views:
 // the Preview window's for its targets (a Preview-role viewport), and a Main-role document view's
 // (ui/document_views' MainViewport role: a text's script device, whose view has no canvas since its
-// Control owns the input, S13 V10; the mission's 3D view, to come). The viewport is the view's, read
+// Control owns the input, S13 V10; the mission's 3D view, S14). The viewport is the view's, read
 // const (DocumentsView::viewports); one the session keeps none of yet (its device made at the next
 // pump) shows its kind's message.
 class ViewportView {
