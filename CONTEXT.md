@@ -852,7 +852,8 @@ check renders a menu again only when it, a file its screens read or a variable i
 Its findings are Problems rows after the build's gate, never in it, and never a finding a use check
 or the asset graph makes. A use check is the other cross-file finding, one whose rows are in the
 gate: a function of the asset graph, keeping nothing. Which one a finding is, is chosen by whether
-it may block a build.
+it may block a build (and in the gate an error blocks only when its code's row says so: a missing
+reference's does not, ADR 0046 S14).
 _Avoid_: use check (in the gate, stateless, one per kind of file), validation (a file's own
 findings)
 
@@ -862,7 +863,10 @@ from, which the finding keeps: what Problems offers for it (its fixes; a Rewrite
 the file again does), whether it says the file does not serialize (its Save refused, no Rewrite
 offered), where Problems takes it (the record and field in the file's document, or the file itself
 in Files), the group it shows under (its family), where it comes from (its own part, the asset
-graph, the render check) and, for a compiler note, whether it is a Problems row at all. The
+graph, the render check), for a compiler note, whether it is a Problems row at all, and whether an
+error of it refuses a build (ADR 0046 S14: every code's does but a missing reference's,
+`reference.missing`, which is listed and fixable and blocks nothing: the shipped game carries such
+names and runs; what the game cannot start without is the manifest's rows). The
 editor's own codes are one table and each document type declares its own, a family of its name
 (`menu.`, `style.`); every finding is made from a row, so a code no table declares cannot be made.
 The wire's `code` is the token.
