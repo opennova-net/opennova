@@ -1532,6 +1532,59 @@ void test_import_dialog_problem_root() {
 	      "Import: the menu alone");
 }
 
+// ADR 0046 S14 (review F2): a chosen file the project holds already is held, unchecked by default,
+// and the import takes the rest without asking to replace; the row checked alone is replaced (the
+// request then replaces), and Replace existing files checks every held row.
+void test_import_dialog_held_rows() {
+	SessionView v = seeded_view();
+	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	preview.open = true;
+	ImportPlanRow fresh;
+	fresh.state = ImportPlanRow::State::Selected;
+	fresh.selected = true;
+	fresh.source = {"C:/game", "hud.mnu", true, false};
+	fresh.name = "hud.mnu";
+	fresh.kind = AssetKind::Menu;
+	fresh.destination = "menus/hud.mnu";
+	fresh.found_in = "the game install";
+	ImportPlanRow held = fresh;
+	held.source = {"C:/game", "items.def", true, false};
+	held.name = "items.def";
+	held.kind = AssetKind::ItemDefs;
+	held.destination = "defs/items.def";
+	held.selected = false;
+	held.held = true;
+	preview.roots = {fresh.source, held.source};
+	editor_test::own(preview.plan).rows = {fresh, held};
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	ImGui::SetWindowSize("Import files", ImVec2(1400.0f, 800.0f));
+	ui.frames(2);
+	const ImGuiID dialog = ImHashStr("Import files");
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos && logged_frame(ui).find("the project has it") != std::string::npos,
+	      "a held row is unchecked and says the project has it");
+	ui.activate(item_id(dialog, {"###import"}));
+	std::vector<EditorRequest> requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].imports.size() == 1 && requests[0].imports[0].entry == "hud.mnu" &&
+	              !requests[0].replace,
+	      "Import: the rest, the project's file kept, nothing replaced");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "the held row checked alone");
+	ui.activate(item_id(dialog, {"###import"}));
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].imports.size() == 2 && requests[0].replace,
+	      "a checked held row is one asked to be replaced");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "unchecked again");
+	ui.activate(item_id(dialog, {"Replace existing files"}));
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "Replace existing files checks every held row");
+	ui.activate(item_id(dialog, {"Replace existing files"}));
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "and unchecks them");
+}
+
 std::string lowered(std::string text) {
 	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
 	return text;
@@ -2478,6 +2531,7 @@ void run_workspace_tests() {
 	test_files_window();
 	test_import_dialog();
 	test_import_dialog_problem_root();
+	test_import_dialog_held_rows();
 	test_preview_follows();
 	test_preview_model_gestures();
 	test_preview_model_pane_input();

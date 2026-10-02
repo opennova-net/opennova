@@ -171,8 +171,13 @@ void ImportDialog::draw(Workspace &workspace) {
 	// save it first (the session's unsaved prompt), one that writes over none goes ahead.
 	ui_kit::WrapRow actions;
 	actions.next(ui_kit::checkbox_width("Replace existing files"));
-	ImGui::Checkbox("Replace existing files", &replace_existing_);
-	ui_kit::tooltip("A checked file the project has already is written over; otherwise the import refuses it.");
+	// The files the project holds already are unchecked by default and kept as they are; Replace
+	// existing files checks them all (each can still be checked or unchecked alone).
+	if (ImGui::Checkbox("Replace existing files", &replace_existing_))
+		for (size_t i = 0; i < checked_.size(); ++i)
+			if (preview.plan->rows[i].held && why_not_[i].empty()) checked_[i] = replace_existing_;
+	ui_kit::tooltip("Check every file the project has already, to write it over; left unchecked, the project's file "
+	                "stays as it is.");
 	const std::string label = "Import " + counted(count, "file") + "###import";
 	// An import writes the project's files: while an operation holds them (a build packing
 	// them), the busy gate refuses it, and Import waits with it (SessionView::allows).
@@ -183,12 +188,14 @@ void ImportDialog::draw(Workspace &workspace) {
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
 		std::vector<ImportChoice> imports;
+		bool replaces = replace_existing_; // a checked file the project holds is one asked to be replaced
 		for (size_t i = 0; i < checked_.size(); ++i) {
 			const ImportChoice &source = preview.plan->rows[i].source;
+			replaces = replaces || (checked_[i] && preview.plan->rows[i].held);
 			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
 				imports.push_back(source);
 		}
-		EditorRequest request = request::import_files(std::move(imports), replace_existing_);
+		EditorRequest request = request::import_files(std::move(imports), replaces);
 		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
@@ -208,8 +215,8 @@ void ImportDialog::take(const DialogsView::ImportPreview &preview) {
 	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = cannot_take(plan, i);
 	checked_.assign(plan.rows.size(), false);
 	for (size_t i = 0; i < plan.rows.size(); ++i)
-		checked_[i] = plan.rows[i].selected &&
-		              (plan.rows[i].state == State::Selected || why_not_[i].empty());
+		checked_[i] = (plan.rows[i].selected && (plan.rows[i].state == State::Selected || why_not_[i].empty())) ||
+		              (plan.rows[i].held && replace_existing_ && why_not_[i].empty());
 	chosen_.assign(preview.choices.size(), false);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
 		chosen_[i] = std::find(preview.roots.begin(), preview.roots.end(), preview.choices[i]) != preview.roots.end();
@@ -396,6 +403,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		}
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!why_not.empty() ? "It cannot be imported: " + why_not
+		                : row.held       ? "The project has " + row.destination +
+		                                     " already: checked, it is written over; left unchecked, it stays as it is."
 		                : row.made_from.empty() ? std::string()
 		                                        : "The files made from " + row.made_from + " come together.");
 		ImGui::TableNextColumn();
@@ -410,6 +419,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		ImGui::TableNextColumn();
 		if (row.state == State::Found)
 			ui_kit::clipped_text(need_words(row.needed_by), need_words(row.needed_by) + " names " + row.needed_by.name);
+		else if (row.held)
+			ui_kit::clipped_text("chosen, the project has it", "One of the files chosen, which the project has already.");
 		else
 			ui_kit::clipped_text("chosen", "One of the files chosen.");
 		ImGui::TableNextColumn();

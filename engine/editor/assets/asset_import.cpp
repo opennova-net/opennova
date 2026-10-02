@@ -395,9 +395,9 @@ private:
 			              name + " is " + player_file_words(name) + ": an import never takes the player's own files.", name);
 		if (!selected_names_.insert(normalized_logical_name(name)).second)
 			return refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
-		const AssetEntry *old = existing_.find(name);
-		if (old && !replace_existing_)
-			return refuse(CoreFinding::ImportExists, name + " already exists; select Replace existing files to replace it.", name);
+		// A file of a name the project holds is decided once the source is read: the same bytes are
+		// left as they are, other bytes refused unless the import replaces (below, for each file the
+		// source makes; review F2).
 		std::vector<uint8_t> bytes;
 		if (!read(source, name, bytes)) return;
 		// What the source becomes: a converter's outputs (the source is not kept), or

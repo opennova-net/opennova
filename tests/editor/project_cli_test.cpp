@@ -172,14 +172,20 @@ static int test_new_status_validate() {
 		            built.find(" file(s) hashed)") != std::string::npos);
 	}
 
-	// Generic native file import uses the same core and requires explicit replacement.
+	// Generic native file import uses the same core; a file the project holds already is kept as it
+	// is, whatever its bytes, unless --replace writes it over (review F2).
 	TEST_EXPECT(run({"import", root}) == 2);
 	const std::string source = dir.file("source.txt");
 	TEST_EXPECT(editor_test::write_text(source, "imported file"));
 	TEST_EXPECT(run({"import", root, source}) == 0);
 	TEST_EXPECT(std::filesystem::is_regular_file(root + "/source.txt"));
-	TEST_EXPECT(run({"import", root, source}) == 1);
-	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0);
+	TEST_EXPECT(run({"import", root, source}) == 0);
+	TEST_EXPECT(editor_test::write_text(source, "changed file"));
+	std::string held_text, held_error;
+	TEST_EXPECT(run({"import", root, source}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	            held_text == "imported file");
+	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	            held_text == "changed file");
 
 	// A file with the wrong content behind a required name is an error too.
 	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));

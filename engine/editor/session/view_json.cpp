@@ -459,6 +459,8 @@ JsonValue plan_row_to_json(const ImportPlanRow &row) {
 		entry.set("made_from", json_string(row.made_from));
 	entry.set("found_in", json_string(row.found_in));
 	entry.set("selected", boolean(row.selected));
+	if (row.held)
+		entry.set("held", boolean(true));
 	if (!row.problem.empty())
 		entry.set("problem", json_string(row.problem));
 	if (!row.rivals.empty()) {

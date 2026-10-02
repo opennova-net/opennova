@@ -539,10 +539,10 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 	size_t take = 0;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &row : items(page, "rows")) {
-			const bool selected = row.get_bool("selected", false);
+			const bool selected = row.get_bool("selected", false), held = row.get_bool("held", false);
 			take += selected ? 1 : 0;
 			if (!rows) continue;
-			std::string line = std::string(selected ? "take " : "skip ") + row.get_string("name", "") + " (" +
+			std::string line = std::string(selected ? "take " : held ? "keep " : "skip ") + row.get_string("name", "") + " (" +
 			                   row.get_string("kind", "") + ") -> " + row.get_string("destination", "");
 			line += row.get_string("state", "") == "found" ? ", needed by " + need_words(at(row, "needed_by"))
 			                                                : std::string(", chosen");
@@ -550,6 +550,7 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 			line += made_from.empty() ? ", from " + found_in : ", made from " + made_from + ", " + found_in;
 			const std::string problem = row.get_string("problem", "");
 			if (!problem.empty()) line += ": " + problem;
+			else if (held) line += ": the project has it already (--replace writes it over)";
 			std::fprintf(to, "%s\n", line.c_str());
 			for (const JsonValue &rival : items(row, "rivals"))
 				std::fprintf(to, "  also in %s as %s (%s)\n", rival.get_string("found_in", "").c_str(),
@@ -637,20 +638,25 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// What the plan takes and nothing else: the sources it holds (the files a converter makes from
 	// one, whole) and each dependency found that the project can take; the files past its cap are
 	// not imported.
+	// A file the project holds already is kept unless --replace writes it over (review F2). The whole
+	// install's import names none of its rows (planned), so it lists none (review F7).
+	const bool replace = args.has("--replace");
 	JsonValue taken = JsonValue::make_array();
-	std::vector<std::string> taken_sources;
+	std::set<std::string> taken_sources;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &file : items(page, "rows")) {
-			if (!file.get_bool("selected", false)) {
+			const bool held = file.get_bool("held", false);
+			if (held && !replace && file.get_string("problem", "").empty()) {
+				std::fprintf(cli.err, "keeping %s: the project has it already (--replace writes it over)\n",
+				             file.get_string("name", "").c_str());
+				continue;
+			}
+			if (!file.get_bool("selected", false) && !(held && replace)) {
 				std::fprintf(cli.err, "not importing %s: %s\n", file.get_string("name", "").c_str(),
 				             file.get_string("problem", "").c_str());
 				continue;
 			}
-			const std::string key = io::json_write(at(file, "source"));
-			bool listed = false;
-			for (const std::string &other : taken_sources) listed = listed || other == key;
-			if (listed) continue;
-			taken_sources.push_back(key);
+			if (all || !taken_sources.insert(io::json_write(at(file, "source"))).second) continue;
 			taken.push(at(file, "source"));
 		}
 	}

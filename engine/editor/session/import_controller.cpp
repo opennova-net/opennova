@@ -146,17 +146,19 @@ void ImportController::show_plan(std::shared_ptr<const ImportPlan> plan, const I
 	planned.flag = preview.changed;
 	view_.events.post(std::move(planned));
 	if (preview.open) {
-		size_t files = 0, found = 0, missing = 0;
+		size_t files = 0, found = 0, missing = 0, held = 0;
 		for (const ImportPlanRow &row : preview.plan->rows) {
 			if (row.state == ImportPlanRow::State::NotFound) ++missing;
 			else if (row.selected) ++files;
 			if (row.state == ImportPlanRow::State::Found) ++found;
+			held += row.held ? 1 : 0;
 		}
 		view_.activity.status = preview.roots.empty() ? std::string("Choose the files to import.")
 		               : "Import preview: " + std::to_string(files) + " file" + (files == 1 ? "" : "s") + " to import" +
 		                         (preview.with_dependencies ? " (" + std::to_string(found) + " the chosen ones need), " +
 		                                                              std::to_string(missing) + " not found."
-		                                                    : std::string("."));
+		                                                    : std::string(".")) +
+		                         (held ? " " + std::to_string(held) + " the project has already: kept unless replaced." : "");
 	}
 	core_.touch(ViewConcern::Dialogs);
 	if (preview.open) core_.touch(ViewConcern::Output);
@@ -240,10 +242,12 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 	}
 	// The rows the plan takes (the dialog's checks of a new plan): each source once, a converter's
 	// outputs sharing theirs; a row the project cannot take is left out, as the command line leaves
-	// it.
+	// it; a file the project holds is left as it is unless the request replaces (review F2).
 	std::set<std::string> taken;
 	for (const ImportPlanRow &row : preview.plan->rows) {
-		if (row.state == ImportPlanRow::State::NotFound || !row.selected || !row.problem.empty()) continue;
+		if (row.state == ImportPlanRow::State::NotFound || !(row.selected || (row.held && request.replace)) ||
+		    !row.problem.empty())
+			continue;
 		const std::string key = row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') +
 		                        (row.source.native ? '1' : '0');
 		if (taken.insert(key).second) imports.push_back(row.source);
@@ -338,7 +342,7 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 	// its file lands.
 	const auto writes = [&request](const ImportPlanRow &row) {
 		if (row.state == ImportPlanRow::State::NotFound) return false;
-		if (request.planned) return row.selected && row.problem.empty();
+		if (request.planned) return (row.selected || (row.held && request.replace)) && row.problem.empty();
 		return std::find(request.imports.begin(), request.imports.end(), row.source) != request.imports.end();
 	};
 	for (const auto &document : documents.documents()) {

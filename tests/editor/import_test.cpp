@@ -859,35 +859,56 @@ static int test_retail_source() {
 	// Everything the install has, chosen at once (ADR 0046 S14): the archives' files and the loose
 	// ones the game ships beside them, none to choose from, no walk (the setting changes nothing:
 	// a walk of every file finds nothing not chosen); imported as the plan has them, nothing echoed
-	// back (planned). The files the project holds already with the same bytes are left as they are.
+	// back (planned). A file the project holds already is marked held and not taken by default
+	// (review F2): the project's file is left as it is, the rest comes; Replace takes them too.
 	{
 		const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
+		const std::string note_path = view.project.root + "/" + view.project.scan->find("note.txt")->relative_path;
+		TEST_EXPECT(editor_test::write_text(note_path, "edited in the project"));
+		editor_test::handle_to_end(session, request::rescan());
 		editor_test::handle_to_end(session, request::import_whole_install());
 		TEST_EXPECT(preview.open && preview.all && preview.choices.empty() && preview.roots.size() == 5 &&
 		            !preview.with_dependencies && preview.plan->rows.size() == 5);
 		const ImportPlanRow *bank = nullptr;
-		for (const ImportPlanRow &row : preview.plan->rows)
+		size_t held = 0;
+		for (const ImportPlanRow &row : preview.plan->rows) {
 			if (row.name == "MENUMUS.SBF") bank = &row;
-		TEST_EXPECT(bank && bank->state == ImportPlanRow::State::Selected && bank->kind == AssetKind::MusicBank &&
-		            bank->size == 5 && bank->found_in == "the game install" && bank->source.install && bank->problem.empty());
+			if (row.held) {
+				++held;
+				TEST_EXPECT(!row.selected && row.problem.empty() && row.destination == view.project.scan->find(row.name)->relative_path);
+			}
+		}
+		TEST_EXPECT(held == 4);
+		TEST_EXPECT(bank && bank->state == ImportPlanRow::State::Selected && bank->kind == AssetKind::MusicBank && bank->selected &&
+		            !bank->held && bank->size == 5 && bank->found_in == "the game install" && bank->source.install &&
+		            bank->problem.empty());
 		TEST_EXPECT(view_section_to_json(view, ViewSection::Import).get_bool("all", false));
 		const uint64_t planned = view.activity.last_operation.id;
 		editor_test::handle_to_end(session, request::set_import_dependencies(true));
 		TEST_EXPECT(preview.open && preview.all && !preview.with_dependencies && view.activity.last_operation.id == planned);
-		// Without Replace existing files the project's own files refuse the whole import (the files
-		// the project holds already, from the imports above); with it, those of the same bytes are
-		// left as they are and the bank comes.
+		// Without Replace existing files: the bank comes, the project's own files stay as they are, no
+		// refusal.
 		editor_test::handle_to_end(session, request::import_planned());
-		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Failed && !view.project.scan->find("MENUMUS.SBF") &&
-		            count_code(view.activity.last_operation.findings, "import.exists") == 4);
-		editor_test::handle_to_end(session, request::import_whole_install());
-		TEST_EXPECT(preview.open && preview.all && preview.plan->rows.size() == 5);
-		editor_test::handle_to_end(session, request::import_planned(true));
-		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open &&
+		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
 		const AssetEntry *music = view.project.scan->find("MENUMUS.SBF");
 		TEST_EXPECT(music && music->kind == AssetKind::MusicBank && !view.project.scan->find("player.sav"));
 		TEST_EXPECT(music && read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
-		TEST_EXPECT(view.project.scan->find("note.txt") && read_file_text(view.project.root + "/" + view.project.scan->find("note.txt")->relative_path, text, message) && text == "retail");
+		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
+		// With Replace: the held files are written over (the edited one too).
+		editor_test::handle_to_end(session, request::import_whole_install());
+		TEST_EXPECT(preview.open && preview.plan->rows.size() == 5);
+		editor_test::handle_to_end(session, request::import_planned(true));
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
+		TEST_EXPECT(read_file_text(note_path, text, message) && text == "retail");
+		// The same bytes imported again without Replace: held, not an error (the source is read
+		// before a file of its name is refused).
+		EditorRequest again = request::of(EditorRequestKind::ImportFiles);
+		again.imports = {source};
+		again.imports.back().entry = "note.txt";
+		editor_test::handle_to_end(session, again);
+		TEST_EXPECT(session.outcome().done() && view.activity.last_operation.end == OperationEnd::Done &&
+		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
 		// Nothing planned: a planned import is refused.
 		editor_test::handle_to_end(session, request::import_planned());
 		TEST_EXPECT(!session.outcome().done() && view.findings.diagnostics.back().code() == "import.not_planned");

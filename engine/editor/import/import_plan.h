@@ -150,9 +150,14 @@ struct ImportPlanRow {
 	// a diffuse row takes a .dds the plan brings, a plain row does not).
 	ImportNeed needed_by;
 	// What the import takes: the selected sources (one with a problem is refused when the import
-	// runs), and each dependency found that the project can take (one with a problem is listed,
-	// not taken).
+	// runs; one the project holds is not, `held`), and each dependency found that the project can
+	// take (one with a problem is listed, not taken).
 	bool selected = false;
+	// A chosen file of a name the project holds already (ADR 0046 S14: the whole game install over a
+	// project with files of its own): the import leaves the project's file as it is unless it is
+	// asked to replace it (the row checked in the dialog, or Replace existing files: import_files'
+	// `replace`). Not selected.
+	bool held = false;
 	// Why the project cannot take the file as it is (check_project_file_name; a kind the game
 	// does not use; a second selected file of the name), "" when it can.
 	std::string problem;
@@ -258,7 +263,7 @@ ImportPlan plan_import(const std::vector<ImportChoice> &sources, bool with_depen
 // Whether two plans come to the same import (an import checks the plan it shows against the
 // one it makes again before it writes): the same rows in the same order, each the same file
 // from the same place (its source) to the same destination, of the same kind, found or not
-// found alike, with the same problem; and both stopped by the cap, or neither. What wanted a
+// found alike, taken or held alike, with the same problem; and both stopped by the cap, or neither. What wanted a
 // file first, where else it was found and the findings do not decide what is written.
 bool same_import(const ImportPlan &a, const ImportPlan &b);
 

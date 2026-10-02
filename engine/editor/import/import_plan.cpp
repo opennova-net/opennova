@@ -469,6 +469,12 @@ private:
 				row.problem = (converter ? "More than one selected file makes " : "More than one selected file has the name ") +
 				              output.name + ".";
 			place(row);
+			// A file of a name the project holds is left as it is unless the import is asked to replace
+			// it (review F2): marked, and not taken by default.
+			if (scan_.find(output.name)) {
+				row.held = true;
+				row.selected = false;
+			}
 			plan_.rows.push_back(std::move(row));
 			++files_;
 			const size_t index = plan_.rows.size() - 1;
@@ -1134,7 +1140,8 @@ bool same_import(const ImportPlan &a, const ImportPlan &b) {
 		const ImportPlanRow &x = a.rows[i];
 		const ImportPlanRow &y = b.rows[i];
 		if (x.state != y.state || x.name != y.name || x.kind != y.kind || x.source != y.source ||
-		    x.destination != y.destination || x.made_from != y.made_from || x.selected != y.selected || x.problem != y.problem)
+		    x.destination != y.destination || x.made_from != y.made_from || x.selected != y.selected || x.held != y.held ||
+		    x.problem != y.problem)
 			return false;
 	}
 	return true;

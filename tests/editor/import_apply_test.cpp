@@ -380,9 +380,11 @@ static int test_apply_guard_reads_the_shown_plan() {
 	TEST_EXPECT(editor_test::write_text(loose, "begin \"Marker\"\nid 100001\ntype marker\nhp 30\nend\n"));
 	preview(project.session, {loose});
 	const ImportPlanRow *row = row_named(*view.dialogs.import_preview.plan, "items.def");
-	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected &&
+	// The project holds items.def: the row is held, the import asked to replace it.
+	TEST_EXPECT(view.dialogs.import_preview.open && row && row->state == State::Selected && row->held && !row->selected &&
 	            row->destination == "defs/items.def");
-	const std::vector<ImportChoice> shown = selected_sources(*view.dialogs.import_preview.plan);
+	if (!row) return 1;
+	const std::vector<ImportChoice> shown = {row->source};
 	std::error_code ec;
 	fs::remove(loose, ec);
 	TEST_EXPECT(!ec);
