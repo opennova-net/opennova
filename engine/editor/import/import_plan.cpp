@@ -70,8 +70,8 @@ constexpr MissionLiteral kMissionLiterals[] = {
 
 } // namespace
 
-bool references_unread(AssetKind kind, const std::string &file) {
-	return asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
+bool references_unread(AssetKind kind) {
+	return asset_kind_row(kind).names_files && !graph_reads_kind(kind);
 }
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
@@ -595,7 +595,7 @@ private:
 		Extracted content;
 		Diagnostic error;
 		const AssetKind kind = from->file_kind(spelling);
-		if (graph_reads_file(kind, spelling) && from->read(spelling, bytes)) {
+		if (graph_reads_kind(kind) && from->read(spelling, bytes)) {
 			cost_ += bytes.size();
 			if (extract_from_bytes(spelling, kind, bytes, document_.target_game, content, error)) {
 				made = std::make_unique<Definitions>();
@@ -876,9 +876,9 @@ private:
 		const bool again = followed_.count(node.row) > 0;
 		followed_.insert(node.row);
 		// What it names is not looked for: a file of a kind that names files the graph does not
-		// read (a dialog bank; a mission's .mis, of a kind it reads).
-		if (!again && references_unread(kind, file)) note(ReferenceKind::None, kind, file);
-		if (!graph_reads_file(kind, file) || !extract(node)) return;
+		// read (a dialog bank, a mission text).
+		if (!again && references_unread(kind)) note(ReferenceKind::None, kind, file);
+		if (!graph_reads_kind(kind) || !extract(node)) return;
 		if (!again) index_symbols(node);
 		if (!again && kind == AssetKind::Menu) menus_.push_back({node.row, node.origin});
 		for (const GraphEdge &edge : node.content.edges) {

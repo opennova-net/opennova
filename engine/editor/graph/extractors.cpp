@@ -415,16 +415,9 @@ bool graph_reads_kind(AssetKind kind) {
 	return native_extractor(kind) != nullptr;
 }
 
-bool graph_reads_file(AssetKind kind, const std::string &name) {
-	// A file its kind's type does not read (a mission's text form, document_reads_file) gives the
-	// graph nothing.
-	if (is_editable_kind(kind) && !document_reads_file(kind, name)) return false;
-	return graph_reads_kind(kind);
-}
-
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error) {
-	if (!graph_reads_file(kind, name))
+	if (!graph_reads_kind(kind))
 		return true;
 	// A record type's document, its records extracted; a text type's, its text's references; a type
 	// of another kind falls through to a native extractor, or gives nothing.

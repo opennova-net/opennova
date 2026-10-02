@@ -21,8 +21,6 @@
 #include <array>
 #include <atomic>
 
-#include <base/io/strutil.h>
-
 namespace opennova::editor {
 namespace {
 
@@ -130,13 +128,6 @@ const DocumentType *document_type_for(AssetKind kind) {
 }
 
 bool is_editable_kind(AssetKind kind) { return document_type_for(kind) != nullptr; }
-
-bool document_reads_file(AssetKind kind, const std::string &name) {
-	// A .mis is a mission by its kind, the mission editors' text form (docs/mission/mis-format-re.md),
-	// which no BMS parse reads.
-	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms")) return false;
-	return is_editable_kind(kind);
-}
 
 DocumentContent document_content(const DocumentType &type) {
 	// A registered type is asked once; a stand-in (a test's) each time.

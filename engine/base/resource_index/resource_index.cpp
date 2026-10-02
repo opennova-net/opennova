@@ -28,7 +28,7 @@ std::string normalize_kind(const std::string &kind) {
 	if (key.empty() || key == "*" || key == "all") {
 		return "";
 	}
-	if (key == "bms" || key == "mis") {
+	if (key == "bms") {
 		return "mission";
 	}
 	if (key == "trn") {

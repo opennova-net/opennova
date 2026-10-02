@@ -13,7 +13,7 @@
 // kept apart; a candidate taken for what it is, not its name; a PNG dependency copied as
 // the game's own and resolving; a bare relative source; a cycle of menus ending; the cap
 // stopping the walk and the selection, a converter's outputs whole or not at all; a symbol,
-// a sound, a terrain and a mission's .mis listed as not followed; and nothing written
+// a sound and a mission text (a .mis) listed as not followed; and nothing written
 // anywhere. S13 D5: what goes unread is the kinds table's rule (a kind that names files the
 // graph does not read), the kinds the hand list named before and a face and a map project.
 #include <cstdint>
@@ -383,11 +383,13 @@ static int test_plan_not_followed() {
 		TEST_EXPECT(editor_test::write_text(art + "/m.mis", text));
 	}
 	TEST_EXPECT(editor_test::write_text(art + "/day.env", "env"));
+	// A mission text (S14: its own kind, which the game never reads): taken, what it names listed
+	// as not followed by its kind.
 	const ImportPlan text_plan = project.plan({ { art + "/m.mis", {} } });
-	const ImportNotFollowed *mis = not_followed(text_plan, ReferenceKind::None, AssetKind::Mission);
+	const ImportNotFollowed *mis = not_followed(text_plan, ReferenceKind::None, AssetKind::MissionText);
 	TEST_EXPECT(mis && mis->count == 1 && mis->first == "m.mis");
 	TEST_EXPECT(text_plan.rows.size() == 1 && row_named(text_plan, "m.mis") &&
-			row_named(text_plan, "m.mis")->kind == AssetKind::Mission);
+			row_named(text_plan, "m.mis")->kind == AssetKind::MissionText);
 	for (const Diagnostic &d : text_plan.diagnostics)
 		TEST_EXPECT(d.code() != "import.unreadable");
 	// A face names its textures, which nothing reads yet: taken, listed; a wave names nothing.
@@ -417,30 +419,28 @@ static int test_plan_not_followed() {
 
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
-// file (graph_reads_file). Those are the kinds the hand-written list named (a dialog bank, the def
+// kind (graph_reads_kind). Those are the kinds the hand-written list named (a dialog bank, the def
 // tables beyond the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a
 // music bank holds its own audio and names no file) and the ones S13 D5 added that name files (a
-// face, a map project); a mission's .mis, which the graph does not read, where its .bms is read.
-// A script the graph reads since S13 D9 (its operands' names) and, since S14, its RUN and its
-// waves: it left the list. powerup.def left the list when the catalog opened it (S13 D10): the
-// graph reads it through the catalog's records. hudpos.def left it with its extractor (S14): the
-// HUD's fonts and textures are followed.
+// face, a map project); a mission text, the original editor's .mis, a kind of its own since S14
+// (the graph reads the .bms the game loads). A script the graph reads since S13 D9 (its operands'
+// names) and, since S14, its RUN and its waves: it left the list. powerup.def left the list when
+// the catalog opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def
+// left it with its extractor (S14): the HUD's fonts and textures are followed.
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::DialogBank,
+	const std::set<AssetKind> unread = {AssetKind::DialogBank, AssetKind::MissionText,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
 	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
-		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";
 		const AssetKindRow &row = asset_kind_row(kind);
-		const bool rule = row.names_files && !graph_reads_file(kind, file);
-		TEST_EXPECT(references_unread(kind, file) == rule);
+		const bool rule = row.names_files && !graph_reads_kind(kind);
+		TEST_EXPECT(references_unread(kind) == rule);
 		if (rule != (unread.count(kind) > 0))
 			std::fprintf(stderr, "references_unread(%s) moved\n", asset_kind_token(kind));
 		TEST_EXPECT(rule == (unread.count(kind) > 0));
 	}
-	TEST_EXPECT(references_unread(AssetKind::Mission, "m.mis"));
-	TEST_EXPECT(!references_unread(AssetKind::Mission, "M.BMS"));
+	TEST_EXPECT(references_unread(AssetKind::MissionText) && !references_unread(AssetKind::Mission));
 	return 0;
 }
 

@@ -175,7 +175,7 @@ std::vector<const AssetEntry *> AssetGraph::files_to_read(const AssetScan &scan,
 		if (document && records_of(*document)) records.insert(document->path());
 	std::vector<const AssetEntry *> out;
 	for (const AssetEntry &asset : scan.entries) {
-		if (!graph_reads_file(asset.kind, asset.logical_name) || records.count(asset.relative_path)) continue;
+		if (!graph_reads_kind(asset.kind) || records.count(asset.relative_path)) continue;
 		const uint32_t id = index_.find(asset.relative_path);
 		if (id != GraphIndex::kNone) {
 			const GraphSlot &slot = index_.slot(id);
@@ -234,9 +234,9 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		}
 		listed.insert(id);
 		GraphSlot &slot = index_.slot(id);
-		// A file the graph does not read (a mission's .mis) holds nothing; its row still counts
-		// (the file set), so one added or gone reaches the edges that could name it.
-		if (!graph_reads_file(asset.kind, asset.logical_name)) {
+		// A file the graph does not read (a texture, a mission text) holds nothing; its row still
+		// counts (the file set), so one added or gone reaches the edges that could name it.
+		if (!graph_reads_kind(asset.kind)) {
 			if (slot.read) {
 				slot.read = slot.open = false;
 				take(id, Extracted(), true, Diagnostic(), patch);

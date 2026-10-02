@@ -372,9 +372,8 @@ static int test_native_extractors() {
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
 		TEST_EXPECT(editor_test::write_bytes(root + "/test.bms", bytes));
-		// The same mission in the mission editors' text form (S13 PR0): a mission to the scan,
-		// which neither the graph nor the mission type reads (document_reads_file), so it is no
-		// finding and names nothing.
+		// The same mission in the original editor's text form (S14): a mission text to the scan, a
+		// kind no document opens and the graph does not read, so it is no finding and names nothing.
 		std::string text;
 		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
 		TEST_EXPECT(editor_test::write_text(root + "/test.mis", text));
@@ -416,9 +415,10 @@ static int test_native_extractors() {
 	TEST_EXPECT(missing >= 4); // sky_b, sun, puff.tga, island
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "reference.missing") == missing);
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
-	// The .mis is skipped, never extracted (graph_reads_file): a changed one is read by nothing.
-	TEST_EXPECT(!graph_reads_file(AssetKind::Mission, "test.mis") &&
-			graph_reads_file(AssetKind::Mission, "TEST.BMS"));
+	// The .mis is skipped, never extracted (graph_reads_kind): a changed one is read by nothing.
+	TEST_EXPECT(session.view().project.scan->find("test.mis") &&
+	            session.view().project.scan->find("test.mis")->kind == AssetKind::MissionText &&
+	            !graph_reads_kind(AssetKind::MissionText) && graph_reads_kind(AssetKind::Mission));
 	TEST_EXPECT(editor_test::write_text(root + "/test.mis", "; changed\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
@@ -1968,7 +1968,7 @@ static int test_generation() {
 	graph.update(paths, doc, scan, {});
 	const uint64_t changed = graph.generation();
 	TEST_EXPECT(changed != grown && changed != assembled && changed != fresh);
-	// A file the graph does not read (a mission's .mis, S13 PR0): its row counts, so one added
+	// A file the graph does not read (a mission text, S14): its row counts, so one added
 	// assembles again, while what it holds is read by nothing, so a change to it keeps the graph.
 	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; one\n"));
 	scan = scan_project_assets(paths, doc);
@@ -2591,7 +2591,7 @@ static int test_incremental_equals_fresh() {
 	fs::remove(root + "/missions/broken.bms");
 	TEST_EXPECT(step("the mission gone", true));
 	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0);
-	// A mission's .mis: its row counts, what it holds is read by nothing.
+	// A mission text (a .mis): its row counts, what it holds is read by nothing.
 	TEST_EXPECT(rewrite(root + "/missions/m1.mis", "; one\n"));
 	TEST_EXPECT(step("a .mis added", true));
 	TEST_EXPECT(rewrite(root + "/missions/m1.mis", "; two, a longer line\n"));
@@ -3201,7 +3201,7 @@ static int test_retail_incremental() {
 		if (opennova::strutil::ends_with_icase(name, ".pff")) continue;
 		const AssetKind kind = origin.file_kind(name);
 		if (kind == AssetKind::Model && model_name.empty()) model_name = name;
-		if (!graph_reads_file(kind, name) || kind == AssetKind::Model ||
+		if (!graph_reads_kind(kind) || kind == AssetKind::Model ||
 				kind == AssetKind::Animation)
 			continue;
 		std::vector<uint8_t> bytes;

@@ -641,7 +641,7 @@ static int test_graph_and_rename() {
 	// The graph reads a script's operands' names, its RUN and its waves (S14): an import follows the
 	// whole of it.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Script) && !graph_reads_kind(AssetKind::Text) &&
-	            !references_unread(AssetKind::Script, "x.wac"));
+	            !references_unread(AssetKind::Script));
 	const std::vector<const GraphEdge *> edges = graph.references_of(script);
 	TEST_EXPECT(edges.size() == 5);
 	const GraphEdge *fx = edge_at(graph, script, "3:12");

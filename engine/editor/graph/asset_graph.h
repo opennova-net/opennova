@@ -411,8 +411,8 @@ void extract_from_text(const TextDocument &document, Extracted &out);
 // loader decodes them): a record type's or a text type's through its document
 // (DocumentBase::load_bytes), a native kind's through the engine's parser. `name` is what the edges
 // and symbols name the file by (the project-relative path in the graph). True with nothing for a
-// file the graph does not read (graph_reads_file), a type's whose documents hold neither records
-// nor a text that names anything included.
+// file of a kind the graph does not read (graph_reads_kind), a type's whose documents hold neither
+// records nor a text that names anything included.
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
@@ -420,11 +420,8 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
                         Extracted &out, Diagnostic &error);
 // True when files of this kind carry references or symbols the graph reads: a record type's
 // (document_content), a text type's whose text names references (DocumentType::references), or
-// a native extractor's kind.
+// a native extractor's kind. A file of another kind (a texture, a mission text) holds nothing the
+// graph reads: its row counts (the file set), what it names goes unchecked.
 bool graph_reads_kind(AssetKind kind);
-// The same for one file, by its name: false for a mission's .mis, the mission editors' text
-// form, which the mission document will read (the graph reads the .bms the game loads), so
-// the graph skips the file and what it names goes unchecked.
-bool graph_reads_file(AssetKind kind, const std::string &name);
 
 } // namespace opennova::editor

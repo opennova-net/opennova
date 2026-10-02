@@ -55,8 +55,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	entry = Entry();
 	entry.filled = entry.asked = true;
 	++stats_.files_validated;
-	const DocumentType *type =
-			document_reads_file(asset.kind, asset.logical_name) ? document_type_for(asset.kind) : nullptr;
+	const DocumentType *type = document_type_for(asset.kind);
 	// A type whose documents hold neither records nor a text (S13 D6, D9): no validator reads
 	// them yet, the file unread.
 	const bool records = type && document_content(*type) != DocumentContent::Other;

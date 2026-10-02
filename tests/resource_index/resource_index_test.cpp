@@ -128,7 +128,7 @@ int main() {
 
 	TEST_EXPECT(index.scan(root.string()));
 	const std::vector<opennova::ResourceFileEntry> all_files = index.resource_files("*");
-	TEST_EXPECT(all_files.size() == 15);
+	TEST_EXPECT(all_files.size() == 14);
 	TEST_EXPECT(has_relative_path(all_files, "Alpha.TRN"));
 	TEST_EXPECT(has_relative_path(all_files, "Avatars.def"));
 	TEST_EXPECT(!has_relative_path(all_files, "weapon.def"));  // co-extension .def stays unbrowsable
@@ -139,7 +139,8 @@ int main() {
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.sbf"));
 	TEST_EXPECT(has_relative_path(all_files, "jo_gamemus.bin"));
 	TEST_EXPECT(has_relative_path(all_files, "first.bms"));
-	TEST_EXPECT(has_relative_path(all_files, "briefing.MIS"));
+	// The original mission editor's text, which the game never reads: no kind (ADR 0046 S14).
+	TEST_EXPECT(!has_relative_path(all_files, "briefing.MIS"));
 	TEST_EXPECT(has_relative_path(all_files, "finale.kda"));
 	TEST_EXPECT(has_relative_path(all_files, "Serpen24.fnt"));
 	TEST_EXPECT(has_relative_path(all_files, "sparks.ptl"));
@@ -163,7 +164,7 @@ int main() {
 
 	TEST_EXPECT(index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.resource_files("environment").size() == 1);
-	TEST_EXPECT(index.resource_files("mission").size() == 2);
+	TEST_EXPECT(index.resource_files("mission").size() == 1);
 	TEST_EXPECT(index.resource_files("object_model").size() == 1);
 	TEST_EXPECT(index.resource_files("strings").size() == 1);
 	TEST_EXPECT(index.resource_files("menu").size() == 1);
@@ -176,8 +177,8 @@ int main() {
 	TEST_EXPECT(index.resource_files("avatar").size() == 1);
 	TEST_EXPECT(index.resource_files("avatar")[0].display_name == "Avatars");
 	TEST_EXPECT(index.resource_files("glb").empty());
-	TEST_EXPECT(index.resource_files("bms").size() == 2);
-	TEST_EXPECT(index.resource_files("mis").size() == 2);
+	TEST_EXPECT(index.resource_files("bms").size() == 1);
+	TEST_EXPECT(index.resource_files("mis").empty());
 	TEST_EXPECT(index.resource_files("trn").size() == 1);
 	TEST_EXPECT(index.resource_files("env").size() == 1);
 	TEST_EXPECT(index.resource_files("3di").size() == 1);
@@ -225,7 +226,7 @@ int main() {
 	TEST_EXPECT(as_string(bytes) == "archived model");
 	TEST_EXPECT(!index.read_file("missing.trn", bytes));
 
-	TEST_EXPECT(mounted_files.size() == 18);  // 15 loose recognized assets + 3 archive-only names
+	TEST_EXPECT(mounted_files.size() == 17);  // 14 loose recognized assets + 3 archive-only names
 	TEST_EXPECT(has_relative_path(mounted_files, "Archive.env"));
 	TEST_EXPECT(has_relative_path(mounted_files, "MenusP.BIN"));
 	TEST_EXPECT(has_relative_path(mounted_files, "Patch.3DI"));

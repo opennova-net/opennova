@@ -22,6 +22,7 @@ constexpr const char *kAiProfile[] = {".aip", nullptr};
 // import record packs as it is (one with its record is an ImportSource: scan_project_assets).
 constexpr const char *kTexture[] = {".tga", ".pcx", ".dds", ".mdt", ".png", nullptr};
 constexpr const char *kRawBin[] = {".bin", nullptr};
+constexpr const char *kMissionText[] = {".mis", nullptr};
 constexpr const char *kMapProject[] = {".npj", ".npz", nullptr};
 constexpr const char *kTerrainPolyData[] = {".cpt", nullptr};
 constexpr const char *kTileInfo[] = {".til", nullptr};
@@ -169,6 +170,15 @@ constexpr AssetKindRow kRows[] = {
 	        .edited_by(DocumentTypeId::Mission)
 	        .folder("missions")
 	        .new_name("newmission.bms")
+	        .row,
+	// The original mission editor's interchange text (dfx2med.exe, docs/mission/mis-format-re.md): the
+	// image holds no `.mis` literal and no reader of one, so the game never asks for it and the build
+	// leaves it out. It names files (a terrain, items, weapons) no reader of the editor follows: an
+	// import takes it and lists it as not followed.
+	Kind(AssetKind::MissionText, "mission_text", "Mission text", ArchiveSlot::None)
+	        .extensions(kMissionText)
+	        .names_files()
+	        .folder("missions")
 	        .row,
 	// Where retail keeps its own (localres.pff holds ASP_G7.npz): its mission list's archive walk
 	// takes a .npj or .npz as it takes a .bms [orig: Mission_BuildMapListFromPFF @ 0x562910]
@@ -383,7 +393,7 @@ constexpr bool rows_well_formed() {
 		const AssetKindRow &row = kRows[i];
 		if (static_cast<size_t>(row.kind) != i || !*row.token || !*row.label) return false;
 		const bool left_out = row.kind == AssetKind::Archive || row.kind == AssetKind::ImportSource ||
-		                      row.kind == AssetKind::Unknown;
+		                      row.kind == AssetKind::Unknown || row.kind == AssetKind::MissionText;
 		if ((row.archive_slot == ArchiveSlot::None) != left_out) return false;
 		const bool by_the_scan = row.kind == AssetKind::ImportSource || row.kind == AssetKind::MaterialChunk;
 		if (by_the_scan && (*row.runtime || row.file_name || row.extensions)) return false;
