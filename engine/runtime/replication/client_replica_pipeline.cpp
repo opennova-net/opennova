@@ -451,18 +451,25 @@ void ClientReplicaPipeline::refresh_carried_entities(bool tick_sweep) {
 			// successfully resolved local sample. A missing carrier invalidates
 			// the sample rather than leaving an offset that could attach to a
 			// later handle reuse.
-			// A world-mover VEHICLE whose carrier is not a pool-1 deck (a static
-			// bridge/roof/ramp its groundEntity resolved to) is predicted by the
-			// embedding sim from the composed record sample; its row publishes
-			// the mirrored predicted pose, so the per-tick recompose must not
-			// drag it back to the record's sample between records (the static
-			// never moves, and the fold already landed the composed pose).
-			const bool predicted_on_static = child.cls == EntityClass::Vehicle &&
+			// A world-mover VEHICLE is predicted by the embedding sim from the
+			// composed record sample whatever its carrier (a pool-1 deck, or
+			// the static a bridge/roof/ramp resolves to), its mover riding the
+			// carrier as its ground link; its row publishes the mirrored
+			// predicted pose, so the per-tick recompose must not drag it back
+			// to the record's sample between records. [orig:
+			// Entity_SerializeVehicleState stages the composed sample and lands
+			// groundEntity @0x4607cd..0x460802; no rigid re-attach]. A
+			// dead-pose wreck on a pool-1 deck keeps the seat-follow: the
+			// mover is frozen for it (JoinerRole) and the dead-pose form's
+			// carrier handling is not re-witnessed here.
+			const bool dead_pose = child.state_flags_known &&
+					(child.state_flags & kVehicleFlagDeadPose) != 0u;
+			const bool world_predicted = child.cls == EntityClass::Vehicle &&
 					child.net_world_mover &&
 					child.carrier_handle != wire_handle::kInvalid &&
-					world::EntityHandle{child.carrier_handle}.pool() != 1;
+					(!dead_pose || world::EntityHandle{child.carrier_handle}.pool() != 1);
 			if (child.net_seat_valid && child.carrier_handle != wire_handle::kInvalid &&
-					!predicted_on_static) {
+					!world_predicted) {
 				const ClientEntityState *carrier = find_row(child.carrier_handle);
 				if (carrier == nullptr) {
 					child.net_seat_valid = false;

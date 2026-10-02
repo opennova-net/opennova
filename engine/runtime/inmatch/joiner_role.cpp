@@ -1902,30 +1902,24 @@ void JoinerRole::mirror_mission_entities() {
 					local->engine_flags ^= (local->engine_flags ^ wire_flags) & 0xB9u;
 					local->health = health_word;
 				}
-				// The mover freezes: the dead-pose/wreck form and a carried row
-				// riding a MOVING deck (a pool-1 carrier: LCAC/ship) stop the
-				// prediction motor — the row keeps its snapped wire pose (wreck
-				// eulers included) / its per-tick seat-follow, and the mirror-back
-				// below yields via net_predicted [orig: the dead-pose short form's
-				// frozen live stores @0x460930..0x460A50]. D-NET-66: death stays a
-				// snap. Wire bit0 is not a vehicle freeze: no vehicle mover tests it
-				// and the pool-1 update calls the mover ungated [orig:
-				// Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
-				// A vehicle whose §5.13 carrier is a STATIC (pool 2/3: the
-				// bridge, roof or ramp its groundEntity resolves to while it
-				// drives over a structure) is not a deck ride: the fold composed
-				// the record into a world sample, and the family mover predicts
-				// from it exactly as the 0xFFFF form — retail's reader composes
-				// the carrier form and still runs the not-driven client leg for
-				// it [orig: Entity_TransformLocalToWorld @0x4608ce; the
-				// not-driven leg @0x48B7F0].
-				const bool deck_ride = es.net_seat_valid &&
-						es.carrier_handle != 0xFFFFu &&
-						world::EntityHandle{es.carrier_handle}.pool() == 1;
-				const bool wire_frozen =
-						(es.state_flags_known &&
-								(es.state_flags & replication::kVehicleFlagDeadPose) != 0u) ||
-						deck_ride;
+				// The mover freezes on the dead-pose/wreck form alone: the row
+				// keeps its snapped wire pose (wreck eulers included) and the
+				// mirror-back below yields via net_predicted [orig: the dead-pose
+				// short form's frozen live stores @0x460930..0x460A50]. D-NET-66:
+				// death stays a snap. Wire bit0 is not a vehicle freeze: no
+				// vehicle mover tests it and the pool-1 update calls the mover
+				// ungated [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
+				// A carried record is not a freeze either, whatever its carrier
+				// (a pool-1 deck, or the static a bridge, roof or ramp
+				// resolves to): the reader composes it into a world sample,
+				// stages that and lands the carrier as groundEntity, and the
+				// family mover predicts from the sample while its carrier block
+				// rides the ground link [orig: Entity_TransformLocalToWorld
+				// @0x4608ce -> the staging @0x4607cd..0x4607fb, groundEntity
+				// @0x460802; the not-driven leg @0x48B7F0; the carrier blocks
+				// (vehicle_follow_carrier)].
+				const bool wire_frozen = es.state_flags_known &&
+						(es.state_flags & replication::kVehicleFlagDeadPose) != 0u;
 				if (wire_frozen) {
 					// The row holds its snapped/followed pose; the registry
 					// entity adopts it below like any un-predicted row so
@@ -1967,6 +1961,18 @@ void JoinerRole::mirror_mission_entities() {
 				if (es.compact_revision != m.net_seen_revision) {
 					const bool prediction_arming = !m.net_predicted;
 					m.net_seen_revision = es.compact_revision;
+					// Every live record lands its carrier as the ground link, or
+					// null for the 0xFFFF form; the mover's own ground refresh
+					// rewrites it every eighth tick [orig: Entity_SerializeVehicleState
+					// @0x460802 (esi = the carrier, 0 @0x4607AF)].
+					const world::Entity *record_carrier =
+							es.carrier_handle != 0xFFFFu
+									? replica_world_entity(world,
+											  world::EntityHandle{es.carrier_handle})
+									: nullptr;
+					local->ground_target = record_carrier != nullptr
+							? record_carrier->handle
+							: world::EntityHandle{};
 					// The fold live-snapped the row to the wire sample (rows
 					// whose first compact landed before this flag flipped stage
 					// their pre-compact pose for one record — self-corrected by
