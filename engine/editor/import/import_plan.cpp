@@ -25,7 +25,6 @@
 #include <editor/requirements/requirements.h>
 #include <formats/mns/mns.h>
 #include <runtime/menu/menu_style.h>
-#include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
 
@@ -530,31 +529,14 @@ private:
 		return true;
 	}
 
-	// A planned mission's files (ADR 0046 S14): those the game finds by its name
-	// (mission::sidecars, each as the project lacks it; the game skips an absent one, so none
-	// is not found; one that waits on another comes only with it) and every file the game opens
-	// by a fixed literal on the way into a mission (the manifest's boot, menu and mission rows: a
-	// Required one found nowhere is not found, an optional one no row; then kMissionLiterals, the
-	// fixed names a running mission opens). Each found is followed like any other file.
+	// The files the game opens by a fixed literal on the way into a mission, once whatever the
+	// missions' number (ADR 0046 S14): the manifest's boot, menu and mission rows (a Required one
+	// found nowhere is not found, an optional one no row), then kMissionLiterals, the fixed names a
+	// running mission opens. Each found is followed like any other file. The files the game finds by
+	// the mission's own name are its edges (documents/mission_file_set.h), which the walk follows.
 	void add_mission_files(const std::pair<size_t, const ImportOrigin *> &mission) {
 		const std::string file = plan_.rows[mission.first].name;
 		const ImportOrigin *own = mission.second;
-		std::set<std::string> roles_found;
-		for (const mission::Sidecar &sidecar : mission::sidecars()) {
-			if (sidecar.needs && !roles_found.count(sidecar.needs)) continue;
-			const ImportNeed need{file, std::string(), sidecar.role, ReferenceKind::None,
-			                      mission::sidecar_name(file, sidecar), -1};
-			if (bring(own, need.name, need)) {
-				roles_found.insert(sidecar.role);
-				continue;
-			}
-			if (sidecar.alternate) {
-				const std::string alternate = mission::sidecar_alternate_name(file, sidecar);
-				ImportNeed other = need;
-				other.name = alternate;
-				if (bring(own, alternate, other)) roles_found.insert(sidecar.role);
-			}
-		}
 		if (!manifest_done_) {
 			manifest_done_ = true;
 			using namespace opennova::gameprofile;
@@ -929,20 +911,34 @@ private:
 		}
 		const std::string name = resolve_name(edge.value);
 		if (is_style_reference(name)) return; // no stylesheet defines it: its variable's reference is listed
-		if (graph_.resolve(edge.kind, name, edge.scope, nullptr, edge.loader_arg) == ReferenceStatus::Present) return;
-		const ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg};
+		// The name, then the one its loader takes next where it has one (a mission's text table, then
+		// medmssn.bin; its dialog sounds' .lwf, then .pwf): the first the project, the plan or a place
+		// serves.
+		std::vector<std::string> names{name};
+		if (!edge.fallback.empty()) names.push_back(edge.fallback);
 		const ImportOrigin *own = node.origin;
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
-		const std::string mine = look(own, need);
-		const std::string theirs = look(install, need);
-		// A file the plan takes serves it: the places that have one too are that file's rivals.
-		if (const Provided *taken = provided_for(need)) {
-			const size_t row = taken->row;
-			add_rival(row, own, mine);
-			add_rival(row, install, theirs);
-			return;
+		ImportNeed need{file, edge.record, edge.field, edge.kind, name, edge.loader_arg};
+		std::string mine, theirs;
+		for (const std::string &candidate : names) {
+			need.name = candidate;
+			if (graph_.resolve(edge.kind, candidate, edge.scope, nullptr, edge.loader_arg) == ReferenceStatus::Present) return;
+			mine = look(own, need);
+			theirs = look(install, need);
+			// A file the plan takes serves it: the places that have one too are that file's rivals.
+			if (const Provided *taken = provided_for(need)) {
+				const size_t row = taken->row;
+				add_rival(row, own, mine);
+				add_rival(row, install, theirs);
+				return;
+			}
+			if (!mine.empty() || !theirs.empty()) break;
 		}
 		if (mine.empty() && theirs.empty()) {
+			// A file the game runs without (GraphEdge::optional: a mission's script, its dialog bank)
+			// is no row when no place has it; any other is not found by the name it is written as.
+			if (edge.optional) return;
+			need.name = name;
 			not_found(need, wanted);
 			return;
 		}

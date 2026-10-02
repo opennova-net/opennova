@@ -37,12 +37,15 @@
 // the kind's row says so (a string id's table, a screen's menu, a user point's model), else
 // the first file of the kind the row says defines it (ReferenceKindRow::defined_in: the
 // catalogs, the particle files, the shell's stylesheets) in the places that has a definition;
-// one no place defines is counted (ImportPlan::undefined). A planned MISSION brings the files
-// the game finds by its name (runtime/mission/mission_sidecars.h, each as the project's scan
-// lacks it) and every file the game opens by a fixed literal at boot, at the menu and at
-// mission start (gameprofile's required-resource manifest; a Required one found nowhere is
-// not found, an optional one no row). A stylesheet the walk brings is read for the %NAME%s
-// the menus followed so far expand through, and those menus are followed again.
+// one no place defines is counted (ImportPlan::undefined). A file reference with a fallback (a
+// mission's text table, else medmssn.bin) brings the fallback where no place has the name, and
+// one the game runs without (GraphEdge::optional: a mission's script, its dialog bank) found
+// nowhere is no row. The files the game finds by a mission's name are the mission's edges
+// (documents/mission_file_set.h), followed as any other. A planned MISSION brings every file the
+// game opens by a fixed literal at boot, at the menu, at mission start (gameprofile's
+// required-resource manifest; a Required one found nowhere is not found, an optional one no row)
+// and while a mission runs. A stylesheet the walk brings is read for the %NAME%s the menus
+// followed so far expand through, and those menus are followed again.
 
 #include <cstddef>
 #include <cstdint>

@@ -756,12 +756,14 @@ static std::string bank_text(const std::vector<std::pair<std::string, std::strin
 // m.pwf), the terrain with its height data and its maps, the environment naming cloud.pcx, items.def whose
 // item names the weapon M4 and the effect BOOM, weapon.def defining M4 with a round of an ammo no
 // place defines, fx.ptl defining BOOM, and a few of the game's manifest files. The plan: the
-// mission's own set each needed by the mission and its role; the file references; the symbols
+// mission's own set each needed by the mission, its role and its edge's kind (data commit 8: the
+// set is the mission's edges); the file references; the symbols
 // followed to their files (the effect to fx.ptl, the item to items.def, which the manifest brings
 // first); the manifest's files the install has found, each needed by the mission for the game, a
 // Required one the install lacks not found (vmacros.bin), an optional one no row (hiscore.txt);
 // the undefined ammo counted; nothing not followed but the kinds the graph does not read; the
-// same plan stepped a byte at a time. Without dependencies, the .bms alone.
+// same plan stepped a byte at a time. Without dependencies, the .bms alone. A second mission with
+// almost none of its set: the optional files no row, the text table's fallback serving it.
 static int test_plan_mission_closure() {
 	Project project("opennova_editor_plan_mission_closure");
 	const std::string install = project.dir.file("install");
@@ -795,6 +797,9 @@ static int test_plan_mission_closure() {
 	const std::string strings(table.begin(), table.end());
 	TEST_EXPECT(write_pff(install + "/localres.pff",
 	                      {{"m.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
+	                       // A second mission with none of its own set but its loading image.
+	                       {"n.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
+	                       {"n.pcx", "pcx"},
 	                       {"m.wac", "// the mission's script\r\n"},
 	                       {"m.dbf", "dbf"},
 	                       {"m.lwf", bank_text({{"LINE1", "SFX\\VOICE\\line1.wav"}, {"LINE2", "gone.wav"}})},
@@ -840,13 +845,19 @@ static int test_plan_mission_closure() {
 		const ImportPlanRow *row = row_named(plan, name);
 		return row && row->state == State::Found && row->selected && row->found_in == "the game install" ? row : nullptr;
 	};
-	// The mission's own set, each as the game finds it by the mission's name.
-	for (const auto &[name, role] : {std::pair<const char *, const char *>{"m.bin", "text"}, {"m.wac", "script"},
-	                                 {"m.pcx", "loading_image"}, {"m.til", "tiles"}, {"m.dbf", "dialog"},
-	                                 {"m.lwf", "dialog_sounds"}}) {
-		const ImportPlanRow *row = found(name);
-		TEST_EXPECT(row && row->needed_by.file == "m.bms" && row->needed_by.field == role && row->needed_by.name == name &&
-		            row->needed_by.reference == ReferenceKind::None);
+	// The mission's own set, each as the game finds it by the mission's name: the mission's edges
+	// (documents/mission_file_set.h), each of its role and kind.
+	struct Own {
+		const char *name, *role;
+		ReferenceKind kind;
+	};
+	for (const Own &own : {Own{"m.bin", "text", ReferenceKind::MissionStrings}, Own{"m.wac", "script", ReferenceKind::Script},
+	                       Own{"m.pcx", "loading_image", ReferenceKind::LoadingImage},
+	                       Own{"m.til", "tiles", ReferenceKind::TilePlacement}, Own{"m.dbf", "dialog", ReferenceKind::DialogBank},
+	                       Own{"m.lwf", "dialog_sounds", ReferenceKind::SoundBank}}) {
+		const ImportPlanRow *row = found(own.name);
+		TEST_EXPECT(row && row->needed_by.file == "m.bms" && row->needed_by.field == own.role && row->needed_by.name == own.name &&
+		            row->needed_by.reference == own.kind);
 	}
 	TEST_EXPECT(!row_named(plan, "m.pwf"));
 	// The file references, and the environment's texture through it.
@@ -944,11 +955,26 @@ static int test_plan_mission_closure() {
 				std::printf("row %zu: %s (%d, %s) | %s (%d, %s)\n", i, plan.rows[i].name.c_str(), int(plan.rows[i].selected),
 				            plan.rows[i].problem.c_str(), stepped.rows[i].name.c_str(), int(stepped.rows[i].selected),
 				            stepped.rows[i].problem.c_str());
-	// A step takes one source, one mission's own set and manifest, or one file followed.
+	// A step takes one source, the manifest for the missions, or one file followed.
 	TEST_EXPECT(steps > 20 && same_import(plan, stepped));
 	// Without dependencies: the .bms alone.
 	const ImportPlan alone = project.plan({mission}, false, install);
 	TEST_EXPECT(alone.rows.size() == 1 && alone.rows[0].name == "m.bms" && alone.undefined.empty());
+	// A mission with none of its own set but its loading image: the files the game runs without
+	// (its script, its dialog bank and the bank's sounds) are no row; its text table is served by
+	// the name its lookup takes next (medmssn.bin, which the manifest brings), no row of its own;
+	// the tile placement, which every shipped mission has, is not found.
+	ImportChoice bare = mission;
+	bare.entry = "n.bms";
+	const ImportPlan lean = project.plan({bare}, true, install);
+	TEST_EXPECT(!row_named(lean, "n.wac") && !row_named(lean, "n.dbf") && !row_named(lean, "n.lwf") &&
+	            !row_named(lean, "n.pwf") && !row_named(lean, "n.bin"));
+	const ImportPlanRow *image = row_named(lean, "n.pcx"), *tiles = row_named(lean, "n.til"),
+	                    *fallback = row_named(lean, "medmssn.bin");
+	TEST_EXPECT(image && image->state == State::Found && image->needed_by.reference == ReferenceKind::LoadingImage);
+	TEST_EXPECT(tiles && tiles->state == State::NotFound && tiles->needed_by.file == "n.bms" &&
+	            tiles->needed_by.reference == ReferenceKind::TilePlacement);
+	TEST_EXPECT(fallback && fallback->state == State::Found);
 	return 0;
 }
 
