@@ -22,6 +22,12 @@ ViewportDevice *ViewportDeviceCache::most_recently_used() const {
 	return newest ? newest->device.get() : nullptr;
 }
 
+bool ViewportDeviceCache::first_picture_pending() const {
+	for (const Slot &slot : slots_)
+		if (slot.device->build().loading && !slot.device->holds_picture()) return true;
+	return false;
+}
+
 ViewportDeviceCache::Slot *ViewportDeviceCache::slot_(const std::string &path, ViewportKind kind) {
 	for (Slot &slot : slots_)
 		if (slot.kind == kind && slot.path == path) return &slot;

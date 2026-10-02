@@ -181,6 +181,14 @@ void Terrain::set_terrain_data(const Ref<TerrainData> &p_data) {
 	if (terrain_data.is_valid() && terrain_data->is_connected("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed))) {
 		terrain_data->disconnect("terrain_changed", callable_mp(this, &Terrain::_on_terrain_changed));
 	}
+	// A stepped build in flight is of the old data: dropped with what it made so far (its next
+	// build_step fails; a build of the new data begins again).
+	if (building_) {
+		_clear_terrain();
+		building_ = false;
+		build_done_ = 0;
+		build_total_ = 0;
+	}
 	terrain_data = p_data;
 	static_shadow_rasterizer.set_terrain_data(p_data);
 	surface_inputs->set_terrain_data(p_data);

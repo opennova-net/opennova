@@ -1491,7 +1491,10 @@ func test_move_static_instance_rewrites_rows_in_place() -> void:
 	assert_eq(placer.get_static_instance_binding_count(bms[1]), 2, "its bindings stand")
 	assert_true(level0.custom_aabb.encloses(before), "the bounds only grow")
 	assert_true(level0.custom_aabb.has_point(moved.origin), "and hold the row where it is now")
-	assert_eq(level1.custom_aabb, level1_before, "a population with no live row of it is left as it was")
+	# Every population it may draw in grows with it, live or not: a later level switch (or a show)
+	# appends it there, inside the bounds the population advertises (review M6).
+	assert_true(level1.custom_aabb.encloses(level1_before), "the level 1 bounds only grow")
+	assert_true(level1.custom_aabb.has_point(moved.origin), "and hold it before it switches there")
 
 	# The LOD walk evaluates it where it is now: at the near camera the third
 	# building (z 200) stays at level 0, and so does the second one beside it;
@@ -1520,6 +1523,14 @@ func test_move_static_instance_rewrites_rows_in_place() -> void:
 	assert_true(placer.show_static_instance(bms[2]))
 	assert_eq(_live_bms(placer, level0), [bms[1], bms[2]])
 	assert_eq(placer.get_static_instance_transform(bms[2]), far)
+	assert_true(level0.custom_aabb.has_point(far.origin), "hidden, moved, shown: the bounds held it all along")
+
+	# A far move out of its 512-unit bin (700 m east): each level's bounds hold it, live or not, so the
+	# level switch the camera makes later never draws it outside the advertised bounds.
+	var away := MissionObjectPlacer.entity_transform(Vector3(700, -200, 3), Vector3.ZERO)
+	assert_true(placer.move_static_instance(bms[1], away))
+	assert_true(level0.custom_aabb.has_point(away.origin), "level 0 holds it where it went")
+	assert_true(level1.custom_aabb.has_point(away.origin), "and level 1, before any switch")
 
 
 # ADR 0046 S14: a graphic's static batches warmed before a placement names it

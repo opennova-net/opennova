@@ -228,17 +228,17 @@ bool MissionObjectPlacer::move_static_instance(int p_bms_id, const Transform3D &
 	for (int binding_index = 0; binding_index < instance.bindings.size(); ++binding_index) {
 		StaticLodBinding &binding = instance.bindings.write[binding_index];
 		binding.live_xform = p_xform * binding.offset;
-		if (binding.row < 0 || binding.population < 0 ||
-				binding.population >= static_populations_.size()) {
+		if (binding.population < 0 || binding.population >= static_populations_.size()) {
 			continue;
 		}
 		StaticPopulation &population = static_populations_.write[binding.population];
 		if (population.multimesh.is_null()) {
 			continue;
 		}
-		population.multimesh->set_instance_transform(binding.row, binding.live_xform);
-		touched.insert(binding.population);
-		// The population's advertised bounds grown to hold the row where it is now.
+		// Every population the instance may draw in (each level's, each shadow twin) has its
+		// advertised bounds grown to hold the slot where it is now, live or not: a later level
+		// switch appends it there (the placement's own rule: the bounds cover every slot's live
+		// transform, mission_placement_run.cpp).
 		StaticPopulationInstance *node = Object::cast_to<StaticPopulationInstance>(
 				ObjectDB::get_instance(population.instance_node));
 		const Ref<Mesh> mesh = population.multimesh->get_mesh();
@@ -247,6 +247,11 @@ bool MissionObjectPlacer::move_static_instance(int p_bms_id, const Transform3D &
 			const AABB held = node->get_custom_aabb();
 			node->set_custom_aabb(held.size == Vector3() ? bounds : held.merge(bounds));
 		}
+		if (binding.row < 0) {
+			continue;
+		}
+		population.multimesh->set_instance_transform(binding.row, binding.live_xform);
+		touched.insert(binding.population);
 	}
 	// The rows the Q3 pass read are stale: the touched populations publish again (their
 	// visibility and shadow row maps stand).
@@ -274,6 +279,14 @@ bool MissionObjectPlacer::warm_static_graphic(const String &p_graphic, Node *p_t
 		return false;
 	}
 	return !_get_static_batches(p_graphic, p_tree_parent).is_empty();
+}
+
+bool MissionObjectPlacer::item_places_static(int p_item_id) {
+	_check_epoch();
+	_ensure_item_db();
+	const String graphic = _graphic_for(p_item_id);
+	// As the placement's bucket splits them (_place_bucket).
+	return !graphic.is_empty() && !_needs_individual_node(p_item_id) && !_graphic_needs_live_panm(graphic);
 }
 
 bool MissionObjectPlacer::update_static_terrain_shadow_source_transform(

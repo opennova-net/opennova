@@ -105,8 +105,13 @@ private:
 	std::vector<MissionObjectPlacer::PlacementRow> rows;
 	Callable progress;
 	Array skip_kinds;
+	// The nodes it places under, valid within a step; between steps they are known by their IDs (a
+	// script holding the run may free them): a step finding the container gone cancels the run, one
+	// finding the populations' holder gone mints another.
 	Node3D *container = nullptr;
 	Node3D *populations = nullptr;
+	ObjectID container_id;
+	ObjectID populations_id;
 	// The bucketing, so far.
 	size_t next_row = 0;
 	HashMap<String, StaticGroup> static_groups;

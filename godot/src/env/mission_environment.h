@@ -228,14 +228,25 @@ public:
 	// its generation moved (ADR 0046 S14, E13: another picture published its
 	// own state over the process-wide globals since; this one renders next).
 	void republish_shader_globals();
-	// The shipped defaults written over the process-wide globals: the retail
-	// noon lighting block (no environment the writer), and the unloaded
-	// state's sun, sky and fog, as a process has them before any mission
-	// publishes. What a picture of no environment (a model's) renders under
-	// after a mission's picture published its own (E13).
+	// The shipped defaults written over the process-wide globals: every global
+	// an environment or a water writes, at the value project.godot ships it
+	// with (no environment the lighting block's writer), as a process has them
+	// before any mission publishes. What a picture of no environment (a
+	// model's) renders under after a mission's picture published its own (E13).
 	static void publish_shipped_defaults();
 	// Whether this environment's lighting block is the one the globals hold.
 	bool is_lighting_block_writer() const { return lighting_block_writer_ == this; }
+	// The hold (ADR 0046 S14, E13): while held, nothing this environment
+	// computes reaches the process-wide shader globals (its state, its light
+	// state and its generation still move); republish_shader_globals writes
+	// them whatever the hold. The editor's mission device holds its
+	// environment but while it publishes its scene state and presents its own
+	// frame, so another picture never renders under it; the game never holds.
+	void set_globals_held(bool p_held) { globals_held_ = p_held; }
+	bool is_globals_held() const { return globals_held_; }
+	// How many process-wide shader globals every environment wrote since the process began: a read-back
+	// for the hold's tests (a headless renderer keeps no global to read back).
+	static int64_t get_global_writes() { return global_writes_; }
 
 
 	void _ready() override;
@@ -273,7 +284,10 @@ private:
 	// The writer leaving the tree or dying puts the noon register back and
 	// forgets its publication generation, so re-entering republishes.
 	void _release_lighting_block();
+	// Every process-wide shader global an environment writes, counted.
+	static void _set_global(const StringName &p_name, const Variant &p_value);
 	static MissionEnvironment *lighting_block_writer_;
+	static int64_t global_writes_;
 
 	Ref<EnvFile> environment_data_;
 	Ref<EnvFile> overcast_data_;
@@ -283,6 +297,7 @@ private:
 	bool underwater_view_ = false;
 	bool underwater_overlay_view_ = false;
 	bool sky_dome_drawn_ = true;
+	bool globals_held_ = false;
 };
 
 // The env appliers' (sky, water, celestial) cached sibling lookup of their

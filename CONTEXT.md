@@ -722,10 +722,13 @@ _Avoid_: gizmo (the handles alone), icon, marker (an entity pool of a mission), 
 
 **Lifted**:
 An entity a mission viewport's device draws apart from the placement it last made: one added (an Add,
-a Duplicate, a Paste, a drop) or given another item since, drawn as the game's placer draws one
-item's model on its own until the next placement takes it in (past 256 lifted rows the device places
-the whole mission again). An entity removed is hidden, and shown where it stands when the removal is
-undone; a moved one is moved in place. None of these places the mission again.
+a Duplicate, a Paste, a drop) or given another item, group or attributes since, built as the
+placement builds an entity's own model (its lighting, its mirror flag from its attributes, its
+terrain shadow) until the next placement takes it in, a static item's too where the placement would
+batch it (past 256 lifted rows the device places the whole mission again). Given back what was
+placed (an undo), the placed one shows again. An entity removed is hidden with its terrain shadow,
+and shown where it stands when the removal is undone; a moved one is moved in place. None of these
+places the mission again.
 _Avoid_: spawned (what the game does at run time), dynamic, unplaced
 
 **Script device**:

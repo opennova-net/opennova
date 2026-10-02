@@ -71,7 +71,7 @@ MissionPlacementRun::Unit MissionPlacementRun::next_unit_() const {
 }
 
 int MissionPlacementRun::get_step_count() const {
-	if (empty_) return done_ ? 1 : 1;
+	if (empty_) return 1;
 	// The static and animated units are known once the bucketing ends.
 	const bool bucketed = next_row >= rows.size();
 	return bucket_units_() + (bucketed ? int(static_order.size()) + animated_units_() : 0) + 1;
@@ -102,6 +102,15 @@ MissionPlacementRun::Step MissionPlacementRun::step() {
 		done_ = true;
 		return STEP_DONE;
 	}
+	// The nodes it places under, as they stand now: a container freed since the last step cancels the
+	// run; a holder freed is minted again.
+	container = Object::cast_to<Node3D>(ObjectDB::get_instance(container_id));
+	if (container == nullptr) {
+		cancelled_ = true;
+		done_ = true;
+		return STEP_DONE;
+	}
+	if (populations != nullptr) populations = Object::cast_to<Node3D>(ObjectDB::get_instance(populations_id));
 	const uint64_t start = now_usec();
 	switch (next_unit_()) {
 	case Unit::Bucket: {
@@ -163,6 +172,7 @@ Ref<MissionPlacementRun> MissionObjectPlacer::begin_place_rows(const std::vector
 	// streamed AI render wire-direct while items/buildings/markers become ordinary placed nodes.
 	run->skip_kinds = p_options.get("skip_kinds", Array());
 	run->container = _ensure_container(p_parent);
+	run->container_id = run->container->get_instance_id();
 	return run;
 }
 
@@ -175,6 +185,7 @@ Node3D *MissionObjectPlacer::_place_populations_parent(MissionPlacementRun &p_ru
 		p_run.populations = memnew(Node3D);
 		p_run.populations->set_name(kStaticPopulationsName);
 		p_run.container->add_child(p_run.populations);
+		p_run.populations_id = p_run.populations->get_instance_id();
 	}
 	return p_run.populations;
 }
@@ -700,93 +711,137 @@ void MissionObjectPlacer::_place_animated(MissionPlacementRun &p_run, int p_firs
 		if (p_run.progress.is_valid()) {
 			p_run.progress.call();
 		}
-		const String graphic = a.get("graphic", String());
-		const Ref<ObjectData> data = _load_object_data(graphic);
+		EntityModelSpec spec;
+		spec.graphic = a.get("graphic", String());
+		const Ref<ObjectData> data = _load_object_data(spec.graphic);
 		if (data.is_null()) {
 			++p_run.unresolved;
 			continue;
 		}
-		const int item_id = int(a.get("item_id", 0));
-		const int kind = int(a.get("kind", -1));
-		ObjectModel *model = memnew(ObjectModel);
-		model->set_panm_clock(panm_clock_);
-		model->set_name(vformat("Anim_%s_%d", graphic, p_run.animated_count));
-		model->set_graphic_name(graphic);
-		model->set_mirror_reflected(_placement_is_mirror_reflected(
-				uint32_t(a.get("ai_flags", 0)), item_id));
-		_configure_item_scale(model, item_id);
-		// Render the model origin at the entity's stored position directly:
-		// the engine bakes the Ground userpoint into the stored position at
-		// author-time (place / terrain-drag), not at render (witness:
-		// placement_traits.h ledger, author-time Ground bake).
-		model->set_transform(a.get("xform", Transform3D()));
-		container->add_child(model);
-		_configure_item_shadow(model, item_id);
-		_configure_item_lighting(model, item_id);
-		// Load the entity's body-animation set (.adm) BEFORE the data:
-		// setting it first is a no-op rebuild, so set_object_data below does
-		// the ONE skeletal-keyed mesh build.
-		_apply_skeletal_anim(model, item_id, data->get_bone_origins(),
-				data->get_bone_parents());
-		// The def names the AI muzzle: items.def launchups_closeattack is
-		// the launch userpoint on this item's graphic
-		// (world-wac-ai-re §21.2).
-		model->set_muzzle_point_name(item_db_->get_launchups_closeattack(item_id));
-		// Mission-world models retain every authored RLOD and select by the
-		// retail projected-radius rule. Closed building OOBJ records also become
-		// Godot occluders; portal/window/open records stay with the section pass.
-		model->set_authored_lod_enabled(true);
-		model->set_authored_occluders_enabled(kind == MissionData::KIND_BUILDING &&
-				_has_occlusion_records(item_id));
-		// A building draws in the mirror's building pass, every other placed
-		// entity in its first entity wave (runtime/environment/water_mirror.h);
-		// a building is a Building-type def, so a pool-2 decoration is an
-		// entity here (mission::placed_record_is_building).
-		model->set_water_mirror_clip_wave(
-				opennova::mission::placed_record_is_building(kind, item_db_->has_item(item_id),
-						item_db_->get_item_type(item_id)) ?
-						opennova::env::MirrorClipWave::kSectorModel :
-						opennova::env::MirrorClipWave::kEntity);
-		// Drive the build explicitly (not via _ready) so it is independent
-		// of when place() runs relative to the main loop.
-		model->set_object_data(data);
+		spec.item_id = int(a.get("item_id", 0));
+		spec.kind = int(a.get("kind", -1));
+		spec.index = int(a.get("index", -1));
+		spec.bms_id = int(a.get("bms_id", 0));
+		spec.group = int(a.get("group", -1));
+		spec.team = int(a.get("team", -1));
+		spec.ai_flags = uint32_t(a.get("ai_flags", 0));
+		spec.position = a.get("position", Vector3());
+		spec.xform = a.get("xform", Transform3D());
+		ObjectModel *model = _build_entity_model(spec, data, container,
+				vformat("Anim_%s_%d", spec.graphic, p_run.animated_count),
+				vformat("live%d", p_run.animated_count));
 		if (model->get_authored_occluder_count() > 0) {
 			++p_run.authored_occluder_models;
 		}
-		if (item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
-					uint32_t(a.get("ai_flags", 0)),
-					item_db_->get_attrib(item_id),
-					item_db_->get_attrib2(item_id))) {
-			_add_individual_static_shadow_siblings(model, graphic,
-					Transform3D(), vformat("live%d", p_run.animated_count));
-		}
-		// Tag identity on the node in BOTH runtime + editor so EntityIndex
-		// can resolve SSN/group/zone event-action targets back to this live
-		// model.
-		Ref<EntityRef> ref;
-		ref.instantiate();
-		ref->set_kind(kind);
-		ref->set_index(int(a.get("index", -1)));
-		ref->set_bms_id(int(a.get("bms_id", 0)));
-		ref->set_group(int(a.get("group", -1)));
-		ref->set_team(int(a.get("team", -1)));
-		ref->set_position(a.get("position", Vector3()));
-		ref->set_item_id(item_id);
-		model->set_thermal_entity_wave(opennova::renderer::entity_uses_thermal_wave(
-				item_db_->get_item_type(item_id)));
-		ref->set_graphic(graphic);
-		ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
-		model->set_entity_ref(ref);
 		placed_models_.push_back(model);
-		_record_static_terrain_shadow_source(kind,
-				int(a.get("index", -1)), int(a.get("bms_id", 0)),
-				int(a.get("team", 0)),
-				uint32_t(a.get("ai_flags", 0)), item_id, graphic,
-				a.get("xform", Transform3D()), data);
 		++p_run.animated_count;
 		++p_run.placed;
 	}
 	p_run.next_animated = last;
+}
+
+// One entity's individual model, the per-entity half of the placement's animated walk: built under
+// `p_container` at the entity's transform, its identity and its terrain shadow source recorded.
+ObjectModel *MissionObjectPlacer::_build_entity_model(const EntityModelSpec &p_spec, const Ref<ObjectData> &p_data,
+		Node3D *p_container, const String &p_name, const String &p_shadow_tag) {
+	const int item_id = p_spec.item_id;
+	const int kind = p_spec.kind;
+	ObjectModel *model = memnew(ObjectModel);
+	model->set_panm_clock(panm_clock_);
+	model->set_name(p_name);
+	model->set_graphic_name(p_spec.graphic);
+	model->set_mirror_reflected(_placement_is_mirror_reflected(p_spec.ai_flags, item_id));
+	_configure_item_scale(model, item_id);
+	// Render the model origin at the entity's stored position directly:
+	// the engine bakes the Ground userpoint into the stored position at
+	// author-time (place / terrain-drag), not at render (witness:
+	// placement_traits.h ledger, author-time Ground bake).
+	model->set_transform(p_spec.xform);
+	p_container->add_child(model);
+	_configure_item_shadow(model, item_id);
+	_configure_item_lighting(model, item_id);
+	// Load the entity's body-animation set (.adm) BEFORE the data:
+	// setting it first is a no-op rebuild, so set_object_data below does
+	// the ONE skeletal-keyed mesh build.
+	_apply_skeletal_anim(model, item_id, p_data->get_bone_origins(),
+			p_data->get_bone_parents());
+	// The def names the AI muzzle: items.def launchups_closeattack is
+	// the launch userpoint on this item's graphic
+	// (world-wac-ai-re §21.2).
+	model->set_muzzle_point_name(item_db_->get_launchups_closeattack(item_id));
+	// Mission-world models retain every authored RLOD and select by the
+	// retail projected-radius rule. Closed building OOBJ records also become
+	// Godot occluders; portal/window/open records stay with the section pass.
+	model->set_authored_lod_enabled(true);
+	model->set_authored_occluders_enabled(kind == MissionData::KIND_BUILDING &&
+			_has_occlusion_records(item_id));
+	// A building draws in the mirror's building pass, every other placed
+	// entity in its first entity wave (runtime/environment/water_mirror.h);
+	// a building is a Building-type def, so a pool-2 decoration is an
+	// entity here (mission::placed_record_is_building).
+	model->set_water_mirror_clip_wave(
+			opennova::mission::placed_record_is_building(kind, item_db_->has_item(item_id),
+					item_db_->get_item_type(item_id)) ?
+					opennova::env::MirrorClipWave::kSectorModel :
+					opennova::env::MirrorClipWave::kEntity);
+	// Drive the build explicitly (not via _ready) so it is independent
+	// of when place() runs relative to the main loop.
+	model->set_object_data(p_data);
+	if (item_casts_static_terrain_shadow(static_cast<MissionData::EntityKind>(kind),
+				p_spec.ai_flags,
+				item_db_->get_attrib(item_id),
+				item_db_->get_attrib2(item_id))) {
+		_add_individual_static_shadow_siblings(model, p_spec.graphic,
+				Transform3D(), p_shadow_tag);
+	}
+	// Tag identity on the node in BOTH runtime + editor so EntityIndex
+	// can resolve SSN/group/zone event-action targets back to this live
+	// model.
+	Ref<EntityRef> ref;
+	ref.instantiate();
+	ref->set_kind(kind);
+	ref->set_index(p_spec.index);
+	ref->set_bms_id(p_spec.bms_id);
+	ref->set_group(p_spec.group);
+	ref->set_team(p_spec.team);
+	ref->set_position(p_spec.position);
+	ref->set_item_id(item_id);
+	model->set_thermal_entity_wave(opennova::renderer::entity_uses_thermal_wave(
+			item_db_->get_item_type(item_id)));
+	ref->set_graphic(p_spec.graphic);
+	ref->set_attrib2(int64_t(item_db_->get_attrib2(item_id)));
+	model->set_entity_ref(ref);
+	_record_static_terrain_shadow_source(kind, p_spec.index, p_spec.bms_id, p_spec.team,
+			p_spec.ai_flags, item_id, p_spec.graphic, p_spec.xform, p_data);
+	return model;
+}
+
+ObjectModel *MissionObjectPlacer::build_entity_model(const PlacementRow &p_row, Node3D *p_parent,
+		const String &p_name) {
+	_check_epoch();
+	_ensure_item_db();
+	if (p_parent == nullptr || item_db_.is_null() || p_row.kind == MissionData::KIND_MARKER) {
+		return nullptr;
+	}
+	EntityModelSpec spec;
+	spec.graphic = _graphic_for(p_row.item_id);
+	if (spec.graphic.is_empty()) {
+		return nullptr;
+	}
+	const Ref<ObjectData> data = _load_object_data(spec.graphic);
+	if (data.is_null()) {
+		return nullptr;
+	}
+	spec.item_id = p_row.item_id;
+	spec.kind = p_row.kind;
+	spec.index = p_row.index;
+	spec.bms_id = p_row.bms_id;
+	spec.group = p_row.group;
+	spec.team = p_row.team;
+	spec.ai_flags = p_row.ai_flags;
+	spec.position = p_row.position;
+	spec.xform = _entity_transform_for_item(p_row.position, p_row.rotation_deg, p_row.item_id);
+	return _build_entity_model(spec, data, p_parent, p_name, vformat("entity%d", p_row.bms_id));
 }
 
 // The census.

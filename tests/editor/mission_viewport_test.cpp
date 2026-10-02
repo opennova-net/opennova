@@ -725,14 +725,21 @@ static int test_retail() {
 					scene.count(MissionPool::Organic), scene.areas().size(), scene.paths().size());
 			largest_counts = line;
 		}
-		// Each mark the first framing shows, hit at its pixel: the front-most record there.
+		// Each mark the first framing shows, hit at its pixel: its own record, or the front-most one a
+		// shown mark within the pick slop of that pixel stands for, its id the row the mark names.
 		const ViewportContext context = viewport_context(rig.session.view(), *viewport);
 		const std::vector<MissionMark> marks = viewport->marks(context.width, context.height, context.device);
-		for (const MissionMark &mark : marks) {
+		for (size_t i = 0; i < marks.size(); ++i) {
+			const MissionMark &mark = marks[i];
 			if (!mark.shown) continue;
 			const ViewportHit hit = viewport->hit(context, mark.x, mark.y);
 			TEST_EXPECT(hit.current && hit.index >= 0 && size_t(hit.index) < marks.size() && hit.id != 0);
-			if (hit.index >= 0 && size_t(hit.index) < marks.size()) TEST_EXPECT(marks[size_t(hit.index)].depth <= mark.depth + 1e-3f);
+			if (hit.index < 0 || size_t(hit.index) >= marks.size()) continue;
+			const MissionMark &found = marks[size_t(hit.index)];
+			TEST_EXPECT(hit.id == found.record.row && found.shown);
+			TEST_EXPECT(size_t(hit.index) == i ||
+					(std::fabs(found.x - mark.x) <= kMissionPickSlop && std::fabs(found.y - mark.y) <= kMissionPickSlop &&
+							found.depth <= mark.depth + 1e-3f));
 			++hits;
 		}
 		// The first item framed, then moved 64 pixels east on the picture: one edit, whose undo gives
@@ -748,6 +755,7 @@ static int test_retail() {
 			TEST_EXPECT(rig.session.outcome().done());
 			rig.pump();
 			const std::string before = records_of(*rig.session.document_for(path))->serialize().text;
+			const MissionEntityMark held = *viewport->scene().entity(item);
 			ViewportDrag drag;
 			drag.id = item;
 			drag.handle = "move";
@@ -758,6 +766,10 @@ static int test_retail() {
 			rig.pump();
 			const Document *after = records_of(*rig.session.document_for(path));
 			TEST_EXPECT(after->dirty() && after->serialize().text != before);
+			// It went along the ground (x or y moved, on the plane through it: no device, its height
+			// stands).
+			const MissionEntityMark *went = viewport->scene().entity(item);
+			TEST_EXPECT(went && (went->x != held.x || went->y != held.y) && went->z == held.z);
 			rig.session.handle(request::undo(path));
 			TEST_EXPECT(rig.session.outcome().done());
 			rig.pump();

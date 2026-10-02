@@ -667,6 +667,9 @@ Error TerrainData::begin_load_from_resource_root(const Ref<ResourceRoot> &p_reso
 	load_units_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
+	load_state_ = LoadState::None;
+	load_missing_.clear();
+	load_failure_ = String();
 
 	if (p_resource_root.is_null() || p_resource_root->get_root_dir().is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: resource root must be configured before loading");
@@ -696,6 +699,9 @@ Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content) {
 	load_units_.clear();
 	load_next_ = 0;
 	load_error_ = OK;
+	load_state_ = LoadState::None;
+	load_missing_.clear();
+	load_failure_ = String();
 	std::string error;
 	std::istringstream trn_stream(trn_content);
 	if (!opennova::load_trn(trn_stream, trn, error)) {
@@ -760,7 +766,14 @@ Error TerrainData::_begin_load_from_trn_text(const std::string &trn_content) {
 	// retail loader refuses such a config), so the .cpt is always named here.
 	heights.filename = String(trn.polydata.c_str());
 	load_units_.push_back(heights);
+	load_state_ = LoadState::Running;
 	return OK;
+}
+
+void TerrainData::_note_load_missing(const String &p_name) const {
+	const std::string name = opennova::to_std(p_name);
+	if (!name.empty() && std::find(load_missing_.begin(), load_missing_.end(), name) == load_missing_.end())
+		load_missing_.push_back(name);
 }
 
 // One texture slot's file through the mounted root (or the .trn's directory). Warn when a
@@ -773,6 +786,7 @@ Ref<Texture2D> TerrainData::_load_slot_texture(const char *slot, const String &f
 	if (tex.is_null() && !filename.is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: ", slot, " texture '", filename,
 			"' did not resolve under ", load_dir_, " (terrain may render untextured)");
+		_note_load_missing(filename);
 	}
 	return tex;
 }
@@ -838,8 +852,10 @@ void TerrainData::_load_pcx_slot(const String &slot_id, const String &filename) 
 				_use_default_pcx_slot(slot_id);
 			}
 		} else {
-			if (!filename.is_empty())
+			if (!filename.is_empty()) {
 				UtilityFunctions::push_warning("TerrainData: ", slot_id, " not found for '", filename, "' under ", load_dir_);
+				_note_load_missing(filename);
+			}
 			_use_default_pcx_slot(slot_id);
 		}
 		return;
@@ -877,6 +893,7 @@ bool TerrainData::_load_heights(const String &cpt_name) {
 		loaded = true;
 		UtilityFunctions::push_warning("TerrainData: CPT '", cpt_path,
 			"' missing; continuing without baked terrain (run Export to generate it)");
+		_note_load_missing(cpt_name);
 		return true;
 	}
 
@@ -884,6 +901,7 @@ bool TerrainData::_load_heights(const String &cpt_name) {
 	if (!opennova::load_cpt(cpt_bytes.ptr(), cpt_bytes.size(), cpt, error)) {
 		UtilityFunctions::push_warning("TerrainData: CPT parse failed: ", error.c_str());
 		load_error_ = ERR_FILE_CANT_READ;
+		load_failure_ = cpt_name + String(": ") + String(error.c_str());
 		return false;
 	}
 
@@ -896,7 +914,16 @@ bool TerrainData::_load_heights(const String &cpt_name) {
 }
 
 TerrainData::LoadStep TerrainData::load_step() {
+	// No load begun (none asked, or the begin refused): nothing loads, a failure; one ended answers
+	// as it ended.
+	switch (load_state_) {
+		case LoadState::None:
+		case LoadState::Failed: return LOAD_STEP_FAILED;
+		case LoadState::Done: return LOAD_STEP_DONE;
+		case LoadState::Running: break;
+	}
 	if (load_next_ >= load_units_.size()) {
+		load_state_ = load_error_ == OK ? LoadState::Done : LoadState::Failed;
 		return load_error_ == OK ? LOAD_STEP_DONE : LOAD_STEP_FAILED;
 	}
 	const LoadUnit unit = load_units_[load_next_++];
@@ -913,8 +940,10 @@ TerrainData::LoadStep TerrainData::load_step() {
 			break;
 		case LoadUnit::Kind::Heights:
 			if (!_load_heights(unit.filename)) {
+				// Why it failed stays (get_load_failure): the file and its parse error.
 				load_units_.clear();
 				load_next_ = 0;
+				load_state_ = LoadState::Failed;
 				return LOAD_STEP_FAILED;
 			}
 			break;
@@ -924,6 +953,7 @@ TerrainData::LoadStep TerrainData::load_step() {
 	}
 	load_units_.clear();
 	load_next_ = 0;
+	load_state_ = LoadState::Done;
 	return LOAD_STEP_DONE;
 }
 

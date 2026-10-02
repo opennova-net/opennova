@@ -58,7 +58,13 @@ bool mission_item_facts(const SessionView &view, int64_t item, MissionItemFacts 
 		out.pool = pool_of_type(*type);
 	}
 	out.model = model_of(*graph, *symbol);
-	// The model's ground anchor, read from the project's file as the game reads it.
+	// The model's ground anchor, read from the project's file as the game reads it. NEEDS-RE (ADR 0046
+	// S14, review m9): the original editor subtracts the Ground userpoint's +0/+4/+8 words from the
+	// entity's position unrotated (docs/world/world-wac-ai-re.md section 12, dfx2med.exe @ 0x401f6e,
+	// 0x4021fe); whether those are the file's raw x/y/z (forward, left, up) taken as mission x/y/z, or
+	// the presentation swizzle used here (mission x, y = the raw y, -x), is unwitnessed. z agrees either
+	// way; an anchor off the model's vertical axis moves the stored x and y. Read 0x401f6e in a dfx2med
+	// database to settle it.
 	std::vector<uint8_t> bytes;
 	if (!out.model.empty() && view.findings.assets) {
 		const size_t slash = out.model.find_last_of('/');

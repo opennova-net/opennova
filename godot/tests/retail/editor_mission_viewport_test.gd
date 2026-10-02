@@ -6,7 +6,7 @@ extends GutTest
 ## flow's end-to-end script makes), opened, and its picture built over the Shell's frames at a
 ## budget of 0 (one unit a frame) to `ready`: the units in the build's order (the environment, the
 ## terrain's files, the terrain a tile a step, the sky, the water, the item table, a unit per graphic,
-## the placement's units, the pose), the terrain built (the body's `ground`), every entity drawn
+## the placement's units, the static shadows bound, the pose), the terrain built (the body's `ground`), every entity drawn
 ## placed (one placement, none lifted or hidden). Prints what the build cost on the frames (frames,
 ## frame_us, unit_us, total_us), each label's units and time, and the three longest units: the
 ## measurement the first-picture budget and the stepped placement (D5) are read against.
@@ -132,7 +132,7 @@ func test_the_largest_mission_builds() -> void:
 	assert_eq(int(built.get("done", 0)), int(built.get("total", -1)), str(built))
 	assert_eq(int(state.get("builds", 0)), 1)
 	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "items", "models",
-			"place", "pose"]))
+			"place", "shadows", "pose"]))
 	for label in ["terrain", "models", "place"]:
 		assert_gt(int(units_by_label.get(label, 0)), 0, "the build's %s units" % label)
 	assert_true(bool(state.get("body", {}).get("ground", false)), "the terrain built: a surface a ray lands on")

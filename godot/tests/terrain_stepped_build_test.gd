@@ -59,7 +59,7 @@ func test_a_load_stepped_is_the_load_whole() -> void:
 	var root := _root()
 	var whole := _loaded(root)
 	var stepped := TerrainData.new()
-	assert_eq(stepped.load_step(), TerrainData.LOAD_STEP_DONE, "no load begun: nothing to step")
+	assert_eq(stepped.load_step(), TerrainData.LOAD_STEP_FAILED, "no load begun: nothing loads")
 	assert_eq(stepped.begin_load_from_resource_root(root, TestFs.TMAP_TRN), OK)
 	assert_false(stepped.is_loaded(), "begun, not loaded")
 	assert_eq(stepped.get_load_step_count(), LOAD_UNITS.size(), "a unit per file the load reads")
@@ -80,6 +80,19 @@ func test_a_load_stepped_is_the_load_whole() -> void:
 	assert_true(stepped.is_loaded())
 	assert_eq(stepped.get_load_step_count(), 0, "a load done leaves no unit")
 	assert_eq(stepped.get_load_step_label(), "")
+	assert_eq(stepped.load_step(), TerrainData.LOAD_STEP_DONE, "a load done answers done")
+	# The data, value for value (not only its size): the heights over the whole map, a sample every
+	# 16 units; the foliage table the map's slots read, as many rows.
+	var differ := 0
+	var samples := 0
+	for z in range(0, 512, 16):
+		for x in range(0, 512, 16):
+			var at := Vector3(float(x), 0.0, float(z))
+			samples += 1
+			if stepped.get_height_world_bilinear(at) != whole.get_height_world_bilinear(at):
+				differ += 1
+	assert_eq(differ, 0, "the heights alike at every one of %d samples" % samples)
+	assert_eq(stepped.get_foliage_defs().size(), whole.get_foliage_defs().size(), "the foliage table alike")
 	# What it loaded is what the whole load loaded.
 	assert_eq(stepped.get_tile_count(), whole.get_tile_count())
 	assert_gt(stepped.get_tile_count(), 0)
@@ -116,6 +129,7 @@ func test_a_load_is_refused_as_the_whole_load_is() -> void:
 			"a .trn the root lacks")
 	assert_false(data.is_loaded())
 	assert_eq(data.get_load_step_count(), 0, "a load refused plans nothing")
+	assert_eq(data.load_step(), TerrainData.LOAD_STEP_FAILED, "a load refused loads nothing")
 	# A load begun over one in flight starts again from its first unit.
 	assert_eq(data.begin_load_from_resource_root(root, TestFs.TMAP_TRN), OK)
 	assert_eq(data.load_step(), TerrainData.LOAD_STEP_MORE)
@@ -191,3 +205,13 @@ func test_a_build_begun_again_starts_again_and_one_with_no_data_is_refused() -> 
 	terrain.build()
 	assert_true(terrain.is_built(), "build() over a build in flight builds whole")
 	assert_eq(terrain.get_build_step_label(), "")
+	# Other data set over a stepped build in flight: the build is of the old data, dropped (its next
+	# step fails; nothing stands built).
+	var other := _terrain_over(_loaded(_root()))
+	assert_true(other.build_begin())
+	for _i in range(3):
+		assert_eq(other.build_step(), Terrain.BUILD_STEP_MORE)
+	other.set_terrain_data(_loaded(_root()))
+	assert_eq(other.build_step(), Terrain.BUILD_STEP_FAILED, "the build in flight dropped with its data")
+	assert_false(other.is_built())
+	assert_true(other.build_begin(), "a build of the new data begins")

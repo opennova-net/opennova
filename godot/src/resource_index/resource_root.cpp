@@ -251,9 +251,11 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> files) {
 	expansion_ = String();
 	mount_kind_ = MountKind::None;
-	// As begin_mount: the caches keyed to the old mount dropped, the old native source discarded.
+	// This root's caches keyed to the old mount dropped; the global epoch stands, so another root's
+	// holders keep theirs (the mounting device makes afresh whatever read a moved file).
 	opennova::clear_texture_resolver_caches();
-	opennova::bump_cache_epoch();
+	texture_cache_.clear();
+	resolve_memo_built_ = false;
 	assets_.invalidate();
 	if (!index_.mount_source(std::move(files))) {
 		root_dir_ = String();
@@ -264,11 +266,6 @@ Error ResourceRoot::mount_files(std::shared_ptr<const opennova::FileSource> file
 	last_error_ = String();
 	mount_kind_ = MountKind::Source;
 	return OK;
-}
-
-void ResourceRoot::files_changed() {
-	index_.mark_changed();
-	bump_cache_epoch();
 }
 
 Error ResourceRoot::begin_mount(const String &path, String &r_clean) {

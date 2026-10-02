@@ -27,6 +27,7 @@
 #include "object/entity_ref.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
+#include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
 
 namespace godot {
@@ -63,7 +64,8 @@ int64_t now_us() {
 	return int64_t(Time::get_singleton()->get_ticks_usec());
 }
 
-// Each device's scene state is its own: a counter no two share, never 0 (the shipped defaults').
+// Each device's scene state is its own: a counter no two share, never 0 (the shipped defaults'), and
+// a new one each time what its picture renders with moves.
 uint64_t next_scene_state() {
 	static uint64_t next = 0;
 	return ++next;
@@ -94,16 +96,28 @@ MissionViewportApplier::EnvironmentKey MissionViewportApplier::environment_key_o
 	return key;
 }
 
+MissionViewportApplier::TerrainKey MissionViewportApplier::terrain_key_of_(const MissionViewport &mission) {
+	TerrainKey key;
+	key.terrain = mission.scene().header().terrain;
+	key.tile_set = mission.scene().header().tile_set;
+	// The mission's own name: the game reads <mission>.til beside its terrain.
+	key.mission = opennova::to_std(opennova::to_gd(mission.path()).get_file().get_basename());
+	return key;
+}
+
 int MissionViewportApplier::layer_of_(Unit::Kind kind) {
 	switch (kind) {
 	case Unit::Kind::Environment:
 	case Unit::Kind::Sky: return kEnvironment;
 	case Unit::Kind::TerrainFile:
 	case Unit::Kind::TerrainBuild:
+	case Unit::Kind::NoTerrain:
 	case Unit::Kind::Water: return kTerrain;
+	case Unit::Kind::DropEntities:
 	case Unit::Kind::Items:
 	case Unit::Kind::Model:
 	case Unit::Kind::Place:
+	case Unit::Kind::Shadows:
 	case Unit::Kind::Lift: return kEntities;
 	case Unit::Kind::Pose: break;
 	}
@@ -127,8 +141,12 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	environment->set_ambient_source(Environment::AMBIENT_SOURCE_DISABLED);
 	clear_->set_environment(environment);
 	root_->add_child(clear_);
+	// The environment and the water hold their process-wide globals from before they enter the tree
+	// (their _ready writes some): only this device's publication and its presented frames write
+	// them (E13).
 	environment_ = memnew(MissionEnvironment);
 	environment_->set_name("Environment");
+	environment_->set_globals_held(true);
 	root_->add_child(environment_);
 	sky_ = memnew(SkyDome);
 	sky_->set_name("Sky");
@@ -137,6 +155,7 @@ MissionViewportApplier::MissionViewportApplier(SubViewport &viewport) : scene_st
 	water_ = memnew(Water);
 	water_->set_name("Water");
 	water_->set_environment_path(NodePath("../Environment"));
+	water_->set_globals_held(true);
 	root_->add_child(water_);
 	terrain_ = memnew(Terrain);
 	terrain_->set_name("Terrain");
@@ -167,22 +186,27 @@ MissionViewportApplier::~MissionViewportApplier() {
 		terrain->set_static_shadow_placer(Ref<MissionObjectPlacer>());
 }
 
+void MissionViewportApplier::touch_scene_state_() {
+	scene_state_ = next_scene_state();
+}
+
 // --- the files -----------------------------------------------------------------------------------
 
-void MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
+bool MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 	const std::shared_ptr<const opennova::editor::ProjectAssetSource> source = view.findings.assets;
 	const bool another = source != mounted_ || !stamped_;
 	bool stale[kLayers] = { another, another, another };
 	if (!another) {
-		if (!stamped_->stamps().moved(*source)) return;
+		if (!stamped_->stamps().moved(*source)) return false;
 		// What moved: the layers that read it; a moved file no layer's units read (a texture a model
 		// read as it was first drawn) is the entities'.
 		stale[kEnvironment] = layer_files_[kEnvironment].moved(*source);
 		stale[kTerrain] = layer_files_[kTerrain].moved(*source);
 		stale[kEntities] = layer_files_[kEntities].moved(*source) || (!stale[kEnvironment] && !stale[kTerrain]);
 	}
-	// A fresh record of what is asked for, the root mounted over it (its caches and the process's
-	// dropped: a file moved); the layers that read none of what moved keep their files noted.
+	// A fresh record of what is asked for, the root mounted over it (its own caches dropped: a file
+	// moved); the layers that read none of what moved keep their files noted. Nothing the picture
+	// draws changes here: the layers that read what moved are built again by the build's units.
 	mounted_ = source;
 	stamped_ = std::make_shared<opennova::editor::StampedFiles>(source);
 	root_files_->mount_files(stamped_);
@@ -196,7 +220,12 @@ void MissionViewportApplier::mount_(const opennova::editor::SessionView &view) {
 	}
 	if (stale[kEnvironment]) environment_built_ = false;
 	if (stale[kTerrain]) terrain_built_ = false;
-	if (stale[kEntities]) drop_entities_();
+	if (stale[kEntities]) {
+		// The placement and the lifted models go in the build's first unit, the placer with them.
+		if (placer_.is_valid() || !entities_.empty()) drop_pending_ = true;
+		placed_ = false;
+	}
+	return stale[kTerrain];
 }
 
 size_t MissionViewportApplier::reads_() const {
@@ -235,19 +264,31 @@ ObjectModel *MissionViewportApplier::model_of_(const Placed &placed) {
 
 // --- the build -----------------------------------------------------------------------------------
 
-void MissionViewportApplier::plan_(Build &build, const MissionScene &scene) {
+void MissionViewportApplier::plan_(Build &build, const MissionViewport &mission, std::vector<Unit> carried) {
+	const MissionScene &scene = mission.scene();
 	const MissionSceneHeader &header = scene.header();
+	// The entities of a moved file go first (the frame that took the Rebuild renders the last whole
+	// scene; the units after it render nothing until the build ends), the item table read again.
+	const bool need_items = drop_pending_ || placer_.is_null();
+	if (drop_pending_) build.units.push_back(Unit{ Unit::Kind::DropEntities });
+	// The graphics warmed under another cache epoch are cold again.
+	if (warm_epoch_ != ResourceRoot::cache_epoch()) {
+		warm_.clear();
+		warm_epoch_ = ResourceRoot::cache_epoch();
+	}
 	// The layers whose keys moved: the environment, the terrain (the sky and the water bound to them).
 	build.environment = !environment_built_ || !(environment_key_of_(header) == environment_key_);
-	TerrainKey terrain_key;
-	terrain_key.terrain = header.terrain;
-	terrain_key.tile_set = header.tile_set;
-	build.terrain = !terrain_built_ || !(terrain_key == terrain_key_);
+	const TerrainKey terrain_key = terrain_key_of_(mission);
+	build.terrain = !terrain_built_ || !(terrain_key == terrain_key_) || !carried.empty();
+	build.terrain_key = terrain_key;
 	if (build.environment) {
 		layer_missing_[kEnvironment].clear();
 		build.units.push_back(Unit{ Unit::Kind::Environment });
 	}
-	if (build.terrain) {
+	if (!carried.empty()) {
+		// The load or the build in flight under this key goes on where it was.
+		build.units.insert(build.units.end(), carried.begin(), carried.end());
+	} else if (build.terrain) {
 		// The .trn parsed as the load begins (its units planned then): one unit per file here, as many
 		// as the load will have; a terrain the project lacks is a note, the picture standing without.
 		layer_missing_[kTerrain].clear();
@@ -265,26 +306,23 @@ void MissionViewportApplier::plan_(Build &build, const MissionScene &scene) {
 		} else {
 			if (!header.terrain.empty()) note_missing_(kTerrain, trn);
 			loading_.unref();
-			// No terrain: the one held dropped, the layer built (with nothing) from its key.
-			terrain_->set_terrain_data(Ref<TerrainData>());
-			water_->set_terrain_data(Ref<TerrainData>());
-			terrain_data_.unref();
-			terrain_built_ = true;
-			terrain_key_ = terrain_key;
+			// No terrain: the one held dropped by a unit (not as the Rebuild is taken).
+			build.units.push_back(Unit{ Unit::Kind::NoTerrain });
 		}
 	}
 	if (build.environment || build.terrain) {
 		build.units.push_back(Unit{ Unit::Kind::Sky });
 		build.units.push_back(Unit{ Unit::Kind::Water });
 	}
-	// The entities: placed whole when none are placed; else the rows added since or of another item
-	// lifted (keys are rows), the lifted set folded back into a whole placement past kLiftedMost.
-	bool place = !placed_ || placer_.is_null();
+	// The entities: placed whole when none are placed (or a placement was cut short); else the rows
+	// added since, or given another item, group or attributes, lifted (keys are rows), the lifted set
+	// folded back into a whole placement past kLiftedMost.
+	bool place = need_items || !placed_;
 	std::vector<NodeId> adds;
 	if (!place) {
 		for (const MissionEntityMark &entity : scene.entities()) {
 			const auto found = entities_.find(entity.row);
-			if (found == entities_.end() || found->second.item != entity.item) adds.push_back(entity.row);
+			if (found == entities_.end() || !places_alike_(found->second, entity)) adds.push_back(entity.row);
 		}
 		size_t lifted = adds.size();
 		for (const NodeId row : lifted_)
@@ -292,22 +330,28 @@ void MissionViewportApplier::plan_(Build &build, const MissionScene &scene) {
 		place = lifted > kLiftedMost;
 	}
 	build.place = place;
-	if (placer_.is_null()) {
+	if (need_items) {
 		// The item table read first; the graphics it names are planned as it is read.
 		layer_missing_[kEntities].clear();
 		build.units.push_back(Unit{ Unit::Kind::Items });
 	} else {
 		// The graphics the entities name, each warmed once: every one for a placement, the adds' for a
 		// lift.
-		std::vector<String> graphics;
+		std::vector<Unit> models;
 		const auto want = [&](const MissionEntityMark &entity) {
 			// A marker draws nothing (the placement places none).
 			if (entity.pool == MissionPool::Marker) return;
 			const String graphic = graphic_of_(entity.item);
-			if (graphic.is_empty() || warm_.count(opennova::to_std(graphic)) ||
-					std::find(graphics.begin(), graphics.end(), graphic) != graphics.end())
-				return;
-			graphics.push_back(graphic);
+			if (graphic.is_empty() || warm_.count(opennova::to_std(graphic))) return;
+			auto unit = std::find_if(models.begin(), models.end(), [&](const Unit &u) { return u.graphic == graphic; });
+			if (unit == models.end()) {
+				Unit model{ Unit::Kind::Model };
+				model.graphic = graphic;
+				models.push_back(model);
+				unit = models.end() - 1;
+			}
+			if (std::find(unit->items.begin(), unit->items.end(), entity.item) == unit->items.end())
+				unit->items.push_back(entity.item);
 		};
 		if (place) {
 			for (const MissionEntityMark &entity : scene.entities()) want(entity);
@@ -315,14 +359,11 @@ void MissionViewportApplier::plan_(Build &build, const MissionScene &scene) {
 			for (const NodeId row : adds)
 				if (const MissionEntityMark *entity = scene.entity(row)) want(*entity);
 		}
-		for (const String &graphic : graphics) {
-			Unit unit{ Unit::Kind::Model };
-			unit.graphic = graphic;
-			build.units.push_back(unit);
-		}
+		build.units.insert(build.units.end(), models.begin(), models.end());
 	}
 	if (place) {
 		build.units.push_back(Unit{ Unit::Kind::Place });
+		build.units.push_back(Unit{ Unit::Kind::Shadows });
 	} else {
 		build.adds = std::move(adds);
 		for (size_t first = 0; first < build.adds.size(); first += kLiftPerUnit) {
@@ -336,16 +377,33 @@ void MissionViewportApplier::plan_(Build &build, const MissionScene &scene) {
 
 void MissionViewportApplier::rebuild(const opennova::editor::ViewportModel &viewport,
 		const opennova::editor::SessionView &view, const opennova::editor::PreviewClock &) {
+	// A terrain load or build in flight: its units left, carried into the new plan when its key and
+	// its files stand (m6: an edit while a large terrain builds does not begin it again).
+	std::vector<Unit> carried;
+	TerrainKey carried_key;
+	if (build_ && build_->terrain) {
+		carried_key = build_->terrain_key;
+		for (size_t i = build_->next; i < build_->units.size(); ++i)
+			if (build_->units[i].kind == Unit::Kind::TerrainFile || build_->units[i].kind == Unit::Kind::TerrainBuild)
+				carried.push_back(build_->units[i]);
+		// Only a load begun or a build begun goes on (a plan whose load never began has nothing to carry).
+		if (loading_.is_null() && !terrain_->is_building()) carried.clear();
+	}
 	build_.reset();
-	loading_.unref();
 	const MissionViewport &mission = mission_of(viewport);
 	if (mission.view_status() != opennova::editor::MissionViewStatus::Ready || !view.findings.assets) {
+		loading_.unref();
 		clear();
 		return;
 	}
-	mount_(view);
+	const bool terrain_moved = mount_(view);
+	if (terrain_moved || !(terrain_key_of_(mission) == carried_key)) {
+		carried.clear();
+		loading_.unref();
+	}
+	if (carried.empty()) loading_.unref();
 	auto build = std::make_unique<Build>();
-	plan_(*build, mission.scene());
+	plan_(*build, mission, std::move(carried));
 	// The pose alone, or one unit of lifts over warm graphics and the pose: made whole as it is taken
 	// (an entity removed, added or of another item, a header field no layer reads).
 	const bool whole = build->units.size() == 1 || (build->units.size() == 2 && build->units[0].kind == Unit::Kind::Lift);
@@ -359,79 +417,53 @@ void MissionViewportApplier::rebuild(const opennova::editor::ViewportModel &view
 
 bool MissionViewportApplier::run_(Build &build, const Unit &unit, const opennova::editor::ViewportModel &viewport,
 		std::string &failure) {
-	const MissionScene &scene = mission_of(viewport).scene();
+	(void)failure;
+	const MissionViewport &mission = mission_of(viewport);
+	const MissionScene &scene = mission.scene();
 	const size_t from = reads_();
-	bool ok = true;
 	switch (unit.kind) {
+	case Unit::Kind::DropEntities: drop_entities_(); break;
 	case Unit::Kind::Environment: run_environment_(scene); break;
-	case Unit::Kind::TerrainFile: {
-		if (loading_.is_null()) break;
-		const TerrainData::LoadStep result = loading_->load_step();
-		if (result == TerrainData::LOAD_STEP_FAILED) {
-			failure = "The terrain " + scene.header().terrain + " does not load: " + opennova::to_std(loading_->get_load_step_label());
-			loading_.unref();
-			ok = false;
-			break;
-		}
-		if (result == TerrainData::LOAD_STEP_DONE) {
-			terrain_data_ = loading_;
-			loading_.unref();
-			terrain_->set_terrain_data(terrain_data_);
-			water_->set_terrain_data(terrain_data_);
-			terrain_built_ = false;
-			if (!terrain_->build_begin()) {
-				failure = "The terrain " + scene.header().terrain + " does not build.";
-				ok = false;
-				break;
-			}
-			// Its units, a tile each, counted now that they are planned (the one planned stands for the
-			// first).
-			const int steps = terrain_->get_build_step_count();
-			for (int i = 1; i < steps; ++i)
-				build.units.insert(build.units.begin() + std::ptrdiff_t(build.next), Unit{ Unit::Kind::TerrainBuild });
-		}
-		break;
-	}
-	case Unit::Kind::TerrainBuild: {
-		const Terrain::BuildStep result = terrain_->build_step();
-		if (result == Terrain::BUILD_STEP_FAILED) {
-			failure = "The terrain " + scene.header().terrain + " does not build.";
-			ok = false;
-			break;
-		}
-		if (result == Terrain::BUILD_STEP_DONE) {
-			terrain_built_ = true;
-			terrain_key_.terrain = scene.header().terrain;
-			terrain_key_.tile_set = scene.header().tile_set;
-		}
-		break;
-	}
+	case Unit::Kind::TerrainFile: run_terrain_file_(build, mission); break;
+	case Unit::Kind::TerrainBuild: run_terrain_build_(build); break;
+	case Unit::Kind::NoTerrain: terrain_empty_(build.terrain_key); break;
 	case Unit::Kind::Sky: sky_->build(); break;
-	case Unit::Kind::Water: water_->build(); break;
+	case Unit::Kind::Water:
+		water_->build();
+		touch_scene_state_();
+		break;
 	case Unit::Kind::Items:
 		run_items_();
 		if (placer_->get_item_db().is_valid()) {
 			// The item table read: the graphics the entities name, now that it names them, before the
 			// placement.
-			std::vector<String> graphics;
+			std::vector<Unit> models;
 			for (const MissionEntityMark &entity : scene.entities()) {
 				if (entity.pool == MissionPool::Marker) continue;
 				const String graphic = graphic_of_(entity.item);
-				if (!graphic.is_empty() && !warm_.count(opennova::to_std(graphic)) &&
-						std::find(graphics.begin(), graphics.end(), graphic) == graphics.end())
-					graphics.push_back(graphic);
+				if (graphic.is_empty() || warm_.count(opennova::to_std(graphic))) continue;
+				auto found = std::find_if(models.begin(), models.end(), [&](const Unit &u) { return u.graphic == graphic; });
+				if (found == models.end()) {
+					Unit model{ Unit::Kind::Model };
+					model.graphic = graphic;
+					models.push_back(model);
+					found = models.end() - 1;
+				}
+				if (std::find(found->items.begin(), found->items.end(), entity.item) == found->items.end())
+					found->items.push_back(entity.item);
 			}
-			for (size_t i = 0; i < graphics.size(); ++i) {
-				Unit model{ Unit::Kind::Model };
-				model.graphic = graphics[i];
-				build.units.insert(build.units.begin() + std::ptrdiff_t(build.next + i), model);
-			}
+			build.units.insert(build.units.begin() + std::ptrdiff_t(build.next), models.begin(), models.end());
 		}
 		break;
-	case Unit::Kind::Model: run_model_(unit.graphic); break;
+	case Unit::Kind::Model: run_model_(unit); break;
 	case Unit::Kind::Place:
 		if (build.place_run.is_null()) run_place_begin_(scene, build);
 		run_place_step_(build);
+		break;
+	case Unit::Kind::Shadows:
+		// The placement's static shadows bound to the terrain: the casters' geometry resolved in the
+		// Model units, so the snapshot is the sources' walk.
+		terrain_->set_static_shadow_placer(shown_shadows_ && placed_ ? placer_ : Ref<MissionObjectPlacer>());
 		break;
 	case Unit::Kind::Lift: run_lift_(scene, build, unit.first); break;
 	case Unit::Kind::Pose:
@@ -441,7 +473,7 @@ bool MissionViewportApplier::run_(Build &build, const Unit &unit, const opennova
 		break;
 	}
 	note_reads_(layer_of_(unit.kind), from);
-	return ok;
+	return true;
 }
 
 ApplierStep MissionViewportApplier::step(const opennova::editor::ViewportModel &viewport,
@@ -490,6 +522,84 @@ void MissionViewportApplier::run_environment_(const MissionScene &scene) {
 	applied_time_ = -2.0;
 	environment_key_ = environment_key_of_(header);
 	environment_built_ = true;
+	touch_scene_state_();
+}
+
+void MissionViewportApplier::terrain_empty_(const TerrainKey &key) {
+	loading_.unref();
+	terrain_->set_terrain_data(Ref<TerrainData>());
+	water_->set_terrain_data(Ref<TerrainData>());
+	terrain_data_.unref();
+	terrain_built_ = true;
+	terrain_key_ = key;
+	touch_scene_state_();
+}
+
+void MissionViewportApplier::run_terrain_file_(Build &build, const MissionViewport &mission) {
+	if (loading_.is_null()) return;
+	const TerrainData::LoadStep result = loading_->load_step();
+	if (result == TerrainData::LOAD_STEP_MORE) return;
+	// What the load named and did not find (a texture, a map, the height data): notes.
+	for (const std::string &name : loading_->get_load_missing()) note_missing_(kTerrain, opennova::to_gd(name));
+	// The rest of the terrain's units go with a load that failed or a build that cannot begin: the
+	// layer is empty (no surface, no ground), the picture stands without it.
+	const auto give_up = [&](const String &why) {
+		if (!why.is_empty()) note_missing_(kTerrain, why);
+		build.units.erase(std::remove_if(build.units.begin() + std::ptrdiff_t(build.next), build.units.end(),
+								  [](const Unit &u) {
+									  return u.kind == Unit::Kind::TerrainFile || u.kind == Unit::Kind::TerrainBuild;
+								  }),
+				build.units.end());
+		terrain_empty_(build.terrain_key);
+	};
+	if (result == TerrainData::LOAD_STEP_FAILED) {
+		give_up(loading_->get_load_failure());
+		return;
+	}
+	terrain_data_ = loading_;
+	loading_.unref();
+	// The mission's .til, as the game reads it before the build (forced loose first, [orig:
+	// Terrain_LoadTileInfoFile @ 0x60a740]; GameWorld::load_mission_tile_info): the tiles it places.
+	Ref<TerrainTileInfo> tile_info;
+	const String til = opennova::to_gd(build.terrain_key.mission) + ".til";
+	if (!build.terrain_key.mission.empty() && root_files_->has_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST)) {
+		const PackedByteArray bytes = root_files_->read_file(til, ResourceRoot::LOOKUP_FORCE_LOOSE_FIRST);
+		Ref<TerrainTileInfo> read;
+		read.instantiate();
+		if (!bytes.is_empty() && read->load_from_bytes(bytes) == OK) tile_info = read;
+	}
+	(void)mission;
+	terrain_->set_tile_info_override(tile_info);
+	terrain_->set_terrain_data(terrain_data_);
+	water_->set_terrain_data(terrain_data_);
+	terrain_built_ = false;
+	touch_scene_state_();
+	if (!terrain_->build_begin()) {
+		give_up(String());
+		return;
+	}
+	// Its units, a tile each, counted now that they are planned (the one planned stands for the
+	// first).
+	const int steps = terrain_->get_build_step_count();
+	for (int i = 1; i < steps; ++i)
+		build.units.insert(build.units.begin() + std::ptrdiff_t(build.next), Unit{ Unit::Kind::TerrainBuild });
+}
+
+void MissionViewportApplier::run_terrain_build_(Build &build) {
+	const Terrain::BuildStep result = terrain_->build_step();
+	if (result == Terrain::BUILD_STEP_FAILED) {
+		// A terrain with no tile (no height data): the layer empty, its height data noted missing where
+		// the load said so.
+		build.units.erase(std::remove_if(build.units.begin() + std::ptrdiff_t(build.next), build.units.end(),
+								  [](const Unit &u) { return u.kind == Unit::Kind::TerrainBuild; }),
+				build.units.end());
+		terrain_empty_(build.terrain_key);
+		return;
+	}
+	if (result == Terrain::BUILD_STEP_DONE) {
+		terrain_built_ = true;
+		terrain_key_ = build.terrain_key;
+	}
 }
 
 void MissionViewportApplier::run_items_() {
@@ -499,30 +609,39 @@ void MissionViewportApplier::run_items_() {
 	if (placer_->get_item_db().is_null()) note_missing_(kEntities, "items.def");
 }
 
-void MissionViewportApplier::run_model_(const String &graphic) {
+void MissionViewportApplier::run_model_(const Unit &unit) {
 	if (placer_.is_null()) return;
-	const Ref<ObjectData> data = placer_->object_data_for(graphic);
+	const Ref<ObjectData> data = placer_->object_data_for(unit.graphic);
 	if (data.is_null()) {
-		note_missing_(kEntities, graphic.get_file().get_basename() + ".3di");
-		warm_[opennova::to_std(graphic)] = false;
+		note_missing_(kEntities, unit.graphic.get_file().get_basename() + ".3di");
+		warm_[opennova::to_std(unit.graphic)] = false;
 		return;
 	}
-	// Its static batches harvested once, so the placement finds every graphic warm.
-	placer_->warm_static_graphic(graphic, objects_);
-	warm_[opennova::to_std(graphic)] = true;
+	// Its static batches harvested once where a placement batches an entity of it (an item that
+	// needs a node of its own, or a graphic with a live PANM, is an individual model: no batches),
+	// so the placement finds every graphic warm; its terrain shadow geometry resolved, so binding the
+	// shadows walks the sources and resolves none.
+	bool statics = false;
+	for (const int64_t item : unit.items) statics = statics || placer_->item_places_static(int(item));
+	if (statics) placer_->warm_static_graphic(unit.graphic, objects_);
+	terrain_->prepare_static_shadow_caster(unit.graphic, data);
+	warm_[opennova::to_std(unit.graphic)] = true;
 }
 
 // The placement begun as a run (MissionPlacementRun, D5): its units are the build's Place units, one
 // stepped per unit; a newer placement on the placer cancels a run in flight by its generation.
 void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &build) {
-	// What the last placement and the lifts made goes: the run's container is made afresh.
+	// What the last placement and the lifts made goes: the run's container is made afresh. Nothing
+	// stands placed until the run's last unit (a Rebuild that drops the run places whole again).
 	terrain_->set_static_shadow_placer(Ref<MissionObjectPlacer>());
 	for (auto &entry : entities_)
 		if (entry.second.lifted)
 			if (ObjectModel *model = model_of_(entry.second)) model->queue_free();
 	entities_.clear();
+	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
+	placed_ = false;
 	place_started_us_ = now_us();
 	place_units_planned_ = 1;
 	if (placer_.is_null() || placer_->get_item_db().is_null()) {
@@ -530,9 +649,12 @@ void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &
 		for (const MissionEntityMark &entity : scene.entities()) {
 			Placed placed;
 			placed.item = entity.item;
+			placed.group = entity.group;
+			placed.attributes = entity.attributes;
 			placed.stamp = entity.stamp;
 			entities_[entity.row] = placed;
 		}
+		next_key_ = 0;
 		return;
 	}
 	std::vector<MissionObjectPlacer::PlacementRow> rows;
@@ -547,18 +669,25 @@ void MissionViewportApplier::run_place_begin_(const MissionScene &scene, Build &
 		row.index = entity.index;
 		row.item_id = int(entity.item);
 		row.bms_id = key;
+		// What the game's placement reads beside the transform (placement_rows_of): the group and the
+		// attributes, which gate the water mirror and the static terrain shadow.
+		row.group = entity.group;
 		row.team = entity.team;
+		row.ai_flags = entity.attributes;
 		row.position = Vector3(float(entity.x), float(entity.y), float(entity.z));
 		row.rotation_deg = Vector3(float(entity.pitch), float(entity.yaw), float(entity.roll));
 		rows.push_back(row);
 		Placed placed;
 		placed.item = entity.item;
+		placed.group = entity.group;
+		placed.attributes = entity.attributes;
 		placed.stamp = entity.stamp;
 		placed.key = key;
 		placed.kind = row.kind;
 		placed.index = row.index;
 		entities_[entity.row] = placed;
 	}
+	next_key_ = key;
 	build.place_run = placer_->begin_place_rows(rows, objects_, Dictionary());
 }
 
@@ -585,47 +714,85 @@ void MissionViewportApplier::run_place_step_(Build &build) {
 	last_place_us_ = now_us() - place_started_us_;
 	++placements_;
 	placed_ = true;
-	terrain_->set_static_shadow_placer(shown_shadows_ ? placer_ : Ref<MissionObjectPlacer>());
 }
 
-ObjectModel *MissionViewportApplier::lift_(const MissionEntityMark &entity) {
+ObjectModel *MissionViewportApplier::lift_(const MissionEntityMark &entity, int key) {
 	// A marker draws nothing, as the placement places none.
 	if (placer_.is_null() || placer_->get_item_db().is_null() || entity.pool == MissionPool::Marker) return nullptr;
-	// One model for the item as the placer builds one (its graphic, scale, rig and shadow).
-	ObjectModel *model = placer_->build_animated_model(int(entity.item), lifted_root_);
-	if (model == nullptr) return nullptr;
-	model->set_name(vformat("Lifted_%d", int64_t(entity.row)));
-	model->set_transform(transform_of_(entity));
-	return model;
+	// Built as the placement builds an entity's model (its lighting, its mirror flag and wave from its
+	// attributes and its item, its occluders, its static shadow siblings and its terrain shadow
+	// source), keyed past every placed key so its shadow source is its own.
+	MissionObjectPlacer::PlacementRow row;
+	row.kind = kind_of(entity.pool);
+	row.index = key;
+	row.item_id = int(entity.item);
+	row.bms_id = key;
+	row.group = entity.group;
+	row.team = entity.team;
+	row.ai_flags = entity.attributes;
+	row.position = Vector3(float(entity.x), float(entity.y), float(entity.z));
+	row.rotation_deg = Vector3(float(entity.pitch), float(entity.yaw), float(entity.roll));
+	return placer_->build_entity_model(row, lifted_root_, vformat("Lifted_%d", int64_t(entity.row)));
+}
+
+void MissionViewportApplier::free_lifted_(const Placed &placed) {
+	ObjectModel *model = model_of_(placed);
+	if (model == nullptr) return;
+	if (placer_.is_valid() && placed.key != 0)
+		placer_->set_static_terrain_shadow_replacement(placed.key, model->get_graphic_name(), model->get_transform(), false);
+	model->queue_free();
 }
 
 void MissionViewportApplier::run_lift_(const MissionScene &scene, Build &build, size_t first) {
 	for (size_t i = first; i < build.adds.size() && i < first + kLiftPerUnit; ++i) {
 		const MissionEntityMark *entity = scene.entity(build.adds[i]);
 		if (!entity) continue;
-		// Of another item: what showed it goes (a lifted model freed, a placed one hidden until the next
-		// placement).
+		// What showed it goes: a lifted model freed, a placed one hidden (its record kept: given back
+		// what was placed, it shows again).
 		const auto found = entities_.find(entity->row);
 		if (found != entities_.end()) {
 			if (found->second.lifted) {
-				if (ObjectModel *model = model_of_(found->second)) model->queue_free();
+				free_lifted_(found->second);
 			} else {
 				show_(found->second, false);
+				origins_[entity->row] = found->second;
 			}
+		}
+		// Given back what was placed (an undo): the placed one shown again, moved to where it stands.
+		const auto origin = origins_.find(entity->row);
+		if (origin != origins_.end() && places_alike_(origin->second, *entity)) {
+			Placed placed = origin->second;
+			origins_.erase(origin);
+			placed.stamp = 0; // moved to where it stands by the pose
+			entities_[entity->row] = placed;
+			show_(entities_[entity->row], true);
+			lifted_.erase(std::remove(lifted_.begin(), lifted_.end(), entity->row), lifted_.end());
+			continue;
 		}
 		Placed placed;
 		placed.item = entity->item;
+		placed.group = entity->group;
+		placed.attributes = entity->attributes;
 		placed.stamp = entity->stamp;
 		placed.lifted = true;
-		if (ObjectModel *model = lift_(*entity)) placed.model = model->get_instance_id();
+		placed.key = ++next_key_;
+		placed.kind = kind_of(entity->pool);
+		placed.index = placed.key;
+		if (ObjectModel *model = lift_(*entity, placed.key)) placed.model = model->get_instance_id();
 		entities_[entity->row] = placed;
 		if (std::find(lifted_.begin(), lifted_.end(), entity->row) == lifted_.end()) lifted_.push_back(entity->row);
 	}
 }
 
 void MissionViewportApplier::show_(Placed &placed, bool shown) {
-	if (ObjectModel *model = model_of_(placed)) model->set_visible(shown);
-	else if (placed.key != 0 && placer_.is_valid()) {
+	if (ObjectModel *model = model_of_(placed)) {
+		model->set_visible(shown);
+		// Its terrain shadow with it (an individual model's source answers to its key).
+		if (placer_.is_valid() && placed.key != 0) {
+			if (shown) placer_->clear_static_terrain_shadow_replacement(placed.key);
+			else placer_->set_static_terrain_shadow_replacement(placed.key, model->get_graphic_name(), model->get_transform(), false);
+		}
+	} else if (placed.key != 0 && placer_.is_valid()) {
 		if (shown) placer_->show_static_instance(placed.key);
 		else placer_->hide_static_instance(placed.key);
 	}
@@ -638,11 +805,12 @@ void MissionViewportApplier::drop_entities_() {
 		if (entry.second.lifted)
 			if (ObjectModel *model = model_of_(entry.second)) model->queue_free();
 	entities_.clear();
+	origins_.clear();
 	lifted_.clear();
 	shadow_pending_.clear();
 	// The placed populations and models go with their container at the frame's end, renamed now: a
 	// placement begun before then makes a container of its own (the placer reuses one it finds by its
-	// name), and nothing of the old one leaves the tree while the frame may still read it.
+	// name). This runs in a build's unit, whose frame renders nothing (the last picture stands).
 	for (int i = objects_->get_child_count() - 1; i >= 0; --i) {
 		Node *child = objects_->get_child(i);
 		child->set_name("Retired");
@@ -651,6 +819,8 @@ void MissionViewportApplier::drop_entities_() {
 	placer_.unref();
 	warm_.clear();
 	placed_ = false;
+	drop_pending_ = false;
+	next_key_ = 0;
 }
 
 opennova::editor::OperationProgress MissionViewportApplier::progress() const {
@@ -661,14 +831,17 @@ opennova::editor::OperationProgress MissionViewportApplier::progress() const {
 	progress.total = build_->units.size();
 	if (build_->next < build_->units.size()) {
 		switch (build_->units[build_->next].kind) {
+		case Unit::Kind::DropEntities: progress.label = "drop"; break;
 		case Unit::Kind::Environment: progress.label = "environment"; break;
 		case Unit::Kind::TerrainFile: progress.label = "terrain files"; break;
-		case Unit::Kind::TerrainBuild: progress.label = "terrain"; break;
+		case Unit::Kind::TerrainBuild:
+		case Unit::Kind::NoTerrain: progress.label = "terrain"; break;
 		case Unit::Kind::Sky: progress.label = "sky"; break;
 		case Unit::Kind::Water: progress.label = "water"; break;
 		case Unit::Kind::Items: progress.label = "items"; break;
 		case Unit::Kind::Model: progress.label = "models"; break;
 		case Unit::Kind::Place: progress.label = "place"; break;
+		case Unit::Kind::Shadows: progress.label = "shadows"; break;
 		case Unit::Kind::Lift: progress.label = "lift"; break;
 		case Unit::Kind::Pose: progress.label = "pose"; break;
 		}
@@ -685,8 +858,8 @@ void MissionViewportApplier::update(const opennova::editor::ViewportModel &viewp
 void MissionViewportApplier::move_entities_(const MissionScene &scene) {
 	for (const MissionEntityMark &entity : scene.entities()) {
 		const auto found = entities_.find(entity.row);
-		// One of another item is the next build's to lift.
-		if (found == entities_.end() || found->second.item != entity.item) continue;
+		// One of another item, group or attributes is the next build's to lift.
+		if (found == entities_.end() || !places_alike_(found->second, entity)) continue;
 		Placed &placed = found->second;
 		// Back in the scene (a removal undone): shown again, where it stands now.
 		const bool back = placed.hidden;
@@ -696,8 +869,7 @@ void MissionViewportApplier::move_entities_(const MissionScene &scene) {
 		const Transform3D xform = transform_of_(entity);
 		if (ObjectModel *model = model_of_(placed)) model->set_transform(xform);
 		else if (placed.key != 0 && placer_.is_valid()) placer_->move_static_instance(placed.key, xform);
-		if (!placed.lifted && placed.key != 0 &&
-				std::find(shadow_pending_.begin(), shadow_pending_.end(), entity.row) == shadow_pending_.end())
+		if (placed.key != 0 && std::find(shadow_pending_.begin(), shadow_pending_.end(), entity.row) == shadow_pending_.end())
 			shadow_pending_.push_back(entity.row);
 	}
 	// What the scene no longer has: hidden until it comes back or the next placement.
@@ -710,7 +882,8 @@ void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {
 	for (const NodeId row : shadow_pending_) {
 		const auto found = entities_.find(row);
 		const MissionEntityMark *entity = scene.entity(row);
-		if (found == entities_.end() || !entity || found->second.lifted) continue;
+		if (found == entities_.end() || !entity) continue;
+		// A placed entity's source by its pool and index at the placement, a lifted one's by its key.
 		placer_->update_static_terrain_shadow_source_transform(static_cast<MissionData::EntityKind>(found->second.kind),
 				found->second.index, transform_of_(*entity));
 	}
@@ -724,12 +897,14 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 	// The layers the options switch.
 	terrain_->set_visible(options.terrain);
 	sky_->set_visible(options.sky);
+	if (options.water != shown_water_) touch_scene_state_(); // the water's globals with it
 	water_->set_visible(options.water);
 	shown_water_ = options.water;
 	objects_->set_visible(options.models);
 	lifted_root_->set_visible(options.models);
 	if (options.shadows != shown_shadows_) {
 		shown_shadows_ = options.shadows;
+		// The casters' geometry is resolved (the Model units): the snapshot walks the sources.
 		if (placed_) terrain_->set_static_shadow_placer(shown_shadows_ ? placer_ : Ref<MissionObjectPlacer>());
 	}
 	// The time of day: the mission's start time, or the option's hour.
@@ -737,6 +912,7 @@ void MissionViewportApplier::apply_state_(const opennova::editor::ViewportModel 
 		if (options.time >= 0.0) environment_->debug_set_mission_minute_of_day(options.time * 60.0);
 		else environment_->configure_mission_clock(environment_key_.start_time, environment_key_.minutes_per_day);
 		applied_time_ = options.time;
+		touch_scene_state_();
 	}
 	place_camera_(viewport);
 }
@@ -764,6 +940,7 @@ void MissionViewportApplier::clear() {
 	environment_built_ = false;
 	for (std::vector<std::string> &missing : layer_missing_) missing.clear();
 	applied_time_ = -2.0;
+	touch_scene_state_();
 }
 
 void MissionViewportApplier::apply(const opennova::editor::ViewportModel &viewport, const opennova::editor::PreviewClock &,
@@ -794,14 +971,20 @@ void MissionViewportApplier::tick(const opennova::editor::ViewportModel &, const
 void MissionViewportApplier::publish_scene_state() {
 	// Every global the mission's picture renders with written again, whatever another picture
 	// published since: the environment's (the lighting block and the rest), the water's (its active
-	// flag, height and plane, pushed as its render activity syncs).
+	// flag, height and plane, pushed as its render activity syncs). The only writes outside a frame
+	// this device presents.
 	environment_->republish_shader_globals();
+	water_->set_globals_held(false);
 	water_->set_world_rendering_enabled(true);
+	water_->set_globals_held(true);
 }
 
 void MissionViewportApplier::present(double dt) {
 	// Nothing to draw while the first build runs (the device keeps no picture yet).
 	if (build_ && !environment_built_) return;
+	// Its own frame: what its legs write of the globals is its state's (the arbitration published it).
+	environment_->set_globals_held(false);
+	water_->set_globals_held(false);
 	water_->set_mirror_enabled(shown_water_);
 	// In the game's leg order (game_world_frame.cpp): the camera, the render eye and the clear, the
 	// environment nodes, the terrain, the water, the static and the individual models' levels.
@@ -826,6 +1009,8 @@ void MissionViewportApplier::present(double dt) {
 	// level as its options say and never joins it).
 	const ObjectLodFrame frames[1] = { ObjectLodFrame::from_camera(camera_, width) };
 	ObjectModel::update_authored_lod_views(frames, 1);
+	environment_->set_globals_held(true);
+	water_->set_globals_held(true);
 }
 
 // --- the ground ----------------------------------------------------------------------------------

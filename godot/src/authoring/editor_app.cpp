@@ -255,8 +255,9 @@ void EditorApp::_process(double p_delta) {
 	// it, whether a canvas draws them or not (pump() synced the devices). Then the devices' builds a
 	// unit further (S13 V6): one unit a frame in all, the most recently used device's first, the next
 	// while the frame's build budget lasts (shared by every build in flight): the first-picture
-	// budget while that device holds no picture yet (S14: a Main viewport's first picture has nothing
-	// to look at), the steady one from then on; a budget of 0 is a test's one unit a frame whatever.
+	// budget while any device builds its first picture (S14: a Main viewport's first picture has
+	// nothing to look at, whichever window asked last), the steady one from then on; a budget of 0 is
+	// a test's one unit a frame whatever.
 	if (devices_) {
 		session_->advance(p_delta);
 		devices_->tick(session_->viewports());
@@ -264,9 +265,8 @@ void EditorApp::_process(double p_delta) {
 		// run), the rest keep their last pictures until the next frame.
 		devices_->arbitrate(session_->viewports());
 		const uint64_t start = Time::get_singleton()->get_ticks_usec();
-		const opennova::editor::ViewportDevice *newest = devices_->most_recently_used();
 		const int budget_ms = build_budget_ms_ == 0 ? 0
-				: newest && !newest->holds_picture() ? std::max(first_picture_budget_ms_, build_budget_ms_)
+				: devices_->first_picture_pending() ? std::max(first_picture_budget_ms_, build_budget_ms_)
 													 : build_budget_ms_;
 		const uint64_t budget = uint64_t(budget_ms) * 1000;
 		devices_->step(session_->viewports(),

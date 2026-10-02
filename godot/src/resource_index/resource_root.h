@@ -110,12 +110,11 @@ public:
 	// load_material_texture, load_font through its bytes); a lookup policy changes nothing; nothing is
 	// listed (list_files, list_file_entries) and no name resolves to a path on disk (resolve_file);
 	// get_root_dir() is ResourceIndex::kSourceRootDir, a label and no directory, so every "is a root
-	// mounted" test answers yes. The source is read as it stands at each call: when one of its files
-	// changed, files_changed() drops what this root and the process cached of the old bytes (the
-	// index's revision and the cache epoch move).
+	// mounted" test answers yes. The source is read as it stands at each call; a mount drops what
+	// this root cached, never the global cache epoch: another root's holders keep theirs (another
+	// editor device's placer, say), and the mounting device makes afresh what read a moved file (its
+	// placer among them).
 	Error mount_files(std::shared_ptr<const opennova::FileSource> files);
-	void files_changed();
-	bool is_source_mount() const { return mount_kind_ == MountKind::Source; }
 	// Global cache epoch (see base/resource_index/resource_index.h): bumped by every mount/clear on ANY
 	// root. GDScript cache holders compare it against the epoch they were built under and
 	// self-clear when it moved. bump_cache_epoch() lets tools/tests force an

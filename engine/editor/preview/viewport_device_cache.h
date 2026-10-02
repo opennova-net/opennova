@@ -90,6 +90,11 @@ public:
 	// holds no picture yet). A pin (sync) keeps a device but is no ask: the Preview's pinned device
 	// never outranks the Main viewport a canvas just drew.
 	ViewportDevice *most_recently_used() const;
+	// A held device builds its first picture (a build in flight, no picture yet): the Shell's frame
+	// budget is the first-picture budget while one does, whichever window asked last (the Preview's
+	// canvas draws after the Document's, so the most recently used device is rarely the one the user
+	// waits on: review m2).
+	bool first_picture_pending() const;
 
 private:
 	struct Slot {

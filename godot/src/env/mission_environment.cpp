@@ -8,6 +8,7 @@
 #include <formats/env/env_weather.h>
 #include <runtime/environment/water_frame.h>
 
+#include <godot_cpp/classes/project_settings.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
@@ -20,6 +21,9 @@ MissionEnvironment::MissionEnvironment() {
 void MissionEnvironment::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("is_lighting_block_writer"),
 			&MissionEnvironment::is_lighting_block_writer);
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &MissionEnvironment::is_globals_held);
+	ClassDB::bind_static_method("MissionEnvironment", D_METHOD("get_global_writes"),
+			&MissionEnvironment::get_global_writes);
 	ClassDB::bind_method(D_METHOD("set_environment_data", "value"),
 			&MissionEnvironment::set_environment_data);
 	ClassDB::bind_method(D_METHOD("get_environment_data"),
@@ -321,10 +325,16 @@ void MissionEnvironment::flush_publication(bool p_pass_changed) {
 }
 
 MissionEnvironment *MissionEnvironment::lighting_block_writer_ = nullptr;
+int64_t MissionEnvironment::global_writes_ = 0;
+
+void MissionEnvironment::_set_global(const StringName &p_name, const Variant &p_value) {
+	++global_writes_;
+	RenderingServer::get_singleton()->global_shader_parameter_set(p_name, p_value);
+}
 
 void MissionEnvironment::_write_lighting_block_globals(
 		const Ref<EnvLightValues> &p_values) {
-	if (p_values.is_null()) {
+	if (p_values.is_null() || globals_held_) {
 		return;
 	}
 	_write_lighting_block(p_values);
@@ -333,39 +343,59 @@ void MissionEnvironment::_write_lighting_block_globals(
 
 void MissionEnvironment::_write_lighting_block(const Ref<EnvLightValues> &p_values) {
 	const EnvLightValues &v = **p_values;
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_light_block_dir", v.dir);
-	rs->global_shader_parameter_set("opennova_light_block_dir_color",
+	_set_global("opennova_light_block_dir", v.dir);
+	_set_global("opennova_light_block_dir_color",
 			v.dir_color);
-	rs->global_shader_parameter_set("opennova_light_block_hemi_sky",
+	_set_global("opennova_light_block_hemi_sky",
 			v.hemi_sky);
-	rs->global_shader_parameter_set("opennova_light_block_hemi_ground",
+	_set_global("opennova_light_block_hemi_ground",
 			v.hemi_ground);
-	rs->global_shader_parameter_set("opennova_light_block_ceiling", v.ceiling);
-	rs->global_shader_parameter_set("opennova_light_block_floor",
+	_set_global("opennova_light_block_ceiling", v.ceiling);
+	_set_global("opennova_light_block_floor",
 			v.floor_color);
-	rs->global_shader_parameter_set("opennova_light_block_gain", v.gain);
+	_set_global("opennova_light_block_gain", v.gain);
 	// The scene fog block itself (color/start/end/type) is the pass state
 	// write_shader_globals / the weather tick / the pass switch already
 	// publish for every fogged consumer; the object family only needs the
 	// enable, which a loaded world always carries.
-	rs->global_shader_parameter_set("opennova_fog_enabled", v.fog_enabled);
-	rs->global_shader_parameter_set("opennova_thermal_view", v.thermal_view);
+	_set_global("opennova_fog_enabled", v.fog_enabled);
+	_set_global("opennova_thermal_view", v.thermal_view);
 }
 
 void MissionEnvironment::republish_shader_globals() {
 	// The generation gate stands down for this one write: the globals hold
-	// another picture's state, not this environment's last publication.
+	// another picture's state, not this environment's last publication. The
+	// hold too: this is the publication it waits for.
+	const bool held = globals_held_;
+	globals_held_ = false;
 	last_published_generation_ = -1;
 	flush_publication(true);
 	write_shader_globals();
+	globals_held_ = held;
 }
 
 void MissionEnvironment::publish_shipped_defaults() {
-	_write_lighting_block(EnvLightValues::retail_noon_defaults());
+	// Each global as project.godot ships it (its shader_globals entry's value).
+	static const char *const kShipped[] = {
+		"opennova_light_block_dir", "opennova_light_block_dir_color", "opennova_light_block_hemi_sky",
+		"opennova_light_block_hemi_ground", "opennova_light_block_ceiling", "opennova_light_block_floor",
+		"opennova_light_block_gain", "opennova_fog_enabled", "opennova_thermal_view", "opennova_sun_light",
+		"opennova_sky_ambient", "opennova_env_light_block", "opennova_sun_direction", "opennova_fog_color",
+		"opennova_fog_end", "opennova_fog_start", "opennova_fog_type", "opennova_viewmodel_fog_color",
+		"opennova_viewmodel_fog_range", "opennova_water_mirror_fog_color", "opennova_water_mirror_fog_range",
+	};
+	ProjectSettings *settings = ProjectSettings::get_singleton();
+	for (const char *name : kShipped) {
+		const Variant entry = settings->get_setting(String("shader_globals/") + name);
+		if (entry.get_type() != Variant::DICTIONARY) {
+			continue;
+		}
+		const Dictionary shipped = entry;
+		if (shipped.has("value")) {
+			_set_global(name, shipped["value"]);
+		}
+	}
 	lighting_block_writer_ = nullptr;
-	opennova::env::EnvironmentState unloaded;
-	_write_globals(unloaded.build_shader_globals(false));
 }
 
 void MissionEnvironment::_release_lighting_block() {
@@ -373,8 +403,11 @@ void MissionEnvironment::_release_lighting_block() {
 		return;
 	}
 	// Globals are process-wide: leave the shipped noon defaults behind so a
-	// later preview or mission does not inherit this world's block.
-	_write_lighting_block_globals(EnvLightValues::retail_noon_defaults());
+	// later preview or mission does not inherit this world's block (a held
+	// environment leaves them to the next publication: E13).
+	if (!globals_held_) {
+		_write_lighting_block(EnvLightValues::retail_noon_defaults());
+	}
 	lighting_block_writer_ = nullptr;
 	// The block the world carries is no longer published anywhere: the next
 	// flush must write it again even though the generation did not move.
@@ -431,35 +464,39 @@ Ref<EnvLightValues> MissionEnvironment::_build_light_values() const {
 }
 
 void MissionEnvironment::write_shader_globals() {
+	if (globals_held_) {
+		return;
+	}
 	_write_globals(state_.build_shader_globals(underwater_view_));
 }
 
 void MissionEnvironment::_write_globals(const opennova::env::EnvShaderGlobals &globals) {
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_sun_light",
+	_set_global("opennova_sun_light",
 			to_vector3(globals.sun_light));
-	rs->global_shader_parameter_set("opennova_sky_ambient",
+	_set_global("opennova_sky_ambient",
 			to_vector3(globals.sky_ambient));
-	rs->global_shader_parameter_set("opennova_env_light_block",
+	_set_global("opennova_env_light_block",
 			to_vector3(globals.light_block));
-	rs->global_shader_parameter_set("opennova_sun_direction",
+	_set_global("opennova_sun_direction",
 			to_vector3(globals.sun_direction));
-	rs->global_shader_parameter_set("opennova_fog_color",
+	_set_global("opennova_fog_color",
 			to_vector3(globals.fog_color));
-	rs->global_shader_parameter_set("opennova_fog_end", globals.fog_end);
-	rs->global_shader_parameter_set("opennova_fog_start", globals.fog_start);
-	rs->global_shader_parameter_set("opennova_fog_type", globals.fog_type);
+	_set_global("opennova_fog_end", globals.fog_end);
+	_set_global("opennova_fog_start", globals.fog_start);
+	_set_global("opennova_fog_type", globals.fog_type);
 }
 
 void MissionEnvironment::_write_scene_fog_globals() {
+	if (globals_held_) {
+		return;
+	}
 	const opennova::env::SceneFogValues fog =
 			state_.build_scene_fog(underwater_view_);
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_fog_color",
+	_set_global("opennova_fog_color",
 			to_vector3(fog.color));
-	rs->global_shader_parameter_set("opennova_fog_end", fog.end);
-	rs->global_shader_parameter_set("opennova_fog_start", fog.start);
-	rs->global_shader_parameter_set("opennova_fog_type", fog.type);
+	_set_global("opennova_fog_end", fog.end);
+	_set_global("opennova_fog_start", fog.start);
+	_set_global("opennova_fog_type", fog.type);
 }
 
 // --- mission clock ----------------------------------------------------------
@@ -540,6 +577,9 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 		return;
 	}
 	flush_publication();
+	if (globals_held_) {
+		return;
+	}
 	// The weather owns the full per-frame global write while present. Refresh
 	// only the affected channels immediately (the terrain sun/sky pair: NVG
 	// selects between the sky blend and the thermal ramps), and let its next
@@ -547,10 +587,9 @@ void MissionEnvironment::set_nvg_view(bool p_active, int p_gain) {
 	// wind/fog state.
 	const opennova::env::TerrainEnvUniforms uniforms =
 			state_.build_terrain_uniforms(underwater_view_);
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_sun_light",
+	_set_global("opennova_sun_light",
 			to_vector3(uniforms.sun_light));
-	rs->global_shader_parameter_set("opennova_sky_ambient",
+	_set_global("opennova_sky_ambient",
 			to_vector3(uniforms.sky_ambient));
 }
 
@@ -564,12 +603,14 @@ void MissionEnvironment::set_thermal_view(bool p_world, bool p_terrain) {
 	// committed now like the NVG channels above.
 	flush_publication();
 	_write_scene_fog_globals();
+	if (globals_held_) {
+		return;
+	}
 	const opennova::env::TerrainEnvUniforms uniforms =
 			state_.build_terrain_uniforms(underwater_view_);
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_sun_light",
+	_set_global("opennova_sun_light",
 			to_vector3(uniforms.sun_light));
-	rs->global_shader_parameter_set("opennova_sky_ambient",
+	_set_global("opennova_sky_ambient",
 			to_vector3(uniforms.sky_ambient));
 }
 
@@ -625,26 +666,24 @@ opennova::env::SceneFogValues MissionEnvironment::_viewmodel_fog() const {
 }
 
 void MissionEnvironment::_write_viewmodel_fog_globals() {
-	if (!state_.is_loaded()) {
+	if (!state_.is_loaded() || globals_held_) {
 		return;
 	}
 	const opennova::env::SceneFogValues fog = _viewmodel_fog();
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_viewmodel_fog_color",
+	_set_global("opennova_viewmodel_fog_color",
 			to_vector3(fog.color));
-	rs->global_shader_parameter_set("opennova_viewmodel_fog_range",
+	_set_global("opennova_viewmodel_fog_range",
 			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
 }
 
 void MissionEnvironment::_write_water_mirror_fog_globals() {
-	if (!state_.is_loaded()) {
+	if (!state_.is_loaded() || globals_held_) {
 		return;
 	}
 	const opennova::env::SceneFogValues fog = state_.build_water_mirror_fog();
-	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_water_mirror_fog_color",
+	_set_global("opennova_water_mirror_fog_color",
 			to_vector3(fog.color));
-	rs->global_shader_parameter_set("opennova_water_mirror_fog_range",
+	_set_global("opennova_water_mirror_fog_range",
 			Vector3(fog.start, fog.end, static_cast<float>(fog.type)));
 }
 

@@ -300,12 +300,15 @@ public:
 	// A retained static entity moved to `p_xform` (its entity transform, as
 	// entity_transform makes it): every row it occupies rewritten in place
 	// across its populations (the level's, the shadow twin's, the view twins'),
-	// its level's bound sphere moved with it, each touched population's bounds
-	// grown to hold it. It keeps the 512-unit bin it was placed in: the cull
-	// stays right, the batching degrades for a far move until the next
-	// placement. The static source rows (its terrain shadow, its effects) do
-	// not follow here: the editor moves them at the gesture's end
-	// (update_static_terrain_shadow_source_transform). False for a bms id
+	// its level's bound sphere moved with it, and the bounds of every population
+	// it may draw in grown to hold it (live or not: a later level switch or a
+	// show appends it there). It keeps the 512-unit bin it was placed in: the
+	// cull stays right, the batching degrades for a far move until the next
+	// placement. Its terrain shadow source and its static instance record do not
+	// follow here: the editor moves them at the gesture's end
+	// (update_static_terrain_shadow_source_transform); its effect and light-draw
+	// source rows stay where it was placed until the next placement (the
+	// editor's picture draws no effect or light from them). False for a bms id
 	// that is no retained static.
 	bool move_static_instance(int p_bms_id, const Transform3D &p_xform);
 	// The entity transform a retained static's rows draw at now (null for a
@@ -320,6 +323,20 @@ public:
 	// one-off harvest under `p_tree_parent`), so a placement that names it
 	// later finds them warm; true when the graphic resolves to batches.
 	bool warm_static_graphic(const String &p_graphic, Node *p_tree_parent);
+	// Whether a placement draws an entity of the item as a row of its
+	// graphic's static populations (else as an individual model: the item
+	// needs a node of its own, or its graphic a live PANM).
+	bool item_places_static(int p_item_id);
+	// One entity's individual model built as the placement's animated walk
+	// builds one (its graphic, scale, shadow, lighting, rig, muzzle, authored
+	// levels and occluders, the water mirror's wave, the mirror flag from the
+	// entity's attributes and its item, the thermal wave, its static shadow
+	// siblings, its EntityRef and its terrain shadow source keyed by the row's
+	// kind and index and its bms id) under `p_parent`, whatever the item would
+	// be in a whole placement; null for a marker, an item no graphic names or
+	// a model that does not load. The editor's lifted entities (ADR 0046 S14),
+	// which no whole placement has taken in yet.
+	ObjectModel *build_entity_model(const PlacementRow &p_row, Node3D *p_parent, const String &p_name);
 
 	// Register an already-resolved object plus its static render batches —
 	// the construction seam for callers that already own parsed geometry
@@ -510,6 +527,21 @@ private:
 	void _place_bucket(MissionPlacementRun &p_run, size_t p_first);
 	void _place_static_group(MissionPlacementRun &p_run, int p_group);
 	void _place_animated(MissionPlacementRun &p_run, int p_first);
+	// One entity as the animated walk builds it: what build_entity_model and _place_animated share.
+	struct EntityModelSpec {
+		String graphic;
+		int item_id = 0;
+		int kind = -1;
+		int index = -1;
+		int bms_id = 0;
+		int group = -1;
+		int team = -1;
+		uint32_t ai_flags = 0;
+		Vector3 position;
+		Transform3D xform;
+	};
+	ObjectModel *_build_entity_model(const EntityModelSpec &p_spec, const Ref<ObjectData> &p_data,
+			Node3D *p_container, const String &p_name, const String &p_shadow_tag);
 	void _place_finish(MissionPlacementRun &p_run);
 	Node3D *_place_populations_parent(MissionPlacementRun &p_run);
 	int _append_static_item_effect_source(int p_kind, int p_entity_index,

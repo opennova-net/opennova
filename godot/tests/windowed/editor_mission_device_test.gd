@@ -9,10 +9,12 @@ extends GutTest
 ## - The render token: with a model drawn in the Preview window in the same frames, the two devices
 ##   are of two scene states (the model's the shipped defaults, the mission's its own), so each frame
 ##   one of them renders and the other keeps its last picture, in turn; in the model's frames the
-##   lighting block the globals hold is the retail noon again, no environment its writer (a
-##   mission's block would otherwise stay: the globals are process-wide and written once per
-##   environment change), in the mission's frames the mission's environment is the writer; the
-##   water's mirror pass is on only in the frames the mission presents.
+##   globals hold the shipped defaults again (project.godot's values), no environment their writer (a
+##   mission's would otherwise stay: the globals are process-wide and written once per environment
+##   change), in the mission's frames the mission's environment is the writer; the water's mirror
+##   pass is on only in the frames the mission presents.
+## - A mission building beside a model never lights it (review M1): every frame of its build the
+##   globals hold the model's shipped values.
 
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
@@ -205,7 +207,7 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 		if model_renders:
 			model_frames += 1
 			assert_false(environment.is_lighting_block_writer(),
-					"frame %d: the model renders under the retail noon, no environment its writer" % frame)
+					"frame %d: the model renders under the shipped defaults, no environment its writer" % frame)
 			assert_false(water.is_mirror_enabled(), "frame %d: no mirror pass in a frame the mission does not present" % frame)
 		else:
 			mission_frames += 1
@@ -214,3 +216,37 @@ func test_a_mission_and_a_model_render_in_turn() -> void:
 			assert_true(water.is_mirror_enabled(), "frame %d: the mirror pass in the mission's frame" % frame)
 	assert_eq(mission_frames, 6)
 	assert_eq(model_frames, 6)
+
+
+## S14 review M1: a mission building beside a model in the Preview never lights the model. The model
+## ready and rendering (its state, the shipped defaults, published once), the mission opened: no
+## environment and no water writes a process-wide global while the mission builds (its environment,
+## its water and its time set in its units; MissionEnvironment.get_global_writes,
+## Water.get_global_writes: a game build's RenderingServer reads no global back), and the
+## environment's lighting block is no writer's. Once built and drawn, the mission publishes its own.
+func test_a_mission_building_never_lights_the_model() -> void:
+	if _app == null:
+		return
+	assert_true(_app.is_available(), "a window: the editor's ImGui pass attached, its canvases drawing")
+	_app.build_budget_ms = 0
+	_open_mission()
+	assert_true(_seam.open_document(MODEL_PATH))
+	assert_eq(String((await _await_ready(MODEL_PATH)).get("status", "")), "ready")
+	for _frame in 5:
+		await get_tree().process_frame
+	var environment_writes := MissionEnvironment.get_global_writes()
+	var water_writes := Water.get_global_writes()
+	assert_true(_seam.open_document(MISSION_PATH))
+	var loading := 0
+	for frame in 900:
+		await get_tree().process_frame
+		var state := _state(MISSION_PATH)
+		if String(state.get("status", "")) != "loading":
+			if loading > 0:
+				break
+			continue
+		loading += 1
+		assert_eq(MissionEnvironment.get_global_writes(), environment_writes,
+				"frame %d of the mission's build: no environment global written" % frame)
+		assert_eq(Water.get_global_writes(), water_writes, "frame %d of the mission's build: no water global written" % frame)
+	assert_gt(loading, 10, "the mission built over frames beside the model")

@@ -2023,7 +2023,16 @@ static int test_builds() {
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
 	const auto *shown_menu = viewport_of<MenuViewport>(session, menu_path, ViewportKind::Menu);
+	// Its first picture pending, whichever device a canvas asked for last (the model's: S14 review m2,
+	// the Preview's canvas draws after the Document's): the Shell's first-picture budget stands.
+	TEST_EXPECT(!devices.cache.first_picture_pending());
+	devices.sync(session);
+	const FakeDevice *first = devices.held(menu_path, ViewportKind::Menu);
+	TEST_EXPECT(first && first->built.loading && first->shown == 0);
+	TEST_EXPECT(devices.cache.device(document->path(), ViewportKind::Model) == device &&
+			devices.cache.most_recently_used() == device && devices.cache.first_picture_pending());
 	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	TEST_EXPECT(!devices.cache.first_picture_pending());
 	FakeDevice *menu_device = devices.held(menu_path, ViewportKind::Menu);
 	TEST_EXPECT(menu_device && shown_menu && menu_device->shown == 1 &&
 			shown_menu->picture_status() == ViewportStatus::Ready);

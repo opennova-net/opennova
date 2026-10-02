@@ -121,9 +121,15 @@ private:
 	};
 	std::vector<LoadUnit> load_units_;
 	size_t load_next_ = 0;
+	// What load_step answers: no load begun (or one refused), one running, done, failed.
+	enum class LoadState : uint8_t { None, Running, Done, Failed };
+	LoadState load_state_ = LoadState::None;
 	bool load_use_root_ = false;
 	String load_dir_;
 	Error load_error_ = OK;
+	mutable std::vector<std::string> load_missing_;
+	String load_failure_;
+	void _note_load_missing(const String &p_name) const;
 	Error _begin_load_from_trn_text(const std::string &trn_content);
 	Ref<Texture2D> _load_slot_texture(const char *slot, const String &filename) const;
 	void _use_default_pcx_slot(const String &slot_id);
@@ -224,6 +230,12 @@ public:
 	int get_load_step_count() const;
 	int get_load_steps_done() const;
 	String get_load_step_label() const;
+	// The files the last load named and did not find (a texture slot, a map, the tilestrip, the
+	// height data: each loads on without it), and why it failed ("" for a load that did not): the
+	// file and what went wrong, as a failed step leaves it. C++ only (the editor's mission device
+	// notes them).
+	const std::vector<std::string> &get_load_missing() const { return load_missing_; }
+	const String &get_load_failure() const { return load_failure_; }
 	bool is_loaded() const;
 	uint64_t get_change_revision() const { return change_revision_; }
 	// Returns depth as little-endian raw16 (value = clamp(height*256)). Reads an

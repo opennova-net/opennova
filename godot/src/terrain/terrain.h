@@ -245,6 +245,12 @@ public:
 	Ref<TerrainData> get_terrain_data() const;
 	void set_static_shadow_placer(
 			const Ref<MissionObjectPlacer> &p_placer);
+	// A caster graphic's static-shadow geometry resolved ahead of the placer
+	// that will name it (TerrainStaticShadowRasterizer::prepare_caster_geometry:
+	// the editor's mission device does it a graphic a unit). C++ only.
+	bool prepare_static_shadow_caster(const String &p_graphic, const Ref<ObjectData> &p_data) {
+		return static_shadow_rasterizer.prepare_caster_geometry(p_graphic, p_data);
+	}
 	void set_static_terrain_shadow_enabled(bool p_enabled);
 	bool is_static_terrain_shadow_enabled() const;
 	void set_tile_cache_capture_diagnostics(bool p_enabled);
@@ -310,6 +316,8 @@ public:
 	bool build_begin();
 	BuildStep build_step();
 	bool is_built() const { return built; }
+	// A stepped build is in flight (begun, its last unit not run). C++ only.
+	bool is_building() const { return building_; }
 	// The units of the build in flight, how many ran, and what the next one makes ("" none).
 	int get_build_step_count() const { return build_total_; }
 	int get_build_steps_done() const { return build_done_; }

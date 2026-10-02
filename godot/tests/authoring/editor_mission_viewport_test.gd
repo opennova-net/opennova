@@ -157,8 +157,10 @@ func _copy_fixture(source: String, target: String) -> void:
 ## The files the mission's picture reads, written into the project at `root`: the terrain (Tmap.trn,
 ## its heights, its two maps and the textures it names), the environment (synth_full.env and its
 ## clouds), the item table the mission's items are in, and the models their graphics name.
-func _mint_project(root: String) -> void:
+func _mint_project(root: String, skip: PackedStringArray = PackedStringArray()) -> void:
 	for name in ["Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"]:
+		if skip.has(name):
+			continue
 		_copy_fixture("terrain/tmap/" + name, root.path_join("terrain").path_join(name))
 	for name in TERRAIN_TEXTURES:
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(2048 if name == "mnml_c" or name == "mnml_d1" else 32))
@@ -176,7 +178,8 @@ func _mint_project(root: String) -> void:
 
 ## A new project holding the minted mission as missions/synth_logic.bms (and, `whole`, the files its
 ## picture reads), scanned, the mission open.
-func _open_mission(whole := true, also: PackedStringArray = PackedStringArray()) -> bool:
+func _open_mission(whole := true, also: PackedStringArray = PackedStringArray(),
+		skip: PackedStringArray = PackedStringArray()) -> bool:
 	var dir := OS.get_cache_dir().path_join("opennova editor mission project %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Mission Viewport Game"))
@@ -187,7 +190,7 @@ func _open_mission(whole := true, also: PackedStringArray = PackedStringArray())
 	for name in also:
 		_write(root.path_join("missions").path_join(name), mission)
 	if whole:
-		_mint_project(root)
+		_mint_project(root, skip)
 	_app.request_json(JSON.stringify({"kind": "rescan"}))
 	assert_true(_seam.settle(), "a Rescan steps across pumps (S13 A3)")
 	return _seam.open_document("missions/synth_logic.bms")
@@ -329,7 +332,8 @@ func test_the_camera_on_the_wire_and_a_move_as_an_update() -> void:
 ## S14 V8, V9: the mission builds over the Shell's frames. Opened at a budget of 0, its viewport is
 ## `loading` at the pump that takes it, one unit a frame, its progress never going back, the units'
 ## labels in the build's order (the environment, the terrain's files, the terrain a tile a step, the
-## sky, the water, the item table, a unit per graphic, the placement's units, the pose), then `ready`
+## sky, the water, the item table, a unit per graphic, the placement's units, the static shadows
+## bound, the pose), then `ready`
 ## with the layers under its device, the terrain built (the body's `ground`) and no file missing.
 func test_the_mission_builds_over_frames() -> void:
 	if _app == null:
@@ -356,7 +360,7 @@ func test_the_mission_builds_over_frames() -> void:
 		state = _state()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
 	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "items", "models",
-			"place", "pose"]))
+			"place", "shadows", "pose"]))
 	var build: Dictionary = state.get("device", {}).get("build", {})
 	gut.p("the mission at 0 ms a frame: %d frames awaited, its build %s" % [frames, str(build)])
 	assert_eq(int(build.get("done", 0)), int(build.get("total", 0)), str(build))
@@ -744,6 +748,7 @@ func test_a_file_change_places_again() -> void:
 	var data: TerrainData = terrain.get_terrain_data()
 	assert_not_null(data)
 	var placer: MissionObjectPlacer = _mission_device().get("placer")
+	var epoch := ResourceRoot.cache_epoch()
 	var root: String = _seam.get_project_root()
 	var crate := root.path_join("models").path_join("crate.3di")
 	var bytes := FileAccess.get_file_as_bytes(crate)
@@ -762,3 +767,291 @@ func test_a_file_change_places_again() -> void:
 	assert_ne(device.get("placer"), placer, "the entities placed again over the files mounted afresh")
 	assert_eq(terrain.get_terrain_data(), data, "the terrain, which read nothing that moved, kept")
 	assert_eq(String(state.get("status", "")), "ready", str(state))
+	# The device's mount dropped its own root's caches, never the process's (review m4: another
+	# device's placer keeps its own).
+	assert_eq(ResourceRoot.cache_epoch(), epoch, "the global cache epoch stands")
+
+
+## The crate's model written again (a new stamp: a byte past the end the reader never reads) and the
+## project rescanned, settled (the pumps take the Rebuild; no frame has stepped a unit yet).
+func _touch_the_crate() -> void:
+	var crate: String = _seam.get_project_root().path_join("models").path_join("crate.3di")
+	_write(crate, FileAccess.get_file_as_bytes(crate) + PackedByteArray([0]))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+
+
+## The frames stepped (a budget of 0: a unit a frame) until `done` says so or `frames` ran out; the
+## labels seen, in order, each once per run of it.
+func _step_until(done: Callable, frames := 900) -> PackedStringArray:
+	var labels := PackedStringArray()
+	var state := _state()
+	for _frame in frames:
+		var label := String(state.get("progress", {}).get("label", "")) if state.get("progress") is Dictionary else ""
+		if not label.is_empty() and (labels.is_empty() or labels[labels.size() - 1] != label):
+			labels.append(label)
+		if done.call(state):
+			break
+		await get_tree().process_frame
+		state = _state()
+	return labels
+
+
+## S14 review M1: no device writes a process-wide shader global outside its publication. Headless no
+## canvas draws the picture, so nothing presents or publishes: the mission builds to ready, takes a time
+## of day (an Update), moves an entity, and builds its entities again for a moved file, and neither
+## the environment nor the water writes a global meanwhile (MissionEnvironment.get_global_writes,
+## Water.get_global_writes: a headless renderer keeps no global to read back). Both hold their
+## globals; the time reaches the environment's clock (6.5 h is minute 390) and a layer switched off
+## hides its node (review m13).
+func test_no_global_written_outside_a_publication() -> void:
+	if _app == null:
+		return
+	_app.build_budget_ms = 0
+	var environment_writes := MissionEnvironment.get_global_writes()
+	var water_writes := Water.get_global_writes()
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var environment: MissionEnvironment = _device_node(state, "MissionEnvironment")
+	var water: Water = _device_node(state, "Water")
+	assert_not_null(environment)
+	assert_not_null(water)
+	if environment == null or water == null:
+		return
+	assert_true(environment.is_globals_held() and water.is_globals_held(), "the device's environment and water hold")
+	assert_true(_change({"kind": "mission", "options": {"time": 6.5}}))
+	assert_almost_eq(environment.get_mission_minute_of_day(), 390.0, 0.5, "the time reached the clock")
+	var item := _first_item(_state())
+	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": int(item.get("id", 0)), "handle": "move", "by": [30, 0], "kind": "mission"}})
+	assert_true(bool(moved.get("outcome", {}).get("done", false)), str(moved))
+	_touch_the_crate()
+	state = await _await_ready()
+	for _frame in 600:
+		if int(_mission_device().get("placements", 0)) >= 2 and String(state.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		state = _state()
+	assert_eq(int(_mission_device().get("placements", 0)), 2, "the entities built again")
+	assert_eq(MissionEnvironment.get_global_writes(), environment_writes, "the environment wrote no global")
+	assert_eq(Water.get_global_writes(), water_writes, "the water wrote no global")
+	# A layer off: its node hidden.
+	assert_true(_change({"kind": "mission", "options": {"show": {"terrain": false, "sky": false}}}))
+	assert_false((_device_node(state, "Terrain") as Node3D).visible, "the terrain off")
+	assert_false((_device_node(state, "SkyDome") as Node3D).visible, "the sky off")
+
+
+## S14 review M5: what a Rebuild replaces leaves in a unit, never as it is taken. A moved model file
+## (the entities' layer read it): at the pumps that take the Rebuild the last whole scene stands (the
+## placer's container in the tree, nothing retired or queued to go), and the build's first unit drops
+## it; the build ends with the entities placed again.
+func test_a_rebuild_keeps_the_last_scene_until_its_units_run() -> void:
+	if _app == null:
+		return
+	_app.build_budget_ms = 0
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _device(state)
+	var container: Node = device.find_child("MissionObjects", true, false)
+	assert_not_null(container)
+	if container == null:
+		return
+	var children := container.get_child_count()
+	assert_gt(children, 0)
+	_touch_the_crate()
+	state = _state()
+	assert_eq(String(state.get("status", "")), "loading", str(state).left(300))
+	assert_eq(String(state.get("progress", {}).get("label", "")), "drop", "the drop is the build's first unit")
+	assert_true(is_instance_valid(container) and container.is_inside_tree() and not container.is_queued_for_deletion(),
+			"the last whole scene stands as the Rebuild is taken")
+	assert_eq(container.get_child_count(), children)
+	assert_true(device.find_children("Retired", "", true, false).is_empty(), "nothing retired yet")
+	state = await _await_ready()
+	for _frame in 600:
+		if int(_mission_device().get("placements", 0)) >= 2 and String(state.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		state = _state()
+	assert_eq(int(_mission_device().get("placements", 0)), 2)
+	assert_eq(int(_mission_device().get("placed", 0)), 12, "every entity placed again")
+
+
+## S14 review M9: a whole placement cut short by a Rebuild is placed whole again. The model file moved
+## (a whole placement), a duplicate made while its place units run: the build that follows places
+## every entity (the copy among them) and lifts none, never leaving the half the cut placement made.
+func test_a_placement_cut_short_places_whole() -> void:
+	if _app == null:
+		return
+	_app.build_budget_ms = 0
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var item := _first_item(state)
+	_touch_the_crate()
+	# Into the placement: its second unit run.
+	var seen := 0
+	for _frame in 900:
+		state = _state()
+		if String(state.get("progress", {}).get("label", "") if state.get("progress") is Dictionary else "") == "place":
+			seen += 1
+			if seen >= 2:
+				break
+		await get_tree().process_frame
+	assert_eq(seen, 2, "the placement under way")
+	assert_true(_seam.duplicate_record(int(item.get("id", 0))))
+	_app.pump()
+	state = await _await_ready()
+	for _frame in 900:
+		if int(_mission_device().get("placements", 0)) >= 2 and String(state.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		state = _state()
+	var device := _mission_device()
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_eq(int(device.get("placed", 0)), 13, "every entity placed, the copy among them: %s" % str(device))
+	assert_eq(int(device.get("lifted", -1)), 0, "none lifted over a half placement")
+	assert_eq(int(device.get("hidden", -1)), 0)
+
+
+## S14 review m6: a Rebuild while the first build makes the terrain carries that work on. Opened at a
+## budget of 0, a duplicate made while the terrain's tiles build: the build that follows goes on with
+## the terrain's units (no terrain file read again) and ends ready with the ground.
+func test_a_rebuild_while_the_terrain_builds_carries_it_on() -> void:
+	if _app == null:
+		return
+	_app.build_budget_ms = 0
+	assert_true(_open_mission())
+	_app.pump()
+	var at_terrain := func(state: Dictionary) -> bool:
+		var progress: Variant = state.get("progress")
+		return progress is Dictionary and String((progress as Dictionary).get("label", "")) == "terrain" and \
+				int((progress as Dictionary).get("done", 0)) > 20
+	var before: PackedStringArray = await _step_until(at_terrain)
+	assert_true(before.has("terrain"), str(before))
+	var item := _first_item(_state())
+	assert_true(_seam.duplicate_record(int(item.get("id", 0))))
+	_app.pump()
+	var ready := func(state: Dictionary) -> bool: return String(state.get("status", "")) == "ready"
+	var after: PackedStringArray = await _step_until(ready)
+	assert_false(after.has("terrain files"), "no terrain file read again: %s" % str(after))
+	assert_false(after.has("environment"), "the environment stands")
+	assert_eq(after[0] if not after.is_empty() else "", "terrain", "the terrain's units went on first: %s" % str(after))
+	var state := _state()
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_true(bool(state.get("body", {}).get("ground", false)), "the terrain built")
+	assert_eq(int(_mission_device().get("placed", 0)), 13, "the copy placed with the rest")
+
+
+## S14 review m5: a terrain without its height data is a note, never a failed picture. The minted
+## project without Tmap.cpt: the viewport is ready, its picture with no terrain (no ground), the .cpt
+## among its notes, the entities placed all the same.
+func test_a_terrain_without_its_height_data_is_a_note() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission(true, PackedStringArray(), PackedStringArray(["Tmap.cpt"])))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_false(bool(state.get("body", {}).get("ground", true)), "no terrain built: no ground")
+	var names: PackedStringArray = []
+	for note: Variant in state.get("notes", []):
+		if String((note as Dictionary).get("code", "")) == "file.missing":
+			names.append(String((note as Dictionary).get("name", "")).to_lower())
+	assert_true(names.has("tmap.cpt"), str(names))
+	assert_eq(int(_mission_device().get("placed", 0)), 12, "the entities placed")
+
+
+## A placed tile at x_fixed (16.16) of tile index.
+func _tile(x_fixed: int, index: int) -> TerrainTileEntry:
+	var entry := TerrainTileEntry.new()
+	entry.x_fixed = x_fixed
+	entry.z_fixed = 0
+	entry.set_tile_index(index)
+	return entry
+
+
+## S14 review M4: the device reads the mission's .til as the game does before the terrain builds
+## (Terrain.set_tile_info_override), and follows it: a .til written beside the mission reaches the
+## terrain (its one tile), one written again with two tiles builds the terrain again with both.
+func test_the_mission_til_reaches_the_terrain() -> void:
+	if _app == null:
+		return
+	var dir := OS.get_cache_dir().path_join("opennova editor mission til %d" % Time.get_ticks_usec())
+	_dirs.append(dir)
+	assert_true(_seam.new_project(dir, "Mission Til"))
+	assert_eq(_seam.create_missing_files(), 0)
+	var root: String = _seam.get_project_root()
+	_write(root.path_join("missions").path_join("synth_logic.bms"),
+			FileAccess.get_file_as_bytes(ProjectSettings.globalize_path(MISSION)))
+	_mint_project(root)
+	var til := TerrainTileInfo.new()
+	til.add_entry(_tile(0, 3))
+	var til_path := root.path_join("missions").path_join("synth_logic.til")
+	assert_eq(til.save_to_path(til_path), OK)
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle())
+	assert_true(_seam.open_document("missions/synth_logic.bms"))
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	var terrain: Terrain = _device_node(state, "Terrain")
+	assert_not_null(terrain)
+	if terrain == null:
+		return
+	var read: TerrainTileInfo = terrain.get_tile_info_override()
+	assert_not_null(read, "the mission's .til on the terrain")
+	if read != null:
+		assert_eq(read.get_entry_count(), 1)
+	til.add_entry(_tile(65536 * 8, 4))
+	assert_eq(til.save_to_path(til_path), OK)
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle())
+	state = await _await_ready()
+	for _frame in 600:
+		var now: TerrainTileInfo = terrain.get_tile_info_override()
+		if now != null and now.get_entry_count() == 2 and String(_state().get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+	read = terrain.get_tile_info_override()
+	assert_true(read != null and read.get_entry_count() == 2, "the .til followed: the terrain built again with both")
+
+
+## S14 review M3, M7: an entity's attributes place it as the game does. The first retained static
+## item given the Reflective attribute (0x00800000) is lifted, built as the placement builds an
+## entity's model: reflected in the water mirror (as its attributes say), its EntityRef keyed past
+## every placed key; given its attributes back (an undo), the placed static shows again and nothing
+## stays lifted.
+func test_attributes_lift_and_undo_shows_the_placed_one() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _mission_device()
+	var placer: MissionObjectPlacer = device.get("placer")
+	var still := _placed_mark(state, device, "static", "item")
+	assert_false(still.is_empty(), "a retained static item")
+	if still.is_empty() or placer == null:
+		return
+	var key := int((device.get("keys", {}) as Dictionary).get(int(still["id"]), 0))
+	assert_true(_seam.set_field(int(still["id"]), "ai_flags", 0x00800000))
+	_app.pump()
+	state = _state()
+	device = _mission_device()
+	assert_eq(int(device.get("lifted", 0)), 1, "another attribute: lifted: %s" % str(device))
+	assert_true(placer.is_static_instance_hidden(key), "the placed static hidden meanwhile")
+	var lifted: Node = _device(state).find_child("Lifted", true, false)
+	var model: ObjectModel = lifted.get_child(lifted.get_child_count() - 1) if lifted != null and lifted.get_child_count() > 0 else null
+	assert_not_null(model, "its model under Lifted")
+	if model != null:
+		assert_true(model.mirror_reflected, "Reflective: drawn in the water mirror, as the placement draws it")
+		var ref: EntityRef = model.get_entity_ref()
+		assert_not_null(ref, "its EntityRef, as the placement's models carry")
+		if ref != null:
+			assert_gt(ref.get_bms_id(), 12, "keyed past every placed key")
+	_seam.undo()
+	_app.pump()
+	device = _mission_device()
+	assert_eq(int(device.get("lifted", -1)), 0, "given back what was placed: nothing lifted")
+	assert_false(placer.is_static_instance_hidden(key), "the placed static shows again")
+	assert_eq(int(device.get("placements", 0)), 1, "nothing placed again")
