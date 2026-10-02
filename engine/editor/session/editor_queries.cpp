@@ -843,7 +843,8 @@ JsonValue answer_operation(const QueryContext &context, const QueryArgs &, std::
 
 // What a build would be refused for, nothing built (S13 A7): the build's own plan
 // (project_build/build_plan.h) over the files as last scanned, the requirements and the Problems
-// rows the build gates on; `blocked` exactly when that plan would not pack. start_build reads the
+// rows the build gates on (an error whose code gates: blocks_build); `blocked` exactly when that
+// plan would not pack. start_build reads the
 // changed documents again and refreshes first, and a build request joins a running build and waits
 // on unsaved edits: the gate says none of that.
 JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, std::string &error) {
@@ -860,7 +861,7 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 			core.problems().gate_findings());
 	std::vector<const Diagnostic *> blocking;
 	for (const Diagnostic &d : plan.diagnostics)
-		if (d.severity == DiagnosticSeverity::Error)
+		if (blocks_build(d))
 			blocking.push_back(&d);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
@@ -1113,10 +1114,12 @@ constexpr EditorQueryRow kRows[] = {
 			concern_set({ C::Project, C::Files, C::Findings }),
 			"What a build would be refused for over the files as last scanned, nothing built: "
 			"blocked (a build would not pack) and a page of the findings that block it, the errors "
-			"among the Problems rows the build gates on, the scan's and the requirements', and the "
+			"among the Problems rows the build gates on whose code gates (the catalog's "
+			"gates_build), the scan's and the requirements', and the "
 			"build's own checks of the files (an archive in the project, a name no archive can "
 			"store). A Problems row the build does not gate on (a project check's: the render "
-			"check's) blocks nothing. The query runs the validation left due to its end first, so "
+			"check's) blocks nothing, nor does a missing reference (reference.missing: listed, "
+			"fixable, never blocking). The query runs the validation left due to its end first, so "
 			"the rows it reads are the files' as they stand. A build request reads changed files "
 			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
 			"not weigh.")
@@ -1143,7 +1146,9 @@ constexpr EditorQueryRow kRows[] = {
 			"concerns; and every finding code the session and the document types know (the "
 			"editor's own table's, then each type's): its code, its table (core or the type's "
 			"name), the fixes Problems offers, what a Rewrite does, whether the finding says the "
-			"file does not serialize (blocks_save), where Problems takes it (content or file), the "
+			"file does not serialize (blocks_save), whether an error of it refuses a build "
+			"(gates_build: false for a missing reference, which is listed and blocks nothing), "
+			"where Problems takes it (content or file), the "
 			"group it shows under (its key), where it comes from (source), for a render check's note "
 			"that is a Problems row its severity (problem: info or warning, left out for none) and "
 			"how many of the findings held now carry it (count); a row a held finding carries that "
@@ -1500,6 +1505,7 @@ JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::st
 		if (row.rewrite_does)
 			entry.set("rewrite_does", json_string(row.rewrite_does));
 		entry.set("blocks_save", JsonValue::make_bool(row.blocks_save));
+		entry.set("gates_build", JsonValue::make_bool(row.gates_build));
 		entry.set("place", json_string(finding_place_token(row.place)));
 		entry.set("group", json_string(finding_group_key(row.group)));
 		entry.set("source", json_string(finding_source_token(row)));

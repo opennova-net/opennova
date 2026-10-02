@@ -157,4 +157,16 @@ inline bool diagnostics_have_errors(const std::vector<Diagnostic> &items) {
 	return false;
 }
 
+// Whether a finding among the rows a build reads refuses it: an error whose code gates
+// (FindingCodeRow::gates_build; an error made from no row gates).
+inline bool blocks_build(const Diagnostic &d) {
+	return d.severity == DiagnosticSeverity::Error && (!d.row() || d.row()->gates_build);
+}
+inline bool diagnostics_block_build(const std::vector<Diagnostic> &items) {
+	for (const Diagnostic &d : items) {
+		if (blocks_build(d)) return true;
+	}
+	return false;
+}
+
 } // namespace opennova::editor

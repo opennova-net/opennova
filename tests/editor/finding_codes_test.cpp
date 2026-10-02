@@ -295,6 +295,17 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.name_unstorable" }));
+	// S14: the one code whose errors gate no build is the missing reference (listed, fixable, never
+	// blocking); a finding of it at any severity does not block, an error of any other row does, as
+	// does an error made from no row. A row that says its file does not serialize always gates.
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) == Tokens({ "reference.missing" }));
+	TEST_EXPECT(!blocks_build(make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing")) &&
+	            blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required")) &&
+	            !blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Warning, "a warning")) &&
+	            blocks_build(Diagnostic{}));
+	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
+	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
+	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
 	std::set<std::string> keys, titles;
 	for (size_t g = 1; g < kFindingGroupCount; ++g) {
 		const auto group = static_cast<FindingGroup>(g);
@@ -304,6 +315,7 @@ static int test_columns() {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
 			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input")));
+			TEST_EXPECT(!row.blocks_save || row.gates_build);
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
 			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));

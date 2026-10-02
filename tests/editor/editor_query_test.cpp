@@ -30,6 +30,7 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
+#include <editor/project_build/build_run.h>
 #include <editor/session/editor_queries.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/preferences_store.h>
@@ -339,7 +340,8 @@ static int test_paging() {
 
 // build_gate (S13 A7): what a build started now would be refused for, nothing built. With no
 // project open it is refused; a new project lacking its required files is blocked, each unmet
-// requirement blocking it; with them made nothing blocks it; an archive in the project blocks it by
+// requirement blocking it; with them made nothing blocks it, a missing reference included (S14: an
+// error that is listed and gates no build); an archive in the project blocks it by
 // the build's own check of the files, which no Problems row shows; and the build then refused, as
 // the gate said.
 static int test_build_gate() {
@@ -360,6 +362,24 @@ static int test_build_gate() {
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0 &&
 			gate.get("blocking")->array.empty());
+	// S14: a missing reference (a particle's texture the project lacks: an error among the Problems
+	// rows) is listed and blocks nothing; the build then lands with the row still there.
+	TEST_EXPECT(editor_test::write_text(dir.file("project/fx.ptl"),
+			"[particledef]\n{\n\tid = puff;\n\tgraphic1 = nowhere.tga, additive;\n}\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	const auto missing_references = [&session] {
+		size_t errors = 0;
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			errors += d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Error ? 1 : 0;
+		return errors;
+	};
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(missing_references() == 1 && !gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok &&
+			missing_references() == 1);
 	// An archive in the project: blocked by the build's own check, no Problems row having it.
 	const uint8_t note[] = { 'x' };
 	const opennova::pff::PffWriteEntry entries[] = { { "note.txt", note, sizeof(note), 0, 0, 0 } };

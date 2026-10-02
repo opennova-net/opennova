@@ -826,8 +826,8 @@ static int test_apply_retail_menu() {
 // unfollowed, no Required manifest file not found; the rows and the bytes printed (the numbers
 // the design estimated at 8,700 files and 515 MB from the archives' listing). The smaller one is
 // then imported, checked (every file reference resolves or names what the install itself lacks;
-// the checklist is met; the only errors are the shipped files' own unresolved references) and
-// built.
+// the checklist is met; the only errors are the shipped files' own unresolved references, which
+// gate nothing) and built by the session's own build.
 static int test_apply_retail_mission_closure() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
@@ -942,30 +942,33 @@ static int test_apply_retail_mission_closure() {
 		editor_test::create_missing_files(project.session);
 		project.session.run_operations();
 		TEST_EXPECT(view.project.requirements->required_missing + view.project.requirements->required_wrong_kind == 0);
-		// The findings a build gates on: each a reference the shipped game's own files leave
-		// unresolved (a name the install lacks, an effect no particle file of it defines), never a
-		// file the import left behind. They gate the build all the same (printed: the number a
-		// project holding the shipped catalogs starts with).
+		// The project's errors: each a reference the shipped game's own files leave unresolved (a
+		// name the install lacks, an effect no particle file of it defines), never a file the import
+		// left behind. They are listed and gate nothing (S14: the game ships them and runs), so no
+		// finding blocks a build.
 		std::map<std::string, size_t> errors;
-		for (const Diagnostic &d : view.findings.diagnostics)
-			if (d.severity == DiagnosticSeverity::Error) ++errors[d.code()];
-		size_t gating = 0;
-		for (const auto &entry : errors) {
-			gating += entry.second;
-			std::printf("editor_import retail closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
+		size_t errors_listed = 0, gating = 0;
+		for (const Diagnostic &d : view.findings.diagnostics) {
+			if (d.severity != DiagnosticSeverity::Error) continue;
+			++errors[d.code()];
+			++errors_listed;
+			gating += blocks_build(d) ? 1 : 0;
 		}
-		TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing"));
-		// The build's plan packs it (asked with no gate finding, as the build tests ask).
-		const ProjectPaths paths = ProjectPaths::for_root(project.root());
+		for (const auto &entry : errors)
+			std::printf("editor_import retail closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
+		TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing") && gating == 0);
+		// The session's own build, gated on the Problems rows as they are, packs it.
 		const auto build_started = std::chrono::steady_clock::now();
-		const BuildReport built = run_build(plan_build(paths, *view.project.scan, *view.project.requirements, {}), project.dir.file("builds"));
+		editor_test::handle_to_end(project.session, request::build(project.dir.file("builds")));
 		const double build_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_started).count();
+		TEST_EXPECT(view.activity.has_build);
+		const BuildReport &built = *view.activity.last_build;
 		for (const Diagnostic &d : built.diagnostics)
 			std::printf("editor_import retail closure build: %s: %s\n", d.code().c_str(), d.message.c_str());
-		TEST_EXPECT(built.ok && built.files_hashed >= planned);
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && built.ok && built.files_hashed >= planned);
 		std::printf("editor_import retail closure %s: %zu files imported in %.1f s; %zu references to files, %zu unresolved (each a "
-		            "name the install lacks); %zu error(s) gate a build; built %zu files (%.1f MB) in %.1f s\n",
-		            name, planned, import_seconds, references, unresolved, gating, built.files_hashed, built.bytes_hashed / 1e6,
+		            "name the install lacks); %zu error(s) listed, none gating; built %zu files (%.1f MB) in %.1f s\n",
+		            name, planned, import_seconds, references, unresolved, errors_listed, built.files_hashed, built.bytes_hashed / 1e6,
 		            build_seconds);
 	}
 	return 0;

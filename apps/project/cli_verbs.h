@@ -29,7 +29,8 @@
 //
 // Exit 0 on success; 1 when validate found what a build would be refused for (the build_gate
 // query: a required file missing or wrong, an error the build gates on; validate lists every
-// Problems row, and an error the build does not gate on, a project check's, fails nothing),
+// Problems row, and an error the build does not gate on, a missing reference or a project check's,
+// fails nothing),
 // create-missing left a role it was asked for unmet, an import found a problem in its plan,
 // reported a finding or stopped at the plan's cap, a reimport was refused, a build was blocked or
 // failed, or a request was refused, is the editor's shell's to serve (nothing done) or its operation

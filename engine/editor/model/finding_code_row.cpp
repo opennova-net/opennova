@@ -40,6 +40,12 @@ constexpr FindingCodeRow from_graph(FindingCodeRow row) {
 	return row;
 }
 
+// A code whose findings are listed and never refuse a build, whatever their severity.
+constexpr FindingCodeRow listed(FindingCodeRow row) {
+	row.gates_build = false;
+	return row;
+}
+
 constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetKindUnknown, code("asset.kind.unknown", G::ProjectFiles) },
 	{ C::AssetNameDuplicate, about_the_file("asset.name.duplicate", G::ProjectFiles, F::Rename) },
@@ -159,7 +165,11 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ProjectTargetGameUnknown, code("project.target_game.unknown", G::Project) },
 	{ C::ProjectTitleEmpty, code("project.title_empty", G::Project) },
 	{ C::ProjectWrite, code("project.write", G::Project) },
-	{ C::ReferenceMissing, from_graph(code("reference.missing", G::MissingReferences, F::Reference)) },
+	// A name the project lacks is shown, counted and fixable, and gates no build (ADR 0046 S14): the
+	// shipped game's own files name what its install does not hold and it runs, so a build refused
+	// for one would assert a failure no one has witnessed. What the game cannot start without is
+	// the witnessed manifest's (requirement.missing), which gates.
+	{ C::ReferenceMissing, listed(from_graph(code("reference.missing", G::MissingReferences, F::Reference))) },
 	{ C::RenameConflict, code("rename.conflict", G::Renames) },
 	{ C::RenameCopy, code("rename.copy", G::Renames) },
 	{ C::RenameExists, code("rename.exists", G::Renames) },

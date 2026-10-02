@@ -71,7 +71,9 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			return normalized_logical_name(a.logical_name) < normalized_logical_name(b.logical_name);
 		});
 	}
-	plan.ok = !diagnostics_have_errors(plan.diagnostics);
+	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
+	// among the plan's findings and refuses nothing (ADR 0046 S14).
+	plan.ok = !diagnostics_block_build(plan.diagnostics);
 	return plan;
 }
 
