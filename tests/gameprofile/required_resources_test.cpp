@@ -62,12 +62,12 @@ static int test_names_are_unique(void) {
 
 static int test_the_witnessed_fatal_set(void) {
     /* The record's fatal set, exactly: the three boot-table archives
-     * (all-missing fatal), the three string bins, items.def (fatal wired),
-     * and main.mnu (silent dead-end). */
+     * (all-missing fatal), the three string bins, and main.mnu (silent
+     * dead-end). */
     static const char *fatal_names[] = {
         "resource.pff", "localres.pff", "language.pff",
         "gametext.bin", "vmacros.bin", "keyhelp.bin",
-        "items.def", "main.mnu",
+        "main.mnu",
     };
     int fatal_count = 0;
     for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
@@ -75,8 +75,15 @@ static int test_the_witnessed_fatal_set(void) {
             ++fatal_count;
         }
     }
-    CHECK(fatal_count == 8, "exactly the eight witnessed fatal rows");
-    for (int i = 0; i < 8; ++i) {
+    CHECK(fatal_count == 7, "exactly the seven witnessed fatal rows");
+    /* items.def never refuses a boot: its loader returns 1 whatever the parse
+     * did, so the wired "Unable to load items.def" fatal is unreachable
+     * [orig: ItemDefs_LoadAndValidate @ 0x4a1da0 returns 1 @ 0x4a20a2; the
+     * dead fatal @ 0x4a71af]. Without it the boot goes on with no items. */
+    const RequiredResource *items = gameprofile_required_resource_find("items.def");
+    CHECK(items != NULL && items->severity == RES_REQUIRED && items->phase == BOOT_PHASE_BOOT,
+          "items.def is required (the boot goes on without it), not fatal");
+    for (int i = 0; i < 7; ++i) {
         const RequiredResource *row = gameprofile_required_resource_find(fatal_names[i]);
         CHECK(row != NULL, "fatal row present");
         CHECK(row->severity == RES_FATAL, "fatal severity");
@@ -91,8 +98,6 @@ static int test_the_witnessed_fatal_set(void) {
     /* main.mnu is fatal in the MENU phase; the rest of the set is BOOT. */
     CHECK(gameprofile_required_resource_find("main.mnu")->phase == BOOT_PHASE_MENU,
           "main.mnu is the menu-phase fatal");
-    CHECK(gameprofile_required_resource_find("items.def")->phase == BOOT_PHASE_BOOT,
-          "items.def is boot-phase");
     return 1;
 }
 
