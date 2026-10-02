@@ -539,8 +539,9 @@ bundle
 A file the game finds by a mission's name rather than by a reference in it, each skipped when
 absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading
 image, else `loadscrn.pcx`), `.til` (its tiles), `.dbf` (its dialog bank) and that bank's sounds
-(`.lwf`, else `.pwf`). One witnessed table (`mission::sidecars`), which the runtime's loaders,
-the import and the editor's Play mission read.
+(`.lwf`, else `.pwf`). One witnessed table (`mission::sidecars`), which the runtime's loaders and
+the editor's Play mission read, and of which the editor's mission document makes the mission's own
+edges (its file set), which the graph, Rename and the import follow.
 _Avoid_: companion, attachment, import sidecar (a source's `.import` record)
 
 **Base layer**:
