@@ -12,18 +12,24 @@
 // partial failure retried against the settings in effect, the dialog closing with its
 // project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
 // right end (what the session said, the unsaved files, the counts, the build or the game,
-// the buttons; never over the menus); Files (its folders, the file count, the kind hidden
+// the buttons; never over the menus); a canvas whose picture fills it read through ImGui (the
+// right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
 // until the header's menu shows it, a filter's flat list, a click and a double click, New
 // and its name prompt, Rename...); the import dialog; the OS window's title; and the view
-// events' mailboxes (each event held until its window draws, taken once).
+// events' mailboxes (each event held until its window draws, taken once). The mission's view
+// in the Document window (ADR 0046 S14): its toolbar raises SetViewports alone, a marquee over
+// its picture one SelectRecord across the four pools, which the Inspector shows as one shared
+// form whose change is one batch over every record.
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -32,6 +38,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
@@ -48,6 +55,7 @@
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/files_window.h>
 #include <editor/ui/preview_window.h>
+#include <editor/ui/viewport_canvas.h>
 #include <editor/ui/view_event_mailbox.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
@@ -862,7 +870,26 @@ void test_menus() {
 	r = raised("Build", {"Build"}, EditorRequestKind::Build);
 	CHECK(r.kind == EditorRequestKind::Build, "Build > Build");
 	r = raised("Build", {"Play"}, EditorRequestKind::Play);
-	CHECK(r.kind == EditorRequestKind::Play, "Build > Play");
+	CHECK(r.kind == EditorRequestKind::Play && r.mission.empty(), "Build > Play: the game at its menu");
+	// S14: Play mission starts the game in the active document's mission (play_mission_for): none
+	// for a menu; with a mission active (the project holds it), that mission.
+	CHECK(choose(ui, "Build", {"Play mission"}).empty(), "Build > Play mission: the active document is no mission's");
+	{
+		const std::string menu = v.documents.active;
+		editor_test::own(v.project.scan).entries.push_back(file_entry("First.bms", "missions/First.bms", AssetKind::Mission));
+		editor_test::own(v.project.scan).index();
+		v.documents.active = "missions/First.bms";
+		v.revisions.touch(ViewConcern::Files);
+		v.revisions.touch(ViewConcern::Documents);
+		ui.frames(2);
+		ui.drain();
+		r = raised("Build", {"Play mission"}, EditorRequestKind::Play);
+		CHECK(r.kind == EditorRequestKind::Play && r.mission == "First.bms", "Build > Play mission: the active mission");
+		v.documents.active = menu;
+		v.revisions.touch(ViewConcern::Documents);
+		ui.frames(2);
+		ui.drain();
+	}
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
 	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
 	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install == std::optional<bool>(true) &&
@@ -1241,6 +1268,46 @@ void test_files_window() {
 	CHECK(logged_frame(ui).find("Rename options.mnu to") != std::string::npos, "Rename... asked on it");
 	ImGui::ClosePopupsExceptModals();
 	ui.frames(2);
+
+	// S14: New > Mission... asks what its blank takes beside its name: a title, and its terrain and
+	// its environment among the project's files. With none in the project it says to import one;
+	// Create waits for both, then raises create_file with the values by their tokens.
+	type_into(ui, item_id(files, {"##filter"}), "");
+	ui.drain();
+	ui.activate(item_id(files, {"##new"}));
+	ui.activate(item_id(pushed(combo, factory_index("", AssetKind::Mission)), {"Mission..."}));
+	ui.frames(2);
+	CHECK(modal_open("New file") && ui.drain().empty(), "a mission's name asked first");
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"New file: Mission", "Title", "Terrain", "The project has no terrain: import one first",
+	                      "Environment", "The project has no environment: import one first", "Create"}),
+	      "the mission's title, terrain and environment asked; none to choose yet");
+	editor_test::own(v.project.scan).entries.push_back(file_entry("island.trn", "terrain/island.trn", AssetKind::Terrain));
+	editor_test::own(v.project.scan).entries.push_back(file_entry("day.env", "day.env", AssetKind::Environment));
+	editor_test::own(v.project.scan).index();
+	v.revisions.touch(ViewConcern::Files);
+	ui.frames(2);
+	type_into(ui, item_id(prompt, {"Name"}), "first.bms");
+	ui.activate(item_id(prompt, {"Create"}));
+	CHECK(ui.drain().empty() && modal_open("New file"), "Create waits for the terrain and the environment");
+	// A combo's list is a window of its own (the first combo open, whatever it is opened from).
+	ui.activate(item_id(pushed(prompt, 1), {"Terrain"}));
+	ui.activate(item_id(combo, {"island.trn"}));
+	ui.frames(2);
+	ui.activate(item_id(prompt, {"Create"}));
+	CHECK(ui.drain().empty() && modal_open("New file"), "Create still waits for the environment");
+	ui.activate(item_id(pushed(prompt, 2), {"Environment"}));
+	ui.activate(item_id(combo, {"day.env"}));
+	ui.frames(2);
+	type_into(ui, item_id(pushed(prompt, 0), {"Title"}), "The first");
+	ui.activate(item_id(prompt, {"Create"}));
+	requests = ui.drain();
+	ui.frames(2);
+	using Values = std::vector<std::pair<std::string, std::string>>;
+	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "first.bms" && requests[0].file_kind == "mission" &&
+	              requests[0].values == Values({{"environment", "day.env"}, {"terrain", "island.trn"}, {"title", "The first"}}) &&
+	              !modal_open("New file"),
+	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them (review F10)");
 }
 
 // Whether `second` follows `first` in `text` on the same logged line.
@@ -1274,17 +1341,41 @@ void test_import_dialog() {
 	ImGui::SetWindowSize("Import files", ImVec2(1700.0f, 1000.0f));
 	ui.frames(2);
 	std::string text = logged_frame(ui);
-	CHECK(in_order(text, {"Include the files these need (3 found)", "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font",
+	const std::string stopped = "The plan stopped at " + std::to_string(kImportPlanFileCap) + " files";
+	// S14: the plan in short first, its files and bytes, then each kind with its count and size, the
+	// largest first (alike: by token), each a toggle; then the rows, each with its size.
+	CHECK(in_order(text, {"Include the files these need (3 found)", "6 files, 0 B:", "Texture 2 (0 B)", "Animation 1 (0 B)",
+	                      "Animation map 1 (0 B)", "Font 1 (0 B)", "Menu 1 (0 B)", "Check shown", "Uncheck shown",
+	                      "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font", "0 B",
 	                      "menu.mnu: MAIN/TITLE font.name", "the folder assets", "logo.tga", "a_long_texture_name.tga",
 	                      "Not found (1)", "gone.tga", "menu.mnu: MAIN/KEEP/Appearance 1 value",
 	                      "arial99.fnt: found in both the folder C:/assets and the game install; using the folder C:/assets",
 	                      "The files these kinds name are not looked for yet: Terrain.",
-	                      "References that name no file are not followed: screen.", "The plan stopped at 1000 files",
+	                      "References that name no file are not followed: sound.",
+	                      "Named by the files but defined nowhere: 1 screen.", stopped.c_str(),
 	                      "broken.mnu: The file could not be read.", "Replace existing files", "Import 5 files", "Cancel"}),
-	      "the plan: the rows, then what is not found, found twice, not followed, the cap, the finding");
+	      "the plan: the summary, the rows, then what is not found, found twice, not followed, the cap, the finding");
 	CHECK(same_line(text, "menu.mnu", "chosen") && same_line(text, "CHECK.adm", "made from walk.o3a, the folder assets"),
 	      "a chosen file says so; a converter's output, what it is made from");
 	const ImGuiID dialog = ImHashStr("Import files");
+	// A kind's toggle shows its rows alone; Uncheck shown and Check shown take the shown rows
+	// together (one the project cannot take never); the toggle again shows every kind.
+	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture 2 (0 B)", "logo.tga", "a_long_texture_name.tga", "Not found (1)"}) &&
+	              text.find("CHECK.adm") == std::string::npos && text.find("Import 5 files") != std::string::npos,
+	      "the texture toggle: the two texture rows alone, the checks kept");
+	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "Uncheck shown: the shown texture left out");
+	ui.activate(item_id(import_body_id(), {"Check shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 5 files") != std::string::npos, "Check shown: the one the project can take back");
+	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "logo.tga"}), "the toggle again: every kind");
 	const auto sources = [](const EditorRequest &request) {
 		std::vector<std::string> out;
 		for (const ImportChoice &source : request.imports) out.push_back(source.path);
@@ -1439,6 +1530,59 @@ void test_import_dialog_problem_root() {
 	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].imports.size() == 1 &&
 	              requests[0].imports[0].path == "C:/art/hud.mnu",
 	      "Import: the menu alone");
+}
+
+// ADR 0046 S14 (review F2): a chosen file the project holds already is held, unchecked by default,
+// and the import takes the rest without asking to replace; the row checked alone is replaced (the
+// request then replaces), and Replace existing files checks every held row.
+void test_import_dialog_held_rows() {
+	SessionView v = seeded_view();
+	DialogsView::ImportPreview &preview = v.dialogs.import_preview;
+	preview.open = true;
+	ImportPlanRow fresh;
+	fresh.state = ImportPlanRow::State::Selected;
+	fresh.selected = true;
+	fresh.source = {"C:/game", "hud.mnu", true, false};
+	fresh.name = "hud.mnu";
+	fresh.kind = AssetKind::Menu;
+	fresh.destination = "menus/hud.mnu";
+	fresh.found_in = "the game install";
+	ImportPlanRow held = fresh;
+	held.source = {"C:/game", "items.def", true, false};
+	held.name = "items.def";
+	held.kind = AssetKind::ItemDefs;
+	held.destination = "defs/items.def";
+	held.selected = false;
+	held.held = true;
+	preview.roots = {fresh.source, held.source};
+	editor_test::own(preview.plan).rows = {fresh, held};
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.away();
+	ui.drain();
+	ImGui::SetWindowSize("Import files", ImVec2(1400.0f, 800.0f));
+	ui.frames(2);
+	const ImGuiID dialog = ImHashStr("Import files");
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos && logged_frame(ui).find("the project has it") != std::string::npos,
+	      "a held row is unchecked and says the project has it");
+	ui.activate(item_id(dialog, {"###import"}));
+	std::vector<EditorRequest> requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].imports.size() == 1 && requests[0].imports[0].entry == "hud.mnu" &&
+	              !requests[0].replace,
+	      "Import: the rest, the project's file kept, nothing replaced");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "the held row checked alone");
+	ui.activate(item_id(dialog, {"###import"}));
+	requests = ui.drain();
+	CHECK(one(requests, EditorRequestKind::ImportFiles) && requests[0].imports.size() == 2 && requests[0].replace,
+	      "a checked held row is one asked to be replaced");
+	ui.activate(import_table_item("import_plan", 1, "##take"));
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "unchecked again");
+	ui.activate(item_id(dialog, {"Replace existing files"}));
+	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "Replace existing files checks every held row");
+	ui.activate(item_id(dialog, {"Replace existing files"}));
+	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "and unchecks them");
 }
 
 std::string lowered(std::string text) {
@@ -1695,7 +1839,6 @@ void test_preview_model_gestures() {
 			"the menu made active mid-drag: the drag's one end, for the model");
 	ui.mouse(at.x + 60.0f, at.y + 20.0f);
 	ui.button(false);
-	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
 	run.settle();
 	CHECK(run.take().empty(), "letting go raises nothing");
 }
@@ -1771,6 +1914,328 @@ void test_preview_model_pane_input() {
 	const std::vector<EditorRequest> raised = run.take();
 	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size(),
 			"the camera's gestures raise SetViewports of it, nothing else");
+}
+
+// The mission's view in the Document window over a real session, its devices the Shell's (ADR 0046
+// S14): the toolbar's Frame and Top each raise one EditInViewport (the session plans the camera's
+// SetViewport over its own context, as for Ground) and nothing else; a marquee over the picture (the areas' marks off) is one SelectRecord of every entity in the box, across the
+// pools, which the session holds and the Inspector shows as their shared form (E9), where a change
+// of Team is one batch over every one of them, ended once.
+void test_mission_view_input() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_input");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	const DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0 && device->width > 0,
+	      "the mission drawn in its tab through its device");
+	if (!viewport || !device) return;
+	// The viewport's column beside the outline, whose items the toolbar's buttons are.
+	const ImGuiWindow *column = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+	CHECK(column != nullptr, "the viewport column beside the outline, drawn");
+	if (!column) return;
+	const auto press = [&](const char *button) {
+		ui.activate(item_id(column->ID, { button }));
+		run.settle();
+		return run.take();
+	};
+	run.camera(path, R"({"kind": "mission", "camera": {"distance": 5000}})");
+	std::vector<EditorRequest> raised = press("Frame");
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport && viewport->camera().distance < 5000.0f,
+	      "Frame: one EditInViewport the session plans (a SetViewport of the camera), the entities framed");
+	raised = press("Top");
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport &&
+	              viewport->camera().pitch >= kOrbitPitchLimit - 1e-4f,
+	      "Top: one EditInViewport, the camera straight down");
+	raised = press("Frame");
+	CHECK(raised.size() == 1 && raised[0].kind == EditorRequestKind::EditInViewport, "framed again");
+	// The areas' marks off: a box over the whole picture takes the entities alone.
+	run.camera(path, R"({"kind": "mission", "options": {"marks": {"areas": false}}})");
+	run.settle();
+	run.take();
+	const ImVec2 from(device->origin.x + 2.0f, device->origin.y + 2.0f);
+	const ImVec2 to(device->origin.x + float(device->width) - 2.0f, device->origin.y + float(device->height) - 2.0f);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	ui.mouse((from.x + to.x) * 0.5f, (from.y + to.y) * 0.5f);
+	ui.mouse(to.x, to.y);
+	ui.button(false);
+	run.settle();
+	raised = run.take();
+	const EditorRequest *boxed = only(raised, EditorRequestKind::SelectRecord);
+	std::set<NodeKind> kinds;
+	if (boxed)
+		for (const NodeAddress &record : boxed->records) kinds.insert(record.kind);
+	CHECK(boxed && boxed->records.size() >= 4 && kinds.size() >= 2 && count_of_kind(raised, EditorRequestKind::EditRecord) == 0,
+	      "a marquee over the picture: one SelectRecord of the entities in it, across the pools, no edit");
+	if (!boxed) return;
+	const size_t selected = v.documents.selection.records.size();
+	CHECK(selected == boxed->records.size() && v.documents.selection.document == path, "the session holds them");
+	// The Inspector's shared form over them: Team changed there is one batch over every record.
+	ui.focus("Inspector");
+	ui.frames(3);
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("records selected (") != std::string::npos && text.find("Team") != std::string::npos,
+	      "the Inspector's shared form over the pools");
+	run.take();
+	const ImGuiID team = item_id(Ui::window_id("Inspector"), { "", "fields", "team", "##value" });
+	ImGui::ActivateItemByID(team);
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	CHECK(GImGui->ActiveId == team, "the Team field has the keyboard");
+	ImGui::GetIO().AddInputCharactersUTF8("1");
+	ui.frames(2);
+	ui.key(ImGuiKey_Enter, true);
+	ui.key(ImGuiKey_Enter, false);
+	run.settle();
+	raised = run.take();
+	const EditorRequest *batch = nullptr;
+	for (const EditorRequest &request : raised)
+		if (request.kind == EditorRequestKind::EditRecord && request.edits.size() == selected) batch = &request;
+	bool teams = batch != nullptr;
+	for (size_t i = 0; batch && i < batch->edits.size(); ++i)
+		teams = teams && batch->edits[i].field == "team" && v.documents.selection.holds(batch->edits[i].address);
+	CHECK(batch && teams && count_of_kind(raised, EditorRequestKind::EndEdit) >= 1 && mission->dirty(),
+	      "a change of Team: one batch over every selected record, ended, applied");
+}
+
+// The mission's view over a device that answers a ground (z = 3 + x / 10; S14 review M2, M8), the
+// session's viewports given the same devices: the canvas reads the device from its first frame, so a
+// drag of an entity with Stick on (the default) keeps its height over that ground where it goes, and
+// an area's mark stands on the ground, where a click selects it; the toolbar's Ground, an entity
+// selected and lifted off the ground, is one EditInViewport the session plans over its own context,
+// the entity set down on the ground.
+void test_mission_view_ground() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_ground");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(device != nullptr, "the mission's device");
+	if (!device) return;
+	const auto ground = [](double x, double) { return 3.0 + x / 10.0; };
+	device->ground = ground;
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	CHECK(viewport && viewport->ground() && device->width > 0, "the device's ground reported, the picture drawn");
+	if (!viewport) return;
+	const auto over = [&](const MissionEntityMark &entity) { return entity.z - ground(entity.x, entity.y); };
+	// An item's mark the canvas takes at its pixel (the marks as the device's ground places them).
+	std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
+	int item = -1;
+	for (size_t i = 0; i < marks.size() && item < 0; ++i)
+		if (marks[i].shown && std::string(marks[i].kind) == "item" && pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+			item = int(i);
+	CHECK(item >= 0, "an item's mark on the picture");
+	if (item < 0) return;
+	const NodeAddress record = marks[size_t(item)].record;
+	const double clearance = over(*viewport->scene().entity(record.row)), x0 = viewport->scene().entity(record.row)->x;
+	// Dragged 60 pixels across, Stick on.
+	const ImVec2 from(device->origin.x + marks[size_t(item)].x, device->origin.y + marks[size_t(item)].y);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	ui.mouse(from.x + 20.0f, from.y);
+	ui.mouse(from.x + 40.0f, from.y);
+	ui.mouse(from.x + 60.0f, from.y);
+	ui.button(false);
+	run.settle();
+	run.take();
+	const MissionEntityMark *moved = viewport->scene().entity(record.row);
+	CHECK(moved && std::fabs(moved->x - x0) > 1.0 && std::fabs(over(*moved) - clearance) < 1e-3,
+	      "a drag with Stick: the entity's height over the device's ground kept where it went");
+	// An area's mark on the ground at its middle: a click there selects it.
+	marks = viewport->marks(device->width, device->height, device);
+	bool area = false;
+	for (size_t i = 0; i < marks.size() && !area; ++i) {
+		if (marks[i].area < 0 || !marks[i].shown || pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		ui.mouse(device->origin.x + marks[i].x, device->origin.y + marks[i].y);
+		ui.button(true);
+		ui.button(false);
+		run.settle();
+		run.take();
+		CHECK(v.documents.selection.primary == marks[i].record, "a click at the area's mark on the ground selects it");
+		area = true;
+	}
+	CHECK(area, "an area's mark on the picture");
+	// Ground: the item selected and lifted 25 m, the toolbar's Ground sets it down.
+	session.handle(request::select_record(path, record));
+	set_field(session, *mission, record, "z", 25.0 + ground(moved->x, moved->y));
+	run.settle();
+	run.take();
+	const ImGuiWindow *column = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+	CHECK(column != nullptr, "the viewport column beside the outline, drawn");
+	if (!column) return;
+	ui.activate(item_id(column->ID, { "Ground" }));
+	run.settle();
+	const std::vector<EditorRequest> raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::EditInViewport) == 1, "Ground: one EditInViewport");
+	const MissionEntityMark *grounded = viewport->scene().entity(record.row);
+	CHECK(grounded && std::fabs(grounded->z - ground(grounded->x, grounded->y)) < 1e-3, "the entity set down on the ground");
+}
+
+// A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
+// button is apart from a press (right_pressed, right_down; never pressed or down), a click of it
+// only when it comes up having travelled less than a drag; the left button is a press; the keys a
+// camera flies by held (W forward, D right, E up; none with Ctrl, a chord's letter), Shift fast,
+// Delete, PgUp; the frame's time; and a line of text among the shapes is drawn.
+void test_canvas_fill_input() {
+	NullBackend backend;
+	ViewportCanvas canvas;
+	CanvasInput in;
+	bool right_clicked = false;
+	int text_vertices = 0;
+	const auto frame = [&]() {
+		ImGui::NewFrame();
+		ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+		ImGui::SetNextWindowSize(ImVec2(400.0f, 300.0f));
+		ImGui::Begin("canvas", nullptr, ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
+		in = CanvasInput();
+		right_clicked = false;
+		if (canvas.begin(200.0f, 0, 0)) {
+			canvas.picture(
+					[](const ViewportPicture &picture) {
+						ImGui::Dummy(ImVec2(float(picture.width), float(picture.height)));
+					},
+					nullptr);
+			in = canvas.input();
+			right_clicked = canvas.right_clicked();
+			OverlayList shapes;
+			const int before = ImGui::GetWindowDrawList()->VtxBuffer.Size;
+			shapes.text(CanvasPoint{ 4.0f, 4.0f }, "label");
+			canvas.draw(shapes, CanvasCursor::Default);
+			text_vertices = ImGui::GetWindowDrawList()->VtxBuffer.Size - before;
+		}
+		canvas.end();
+		ImGui::End();
+		ImGui::Render();
+		canvas.end_frame();
+	};
+	ImGuiIO &io = ImGui::GetIO();
+	const auto mouse = [&](float x, float y) {
+		io.AddMousePosEvent(x, y);
+		frame();
+	};
+	const auto button = [&](int which, bool down) {
+		io.AddMouseButtonEvent(which, down);
+		frame();
+	};
+	const auto key = [&](ImGuiKey which, bool down) {
+		io.AddKeyEvent(which, down);
+		frame();
+	};
+	frame();
+	frame();
+	CHECK(in.width > 0 && in.height == 200 && text_vertices > 0, "the canvas draws, its text too");
+	CHECK(in.dt == io.DeltaTime && in.dt > 0.0f, "the frame's time");
+
+	// The right button: a look, never a press.
+	mouse(100.0f, 100.0f);
+	button(1, true);
+	CHECK(in.hovered && in.right_pressed && in.right_down && !in.pressed && !in.down && !in.middle,
+			"the right button down: apart from a press");
+	mouse(140.0f, 110.0f);
+	CHECK(!in.right_pressed && in.right_down && !in.down && in.delta.x == 40.0f && in.delta.y == 10.0f,
+			"held and moved");
+	button(1, false);
+	CHECK(!in.right_down && !right_clicked, "let go after a drag: no click");
+	button(1, true);
+	CHECK(in.right_pressed && !right_clicked, "pressed again");
+	button(1, false);
+	CHECK(!in.right_down && right_clicked, "let go where it went down: a click");
+	frame();
+	CHECK(!right_clicked, "a click once");
+
+	// The left button: a press, as before.
+	button(0, true);
+	CHECK(in.pressed && in.down && !in.right_pressed && !in.right_down, "the left button: a press");
+	button(0, false);
+	CHECK(!in.pressed && !in.down, "let go");
+
+	// The keys, while the canvas's window has the keyboard.
+	CHECK(in.keyboard.focused, "the canvas's window has the keyboard");
+	key(ImGuiKey_W, true);
+	key(ImGuiKey_D, true);
+	key(ImGuiKey_E, true);
+	CHECK(in.keyboard.move_z == 1 && in.keyboard.move_x == 1 && in.keyboard.move_y == 1 &&
+					!in.keyboard.fast,
+			"W, D and E held: forward, right, up");
+	key(ImGuiMod_Shift, true);
+	CHECK(in.keyboard.fast && in.keyboard.move_z == 1, "Shift: fast");
+	key(ImGuiMod_Shift, false);
+	key(ImGuiMod_Ctrl, true);
+	CHECK(in.keyboard.move_z == 0 && in.keyboard.move_x == 0 && in.keyboard.move_y == 0,
+			"with Ctrl a letter is a chord's, not the camera's");
+	key(ImGuiMod_Ctrl, false);
+	key(ImGuiKey_W, false);
+	key(ImGuiKey_D, false);
+	key(ImGuiKey_E, false);
+	key(ImGuiKey_S, true);
+	key(ImGuiKey_A, true);
+	key(ImGuiKey_Q, true);
+	CHECK(in.keyboard.move_z == -1 && in.keyboard.move_x == -1 && in.keyboard.move_y == -1,
+			"S, A and Q held: back, left, down");
+	key(ImGuiKey_S, false);
+	key(ImGuiKey_A, false);
+	key(ImGuiKey_Q, false);
+	CHECK(in.keyboard.move_z == 0 && in.keyboard.move_x == 0 && in.keyboard.move_y == 0, "let go");
+	key(ImGuiKey_Delete, true);
+	CHECK(in.keyboard.remove, "Delete pressed");
+	key(ImGuiKey_Delete, false);
+	CHECK(!in.keyboard.remove, "once");
+	key(ImGuiKey_PageUp, true);
+	CHECK(in.keyboard.page == 1, "PgUp");
+	key(ImGuiKey_PageUp, false);
+	key(ImGuiKey_PageDown, true);
+	CHECK(in.keyboard.page == -1, "PgDn");
+	key(ImGuiKey_PageDown, false);
 }
 
 // The OS window's title: the product, the project's name before it, a bullet while a file has
@@ -2066,9 +2531,13 @@ void run_workspace_tests() {
 	test_files_window();
 	test_import_dialog();
 	test_import_dialog_problem_root();
+	test_import_dialog_held_rows();
 	test_preview_follows();
 	test_preview_model_gestures();
 	test_preview_model_pane_input();
+	test_mission_view_input();
+	test_mission_view_ground();
+	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();
 	test_view_event_mailbox_cap();

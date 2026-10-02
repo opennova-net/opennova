@@ -43,7 +43,9 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
 			a.through == b.through && a.loader_arg == b.loader_arg &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
-			a.span.length == b.span.length && a.fallback == b.fallback;
+			a.span.length == b.span.length && a.fallback == b.fallback &&
+			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
+			a.scope_owner == b.scope_owner && a.needs == b.needs;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -105,11 +107,13 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 	}
 }
 
-// An edge whose resolution reads the file set: a file reference, and a screen's (its lookup asks
-// whether its menu file is one).
+// An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
+// whether its menu file is one), and one whose scope a file decides (its table there or not, its
+// owner there or not), or whose reading at all does (GraphEdge::needs).
 bool reads_file_set(const GraphEdge &edge) {
 	return reference_row(edge.kind).resolution == ReferenceResolution::File ||
-			edge.kind == ReferenceKind::MenuScreen;
+			edge.kind == ReferenceKind::MenuScreen || !edge.scope_alternate.empty() || !edge.scope_owner.empty() ||
+			!edge.needs.empty();
 }
 
 } // namespace
@@ -174,7 +178,7 @@ std::vector<const AssetEntry *> AssetGraph::files_to_read(const AssetScan &scan,
 		if (document && records_of(*document)) records.insert(document->path());
 	std::vector<const AssetEntry *> out;
 	for (const AssetEntry &asset : scan.entries) {
-		if (!graph_reads_file(asset.kind, asset.logical_name) || records.count(asset.relative_path)) continue;
+		if (!graph_reads_kind(asset.kind) || records.count(asset.relative_path)) continue;
 		const uint32_t id = index_.find(asset.relative_path);
 		if (id != GraphIndex::kNone) {
 			const GraphSlot &slot = index_.slot(id);
@@ -233,9 +237,9 @@ GraphUpdate AssetGraph::update(const ProjectPaths &paths, const ProjectDocument 
 		}
 		listed.insert(id);
 		GraphSlot &slot = index_.slot(id);
-		// A file the graph does not read (a mission's .mis) holds nothing; its row still counts
-		// (the file set), so one added or gone reaches the edges that could name it.
-		if (!graph_reads_file(asset.kind, asset.logical_name)) {
+		// A file the graph does not read (a texture, a mission text) holds nothing; its row still
+		// counts (the file set), so one added or gone reaches the edges that could name it.
+		if (!graph_reads_kind(asset.kind)) {
 			if (slot.read) {
 				slot.read = slot.open = false;
 				take(id, Extracted(), true, Diagnostic(), patch);
@@ -609,8 +613,9 @@ bool AssetGraph::counts_missing(const GraphSlot &slot, const GraphEdge &edge,
 		const std::string &target, ReferenceStatus status) const {
 	if (target.empty() || status != ReferenceStatus::Missing) return false;
 	// A kind the graph never finds missing (no message for it: a Record reference, an index past
-	// its collection, which its file's own validation reports with what the game makes of it).
-	if (!reference_row(edge.kind).missing_message) return false;
+	// its collection, which its file's own validation reports with what the game makes of it); a
+	// file the game runs without (GraphEdge::optional).
+	if (!reference_row(edge.kind).missing_message || edge.optional) return false;
 	const bool file = reference_row(edge.kind).resolution == ReferenceResolution::File;
 	// A file named through a variable no stylesheet the game reads defines: the variable's own
 	// edge reports it.
@@ -720,13 +725,10 @@ const GraphSymbol *AssetGraph::style_binding(const std::string &name) const {
 std::string AssetGraph::resolved_target(const GraphEdge &edge) const {
 	switch (reference_row(edge.kind).resolution) {
 	case ReferenceResolution::StyleVariable: return is_style_reference(edge.value) ? style_variable(edge.value) : std::string();
-	case ReferenceResolution::Symbol: {
-		// The name it reaches: its value, else its fallback where only that one is defined.
-		if (!edge.fallback.empty() && !resolve_symbol(edge.kind, edge.value, edge.scope) &&
-				resolve_symbol(edge.kind, edge.fallback, edge.scope))
-			return symbol_name(edge.kind, edge.fallback);
-		return symbol_name(edge.kind, edge.value);
-	}
+	case ReferenceResolution::Symbol:
+		// The name it reaches: its value, else its fallback where only that one is defined (in the
+		// first scope a lookup finds either in).
+		return symbol_name(edge.kind, reached_name(edge));
 	// A record's index, in the file the edge's scope names (the key holds it).
 	case ReferenceResolution::Record: return edge.value;
 	case ReferenceResolution::File:
@@ -742,18 +744,102 @@ std::string AssetGraph::resolve_style(const std::string &value) const {
 	return binding ? binding->value : value;
 }
 
+namespace {
+
+// Where an edge's lookup starts, and whether it goes on to the scopes after it: its own scope; any
+// table, and nothing after, where its owner is a file the project does not have
+// (GraphEdge::scope_owner); its alternate table's section where the project has no file of its own
+// scope's table (GraphEdge::scope_alternate).
+struct FirstScope {
+	const std::string *own = nullptr;
+	std::string made;
+	bool use_made = false;
+	bool then_after = true;
+	const std::string &scope() const { return use_made ? made : *own; }
+};
+
+FirstScope first_scope(const AssetGraph &graph, const GraphEdge &edge) {
+	FirstScope out;
+	out.own = &edge.scope;
+	if (!edge.scope_owner.empty() && !graph.has_file(edge.scope_owner)) {
+		out.use_made = true;
+		out.then_after = false;
+		return out;
+	}
+	if (!edge.scope_alternate.empty()) {
+		const size_t slash = edge.scope.find('/');
+		if (!graph.has_file(edge.scope.substr(0, slash))) {
+			out.made = edge.scope_alternate + (slash == std::string::npos ? std::string() : edge.scope.substr(slash));
+			out.use_made = true;
+		}
+	}
+	return out;
+}
+
+// The scopes an edge's lookup tries, in order: its first (first_scope), then each of scopes_after.
+template <class Try> bool each_scope(const AssetGraph &graph, const GraphEdge &edge, Try try_scope) {
+	const FirstScope first = first_scope(graph, edge);
+	if (try_scope(first.scope(), true)) return true;
+	if (!first.then_after) return false;
+	for (const std::string &scope : edge.scopes_after)
+		if (try_scope(scope, false)) return true;
+	return false;
+}
+
+} // namespace
+
+std::string AssetGraph::lookup_scope(const GraphEdge &edge) const { return first_scope(*this, edge).scope(); }
+
+bool AssetGraph::rewrites(const GraphEdge &edge) const {
+	return edge.rewritable && (edge.scope_owner.empty() || has_file(edge.scope_owner));
+}
+
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
-	const ReferenceStatus status = resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
-	if (status != ReferenceStatus::Missing || edge.fallback.empty()) return status;
-	// The lookup's second name, where the first finds nothing.
-	const ReferenceStatus second =
-			resolve(edge.kind, edge.fallback, edge.scope, file_out, edge.loader_arg);
-	return second == ReferenceStatus::Present ? second : status;
+	// A file the reader reads only beside another the project lacks: no reference (GraphEdge::needs).
+	if (!edge.needs.empty() && !has_file(edge.needs)) {
+		if (file_out) file_out->clear();
+		return ReferenceStatus::NotAReference;
+	}
+	const FirstScope first = first_scope(*this, edge);
+	const ReferenceStatus status = resolve(edge.kind, edge.value, first.scope(), file_out, edge.loader_arg);
+	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && (edge.scopes_after.empty() || !first.then_after)))
+		return status;
+	// The lookup's second name where the first finds nothing, then each later scope, both names.
+	ReferenceStatus found = status;
+	each_scope(*this, edge, [&](const std::string &scope, bool at_first) {
+		for (const std::string *name : {&edge.value, &edge.fallback}) {
+			if (name->empty() || (name == &edge.value && at_first)) continue;
+			const ReferenceStatus second = resolve(edge.kind, *name, scope, file_out, edge.loader_arg);
+			if (second != ReferenceStatus::Present) continue;
+			found = second;
+			return true;
+		}
+		return false;
+	});
+	return found;
+}
+
+const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
+	const std::string *reached = &edge.value;
+	each_scope(*this, edge, [&](const std::string &scope, bool) {
+		if (resolve_symbol(edge.kind, edge.value, scope)) return true;
+		if (!edge.fallback.empty() && resolve_symbol(edge.kind, edge.fallback, scope)) {
+			reached = &edge.fallback;
+			return true;
+		}
+		return false;
+	});
+	return *reached;
 }
 
 const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
-	if (const GraphSymbol *found = resolve_symbol(edge.kind, edge.value, edge.scope)) return found;
-	return edge.fallback.empty() ? nullptr : resolve_symbol(edge.kind, edge.fallback, edge.scope);
+	const GraphSymbol *found = nullptr;
+	each_scope(*this, edge, [&](const std::string &scope, bool) {
+		found = resolve_symbol(edge.kind, edge.value, scope);
+		if (!found && !edge.fallback.empty()) found = resolve_symbol(edge.kind, edge.fallback, scope);
+		return found != nullptr;
+	});
+	return found;
 }
 
 std::vector<const GraphEdge *> AssetGraph::edges_naming(ReferenceKind kind, const std::string &name) const {
@@ -956,7 +1042,10 @@ std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, cons
 	for (const Ref ref :
 			index_.edges_targeting(GraphIndex::key_of(kind, symbol_name(kind, name), scope))) {
 		const GraphEdge &edge = index_.edge(ref);
-		if (!record && !scope.empty() && !scope_matches(scope, edge.scope)) continue;
+		// An edge reads the symbol's scope through its own, or one it tries after it.
+		if (!record && !scope.empty() &&
+		    !each_scope(*this, edge, [&](const std::string &tried, bool) { return scope_matches(scope, tried); }))
+			continue;
 		out.push_back(&edge);
 	}
 	return out;
@@ -1090,10 +1179,22 @@ Diagnostic AssetGraph::missing_finding(const GraphEdge &edge) const {
 	// what the game shrugs off is a warning).
 	const ReferenceKindRow &row = reference_row(edge.kind);
 	const std::string who = edge.record.empty() ? edge.source : "'" + edge.record + "' in " + edge.source;
-	const std::string message = who + " names " + row.phrase + " '" + edge.value + "'" +
-	                            (row.missing_message ? row.missing_message(*this, edge)
-	                                                 : std::string(", which the project does not have."));
-	Diagnostic d = make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
+	// A file of a name its loader opens that the project holds, of another kind: no name missing, a
+	// file the game reads as what it is not (review F3), an error that gates.
+	const GraphSlot *other = nullptr;
+	if (row.resolution == ReferenceResolution::File)
+		for (const std::string &candidate :
+		     reference_file_candidates(edge.kind, resolve_style(edge.value), edge.loader_arg,
+		                               [this](const std::string &name) { return file_named(key(name)) != nullptr; }))
+			if ((other = file_named(key(candidate))) != nullptr) break;
+	const std::string message =
+	        who + " names " + row.phrase + " '" + edge.value + "'" +
+	        (other ? ", but the project's " + other->logical_name + " is " + asset_kind_label(other->kind) +
+	                         ", which the game does not load as " + row.phrase + "."
+	         : row.missing_message ? row.missing_message(*this, edge)
+	                               : std::string(", which the project does not have."));
+	Diagnostic d = other ? make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, message, edge.source, edge.field)
+	                     : make_finding(CoreFinding::ReferenceMissing, row.severity_when_missing, message, edge.source, edge.field);
 	d.record = edge.record;
 	// A text's reference: its place, where Problems opens the document.
 	d.line = edge.span.line;

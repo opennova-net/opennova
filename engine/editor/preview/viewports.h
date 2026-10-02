@@ -14,6 +14,7 @@
 
 namespace opennova::editor {
 
+class ViewportDeviceSource;
 class ViewportModel;
 struct SessionView;
 struct ViewportBuildReport;
@@ -97,6 +98,11 @@ public:
 	// ViewportState: a held window, a framing, a clip's clock sought), or a device's build moved (S13
 	// V6): the session moves its Viewports concern.
 	void set_on_derived_change(std::function<void()> notify) { on_derived_change_ = std::move(notify); }
+	// The Shell's devices (ViewportDeviceCache; null: none, a session with no Shell), which a planner
+	// with no canvas reads the device of a viewport through (viewport_context: a wire's drag or drop
+	// lands on what the device draws, a mission's terrain). Never used through here: read (peek).
+	void set_devices(const ViewportDeviceSource *devices) { devices_ = devices; }
+	const ViewportDeviceSource *devices() const { return devices_; }
 
 private:
 	struct Slot {
@@ -119,6 +125,7 @@ private:
 	std::vector<Slot> slots_;
 	PreviewClock clock_;
 	std::function<void()> on_derived_change_;
+	const ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
 	uint64_t next_event_ = 0; // the first event seq not handed out yet
 };
 
