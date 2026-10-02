@@ -16,6 +16,9 @@
 #include <formats/dds/dds.h>
 #include <formats/def/def.h>
 #include <formats/fnt/fnt.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/mns/mns_document.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pcx/pcx_io.h>
@@ -25,6 +28,7 @@
 #include <runtime/menu/menu_assets.h>
 #include <runtime/menu/menu_frame.h>
 #include <runtime/renderer/material_texture.h>
+#include <runtime/wac/compiler.h>
 
 #include "common/test_expect.h"
 
@@ -398,9 +402,90 @@ static int test_placeholder_texture() {
 	return 0;
 }
 
+// ADR 0046 S14: a new mission is its header alone, on the terrain and under the environment asked
+// for (a file's name as its picker gives it, with or without its extension), named by its title or
+// its file's stem, written through the mission writer (parsed back, made twice byte for byte); a
+// name past its slot is refused. Its factory says what it takes (the title, the terrain and the
+// environment, the two files required), and blank_values_fit holds a request to that. Its text
+// table holds the two keys the mission list reads; a new script is a comment that compiles.
+static int test_mission_blanks() {
+	const BlankFactory *factory = find_blank_factory_for_kind(AssetKind::Mission);
+	TEST_EXPECT(factory && factory->param_count == 3 && std::string(factory->params[0].token) == "title" &&
+	            !factory->params[0].required && factory->params[0].reference == ReferenceKind::None &&
+	            std::string(factory->params[1].token) == "terrain" && factory->params[1].required &&
+	            factory->params[1].reference == ReferenceKind::Terrain &&
+	            std::string(factory->params[2].token) == "environment" && factory->params[2].required &&
+	            factory->params[2].reference == ReferenceKind::Environment);
+	TEST_EXPECT(std::string(asset_kind_row(AssetKind::Mission).folder) == "missions" &&
+	            std::string(asset_kind_row(AssetKind::Mission).new_name) == "newmission.bms" &&
+	            std::string(asset_kind_row(AssetKind::Script).folder) == "missions");
+	if (!factory) return 1;
+	BlankRequest request;
+	request.logical_name = "first.bms";
+	request.values = {{"environment", "DAY"}, {"terrain", "Island.TRN"}, {"title", "The first"}};
+	std::string why;
+	TEST_EXPECT(blank_values_fit(*factory, request, why) && request.value("terrain") == "Island.TRN" &&
+	            request.value("nothing").empty() && blank_mission_title(request) == "The first");
+	std::vector<uint8_t> once, twice;
+	Diagnostic error;
+	TEST_EXPECT(make_blank(request, AssetKind::Mission, once, error) && make_blank(request, AssetKind::Mission, twice, error) &&
+	            !once.empty() && once == twice);
+	opennova::bms::File file;
+	TEST_EXPECT(opennova::bms::parse(once.data(), once.size(), file, why));
+	const opennova::mission::MissionInfo info = opennova::mission::mission_info(file);
+	TEST_EXPECT(info.mission_name == "The first" && info.terrain == "Island" && info.environment == "DAY" &&
+	            info.designer.empty());
+	// No title: the file's stem. A value the blank does not take, a required one left out, a name
+	// past its slot: refused, in words.
+	BlankRequest plain;
+	plain.logical_name = "second.bms";
+	plain.values = {{"environment", "day.env"}, {"terrain", "island"}};
+	std::vector<uint8_t> second;
+	TEST_EXPECT(blank_values_fit(*factory, plain, why) && make_blank(plain, AssetKind::Mission, second, error) &&
+	            opennova::bms::parse(second.data(), second.size(), file, why));
+	TEST_EXPECT(opennova::mission::mission_info(file).mission_name == "second" &&
+	            opennova::mission::mission_info(file).environment == "day");
+	BlankRequest extra = plain;
+	extra.values.push_back({"weather", "rain"});
+	TEST_EXPECT(!blank_values_fit(*factory, extra, why) && why.find("takes no value \"weather\"") != std::string::npos &&
+	            why.find("title, terrain, environment") != std::string::npos);
+	BlankRequest lacking;
+	lacking.logical_name = "third.bms";
+	lacking.values = {{"terrain", "island"}};
+	TEST_EXPECT(!blank_values_fit(*factory, lacking, why) && why == "third.bms needs its environment.");
+	BlankRequest long_name = plain;
+	long_name.values.push_back({"title", std::string(40, 'x')});
+	std::vector<uint8_t> none;
+	TEST_EXPECT(!make_blank(long_name, AssetKind::Mission, none, error) && none.empty() && error.code() == "blank.mission");
+
+	// The text table beside it: [Info] TITLE and an empty BRIEFING.
+	const BlankFactory *text = find_blank_factory_for_role(kBlankMissionTextRole);
+	TEST_EXPECT(text && text->kind == AssetKind::Strings && !text->free_form);
+	BlankRequest table_request;
+	table_request.logical_name = "first.bin";
+	table_request.role = kBlankMissionTextRole;
+	table_request.values = {{"title", "The first"}};
+	std::vector<uint8_t> table_bytes;
+	TEST_EXPECT(make_blank(table_request, AssetKind::Strings, table_bytes, error));
+	opennova::rtxt::File table;
+	TEST_EXPECT(opennova::rtxt::parse(table_bytes.data(), table_bytes.size(), table, why) && table.sections.size() == 1 &&
+	            table.sections[0].name == "Info" && table.entries.size() == 2 && table.entries[0].key == "TITLE" &&
+	            table.entries[0].text == "The first" && table.entries[1].key == "BRIEFING" && table.entries[1].text.empty());
+
+	// A script: a comment naming it, CR LF, which the compiler takes with nothing to say.
+	BlankRequest script;
+	script.logical_name = "patrol.wac";
+	std::vector<uint8_t> script_bytes;
+	TEST_EXPECT(make_blank(script, AssetKind::Script, script_bytes, error) && text_of(script_bytes) == "// patrol.wac\r\n");
+	const opennova::wac::Program program = opennova::wac::compile_source(text_of(script_bytes), opennova::wac::CompileEnv());
+	TEST_EXPECT(program.ok() && program.diagnostics.empty() && program.event_count == 0);
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_registry_shape();
+	failures += test_mission_blanks();
 	failures += test_string_tables();
 	failures += test_startup_menu_compiles();
 	failures += test_free_form_menu();

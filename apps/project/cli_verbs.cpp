@@ -425,7 +425,8 @@ std::string finding_key(const JsonValue &finding) {
 // notes), then the verdict of the build's gate (the build_gate query): validate fails exactly when
 // a build would be refused. A finding that blocks the build and no row shows (the build's own check
 // of the files: an archive in the project) is said before the verdict; an error row the build does
-// not gate on (a project check's: the render check's) is listed and fails nothing.
+// not gate on (a project check's: the render check's; a missing reference, ADR 0046 S14) is listed
+// and fails nothing.
 int run_validate(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	std::vector<JsonValue> pages, gate;
 	if (!pages_of(cli, row, !cli.json, pages) || !ask_pages(cli, Q::BuildGate, JsonValue(), !cli.json, gate))
@@ -530,16 +531,18 @@ void print_not_found(std::FILE *to, const JsonValue &row) {
 	             row.get_string("kind", "").c_str(), need_words(at(row, "needed_by")).c_str());
 }
 
-// An import's plan, one line per file (the import_preview query's pages): what it takes, where it
-// puts it, what wanted it, where it comes from and the other places that have it; what it cannot
-// take and why; what is not found; the kinds not followed; whether the cap stopped it.
-void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
+// An import's plan (the import_preview query's pages): with `rows`, one line per file (what it
+// takes, where it puts it, what wanted it, where it comes from and the other places that have it;
+// what it cannot take and why); what is not found; the plan by kind (its files and bytes); the
+// kinds not followed; whether the cap stopped it; and the plan's own line.
+void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 	size_t take = 0;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &row : items(page, "rows")) {
-			const bool selected = row.get_bool("selected", false);
+			const bool selected = row.get_bool("selected", false), held = row.get_bool("held", false);
 			take += selected ? 1 : 0;
-			std::string line = std::string(selected ? "take " : "skip ") + row.get_string("name", "") + " (" +
+			if (!rows) continue;
+			std::string line = std::string(selected ? "take " : held ? "keep " : "skip ") + row.get_string("name", "") + " (" +
 			                   row.get_string("kind", "") + ") -> " + row.get_string("destination", "");
 			line += row.get_string("state", "") == "found" ? ", needed by " + need_words(at(row, "needed_by"))
 			                                                : std::string(", chosen");
@@ -547,6 +550,7 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
 			line += made_from.empty() ? ", from " + found_in : ", made from " + made_from + ", " + found_in;
 			const std::string problem = row.get_string("problem", "");
 			if (!problem.empty()) line += ": " + problem;
+			else if (held) line += ": the project has it already (--replace writes it over)";
 			std::fprintf(to, "%s\n", line.c_str());
 			for (const JsonValue &rival : items(row, "rivals"))
 				std::fprintf(to, "  also in %s as %s (%s)\n", rival.get_string("found_in", "").c_str(),
@@ -557,6 +561,9 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
 	for (const JsonValue &page : pages)
 		for (const JsonValue &row : items(page, "not_found")) print_not_found(to, row);
 	const JsonValue &plan = pages.front();
+	for (const JsonValue &entry : items(plan, "summary"))
+		std::fprintf(to, "  %s: %zu file(s), %.1f MB\n", entry.get_string("kind", "").c_str(), count_at(entry, "files"),
+		             entry.get_number("bytes", 0.0) / 1e6);
 	for (const JsonValue &entry : items(plan, "not_followed")) {
 		const std::string reference = entry.get_string("reference", "");
 		if (reference.empty())
@@ -566,9 +573,18 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
 			std::fprintf(to, "not followed: %s references, which name no file (%zu, the first in %s)\n",
 			             reference.c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	}
+	for (const JsonValue &entry : items(plan, "undefined"))
+		std::fprintf(to, "undefined: %s references no place defines (%zu, the first in %s)\n",
+		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
+	for (const JsonValue &entry : items(plan, "shadowed"))
+		std::fprintf(to,
+		             "shadowed: %s references only the source's copy of a file the project has defines; the project's "
+		             "own is kept (import that file with --replace to take the source's) (%zu, the first in %s)\n",
+		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	if (plan.get_bool("truncated", false))
 		std::fprintf(to, "the plan stopped at %zu files: the files past them are not in it\n", count_at(plan, "count"));
-	std::fprintf(to, "plan: %zu file(s) to import, %zu not found\n", take, count_at(plan, "not_found_count"));
+	std::fprintf(to, "plan: %zu file(s) to import, %zu not found, %.1f MB\n", take, count_at(plan, "not_found_count"),
+	             plan.get_number("total_bytes", 0.0) / 1e6);
 }
 
 // An import source in its wire form, as a request's imports take it.
@@ -588,8 +604,12 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string source = args.positional.size() > 1 ? args.positional[1] : std::string();
 	const std::vector<std::string> entries = args.values("--entry");
 	const bool with_dependencies = args.has("--with-dependencies"), dry_run = args.has("--dry-run");
+	const bool all = args.has("--all");
 	JsonValue planned;
-	if (!source.empty()) {
+	if (all) {
+		// Every file of the game install, chosen at once with no walk (ADR 0046 S14).
+		planned = send(cli, editor::request::import_whole_install());
+	} else if (!source.empty()) {
 		JsonValue imports = JsonValue::make_array();
 		if (entries.empty()) imports.push(import_source(source, std::string()));
 		for (const std::string &entry : entries) imports.push(import_source(source, entry));
@@ -613,7 +633,7 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		if (cli.json)
 			print_json(cli.out, plan);
 		else
-			print_plan(cli.out, pages);
+			print_plan(cli.out, pages, args.has("--rows"));
 		return plan_errors || truncated ? 1 : 0;
 	}
 	if (plan_errors) {
@@ -623,20 +643,25 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	// What the plan takes and nothing else: the sources it holds (the files a converter makes from
 	// one, whole) and each dependency found that the project can take; the files past its cap are
 	// not imported.
+	// A file the project holds already is kept unless --replace writes it over (review F2). The whole
+	// install's import names none of its rows (planned), so it lists none (review F7).
+	const bool replace = args.has("--replace");
 	JsonValue taken = JsonValue::make_array();
-	std::vector<std::string> taken_sources;
+	std::set<std::string> taken_sources;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &file : items(page, "rows")) {
-			if (!file.get_bool("selected", false)) {
+			const bool held = file.get_bool("held", false);
+			if (held && !replace && file.get_string("problem", "").empty()) {
+				std::fprintf(cli.err, "keeping %s: the project has it already (--replace writes it over)\n",
+				             file.get_string("name", "").c_str());
+				continue;
+			}
+			if (!file.get_bool("selected", false) && !(held && replace)) {
 				std::fprintf(cli.err, "not importing %s: %s\n", file.get_string("name", "").c_str(),
 				             file.get_string("problem", "").c_str());
 				continue;
 			}
-			const std::string key = io::json_write(at(file, "source"));
-			bool listed = false;
-			for (const std::string &other : taken_sources) listed = listed || other == key;
-			if (listed) continue;
-			taken_sources.push_back(key);
+			if (all || !taken_sources.insert(io::json_write(at(file, "source"))).second) continue;
 			taken.push(at(file, "source"));
 		}
 	}
@@ -646,9 +671,21 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	if (truncated)
 		std::fprintf(cli.err, "the plan stopped at %zu files: the files past them are not imported (import fewer at once)\n",
 		             count_at(plan, "count"));
+	// Nothing the plan takes (each file the project holds kept): the preview closed, nothing raised (an
+	// import naming no file is refused, review F14).
+	if (!all && taken.array.empty()) {
+		send(cli, editor::request::cancel_import());
+		if (!cli.json) std::fprintf(cli.out, "nothing to import\n");
+		return 0;
+	}
+	// The whole install: the plan's rows as the editor holds them (planned), nine thousand sources
+	// not echoed back.
 	JsonValue request = JsonValue::make_object();
 	request.set("kind", json_string(editor::request_kind_row(K::ImportFiles).token));
-	request.set("imports", std::move(taken));
+	if (all)
+		request.set("planned", boolean(true));
+	else
+		request.set("imports", std::move(taken));
 	request.set("replace", boolean(args.has("--replace")));
 	JsonValue outcome;
 	if (!send_wire(cli, request, outcome)) return 2;
@@ -903,10 +940,17 @@ bool check_query(const CliArgs &args, std::string &why) {
 	return true;
 }
 
-// An import names what it takes: a source file, or the game install's files by --entry; an
-// archive's members are chosen by --entry too.
+// An import names what it takes: a source file, or the game install's files by --entry, or every
+// file of the game install (--all, which names nothing else); an archive's members are chosen by
+// --entry too.
 bool check_import(const CliArgs &args, std::string &why) {
 	const bool source = args.positional.size() > 1;
+	if (args.has("--all")) {
+		if (!source && !args.has("--entry") && !args.has("--with-dependencies")) return true;
+		why = "--all imports every file of the game install, with no walk: it takes no source, no --entry and no "
+		      "--with-dependencies";
+		return false;
+	}
 	if (!source && !args.has("--entry")) {
 		why = args.has("--install") ? "choose the game's files with --entry <name> (repeat for more files)"
 		                             : "import needs a source file, or the game install's files by --entry <name>";
@@ -1005,7 +1049,9 @@ constexpr CliOption kCreateMissingOptions[] = { { "--role", "a token" } };
 constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
 	                                     { "--with-dependencies" },
-	                                     { "--dry-run" } };
+	                                     { "--all" },
+	                                     { "--dry-run" },
+	                                     { "--rows" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
@@ -1028,8 +1074,8 @@ constexpr VerbRow kRows[] = {
 	Verb(V::Validate, "validate", "<dir>", kReadRequests, kDir, run_validate,
 	     "list every finding the editor's Problems lists; exit 1 exactly when a build would be\n"
 	     "refused (the build_gate query: a required file missing or wrong, an error the build\n"
-	     "gates on; an error it does not gate on, a project check's such as the render\n"
-	     "check's, is listed and fails nothing) (--json: the problems query)")
+	     "gates on; an error it does not gate on, a missing reference or a project check's\n"
+	     "such as the render check's, is listed and fails nothing) (--json: the problems query)")
 	        .answers(Q::Problems)
 	        .row,
 	Verb(V::CreateMissing, "create-missing", "<dir> [--role <token>]", kCreateMissingRequests, kDir,
@@ -1041,15 +1087,19 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Import, "import",
 	     "<dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]\n"
-	     "                               [--dry-run]",
+	     "                               [--all] [--dry-run [--rows]]",
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
 	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
-	     "game install, 1000 files at most; an .o3d's textures come only with\n"
-	     "--with-dependencies; --dry-run prints the plan and writes nothing (no import pass\n"
-	     "either; --install is that run's alone) (--json: the import_preview query, the plan)")
+	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
+	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
+	     "the loose files the game ships beside them), with no walk and nothing else named:\n"
+	     "the default for a project that holds missions;\n"
+	     "--dry-run prints the plan (what is not found, the files by kind, the plan's line;\n"
+	     "--rows each file too) and writes nothing (no import pass either; --install is that\n"
+	     "run's alone) (--json: the import_preview query, the plan)")
 	        .takes(kImportOptions)
 	        .checked_by(check_import)
 	        .answers(Q::ImportPreview)
