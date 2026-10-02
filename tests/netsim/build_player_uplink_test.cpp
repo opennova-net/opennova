@@ -22,6 +22,7 @@
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/world.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <cmath>
 #include <cstdint>
@@ -170,6 +171,66 @@ bool run_interest_person_bound_radius() {
 		return false;
 	}
 	return true;
+}
+
+// A remote person is an LOS endpoint ENTITY on a retail client (its own
+// pool-0 row): the terrain leg skips only when both ends are indoors, and
+// otherwise always runs the heightmap ray; the no-entity leg's buried-endpoint
+// pass never applies. Under a flat surface 10 units up, two buried ends see
+// nothing through the ground unless both are indoors (in view at 600: +200,
+// and +100 only with LOS).
+// [orig: Entity_CheckLineOfSightTerrainAndEntities(player, entity, ...)
+//  @0x50E179 -> Physics_CheckTerrainLineOfSight @0x53B080: the both-indoors
+//  return @0x53B0A0, the entity-pair ray @0x53B0B2..0x53B0CC; the no-entity
+//  leg's surface tests @0x53B0F1..0x53B100]
+bool run_interest_person_los_takes_the_entity_leg() {
+	bool ok = true;
+	std::vector<uint16_t> heights(512 * 512, 10 * 256);
+	std::vector<int> sectors(256, 1);
+	opennova::terrain::TerrainHeightField field;
+	field.heightmap = heights.data();
+	field.dim = 512;
+	field.layout.sector_grid = sectors.data();
+	field.layout.origin_x = 0;
+	field.layout.origin_y = 0;
+	for (const bool indoors : {false, true}) {
+		ns::ClientState replica;
+		ns::ClientEntityState person;
+		person.handle = 0x0000;
+		person.cls = nw::EntityClass::Player;
+		person.team = 2;
+		person.team_known = true;
+		person.x = w::to_fixed(100.0);
+		person.z = w::to_fixed(5.0);
+		person.rm_entity_flags = indoors ? w::kEntityFlagIndoors : 0u;
+		replica.entities.push_back(person);
+		w::World world;
+		world.registry.configure_pool(0, 4);
+		w::CollisionWorld collision;
+		collision.terrain = &field;
+		world.collision = &collision;
+		w::Entity self{};
+		self.team = 1;
+		if (indoors) self.flags |= w::kEntityFlagIndoors;
+		const w::EntityHandle self_h = world.registry.spawn(0, self);
+		w::AiEntity body{};
+		body.pos[2] = w::to_fixed(5.0);
+		ns::UplinkClientInputs inputs;
+		inputs.replica = &replica;
+		inputs.self_wire_handle = 0x0002;
+		ns::set_view_distance_units(600);
+		const nw::PlayerExtendedUplink up =
+				ns::build_player_uplink(world, *world.registry.get(self_h), body, inputs);
+		ns::set_view_distance_units(0);
+		const uint16_t want = indoors ? 2036 : 1936;
+		if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == want,
+				indoors ? "two indoor ends skip the terrain ray"
+				        : "a buried remote person is still behind the ground")) {
+			std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
+			ok = false;
+		}
+	}
+	return ok;
 }
 
 // The two stat bytes are the low bytes of the main loop's FR-counter frame
@@ -807,5 +868,6 @@ int main() {
 	ok = run_scope_flag_reaches_host() && ok;
 	ok = run_equipped_adm_ingest_gate() && ok;
 	ok = run_hud_cursor_names_a_remote_person() && ok;
+	ok = run_interest_person_los_takes_the_entity_leg() && ok;
 	return ok ? 0 : 1;
 }

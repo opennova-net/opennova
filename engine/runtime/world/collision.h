@@ -1248,6 +1248,19 @@ public:
 	bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
 			const int32_t start[3], const int32_t end[3], int32_t height_offset,
 			bool all_types = false, bool query_parent_cleared = false);
+	// A decoded remote person as the endpoint ENTITY, for a client that keeps
+	// no registry entity for it: the two endpoint fields the query reads, its
+	// Flags indoors bit and its parent slot. Retail's endpoint is the client's
+	// own pool-0 row, so the no-entity leg's buried-endpoint pass never runs.
+	// [orig: Physics_CheckTerrainLineOfSight `entityB+24h & 800000h` @0x53B0A0;
+	//  Physics_RaycastFindCollisionEntity entity_b[154] / [91] @0x539AE8..0x539B10]
+	struct LosWireEndpoint {
+		bool indoors = false;
+		EntityHandle parent;
+	};
+	bool wire_person_los_clear(World &world, EntityHandle query, const LosWireEndpoint &endpoint,
+			const int32_t start[3], const int32_t end[3], int32_t height_offset,
+			bool all_types = false);
 	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
@@ -1573,6 +1586,11 @@ public:
 private:
     void build_tables(World &world, bool advance_candidate_slices);
     void build_candidate_slices(World &world);
+    // entity_los_clear over an endpoint described by its read fields.
+    bool entity_los_clear_impl(World &world, EntityHandle listener, EntityHandle source,
+            bool endpoint_present, bool endpoint_indoors, EntityHandle parent_b,
+            const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset,
+            bool all_types, bool query_parent_cleared);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);

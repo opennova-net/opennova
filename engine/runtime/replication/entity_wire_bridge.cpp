@@ -1070,11 +1070,22 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 			// [orig: Entity_CheckLineOfSightTerrainAndEntities(player, entity,
 			//  player+4, entity+4, 0, 0) @0x50E179]
 			const int32_t end[3] = {row->x, row->y, row->z};
-			los = world.collision == nullptr ||
-					world.collision->entity_los_clear(world, e.handle,
-							native != nullptr ? native->handle : world::EntityHandle{},
-							ae.pos, end, 0, false)
-					? 1 : 0;
+			if (world.collision == nullptr) {
+				los = 1;
+			} else if (pool == 0) {
+				// A decoded person is the endpoint entity through its row: the
+				// Flags indoors bit and the parent slot (its seat mount).
+				world::CollisionWorld::LosWireEndpoint person;
+				person.indoors = (row->rm_entity_flags & world::kEntityFlagIndoors) != 0;
+				if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0)
+					person.parent = world::EntityHandle{row->carrier_handle};
+				los = world.collision->wire_person_los_clear(world, e.handle, person, ae.pos, end, 0,
+						false) ? 1 : 0;
+			} else {
+				los = world.collision->entity_los_clear(world, e.handle,
+						native != nullptr ? native->handle : world::EntityHandle{},
+						ae.pos, end, 0, false) ? 1 : 0;
+			}
 		}
 		const int32_t target = row->handle == player_target.packed ? 1 : 0;
 		const int32_t cursor = row->handle == interest.hud_target_wire_handle ? 1 : 0;
