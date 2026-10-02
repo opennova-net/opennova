@@ -6482,6 +6482,17 @@ bool run_zone_event_cues_play_on_the_client() {
     const std::string threat = cues_of(42);  // red's zone threatened
     const std::string own_threat = cues_of(54);
     const std::string mortar = cues_of(48);
+    // A camp event names its team in the victim byte; the local player is blue.
+    const auto camp_cue = [&](uint8_t event, uint8_t team) {
+        world.out.script_sounds.clear();
+        runtime.view().apply(s2c::GAME_EVENT, {event, 0, team, 255, 0, 0, 0, 0});
+        runtime.apply_received_effects(world);
+        std::string out;
+        for (const auto &sound : world.out.script_sounds) out += sound.name + ";";
+        return out;
+    };
+    const std::string camped_own = camp_cue(59, 1), camped_other = camp_cue(59, 2);
+    const std::string uncamped_own = camp_cue(60, 1), uncamped_other = camp_cue(60, 2);
     std::fprintf(stderr, "[zone-cues] won=%s lost=%s threat=%s own=%s mortar=%s voices=%zu\n",
             won.c_str(), lost.c_str(), threat.c_str(), own_threat.c_str(), mortar.c_str(),
             voices.size());
@@ -6492,7 +6503,11 @@ bool run_zone_event_cues_play_on_the_client() {
                    "the loss voice plays 62 ticks later") &&
            expect(threat == "PSP_THREAT_OT;", "the other team's zone warning plays THREAT_OT") &&
            expect(own_threat == "PSP_THREAT_T;", "the local team's zone warning plays THREAT_T") &&
-           expect(mortar == "MORTAR_REQ;", "a mortar request plays MORTAR_REQ");
+           expect(mortar == "MORTAR_REQ;", "a mortar request plays MORTAR_REQ") &&
+           expect(camped_own == "PSP_WIN;" && camped_other == "PSP_LOST;",
+                   "event 59 plays PSP_WIN to the team its victim byte names, PSP_LOST to the rest") &&
+           expect(uncamped_own == "PSP_LOST;" && uncamped_other == "PSP_WIN;",
+                   "event 60 plays the reverse");
 }
 
 bool run_medic_reviving_plays_both_receive_cues() {

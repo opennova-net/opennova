@@ -168,10 +168,15 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
 // LOCAL player's team alone (no actor): a PSP/LFP warning plays the
 // team's threat cue, or the other team's plus its delayed voice; a capture
 // plays the win cue, or the loss cue plus its delayed voice; event 48 plays
-// the mortar request. Other events return.
+// the mortar request. A camp event (59 / 60) names its team in the event's
+// victim byte (`team_index`): 59 plays the win cue to that team and the loss
+// cue to everyone else, 60 the reverse, neither with a voice. Other events
+// return.
 // [orig: NetPacket_HandleGameEvent @ 0x426270, cases 41..44 / 54..57
-//  @0x42759b..0x42790e, event 48 @0x426387..0x4263c4]
-void play_zone_event_sound(World &world, uint8_t event, const Entity &local);
+//  @0x42759b..0x42790e, event 48 @0x426387..0x4263c4, case 59
+//  @0x427387..0x4273a6, case 60 @0x427492..0x4274ad]
+void play_zone_event_sound(World &world, uint8_t event, const Entity &local,
+        uint8_t team_index);
 
 // The per-spawn fire-sound dispatch, called beside the FireEvent record — the
 // inline-presentation moment of the original. The local player's own fire

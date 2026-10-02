@@ -220,10 +220,24 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
         world.script.waypoints.select_nearest_enemy_base(world.registry, local, game_type);
 }
 
-void play_zone_event_sound(World &world, uint8_t event, const Entity &local) {
+void play_zone_event_sound(World &world, uint8_t event, const Entity &local,
+        uint8_t team_index) {
     const char *cue = nullptr;
     const char *voice = nullptr;
     switch (event) {
+    case 59: case 60: {
+        // A camp event: the local team byte, sign-extended, against the
+        // event's third byte. 59 plays the win cue on a match and the loss
+        // cue otherwise; 60 the reverse. No voice follows.
+        // [orig: `movsx ecx, byte ptr [eax+162h]` / `cmp ecx, ebp` @0x42738c
+        //  -> PSP_WIN @0x427397, PSP_LOST @0x4273a0; case 60 @0x427492 ->
+        //  PSP_LOST @0x42749d, PSP_WIN @0x4274a6; ebp = the third byte,
+        //  `movzx ebp, bl` @0x4262de]
+        const bool named = static_cast<int>(static_cast<int8_t>(local.team)) ==
+                static_cast<int>(team_index);
+        cue = (named == (event == 59)) ? "PSP_WIN" : "PSP_LOST";
+        break;
+    }
     case 48: // the mortar request [orig: @0x426387 -> @0x4263c4]
         cue = "MORTAR_REQ";
         break;
