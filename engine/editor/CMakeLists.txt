@@ -13,6 +13,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a
@@ -22,6 +23,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_factory.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_menu.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_mission.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_strings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_style.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/blank/blank_texture.cpp
@@ -49,6 +51,11 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mnu_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_clipboard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
@@ -87,6 +94,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_pass.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
@@ -113,6 +121,15 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_items.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
@@ -216,6 +233,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp

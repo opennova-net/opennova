@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/preview/canvas_gesture.h>
@@ -18,6 +20,7 @@ enum class OverlayKind : uint8_t {
 	Circle, // centred on points[0], `size` its radius
 	Quad, // points[0..3]
 	Marker, // a glyph reaching `size` pixels from points[0], whatever the zoom
+	Text, // `text` with its top-left corner at points[0], on a dark ground when `filled`
 };
 
 // What a shape is to the author, which picks its colour: a Normal shape draws in its own `rgb`;
@@ -39,6 +42,7 @@ struct OverlayShape {
 	bool filled = false; // a Rect, Circle or Quad filled instead of outlined
 	uint32_t rgb = 0xFFFFFF; // a Normal shape's colour, 0xRRGGBB
 	uint8_t alpha = 255; // and its opacity
+	std::string text; // a Text's line
 };
 
 // One frame's shapes, drawn in order: a later one over an earlier one.
@@ -90,6 +94,13 @@ public:
 		shape.points[0] = at;
 		shape.size = size;
 		shape.thickness = thickness;
+	}
+	// A line of text in its own colour, on a dark ground (a label over the picture).
+	void text(CanvasPoint at, std::string line, uint32_t rgb = 0xFFFFFF, OverlayRole role = OverlayRole::Normal) {
+		OverlayShape &shape = add(OverlayKind::Text, role, rgb);
+		shape.points[0] = at;
+		shape.text = std::move(line);
+		shape.filled = true;
 	}
 
 private:

@@ -91,6 +91,12 @@ void RenameDialog::draw(Workspace &workspace) {
 			ui_kit::clipped_text(line);
 			ImGui::PopID();
 		}
+		if (!plan.companions.empty()) ImGui::TextDisabled("Renamed with it:");
+		for (size_t i = 0; i < plan.companions.size(); ++i) {
+			ImGui::PushID(static_cast<int>(sites.size() + i));
+			ui_kit::clipped_text(plan.companions[i]);
+			ImGui::PopID();
+		}
 	}
 	ImGui::EndChild();
 	// A rename rewrites the project's files: while an operation holds them (a build packing them),

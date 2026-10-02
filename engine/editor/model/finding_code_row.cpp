@@ -40,6 +40,12 @@ constexpr FindingCodeRow from_graph(FindingCodeRow row) {
 	return row;
 }
 
+// A code whose findings are listed and never refuse a build, whatever their severity.
+constexpr FindingCodeRow listed(FindingCodeRow row) {
+	row.gates_build = false;
+	return row;
+}
+
 constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::AssetKindUnknown, code("asset.kind.unknown", G::ProjectFiles) },
 	{ C::AssetNameDuplicate, about_the_file("asset.name.duplicate", G::ProjectFiles, F::Rename) },
@@ -49,6 +55,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BlankDef, code("blank.def", G::NewFiles) },
 	{ C::BlankFont, code("blank.font", G::NewFiles) },
 	{ C::BlankMenu, code("blank.menu", G::NewFiles) },
+	{ C::BlankMission, code("blank.mission", G::NewFiles) },
 	{ C::BlankStrings, code("blank.strings", G::NewFiles) },
 	{ C::BlankStyle, code("blank.style", G::NewFiles) },
 	{ C::BlankTexture, code("blank.texture", G::NewFiles) },
@@ -60,6 +67,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildCopy, code("build.copy", G::Build) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
+	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,
+	// assets/player_files.h).
+	{ C::BuildPlayerFile, code("build.player_file", G::Build) },
 	{ C::BuildRead, code("build.read", G::Build) },
 	{ C::BuildVerify, code("build.verify", G::Build) },
 	{ C::BuildWrite, code("build.write", G::Build) },
@@ -92,6 +102,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::DocumentStructure, code("document.structure", G::Documents) },
 	{ C::DocumentUnserializable, blocking(code("document.unserializable", G::Documents)) },
 	{ C::DocumentValue, code("document.value", G::Documents) },
+	{ C::DocumentValues, code("document.values", G::Documents) },
 	{ C::DocumentWrite, code("document.write", G::Documents) },
 	{ C::EditorSettingsJson, code("editor_settings.json", G::EditorSettings) },
 	{ C::EditorSettingsSchemaVersionUnsupported, code("editor_settings.schema_version.unsupported", G::EditorSettings) },
@@ -116,9 +127,14 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportOrphanRecord, code("import.orphan_record", G::Imports) },
 	{ C::ImportOutputMissing, code("import.output_missing", G::Imports, F::Reimport) },
 	{ C::ImportPath, code("import.path", G::Imports) },
+	// A player's or this machine's file, which an import never takes (ADR 0046 S14).
+	{ C::ImportPlayerFile, code("import.player_file", G::Imports) },
 	{ C::ImportPublish, code("import.publish", G::Imports) },
 	{ C::ImportRead, code("import.read", G::Imports) },
 	{ C::ImportRecord, code("import.record", G::Imports) },
+	// An import request whose fields ask for two things at once (every file and some by name; every
+	// file and a walk; an import of nothing named and nothing planned): refused, never half-served.
+	{ C::ImportRequest, code("import.request", G::Imports) },
 	{ C::ImportScene, code("import.scene", G::Imports) },
 	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
 	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
@@ -130,6 +146,7 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::LocalSettingsSchemaVersionUnsupported, code("local_settings.schema_version.unsupported", G::LocalSettings) },
 	{ C::LocalSettingsUnreadable, code("local_settings.unreadable", G::LocalSettings) },
 	{ C::LocalSettingsWrite, code("local_settings.write", G::LocalSettings) },
+	{ C::MissionSidecarUnused, code("mission.sidecar.unused", G::Missions) },
 	{ C::OperationBusy, code("operation.busy", G::Operations) },
 	{ C::OperationNone, code("operation.none", G::Operations) },
 	{ C::OperationNotCancellable, code("operation.not_cancellable", G::Operations) },
@@ -138,6 +155,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
 	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
 	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
+	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
+	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
@@ -147,13 +166,21 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
 	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },
 	{ C::ProjectJson, code("project.json", G::Project) },
+	{ C::ProjectMissionFeatureOff, code("project.mission.feature_off", G::Project) },
 	{ C::ProjectNone, code("project.none", G::Project) },
 	{ C::ProjectRootUnreadable, code("project.root.unreadable", G::Project) },
 	{ C::ProjectSchemaVersionUnsupported, code("project.schema_version.unsupported", G::Project) },
 	{ C::ProjectTargetGameUnknown, code("project.target_game.unknown", G::Project) },
 	{ C::ProjectTitleEmpty, code("project.title_empty", G::Project) },
 	{ C::ProjectWrite, code("project.write", G::Project) },
-	{ C::ReferenceMissing, from_graph(code("reference.missing", G::MissingReferences, F::Reference)) },
+	// A name the project lacks is shown, counted and fixable, and gates no build (ADR 0046 S14): the
+	// shipped game's own files name what its install does not hold and it runs, so a build refused
+	// for one would assert a failure no one has witnessed. What the game cannot start without is
+	// the witnessed manifest's (requirement.missing), which gates.
+	{ C::ReferenceMissing, listed(from_graph(code("reference.missing", G::MissingReferences, F::Reference))) },
+	// A file of the name the project holds, of a kind the reference's loader does not load: the game
+	// opens it and reads it as what it is not. It gates (review F3).
+	{ C::ReferenceWrongKind, from_graph(code("reference.wrong_kind", G::MissingReferences)) },
 	{ C::RenameConflict, code("rename.conflict", G::Renames) },
 	{ C::RenameCopy, code("rename.copy", G::Renames) },
 	{ C::RenameExists, code("rename.exists", G::Renames) },

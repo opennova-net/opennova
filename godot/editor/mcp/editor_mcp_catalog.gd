@@ -20,15 +20,16 @@ const PLAY_OPS: Array[String] = ["start", "stop", "state"]
 ## it needs, and where the tool's `kind` goes (the request's member that names the viewport's kind):
 ## options and camera a set_viewport of the viewport's state (`device`, its device's size, beside the
 ## options or the camera; kind the change's), seek a set_viewport of the clock alone, which names no
-## document and no kind (the one preview clock every viewport reads), drag and command an
-## edit_in_viewport (kind the drag's or the command's). Its reads are the viewport query's own op, the
-## tokens the catalog lists for it (viewport_reads).
+## document and no kind (the one preview clock every viewport reads), drag, command and drop (S14) an
+## edit_in_viewport (kind the drag's, the command's or the drop's). Its reads are the viewport query's
+## own op, the tokens the catalog lists for it (viewport_reads).
 const VIEWPORT_WRITES := {
 	"options": {"kind": "set_viewport", "takes": ["options", "device"], "needs": "options", "kind_in": "viewport"},
 	"camera": {"kind": "set_viewport", "takes": ["camera", "device"], "needs": "camera", "kind_in": "viewport"},
 	"seek": {"kind": "set_viewport", "takes": ["clock"], "needs": "clock", "pathless": true},
 	"drag": {"kind": "edit_in_viewport", "takes": ["drag"], "needs": "drag", "kind_in": "drag"},
 	"command": {"kind": "edit_in_viewport", "takes": ["command"], "needs": "command", "kind_in": "command"},
+	"drop": {"kind": "edit_in_viewport", "takes": ["drop"], "needs": "drop", "kind_in": "drop"},
 }
 
 const VIEWPORT_PROSE := (
@@ -42,8 +43,9 @@ const VIEWPORT_PROSE := (
 		+ "options and camera change its state (a set_viewport: options {...} the kind's options, camera {...} "
 		+ "its camera, each with device {width, height}, its device's size, beside it); op seek sets the "
 		+ "preview clock every viewport reads (clock {playing, rate, time_ms, ticks}; it names no document and "
-		+ "no kind, and takes no path); op drag and command edit through it (an edit_in_viewport: drag {...}, "
-		+ "command {...}; a gesture's samples are consecutive drags of one handle on its document, gesture "
+		+ "no kind, and takes no path); op drag, command and drop edit through it (an edit_in_viewport: drag {...}, "
+		+ "command {...}, drop {...}, a file or a reference released on the picture at a point; a gesture's "
+		+ "samples are consecutive drags of one handle on its document, gesture "
 		+ "the token the first's answer gave, end false keeping it open; any other request on the document, "
 		+ "another gesture, or 10 s with no sample ends it). Each write answers as editor_request answers (ok, "
 		+ "served, outcome: done, findings, a drag's gesture; status, view_revision; a request that did not read "
@@ -129,9 +131,15 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			"op=start: build, waiting as editor_build does, then run the game on the build (the runtime beside "
 			+ "the editor, or this Godot binary in a source run) with its own MCP endpoint, its port allocated as "
 			+ "the build lands; the reply is the run section (state, pid, mcp_port: game_state, game_menu and "
-			+ "game_probe on that port drive it, exit_code). op=stop ends the game and waits; op=state reads the "
-			+ "run section.",
-			{"op": {"type": "string", "enum": PLAY_OPS}}, ["op"], true, BUILD_TIMEOUT_MS),
+			+ "game_probe on that port drive it, mission, exit_code). With mission (op=start), a .bms of the "
+			+ "project by its logical name, the game starts in that mission instead of at its menu (one the "
+			+ "project does not hold is refused, play.mission.unknown; one that does not load is a "
+			+ "play.mission.failed Problems row). op=stop ends the game and waits; op=state reads the run "
+			+ "section.",
+			{
+				"op": {"type": "string", "enum": PLAY_OPS},
+				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
+			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
 			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "
@@ -382,6 +390,6 @@ static func _viewport_tool(catalog: Dictionary) -> McpToolDef:
 	for member: String in ["options", "camera", "clock", "device"]:
 		properties[member] = {"type": "object", "description": "op %s: set_viewport's %s, as its viewport field takes it: %s"
 				% ["seek" if member == "clock" else ("options or camera" if member == "device" else member), member, change]}
-	for member: String in ["drag", "command"]:
+	for member: String in ["drag", "command", "drop"]:
 		properties[member] = {"type": "object", "description": "op %s: edit_in_viewport's: %s" % [member, docs.get(member, "")]}
 	return McpToolDef.make("editor_viewport", " ".join(PackedStringArray(lines)), properties, ["op"], true)
