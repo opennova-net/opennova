@@ -748,4 +748,22 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
     return vfs_version_crc(bytes.data(), bytes.size());
 }
 
+std::string vfs_country_code(const std::string &game_root) {
+    // [orig: Game_ReadCCBinFile @ 0x4a5860 — fopen("CC.BIN", "rb") @ 0x4a58d0,
+    //  one byte @ 0x4a58e6 then a second @ 0x4a58fe, the NUL @ 0x4a591e,
+    //  Napi_CopyString(dst, cc_value, 8) @ 0x4a5921 (stops at an inner NUL)]
+    if (game_root.empty()) return {};
+    fs::path path;
+    if (!resolve_retail_loose_file(game_root, {"CC.BIN"}, path)) return {};
+    std::ifstream file(path, std::ios::binary);
+    if (!file) return {};
+    char bytes[2] = {0, 0};
+    std::string out;
+    for (char &byte : bytes) {
+        if (!file.get(byte) || byte == '\0') break;
+        out.push_back(byte);
+    }
+    return out;
+}
+
 } // namespace opennova

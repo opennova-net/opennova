@@ -12,6 +12,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <array>
 #include <functional>
 #include <string>
@@ -56,6 +57,26 @@
 // [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730;
 // NapiNP_GetLocalConnectionId @0x4C6D40]. The owner pumps bytes; no socket I/O here.
 namespace opennova::inmatch {
+
+// The OS time-zone bias in minutes, UTC = local + bias, of standard (not
+// daylight) time: the standard-library equivalent of TIME_ZONE_INFORMATION.Bias.
+// UTC's broken-down fields read back as local standard time (tm_isdst = 0) lie
+// exactly `bias` after the instant they came from.
+// [orig: UI_JoinSelectedSession @0x5699d0 — GetTimeZoneInformation @0x569da1,
+//  net_config.tzb = Bias @0x569dbd]
+inline int32_t local_time_zone_bias_minutes() {
+	const std::time_t now = std::time(nullptr);
+	std::tm utc{};
+#ifdef _WIN32
+	if (gmtime_s(&utc, &now) != 0) return 0;
+#else
+	if (gmtime_r(&now, &utc) == nullptr) return 0;
+#endif
+	utc.tm_isdst = 0;
+	const std::time_t as_local = std::mktime(&utc);
+	if (as_local == static_cast<std::time_t>(-1)) return 0;
+	return static_cast<int32_t>(std::difftime(as_local, now) / 60.0);
+}
 
 enum class TerrainTilState : uint8_t {
 	Absent = 0,
@@ -418,9 +439,13 @@ public:
 	// g_ExpansionChecksum [orig: Expansion_LoadAssets @0x4a4885;
 	// NapiNP_WriteClientAuthPayload @0x42a287]. Unset (empty) keeps the golden
 	// "0" — the no-version.txt install every capture used.
+	// The same root's CC.BIN is the ClientAuth COUNTRYCODE (vfs_country_code).
 	void set_expansion_version_root(std::string game_root) {
 		expansion_version_root_ = std::move(game_root);
 	}
+	// The ClientAuth TZB: the OS time-zone bias in minutes (UTC = local + bias),
+	// sent only when nonzero; defaults to local_time_zone_bias_minutes().
+	void set_time_zone_bias(int32_t bias_minutes) { time_zone_bias_ = bias_minutes; }
 
 	// The game-session APPID — the decimal the retail client recovers from the
 	// NWJoin .joi CK and uploads as the ClientAuth APPID conn-tag; a NovaWorld
@@ -815,7 +840,8 @@ private:
 	// payload reaches gameplay dispatch.
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
-	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
+	std::string expansion_version_root_; // install root: the JOIN checksum (D-NET-166), CC.BIN (D-NET-296)
+	int32_t time_zone_bias_ = local_time_zone_bias_minutes(); // ClientAuth TZB (D-NET-296)
 	std::string app_id_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
 	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)
 

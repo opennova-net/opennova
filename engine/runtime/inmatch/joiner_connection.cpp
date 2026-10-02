@@ -360,8 +360,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// BN==1 (DC=2 @0x512155), VN==2 (DC=3), MBN==20042002 (DC=4; the 0x131D112 immediate),
 	// SOPD==180 (DC=8) — any client of this patch must send exactly these; do not "unpin" them.
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
-	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB): retail derives VERSIONSTRING from its
-	// exe resource and COUNTRYCODE/TZB from the OS locale — deriving ours is a fidelity follow-up.
+	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
+	// sprintf("V%i.%i.%i.%i", 1, 7, 5, 7) [orig: Game_ParseCommandLineAndInit @0x4a7d81 into
+	// byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE is the install's CC.BIN, omitted when empty
+	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
 	// @0x4c7260 -> Server_ValidatePlayerJoinRequest @0x512100]
 	// BT stays "0" (retail's LAN default; the host's code-6/7 ban-type gate).
@@ -381,10 +383,11 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 			std::pair<const char *, const char *>{"MBN", "20042002"},
 			std::pair<const char *, const char *>{"SOPD", "180"},
 			std::pair<const char *, const char *>{"VERSIONSTRING", "V1.7.5.7"},
-			std::pair<const char *, const char *>{"COUNTRYCODE", "us"},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
 	}
+	const std::string country_code = vfs_country_code(expansion_version_root_);
+	if (!country_code.empty()) auth.cu.push_back(make_client_cu_chunk(2, "COUNTRYCODE", country_code));
 	// APPID (the .joi CK decimal) rides only a NovaWorld join, in retail's wire
 	// order right after COUNTRYCODE. LAN sends no APPID (app_id_ == "0"), the
 	// host's code-9 gate being NovaWorld-transport only.
@@ -434,12 +437,12 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 					2, "JSPP", spectator_password_));
 		}
 	}
-	for (const auto &field : {
-			std::pair{"TZB", "300"},
-			std::pair{"MPS", "1300"},
-	}) {
-		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
-	}
+	// TZB is the OS time-zone bias, omitted when 0; MPS the stock mpmaxpacketsize (no cfg loader).
+	// [orig: tzb @0x569dbd, its gate @0x4c3da4; max_packet_bytes = maxPacketSize_338 @0x569ca0,
+	//  cfg row @0x833380 default "1300"] (D-NET-296)
+	if (time_zone_bias_ != 0)
+		auth.cu.push_back(make_client_cu_chunk(2, "TZB", std::to_string(time_zone_bias_)));
+	auth.cu.push_back(make_client_cu_chunk(2, "MPS", "1300"));
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 }
 

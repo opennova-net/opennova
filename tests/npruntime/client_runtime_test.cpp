@@ -1,4 +1,7 @@
 #include <runtime/world/radio_call.h>
+
+#include <filesystem>
+#include <fstream>
 // P5 — inmatch::ClientRuntime (the headless Client_ProcessNetworkFrame role), always-on:
 //
 //  (A) Full in-process round-trip — client_runtime <-> the REAL np server legs <-> Server_TickUpdate
@@ -874,8 +877,18 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 		return -1;
 	};
 
+	// The install root whose CC.BIN is the COUNTRYCODE (the retail installs' bytes).
+	const std::filesystem::path cc_root =
+			std::filesystem::temp_directory_path() / "opennova_join_tokens_cc";
+	std::filesystem::create_directories(cc_root);
+	{
+		std::ofstream cc(cc_root / "cc.bin", std::ios::binary);
+		cc << "usqq0409us";
+	}
+
 	// --- the NovaWorld joiner: APPID after COUNTRYCODE, CD after VERSIONCRCSTRING
 	inmatch::JoinerConnection joiner("JoinTokens");
+	joiner.set_expansion_version_root(cc_root.string());
 	joiner.set_join_request(inmatch::JoinRole::Player, "", "", "SideSecret");
 	inmatch::CharacterJoinVars side_profile;
 	side_profile.char_id[0] = 0x2101;
@@ -949,14 +962,34 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 
 	// --- the LAN joiner: no APPID chunk
 	inmatch::JoinerConnection lan("JoinTokensLan");
+	lan.set_expansion_version_root(cc_root.string());
+	lan.set_time_zone_bias(-330);
 	ServerHello lan_hello;
 	ClientAuth lan_auth;
 	if (!hello_to_client_auth(lan, lan_hello, lan_auth)) return false;
 	const auto lan_cu = cu_fields(lan_auth);
 	if (!expect(index_of(lan_cu, "JSP") < 0, "empty join credentials omit JSP")) return false;
 	if (!expect(index_of(lan_cu, "APPID") < 0, "a LAN joiner sends no APPID")) return false;
-	return expect(index_of(lan_cu, "COUNTRYCODE") >= 0,
-	              "the LAN ClientAuth keeps its fixed fields through COUNTRYCODE");
+	// D-NET-296: COUNTRYCODE is the install's CC.BIN (two bytes) and TZB the OS
+	// bias, each omitted when empty / 0. [orig: Game_ReadCCBinFile @0x4a5860;
+	//  UI_JoinSelectedSession @0x569b70 / @0x569dbd; the gates @0x4c385a / @0x4c3da4]
+	const int lan_country = index_of(lan_cu, "COUNTRYCODE");
+	const int lan_tzb = index_of(lan_cu, "TZB");
+	if (!expect(lan_country >= 0 && lan_cu[static_cast<size_t>(lan_country)].second == "us",
+	            "COUNTRYCODE is CC.BIN's first two bytes"))
+		return false;
+	if (!expect(lan_tzb >= 0 && lan_cu[static_cast<size_t>(lan_tzb)].second == "-330",
+	            "TZB is the time-zone bias in signed minutes"))
+		return false;
+	inmatch::JoinerConnection bare("JoinTokensBare");
+	bare.set_time_zone_bias(0);
+	ServerHello bare_hello;
+	ClientAuth bare_auth;
+	if (!hello_to_client_auth(bare, bare_hello, bare_auth)) return false;
+	const auto bare_cu = cu_fields(bare_auth);
+	return expect(index_of(bare_cu, "COUNTRYCODE") < 0 && index_of(bare_cu, "TZB") < 0 &&
+	                      index_of(bare_cu, "VERSIONSTRING") >= 0 && index_of(bare_cu, "MPS") >= 0,
+	              "no CC.BIN and a zero bias omit COUNTRYCODE and TZB");
 }
 
 bool run_retail_post_auth_prelude() {
