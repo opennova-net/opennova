@@ -133,10 +133,14 @@ public:
 		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
 		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
 		std::vector<std::vector<uint8_t>> immediate_outbound;
-		// Receive handlers queue reliable semantic replies here. ClientRuntime folds all state
-		// from this receive boundary first, then places these behind the shared send-holdoff gate
-		// so they batch with same-frame housekeeping/gameplay at PumpClientProtocolSend.
+		// Receive handlers queue reliable semantic replies here, in the order they ran.
+		// ClientRuntime appends them to its one C2S queue as it folds the reducer stream.
 		std::vector<ProtocolMessage> queued_send_messages;
+		// For each queued reply, how many inbound_reducer entries its handler's message
+		// follows: the reply joins the queue right after the fold of that many entries, so
+		// the replies of a datagram keep its messages' wire order beside the fold's own
+		// requests (the 0x16 handler's 0x22, the 0x0A handler's 0x0F).
+		std::vector<std::size_t> queued_send_after;
 		// DIAGNOSTIC VIEW ONLY: raw S2C 0x0A bodies. ClientRuntime applies
 		// nothing from this vector — the reducer stream below is the sole
 		// applied stream; per-family tests assert against these views.

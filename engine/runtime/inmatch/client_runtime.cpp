@@ -997,6 +997,55 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				framed_send_queue_.push_back(std::move(reply));
 			// World, live-frame, map, and gameplay bodies cross one reducer stream
 			// in wire order. The family vectors on PollResult are diagnostics only.
+			// Every handler queues what it asks the host for while it runs, so the
+			// fold's own requests and the connection's replies join the one queue
+			// entry by entry, in the datagram's wire order.
+			// [orig: inside PumpClientProtocolRecv @0x42c228: the 0x16 handler's 0x22
+			//  @0x42fc35, the 0x6A walk's 0x4E @0x43266c, the 0x0A handler's 0x0F
+			//  @0x4307E9, the 0x57 pong @0x43226d]
+			std::size_t reply = 0;
+			auto queue_replies_after = [&](std::size_t entries_folded) {
+				while (reply < pr.queued_send_messages.size() &&
+				       (reply >= pr.queued_send_after.size() ||
+				        pr.queued_send_after[reply] <= entries_folded))
+					send_queue_.push_back(std::move(pr.queued_send_messages[reply++]));
+			};
+			auto queue_fold_requests = [&] {
+				// A record the fold dropped over an unresolvable slot or carrier asks
+				// the host for that entity at once (reply: S2C 0x18, §5.46).
+				// [orig: NapiNPClientMsg_0x00A @0x4307E9 -> QueueReliableMessage(0x0F,
+				//  1, 0); the vehicle record @0x4608b3]
+				queue_carrier_repair_requests();
+				// Every 0x16 row whose connection slot the roster has not bound yet
+				// is dropped by the reducer and re-requested: one reliable C2S 0x22
+				// {slot, 0x1CF7} per dropped row
+				// [orig: NapiNPClientMsg_PlayerList @0x42fc05..0x42fc3a ->
+				//  CNapiNetwork_QueueReliableMessage(ctx, 0x22, 1, 0,
+				//  {slot, 0xF7, 0x1C}, 3) @0x42fc35].
+				std::vector<uint8_t> &sync_retries =
+						view_.state().scoreboard.pending_sync_requests;
+				for (const uint8_t slot : sync_retries) {
+					send_queue_.push_back(make_protocol_message(
+							c2s::PLAYER_SYNC_REQUEST, std::vector<uint8_t>{slot, 0xF7, 0x1C}));
+				}
+				sync_retries.clear();
+				// Each S2C 0x6A action-3 walk reply queues the next step of the
+				// clan-registry walk: one reliable C2S 0x4E {netId}
+				// [orig: NapiNPClientMsg_HandlePlayerJoinLeave ->
+				//  CNapiNetwork_QueueReliableMessage(ctx, 0x4E, 1, 0, {netId}, 4)
+				//  @0x43265c..0x43266c].
+				std::vector<uint32_t> &clan_walk = view_.state().pending_clan_walk_requests;
+				for (const uint32_t net_id : clan_walk) {
+					ClanRosterWalkRequest request;
+					request.after_account_id = net_id;
+					send_queue_.push_back(make_protocol_message(
+							c2s::GAME_START_ACK, encode_clan_roster_walk_request(request)));
+				}
+				clan_walk.clear();
+				drain_visible_refreshes();
+			};
+			queue_replies_after(0);
+			std::size_t entries_folded = 0;
 			bool death_edge_in_poll = false;
 			for (const auto &tb : pr.inbound_reducer) {
 				const uint32_t health_before =
@@ -1019,42 +1068,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					authoritative_spawn_released_ = false;
 					joiner_->begin_redeployment();
 				}
+				queue_fold_requests();
+				queue_replies_after(++entries_folded);
 			}
-			// A record the fold dropped over an unresolvable slot or carrier asks the
-			// host for that entity at once, from the receive handler, so its 0x0F sits
-			// at this datagram's place in the queue (reply: S2C 0x18, §5.46).
-			// [orig: NapiNPClientMsg_0x00A @0x4307E9 -> QueueReliableMessage(0x0F, 1, 0);
-			//  the vehicle record @0x4608b3]
-			queue_carrier_repair_requests();
-			// Every 0x16 row whose connection slot the roster has not bound yet
-			// is dropped by the reducer and re-requested here: one reliable C2S
-			// 0x22 {slot, 0x1CF7} per dropped row, queued with the housekeeping
-			// and released inside the next open send boundary
-			// [orig: NapiNPClientMsg_PlayerList @0x42fc05..0x42fc3a ->
-			//  CNapiNetwork_QueueReliableMessage(ctx, 0x22, 1, 0,
-			//  {slot, 0xF7, 0x1C}, 3) @0x42fc35].
-			std::vector<uint8_t> &sync_retries =
-					view_.state().scoreboard.pending_sync_requests;
-			for (const uint8_t slot : sync_retries) {
-				send_queue_.push_back(make_protocol_message(
-						c2s::PLAYER_SYNC_REQUEST, std::vector<uint8_t>{slot, 0xF7, 0x1C}));
-			}
-			sync_retries.clear();
-			// Each S2C 0x6A action-3 walk reply queues the next step of the
-			// clan-registry walk: one reliable C2S 0x4E {netId}, released
-			// inside the next open send boundary
-			// [orig: NapiNPClientMsg_HandlePlayerJoinLeave ->
-			//  CNapiNetwork_QueueReliableMessage(ctx, 0x4E, 1, 0, {netId}, 4)
-			//  @0x43265c..0x43266c].
-			std::vector<uint32_t> &clan_walk = view_.state().pending_clan_walk_requests;
-			for (const uint32_t net_id : clan_walk) {
-				ClanRosterWalkRequest request;
-				request.after_account_id = net_id;
-				send_queue_.push_back(make_protocol_message(
-						c2s::GAME_START_ACK, encode_clan_roster_walk_request(request)));
-			}
-			clan_walk.clear();
-			drain_visible_refreshes();
+			queue_fold_requests();
+			queue_replies_after(pr.inbound_reducer.size());
 			// The host's tick seed anchors our whole network-role clock. A seed of ZERO is a
 			// real, witnessed value (the round-end disarm form), so it is applied like any
 			// other — it parks the tick, which is exactly what retail does.
@@ -1124,13 +1142,10 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			// poll, so without this hold they would out-order the wire-position
 			// 0x0A tail that closed the latch inside the reducer loop.
 			if (death_edge_in_poll) authoritative_spawn_released_ = false;
-			// Periodic replies are produced by the receive handlers, but retail does not
-			// frame them until PumpClientProtocolSend. Defer them behind the shared holdoff
-			// gate. In particular, C2S 0x3D already pages the renderer-finalized loaded-model
-			// snapshot; decoded S2C entity records must never rebuild or mutate that domain.
-			for (ProtocolMessage &reply : pr.queued_send_messages) {
-				send_queue_.push_back(std::move(reply));
-			}
+			// (The receive handlers' replies joined the queue during the fold above; retail
+			// frames them only at PumpClientProtocolSend. C2S 0x3D already pages the
+			// renderer-finalized loaded-model snapshot; decoded S2C entity records must
+			// never rebuild or mutate that domain.)
 		}
 		// The receive pump ends with the connection's missing-sequence check: a future S2C
 		// packet seen in this batch whose gap the batch did not close sends ONE C2S 0x44 now,

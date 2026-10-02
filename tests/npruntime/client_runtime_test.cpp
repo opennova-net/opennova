@@ -5526,6 +5526,38 @@ bool run_carrier_repair_queues_at_its_record() {
 			"repair-queue: the record's 0x0F sits between the earlier stance and the 0x2C");
 }
 
+// Each receive handler queues its replies while it runs, so the replies of one datagram follow
+// its messages' wire order whichever part of the port produced them: the 0x57 handler's pong
+// (the connection reply) ahead of the 0x16 handler's 0x22 re-request (the reducer's), then the
+// send block's own 0x2C.
+// [orig: NapiNPClientMsg_0x057_RTT queues its pong @0x43226d; NapiNPClientMsg_PlayerList
+//  @0x42fc35 queues the 0x22; both inside PumpClientProtocolRecv @0x42c228]
+bool run_receive_replies_queue_in_wire_order() {
+	constexpr uint32_t kServerKey = 0x57495245u;
+	const std::string client_scrk = "CLIENT-WIRE-ORDER-SCRK";
+	const std::string server_scrk = "SERVER-WIRE-ORDER-SCRK";
+	inmatch::ClientRuntime client("WireOrder", [] { return uint64_t{0x61626364u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(0x57, {0x44, 0x33, 0x22, 0x11, 0x01}),
+			 make_protocol_message(0x16, encode_test_player_list({{9, 2}}))});
+	client.receive(dg.data(), dg.size());
+	std::vector<ProtocolMessage> sent;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) return false;
+		sent.insert(sent.end(), messages.begin(), messages.end());
+	}
+	return expect(sent.size() == 3 && sent[0].tag == c2s::RTT_CONSUMED &&
+	                      sent[0].payload == std::vector<uint8_t>({0x44, 0x33, 0x22, 0x11, 0x00}) &&
+	                      sent[1].tag == c2s::PLAYER_SYNC_REQUEST &&
+	                      sent[2].tag == c2s::RTT_CONSUMED,
+			"wire-order: the 0x57 pong, then the 0x16 re-request, then the frame's own 0x2C");
+}
+
 bool run_settings_update_preserves_active_holdoff_countdown() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-UPDATE-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-UPDATE-SCRK";
@@ -7129,6 +7161,7 @@ int main() {
 	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_c2s_producers_share_one_chronological_queue() &&
 	                run_carrier_repair_queues_at_its_record() &&
+	                run_receive_replies_queue_in_wire_order() &&
 	                run_settings_update_preserves_active_holdoff_countdown() &&
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&

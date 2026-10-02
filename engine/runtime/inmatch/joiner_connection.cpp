@@ -913,6 +913,9 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 	if (containing_packet_ack.size() != messages.size())
 		containing_packet_ack.assign(messages.size(), hdr.ack_count);
 	std::vector<ProtocolMessage> periodic_replies;
+	// periodic_replies' size when each reducer entry was emitted: the replies its handler
+	// produced follow it.
+	std::vector<std::size_t> reducer_reply_start;
 	// The fixed 0x0F header carries gameFlags at byte 22. Bit 0 says the host
 	// has spawn zones and will keep this player hidden until C2S 0x0E. Keep an
 	// explicit unknown state because OpenNova and retail may send the initial
@@ -1075,6 +1078,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		// reducer-only and loopback tests still passed.
 		// [orig: g_NPMsgInfoClient @0x82AE28]
 		out.inbound_reducer.emplace_back(m.tag, m.payload);
+		reducer_reply_start.push_back(periodic_replies.size());
 		on_list_walk_page(m, periodic_replies);
 
 		// Dispatch records in wire order. Keeping this out of the metadata pre-pass
@@ -1940,8 +1944,14 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 		}
 		// Other tags (game-start bundle scalars, world-state-load 0x0F) are not entity data.
 	}
-	for (ProtocolMessage &reply : periodic_replies)
-		out.queued_send_messages.push_back(std::move(reply));
+	std::size_t reducer_entries = 0;
+	for (std::size_t reply = 0; reply < periodic_replies.size(); ++reply) {
+		while (reducer_entries < reducer_reply_start.size() &&
+		       reducer_reply_start[reducer_entries] <= reply)
+			++reducer_entries;
+		out.queued_send_after.push_back(reducer_entries);
+		out.queued_send_messages.push_back(std::move(periodic_replies[reply]));
+	}
 	if (admission.admitted && initial_loadout_grant_count_ >= 2 &&
 	    deployment_policy_seen_ &&
 	    post_auth_stage_ == PostAuthStage::AwaitDeployment) {
