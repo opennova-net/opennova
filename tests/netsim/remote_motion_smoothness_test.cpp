@@ -1639,6 +1639,77 @@ bool run_org1_corpse_is_destroyed_at_zero() {
 	return ok;
 }
 
+// A player body's death edge drops the flag it carries on every machine:
+// the flag's row leaves the carrier and keeps the carrier's pose for the
+// client's own drop, as a destroy of the carrier would; an org1 body's edge
+// drops nothing, and a flag on another carrier stays put. [orig:
+// Entity_UpdateInfantryPlayerBody @0x4b4d0d -> Entity_DropCarriedObject
+// @0x439DF0; the org1 edge @0x4b9c40..0x4b9d3e calls no drop]
+bool run_player_death_edge_drops_the_carried_flag() {
+	static constexpr uint16_t kAiType = 0x0777;
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		if (type_id == kPlayerType) return nw::EntityClass::Player;
+		return type_id == kAiType ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	const uint16_t player = 0x0048, other = 0x0049, ai = 0x0035;
+	const uint16_t flag = 0x1007, other_flag = 0x1008, ai_flag = 0x1009;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, player, kPlayerType);
+	seed_row(view, other, kPlayerType);
+	seed_row(view, ai, kAiType);
+	const auto carry = [&](uint16_t handle, uint16_t carrier) {
+		ns::ClientEntityState &row = view.state().upsert(handle);
+		row.type_id = 4091;
+		row.parent_handle = carrier;
+		row.objective_state_serial = 1;
+	};
+	carry(flag, player);
+	carry(other_flag, other);
+	carry(ai_flag, ai);
+	nw::FrameUpdate fu = player_frame(player, ax, ay, az, ax);
+	nw::FrameUpdateRecord r;
+	r.handle = ai;
+	r.type_id = kAiType;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.anim_byte = opennova::world::anim_state::kIdle;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF);
+	const int16_t death = opennova::world::anim_state::kDeathBulletBase + 6;
+	const std::vector<uint8_t> body = {
+			static_cast<uint8_t>(ai & 0xFF), static_cast<uint8_t>(ai >> 8),
+			static_cast<uint8_t>(death & 0xFF), static_cast<uint8_t>(death >> 8)};
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	nw::FrameUpdate dead = player_frame(player, ax, ay, az, ax, 0x02);
+	dead.records[0].player.anim_state_id = opennova::world::anim_state::kDeathFire;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
+	const std::uint64_t topology = view.state().topology_revision;
+	view.tick_remote_motion(0xFFFF);
+	const ns::ClientEntityState *carrier = view.state().find(player);
+	const ns::ClientEntityState *f = view.state().find(flag);
+	bool ok = expect(carrier != nullptr && (carrier->rm_entity_flags & 0x2u) != 0u,
+	                 "the player body took its death edge");
+	ok &= expect(f != nullptr && f->parent_handle == 0xFFFF &&
+	                     f->objective_state_serial == 2 &&
+	                     f->objective_drop_serial == f->objective_state_serial &&
+	                     f->objective_drop_x == carrier->x &&
+	                     f->objective_drop_y == carrier->y &&
+	                     f->objective_drop_z == carrier->z &&
+	                     f->objective_drop_heading_bam == carrier->heading_bam,
+	             "the death edge drops the carried flag off the body's pose");
+	ok &= expect(view.state().topology_revision != topology,
+	             "the drop is a topology change the materializer takes");
+	ok &= expect(view.state().find(other_flag)->parent_handle == other &&
+	                     view.state().find(other_flag)->objective_drop_serial == 0,
+	             "a flag on a living carrier stays carried");
+	ok &= expect((view.state().find(ai)->rm_entity_flags & 0x2u) != 0u &&
+	                     view.state().find(ai_flag)->parent_handle == ai,
+	             "an org1 death edge drops nothing");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -1675,6 +1746,7 @@ int main() {
 	ok &= run_entity_death_parks_the_death_anim();
 	ok &= run_dead_tail_counts_down_and_decays();
 	ok &= run_org1_corpse_is_destroyed_at_zero();
+	ok &= run_player_death_edge_drops_the_carried_flag();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

@@ -530,6 +530,10 @@ private:
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	void erase_entity_tree(uint16_t root_handle);
+	// Entity_DropCarriedObject over a person carrier's row: the carried flag
+	// leaves it and keeps the carrier's pose for the drop the client runs
+	// (ClientWorldMaterializer). True when a flag was dropped.
+	bool drop_carried_objective(uint16_t carrier_handle);
 	uint32_t begin_entity_lifetime(uint16_t handle);
 	void discard_entity_notifications(uint16_t handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /

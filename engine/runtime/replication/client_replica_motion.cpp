@@ -1051,6 +1051,10 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			const int16_t death_state = row_death_edge(es);
 			if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
+			// The org2 death edge drops the carried flag on every machine,
+			// ungated [orig: Entity_UpdateInfantryPlayerBody @0x4b4d0d ->
+			// Entity_DropCarriedObject].
+			if (death_state >= 0) drop_carried_objective(es.handle);
 			corpse_leg(es, death_state >= 0, /*org1=*/false);
 			organic_chase_tail(es, is_self);
 			commit_death_state(es, death_state);
