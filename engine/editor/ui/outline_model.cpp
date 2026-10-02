@@ -355,6 +355,7 @@ OutlineLine collection_line(const NodeAddress &owner, const Document::Collection
 	line.count = collection.ids.size();
 	line.branch = !collection.ids.empty();
 	line.addable = !spec.fixed && (spec.max == 0 || collection.ids.size() < spec.max);
+	if (!spec.fixed && spec.max != 0 && collection.ids.size() >= spec.max) line.full = spec.max;
 	line.text = std::string(spec.label) + " (" + std::to_string(collection.ids.size()) + ")";
 	return line;
 }

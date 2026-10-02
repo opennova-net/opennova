@@ -53,7 +53,9 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_clipboard.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_logic.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_sentence.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
@@ -183,6 +185,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/import_plan_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/mission_logic_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/open_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/operation_progress.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/outcome_json.cpp
@@ -234,6 +237,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_logic_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp

@@ -35,6 +35,7 @@ struct OutlineLine {
 	size_t index = 0;    // a record's place among its owner's records of its kind, a row's among the rows
 	size_t count = 0;    // a collection's records
 	bool addable = false; // a collection that takes another record at its end (its + tool)
+	size_t full = 0;      // a collection holding the most it holds: that most (its + off, saying so)
 	int lines = 1;        // master and detail: the lines of text its tallest cell shows (1 to 8)
 	// What the line shows: a record's title (Document::record_title; in a list, a row of another
 	// kind than the file's own after its kind's label), a collection's label and count; a record's
@@ -65,13 +66,21 @@ using OutlineFileValuesHook = bool (*)(const Document &document, OutlineFileValu
 // files hold rows most of which stand empty (a mission's 128 paths: one with no stop is not listed).
 using OutlineRowListedHook = bool (*)(const Document &document, const Node &row);
 
+class Workspace;
+// A collection whose records are added by type (a mission's triggers and actions, S15): whether the
+// collection of `kind` is one, and the body of the popup its "+" opens, which offers the types and
+// raises the add into `owner`.
+using OutlineAddsByMenuHook = bool (*)(NodeKind kind);
+using OutlineAddMenuHook = void (*)(Workspace &workspace, const Document &document, const NodeAddress &owner, NodeKind kind);
+
 // What an outline view of a type is (its DocumentViewRow's outline, ui/document_views): its mode,
 // the heading of the master column (master and detail: the rows' words, "Sections"), the hook
 // of a type whose files hold file-wide values a list shows after its rows (null: none), whether a
 // list or a tree filters its rows by kind (a chip per kind of row the file holds, each listing or
 // leaving out its kind's rows: a mission's pools, paths, areas and events), and the hook of a type
 // some of whose rows are left out until the view's switch lists them (null: every row is listed),
-// with the switch's words ("Empty paths").
+// with the switch's words ("Empty paths"); and the hooks of a type some of whose collections add
+// their records by type (null: a "+" adds a blank one).
 struct OutlineSpec {
 	OutlineMode mode = OutlineMode::Tree;
 	const char *rows = "";
@@ -79,6 +88,8 @@ struct OutlineSpec {
 	bool by_kind = false;
 	OutlineRowListedHook row_listed = nullptr;
 	const char *unlisted = "";
+	OutlineAddsByMenuHook adds_by_menu = nullptr;
+	OutlineAddMenuHook add_menu = nullptr;
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the

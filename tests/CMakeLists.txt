@@ -4251,11 +4251,12 @@ if(OPENNOVA_IMGUI)
     add_executable(editor_ui_test editor_ui/editor_windows_test.cpp editor_ui/workspace_test.cpp
                                   editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
                                   editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
-                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp)
+                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp
+                                  editor_ui/logic_test.cpp)
     target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
     target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
-                                  menu inspector preview styles problems gate)
+                                  menu inspector preview styles problems gate logic)
     foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
         add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
     endforeach()
@@ -4356,6 +4357,16 @@ add_executable(editor_mission_sentence_test editor/mission_sentence_test.cpp)
 target_link_libraries(editor_mission_sentence_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_sentence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_sentence COMMAND editor_mission_sentence_test)
+
+# Adding and editing a mission's logic without its format (editor/documents/mission_logic.h,
+# mission_uses.h, ADR 0046 S15): the forms, an add by type, the 20 an event holds refused before the
+# edit, a retype keeping what applies, a move, a negation and a join, what names a record, the
+# mission_logic and mission_uses queries; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped record
+# given a form and the defaults' measured values.
+add_executable(editor_mission_logic_test editor/mission_logic_test.cpp)
+target_link_libraries(editor_mission_logic_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_logic COMMAND editor_mission_logic_test)
 
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the

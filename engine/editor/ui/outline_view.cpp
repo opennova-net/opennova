@@ -40,7 +40,9 @@ std::string lower(std::string text) {
 // ("anim_walk_forward" under "walk forward"), then whether it changed since the last save.
 std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
 	const std::string words = ui_kit::change_words(change);
-	std::string tip = line.name;
+	// The whole line where the column cuts it (a mission's event, its sentence), then its name.
+	std::string tip = line.text;
+	if (!line.name.empty()) tip += "\n" + line.name;
 	if (!words.empty()) tip += (tip.empty() ? "" : "\n") + words;
 	return tip;
 }
@@ -315,11 +317,25 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		ImGui::PushID(static_cast<int>(line.address.child ? line.address.child : line.address.row));
 		ImGui::TreeNodeEx("##collection", flags | ImGuiTreeNodeFlags_AllowOverlap, "%s", line.text.c_str());
 		if (line.branch && ImGui::IsItemToggledOpen()) model_.set_open(line, !line.open);
-		if (line.addable) {
+		// Its "+": a blank record at the end, or where the type adds its records by type (a mission's
+		// triggers and actions, S15) a popup of the types by name; off, saying so, while the list holds
+		// the most it holds.
+		const bool by_menu = spec_.adds_by_menu && spec_.add_menu && spec_.adds_by_menu(line.kind);
+		if (line.addable || line.full) {
 			ImGui::SameLine();
-			if (ImGui::SmallButton("+"))
-				edit(workspace, document, EditOperation::Add, {line.address.row, line.kind, 0}, SIZE_MAX, line.address.child);
-			ui_kit::tooltip("Adds one at the end.");
+			ImGui::BeginDisabled(!line.addable);
+			if (ImGui::SmallButton("+")) {
+				if (by_menu) ImGui::OpenPopup("add");
+				else edit(workspace, document, EditOperation::Add, {line.address.row, line.kind, 0}, SIZE_MAX, line.address.child);
+			}
+			ImGui::EndDisabled();
+			ui_kit::tooltip(!line.addable ? "It holds " + std::to_string(line.full) + ", the most it holds: remove one first."
+			                : by_menu     ? std::string("Adds one at the end: pick its type by name.")
+			                              : std::string("Adds one at the end."));
+			if (by_menu && ImGui::BeginPopup("add")) {
+				spec_.add_menu(workspace, document, line.address, line.kind);
+				ImGui::EndPopup();
+			}
 		}
 		ImGui::PopID();
 		ImGui::PopID();
@@ -327,7 +343,10 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		flags |= ImGuiTreeNodeFlags_OpenOnArrow;
 		if (view.documents.selection.holds(line.address)) flags |= ImGuiTreeNodeFlags_Selected;
 		const float x = ImGui::GetCursorScreenPos().x;
-		const std::string label = ui_kit::kChangeRoom + line.text;
+		// Cut to the column (a mission's event is its whole sentence, S15): the whole in its tooltip.
+		const float room = ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing() -
+		                   ui_kit::text_width(ui_kit::kChangeRoom);
+		const std::string label = ui_kit::kChangeRoom + ui_kit::fit(line.text, std::max(room, ImGui::GetFontSize() * 6.0f));
 		const NodeId id = line.address.child ? line.address.child : line.address.row;
 		ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(id)), flags, "%s", label.c_str());
 		const bool toggled = ImGui::IsItemToggledOpen();

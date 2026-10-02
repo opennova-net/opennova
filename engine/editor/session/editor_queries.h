@@ -42,6 +42,8 @@ enum class EditorQueryKind : uint8_t {
 	Operation,
 	BuildGate,
 	Events,
+	MissionLogic,
+	MissionUses,
 	Catalog,
 	kCount,
 };

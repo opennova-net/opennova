@@ -5,6 +5,8 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/model/field_text.h>
@@ -884,8 +886,11 @@ void draw_section(Workspace &workspace, Controls &controls, const Document &docu
 }
 
 // The row and every record that holds the selection, each one click away, on a row that
-// wraps; a long name cut to the window (whole in its tooltip, with the token its type words).
-void breadcrumb(Workspace &workspace, const Document &document, const NodeAddress &selection) {
+// wraps; a long name cut to the window (whole in its tooltip, with the token its type words). A
+// record its type's part of the Inspector shows in words by its name (`by_name`, S15: a mission's
+// event, trigger or action).
+void breadcrumb(Workspace &workspace, const Document &document, const NodeAddress &selection,
+                InspectorNamesInBreadcrumb by_name) {
 	std::vector<NodeAddress> chain = document.ancestors(selection);
 	chain.push_back(selection);
 	const float room = ImGui::GetContentRegionAvail().x;
@@ -896,7 +901,8 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 			row.next(ui_kit::text_width("/"));
 			ImGui::TextDisabled("/");
 		}
-		const std::string title = document.record_title(chain[i]), name = document.record_name(chain[i]);
+		const std::string name = document.record_name(chain[i]);
+		const std::string title = by_name && by_name(document, chain[i]) ? name : document.record_title(chain[i]);
 		const bool last = i + 1 == chain.size();
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
@@ -936,7 +942,7 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 // edges stay where they are while it stands) and the files. Clipped: a variable a thousand
 // windows use draws only the lines that show, each cut to the window (the whole of it, and the
 // field's id, in its tooltip); a click goes to the use (graph/reference_queries' usage_target).
-void InspectorWindow::referenced_by(const Document &document, const NodeAddress &record) {
+void InspectorWindow::referenced_by(const Document &document, const NodeAddress &record, bool others_only) {
 	const SessionView &view = workspace_.view();
 	if (!view.findings.graph) return;
 	const AssetGraph &graph = *view.findings.graph;
@@ -948,6 +954,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 	key.graph = &graph;
 	key.generation = graph.generation();
 	key.files = revision_key(view.revisions, {ViewConcern::Files});
+	key.others_only = others_only;
 	if (!(key == users_key_)) {
 		users_key_ = key;
 		++users_made_;
@@ -956,6 +963,8 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 			if (symbol->inert) continue; // not what the game reads: nothing names this one
 			if (symbol->address.row && symbol->address != record) continue; // another record of the same path
 			for (const GraphEdge *edge : graph.referrers_of(symbol->kind, symbol->name, symbol->scope)) {
+				// Its own document's uses listed in its type's words already (S15: a mission's events).
+				if (others_only && edge->source == document.path()) continue;
 				const std::string field = edge_field_title(view, *edge);
 				users_.push_back({edge, edge->source + ": " + (edge->record.empty() ? field : edge->record + " - " + field)});
 			}
@@ -963,7 +972,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 	}
 	if (users_.empty()) return;
 	ImGui::Separator();
-	ImGui::Text("Referenced by %zu field(s)", users_.size());
+	ImGui::Text(others_only ? "Referenced by %zu field(s) in other files" : "Referenced by %zu field(s)", users_.size());
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(users_.size()));
 	while (clipper.Step())
@@ -1033,7 +1042,8 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	reveal.scroll = reveal_scroll_;
 	const double since = ImGui::GetTime() - reveal_time_;
 	reveal.light = reveal_field_.empty() || since >= kFlashSeconds ? 0.0f : float(1.0 - since / kFlashSeconds) * 0.8f;
-	breadcrumb(workspace_, *document, selection);
+	const DocumentViewRow *own = document_view_row(asset_kind_row(document->kind()).document);
+	breadcrumb(workspace_, *document, selection, own ? own->breadcrumb_names : nullptr);
 	// Several records of one kind, or of kinds whose fields are alike (a mission's entities of
 	// several pools): the fields they share, each change set on every one.
 	Targets together{selection};
@@ -1061,13 +1071,18 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		                         " records of different kinds selected; the fields below are the primary one's.";
 		ui_kit::empty_state(note.c_str());
 	}
+	// The type's own part first (S15: a mission's event, trigger or action in words), and what it
+	// draws itself the generic form leaves out.
+	InspectorTaken taken;
+	if (own && own->inspector_top) own->inspector_top(workspace_, *document, selection, taken);
 	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter fields and lists");
 	// The selection's own collections, or its owner's when it holds none, so the records
 	// beside it (a window's other actions) stay one click away.
 	NodeAddress owner = selection;
 	Document::Placement at;
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
-	const std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
+	std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
+	leave_out(plan, taken.fields, taken.collections);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
 	Controls controls{picker_, typed_};
 	ImGui::BeginDisabled(!editable);
@@ -1083,7 +1098,10 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			rename_everywhere(workspace_, *document, selection, field, value);
 			break;
 		}
-	referenced_by(*document, selection);
+	// The type's own part last (S15: what in its document names the record, in its words), then who
+	// names it in the other files.
+	if (own && own->inspector_bottom) own->inspector_bottom(workspace_, *document, selection, taken);
+	referenced_by(*document, selection, taken.own_uses);
 	findings_.follow(view);
 	findings(view, findings_, *document, *row, selection);
 }

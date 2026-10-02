@@ -14,6 +14,10 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_logic.h>
+#include <editor/documents/mission_table.h>
+#include <editor/documents/mission_uses.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
@@ -25,6 +29,7 @@
 #include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
 #include <editor/session/finding_codes.h>
+#include <editor/session/mission_logic_json.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
@@ -879,6 +884,148 @@ JsonValue answer_events(const QueryContext &context, const QueryArgs &args, std:
 	return events_page_to_json(context.core.view().events, args.cursor(), args.limit());
 }
 
+// --- a mission's logic (S15) ---------------------------------------------------------------------
+
+constexpr const char *kLogicOps[] = { "form", "types", "add", "retype", "move", "negate", "join" };
+const char *logic_op_choice(size_t index) { return index < std::size(kLogicOps) ? kLogicOps[index] : nullptr; }
+constexpr const char *kLogicLists[] = { "trigger", "action" };
+const char *logic_list_choice(size_t index) { return index < std::size(kLogicLists) ? kLogicLists[index] : nullptr; }
+const char *logic_join_choice(size_t index) {
+	constexpr LogicJoin joins[] = { LogicJoin::And, LogicJoin::Or, LogicJoin::Xor };
+	return index < std::size(joins) ? logic_join_token(joins[index]) : nullptr;
+}
+constexpr QueryChoices kLogicChoices[] = {
+	{ "op", logic_op_choice },
+	{ "list", logic_list_choice },
+	{ "join", logic_join_choice },
+};
+
+constexpr QueryParam kMissionLogicParams[] = {
+	{ "path", J::String, false, nullptr, "An open mission by its project-relative path or its logical name; left out, the "
+			"active document." },
+	{ "op", J::String, true, nullptr,
+			"What is asked: form (an event's, or a trigger's or an action's: its words and what it holds), types "
+			"(what Add trigger or Add action offers, by name and group), add, retype, move, negate, join (the "
+			"edits that change the logic so, in the batch form an edit_record takes back)." },
+	{ "id", J::Integer, false, nullptr,
+			"The record: an event (form, add) or a trigger or an action (form, retype, move, negate, join), by "
+			"its identity." },
+	{ "list", J::String, false, nullptr, "types' and add's list: trigger or action." },
+	{ "type", J::Integer, false, nullptr, "add's and retype's type (a trigger's main type, an action's type)." },
+	{ "sub", J::Integer, false, "0", "add's and retype's sub-type (a trigger's, an AI action's command)." },
+	{ "to", J::Integer, false, nullptr, "move's event, by its identity." },
+	{ "position", J::Integer, false, nullptr, "add's and move's place in the list; left out, the end." },
+	{ "negated", J::Boolean, false, nullptr, "negate's: whether the trigger is negated." },
+	{ "join", J::String, false, nullptr, "join's: how the trigger joins the next (and, or, or_else)." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+constexpr QueryParam kMissionUsesParams[] = {
+	{ "path", J::String, false, nullptr, "An open mission, as mission_logic takes it." },
+	{ "id", J::Integer, true, nullptr,
+			"The record by its identity: an entity, an area trigger, a waypoint path, an event, or a group (a "
+			"record of the mission row's Groups)." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+// The open mission `args` names, or null with `error`.
+const MissionDocument *mission_of(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const Document *document = document_of(context, args, error);
+	const auto *mission = dynamic_cast<const MissionDocument *>(document);
+	if (document && !mission) error = document->path() + " is no mission.";
+	return mission;
+}
+
+// The planned edits in the batch form an edit_record takes back, or the refusal that says why none.
+JsonValue planned(const Document &document, bool ok, const std::vector<Edit> &edits, const std::string &refusal) {
+	JsonValue out = JsonValue::make_object();
+	out.set("edits", ok ? record_batch_to_json(edits, &document, RecordBatchForm::Edits) : JsonValue::make_array());
+	if (!ok) out.set("refusal", json_string(refusal));
+	return out;
+}
+
+JsonValue answer_mission_logic(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const std::string op = args.text("op");
+	const bool actions = args.text("list") == "action";
+	if (op == "types") {
+		if (!args.has("list")) {
+			error = "op types needs \"list\": trigger or action.";
+			return JsonValue::make_null();
+		}
+		return logic_types_to_json(actions, page_of(args));
+	}
+	const MissionDocument *mission = mission_of(context, args, error);
+	if (!mission) return JsonValue::make_null();
+	if (!args.has("id")) {
+		error = "op " + op + " needs \"id\", the record by its identity.";
+		return JsonValue::make_null();
+	}
+	NodeAddress address;
+	if (!record_of(*mission, args, address, error)) return JsonValue::make_null();
+	const DocumentMissionNames names(*mission);
+	const bool event = !address.child && address.kind == node_kind(MissionKind::Event);
+	if (op == "form") {
+		if (event) {
+			LogicEventForm form;
+			logic_event_form(*mission, address.row, names, form);
+			return logic_event_form_to_json(form);
+		}
+		LogicForm form;
+		if (!logic_form(*mission, address, names, form)) {
+			error = "record " + std::to_string(identity_of(address)) + " is no event, trigger or action.";
+			return JsonValue::make_null();
+		}
+		return logic_form_to_json(form);
+	}
+	std::vector<Edit> edits;
+	std::string refusal;
+	bool ok = false;
+	if (op == "add" || op == "retype") {
+		if (!args.has("type") || (op == "add" && !args.has("list"))) {
+			error = "op " + op + " needs \"type\"" + (op == "add" ? std::string(" and \"list\"") : std::string()) + ".";
+			return JsonValue::make_null();
+		}
+		const bool list_actions = op == "add" ? actions : address.kind == node_kind(MissionKind::Action);
+		const LogicType *type = logic_type(list_actions, int32_t(args.integer("type")), int32_t(args.integer("sub")));
+		if (!type) {
+			error = "no " + std::string(list_actions ? "action" : "trigger") + " type " + std::to_string(args.integer("type")) +
+			        "/" + std::to_string(args.integer("sub")) + " is offered (op types lists them).";
+			return JsonValue::make_null();
+		}
+		const size_t position = args.has("position") ? size_t(args.integer("position")) : SIZE_MAX;
+		ok = op == "add" ? logic_add_edits(*mission, address.row, *type, position, edits, refusal)
+		                 : logic_retype_edits(*mission, address, *type, edits, refusal);
+	} else if (op == "move") {
+		if (!args.has("to")) {
+			error = "op move needs \"to\", the event by its identity.";
+			return JsonValue::make_null();
+		}
+		const size_t position = args.has("position") ? size_t(args.integer("position")) : SIZE_MAX;
+		ok = logic_move_edits(*mission, address, NodeId(args.integer("to")), position, edits, refusal);
+	} else if (op == "negate" || op == "join") {
+		Edit edit;
+		LogicJoin join = LogicJoin::And;
+		if (op == "join" && !logic_join_from_token(args.text("join"), join)) {
+			error = "op join needs \"join\": and, or or or_else.";
+			return JsonValue::make_null();
+		}
+		ok = op == "negate" ? logic_negate_edit(*mission, address, args.boolean("negated"), edit)
+		                    : logic_join_edit(*mission, address, join, edit);
+		if (ok) edits.push_back(edit);
+		else refusal = "That is no trigger of the mission.";
+	}
+	return planned(*mission, ok, edits, refusal);
+}
+
+JsonValue answer_mission_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const MissionDocument *mission = mission_of(context, args, error);
+	NodeAddress address;
+	if (!mission || !record_of(*mission, args, address, error)) return JsonValue::make_null();
+	return mission_uses_to_json(mission_uses(*mission, address, DocumentMissionNames(*mission)), page_of(args));
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1143,6 +1290,30 @@ constexpr EditorQueryRow kRows[] = {
 			"more than 64 behind misses the events dropped, the cursor coming back larger than it "
 			"asked.")
 			.pages("items")
+			.row,
+	Query(K::MissionLogic, "mission_logic", answer_mission_logic, kMissionLogicParams, kDocumentReads,
+			"A mission's logic without its format (ADR 0046 S15), by op. form: an event's (its sentence and its "
+			"parts, when, then, delay, repeat; repeats, at_start, at_end; delay_steps and repeat_steps with their "
+			"seconds and most_steps; its triggers' and actions' counts, the most an event holds and why it takes "
+			"no more, trigger_refusal and action_refusal), or a trigger's or an action's (its type by title and "
+			"group, a trigger's negation, its join to the next and whether it is the last, the params its type "
+			"reads, each its slot, field, kind, label, value, the value in words and its unit, those it does not "
+			"read that hold a value, its words and its event's sentence). types: what Add trigger or Add action "
+			"offers (list), each type, sub, title, group and tip, in their groups' order. add, retype, move, "
+			"negate, join: the edits that add a record of a type with its kinds' defaults, give one another type "
+			"keeping what still applies, move it (to another event: added there and removed here, one batch), "
+			"negate it or join it to the next, in the batch form an edit_record takes back, or the refusal that "
+			"says why none (an event holding the most it holds).")
+			.pages("types")
+			.chooses(kLogicChoices)
+			.row,
+	Query(K::MissionUses, "mission_uses", answer_mission_uses, kMissionUsesParams, kDocumentReads,
+			"What happens when (ADR 0046 S15): the events whose triggers or actions name a record of a mission "
+			"(an entity by its SSN, an area by its zone id, a waypoint path, an event, a group), each its event "
+			"(address and index), the record and the field naming it, the record's words and its event's "
+			"sentence; what the record is to them, and why a second holder of an SSN or a zone id is named by "
+			"none (inert).")
+			.pages("uses")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "
