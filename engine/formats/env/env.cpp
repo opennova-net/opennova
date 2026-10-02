@@ -466,7 +466,13 @@ bool save_env(std::ostream &output, const Config &cfg, std::string &error) {
 	output << NL;
 	output << "sky_map1 " << cfg.sky_map1 << NL;
 	output << "sky_map2 " << cfg.sky_map2 << NL;
-	output << "sky_height " << number_to_string(cfg.sky_height) << NL;
+	// The keyword reads whole units (atol, stored << 16 [orig: TimeOfDay_ParseProperty
+	// @ 0x57cbc3]), so the engine's raw-200 default (~0.003 units [orig:
+	// Environment_InitDefaults @ 0x57c1ab]) has no file form: left unwritten, it reads back
+	// as itself, where any line would read back as 0.
+	if (cfg.sky_height != Config().sky_height) {
+		output << "sky_height " << number_to_string(cfg.sky_height) << NL;
+	}
 	output << "sky_speed " << number_to_string(cfg.sky_speed) << NL;
 	output << NL;
 	output << "fog_level " << number_to_string(cfg.fog_level) << NL;

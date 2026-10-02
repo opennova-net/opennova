@@ -120,6 +120,21 @@ int main() {
 		                    near(back.scratch.skyfog.g, 25.0f / 255.0f),
 		            "a saved scratch keyframe reads back and saves the same"))
 			return 1;
+		// The engine's raw-200 sky_height default has no file form (the keyword reads whole
+		// units, atol << 16): a config holding it writes no sky_height line, so it reads back
+		// as the default, where "sky_height 0.00305176" read back as 0.
+		{
+			std::ostringstream first;
+			opennova::env::Config reread;
+			if (!expect(opennova::env::save_env(first, opennova::env::Config(), err), "save the defaults")) return 1;
+			std::istringstream again_in(first.str());
+			std::ostringstream second;
+			if (!expect(opennova::env::load_env(again_in, reread, err) &&
+			                    reread.sky_height == opennova::env::Config().sky_height &&
+			                    opennova::env::save_env(second, reread, err) && second.str() == first.str(),
+			            "the default sky_height survives a save"))
+				return 1;
+		}
 		std::ostringstream plain;
 		if (!expect(opennova::env::save_env(plain, opennova::env::Config(), err) &&
 		                    plain.str().find("_rgb 192,192,255") == std::string::npos &&
