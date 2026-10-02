@@ -1173,6 +1173,7 @@ func _on_world_load_failed(reason: String) -> void:
 		if error != null and error.is_set():
 			text = error.reason_text(Strings.get_override_table(),
 					Strings.get_table(Strings.TABLE_GAMEERR))
+		_net.note_join_failure(error)
 		_join_screen.show_failure(text)
 		return
 	# A load-step failure or abort returns to the menu — the witnessed early

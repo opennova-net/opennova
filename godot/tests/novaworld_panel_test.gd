@@ -431,6 +431,25 @@ func test_nw_join_callsign_is_the_signed_in_handle() -> void:
 			"a blank handle cannot clobber the retained one")
 
 
+func test_a_server_that_refused_this_install_is_greyed_with_its_reason() -> void:
+	var panel := _make_panel(PackedStringArray())
+	var rows: Array[NovaWorldServerRow] = [
+		_row({"name": "AlphaHost", "rid": 7, "max_players": 16}),
+		_row({"name": "BravoHost", "rid": 42, "max_players": 16}),
+	]
+	panel.set_rows_for_test(rows)
+	assert_false(panel.visible_row_dimmed(1), "before the refusal the row draws normally")
+	panel.set_refused_servers({42: "Your game is incompatible with this server. (NCC007)"})
+	assert_eq(panel.join_block_reason(rows[1]),
+			"Your game is incompatible with this server. (NCC007)",
+			"the reason is the refusal's own text")
+	assert_true(panel.visible_row_dimmed(1), "the refused server draws greyed out")
+	panel.select_visible_row_for_test(1)
+	assert_false(panel.join_enabled(), "Join stays disabled on it")
+	assert_string_contains(panel.details_text(), "Cannot join: Your game is incompatible")
+	assert_eq(panel.join_block_reason(rows[0]), "", "other servers stay joinable")
+
+
 func test_rows_without_an_expansion_are_joinable() -> void:
 	var panel := _make_panel(PackedStringArray())
 	assert_eq(panel.join_block_reason(_row({"name": "BaseGameHost", "exp": "", "rid": 7})), "",

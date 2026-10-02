@@ -82,6 +82,13 @@ var _nw_callsign := ""
 # reads it for every row the table draws).
 var _installed_expansions := PackedStringArray()
 var _installed_listed := false
+# rid -> the reason a server refused this install earlier in the session (its
+# game version, an expansion mismatch, a banned address): retrying cannot work.
+# The controller keeps the record across panel instances (set_refused_servers).
+var _refused_servers: Dictionary = {}
+# The rid of the row the last Join press went to (the controller reads it when
+# the join leaves the panel, to remember a refusal against it).
+var _joining_rid := 0
 # The mounted resource root, set by MainGame BEFORE _ready so the host Map picker can list the
 # install's .bms missions (the panel owns no mission list; the world's root is null until a load).
 var resource_root: ResourceRoot
@@ -602,12 +609,17 @@ func _update_join_button(row: NovaWorldServerRow) -> void:
 	_join_button.disabled = row == null or not join_block_reason(row).is_empty()
 
 
-## Why this install cannot join the row, or "" when it can: the row advertises
-## an expansion the install does not have, the decision the in-match 0x7B
-## reconcile would fail the load on (D-NET-178). A row with no expansion field
-## (base game, or absent GSB data) is always joinable.
+## Why this install cannot join the row, or "" when it can: the server already
+## refused this install this session (the refusal's own text), or the row
+## advertises an expansion the install does not have, the decision the in-match
+## 0x7B reconcile would fail the load on (D-NET-178). A row with no expansion
+## field (base game, or absent GSB data) is otherwise joinable.
 func join_block_reason(row: NovaWorldServerRow) -> String:
-	if row == null or resource_root == null:
+	if row == null:
+		return ""
+	if _refused_servers.has(row.rid):
+		return String(_refused_servers[row.rid])
+	if resource_root == null:
 		return ""
 	var host_exp := row.exp.strip_edges()
 	if host_exp.is_empty():
@@ -722,6 +734,7 @@ func _on_join_pressed() -> void:
 		_set_status(blocked)
 		return
 	# Remember what we need for the in-match join — joined_game only carries the resolved address.
+	_joining_rid = rid
 	_pending_mission = row.mission_name
 	_pending_expansion = row.exp.strip_edges()
 	# The NW handle when signed in (retail: your account name is your callsign
@@ -966,6 +979,18 @@ func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	if row < 0 or row >= _view.size():
 		return ""
 	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
+
+
+## The servers that refused this install this session (rid -> reason), kept by
+## the controller across panel instances.
+func set_refused_servers(refused: Dictionary) -> void:
+	_refused_servers = refused
+	_rebuild_view()
+
+
+## The rid of the row the last Join press went to.
+func joining_rid() -> int:
+	return _joining_rid
 
 
 ## Select a visible row through the table (the real selection signal path).

@@ -11,6 +11,11 @@ extends Node
 # launch flags.
 
 var _shell: MainGame  # start_world_load / current_resource_root
+# The NovaWorld servers that refused this install this session (rid -> reason),
+# and the rid the current NovaWorld join went to (note_join_failure).
+var _refused_servers: Dictionary = {}
+var _joining_rid := 0
+var _joining_novaworld_server := false
 var _world: GameWorld
 var _menu_shell: MenuShell
 var _panel_layer: Node  # where the NovaWorld panel mounts (the menu layer)
@@ -477,6 +482,7 @@ func open_novaworld_panel(start_client := true) -> void:
 	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
 	_panel_layer.add_child(_novaworld_panel)
+	_novaworld_panel.set_refused_servers(_refused_servers)
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
 	# --lan-join launch use); the panel emits the same typed JoinTarget load_mission_as_joiner
@@ -487,6 +493,24 @@ func open_novaworld_panel(start_client := true) -> void:
 
 func _on_novaworld_closed() -> void:
 	_dismiss_novaworld_panel()
+
+
+## A join that failed on the join screen: a NovaWorld server that refused this
+## install outright (ConnectionError.refuses_this_install) reads as unjoinable
+## in the browser for the rest of the session, with the refusal's own text.
+func note_join_failure(error: ConnectionError) -> void:
+	if not _joining_novaworld_server:
+		return
+	_joining_novaworld_server = false
+	if error == null or not error.refuses_this_install():
+		return
+	_refused_servers[_joining_rid] = error.reason_text(Strings.get_override_table(),
+			Strings.get_table(Strings.TABLE_GAMEERR))
+
+
+## The servers that refused this install this session (rid -> reason).
+func refused_servers() -> Dictionary:
+	return _refused_servers
 
 
 func _dismiss_novaworld_panel() -> void:
@@ -553,6 +577,8 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 # through the SAME joiner entry the LAN browser + --lan-join launch use (the target already
 # carries host_ip/port/mission/player_name).
 func _on_novaworld_join_requested(target: JoinTarget) -> void:
+	_joining_rid = _novaworld_panel.joining_rid()
+	_joining_novaworld_server = true
 	_hold_novaworld_client(_novaworld_panel.release_client())
 	_return_to_novaworld = true
 	_dismiss_novaworld_panel()
