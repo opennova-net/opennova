@@ -57,6 +57,9 @@ void ClientReplicaPipeline::apply_end_round_header(
 	// SP listen host's loopback replica stands in world.rules.mp_session for
 	// is_in_session (see mp_session_).
 	state_.spawn_success_gate = true; // before the parse [orig: @0x430858]
+	// The linger never runs out on its own: only a 0x25 ends it
+	// [orig: `mov g_EndRoundLingerTimer, 7FFFFFFFh` @0x430862].
+	state_.end_round_linger_ticks = INT32_MAX;
 	if (!decode_end_round_header(body.data(), body.size(),
 			mp_session_ && (game_type_ & 0x10000u) == 0, header))
 		return;

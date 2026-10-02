@@ -5346,6 +5346,43 @@ bool run_resend_answer_and_pong_leave_from_the_receive_pump() {
 			"resend-holdoff: the next open boundary sends only the fresh live packet");
 }
 
+// A joiner's end-round linger: the 0x1D arms it at INT32_MAX (the client never
+// times it out itself), the host's 0x25 zeroes it, and the next client frame
+// stores mission exit 4 -- the joiner leaves the match for the lobby.
+// [orig: NapiNPClientMsg_0x01D @0x430862; NapiNPClientMsg_GameReset @0x42281f;
+//  Client_ProcessNetworkFrame @0x42c3ab..0x42c3d3]
+bool run_game_reset_ends_the_round_linger() {
+	constexpr uint32_t kServerKey = 0x4C494E47u;
+	const std::string client_scrk = "CLIENT-LINGER-SCRK";
+	const std::string server_scrk = "SERVER-LINGER-SCRK";
+	inmatch::ClientRuntime client("Linger", [] { return uint64_t{0x31323334u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk, 1, 0, 0x0002,
+			w::kPlayerInfantryTypeId, 0x10000u, 0, /*replay_mode=*/false);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	EndRoundHeader header;
+	header.winner_team = 2;
+	header.team_score_0 = 3;
+	header.team_score_1 = 8;
+	header.player_index = 0;
+	const std::vector<uint8_t> round_over = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::END_ROUND_HEADER,
+					encode_end_round_header(header, /*non_team_form=*/false))});
+	client.receive(round_over.data(), round_over.size());
+	for (uint32_t tick = 1; tick <= 400; ++tick) client.Client_ProcessNetworkFrame(tick);
+	if (!expect(client.mission_exit_reason() == inmatch::kMissionExitNone,
+			"linger: a 0x1D alone never runs the linger out"))
+		return false;
+	const std::vector<uint8_t> reset = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(s2c::GAME_RESET, {})});
+	client.receive(reset.data(), reset.size());
+	if (!expect(client.mission_exit_reason() == inmatch::kMissionExitNone,
+			"linger: the 0x25 itself stores no exit reason"))
+		return false;
+	client.Client_ProcessNetworkFrame(401);
+	return expect(client.mission_exit_reason() == inmatch::kMissionExitRoundOver,
+			"linger: the client frame after a 0x25 stores mission exit 4");
+}
+
 // A stance change pressed between boundaries is QUEUED like every other
 // reliable C2S: it mints no sequence and ages nothing until the next open
 // boundary, which carries it in queue order ahead of what was queued after it
@@ -7335,6 +7372,7 @@ int main() {
 	                run_same_packet_holdoff_keeps_first_admission_boundary_open() &&
 	                run_missing_sequence_request_leaves_from_the_receive_pump() &&
 	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
+	                run_game_reset_ends_the_round_linger() &&
 	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_c2s_producers_share_one_chronological_queue() &&
 	                run_carrier_repair_queues_at_its_record() &&

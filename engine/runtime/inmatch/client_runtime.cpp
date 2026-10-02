@@ -1225,6 +1225,22 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		                                 : 0xFFFFu);
 	lap.mark(devtools::Slot::SIM_CLIENT_MAINTENANCE);
 
+	// The end-round linger: in session, not the authority, the round-over gate
+	// up, the frame's tick comes off g_EndRoundLingerTimer and its expiry
+	// stores mission exit 4 (the joiner leaves the match: the shell's route
+	// takes the NovaWorld lobby or the LAN menu). The 0x1D armed it at
+	// INT32_MAX, so only the host's 0x25 (which zeroes it) brings it here.
+	// [orig: Client_ProcessNetworkFrame @0x42c3ab..0x42c3d3 -- `cmp
+	//  is_in_session` / `cmp is_authority` / `cmp g_SpawnSuccessGate` /
+	//  `sub eax, ebp` / `mov g_MissionExitReason, 4`]
+	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() &&
+			view_.state().spawn_success_gate) {
+		int32_t &linger = view_.state().end_round_linger_ticks;
+		linger -= 1;
+		if (linger <= 0 && mission_exit_reason_ == kMissionExitNone)
+			mission_exit_reason_ = kMissionExitRoundOver;
+	}
+
 	if (role_ == Role::HostClient) {
 		// host: no connect-drive, no housekeeping send, no 0x0C. Its send block
 		// opens every frame, so the held one-shots leave here, after the

@@ -310,6 +310,10 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
 			state_.spawn_success_gate = true;
+			// The reset ends the end-round linger: the next client frame's
+			// countdown stores mission exit 4 [orig: `mov g_EndRoundLingerTimer,
+			//  ebx` (0) @0x42281f -> Client_ProcessNetworkFrame @0x42c3d3].
+			state_.end_round_linger_ticks = 0;
 		}
 		break;
 	case s2c::DIALOG_LINE: { // the co-op dialog line (0x28)

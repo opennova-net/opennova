@@ -1085,6 +1085,12 @@ struct ClientState {
 	// read it. [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset
 	// @0x422849; Server_ProcessRoundEnd @0x5168e4; Game_StartMission @0x524a1f]
 	bool spawn_success_gate = false;
+	// g_EndRoundLingerTimer on a client: the 0x1D arms it at INT32_MAX (a
+	// client never times its own linger out), the host's 0x25 zeroes it, and
+	// the client frame's countdown stores mission exit 4 once it is spent
+	// [orig: NapiNPClientMsg_0x01D @0x430862; NapiNPClientMsg_GameReset
+	//  @0x42281f; Client_ProcessNetworkFrame @0x42c3c3..0x42c3d3].
+	int32_t end_round_linger_ticks = 0;
 	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
 	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),
