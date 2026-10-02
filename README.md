@@ -29,6 +29,20 @@ exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for
 round-trip limitations.
 
+The OpenNova Editor (pre-1.0 and experimental, built slice by slice under ADR 0046) is
+a separately exported application, `opennova-editor.exe`, for the data of the JO and
+newer titles, starting with Joint Operations: a project directory of loose game files; a
+Problems list that checks every file the engine expects by name and offers fixes (one
+Fix all makes a blank but bootable game); editors for the game's catalogs, string tables,
+menus and menu stylesheets, models (their materials, lights, user points, part
+animations and the rest the engine reads) and their animation clips and tables, each open
+file in a tab with its unsaved changes marked; a preview that draws a menu screen or a
+model and plays its clips the way the game does; imports that can bring along the files a
+file needs; and a Build / Play step that packs the archives and runs the game on them.
+An agent can drive it through its own MCP endpoint
+([docs/mcp.md](docs/mcp.md)). Geometry and animation keys are authored in Blender with the
+add-on above (ADR 0047); the editor imports the add-on's `.o3d` and `.o3a` files.
+
 ## Build and test
 
 Prerequisites are CMake, a C++17 compiler, Git LFS, and Git submodules. Godot
@@ -97,6 +111,19 @@ CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, the `assets/`
 placeholder data, and launch instructions. Retail game data is supplied
 separately. Debug builds include the game's dev tools (Insert).
+
+They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
+OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
+with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
+Joint Operations projects today. It creates a project and fills in the files the game
+needs; lists what a project lacks or gets wrong as problems, with a fix where the editor
+has one; edits the item, weapon and ammo catalogs, the string tables, the menus with
+their stylesheets, and models with their animation clips and tables, each open file in a
+tab with its unsaved changes marked, with a live preview that draws a menu screen or a
+model the way the game does, handles to move and resize a menu's windows, and a note
+wherever the game would draw something other than you may mean; imports PNG images and
+files from a folder, an archive or a game install, with the files they need; finds
+references and renames files with them; and builds and plays.
 
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include

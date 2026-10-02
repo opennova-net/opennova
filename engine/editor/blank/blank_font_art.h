@@ -1,11 +1,13 @@
-// The minimal set's from-scratch bitmap font — a self-authored 5x7 stroke font
-// rendered 2x into one 256x256 RGBA page and emitted through engine/formats/fnt fnt_write.
-// The menu boot loads a HARDCODED font set (Arial12b/14n/14b/16n/16b,
+// The editor's from-scratch bitmap font (ADR 0046 d8): a self-authored 5x7 stroke font
+// rendered 2x into one 256x256 RGBA page and emitted through engine/formats/fnt
+// fnt_write. The menu boot loads a HARDCODED font set (Arial12b/14n/14b/16n/16b,
 // Impac22b, Impac38b) [orig: HUD_InitAllFonts @ 0x51ee20]; the stylesheet's
-// DEF_FONTNAME_* keys name fonts too (menu_style.mns). All of them are served
-// by this one generated glyph set — a null font slot draws nothing, which is
-// exactly the black Startup screen the minimal set showed without it.
-// Glyph data is authored here (no external font, no retail bytes).
+// DEF_FONTNAME_* keys name fonts too (menu_style.mns). All of them are served by this
+// one generated glyph set: a null font slot draws nothing, which is exactly the black
+// Startup screen a new project would show without it. Glyph data is authored here (no
+// external font, no retail bytes). The bundled assets/opennova.fnt (the placeholder main
+// menu's one font, ADR 0048) and the committed fixtures/fnt/synth_{1,3}page.fnt test
+// fixtures are minted from the same art (tests/fixtures/minimal_fnt_gen.cpp).
 #pragma once
 
 #include <formats/fnt/fnt.h>
@@ -13,9 +15,9 @@
 #include <cstdint>
 #include <cstring>
 
-namespace minimal_fnt {
+namespace opennova::editor::blank_font {
 
-// 5 columns x 7 rows per glyph; '#' = opaque white pixel. Uppercase-only —
+// 5 columns x 7 rows per glyph; '#' = opaque white pixel. Uppercase-only:
 // lowercase input maps to uppercase at lookup. Enough coverage for menu labels
 // (A-Z, 0-9, and the punctuation the authored menus/strings use).
 struct GlyphArt {
@@ -105,9 +107,7 @@ inline const GlyphArt *find_art(char ch) {
 // UV rect on page (slot % num_pages), so a multi-page font exercises the
 // per-glyph page lookup; drawable characters get their 2x stroke art, space
 // stays blank, and anything else renders as a hollow box (visibly "missing",
-// never invisible). The minimal set's boot font is the one-page form; the
-// committed fixtures/fnt/synth_{1,3}page.fnt test fixtures are minted from
-// the same art (tests/fixtures/minimal_fnt_gen.cpp).
+// never invisible). The editor's blank font is the one-page form.
 inline opennova::fnt::fnt_error_t build_font_pages(opennova::fnt::fnt_font_t *font, uint32_t num_pages) {
 	if (num_pages == 0 || num_pages > opennova::fnt::FNT_MAX_PAGES) return opennova::fnt::FNT_ERR_INVALID_PAGE_COUNT;
 	const opennova::fnt::fnt_error_t rc = opennova::fnt::fnt_init_blank(font, num_pages, 0);
@@ -156,25 +156,7 @@ inline opennova::fnt::fnt_error_t build_font_pages(opennova::fnt::fnt_font_t *fo
 	return opennova::fnt::FNT_OK;
 }
 
-// The minimal set's boot font: the one-page form.
+// The blank font: the one-page form.
 inline opennova::fnt::fnt_error_t build_font(opennova::fnt::fnt_font_t *font) { return build_font_pages(font, 1); }
 
-// The uniform font the HUD and menu frame-compiler tests measure against: one
-// blank page, every glyph an 8x16 px UV rect on the 256-page grid, spacing 2,
-// design width 800 (scale 1): glyph advance 9, and the measured width strips
-// the trailing pad.
-inline opennova::fnt::fnt_font_t uniform_test_font() {
-	opennova::fnt::fnt_font_t font{};
-	opennova::fnt::fnt_init_blank(&font, 1, 2);
-	font.design_width = 800;
-	for (uint32_t i = 0; i < opennova::fnt::FNT_GLYPH_COUNT; ++i) {
-		font.glyphs[i].page = 0;
-		font.glyphs[i].uv.u0 = 0.0f;
-		font.glyphs[i].uv.v0 = 0.0f;
-		font.glyphs[i].uv.u1 = 8.0f / 256.0f;
-		font.glyphs[i].uv.v1 = 16.0f / 256.0f;
-	}
-	return font;
-}
-
-} // namespace minimal_fnt
+} // namespace opennova::editor::blank_font
