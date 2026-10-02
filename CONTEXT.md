@@ -485,7 +485,10 @@ The folder of an installed NovaLogic game (Joint Operations) that a project impo
 plays in, mounted as a stock launch mounts it (the boot archives, no `/d`). Each project names
 its own in `.opennova/local.json` (`game_install`); the editor keeps the one last chosen, where
 a project naming none starts. Its files are copied into a project on request (Import from the
-game data), never redistributed; Play in the game install runs a build there.
+game data: the files chosen, their **import closure**, or the whole install in one action), never
+redistributed: its archives' files, and the loose files the game ships beside them and reads from
+there (its music banks, its videos, the country code, the NovaWorld table and its screens; never
+a save, a configuration or a score). Play in the game install runs a build there.
 _Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
 dir (the runtime's `--resource-dir`, which may be a build)
 
@@ -516,12 +519,36 @@ outputs. The files the import dialog offers are **import choices** (`ImportChoic
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
 
+**Import closure**:
+What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
+file they reference, and those files' in turn; the file that defines each name they use (an
+item, a weapon, a particle effect, a string id, a screen, a style variable), where no file of
+the project or the import does; and for a mission its **mission sidecars** and every file the
+game opens by a fixed name at boot, at the menu, at mission start (the required-resources
+manifest) and while a mission runs. It is planned before anything is written, a file a step (the **import plan**: each
+file, where it comes from, what wanted it and its size, the files by kind, what is found
+nowhere, the names no place defines), then written whole or not at all, a file a step too. A
+project is its own files: nothing is mounted under it, so a mission plays, previews and builds
+from what its project holds, and a shipped JO mission's closure is some 7,300 files (650 MB:
+most of the game, its sounds included). Importing the whole game install is the one action that
+leaves nothing out.
+_Avoid_: dependency mount, base, parent project (a project builds on nothing but what it holds),
+bundle
+
+**Mission sidecar**:
+A file the game finds by a mission's name rather than by a reference in it, each skipped when
+absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading
+image, else `loadscrn.pcx`), `.til` (its tiles), `.dbf` (its dialog bank) and that bank's sounds
+(`.lwf`, else `.pwf`). One witnessed table (`mission::sidecars`), which the runtime's loaders,
+the import and the editor's Play mission read.
+_Avoid_: companion, attachment, import sidecar (a source's `.import` record)
+
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
 asset graph: its files and the names they define, read once and never edited. A lookup by name
 tries the project first, then the base layer, whose file of a name the project also has is
 hidden with the names it defines (project assets win); the base layer makes no reference and no
-finding of its own.
+finding of its own. No project mounts one (ADR 0046 S14: a project imports what it needs).
 _Avoid_: second graph (one graph, the base under it), import (an import copies files in; the
 base layer only answers names)
 
@@ -956,8 +983,13 @@ _Avoid_: task, job, background work (nothing runs on another thread)
 
 **Play**:
 Build, then launch the game runtime (`opennova.exe -- --resource-dir <build>
---mcp-port <n>`) as the editor's one managed child through a `PlaySession`, in a run directory;
-Stop ends it. The editor tails the session log until the runtime MCP answers, then drives it there.
+--mcp-port <n> [--mission <name.bms>]`) as the editor's one managed child through a
+`PlaySession`, in a run directory; Stop ends it. The editor tails the session log until the
+runtime MCP answers, then drives it there. Play starts the game at its menu; **Play mission**
+(Ctrl+F5) starts it in the active document's mission, a `.bms` of the project (the document
+itself, or the mission whose sidecar it is). A mission the project does not hold is refused
+before anything is built; one that does not load is a Problems row until the next Play. Play in
+the game install starts at its menu whatever is asked (the stock game takes no mission).
 _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
 "see in game"
 
