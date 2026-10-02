@@ -1288,7 +1288,7 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
-		_net.return_from_mission(novaworld_client, route.error, _post_mission_error_text(route))
+		_net.return_from_mission(novaworld_client, route.error, post_mission_error_text(route))
 		return
 	if novaworld_client != null:
 		novaworld_client.stop()
@@ -1300,9 +1300,15 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 # The error text the post-mission route stores: a gameerr.bin generic error, else the
 # in-match connection's disconnect reason (empty while it was healthy; the dialog then
 # shows its unknown-error text).
-static func _post_mission_error_text(route: PostMissionRoute) -> String:
+static func post_mission_error_text(route: PostMissionRoute) -> String:
 	var key := route.error_key
 	if key.is_empty():
+		# A lost connection reads retail's reason text over its error record
+		# (engine: inmatch/disconnect_reason.h).
+		var connection_error := route.connection_error
+		if connection_error != null and connection_error.is_set():
+			return connection_error.reason_text(Strings.get_override_table(),
+					Strings.get_table(Strings.TABLE_GAMEERR))
 		return route.error_text
 	var text := Strings.lookup_or(Strings.TABLE_GAMEERR, Strings.SECTION_GENERIC_ERRORS, key, "")
 	if text.is_empty() and key == "STRE_BADMISSION":

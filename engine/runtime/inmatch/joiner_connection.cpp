@@ -123,46 +123,6 @@ std::vector<uint8_t> build_join_request(
 	return body;
 }
 
-// The witnessed join-failure families -> player-facing reasons. The NP-layer
-// identity/capacity gates carry a JFC alone; the validate callback (14)
-// carries its own JFP sub-reason. PV2 (7) is a protocol-version token the
-// host pins per build (proto+364 = "16" on retail 1.7.5.7): a mismatch means
-// the server runs a different JO patch, and a stock client of THIS build is
-// rejected the same way — our PV2 is byte-correct for the install.
-// [orig: HandleClientJoin @0x62b750 gate — 3 HK @0x62bdd5 / 4 PW @0x62be18 /
-//  7 PV2 @0x62be40 / 5 empty-NA @0x62be7d / 6 disabled @0x62be8f; the
-//  9/10/15 CU-overflow arms; 11 = a CU chunk NapiNPChunk_Create refused
-//  ("NP.C:PCCR:CCH[1]" @0x62c14e); CNapiNetwork_Init @0x4ca4a0 pins
-//  proto+364; the JFP sub-reasons of the validate callback
-//  Server_ValidatePlayerJoinRequest @0x512100]
-struct JoinFailReason {
-	unsigned code;
-	const char *reason;
-};
-constexpr JoinFailReason kJoinFailFamilies[] = {
-		{3, "The host rejected the connection key"},
-		{4, "The server password is incorrect"},
-		{5, "The server did not receive a player name"},
-		{6, "The server is not accepting new players"},
-		{7, "The server runs an incompatible protocol version (different game patch)"},
-		{9, "The join request carried too much connection data"},
-		{10, "The join request carried too much connection data"},
-		{15, "The join request carried too much connection data"},
-		{11, "The host could not process the join request"},
-};
-constexpr JoinFailReason kJoinValidateReasons[] = {
-		{2, "The server is locked"},
-		{3, "You are banned from this server"},
-		{4, "The server is full"},
-		{5, "The server is full"},
-};
-template <size_t N>
-const char *join_fail_reason(const JoinFailReason (&table)[N], unsigned code) {
-	for (const JoinFailReason &row : table)
-		if (row.code == code) return row.reason;
-	return nullptr;
-}
-
 std::vector<uint8_t> le32_pair(uint32_t first, uint32_t second) {
 	std::vector<uint8_t> body;
 	body.reserve(8);
@@ -581,6 +541,21 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	out.outbound.push_back(handshake_retry_datagram_);
 }
 
+ConnectionErrorRecord JoinerConnection::connection_error_record() const {
+	ConnectionErrorRecord record;
+	if (last_join_reject_.set) {
+		record.connect_error = last_join_reject_.jfc;
+		record.connect_param = last_join_reject_.jfp;
+		record.connect_text = last_join_reject_.jfs;
+	}
+	if (disconnect_event_set_) {
+		record.disconnect_code = last_disconnect_event_.dc;
+		record.disconnect_text = last_disconnect_event_.dstr;
+		record.disconnect_param = last_disconnect_event_.dpc;
+	}
+	return record;
+}
+
 void JoinerConnection::on_server_auth(
 		const std::vector<uint8_t> &body, PollResult & /*out*/) {
 	ServerAuth sa;
@@ -611,23 +586,11 @@ void JoinerConnection::on_server_auth(
 				"np joiner: join rejected: jfc=%u jfp=%u jfs='%s'",
 				static_cast<unsigned>(sa.jfc), static_cast<unsigned>(sa.jfp),
 				sa.jfs.c_str());
-		// The witnessed families (kJoinFailFamilies / kJoinValidateReasons above)
-		// map to player-facing reasons; an unmapped code keeps the host's own
-		// text when it sent one.
-		if (sa.jfc == 14) {
-			if (const char *reason = join_fail_reason(kJoinValidateReasons, sa.jfp))
-				fail(reason);
-			else
-				fail("The server refused the join (reason " +
-						std::to_string(sa.jfp) + ")");
-		} else if (const char *reason = join_fail_reason(kJoinFailFamilies, sa.jfc)) {
-			fail(reason);
-		} else if (!sa.jfs.empty()) {
-			fail(sa.jfs);
-		} else {
-			fail("The server refused the join (code " +
-					std::to_string(sa.jfc) + ")");
-		}
+		// The player-facing text is retail's reason string over this record
+		// (disconnect_reason.h), resolved where gameerr.bin is loaded; the
+		// connection's own error names the gameerr entry it reads.
+		const ConnectionErrorRecord record = connection_error_record();
+		fail("join refused (" + disconnect_reason_key(&record).key + ")");
 		return;
 	}
 	conn_.server_sk = sa.sk;      // session_id for our outbound 0x43s

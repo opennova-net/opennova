@@ -147,6 +147,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 				"SessionDrive: join LN=%d asks for a LAN-discovered endpoint; none is available, dialing %s:%d",
 				p_target->get_lobby_number(), p_target->get_host_ip(), p_target->get_port()));
 	}
+	last_connection_error_.unref();
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
 				p_target->get_player_name(), p_target->get_join_role(),
 				p_target->get_spectator_password(), p_target->get_server_password(),
@@ -424,6 +425,7 @@ void SessionDrive::update_joiner_admission_signals() {
 	}
 	if (pre & NetSessionPolicy::FRAME_DONE) {
 		if (pre & NetSessionPolicy::LOAD_FAILED) {
+			last_connection_error_ = sim->get_connection_error();
 			world_->emit_signal(kSignalLoadFailed, policy_->fail_reason());
 		}
 		return;
@@ -466,6 +468,9 @@ bool SessionDrive::cancel_admission_wait() {
 }
 
 void SessionDrive::fail_join_preload(const String &p_reason) {
+	if (join_preload_sim_.is_valid()) {
+		last_connection_error_ = join_preload_sim_->get_connection_error();
+	}
 	cancel_join_preload();
 	clear_pending_session();
 	world_->emit_signal(kSignalLoadFailed, p_reason);
@@ -681,6 +686,7 @@ Ref<PostMissionRoute> SessionDrive::post_mission_route(int p_reason) const {
 	out->set_error_key(String(opennova::inmatch::post_mission_error_key(route.error)));
 	if (route.error == opennova::inmatch::PostMissionError::DisconnectReason && sim.is_valid()) {
 		out->set_error_text(sim->get_session_loss_reason());
+		out->set_connection_error(sim->get_connection_error());
 	}
 	return out;
 }

@@ -62,52 +62,17 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 			static_cast<unsigned>(event.dc), static_cast<unsigned>(event.dpc),
 			event.ddstr.c_str(), event.dstr.c_str(), post_auth_stage_name());
 	// The client's exit-reason switch keys on DPC and only runs for the DC == 2 family; both
-	// therefore belong in the reason, alongside the sender's own tag and text (for the
-	// witnessed deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35").
-	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569]
-	// The game-layer join gate answers its spectator failures through this
-	// same record with empty strings — DPC 14 disabled / 15 full / 16 bad
-	// password. [orig: Server_ValidatePlayerJoinRequest @0x512100 via
-	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
-	if (event.dc == 2) {
-		switch (event.dpc) {
-		case 14:
-			host_disconnect_reason_ = "Spectators are disabled on this server";
-			fail(host_disconnect_reason_);
-			return;
-		case 15:
-			host_disconnect_reason_ = "The spectator slots are full";
-			fail(host_disconnect_reason_);
-			return;
-		case 16:
-			host_disconnect_reason_ = "The spectator password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 18:
-			host_disconnect_reason_ = "The team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 19:
-			host_disconnect_reason_ = "The blue team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 20:
-			host_disconnect_reason_ = "The red team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 21:
-			host_disconnect_reason_ = "The squad password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 22:
-			host_disconnect_reason_ = "The requested team is invalid";
-			fail(host_disconnect_reason_);
-			return;
-		default:
-			break;
-		}
-	}
-	host_disconnect_reason_ = "the host closed the session (reason " +
+	// therefore belong in the diagnostic, alongside the gameerr entry retail's reason text
+	// reads (disconnect_reason.h) and the sender's own tag and text (for the witnessed
+	// deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35"). The game-layer join
+	// gate answers its spectator / side-password / team failures through this same record
+	// (DPC 14..22), shown as their GDC text.
+	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569;
+	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_SendChatMessage
+	//  @0x4c7ef0]
+	const ConnectionErrorRecord record = connection_error_record();
+	host_disconnect_reason_ = "the host closed the session (" +
+			disconnect_reason_key(&record).key + "; reason " +
 			std::to_string(event.dpc) + ", class " + std::to_string(event.dc) + ")";
 	if (!event.ddstr.empty()) host_disconnect_reason_ += ": " + event.ddstr;
 	if (!event.dstr.empty()) host_disconnect_reason_ += " " + event.dstr;

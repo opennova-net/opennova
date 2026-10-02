@@ -208,6 +208,10 @@ Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
 	return drive_.post_mission_route(p_reason);
 }
 
+Ref<ConnectionError> GameWorld::get_last_connection_error() const {
+	return drive_.last_connection_error();
+}
+
 bool GameWorld::cancel_join_preload() {
 	return drive_.cancel_preload();
 }
@@ -662,6 +666,7 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("mount_join_expansion", "expansion"), &GameWorld::mount_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("get_last_connection_error"), &GameWorld::get_last_connection_error);
 	// The exit reasons the shell's own exits store (engine: inmatch/mission_exit.h).
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_QUIT",
 			opennova::inmatch::kMissionExitQuit);

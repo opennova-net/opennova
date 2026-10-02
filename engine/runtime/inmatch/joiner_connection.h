@@ -1,6 +1,7 @@
 #pragma once
 
 #include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/disconnect_reason.h>
 #include <runtime/inmatch/integrity_challenge_profile.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -558,6 +559,9 @@ public:
 	const DisconnectEvent &last_disconnect_event() const {
 		return last_disconnect_event_;
 	}
+	// The error record retail's reason text is built from: the CR=0 join
+	// failure fields and the latched disconnect record (disconnect_reason.h).
+	ConnectionErrorRecord connection_error_record() const;
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
 	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
 	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }

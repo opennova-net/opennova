@@ -177,6 +177,12 @@ public:
 				? joiner_->last_join_reject()
 				: JoinerConnection::JoinRejectRecord{};
 	}
+	// The joiner connection's error record (empty for any other role).
+	ConnectionErrorRecord connection_error_record() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->connection_error_record()
+				: ConnectionErrorRecord{};
+	}
 	bool has_disconnect_event() const {
 		return role_ == Role::Joiner && joiner_ != nullptr &&
 				joiner_->has_disconnect_event();

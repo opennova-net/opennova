@@ -222,6 +222,8 @@ public:
 	Node *release_novaworld_client();
 	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The error record of the join that last failed (SessionDrive::last_connection_error).
+	Ref<ConnectionError> get_last_connection_error() const;
 	// Load an in-memory mission through the shared world pipeline. This is
 	// retained as a focused engine-test/tool seam; normal game launches always
 	// use a saved .bms through load_mission() or load_loose_mission().

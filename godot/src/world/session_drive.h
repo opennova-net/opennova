@@ -131,6 +131,9 @@ public:
 	// The post-mission router's verdict for an exit reason (inmatch::route_mission_exit) on
 	// this world's session; a NovaWorld network type rides an adopted NovaWorld session.
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The error record of the join that last failed (null until one did): the preload's
+	// refusal or timeout, or the admission tail's loss.
+	Ref<ConnectionError> last_connection_error() const { return last_connection_error_; }
 	// Switch `p_root` in place to the host's expansion (keep / remount / fail,
 	// inmatch::decide_join_expansion): the post-auth reconcile and the pre-dial
 	// leg (GameWorld::mount_join_expansion) share it. Returns the failure text,
@@ -206,6 +209,7 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
+	Ref<ConnectionError> last_connection_error_;
 };
 
 } // namespace godot

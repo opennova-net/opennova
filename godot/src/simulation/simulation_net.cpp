@@ -2,6 +2,7 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include "network/connection_error.h"
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include "network/udp_pump_datagram_socket.h"
@@ -842,6 +843,15 @@ int64_t Simulation::get_join_game_type() const {
 
 String Simulation::get_join_error() const {
 	return (is_joiner() && runtime_) ? String(runtime_->last_error().c_str()) : String();
+}
+
+// The record a failed join or a lost session leaves on the joiner connection; the
+// shell builds retail's reason text from it through its gameerr table
+// (engine: inmatch/disconnect_reason.h).
+Ref<ConnectionError> Simulation::get_connection_error() const {
+	return ConnectionError::make((is_joiner() && runtime_)
+					? runtime_->connection_error_record()
+					: opennova::inmatch::ConnectionErrorRecord{});
 }
 
 // The in-match analog of get_join_error: the host closed the session on its own terms

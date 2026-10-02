@@ -102,6 +102,7 @@ class ScoreboardHeader;
 class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
+class ConnectionError;   // the joiner connection's error record (network/connection_error.h)
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the hitbox oracle payload (simulation/hitbox_debug_report.h)
 class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card.h)
@@ -1247,11 +1248,10 @@ public:
 	String get_join_expansion() const;
 	int64_t get_join_game_type() const;
 	String get_join_error() const;
-	// Session loss: empty while healthy, else a player-facing reason the shell surfaces the
-	// way it surfaces a join failure. Two causes — the host's explicit close (the punt
-	// channel) and in-match silence past the reap window. Retail exits the mission with a
-	// mapped exit reason here and shows no in-world dialog.
-	// (engine: net/novaworld/client_session.h)
+	// The joiner connection's error record, the input to retail's reason text.
+	Ref<ConnectionError> get_connection_error() const;
+	// Session loss: empty while healthy, else a diagnostic naming the cause (the host's close
+	// or the silence reap); retail exits the mission with a mapped reason, no in-world dialog.
 	String get_session_loss_reason() const;
 	// The same edge as a state test rather than a presentation string: in-world surfaces
 	// (the deploy screen) need to know the session is gone, not what to tell the player.

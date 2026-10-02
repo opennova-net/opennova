@@ -1602,9 +1602,9 @@ bool check_crc_challenges_are_not_answered() {
 }
 
 // A CR=0 ServerSessionInit carries the NP-layer reject family (JFC) and the
-// validate-callback sub-reason (JFP). The joiner maps the witnessed families to
-// player-facing text AND retains the raw fields so a live-join investigation
-// can name the family after the mapped string replaced it.
+// validate-callback sub-reason (JFP). The joiner retains the raw fields as the
+// connection's error record, the one input retail's reason text is built from
+// (disconnect_reason.h), and its own error names the gameerr entry.
 // [orig: NapiNPProtocol_SendJoinRejection @0x620cd0; client store
 //  NapiNP_HandleServerJoinResponse @0x629840]
 bool check_join_rejection_retains_the_raw_reject_record() {
@@ -1642,8 +1642,13 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
 	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
 	if (!expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
-					joiner.last_error() == "The server is locked",
-			"the witnessed JFC=14/JFP=2 family maps to the locked-server text"))
+					joiner.last_error() == "join refused (GCC002)",
+			"the JFC=14/JFP=2 family names the game-connect entry GCC002"))
+		return false;
+	const inmatch::ConnectionErrorRecord record = joiner.connection_error_record();
+	if (!expect(record.connect_error == 14 && record.connect_param == 2 &&
+					record.disconnect_code == 0,
+			"the connection error record carries the reject fields"))
 		return false;
 	return expect(joiner.last_join_reject().set &&
 					joiner.last_join_reject().jfc == 14 &&
@@ -1654,7 +1659,7 @@ bool check_join_rejection_retains_the_raw_reject_record() {
 
 // The PV2 identity gate (JFC=7): a live retail server on a different JO patch
 // pins proto+364 to a different token than our byte-correct "16", and rejects
-// the join at auth. The reason must name the incompatibility, not print "code 7"
+// the join at auth. The reason is the incompatible-game entry NCC007
 // [orig: HandleClientJoin @0x62b750 PV2 gate @0x62be40]. Witnessed live against
 // the NovaWorld server "THOR THUNDER" 2026-08-31.
 bool check_pv2_mismatch_reports_an_incompatible_version() {
@@ -1694,8 +1699,9 @@ bool check_pv2_mismatch_reports_an_incompatible_version() {
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(rejection));
 	joiner.handle_datagram(rejection_datagram.data(), rejection_datagram.size());
 	return expect(joiner.phase() == inmatch::JoinerConnection::Phase::Error &&
-					joiner.last_error().find("incompatible protocol version") != std::string::npos,
-			"JFC=7 reports an incompatible protocol version, not a bare code");
+					joiner.last_error() == "join refused (NCC007)" &&
+					joiner.connection_error_record().connect_error == 7,
+			"JFC=7 names the incompatible-game entry NCC007");
 }
 
 // A named, independently witnessed retail-corpus profile may answer only the
