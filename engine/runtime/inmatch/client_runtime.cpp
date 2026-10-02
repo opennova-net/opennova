@@ -1182,11 +1182,18 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 
 	if (role_ == Role::HostClient) {
 		// host: no connect-drive, no housekeeping send, no 0x0C. Its send block
-		// opens every frame (it receives no holdoff), so the held one-shots
-		// leave here, after the receive fold. The local connection has no peer
-		// address: its datagram lands in the manager's FIFO, which only the
-		// NEXT frame's head drains toward the server tick's receive pump.
-		// [orig: Client_ProcessNetworkFrame @0x42c3dd -> PumpClientProtocolSend
+		// opens every frame, so the held one-shots leave here, after the
+		// receive fold: the local connection has no peer address, and its own
+		// server dictates such a connection a one-tick holdoff in both
+		// directions whatever the session's period (LAN lanmode 1 and
+		// NovaWorld dictate 12 to the rest). Its datagram lands in the
+		// manager's FIFO, which only the NEXT frame's head drains toward the
+		// server tick's receive pump.
+		// [orig: NapiNPServer_UpdateHoldoffTicks -- `cmp byte ptr [esi+2Eh], 0`
+		//  @0x4c5f53, 1 for both directions @0x4c5f59..0x4c5f69; +0x2E = (peer
+		//  address +0x30 == 0) @0x62bf1c..0x62bf21 (NapiNPProtocol_HandleClientJoin)
+		//  and @0x62607f..0x626093 (CNapiNPConnection_OnStateChange);
+		//  Client_ProcessNetworkFrame @0x42c3dd -> PumpClientProtocolSend
 		//  @0x42c4bc; CNapiNPConnection_SendSessionPacket @0x61f039 ->
 		//  CNapiNPManager_SendTo `addr == 0` @0x61ec59 -> NapiFifo_WritePacketAtomic
 		//  @0x61eccd; CNapiGameSession_CreateSession @0x4c9b9c..0x4c9c67 sets no

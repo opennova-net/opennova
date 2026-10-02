@@ -310,10 +310,12 @@ void HostRole::run_tick(const TickInput &input) {
 		kernel.world.profile->add(devtools::Slot::SIM_HOST_PREP,
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
-	// The host dictates send holdoffs but receives none, so its own client
-	// frame's send block -- and the input pack inside it -- opens every frame
-	// [orig: Client_ProcessNetworkFrame @0x42C3DD -> @0x42C3E9; the period
-	//  arrives only as a CS field-3 update, HandleCSConfigUpdate @0x621940].
+	// The host dictates its own client's local connection (no peer address) a
+	// one-tick holdoff, so that client frame's send block -- and the input
+	// pack inside it -- opens every frame [orig: Client_ProcessNetworkFrame
+	//  @0x42C3DD -> @0x42C3E9; NapiNPServer_UpdateHoldoffTicks @0x4c5f53 ->
+	//  1 @0x4c5f59..0x4c5f69; the period arrives as a CS field-3 update,
+	//  HandleCSConfigUpdate @0x621940].
 	kernel.local.apply_player_input_pre_tick(/*pack_input=*/true);
 	// The pending fire-sound slots count down ahead of the server tick's
 	// receive, so a slot this frame's C2S queues starts on the next frame.
