@@ -28,6 +28,21 @@
 // cap on the files planned stops the plan, the selection's files included, the files one
 // converter source makes taken whole or not at all (truncated). The plan reads the sources
 // and the places it looks, and writes nothing.
+//
+// The closure of a mission (ADR 0046 S14, plan R4: a project is its own files, and an import
+// brings everything the game would open for what it imports). Beyond the file references:
+// a reference to a SYMBOL (an item id, a weapon, an ammo, a powerup, a particle effect, a
+// string id, a screen, a window, a user point, a style variable) is followed to the file that
+// defines it, where no file of the project or the plan does: the file its scope names where
+// the kind's row says so (a string id's table, a screen's menu, a user point's model), else
+// the first file of the kind the row says defines it (ReferenceKindRow::defined_in: the
+// catalogs, the particle files, the shell's stylesheets) in the places that has a definition;
+// one no place defines is counted (ImportPlan::undefined). A planned MISSION brings the files
+// the game finds by its name (runtime/mission/mission_sidecars.h, each as the project's scan
+// lacks it) and every file the game opens by a fixed literal at boot, at the menu and at
+// mission start (gameprofile's required-resource manifest; a Required one found nowhere is
+// not found, an optional one no row). A stylesheet the walk brings is read for the %NAME%s
+// the menus followed so far expand through, and those menus are followed again.
 
 #include <cstddef>
 #include <cstdint>
@@ -67,6 +82,10 @@ public:
 	// The size of a file of the origin as it is stored there (a folder's file on the disk, an
 	// archive's entry), without reading it; 0 when the origin has no such file.
 	uint64_t size(const std::string &name) const;
+	// The origin's files a name alone makes of `kind` (classify_asset with no bytes: a kind of a
+	// file name or an extension, never one its bytes decide), in the origin's order, each as it
+	// spells it.
+	std::vector<std::string> files_of_kind(AssetKind kind) const;
 	// What a file of the origin is to the engine once copied as the game's own: its kind by its
 	// name, by its bytes where the name cannot tell (a .bin, a chunk container), a PNG a
 	// texture (it gets no import record); Unknown when the origin has no such file.
@@ -158,6 +177,11 @@ struct ImportNotFollowed {
 struct ImportPlan {
 	std::vector<ImportPlanRow> rows; // in the walk's order, the selected sources first
 	std::vector<ImportNotFollowed> not_followed;
+	// The symbols followed to no file (ADR 0046 S14): references to a name no place defines (a
+	// string id no table of the project, the plan or the places has; an item id of no items.def
+	// anywhere), once per reference kind, with how many and where the first was met. What the
+	// game would show the id of, or leave out.
+	std::vector<ImportNotFollowed> undefined;
 	// A source that cannot be read or converted (as import_assets reports it), a file whose
 	// references could not be read, a folder that cannot be listed, a game install that does
 	// not mount.
@@ -180,8 +204,8 @@ inline constexpr size_t kImportPlanFileCap = 50000;
 // sources taken, a few a step, then, with dependencies, the stylesheets and the walk, each queued
 // file read and its references followed within the step's bytes. A file's bytes are read when its
 // references are followed, never when it is queued, and a file the graph does not read is not
-// read at all (its kind from its name, its size from where it is stored). The project's paths,
-// document, scan and graph are the caller's and outlive the planner.
+// read at all (its kind from its name, its size from where it is stored). The project's scan and
+// graph are the caller's and outlive the planner (its paths and document it copies).
 class ImportPlanner {
 public:
 	ImportPlanner(std::vector<ImportChoice> sources, bool with_dependencies, const ProjectPaths &paths,

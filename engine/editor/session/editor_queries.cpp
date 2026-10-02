@@ -1053,8 +1053,8 @@ constexpr EditorQueryRow kRows[] = {
 			"made_from, needed_by, found_in, selected, problem, rivals), total_bytes (what the "
 			"whole plan copies), by the same page what it "
 			"offers and chose (choices, roots) and the files not found, each list with its own "
-			"count (next_offset runs to the end of the longest), then the kinds not followed, "
-			"truncated and the plan's findings.")
+			"count (next_offset runs to the end of the longest), then the kinds not followed, the "
+			"symbols no place defines (undefined), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
 	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),

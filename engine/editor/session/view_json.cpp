@@ -673,18 +673,22 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 		missing.push(plan_row_to_json(*not_found[i]));
 	out.set("not_found_count", json_number(double(not_found.size())));
 	out.set("not_found", std::move(missing));
-	JsonValue not_followed = JsonValue::make_array();
-	for (const ImportNotFollowed &kind : plan.not_followed) {
-		JsonValue entry = JsonValue::make_object();
-		if (kind.reference != ReferenceKind::None)
-			entry.set("reference", json_string(reference_row(kind.reference).token));
-		else
-			entry.set("kind", json_string(asset_kind_token(kind.kind)));
-		entry.set("count", json_number(double(kind.count)));
-		entry.set("first", json_string(kind.first));
-		not_followed.push(std::move(entry));
-	}
-	out.set("not_followed", std::move(not_followed));
+	const auto counted = [](const std::vector<ImportNotFollowed> &entries) {
+		JsonValue list = JsonValue::make_array();
+		for (const ImportNotFollowed &kind : entries) {
+			JsonValue entry = JsonValue::make_object();
+			if (kind.reference != ReferenceKind::None)
+				entry.set("reference", json_string(reference_row(kind.reference).token));
+			else
+				entry.set("kind", json_string(asset_kind_token(kind.kind)));
+			entry.set("count", json_number(double(kind.count)));
+			entry.set("first", json_string(kind.first));
+			list.push(std::move(entry));
+		}
+		return list;
+	};
+	out.set("not_followed", counted(plan.not_followed));
+	out.set("undefined", counted(plan.undefined));
 	out.set("truncated", boolean(plan.truncated));
 	out.set("diagnostics", diagnostics_to_json(plan.diagnostics));
 	return out;

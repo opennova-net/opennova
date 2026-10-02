@@ -85,6 +85,15 @@ void not_followed_line(const ImportPlan &plan) {
 	if (!references.empty())
 		line += std::string(line.empty() ? "" : " ") + "References that name no file are not followed: " + joined(references) +
 		        ".";
+	// The symbols followed to no file: what no place defines.
+	std::vector<std::string> undefined;
+	for (const ImportNotFollowed &entry : plan.undefined) {
+		const std::string label = reference_row(entry.reference).label;
+		undefined.push_back(counted(entry.count, label.c_str()));
+		tip += label + ": " + counted(entry.count, "reference") + " no place defines, the first in " + entry.first + "\n";
+	}
+	if (!undefined.empty())
+		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + joined(undefined) + ".";
 	if (line.empty()) return;
 	ImGui::TextWrapped("%s", line.c_str());
 	if (!tip.empty()) tip.pop_back();

@@ -5,10 +5,12 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <set>
 #include <system_error>
 #include <utility>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
@@ -18,8 +20,10 @@
 #include <editor/import/importer.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <editor/requirements/requirements.h>
 #include <formats/mns/mns.h>
 #include <runtime/menu/menu_style.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
 
@@ -28,6 +32,7 @@ namespace opennova::editor {
 using graph_names::is_style_reference;
 using graph_names::key;
 using graph_names::style_variable;
+using graph_names::symbol_name;
 
 bool references_unread(AssetKind kind, const std::string &file) {
 	const AssetKindRow &row = asset_kind_row(kind);
@@ -97,6 +102,13 @@ uint64_t ImportOrigin::size(const std::string &name) const {
 	std::error_code ec;
 	const auto on_disk = fs::file_size(fs::path(path_) / spelling, ec);
 	return ec ? 0 : static_cast<uint64_t>(on_disk);
+}
+
+std::vector<std::string> ImportOrigin::files_of_kind(AssetKind kind) const {
+	std::vector<std::string> out;
+	for (const auto &entry : names_)
+		if (classify_asset(entry.second, nullptr) == kind) out.push_back(entry.second);
+	return out;
 }
 
 AssetKind ImportOrigin::file_kind(const std::string &name) const {
@@ -217,10 +229,19 @@ public:
 					add_source(sources_[next_source_++], with_dependencies_);
 					break;
 				}
-				phase_ = with_dependencies_ && !plan_.truncated ? Phase::Stylesheets : Phase::Done;
+				phase_ = with_dependencies_ && !plan_.truncated ? Phase::Mission : Phase::Done;
+				break;
+			case Phase::Mission:
+				// A planned mission's own files and the game's: one mission a step.
+				if (next_mission_ < missions_.size() && !plan_.truncated) {
+					add_mission_files(missions_[next_mission_++]);
+					break;
+				}
+				phase_ = Phase::Stylesheets;
 				break;
 			case Phase::Stylesheets:
 				read_stylesheets();
+				sheets_dirty_ = false;
 				phase_ = Phase::Follow;
 				break;
 			case Phase::Follow:
@@ -231,6 +252,25 @@ public:
 					break;
 				}
 				queue_.clear();
+				phase_ = Phase::Symbols;
+				break;
+			case Phase::Symbols:
+				// The symbol references of every file followed, each to the file that defines it:
+				// one a step; a file it brings is followed in turn (a round of Follow), with the
+				// stylesheets read again when it brought one.
+				if (next_symbol_ < symbols_.size() && !plan_.truncated) {
+					follow_symbol(symbols_[next_symbol_++]);
+					break;
+				}
+				if (!queue_.empty() && !plan_.truncated) {
+					if (sheets_dirty_) {
+						sheets_dirty_ = false;
+						read_stylesheets();
+						requeue_menus();
+					}
+					phase_ = Phase::Follow;
+					break;
+				}
 				settle();
 				phase_ = Phase::Done;
 				break;
@@ -247,7 +287,19 @@ public:
 	ImportPlan take() { return std::move(plan_); }
 
 private:
-	enum class Phase : uint8_t { Install, Sources, Stylesheets, Follow, Done };
+	enum class Phase : uint8_t { Install, Sources, Mission, Stylesheets, Follow, Symbols, Done };
+
+	// A symbol reference of a planned file, kept for the Symbols phase (every file followed
+	// first, so a planned file that defines the name is known).
+	struct SymbolUse {
+		std::string file;
+		GraphEdge edge;
+	};
+	// A file of a place read for the names it defines (a candidate for a symbol): each symbol's
+	// key and scope.
+	struct Definitions {
+		std::vector<std::pair<std::string, std::string>> symbols; // (GraphIndex::key_of, scope)
+	};
 
 	// The place of a kind at a path, opened once; null (with `error`) when it does not open.
 	const ImportOrigin *origin(ImportOrigin::Kind kind, const std::string &path, std::string &error) {
@@ -377,8 +429,240 @@ private:
 			++files_;
 			const size_t index = plan_.rows.size() - 1;
 			if (converter) made_[index] = std::make_shared<const std::vector<uint8_t>>(output.bytes);
-			if (walk && first) queue(index, from, std::move(output.bytes), loaded);
+			if (walk && first) {
+				planned(index, from);
+				queue(index, from, std::move(output.bytes), loaded);
+			}
 		}
+	}
+
+	// A file the plan took, whatever took it: a mission (its .bms) brings its own files and the
+	// game's (Phase::Mission); a shell stylesheet changes what a %NAME% expands to.
+	void planned(size_t index, const ImportOrigin *from) {
+		const ImportPlanRow &row = plan_.rows[index];
+		if (row.kind == AssetKind::Mission && strutil::ends_with_icase(row.name, ".bms")) missions_.push_back({index, from});
+		if (row.kind == AssetKind::MenuStyle && menu::is_shell_stylesheet(row.name)) sheets_dirty_ = true;
+	}
+
+	// The file `name` of the places, as a found row the plan takes (its row index), or none: the
+	// project's scan has it (nothing to bring), the plan has it (that row), else the origin the
+	// wanting file came from, then the install; `need` says what wanted it.
+	bool bring(const ImportOrigin *own, const std::string &name, const ImportNeed &need, size_t *row_out = nullptr) {
+		if (row_out) *row_out = SIZE_MAX;
+		if (scan_.find(name)) return true;
+		const auto taken = provided_.find(key(name));
+		if (taken != provided_.end()) {
+			if (row_out) *row_out = taken->second.row;
+			return true;
+		}
+		const ImportOrigin *install = install_ != own ? install_ : nullptr;
+		const ImportOrigin *from = own && !own->find(name).empty() ? own : nullptr;
+		if (!from && install && !install->find(name).empty()) from = install;
+		if (!from) return false;
+		if (files_ >= cap_) {
+			plan_.truncated = true;
+			return false;
+		}
+		const std::string spelling = from->find(name);
+		ImportPlanRow row;
+		row.state = ImportPlanRow::State::Found;
+		row.selected = true;
+		row.source = from->source(spelling);
+		row.name = spelling;
+		row.kind = from->file_kind(spelling);
+		row.size = from->size(spelling);
+		row.found_in = from->words();
+		row.needed_by = need;
+		place(row);
+		row.selected = row.problem.empty();
+		const size_t index = plan_.rows.size();
+		plan_.rows.push_back(std::move(row));
+		provided_[key(spelling)] = {index, plan_.rows[index].kind};
+		++files_;
+		if (from == own && install && !install->find(name).empty()) add_rival(index, install, install->find(name));
+		planned(index, from);
+		queue(index, from);
+		if (row_out) *row_out = index;
+		return true;
+	}
+
+	// A planned mission's files (ADR 0046 S14): those the game finds by its name
+	// (mission::sidecars, each as the project lacks it; the game skips an absent one, so none
+	// is not found; one that waits on another comes only with it) and every file the game opens
+	// by a fixed literal on the way into a mission (the manifest's boot, menu and mission rows: a
+	// Required one found nowhere is not found, an optional one no row). Each found is followed
+	// like any other file.
+	void add_mission_files(const std::pair<size_t, const ImportOrigin *> &mission) {
+		const std::string file = plan_.rows[mission.first].name;
+		const ImportOrigin *own = mission.second;
+		std::set<std::string> roles_found;
+		for (const mission::Sidecar &sidecar : mission::sidecars()) {
+			if (sidecar.needs && !roles_found.count(sidecar.needs)) continue;
+			const ImportNeed need{file, std::string(), sidecar.role, ReferenceKind::None,
+			                      mission::sidecar_name(file, sidecar), -1};
+			if (bring(own, need.name, need)) {
+				roles_found.insert(sidecar.role);
+				continue;
+			}
+			if (sidecar.alternate) {
+				const std::string alternate = mission::sidecar_alternate_name(file, sidecar);
+				ImportNeed other = need;
+				other.name = alternate;
+				if (bring(own, alternate, other)) roles_found.insert(sidecar.role);
+			}
+		}
+		if (!manifest_done_) {
+			manifest_done_ = true;
+			using namespace opennova::gameprofile;
+			const int count = gameprofile_required_resource_count();
+			for (int i = 0; i < count; ++i) {
+				const RequiredResource *resource = gameprofile_required_resource_at(i);
+				if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+				const ImportNeed need{file, std::string(),
+				                      std::string("the game, ") + requirement_phase_label(resource->phase),
+				                      ReferenceKind::None, resource->name, -1};
+				if (bring(own, resource->name, need)) continue;
+				if (plan_.truncated) return;
+				if (resource->severity != RES_OPTIONAL) not_found(need, expected_asset_kind_for_required_name(resource->name));
+			}
+		}
+	}
+
+	// The menus followed so far, followed again (a stylesheet the walk brought changed what their
+	// %NAME%s expand to): each read again.
+	void requeue_menus() {
+		for (const auto &menu : menus_) queue(menu.first, menu.second);
+	}
+
+	// What a planned file defines, once extracted: the symbol references of other files resolve
+	// against it (follow_symbol).
+	void index_symbols(const PlanNode &node) {
+		for (const GraphSymbol &symbol : node.content.symbols) {
+			if (symbol.inert) continue;
+			planned_symbols_[GraphIndex::key_of(symbol.kind, symbol.name, std::string())].push_back(symbol.scope);
+		}
+	}
+
+	// Whether a planned file defines a symbol of `kind` named `name` where `scope` reads it.
+	bool planned_defines(ReferenceKind kind, const std::string &name, const std::string &scope) const {
+		const auto found = planned_symbols_.find(GraphIndex::key_of(kind, symbol_name(kind, name), std::string()));
+		if (found == planned_symbols_.end()) return false;
+		for (const std::string &defined_in : found->second)
+			if (scope_matches(defined_in, scope)) return true;
+		return false;
+	}
+
+	// What a file of a place defines, read once per place and file (a catalog's names, a
+	// particle file's effects, a stylesheet's variables); null when it does not read.
+	const Definitions *definitions_of(const ImportOrigin *from, const std::string &spelling) {
+		const std::string cache_key = from->path() + '\n' + key(spelling);
+		auto found = read_definitions_.find(cache_key);
+		if (found != read_definitions_.end()) return found->second ? &*found->second : nullptr;
+		std::unique_ptr<Definitions> made;
+		std::vector<uint8_t> bytes;
+		Extracted content;
+		Diagnostic error;
+		const AssetKind kind = from->file_kind(spelling);
+		if (graph_reads_file(kind, spelling) && from->read(spelling, bytes)) {
+			cost_ += bytes.size();
+			if (extract_from_bytes(spelling, kind, bytes, document_.target_game, content, error)) {
+				made = std::make_unique<Definitions>();
+				for (const GraphSymbol &symbol : content.symbols)
+					if (!symbol.inert)
+						made->symbols.push_back({GraphIndex::key_of(symbol.kind, symbol.name, std::string()), symbol.scope});
+			}
+		}
+		const Definitions *out = made.get();
+		read_definitions_.emplace(cache_key, std::move(made));
+		return out;
+	}
+
+	bool defines(const Definitions &definitions, ReferenceKind kind, const std::string &name, const std::string &scope) const {
+		const std::string wanted = GraphIndex::key_of(kind, symbol_name(kind, name), std::string());
+		for (const auto &symbol : definitions.symbols)
+			if (symbol.first == wanted && scope_matches(symbol.second, scope)) return true;
+		return false;
+	}
+
+	// The files of a place a symbol of `kind` could be defined in, in the order looked: the file
+	// its scope names where the kind's row says so (a string id's table, a screen's menu, a user
+	// point's model; none when the scope names no file), else the files of the kind the row says
+	// defines it (a style variable's, the two shell stylesheets the game reads).
+	std::vector<std::string> defining_candidates(const ImportOrigin *from, ReferenceKind kind, const std::string &scope) {
+		std::vector<std::string> out;
+		if (!from) return out;
+		const ReferenceKindRow &row = reference_row(kind);
+		if (row.scope_names_file) {
+			const std::string named = scope.substr(0, scope.find('/'));
+			if (!named.empty()) {
+				const std::string spelling = from->find(named);
+				if (!spelling.empty()) out.push_back(spelling);
+			}
+			return out;
+		}
+		if (row.resolution == ReferenceResolution::StyleVariable) {
+			for (const char *sheet : {"menu_style.mns", "brand.mns"}) {
+				const std::string spelling = from->find(sheet);
+				if (!spelling.empty()) out.push_back(spelling);
+			}
+			return out;
+		}
+		if (row.defined_in == AssetKind::Unknown) return out;
+		// A place's files of a kind, listed once per place and kind (an install has nine thousand
+		// names to type; a mission's items name hundreds of effects).
+		const std::string cache_key = from->path() + '\n' + asset_kind_token(row.defined_in);
+		auto listed = files_by_kind_.find(cache_key);
+		if (listed == files_by_kind_.end())
+			listed = files_by_kind_.emplace(cache_key, from->files_of_kind(row.defined_in)).first;
+		return listed->second;
+	}
+
+	// A symbol reference followed to the file that defines it (import_plan.h): nothing when the
+	// project or a planned file defines it; else the first file of the wanting file's origin, then
+	// of the install, that does, planned and queued; else counted as undefined.
+	// The lookup is the graph's (AssetGraph::resolve): the edge's scope, then each scope it tries
+	// after (a mission's text key: its own table, then GAMETEXT.BIN), the value then its fallback
+	// in each.
+	void follow_symbol(const SymbolUse &use) {
+		const GraphEdge &edge = use.edge;
+		if (graph_.resolve(edge) == ReferenceStatus::Present) return;
+		// A style variable is written as its %NAME% and defined by its NAME (graph_names).
+		const bool variable = reference_row(edge.kind).spell == NameSpelling::StyleVariable && is_style_reference(edge.value);
+		std::vector<std::string> names{variable ? style_variable(edge.value) : edge.value};
+		if (!edge.fallback.empty()) names.push_back(edge.fallback);
+		std::vector<const std::string *> scopes{&edge.scope};
+		for (const std::string &scope : edge.scopes_after) scopes.push_back(&scope);
+		const ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg};
+		const ImportOrigin *own = origin_of(use.file);
+		const ImportOrigin *install = install_ != own ? install_ : nullptr;
+		for (const std::string *scope : scopes) {
+			for (const std::string &name : names) {
+				if (planned_defines(edge.kind, name, *scope)) return;
+				for (const ImportOrigin *from : {own, install}) {
+					if (!from) continue;
+					for (const std::string &candidate : defining_candidates(from, edge.kind, *scope)) {
+						const Definitions *definitions = definitions_of(from, candidate);
+						if (!definitions || !defines(*definitions, edge.kind, name, *scope)) continue;
+						// Planned already (brought for an earlier symbol, not yet followed): it
+						// defines this one too.
+						if (!provided_.count(key(candidate))) bring(from, candidate, need);
+						return;
+					}
+				}
+			}
+		}
+		for (ImportNotFollowed &entry : plan_.undefined)
+			if (entry.reference == edge.kind) {
+				++entry.count;
+				return;
+			}
+		plan_.undefined.push_back({edge.kind, AssetKind::Unknown, 1, use.file});
+	}
+
+	// The place a planned file came from (by its name); null for one the plan does not hold.
+	const ImportOrigin *origin_of(const std::string &file) const {
+		const auto found = origins_by_file_.find(key(file));
+		return found == origins_by_file_.end() ? nullptr : found->second;
 	}
 
 	// The variables a %NAME% expands through once the import is in: the shell's own load of
@@ -421,6 +705,7 @@ private:
 		node.origin = from;
 		node.bytes = std::move(bytes);
 		node.loaded = loaded;
+		origins_by_file_[key(plan_.rows[row].name)] = from;
 		queue_.push_back(std::move(node));
 	}
 
@@ -438,16 +723,10 @@ private:
 	}
 
 	// A stylesheet the shell reads by name, as the project holds it once the import is in: the
-	// selection's copy, else the project's file of the name.
+	// plan's copy (chosen, or brought by the walk), else the project's file of the name.
 	bool stylesheet_bytes(const std::string &name, std::vector<uint8_t> &bytes) {
-		for (const PlanNode &node : queue_) {
-			const ImportPlanRow &row = plan_.rows[node.row];
-			if (row.state == ImportPlanRow::State::Selected && row.kind == AssetKind::MenuStyle && key(row.name) == key(name)) {
-				if (!node.loaded) return read_row(node.row, bytes);
-				bytes = node.bytes;
-				return true;
-			}
-		}
+		const auto taken = provided_.find(key(name));
+		if (taken != provided_.end() && taken->second.kind == AssetKind::MenuStyle) return read_row(taken->second.row, bytes);
 		const AssetEntry *asset = scan_.find(name);
 		if (!asset || asset->kind != AssetKind::MenuStyle) return false;
 		std::string error;
@@ -556,14 +835,20 @@ private:
 		plan_.rows[row].rivals.push_back(std::move(rival));
 	}
 
-	// A planned file's references (none read for a file the graph does not read).
+	// A planned file's references (none read for a file the graph does not read). Followed again
+	// (a menu, after a stylesheet came): its file edges once more (each planned already), its
+	// symbol edges not kept again.
 	void follow(PlanNode &node) {
 		const std::string file = plan_.rows[node.row].name;
 		const AssetKind kind = plan_.rows[node.row].kind;
+		const bool again = followed_.count(node.row) > 0;
+		followed_.insert(node.row);
 		// What it names is not looked for: a file of a kind that names files the graph does not
 		// read (a terrain; a mission's .mis, of a kind it reads).
-		if (references_unread(kind, file)) note(ReferenceKind::None, kind, file);
+		if (!again && references_unread(kind, file)) note(ReferenceKind::None, kind, file);
 		if (!graph_reads_file(kind, file) || !extract(node)) return;
+		if (!again) index_symbols(node);
+		if (!again && kind == AssetKind::Menu) menus_.push_back({node.row, node.origin});
 		for (const GraphEdge &edge : node.content.edges) {
 			if (plan_.truncated) return;
 			// A stylesheet value the game does not read (another sheet's, or a definition after
@@ -571,15 +856,25 @@ private:
 			if (kind == AssetKind::MenuStyle && edge.field == "value" &&
 			    (!sheet_.has(edge.record) || key(sheet_.get(edge.record)) != key(edge.value)))
 				continue;
-			follow_edge(node, file, edge);
+			follow_edge(node, file, edge, again);
 		}
 	}
 
 	// One reference of a node's file, in the plan's order (import_plan.h).
-	void follow_edge(const PlanNode &node, const std::string &file, const GraphEdge &edge) {
-		const AssetKind wanted = reference_row(edge.kind).file;
+	void follow_edge(const PlanNode &node, const std::string &file, const GraphEdge &edge, bool again) {
+		const ReferenceKindRow &kind_row = reference_row(edge.kind);
+		const AssetKind wanted = kind_row.file;
 		if (wanted == AssetKind::Unknown) {
-			note(edge.kind, AssetKind::Unknown, file); // a symbol, a sound: no file to look for
+			if (again) return;
+			// A symbol or a style variable: followed to the file that defines it once every file is
+			// (Phase::Symbols); a record of the file's own (S13 D8) resolves there; an unchecked kind
+			// (a sound) names no file the plan can look for.
+			if (kind_row.names_symbol() && kind_row.resolution != ReferenceResolution::Record) {
+				symbols_.push_back({file, edge});
+				return;
+			}
+			if (kind_row.resolution == ReferenceResolution::Record) return;
+			note(edge.kind, AssetKind::Unknown, file);
 			return;
 		}
 		const std::string name = resolve_name(edge.value);
@@ -627,6 +922,7 @@ private:
 		if (!mine.empty() && !theirs.empty()) add_rival(index, install, theirs);
 		// Its bytes are read when the walk reads its references (extract), never for a file the
 		// graph does not read.
+		planned(index, from);
 		queue(index, from);
 	}
 
@@ -677,8 +973,8 @@ private:
 	const std::vector<ImportChoice> sources_;
 	const bool with_dependencies_;
 	const std::string retail_directory_;
-	const ProjectPaths &paths_;
-	const ProjectDocument &document_;
+	const ProjectPaths paths_;        // the planner's own copies: a caller's temporaries may go
+	const ProjectDocument document_;
 	const AssetScan &scan_;
 	const AssetGraph &graph_;
 	const size_t cap_;
@@ -689,6 +985,24 @@ private:
 	std::map<std::pair<ImportOrigin::Kind, std::string>, Opened> origins_;
 	const ImportOrigin *install_ = nullptr;
 	std::deque<PlanNode> queue_;
+	// The closure's own books (import_plan.h): the missions planned and their places, one brought
+	// in turn; whether the game's manifest was brought (once, for the first); the symbol references
+	// kept for the Symbols phase, followed in turn; what the planned files define, by key, each
+	// definition's scope; what the places' files define, read once per place and file; the place
+	// each planned file came from; the menus followed, followed again after a stylesheet came; the
+	// rows followed (a file followed again keeps no second note).
+	std::vector<std::pair<size_t, const ImportOrigin *>> missions_;
+	size_t next_mission_ = 0;
+	bool manifest_done_ = false;
+	std::vector<SymbolUse> symbols_;
+	size_t next_symbol_ = 0;
+	std::map<std::string, std::vector<std::string>> planned_symbols_;
+	std::map<std::string, std::unique_ptr<Definitions>> read_definitions_;
+	std::map<std::string, std::vector<std::string>> files_by_kind_; // a place's files of a kind, once
+	std::map<std::string, const ImportOrigin *> origins_by_file_;
+	std::vector<std::pair<size_t, const ImportOrigin *>> menus_;
+	std::set<size_t> followed_;
+	bool sheets_dirty_ = false;
 	std::map<std::string, Provided> provided_;                             // the files the plan takes
 	std::map<size_t, std::shared_ptr<const std::vector<uint8_t>>> made_; // a converter output's bytes, by row
 	std::map<std::string, Missing> missing_;                               // the names looked for in vain

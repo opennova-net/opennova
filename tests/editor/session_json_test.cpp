@@ -1794,6 +1794,7 @@ static int test_import_plan_json() {
 	planned.rows = {chosen, font, gone, cut};
 	planned.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
 	                        {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
+	planned.undefined = {{ReferenceKind::TextId, AssetKind::Unknown, 3, "a.mnu"}};
 	planned.truncated = true;
 	planned.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read.", "b.mnu") };
@@ -1845,6 +1846,12 @@ static int test_import_plan_json() {
 	TEST_EXPECT(skipped && skipped->array.size() == 2 && skipped->array[0].get_string("reference", "") == "menu_screen" &&
 	            skipped->array[0].get_int("count", 0) == 2 && skipped->array[1].get_string("kind", "") == "terrain" &&
 	            skipped->array[1].get("reference") == nullptr && skipped->array[1].get_string("first", "") == "level.trn");
+	// S14: the symbols no place defines, and the row sizes with what the whole plan copies.
+	const JsonValue *undefined = import->get("undefined");
+	TEST_EXPECT(undefined && undefined->array.size() == 1 && undefined->array[0].get_string("reference", "") == "text_id" &&
+	            undefined->array[0].get_int("count", 0) == 3 && undefined->array[0].get_string("first", "") == "a.mnu");
+	TEST_EXPECT(first.get("size") && import->get("total_bytes") &&
+	            import->get_number("total_bytes", -1.0) == double(preview.plan->total_bytes()));
 	const JsonValue *findings = import->get("diagnostics");
 	TEST_EXPECT(findings && findings->array.size() == 1 && findings->array[0].get_string("code", "") == "import.unreadable");
 	// A row's source is an import a request takes as it is.

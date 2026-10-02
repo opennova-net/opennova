@@ -111,6 +111,14 @@ bool staged_left(const std::string &root) {
 	return fs::exists(ProjectPaths::for_root(root).staging_dir, ec);
 }
 
+// What wanted a file, in a line.
+std::string need_words_of(const ImportNeed &need) {
+	std::string out = need.file;
+	if (!need.record.empty()) out += ": " + need.record;
+	if (!need.field.empty()) out += (need.record.empty() ? ": " : " ") + need.field;
+	return out;
+}
+
 bool has_warning(const std::vector<Diagnostic> &findings, const char *code, const std::string &asset) {
 	for (const Diagnostic &d : findings)
 		if (d.code() == code && d.severity == DiagnosticSeverity::Warning && d.asset == asset) return true;
@@ -120,7 +128,7 @@ bool has_warning(const std::vector<Diagnostic> &findings, const char *code, cons
 } // namespace
 
 // A folder's menu previewed with the files it needs: the plan holds the known closure, gone.tga
-// not found (with what wants it) and the screen reference not followed; Import with the rows it
+// not found (with what wants it) and the screen reference followed to b.mnu; Import with the rows it
 // takes writes those five files, the preview closes, and every reference of the two menus to a
 // file resolves but gone.tga's, which stays missing.
 static int test_apply_closure() {
@@ -144,8 +152,8 @@ static int test_apply_closure() {
 	const ImportPlanRow *gone = row_named(plan, "gone.tga");
 	TEST_EXPECT(gone && gone->state == State::NotFound && !gone->selected && gone->needed_by.file == "a.mnu" &&
 	            gone->needed_by.record == "A/KEEP/Appearance 1" && gone->needed_by.reference == ReferenceKind::MenuTexture);
-	const ImportNotFollowed *screens = not_followed(plan, ReferenceKind::MenuScreen);
-	TEST_EXPECT(screens && screens->count == 1 && screens->first == "a.mnu" && plan.not_followed.size() == 1);
+	// The screen B of b.mnu, a symbol the planned b.mnu defines (S14): followed to nothing.
+	TEST_EXPECT(plan.not_followed.empty() && plan.undefined.empty());
 
 	const std::vector<ImportChoice> kept = selected_sources(plan);
 	TEST_EXPECT(kept.size() == 5);
@@ -738,11 +746,18 @@ static int test_apply_retail_menu() {
 		found += row.state == State::Found ? 1 : 0;
 	}
 	TEST_EXPECT(found > 0);
+	// S14: the symbols are followed to their files (the string ids to the tables their windows
+	// name, the screens and windows to their menus, the variables to the stylesheet), so only the
+	// sound bank (a file kind whose references the graph does not read) is not followed; what no
+	// place defines is counted apart and printed.
 	std::set<std::string> skipped;
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		skipped.insert(entry.reference != ReferenceKind::None ? reference_row(entry.reference).token
 		                                                      : asset_kind_token(entry.kind));
-	TEST_EXPECT(skipped == std::set<std::string>({"style_var", "menu_screen", "menu_window", "text_id", "sound_bank"}));
+	TEST_EXPECT(skipped == std::set<std::string>({"sound_bank"}));
+	for (const ImportNotFollowed &entry : plan.undefined)
+		std::printf("editor_import retail: %zu %s reference(s) no place defines, the first in %s\n", entry.count,
+		            reference_row(entry.reference).token, entry.first.c_str());
 	const ActionOutcome imported = import(project.session, selected_sources(plan));
 	TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
 	size_t references = 0;
@@ -800,8 +815,85 @@ static int test_apply_retail_menu() {
 	return 0;
 }
 
+// ADR 0046 S14, the retail leg: the smallest and the largest shipped JO mission (04TR.bms, 140 KB;
+// ASH_I1gA.bms, 398 KB) each planned from the install with their dependencies into a fresh project.
+// The plan is the mission's closure: every file found by its name the install has, its terrain,
+// its environment, the catalogs and the game's manifest, nothing of a kind the graph reads left
+// unfollowed, no Required manifest file not found; the rows and the bytes printed (the numbers
+// the design estimated at 8,700 files and 515 MB from the archives' listing).
+static int test_apply_retail_mission_closure() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
+	for (const char *name : {"04TR.bms", "ASH_I1gA.bms"}) {
+		Project project("opennova_editor_apply_retail_closure");
+		editor_test::set_game_install(project.session, install);
+		const SessionView &view = project.view();
+		EditorRequest listed = request::preview_install_import();
+		listed.names = {name};
+		listed.with_dependencies = true;
+		const auto started = std::chrono::steady_clock::now();
+		project.session.handle(listed);
+		project.session.run_operations();
+		const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+		const ImportPlan &plan = *view.dialogs.import_preview.plan;
+		TEST_EXPECT(project.session.outcome().done() && view.dialogs.import_preview.open);
+		TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
+		size_t found = 0, missing = 0, problems = 0;
+		std::map<std::string, std::pair<size_t, uint64_t>> by_kind;
+		for (const ImportPlanRow &row : plan.rows) {
+			if (row.state == State::NotFound) {
+				++missing;
+				std::printf("editor_import retail closure %s: %s (%s) not found, needed by %s\n", name, row.name.c_str(),
+				            asset_kind_token(row.kind), need_words_of(row.needed_by).c_str());
+				continue;
+			}
+			found += row.state == State::Found ? 1 : 0;
+			if (!row.problem.empty()) {
+				++problems;
+				std::printf("editor_import retail closure %s: %s cannot be taken: %s\n", name, row.name.c_str(), row.problem.c_str());
+			}
+			auto &kind = by_kind[asset_kind_token(row.kind)];
+			++kind.first;
+			kind.second += row.size;
+		}
+		std::printf("editor_import retail closure %s: %zu files (%zu found), %.1f MB, %zu not found, %zu the project cannot "
+		            "take, planned in %.1f s\n",
+		            name, plan.file_count(), found, plan.total_bytes() / 1e6, missing, problems, seconds);
+		for (const auto &entry : by_kind)
+			std::printf("  %-20s %5zu %8.1f MB\n", entry.first.c_str(), entry.second.first, entry.second.second / 1e6);
+		for (const ImportNotFollowed &entry : plan.not_followed)
+			std::printf("  not followed: %s (%zu, the first %s)\n",
+			            entry.reference != ReferenceKind::None ? reference_row(entry.reference).token : asset_kind_token(entry.kind),
+			            entry.count, entry.first.c_str());
+		for (const ImportNotFollowed &entry : plan.undefined)
+			std::printf("  undefined: %s (%zu, the first in %s)\n", reference_row(entry.reference).token, entry.count,
+			            entry.first.c_str());
+		// The mission's own set (as the install spells each): the install has a .bin, a .til and a
+		// .pcx for every shipped mission, each needed by the mission.
+		const auto row_called = [&plan](const std::string &wanted) -> const ImportPlanRow * {
+			for (const ImportPlanRow &row : plan.rows)
+				if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
+			return nullptr;
+		};
+		for (const char *extension : {".bin", ".til", ".pcx"}) {
+			const std::string own = std::string(name).substr(0, std::string(name).size() - 4) + extension;
+			const ImportPlanRow *row = row_called(own);
+			TEST_EXPECT(row && row->state == State::Found &&
+			            normalized_logical_name(row->needed_by.file) == normalized_logical_name(name));
+		}
+		// The catalogs and the terrain, through the mission; no symbol kind left unfollowed.
+		TEST_EXPECT(row_called("items.def") && row_called("weapon.def") && row_called("ammo.def"));
+		for (const ImportNotFollowed &entry : plan.not_followed)
+			TEST_EXPECT(entry.reference == ReferenceKind::None ||
+			            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
+		TEST_EXPECT(found > 100 && plan.total_bytes() > (uint64_t(100) << 20) && problems == 0);
+	}
+	return 0;
+}
+
 int run_import_apply_tests() {
 	int failures = 0;
+	failures += test_apply_retail_mission_closure();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();
 	failures += test_apply_changed();

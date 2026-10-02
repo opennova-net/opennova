@@ -566,9 +566,13 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
 			std::fprintf(to, "not followed: %s references, which name no file (%zu, the first in %s)\n",
 			             reference.c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	}
+	for (const JsonValue &entry : items(plan, "undefined"))
+		std::fprintf(to, "undefined: %s references no place defines (%zu, the first in %s)\n",
+		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	if (plan.get_bool("truncated", false))
 		std::fprintf(to, "the plan stopped at %zu files: the files past them are not in it\n", count_at(plan, "count"));
-	std::fprintf(to, "plan: %zu file(s) to import, %zu not found\n", take, count_at(plan, "not_found_count"));
+	std::fprintf(to, "plan: %zu file(s) to import, %zu not found, %.1f MB\n", take, count_at(plan, "not_found_count"),
+	             plan.get_number("total_bytes", 0.0) / 1e6);
 }
 
 // An import source in its wire form, as a request's imports take it.

@@ -305,8 +305,9 @@ static int test_import_with_dependencies() {
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the folder " + art + "\n"));
 	TEST_EXPECT(has("take b.mnu (menu) -> menus/b.mnu, needed by a.mnu: A/GO"));
 	TEST_EXPECT(has("not found gone.tga (texture), needed by a.mnu: A/GO/Appearance 1"));
-	TEST_EXPECT(has("not followed: menu_screen references, which name no file (1, the first in a.mnu)"));
-	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found"));
+	// S14: the screen B is a symbol the planned b.mnu defines, followed to nothing.
+	TEST_EXPECT(!has("not followed: menu_screen") && !has("undefined:"));
+	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found, 0.0 MB"));
 	TEST_EXPECT(!fs::exists(root + "/menus") && !fs::exists(root + "/fonts")); // written nowhere
 	// The source alone without --with-dependencies.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--dry-run"}, text) == 0);

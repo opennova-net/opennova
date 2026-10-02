@@ -21,6 +21,7 @@
 #include <filesystem>
 #include <map>
 #include <set>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -35,6 +36,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
@@ -128,7 +130,9 @@ static int test_plan_folder() {
 	const ImportPlanRow *long_name = row_named(styled, "a_long_texture_name.tga");
 	TEST_EXPECT(long_name && long_name->state == State::Found && !long_name->selected &&
 	            long_name->problem.find("16 characters") != std::string::npos);
-	TEST_EXPECT(not_followed(styled, ReferenceKind::StyleVar) && styled.rows.size() == 4);
+	// The variable's own reference is a symbol the selection's stylesheet defines (S14): followed
+	// to nothing.
+	TEST_EXPECT(!not_followed(styled, ReferenceKind::StyleVar) && styled.undefined.empty() && styled.rows.size() == 4);
 
 	// A menu found that does not read: taken, its references not looked for, said once.
 	TEST_EXPECT(editor_test::write_text(art + "/c.mnu", screen("C", window("BUTTON", "GO", go_to("broken.mnu", "X")))));
@@ -169,9 +173,9 @@ static int test_plan_archive() {
 	const ImportPlanRow *tex = row_named(plan, "tex.pcx");
 	TEST_EXPECT(second && second->kind == AssetKind::Menu && tex && tex->kind == AssetKind::Texture);
 	TEST_EXPECT(second && second->needed_by.reference == ReferenceKind::Menu && second->needed_by.file == "first.mnu");
-	// The target screen is a symbol: not followed.
-	const ImportNotFollowed *target = not_followed(plan, ReferenceKind::MenuScreen);
-	TEST_EXPECT(target && target->first == "first.mnu");
+	// The target screen is a symbol the planned second.mnu defines (S14): neither not followed
+	// nor undefined.
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && plan.undefined.empty());
 	return 0;
 }
 
@@ -317,10 +321,11 @@ static int test_plan_cycle_and_cap() {
 	return 0;
 }
 
-// What the walk does not follow: a menu's SCREEN target (a symbol) and a def's sound, each
-// kind listed with where it was met first; a terrain a mission names found and taken, its
-// own references not read (listed once by kind); a mission's .mis taken, what it names not
-// looked for (the graph reads the .bms alone), listed by its kind, and no unreadable file.
+// What the walk does not follow: a def's sound (an unchecked kind), listed with where it was met
+// first; a menu's SCREEN target its own menu defines is followed to nothing (S14: neither not
+// followed nor undefined); a terrain a mission names found and taken, its own references not read
+// (listed once by kind); a mission's .mis taken, what it names not looked for (the graph reads the
+// .bms alone), listed by its kind, and no unreadable file.
 static int test_plan_not_followed() {
 	Project project("opennova_editor_plan_not_followed");
 	const std::string art = project.dir.file("art");
@@ -342,8 +347,7 @@ static int test_plan_not_followed() {
 	            terrain->needed_by.file == "m.bms" && terrain->needed_by.reference == ReferenceKind::Terrain);
 	const ImportNotFollowed *trn = not_followed(plan, ReferenceKind::None, AssetKind::Terrain);
 	TEST_EXPECT(trn && trn->count == 1 && trn->first == "island.trn");
-	const ImportNotFollowed *target = not_followed(plan, ReferenceKind::MenuScreen);
-	TEST_EXPECT(target && target->count == 1 && target->first == "a.mnu");
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && plan.undefined.empty());
 	const ImportNotFollowed *sound = not_followed(plan, ReferenceKind::Sound);
 	TEST_EXPECT(sound && sound->count == 1 && sound->first == "items.def");
 	{
@@ -694,8 +698,149 @@ static int test_plan_steps() {
 	return 0;
 }
 
+// ADR 0046 S14: a mission imported from a game install with its dependencies brings its closure.
+// A fake install of the three boot archives holds m.bms (its terrain island, its environment day,
+// one item 100100), the files found by its name (m.bin, m.wac, m.pcx, m.til, m.dbf and, since the
+// .dbf exists, m.lwf; no m.pwf), the terrain, the environment naming cloud.pcx, items.def whose
+// item names the weapon M4 and the effect BOOM, weapon.def defining M4 with a round of an ammo no
+// place defines, fx.ptl defining BOOM, and a few of the game's manifest files. The plan: the
+// mission's own set each needed by the mission and its role; the file references; the symbols
+// followed to their files (the effect to fx.ptl, the item to items.def, which the manifest brings
+// first); the manifest's files the install has found, each needed by the mission for the game, a
+// Required one the install lacks not found (vmacros.bin), an optional one no row (hiscore.txt);
+// the undefined ammo counted; nothing not followed but the kinds the graph does not read; the
+// same plan stepped a byte at a time. Without dependencies, the .bms alone.
+static int test_plan_mission_closure() {
+	Project project("opennova_editor_plan_mission_closure");
+	const std::string install = project.dir.file("install");
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::mission::set_header_string(mission, "terrain", "island", error));
+		TEST_EXPECT(opennova::mission::set_header_string(mission, "environment", "day", error));
+		opennova::mission::add_entity(mission, opennova::mission::EntityKind::Building, 100100, {});
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	std::string env_text;
+	{
+		opennova::env::Config config;
+		config.sky_map1 = "cloud.pcx";
+		config.sky_map2 = "cloud.pcx";
+		std::ostringstream out;
+		std::string error;
+		TEST_EXPECT(opennova::env::save_env(out, config, error));
+		env_text = out.str();
+	}
+	std::vector<uint8_t> table;
+	{
+		Diagnostic error;
+		BlankRequest blank;
+		blank.logical_name = "m.bin";
+		TEST_EXPECT(make_blank(blank, AssetKind::Strings, table, error));
+	}
+	const std::string strings(table.begin(), table.end());
+	TEST_EXPECT(write_pff(install + "/localres.pff",
+	                      {{"m.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
+	                       {"m.wac", "// the mission's script\r\n"},
+	                       {"m.dbf", "dbf"},
+	                       {"m.lwf", "lwf"},
+	                       {"items.def", "begin \"Box\"\nid 100100\ntype building\nprimary_weapon \"M4\"\nparticledeath BOOM\nend\n"},
+	                       {"weapon.def", "weapon \"M4\"\nround_type NOWHERE\nend\n"},
+	                       {"ammo.def", "ammo AMMO_X\nend\n"},
+	                       // The main menu's font through a variable only the install's stylesheet defines
+	                       // (the manifest brings the sheet; the menu is followed again once it came).
+	                       {"main.mnu", screen("STARTUP", window("STATIC", "W", font("%FONT_X%")))},
+	                       {"menu_style.mns", "FONT_X styled.fnt\r\n"},
+	                       {"styled.fnt", "fnt"}}));
+	TEST_EXPECT(write_pff(install + "/language.pff", {{"m.bin", strings}, {"gametext.bin", strings}, {"medmssn.bin", strings}}));
+	TEST_EXPECT(write_pff(install + "/resource.pff",
+	                      {{"island.trn", "trn"}, {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
+	                       {"m.til", "til"}, {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"},
+	                       {"puff.tga", "tga"}, {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
+	ImportChoice mission;
+	mission.path = install;
+	mission.entry = "m.bms";
+	mission.install = true;
+	const ImportPlan plan = project.plan({mission}, true, install);
+	TEST_EXPECT(!plan.truncated && !has_error(plan.diagnostics));
+	const auto found = [&plan](const char *name) {
+		const ImportPlanRow *row = row_named(plan, name);
+		return row && row->state == State::Found && row->selected && row->found_in == "the game install" ? row : nullptr;
+	};
+	// The mission's own set, each as the game finds it by the mission's name.
+	for (const auto &[name, role] : {std::pair<const char *, const char *>{"m.bin", "text"}, {"m.wac", "script"},
+	                                 {"m.pcx", "loading_image"}, {"m.til", "tiles"}, {"m.dbf", "dialog"},
+	                                 {"m.lwf", "dialog_sounds"}}) {
+		const ImportPlanRow *row = found(name);
+		TEST_EXPECT(row && row->needed_by.file == "m.bms" && row->needed_by.field == role && row->needed_by.name == name &&
+		            row->needed_by.reference == ReferenceKind::None);
+	}
+	TEST_EXPECT(!row_named(plan, "m.pwf"));
+	// The file references, and the environment's texture through it.
+	const ImportPlanRow *terrain = found("island.trn"), *env = found("day.env"), *cloud = found("cloud.pcx");
+	TEST_EXPECT(terrain && terrain->needed_by.reference == ReferenceKind::Terrain && env && cloud &&
+	            cloud->needed_by.file == "day.env" && cloud->needed_by.reference == ReferenceKind::Texture);
+	// The symbols: the effect to the particle file defining it (and its texture through it), the
+	// other particle file not; the item to items.def, which the manifest brought first.
+	const ImportPlanRow *fx = found("fx.ptl"), *puff = found("puff.tga"), *items = found("items.def");
+	TEST_EXPECT(fx && fx->needed_by.file == "items.def" && fx->needed_by.reference == ReferenceKind::Particle &&
+	            fx->needed_by.name == "BOOM" && puff && puff->needed_by.file == "fx.ptl" && !row_named(plan, "other.ptl"));
+	TEST_EXPECT(items && items->needed_by.file == "m.bms" && items->needed_by.reference == ReferenceKind::None &&
+	            items->needed_by.field.find("the game") == 0);
+	// The manifest: found in the install, each for the game; a Required one the install lacks not
+	// found; an optional one no row.
+	for (const char *name : {"gametext.bin", "weapon.def", "ammo.def", "main.mnu", "menu_style.mns", "medmssn.bin"}) {
+		const ImportPlanRow *row = found(name);
+		TEST_EXPECT(row && row->needed_by.file == "m.bms" && row->needed_by.field.find("the game, ") == 0);
+	}
+	// The menu's font through the variable the stylesheet the walk brought defines: the font found
+	// (the sheet's own value names it first, in the manifest's order; the menu followed again once
+	// the sheet was read names it too), the variable neither undefined nor not followed.
+	const ImportPlanRow *styled = found("styled.fnt");
+	TEST_EXPECT(styled && (styled->needed_by.file == "main.mnu" || styled->needed_by.file == "menu_style.mns") &&
+	            styled->needed_by.reference == ReferenceKind::Font && !not_followed(plan, ReferenceKind::StyleVar));
+	for (const ImportNotFollowed &entry : plan.undefined) TEST_EXPECT(entry.reference != ReferenceKind::StyleVar);
+	const ImportPlanRow *vmacros = row_named(plan, "vmacros.bin");
+	TEST_EXPECT(vmacros && vmacros->state == State::NotFound && vmacros->kind == AssetKind::Strings &&
+	            vmacros->needed_by.file == "m.bms");
+	TEST_EXPECT(!row_named(plan, "hiscore.txt") && !row_named(plan, "loadscrn.pcx"));
+	// The ammo no place defines, counted; the weapon M4 defined by the planned weapon.def is not.
+	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Ammo &&
+	            plan.undefined[0].count == 1 && plan.undefined[0].first == "weapon.def");
+	// Not followed: only the kinds whose references the graph does not read (the terrain, the
+	// banks, the dialog bank), never a symbol kind.
+	for (const ImportNotFollowed &entry : plan.not_followed)
+		TEST_EXPECT(entry.reference == ReferenceKind::None || reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
+	TEST_EXPECT(not_followed(plan, ReferenceKind::None, AssetKind::Terrain) && !not_followed(plan, ReferenceKind::Particle) &&
+	            !not_followed(plan, ReferenceKind::Item) && !not_followed(plan, ReferenceKind::Weapon));
+	TEST_EXPECT(plan.file_count() >= 18 && plan.total_bytes() > mission_bytes.size());
+	// Stepped a byte at a time: the same plan.
+	const SessionView &v = project.view();
+	ImportPlanner planner({mission}, true, ProjectPaths::for_root(v.project.root), *v.project.document, *v.project.scan,
+	                      *v.findings.graph, install);
+	size_t steps = 0;
+	while (!planner.step(1)) TEST_EXPECT(++steps < 2000);
+	const ImportPlan stepped = planner.take();
+	if (!same_import(plan, stepped))
+		for (size_t i = 0; i < std::min(plan.rows.size(), stepped.rows.size()); ++i)
+			if (plan.rows[i].name != stepped.rows[i].name || plan.rows[i].selected != stepped.rows[i].selected ||
+			    plan.rows[i].problem != stepped.rows[i].problem)
+				std::printf("row %zu: %s (%d, %s) | %s (%d, %s)\n", i, plan.rows[i].name.c_str(), int(plan.rows[i].selected),
+				            plan.rows[i].problem.c_str(), stepped.rows[i].name.c_str(), int(stepped.rows[i].selected),
+				            stepped.rows[i].problem.c_str());
+	// A step takes one source, one mission's own set and manifest, or one file followed.
+	TEST_EXPECT(steps > 20 && same_import(plan, stepped));
+	// Without dependencies: the .bms alone.
+	const ImportPlan alone = project.plan({mission}, false, install);
+	TEST_EXPECT(alone.rows.size() == 1 && alone.rows[0].name == "m.bms" && alone.undefined.empty());
+	return 0;
+}
+
 int run_import_plan_tests() {
 	int failures = 0;
+	failures += test_plan_mission_closure();
 	failures += test_plan_steps();
 	failures += test_plan_folder();
 	failures += test_plan_archive();
