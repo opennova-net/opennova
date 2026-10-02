@@ -224,6 +224,13 @@ public:
 	// The standalone-owner full global refresh (the weather node owns the
 	// per-frame write while present).
 	void write_shader_globals();
+	// The object lighting block as last written to the global shader parameters
+	// (opennova_light_block_*, opennova_fog_enabled, opennova_thermal_view) and
+	// how many blocks were written. Process-wide like the globals; the read seam
+	// the tests assert through, since outside the editor a RenderingServer gives
+	// no global back (global_shader_parameter_get is editor-only).
+	static Ref<EnvLightValues> get_published_lighting_block();
+	static int64_t get_lighting_block_writes();
 
 
 	void _ready() override;
@@ -259,6 +266,21 @@ private:
 	// forgets its publication generation, so re-entering republishes.
 	void _release_lighting_block();
 	static MissionEnvironment *lighting_block_writer_;
+	// What _write_lighting_block_globals last wrote (plain values: a static
+	// Variant would outlive the engine at exit).
+	struct PublishedLightingBlock {
+		Vector3 dir;
+		Vector3 dir_color;
+		Vector3 hemi_sky;
+		Vector3 hemi_ground;
+		Vector3 ceiling;
+		Vector3 floor_color;
+		Vector3 gain;
+		bool fog_enabled = false;
+		bool thermal_view = false;
+		int64_t writes = 0;
+	};
+	static PublishedLightingBlock published_block_;
 
 	Ref<EnvFile> environment_data_;
 	Ref<EnvFile> overcast_data_;
