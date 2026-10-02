@@ -1,5 +1,6 @@
 #include <editor/requirements/requirements.h>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/model/diagnostic.h>
 
@@ -30,7 +31,9 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
-		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+		// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
+		// project's, ADR 0046 S14) is no row of the checklist.
+		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 		if (!requirement_phase_enabled(doc, resource->phase)) continue;
 
 		RequirementRow row;
@@ -84,6 +87,20 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			                                     std::string()));
 		}
 		report.rows.push_back(std::move(row));
+	}
+	// A mission in a project whose Missions feature is off (ADR 0046 S14): the files a mission needs
+	// when it starts are not on the checklist, so nothing says which the project lacks. A warning on
+	// the project, said once, never a build's gate.
+	if (!doc.features.mission) {
+		for (const AssetEntry &entry : scan.entries) {
+			if (entry.kind != AssetKind::Mission || !strutil::ends_with_icase(entry.logical_name, ".bms")) continue;
+			report.diagnostics.push_back(make_finding(
+					CoreFinding::ProjectMissionFeatureOff, DiagnosticSeverity::Warning,
+					"The project holds a mission (" + entry.logical_name +
+							") while its Missions feature is off: the files a mission needs when it starts are "
+							"not checked. Turn Missions on in File > Project settings..."));
+			break;
+		}
 	}
 	return report;
 }

@@ -6,6 +6,18 @@ namespace opennova::editor {
 
 namespace {
 
+// What a new mission asks: the name its header carries (its file's stem when left out), and the
+// terrain and the environment it loads, each a file of the project (a mission with neither loads
+// nothing).
+const BlankParam k_mission_params[] = {
+	{ "title", "Title", ReferenceKind::None, false },
+	{ "terrain", "Terrain", ReferenceKind::Terrain, true },
+	{ "environment", "Environment", ReferenceKind::Environment, true },
+};
+const BlankParam k_mission_text_params[] = {
+	{ "title", "Title", ReferenceKind::None, false },
+};
+
 const BlankFactory k_factories[] = {
 	// Boot: the string tables and definition files Game_InitSubsystems demands.
 	{ "gameerr", AssetKind::Strings, make_blank_empty_strings, "an empty error-message table", false },
@@ -44,11 +56,46 @@ const BlankFactory k_factories[] = {
 	{ "", AssetKind::Font, make_blank_font, "the built-in bitmap font", true },
 	{ "", AssetKind::Texture, make_blank_texture,
 	  "the checkerboard the game draws for a missing texture, 128 by 128 gray squares", true },
+	// S14: a mission on the terrain and under the environment chosen, with no entity yet; the text
+	// table made beside it (its title, an empty briefing); a script.
+	{ "", AssetKind::Mission, make_blank_mission, "an empty mission on the terrain and under the environment chosen",
+	  true, k_mission_params, sizeof(k_mission_params) / sizeof(k_mission_params[0]) },
+	{ kBlankMissionTextRole, AssetKind::Strings, make_blank_mission_text,
+	  "a mission's text table: its title and an empty briefing", false, k_mission_text_params,
+	  sizeof(k_mission_text_params) / sizeof(k_mission_text_params[0]) },
+	{ "", AssetKind::Script, make_blank_script, "an empty script", true },
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);
 
 } // namespace
+
+const std::string &BlankRequest::value(std::string_view token) const {
+	static const std::string none;
+	for (const auto &entry : values)
+		if (entry.first == token) return entry.second;
+	return none;
+}
+
+bool blank_values_fit(const BlankFactory &factory, const BlankRequest &request, std::string &why) {
+	std::string takes;
+	for (size_t i = 0; i < factory.param_count; ++i) takes += std::string(i ? ", " : "") + factory.params[i].token;
+	for (const auto &entry : request.values) {
+		bool known = false;
+		for (size_t i = 0; i < factory.param_count; ++i) known = known || entry.first == factory.params[i].token;
+		if (known) continue;
+		why = request.logical_name + " takes no value \"" + entry.first + "\"" +
+		      (takes.empty() ? std::string(" (it takes none).") : " (it takes " + takes + ").");
+		return false;
+	}
+	for (size_t i = 0; i < factory.param_count; ++i) {
+		const BlankParam &param = factory.params[i];
+		if (!param.required || !request.value(param.token).empty()) continue;
+		why = request.logical_name + " needs its " + param.token + ".";
+		return false;
+	}
+	return true;
+}
 
 size_t blank_factory_count() {
 	return k_factory_count;

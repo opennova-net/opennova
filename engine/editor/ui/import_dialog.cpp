@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -85,6 +86,26 @@ void not_followed_line(const ImportPlan &plan) {
 	if (!references.empty())
 		line += std::string(line.empty() ? "" : " ") + "References that name no file are not followed: " + joined(references) +
 		        ".";
+	// The symbols followed to no file: what no place defines.
+	std::vector<std::string> undefined;
+	for (const ImportNotFollowed &entry : plan.undefined) {
+		const std::string label = reference_row(entry.reference).label;
+		undefined.push_back(counted(entry.count, label.c_str()));
+		tip += label + ": " + counted(entry.count, "reference") + " no place defines, the first in " + entry.first + "\n";
+	}
+	if (!undefined.empty())
+		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + joined(undefined) + ".";
+	// The symbols only a place's copy of a file the project holds defines (review F6).
+	std::vector<std::string> shadowed;
+	for (const ImportNotFollowed &entry : plan.shadowed) {
+		const std::string label = reference_row(entry.reference).label;
+		shadowed.push_back(counted(entry.count, label.c_str()));
+		tip += label + ": " + counted(entry.count, "reference") + " only the source's " + asset_kind_label(entry.kind) +
+		       " defines, which the project's own does not, the first in " + entry.first + "\n";
+	}
+	if (!shadowed.empty())
+		line += std::string(line.empty() ? "" : " ") + "Defined only in the source's copy of a file the project has (its own is kept, "
+		        "so these stay undefined; import that file with Replace to take the source's): " + joined(shadowed) + ".";
 	if (line.empty()) return;
 	ImGui::TextWrapped("%s", line.c_str());
 	if (!tip.empty()) tip.pop_back();
@@ -105,6 +126,8 @@ void ImportDialog::draw(Workspace &workspace) {
 	if (preview.open && !previewing_) {
 		if (!preview.changed) {
 			filter_[0] = '\0';
+			rows_filter_[0] = '\0';
+			kind_shown_ = AssetKind::kCount;
 			replace_existing_ = false;
 		}
 		retake_ = true;
@@ -134,7 +157,9 @@ void ImportDialog::draw(Workspace &workspace) {
 	}
 	const bool from_game = (!preview.roots.empty() && preview.roots.front().install) ||
 	                       (!preview.choices.empty() && preview.choices.front().install);
-	ImGui::TextWrapped("%s", from_game ? "Copy files from the game data into the project." : "Copy files into the project.");
+	ImGui::TextWrapped("%s", preview.all ? "Copy every file of the game data into the project."
+	                         : from_game  ? "Copy files from the game data into the project."
+	                                      : "Copy files into the project.");
 	// The lists scroll; Replace existing files, Import and Cancel stay under them, on two lines
 	// in a narrow dialog.
 	ImGui::BeginChild("import_body", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 3));
@@ -158,8 +183,13 @@ void ImportDialog::draw(Workspace &workspace) {
 	// save it first (the session's unsaved prompt), one that writes over none goes ahead.
 	ui_kit::WrapRow actions;
 	actions.next(ui_kit::checkbox_width("Replace existing files"));
-	ImGui::Checkbox("Replace existing files", &replace_existing_);
-	ui_kit::tooltip("A checked file the project has already is written over; otherwise the import refuses it.");
+	// The files the project holds already are unchecked by default and kept as they are; Replace
+	// existing files checks them all (each can still be checked or unchecked alone).
+	if (ImGui::Checkbox("Replace existing files", &replace_existing_))
+		for (size_t i = 0; i < checked_.size(); ++i)
+			if (preview.plan->rows[i].held && why_not_[i].empty()) checked_[i] = replace_existing_;
+	ui_kit::tooltip("Check every file the project has already, to write it over; left unchecked, the project's file "
+	                "stays as it is.");
 	const std::string label = "Import " + counted(count, "file") + "###import";
 	// An import writes the project's files: while an operation holds them (a build packing
 	// them), the busy gate refuses it, and Import waits with it (SessionView::allows).
@@ -170,12 +200,14 @@ void ImportDialog::draw(Workspace &workspace) {
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
 		std::vector<ImportChoice> imports;
+		std::set<ImportChoice> sent; // each source once, looked up in log time (a whole install's rows)
+		bool replaces = replace_existing_; // a checked file the project holds is one asked to be replaced
 		for (size_t i = 0; i < checked_.size(); ++i) {
 			const ImportChoice &source = preview.plan->rows[i].source;
-			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
-				imports.push_back(source);
+			replaces = replaces || (checked_[i] && preview.plan->rows[i].held);
+			if (checked_[i] && sent.insert(source).second) imports.push_back(source);
 		}
-		EditorRequest request = request::import_files(std::move(imports), replace_existing_);
+		EditorRequest request = request::import_files(std::move(imports), replaces);
 		workspace.request(std::move(request));
 		ImGui::CloseCurrentPopup();
 	}
@@ -195,20 +227,20 @@ void ImportDialog::take(const DialogsView::ImportPreview &preview) {
 	for (size_t i = 0; i < plan.rows.size(); ++i) why_not_[i] = cannot_take(plan, i);
 	checked_.assign(plan.rows.size(), false);
 	for (size_t i = 0; i < plan.rows.size(); ++i)
-		checked_[i] = plan.rows[i].selected &&
-		              (plan.rows[i].state == State::Selected || why_not_[i].empty());
+		checked_[i] = (plan.rows[i].selected && (plan.rows[i].state == State::Selected || why_not_[i].empty())) ||
+		              (plan.rows[i].held && replace_existing_ && why_not_[i].empty());
 	chosen_.assign(preview.choices.size(), false);
-	for (size_t i = 0; i < preview.choices.size(); ++i)
-		chosen_[i] = std::find(preview.roots.begin(), preview.roots.end(), preview.choices[i]) != preview.roots.end();
+	const std::set<ImportChoice> roots(preview.roots.begin(), preview.roots.end());
+	for (size_t i = 0; i < preview.choices.size(); ++i) chosen_[i] = roots.count(preview.choices[i]) > 0;
 }
 
 // The files chosen, planned again: the chosen ones that are not in the list, then those
 // checked in it.
 void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	EditorRequest request = request::plan_import({}, preview.with_dependencies);
+	const std::set<ImportChoice> listed(preview.choices.begin(), preview.choices.end());
 	for (const ImportChoice &root : preview.roots)
-		if (std::find(preview.choices.begin(), preview.choices.end(), root) == preview.choices.end())
-			request.imports.push_back(root);
+		if (!listed.count(root)) request.imports.push_back(root);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
 		if (chosen_[i]) request.imports.push_back(preview.choices[i]);
 	workspace.request(std::move(request));
@@ -274,15 +306,20 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ImGui::EndTable();
 }
 
-// "Include the files these need", then the rows: the chosen files first, then what they need.
+// "Include the files these need", the plan in short (its files and bytes, each kind a toggle that
+// shows its rows alone, a filter over the names, Check shown and Uncheck shown), then the rows:
+// the chosen files first, then what they need.
 void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	const ImportPlan &plan = *preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
+	const std::string wanted = normalized_logical_name(rows_filter_);
 	for (size_t i = 0; i < plan.rows.size(); ++i) {
 		if (plan.rows[i].state == State::NotFound) continue;
-		rows.push_back(i);
 		if (plan.rows[i].state == State::Found) ++found;
+		if (kind_shown_ != AssetKind::kCount && plan.rows[i].kind != kind_shown_) continue;
+		if (!wanted.empty() && normalized_logical_name(plan.rows[i].name).find(wanted) == std::string::npos) continue;
+		rows.push_back(i);
 	}
 	// The check box's label cut to the dialog's width (whole in its tooltip).
 	bool with = preview.with_dependencies;
@@ -290,23 +327,58 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
 	// The setting plans the open dialog again (a plan_import through the gate): held back while
-	// that would be refused.
-	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies) &&
+	// that would be refused, and with everything chosen (a walk of every file finds nothing more).
+	const bool plans = !preview.all && workspace.view().allows(EditorRequestKind::SetImportDependencies) &&
 	                   workspace.view().allows(EditorRequestKind::PlanImport);
 	ImGui::BeginDisabled(!plans);
 	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans)
 		workspace.request(request::set_import_dependencies(with));
 	ImGui::EndDisabled();
 	ui_kit::tooltip((shown != include ? include + ".\n" : std::string()) +
-	                "Look for the files the chosen ones name (fonts, textures, models...) beside them and in the game "
-	                "install, and import those found too. The editor remembers it.");
-	if (rows.empty()) {
+	                (preview.all ? std::string("Every file of the game install is chosen: there is nothing more to look for.")
+	                             : std::string("Look for the files the chosen ones name (fonts, textures, models...) beside them "
+	                                           "and in the game install, and import those found too. The editor remembers it.")));
+	if (plan.file_count() == 0) {
 		if (preview.roots.empty()) ui_kit::empty_state("No file chosen.", "Choose the files to import above.");
 		else ui_kit::empty_state("Nothing to import.", plan.diagnostics.empty() ? nullptr : "See why below.");
 		return;
 	}
+	// The plan in short: its files and bytes, then each kind with its count and size, a toggle that
+	// shows that kind's rows alone (the videos of a mission's closure unchecked in two clicks).
+	ImGui::TextWrapped("%s", (counted(plan.file_count(), "file") + ", " + ui_kit::size_text(plan.total_bytes()) + ":").c_str());
+	ui_kit::WrapRow kinds;
+	for (const ImportPlanKind &entry : plan.by_kind()) {
+		const std::string label = std::string(asset_kind_label(entry.kind)) + " " + std::to_string(entry.files) + " (" +
+		                          ui_kit::size_text(entry.bytes) + ")";
+		const std::string id = label + "###kind_" + asset_kind_token(entry.kind);
+		const float width = ui_kit::text_width(label.c_str()) + ImGui::GetStyle().FramePadding.x * 2.0f;
+		kinds.next(width);
+		const bool shown = kind_shown_ == entry.kind;
+		if (ImGui::Selectable(id.c_str(), shown, ImGuiSelectableFlags_None, ImVec2(width, 0.0f)))
+			kind_shown_ = shown ? AssetKind::kCount : entry.kind;
+		ui_kit::tooltip(shown ? std::string("Every kind's rows again.")
+		                      : "Only the rows of this kind, " + counted(entry.files, "file") + ".");
+	}
+	// A filter over the rows' names (Ctrl+F is the listing's filter's where one is drawn), and the
+	// shown rows checked or unchecked together.
+	ui_kit::WrapRow controls;
+	const float filter_width = ImGui::GetFontSize() * 18.0f;
+	controls.next(filter_width);
+	ui_kit::filter_box("##rows_filter", rows_filter_, sizeof(rows_filter_), "Filter the rows", filter_width, nullptr,
+	                   preview.choices.empty());
+	if (ui_kit::tool(controls, "Check shown", !rows.empty(), "Take every row the table shows that the project can take.")) {
+		for (const size_t i : rows)
+			if (why_not_[i].empty()) checked_[i] = true;
+	}
+	if (ui_kit::tool(controls, "Uncheck shown", !rows.empty(), "Leave every row the table shows out.")) {
+		for (const size_t i : rows) checked_[i] = false;
+	}
+	if (rows.empty()) {
+		ui_kit::empty_state("No row matches.", "Clear the filter, or show every kind.");
+		return;
+	}
 	const float lines = static_cast<float>(std::min<size_t>(rows.size(), 10)) + 1.5f;
-	if (!ImGui::BeginTable("import_plan", 5,
+	if (!ImGui::BeginTable("import_plan", 6,
 	                       ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
 	                               ImGuiTableFlags_BordersInnerV,
 	                       ImVec2(0, ImGui::GetFrameHeightWithSpacing() * lines)))
@@ -315,6 +387,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	                        ImGui::GetFrameHeight());
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+	ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
 	ImGui::TableSetupColumn("Needed by", ImGuiTableColumnFlags_WidthStretch, 3.0f);
 	ImGui::TableSetupColumn("Found in", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	ImGui::TableSetupScrollFreeze(0, 1);
@@ -342,6 +415,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		}
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!why_not.empty() ? "It cannot be imported: " + why_not
+		                : row.held       ? "The project has " + row.destination +
+		                                     " already: checked, it is written over; left unchecked, it stays as it is."
 		                : row.made_from.empty() ? std::string()
 		                                        : "The files made from " + row.made_from + " come together.");
 		ImGui::TableNextColumn();
@@ -352,8 +427,12 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		ImGui::TableNextColumn();
 		ui_kit::clipped_text(asset_kind_label(row.kind));
 		ImGui::TableNextColumn();
+		ui_kit::clipped_text(ui_kit::size_text(row.size), std::to_string(row.size) + " bytes as stored");
+		ImGui::TableNextColumn();
 		if (row.state == State::Found)
 			ui_kit::clipped_text(need_words(row.needed_by), need_words(row.needed_by) + " names " + row.needed_by.name);
+		else if (row.held)
+			ui_kit::clipped_text("chosen, the project has it", "One of the files chosen, which the project has already.");
 		else
 			ui_kit::clipped_text("chosen", "One of the files chosen.");
 		ImGui::TableNextColumn();
@@ -370,8 +449,10 @@ void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
 	std::vector<const ImportPlanRow *> missing;
 	for (const ImportPlanRow &row : plan.rows)
 		if (row.state == State::NotFound) missing.push_back(&row);
+	// Open by default while they are few; a mission's closure names dozens the install itself lacks.
 	const std::string header = "Not found (" + std::to_string(missing.size()) + ")###not_found";
-	if (!missing.empty() && ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen) &&
+	const ImGuiTreeNodeFlags open_by_default = missing.size() <= 20 ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+	if (!missing.empty() && ImGui::CollapsingHeader(header.c_str(), open_by_default) &&
 	    ImGui::BeginTable("import_missing", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
 		ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch, 1.0f);

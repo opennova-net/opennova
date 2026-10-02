@@ -60,6 +60,7 @@
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
@@ -235,6 +236,57 @@ static int test_menu_text_scope() {
 	TEST_EXPECT(gametext);
 	add_id(*gametext, add_section(*gametext, "menu"), "GAME_TITLE");
 
+	// A lookup that tries a second scope after its own (GraphEdge::scopes_after, S14: a mission's text
+	// key reads the mission's table, then gametext.bin): the name found in the first scope, else in
+	// the next, else missing; the definition reached the one found, the name reached the value.
+	{
+		const AssetGraph &graph = *view.findings.graph;
+		GraphEdge edge;
+		edge.kind = ReferenceKind::TextId;
+		edge.value = "GAME_TITLE";
+		edge.scope = "MENUTXT.BIN/menu";
+		edge.scopes_after = {"GAMETEXT.BIN/menu"};
+		std::string file;
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == gametext->path());
+		TEST_EXPECT(graph.symbol_reached(edge) && graph.symbol_reached(edge)->file == gametext->path() &&
+		            graph.reached_name(edge) == "GAME_TITLE");
+		edge.value = "TITLE_ID";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == menutxt->path() &&
+		            graph.symbol_reached(edge) && graph.symbol_reached(edge)->file == menutxt->path());
+		edge.value = "STATS_ONLY";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Missing && !graph.symbol_reached(edge));
+		edge.scopes_after = {"GAMETEXT.BIN/menu", "MENUTXT.BIN/Stats"};
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == menutxt->path());
+		edge.value = "NOPE";
+		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Missing && file.empty() && !graph.symbol_reached(edge));
+		// The table loaded in the place of one the project lacks (GraphEdge::scope_alternate: a mission's
+		// medmssn.bin where it has no <stem>.bin, never both [orig: TextResource_LoadMissionTextBin
+		// @0x51ed90]): the alternate's section where the own table is absent, the own table alone where
+		// it is present.
+		GraphEdge mission;
+		mission.kind = ReferenceKind::TextId;
+		mission.value = "GAME_TITLE";
+		mission.scope = "ABSENT.BIN/menu";
+		mission.scope_alternate = "GAMETEXT.BIN";
+		TEST_EXPECT(graph.lookup_scope(mission) == "GAMETEXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Present && file == gametext->path());
+		mission.scope = "MENUTXT.BIN/menu";
+		TEST_EXPECT(graph.lookup_scope(mission) == "MENUTXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Missing && !graph.symbol_reached(mission));
+		// A lookup whose owner the project lacks (GraphEdge::scope_owner: a script of a mission the
+		// project does not have runs with whichever mission's table plays): any table, nothing after,
+		// and no rename rewrites it; with the owner present, its own scope and a rewrite.
+		mission.value = "STATS_ONLY";
+		mission.rewritable = true;
+		mission.scope_owner = "NOSUCH.BMS";
+		mission.scopes_after = {"GAMETEXT.BIN/menu"};
+		TEST_EXPECT(graph.lookup_scope(mission).empty() && graph.resolve(mission, &file) == ReferenceStatus::Present &&
+		            file == menutxt->path() && !graph.rewrites(mission));
+		mission.scope_owner = "MENUTXT.BIN";
+		TEST_EXPECT(graph.lookup_scope(mission) == "MENUTXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Missing && graph.rewrites(mission));
+	}
+
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));
 	Document *menu = session.document_for("main.mnu");
 	TEST_EXPECT(menu);
@@ -346,9 +398,8 @@ static int test_native_extractors() {
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
 		TEST_EXPECT(editor_test::write_bytes(root + "/test.bms", bytes));
-		// The same mission in the mission editors' text form (S13 PR0): a mission to the scan,
-		// which the graph does not read (the mission document will), so it is no finding and
-		// names nothing.
+		// The same mission in the original editor's text form (S14): a mission text to the scan, a
+		// kind no document opens and the graph does not read, so it is no finding and names nothing.
 		std::string text;
 		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
 		TEST_EXPECT(editor_test::write_text(root + "/test.mis", text));
@@ -382,8 +433,10 @@ static int test_native_extractors() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::Particle, "boom") == ReferenceStatus::Present);
 	const GraphEdge *puff = edge_to(graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && puff->record == "puff" && puff->field == "graphic1");
+	// The mission's references are its document's fields (S14): rewritable, on its mission row.
 	const GraphEdge *terrain = edge_to(graph, "test.bms", ReferenceKind::Terrain, "island");
-	TEST_EXPECT(terrain && graph.resolve(ReferenceKind::Terrain, "island") == ReferenceStatus::Missing);
+	TEST_EXPECT(terrain && terrain->rewritable && terrain->field == "terrain" &&
+			graph.resolve(ReferenceKind::Terrain, "island") == ReferenceStatus::Missing);
 	TEST_EXPECT(edge_to(graph, "test.bms", ReferenceKind::Environment, "day"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Environment, "day") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.references_of("test.mis").empty());
@@ -397,9 +450,10 @@ static int test_native_extractors() {
 	TEST_EXPECT(missing >= 4); // sky_b, sun, puff.tga, island
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "reference.missing") == missing);
 	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
-	// The .mis is skipped, never extracted (graph_reads_file): a changed one is read by nothing.
-	TEST_EXPECT(!graph_reads_file(AssetKind::Mission, "test.mis") &&
-			graph_reads_file(AssetKind::Mission, "TEST.BMS"));
+	// The .mis is skipped, never extracted (graph_reads_kind): a changed one is read by nothing.
+	TEST_EXPECT(session.view().project.scan->find("test.mis") &&
+	            session.view().project.scan->find("test.mis")->kind == AssetKind::MissionText &&
+	            !graph_reads_kind(AssetKind::MissionText) && graph_reads_kind(AssetKind::Mission));
 	TEST_EXPECT(editor_test::write_text(root + "/test.mis", "; changed\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.stats().files_extracted == 0 && graph.stats().files_failed == 0);
@@ -407,8 +461,9 @@ static int test_native_extractors() {
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
-	// while the file is unchanged; a document type's file that does not load is its
-	// validator's error, not the graph's.
+	// while the file is unchanged; a document type's file that does not load (a mission, a model,
+	// a menu) is its validator's error, not the graph's.
+	TEST_EXPECT(editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
 	TEST_EXPECT(editor_test::write_bytes(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
@@ -420,8 +475,12 @@ static int test_native_extractors() {
 			n += d.code() == "graph.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return n;
 	};
-	TEST_EXPECT(unreadable("broken.bms") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
-	TEST_EXPECT(graph.stats().files_failed == 3);
+	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
+	TEST_EXPECT(graph.stats().files_failed == 4);
+	bool mission_error = false;
+	for (const Diagnostic &d : diagnostics)
+		mission_error = mission_error || (d.asset == "broken.bms" && d.severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(mission_error);
 	bool menu_error = false;
 	for (const Diagnostic &d : diagnostics)
 		menu_error = menu_error || (d.asset == "broken.mnu" && d.severity == DiagnosticSeverity::Error);
@@ -431,7 +490,8 @@ static int test_native_extractors() {
 		model_error = model_error || (d.asset == "broken.3di" && d.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(model_error);
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.bms") == 1);
+	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.ptl") == 1);
+	fs::remove(fs::path(root) / "broken.ptl");
 	fs::remove(fs::path(root) / "broken.bms");
 	fs::remove(fs::path(root) / "broken.3di");
 	editor_test::handle_to_end(session, request::rescan());
@@ -1512,10 +1572,13 @@ static int test_reference_kind_rows() {
 		// A Record reference names its collection, and the graph finds none missing (S13 D8).
 		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
 		TEST_EXPECT((row.missing_message != nullptr) == (file || (row.names_symbol() && !record)));
-		const bool tolerated = kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
+		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
-		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint;
+		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
+		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
+		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
+		                       kind == ReferenceKind::MissionStrings;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -1586,6 +1649,10 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "art.tga.alpha", hud, none) == Names({"art.tga"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "icon.pcx", hud, none) == Names({"icon.pcx"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "icon.bmp", hud, has({"icon.bmp"})).empty());
+	// A mission's tile set: its atlas, the name to its first dot plus .TGA, through the TGA reader.
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "jtt01.til", kTileSetTextureArg, none) ==
+	            Names({"jtt01.TGA"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "jtt01", kTileSetTextureArg, none) == Names({"jtt01.TGA"}));
 	TextureLoader loader = TextureLoader::Stage;
 	TEST_EXPECT(texture_loader_of(sky, loader) && loader == TextureLoader::ArchiveSelfAlpha &&
 	            !texture_loader_of(-1, loader) && !texture_loader_of(0, loader) &&
@@ -1615,9 +1682,90 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "trim.tga", 3, has({"trim.dds"})) == Names({"trim.dds"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall.bmp", 0, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::SoundBank, "click.lwf", -1, none) == Names({"click.lwf"}));
+	// S14: a terrain's height data by the name as written; a sound bank's wave by the file name of
+	// the path its single holds, either separator.
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::TerrainData, "isle.cpt", -1, none) == Names({"isle.cpt"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "SFX\\MENU\\click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "sfx/menu/click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "sfx\\", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Weapon, "M16", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Sound, "shot", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Model, "", -1, none).empty());
+	return 0;
+}
+
+// S14: a terrain and a sound bank through the engine's parsers. A terrain names its height data,
+// its maps, its tile atlas and each foliage block's model; a bank the wave of each single, found
+// by the file name of the path it holds. A terrain's height data the project lacks is an error
+// (the game refuses the terrain), a wave it lacks a warning (nothing plays); a terrain the game's
+// gate refuses is a file the graph does not read.
+static int test_terrain_and_bank_extractors() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_terrain_bank");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Terrain"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_text(root + "/isle.trn",
+	                                    "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\npolytrn_polydata isle.cpt\r\n"
+	                                    "polytrn_tilestrip tiles.tga\r\npolytrn_charmap isle_m.pcx\r\npolytrn_sectorcount 1\r\n"
+	                                    "polytrn_sectors 1\r\nfoliage\r\n  graphic palm\r\nend\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/isle_c.tga", "x") && editor_test::write_text(root + "/shot.wav", "RIFF"));
+	{
+		opennova::lwf::File bank;
+		for (const auto &[name, path] : {std::pair<const char *, const char *>{"SHOT", "SFX\\WEAPON\\shot.wav"}, {"GONE", "gone.wav"}}) {
+			opennova::lwf::Single single;
+			single.name = name;
+			single.path = path;
+			bank.singles.push_back(single);
+		}
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error) && editor_test::write_bytes(root + "/game.lwf", bytes));
+	}
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &graph = *session.view().findings.graph;
+	const GraphEdge *heights = edge_to(graph, "isle.trn", ReferenceKind::TerrainData, "isle.cpt");
+	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && !heights->rewritable);
+	for (const char *map : {"isle_c.tga", "det.tga", "tiles.tga", "isle_m.pcx"})
+		TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, map));
+	// Each map by its game loader: the colour map and the atlas through the TGA reader, a near
+	// detail map through the stage loader (its .dds sibling first), the character map by its name.
+	using opennova::renderer::TextureLoader;
+	TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, "isle_c.tga")->loader_arg ==
+	                    texture_loader_arg(TextureLoader::Tga) &&
+	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "tiles.tga")->loader_arg ==
+	                    texture_loader_arg(TextureLoader::Tga) &&
+	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "det.tga")->loader_arg ==
+	                    texture_loader_arg(TextureLoader::Stage) &&
+	            edge_to(graph, "isle.trn", ReferenceKind::Texture, "isle_m.pcx")->loader_arg == -1);
+	const GraphEdge *palm = edge_to(graph, "isle.trn", ReferenceKind::Model, "palm");
+	TEST_EXPECT(palm && palm->record == "foliage 1" && palm->field == "graphic");
+	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
+	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
+	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
+	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "wave");
+	TEST_EXPECT(graph.resolve(ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Wave, "gone.wav") == ReferenceStatus::Missing &&
+	            !graph.referrers_of_file("shot.wav").empty());
+	const auto missing = [&session](const char *file, const char *name) {
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			if (d.code() == "reference.missing" && d.asset == file && d.message.find(name) != std::string::npos) return &d;
+		return static_cast<const Diagnostic *>(nullptr);
+	};
+	const Diagnostic *no_heights = missing("isle.trn", "isle.cpt"), *no_wave = missing("game.lwf", "gone.wav");
+	TEST_EXPECT(no_heights && no_heights->severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(no_wave && no_wave->severity == DiagnosticSeverity::Warning &&
+	            no_wave->message.find("plays nothing") != std::string::npos && !missing("game.lwf", "shot.wav"));
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
+	// The height data in: the terrain's reference resolves. A terrain with no height data named is
+	// one the game refuses: unread, a warning of the graph's.
+	TEST_EXPECT(editor_test::write_text(root + "/isle.cpt", "x") &&
+	            editor_test::write_text(root + "/bare.trn", "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Present && !missing("isle.trn", "isle.cpt"));
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 1 && graph.references_of("bare.trn").empty());
 	return 0;
 }
 
@@ -1724,11 +1872,18 @@ static int test_model_texture_references() {
 	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(!(d.code() == "asset.kind.unknown" && d.asset == "textures/ready.mdt"));
 	// No other texture takes a material chunk: a particle naming field.nq8 misses it.
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "field.nq8") == ReferenceStatus::Missing);
-	// A file of the name that holds no chunk is of no kind the game knows: it serves no row.
+	// A file of the name that holds no chunk is of no kind the game knows: it serves no row, and the
+	// game opening it reads no chunk, which is its own finding (review F3: reference.wrong_kind, an
+	// error that gates), not a name the project lacks.
 	TEST_EXPECT(editor_test::write_text(root + "/textures/field.nq8", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.project.scan->find("field.nq8") && view.project.scan->find("field.nq8")->kind == AssetKind::Unknown);
-	TEST_EXPECT(resolved("field.nq8") == ReferenceStatus::Missing && finding_for("field.nq8"));
+	TEST_EXPECT(resolved("field.nq8") == ReferenceStatus::Missing && !finding_for("field.nq8"));
+	const Diagnostic *wrong_kind = nullptr;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "reference.wrong_kind" && d.asset == model && subject_target(d) == "field.nq8") wrong_kind = &d;
+	TEST_EXPECT(wrong_kind && wrong_kind->severity == DiagnosticSeverity::Error && blocks_build(*wrong_kind) &&
+	            wrong_kind->message.find("field.nq8 is ") != std::string::npos);
 	textures({"wall.tga", "wall.dds", "plain.tga", "plain.dds", "bump.tga", "bump.dds", "ready.mdt", "field.nq8"});
 	// The inspector's badge and Go to, and the edge's JSON, answer the same.
 	editor_test::handle_to_end(session, request::open_document(model));
@@ -1883,7 +2038,7 @@ static int test_generation() {
 	graph.update(paths, doc, scan, {});
 	const uint64_t changed = graph.generation();
 	TEST_EXPECT(changed != grown && changed != assembled && changed != fresh);
-	// A file the graph does not read (a mission's .mis, S13 PR0): its row counts, so one added
+	// A file the graph does not read (a mission text, S14): its row counts, so one added
 	// assembles again, while what it holds is read by nothing, so a change to it keeps the graph.
 	TEST_EXPECT(editor_test::write_text(root + "/missions/m1.mis", "; one\n"));
 	scan = scan_project_assets(paths, doc);
@@ -2487,7 +2642,7 @@ static int test_incremental_equals_fresh() {
 		TEST_EXPECT(step("a string table become a raw table", true));
 	}
 	// A mission that reads (an item the project has and one it lacks), then does not: its edges
-	// gone and a finding of the graph's in their place, gone with the file.
+	// gone (the finding is its type's validation's, S14, not the graph's), then the file.
 	{
 		opennova::bms::File mission;
 		opennova::mission::make_default(mission);
@@ -2501,11 +2656,12 @@ static int test_incremental_equals_fresh() {
 	TEST_EXPECT(step("a mission placing two items", true));
 	TEST_EXPECT(rewrite(root + "/missions/broken.bms", "not a mission"));
 	TEST_EXPECT(step("the mission no longer reads", true));
-	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 1);
+	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0 &&
+			graph.references_of("missions/broken.bms").empty());
 	fs::remove(root + "/missions/broken.bms");
 	TEST_EXPECT(step("the mission gone", true));
 	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0);
-	// A mission's .mis: its row counts, what it holds is read by nothing.
+	// A mission text (a .mis): its row counts, what it holds is read by nothing.
 	TEST_EXPECT(rewrite(root + "/missions/m1.mis", "; one\n"));
 	TEST_EXPECT(step("a .mis added", true));
 	TEST_EXPECT(rewrite(root + "/missions/m1.mis", "; two, a longer line\n"));
@@ -3116,7 +3272,7 @@ static int test_retail_incremental() {
 		if (opennova::strutil::ends_with_icase(name, ".pff")) continue;
 		const AssetKind kind = origin.file_kind(name);
 		if (kind == AssetKind::Model && model_name.empty()) model_name = name;
-		if (!graph_reads_file(kind, name) || kind == AssetKind::Model ||
+		if (!graph_reads_kind(kind) || kind == AssetKind::Model ||
 				kind == AssetKind::Animation)
 			continue;
 		std::vector<uint8_t> bytes;
@@ -3296,6 +3452,7 @@ int main(int argc, char **argv) {
 	failures += test_retail_record_references();
 	failures += test_reference_kind_rows();
 	failures += test_reference_file_candidates();
+	failures += test_terrain_and_bank_extractors();
 	failures += test_model_texture_references();
 	failures += test_rename_keeps_loader_spelling();
 	failures += test_user_point_references();

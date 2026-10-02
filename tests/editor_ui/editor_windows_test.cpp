@@ -20,7 +20,8 @@
 // draws with (ui_kit). S12 D3: the
 // Inspector's Go to (a menu of the places a font through a style variable leads) and its
 // clickable "Referenced by" rows. S13 V1: a window a list's part holds is not copyable from the
-// tree (the one clipboard rule, tests/editor/mnu_clipboard_test.cpp). Each group of the
+// tree (the one clipboard rule, tests/editor/mnu_clipboard_test.cpp). ADR 0046 S14: the Inspector's
+// shared form over records of kinds whose fields are alike. Each group of the
 // editor_ui ctest is a row of its own (main: the group named on the command line).
 #include <algorithm>
 #include <cmath>
@@ -47,6 +48,7 @@
 #include <editor/session/view/session_view.h>
 #include "../editor/editor_test_support.h"
 #include "../editor/menu_test_support.h"
+#include "../editor/pool_document.h"
 #include "common/test_paths.h"
 #include "editor_ui_test_support.h"
 #include <editor/ui/document_window.h>
@@ -2431,6 +2433,78 @@ void test_menu_tree_follows_changes() {
 	CHECK(view->trees_made() == made + 1, "the shown screen's window moved: the tree made again");
 }
 
+// ADR 0046 S14: several records of kinds whose fields are alike take the Inspector's shared form
+// (the pool document's crates and barrels, two kinds over one field table, as a mission's four
+// entity pools are): its heading counts them by kind, a field that differs is marked, and a change
+// is one batch over every one, each Set naming its record's own kind. A record of another kind among
+// them: the primary's own form, under the note that the kinds differ.
+void test_inspector_kinds_alike() {
+	using editor_test::PoolDocument;
+	auto pool = std::make_shared<PoolDocument>();
+	Diagnostic error;
+	const std::string text = "C alpha 5\nB bravo 3\nC charlie 0\nN delta words\nB echo 7\n";
+	CHECK(pool->load_bytes(std::vector<uint8_t>(text.begin(), text.end()), "pool.txt", AssetKind::Unknown, "jo", error),
+	      "the pool loads");
+	const auto row_at = [&](size_t i) { return NodeAddress{pool->rows()[i]->id, pool->rows()[i]->kind, 0}; };
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Pool";
+	editor_test::own(v.project.document).title = "Pool";
+	editor_test::own(v.project.scan).entries.push_back(file_entry("pool.txt", pool->path(), AssetKind::Unknown));
+	editor_test::own(v.project.scan).index();
+	v.documents.open.push_back(pool);
+	v.documents.active = pool->path();
+	v.documents.selection.select(pool->path(), row_at(0), {row_at(1), row_at(4)}, SelectMode::Replace);
+	v.revisions.touch(ViewConcern::Selection);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	std::string shown = logged_frame(ui);
+	CHECK(shown.find("3 records selected (1 Crate, 2 Barrel): a change here sets every one of them.") != std::string::npos,
+	      "a crate and two barrels: the shared form, counted by kind");
+	CHECK(shown.find("of different kinds") == std::string::npos && shown.find("(mixed)") != std::string::npos,
+	      "no note that the kinds differ; what differs is marked");
+	// The weight typed: one batch, a Set on each record under its own kind.
+	const ImGuiID inspector = Ui::window_id("Inspector");
+	ImGui::ActivateItemByID(item_id(inspector, {"", "fields", "weight", "##value"}));
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	ui.key(ImGuiMod_Ctrl, true);
+	ui.key(ImGuiKey_A, true);
+	ui.key(ImGuiKey_A, false);
+	ui.key(ImGuiMod_Ctrl, false);
+	ImGui::GetIO().AddInputCharactersUTF8("9");
+	ui.frames(2);
+	ui.key(ImGuiKey_Enter, true);
+	ui.key(ImGuiKey_Enter, false);
+	ui.frames(2);
+	std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *batch = nullptr;
+	for (const EditorRequest &request : requests)
+		if (request.kind == EditorRequestKind::EditRecord) batch = &request;
+	CHECK(batch && batch->edits.size() == 3 && batch->edits[0].address == row_at(0) &&
+	              batch->edits[1].address == row_at(1) && batch->edits[2].address == row_at(4) &&
+	              batch->edits[1].address.kind == editor_test::kPoolBarrel && batch->edits[0].field == "weight" &&
+	              std::get<int64_t>(batch->edits[2].value) == 9,
+	      "a change is one batch over every record, each Set naming its record's own kind");
+	ImGui::ClearActiveID();
+	ui.frames(2);
+	ui.drain();
+
+	// A note among them: the kinds differ, the primary's own form.
+	v.documents.selection.select(pool->path(), row_at(0), {row_at(3)}, SelectMode::Replace);
+	v.revisions.touch(ViewConcern::Selection);
+	ui.frames(3);
+	shown = logged_frame(ui);
+	CHECK(shown.find("2 records of different kinds selected") != std::string::npos &&
+	              shown.find("a change here sets every one") == std::string::npos,
+	      "a note with a crate: the kinds differ");
+	ui.drain();
+}
+
 void run_menu_tests() {
 	test_requests_round_trip();
 	test_frame_bracket_follows_the_table();
@@ -2442,6 +2516,7 @@ void run_menu_tests() {
 void run_inspector_tests() {
 	test_inspector_plan();
 	test_inspector_ui();
+	test_inspector_kinds_alike();
 	test_go_to_ui();
 	test_numeric_go_to_ui();
 }

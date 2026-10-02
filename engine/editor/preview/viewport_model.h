@@ -88,7 +88,8 @@ struct ViewportInput {
 // What a viewport's planners read (a canvas's gestures, the MCP's drag and command): the input, the
 // size the canvas draws the picture at (pixels; the state's where no canvas draws), the grid a drag
 // snaps to (a menu's 8-unit grid where it is not 0, a model's grid in metres; 0 free), and the device
-// drawing it (null: none; what a drop lands on, ViewportDevice::surface_at).
+// drawing it (null: none; what a drop or a move lands on, ViewportDevice::surface_between and
+// ground_at).
 struct ViewportContext {
 	ViewportInput input;
 	int width = 0;
@@ -107,7 +108,8 @@ class ViewportModel;
 // What a planner reads of a viewport the session keeps, with no canvas drawing it (the viewport
 // query's hit, an EditInViewport's drag and command, a test): the view, the preview clock, the
 // document open at its path, as it followed (ChangeClass None), at the size its device draws at
-// (ViewportModel::size), snapped by `snap`, over no device.
+// (ViewportModel::size), snapped by `snap`, over the device the Shell holds for it (Viewports::devices,
+// read and not used; none in a session with no Shell).
 ViewportContext viewport_context(const SessionView &view, const ViewportModel &model, float snap = 0.0f);
 
 // How a canvas lays the picture out: a design picture `design_width` x `design_height` (a menu's
@@ -208,6 +210,19 @@ public:
 	// one it cannot plan.
 	virtual bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const = 0;
+	// A drop on the picture (S14, EditInViewport: session/editor_request.h's ViewportDrop: a project
+	// file or a reference kind's name let go at a point of it) planned into requests: what it makes
+	// there, one batch. False, with why: by default a kind takes no drop (a menu's, a model's), and
+	// one that does refuses a thing it cannot place, a picture that is not its document's own, a
+	// drop the session would not take.
+	virtual bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+			std::string &error) const;
+	// What a box of the picture selects (S14: a marquee's records, the viewport query's box): the
+	// items the box from (x0, y0) to (x1, y1) takes, in its units, as a canvas's marquee over it
+	// takes them (a menu's windows it touches, a mission's marks whose anchors lie in it), each as
+	// hit names one; none for a kind with no marquee (the default), or a picture that is not current.
+	virtual std::vector<ViewportHit> box(const ViewportContext &context, float x0, float y0, float x1,
+			float y1) const;
 
 	// --- the wire's (viewport_json.h) ----------------------------------------------------------------
 

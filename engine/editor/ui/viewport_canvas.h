@@ -31,7 +31,7 @@ private:
 // the kind's overlay shapes over it, clipped to the canvas, coloured by their roles; the cursor the
 // kind asks for; the keys the kinds act on (the arrows, Esc, F), read while the canvas's window has
 // the keyboard; and the zoom and the pan. A picture that fills the canvas (the model's) leaves the
-// zoom and the pan to its kind's camera and hands it the wheel and the middle button. A design
+// zoom and the pan to its kind's camera and hands it the wheel, the middle button and the right one. A design
 // picture (the menu's 800 x 600) is the canvas's to zoom and scroll: fitted to the canvas at the
 // design's aspect, a scale of the design (Ctrl+wheel steps it about the mouse), or the device's
 // own size, with a margin the handles on its edges stay on; the middle button, or Space with
@@ -68,7 +68,9 @@ public:
 	// After picture(): a line over the picture's top left corner (S13 V6: how far its device's build
 	// is while the last picture shows, or why the build failed).
 	void badge(const std::string &text);
-	// The right button clicked on the canvas this frame (not while it pans).
+	// The right button clicked on the canvas this frame (not while it pans). On a picture that fills
+	// the canvas, whose right button is its kind's (a look), a click is the button let go having
+	// travelled less than a drag does.
 	bool right_clicked() const { return right_clicked_; }
 	void draw(const OverlayList &shapes, CanvasCursor cursor);
 	void end();
@@ -85,6 +87,7 @@ private:
 	bool child_ = false; // a design picture's scrolling child is open
 	bool drawn_ = false; // drew this frame
 	bool right_clicked_ = false;
+	bool right_held_ = false; // the right button went down on a picture that fills the canvas
 	CanvasPoint origin_; // the picture's top-left corner on the screen
 	CanvasPoint surface_min_, surface_max_; // the canvas's surface on the screen (the shapes' clip)
 	CanvasInput input_;
