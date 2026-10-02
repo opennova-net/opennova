@@ -41,7 +41,9 @@ struct DialogsView {
 	// (editor/import/import_plan), with the files they need when `with_dependencies`: its rows
 	// are what the dialog checks, then the files not found, the competing candidates and the
 	// kinds not followed. `changed`: an Import found the files changed since the plan it was
-	// shown, wrote nothing, and this is the plan made again. Every plan made posts an
+	// shown, wrote nothing, and this is the plan made again. `all`: every file of the game
+	// install chosen at once (ADR 0046 S14), nothing to choose from and no walk (the closure of
+	// everything is everything; the setting changes nothing of it). Every plan made posts an
 	// ImportPlanned event (view_events.h).
 	struct ImportPreview {
 		ImportPreview(); // the plan made, empty
@@ -49,6 +51,7 @@ struct DialogsView {
 		std::vector<ImportChoice> choices;
 		std::vector<ImportChoice> roots;
 		bool with_dependencies = false;
+		bool all = false;
 		std::shared_ptr<const ImportPlan> plan;
 		bool changed = false;
 	};
@@ -70,6 +73,9 @@ struct DialogsView {
 		std::string new_name;  // as the definition takes it (an item id "0100302" is 100302)
 		std::string requested; // as asked: what a window compares the name it sent with
 		std::shared_ptr<const std::vector<RenameSite>> sites;
+		// A file's rename: the companions renamed with it (a mission's set, ADR 0046 S14), each
+		// "old to new".
+		std::vector<std::string> companions;
 		std::vector<Diagnostic> refusals;
 	};
 	RenamePreview rename_preview;

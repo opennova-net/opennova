@@ -12,6 +12,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/documents/document_types.h>
 #include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 
@@ -57,6 +58,10 @@ static int test_classification() {
 	TEST_EXPECT(classify_asset("x.dds", nullptr) == AssetKind::Texture);
 	TEST_EXPECT(classify_asset("x.fnt", nullptr) == AssetKind::Font);
 	TEST_EXPECT(classify_asset("x.bms", nullptr) == AssetKind::Mission);
+	// The original mission editor's text, which the game never reads (S14): a kind of its own.
+	TEST_EXPECT(classify_asset("briefing.MIS", nullptr) == AssetKind::MissionText &&
+	            std::string(asset_kind_token(AssetKind::MissionText)) == "mission_text" &&
+	            !asset_kind_packed(AssetKind::MissionText) && document_type_for(AssetKind::MissionText) == nullptr);
 	TEST_EXPECT(classify_asset("x.trn", nullptr) == AssetKind::Terrain);
 	TEST_EXPECT(classify_asset("x.cpt", nullptr) == AssetKind::TerrainPolyData);
 	TEST_EXPECT(classify_asset("x.til", nullptr) == AssetKind::TileInfo);

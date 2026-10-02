@@ -50,6 +50,11 @@ struct ActivityView {
 	// The port the running game's MCP endpoint answers on (0: no game, or none).
 	int play_mcp_port = 0;
 	std::string play_command_line;
+	// The mission the running (or last) game was started in, as the project spells its file
+	// ("" at its menu: a plain Play, or the game install, which starts there whatever was asked).
+	// One that did not load is a Problems row (play.mission.failed) until Play starts again or the
+	// project closes.
+	std::string play_mission;
 	// Where the running (or last) game runs, its run directory (run/run_directory.h), and the log
 	// Play tails there ("" before the first Play): never the build directory it runs from.
 	std::string play_run_dir;

@@ -10,8 +10,9 @@
 // scrolls sideways, and every cell of a table keeps within its column (a table that scrolls
 // sideways still clips a cell to its column); the failure lists the offenders by name. In
 // the narrow layout the mouse reaches the last button of a toolbar that wrapped (Files'
-// Refresh, the menu view's Outdent) and the last of thirty tabs through the tab list, each
-// raising its request.
+// Refresh, the menu view's Outdent, and the mission view's Play mission in a viewport column
+// narrower than 320 pixels, S14) and the last of thirty tabs through the tab list, each
+// raising its request. The mission's view is among the documents swept.
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -30,6 +31,7 @@
 #include <editor/ui/editor_windows.h>
 #include <editor/ui/inspector_layout.h>
 #include "common/file_io.h"
+#include "common/test_paths.h"
 #include "editor_ui_test_support.h"
 
 #include <imgui.h>
@@ -115,11 +117,13 @@ bool bounds_project(ProjectSession &session, const editor_test::TempProjectDir &
 		if (!editor_test::write_bytes(v.project.root + name, bytes)) return false;
 	}
 	if (!editor_test::write_text(v.project.root + "/" + style->relative_path, long_style()) ||
-	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()))
+	    !editor_test::write_text(v.project.root + "/menus/deep.mnu", deep_menu()) ||
+	    !editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                              test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms")))
 		return false;
 	session.handle(request::rescan());
 	session.run_operations();
-	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") &&
+	return v.project.scan->find("table29.bin") && v.project.scan->find("deep.mnu") && v.project.scan->find("synth_logic.bms") &&
 			fill_strings(session);
 }
 
@@ -255,6 +259,7 @@ void sweep_everything(Sweep &sweep, const std::string &layout) {
 	                 {"menus/deep.mnu", "LEVEL_9_WINDOW_WITH_A_RATHER_LONG_NAME"},
 	                 {"menu_style.mns", nullptr},
 	                 {"models/armory.3di", nullptr},
+	                 {"missions/synth_logic.bms", nullptr},
 	                 {"anims/walk.bad", nullptr},
 	                 {"anims/SKIN.adm", nullptr}};
 	bool picked = false;
@@ -351,6 +356,33 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	const EditorRequest *move = one(requests, EditorRequestKind::EditRecord);
 	CHECK(move && edit_of(*move).operation == EditOperation::Move, "Outdent raised");
 	ui.away();
+
+	// The mission's view (S14) in this narrow layout (the Document window beside the Preview takes
+	// about 250 pixels, its viewport column about 100 beside the outline, narrower than the 320 the
+	// design named): its toolbar wraps within the viewport's column, nothing of it past the column,
+	// and the mouse reaches its last button, Play mission (cut to the column where its label does
+	// not fit, found by ###), under the first line; pressed, it raises Play in the mission.
+	sweep.open("missions/synth_logic.bms", nullptr);
+	const ImGuiWindow *documents = ImGui::FindWindowByName("Document");
+	const ImGuiWindow *column = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+	CHECK(documents && column, "the mission's viewport column in the Document window");
+	if (column && documents) {
+		CHECK(column->Size.x < 320.0f, "the column narrower than 320 pixels");
+		CHECK(column->ContentSize.x <= column->ContentRegionRect.GetWidth() + 1.0f, "the mission's toolbar wraps within its column");
+		const float top = column->Pos.y, bottom = column->Pos.y + ImGui::GetFrameHeightWithSpacing() * 8.0f;
+		CHECK(hover_item(ui, item_id(column->ID, {"###Play mission"}), documents, top, bottom, at) ||
+		              hover_item(ui, item_id(column->ID, {"Play mission"}), documents, top, bottom, at),
+		      "the mission toolbar's Play mission reached");
+		CHECK(at.y > column->Pos.y + ImGui::GetFrameHeight(), "Play mission wrapped under the first line");
+		ui.button(true);
+		ui.button(false);
+		requests = ui.drain();
+		const EditorRequest *play = one(requests, EditorRequestKind::Play);
+		CHECK(play && play->mission == "synth_logic.bms", "Play mission raised in the mission");
+		ui.away();
+	}
 }
 
 // Thirty string tables open: the tab list, opened with the mouse, lists them, and the mouse

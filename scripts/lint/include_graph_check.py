@@ -44,9 +44,11 @@ in the path is what makes the layering visible, so this check reads it:
   7. EDITOR RANK (ADR 0046 S13 D3) — inside engine/editor the editing model,
      the document types, the asset graph, the session and the windows are
      ranked model < documents < graph < session < ui: a ranked library
-     includes only its own rank and below. graph/reference_kinds.h is a seam
-     header any library may include (what a reference kind is, which the
-     model's field schema names), like the terrain_query headers. The other
+     includes only its own rank and below. graph/reference_kinds.h and
+     graph/graph_edge.h are seam headers any library may include (what a
+     reference kind is, which the model's field schema names; the edge and
+     symbol records a document type's own references are made of, ADR 0046
+     S14), like the terrain_query headers. The other
      editor libraries stay unranked. The upward includes the tree still makes
      are listed (EDITOR_RANK_ALLOWED), each with the slice that removes it; an
      entry the tree no longer makes is itself a violation, so the list only
@@ -134,7 +136,7 @@ SEAM_TREE_EXTRA_HEADERS = {
 
 # Rule 7: the editor's rank (ADR 0046 S13 D3).
 EDITOR_RANK = {"model": 0, "documents": 1, "graph": 2, "session": 3, "ui": 4}
-EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h"}
+EDITOR_SEAM_HEADERS = {"editor/graph/reference_kinds.h", "editor/graph/graph_edge.h"}
 # (includer, included header): the upward includes the tree still makes. None
 # since S13 V3, which moved the last (a stylesheet line's value use, which reads
 # the menus' uses from the graph) out of documents/ into graph/style_value_use;

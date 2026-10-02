@@ -26,6 +26,10 @@
 // Rebuild; the menu's caret on the preview clock with no configure, the device's frame drawn again
 // only as the caret's half of the blink changes (and, with OPENNOVA_JO_DIR, mp.mnu's GAME_NAME box
 // blinking its caret on it).
+//
+// ADR 0046 S14 (D3): a mission's drag through a real session and a fake device is Updates alone and
+// one undo step; the mission kind keeps two devices, a third mission given one giving up the least
+// recently used mission's.
 
 #include <climits>
 #include <cmath>
@@ -40,12 +44,14 @@
 #include <base/io/json.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mnu_table.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/menu_viewport.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/preview_clock.h>
@@ -2017,7 +2023,16 @@ static int test_builds() {
 	if (!menu) return 1;
 	const std::string menu_path = menu->path();
 	const auto *shown_menu = viewport_of<MenuViewport>(session, menu_path, ViewportKind::Menu);
+	// Its first picture pending, whichever device a canvas asked for last (the model's: S14 review m2,
+	// the Preview's canvas draws after the Document's): the Shell's first-picture budget stands.
+	TEST_EXPECT(!devices.cache.first_picture_pending());
+	devices.sync(session);
+	const FakeDevice *first = devices.held(menu_path, ViewportKind::Menu);
+	TEST_EXPECT(first && first->built.loading && first->shown == 0);
+	TEST_EXPECT(devices.cache.device(document->path(), ViewportKind::Model) == device &&
+			devices.cache.most_recently_used() == device && devices.cache.first_picture_pending());
 	for (int frame = 0; frame < 3; ++frame) devices.frame(session);
+	TEST_EXPECT(!devices.cache.first_picture_pending());
 	FakeDevice *menu_device = devices.held(menu_path, ViewportKind::Menu);
 	TEST_EXPECT(menu_device && shown_menu && menu_device->shown == 1 &&
 			shown_menu->picture_status() == ViewportStatus::Ready);
@@ -2090,8 +2105,228 @@ static int test_follow_reads() {
 	return 0;
 }
 
+// ADR 0046 S14: a kind may keep fewer devices than the cache (ViewportKindRow::devices; here a test's
+// limit of two menus): the third menu given a device gives up the least recently used menu's, the
+// model's device untouched and the capacity not reached; most_recently_used is the device used last;
+// a device holds no picture until its first build ends.
+static int test_kind_limit() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_kind_limit");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache cache(
+			[&made](ViewportKind) {
+				auto device = std::make_unique<editor_test::FakeDevice>();
+				made.push_back(device.get());
+				return std::unique_ptr<ViewportDevice>(std::move(device));
+			},
+			4, [](ViewportKind kind) { return kind == ViewportKind::Menu ? size_t(2) : size_t(0); });
+	const auto sync = [&] { cache.sync(session.viewports(), view); };
+	session.handle(request::new_project(dir.file("project"), "Kind Limit"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	editor_test::FakeDevice fresh;
+	TEST_EXPECT(!fresh.holds_picture() && cache.most_recently_used() == nullptr);
+	session.handle(request::open_document("models/armory.3di"));
+	sync();
+	TEST_EXPECT(cache.size() == 1 && made.size() == 1 && cache.most_recently_used() == made[0] && made[0]->holds_picture());
+	session.handle(request::open_document("main.mnu"));
+	sync();
+	const std::string main_path = session.document_for("main.mnu")->path();
+	TEST_EXPECT(cache.size() == 2 && cache.held(main_path, ViewportKind::Menu) == made[1] && cache.most_recently_used() == made[1]);
+	session.handle(request::create_file("a.mnu", "menu"));
+	sync();
+	const std::string a_path = session.document_for("a.mnu")->path();
+	TEST_EXPECT(cache.size() == 3 && cache.held(a_path, ViewportKind::Menu) && cache.held(main_path, ViewportKind::Menu));
+	// A third menu: the menu's limit of two gives up the least recently used menu (main's), though the
+	// cache holds three of its four.
+	session.handle(request::create_file("b.mnu", "menu"));
+	sync();
+	const std::string b_path = session.document_for("b.mnu")->path();
+	TEST_EXPECT(cache.size() == 3 && made.size() == 4);
+	TEST_EXPECT(cache.held(b_path, ViewportKind::Menu) == made[3] && cache.held(a_path, ViewportKind::Menu) &&
+			!cache.held(main_path, ViewportKind::Menu) && cache.held("models/armory.3di", ViewportKind::Model) == made[0]);
+	TEST_EXPECT(!session.viewports().find(main_path, ViewportKind::Menu)->attached());
+	TEST_EXPECT(cache.most_recently_used() == made[3]);
+	// The model's device asked for: now the most recently used; the menus' limit stands as main's view
+	// asks for its device back (a's, the least recently used menu, given up at the next sync).
+	TEST_EXPECT(cache.device("models/armory.3di", ViewportKind::Model) == made[0] && cache.most_recently_used() == made[0]);
+	TEST_EXPECT(cache.device(main_path, ViewportKind::Menu) == nullptr);
+	sync();
+	TEST_EXPECT(cache.size() == 3 && made.size() == 5 && cache.held(main_path, ViewportKind::Menu) == made[4] &&
+			!cache.held(a_path, ViewportKind::Menu) && cache.held(b_path, ViewportKind::Menu) == made[3]);
+	std::printf("test_kind_limit passed\n");
+	return 0;
+}
+
+// ADR 0046 S14 (D3): a mission's drag through a real session and a fake device (four samples of its
+// move handle under one gesture) is an Update a sample, the build generation standing, and one undo
+// step, whose undo is an Update too; the mission kind keeps two devices (its kind row's column): a
+// third mission given one gives up the least recently used mission's, the model's untouched and the
+// cache's capacity not reached.
+static int test_mission_devices() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_mission_devices");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	FakeDevices devices;
+	session.handle(request::new_project(dir.file("project"), "Mission Devices"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::vector<uint8_t> mission =
+			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
+	for (const char *name : { "a.bms", "b.bms", "c.bms" })
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/missions/" + name, mission));
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("missions/a.bms"));
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/a.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string a = document->path();
+	devices.sync(session);
+	FakeDevice *device = devices.held(a, ViewportKind::Mission);
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(a, ViewportKind::Mission));
+	TEST_EXPECT(device && viewport && device->last() == ViewportAction::Rebuild && viewport->builds() == 1);
+	if (!device || !viewport) return 1;
+	const std::vector<const Node *> items = document->rows_of(MissionKind::Item);
+	TEST_EXPECT(!items.empty());
+	if (items.empty()) return 1;
+	const NodeId item = items[0]->id;
+	const double x = viewport->scene().entity(item)->x;
+	const size_t from = device->taken.size();
+	// The first sample begins the gesture (the session's token, which its outcome names), the rest go
+	// on with it.
+	uint64_t gesture = 0;
+	for (int sample = 0; sample < 4; ++sample) {
+		ViewportDrag drag;
+		drag.id = item;
+		drag.handle = "move";
+		drag.x = 16.0f;
+		drag.gesture = gesture;
+		drag.end = sample == 3;
+		session.handle(request::edit_in_viewport(a, drag));
+		TEST_EXPECT(session.outcome().done());
+		if (sample == 0) gesture = session.outcome().gesture;
+		TEST_EXPECT(gesture != 0);
+		devices.sync(session);
+	}
+	TEST_EXPECT(device->since(from) == Actions({ ViewportAction::Update, ViewportAction::Update, ViewportAction::Update,
+										ViewportAction::Update }));
+	TEST_EXPECT(viewport->builds() == 1 && viewport->scene().entity(item)->x > x && view.documents.gestures.empty());
+	session.handle(request::undo(a));
+	devices.sync(session);
+	TEST_EXPECT(!document->dirty() && !document->can_undo() && viewport->scene().entity(item)->x == x);
+	TEST_EXPECT(device->last() == ViewportAction::Update && viewport->builds() == 1);
+	// The kind's limit of two: a model's device beside the missions', the third mission giving up
+	// the first's.
+	TEST_EXPECT(viewport_kind_row(ViewportKind::Mission).devices == 2);
+	session.handle(request::open_document("models/armory.3di"));
+	devices.sync(session);
+	FakeDevice *model = devices.held("models/armory.3di", ViewportKind::Model);
+	TEST_EXPECT(model != nullptr);
+	session.handle(request::open_document("missions/b.bms"));
+	devices.sync(session);
+	const std::string b = session.document_for("missions/b.bms")->path();
+	TEST_EXPECT(devices.held(a, ViewportKind::Mission) == device && devices.held(b, ViewportKind::Mission) != nullptr);
+	TEST_EXPECT(devices.cache.size() == 3);
+	session.handle(request::open_document("missions/c.bms"));
+	devices.sync(session);
+	const std::string c = session.document_for("missions/c.bms")->path();
+	TEST_EXPECT(devices.held(c, ViewportKind::Mission) != nullptr && devices.held(b, ViewportKind::Mission) != nullptr);
+	TEST_EXPECT(devices.held(a, ViewportKind::Mission) == nullptr && !session.viewports().find(a, ViewportKind::Mission)->attached());
+	TEST_EXPECT(devices.held("models/armory.3di", ViewportKind::Model) == model && devices.cache.size() == 3);
+	std::printf("test_mission_devices passed\n");
+	return 0;
+}
+
+// ADR 0046 S14 (E13): the devices drawn in one frame arbitrate their scene state. Two of one state
+// both render; of two states, the one that rendered longest ago renders (the other keeps its last
+// picture, withheld), its state published again when another was published last, so a mission and a
+// model drawn together take turns; alone, a device renders every frame and its state is published
+// once; a device whose draw asked nothing is left out.
+static int test_scene_state_arbitration() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_arbitration");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache cache([&made](ViewportKind) {
+		auto device = std::make_unique<editor_test::FakeDevice>();
+		made.push_back(device.get());
+		return std::unique_ptr<ViewportDevice>(std::move(device));
+	});
+	session.handle(request::new_project(dir.file("project"), "Arbitration"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	session.handle(request::open_document("main.mnu"));
+	cache.sync(session.viewports(), view);
+	TEST_EXPECT(made.size() == 2 && cache.published_state() == 0);
+	editor_test::FakeDevice &model = *made[0], &menu = *made[1];
+	// Nothing asked: nothing happens.
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 0 && menu.presented == 0 && menu.published == 0 && cache.published_state() == 0);
+	// Both of the shipped state, both asked: both render, the state published once.
+	uint64_t frame = 1;
+	const auto draw = [&](editor_test::FakeDevice &device) {
+		device.asked = true;
+		device.frame = frame;
+	};
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 1 && menu.presented == 1 && model.withheld == 0 && menu.withheld == 0);
+	TEST_EXPECT(model.published + menu.published == 1 && !model.asked && !menu.asked && cache.published_state() == 0);
+	// The model's device of a state of its own (a mission's, say): drawn together, the one that
+	// rendered longest ago wins each frame, so they take turns, each turn publishing its state (the
+	// first publish above went to whichever device the cache made first).
+	const int model_published = model.published;
+	model.state = 7;
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(menu.presented == 2 && model.presented == 1 && model.withheld == 1 && cache.published_state() == 0);
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 2 && menu.presented == 2 && menu.withheld == 1 && model.published == model_published + 1 &&
+			cache.published_state() == 7 && model.rendered == 3);
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(menu.presented == 3 && model.withheld == 2 && cache.published_state() == 0 && menu.rendered == 4);
+	// Alone, the model's device renders every frame, its state published once more and then kept.
+	for (int i = 0; i < 3; ++i) {
+		++frame;
+		draw(model);
+		cache.arbitrate(session.viewports());
+	}
+	TEST_EXPECT(model.presented == 5 && model.published == model_published + 2 && model.withheld == 2 && cache.published_state() == 7);
+	TEST_EXPECT(menu.presented == 3 && menu.withheld == 1);
+	std::printf("test_scene_state_arbitration passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_scene_state_arbitration() == 0);
+	TEST_EXPECT(test_kind_limit() == 0);
+	TEST_EXPECT(test_mission_devices() == 0);
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);
 	TEST_EXPECT(test_two_menus() == 0);
