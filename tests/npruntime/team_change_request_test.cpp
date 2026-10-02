@@ -140,7 +140,7 @@ void test_switch_kills_and_penalizes() {
 	CHECK(f.conn(0).link.respawn_delay_seconds == 60);
 	CHECK(f.conn(0).link.spawn_target_hold_seconds == 60);
 	CHECK(f.conn(0).link.downed_revive_seconds == 0);
-	CHECK(f.conn(0).reply.team_change_ms == inmatch::host_milliseconds_for_logic_tick(100));
+	CHECK(f.conn(0).reply.team_change_ms == opennova::io::host_milliseconds_for_logic_tick(100));
 	// The death ran once: the next host ticks (one periodic second) raise no
 	// second transaction and keep the penalty.
 	for (int tick = 0; tick < 4; ++tick) inmatch::Server_TickUpdate(f.ctx);
@@ -158,7 +158,7 @@ void test_interval_gate() {
 	// 300 s from tick 100's stamp is tick 18700 on the 62-tick host clock.
 	f.request(0, 18699);
 	CHECK(f.entity(0).team == 1);
-	CHECK(f.conn(0).reply.team_change_ms == inmatch::host_milliseconds_for_logic_tick(100));
+	CHECK(f.conn(0).reply.team_change_ms == opennova::io::host_milliseconds_for_logic_tick(100));
 	CHECK(f.drain(0).empty());
 	f.request(0, 18700);
 	CHECK(f.entity(0).team == 2);
@@ -166,7 +166,7 @@ void test_interval_gate() {
 	const int line = index_of(sent, s2c::CHAT_BROADCAST);
 	CHECK(line >= 0);
 	if (line >= 0) CHECK(sent[static_cast<size_t>(line)].body == system_line("P1 to Red"));
-	CHECK(f.conn(0).reply.team_change_ms == inmatch::host_milliseconds_for_logic_tick(18700));
+	CHECK(f.conn(0).reply.team_change_ms == opennova::io::host_milliseconds_for_logic_tick(18700));
 }
 
 // TeamChoose off, a spectator slot, or a non-authority: nothing, no stamp.
@@ -192,7 +192,7 @@ void test_other_team_only_stamps() {
 	f.request(0, 100);
 	CHECK(f.entity(0).team == 3);
 	CHECK(f.drain(0).empty());
-	CHECK(f.conn(0).reply.team_change_ms == inmatch::host_milliseconds_for_logic_tick(100));
+	CHECK(f.conn(0).reply.team_change_ms == opennova::io::host_milliseconds_for_logic_tick(100));
 	CHECK(f.conn(0).link.respawn_delay_seconds == 0);
 }
 

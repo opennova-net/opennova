@@ -4283,7 +4283,7 @@ bool check_refused_touch_arms_the_nag() {
 	auto touch = [&f](uint32_t age_ms) {
 		const uint32_t frame_tick = f.world.logic_tick;
 		const uint32_t now_ms =
-				opennova::inmatch::host_milliseconds_for_logic_tick(frame_tick);
+				opennova::io::host_milliseconds_for_logic_tick(frame_tick);
 		f.conn().reply.chat_last_ms = age_ms == 0 ? 0 : now_ms - age_ms;
 		f.world.zones.capture.refused_touches.push_back(f.player);
 		opennova::inmatch::Server_TickUpdate(f.ctx);
@@ -4639,7 +4639,7 @@ bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 	RttSample sample; size_t consumed = 0;
 	if (!expect(decode_rtt_sample(first[0].body.data(), first[0].body.size(), sample, consumed) &&
 			sample.echo_flag == 1 &&
-			sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
+			sample.timestamp == opennova::io::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
 			"periodic RTT requests carry the frame's host clock and echo flag 1")) return false;
 	for (int i = 1; i < 62; ++i) { inmatch::Server_TickUpdate(ctx); if (!expect(drain().empty(), "RTT waits 62 ticks")) return false; }
 	peer.s2c_send_holdoff_countdown = 2;

@@ -605,7 +605,7 @@ void emit_frontier_hints(NapiNPServerCtx &ctx, world::World &world) {
 //  @0x500BE4..0x500BF1, bit 0x08 @0x500C10, the stamp @0x500C19..0x500C33, the
 //  set @0x500C35..0x500C3C]
 void arm_refused_capture_nags(NapiNPServerCtx &ctx, world::World &world) {
-	const uint32_t now_ms = host_milliseconds_for_logic_tick(world.logic_tick);
+	const uint32_t now_ms = io::host_milliseconds_for_logic_tick(world.logic_tick);
 	for (const world::EntityHandle toucher : world.zones.capture.refused_touches) {
 		for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 			if (!conn.link.owned_entity.valid() || conn.link.owned_entity != toucher)
@@ -1242,7 +1242,7 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 				conn.s2c_send_holdoff_countdown != 0 || conn.reply.rtt_request_countdown != 0) continue;
 		conn.reply.rtt_request_countdown = 62;
 		std::vector<uint8_t> body;
-		put_u32le(body, host_milliseconds_for_logic_tick(world.logic_tick));
+		put_u32le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
 		body.push_back(1);
 		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
@@ -1383,7 +1383,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 						s2c::INPUT_STATE_FLAGS, {0x00, 0x00}, /*reliable=*/false);
 
 				const uint32_t host_ms =
-						host_milliseconds_for_logic_tick(world.logic_tick);
+						io::host_milliseconds_for_logic_tick(world.logic_tick);
 				if (reply.time_sync_host_baseline_ms == 0)
 					reply.time_sync_host_baseline_ms = host_ms;
 				if (reply.time_sync_round_host_ms == 0) {
@@ -2181,7 +2181,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 					if (conn.link.owned_entity.valid() &&
 							conn.link.owned_entity == flip->capturer)
 						conn.reply.chat_last_ms =
-								host_milliseconds_for_logic_tick(world.logic_tick);
+								io::host_milliseconds_for_logic_tick(world.logic_tick);
 			}
 			// The banner, keyed on the zone's new owner, goes to every in-match
 			// player even once the round is decided.

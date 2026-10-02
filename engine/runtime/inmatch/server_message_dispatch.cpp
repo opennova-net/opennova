@@ -1212,7 +1212,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 			case c2s::TEAM_CHANGE_REQUEST: // [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70]
 				if (world != nullptr && inputs.server_ctx != nullptr)
 					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
-							host_milliseconds_for_logic_tick(now_tick));
+							io::host_milliseconds_for_logic_tick(now_tick));
 				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
@@ -1252,7 +1252,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					} else {
 						st.time_sync_latest_client_ms = client_ms;
 						st.time_sync_current_host_ms =
-								host_milliseconds_for_logic_tick(now_tick);
+								io::host_milliseconds_for_logic_tick(now_tick);
 						const bool round_ok = client_delta_fits_retail_time_window(
 								client_ms - st.time_sync_previous_client_ms,
 								st.time_sync_current_host_ms -
@@ -1897,7 +1897,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(pong));
 				} else if (conn.link.owned_entity.valid()) {
 					Server_RecordPingSample(config, conn, ts,
-							host_milliseconds_for_logic_tick(now_tick),
+							io::host_milliseconds_for_logic_tick(now_tick),
 							inputs.server_ctx != nullptr && inputs.server_ctx->is_in_session != 0);
 				}
 				break;
@@ -1922,7 +1922,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
 						*inputs.server_ctx, conn, uplink,
-						host_milliseconds_for_logic_tick(now_tick), *world);
+						io::host_milliseconds_for_logic_tick(now_tick), *world);
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}

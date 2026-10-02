@@ -40,15 +40,6 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
 inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
 
-// Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
-// time-sync validator compares only unsigned deltas, so a nonzero logical base
-// preserves its clock contract without introducing wall-time into native tests.
-inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
-	return static_cast<uint32_t>(
-			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) /
-					static_cast<uint64_t>(io::kTicksPerSecondInt));
-}
-
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at
 // 0x4B0 records.
 // NapiNPMessage_Create rejects a new record when pending + retained + 1 exceeds this field; admitted
