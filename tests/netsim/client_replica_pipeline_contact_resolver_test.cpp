@@ -235,11 +235,36 @@ int main() {
 	tick_fresh(view);
 	ok &= expect((row_a->rm_entity_flags & 0x2000u) != 0,
 	             "clearance > 0xF000 latches the airborne bit");
+	(void)view.drain_slot_sounds();
 	cap.return_clearance = -0x100;
 	tick_fresh(view);
 	ok &= expect((row_a->rm_entity_flags & 0x2000u) == 0,
 	             "a grounded clearance clears the airborne bit");
 	ok &= expect(row_a->rm_vel_z == 0, "the landing zeroes the velocity");
+	// The landing thump rides that clear on every machine: profile slot 16
+	// SSFallAlive at the lifted origin, 15 SSFallDead for a dead body; a
+	// grounded tick with no airborne bit plays nothing.
+	// [orig: org2 @0x4b7f71..0x4b7f99; org1 @0x4bf87f..0x4bf897]
+	{
+		const auto sounds = view.drain_slot_sounds();
+		bool thump_a = false;
+		for (const auto &snd : sounds)
+			if (snd.handle == kRowA && snd.slot == 16 && snd.type_id == kPlayerType &&
+					snd.pos[0] == row_a->x && snd.pos[2] == row_a->z)
+				thump_a = true;
+		ok &= expect(sounds.size() == 2 && thump_a,
+		             "each landing body thumps SSFallAlive at its lifted origin");
+		tick_fresh(view);
+		ok &= expect(view.drain_slot_sounds().empty(),
+		             "a grounded body with no airborne bit plays no thump");
+		row_a->rm_entity_flags = 0x2000u | 0x2u; // a dead body in the air
+		row_b->rm_entity_flags = 0;
+		tick_fresh(view);
+		const auto dead = view.drain_slot_sounds();
+		ok &= expect(dead.size() == 1 && dead[0].handle == kRowA && dead[0].slot == 15,
+		             "a dead body lands with SSFallDead");
+		row_a->rm_entity_flags = 0;
+	}
 	// The suppressed edge: a pre-set CL contact keeps the ledge edge closed.
 	row_a->rm_entity_flags = 0x100000u;
 	cap.return_clearance = 0x10000;

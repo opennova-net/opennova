@@ -295,6 +295,13 @@ ClientReplicaPipeline::drain_corpse_decays() {
 	return out;
 }
 
+std::vector<ClientReplicaPipeline::ReplicaSlotSound>
+ClientReplicaPipeline::drain_slot_sounds() {
+	std::vector<ReplicaSlotSound> out;
+	out.swap(slot_sounds_);
+	return out;
+}
+
 void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	if (!decode_pool_spawn_batch(body.data(), body.size(), batch)) {

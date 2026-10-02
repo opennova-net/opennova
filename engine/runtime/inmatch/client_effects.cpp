@@ -191,6 +191,27 @@ void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
         }
         world.out.slot_sounds.push_back(scream);
     }
+    // The profile-slot plays the remote bodies' mover legs made this tick,
+    // each at the position its leg played it: the slot resolves through the
+    // body's items.def profile, a player's female binding picked by its
+    // packed avatar id (player-only), the resolved-id-0 slot playing nothing.
+    // [orig: Entity_GetProfileSlotSound @0x528300, the female byte
+    //  @0x52831c -> Entity_PlaySound3D_FullVolume @0x528E20]
+    for (const auto &sound : view_.drain_slot_sounds()) {
+        const bool female = sound.character_id != 0 &&
+                world.tables.character_traits.is_female(sound.character_id);
+        const std::string *set = audio::organic_slot_set(world.tables.sound_profiles,
+                world.tables.organic_sound_profiles, sound.type_id, female, sound.slot);
+        if (set == nullptr) continue;
+        world::SoundSlotEvent event;
+        event.source_handle = sound.handle;
+        event.pos[0] = sound.pos[0];
+        event.pos[1] = sound.pos[1];
+        event.pos[2] = sound.pos[2];
+        event.slot = sound.slot;
+        std::snprintf(event.set_name, sizeof(event.set_name), "%s", set->c_str());
+        world.out.slot_sounds.push_back(event);
+    }
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
                 (has_self_handle() && row.handle == self_handle())) continue;

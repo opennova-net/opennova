@@ -6962,6 +6962,82 @@ bool run_remote_death_edge_screams() {
                    "the self row's edge stays silent");
 }
 
+// A zero-root clip source with live capsule extents: the replica settle leg
+// is the subject of the mover-sound legs below, not the walk.
+struct StillBodySource final : w::IRootMotionSource {
+    bool has_clip(int, int) const override { return true; }
+    int32_t clip_length_ticks(int, int, int) const override { return 1024; }
+    bool advance(int, int, int32_t &phase, w::RootMotionFrame &out) override {
+        phase += 1024;
+        out = {};
+        out.capsule_bottom = 0x8000;
+        out.capsule_top = 0x1C000;
+        return true;
+    }
+};
+
+// The client half of a replica body's mover-leg sound: the profile slot its
+// leg queued resolves through the body's items.def binding and plays at the
+// position the leg played it. One remote player row, one mover tick against
+// the given contact clearance, then the client's sound pass.
+std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_z,
+        int32_t clearance) {
+    inmatch::ClientRuntime runtime("ReplicaMoverAudio");
+    w::World world;
+    static const char kProfiles[] =
+            "begin \"default\"\n"
+            "end\n"
+            "begin \"SP_Remote\"\n"
+            "     SSFallDead     T_BODYDROP\n"
+            "     SSFallAlive    T_LAND\n"
+            "     ChuteOpen      T_CHUTE_OPEN\n"
+            "     ChuteClose     T_CHUTE_CLOSE\n"
+            "     ChuteFlap      T_CHUTE_FLAP\n"
+            "     FreeFall       T_FREEFALL\n"
+            "end\n";
+    world.tables.sound_profiles.parse(kProfiles, sizeof(kProfiles) - 1);
+    opennova::audio::OrganicSoundProfile binding;
+    binding.primary = 1;
+    binding.female = 1;
+    world.tables.organic_sound_profiles.set(w::kPlayerInfantryTypeId, binding);
+    StillBodySource still;
+    runtime.view().set_remote_motion_mode(true);
+    runtime.view().set_root_motion_source(&still);
+    runtime.view().set_replica_contact_resolver(
+            [clearance](ns::ClientReplicaPipeline::ReplicaContactQuery &) { return clearance; });
+    ns::ClientEntityState &row = runtime.state().upsert(0x0011u);
+    row.type_id = w::kPlayerInfantryTypeId;
+    row.cls = EntityClass::Player;
+    row.net_has_compact = true;
+    row.rm_adm_id = 0;
+    row.rm_entity_flags = flags;
+    row.rm_vel_z = vel_z;
+    row.x = 7 << 16;
+    row.net_smooth_target[0] = row.x;
+    runtime.view().tick_remote_motion(0xFFFF);
+    runtime.tick_remote_stance_sounds(world);
+    std::vector<w::SoundSlotEvent> out;
+    for (const w::SoundSlotEvent &event : world.out.slot_sounds)
+        if (event.source_handle == 0x0011u && event.slot != 0) out.push_back(event);
+    return out;
+}
+
+// A remote body landing from the air thumps on the client itself, dead
+// bodies included: profile slot 16 SSFallAlive, 15 SSFallDead, at the lifted
+// origin; a grounded body plays nothing. [orig: org2 @0x4b7f71..0x4b7f99;
+// org1 @0x4bf87f..0x4bf897; Entity_GetProfileSlotSound @0x528300]
+bool run_remote_landing_thumps() {
+    const auto alive = replica_mover_sounds(0x2000u, 0, -0x100);
+    const auto dead = replica_mover_sounds(0x2000u | 0x2u, 0, -0x100);
+    const auto grounded = replica_mover_sounds(0, 0, -0x100);
+    return expect(alive.size() == 1 && std::string(alive[0].set_name) == "T_LAND" &&
+                          alive[0].slot == 16 && alive[0].pos[0] == (7 << 16),
+                   "a remote body landing from the air thumps SSFallAlive") &&
+           expect(dead.size() == 1 && std::string(dead[0].set_name) == "T_BODYDROP",
+                   "a dead remote body lands with SSFallDead") &&
+           expect(grounded.empty(), "a grounded remote body plays no thump");
+}
+
 // The remote stance latch's prone clear reads only a MOUNT parent's def: a
 // deck-standing remote (carrier = the ground link, mount_bone 0) keeps TO_PRONE.
 bool run_remote_stance_sound_parent_is_the_mount_only() {
@@ -7147,6 +7223,7 @@ int main() {
                     run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() &&
                     run_remote_stance_sound_parent_is_the_mount_only() &&
                     run_remote_death_edge_screams() &&
+                    run_remote_landing_thumps() &&
                     run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&

@@ -222,6 +222,20 @@ public:
 		bool release = false;
 	};
 	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
+	// A sound-profile slot one replica body's mover leg played this tick, at
+	// the body's position when it played, with the identity the embedder
+	// resolves it through: the row's items.def type and, for a player, its
+	// packed avatar id (the wire net_id) that picks the female binding
+	// [orig: Entity_GetProfileSlotSound @0x528300 ->
+	// Entity_PlaySound3D_FullVolume @0x528E20].
+	struct ReplicaSlotSound {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t slot = 0;
+		int32_t pos[3] = {};
+	};
+	std::vector<ReplicaSlotSound> drain_slot_sounds();
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
 	// contact resolve grounded it on an entity follows that carrier's
@@ -479,6 +493,7 @@ private:
 	std::vector<uint16_t> carrier_repair_requests_;
 	std::vector<uint16_t> death_edges_;
 	std::vector<ReplicaCorpseDecay> corpse_decays_;
+	std::vector<ReplicaSlotSound> slot_sounds_;
 	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /

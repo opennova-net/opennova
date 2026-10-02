@@ -8,6 +8,7 @@
 
 #include "client_replica_body_arbitration.h"
 
+#include <runtime/audio/sound_profile.h>            // kSlot* (the replica mover legs' profile slots)
 #include <runtime/terrain_query/height_field.h>        // remote-person terrain settle
 #include <runtime/world/entity.h>              // kEntityFlag* (the wire state_flags byte IS entity+36 low)
 #include <runtime/world/infantry.h>            // IRootMotionSource + the anim flag/state tables
@@ -373,8 +374,21 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           const ClientReplicaPipeline::ReplicaBoundRadiusResolver *bound_resolver,
                           const ClientReplicaPipeline::ReplicaPeerSphere *peers,
                           int32_t peer_count, uint32_t tick, int32_t water_z,
-                          bool has_water) {
+                          bool has_water,
+                          std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
 	if (es.rm_adm_id < 0) return;
+	const auto play_slot = [&](uint8_t slot) {
+		ClientReplicaPipeline::ReplicaSlotSound sound;
+		sound.handle = es.handle;
+		sound.type_id = es.type_id;
+		sound.character_id = es.cls == EntityClass::Player
+				? static_cast<uint16_t>(es.net_id) : 0;
+		sound.slot = slot;
+		sound.pos[0] = es.x;
+		sound.pos[1] = es.y;
+		sound.pos[2] = es.z;
+		sounds.push_back(sound);
+	};
 	// Channel state machine (the begin_body_transition mirror). The channel
 	// chases the ARBITRATED current (+0x2BC, written per record by the fold's
 	// @0x4c1153 apply — D-NET-209), never the raw coalesced wire byte; the
@@ -674,9 +688,18 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		if (clearance <= 0) {
 			es.z = io::bam_sub(es.z, clearance);
 			es.rm_vel_z = 0;
-			// Landing clears the airborne/swim bit (the landing sound is an
-			// FX deferral) [orig: org2 @0x4b7f7c..0x4b7fa1; org1 landing
-			// tail @0x4bf89f].
+			// Landing from the air thumps on every machine, dead bodies
+			// included: profile slot 16 SSFallAlive, 15 SSFallDead when the
+			// dead bit is set, at the lifted origin; then the airborne bit
+			// clears. Only the authority's fall damage ahead of it is gated.
+			// [orig: org2 @0x4b7f71..0x4b7f99, the clear @0x4b7fa1; org1
+			// @0x4bf812 (the 0x2000 test), the authority-only damage
+			// @0x4bf81e..0x4bf879, the thump @0x4bf87f..0x4bf897, the clear
+			// @0x4bf89f]
+			if ((es.rm_entity_flags & 0x2000u) != 0)
+				play_slot((es.rm_entity_flags & world::kEntityFlagDead) != 0
+								? audio::kSlotFallDead
+								: audio::kSlotFallAlive);
 			es.rm_entity_flags &= ~0x2000u;
 		} else if (clearance > 0xF000) {
 			// The ledge/airborne edge: gate on !(Flags & 0x10A002) for the
@@ -889,7 +912,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			                     &replica_bound_radius_resolver_,
 			                     contact_peers.data(),
 			                     static_cast<int32_t>(contact_peers.size()),
-			                     rm_key, water_z_, has_water_);
+			                     rm_key, water_z_, has_water_, slot_sounds_);
 	};
 	// The corpse leg's def source (row_corpse_tail), read only for a row
 	// whose dead bit is latched or latches this tick, and the org1 corpses it
