@@ -439,7 +439,7 @@ func test_a_server_that_refused_this_install_is_greyed_with_its_reason() -> void
 	]
 	panel.set_rows_for_test(rows)
 	assert_false(panel.visible_row_dimmed(1), "before the refusal the row draws normally")
-	panel.set_refused_servers({42: "Your game is incompatible with this server. (NCC007)"})
+	panel.mark_refused(42, "Your game is incompatible with this server. (NCC007)")
 	assert_eq(panel.join_block_reason(rows[1]),
 			"Your game is incompatible with this server. (NCC007)",
 			"the reason is the refusal's own text")

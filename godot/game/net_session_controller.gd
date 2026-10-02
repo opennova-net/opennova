@@ -482,7 +482,8 @@ func open_novaworld_panel(start_client := true) -> void:
 	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
 	_panel_layer.add_child(_novaworld_panel)
-	_novaworld_panel.set_refused_servers(_refused_servers)
+	for rid: int in _refused_servers:
+		_novaworld_panel.mark_refused(rid, String(_refused_servers[rid]))
 	_novaworld_panel.closed.connect(_on_novaworld_closed)
 	# Bridge the panel's resolved join into the ONE joiner path (the same handler the LAN browser +
 	# --lan-join launch use); the panel emits the same typed JoinTarget load_mission_as_joiner
@@ -506,11 +507,6 @@ func note_join_failure(error: ConnectionError) -> void:
 		return
 	_refused_servers[_joining_rid] = error.reason_text(Strings.get_override_table(),
 			Strings.get_table(Strings.TABLE_GAMEERR))
-
-
-## The servers that refused this install this session (rid -> reason).
-func refused_servers() -> Dictionary:
-	return _refused_servers
 
 
 func _dismiss_novaworld_panel() -> void:

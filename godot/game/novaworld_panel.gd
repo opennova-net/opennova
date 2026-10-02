@@ -84,7 +84,7 @@ var _installed_expansions := PackedStringArray()
 var _installed_listed := false
 # rid -> the reason a server refused this install earlier in the session (its
 # game version, an expansion mismatch, a banned address): retrying cannot work.
-# The controller keeps the record across panel instances (set_refused_servers).
+# The controller keeps the record across panel instances (mark_refused).
 var _refused_servers: Dictionary = {}
 # The rid of the row the last Join press went to (the controller reads it when
 # the join leaves the panel, to remember a refusal against it).
@@ -981,10 +981,10 @@ func visible_cell(row: int, column: NovaWorldServerBrowser.Column) -> String:
 	return NovaWorldServerBrowser.row_cells(_view[row], _ping_for(_view[row]))[column]
 
 
-## The servers that refused this install this session (rid -> reason), kept by
-## the controller across panel instances.
-func set_refused_servers(refused: Dictionary) -> void:
-	_refused_servers = refused
+## A server that refused this install this session, with the refusal's text
+## (the controller replays its record into each panel instance).
+func mark_refused(rid: int, reason: String) -> void:
+	_refused_servers[rid] = reason
 	_rebuild_view()
 
 
