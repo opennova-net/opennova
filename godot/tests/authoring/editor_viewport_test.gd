@@ -1076,9 +1076,11 @@ func test_a_large_model_builds_over_frames() -> void:
 	assert_true(_seam.open_document("models/jolarge.3di"))
 	_app.pump()
 
-	# The editor's budget: loading at once, its progress rising, then ready.
-	var budget_ms: int = _app.build_budget_ms
-	assert_gt(budget_ms, 0)
+	# The editor's budget: loading at once, its progress rising, then ready. A first picture builds
+	# at the first-picture budget, the wider one (S14: the device holds no picture yet).
+	var budget_ms: int = max(_app.build_budget_ms, _app.first_picture_budget_ms)
+	assert_gt(_app.build_budget_ms, 0)
+	assert_gte(_app.first_picture_budget_ms, _app.build_budget_ms)
 	var preview := _state()
 	assert_eq(String(preview.get("status", "")), "loading", str(preview))
 	var total := int(preview.get("progress", {}).get("total", 0))
@@ -1196,7 +1198,8 @@ func _units(paths: Array) -> Dictionary:
 ## used one's first. At a budget of 0 the frame runs one unit in all (the menu's and the model's
 ## builds, summed, a unit further each frame, never two); at the editor's budget no frame's units,
 ## both builds' together, run past the budget by more than the longest unit and a millisecond
-## (measured, asserted loosely).
+## (measured, asserted loosely; S14: the first-picture budget, the wider, while the most recently
+## used device holds no picture yet).
 func test_two_builds_share_the_frame() -> void:
 	if _app == null:
 		return
@@ -1257,7 +1260,8 @@ func test_two_builds_share_the_frame() -> void:
 		longest_frame = maxi(longest_frame, int(units["spent"]) - spent)
 		spent = int(units["spent"])
 	assert_false(bool(units["loading"]), "both built")
-	gut.p("two builds at %d ms a frame: %d frames, the longest frame's units %d us, the longest unit %d us"
-			% [budget_ms, frames, longest_frame, int(units["longest"])])
-	assert_lte(longest_frame, budget_ms * 1000 + int(units["longest"]) + 1000,
+	var widest: int = maxi(budget_ms, _app.first_picture_budget_ms)
+	gut.p("two builds at %d ms a frame (%d ms before a first picture): %d frames, the longest frame's units %d us, the longest unit %d us"
+			% [budget_ms, widest, frames, longest_frame, int(units["longest"])])
+	assert_lte(longest_frame, widest * 1000 + int(units["longest"]) + 1000,
 			"the frame's units, both builds', past the budget by no more than one unit")

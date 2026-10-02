@@ -178,6 +178,30 @@ inline bool operator!=(const ViewportCommand &a, const ViewportCommand &b) {
 	return !(a == b);
 }
 
+// A drop on a viewport's picture (EditInViewport, ADR 0046 S14): what is dropped, a project file by
+// its logical name (a Files row let go on the canvas: a model, which the viewport finds the item of)
+// or a name of a reference kind (`reference` its token, `name` the name as a field of that kind holds
+// it: an item's id, picked for a mission's Place tool), at the picture's point (x, y) in the
+// viewport's units, in the viewport of `kind` (kCount: the one the document shows in). The viewport
+// plans what the drop makes (a mission: an entity of the item added where the point meets the
+// ground, one batch); a kind that takes no drop refuses it.
+struct ViewportDrop {
+	std::string file;
+	std::string reference;
+	std::string name;
+	float x = 0.0f;
+	float y = 0.0f;
+	ViewportKind kind = ViewportKind::kCount;
+};
+
+inline bool operator==(const ViewportDrop &a, const ViewportDrop &b) {
+	return a.file == b.file && a.reference == b.reference && a.name == b.name && a.x == b.x && a.y == b.y &&
+			a.kind == b.kind;
+}
+inline bool operator!=(const ViewportDrop &a, const ViewportDrop &b) {
+	return !(a == b);
+}
+
 // One request: its kind and the fields that kind takes, each field meaning one thing
 // whatever the kind (request_fields.cpp has a row per field: its token on the wire, its
 // JSON type and what it means; the kind's row lists the fields it takes and those it must
@@ -203,6 +227,11 @@ struct EditorRequest {
 	std::string file_kind;
 	// Where a build lands ("" the project's own place under its cache).
 	std::string out_dir;
+	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
+	std::string mission;
+	// A new file's starting values, by its blank's parameter tokens (blank_factory.h: a mission's
+	// title, terrain and environment), in the tokens' order.
+	std::vector<std::pair<std::string, std::string>> values;
 	// Requirements' roles; the game install's files by logical name; files on disk to import.
 	std::vector<std::string> roles;
 	std::vector<std::string> names;
@@ -223,9 +252,10 @@ struct EditorRequest {
 	// options?, camera?}, as preview/viewports.h's set takes it (text: this header pulls no JSON
 	// reader).
 	std::string viewport;
-	// A drag or a command in a viewport, one of them (EditInViewport, S13 V7).
+	// A drag, a command or a drop in a viewport, one of them (EditInViewport, S13 V7, S14).
 	ViewportDrag drag;
 	ViewportCommand command;
+	ViewportDrop drop;
 	PickPurpose purpose = PickPurpose::None;
 	// An import brings the files the chosen ones need; it replaces the project's files of the
 	// names; a source imports again even when unchanged; and asks the new name (Files'
@@ -240,6 +270,10 @@ struct EditorRequest {
 	bool import_pass = true;
 	// A build reads every file again, the build cache set aside (S13 A8).
 	bool rehash = false;
+	// Every file of the game install chosen, with no walk (S14: "Import the whole game install");
+	// an import takes the open preview's rows as its plan has them, in place of `imports`.
+	bool all = false;
+	bool planned = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -247,16 +281,17 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
 			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
-			a.out_dir == b.out_dir && a.roles == b.roles &&
+			a.out_dir == b.out_dir && a.mission == b.mission && a.values == b.values && a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&
 			a.mode == b.mode && a.choice == b.choice && a.settings == b.settings &&
-			a.viewport == b.viewport && a.drag == b.drag && a.command == b.command &&
+			a.viewport == b.viewport && a.drag == b.drag && a.command == b.command && a.drop == b.drop &&
 			a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
-			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash;
+			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
+			a.all == b.all && a.planned == b.planned;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

@@ -99,6 +99,7 @@ const Route kRoutes[] = {
 	{AssetKind::CountryCode, ArchiveSlot::Loose}, // CC.BIN, a RawBin (language.pff) before
 	{AssetKind::Credits, ArchiveSlot::Localres},
 	{AssetKind::Mission, ArchiveSlot::Localres},
+	{AssetKind::MissionText, ArchiveSlot::None}, // a .mis, a Mission (localres.pff) before S14
 	{AssetKind::MapProject, ArchiveSlot::Localres},
 	{AssetKind::Terrain, ArchiveSlot::Resource},
 	{AssetKind::TerrainPolyData, ArchiveSlot::Resource},

@@ -10,7 +10,16 @@
 // `to` over a selection; a model's drag that moves nothing writes nothing, its frame of a record that
 // is no marker refused, a frame beside any operation and a drag refused while one holds the
 // documents. The clock set with no document named, whatever is active. A model read at a size a
-// canvas set: its markers' pixels and its hit agree.
+// canvas set: its markers' pixels and its hit agree. ADR 0046 S14: the device a planner with no
+// canvas reads (Viewports::set_devices, a peek that uses nothing); a drop, the third thing an edit in
+// a viewport names, which a menu's and a model's viewports refuse; and the viewport query's box. A
+// mission's edits over the wire (S14 V7): a drag of an entity's move handle by pixels over no device
+// (the plane through it) moves it on the file's axes, one undo step whose undo gives the bytes back;
+// four samples under one gesture one step; its height and yaw handles; a drag of a selected entity
+// takes the selected with it; refused as the planner says (an unknown handle, a record the picture
+// does not show, an area's yaw, an operation holding the documents); the frame and top commands. A
+// mission's drop (S14 V10): an item or a model file let go at a point, one batch, one undo step; its
+// refusals; the ground command refused with no ground.
 
 #include <cmath>
 #include <cstdint>
@@ -21,8 +30,11 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_device.h>
@@ -33,6 +45,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
+#include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
 #include "common/file_io.h"
@@ -122,7 +135,8 @@ uint64_t gesture_of(const JsonValue &answer) {
 	return outcome ? uint64_t(outcome->get_number("gesture", 0)) : 0;
 }
 
-// A session over a new project with layout.mnu (kLayoutMenu) and models/armory.3di, the menu open.
+// A session over a new project with layout.mnu (kLayoutMenu) and models/armory.3di (and, asked, the
+// minted mission as missions/synth_logic.bms), the menu open.
 struct Wired {
 	editor_test::TempProjectDir dir;
 	MemoryPreferencesStore preferences;
@@ -131,12 +145,18 @@ struct Wired {
 	NodeAddress box, other, tiny;
 	std::string id_box, id_other, id_tiny;
 
-	Wired(const char *name, ProcessPlatform &platform) : dir(name), session(platform, preferences) {
+	Wired(const char *name, ProcessPlatform &platform, bool mission = false) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Wire"));
 		session.run_operations();
 		const std::string root = session.view().project.root;
 		editor_test::write_text(root + "/layout.mnu", kLayoutMenu);
 		editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di")));
+		if (mission) {
+			editor_test::write_bytes(root + "/missions/synth_logic.bms",
+					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
+			// The item a drop places: the armory, a building.
+			editor_test::write_text(root + "/defs/items.def", "begin \"Wire Armory\"\nid 106101\ntype building\ngraphic armory\nend\n");
+		}
 		session.handle(request::rescan());
 		session.run_operations();
 		session.handle(request::open_document("layout.mnu"));
@@ -567,6 +587,157 @@ static int test_model_edits() {
 	return 0;
 }
 
+// A mission's edits over the wire (S14): a drag of an entity's move handle by 64 pixels across, over
+// no device, moves it on the plane through it (x moved, z standing) in one undo step, the undo giving
+// the file's bytes back; four samples under one gesture one step, each going on from the last; a
+// drag of a selected entity moves the selected with it; the height handle lifts, the yaw handle
+// turns; refused and nothing written: an unknown handle, a record the picture does not show, an
+// area's yaw, a drag while an operation holds the documents; the frame and top commands move the
+// camera and make no undo step.
+static int test_mission_edits() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_mission", platform, true);
+	ProjectSession &session = wired.session;
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	session.run_operations();
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string path = document->path();
+	const std::vector<const Node *> items = document->rows_of(MissionKind::Item);
+	const std::vector<const Node *> areas = document->rows_of(MissionKind::Area);
+	TEST_EXPECT(items.size() == 3 && areas.size() == 2);
+	if (items.size() < 3 || areas.empty()) return 1;
+	// The viewport followed once (no device pumps it here): its scene read, its camera framed.
+	const auto *viewport = static_cast<const MissionViewport *>(
+			session.viewports().follow_one(session.view(), path, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	const auto drag = [&](NodeId id, const std::string &members) {
+		return wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "drag": {"id": )" + std::to_string(id) +
+				", " + members + "}}");
+	};
+	// The scene as the viewport reads it now (no device pumps it: followed before each read).
+	const auto entity = [&](NodeId id) {
+		session.viewports().follow_one(session.view(), path, ViewportKind::Mission);
+		return viewport->scene().entity(id);
+	};
+	const auto undo_all = [&]() {
+		int steps = 0;
+		while (document->can_undo() && steps < 16) {
+			session.handle(request::undo(path));
+			++steps;
+		}
+		return steps;
+	};
+	const NodeId first = items[0]->id, second = items[1]->id, third = items[2]->id;
+	const std::string bytes = document->serialize().text;
+	TEST_EXPECT(!bytes.empty() && !document->dirty());
+	// Looking north from the first framing, 64 pixels across is east: x moves, y and z stand.
+	const double x = entity(first)->x, y = entity(first)->y, z = entity(first)->z;
+	TEST_EXPECT(std::fabs(mission_camera_heading(viewport->camera())) < 1e-3);
+	JsonValue answer = drag(first, R"("handle": "move", "by": [64, 0])");
+	TEST_EXPECT(done(answer));
+	TEST_EXPECT(entity(first)->x > x && entity(first)->z == z && std::fabs(entity(first)->y - y) < 1.0);
+	TEST_EXPECT(document->dirty() && undo_all() == 1 && !document->dirty() && document->serialize().text == bytes);
+	TEST_EXPECT(entity(first)->x == x);
+	// Four samples under one gesture: one step, each going on from where the last left the handle.
+	answer = drag(first, R"("handle": "move", "by": [16, 0], "end": false)");
+	const uint64_t gesture = gesture_of(answer);
+	TEST_EXPECT(done(answer) && gesture != 0);
+	const double after_one = entity(first)->x;
+	for (int sample = 1; sample < 4; ++sample) {
+		answer = drag(first, R"("handle": "move", "by": [16, 0], "gesture": )" + std::to_string(gesture) +
+				(sample == 3 ? ", \"end\": true" : ", \"end\": false"));
+		TEST_EXPECT(done(answer));
+	}
+	TEST_EXPECT(std::fabs((entity(first)->x - x) - 4.0 * (after_one - x)) < 1.0 && session.view().documents.gestures.empty());
+	TEST_EXPECT(undo_all() == 1 && document->serialize().text == bytes);
+	// The selected move together: the second and third selected, the second dragged moves both.
+	session.handle(request::select_record(path, NodeAddress{ second, items[1]->kind, 0 }, SelectMode::Replace,
+			{ NodeAddress{ third, items[2]->kind, 0 } }));
+	const double third_x = entity(third)->x;
+	answer = drag(second, R"("handle": "move", "by": [32, 0])");
+	TEST_EXPECT(done(answer) && entity(third)->x > third_x && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1);
+	session.handle(request::select_record(path, NodeAddress()));
+	// The height handle, dragged up the picture, lifts; the yaw handle, dragged round, turns.
+	answer = drag(first, R"("handle": "height", "by": [0, -30])");
+	TEST_EXPECT(done(answer) && entity(first)->z > z && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1);
+	const int yaw = entity(first)->yaw;
+	answer = drag(first, R"("handle": "yaw", "by": [40, 40])");
+	TEST_EXPECT(done(answer) && entity(first)->yaw != yaw && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1 && document->serialize().text == bytes);
+	// Refused, nothing written.
+	TEST_EXPECT(refused(drag(first, R"("handle": "spin", "by": [8, 0])"), "Unknown handle"));
+	TEST_EXPECT(refused(drag(999999, R"("handle": "move", "by": [8, 0])"), "no entity or area the viewport shows"));
+	TEST_EXPECT(refused(drag(areas[0]->id, R"("handle": "yaw", "by": [8, 0])"), "An area has no yaw handle"));
+	TEST_EXPECT(refused(drag(first, R"("handle": "x_min", "by": [8, 0])"), "An entity has no x_min handle"));
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "path": ")" + path +
+										R"(", "drag": {"id": )" + std::to_string(first) + R"(, "handle": "move", "by": [8, 0]}})")),
+			"an operation holds the documents"));
+	session.run_operations();
+	TEST_EXPECT(!document->dirty() && document->serialize().text == bytes);
+	// The commands: top (straight down, north up) and frame (the first named record), each a
+	// set_viewport and no undo step.
+	answer = wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "top"}})");
+	TEST_EXPECT(done(answer) && viewport->camera().pitch >= kOrbitPitchLimit - 1e-4f);
+	session.handle(request::set_viewport(path, R"({"kind": "mission", "camera": {"distance": 5000}})"));
+	answer = wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "frame", "ids": [)" +
+			std::to_string(first) + "]}}");
+	TEST_EXPECT(done(answer) && viewport->camera().distance < 5000.0f && !document->can_undo());
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "frame", "ids": [999999]}})"),
+			"999999"));
+	std::printf("test_mission_edits passed\n");
+	return 0;
+}
+
+// A mission's drop over the wire (S14 V10): an item by its id let go at the picture's middle is one
+// batch adding a building there (its TYPE's pool), one undo step whose undo gives the bytes back; the
+// armory's model file drops its one item alike; refused and nothing written: an item no catalog
+// defines (named), a file that is no model, the ground command with no device's ground.
+static int test_mission_drop() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_mission_drop", platform, true);
+	ProjectSession &session = wired.session;
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	session.run_operations();
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string path = document->path();
+	const auto *viewport = static_cast<const MissionViewport *>(
+			session.viewports().follow_one(session.view(), path, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	const std::string middle = "[" + std::to_string(viewport->size().width / 2) + ", " +
+			std::to_string(viewport->size().height / 2) + "]";
+	const auto dropped = [&](const std::string &members) {
+		return wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "drop": {)" + members + ", \"at\": " +
+				middle + "}}");
+	};
+	const std::string bytes = document->serialize().text;
+	const size_t buildings = document->rows_of(MissionKind::Building).size();
+	for (const std::string &members : { std::string(R"("reference": "item", "name": "106101")"), std::string(R"("file": "armory.3di")") }) {
+		const JsonValue answer = dropped(members);
+		TEST_EXPECT(done(answer));
+		TEST_EXPECT(document->rows_of(MissionKind::Building).size() == buildings + 1);
+		session.handle(request::undo(path));
+		TEST_EXPECT(session.outcome().done() && !document->can_undo() && document->serialize().text == bytes);
+	}
+	TEST_EXPECT(refused(dropped(R"("reference": "item", "name": "999999")"), "999999"));
+	TEST_EXPECT(refused(dropped(R"("file": "layout.mnu")"), "is no model"));
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path +
+									R"(", "command": {"name": "ground", "ids": [)" +
+									std::to_string(document->rows_of(MissionKind::Item).front()->id) + "]}}"),
+			"no ground"));
+	TEST_EXPECT(document->serialize().text == bytes && !document->dirty());
+	std::printf("test_mission_drop passed\n");
+	return 0;
+}
+
 // The preview clock set with no document named: a change of the clock alone, pathless, sets it
 // whatever is active (a stylesheet, which shows in no viewport; nothing at all); one with another
 // member beside it names the active document's viewport, refused for a stylesheet (naming the types
@@ -646,12 +817,239 @@ static int test_canvas_sized_reads() {
 	return 0;
 }
 
+// The device in a planner's context with no canvas (the wire's): none while the session's viewports
+// are given no devices, or the Shell holds none for the viewport; the one it holds once they are, read
+// and not used (a peek keeps no device through the cache's next round and asks for none); and what a
+// planner asks of it: the surface a segment first meets, the ground's height at a point.
+static int test_device_in_the_wire_context() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_device", platform);
+	ProjectSession &session = wired.session;
+	const SessionView &view = session.view();
+	const std::string menu = wired.menu ? wired.menu->path() : std::string();
+	TEST_EXPECT(!menu.empty());
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	const std::string armory = "models/armory.3di";
+	std::string error;
+	const ViewportModel *model = session.viewports().resolve(view, armory, ViewportKind::Model, error);
+	const ViewportModel *screen = session.viewports().resolve(view, menu, ViewportKind::Menu, error);
+	TEST_EXPECT(model && screen);
+	if (!model || !screen) return 1;
+
+	// No devices given to the viewports: a planner's context has none, whatever a cache holds.
+	FakeDevices devices;
+	devices.sync(session);
+	TEST_EXPECT(devices.held(armory, ViewportKind::Model) != nullptr);
+	TEST_EXPECT(session.viewports().devices() == nullptr && viewport_context(view, *model).device == nullptr);
+	// Given them: the device the Shell holds for the viewport.
+	session.viewports().set_devices(&devices.cache);
+	TEST_EXPECT(viewport_context(view, *model).device == devices.held(armory, ViewportKind::Model));
+	TEST_EXPECT(viewport_context(view, *model, 4.0f).snap == 4.0f);
+
+	// What a planner asks of it: nothing of a device with no surface; a ground's height, and where a
+	// segment first meets it (z up: a slope rising east, met from above).
+	editor_test::FakeDevice *fake = devices.held(armory, ViewportKind::Model);
+	const ViewportDevice *device = viewport_context(view, *model).device;
+	double height = -1.0, point[3] = { 0.0, 0.0, 0.0 };
+	const double from[3] = { 10.0, 20.0, 100.0 }, to[3] = { 30.0, 20.0, -100.0 };
+	TEST_EXPECT(device && !device->ground_at(4.0, 2.0, height) && !device->surface_between(from, to, point));
+	fake->ground = [](double x, double) { return 0.5 * x; };
+	TEST_EXPECT(device->ground_at(4.0, 2.0, height) && height == 2.0);
+	// z = 100 - 10 (x - 10) meets z = x / 2 at x = 200 / 10.5.
+	TEST_EXPECT(device->surface_between(from, to, point) && std::fabs(point[0] - 200.0 / 10.5) < 1e-6 &&
+			point[1] == 20.0 && std::fabs(point[2] - 0.5 * point[0]) < 1e-6);
+	const double under[3] = { 10.0, 20.0, -5.0 };
+	TEST_EXPECT(!device->surface_between(under, to, point) && !device->surface_between(from, from, point));
+	session.viewports().set_devices(nullptr);
+	TEST_EXPECT(viewport_context(view, *model).device == nullptr);
+
+	// A peek reads: a cache of one device, the menu's; the model's asked for and the menu's peeked
+	// before the next round gives the menu's up for the model's (a use would have kept it, the model's
+	// waiting), and a peek of a viewport with no device asks for none.
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache one(
+			[&made](ViewportKind) {
+				auto fresh = std::make_unique<editor_test::FakeDevice>();
+				made.push_back(fresh.get());
+				return std::unique_ptr<ViewportDevice>(std::move(fresh));
+			},
+			1);
+	// A workspace whose Preview window shows no kind: a device only where one is asked for.
+	one.set_pin_all_targets(false);
+	SessionView unpinned = view;
+	unpinned.documents.preview_shown = ViewportKind::kCount;
+	session.viewports().set_devices(&one);
+	TEST_EXPECT(one.device(menu, ViewportKind::Menu) == nullptr);
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(one.size() == 1 && one.held(menu, ViewportKind::Menu) != nullptr);
+	TEST_EXPECT(viewport_context(view, *screen).device == one.held(menu, ViewportKind::Menu) &&
+			viewport_context(view, *model).device == nullptr);
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(made.size() == 1 && one.held(armory, ViewportKind::Model) == nullptr);
+	TEST_EXPECT(one.device(armory, ViewportKind::Model) == nullptr);
+	TEST_EXPECT(one.peek(menu, ViewportKind::Menu) == one.held(menu, ViewportKind::Menu));
+	one.sync(session.viewports(), unpinned);
+	TEST_EXPECT(made.size() == 2 && one.size() == 1 && one.held(armory, ViewportKind::Model) != nullptr &&
+			one.held(menu, ViewportKind::Menu) == nullptr);
+	session.viewports().set_devices(nullptr);
+	std::printf("test_device_in_the_wire_context passed\n");
+	return 0;
+}
+
+// A drop over the wire (S14): the third thing an edit in a viewport names. One the reader refuses is
+// not read (no file and no name, both, a kind with no name, no point, a member it does not take);
+// with a drag or a command beside it, refused as it is served (one of them); a menu's and a model's
+// viewports take no drop, refused naming the kind, nothing written, and a drop ends a gesture the
+// wire holds open on the document as any other request does.
+static int test_drop() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_drop", platform);
+	ProjectSession &session = wired.session;
+	Document *menu = wired.menu;
+	TEST_EXPECT(menu != nullptr);
+	if (!menu) return 1;
+	const uint64_t untouched = menu->revision();
+	for (const char *unread : {
+				 R"({"kind": "edit_in_viewport", "drop": {"at": [10, 10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "reference": "item", "name": "1", "at": [10, 10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"reference": "item", "at": [10, 10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"name": "100300", "at": [10, 10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di"}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [1e300, 0]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "", "at": [10, 10]}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "snap": 1}})",
+				 R"({"kind": "edit_in_viewport", "drop": {"file": "a.3di", "at": [10, 10], "kind": "map"}})",
+				 R"({"kind": "edit_in_viewport", "drop": "a.3di"})" }) {
+		const JsonValue answer = wired.wire(unread);
+		TEST_EXPECT(!answer.get_bool("ok", true) && answer.get_string("error", "").find("drop") != std::string::npos);
+	}
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "drop": {"file": "armory.3di", "at": [10, 10]}, )"
+								   R"("command": {"name": "align_left"}})"),
+			"a drag, a command or a drop, one of them"));
+	TEST_EXPECT(refused(wired.drag(wired.id_box, R"("handle": "move", "by": [8, 0]}, "drop": {"file": "armory.3di", "at": [1, 1])"),
+			"one of them"));
+	// A menu takes no drop, a file's or a name's; nor does a model.
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "drop": {"file": "armory.3di", "at": [400, 300]}})"),
+			"A menu viewport takes no drop"));
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "drop": {"reference": "item", "name": "100300", )"
+								   R"("at": [400, 300], "kind": "menu"}})"),
+			"A menu viewport takes no drop"));
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "drop": {"file": "armory.3di", "at": [4, 3], "kind": "model"}})"),
+			"does not show in a model viewport"));
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": "models/armory.3di", )"
+								   R"("drop": {"file": "armory.3di", "at": [4, 3]}})"),
+			"A model viewport takes no drop"));
+	TEST_EXPECT(menu->revision() == untouched && !menu->dirty());
+	// A gesture the wire holds open on the menu ends at a drop on it, refused or not.
+	const JsonValue first = wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + menu->path() +
+			R"(", "drag": {"id": )" + wired.id_box + R"(, "handle": "move", "by": [8, 8], "end": false}})");
+	TEST_EXPECT(done(first) && gesture_of(first) != 0 && wired.open_gestures() == 1);
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + menu->path() +
+								   R"(", "drop": {"file": "armory.3di", "at": [400, 300]}})"),
+			"takes no drop"));
+	TEST_EXPECT(wired.open_gestures() == 0 && wired.undo_all() == 1);
+	// A request made of a drop reads back as it was made (the factory's, through the wire's form).
+	ViewportDrop dropped;
+	dropped.file = "armory.3di";
+	dropped.x = 12.5f;
+	dropped.y = 40.0f;
+	dropped.kind = ViewportKind::Model;
+	const EditorRequest made = request::edit_in_viewport(menu->path(), dropped);
+	EditorRequest back;
+	std::string error;
+	TEST_EXPECT(editor_request_from_json(editor_request_to_json(made), back, error) && back == made &&
+			back.drop.file == "armory.3di" && back.drop.reference.empty());
+	std::printf("test_drop passed\n");
+	return 0;
+}
+
+// The viewport query's box (S14): what a box of the picture takes, as a marquee over it. The menu's:
+// the windows the box touches, each as a hit names one (never the root window: the background a
+// marquee starts on), the corners either way round, none for a box over nothing; refused with a
+// corner left out, or a param it does not take; a model's box takes nothing (it has no marquee);
+// a text's script viewport has no canvas.
+static int test_viewport_box() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_box", platform);
+	ProjectSession &session = wired.session;
+	TEST_EXPECT(wired.menu != nullptr);
+	if (!wired.menu) return 1;
+	const auto ask = [&session](const std::string &args, std::string *why = nullptr) {
+		std::string error;
+		const JsonValue answer = session.query("viewport", parse(args), error);
+		if (why) *why = error;
+		else if (!error.empty()) std::printf("  viewport %s: %s\n", args.c_str(), error.c_str());
+		return answer;
+	};
+	const auto names = [](const JsonValue &answer) {
+		std::vector<std::string> out;
+		if (const JsonValue *records = answer.get("records"))
+			for (const JsonValue &record : records->array) out.push_back(record.get_string("name", ""));
+		return out;
+	};
+	// BOX is 100..300 x 100..200, OTHER 400..600 x 300..400, TINY 600..612 x 104..116.
+	session.handle(request::select_record(wired.menu->path(), wired.box));
+	JsonValue answer = ask(R"({"op": "box", "x": 90, "y": 90, "x2": 310, "y2": 210})");
+	TEST_EXPECT(answer.get_string("viewport", "") == "menu" && answer.get_bool("current", false) &&
+			names(answer) == std::vector<std::string>({ "BOX" }) && answer.get_number("count", 0) == 1.0);
+	const JsonValue *records = answer.get("records");
+	TEST_EXPECT(records && records->array.size() == 1 &&
+			records->array[0].get_number("id", 0) == double(wired.box.child) &&
+			records->array[0].get_string("kind", "") == "window" && records->array[0].get_number("index", -1) >= 0);
+	// The box touches what it overlaps: BOX's corner and OTHER's, the corners the other way round.
+	TEST_EXPECT(names(ask(R"({"op": "box", "x": 450, "y": 350, "x2": 290, "y2": 190})")) ==
+			std::vector<std::string>({ "BOX", "OTHER" }));
+	TEST_EXPECT(names(ask(R"({"op": "box", "x": 0, "y": 0, "x2": 800, "y2": 600})")) ==
+			std::vector<std::string>({ "BOX", "OTHER", "TINY" }));
+	TEST_EXPECT(names(ask(R"({"op": "box", "x": 700, "y": 500, "x2": 780, "y2": 580})")).empty());
+	// What a hit at a point of the box finds is among what the box takes.
+	const JsonValue hit = ask(R"({"op": "hit", "x": 605, "y": 110})");
+	TEST_EXPECT(hit.get_string("name", "") == "TINY" &&
+			names(ask(R"({"op": "box", "x": 600, "y": 104, "x2": 612, "y2": 116})")) == std::vector<std::string>({ "TINY" }));
+	std::string why;
+	ask(R"({"op": "box", "x": 0, "y": 0})", &why);
+	TEST_EXPECT(why.find("needs \"x2\" and \"y2\"") != std::string::npos);
+	ask(R"({"op": "box", "x2": 10, "y2": 10})", &why);
+	TEST_EXPECT(why.find("needs \"x\" and \"y\"") != std::string::npos);
+	ask(R"({"op": "box", "x": 0, "y": 0, "x2": 10, "y2": 10, "limit": 5})", &why);
+	TEST_EXPECT(why.find("op box takes no \"limit\"") != std::string::npos);
+	ask(R"({"op": "hit", "x": 0, "y": 0, "x2": 10})", &why);
+	TEST_EXPECT(why.find("op hit takes no \"x2\"") != std::string::npos);
+	ask(R"({"op": "box", "x": 0, "y": 0, "x2": "wide", "y2": 10})", &why);
+	TEST_EXPECT(!why.empty());
+	// A model has no marquee: its box takes nothing.
+	session.handle(request::open_document("models/armory.3di"));
+	session.run_operations();
+	answer = ask(R"({"op": "box", "path": "models/armory.3di", "x": 0, "y": 0, "x2": 800, "y2": 600})");
+	TEST_EXPECT(answer.get_string("viewport", "") == "model" && names(answer).empty() &&
+			answer.get_number("count", -1) == 0.0);
+	// A text's viewport has no canvas.
+	editor_test::write_text(session.view().project.root + "/notes.cfg", "[Game]\r\nname = Box\r\n");
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("notes.cfg"));
+	session.run_operations();
+	ask(R"({"op": "box", "path": "notes.cfg", "x": 0, "y": 0, "x2": 10, "y2": 10})", &why);
+	TEST_EXPECT(why.find("has no canvas") != std::string::npos);
+	std::printf("test_viewport_box passed\n");
+	return 0;
+}
+
 int main() {
+	TEST_EXPECT(test_device_in_the_wire_context() == 0);
+	TEST_EXPECT(test_drop() == 0);
+	TEST_EXPECT(test_viewport_box() == 0);
 	TEST_EXPECT(test_edits_in_viewport() == 0);
 	TEST_EXPECT(test_wire_gestures() == 0);
 	TEST_EXPECT(test_gesture_lapses() == 0);
 	TEST_EXPECT(test_menu_drags() == 0);
 	TEST_EXPECT(test_model_edits() == 0);
+	TEST_EXPECT(test_mission_edits() == 0);
+	TEST_EXPECT(test_mission_drop() == 0);
 	TEST_EXPECT(test_pathless_clock() == 0);
 	TEST_EXPECT(test_canvas_sized_reads() == 0);
 	std::printf("editor_viewport_wire: all tests passed\n");

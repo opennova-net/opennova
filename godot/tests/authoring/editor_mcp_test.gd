@@ -393,11 +393,12 @@ func test_request_table_on_the_wire() -> void:
 					reads = (param as Dictionary).get("enum", [])
 				elif String((param as Dictionary).get("name", "")) == "kind":
 					viewport_kinds = (param as Dictionary).get("enum", [])
-	assert_eq(reads, ["state", "items", "hit", "notes", "render"], "the catalog lists the query's ops")
+	assert_eq(reads, ["state", "items", "hit", "box", "notes", "render"], "the catalog lists the query's ops")
 	assert_true(viewport_kinds.has("menu") and viewport_kinds.has("model"), str(viewport_kinds))
 	var properties: Dictionary = viewport.get("inputSchema", {}).get("properties", {})
-	assert_eq(properties.get("op", {}).get("enum", []), reads + ["options", "camera", "seek", "drag", "command"])
-	for key in ["path", "kind", "x", "y", "row", "offset", "limit", "options", "camera", "clock", "device", "drag", "command"]:
+	assert_eq(properties.get("op", {}).get("enum", []), reads + ["options", "camera", "seek", "drag", "command", "drop"])
+	for key in ["path", "kind", "x", "y", "x2", "y2", "row", "offset", "limit", "options", "camera", "clock", "device",
+			"drag", "command", "drop"]:
 		assert_true(properties.has(key), "editor_viewport takes %s" % key)
 	assert_eq(properties.get("kind", {}).get("enum", []), viewport_kinds, "the viewport kinds' tokens, the catalog's")
 	assert_eq(String(properties.get("x", {}).get("type", "")), "number", "a point is a number")

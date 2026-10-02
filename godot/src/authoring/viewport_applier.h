@@ -73,6 +73,32 @@ public:
 		(void)point;
 		return false;
 	}
+	// Where the segment from `from` to `to` meets the surface the picture draws, and the surface's
+	// height at (x, y), in the viewport's space (opennova::editor::ViewportDevice's; a mission's
+	// terrain): answered by the applier while the layer that holds the surface stands, whatever else
+	// it builds meanwhile (an added model's units leave the ground as it was). None for a kind with no
+	// surface.
+	virtual bool surface_between(const double from[3], const double to[3], double point[3]) const {
+		(void)from;
+		(void)to;
+		(void)point;
+		return false;
+	}
+	virtual bool ground_at(double x, double y, double &height) const {
+		(void)x;
+		(void)y;
+		(void)height;
+		return false;
+	}
+	// The process-wide scene state its picture renders with (ADR 0046 S14, E13; the portable
+	// ViewportDevice::scene_state): 0 for the shipped defaults (the menu's, the model's), else a
+	// value of the applier's own (the mission's: its device). publish_scene_state writes every global
+	// of it again (an environment's shader globals, the water plane); present runs the frame's legs
+	// over its picture before it renders, `dt` the preview clock's seconds since its last present (0
+	// while the clock is paused, so a test's frame is deterministic).
+	virtual uint64_t scene_state() const { return 0; }
+	virtual void publish_scene_state() {}
+	virtual void present(double dt) { (void)dt; }
 };
 
 } // namespace godot
