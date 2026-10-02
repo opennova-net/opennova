@@ -72,6 +72,8 @@ struct TerrainHeightField;
 }
 
 namespace opennova::audio { class SoundSetIndex; }
+namespace opennova::dbf { struct File; }
+namespace opennova::rtxt { struct File; }
 
 namespace opennova::world {
 
@@ -532,6 +534,13 @@ struct MissionTables {
     audio::SoundProfileTable sound_profiles;
     // MissionKernel owns this immutable bank catalog for the world's lifetime.
     const audio::SoundSetIndex *sound_sets = nullptr;
+    // And the mission's co-named dialog bank and its mission text table, which
+    // a dialog line's clip and chat lines resolve against (null when the
+    // mission has none). [orig: DialogSystem_Init @0x5275E0 ->
+    // DialogManager_LoadFromFile @0x44E650 (the .dbf); g_TextMission, read by
+    // Dialog_LoadAudioClip @0x44DDCD / Dialog_LoadAudioClipLocalized @0x44E054]
+    const dbf::File *dialog_bank = nullptr;
+    const rtxt::File *mission_text = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the

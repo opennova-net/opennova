@@ -70,6 +70,12 @@ std::vector<hud::SquadFeedLine> ClientRuntime::drain_squad_lines() {
 	return out;
 }
 
+std::vector<hud::FeedPost> ClientRuntime::drain_ring_posts() {
+	std::vector<hud::FeedPost> out;
+	out.swap(pending_ring_posts_);
+	return out;
+}
+
 bool ClientRuntime::place_user_waypoint(world::World &world, int32_t x, int32_t y,
 		const std::string &name) {
 	const world::EntityHandle handle = world::place_user_waypoint(world, x, y, name);

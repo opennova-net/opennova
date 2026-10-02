@@ -22,7 +22,9 @@
 
 #include <base/resource_index/resource_index.h>
 #include <runtime/world/vehicle_attach.h>
+#include <formats/dbf/dbf.h>
 #include <formats/def/def.h>
+#include <formats/rtxt/rtxt.h>
 #include <formats/mission/bms.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <runtime/mission/event_runtime.h>
@@ -359,6 +361,10 @@ public:
     // — binds against the same names. Names and handles only; the shell's
     // EffectWorld owns the one runtime effect scene.
     audio::SoundSetIndex script_sound_catalog;
+    // The mission's <mission>.dbf dialog bank and its parsed mission text
+    // table (world.tables.dialog_bank / mission_text point here when loaded).
+    dbf::File dialog_bank;
+    rtxt::File mission_text_table;
     particle::EffectCatalogNames script_effect_catalog;
 	bool wac_loaded = false;
 	world::CollisionWorld collision;

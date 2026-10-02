@@ -10,6 +10,8 @@
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/replication/client_replica_pipeline.h>
+#include <runtime/audio/dialog_queue.h>
+#include <runtime/hud/feed_format.h>
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -75,6 +77,74 @@ void test_effect_pass() {
 	}
 }
 
+// D-NET-286: the line's chat legs. A line no bank carries posts "EX Cannot
+// load audio: <def name>" on the SYSTEM ring in 0xFFFF2222; a resolved
+// subtitle goes to the CHAT ring in white; an unknown dialog posts nothing.
+// [orig: Dialog_LoadAudioClipLocalized @0x44DEF0 — @0x44DFD1..0x44DFF8,
+//  @0x44E144..0x44E150; Chat_AddSystemMessageIfValid @0x5275B0]
+void test_chat_legs() {
+	auto world = std::make_unique<w::World>();
+	world->registry.configure_pool(0, 4);
+	w::Entity local;
+	local.kind = w::EntityKind::Organic;
+	local.player_class = 2;
+	world->cached.local_player = world->registry.spawn(0, local);
+	dbf::File bank;
+	dbf::Group group;
+	group.group_name = "dlg012";
+	for (const char *def : {"SynR100", "MISSING"}) {
+		dbf::Line line;
+		line.def_id_name = def;
+		line.sequence = std::string("_0000") + (def[0] == 'S' ? "0" : "1");
+		group.lines.push_back(line);
+	}
+	bank.groups.push_back(group);
+	lwf::File sounds;
+	lwf::Multi set;
+	set.name = "SynR100";
+	sounds.multis.push_back(set);
+	audio::SoundSetIndex sets;
+	sets.add_bank(0, sounds);
+	rtxt::File text;
+	text.sections.push_back(rtxt::Section{"Info", 2});
+	text.sections.push_back(rtxt::Section{"Mission Dialog", 1});
+	rtxt::Entry title, second, line0;
+	title.key = "title";
+	title.text = "Title";
+	second.key = "second";
+	second.text = "Hold the line.";
+	line0.key = "SynR100";
+	line0.text = "Move out!";
+	line0.section_index = 1;
+	text.entries = {title, second, line0};
+	world->tables.dialog_bank = &bank;
+	world->tables.sound_sets = &sets;
+	world->tables.mission_text = &text;
+
+	inmatch::ClientRuntime runtime("DialogText");
+	const auto play = [&](const char *name, int16_t line) {
+		runtime.view().apply(s2c::DIALOG_LINE, line_body(name, line));
+		runtime.apply_received_effects(*world);
+		return runtime.drain_ring_posts();
+	};
+	std::vector<hud::FeedPost> posts = play("dlg012", 0);
+	CHECK(posts.size() == 1);
+	if (posts.size() == 1)
+		CHECK(posts[0].sink == hud::ChatSink::Chat && posts[0].argb == 0xFFFFFFFFu &&
+				posts[0].text == "Move out!");
+	posts = play("dlg012", 1);
+	CHECK(posts.size() == 2);
+	if (posts.size() == 2) {
+		CHECK(posts[0].sink == hud::ChatSink::System && posts[0].argb == 0xFFFF2222u &&
+				posts[0].text == "EX Cannot load audio: MISSING");
+		CHECK(posts[1].sink == hud::ChatSink::Chat && posts[1].text == "Hold the line.");
+		CHECK(posts[0].order < posts[1].order);
+	}
+	CHECK(play("dlg999", 0).empty());
+	world->tables.dialog_bank = nullptr;
+	CHECK(play("dlg012", 1).empty());
+}
+
 // The host fans the line to the in-match remotes, never to the listen host.
 void test_host_fan() {
 	ns::LoopbackChannel remote_wire, local_wire, loading_wire;
@@ -111,6 +181,7 @@ void test_host_fan() {
 int main() {
 	test_fold();
 	test_effect_pass();
+	test_chat_legs();
 	test_host_fan();
 	std::printf("dialog_line: %d failures\n", failures);
 	return failures ? 1 : 0;

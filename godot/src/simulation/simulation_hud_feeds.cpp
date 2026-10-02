@@ -239,6 +239,7 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 				post.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
 				post.argb, std::move(post.text), false});
 	}
+	for (opennova::hud::FeedPost &post : runtime_->drain_ring_posts()) r_posts.push_back(std::move(post));
 	const uint32_t game_type = runtime_->game_type();
 	for (const opennova::replication::ClientGameText &text : runtime_->view().drain_game_texts()) {
 		std::string line = opennova::hud::formatted_game_text_line(

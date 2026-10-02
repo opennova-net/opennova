@@ -8,6 +8,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/audio/footstep_slot.h> // organic_slot_set (the org1 scream slot)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set (the player scream)
+#include <runtime/audio/dialog_queue.h>  // resolve_dialog_line (the dialog line's chat legs)
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -265,9 +266,30 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
             //  @0x425b88..0x425b94]
             const world::Entity *local = world.registry.get(world.cached.local_player);
-            world.out.effects.push({"dialog_line", dialog->line,
-                    local != nullptr ? static_cast<int32_t>(local->player_class) : 0, 0, 0,
+            const int32_t player_class =
+                    local != nullptr ? static_cast<int32_t>(local->player_class) : 0;
+            world.out.effects.push({"dialog_line", dialog->line, player_class, 0, 0,
                     dialog->dialog_name});
+            // The line's chat legs: with no clip, "EX Cannot load audio: <def
+            // name>" on the SYSTEM ring in -56798 (0xFFFF2222); then the
+            // subtitle on the CHAT ring in -1 (white), both 930 ticks. The
+            // master-volume gate before the subtitle is the shell's.
+            // [orig: Dialog_LoadAudioClipLocalized @0x44DFD1..0x44DFF8
+            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle
+            //  @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
+            //  Chat_AddMessageChannel1(msg, -1, 930) @0x5275D5]
+            if (world.tables.dialog_bank != nullptr && world.tables.sound_sets != nullptr) {
+                const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
+                        world.tables.dialog_bank, *world.tables.sound_sets,
+                        world.tables.mission_text, dialog->dialog_name, dialog->line,
+                        player_class);
+                if (resolved.line_found && resolved.set_name.empty())
+                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
+                            0xFFFF2222u, "EX Cannot load audio: " + resolved.def_id_name, false});
+                if (resolved.line_found && !resolved.text.empty())
+                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
+                            0xFFFFFFFFu, resolved.text, false});
+            }
         } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
             // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
             //  @0x429ef5 -> g_EnvLightningTimerA]
