@@ -46,7 +46,7 @@ struct MissionAreaMark {
 	int zone = 0;
 	double min[3] = { 0.0, 0.0, 0.0 };
 	double max[3] = { 0.0, 0.0, 0.0 };
-	uint32_t flags = 0; // the file's: bit 1 bounds z
+	bool constrains_z = false; // its z bounds hold (the file's flag bit 1)
 };
 struct MissionPathMark {
 	NodeId row = 0;
@@ -55,10 +55,16 @@ struct MissionPathMark {
 	uint32_t flags = 0; // bms::WaypointFlags: bit 0 does not loop, bit 1 blue, bit 2 red
 	std::vector<NodeId> stops; // the marker rows its stops name (0: a stop naming none)
 };
+// The header's fields the device reads (formats/mission/mission.h's MissionInfo): the terrain, the
+// tile set, the environment, the clock (the start time as the file packs it), and the environment
+// overrides the attrib flags gate (env::bms_env_overrides_from_header takes them as they are).
 struct MissionSceneHeader {
-	std::string terrain, terrain_tile, environment;
+	std::string terrain, tile_set, environment;
 	int start_time = 0, minutes_per_day = 0;
-	double water_override = 0.0, fog_override = 0.0;
+	uint32_t attrib_flags = 0;
+	int water_override = 0, fog_override = 0;
+	int fog_color[3] = { 0, 0, 0 }, water_color[3] = { 0, 0, 0 };
+	int water_murk = 0;
 };
 bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b);
 inline bool operator!=(const MissionSceneHeader &a, const MissionSceneHeader &b) { return !(a == b); }

@@ -124,7 +124,7 @@ Source make_source() {
 	area.max[1] = 30.0;
 	area.min[2] = 0.0;
 	area.max[2] = 8.0;
-	area.flags = 0x2;
+	area.constrains_z = true;
 	source.area_rows = { area };
 	MissionPathMark path;
 	path.row = 30;

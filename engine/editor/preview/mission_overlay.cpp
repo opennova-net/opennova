@@ -12,7 +12,6 @@ namespace opennova::editor {
 
 namespace {
 
-constexpr uint32_t kAreaBoundsZ = 0x2; // the area's flag: its z bounds hold
 constexpr float kLabelDx = 10.0f, kLabelDy = -7.0f;
 
 PreviewVec3 along(const PreviewVec3 &from, const PreviewVec3 &direction, float t) {
@@ -147,7 +146,7 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 				mission_scene_point(area.max[0], area.min[1], z), mission_scene_point(area.max[0], area.max[1], z),
 				mission_scene_point(area.min[0], area.max[1], z) };
 			for (int c = 0; c < 4; ++c) line(corners[c], corners[(c + 1) % 4], kMissionAreaRgb, 1.0f);
-			if (area.flags & kAreaBoundsZ) {
+			if (area.constrains_z) {
 				for (const double level : { area.min[2], area.max[2] }) {
 					const PreviewVec3 ring[4] = { mission_scene_point(area.min[0], area.min[1], level),
 						mission_scene_point(area.max[0], area.min[1], level),

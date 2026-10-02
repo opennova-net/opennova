@@ -34,9 +34,11 @@ const char *mission_pool_token(MissionPool pool) {
 }
 
 bool operator==(const MissionSceneHeader &a, const MissionSceneHeader &b) {
-	return a.terrain == b.terrain && a.terrain_tile == b.terrain_tile && a.environment == b.environment &&
-			a.start_time == b.start_time && a.minutes_per_day == b.minutes_per_day &&
-			a.water_override == b.water_override && a.fog_override == b.fog_override;
+	return a.terrain == b.terrain && a.tile_set == b.tile_set && a.environment == b.environment &&
+			a.start_time == b.start_time && a.minutes_per_day == b.minutes_per_day && a.attrib_flags == b.attrib_flags &&
+			a.water_override == b.water_override && a.fog_override == b.fog_override && a.water_murk == b.water_murk &&
+			std::equal(std::begin(a.fog_color), std::end(a.fog_color), std::begin(b.fog_color)) &&
+			std::equal(std::begin(a.water_color), std::end(a.water_color), std::begin(b.water_color));
 }
 
 PreviewVec3 mission_scene_point(double x, double y, double z) {
@@ -113,7 +115,7 @@ MissionSceneDelta MissionScene::patch(const RowChanges &changes, const MissionSc
 			const MissionAreaMark *was = nullptr;
 			for (const MissionAreaMark &each : areas_were)
 				if (each.row == mark.row) was = &each;
-			if (!was || was->zone != mark.zone || was->flags != mark.flags ||
+			if (!was || was->zone != mark.zone || was->constrains_z != mark.constrains_z ||
 					!std::equal(std::begin(was->min), std::end(was->min), std::begin(mark.min)) ||
 					!std::equal(std::begin(was->max), std::end(was->max), std::begin(mark.max)))
 				delta.overlays = true;
