@@ -1304,6 +1304,18 @@ int main() {
 		TEST_EXPECT(doc.triggers.size() == 3 && doc.triggers[0].param1 == 0 && doc.triggers[1].param1 == -1 &&
 		            doc.triggers[2].param1 == 1);
 		TEST_EXPECT(doc.actions.size() == 1 && doc.actions[0].param1 == 1);
+		// event_chain reports both the same way: each Event trigger's and each ResetEvent action's
+		// event, the dangling one flagged.
+		MissionEventChain chain;
+		TEST_EXPECT(event_chain(doc, 2, chain));
+		std::vector<std::pair<std::string, int>> named;
+		for (const MissionLogicReference &reference : chain.references)
+			if (reference.target_kind == "event") named.push_back({reference.source_kind, reference.target_index});
+		const std::vector<std::pair<std::string, int>> expected = {
+				{"trigger", 0}, {"trigger", -1}, {"trigger", 1}, {"action", 1}};
+		TEST_EXPECT(named == expected);
+		TEST_EXPECT(chain.diagnostics.size() == 1 && chain.diagnostics[0].code == "logic.event_reference_out_of_range" &&
+		            chain.diagnostics[0].subject_kind == "trigger" && chain.diagnostics[0].subject_index == 1);
 	}
 
 	// E1: entity-property inspection is portable. A group-only edit must

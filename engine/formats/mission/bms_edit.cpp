@@ -969,6 +969,19 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 			out.triggers.push_back(trig);
 			out.references.push_back(logic_reference("event", static_cast<int>(index), "trigger", static_cast<int>(trigger_index), 0, static_cast<int>(trigger_index), "trigger", true));
 			add_trigger_area_reference(trig, file.area_triggers, out);
+			// An Event trigger names an event by its index, as a ResetEvent action does
+			// [orig: EventTrigger_EvaluateCondition @0x453620, main type 3 reads events[p1]].
+			if (trig.main_type == static_cast<int>(bms::TriggerMainType::Event)) {
+				const bool valid = trig.param1 >= 0 && static_cast<size_t>(trig.param1) < file.events.size();
+				out.references.push_back(logic_reference("trigger", static_cast<int>(trigger_index), "event", trig.param1, 1, trig.param1, "fired event", valid));
+				if (!valid) {
+					out.diagnostics.push_back(logic_diagnostic(
+							"logic.event_reference_out_of_range",
+							"Trigger references an event index outside the mission event table.",
+							"trigger",
+							static_cast<int>(trigger_index)));
+				}
+			}
 		}
 	}
 	if (!valid_range(out.event.action_index, out.event.action_count, file.actions.size())) {
