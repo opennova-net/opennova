@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Link-graph seam check over the Shape A target graph.
 
-The engine builds as five STATIC group targets plus two leaves
+The engine builds as six STATIC group targets plus two leaves
 (engine/CMakeLists.txt): opennova_formats, opennova_base, opennova_runtime,
-opennova_net, opennova_novaworld_service (+ the header-only opennova_io and
+opennova_net, opennova_novaworld_service, opennova_editor (the OpenNova
+Editor's core above runtime, ADR 0046) (+ the header-only opennova_io and
 the opennova_crt STATIC leaf, the retail-parity CRT rand stream both formats
 and runtime link).
 The old ~400-target graph's per-format and terrain-seam rules moved to the
@@ -103,6 +104,20 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         ["opennova"],
         [SERVICE_TARGET],
         {"opennova"},  # defined only in the godot/src CMake root
+    ),
+    (
+        "the OpenNova Editor's core sits ABOVE the engine (ADR 0046 d3): no engine "
+        "group target links opennova_editor, so the game never carries editor code",
+        ["opennova_formats", "opennova_base", "opennova_net", "opennova_runtime", SERVICE_TARGET],
+        ["opennova_editor"],
+        set(),
+    ),
+    (
+        "the runtime GDExtension variant (the game, the Play child) never links the "
+        "editor core (ADR 0046 d4): only opennova_editor_gdext does",
+        ["opennova", "opennova_bindings"],
+        ["opennova_editor"],
+        {"opennova", "opennova_bindings"},  # defined only in the godot/src CMake root
     ),
 ]
 

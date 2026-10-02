@@ -3,6 +3,10 @@
     "opennova-game": {
       "type": "http",
       "url": "http://127.0.0.1:8975/mcp"
+    },
+    "opennova-editor": {
+      "type": "http",
+      "url": "http://127.0.0.1:8977/mcp"
     }
   }
 }
