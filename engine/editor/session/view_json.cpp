@@ -262,6 +262,7 @@ JsonValue dialogs_section(const SessionView &view) {
 			sites.push(std::move(entry));
 		}
 		preview.set("sites", std::move(sites));
+		preview.set("companions", strings_to_json(rename.companions));
 		preview.set("refusals", diagnostics_to_json(rename.refusals));
 		preview.set("ok", boolean(rename.refusals.empty()));
 		out.set("rename_preview", std::move(preview));

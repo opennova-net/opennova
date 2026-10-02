@@ -44,7 +44,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.through == b.through && a.loader_arg == b.loader_arg &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
-			a.scopes_after == b.scopes_after;
+			a.scopes_after == b.scopes_after && a.optional == b.optional;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -610,8 +610,9 @@ bool AssetGraph::counts_missing(const GraphSlot &slot, const GraphEdge &edge,
 		const std::string &target, ReferenceStatus status) const {
 	if (target.empty() || status != ReferenceStatus::Missing) return false;
 	// A kind the graph never finds missing (no message for it: a Record reference, an index past
-	// its collection, which its file's own validation reports with what the game makes of it).
-	if (!reference_row(edge.kind).missing_message) return false;
+	// its collection, which its file's own validation reports with what the game makes of it); a
+	// file the game runs without (GraphEdge::optional).
+	if (!reference_row(edge.kind).missing_message || edge.optional) return false;
 	const bool file = reference_row(edge.kind).resolution == ReferenceResolution::File;
 	// A file named through a variable no stylesheet the game reads defines: the variable's own
 	// edge reports it.

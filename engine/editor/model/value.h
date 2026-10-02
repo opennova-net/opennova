@@ -75,6 +75,11 @@ enum class ReferenceKind {
 	MissionPath,    // a mission's waypoint path by its number among the file's 128, 0 none and 123..127 commands
 	MissionEntity,  // a mission's entity by its SSN, in the mission file the scope names (a parameter's)
 	MissionZone,    // a mission's area trigger by its zone id, in the mission file the scope names (a parameter's)
+	Script,         // a .wac by the name as written (a mission's own script, a RUN's)
+	LoadingImage,   // a mission's loading image, a .pcx by its name (else loadscrn.pcx)
+	TilePlacement,  // a mission's tile placement, a .til by its name
+	DialogBank,     // a mission's dialog bank, a .dbf by its name (a dialog a record plays)
+	MissionStrings, // a mission's own string table, a .bin by its name (else medmssn.bin)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

@@ -8,6 +8,7 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <editor/documents/mission_file_set.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
@@ -719,6 +720,48 @@ void mission_references(const Document &document, Extracted &out) {
 			text(top, "win_conditions" + at, "WinConditions", "STRWINCOND", win);
 		}
 		if (lose != 0 && lose != 255) text(top, "lose_conditions" + at, "LoseConditions", "STRLOSEDIRECTIVE", lose);
+	}
+	// The files the game finds by the mission's name (documents/mission_file_set.h), one edge each
+	// from the file itself: the name its reader builds, then the alternate or the fallback the reader
+	// takes next; an optional one makes no finding when the project lacks it.
+	const std::string &file = document.path();
+	for (const MissionFileSetRow &row : mission_file_set()) {
+		const mission::Sidecar *sidecar = mission::sidecar_for_role(row.role);
+		if (!sidecar) continue;
+		GraphEdge edge;
+		edge.source = file;
+		edge.field = row.role;
+		edge.kind = row.kind;
+		edge.value = mission::sidecar_name(file, *sidecar);
+		edge.fallback = sidecar->fallback ? std::string(sidecar->fallback) : mission::sidecar_alternate_name(file, *sidecar);
+		edge.optional = row.optional;
+		out.edges.push_back(std::move(edge));
+	}
+	// A dialog a trigger or an action names (a PlayWavList's, a PlayerDialogDone's) plays from the
+	// mission's own bank [orig: DialogSystem_Init @0x5275e0 builds the name from the mission's]: the
+	// record names the bank, which the game needs for it.
+	const mission::Sidecar *dialog = mission::sidecar_for_role("dialog");
+	if (!dialog) return;
+	const std::string bank = mission::sidecar_name(file, *dialog);
+	for (const Node *row : mission->rows_of(K::Event)) {
+		const EventRow &event = static_cast<const EventRow &>(*row);
+		if (event.ids.lists.size() < 2) continue;
+		const auto plays = [&](NodeKind kind, size_t list, size_t i) {
+			const NodeAddress address{row->id, kind, event.ids.lists[list][i].id};
+			GraphEdge edge;
+			edge.source = file;
+			edge.record = document.record_path(address);
+			edge.locator = document.locator(address);
+			edge.address = address;
+			edge.field = "param1";
+			edge.kind = ReferenceKind::DialogBank;
+			edge.value = bank;
+			out.edges.push_back(std::move(edge));
+		};
+		for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i)
+			if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Dialog) plays(k(K::Trigger), 0, i);
+		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
+			if (action_param_kind(event.native.actions[i], 0) == ParamKind::Dialog) plays(k(K::Action), 1, i);
 	}
 }
 

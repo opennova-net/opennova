@@ -56,6 +56,10 @@ struct RenamePlan {
 	std::string output_dir;
 	std::string new_output_dir;
 	std::vector<RenameOutput> outputs;
+	// A mission's companions (ADR 0046 S14): the files the game finds by its name that the project
+	// has (documents/mission_file_set.h), each renamed with it to the new base name and its own
+	// extension, every site naming one rewritten; the commit moves them together.
+	std::vector<RenameOutput> companions;
 	std::vector<Diagnostic> refusals;
 	bool ok() const { return refusals.empty(); }
 };

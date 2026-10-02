@@ -64,6 +64,10 @@ constexpr const char *kMenu[] = {".mnu", nullptr};
 constexpr const char *kTable[] = {".bin", nullptr};
 constexpr const char *kTerrain[] = {".trn", nullptr};
 constexpr const char *kEnvironment[] = {".env", nullptr};
+constexpr const char *kScriptFile[] = {".wac", nullptr};
+constexpr const char *kLoadingImage[] = {".pcx", nullptr};
+constexpr const char *kTilePlacement[] = {".til", nullptr};
+constexpr const char *kDialogBankFile[] = {".dbf", nullptr};
 
 // --- what a finding says of a name nothing resolves (ReferenceKindRow::missing_message) ---
 
@@ -155,6 +159,29 @@ std::string entity_missing(const AssetGraph &, const GraphEdge &) {
 std::string zone_missing(const AssetGraph &, const GraphEdge &) {
 	return ", a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
 	       "action naming it do nothing.";
+}
+
+// The mission's tile placement the game reads loose first [orig: Terrain_LoadTileInfoFile @0x60a740];
+// without it the terrain's own tiles stand.
+std::string tiles_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the terrain's own tiles stand.";
+}
+
+// A dialog plays from the mission's own bank [orig: DialogSystem_Init @0x5275e0 builds the name
+// from the mission's]; without it the game plays no dialog.
+std::string dialog_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game plays no dialog of this mission.";
+}
+
+// The mission's text loads from its own table, else medmssn.bin [orig: TextResource_LoadMissionTextBin
+// @0x51ed90]; with neither every key the mission reads answers "" [orig:
+// MissionText_GetStringByKeyOrGameText @0x51ECD0, the "" @0x51ecea]: no title, no briefing, no
+// location name, no objective text.
+std::string mission_strings_missing(const AssetGraph &graph, const GraphEdge &) {
+	return graph.has_file("medmssn.bin")
+	               ? ", which the project does not have: the game reads medmssn.bin in its place."
+	               : ", which the project does not have, nor medmssn.bin to read in its place: the mission's title, "
+	                 "briefing, location names and objectives show empty.";
 }
 
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
@@ -394,6 +421,29 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::Exact)
 	        .scoped(true)
 	        .tolerated(zone_missing)
+	        .row,
+	// The files the game finds by a mission's name (documents/mission_file_set.h), each by the name
+	// its reader builds [orig: Game_StartMission @0x524360]: the script compiled after game.wac and
+	// server.wac [orig: WacScript_InitAndLoad @0x4f91f0], the loading image [orig: Render_LoadingScreen
+	// @0x521d10], the tile placement, the dialog bank (its sounds a SoundBank).
+	Row(ReferenceKind::Script, "script", "the script", "script").loads(AssetKind::Script, kScriptFile).row,
+	Row(ReferenceKind::LoadingImage, "loading_image", "the loading image", "loading image")
+	        .loads(AssetKind::Texture, kLoadingImage)
+	        .row,
+	Row(ReferenceKind::TilePlacement, "tile_placement", "the tile placement", "tile placement")
+	        .loads(AssetKind::TileInfo, kTilePlacement)
+	        .tolerated(tiles_missing)
+	        .row,
+	Row(ReferenceKind::DialogBank, "dialog_bank", "the dialog bank", "dialog bank")
+	        .loads(AssetKind::DialogBank, kDialogBankFile)
+	        .tolerated(dialog_missing)
+	        .row,
+	// The mission's own string table, a Strings file as a menu's TextTable is, but one the game runs
+	// without (its keys read empty): a warning, worded by whether medmssn.bin stands in.
+	Row(ReferenceKind::MissionStrings, "mission_strings", "the mission's string table", "mission string table")
+	        .loads(AssetKind::Strings, kTable)
+	        .tolerated(mission_strings_missing)
+	        .message_reads_files()
 	        .row,
 };
 

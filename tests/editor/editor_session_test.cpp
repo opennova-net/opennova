@@ -2162,8 +2162,11 @@ static int test_new_mission() {
 	opennova::rtxt::File table;
 	TEST_EXPECT(read_file_bytes(root + "/strings/first.bin", bytes, error) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error) &&
 	            table.entries.size() == 2 && table.entries[0].key == "TITLE" && table.entries[0].text == "The first");
-	// Its terrain and its environment resolve: the mission names nothing the project lacks.
-	TEST_EXPECT(finding_in(v.findings.diagnostics, "reference.missing", "missions/first.bms") == nullptr);
+	// Its terrain, its environment and its text table resolve: the mission names nothing the project
+	// lacks but a tile placement (S14: every shipped mission has one, a warning).
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "reference.missing" && d.asset == "missions/first.bms")
+			TEST_EXPECT(d.field == "tiles" && d.severity == DiagnosticSeverity::Warning);
 	// A mission whose text table the project holds already keeps that table.
 	TEST_EXPECT(editor_test::write_text(root + "/strings/second.bin", "mine"));
 	session.handle(request::rescan());

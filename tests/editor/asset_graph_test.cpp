@@ -1541,7 +1541,9 @@ static int test_reference_kind_rows() {
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
-		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
+		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone ||
+		                       kind == ReferenceKind::TilePlacement || kind == ReferenceKind::DialogBank ||
+		                       kind == ReferenceKind::MissionStrings;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;

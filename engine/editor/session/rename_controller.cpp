@@ -125,8 +125,11 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
 	} else if (ok) {
 		const RenamePlan &plan = operation.file_plan();
+		std::string companions;
+		for (const RenameOutput &companion : plan.companions)
+			companions += (companions.empty() ? ", with " : ", ") + companion.old_name + " to " + companion.new_name;
 		core_.note("Renamed " + plan.old_name + " to " + plan.new_name + " (" + std::to_string(plan.sites.size()) +
-		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten)");
+		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten" + companions + ")");
 		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
 	} else {
 		view_.activity.status = "The rename did not finish.";
@@ -188,6 +191,7 @@ void RenameController::preview(const EditorRequest &request) {
 		preview.old_name = plan.old_name;
 		preview.new_name = plan.new_name;
 		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
+		for (const RenameOutput &companion : plan.companions) preview.companions.push_back(companion.old_name + " to " + companion.new_name);
 		preview.refusals = plan.refusals;
 	} else {
 		SymbolRenamePlan plan = plan_symbol(request);

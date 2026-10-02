@@ -32,10 +32,12 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_reads.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/graph/rename_transaction.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -104,6 +106,13 @@ const GraphEdge *edge(const Extracted &extracted, ReferenceKind kind, const char
 		if (edge.kind == kind && edge.value == value) return &edge;
 	return nullptr;
 }
+// The first edge of `kind` a file of the graph makes; null for none.
+const GraphEdge *edge_to_file(const AssetGraph &graph, const std::string &file, ReferenceKind kind) {
+	for (const GraphEdge *edge : graph.references_of(file))
+		if (edge->kind == kind) return edge;
+	return nullptr;
+}
+
 size_t count_symbols(const Extracted &extracted, ReferenceKind kind) {
 	size_t n = 0;
 	for (const GraphSymbol &symbol : extracted.symbols) n += symbol.kind == kind ? 1 : 0;
@@ -193,6 +202,36 @@ int test_references() {
 	TEST_EXPECT(win && win->scope == "SYNTH_LOGIC.BIN/WinConditions" && win->field == "win_conditions[0]" &&
 	            win->address == row_at(*document, MissionKind::Mission, 0) && edge(extracted, ReferenceKind::TextId, "STRWINCOND001") &&
 	            edge(extracted, ReferenceKind::TextId, "STRLOSEDIRECTIVE001") && count_edges(extracted, ReferenceKind::TextId) == 5);
+	// The files the game finds by the mission's name, one edge each from the file itself: the name
+	// the reader builds, its alternate or its fallback next; the ones the game runs without optional.
+	const auto sidecar = [&](ReferenceKind kind, const char *value, const char *fallback, bool optional, const char *field) {
+		const GraphEdge *found = edge(extracted, kind, value);
+		return found && found->fallback == fallback && found->optional == optional && found->field == field &&
+		       found->record.empty() && !found->rewritable;
+	};
+	TEST_EXPECT(sidecar(ReferenceKind::MissionStrings, "synth_logic.bin", "medmssn.bin", false, "text"));
+	TEST_EXPECT(sidecar(ReferenceKind::Script, "synth_logic.wac", "", true, "script"));
+	TEST_EXPECT(sidecar(ReferenceKind::LoadingImage, "synth_logic.pcx", "loadscrn.pcx", true, "loading_image"));
+	TEST_EXPECT(sidecar(ReferenceKind::TilePlacement, "synth_logic.til", "", false, "tiles"));
+	TEST_EXPECT(sidecar(ReferenceKind::DialogBank, "synth_logic.dbf", "", true, "dialog"));
+	TEST_EXPECT(sidecar(ReferenceKind::SoundBank, "synth_logic.lwf", "synth_logic.pwf", true, "dialog_sounds"));
+	TEST_EXPECT(count_edges(extracted, ReferenceKind::DialogBank) == 1);
+	// A record that plays a dialog names the bank itself, which the game needs for it.
+	{
+		Diagnostic error;
+		const NodeAddress action = first_child(*document, row_at(*document, MissionKind::Event, 1), MissionKind::Action);
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action, "action_type", int64_t(bms::ActionType::PlayWavList)), error));
+		Extracted plays;
+		extract_from_document(*document, plays);
+		size_t banks = 0;
+		for (const GraphEdge &e : plays.edges)
+			if (e.kind == ReferenceKind::DialogBank && e.address == action) {
+				++banks;
+				TEST_EXPECT(e.value == "synth_logic.dbf" && !e.optional && e.field == "param1" && !e.rewritable);
+			}
+		TEST_EXPECT(banks == 1 && count_edges(plays, ReferenceKind::DialogBank) == 2);
+		document->undo();
+	}
 	// What a parameter is called and whether the game reads it, by its record's type; its own choices.
 	const NodeAddress trigger = first_child(*document, row_at(*document, MissionKind::Event, 0), MissionKind::Trigger);
 	const NodeAddress reset = first_child(*document, row_at(*document, MissionKind::Event, 0), MissionKind::Action);
@@ -596,6 +635,50 @@ int test_pool_check() {
 	return 0;
 }
 
+// A mission renamed takes the files the game finds by its name that the project has (ADR 0046 S14):
+// the plan lists them as companions (its own derived edges rewriting nothing), the commit moves
+// them with it, and the renamed mission's set resolves under the new names.
+int test_rename_companions() {
+	editor_test::TempProjectDir dir("opennova_mission_rename_companions");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Companions"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	const std::string repo = test_paths_repo_root(__FILE__);
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/walk.bms", fixture_bytes()));
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/walk.bin", test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")));
+	TEST_EXPECT(editor_test::write_text(root + "/missions/walk.wac", "; the walk\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const SessionView &view = session.view();
+	const AssetGraph &graph = *view.findings.graph;
+	const GraphEdge *table = edge_to_file(graph, "missions/walk.bms", ReferenceKind::MissionStrings);
+	TEST_EXPECT(table && graph.resolve(*table) == ReferenceStatus::Present);
+	TEST_EXPECT(graph.resolve(*edge_to_file(graph, "missions/walk.bms", ReferenceKind::Script)) == ReferenceStatus::Present);
+	// Of the set, the optional sidecars the project lacks make no finding; the tile placement, which
+	// every shipped mission has, is a warning (the fixture's terrain, environment, items and weapons,
+	// which this project lacks too, are the records' own missing references).
+	size_t missing_sidecars = 0;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "reference.missing" && d.asset == "missions/walk.bms" && mission_file_set_row(d.field)) {
+			++missing_sidecars;
+			TEST_EXPECT(d.field == "tiles" && d.severity == DiagnosticSeverity::Warning);
+		}
+	TEST_EXPECT(missing_sidecars == 1);
+	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, graph, "walk.bms", "run.bms");
+	TEST_EXPECT(plan.ok() && plan.companions.size() == 2 && plan.companions[0].old_name == "walk.bin" &&
+	            plan.companions[0].new_name == "run.bin" && plan.companions[1].new_name == "run.wac");
+	TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, graph, "walk.bms", "a_name_far_too_long.bms").ok());
+	editor_test::handle_to_end(session, request::rename_asset("walk.bms", "run.bms"));
+	namespace fs = std::filesystem;
+	TEST_EXPECT(fs::exists(root + "/missions/run.bms") && fs::exists(root + "/missions/run.bin") && fs::exists(root + "/missions/run.wac"));
+	TEST_EXPECT(!fs::exists(root + "/missions/walk.bms") && !fs::exists(root + "/missions/walk.bin") && !fs::exists(root + "/missions/walk.wac"));
+	const GraphEdge *renamed = edge_to_file(graph, "missions/run.bms", ReferenceKind::MissionStrings);
+	TEST_EXPECT(renamed && renamed->value == "run.bin" && graph.resolve(*renamed) == ReferenceStatus::Present);
+	return 0;
+}
+
 // What the shipped missions reference (OPENNOVA_JO_DIR, base and each expansion through the VFS): each
 // opened as a document, unblocked, its runs canonical (the five with a damaged loadout chunk noted,
 // mission_corpus's); the references counted: the entity parameters and those naming no SSN of their
@@ -698,5 +781,6 @@ int main(int argc, char **argv) {
 	if (test_item_type_on_symbol() != 0) return 1;
 	if (test_validation() != 0) return 1;
 	if (test_pool_check() != 0) return 1;
+	if (test_rename_companions() != 0) return 1;
 	return test_retail();
 }

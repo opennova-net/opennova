@@ -49,6 +49,10 @@ struct GraphEdge {
 	// kind's edge only: it resolves to the first scope's definition a lookup finds (a fallback is a
 	// second name, this a second place).
 	std::vector<std::string> scopes_after;
+	// The game runs without the file (a mission's script, which 40 of 115 shipped missions have,
+	// ADR 0046 S14): the graph makes no finding of it missing; the resolver, the pickers, References
+	// and the import read the edge as any other.
+	bool optional = false;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on

@@ -73,6 +73,9 @@ struct DialogsView {
 		std::string new_name;  // as the definition takes it (an item id "0100302" is 100302)
 		std::string requested; // as asked: what a window compares the name it sent with
 		std::shared_ptr<const std::vector<RenameSite>> sites;
+		// A file's rename: the companions renamed with it (a mission's set, ADR 0046 S14), each
+		// "old to new".
+		std::vector<std::string> companions;
 		std::vector<Diagnostic> refusals;
 	};
 	RenamePreview rename_preview;

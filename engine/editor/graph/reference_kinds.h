@@ -127,8 +127,8 @@ struct ReferenceKindRow {
 	}
 };
 
-// The number of reference kinds: MissionZone is the last.
-inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::MissionZone) + 1;
+// The number of reference kinds: MissionStrings is the last.
+inline constexpr size_t kReferenceKindCount = static_cast<size_t>(ReferenceKind::MissionStrings) + 1;
 
 // The record a Record reference's value names, by its index in the kind's collection: a whole
 // number from 0 that the kind's none does not take (a negative one names none: an index from 0 is
