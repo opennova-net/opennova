@@ -95,6 +95,13 @@ inline EditorRequest import_files(std::vector<ImportChoice> imports, bool replac
 	request.replace = replace;
 	return request;
 }
+// The open import preview's rows imported as its plan has them (each the project can take).
+inline EditorRequest import_planned(bool replace = false) {
+	EditorRequest request = of(EditorRequestKind::ImportFiles);
+	request.planned = true;
+	request.replace = replace;
+	return request;
+}
 inline EditorRequest cancel_import() {
 	return of(EditorRequestKind::CancelImport);
 }
@@ -111,6 +118,13 @@ inline EditorRequest preview_install_import(
 	EditorRequest request = of(EditorRequestKind::PreviewInstallImport);
 	request.names = std::move(names);
 	request.with_dependencies = with_dependencies;
+	return request;
+}
+// The import dialog on every file of the game install, chosen at once, with no walk (ADR 0046
+// S14: the closure of everything is everything).
+inline EditorRequest import_whole_install() {
+	EditorRequest request = of(EditorRequestKind::PreviewInstallImport);
+	request.all = true;
 	return request;
 }
 

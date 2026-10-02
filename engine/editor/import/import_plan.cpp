@@ -78,6 +78,11 @@ bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocumen
 	for (const VfsFileLocation &file : vfs_.list_files())
 		if (!strutil::ends_with_icase(file.logical_name, ".pff")) // the archives themselves
 			names_.emplace(normalized_logical_name(file.logical_name), file.logical_name);
+	// The loose files the game ships beside its archives and reads from there (a music bank, a
+	// video, the NovaWorld table), where no archive has the name.
+	if (kind == Kind::GameInstall)
+		for (const std::string &loose : list_install_loose_files(path))
+			names_.emplace(normalized_logical_name(loose), loose);
 	return true;
 }
 
@@ -87,7 +92,8 @@ std::string ImportOrigin::find(const std::string &name) const {
 }
 
 bool ImportOrigin::read(const std::string &name, std::vector<uint8_t> &out) const {
-	if (kind_ != Kind::Folder) return read_served(vfs_, name, out);
+	if (kind_ == Kind::GameInstall) return read_install_file(vfs_, path_, name, out);
+	if (kind_ == Kind::Archive) return read_served(vfs_, name, out);
 	std::string error;
 	return read_file_bytes((fs::path(path_) / name).generic_string(), out, error);
 }
@@ -97,7 +103,9 @@ uint64_t ImportOrigin::size(const std::string &name) const {
 	if (spelling.empty()) return 0;
 	if (kind_ != Kind::Folder) {
 		uint64_t stored = 0;
-		return vfs_.file_size(spelling, stored) ? stored : 0;
+		if (vfs_.file_size(spelling, stored)) return stored;
+		if (kind_ == Kind::Archive) return 0;
+		// The install's loose file: on the disk, as a folder's.
 	}
 	std::error_code ec;
 	const auto on_disk = fs::file_size(fs::path(path_) / spelling, ec);

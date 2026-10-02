@@ -233,7 +233,8 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
                  "out_dir", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
-REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash")
+REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
+                    "planned")
 
 
 def request_of(args: argparse.Namespace) -> dict:
@@ -642,6 +643,10 @@ def build_parser() -> argparse.ArgumentParser:
                               "checked, no source imported")
     request.add_argument("--rehash", choices=switch, default=None,
                          help="build: read every file again, the build cache set aside")
+    request.add_argument("--all", choices=switch, default=None,
+                         help="preview_install_import: every file of the game install chosen at once, with no walk")
+    request.add_argument("--planned", choices=switch, default=None,
+                         help="import_files: the open preview's rows as its plan has them, in place of --imports")
     request.add_argument("--wait", action="store_true",
                          help="await the operation the request starts or joins (open_project, new_project, rescan, "
                               "reimport, the import previews and import_files, the renames, build, play) and the "

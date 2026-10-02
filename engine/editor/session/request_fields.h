@@ -45,6 +45,8 @@ enum class RequestFieldId : uint8_t {
 	OpenFirst,
 	ImportPass,
 	Rehash,
+	All,
+	Planned,
 	kCount,
 };
 

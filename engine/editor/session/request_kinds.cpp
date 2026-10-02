@@ -326,13 +326,14 @@ constexpr RequestKindRow kRows[] = {
 			.takes(request_params({ F::WithDependencies }))
 			.row,
 	Request(K::ImportFiles, "import_files", serve_import_files,
-			"The import dialog's rows kept, imports, copied into the project, every file checked "
+			"The import dialog's rows kept, imports (or, with planned, the open preview's rows as its "
+			"plan has them, each the project can take), copied into the project, every file checked "
 			"and "
 			"staged before any is published (replace: over the project's files of the names), then "
 			"the project's files read again, an operation (the outcome names it; it can be cancelled "
 			"until it writes); with a preview open the files are planned again first, and nothing is "
 			"written when that is not the plan shown (import.changed).")
-			.takes(request_params({ F::Imports }, { F::Replace }))
+			.takes(request_params({}, { F::Imports, F::Replace, F::Planned }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | kSlot)
 			.ends_edit_groups()
 			.guarded(GuardScope::PlannedWrites, "Import", "Save all and import")
@@ -570,8 +571,10 @@ constexpr RequestKindRow kRows[] = {
 			"The import dialog on the game install's files: the names alone, chosen, or with none "
 			"every file listed to choose from, with the files they need when with_dependencies "
 			"(their "
-			"sources carry install: true); planned as preview_import plans.")
-			.takes(request_params({}, { F::Names, F::WithDependencies }))
+			"sources carry install: true); planned as preview_import plans. With all, every file "
+			"chosen at once (the archives' and the loose files the game ships beside them), with no "
+			"walk: import_files with planned then takes them.")
+			.takes(request_params({}, { F::Names, F::WithDependencies, F::All }))
 			.holds(kFiles, kSlot, OnBusy::Supersede)
 			.ends_edit_groups()
 			.row,

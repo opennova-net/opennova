@@ -129,6 +129,14 @@ constexpr RequestField kFields[] = {
 			"no source imported (a dry run's read, a project made in a folder that holds sources)." },
 	{ F::Rehash, "rehash", J::Boolean,
 			"A build reads every file again, the build cache's hashes set aside (and kept afresh)." },
+	{ F::All, "all", J::Boolean,
+			"Every file of the game install chosen (its archives' and the loose files the game ships "
+			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
+			"of everything is everything." },
+	{ F::Planned, "planned", J::Boolean,
+			"An import takes the open import preview's rows as its plan has them (each the project can "
+			"take, once per source) in place of imports, so a client need not echo thousands of rows "
+			"back; refused with no preview open." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

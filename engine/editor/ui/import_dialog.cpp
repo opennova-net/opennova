@@ -143,7 +143,9 @@ void ImportDialog::draw(Workspace &workspace) {
 	}
 	const bool from_game = (!preview.roots.empty() && preview.roots.front().install) ||
 	                       (!preview.choices.empty() && preview.choices.front().install);
-	ImGui::TextWrapped("%s", from_game ? "Copy files from the game data into the project." : "Copy files into the project.");
+	ImGui::TextWrapped("%s", preview.all ? "Copy every file of the game data into the project."
+	                         : from_game  ? "Copy files from the game data into the project."
+	                                      : "Copy files into the project.");
 	// The lists scroll; Replace existing files, Import and Cancel stay under them, on two lines
 	// in a narrow dialog.
 	ImGui::BeginChild("import_body", ImVec2(0, -ImGui::GetFrameHeightWithSpacing() * 3));
@@ -299,16 +301,17 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	const float room = ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() - ImGui::GetStyle().ItemInnerSpacing.x;
 	const std::string shown = ui_kit::fit(include, room);
 	// The setting plans the open dialog again (a plan_import through the gate): held back while
-	// that would be refused.
-	const bool plans = workspace.view().allows(EditorRequestKind::SetImportDependencies) &&
+	// that would be refused, and with everything chosen (a walk of every file finds nothing more).
+	const bool plans = !preview.all && workspace.view().allows(EditorRequestKind::SetImportDependencies) &&
 	                   workspace.view().allows(EditorRequestKind::PlanImport);
 	ImGui::BeginDisabled(!plans);
 	if (ImGui::Checkbox((shown + "###needs").c_str(), &with) && plans)
 		workspace.request(request::set_import_dependencies(with));
 	ImGui::EndDisabled();
 	ui_kit::tooltip((shown != include ? include + ".\n" : std::string()) +
-	                "Look for the files the chosen ones name (fonts, textures, models...) beside them and in the game "
-	                "install, and import those found too. The editor remembers it.");
+	                (preview.all ? std::string("Every file of the game install is chosen: there is nothing more to look for.")
+	                             : std::string("Look for the files the chosen ones name (fonts, textures, models...) beside them "
+	                                           "and in the game install, and import those found too. The editor remembers it.")));
 	if (rows.empty()) {
 		if (preview.roots.empty()) ui_kit::empty_state("No file chosen.", "Choose the files to import above.");
 		else ui_kit::empty_state("Nothing to import.", plan.diagnostics.empty() ? nullptr : "See why below.");

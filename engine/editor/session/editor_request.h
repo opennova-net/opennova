@@ -265,6 +265,10 @@ struct EditorRequest {
 	bool import_pass = true;
 	// A build reads every file again, the build cache set aside (S13 A8).
 	bool rehash = false;
+	// Every file of the game install chosen, with no walk (S14: "Import the whole game install");
+	// an import takes the open preview's rows as its plan has them, in place of `imports`.
+	bool all = false;
+	bool planned = false;
 };
 
 inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
@@ -281,7 +285,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.purpose == b.purpose &&
 			a.with_dependencies == b.with_dependencies &&
 			a.replace == b.replace && a.force == b.force && a.ask_name == b.ask_name &&
-			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash;
+			a.open_first == b.open_first && a.import_pass == b.import_pass && a.rehash == b.rehash &&
+			a.all == b.all && a.planned == b.planned;
 }
 inline bool operator!=(const EditorRequest &a, const EditorRequest &b) {
 	return !(a == b);

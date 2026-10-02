@@ -592,8 +592,12 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string source = args.positional.size() > 1 ? args.positional[1] : std::string();
 	const std::vector<std::string> entries = args.values("--entry");
 	const bool with_dependencies = args.has("--with-dependencies"), dry_run = args.has("--dry-run");
+	const bool all = args.has("--all");
 	JsonValue planned;
-	if (!source.empty()) {
+	if (all) {
+		// Every file of the game install, chosen at once with no walk (ADR 0046 S14).
+		planned = send(cli, editor::request::import_whole_install());
+	} else if (!source.empty()) {
 		JsonValue imports = JsonValue::make_array();
 		if (entries.empty()) imports.push(import_source(source, std::string()));
 		for (const std::string &entry : entries) imports.push(import_source(source, entry));
@@ -650,9 +654,14 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	if (truncated)
 		std::fprintf(cli.err, "the plan stopped at %zu files: the files past them are not imported (import fewer at once)\n",
 		             count_at(plan, "count"));
+	// The whole install: the plan's rows as the editor holds them (planned), nine thousand sources
+	// not echoed back.
 	JsonValue request = JsonValue::make_object();
 	request.set("kind", json_string(editor::request_kind_row(K::ImportFiles).token));
-	request.set("imports", std::move(taken));
+	if (all)
+		request.set("planned", boolean(true));
+	else
+		request.set("imports", std::move(taken));
 	request.set("replace", boolean(args.has("--replace")));
 	JsonValue outcome;
 	if (!send_wire(cli, request, outcome)) return 2;
@@ -907,10 +916,16 @@ bool check_query(const CliArgs &args, std::string &why) {
 	return true;
 }
 
-// An import names what it takes: a source file, or the game install's files by --entry; an
-// archive's members are chosen by --entry too.
+// An import names what it takes: a source file, or the game install's files by --entry, or every
+// file of the game install (--all, which names nothing else); an archive's members are chosen by
+// --entry too.
 bool check_import(const CliArgs &args, std::string &why) {
 	const bool source = args.positional.size() > 1;
+	if (args.has("--all")) {
+		if (!source && !args.has("--entry")) return true;
+		why = "--all imports every file of the game install: it takes no source and no --entry";
+		return false;
+	}
 	if (!source && !args.has("--entry")) {
 		why = args.has("--install") ? "choose the game's files with --entry <name> (repeat for more files)"
 		                             : "import needs a source file, or the game install's files by --entry <name>";
@@ -1009,6 +1024,7 @@ constexpr CliOption kCreateMissingOptions[] = { { "--role", "a token" } };
 constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
 	                                     { "--with-dependencies" },
+	                                     { "--all" },
 	                                     { "--dry-run" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
@@ -1045,14 +1061,16 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Import, "import",
 	     "<dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]\n"
-	     "                               [--dry-run]",
+	     "                               [--all] [--dry-run]",
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
 	     "set) the Blender add-on wrote converts to the .3di or the .adm and .bad;\n"
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
-	     "--with-dependencies; --dry-run prints the plan and writes nothing (no import pass\n"
+	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
+	     "the loose files the game ships beside them), with no walk and nothing else named;\n"
+	     "--dry-run prints the plan and writes nothing (no import pass\n"
 	     "either; --install is that run's alone) (--json: the import_preview query, the plan)")
 	        .takes(kImportOptions)
 	        .checked_by(check_import)

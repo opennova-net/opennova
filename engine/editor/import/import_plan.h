@@ -64,8 +64,9 @@ namespace opennova::editor {
 
 // A place the files of an import come from and its dependencies are looked for: the folder
 // a loose source sits in (listed once), the archive a member comes from, or the game install
-// (mounted as a stock launch mounts it: mount_retail). Names compare as the scan's logical
-// names do, without case (normalized_logical_name).
+// (mounted as a stock launch mounts it: mount_retail, with the loose files the game ships beside
+// its archives and reads from there, list_install_loose_files, where no archive has the name).
+// Names compare as the scan's logical names do, without case (normalized_logical_name).
 class ImportOrigin {
 public:
 	enum class Kind { Folder, Archive, GameInstall };

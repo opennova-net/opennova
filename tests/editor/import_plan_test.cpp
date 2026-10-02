@@ -757,8 +757,12 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(write_pff(install + "/language.pff", {{"m.bin", strings}, {"gametext.bin", strings}, {"medmssn.bin", strings}}));
 	TEST_EXPECT(write_pff(install + "/resource.pff",
 	                      {{"island.trn", "trn"}, {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
-	                       {"m.til", "til"}, {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"},
+	                       {"m.til", "til"}, {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"},
 	                       {"puff.tga", "tga"}, {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
+	// The music banks the game streams loose from its root (the manifest's, found there), and a
+	// save beside them, which is the player's, never the game's.
+	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "menu music") &&
+	            editor_test::write_text(install + "/GAMEMUS.SBF", "game music") && editor_test::write_text(install + "/player.sav", "save"));
 	ImportChoice mission;
 	mission.path = install;
 	mission.entry = "m.bms";
@@ -795,6 +799,14 @@ static int test_plan_mission_closure() {
 		const ImportPlanRow *row = found(name);
 		TEST_EXPECT(row && row->needed_by.file == "m.bms" && row->needed_by.field.find("the game, ") == 0);
 	}
+	// The install's loose files of the kinds the game ships loose, as the disk spells them, their
+	// sizes the disk's; never a save.
+	for (const auto &[name, bytes] : {std::pair<const char *, uint64_t>{"menumus.sbf", 10}, {"GAMEMUS.SBF", 10}}) {
+		const ImportPlanRow *row = found(name);
+		TEST_EXPECT(row && row->kind == AssetKind::MusicBank && row->size == bytes && row->source.install &&
+		            row->needed_by.field.find("the game, ") == 0);
+	}
+	TEST_EXPECT(!row_named(plan, "player.sav"));
 	// The menu's font through the variable the stylesheet the walk brought defines: the font found
 	// (the sheet's own value names it first, in the manifest's order; the menu followed again once
 	// the sheet was read names it too), the variable neither undefined nor not followed.

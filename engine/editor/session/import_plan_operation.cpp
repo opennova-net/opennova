@@ -1,5 +1,6 @@
 #include <editor/session/import_plan_operation.h>
 
+#include <algorithm>
 #include <utility>
 
 #include <editor/session/import_controller.h>
@@ -49,9 +50,12 @@ bool ImportPlanOperation::step(const StepBudget &budget) {
 		phase_ = Phase::Mount;
 		return false;
 	case Phase::Mount:
-		// The game install where the plan looks for the files the chosen ones need: one that does not
-		// mount is the plan's to say (it mounts it again and reports why).
-		if (with_dependencies_ && !install_.empty()) {
+		// The game install where the plan looks for the files the chosen ones need, or whose files
+		// are chosen: one that does not mount is the plan's to say (it mounts it again and reports
+		// why).
+		if (!install_.empty() && (with_dependencies_ || std::any_of(roots_.begin(), roots_.end(), [](const ImportChoice &root) {
+			    return root.install;
+		    }))) {
 			auto install = std::make_shared<ImportOrigin>();
 			std::string error;
 			if (install->open(ImportOrigin::Kind::GameInstall, install_, document_, error)) mounted_ = std::move(install);

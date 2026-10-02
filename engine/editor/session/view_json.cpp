@@ -177,6 +177,7 @@ JsonValue import_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
+	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
 	size_t rows = 0, not_found = 0;
@@ -643,6 +644,7 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(preview.open));
 	out.set("with_dependencies", boolean(preview.with_dependencies));
+	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
 	// The plan's importable rows (the paged list) and the rows not found, apart, in plan order.

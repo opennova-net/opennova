@@ -750,6 +750,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::OpenFirst: return flag_of(json, token, request.open_first, error);
 	case F::ImportPass: return flag_of(json, token, request.import_pass, error);
 	case F::Rehash: return flag_of(json, token, request.rehash, error);
+	case F::All: return flag_of(json, token, request.all, error);
+	case F::Planned: return flag_of(json, token, request.planned, error);
 	case F::kCount: break;
 	}
 	error = std::string("Unknown request member \"") + token + "\".";
@@ -830,6 +832,8 @@ bool field_to_json(
 	// Its default is true: the writer names it only when it is false.
 	case F::ImportPass: out = boolean(request.import_pass); return !request.import_pass;
 	case F::Rehash: out = boolean(request.rehash); return request.rehash;
+	case F::All: out = boolean(request.all); return request.all;
+	case F::Planned: out = boolean(request.planned); return request.planned;
 	case F::kCount: break;
 	}
 	out = JsonValue::make_null();

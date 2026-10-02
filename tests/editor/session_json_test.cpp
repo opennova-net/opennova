@@ -768,6 +768,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::OpenFirst: out.open_first = true; break;
 		case F::ImportPass: out.import_pass = false; break; // its default is true
 		case F::Rehash: out.rehash = true; break;
+		case F::All: out.all = true; break;
+		case F::Planned: out.planned = true; break;
 		case F::kCount: break;
 		}
 	}

@@ -37,12 +37,27 @@ bool mount_retail(Vfs &game, const std::string &retail_root, const ProjectDocume
 // SCR form under a key of its own and unwraps it itself (a shader: AssetKindRow::scr, ScrForm::Shader),
 // the bytes as stored. What an import copies into the project and what its plan reads.
 bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> &out);
-// Every effective file of a game install, mounted as a stock launch mounts it
-// (mount_retail): the "Import from game data" list.
+// The kinds the game ships loose in its install root and reads from there, never through the
+// archives (ArchiveSlot::Loose; ADR 0046 S14): a music bank, a video, the country code, the
+// NovaWorld string table and its screens. What an import of the game install may take beside its
+// archives' files; never the player's saves, configuration or score table, nor a text beside the
+// game.
+bool install_loose_kind(AssetKind kind);
+// The loose files of those kinds in a game install's root, each as the disk spells it, sorted by
+// their normalized names; none for a root that cannot be listed.
+std::vector<std::string> list_install_loose_files(const std::string &retail_root);
+// A file of a game install as the game is served it: its archives' member decoded (read_served),
+// else, for a name of a kind the game ships loose (install_loose_kind), the root's loose file of
+// that name (compared without case, as the game compares names). False for any other name.
+bool read_install_file(const Vfs &game, const std::string &retail_root, const std::string &name,
+                       std::vector<uint8_t> &out);
+// Every effective file of a game install, mounted as a stock launch mounts it (mount_retail),
+// and the loose files the game ships beside its archives (list_install_loose_files) where no
+// archive has the name: the "Import from game data" list.
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics);
-// The logical names a game install resolves, sorted by their normalized form (the
-// Problems Import fixes).
+// The logical names a game install resolves, its loose files included, sorted by their normalized
+// form (the Problems Import fixes).
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document);
 // Where an import writes a file of `kind` (project-relative): over the project's file of
 // the name when it has one (a replace keeps its place), else in the kind's folder

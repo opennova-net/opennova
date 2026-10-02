@@ -78,7 +78,7 @@ io::JsonValue output_page_to_json(const OutputLog &output, uint64_t cursor, size
 // A page of the view's events by seq (ViewEvents): {first, next, count, cursor, next_cursor, items
 // (view_event_to_json's)}, paged as the output lines are.
 io::JsonValue events_page_to_json(const ViewEvents &events, uint64_t cursor, size_t limit);
-// The import dialog's preview (DialogsView::ImportPreview): {open, with_dependencies, changed?,
+// The import dialog's preview (DialogsView::ImportPreview): {open, with_dependencies, all?, changed?,
 // then a page of its plan's importable rows (`rows`, `count` the whole plan's), and by the same
 // offset and limit the lists it offers and chose (`choices`, `roots`) and the files not found
 // (`not_found`), each with its whole length (`choice_count`, `root_count`, `not_found_count`),

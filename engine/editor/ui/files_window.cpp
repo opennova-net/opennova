@@ -290,6 +290,14 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
+		ImGui::BeginDisabled(!game_data);
+		if (ImGui::Selectable("The whole game install...") && game_data)
+			workspace_.request(request::import_whole_install());
+		ImGui::EndDisabled();
+		ui_kit::tooltip(!view.project.retail_directory.empty()
+		                        ? "Every file of the game install, copied into the project: what a mission project needs to "
+		                          "play, build and resolve every name."
+		                        : "Choose the game install folder in File > Project settings... first.");
 		const bool reimports =
 				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);

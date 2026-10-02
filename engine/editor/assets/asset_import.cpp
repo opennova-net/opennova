@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -62,6 +63,71 @@ bool read_served(const Vfs &game, const std::string &name, std::vector<uint8_t> 
 	return game.read_file(name, out);
 }
 
+bool install_loose_kind(AssetKind kind) {
+	switch (kind) {
+	case AssetKind::MusicBank:
+	case AssetKind::Video:
+	case AssetKind::CountryCode:
+	case AssetKind::StringTableCoo:
+	case AssetKind::NovaWorldScreen: return true;
+	default: return false;
+	}
+}
+
+std::vector<std::string> list_install_loose_files(const std::string &retail_root) {
+	std::vector<std::string> names;
+	std::error_code ec;
+	fs::directory_iterator it(retail_root, ec);
+	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+		std::error_code status;
+		try {
+			if (!it->is_regular_file(status)) continue;
+			const std::string name = it->path().filename().string();
+			if (install_loose_kind(classify_asset(name, nullptr))) names.push_back(name);
+		} catch (const std::exception &) {
+			// A name the narrow encoding cannot carry is no file the game ships.
+		}
+	}
+	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
+		return normalized_logical_name(a) < normalized_logical_name(b);
+	});
+	return names;
+}
+
+bool read_install_file(const Vfs &game, const std::string &retail_root, const std::string &name,
+                       std::vector<uint8_t> &out) {
+	if (read_served(game, name, out)) return true;
+	if (!install_loose_kind(classify_asset(name, nullptr))) return false;
+	const std::string wanted = normalized_logical_name(name);
+	for (const std::string &loose : list_install_loose_files(retail_root)) {
+		if (normalized_logical_name(loose) != wanted) continue;
+		std::string error;
+		return read_file_bytes((fs::path(retail_root) / loose).generic_string(), out, error);
+	}
+	return false;
+}
+
+namespace {
+
+// The game install's files by their logical names: the archives' (as a stock launch mounts them,
+// the archives themselves left out), then the root's loose files of the kinds the game ships loose
+// where no archive has the name. False when the folder holds none of the game's archives.
+bool list_install_names(const std::string &retail_root, const ProjectDocument &document, std::vector<std::string> &names) {
+	Vfs game;
+	if (retail_root.empty() || !mount_retail(game, retail_root, document)) return false;
+	std::set<std::string> known;
+	for (const VfsFileLocation &file : game.list_files()) {
+		if (strutil::ends_with_icase(file.logical_name, ".pff")) continue; // the archives themselves
+		names.push_back(file.logical_name);
+		known.insert(normalized_logical_name(file.logical_name));
+	}
+	for (const std::string &loose : list_install_loose_files(retail_root))
+		if (known.insert(normalized_logical_name(loose)).second) names.push_back(loose);
+	return true;
+}
+
+} // namespace
+
 std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_root, const ProjectDocument &document,
                                                     std::vector<Diagnostic> &diagnostics) {
 	std::vector<ImportChoice> sources;
@@ -70,17 +136,16 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 		                                  "Choose the game install folder in File > Project settings... first."));
 		return sources;
 	}
-	Vfs game;
-	if (!mount_retail(game, retail_root, document)) {
+	std::vector<std::string> names;
+	if (!list_install_names(retail_root, document, names)) {
 		diagnostics.push_back(make_finding(CoreFinding::ImportInstall, DiagnosticSeverity::Error,
 		                                  "No game archives found under " + retail_root + "."));
 		return sources;
 	}
-	for (const VfsFileLocation &file : game.list_files()) {
-		if (strutil::ends_with_icase(file.logical_name, ".pff")) continue; // the archives themselves
+	for (const std::string &name : names) {
 		ImportChoice source;
 		source.path = retail_root;
-		source.entry = file.logical_name;
+		source.entry = name;
 		source.install = true;
 		sources.push_back(std::move(source));
 	}
@@ -89,10 +154,7 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 
 std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document) {
 	std::vector<std::string> names;
-	Vfs game;
-	if (retail_root.empty() || !mount_retail(game, retail_root, document)) return names;
-	for (const VfsFileLocation &file : game.list_files())
-		if (!strutil::ends_with_icase(file.logical_name, ".pff")) names.push_back(file.logical_name);
+	list_install_names(retail_root, document, names);
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
 		return normalized_logical_name(a) < normalized_logical_name(b);
 	});
@@ -287,7 +349,7 @@ private:
 				}
 				retail_root_ = source.path;
 			}
-			if (!read_served(retail_, source.entry, bytes)) {
+			if (!read_install_file(retail_, source.path, source.entry, bytes)) {
 				refuse(CoreFinding::ImportRead, "The game data has no file named " + name + ".", name);
 				return false;
 			}

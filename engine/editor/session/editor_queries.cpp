@@ -1068,7 +1068,8 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
 			concern_set({ C::Dialogs, C::Preferences, C::Files }),
-			"The import dialog's preview: open, with_dependencies, a page of its plan's rows in "
+			"The import dialog's preview: open, with_dependencies, all (every file of the game "
+			"install chosen, with no walk), a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, size, "
 			"made_from, needed_by, found_in, selected, problem, rivals), total_bytes (what the "
 			"whole plan copies), by the same page what it "

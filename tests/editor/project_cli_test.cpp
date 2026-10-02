@@ -586,6 +586,20 @@ static int test_one_game_install() {
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0 && has("game install: " + install + "\n"));
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the game install"));
+	// Everything the install has (ADR 0046 S14): its archives' files and the loose files the game
+	// ships beside them, chosen at once, with no walk and nothing else named; imported as the plan
+	// has them.
+	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "music") && editor_test::write_text(install + "/game.cfg", "cfg"));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--entry", "arial99.fnt"}, text) == 2 &&
+	            text.find("--all") != std::string::npos);
+	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run"}, text) == 0);
+	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, chosen, from the game install") &&
+	            has("take menumus.sbf (music_bank) -> ") && !has("game.cfg") && has("plan: 2 file(s) to import, 0 not found"));
+	TEST_EXPECT(!fs::exists(root + "/fonts/arial99.fnt"));
+	TEST_EXPECT(run_capture(capture, {"import", root, "--all"}, text) == 0);
+	TEST_EXPECT(has("imported fonts/arial99.fnt") && has("imported ") && fs::is_regular_file(root + "/fonts/arial99.fnt"));
+	std::string music, io_error;
+	TEST_EXPECT(opennova::editor::read_file_text(root + "/menumus.sbf", music, io_error) && music == "music");
 
 	// Another project names none: the editor opens it on the install it last chose.
 	const std::string other = dir.file("Other");

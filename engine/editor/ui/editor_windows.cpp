@@ -308,6 +308,11 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 		request(request::preview_install_import({}, v.project.import_dependencies));
 	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
+	if (menu_item("Import the whole game install...", nullptr, lists)) request(request::import_whole_install());
+	ui_kit::tooltip(v.project.open && v.project.retail_directory.empty()
+	                        ? "Choose the game install folder in File > Project settings... first."
+	                        : "Every file of the game install, copied into the project: what a mission project needs to "
+	                          "play, build and resolve every name.");
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		settings_.open(v);
