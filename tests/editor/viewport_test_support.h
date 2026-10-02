@@ -68,6 +68,26 @@ struct FakeDevice final : opennova::editor::ViewportDevice {
 	int ended_lod = -2;
 	std::function<double(double x, double y)> ground;
 	std::vector<std::string> missing;
+	// E13: its scene state, whether its draw asked to render this frame (a test says), the frame it
+	// last rendered (the test's `frame` at its present), and what the arbitration did to it.
+	uint64_t state = 0;
+	bool asked = false;
+	uint64_t frame = 0;
+	uint64_t rendered = 0;
+	int withheld = 0, published = 0, presented = 0;
+	uint64_t scene_state() const override { return state; }
+	bool render_asked() const override { return asked; }
+	uint64_t rendered_frame() const override { return rendered; }
+	void withhold_render() override {
+		++withheld;
+		asked = false;
+	}
+	void publish_scene_state() override { ++published; }
+	void present(const opennova::editor::ViewportModel &, const opennova::editor::PreviewClock &) override {
+		++presented;
+		asked = false;
+		rendered = frame;
+	}
 	bool ground_at(double x, double y, double &height) const override {
 		if (!ground) return false;
 		height = ground(x, y);

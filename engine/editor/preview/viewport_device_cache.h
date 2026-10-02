@@ -65,6 +65,16 @@ public:
 	// Shell's: the milliseconds it gives the builds, shared by every build; a test's, a count), and
 	// what each build came to given to its viewport (Viewports::device_build).
 	void step(Viewports &viewports, const std::function<bool()> &more);
+	// Every frame between the tick and the steps (ADR 0046 S14, E13): among the devices whose draws
+	// asked to render this frame, those of one scene state render and the rest keep their last
+	// pictures (ViewportDevice::withhold_render). Of two states drawn, the one that rendered longest
+	// ago wins (its latest render the oldest; a tie the state published last, else the first held),
+	// so a mission and a model both visible each render every other frame; one alone every frame.
+	// The winners' state is published again when it is not the one published last, and each winner
+	// runs its frame's legs (present). Nothing with no device asking.
+	void arbitrate(const Viewports &viewports);
+	// The scene state last published (0 before any, the shipped defaults).
+	uint64_t published_state() const { return published_; }
 	// The device drawing the viewport of `kind` over `path`, now the most recently used and kept
 	// through the next sync; null while none is made, which the next sync makes.
 	ViewportDevice *device(const std::string &path, ViewportKind kind) override;
@@ -107,6 +117,8 @@ private:
 	uint64_t clock_ = 0; // the recency stamp
 	uint64_t round_ = 0; // the syncs so far: the round a device used now belongs to
 	bool pin_all_ = true;
+	uint64_t published_ = 0; // the scene state published last (E13)
+	bool published_any_ = false;
 };
 
 } // namespace opennova::editor

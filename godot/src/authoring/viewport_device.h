@@ -57,6 +57,15 @@ public:
 	opennova::editor::ViewportBuildReport build() const override { return build_; }
 	// A first build ended (whole as it was taken, or by its last unit): there is a picture to draw.
 	bool holds_picture() const override { return built_once_; }
+	// E13: the applier's scene state; a draw's render asked this frame, the frame it last rendered;
+	// the render withheld (UPDATE_DISABLED again, its units free to run this frame); the applier's
+	// legs before it renders, at the clock's seconds since its last present.
+	uint64_t scene_state() const override { return applier_->scene_state(); }
+	bool render_asked() const override { return render_asked_; }
+	uint64_t rendered_frame() const override { return rendered_frame_; }
+	void withhold_render() override;
+	void publish_scene_state() override { applier_->publish_scene_state(); }
+	void present(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) override;
 
 	ViewportApplier &applier() { return *applier_; }
 	SubViewport *sub_viewport() const { return viewport_; }
@@ -83,6 +92,11 @@ private:
 	// The process frame whose draw asked for a render (UINT64_MAX: none yet): that frame renders
 	// what stands as it ends, so no unit runs in it.
 	uint64_t render_frame_ = UINT64_MAX;
+	// A draw asked for a render this frame, not yet arbitrated (E13); the frame it last rendered
+	// (0 none); the clock's milliseconds at its last present (-1 none).
+	bool render_asked_ = false;
+	uint64_t rendered_frame_ = 0;
+	double presented_ms_ = -1.0;
 	// Its build (S13 V6): the generation it builds or built, where it stands, what it cost; and the
 	// microseconds its units ran this frame (-1 from the tick until one runs).
 	opennova::editor::ViewportBuildReport build_;

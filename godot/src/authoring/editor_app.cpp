@@ -256,6 +256,9 @@ void EditorApp::_process(double p_delta) {
 	if (devices_) {
 		session_->advance(p_delta);
 		devices_->tick(session_->viewports());
+		// E13: of the devices drawn this frame, those of one scene state render (their frame legs
+		// run), the rest keep their last pictures until the next frame.
+		devices_->arbitrate(session_->viewports());
 		const uint64_t start = Time::get_singleton()->get_ticks_usec();
 		const opennova::editor::ViewportDevice *newest = devices_->most_recently_used();
 		const int budget_ms = build_budget_ms_ == 0 ? 0

@@ -40,6 +40,9 @@ struct ViewportDeviceReport {
 	bool canvas_sized = false;
 	ViewportBuildReport build;
 	std::vector<std::string> missing;
+	// Its picture holds a surface a ray lands on (surface_between and ground_at answer: a mission's
+	// terrain, built).
+	bool surface = false;
 };
 
 // Where a canvas draws a device's picture this frame (ADR 0046 S13 V5), in the pixels the canvas
@@ -137,6 +140,30 @@ public:
 	// keeping the last picture meanwhile. A device that makes its picture whole holds one from its
 	// first Rebuild (the default: true).
 	virtual bool holds_picture() const { return true; }
+
+	// --- the frame's render (ADR 0046 S14, E13) ------------------------------------------------------
+	// The process-wide scene state its picture renders with (the shader globals an environment
+	// publishes, the water plane): 0 the shipped defaults (a menu's, a model's), else a value of its
+	// device's own (a mission's). Two devices of different states never render in one frame: the
+	// Shell's devices arbitrate (ViewportDeviceCache::arbitrate), and the winners' state is published
+	// to the process again when another was published last.
+	virtual uint64_t scene_state() const { return 0; }
+	// Whether its draw this frame asked for a render (false while it keeps its last picture, or no
+	// canvas drew it), and the frame it last rendered (0 none): of two states drawn, the one that
+	// rendered longest ago wins.
+	virtual bool render_asked() const { return false; }
+	virtual uint64_t rendered_frame() const { return 0; }
+	// The render its draw asked for this frame dropped: it keeps its last picture, and wins the next.
+	virtual void withhold_render() {}
+	// Its scene state written to the process again.
+	virtual void publish_scene_state() {}
+	// The frame's legs over its picture before it renders this frame (a mission's: the render eye and
+	// the clear, the sky, the terrain, the water, the levels), at `clock`; asked only of a device that
+	// renders this frame, after the arbitration.
+	virtual void present(const ViewportModel &model, const PreviewClock &clock) {
+		(void)model;
+		(void)clock;
+	}
 };
 
 // Where a canvas finds the device of a viewport (the Shell's devices, ViewportDeviceCache; a test's):

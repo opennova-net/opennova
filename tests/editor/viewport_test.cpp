@@ -2149,8 +2149,84 @@ static int test_kind_limit() {
 	return 0;
 }
 
+// ADR 0046 S14 (E13): the devices drawn in one frame arbitrate their scene state. Two of one state
+// both render; of two states, the one that rendered longest ago renders (the other keeps its last
+// picture, withheld), its state published again when another was published last, so a mission and a
+// model drawn together take turns; alone, a device renders every frame and its state is published
+// once; a device whose draw asked nothing is left out.
+static int test_scene_state_arbitration() {
+	editor_test::TempProjectDir dir("opennova_editor_viewport_arbitration");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &view = session.view();
+	std::vector<editor_test::FakeDevice *> made;
+	ViewportDeviceCache cache([&made](ViewportKind) {
+		auto device = std::make_unique<editor_test::FakeDevice>();
+		made.push_back(device.get());
+		return std::unique_ptr<ViewportDevice>(std::move(device));
+	});
+	session.handle(request::new_project(dir.file("project"), "Arbitration"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::open_document("models/armory.3di"));
+	session.handle(request::open_document("main.mnu"));
+	cache.sync(session.viewports(), view);
+	TEST_EXPECT(made.size() == 2 && cache.published_state() == 0);
+	editor_test::FakeDevice &model = *made[0], &menu = *made[1];
+	// Nothing asked: nothing happens.
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 0 && menu.presented == 0 && menu.published == 0 && cache.published_state() == 0);
+	// Both of the shipped state, both asked: both render, the state published once.
+	uint64_t frame = 1;
+	const auto draw = [&](editor_test::FakeDevice &device) {
+		device.asked = true;
+		device.frame = frame;
+	};
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 1 && menu.presented == 1 && model.withheld == 0 && menu.withheld == 0);
+	TEST_EXPECT(model.published + menu.published == 1 && !model.asked && !menu.asked && cache.published_state() == 0);
+	// The model's device of a state of its own (a mission's, say): drawn together, the one that
+	// rendered longest ago wins each frame, so they take turns, each turn publishing its state (the
+	// first publish above went to whichever device the cache made first).
+	const int model_published = model.published;
+	model.state = 7;
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(menu.presented == 2 && model.presented == 1 && model.withheld == 1 && cache.published_state() == 0);
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(model.presented == 2 && menu.presented == 2 && menu.withheld == 1 && model.published == model_published + 1 &&
+			cache.published_state() == 7 && model.rendered == 3);
+	++frame;
+	draw(model);
+	draw(menu);
+	cache.arbitrate(session.viewports());
+	TEST_EXPECT(menu.presented == 3 && model.withheld == 2 && cache.published_state() == 0 && menu.rendered == 4);
+	// Alone, the model's device renders every frame, its state published once more and then kept.
+	for (int i = 0; i < 3; ++i) {
+		++frame;
+		draw(model);
+		cache.arbitrate(session.viewports());
+	}
+	TEST_EXPECT(model.presented == 5 && model.published == model_published + 2 && model.withheld == 2 && cache.published_state() == 7);
+	TEST_EXPECT(menu.presented == 3 && menu.withheld == 1);
+	std::printf("test_scene_state_arbitration passed\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
+	TEST_EXPECT(test_scene_state_arbitration() == 0);
 	TEST_EXPECT(test_kind_limit() == 0);
 	TEST_EXPECT(test_actions() == 0);
 	TEST_EXPECT(test_clock() == 0);

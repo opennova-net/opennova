@@ -68,6 +68,7 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 		viewport_->set_update_mode(SubViewport::UPDATE_ONCE);
 		rendered_ = true;
 		render_frame_ = frame_now();
+		render_asked_ = true;
 	} else if (!rendered_) {
 		size_(picture.width, picture.height);
 	}
@@ -75,6 +76,25 @@ void ViewportDevice::draw(const opennova::editor::ViewportPicture &picture) {
 	if (engine->has_singleton("ImGuiGD")) {
 		engine->get_singleton("ImGuiGD")->call("SubViewport", viewport_);
 	}
+}
+
+void ViewportDevice::withhold_render() {
+	// The frame's render dropped: the last picture stands, and the frame is no render frame of its
+	// (its units may run).
+	viewport_->set_update_mode(SubViewport::UPDATE_DISABLED);
+	render_asked_ = false;
+	render_frame_ = UINT64_MAX;
+}
+
+void ViewportDevice::present(const opennova::editor::ViewportModel &model, const opennova::editor::PreviewClock &clock) {
+	(void)model;
+	// The clock's seconds since the last present (none, or a paused clock: 0).
+	const double ms = double(clock.ms());
+	const double dt = presented_ms_ < 0.0 || ms < presented_ms_ ? 0.0 : (ms - presented_ms_) / 1000.0;
+	presented_ms_ = ms;
+	render_asked_ = false;
+	rendered_frame_ = frame_now();
+	applier_->present(dt);
 }
 
 bool ViewportDevice::surface_at(float x, float y, float point[3]) const {

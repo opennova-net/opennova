@@ -90,6 +90,15 @@ public:
 		(void)height;
 		return false;
 	}
+	// The process-wide scene state its picture renders with (ADR 0046 S14, E13; the portable
+	// ViewportDevice::scene_state): 0 for the shipped defaults (the menu's, the model's), else a
+	// value of the applier's own (the mission's: its device). publish_scene_state writes every global
+	// of it again (an environment's shader globals, the water plane); present runs the frame's legs
+	// over its picture before it renders, `dt` the preview clock's seconds since its last present (0
+	// while the clock is paused, so a test's frame is deterministic).
+	virtual uint64_t scene_state() const { return 0; }
+	virtual void publish_scene_state() {}
+	virtual void present(double dt) { (void)dt; }
 };
 
 } // namespace godot
