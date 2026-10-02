@@ -149,7 +149,8 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
 	node.timeouts.max_packet_bytes = static_cast<int32_t>(
 			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
-	node.seq = make_jo_game_session_sequencing(1, 0, node.timeouts.msg_out_max);
+	node.seq = make_jo_game_session_sequencing();
+	sync_session_sequencing_limits(node.seq, node.timeouts);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
 }

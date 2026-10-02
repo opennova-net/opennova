@@ -299,6 +299,11 @@ struct SessionSequencing {
 	// framing helper cannot create an unrecoverable queue behind a missing packet.
 	bool ordered_recovery_enabled = false;
 	std::map<uint32_t, QueuedSessionPacket> queued_inbound;
+	// The connection's cs_dir0.packet_queue_max (CS field 10): a future packet is retained only
+	// while fewer than this many are queued; negative is unbounded. The template's 100 unless the
+	// owner overlays its CS block. [orig: HandleSessionPacket @0x626c18..0x626c28 — `test eax,eax;
+	// jl` insert, `cmp [esi+7A8h], eax; jge` skip]
+	int32_t packet_queue_max = static_cast<int32_t>(SESSION_PACKET_QUEUE_MAX);
 	// Set when any future packet is observed and cleared only at the owner's receive-batch boundary.
 	// The queue may have drained by then; in that case the boundary clears this without sending a
 	// needless NACK. This is the retail recv-pump latch, not a per-datagram send trigger.

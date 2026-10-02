@@ -1217,9 +1217,16 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// These packets already own the connection's earliest allocated
 		// sequences. Preserve wire/retention fidelity by releasing them unchanged
 		// and before framing any later semantic work below.
-		while (!framed_send_queue_.empty()) {
+		// One build sends at most cs_dir0 field 14's packets (the template's -1 is
+		// unbounded); what it leaves stays queued for the next build, in order.
+		// [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
+		const std::size_t build_budget =
+				max_packets_per_build(joiner_->session_timeouts().max_packets_per_tick);
+		std::size_t packets_built = 0;
+		while (!framed_send_queue_.empty() && packets_built < build_budget) {
 			outbound.push_back(std::move(framed_send_queue_.front()));
 			framed_send_queue_.pop_front();
+			++packets_built;
 		}
 		// Input case 12 queues the deployment pick before Client_ProcessNetworkFrame.
 		// Keep it first at this send boundary: prepare_deployment_pick records the
@@ -1307,8 +1314,13 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			send_messages.push_back(make_protocol_message(
 					c2s::ENTITY_INFO_QUERY, std::move(body)));
 		}
-		JoinerConnection::FrameMessagesResult framed =
-				joiner_->frame_messages_detailed(send_messages);
+		JoinerConnection::FrameMessagesResult framed;
+		if (packets_built < build_budget) {
+			framed = joiner_->frame_messages_detailed(send_messages,
+					joiner_->packet_ceiling_bytes(), build_budget - packets_built);
+		} else {
+			framed.unbuilt = std::move(send_messages);
+		}
 		for (std::vector<uint8_t> &datagram : framed.datagrams)
 			outbound.push_back(std::move(datagram));
 		if (framed.frame_failed) {
@@ -1320,6 +1332,8 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				pre_send_queue_.push_back(std::move(send_messages[i]));
 			}
 		}
+		for (auto it = framed.unbuilt.rbegin(); it != framed.unbuilt.rend(); ++it)
+			pre_send_queue_.push_front(std::move(*it));
 		// Connection send boundary: advance the pre-spawn drive, emit retained-message
 		// active probes, and flush an ACK only if no substantive C2S producer above
 		// already carried it. Retail places this pump inside the same field-3 gate

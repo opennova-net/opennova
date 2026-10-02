@@ -1190,6 +1190,61 @@ bool check_host_send_interval_legs_run_every_tick() {
 			"per-tick legs: the ACTIVE leg builds the queued record mid-window");
 }
 
+// The host's builds obey its connection's CS field 14 the same way: at most that many
+// packets per build (the template's -1 is unbounded), the rest of the queue waiting, in
+// order, for the next build. [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
+bool check_host_builds_at_most_field_14_packets() {
+	opennova::inmatch::HostOwner owner;
+	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
+	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
+	opennova::inmatch::GameConfig config;
+	opennova::inmatch::create_session(
+			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+
+	const opennova::PeerAddr peer{0x0100007Fu, 33118};
+	auto &peer_link = owner.peers[peer];
+	peer_link.transport =
+			std::make_unique<opennova::replication::UdpSessionTransport>(
+					opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.server_scrk = "SERVERPACKETBUDGETSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ01";
+	conn.client_ck = 0x10203042u;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.timeouts.max_packets_per_tick = 1;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	auto &remote = owner.ctx.np_protocol.connection_list.front();
+
+	// Three 600-byte records: two fit one 1300-byte packet, the third needs another.
+	for (uint8_t tag : {uint8_t{0x31}, uint8_t{0x32}, uint8_t{0x33}})
+		owner.pending_session_messages[peer].push_back(
+				opennova::make_protocol_message(tag, std::vector<uint8_t>(600, tag)));
+	CaptureDatagramSocket socket;
+	opennova::inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1 && owner.pending_session_messages.count(peer) == 1 &&
+	                    owner.pending_session_messages[peer].size() == 1 &&
+	                    owner.pending_session_messages[peer][0].tag == 0x33,
+			"packet budget: one build sends one packet and keeps the third record queued"))
+		return false;
+	opennova::inmatch::host_session_pump(owner, socket);
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	return expect(socket.sent.size() == 2 && owner.pending_session_messages.count(peer) == 0 &&
+	                      opennova::nw_decode_inbound(socket.sent[1].data(), socket.sent[1].size(),
+	                              opcode, session_body) &&
+	                      opennova::decode_protocol_packet_plaintext(session_body.data(),
+	                              session_body.size(), remote.server_scrk, header, messages) &&
+	                      messages.size() == 1 && messages[0].tag == 0x33,
+			"packet budget: the next build sends the record the budget left");
+}
+
 bool check_host_admits_exact_retail_message_prefix() {
 	opennova::inmatch::HostOwner owner;
 	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
@@ -4629,6 +4684,7 @@ int main() {
 	ok = check_requeued_fragment_run_overflows_per_node() && ok;
 	ok = check_host_idle_send_interval_keepalive() && ok;
 	ok = check_host_send_interval_legs_run_every_tick() && ok;
+	ok = check_host_builds_at_most_field_14_packets() && ok;
 	ok = check_host_admits_exact_retail_message_prefix() && ok;
 	ok = check_host_s2c_holdoff_and_frame_envelope() && ok;
 	ok = check_host_s2c_holdoff_is_per_connection() && ok;

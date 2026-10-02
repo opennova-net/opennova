@@ -33,17 +33,22 @@ namespace opennova::inmatch {
 //                              [orig: TeardownActiveConnection @0x6253ef]
 //   4  idle_send_interval_ms   PumpSendIntervals' EMPTY leg [orig: @0x629041]
 //   5  active_send_interval_ms PumpSendIntervals' ACTIVE leg [orig: @0x628ff1]
+//   10 packet_queue_max        HandleSessionPacket's out-of-order queue bound
+//                              [orig: @0x626c18]
 //   13 max_packet_bytes        BuildOutgoingPackets' packet ceiling [orig: @0x628436]
+//   14 max_packets_per_tick    BuildOutgoingPackets' packets per call [orig: @0x62844e]
 // [orig: CNapiNetwork_Init @0x4cab60 (4), @0x4cab88 (30000), @0x4cab98 (10000),
-//  @0x4cab3c (mpmaxpacketsize, 1300 by default); the field map is NapiCSConfig at
-//  conn+0x17C (cs_dir0)]
+//  @0x4cabe0 (100), @0x4cab3c (mpmaxpacketsize, 1300 by default), @0x4cac18 (-1, the
+//  `or ecx, -1` @0x4caad5); the field map is NapiCSConfig at conn+0x17C (cs_dir0)]
 struct SessionTimeoutConfig {
 	int32_t timeout_ms = 120000;              // CS field 0
 	int32_t recv_max_per_tick = 4;            // CS field 1
 	int32_t idle_send_interval_ms = 30000;    // CS field 4
 	int32_t active_send_interval_ms = 10000;  // CS field 5
+	int32_t packet_queue_max = 100;           // CS field 10
 	int32_t msg_out_max = 0x4B0;              // CS field 11
 	int32_t max_packet_bytes = 1300;          // CS field 13
+	int32_t max_packets_per_tick = -1;        // CS field 14
 };
 
 // Store one CS slot the way CNapiNPConnection_HandleCSConfigUpdate and
@@ -56,8 +61,10 @@ inline void apply_session_cs_field(SessionTimeoutConfig &cfg, uint32_t slot, int
 	case 1: cfg.recv_max_per_tick = value; break;
 	case 4: cfg.idle_send_interval_ms = value; break;
 	case 5: cfg.active_send_interval_ms = value; break;
+	case 10: cfg.packet_queue_max = value; break;
 	case 11: cfg.msg_out_max = value; break;
 	case 13: cfg.max_packet_bytes = value; break;
+	case 14: cfg.max_packets_per_tick = value; break;
 	default: break;
 	}
 }

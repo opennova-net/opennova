@@ -554,7 +554,8 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 		seq.missing_request_pending = true;
 		const auto existing = seq.queued_inbound.find(hdr_out.seq_num);
 		if (existing == seq.queued_inbound.end() &&
-		    seq.queued_inbound.size() < SESSION_PACKET_QUEUE_MAX) {
+		    (seq.packet_queue_max < 0 ||
+		     seq.queued_inbound.size() < static_cast<size_t>(seq.packet_queue_max))) {
 			seq.queued_inbound.emplace(
 					hdr_out.seq_num, QueuedSessionPacket{hdr_out, std::move(decoded)});
 		}

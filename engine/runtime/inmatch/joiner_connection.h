@@ -270,16 +270,28 @@ public:
 		// [framed_count, admitted_count) remains owned by the caller.
 		std::size_t framed_count = 0;
 		bool frame_failed = false;
+		// Admitted nodes the build's packet budget left queued, in queue order (a split
+		// message's remaining pieces first): the caller keeps them at the head of its queue
+		// for the next build.
+		std::vector<ProtocolMessage> unbuilt;
 	};
 	// The one-argument forms frame under this connection's packet ceiling: cs_dir0 field 13
 	// (the template's 1300, overlaid by the host's 0x82 and its 0x2000 CS update, the
 	// negotiated mpmaxpacketsize) [orig: BuildOutgoingPackets @0x628436, min 26 @0x628446].
+	// Every form but the three-argument one builds at most cs_dir0 field 14's packets
+	// (max_packets_per_build; the template's -1 is unbounded) [orig: @0x62844e].
 	FrameMessagesResult frame_messages_detailed(
 			const std::vector<ProtocolMessage> &messages) {
 		return frame_messages_detailed(messages, packet_ceiling_bytes());
 	}
 	FrameMessagesResult frame_messages_detailed(
-			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes);
+			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
+		return frame_messages_detailed(messages, max_packet_bytes,
+				max_packets_per_build(conn_.timeouts.max_packets_per_tick));
+	}
+	// `max_packets` is what remains of this build's packet budget (at least 1).
+	FrameMessagesResult frame_messages_detailed(const std::vector<ProtocolMessage> &messages,
+			std::size_t max_packet_bytes, std::size_t max_packets);
 	std::vector<std::vector<uint8_t>> frame_messages(
 			const std::vector<ProtocolMessage> &messages) {
 		return frame_messages(messages, packet_ceiling_bytes());

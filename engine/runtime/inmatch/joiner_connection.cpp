@@ -635,14 +635,15 @@ void JoinerConnection::on_server_auth(
 	// The host's CS block overlays this connection's cs_dir0 template: CLIENT-direction
 	// (byte 1) entries land in cs_dir0, the block this connection's pumps read — the reap
 	// (field 0), the teardown burst (1), the empty and active send intervals (4, 5), the
-	// pool bound (11) and the packet ceiling (13) — so a host `_NSTMOUT.TXT` override (or a
-	// NEVER -1) or its `mpmaxpacketsize` reaches us. Fields the 0x82 omits keep the template.
+	// out-of-order queue bound (10), the pool bound (11), the packet ceiling (13) and the
+	// packets per build (14) — so a host `_NSTMOUT.TXT` override (or a NEVER -1) or its
+	// `mpmaxpacketsize` reaches us. Fields the 0x82 omits keep the template.
 	// [orig: NapiNP_HandleServerJoinResponse @0x629840 — the template seed @0x6299ae, the
 	//  CS overlay @0x629b4c..0x629b75, the copy onto the connection @0x629d72/@0x629d89]
 	for (const CsField &field : sa.client_cs)
 		apply_session_cs_field(conn_.timeouts, field.field_index,
 				static_cast<int32_t>(field.value));
-	conn_.seq.outbound_message_limit = outbound_message_limit_for(conn_.timeouts.msg_out_max);
+	sync_session_sequencing_limits(conn_.seq, conn_.timeouts);
 	phase_ = Phase::Driving;
 	// State-5 entry initializes the reap clock: the 120 s window runs from the accepted
 	// 0x82 onward, through every join stage, with no gameplay gate.
@@ -931,8 +932,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 					if ((settings.written & (1u << slot)) != 0)
 						apply_session_cs_field(conn_.timeouts, slot, settings.value[slot]);
 				}
-				conn_.seq.outbound_message_limit =
-						outbound_message_limit_for(conn_.timeouts.msg_out_max);
+				sync_session_sequencing_limits(conn_.seq, conn_.timeouts);
 			}
 		}
 		if (!m.flags.settings_update && m.full_tag < PROTOCOL_FULL_TAG_HIGH_BASE && m.tag == s2c::WEAPON_LOADOUT) {

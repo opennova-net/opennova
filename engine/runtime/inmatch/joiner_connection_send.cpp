@@ -97,7 +97,8 @@ std::vector<uint8_t> JoinerConnection::frame_session(const std::vector<ProtocolM
 }
 
 JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
-		const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
+		const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes,
+		std::size_t max_packets) {
 	FrameMessagesResult result;
 	if (session_lost() || phase_ == Phase::Error) return result;
 	if (max_packet_bytes <= PROTOCOL_DATAGRAM_OVERHEAD) { result.frame_failed = true; return result; }
@@ -107,10 +108,12 @@ JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 	std::vector<ProtocolMessage> packet;
 	std::size_t packet_bytes = PROTOCOL_DATAGRAM_OVERHEAD;
 	std::size_t completed_in_packet = 0;
+	std::size_t packets_built = 0;
 	auto flush = [&] {
 		if (packet.empty()) return true;
 		std::vector<uint8_t> datagram = frame_session(packet);
 		if (datagram.empty()) return false;
+		++packets_built;
 		result.framed_count += completed_in_packet;
 		result.datagrams.push_back(std::move(datagram));
 		packet.clear(); completed_in_packet = 0;
@@ -156,14 +159,26 @@ JoinerConnection::FrameMessagesResult JoinerConnection::frame_messages_detailed(
 		++result.admitted_count;
 		planned.push_back(std::move(pieces));
 	}
-	for (auto &pieces : planned) {
+	for (std::size_t k = 0; k < planned.size(); ++k) {
+		std::vector<ProtocolMessage> &pieces = planned[k];
 		for (std::size_t i = 0; i < pieces.size(); ++i) {
 			std::vector<uint8_t> encoded;
 			if (!append_protocol_message(encoded, pieces[i])) {
 				(void)flush(); result.frame_failed = true; return result;
 			}
-			if (packet_bytes + encoded.size() > max_packet_bytes && !flush()) {
-				result.frame_failed = true; return result;
+			if (packet_bytes + encoded.size() > max_packet_bytes) {
+				if (!flush()) { result.frame_failed = true; return result; }
+				// The build stops once its packet budget went out (cs_dir0 field 14); the
+				// rest of the queue, this message's remaining pieces first, waits for the
+				// next build. [orig: BuildOutgoingPackets @0x62860b..0x628619]
+				if (packets_built >= max_packets) {
+					for (std::size_t j = i; j < pieces.size(); ++j)
+						result.unbuilt.push_back(std::move(pieces[j]));
+					for (std::size_t later = k + 1; later < planned.size(); ++later)
+						for (ProtocolMessage &piece : planned[later])
+							result.unbuilt.push_back(std::move(piece));
+					return result;
+				}
 			}
 			packet.push_back(std::move(pieces[i]));
 			packet_bytes += encoded.size();

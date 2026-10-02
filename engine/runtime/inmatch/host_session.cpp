@@ -61,11 +61,19 @@ SessionStartup make_session_startup(const HostConfig &cfg) {
 	return startup;
 }
 
+// Frame and send `messages` in as few packets as fit under the connection's
+// ceiling, at most `max_packets` of them (what remains of this build's cs_dir0
+// field-14 budget). Returns the nodes left queued — a failed frame's tail, or
+// what the budget left (a split message's remaining pieces first) — for the
+// head of the connection's queue.
 std::vector<ProtocolMessage> send_session_batches(
 		HostOwner &owner, opennova::IDatagramSocket &sock,
-		NapiNPConnection &connection, std::vector<ProtocolMessage> messages) {
+		NapiNPConnection &connection, std::vector<ProtocolMessage> messages,
+		std::size_t max_packets) {
+	if (max_packets == 0) return messages;
 	std::vector<ProtocolMessage> batch;
 	std::vector<uint8_t> encoded_messages;
+	std::size_t packets_built = 0;
 
 	auto flush = [&] {
 		if (batch.empty()) return true;
@@ -75,6 +83,7 @@ std::vector<ProtocolMessage> send_session_batches(
 			return false;
 		sock.send_to(connection.peer, datagram.data(), datagram.size());
 		connection.last_session_send_tick = owner.now_tick;
+		++packets_built;
 		batch.clear();
 		encoded_messages.clear();
 		return true;
@@ -171,6 +180,10 @@ std::vector<ProtocolMessage> send_session_batches(
 				batch.insert(batch.end(), enveloped.begin() + i, enveloped.end());
 				return batch;
 			}
+			// The build stops once its packet budget went out; the rest waits for the
+			// next build. [orig: BuildOutgoingPackets @0x62860b..0x628619]
+			if (packets_built >= max_packets)
+				return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
 			candidate.clear();
 			if (!append_protocol_message(candidate, message)) {
 				return std::vector<ProtocolMessage>(enveloped.begin() + i, enveloped.end());
@@ -421,15 +434,26 @@ void host_session_flush_s2c(HostOwner &owner, opennova::IDatagramSocket &sock) {
 // before this build (they own the lower sequence numbers) leave first, then
 // every queued semantic record, split at the connection's ceiling. Returns
 // whether a staged packet left; the caller compares sequences for the rest.
+// One build sends at most cs_dir0 field 14's packets (the template's -1 is
+// unbounded); the pre-framed packets count first, and whatever the budget
+// leaves stays queued, in order, for the next build.
+// [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
 static bool build_s2c_queue(HostOwner &owner, opennova::IDatagramSocket &sock,
 		NapiNPConnection &c, uint32_t now) {
 	auto &pending_session_messages = owner.pending_session_messages;
+	std::size_t budget = max_packets_per_build(c.timeouts.max_packets_per_tick);
 	bool released = false;
 	auto pending_datagrams = owner.pending_session_datagrams.find(c.peer);
 	if (pending_datagrams != owner.pending_session_datagrams.end()) {
-		for (const std::vector<uint8_t> &datagram : pending_datagrams->second)
-			sock.send_to(c.peer, datagram.data(), datagram.size());
-		owner.pending_session_datagrams.erase(pending_datagrams);
+		std::vector<std::vector<uint8_t>> &staged = pending_datagrams->second;
+		std::size_t sent = 0;
+		while (sent < staged.size() && sent < budget) {
+			sock.send_to(c.peer, staged[sent].data(), staged[sent].size());
+			++sent;
+		}
+		staged.erase(staged.begin(), staged.begin() + static_cast<std::ptrdiff_t>(sent));
+		if (staged.empty()) owner.pending_session_datagrams.erase(pending_datagrams);
+		budget -= sent;
 		c.last_session_send_tick = now;
 		released = true;
 	}
@@ -440,7 +464,7 @@ static bool build_s2c_queue(HostOwner &owner, opennova::IDatagramSocket &sock,
 		pending_session_messages.erase(pending);
 	}
 	std::vector<ProtocolMessage> retry =
-			send_session_batches(owner, sock, c, std::move(messages));
+			send_session_batches(owner, sock, c, std::move(messages), budget);
 	if (!retry.empty())
 		pending_session_messages[c.peer] = std::move(retry);
 	return released;

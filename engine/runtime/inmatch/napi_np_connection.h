@@ -85,6 +85,25 @@ inline std::size_t outbound_message_limit_for(int32_t msg_out_max) {
 	return msg_out_max < 0 ? std::size_t{0} : static_cast<std::size_t>(msg_out_max);
 }
 
+// The cs_dir0 slots the shared session sequencing enforces, pushed onto a connection's
+// sequencing whenever its block changes: the outbound pool bound (field 11) and the
+// out-of-order queue bound (field 10).
+inline void sync_session_sequencing_limits(
+		SessionSequencing &sequencing, const SessionTimeoutConfig &timeouts) {
+	sequencing.outbound_message_limit = outbound_message_limit_for(timeouts.msg_out_max);
+	sequencing.packet_queue_max = timeouts.packet_queue_max;
+}
+
+// BuildOutgoingPackets' packets per call, cs_dir0 field 14: negative is unbounded, and the
+// loop builds one packet before it first tests the count, so 0 still builds one.
+// [orig: BuildOutgoingPackets @0x62844e (the load), @0x62860b..0x628619 (`max < 0` or
+//  `built < max` loops again)]
+inline std::size_t max_packets_per_build(int32_t max_packets_per_tick) {
+	if (max_packets_per_tick < 0) return static_cast<std::size_t>(-1);
+	return max_packets_per_tick < 1 ? std::size_t{1}
+	                                : static_cast<std::size_t>(max_packets_per_tick);
+}
+
 inline SessionSequencing make_jo_game_session_sequencing(
 		uint32_t next_outbound_seq = 1, uint32_t last_inbound_seq = 0,
 		int32_t msg_out_max = static_cast<int32_t>(JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX)) {
