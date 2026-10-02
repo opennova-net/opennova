@@ -1013,6 +1013,14 @@ void NovaWorldClient::stop_playing() {
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
 void NovaWorldClient::resolve_join_target() {
+	// The in-match join refuses an NK endpoint whose port reads 0 or whose host
+	// string is under eight characters (the engine's joi_endpoint_usable); the
+	// player is back in the lobby, which leaves the play.
+	if (!opennova::joi_endpoint_usable(pending_join_.host_ip, pending_join_.host_port)) {
+		stop_playing();
+		emit_signal("join_failed", String(opennova::kJoinEndpointRejectTag));
+		return;
+	}
 	// The .joi endpoint and APPID are the service's bytes.
 	const String host = opennova::cp1252_to_gd(pending_join_.host_ip);
 	const uint16_t port = pending_join_.host_port;

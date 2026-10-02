@@ -158,6 +158,10 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 	return out;
 }
 
+bool joi_endpoint_usable(const std::string &host_ip, long port) {
+	return port != 0 && host_ip.size() >= 8;
+}
+
 void CookieJar::set(const std::string &name, const std::string &value) {
 	auto it = values_.find(name);
 	if (it == values_.end()) {

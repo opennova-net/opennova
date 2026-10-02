@@ -119,6 +119,16 @@ struct JoiConnection {
 // is taken from decoded NK; NI/NP are preserved but are not the dial authority.
 JoiConnection parse_joi_connection_string(const std::string &body);
 
+// The NovaWorld join's endpoint gate, run when the in-match join starts (after
+// the play request): an NK port that reads 0 or an NK host string shorter than
+// eight characters is refused with gameerr "MP Errors" CVSTATCLIENTERR before
+// any transport opens (so a short dotted address such as "1.2.3.4" is refused
+// too). [orig: UI_EnumerateAndJoinSession @0x569f50 — atol(g_NkExtraBuf)
+//  @0x569fdd, strlen(g_NkBuf) @0x569ff9, the `!port || len < 8` test @0x56a006,
+//  CVSTATCLIENTERR @0x56a145]
+inline constexpr char kJoinEndpointRejectTag[] = "CVSTATCLIENTERR";
+bool joi_endpoint_usable(const std::string &host_ip, long port);
+
 // Truncate an HTTP host to the retail cookie-jar subnet key: a dotted-decimal
 // IPv4 keeps its first two octets ("192.168.1.1" -> "192.168"); any other host
 // (a DNS name, or a malformed address) is returned unchanged.

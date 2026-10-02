@@ -715,6 +715,10 @@ static func error_message(reason: String) -> String:
 		var localized := menutxt.get_string(reason)
 		if not localized.is_empty() and localized != reason:
 			return "%s\n\n(%s)" % [localized, reason]
+	# The in-match join's CV* refusals are gameerr "MP Errors" keys.
+	var mp_error := Strings.lookup_or(Strings.TABLE_GAMEERR, "MP Errors", reason, "")
+	if not mp_error.is_empty() and mp_error != reason:
+		return "%s\n\n(%s)" % [mp_error, reason]
 	return reason
 
 

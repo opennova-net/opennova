@@ -87,6 +87,16 @@ int main() {
 	check(no_nk.host_ip.empty() && no_nk.host_port.empty(),
 	      "without NK no dial endpoint is recovered from NI/NP");
 
+	// The in-match join's endpoint gate: a 0 port or a host string under eight
+	// characters is refused (CVSTATCLIENTERR), a short dotted address included.
+	// [orig: UI_EnumerateAndJoinSession @0x56a006]
+	check(joi_endpoint_usable("127.0.0.1", 64206), "a full dotted endpoint is usable");
+	check(joi_endpoint_usable("10.0.0.1", 1), "an eight-character host is usable");
+	check(!joi_endpoint_usable("1.2.3.4", 3000), "a seven-character host is refused");
+	check(!joi_endpoint_usable("127.0.0.1", 0), "a 0 port is refused");
+	check(std::string(kJoinEndpointRejectTag) == "CVSTATCLIENTERR",
+	      "the refusal text is gameerr MP Errors CVSTATCLIENTERR");
+
 	if (g_failures == 0) {
 		std::printf("joi_parse: all checks passed\n");
 		return 0;
