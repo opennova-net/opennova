@@ -418,6 +418,14 @@ target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(mission_catalog_test PRIVATE cxx_std_17)
 add_test(NAME mission_catalog COMMAND mission_catalog_test)
 
+# The files the game finds by a mission's name (mission/mission_sidecars.h): the
+# six witnessed rows and the names they build.
+add_executable(mission_sidecars_test mission/mission_sidecars_test.cpp)
+target_link_libraries(mission_sidecars_test PRIVATE opennova_runtime)
+target_include_directories(mission_sidecars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_sidecars_test PRIVATE cxx_std_17)
+add_test(NAME mission_sidecars COMMAND mission_sidecars_test)
+
 # The mission load plan (mission/mission_load_plan.h): the stage order and the
 # witnessed loading-screen anchors the shell presents.
 add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
@@ -432,10 +440,35 @@ target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_bms_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
 
+# fixtures/bms/synth_logic.bms + synth_logic.bin: the small mission with everything the
+# mission document and its picture read (every row kind, a path, two events naming one
+# another, the text keys its records form) and its string table, written by bms::write and
+# rtxt::write; editor_mission_document and editor_document_contract read them.
+add_executable(mission_set_gen_test fixtures/mission_set_gen.cpp)
+target_link_libraries(mission_set_gen_test PRIVATE opennova_formats)
+target_include_directories(mission_set_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_set_gen COMMAND mission_set_gen_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_bms COMMAND mission_bms_test)
+
+# An event's runs split out of the file's tables and joined back
+# (formats/mission/mission_chains.h): the identity on a canonical file, a
+# reordered one joined canonical, the refusals, an empty run's running offset.
+add_executable(mission_chains_test mission/mission_chains_test.cpp)
+target_link_libraries(mission_chains_test PRIVATE opennova_formats)
+target_include_directories(mission_chains_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_chains COMMAND mission_chains_test)
+
+# What each trigger's and action's parameters are, as rows
+# (formats/mission/mission_params.h): a row per sub-type and action type, the
+# references they make, the sub-type names the typed views give.
+add_executable(mission_params_test mission/mission_params_test.cpp)
+target_link_libraries(mission_params_test PRIVATE opennova_formats)
+target_include_directories(mission_params_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_params COMMAND mission_params_test)
 
 add_executable(mission_mis_test mission/mission_mis_test.cpp)
 target_link_libraries(mission_mis_test PRIVATE opennova_formats)
@@ -956,6 +989,14 @@ add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cp
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
+
+# ResourceIndex over an embedder's own file set (mount_source, ADR 0046 S14: the editor's project
+# files in place of an install): what it has and reads, what it does not index, its revision, and an
+# AssetStore parsing a model through it.
+add_executable(resource_index_source_test resource_index/resource_index_source_test.cpp)
+target_link_libraries(resource_index_source_test PRIVATE opennova_runtime)
+target_include_directories(resource_index_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME resource_index_source COMMAND resource_index_source_test)
 
 # The presented-model lookup (world/entity_index.h): the BMS-id and origin
 # candidates, groups and area-trigger zones an embedder resolves its presented
@@ -4387,6 +4428,40 @@ target_link_libraries(editor_viewport_wire_test PRIVATE opennova_editor)
 target_include_directories(editor_viewport_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_viewport_wire COMMAND editor_viewport_wire_test)
 
+# What a drag in a mission's viewport writes (editor/preview/mission_handle_edit, ADR 0046 S14) and the
+# mission camera (editor/preview/mission_camera), over a fake record document that carries the
+# mission's field tokens: a move on the plane and on a fake ground with and without stick, the snap,
+# the offsets kept, a sample within a 16.16 step, the lift, the turn's wrap and snap, an area's
+# edges; the camera's wire yaw and pitch against presentation_forward_from_angles, a look, a fly,
+# the ground point, top, the wire form.
+add_executable(editor_mission_handle_edit_test editor/mission_handle_edit_test.cpp)
+target_link_libraries(editor_mission_handle_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_handle_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_handle_edit COMMAND editor_mission_handle_edit_test)
+
+# The mission viewport's portable half that reads no document type (ADR 0046 S14): the scene over
+# a source a test holds (editor/preview/mission_scene: read, the patch reading the changed rows
+# alone, a reshape reading everything), its marks, picks and boxes, the options' wire form
+# (mission_options) and the overlays (mission_overlay: the glyphs, the rings, the primary's handles
+# with a yaw-90 entity's east, an area's box, a path's lines, the labels, the marquee, a line clipped
+# at the near plane).
+add_executable(editor_mission_scene_test editor/mission_scene_test.cpp)
+target_link_libraries(editor_mission_scene_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_scene_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
+
+# The mission viewport (editor/preview/mission_viewport, ADR 0046 S14) over a real session, a
+# project holding the minted mission (fixtures/bms/synth_logic.bms) and fake devices: the kind's
+# row, its status and follow, what each change set comes to (an entity's transform an Update, an
+# event's field Keep with no row read, an Add and the header's terrain a Rebuild), a Rebuild held for
+# a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope,
+# a drop and the ground command. Mixed: the retail row opens every shipped mission (OPENNOVA_JO_DIR)
+# in its viewport, hits its marks and moves its first item and back.
+add_executable(editor_mission_viewport_test editor/mission_viewport_test.cpp)
+target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
@@ -4539,14 +4614,25 @@ target_link_libraries(editor_model_table_test PRIVATE opennova_editor)
 target_include_directories(editor_model_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_table COMMAND editor_model_table_test)
 
-# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10): a mission's records as
-# rows of the one table shape over the format's field rows and bms_edit's typed structure; the rules,
-# the editor's ranges, the lists and the chains over the synthetic dense mission, and (a SKIP-LEG
-# without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
+# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10, S14): a mission's records
+# as rows of the one table shape over the format's field rows, read through the mission document;
+# the rules, the editor's ranges, the lists and the chains over the synthetic dense mission, and (a
+# SKIP-LEG without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
 add_executable(editor_mission_table_test editor/mission_table_test.cpp)
 target_link_libraries(editor_mission_table_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_table COMMAND editor_mission_table_test)
+
+# The mission document (editor/documents/mission_document.h, ADR 0046 S14) over the minted
+# synth_logic mission: the rows in bands, every reference as a graph edge of its kind, the
+# edits and their cascades, the parse's findings, the validator's findings and the mission's
+# use check, the picture's reads, an item's TYPE on its symbol; and (a SKIP-LEG without
+# OPENNOVA_JO_DIR) every shipped mission opened, its references counted and its findings by
+# code.
+add_executable(editor_mission_document_test editor/mission_document_test.cpp)
+target_link_libraries(editor_mission_document_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_document COMMAND editor_mission_document_test)
 
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the

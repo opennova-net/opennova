@@ -36,6 +36,7 @@
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mnu_table.h>
@@ -384,25 +385,33 @@ int model() {
 }
 
 // The mission: the synthetic dense mission (its rows: the mission and its own tables, the entities of
-// the four pools, the paths and their stops, the zones, the events, the triggers and the actions).
+// the four pools, the paths and their stops, the zones, the events with their triggers and actions).
 int mission() {
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("bms/synth_dense.bms"));
-	bms::File file;
-	std::string message;
-	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message));
+	// The mission document's rows, cloned: the natives the test owns.
+	MissionDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(test_io::read_file(fixture("bms/synth_dense.bms")), "synth_dense.bms",
+	                                AssetKind::Mission, "JO", error));
+	std::vector<std::shared_ptr<const Node>> rows;
+	for (const auto &row : document.rows()) rows.push_back(row->clone());
 	Subject subject{"mission", &mission_table(), nullptr, nullptr};
-	subject.roots = [&] { return mission_rows(file); };
+	subject.roots = [&] {
+		std::vector<RecordHandle> out;
+		for (const auto &row : rows) out.push_back(static_cast<const TableRow &>(*row).record());
+		return out;
+	};
 	subject.write = [&] {
+		bms::File file;
 		std::vector<uint8_t> out;
-		std::string error;
-		bms::write(file, out, error);
+		std::string message;
+		if (compose_mission(rows, file)) bms::write(file, out, message);
 		return out;
 	};
 	Counts counts;
 	if (sweep(subject, counts) != 0) return 1;
-	// The lists the synthetic mission holds records of: the loadout and a path's stops (its availability
-	// rules and boxes none; its groups and layers fixed).
-	TEST_EXPECT(counts.records > 200 && counts.lists == 2 && counts.choices > 0 && counts.decided > 0);
+	// The lists the synthetic mission holds records of: the loadout, a path's stops, an event's triggers
+	// and its actions (its availability rules and boxes none; its groups and layers fixed).
+	TEST_EXPECT(counts.records > 200 && counts.lists == 4 && counts.choices > 0 && counts.decided > 0);
 	return 0;
 }
 
