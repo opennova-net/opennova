@@ -631,6 +631,9 @@ static int test_deep_project_files() {
 	TEST_EXPECT(view.project.open);
 	if (!view.project.open) return 1;
 	editor_test::create_missing_files(session);
+	if (view.project.requirements->required_missing != 0)
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.severity == DiagnosticSeverity::Error) std::printf("  deep: %s %s\n", d.code().c_str(), d.message.c_str());
 	TEST_EXPECT(view.project.requirements->required_missing == 0 && view.project.requirements->required_total > 0);
 	const AssetEntry *table = view.project.scan->find("gametext.bin");
 	TEST_EXPECT(table && (root + "/" + table->relative_path).size() > 260 && table->size_bytes > 0 &&
