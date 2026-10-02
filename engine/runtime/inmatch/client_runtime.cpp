@@ -1020,6 +1020,12 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 					joiner_->begin_redeployment();
 				}
 			}
+			// A record the fold dropped over an unresolvable slot or carrier asks the
+			// host for that entity at once, from the receive handler, so its 0x0F sits
+			// at this datagram's place in the queue (reply: S2C 0x18, §5.46).
+			// [orig: NapiNPClientMsg_0x00A @0x4307E9 -> QueueReliableMessage(0x0F, 1, 0);
+			//  the vehicle record @0x4608b3]
+			queue_carrier_repair_requests();
 			// Every 0x16 row whose connection slot the roster has not bound yet
 			// is dropped by the reducer and re-requested here: one reliable C2S
 			// 0x22 {slot, 0x1CF7} per dropped row, queued with the housekeeping
@@ -1310,17 +1316,6 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			uplink_message.reliable = false; // Client_ProcessNetworkFrame @0x42C4A3 userParam=1
 			send_messages.push_back(std::move(uplink_message));
 		}
-		// Records the fold dropped over an unresolvable carrier ask the host
-		// for the missing entity, exactly the retail bail's self-heal
-		// [orig: the carrier repair queue @0x4608ae..0x4608c1 -> C2S 0x0F;
-		// reply = S2C 0x18 full entity spawn, §5.46].
-		for (const uint16_t handle : view_.drain_carrier_repair_requests()) {
-			std::vector<uint8_t> body;
-			body.push_back(static_cast<uint8_t>(handle & 0xFFu));
-			body.push_back(static_cast<uint8_t>(handle >> 8));
-			send_messages.push_back(make_protocol_message(
-					c2s::ENTITY_INFO_QUERY, std::move(body)));
-		}
 		JoinerConnection::FrameMessagesResult framed;
 		if (packets_built < build_budget) {
 			framed = joiner_->frame_messages_detailed(send_messages,
@@ -1356,8 +1351,25 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		// @0x629802]: the in-match boundary reopens every send_holdoff_ticks_
 		// ticks, 0 = per-tick.)
 	}
+	// The stale-carrier sweep runs in the entity update, after the client net frame,
+	// so its 0x0F requests queue behind this frame's send block and leave at the next
+	// boundary ahead of that frame's producers. Our movers step inside run_frame,
+	// before the block; queue what they raised here.
+	// [orig: Entity_UpdateTransformAndTurret @0x440e29 -> QueueReliableMessage(0x0F);
+	//  Game_ProcessMainFrame: Client_ProcessNetworkFrame @0x526692, then
+	//  Entity_UpdateAllEntities @0x52674b]
+	queue_carrier_repair_requests();
 	lap.mark(devtools::Slot::SIM_CLIENT_SEND);
 	return outbound;
+}
+
+void ClientRuntime::queue_carrier_repair_requests() {
+	for (const uint16_t handle : view_.drain_carrier_repair_requests()) {
+		std::vector<uint8_t> body;
+		body.push_back(static_cast<uint8_t>(handle & 0xFFu));
+		body.push_back(static_cast<uint8_t>(handle >> 8));
+		send_queue_.push_back(make_protocol_message(c2s::ENTITY_INFO_QUERY, std::move(body)));
+	}
 }
 
 // One frame of the joiner's send cadence. The frame's receive pump steps a

@@ -821,6 +821,9 @@ private:
 	// The receive pump's countdown step plus whether this frame's send pump call builds,
 	// per the loop the joiner's admission stage runs in.
 	bool step_send_pump_loop();
+	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
+	// appended to the one queue where their producer ran.
+	void queue_carrier_repair_requests();
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

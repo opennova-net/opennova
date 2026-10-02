@@ -5488,6 +5488,44 @@ bool run_c2s_producers_share_one_chronological_queue() {
 			"one-queue: the pick input case 12 queued after the medic call leaves after it");
 }
 
+// The 0x0A handler queues a record's 0x0F self-heal the moment it drops the record, inside the
+// receive pump: in the one queue it sits behind what was queued before the frame (a stance key)
+// and ahead of the 0x2C the send block builds.
+// [orig: NapiNPClientMsg_0x00A @0x4307E9 -> CNapiNetwork_QueueReliableMessage(0x0F, 1, 0)]
+bool run_carrier_repair_queues_at_its_record() {
+	constexpr uint32_t kServerKey = 0x52455052u;
+	const std::string client_scrk = "CLIENT-REPAIR-QUEUE-SCRK";
+	const std::string server_scrk = "SERVER-REPAIR-QUEUE-SCRK";
+	inmatch::ClientRuntime client("RepairQueue", [] { return uint64_t{0x51525354u}; });
+	client.seed_session(kServerKey, 1u, client_scrk, server_scrk,
+			1, 0, 0x0002, w::kPlayerInfantryTypeId, 0, 0x00100000u, /*replay_mode=*/false);
+	FrameUpdate frame;
+	frame.mount_handle = 0xFFFF;
+	frame.health = 100;
+	FrameUpdateRecord record; // a slot the spawn stream never filled
+	record.handle = 0x0005;
+	record.type_id = w::kPlayerInfantryTypeId;
+	record.cls = EntityClass::Player;
+	record.player.carrier_handle = 0xFFFF;
+	frame.records.push_back(record);
+	SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing();
+	const std::vector<uint8_t> dg = frame_server_session(server_tx, server_scrk, 1u,
+			{make_protocol_message(0x0A, encode_frame_update(frame))});
+	if (!expect(client.queue_stance_change(0xA9), "repair-queue: the stance key queues"))
+		return false;
+	client.receive(dg.data(), dg.size());
+	std::vector<uint8_t> tags;
+	for (const std::vector<uint8_t> &datagram : client.Client_ProcessNetworkFrame(1)) {
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> messages;
+		if (!decode_client_session(datagram, client_scrk, header, messages)) return false;
+		for (const ProtocolMessage &m : messages) tags.push_back(m.tag);
+	}
+	return expect(tags == std::vector<uint8_t>({c2s::STANCE_CHANGE, c2s::ENTITY_INFO_QUERY,
+	                      c2s::RTT_CONSUMED}),
+			"repair-queue: the record's 0x0F sits between the earlier stance and the 0x2C");
+}
+
 bool run_settings_update_preserves_active_holdoff_countdown() {
 	const std::string client_scrk = "CLIENT-HOLDOFF-UPDATE-SCRK";
 	const std::string server_scrk = "SERVER-HOLDOFF-UPDATE-SCRK";
@@ -7090,6 +7128,7 @@ int main() {
 	                run_resend_answer_and_pong_leave_from_the_receive_pump() &&
 	                run_queued_stance_waits_for_the_send_boundary() &&
 	                run_c2s_producers_share_one_chronological_queue() &&
+	                run_carrier_repair_queues_at_its_record() &&
 	                run_settings_update_preserves_active_holdoff_countdown() &&
 	                run_settings_send_holdoff_blocks_exact_frame_count() &&
 	                run_send_holdoff_defers_due_housekeeping() &&
