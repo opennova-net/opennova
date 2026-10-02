@@ -157,6 +157,7 @@
 #include "network/net_protocol.h"
 #include "network/net_session_policy.h"
 #include "network/connection_error.h"
+#include "network/join_screen_status.h"
 #include "util/paths.h"
 #include "resource_index/launch_flags.h"
 #include "resource_index/resource_root.h"
@@ -458,6 +459,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(NetProtocol);
 	GDREGISTER_CLASS(NetSessionPolicy);
 	GDREGISTER_CLASS(ConnectionError);
+	GDREGISTER_CLASS(JoinScreenStatus);
 	// The ImGui pass seams (ADR 0039): registered in every flavour so scripts
 	// parse; the release DLL's DevTools is inert.
 	GDREGISTER_CLASS(FrameStatsWindow);

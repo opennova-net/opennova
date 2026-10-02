@@ -183,6 +183,20 @@ public:
 				? joiner_->connection_error_record()
 				: ConnectionErrorRecord{};
 	}
+	// The join screen's status line inputs (pre_game_menu.h); Joining with an
+	// empty queue for any other role.
+	JoinScreenStage join_screen_stage() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->join_screen_stage()
+		                                                     : JoinScreenStage::Joining;
+	}
+	JoinQueueRecord join_queue() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->join_queue()
+		                                                     : JoinQueueRecord{};
+	}
+	// The joiner's monotonic clock (the queue record's queued-since time base).
+	uint64_t join_clock_ms() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->monotonic_now_ms() : 0;
+	}
 	bool has_disconnect_event() const {
 		return role_ == Role::Joiner && joiner_ != nullptr &&
 				joiner_->has_disconnect_event();

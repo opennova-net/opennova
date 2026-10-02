@@ -541,6 +541,23 @@ void JoinerConnection::on_server_hello(const std::vector<uint8_t> &body, PollRes
 	out.outbound.push_back(handshake_retry_datagram_);
 }
 
+JoinScreenStage JoinerConnection::join_screen_stage() const {
+	switch (post_auth_stage_) {
+	case PostAuthStage::Inactive:
+		return JoinScreenStage::Joining;
+	case PostAuthStage::AwaitServerSettings:
+	case PostAuthStage::AwaitJoinAck:
+		return JoinScreenStage::Connecting;
+	case PostAuthStage::AwaitPaddingProbe:
+	case PostAuthStage::AwaitGameStart:
+		// [orig: the state-6 wait on the verification value @0x56a68f, the
+		//  queue line only once it reads 1 @0x56a6cd]
+		return verification_value_ == 1 ? JoinScreenStage::Queued : JoinScreenStage::Verifying;
+	default:
+		return JoinScreenStage::Starting;
+	}
+}
+
 ConnectionErrorRecord JoinerConnection::connection_error_record() const {
 	ConnectionErrorRecord record;
 	if (last_join_reject_.set) {
@@ -1059,6 +1076,12 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			}
 		}
 
+		if (m.tag == s2c::SYNC_STATE) {
+			verification_value_ = m.payload.size() >= 4 ? io::read_u32_le(m.payload.data()) : 0;
+		} else if (m.tag == s2c::SYNC_TICK) {
+			fold_join_queue_record(join_queue_, m.payload.data(), m.payload.size(),
+					monotonic_milliseconds_());
+		}
 		if (m.tag == s2c::INIT && post_auth_stage_ == PostAuthStage::AwaitJoinAck) {
 			// Golden retail frames 9-11: acknowledge S2C 0x00 with a header-only sequence, then post
 			// the one-byte zero form body. An empty 0x01 is not accepted by the retail host FSM.

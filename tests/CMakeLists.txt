@@ -3570,6 +3570,10 @@ add_test(NAME npruntime_client_loading_pump COMMAND npruntime_client_loading_pum
 # CRC challenges a stock host streams at every joiner. [orig: Server_LogCRCMismatchPunt @0x517ed0 ->
 # NapiNPDataTransfer_SendDescription @0x628c80; CNapiNPConnection_HandleDescriptionPacket @0x621ae0;
 # NapiNPClientMsg_HandleChecksumRequest @0x431170; NapiNPClientMsg_0x031 @0x4311e0]
+add_executable(npruntime_pre_game_menu_test npruntime/pre_game_menu_test.cpp)
+target_link_libraries(npruntime_pre_game_menu_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_pre_game_menu COMMAND npruntime_pre_game_menu_test)
+
 add_executable(npruntime_disconnect_reason_test npruntime/disconnect_reason_test.cpp)
 target_link_libraries(npruntime_disconnect_reason_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_disconnect_reason COMMAND npruntime_disconnect_reason_test)

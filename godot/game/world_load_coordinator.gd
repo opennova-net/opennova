@@ -23,6 +23,9 @@ var _screen: LoadingScreen = null
 var _operation: WorldLoadOperation = null
 var _presentation_active := false
 var _load_info: LoadingScreenInfo = null
+# A join's loading screen waits for the game start: the join screen shows until
+# then (PreGameMenuPresenter), and show_deferred_screen brings this one up.
+var _screen_deferred := false
 
 
 func can_start() -> bool:
@@ -30,7 +33,8 @@ func can_start() -> bool:
 
 
 func start(owner: Node, root: ResourceRoot, world: GameWorld,
-		load_info: LoadingScreenInfo, loader: Callable) -> WorldLoadOperation:
+		load_info: LoadingScreenInfo, loader: Callable,
+		defer_screen := false) -> WorldLoadOperation:
 	if not can_start() or owner == null or world == null or not loader.is_valid():
 		return null
 	_owner = owner
@@ -39,9 +43,21 @@ func start(owner: Node, root: ResourceRoot, world: GameWorld,
 	_load_info = load_info
 	_operation = WorldLoadOperation.new()
 	_presentation_active = true
-	_show_screen(load_info)
+	_screen_deferred = defer_screen
+	if not defer_screen:
+		_show_screen(load_info)
 	_run(_operation, loader)
 	return _operation
+
+
+## Bring up a deferred loading screen (the join's game start). False when none
+## is deferred.
+func show_deferred_screen() -> bool:
+	if not _screen_deferred:
+		return false
+	_screen_deferred = false
+	_show_screen(_load_info)
+	return true
 
 
 func cancel_current() -> WorldLoadOperation:
@@ -89,6 +105,7 @@ func surface_size() -> Vector2i:
 
 func dismiss() -> void:
 	_presentation_active = false
+	_screen_deferred = false
 	if _world != null:
 		if _world.load_progress.is_connected(_on_load_progress):
 			_world.load_progress.disconnect(_on_load_progress)

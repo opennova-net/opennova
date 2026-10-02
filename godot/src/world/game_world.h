@@ -224,6 +224,8 @@ public:
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
 	// The error record of the join that last failed (SessionDrive::last_connection_error).
 	Ref<ConnectionError> get_last_connection_error() const;
+	// The join screen's status while a join preload runs (SessionDrive::join_screen_status).
+	Ref<JoinScreenStatus> get_join_screen_status() const;
 	// Load an in-memory mission through the shared world pipeline. This is
 	// retained as a focused engine-test/tool seam; normal game launches always
 	// use a saved .bms through load_mission() or load_loose_mission().

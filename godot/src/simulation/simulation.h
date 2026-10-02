@@ -103,6 +103,7 @@ class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
 class ConnectionError;   // the joiner connection's error record (network/connection_error.h)
+class JoinScreenStatus;  // one read of the join screen (network/join_screen_status.h)
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the hitbox oracle payload (simulation/hitbox_debug_report.h)
 class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card.h)
@@ -1238,23 +1239,22 @@ public:
 	std::vector<opennova::audio::EnvsMarker> envs_markers_from_world(const opennova::def::DefItemsFile &p_items) const;
 	// The deploy keys' event-12 parameter for a Windows VK (inmatch::deploy_key_pick), -1 if not taken.
 	int deploy_key_pick(int p_vk);
-	// Exact pre-world payloads retained by the joiner from retail's initial
-	// state stream. The mission header is exactly 616 bytes when available. TIL
-	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
-	// valid omitted 0x45 from a partial or malformed stream.
+	// Exact pre-world payloads the joiner retained from retail's initial state stream: the
+	// 616-byte mission header when available; the TIL only in COMPLETE, the explicit state
+	// telling a valid omitted 0x45 from a partial or malformed stream.
 	PackedByteArray get_join_mission_header() const;
 	int64_t get_join_terrain_til_state() const;
 	PackedByteArray get_join_terrain_til() const;
 	String get_join_expansion() const;
 	int64_t get_join_game_type() const;
 	String get_join_error() const;
-	// The joiner connection's error record, the input to retail's reason text.
+	// The joiner connection's error record (retail's reason text) and join-screen status.
 	Ref<ConnectionError> get_connection_error() const;
+	Ref<JoinScreenStatus> get_join_screen_status() const;
 	// Session loss: empty while healthy, else a diagnostic naming the cause (the host's close
 	// or the silence reap); retail exits the mission with a mapped reason, no in-world dialog.
 	String get_session_loss_reason() const;
-	// The same edge as a state test rather than a presentation string: in-world surfaces
-	// (the deploy screen) need to know the session is gone, not what to tell the player.
+	// The same edge as a state test, for the in-world surfaces (the deploy screen).
 	bool is_session_lost() const;
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record.
 	int get_mission_exit_reason() const;

@@ -2,6 +2,7 @@
 
 #include <runtime/inmatch/charattr_challenge.h>
 #include <runtime/inmatch/disconnect_reason.h>
+#include <runtime/inmatch/pre_game_menu.h>
 #include <runtime/inmatch/integrity_challenge_profile.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -562,6 +563,11 @@ public:
 	// The error record retail's reason text is built from: the CR=0 join
 	// failure fields and the latched disconnect record (disconnect_reason.h).
 	ConnectionErrorRecord connection_error_record() const;
+	// The join screen's status (pre_game_menu.h): the dial until ServerAuth
+	// accepts, the connect until S2C 0x00, the verification until the S2C 0x01
+	// value reads 1, then the host's queue until S2C 0x05 starts the game.
+	JoinScreenStage join_screen_stage() const;
+	const JoinQueueRecord &join_queue() const { return join_queue_; }
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
 	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
 	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }
@@ -747,6 +753,7 @@ public:
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
+	uint64_t monotonic_now_ms() const { return monotonic_milliseconds_(); }
 	// The client's own ping: the last completed S2C 0x57 round trip and the
 	// ten-entry ring's mean (see rtt_ring_ below) [orig: dword_A860D4;
 	//  CNetStats_GetAveragePing @0x4C2750].
@@ -982,6 +989,12 @@ private:
 	std::string host_disconnect_reason_;
 	ChallengeDiagnostics challenge_diagnostics_{};
 	JoinRejectRecord last_join_reject_{};
+	// The S2C 0x01 verification value (4 bytes, 0 when short) and the S2C 0x03
+	// join-queue record the join screen reads.
+	// [orig: NapiNPClientMsg_0x001 @0x425360 -> +0x30C; NapiNPClientMsg_0x003
+	//  @0x425390 -> +0x2F4..+0x300]
+	uint32_t verification_value_ = 0;
+	JoinQueueRecord join_queue_{};
 	DisconnectEvent last_disconnect_event_{};
 	bool disconnect_event_set_ = false;
 };

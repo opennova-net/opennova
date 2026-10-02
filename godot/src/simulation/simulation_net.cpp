@@ -2,6 +2,7 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include "network/join_screen_status.h"
 #include "network/connection_error.h"
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
@@ -852,6 +853,13 @@ Ref<ConnectionError> Simulation::get_connection_error() const {
 	return ConnectionError::make((is_joiner() && runtime_)
 					? runtime_->connection_error_record()
 					: opennova::inmatch::ConnectionErrorRecord{});
+}
+
+// Where the join stands for the join screen (engine: inmatch/pre_game_menu.h).
+Ref<JoinScreenStatus> Simulation::get_join_screen_status() const {
+	if (!is_joiner() || !runtime_) return Ref<JoinScreenStatus>();
+	return JoinScreenStatus::make(runtime_->join_screen_stage(), runtime_->join_queue(),
+			runtime_->join_clock_ms());
 }
 
 // The in-match analog of get_join_error: the host closed the session on its own terms

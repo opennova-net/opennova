@@ -467,6 +467,11 @@ bool SessionDrive::cancel_admission_wait() {
 	return policy_->request_admission_abort();
 }
 
+Ref<JoinScreenStatus> SessionDrive::join_screen_status() const {
+	return join_preload_sim_.is_valid() ? join_preload_sim_->get_join_screen_status()
+	                                    : Ref<JoinScreenStatus>();
+}
+
 void SessionDrive::fail_join_preload(const String &p_reason) {
 	if (join_preload_sim_.is_valid()) {
 		last_connection_error_ = join_preload_sim_->get_connection_error();

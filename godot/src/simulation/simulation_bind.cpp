@@ -1,5 +1,6 @@
 // Simulation — ClassDB registration.
 #include "simulation/simulation_internal.h"
+#include "network/join_screen_status.h"
 #include "network/connection_error.h"
 #include "audio/music_director.h"
 
@@ -128,6 +129,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_game_type"), &Simulation::get_join_game_type);
 	ClassDB::bind_method(D_METHOD("get_join_error"), &Simulation::get_join_error);
 	ClassDB::bind_method(D_METHOD("get_connection_error"), &Simulation::get_connection_error);
+	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
 	ClassDB::bind_method(D_METHOD("is_joined_in_match"), &Simulation::is_joined_in_match);

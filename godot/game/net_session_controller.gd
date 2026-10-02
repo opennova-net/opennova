@@ -207,7 +207,7 @@ func _start_lan_join(target: JoinTarget) -> void:
 	var load_info := LoadingScreenInfo.make(target.mission, true, target.server_name, "",
 			target.game_type, "")
 	_adopt_held_novaworld_client()
-	_shell.start_world_load(
+	_shell.start_join_load(
 		load_info,
 		_world.load_mission_as_joiner.bind(target))
 

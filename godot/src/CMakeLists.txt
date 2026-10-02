@@ -56,6 +56,7 @@ add_library(${TARGET_NAME} SHARED
     network/net_protocol.cpp
     network/net_session_policy.cpp
     network/connection_error.cpp
+    network/join_screen_status.cpp
     network/join_target.cpp
     terrain/terrain.cpp
     terrain/terrain_surface_inputs.cpp

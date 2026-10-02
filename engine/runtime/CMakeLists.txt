@@ -393,6 +393,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/disconnect_reason.cpp  # retail's join/disconnect reason text over gameerr.bin
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_menu.cpp  # the PreMenu join screen (pre.mnu PRE_GAME_MENU)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_send.cpp  # the C2S framing and send-boundary pump of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp

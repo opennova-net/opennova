@@ -513,12 +513,51 @@ bool run_a_reset_before_the_mission_start_is_cleared() {
 			"reset: the joiner does not leave the match it is loading");
 }
 
+// The join screen reads where the join stands: the dial until ServerAuth
+// accepts, the connect until the host's S2C 0x00, the verification until its
+// S2C 0x01 reads 1, the host's S2C 0x03 queue record, and the game start at
+// S2C 0x05, when the loading screen takes over.
+// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 4..7;
+//  NapiNPClientMsg_0x001 @0x425360; NapiNPClientMsg_0x003 @0x425390]
+bool run_the_join_screen_follows_the_admission() {
+	Harness h;
+	if (!expect(h.client.join_screen_stage() == inmatch::JoinScreenStage::Joining,
+			"screen: the dial reads Joining"))
+		return false;
+	if (!expect(h.handshake(), "screen: handshake")) return false;
+	if (!expect(h.client.join_screen_stage() == inmatch::JoinScreenStage::Connecting,
+			"screen: an accepted ServerAuth reads Connecting"))
+		return false;
+	h.frame({settings_record(0), settings_record(1)});
+	h.frame({make_protocol_message(0x00, {})});
+	if (!expect(h.client.join_screen_stage() == inmatch::JoinScreenStage::Verifying,
+			"screen: the host's S2C 0x00 starts the verification"))
+		return false;
+	h.frame({make_protocol_message(0x01, {0x01, 0x00, 0x00, 0x00})});
+	if (!expect(h.client.join_screen_stage() == inmatch::JoinScreenStage::Queued,
+			"screen: an S2C 0x01 of 1 moves to the queue line"))
+		return false;
+	h.frame({make_protocol_message(0x03, {0x01, 0x03, 0x00, 0x04, 0x00})});
+	const inmatch::JoinQueueRecord queue = h.client.join_queue();
+	if (!expect(queue.queued && queue.position == 3 && queue.length == 4 &&
+					queue.queued_since_ms == h.now_ms,
+			"screen: the S2C 0x03 record is kept with its queued-since time"))
+		return false;
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	h.frame({make_protocol_message(0x02, probe)});
+	h.frame({make_protocol_message(0x05, {0x01})});
+	return expect(h.client.join_screen_stage() == inmatch::JoinScreenStage::Starting,
+			"screen: the S2C 0x05 game start hands over to the loading screen");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
 	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
+	ok = run_the_join_screen_follows_the_admission() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;
 }
