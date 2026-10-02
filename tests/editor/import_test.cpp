@@ -45,6 +45,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <editor/session/view_json.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/pff/pff.h>
 #include <formats/tga/tga.h>
@@ -781,8 +782,15 @@ static int test_retail_source() {
 	            opennova::pff::PFF_WRITE_OK);
 	// A loose note.txt beside the archive: a stock launch reads the archive's alone (the
 	// loose file wins only under /d) [orig: FileSystem_OpenFile @ 0x75b1c0, the gate
-	// @ 0x75b1e5], and so does the import.
+	// @ 0x75b1e5], and so does the import. A music bank beside it is a file the game ships
+	// loose and reads from there (ADR 0046 S14: install_loose_kind), so the install lists it; a
+	// player's save is never the game's to import.
 	TEST_EXPECT(editor_test::write_text(retail + "/note.txt", "loose"));
+	TEST_EXPECT(editor_test::write_text(retail + "/MENUMUS.SBF", "music") && editor_test::write_text(retail + "/player.sav", "save"));
+	TEST_EXPECT(install_loose_kind(AssetKind::MusicBank) && install_loose_kind(AssetKind::Video) &&
+	            !install_loose_kind(AssetKind::PlayerSave) && !install_loose_kind(AssetKind::Config) &&
+	            !install_loose_kind(AssetKind::Text) && !install_loose_kind(AssetKind::Texture));
+	TEST_EXPECT(list_install_loose_files(retail) == std::vector<std::string>{"MENUMUS.SBF"});
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -794,15 +802,16 @@ static int test_retail_source() {
 			view.findings.diagnostics.back().code() == "import.install");
 	editor_test::set_game_install(session, retail);
 	TEST_EXPECT(
-			view.project.retail_files.size() == 4); // the archive itself is not an importable file
+			view.project.retail_files.size() == 5); // the archive itself is not an importable file; the bank is
 	std::vector<Diagnostic> diagnostics;
 	const std::vector<ImportChoice> sources = list_retail_import_choices(retail, *view.project.document, diagnostics);
-	TEST_EXPECT(diagnostics.empty() && sources.size() == 4 && sources[0].install && sources[0].path == retail);
+	TEST_EXPECT(diagnostics.empty() && sources.size() == 5 && sources[0].install && sources[0].path == retail &&
+	            sources.back().entry == "MENUMUS.SBF");
 	// The whole list to choose from, none chosen: nothing planned yet.
 	editor_test::handle_to_end(session, request::preview_install_import());
 	TEST_EXPECT(view.dialogs.import_preview.open &&
-			view.dialogs.import_preview.choices.size() == 4 &&
-			view.dialogs.import_preview.choices[0].install);
+			view.dialogs.import_preview.choices.size() == 5 &&
+			view.dialogs.import_preview.choices[0].install && !view.dialogs.import_preview.all);
 	TEST_EXPECT(view.dialogs.import_preview.roots.empty() &&
 			view.dialogs.import_preview.plan->rows.empty());
 	// The requirement gametext.bin, missing in the project, chosen from the list (the plan made
@@ -819,7 +828,7 @@ static int test_retail_source() {
 	source.entry = "note.txt";
 	choose.imports.push_back(source);
 	editor_test::handle_to_end(session, choose);
-	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.choices.size() == 4 && view.dialogs.import_preview.roots.size() == 2);
+	TEST_EXPECT(view.dialogs.import_preview.open && view.dialogs.import_preview.choices.size() == 5 && view.dialogs.import_preview.roots.size() == 2);
 	TEST_EXPECT(view.dialogs.import_preview.plan->rows.size() == 2 && view.dialogs.import_preview.plan->rows[0].found_in == "the game install");
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = choose.imports;
@@ -853,6 +862,75 @@ static int test_retail_source() {
 		TEST_EXPECT(png && !fs::exists(fs::path(view.project.root) / (png->relative_path + kImportSidecarSuffix)));
 	}
 	TEST_EXPECT(view.project.imports->empty());
+	// Everything the install has, chosen at once (ADR 0046 S14): the archives' files and the loose
+	// ones the game ships beside them, none to choose from, no walk (the setting changes nothing:
+	// a walk of every file finds nothing not chosen); imported as the plan has them, nothing echoed
+	// back (planned). A file the project holds already is marked held and not taken by default
+	// (review F2): the project's file is left as it is, the rest comes; Replace takes them too.
+	{
+		const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
+		const std::string note_path = view.project.root + "/" + view.project.scan->find("note.txt")->relative_path;
+		TEST_EXPECT(editor_test::write_text(note_path, "edited in the project"));
+		editor_test::handle_to_end(session, request::rescan());
+		editor_test::handle_to_end(session, request::import_whole_install());
+		TEST_EXPECT(preview.open && preview.all && preview.choices.empty() && preview.roots.size() == 5 &&
+		            !preview.with_dependencies && preview.plan->rows.size() == 5);
+		const ImportPlanRow *bank = nullptr;
+		size_t held = 0;
+		for (const ImportPlanRow &row : preview.plan->rows) {
+			if (row.name == "MENUMUS.SBF") bank = &row;
+			if (row.held) {
+				++held;
+				TEST_EXPECT(!row.selected && row.problem.empty() && row.destination == view.project.scan->find(row.name)->relative_path);
+			}
+		}
+		TEST_EXPECT(held == 4);
+		TEST_EXPECT(bank && bank->state == ImportPlanRow::State::Selected && bank->kind == AssetKind::MusicBank && bank->selected &&
+		            !bank->held && bank->size == 5 && bank->found_in == "the game install" && bank->source.install &&
+		            bank->problem.empty());
+		TEST_EXPECT(view_section_to_json(view, ViewSection::Import).get_bool("all", false));
+		const uint64_t planned = view.activity.last_operation.id;
+		editor_test::handle_to_end(session, request::set_import_dependencies(true));
+		TEST_EXPECT(preview.open && preview.all && !preview.with_dependencies && view.activity.last_operation.id == planned);
+		// Without Replace existing files: the bank comes, the project's own files stay as they are, no
+		// refusal.
+		editor_test::handle_to_end(session, request::import_planned());
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open &&
+		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
+		const AssetEntry *music = view.project.scan->find("MENUMUS.SBF");
+		TEST_EXPECT(music && music->kind == AssetKind::MusicBank && !view.project.scan->find("player.sav"));
+		TEST_EXPECT(music && read_file_text(view.project.root + "/" + music->relative_path, text, message) && text == "music");
+		TEST_EXPECT(read_file_text(note_path, text, message) && text == "edited in the project");
+		// With Replace: the held files are written over (the edited one too).
+		editor_test::handle_to_end(session, request::import_whole_install());
+		TEST_EXPECT(preview.open && preview.plan->rows.size() == 5);
+		editor_test::handle_to_end(session, request::import_planned(true));
+		TEST_EXPECT(view.activity.last_operation.end == OperationEnd::Done && !preview.open);
+		TEST_EXPECT(read_file_text(note_path, text, message) && text == "retail");
+		// The same bytes imported again without Replace: held, not an error (the source is read
+		// before a file of its name is refused).
+		EditorRequest again = request::of(EditorRequestKind::ImportFiles);
+		again.imports = {source};
+		again.imports.back().entry = "note.txt";
+		editor_test::handle_to_end(session, again);
+		TEST_EXPECT(session.outcome().done() && view.activity.last_operation.end == OperationEnd::Done &&
+		            count_code(view.activity.last_operation.findings, "import.exists") == 0);
+		// Nothing planned: a planned import is refused.
+		editor_test::handle_to_end(session, request::import_planned());
+		TEST_EXPECT(!session.outcome().done() && view.findings.diagnostics.back().code() == "import.not_planned");
+		// A request asking for two things at once is refused, never served in part (review F14): every
+		// file and some by name, every file and a walk; an import naming nothing and planning nothing.
+		EditorRequest both = request::import_whole_install();
+		both.names = {"note.txt"};
+		editor_test::handle_to_end(session, both);
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1 && !preview.open);
+		EditorRequest walked = request::import_whole_install();
+		walked.with_dependencies = true;
+		editor_test::handle_to_end(session, walked);
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1 && !preview.open);
+		editor_test::handle_to_end(session, request::import_files({}));
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1);
+	}
 	// A directory that is no install.
 	editor_test::set_game_install(session, dir.file("empty"));
 	TEST_EXPECT(view.project.retail_files.empty());

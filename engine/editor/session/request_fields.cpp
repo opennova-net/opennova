@@ -40,6 +40,13 @@ constexpr RequestField kFields[] = {
 			"Where a build lands: a directory on disk, each build a directory under it named by "
 			"its id (left out, the project's .opennova/build/play; a relative one from the "
 			"project's folder; one inside the project refused but its cache or export folder)." },
+	{ F::Mission, "mission", J::String,
+			"A mission of the project by its logical name (04TR.bms): the one Play starts the game "
+			"in; left out, the game starts at its menu." },
+	{ F::Values, "values", J::Object,
+			"A new file's starting values, each a string by its blank's parameter: a mission's "
+			"{title?, terrain, environment} (the terrain and the environment files of the project, "
+			"by name, with or without their extension; the title its file's name when left out)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,
@@ -104,6 +111,13 @@ constexpr RequestField kFields[] = {
 			"distribute_vertically, three or more; bring_to_front, bring_forward, send_backward, "
 			"send_to_back), or a model's frame (its camera on the marker of the first id, else on "
 			"the whole model); kind the viewport's (left out, the one the document shows in)." },
+	{ F::Drop, "drop", J::Object,
+			"A drop on a viewport's picture, {file | reference + name, at, kind?}: a project file by its "
+			"logical name (a Files row let go on the canvas), or a name of a reference kind (reference "
+			"its token, name the name as a field of that kind holds it), at the point [x, y] of the "
+			"picture in the viewport's units; kind the viewport's (left out, the one the document shows "
+			"in). The viewport plans what it makes, one batch, one undo step; one that takes no drop "
+			"refuses it (a menu's, a model's)." },
 	{ F::Purpose, "purpose", J::String,
 			"What a picked path is for: new_project_location, open_project, runtime_executable, "
 			"game_install or import_files." },
@@ -122,6 +136,14 @@ constexpr RequestField kFields[] = {
 			"no source imported (a dry run's read, a project made in a folder that holds sources)." },
 	{ F::Rehash, "rehash", J::Boolean,
 			"A build reads every file again, the build cache's hashes set aside (and kept afresh)." },
+	{ F::All, "all", J::Boolean,
+			"Every file of the game install chosen (its archives' and the loose files the game ships "
+			"beside them: the music banks, the videos, the NovaWorld table), with no walk: the closure "
+			"of everything is everything." },
+	{ F::Planned, "planned", J::Boolean,
+			"An import takes the open import preview's rows as its plan has them (each the project can "
+			"take, once per source) in place of imports, so a client need not echo thousands of rows "
+			"back; refused with no preview open." },
 };
 
 static_assert(std::size(kFields) == kRequestFieldCount, "every request field has exactly one row");

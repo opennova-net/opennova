@@ -431,6 +431,17 @@ struct DrawnDevice final : ViewportDevice {
 	bool drawn = false; // a canvas drew it since the last pump
 	ViewportPicture last;
 	std::vector<ViewportAction> taken;
+	// A ground a test gives it (the height at a point of the viewport's space, z up; none: no
+	// surface): what ground_at answers and surface_between finds, and its report's surface.
+	std::function<double(double x, double y)> ground;
+	bool ground_at(double x, double y, double &height) const override {
+		if (!ground) return false;
+		height = ground(x, y);
+		return true;
+	}
+	bool surface_between(const double from[3], const double to[3], double point[3]) const override {
+		return ground && editor_test::ground_crossing(ground, from, to, point);
+	}
 	void draw(const ViewportPicture &picture) override {
 		drawn = true;
 		last = picture;
@@ -454,6 +465,7 @@ struct DrawnDevice final : ViewportDevice {
 		report.width = drawn ? width : model.state().width;
 		report.height = drawn ? height : model.state().height;
 		report.canvas_sized = drawn && last.canvas_sized;
+		report.surface = bool(ground);
 		drawn = false;
 	}
 	void tick(const ViewportModel &, const PreviewClock &) override {}
@@ -487,11 +499,14 @@ struct HandViewports {
 		v.documents.viewports = viewports;
 		if (!v.findings.assets) v.findings.assets = std::make_shared<const ProjectAssetSource>();
 	}
-	// A SetViewport's change applied to the viewport at `path` (the session's set_viewport).
+	// A SetViewport's change applied to the viewport at `path` (the session's set_viewport): one the
+	// windows raised that the viewport refuses fails the test, naming why.
 	bool set(const SessionView &v, const std::string &path, const char *change) {
 		opennova::io::JsonValue json;
 		std::string error;
-		return opennova::io::json_parse(change, json, error) && viewports->set(v, path, json, error);
+		const bool applied = opennova::io::json_parse(change, json, error) && viewports->set(v, path, json, error);
+		CHECK(applied, (std::string("a window's SetViewport applies: ") + error + " (" + change + ")").c_str());
+		return applied;
 	}
 	// The Shell's pump: the windows' SetViewports served, the viewports tracked to the view (as the
 	// session does after each change) and their devices synced.
@@ -589,8 +604,9 @@ inline DialogsView::ImportPreview planned_import(const std::string &folder, cons
 	ImportPlan plan;
 	plan.rows = { row(State::Selected, menu, AssetKind::Menu, chosen, "menus/" + menu), table, clip,
 		font, gone, logo, cut };
-	plan.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu},
+	plan.not_followed = {{ReferenceKind::Sound, AssetKind::Unknown, 1, menu},
 	                     {ReferenceKind::None, AssetKind::Terrain, 1, "level" + stretch + ".trn"}};
+	plan.undefined = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 1, menu}};
 	plan.truncated = true;
 	plan.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read" + stretch + ". The files it names are not looked for.",

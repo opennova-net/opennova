@@ -667,6 +667,13 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
+		case F::Mission: out.mission = "04TR.bms"; break;
+		// In its keys' order, as the wire keeps an object's members.
+		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads
+		// them: the request equals its round trip (review F10).
+		case F::Values:
+			out.values = request::create_file("", "", {{"title", "My map"}, {"terrain", "island"}, {"environment", "day"}}).values;
+			break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
@@ -753,6 +760,13 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 			out.command.ids = {9, 11, 12};
 			out.command.kind = ViewportKind::Menu;
 			break;
+		case F::Drop:
+			out.drop.reference = "item";
+			out.drop.name = "100300";
+			out.drop.x = 320.5f;
+			out.drop.y = 200.0f;
+			out.drop.kind = ViewportKind::Model;
+			break;
 		case F::Purpose: out.purpose = PickPurpose::GameInstall; break;
 		case F::WithDependencies: out.with_dependencies = true; break;
 		case F::Replace: out.replace = true; break;
@@ -761,6 +775,8 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::OpenFirst: out.open_first = true; break;
 		case F::ImportPass: out.import_pass = false; break; // its default is true
 		case F::Rehash: out.rehash = true; break;
+		case F::All: out.all = true; break;
+		case F::Planned: out.planned = true; break;
 		case F::kCount: break;
 		}
 	}
@@ -1065,11 +1081,12 @@ static int test_over_a_session() {
 	TEST_EXPECT(section(ViewSection::GraphCounts).get_int("missing", -1) == 0);
 	TEST_EXPECT(diagnostics_to_json(view.findings.diagnostics).array.size() ==
 			view.findings.diagnostics.size());
-	// The first row, the manifest's first: an optional file the game does without, a note.
+	// The first row, the manifest's first a project holds (game.cfg before it is this machine's own,
+	// no row): an optional file the game does without, a note.
 	const JsonValue first_finding = diagnostics_to_json(view.findings.diagnostics).array.front();
 	TEST_EXPECT(first_finding.get_string("severity", "") == "info" &&
 	            first_finding.get_string("code", "") == "requirement.optional_missing" &&
-	            first_finding.get_string("role", "") == "game_cfg" && first_finding.get_string("target", "") == "game.cfg");
+	            first_finding.get_string("role", "") == "fgn2_bin" && first_finding.get_string("target", "") == "fgn2.bin");
 
 	// Problems through the wire: every finding counted, the errors shown, each required file
 	// the project lacks naming its role and file (no file of the project's) with its fixes.
@@ -1794,6 +1811,7 @@ static int test_import_plan_json() {
 	planned.rows = {chosen, font, gone, cut};
 	planned.not_followed = {{ReferenceKind::MenuScreen, AssetKind::Unknown, 2, "a.mnu"},
 	                        {ReferenceKind::None, AssetKind::Terrain, 1, "level.trn"}};
+	planned.undefined = {{ReferenceKind::TextId, AssetKind::Unknown, 3, "a.mnu"}};
 	planned.truncated = true;
 	planned.diagnostics = { editor_test::finding_of(DiagnosticSeverity::Warning, "import.unreadable",
 			"The file could not be read.", "b.mnu") };
@@ -1802,6 +1820,19 @@ static int test_import_plan_json() {
 	const JsonValue *import = &json;
 	TEST_EXPECT(import->get_bool("open", false) && import->get_bool("with_dependencies", false) && import->get_bool("changed", false));
 	TEST_EXPECT(import->get("serial") == nullptr && import->get_int("count", 0) == 3 && import->get_int("offset", -1) == 0);
+	// S14: the plan by kind, the largest first (alike in bytes and files: by token), and a page of
+	// one kind's rows alone, count theirs.
+	{
+		const JsonValue *summary = import->get("summary");
+		TEST_EXPECT(summary && summary->array.size() == 3 && summary->array[0].get_string("kind", "") == "font" &&
+		            summary->array[1].get_string("kind", "") == "menu" && summary->array[2].get_string("kind", "") == "texture" &&
+		            summary->array[0].get_int("files", 0) == 1 && summary->array[0].get_int("bytes", -1) == 0);
+		const JsonValue fonts = import_preview_to_json(view, JsonPage{}, AssetKind::Font);
+		const JsonValue *rows = fonts.get("rows");
+		TEST_EXPECT(fonts.get_string("kind", "") == "font" && fonts.get_int("count", 0) == 1 && rows && rows->array.size() == 1 &&
+		            rows->array[0].get_string("name", "") == "arial99.fnt" && fonts.get_int("not_found_count", 0) == 1 &&
+		            fonts.get("summary")->array.size() == 3);
+	}
 	// The import section: the dialog in short, the editor's setting, no lists.
 	const JsonValue summary = view_section_to_json(view, ViewSection::Import);
 	TEST_EXPECT(summary.get_bool("open", false) && summary.get_bool("changed", false) &&
@@ -1845,6 +1876,12 @@ static int test_import_plan_json() {
 	TEST_EXPECT(skipped && skipped->array.size() == 2 && skipped->array[0].get_string("reference", "") == "menu_screen" &&
 	            skipped->array[0].get_int("count", 0) == 2 && skipped->array[1].get_string("kind", "") == "terrain" &&
 	            skipped->array[1].get("reference") == nullptr && skipped->array[1].get_string("first", "") == "level.trn");
+	// S14: the symbols no place defines, and the row sizes with what the whole plan copies.
+	const JsonValue *undefined = import->get("undefined");
+	TEST_EXPECT(undefined && undefined->array.size() == 1 && undefined->array[0].get_string("reference", "") == "text_id" &&
+	            undefined->array[0].get_int("count", 0) == 3 && undefined->array[0].get_string("first", "") == "a.mnu");
+	TEST_EXPECT(first.get("size") && import->get("total_bytes") &&
+	            import->get_number("total_bytes", -1.0) == double(preview.plan->total_bytes()));
 	const JsonValue *findings = import->get("diagnostics");
 	TEST_EXPECT(findings && findings->array.size() == 1 && findings->array[0].get_string("code", "") == "import.unreadable");
 	// A row's source is an import a request takes as it is.
@@ -1867,7 +1904,9 @@ static int test_game_install_keys() {
 	view.project.retail_directory = "C:/games/JO";
 	view.project.play_retail = true;
 	view.project.retail_files = {"items.def", "main.mnu"};
+	view.activity.play_mission = "04TR.bms"; // S14: the mission the game was started in
 	const JsonValue run = view_section_to_json(view, ViewSection::Run);
+	TEST_EXPECT(run.get_string("mission", "") == "04TR.bms");
 	const JsonValue import = view_section_to_json(view, ViewSection::Import);
 	const JsonValue preferences = view_section_to_json(view, ViewSection::Preferences);
 	TEST_EXPECT(run.get_bool("in_install", false) && run.get_string("game_install", "") == "C:/games/JO" &&

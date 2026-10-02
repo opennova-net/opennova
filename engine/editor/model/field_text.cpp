@@ -8,6 +8,10 @@ namespace opennova::editor {
 
 std::string field_title(const FieldSchema &field) { return field.label.empty() ? field.id : field.label; }
 
+std::string field_title(const FieldUse &field) {
+	return field.label ? std::string(field.label) : field_title(*field.schema);
+}
+
 const std::string &choice_title(const FieldChoice &choice) { return choice.label.empty() ? choice.name : choice.label; }
 
 const FieldChoice *choice_of(const std::vector<FieldChoice> &choices, const Value &value) {
