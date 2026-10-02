@@ -2904,6 +2904,21 @@ add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
 # manufacture packet timeouts that never reproduce in isolation.
 set_tests_properties(nw_host_register_e2e PROPERTIES RUN_SERIAL TRUE)
 
+# The lobby's answer to a stock client's 0x44 resend request, through the real
+# listener over loopback UDP (same listener-source recipe as above).
+add_executable(nw_lobby_resend_e2e_test
+    novaworld/nw_lobby_resend_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_lobby_resend_e2e_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
+target_include_directories(nw_lobby_resend_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
+set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
+
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
 # the server's parse_form_body + EPASK path, then checks the cookie jar carries
