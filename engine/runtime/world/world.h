@@ -79,6 +79,7 @@ namespace opennova::world {
 
 class CollisionWorld;
 class LocalPlayer;
+struct WeaponInventory;
 
 // One sound-profile slot fire (footstep, foley, landing, death scream),
 // already resolved to the profile's authored sound-set name. The host present
@@ -727,6 +728,10 @@ struct WorldOutbox {
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);
     // the host tick drains them.
     std::vector<PowerupGrant> powerup_grants;
+    // The authority's powerup weapon grants, every picker's (world/powerup.h):
+    // the host tick lands a remote picker's on its connection's slot table and
+    // fans S2C 0x35 for each.
+    std::vector<PowerupWeaponGrant> powerup_weapon_grants;
     // Fired-round events pending per-recipient S2C 0x0A tag-2 echo (round_ring.h). Fed by
     // the C2S 0x06 dispatch on accepted fire; drained per connection watermark by the
     // replication emit. [orig: g_RoundRing @0xC8D848 via RoundData_AddRound @0x4fdb40] (D-NET-152)
@@ -792,6 +797,21 @@ public:
     virtual void update_entity_idle_timers(World &world) = 0;
 };
 
+// The authority's per-player weapon tables for a REMOTE player: retail's
+// player-slot block behind Entity_ValidatePtr, its 780-slot table at +0x1D0,
+// its class pools at +0x15A58 and its shared clips at +0x15C58. The host
+// session installs it around its entity pass; with none installed (a joiner,
+// a bare world) no remote player has tables, as Entity_ValidatePtr finds no
+// slot. [orig: Entity_ValidatePtr @0x500910; WeaponSlot_RecalculateScore
+//  @0x542464..0x54247C]
+class IRemoteWeaponTables {
+public:
+    virtual ~IRemoteWeaponTables() = default;
+    // A copy of `player`'s tables; false when no session slot holds it.
+    virtual bool remote_weapon_tables(const World &world, EntityHandle player,
+                                      WeaponInventory &out) const = 0;
+};
+
 // Server_TickUpdate's every-32 legs, inside the one script admission, between
 // the WAC tick and the BMS quarter pass: the vehicle spawn markers, then the
 // player idle timers. The kernel registers it between the two script systems.
@@ -839,6 +859,7 @@ public:
     // kernel between WAC and BMS; the host session installs the idle timers.
     ServerIdleLegs server_idle_legs;
     IEntityIdleTimers *entity_idle_timers = nullptr;
+    IRemoteWeaponTables *remote_weapon_tables = nullptr;
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;

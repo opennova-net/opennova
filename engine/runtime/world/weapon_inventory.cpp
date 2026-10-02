@@ -257,15 +257,159 @@ WeaponFillResult weapon_inventory_load_from_display(
             result.warnings.emplace_back(msg); // incumbent stays [orig: @ 0x5415d6]
             continue;
         }
-        // [orig: WeaponSlot_InitFromDef @ 0x53EE70 — fresh slot state, clip 0]
-        slot->adm_index = static_cast<int16_t>(adm);
-        slot->clip = 0;
-        slot->scope_zero = weapon_scope_zero_initial(def->action_fsm.scope_zero);
-        slot->scope_zoom = weapon_slot_initial_zoom(def->scope_max_mag, def->scope_initial_mag,
-                def->scope_min_mag,
-                weapon_slot_zoom_sniper_lock(owner_class, def->category, allow_sniper_scope_zoom));
+        weapon_slot_init_from_def(*def, static_cast<int16_t>(adm), *slot, owner_class,
+                                  allow_sniper_scope_zoom);
     }
     return result;
+}
+
+void weapon_slot_init_from_def(const WeaponTableEntry &def, int16_t adm_index,
+                               WeaponInventorySlot &slot, int32_t owner_class,
+                               bool allow_sniper_scope_zoom) {
+    // [orig: WeaponSlot_InitFromDef @ 0x53EE70 — the memset @ 0x53EE86 (clip 0),
+    //  the def bound @ 0x53EEA1, the zoom seed @ 0x53EF2D..0x53EF44]
+    slot = WeaponInventorySlot{};
+    slot.adm_index = adm_index;
+    slot.clip = 0;
+    slot.scope_zero = weapon_scope_zero_initial(def.action_fsm.scope_zero);
+    slot.scope_zoom = weapon_slot_initial_zoom(def.scope_max_mag, def.scope_initial_mag,
+            def.scope_min_mag,
+            weapon_slot_zoom_sniper_lock(owner_class, def.category, allow_sniper_scope_zoom));
+}
+
+namespace {
+
+int32_t combo_of(const WeaponTableEntry &def) {
+    return def.rank + weapon_combo::kRanksPerCategory * def.category;
+}
+
+// The refill both legs of the grant run on a slot whose def carries a clip:
+// the loaded rounds zeroed (the shared bucket's when the def names one), the
+// class pool set to the def's startrounds, one reload drawn.
+// [orig: WeaponSlot_InitFromAvatarDef — the child leg @0x542848..0x542883, the
+//  tail @0x5428CE..0x542909: sub_540670(bucket, picker, 0) or slot+0x10 = 0,
+//  WeaponSlot_SetAmmoCount(def+0x5C, def+0xD8, picker), WeaponSlot_ReloadAmmo
+//  (picker, slotIndex)]
+void refill_slot(const WeaponTable &table, WeaponInventory &inv, const WeaponTableEntry &def,
+                 int32_t slot_combo, int32_t reload_combo) {
+    WeaponInventorySlot *slot = inv.slot(slot_combo);
+    if (slot == nullptr) return;
+    if (def.ammo_bucket != 0) {
+        const uint32_t bucket = static_cast<uint32_t>(def.ammo_bucket);
+        if (bucket < inv.shared_clips.size()) inv.shared_clips[bucket] = 0;
+    } else {
+        slot->clip = 0;
+    }
+    weapon_pool_set(table, inv, def.ammo_class_id, def.startrounds);
+    weapon_inventory_reload_slot(table, inv, reload_combo);
+}
+
+} // namespace
+
+WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
+        WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
+        bool allow_sniper_scope_zoom) {
+    // [orig: WeaponSlot_InitFromAvatarDef @ 0x542730]
+    WeaponAvatarGrant out;
+    if ((adm_index & 0xFF) == 0xFF) return out;                  // @0x542753
+    int32_t cur_adm = adm_index & 0xFF;
+    const WeaponTableEntry *cur = table.by_index(static_cast<uint8_t>(cur_adm));
+    if (cur == nullptr || cur->name.empty()) return out;         // @0x542762..0x54276B
+    // The `sameas` redirect: the named weapon's slot becomes the target, and a
+    // HELD one takes the grant as its own def [orig: @0x542779..0x5427C8].
+    int32_t slot_combo = -1; // retail's null slot pointer
+    if (!cur->sameas.empty()) {
+        const int parent = table.index_of(cur->sameas.c_str()); // AvatarDef_FindIndexByName
+        const WeaponTableEntry *pdef =
+                parent >= 0 && parent != 0xFF ? table.by_index(static_cast<uint8_t>(parent))
+                                              : nullptr;
+        if (pdef != nullptr && !pdef->name.empty()) {
+            slot_combo = combo_of(*pdef);                        // @0x5427BA
+            const WeaponInventorySlot *held = inv.slot(slot_combo);
+            if (held != nullptr && held->adm_index >= 0) {       // @0x5427BE
+                cur = pdef;
+                cur_adm = parent;
+            }
+        }
+    }
+    // The def's own slot unless it is category 0 rank 0 [orig: @0x5427D1..0x5427E1]
+    const int32_t own_combo = combo_of(*cur);
+    if (own_combo != 0) slot_combo = own_combo;
+    WeaponInventorySlot *slot = inv.slot(slot_combo);
+    if (slot == nullptr) return out;                             // @0x5427E7
+    if (slot->adm_index < 0) {                                   // @0x5427F1
+        // The sub-variants first: the loadout_subclasses entries that follow
+        // the def, each into its own slot (initialized even when held). Their
+        // reload runs on the MAIN slot, still empty here, so it draws nothing
+        // but the window stamp [orig: @0x542800..0x5428A6; ReloadAmmo(picker,
+        // slotIndex) @0x542883].
+        for (int32_t k = 0; k < cur->loadout_subclasses; ++k) {
+            const int32_t child_adm = cur_adm + 1 + k;
+            const WeaponTableEntry *child =
+                    child_adm < 0xFF ? table.by_index(static_cast<uint8_t>(child_adm)) : nullptr;
+            if (child == nullptr) continue;
+            WeaponInventorySlot *child_slot = inv.slot(combo_of(*child));
+            if (child_slot == nullptr) continue;
+            weapon_slot_init_from_def(*child, static_cast<int16_t>(child_adm), *child_slot,
+                                      owner_class, allow_sniper_scope_zoom); // @0x542839
+            if (child->clipsize != -1) {                         // @0x542848
+                refill_slot(table, inv, *child, combo_of(*child), own_combo);
+                out.reloaded = true;
+            }
+        }
+        weapon_slot_init_from_def(*cur, static_cast<int16_t>(cur_adm), *slot, owner_class,
+                                  allow_sniper_scope_zoom);      // @0x5428B2
+    }
+    // The refill tail on the slot's def [orig: @0x5428BA..0x542909].
+    const WeaponTableEntry *slot_def = slot->adm_index >= 0
+            ? table.by_index(static_cast<uint8_t>(slot->adm_index))
+            : nullptr;
+    if (slot_def != nullptr && slot_def->ammo_class_count != 0 && slot_def->clipsize != -1) {
+        refill_slot(table, inv, *slot_def, slot_combo, own_combo);
+        out.reloaded = true;
+    }
+    out.combo = slot_combo;
+    return out;
+}
+
+bool weapon_inventory_weapon_full(const WeaponTable &table, const WeaponInventory &inv,
+                                  int32_t adm_index) {
+    // [orig: WeaponSlot_RecalculateScore @ 0x542450, the slot leg]
+    if ((adm_index & 0xFF) == 0xFF) return false;                // @0x54249E
+    const WeaponTableEntry *def = table.by_index(static_cast<uint8_t>(adm_index & 0xFF));
+    if (def == nullptr || def->name.empty()) return false;       // @0x5424AB..0x5424BC
+    int32_t combo = combo_of(*def);                              // @0x5424BE..0x5424D0
+    if (!def->sameas.empty()) {                                  // @0x5424D2
+        // AdmDef_GetEntryByIndex(AvatarDef_FindIndexByName(sameas)): a hit
+        // names its slot whether or not it is held [orig: @0x5424D7..0x5424F9]
+        const int parent = table.index_of(def->sameas.c_str());
+        const WeaponTableEntry *pdef =
+                parent >= 0 && parent != 0xFF ? table.by_index(static_cast<uint8_t>(parent))
+                                              : nullptr;
+        if (pdef != nullptr) combo = combo_of(*pdef);
+    }
+    const WeaponInventorySlot *slot = inv.slot(combo);
+    if (slot == nullptr || slot->adm_index < 0) return false;    // @0x5424FB..0x542506
+    const WeaponTableEntry *slot_def = table.by_index(static_cast<uint8_t>(slot->adm_index));
+    if (slot_def == nullptr) return false;
+    // Score_CalculateKillScore(slot) against the slot def's startrounds, setz
+    // [orig: @0x54251E..0x54253A]
+    return weapon_slot_ammo_score(table, inv, combo) == slot_def->startrounds;
+}
+
+bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &inv,
+                               bool picker_has_item_def) {
+    // [orig: WeaponSlot_RecalculateScore @ 0x542450, the -1 walk]
+    for (int32_t combo = 0; combo < weapon_combo::kSlotCount; ++combo) {
+        const WeaponTableEntry *def = entry_at(table, inv, combo);
+        if (def == nullptr) continue;                            // @0x542543..0x542547
+        // Entity_GetScoreValueBySlotType(def+0xD8) + the loaded rounds (the
+        // shared bucket when def+0xDC is set), 0 without an item def
+        // [orig: @0x54254D..0x542587]
+        const int32_t score = picker_has_item_def ? weapon_slot_ammo_score(table, inv, combo) : 0;
+        if (score != def->startrounds) return false;             // @0x542589..0x54258C
+    }
+    return true;                                                 // @0x54259F
 }
 
 void weapon_inventory_seed_pools(const WeaponTable &table, WeaponInventory &inv,

@@ -367,6 +367,12 @@ std::vector<uint8_t> encode_loadout_submit(const LoadoutSubmit &submit);
 // [orig: NapiNPServerMsg_HandleReloadRequest @ 0x514DF0]
 std::vector<uint8_t> encode_weapon_reload(const WeaponReload &reload);
 
+// S2C 0x35 WEAPON-PICKUP -- [u16 pickerHandle][u16 powerupHandle] (4 B), the
+// inverse of decode_weapon_pickup. [orig: Server_BroadcastWeaponOverlayUpdate
+// @0x509FC0 -- the picker's handle @0x50A054, the row's @0x50A06C, length 4
+// @0x50A073]
+std::vector<uint8_t> encode_weapon_pickup(const WeaponPickupNotice &notice);
+
 // C2S 0x16 -- exact inverse of decode_mounted_weapon_slot_selection; retail's
 // NetPacket_WriteBoolAsInt16 emits canonical 0 or 1 in a two-byte body.
 std::vector<uint8_t> encode_mounted_weapon_slot_selection(

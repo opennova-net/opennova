@@ -1393,6 +1393,20 @@ bool decode_weapon_reload(const uint8_t *body, size_t len,
 	return consumed == 4;
 }
 
+// S2C 0x35 weapon pickup -- [u16 picker][u16 powerup] (4 B).
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 -- the two u16 reads @0x4261B8 /
+//  @0x4261C8]
+bool decode_weapon_pickup(const uint8_t *body, size_t len,
+                          WeaponPickupNotice &out, size_t &consumed) {
+	consumed = 0;
+	Cursor c{body, body + len, true};
+	out.picker_handle = c.u16();
+	out.powerup_handle = c.u16();
+	if (!c.ok) return false;
+	consumed = size_t(c.p - body);
+	return consumed == 4;
+}
+
 bool decode_mounted_weapon_slot_selection(
 		const uint8_t *body, size_t len,
 		MountedWeaponSlotSelection &out, size_t &consumed) {

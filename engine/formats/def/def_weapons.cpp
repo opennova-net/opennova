@@ -230,6 +230,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "ammobucket")) {
                 cw.ammobucket = parse_int_n(v, vl);
                 parsed = 1;
+            } else if (key_is(key, "sameas")) {
+                /* [orig: @0x544056..0x544072 -- strncpy(AdmDef+0x34, value, 0x20):
+                   at most 32 characters survive; a 32-character name keeps no
+                   terminator in the record and its readers run on into the
+                   next field, which this copy does not reproduce] */
+                safe_copy(cw.sameas, sizeof(cw.sameas), v, vl);
+                parsed = 1;
             } else if (key_is(key, "ammoclass")) {
                 /* ammoclass <CLASS_NAME> <pool-units-per-round> [orig: parse @0x5441CB] */
                 Token tok[MAX_TOKENS];

@@ -370,6 +370,9 @@ public:
 	// drained once per frame by the embedder that owns gametext.
 	std::vector<ClientGameText> drain_game_texts();
 	std::vector<WeaponReload> drain_weapon_reloads();
+	// S2C 0x35 powerup weapon grants, in receive order; the joiner role
+	// applies the ones naming its own player (inmatch/joiner_role.cpp).
+	std::vector<WeaponPickupNotice> drain_weapon_pickups();
 	std::vector<ClientEffectCommand> drain_effect_commands();
 	void post_chat_line(ClientChatLine line) {
 		line.feed_order = next_feed_order_++;
@@ -619,6 +622,7 @@ private:
 	// The dispatch stamp the ring-bound records take (ClientGameEvent::feed_order).
 	uint32_t next_feed_order_ = 0;
 	std::vector<WeaponReload> pending_weapon_reloads_;
+	std::vector<WeaponPickupNotice> pending_weapon_pickups_;
 	std::vector<ClientEffectCommand> pending_effect_commands_;
 	std::vector<ScriptRemoteCommand> pending_script_remote_commands_;
 	std::vector<ObjectiveNotification> pending_objective_notifications_;

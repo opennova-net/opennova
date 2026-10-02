@@ -81,6 +81,45 @@ void play_action_sound(World &world, const PowerupAction &action, const Entity &
                                          at.handle.packed);
 }
 
+// The tables the authority's refusal walk reads for `picker`: the local
+// player's own inventory (one table here for retail's g_WeaponSlotArrayBase and
+// the listen host's own slot block, D-WPN-24's collapse), else the session
+// slot's copy; null when neither exists, which WeaponSlot_RecalculateScore
+// treats as a pass. [orig: WeaponSlot_RecalculateScore @0x542464..0x542519 --
+// Entity_ValidatePtr, else the local table for the local player, else 0]
+const WeaponInventory *authority_tables(const World &world, const Entity &picker,
+                                        const WeaponInventory *local, WeaponInventory &remote) {
+    if (local != nullptr) return local;
+    if (picker.handle == world.cached.local_player) return nullptr;
+    if (world.remote_weapon_tables == nullptr) return nullptr;
+    return world.remote_weapon_tables->remote_weapon_tables(world, picker.handle, remote)
+            ? &remote
+            : nullptr;
+}
+
+} // namespace
+
+void powerup_sync_local_weapon_grant(World &world, LocalPlayer &lp, const Entity &picker,
+                                     const WeaponAvatarGrant &landed) {
+    if (!landed.reloaded) return;
+    // WeaponSlot_ReloadAmmo's entry stamps the picker's 3P reload window
+    // [orig: @0x54173c; world-wac-ai-re.md §14.8.5]
+    if (AiEntity *body = world.ai.for_handle(picker.handle))
+        if (body->inf.active) body->inf.reload_anim_ticks = 80;
+    // The held weapon's FSM carries its own magazine, which the next pump
+    // mirrors back into the inventory; a refill of the equipped slot reaches it
+    // now, its pending-reload bit cleared as the refill clears slot+0x5A's
+    // [orig: WeaponSlot_ReloadAmmo @0x5417A2]
+    if (!lp.weapon.active || lp.weapon.usegun_slot_active) return;
+    if (lp.inventory.equipped_combo < 0 || lp.inventory.equipped_combo != landed.combo) return;
+    WeaponSlotState &slot = *active_local_weapon_slot(world, lp.weapon);
+    slot.clip = weapon_inventory_loaded_rounds(world.tables.weapons, lp.inventory,
+                                               lp.inventory.equipped_combo);
+    slot.phase = static_cast<uint8_t>(slot.phase & ~weapon_phase::kReloadPendingBit);
+}
+
+namespace {
+
 // [orig: PowerupAction_Pickup @0x4428A0 (action_def = the row's pickup
 //  ActionDef, action_slot = the powerup entity, entity = the picker)]
 void action_pickup(World &world, const PowerupDef &def, const PowerupAction &action,
@@ -109,20 +148,49 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
         grant_needed = false;
     };
 
-    // The `weapon` grant [orig: @0x4428DA..0x44292A -- the slot validation walk
-    //  WeaponSlot_RecalculateScore @0x4428E8, the +0x2B0 store @0x4428FB, the
-    //  local WeaponSlot_InitFromAvatarDef @0x442912, the authority's S2C 0x35
-    //  Server_BroadcastWeaponOverlayUpdate @0x442925]. JO:CA's powerup.def
-    //  authors no `weapon`; the JOTAC mod's PU_* weapon pickups do. The arm is
-    //  D-PWR-1 (docs/world/powerup-re.md).
-    (void)def.weapon;
+    // The `weapon` grant; `all` (-1) and an unresolved name (0) skip it
+    // [orig: @0x4428DA..0x44292A]. JO:CA's powerup.def authors no `weapon`;
+    // the JOTAC mod's PU_* weapon pickups do.
+    if (def.weapon != -1 && def.weapon != 0) {
+        const uint8_t weapon = static_cast<uint8_t>(def.weapon);
+        // The authority refuses a picker already carrying the weapon full:
+        // the whole pickup ends, the row unconsumed [orig: WeaponSlot_RecalculateScore
+        //  @0x4428E8, the refusal @0x4428F2]
+        if (ctx.is_authority) {
+            WeaponInventory remote;
+            const WeaponInventory *tables = authority_tables(world, picker, inv, remote);
+            if (tables != nullptr && weapon_inventory_weapon_full(table, *tables, weapon))
+                return;
+        }
+        powerup.powerup_weapon = weapon; // +0x2B0 @0x4428FB
+        if (inv != nullptr) {
+            // The local player's own table [orig: WeaponSlot_InitFromAvatarDef
+            //  (g_WeaponSlotArrayBase, picker, row) @0x442912]
+            const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, *inv,
+                    powerup.powerup_weapon, picker.player_class,
+                    world.rules.allow_sniper_scope_zoom);
+            powerup_sync_local_weapon_grant(world, *lp, picker, landed);
+        }
+        // The authority's slot-table copy and S2C 0x35, for every picker
+        // [orig: Server_BroadcastWeaponOverlayUpdate @0x442925]
+        if (ctx.is_authority)
+            world.out.powerup_weapon_grants.push_back({picker.handle, powerup.handle, weapon});
+    }
 
-    // `allammo` [orig: @0x44292D..0x44294B -- the validation walk
-    //  WeaponSlot_RecalculateScore(entity, -1) @0x442936 (the authority's
-    //  slot-score consistency check, refusing on a mismatch), then
-    //  Entity_UpdateWeaponOverlayFrameState @0x442943: the slot pools re-seeded
-    //  from the defs and every clip redrawn; the walk and the connection-side
-    //  seeded-slot tail are D-PWR-4]
+    // `allammo` [orig: @0x44292D..0x44294B -- WeaponSlot_RecalculateScore
+    //  (entity, -1) @0x442936: the authority refuses a picker whose every held
+    //  slot already scores its startrounds (the pack touched at full ammo stays,
+    //  as a full med pack does); then Entity_UpdateWeaponOverlayFrameState
+    //  @0x442943: the slot pools re-seeded from the defs and every clip redrawn;
+    //  the connection-side seeded-slot tail is D-PWR-4]
+    if (def.allammo && ctx.is_authority) {
+        WeaponInventory remote;
+        const WeaponInventory *tables = authority_tables(world, picker, inv, remote);
+        if (tables != nullptr && weapon_inventory_all_full(table, *tables, picker.has_item_def)) {
+            publish_grant();
+            return;
+        }
+    }
     if (def.allammo) {
         if (inv != nullptr) {
             weapon_inventory_seed_pools(table, *inv, picker.player_class);
@@ -353,6 +421,43 @@ void powerup_process_contacts(World &world, const TickContext &ctx) {
             world.collision->take_powerup_contacts();
     for (const CollisionWorld::GameplayContact &contact : contacts)
         powerup_pickup(world, contact.target, contact.source, ctx);
+}
+
+bool powerup_weapon_grant_received(World &world, LocalPlayer &lp, const Entity *row,
+                                   bool local_dead) {
+    // [orig: sub_4E03D0 @0x4E03D0 -- the local-player and null gates
+    //  @0x4E03DC..0x4E03E8, the dead bit @0x4E03EE, the row's +0x155 byte
+    //  @0x4E03F0 (set only on a dropped carried object and a 0x18 drop
+    //  template, neither a powerup row; not carried here)]
+    Entity *player = world.registry.get(world.cached.local_player);
+    if (player == nullptr || row == nullptr || local_dead) return false;
+    if (!lp.inventory_valid) return false;
+    const WeaponTable &table = world.tables.weapons;
+    const WeaponAvatarGrant landed = weapon_inventory_init_from_avatar_def(table, lp.inventory,
+            row->powerup_weapon, player->player_class, world.rules.allow_sniper_scope_zoom);
+    if (landed.combo < 0) return false;                          // @0x4E040B
+    powerup_sync_local_weapon_grant(world, lp, *player, landed);
+    // Player_MountWeaponSlot(slot) @0x4E040E: with an equipped weapon the slot
+    // becomes the pending one and the held weapon queues its switch-out, rank
+    // within a category, else from [orig: Player_MountWeaponSlot @0x4DFA40 --
+    //  the EquippedSlot def gate @0x4DFA6B..0x4DFA71, g_PendingWeaponSlot
+    //  @0x4DFB16, the category compare @0x4DFB8B]
+    const WeaponInventorySlot *equipped = lp.inventory.slot(lp.inventory.equipped_combo);
+    const WeaponTableEntry *equipped_def = equipped != nullptr && equipped->adm_index >= 0
+            ? table.by_index(static_cast<uint8_t>(equipped->adm_index))
+            : nullptr;
+    const WeaponInventorySlot *granted = lp.inventory.slot(landed.combo);
+    const WeaponTableEntry *granted_def = granted != nullptr && granted->adm_index >= 0
+            ? table.by_index(static_cast<uint8_t>(granted->adm_index))
+            : nullptr;
+    if (equipped_def == nullptr || granted_def == nullptr) return true;
+    lp.inventory.pending_combo = landed.combo;
+    WeaponSwitchOutcome mount;
+    mount.kind = WeaponSwitchOutcome::kMount;
+    mount.combo = landed.combo;
+    mount.same_category = equipped_def->category == granted_def->category;
+    handle_weapon_switch_outcome(world, lp.weapon, &lp.inventory, mount, lp.view);
+    return true;
 }
 
 void powerup_tick(World &world, const TickContext &ctx) {

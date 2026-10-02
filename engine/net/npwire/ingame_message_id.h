@@ -114,7 +114,10 @@ inline constexpr uint8_t EMOTE_BROADCAST = 0x2D;            // emote + sender po
 inline constexpr uint8_t FORM_FIELD = 0x2E;
 inline constexpr uint8_t FORMATTED_GAME_TEXT = 0x32;
 inline constexpr uint8_t WAYPOINT_CREATE = 0x33;
-inline constexpr uint8_t PLAYER_ACTION = 0x35;
+// A powerup's `weapon` grant: [u16 picker][u16 powerup]; the picker's client
+// lands and mounts the weapon. [orig: NapiNPClientMsg_0x035 @0x4261A0; sender
+// Server_BroadcastWeaponOverlayUpdate @0x509FC0]
+inline constexpr uint8_t WEAPON_PICKUP = 0x35;
 inline constexpr uint8_t VEHICLE_SPAWN_NOTIFY = 0x36;
 // Door-row sync: [u16 handle][i16 state][u8 number] (5 B). The IDB names it a
 // "weapon slot action"; the rows it writes are the 0xA8A418 door records
@@ -232,7 +235,13 @@ inline constexpr uint8_t EMOTE_REQUEST = 0x14;              // i16 Emotes-menu d
 // [orig: NetPacket_SendChatMessage @0x42DDC0 (a misnomer) ->
 //  NapiNPServerMsg_HandleChatOrWhisper @0x514850 (a misnomer)]
 inline constexpr uint8_t WAYPOINT_SHARE = 0x17;
-inline constexpr uint8_t WEAPON_SPAWN = 0x18;
+// The weapon drop (44 B, NetPacket_WriteCompactEntityState @0x42AB40). No
+// stock client reaches its sender, and retail's authority handler terminates
+// on every body that sender writes; an opennova host leaves it unhandled
+// (world/powerup-re.md "The weapon2 -pwrup family").
+// [orig: NapiNPServerMsg_HandleWeaponSpawn @0x51A020 (a misnomer); sender
+//  Entity_SpawnVehicleAtEntity @0x4DD920 (a misnomer)]
+inline constexpr uint8_t WEAPON_DROP = 0x18;
 inline constexpr uint8_t ENTITY_REMOVE_REQUEST = 0x19;
 // A non-authority's door-row request: the same [u16 handle][i16 state][u8 number]
 // body as s2c::DOOR_SLOT_ACTION, queued reliable per selected section of a

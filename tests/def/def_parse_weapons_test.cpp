@@ -1090,6 +1090,42 @@ int main(int argc, char **argv) {
         printf("short pos/tpos refusal OK\n");
     }
 
+    /* `sameas <weapon>`: the first value token, at most 32 characters (retail's
+       strncpy into AdmDef+0x34 caps at 0x20); absent = empty.
+       [orig: WeaponDefs_ParseLineCallback @0x544056..0x544072] */
+    {
+        static const char kSameAsDef[] =
+            "weapon \"WPN_A\"\n"
+            "\tsameas WPN_M4AUTO\n"
+            "end\n"
+            "weapon \"WPN_B\"\n"
+            "\tsameas WPN_0123456789012345678901234567890123\n"
+            "end\n"
+            "weapon \"WPN_C\"\n"
+            "end\n";
+        DefWeaponsFile sf;
+        memset(&sf, 0, sizeof(sf));
+        if (def_parse_weapons_memory((const unsigned char *)kSameAsDef, sizeof(kSameAsDef) - 1,
+                                     &sf) != 0 ||
+            sf.count != 3) {
+            fprintf(stderr, "FAIL: sameas inline parse failed\n");
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        if (strcmp(sf.entries[0].sameas, "WPN_M4AUTO") != 0 ||
+            strcmp(sf.entries[1].sameas, "WPN_0123456789012345678901234567") != 0 ||
+            sf.entries[2].sameas[0] != '\0') {
+            fprintf(stderr, "FAIL: sameas: '%s' / '%s' / '%s'\n", sf.entries[0].sameas,
+                    sf.entries[1].sameas, sf.entries[2].sameas);
+            def_free_weapons(&sf);
+            def_free_weapons(&wf);
+            return 1;
+        }
+        def_free_weapons(&sf);
+        printf("sameas OK\n");
+    }
+
     def_free_weapons(&wf);
     if (!have_retail)
         return retail::skip_leg("OPENNOVA_JO_ASSETS/fixtures/def/weapon.def (the shipped weapon table)");

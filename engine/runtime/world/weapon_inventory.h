@@ -138,6 +138,13 @@ bool weapon_slot_zoom_sniper_lock(int32_t owner_class, int32_t def_category,
 int32_t weapon_slot_initial_zoom(int32_t scope_max_mag, int32_t scope_initial_mag,
                                  int32_t scope_min_mag, bool sniper_lock);
 
+// The slot init [orig: WeaponSlot_InitFromDef @ 0x53EE70]: the 100-byte slot
+// zeroed (clip 0) and bound to `adm_index`, its scope zero and zoom seeded with
+// `owner_class` as the owner (the sniper lock above).
+void weapon_slot_init_from_def(const WeaponTableEntry &def, int16_t adm_index,
+                               WeaponInventorySlot &slot, int32_t owner_class,
+                               bool allow_sniper_scope_zoom);
+
 struct WeaponInventory {
     std::array<WeaponInventorySlot, weapon_combo::kSlotCount> slots;
     // Per-ammo-class carried pools, keyed by WeaponTableEntry::ammo_class_id. The
@@ -250,6 +257,41 @@ void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &in
 // slot-predicate role: pool for the def's ammo class + the slot's loaded rounds].
 int32_t weapon_slot_ammo_score(const WeaponTable &table, const WeaponInventory &inv,
                                int32_t combo);
+
+// The weapon a powerup row hands out, landed in the picker's slot table
+// [orig: WeaponSlot_InitFromAvatarDef @ 0x542730 (slotTable, picker, row) — the
+//  weapon is the row's +0x2B0 byte]. A def with a `sameas` weapon the picker
+//  already holds refills that weapon's slot instead. An EMPTY target slot first
+//  takes the def's loadout_subclasses sub-variants (the entries that follow it,
+//  each slot initialized, its loaded rounds zeroed, its class pool set to its
+//  startrounds) and then the def itself; a held one keeps its slot. Either way a
+//  def with an ammo class and a clip then has its loaded rounds zeroed, its class
+//  pool SET to its startrounds and one reload drawn. `combo` is the landed slot,
+//  -1 when the weapon names no slot (retail returns null: the 0xFF byte, an
+//  unnamed def, or category 0 rank 0 with no `sameas` slot).
+struct WeaponAvatarGrant {
+    int32_t combo = -1;
+    // WeaponSlot_ReloadAmmo ran at least once: retail's entry stamps the
+    // picker's 80-tick 3P reload window, which the caller owns
+    // [orig: WeaponSlot_ReloadAmmo @ 0x54173c].
+    bool reloaded = false;
+};
+WeaponAvatarGrant weapon_inventory_init_from_avatar_def(const WeaponTable &table,
+        WeaponInventory &inv, int32_t adm_index, int32_t owner_class,
+        bool allow_sniper_scope_zoom);
+
+// The authority's pickup refusals [orig: WeaponSlot_RecalculateScore @ 0x542450;
+// it returns 0 (proceed) on a peer without authority]. The slot leg: the
+// weapon's slot (its `sameas` weapon's when that one resolves) is held and its
+// ammo score equals the slot def's startrounds — the picker already carries
+// that weapon full [@ 0x54249E..0x54253C].
+bool weapon_inventory_weapon_full(const WeaponTable &table, const WeaponInventory &inv,
+                                  int32_t adm_index);
+// The walk leg (slot -1, the `allammo` arm): every held slot's ammo score
+// equals its def's startrounds, an empty table included; a picker without an
+// item def scores every slot 0 [@ 0x54253D..0x5425A4].
+bool weapon_inventory_all_full(const WeaponTable &table, const WeaponInventory &inv,
+                               bool picker_has_item_def);
 
 // The reload transfer [orig: WeaponSlot_ReloadAmmo @ 0x541720, net-re §5.58]: refund
 // the remaining clip into the pool, then refill to clipsize clamped by the pool.

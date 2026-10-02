@@ -1,8 +1,11 @@
 #include "client_weapon_replay.h"
+#include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/joiner_role.h>
 #include <runtime/replication/client_state.h>
 #include <runtime/world/world.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/powerup.h>
 #include <algorithm>
 #include <vector>
 
@@ -136,6 +139,18 @@ void tick_replica_weapon_slots(replication::ClientState &state, world::World &wo
                 mount->primary_occupant.valid() || mount->primary_weapon_slot.heat_window_end_tick == 0 ||
                 std::find(pumped.begin(), pumped.end(), mount->handle.packed) != pumped.end()) continue;
         pump(*mount);
+    }
+}
+
+void apply_weapon_pickups(JoinerRole &role, ClientRuntime &rt, world::World &world,
+        world::LocalPlayer &lp) {
+    for (const WeaponPickupNotice &notice : rt.drain_weapon_pickups()) {
+        // Only the picker's own client acts [orig: sub_4E03D0 @0x4E03DC]
+        if (!rt.has_self_handle() || notice.picker_handle != rt.self_handle()) continue;
+        world::EntityHandle row_handle;
+        row_handle.packed = notice.powerup_handle;
+        world::powerup_weapon_grant_received(world, lp,
+                role.replica_world_entity(world, row_handle), rt.local_player_dead());
     }
 }
 } // namespace opennova::inmatch

@@ -441,6 +441,7 @@ std::vector<uint8_t> ClientRuntime::start() {
 	view_.drain_round_events();
 	view_.drain_game_events();
 	view_.drain_weapon_reloads();
+	view_.drain_weapon_pickups();
 	view_.drain_script_remote_commands();
 	view_.drain_objective_notifications();
 	view_.drain_effect_commands();

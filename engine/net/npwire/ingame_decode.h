@@ -1666,6 +1666,22 @@ struct WeaponReload {
 bool decode_weapon_reload(const uint8_t *body, size_t len,
                           WeaponReload &out, size_t &consumed);
 
+// S2C 0x35 -- a powerup's `weapon` grant: `[u16 pickerHandle][u16 powerupHandle]`
+// (4 B), reliable, to every in-match slot but the listen host (mask 0x90),
+// sent by the authority for every picker its pickup admitted. The client acts
+// only when the picker is its own live player: it lands the weapon the
+// powerup row's +0x2B0 byte names (its own copy of the row, written by its own
+// pickup) in its slot table and mounts it. This decoder takes exactly the four
+// bytes a stock host writes; retail's handler reads a short body as handle 0.
+// [orig: NapiNPClientMsg_0x035 @0x4261A0 -> sub_4E03D0 @0x4E03D0; sender
+//  Server_BroadcastWeaponOverlayUpdate @0x509FC0]
+struct WeaponPickupNotice {
+	uint16_t picker_handle = 0;
+	uint16_t powerup_handle = 0;
+};
+bool decode_weapon_pickup(const uint8_t *body, size_t len,
+                          WeaponPickupNotice &out, size_t &consumed);
+
 // C2S 0x16 -- the designated-G mounted weapon route selector. Retail's action-6
 // producer writes a bool as a little-endian i16; the authority tests the full
 // word for zero/nonzero. This guarded codec accepts exactly two bytes.
