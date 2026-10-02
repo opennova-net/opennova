@@ -38,12 +38,17 @@ struct ProjectFindingsInput {
 };
 
 // `rows`: every finding, the Problems rows the editor shows and `opennova-project validate`
-// prints, in order: the scan's, the requirements', the boot report's, the last Play's, the
+// prints, in order: the scan's, the requirements' (with the note of a mission in a project whose
+// Missions feature is off), the notes of the files the game finds by a mission's name that
+// nothing reads (ADR 0046 S14: mission.sidecar.unused), the boot report's, the last Play's, the
 // documents' (each file's own, the use checks', the asset graph's: graph/project_validation.h)
 // and the open documents' own, the document types' project checks' (documents/project_check.h,
 // in the registry's order: the menu type's render check's notes) and the last build's. The rows
 // from `gate_begin` to `gate_end` are the documents' and the open documents' own: what a build
-// gates on beside the scan and the requirements (a project check's findings never are). Each
+// gates on beside the scan and the requirements (a project check's findings never are; among the
+// range's rows an error gates as blocks_build says, graph/reference_kinds.h: when its code does,
+// FindingCodeRow::gates_build, which a missing reference's does not but where its kind's row cites
+// the game's refusal, ReferenceKindRow::gates_when_missing). Each
 // finding is copied into the rows once; the session moves them into its view.
 struct ProjectFindings {
 	std::vector<Diagnostic> rows;

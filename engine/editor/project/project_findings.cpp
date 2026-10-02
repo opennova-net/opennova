@@ -1,11 +1,15 @@
 #include <editor/project/project_findings.h>
 
 #include <iterator>
+#include <set>
 
 #include <base/gameprofile/required_resources.h>
+#include <editor/assets/asset_kind.h>
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace opennova::editor {
 
@@ -21,6 +25,36 @@ Diagnostic boot_finding(const std::string &name) {
 	Diagnostic d = make_finding(CoreFinding::PlayBootMissing, DiagnosticSeverity::Error, message);
 	d.subject = RequirementSubject{ row != nullptr ? row->role : "", row != nullptr ? row->name : name };
 	return d;
+}
+
+// The files the game finds by a mission's name alone (ADR 0046 S14, mission::sidecars) that nothing
+// reads: a script, a tile placement or a dialog bank whose mission the project does not hold, which
+// no file names (a script another runs, a tile file a terrain names) and the game opens by no
+// fixed name (game.wac, server.wac). What a mission's rename leaves behind, or an import of the
+// file without its mission: a note on the file, never a gate.
+void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<Diagnostic> &rows) {
+	// The base names of the project's missions, as every reader takes them (to the first dot: a
+	// mission "op.v2.bms" opens "op.wac").
+	std::set<std::string> missions;
+	for (const AssetEntry &entry : scan.entries)
+		if (entry.kind == AssetKind::Mission) missions.insert(normalized_logical_name(mission::mission_base_name(entry.logical_name)));
+	for (const AssetEntry &entry : scan.entries) {
+		if (entry.kind != AssetKind::Script && entry.kind != AssetKind::TileInfo && entry.kind != AssetKind::DialogBank)
+			continue;
+		if (gameprofile::gameprofile_required_resource_find(entry.logical_name.c_str()) != nullptr) continue;
+		const std::string base = mission::mission_base_name(entry.logical_name);
+		const std::string mission = base + ".bms";
+		const std::string wanted = normalized_logical_name(entry.logical_name);
+		bool by_name = false;
+		for (const mission::Sidecar &sidecar : mission::sidecars())
+			by_name = by_name || normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted;
+		if (!by_name || missions.count(normalized_logical_name(base)) || !graph.referrers_of_file(entry.relative_path).empty())
+			continue;
+		rows.push_back(make_finding(CoreFinding::MissionSidecarUnused, DiagnosticSeverity::Info,
+		                            "The game opens " + entry.logical_name + " with the mission " + mission +
+		                                    ", which the project does not hold, and no file names it: nothing reads it.",
+		                            entry.relative_path));
+	}
 }
 
 } // namespace
@@ -52,6 +86,7 @@ ProjectFindings collect_project_findings(const ProjectFindingsInput &input, cons
 	rows.insert(rows.end(), input.scan.diagnostics.begin(), input.scan.diagnostics.end());
 	rows.insert(rows.end(), input.requirements.diagnostics.begin(),
 			input.requirements.diagnostics.end());
+	sidecar_notes(input.scan, graph, rows);
 	for (const std::string &name : input.boot_missing)
 		rows.push_back(boot_finding(name));
 	rows.insert(rows.end(), input.play.begin(), input.play.end());

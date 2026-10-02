@@ -36,7 +36,8 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 	// A viewport drawn has a device, asked for whatever it shows yet: the Shell's pump makes one and
 	// attaches it, and the viewport follows its document from then on (a Main-role viewport, which no
 	// Preview target names, would otherwise never follow).
-	if (ViewportDeviceSource *devices = model ? workspace.devices() : nullptr) devices->device(path, kind_);
+	ViewportDevice *device = nullptr;
+	if (ViewportDeviceSource *devices = model ? workspace.devices() : nullptr) device = devices->device(path, kind_);
 	if (!model || model->status() != ViewportStatus::Ready) {
 		draw_empty(workspace, model, path);
 		return;
@@ -46,9 +47,11 @@ void ViewportView::draw(Workspace &workspace, const std::string &path) {
 		canvas_ = std::make_unique<ViewportCanvas>(layout.design_width, layout.design_height);
 	}
 	if (!half_) half_ = model->make_canvas();
+	// The context carries the device from the first (a toolbar's planner, the canvas's frame: a
+	// mission's ground, its area anchors and its stick read it).
 	ViewportContext context{ ViewportInput{ view, view.documents.viewports->clock(), open_at(view, path),
 									 ChangeClass::None },
-		model->size().width, model->size().height, snap, nullptr };
+		model->size().width, model->size().height, snap, device };
 	draw_ready(workspace, *model, context);
 }
 
@@ -61,15 +64,17 @@ void ViewportView::draw_empty(Workspace &, const ViewportModel *model, const std
 void ViewportView::canvas(Workspace &workspace, const ViewportModel &model, ViewportContext &context,
 		float height, const std::function<void(const CanvasInput &)> &inside) {
 	CanvasWindowRequests requests(workspace);
+	// The device before the frame is made: what the half maps of the picture (a mission's marks, its
+	// ground) reads it.
+	ViewportDeviceSource *devices = workspace.devices();
+	ViewportDevice *device = devices ? devices->device(path_, kind_) : nullptr;
+	context.device = device;
 	half_->follow(model, context, requests);
 	ViewportCanvas &ui = *canvas_;
 	if (ui.begin(height, model.state().width, model.state().height)) {
 		const CanvasInput &in = ui.input();
 		context.width = in.width;
 		context.height = in.height;
-		ViewportDeviceSource *devices = workspace.devices();
-		ViewportDevice *device = devices ? devices->device(path_, kind_) : nullptr;
-		context.device = device;
 		// A picture that fills the canvas, or a design picture fitted or scaled, is drawn at the
 		// canvas's size: its device sizes itself as it draws, and reports it at the next pump.
 		ui.picture(

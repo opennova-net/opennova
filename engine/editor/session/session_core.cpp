@@ -609,7 +609,8 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 		void request(EditorRequest each) override { requests.push_back(std::move(each)); }
 	} planned;
 	const ViewportDrag &asked = request.drag;
-	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand();
+	const bool drag = asked != ViewportDrag(), command = request.command != ViewportCommand(),
+			   drop = request.drop != ViewportDrop();
 	const std::string at = request.path.empty() ? view_.documents.active : viewport_document(request.path);
 	// The gesture a drag names, its answer's whether the drag is refused or not.
 	if (drag) outcome_.gesture = asked.gesture;
@@ -617,8 +618,8 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// A sample naming a gesture goes on with one the wire opened in the document, of the same record's
 	// handle.
 	const WireDrag *going = nullptr;
-	if (drag == command) {
-		error = "edit_in_viewport names a drag or a command, one of them.";
+	if (int(drag) + int(command) + int(drop) != 1) {
+		error = "edit_in_viewport names a drag, a command or a drop, one of them.";
 	} else if (drag && asked.gesture && documents().document_for(at)) {
 		going = wire_drag(at);
 		if (!going || going->token != asked.gesture) {
@@ -639,11 +640,13 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	float x = asked.x, y = asked.y; // the point this sample takes the handle to
 	ViewportKind shown = ViewportKind::kCount;
 	if (error.empty()) {
-		const ViewportKind named = !drag ? request.command.kind : going ? going->kind : asked.kind;
+		const ViewportKind named = drop ? request.drop.kind : !drag ? request.command.kind : going ? going->kind : asked.kind;
 		if (const ViewportModel *viewport = viewports_->resolve(view_, at, named, error)) {
 			shown = viewport->kind();
 			const ViewportContext context = viewport_context(view_, *viewport, drag ? asked.snap : 0.0f);
-			if (!drag) {
+			if (drop) {
+				viewport->drop(context, request.drop, planned, error);
+			} else if (!drag) {
 				viewport->command(context, request.command.name, request.command.ids, planned, error);
 			} else {
 				if (going && asked.by) {
@@ -780,8 +783,8 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(bool then_play, const std::string &out_dir, bool rehash) {
-	if (then_play && play().refused()) return;
+void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash) {
+	if (intent.wanted && play().refused(intent.mission)) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
 	// project the next scan lists, an archive every later build refuses: refused before anything
@@ -824,16 +827,16 @@ void SessionCore::start_build(bool then_play, const std::string &out_dir, bool r
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, then_play));
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
-	view_.activity.status = then_play ? "Building, then playing..." : "Building...";
+	view_.activity.status = intent.wanted ? "Building, then playing..." : "Building...";
 	note("Build started.");
 	show_operation();
 }
 
 OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate,
-                                           bool then_play) {
+                                           const PlayIntent &intent) {
 	view_.activity.has_build = true;
 	view_.activity.last_build = std::make_shared<const BuildReport>(result);
 	// A blocked build's report repeats the findings that blocked it, which were Problems rows
@@ -861,7 +864,7 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";
 	}
-	if (result.ok && then_play) play().start();
+	if (result.ok && intent.wanted) play().start(intent.mission);
 	touch(ViewConcern::Operation);
 	OperationOutcome outcome;
 	outcome.end = result.ok ? OperationEnd::Done : OperationEnd::Failed;
