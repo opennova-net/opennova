@@ -546,7 +546,7 @@ bool make_project(ScriptRig &rig) {
 	        editor_test::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
 	        editor_test::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n") &&
-	        editor_test::write_bytes(root + "/strings/missiontext.bin", strings) &&
+	        editor_test::write_bytes(root + "/strings/text_document.bin", strings) &&
 	        editor_test::write_text(root + "/menus/nlist.kda", repo_file("cbin/synth_nlist.kda"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	return written;

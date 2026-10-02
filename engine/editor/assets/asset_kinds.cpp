@@ -89,11 +89,6 @@ struct Kind {
 		out.row.scr = form;
 		return out;
 	}
-	constexpr Kind names_unfollowed() const {
-		Kind out = *this;
-		out.row.names_unfollowed = true;
-		return out;
-	}
 };
 
 constexpr AssetKindRow kRows[] = {
@@ -237,13 +232,12 @@ constexpr AssetKindRow kRows[] = {
 	        .runtime("particle")
 	        .names_files()
 	        .row,
-	// A RUN names another script [orig: Script_LoadAndCompileFile @ 0x4EE660], which the graph
-	// makes no edge of yet (S13 D9): an import does not follow it.
+	// Its operands' names (S13 D9), the script a RUN names [orig: Script_LoadAndCompileFile @
+	// 0x4EE660] and the waves it plays (S14), each an edge the graph reads (documents/script_type).
 	Kind(AssetKind::Script, "script", "Script", ArchiveSlot::Localres)
 	        .extensions(kScript)
 	        .edited_by(DocumentTypeId::Script)
 	        .names_files()
-	        .names_unfollowed()
 	        .folder("missions")
 	        .new_name("newscript.wac")
 	        .row,

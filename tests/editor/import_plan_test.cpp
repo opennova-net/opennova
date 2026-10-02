@@ -400,29 +400,40 @@ static int test_plan_not_followed() {
 	TEST_EXPECT(face_plan.not_followed.size() == 1 && row_named(face_plan, "head.grm"));
 	const ImportPlanRow *wave = row_named(face_plan, "boom.wav");
 	TEST_EXPECT(wave && wave->kind == AssetKind::Wave && wave->problem.empty());
+	// A script is followed whole (S14): the script its RUN names (by the name written, the kind's
+	// extension reaching the file) and the wave it plays, each found beside it; nothing of it not
+	// followed.
+	TEST_EXPECT(editor_test::write_text(art + "/m.wac", "If true(bluekills) then\r\n\twave \"boom.wav\"\r\nendif\r\nRUN other\r\n") &&
+	            editor_test::write_text(art + "/other.wac", "; the other\r\n"));
+	const ImportPlan script_plan = project.plan({{art + "/m.wac", {}}});
+	const ImportPlanRow *run = row_named(script_plan, "other.wac"), *played = row_named(script_plan, "boom.wav");
+	TEST_EXPECT(run && run->state == State::Found && run->kind == AssetKind::Script && run->needed_by.file == "m.wac" &&
+	            run->needed_by.reference == ReferenceKind::Script && run->needed_by.name == "other");
+	TEST_EXPECT(played && played->state == State::Found && played->kind == AssetKind::Wave &&
+	            played->needed_by.file == "m.wac" && played->needed_by.reference == ReferenceKind::Wave);
+	TEST_EXPECT(script_plan.rows.size() == 3 && script_plan.not_followed.empty());
 	return 0;
 }
 
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
-// file (graph_reads_file), or reads it but not the files it names (AssetKindRow::names_unfollowed).
-// Those are the kinds the hand-written list named (a script, a dialog bank, the def tables beyond
-// the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a music bank holds
-// its own audio and names no file) and the ones S13 D5 added
-// that name files (a face, a map project); a mission's .mis, which the graph does not read, where
-// its .bms is read. A script the graph reads since S13 D9 (its operands' names), but not its RUN,
-// which names another script: it stays not followed. powerup.def left the list when the catalog
-// opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def left it with
-// its extractor (S14): the HUD's fonts and textures are followed.
+// file (graph_reads_file). Those are the kinds the hand-written list named (a dialog bank, the def
+// tables beyond the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a
+// music bank holds its own audio and names no file) and the ones S13 D5 added that name files (a
+// face, a map project); a mission's .mis, which the graph does not read, where its .bms is read.
+// A script the graph reads since S13 D9 (its operands' names) and, since S14, its RUN and its
+// waves: it left the list. powerup.def left the list when the catalog opened it (S13 D10): the
+// graph reads it through the catalog's records. hudpos.def left it with its extractor (S14): the
+// HUD's fonts and textures are followed.
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::Script, AssetKind::DialogBank,
+	const std::set<AssetKind> unread = {AssetKind::DialogBank,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
 	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
 		const AssetKind kind = AssetKind(i);
 		const std::string file = kind == AssetKind::Mission ? "m.bms" : "x";
 		const AssetKindRow &row = asset_kind_row(kind);
-		const bool rule = row.names_files && (row.names_unfollowed || !graph_reads_file(kind, file));
+		const bool rule = row.names_files && !graph_reads_file(kind, file);
 		TEST_EXPECT(references_unread(kind, file) == rule);
 		if (rule != (unread.count(kind) > 0))
 			std::fprintf(stderr, "references_unread(%s) moved\n", asset_kind_token(kind));

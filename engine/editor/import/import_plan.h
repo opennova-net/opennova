@@ -158,11 +158,8 @@ struct ImportPlanRow {
 
 // Whether what a file names goes unread: its kind names files (AssetKindRow::names_files) and
 // the graph does not read the file (graph_reads_file: a kind it has no record type or
-// extractor for: a dialog bank, the def tables beyond the catalogs, the avatar table and the HUD
-// layout, a face; or a mission's .mis), or reads it but not the files it names
-// (AssetKindRow::names_unfollowed: a script, whose RUN names a script the graph makes no edge of
-// yet). An import takes such a file and lists it as not followed (a script's other references,
-// which the graph reads, followed still).
+// extractor for: a dialog bank, the def tables beyond the catalogs, the avatar table, a face; or
+// a mission's .mis). An import takes such a file and lists it as not followed.
 bool references_unread(AssetKind kind, const std::string &file);
 
 // What the walk does not follow, once per kind: references of a kind that names no file (a

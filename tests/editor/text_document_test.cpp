@@ -452,9 +452,57 @@ static int test_script_type() {
 	TEST_EXPECT(is(2, ReferenceKind::Ammo, "AT_CONTRACT", 5, 16) && references[2].fallback == "ammo_AT_CONTRACT");
 	TEST_EXPECT(is(3, ReferenceKind::Ammo, "satchel", 6, 16) && references[3].fallback == "ammo_satchel");
 	TEST_EXPECT(is(4, ReferenceKind::TextId, "MISSION_START", 7, 15) && references[4].fallback.empty());
-	// A text key's use is not one Rename everywhere rewrites (its lookup is the game's own order of
-	// tables); the others are.
-	TEST_EXPECT(!references[4].rewritable && references[0].rewritable && references[3].rewritable);
+	// A text key of a script of a mission's name reads that mission's table (its stem's .bin, else
+	// medmssn.bin) and then gametext.bin (S14): a use Rename everywhere rewrites, as the others are.
+	const std::vector<std::string> tables_after = {"MEDMSSN.BIN", "GAMETEXT.BIN"};
+	TEST_EXPECT(references[4].scope == "TEXT_DOCUMENT.BIN" && references[4].scopes_after == tables_after);
+	TEST_EXPECT(references[4].rewritable && references[0].rewritable && references[3].rewritable);
+	// game.wac runs with every mission: its key reads whichever table plays, any table here, and no
+	// rename rewrites it.
+	{
+		const auto shared = text_document("If true(bluekills) then\r\n\tssnname 1 TT_MISSION_START\r\nendif\r\n", "game.wac");
+		std::vector<TextReference> keys;
+		script_references(*shared, keys);
+		TEST_EXPECT(keys.size() == 1 && keys[0].kind == ReferenceKind::TextId && keys[0].scope.empty() &&
+		            keys[0].scopes_after.empty() && !keys[0].rewritable);
+	}
+	// The files a script names (S14): a wave by its string (past the quote), a RUN's script by the name
+	// written, the compiler's own name (to the first '.', then ".wac") its second where the written one
+	// does not reach it; each a word the device colours.
+	{
+		const auto files = text_document("If true(bluekills) then\r\n\twave \"intro.wav\"\r\n\tSSNwave 1, radio.WAV, 50\r\nendif\r\n"
+		                                 "RUN other.txt\r\nrun patrol\r\n",
+		                                 "first.wac");
+		std::vector<TextReference> named;
+		script_references(*files, named);
+		TEST_EXPECT(named.size() == 4);
+		if (named.size() != 4) return 1;
+		const auto file_at = [&](size_t i, ReferenceKind kind, const char *value, size_t line, size_t column, const char *fallback) {
+			const TextReference &r = named[i];
+			std::string written;
+			return r.kind == kind && r.value == value && r.span.line == line && r.span.column == column &&
+			       r.span.length == r.value.size() && files->span_text(r.span, written) && written == value &&
+			       r.fallback == fallback && r.rewritable;
+		};
+		TEST_EXPECT(file_at(0, ReferenceKind::Wave, "intro.wav", 2, 8, ""));
+		TEST_EXPECT(file_at(1, ReferenceKind::Wave, "radio.WAV", 3, 13, ""));
+		TEST_EXPECT(file_at(2, ReferenceKind::Script, "other.txt", 5, 5, "OTHER.wac"));
+		TEST_EXPECT(file_at(3, ReferenceKind::Script, "patrol", 6, 5, ""));
+		const opennova::wac::Program naming = compile_script(*files);
+		TEST_EXPECT(naming.file_uses.size() == 4 && naming.file_uses[0].kind == opennova::wac::FileUse::Kind::Wave &&
+		            naming.file_uses[0].name == "intro.wav" && naming.file_uses[3].kind == opennova::wac::FileUse::Kind::Run &&
+		            naming.file_uses[3].name == "PATROL.wac");
+		std::vector<TextHighlight> words;
+		script_highlights(*files, words);
+		size_t keywords = 0, commands = 0, operands = 0;
+		for (const TextHighlight &word : words) {
+			keywords += word.kind == TextHighlightKind::Keyword;
+			commands += word.kind == TextHighlightKind::Command;
+			operands += word.kind == TextHighlightKind::Operand;
+		}
+		// If, then, endif, RUN, run; true, wave, SSNwave; the two waves' tokens and the two RUNs' names.
+		TEST_EXPECT(keywords == 5 && commands == 3 && operands == 4);
+	}
 	// A declared name is a name the script gives, never one it looks up: no reference (a VAR's, a
 	// CHEAT's; each refused as a name in use, the pool answering its leg).
 	for (const char *text : {"VAR AMMO_COUNT\r\n", "CHEAT FX_GLOW\r\n"}) {
@@ -544,7 +592,8 @@ static int test_line_ends() {
 	return 0;
 }
 
-// A project holding the script, the minted particle file, an ammo table and a string table.
+// A project holding the script, the minted particle file, an ammo table and the string table of the
+// script's name (the mission text a script of that mission's name reads its keys from, S14).
 struct ScriptProject {
 	editor_test::TempProjectDir dir{"opennova_editor_text_project"};
 	editor_test::NoProcess platform;
@@ -571,7 +620,7 @@ bool make_script_project(ScriptProject &project) {
 	        editor_test::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n"
 	                                "ammo bomb\nmax_age 3\nend\n") &&
-	        editor_test::write_bytes(root + "/strings/missiontext.bin", strings);
+	        editor_test::write_bytes(root + "/strings/text_document.bin", strings);
 	editor_test::handle_to_end(project.session, request::rescan());
 	return written && project.view().findings.graph;
 }
@@ -589,9 +638,10 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(make_script_project(project));
 	const std::string script = "scripts/text_document.wac";
 	const AssetGraph &graph = project.graph();
-	// The graph reads a script's operands' names; an import still lists its RUN as not followed.
+	// The graph reads a script's operands' names, its RUN and its waves (S14): an import follows the
+	// whole of it.
 	TEST_EXPECT(graph_reads_kind(AssetKind::Script) && !graph_reads_kind(AssetKind::Text) &&
-	            references_unread(AssetKind::Script, "x.wac"));
+	            !references_unread(AssetKind::Script, "x.wac"));
 	const std::vector<const GraphEdge *> edges = graph.references_of(script);
 	TEST_EXPECT(edges.size() == 5);
 	const GraphEdge *fx = edge_at(graph, script, "3:12");
@@ -603,6 +653,9 @@ static int test_graph_and_rename() {
 	TEST_EXPECT(fx->span.line == 3 && fx->span.length == 7 && fx->rewritable && fx->record.empty());
 	TEST_EXPECT(graph.resolve(*fx) == ReferenceStatus::Present && graph.resolve(*ammo) == ReferenceStatus::Present &&
 	            graph.resolve(*fallback) == ReferenceStatus::Present && graph.resolve(*key) == ReferenceStatus::Present);
+	// The key reads the table of the script's name (the mission text), where this project defines it.
+	TEST_EXPECT(key->scope == "TEXT_DOCUMENT.BIN" && key->rewritable && graph.symbol_reached(*key) &&
+	            graph.symbol_reached(*key)->file == "strings/text_document.bin");
 	// The fallback reaches ammo_satchel: its target, and the definition's users.
 	const std::vector<const GraphSymbol *> satchel = graph.symbols_named(ReferenceKind::Ammo, "ammo_satchel");
 	TEST_EXPECT(satchel.size() == 1 && graph.symbol_reached(*fallback) == satchel.front());
@@ -669,15 +722,16 @@ static int test_graph_and_rename() {
 	            has_code(stale, "rename.partial"));
 	editor_test::handle_to_end(project.session, request::undo(script));
 	TEST_EXPECT(open->line(5) == "\tammoarea AMMO_AT_CONTRACT 8");
-	// A text key's use is not rewritten: its definition's rename is refused at the script's span.
+	// A text key's use in the script of its table's name is rewritten with its definition (S14: the
+	// graph scopes the lookup as the game makes it): the plan reaches the script's span.
 	const std::vector<const GraphSymbol *> start = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
 	const GraphEdge *key_now = edge_at(project.graph(), script, "7:15");
-	TEST_EXPECT(start.size() == 1 && key_now && !key_now->rewritable);
+	TEST_EXPECT(start.size() == 1 && key_now && key_now->rewritable);
 	if (start.empty()) return 1;
 	const SymbolRenamePlan keyed =
 	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *start.front(), "MISSION_GO");
-	TEST_EXPECT(!keyed.ok() && has_code(keyed.refusals, "rename.site") &&
-	            keyed.refusals[0].message.find("at 7:15") != std::string::npos);
+	TEST_EXPECT(keyed.ok() && keyed.sites.size() == 2 && keyed.sites[1].file == script && keyed.sites[1].span.line == 7 &&
+	            keyed.sites[1].span.column == 15 && keyed.sites[1].before == "MISSION_START" && keyed.sites[1].after == "MISSION_GO");
 	// A rename that would take over a use reaching another ammo through its fallback: bomb renamed
 	// satchel would catch the script's ammo_satchel (its lookup's first name), refused.
 	const std::vector<const GraphSymbol *> bomb = project.graph().symbols_named(ReferenceKind::Ammo, "bomb");

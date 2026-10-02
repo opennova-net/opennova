@@ -42,15 +42,20 @@ std::vector<Diagnostic> validate_script_file(const DocumentBase &document);
 // (wac::Program::catalog_lookups), but a declared name's (a VAR's, a CHEAT's, an IF's: checked as
 // new through the same legs, a name the script gives): an effect (FX:NAME, a particle effect), a
 // sound set (SS:NAME), an ammo (AMMO:NAME, then ammo_NAME [orig: WacScript_ResolveParameter @
-// 0x4F2E21..0x4F2E92]) and a text key (TT:KEY, a string id of any table, where the game reads the
-// override table, the mission's own and then gametext.bin [orig:
-// MissionText_GetStringByKeyOrGameText @ 0x51ECD0]: until the graph scopes that lookup, a key's use
-// is not one a rename rewrites).
+// 0x4F2E21..0x4F2E92]) and a text key (TT:KEY, a string id the game reads from the mission text's
+// table, then gametext.bin [orig: MissionText_GetStringByKeyOrGameText @ 0x51ECD0]: for a script of a
+// mission's name, its table (<stem>.bin, else medmssn.bin) then GAMETEXT.BIN, a use a rename
+// rewrites; for game.wac and server.wac, which run with every mission, any table, and no rename).
+// And the files it names (wac::Program::file_uses, ADR 0046 S14): a RUN's script (a Script, by the
+// name written; the compiler's own name, the token to its first '.' plus ".wac", its second name
+// where the written one does not reach it [orig: Script_LoadAndCompileFile @ 0x4EE660]) and a
+// Filename slot's wave (a Wave, the string as written [orig: Wac_PlayScriptedVoiceWave @ 0x4ED610]).
 void script_references(const TextDocument &document, std::vector<TextReference> &out);
 // The words of the WAC language in the text, each at its span, as the compiler read them
 // (wac::Program::word_uses, ADR 0046 S13 V10): its keywords, the commands of its table it emitted,
-// and the operands it looked a name up for (their whole token, the prefix with the name), in the
-// text's order; read from the same compile as the findings and the references.
+// the operands it looked a name up for (their whole token, the prefix with the name) and the files
+// it names (a RUN's, a wave's), in the text's order; read from the same compile as the findings
+// and the references.
 void script_highlights(const TextDocument &document, std::vector<TextHighlight> &out);
 
 enum class ScriptFinding {

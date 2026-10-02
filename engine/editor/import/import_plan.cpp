@@ -72,8 +72,7 @@ constexpr MissionLiteral kMissionLiterals[] = {
 } // namespace
 
 bool references_unread(AssetKind kind, const std::string &file) {
-	const AssetKindRow &row = asset_kind_row(kind);
-	return row.names_files && (row.names_unfollowed || !graph_reads_file(kind, file));
+	return asset_kind_row(kind).names_files && !graph_reads_file(kind, file);
 }
 
 bool ImportOrigin::open(Kind kind, const std::string &path, const ProjectDocument &document, std::string &error) {
@@ -895,7 +894,7 @@ private:
 		const bool again = followed_.count(node.row) > 0;
 		followed_.insert(node.row);
 		// What it names is not looked for: a file of a kind that names files the graph does not
-		// read (a terrain; a mission's .mis, of a kind it reads).
+		// read (a dialog bank; a mission's .mis, of a kind it reads).
 		if (!again && references_unread(kind, file)) note(ReferenceKind::None, kind, file);
 		if (!graph_reads_file(kind, file) || !extract(node)) return;
 		if (!again) index_symbols(node);
