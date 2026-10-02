@@ -309,6 +309,15 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			state_.spawn_success_gate = true;
 		}
 		break;
+	case s2c::DIALOG_LINE: { // the co-op dialog line (0x28)
+		// The authority's own client never plays it [orig: NapiNPClientMsg_0x028
+		// @0x425b47]; a misshapen body still plays with its defaulted fields.
+		if (authority_recipient_) break;
+		DialogLine line;
+		if (!decode_dialog_line(body.data(), body.size(), line)) ++malformed_bodies_;
+		pending_effect_commands_.push_back(DialogLineCommand{std::move(line.dialog_name), line.line});
+		break;
+	}
 	case s2c::CLAN_ROSTER: // the NovaWorld clan registry (0x6A)
 		apply_clan_roster(body);
 		break;

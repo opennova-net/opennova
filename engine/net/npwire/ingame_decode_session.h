@@ -165,6 +165,20 @@ struct ChatBroadcast {
 };
 bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out);
 
+// S2C 0x28 — one co-op dialog line the authority's dialog playback started:
+// [cstr dialog name][i16 line]. The reader takes the name to its NUL (clamped
+// at the body end) and a line that does not fit reads 0; a non-authority then
+// plays that line of the named dialog. False (the fields still filled) when
+// the body is not exactly that shape.
+// [orig: Server_SendEntityStateToAll @0x50A0D0 -> sub_5038A0 @0x5038A0 (the
+//  writer); NapiNPClientMsg_0x028 @0x425B40 — the name @0x425b67..0x425b73,
+//  the line @0x425b7a..0x425b80]
+struct DialogLine {
+	std::string dialog_name;
+	int16_t line = 0;
+};
+bool decode_dialog_line(const uint8_t *body, size_t len, DialogLine &out);
+
 // S2C 0x32 — FORMATTED GAME TEXT, the SYSTEM-ring join/leave lines:
 // `[i8 subtype][cstr text]`, subtypes 1/2 add `[i8 team]` after the NUL.
 // Every other subtype posts nothing. The client resolves the Client gametext

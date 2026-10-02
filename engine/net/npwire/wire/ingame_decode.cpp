@@ -1855,6 +1855,25 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	return c.ok && (c.p == c.end);
 }
 
+// S2C 0x28 — [orig: NapiNPClientMsg_0x028 @0x425B40].
+bool decode_dialog_line(const uint8_t *body, size_t len, DialogLine &out) {
+	out = DialogLine{};
+	const uint8_t *p = body;
+	const uint8_t *const end = body + len;
+	while (p < end && *p != 0) ++p;
+	out.dialog_name.assign(reinterpret_cast<const char *>(body),
+			static_cast<size_t>(p - body));
+	const bool terminated = p < end;
+	if (terminated) ++p;
+	if (p + 2 <= end) {
+		out.line = static_cast<int16_t>(p[0] | (p[1] << 8));
+		p += 2;
+	} else {
+		return false;
+	}
+	return terminated && p == end;
+}
+
 // S2C 0x32 formatted game text. [orig: NapiNPClientMsg_0x032 @0x428060]
 bool decode_formatted_game_text(const uint8_t *body, size_t len, FormattedGameText &out,
 		bool *clean) {

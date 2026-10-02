@@ -239,6 +239,14 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             if (!handle.valid() || handle.pool() >= world::kEntityPoolCount) continue;
             if (const world::Entity *entity = world.registry.get(handle))
                 world.doors.apply_wire_row(*entity, door->number, door->state);
+        } else if (const auto *dialog = std::get_if<replication::DialogLineCommand>(&request)) {
+            // The line rides the presentation's effect log with the local
+            // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
+            //  @0x425b88..0x425b94]
+            const world::Entity *local = world.registry.get(world.cached.local_player);
+            world.out.effects.push({"dialog_line", dialog->line,
+                    local != nullptr ? static_cast<int32_t>(local->player_class) : 0, 0, 0,
+                    dialog->dialog_name});
         } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
             // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
             //  @0x429ef5 -> g_EnvLightningTimerA]

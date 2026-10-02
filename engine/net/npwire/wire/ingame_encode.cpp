@@ -992,6 +992,14 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
 	return out;
 }
 
+std::vector<uint8_t> encode_dialog_line(const DialogLine &line) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.cstr(line.dialog_name);                    // [orig: @0x5038D1]
+	w.u16(static_cast<uint16_t>(line.line));     // [orig: @0x5038F4]
+	return out;
+}
+
 std::vector<uint8_t> encode_formatted_game_text(const FormattedGameText &text) {
 	std::vector<uint8_t> out;
 	Writer w{out};

@@ -75,10 +75,19 @@ struct LocalChatSpeaker {
 struct TipEventCommand {
     uint8_t event = 0;
 };
+// S2C 0x28: one co-op dialog line the authority's playback started. The
+// effect pass hands it to the presentation with the local player's class, the
+// locale the clip resolves by. [orig: NapiNPClientMsg_0x028 @0x425B40 ->
+// Dialog_PlayByNameAndSlot(g_LocalPlayerEntity->playerClass, name, line)
+// @0x425b94 (Dialog_PlayByNameAndSlot @0x44E3F0)]
+struct DialogLineCommand {
+    std::string dialog_name;
+    int16_t line = 0;
+};
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
         EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
-        LightningTimerCommand, DoorRowUpdate>;
+        LightningTimerCommand, DoorRowUpdate, DialogLineCommand>;
 
 class ClientReplicaPipeline {
 public:

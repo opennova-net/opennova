@@ -68,6 +68,17 @@ void broadcast_player_joined_text(std::vector<NapiNPConnection> &roster,
 void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
 		const NapiNPConnection &leaver, const world::World *world);
 
+// The co-op dialog line: when the authority's dialog playback loads line
+// `line` of dialog `dialog_name` (the entry index before it advances), S2C
+// 0x28 [cstr name][i16 line] goes reliable to every in-match slot but the
+// listen host (mask 0x90). The embedder's dialog playback reports the line.
+// [orig: Dialog_UpdatePlayback @0x44E470 — Dialog_LoadAudioClip @0x44e599 then
+//  Server_SendEntityStateToAll(dialog+4, entry) @0x44e5a5; Server_SendEntityStateToAll
+//  @0x50A0D0 — the authority @0x50A0D7, mask 0x90 @0x50A0ED, SendFiltered(0x28, 1)
+//  @0x50A115]
+void Server_BroadcastDialogLine(NapiNPServerCtx &ctx, const std::string &dialog_name,
+		int16_t line);
+
 // The nearest type-2044 location marker whose radius contains `sender` (2-D
 // distance), by the marker's spawn-order index (the marker's +0x280 word), -1
 // when none. The chat location tag and the radio call's location word share

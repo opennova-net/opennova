@@ -2060,6 +2060,26 @@ int check_S_4C_visible_players() {
 	return 0;
 }
 
+// S2C 0x28 — the co-op dialog line [cstr name][i16 line]; the reader clamps
+// the name at the body end and defaults a short line to 0.
+// [orig: sub_5038A0 @0x5038A0; NapiNPClientMsg_0x028 @0x425B40]
+int check_S_28_dialog_line() {
+	DialogLine line;
+	line.dialog_name = "dlg012";
+	line.line = 3;
+	const std::vector<uint8_t> wire = encode_dialog_line(line);
+	EXPECT(wire == std::vector<uint8_t>({'d', 'l', 'g', '0', '1', '2', 0, 3, 0}));
+	DialogLine out;
+	EXPECT(decode_dialog_line(wire.data(), wire.size(), out));
+	EXPECT(out.dialog_name == "dlg012" && out.line == 3);
+	EXPECT(!decode_dialog_line(wire.data(), 7, out));
+	EXPECT(out.dialog_name == "dlg012" && out.line == 0);
+	EXPECT(!decode_dialog_line(wire.data(), 3, out));
+	EXPECT(out.dialog_name == "dlg" && out.line == 0);
+	cover('S', 0x28);
+	return 0;
+}
+
 // S2C 0x4D — the join notice [u8 slot]. [orig: NapiNPClientMsg_HandleSpawnSlot
 // @0x4317B0; Server_OnPlayerJoin @0x51a946]
 int check_S_4D_spawn_slot_notice() {
@@ -2211,6 +2231,7 @@ int main() {
     if (check_S_21_explosion_effect()) return 1;
 	if (check_S_4C_visible_players()) return 1;
 	if (check_S_4D_spawn_slot_notice()) return 1;
+	if (check_S_28_dialog_line()) return 1;
 	if (check_emote_pair()) return 1;
 	if (check_squad_and_waypoint_legs()) return 1;
 	if (check_radio_call_request()) return 1;

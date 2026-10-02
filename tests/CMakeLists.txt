@@ -1465,6 +1465,11 @@ target_link_libraries(client_message_folds_test PRIVATE opennova_net opennova_ru
 target_include_directories(client_message_folds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_message_folds COMMAND client_message_folds_test)
 
+# D-NET-285: the co-op dialog line (S2C 0x28), engine side.
+add_executable(dialog_line_test netsim/dialog_line_test.cpp)
+target_link_libraries(dialog_line_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME dialog_line COMMAND dialog_line_test)
+
 # D-NET-282: the death screen's team change, client side.
 add_executable(team_change_client_test netsim/team_change_client_test.cpp)
 target_link_libraries(team_change_client_test PRIVATE opennova_net opennova_runtime)
