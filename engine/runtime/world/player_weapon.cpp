@@ -1180,8 +1180,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                         player_view_scope_settled(view), pose);
                 const Vec3 origin{float(pose[0])/65536.0f, float(pose[1])/65536.0f, float(pose[2])/65536.0f};
                 const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
+				// The authority arm first passes its own-slot gate, then the
+				// round validation. [orig: Entity_FireWeaponAndSendPacket
+				//  @0x42be3a ahead of Server_ClientFiredRound @0x42bf34]
 				const bool accepted = !io.is_authority ||
-						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
+						(io.authority_fire_admitted &&
+						 weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
 						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0);
 				if (accepted) {
 				// The round bearing frame IS the engine heading frame: RoundSim's

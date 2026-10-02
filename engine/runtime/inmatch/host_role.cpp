@@ -248,6 +248,25 @@ bool HostRole::send_medic_request() {
 // (the C2S drain, ONE logic tick, the 0x0A fan) through the shared owner
 // loop, the local view/weapon pumps, then the local ClientState fold.
 // [orig: Game_ProcessMainFrame @0x5263f0]
+bool HostRole::local_fire_admitted() const {
+	const mission::MissionKernel &kernel = *kernel_;
+	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The gate's session tests: the retail is_in_session fact and the
+	// is_client bit; the shooter is the local player here by construction.
+	// [orig: `cmp is_in_session` @0x42be12, `cmp is_mp_session_peer` @0x42be1e,
+	//  `cmp edi, g_LocalPlayerEntity` @0x42be26]
+	if (!kernel.world.rules.mp_session || ctx.is_mp_session_peer == 0) return true;
+	if (!kernel.world.cached.local_player.valid() || state.client_runtime == nullptr) return true;
+	// Entity_ValidatePtr: the player slot that owns the entity; none admits
+	// [orig: `cmp eax, ebx; jz` @0x42be2e].
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.link.owned_entity != kernel.world.cached.local_player) continue;
+		return Server_AcceptsPlayerFireTick(conn, state.client_runtime->current_tick(),
+				kernel.world.logic_tick, ctx.config.effective_send_holdoff_ticks());
+	}
+	return true;
+}
+
 void HostRole::run_tick(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
 	// The socketless host (the SP listen server, the headless test rigs):
@@ -315,6 +334,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// local player's slot pumps at its own pool-0 slot, the gunners around it.
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
+	kernel.local.authority_fire_admitted = local_fire_admitted();
 	kernel.world.pump_weapon_actions();
 	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();

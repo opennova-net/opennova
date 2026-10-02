@@ -665,6 +665,7 @@ void LocalPlayer::pump_local_weapon() {
 	io.view = &view;
 	io.inventory = inventory_valid ? &inventory : nullptr;
 	io.is_authority = true;
+	io.authority_fire_admitted = authority_fire_admitted;
 	w::local_weapon_pump_tick(world, weapon, io);
 	hud_map_control.weapon_command(io.map_command);
 	// The wire-facing outcome for the embedder's relay leg (the local reload

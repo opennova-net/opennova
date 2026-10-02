@@ -285,6 +285,14 @@ struct LocalWeaponPumpIO {
     PlayerViewState *view = nullptr;      // required
     WeaponInventory *inventory = nullptr; // null = no inventory installed
     bool is_authority = true;             // the joiner defers refills/rounds
+    // The authority's own-slot fire gate, decided by the embedding role: in an
+    // MP session a listen host's local shot reaches the server only while its
+    // own player slot is active against its own client tick; refused, the shot
+    // spawns no round at all. True everywhere else.
+    // [orig: Entity_FireWeaponAndSendPacket @0x42be12..0x42be44 --
+    //  PlayerSlot_IsActive(Entity_ValidatePtr(shooter), g_ClientCurrentTick)
+    //  @0x42be3a, refused -> return 0 @0x42c079]
+    bool authority_fire_admitted = true;
     uint16_t self_wire_handle = 0;        // joiner wire handle; 0 = local packed
     // Invoked only on a joiner fire: the shooter's carrier-exclusion handle
     // resolved from the decoded net state (0xFFFF = none).

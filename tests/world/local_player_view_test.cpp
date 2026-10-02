@@ -2405,6 +2405,40 @@ void test_pack_analog_axes_and_their_hysteresis() {
     CHECK(t.entity().analog_throttle == 0);
 }
 
+// The authority arm's own-slot gate: a refused local shot spawns no round
+// (no ring record, no live round); an admitted one does. [orig:
+// Entity_FireWeaponAndSendPacket @0x42be3a -> return 0 @0x42c079, ahead of
+// Server_ClientFiredRound @0x42bf34]
+void test_authority_fire_gate_refuses_the_round() {
+    for (const bool admitted : {false, true}) {
+        ScopedAimFixture f;
+        WeaponInstallData data;
+        data.name = "WPN_AIM";
+        data.clipsize = 30;
+        data.rows.resize(3);
+        std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "idle");
+        std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "fire");
+        data.rows[1].delayend = 6;
+        std::snprintf(data.rows[2].name, sizeof(data.rows[2].name), "recoil");
+        local_weapon_install(f.w, f.player.weapon, data, false, false, nullptr, f.player.view);
+        f.w.tables.weapons.entries[1].ammo_index = 1;
+        f.w.tables.ammo.entries.resize(2);
+        f.w.tables.ammo.entries[1].valid = true;
+        local_weapon_set_input(f.player.weapon, f.player.view, true, true, false);
+        LocalWeaponPumpIO io;
+        io.view = &f.player.view;
+        io.is_authority = true;
+        io.authority_fire_admitted = admitted;
+        // Off the player-class bit the server's origin-distance test passes
+        // through, leaving the own-slot gate the only refusal in play.
+        // [orig: Server_ClientFiredRound @0x50c172 (`Flags & 0x100`)]
+        f.entity().flags &= ~kEntityFlagPlayer;
+        const int before = f.w.out.rounds.count;
+        local_weapon_pump_tick(f.w, f.player.weapon, io);
+        CHECK(f.w.out.rounds.count == before + (admitted ? 1 : 0));
+    }
+}
+
 void test_scoped_aim_body_input_camera_and_fired_round() {
     ScopedAimFixture f;
     WeaponInstallData data;
@@ -2626,6 +2660,7 @@ int main() {
     test_pack_owns_the_movement_latch_and_unscope();
     test_pack_masks_movement_under_a_nomove_weapon();
     test_pack_analog_axes_and_their_hysteresis();
+    test_authority_fire_gate_refuses_the_round();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {

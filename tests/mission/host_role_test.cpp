@@ -13,6 +13,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h>
 #include <runtime/world/angle.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <base/gameprofile/game_type.h>
@@ -524,6 +525,79 @@ int main() {
 		const int32_t last = (world.out.rounds.cursor + w::RoundRing::kCapacity - 1) %
 				w::RoundRing::kCapacity;
 		CHECK(world.out.rounds.records[static_cast<size_t>(last)].shooter_handle == npc.packed);
+	}
+
+	// --- the authority-local fire gate on an MP listen host ------------------
+	// The host's own client takes its looped-back tick seed, and its own shot
+	// reaches the server only while its own slot is active against that clock:
+	// refused on the frame the seed lands (tick == floor), then admitted; a
+	// disarm opens the 3-period grace, then refuses; a zero seed parks the
+	// clock and refuses. Single player has no gate.
+	// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0;
+	//  Entity_FireWeaponAndSendPacket @0x42be12..0x42be44 -> PlayerSlot_IsActive
+	//  @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
+	{
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "fire_gate", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "fire_gate";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true; // a listen host: HostClient + its own player
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.host_owner.serve_and_play && host.client_runtime != nullptr);
+		CHECK(kernel.local.has_local_player());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr);
+		if (own != nullptr && host.client_runtime != nullptr) {
+			CHECK(own->fire_tick_mode && own->tick_seed != 0);
+			// The seed rode the loopback to the host's own client.
+			role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() != 0);
+			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() > own->fire_tick_floor);
+			CHECK(role.local_fire_admitted());
+			CHECK(kernel.local.authority_fire_admitted);
+			// The tick on the floor is refused.
+			const uint32_t floor = own->fire_tick_floor;
+			own->fire_tick_floor = host.client_runtime->current_tick();
+			CHECK(!role.local_fire_admitted());
+			own->fire_tick_floor = floor;
+			// A disarm: the grace admits, then refuses past three periods.
+			(void)inmatch::Server_DisarmPlayerTickSeed(*own, kernel.world.logic_tick);
+			CHECK(role.local_fire_admitted());
+			const uint32_t holdoff = host.host_owner.ctx.config.effective_send_holdoff_ticks();
+			kernel.world.logic_tick += 3 * holdoff;
+			CHECK(!role.local_fire_admitted());
+			role.run_tick(tick_input(0));
+			CHECK(!kernel.local.authority_fire_admitted);
+			// A re-arm admits again; the disarm's zero seed then parks the
+			// host client's clock and refuses.
+			(void)inmatch::Server_RerollPlayerTickSeed(*own);
+			own->fire_tick_floor = 1;
+			CHECK(role.local_fire_admitted());
+			host.host_loop.host_send(s2c::TICK_SEED, {0, 0, 0, 0});
+			role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() == 0);
+			CHECK(!role.local_fire_admitted());
+		}
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

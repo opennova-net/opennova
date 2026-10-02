@@ -213,6 +213,10 @@ public:
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
     void run_local_view_tick();
+    // The authority's own-slot fire gate the embedding role decides each frame
+    // ahead of the weapon walk (true outside an MP listen host).
+    // [orig: Entity_FireWeaponAndSendPacket @0x42be3a]
+    bool authority_fire_admitted = true;
     // The equipped-slot FSM pump: the local player's visit in the world's
     // weapon-action walk (World::pump_weapon_actions calls it at the local
     // player's own pool-0 slot), after run_local_view_tick.

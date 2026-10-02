@@ -88,6 +88,13 @@ public:
 
 	// The C2S drain the host's own client feeds before the server tick.
 	void drain_host_client_gameplay_requests();
+	// The authority-local fire gate for this frame's weapon walk: in an MP
+	// session, the host's own player slot must be active against its own
+	// client's tick (PlayerSlot_IsActive); a host with no slot for its player,
+	// or outside a session, admits. [orig: Entity_FireWeaponAndSendPacket
+	// @0x42be12..0x42be44 -- PlayerSlot_IsActive @0x42be3a over
+	// Entity_ValidatePtr(shooter) @0x42be0a and g_ClientCurrentTick]
+	bool local_fire_admitted() const;
 
 	bool send_medic_request() override;
 	void run_tick(const TickInput &input) override;

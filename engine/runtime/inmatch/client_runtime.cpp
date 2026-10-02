@@ -900,6 +900,15 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			while (loopback_->client_recv(datagram)) {
 				if (!apply_zone_timer_body(datagram.tag, datagram.body))
 					view_.apply(datagram.tag, datagram.body);
+				// The host's own client takes its looped-back tick seed like any
+				// client: the clock its own fire is admitted against. A short body
+				// reads 0. [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0 --
+				//  no role gate; g_ClientCurrentTick / g_LastKeepaliveTick
+				//  @0x4297f8/@0x4297fd]
+				if (datagram.tag == s2c::TICK_SEED) {
+					current_tick_ = datagram.body.size() >= 4 ? io::read_u32_le(datagram.body.data()) : 0u;
+					last_keepalive_tick_ = current_tick_;
+				}
 				// The world-state load's completion burst carries this
 				// client's first player-slot refresh: C2S 0x22 {0, 0x5CF7}
 				// then the 0x23 snapshot request. The burst's other members

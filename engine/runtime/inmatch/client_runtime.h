@@ -665,6 +665,9 @@ public:
 		return authoritative_ammo_pools_;
 	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
+	// The network-role clock [orig: g_ClientCurrentTick @0xA8229C]: 0 until a
+	// tick seed lands, then one tick per client frame.
+	uint32_t current_tick() const { return current_tick_; }
 	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
 	// Whether the next Client_ProcessNetworkFrame opens its send block: the
 	// receive pump decrements a nonzero countdown before the gate tests it for
