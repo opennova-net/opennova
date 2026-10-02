@@ -211,12 +211,13 @@ constexpr AssetKindRow kRows[] = {
 	        .names_files()
 	        .folder("menus")
 	        .row,
-	// Streamed by path, never through the archives (ArchiveSlot).
+	// Streamed by path, never through the archives (ArchiveSlot). It names no file: its entries are
+	// its own chunks of audio (formats/sbf).
 	Kind(AssetKind::MusicBank, "music_bank", "Music bank", ArchiveSlot::Loose)
 	        .runtime("sbf")
-	        .names_files()
 	        .row,
-	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves.
+	// The sound sets, read by SoundBank_OpenFile (formats/lwf), their singles naming the waves
+	// (the graph's extract_sound_bank).
 	Kind(AssetKind::SoundBank, "sound_bank", "Sound bank", ArchiveSlot::Resource)
 	        .runtime("sound")
 	        .names_files()

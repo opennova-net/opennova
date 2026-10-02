@@ -48,6 +48,13 @@ std::vector<std::string> font_files(const std::string &name, int32_t, const Exis
 	return one(menu::menu_font_file(name));
 }
 
+// The file's name of the path a sound bank's single holds: an archive holds names, no folders (the
+// shell's sound bank reads the same name, audio/sound_bank.cpp).
+std::vector<std::string> wave_files(const std::string &name, int32_t, const Exists &) {
+	const size_t slash = name.find_last_of("/\\");
+	return one(slash == std::string::npos ? name : name.substr(slash + 1));
+}
+
 // The extensions a loader appends to a name, tried after the name as written.
 constexpr const char *kModel[] = {".3di", nullptr};
 constexpr const char *kAnimationMap[] = {".adm", nullptr};
@@ -113,6 +120,10 @@ std::string window_missing(const AssetGraph &graph, const GraphEdge &edge) {
 
 std::string bank_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which the project does not have: the game plays no sound for it.";
+}
+
+std::string wave_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game plays nothing for it.";
 }
 
 std::string credits_missing(const AssetGraph &, const GraphEdge &) {
@@ -313,6 +324,18 @@ constexpr ReferenceKindRow kRows[] = {
 	        .symbol(NameCase::NoCase)
 	        .scoped(true)
 	        .tolerated(user_point_missing)
+	        .row,
+	// A terrain's height data, opened by the name its .trn gives; a terrain with none is refused
+	// [orig: Terrain_LoadEnvironmentConfig @0x610940, the admission gate at its tail].
+	Row(ReferenceKind::TerrainData, "terrain_data", "the terrain height data", "terrain height data")
+	        .loads(AssetKind::TerrainPolyData, nullptr)
+	        .row,
+	// A sound bank's single holds its wave's file name in a 256-byte slot the load patches in [orig:
+	// SoundBank_LoadTriggerSets @0x75c370, the string pool @0x75c688; docs/audio/lwf-dbf-sound-re.md],
+	// read from the archives by that name (wave_files); a wave the files lack plays nothing.
+	Row(ReferenceKind::Wave, "wave", "the wave", "wave")
+	        .loads(AssetKind::Wave, nullptr, wave_files)
+	        .tolerated(wave_missing)
 	        .row,
 	// A powerup row by name, the first row of the name [orig: PowerUpDef_FindByName @0x442660, stricmp
 	// over the rows in order]; an item whose powerupdef names none is destroyed as the mission starts

@@ -37,6 +37,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
@@ -321,11 +322,21 @@ static int test_plan_cycle_and_cap() {
 	return 0;
 }
 
+// A terrain the game admits (load_trn's gate: a colour map, a detail map, height data, a sector
+// grid of a power of two), its files named from `stem`, with one foliage block.
+static std::string terrain_text(const std::string &stem) {
+	return "terrain_name \"" + stem + "\"\r\npolytrn_colormap " + stem + "_c.tga\r\npolytrn_detailmap det.tga\r\n"
+	       "polytrn_polydata " + stem + ".cpt\r\npolytrn_sectorcount 1\r\npolytrn_sectors 1\r\n"
+	       "foliage\r\n  graphic palm\r\nend\r\n";
+}
+
 // What the walk does not follow: a def's sound (an unchecked kind), listed with where it was met
 // first; a menu's SCREEN target its own menu defines is followed to nothing (S14: neither not
-// followed nor undefined); a terrain a mission names found and taken, its own references not read
-// (listed once by kind); a mission's .mis taken, what it names not looked for (the graph reads the
-// .bms alone), listed by its kind, and no unreadable file.
+// followed nor undefined); a terrain a mission names found, taken and read (S14): its height data
+// and its colour map found beside it, the detail map and the foliage model the folder lacks not
+// found; the mission's dialog bank, a kind the graph does not read, listed once by its kind; a
+// mission's .mis taken, what it names not looked for (the graph reads the .bms alone), listed by
+// its kind, and no unreadable file.
 static int test_plan_not_followed() {
 	Project project("opennova_editor_plan_not_followed");
 	const std::string art = project.dir.file("art");
@@ -338,15 +349,27 @@ static int test_plan_not_followed() {
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
 		TEST_EXPECT(editor_test::write_bytes(art + "/m.bms", bytes));
 	}
-	TEST_EXPECT(editor_test::write_text(art + "/island.trn", "trn"));
+	TEST_EXPECT(editor_test::write_text(art + "/island.trn", terrain_text("island")) &&
+	            editor_test::write_text(art + "/island.cpt", "cpt") && editor_test::write_text(art + "/island_c.tga", "tga") &&
+	            editor_test::write_text(art + "/m.dbf", "dbf"));
 	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", go_to("a.mnu", "A")))));
 	TEST_EXPECT(editor_test::write_text(art + "/items.def", "begin \"Boom\"\nid 100100\ntype building\nsounddeath boom\nend\n"));
 	const ImportPlan plan = project.plan({{art + "/m.bms", {}}, {art + "/a.mnu", {}}, {art + "/items.def", {}}});
 	const ImportPlanRow *terrain = row_named(plan, "island.trn");
 	TEST_EXPECT(terrain && terrain->state == State::Found && terrain->kind == AssetKind::Terrain &&
 	            terrain->needed_by.file == "m.bms" && terrain->needed_by.reference == ReferenceKind::Terrain);
-	const ImportNotFollowed *trn = not_followed(plan, ReferenceKind::None, AssetKind::Terrain);
-	TEST_EXPECT(trn && trn->count == 1 && trn->first == "island.trn");
+	const ImportPlanRow *heights = row_named(plan, "island.cpt"), *colour = row_named(plan, "island_c.tga");
+	TEST_EXPECT(heights && heights->state == State::Found && heights->kind == AssetKind::TerrainPolyData &&
+	            heights->needed_by.file == "island.trn" && heights->needed_by.field == "polytrn_polydata" &&
+	            heights->needed_by.reference == ReferenceKind::TerrainData);
+	TEST_EXPECT(colour && colour->state == State::Found && colour->needed_by.file == "island.trn" &&
+	            colour->needed_by.reference == ReferenceKind::Texture);
+	const ImportPlanRow *detail = row_named(plan, "det.tga"), *palm = row_named(plan, "palm");
+	TEST_EXPECT(detail && detail->state == State::NotFound && palm && palm->state == State::NotFound &&
+	            palm->kind == AssetKind::Model && palm->needed_by.record == "foliage 1");
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::Terrain));
+	const ImportNotFollowed *dialog = not_followed(plan, ReferenceKind::None, AssetKind::DialogBank);
+	TEST_EXPECT(dialog && dialog->count == 1 && dialog->first == "m.dbf");
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::MenuScreen) && plan.undefined.empty());
 	const ImportNotFollowed *sound = not_followed(plan, ReferenceKind::Sound);
 	TEST_EXPECT(sound && sound->count == 1 && sound->first == "items.def");
@@ -383,16 +406,16 @@ static int test_plan_not_followed() {
 // What an import does not follow is the kinds table's rule (S13 D5): a file's references go
 // unread when its kind names files (AssetKindRow::names_files) and the graph does not read the
 // file (graph_reads_file), or reads it but not the files it names (AssetKindRow::names_unfollowed).
-// Those are the kinds the hand-written list named (a terrain, a script, the two sound banks, a
-// dialog bank, the def tables beyond the catalogs and the avatar table) and the ones S13 D5 added
+// Those are the kinds the hand-written list named (a script, a dialog bank, the def tables beyond
+// the catalogs and the avatar table; S14 reads a terrain and a sound bank, and a music bank holds
+// its own audio and names no file) and the ones S13 D5 added
 // that name files (a face, a map project); a mission's .mis, which the graph does not read, where
 // its .bms is read. A script the graph reads since S13 D9 (its operands' names), but not its RUN,
 // which names another script: it stays not followed. powerup.def left the list when the catalog
 // opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def left it with
 // its extractor (S14): the HUD's fonts and textures are followed.
 static int test_references_unread() {
-	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
-	        AssetKind::SoundBank, AssetKind::DialogBank,
+	const std::set<AssetKind> unread = {AssetKind::Script, AssetKind::DialogBank,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
 	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
@@ -699,10 +722,27 @@ static int test_plan_steps() {
 	return 0;
 }
 
+// A sound bank of the singles given (each its name and its wave's path), with no set: what the
+// graph reads of one.
+static std::string bank_text(const std::vector<std::pair<std::string, std::string>> &singles) {
+	opennova::lwf::File bank;
+	for (const auto &[name, path] : singles) {
+		opennova::lwf::Single single;
+		single.name = name;
+		single.path = path;
+		bank.singles.push_back(single);
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!opennova::lwf::encode_lwf(bank, bytes, error)) return std::string();
+	return std::string(bytes.begin(), bytes.end());
+}
+
 // ADR 0046 S14: a mission imported from a game install with its dependencies brings its closure.
 // A fake install of the three boot archives holds m.bms (its terrain island, its environment day,
 // one item 100100), the files found by its name (m.bin, m.wac, m.pcx, m.til, m.dbf and, since the
-// .dbf exists, m.lwf; no m.pwf), the terrain, the environment naming cloud.pcx, items.def whose
+// .dbf exists, m.lwf, a bank of two waves, one the install has under the path's file name; no
+// m.pwf), the terrain with its height data and its maps, the environment naming cloud.pcx, items.def whose
 // item names the weapon M4 and the effect BOOM, weapon.def defining M4 with a round of an ammo no
 // place defines, fx.ptl defining BOOM, and a few of the game's manifest files. The plan: the
 // mission's own set each needed by the mission and its role; the file references; the symbols
@@ -746,7 +786,8 @@ static int test_plan_mission_closure() {
 	                      {{"m.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
 	                       {"m.wac", "// the mission's script\r\n"},
 	                       {"m.dbf", "dbf"},
-	                       {"m.lwf", "lwf"},
+	                       {"m.lwf", bank_text({{"LINE1", "SFX\\VOICE\\line1.wav"}, {"LINE2", "gone.wav"}})},
+	                       {"line1.wav", "RIFF"},
 	                       {"items.def", "begin \"Box\"\nid 100100\ntype building\nprimary_weapon \"M4\"\nparticledeath BOOM\nend\n"},
 	                       {"weapon.def", "weapon \"M4\"\nround_type NOWHERE\nend\n"},
 	                       {"ammo.def", "ammo AMMO_X\nend\n"},
@@ -762,7 +803,10 @@ static int test_plan_mission_closure() {
 	                       {"hud.fnt", "fnt"}}));
 	TEST_EXPECT(write_pff(install + "/language.pff", {{"m.bin", strings}, {"gametext.bin", strings}, {"medmssn.bin", strings}}));
 	TEST_EXPECT(write_pff(install + "/resource.pff",
-	                      {{"island.trn", "trn"}, {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
+	                      {{"island.trn", terrain_text("island")}, {"island.cpt", "cpt"}, {"island_c.tga", "tga"}, {"det.tga", "tga"},
+	                       {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
+	                       // Two of the fixed names a running mission opens that the manifest does not list.
+	                       {"overcast.def", "; overcast\r\n"}, {"eraindrp.tga", "tga"},
 	                       {"m.til", "til"},
 	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
 	                       // loads a file a frame named from the graphic's and never the graphic's own name.
@@ -817,6 +861,20 @@ static int test_plan_mission_closure() {
 	            stand && stand->needed_by.record == "HUDSTANCE 0" && frame && frame->needed_by.record == "StaticFrame" &&
 	            !row_named(plan, "old.tga") && !row_named(plan, "first.tga"));
 	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::HudPosDefs));
+	// The terrain's files: its height data and its two maps found, the foliage model the install
+	// lacks not found.
+	const ImportPlanRow *heights = found("island.cpt"), *colour = found("island_c.tga"), *detail = found("det.tga");
+	TEST_EXPECT(heights && heights->kind == AssetKind::TerrainPolyData && heights->needed_by.file == "island.trn" &&
+	            heights->needed_by.reference == ReferenceKind::TerrainData && colour && detail &&
+	            detail->needed_by.field == "polytrn_detailmap");
+	const ImportPlanRow *palm = row_named(plan, "palm");
+	TEST_EXPECT(palm && palm->state == State::NotFound && palm->needed_by.file == "island.trn");
+	// The dialog bank's sounds: a wave by the file name of the path its single holds, one the
+	// install lacks not found under the name the single gives.
+	const ImportPlanRow *line = found("line1.wav"), *gone = row_named(plan, "gone.wav");
+	TEST_EXPECT(line && line->kind == AssetKind::Wave && line->needed_by.file == "m.lwf" && line->needed_by.record == "LINE1" &&
+	            line->needed_by.reference == ReferenceKind::Wave && line->needed_by.name == "SFX\\VOICE\\line1.wav");
+	TEST_EXPECT(gone && gone->state == State::NotFound && gone->kind == AssetKind::Wave && gone->needed_by.record == "LINE2");
 	// The manifest: found in the install, each for the game; a Required one the install lacks not
 	// found; an optional one no row.
 	for (const char *name : {"gametext.bin", "weapon.def", "ammo.def", "main.mnu", "menu_style.mns", "medmssn.bin"}) {
@@ -842,14 +900,23 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(vmacros && vmacros->state == State::NotFound && vmacros->kind == AssetKind::Strings &&
 	            vmacros->needed_by.file == "m.bms");
 	TEST_EXPECT(!row_named(plan, "hiscore.txt") && !row_named(plan, "loadscrn.pcx"));
+	// The fixed names a running mission opens beyond the manifest: the ones the install has found,
+	// each for the game; one it lacks no row.
+	const ImportPlanRow *overcast = found("overcast.def"), *rain = found("eraindrp.tga");
+	TEST_EXPECT(overcast && overcast->needed_by.file == "m.bms" && overcast->needed_by.field == "the game, for the overcast sky" &&
+	            rain && rain->kind == AssetKind::Texture && rain->needed_by.field == "the game, for rain");
+	TEST_EXPECT(!row_named(plan, "jsnwflk.tga") && !row_named(plan, "helo1.aip"));
 	// The ammo no place defines, counted; the weapon M4 defined by the planned weapon.def is not.
 	TEST_EXPECT(plan.undefined.size() == 1 && plan.undefined[0].reference == ReferenceKind::Ammo &&
 	            plan.undefined[0].count == 1 && plan.undefined[0].first == "weapon.def");
-	// Not followed: only the kinds whose references the graph does not read (the terrain, the
-	// banks, the dialog bank), never a symbol kind.
+	// Not followed: only the kinds whose references the graph does not read (the dialog bank, the
+	// script's RUN), never a symbol kind, the terrain or a sound bank.
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		TEST_EXPECT(entry.reference == ReferenceKind::None || reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
-	TEST_EXPECT(not_followed(plan, ReferenceKind::None, AssetKind::Terrain) && !not_followed(plan, ReferenceKind::Particle) &&
+	TEST_EXPECT(not_followed(plan, ReferenceKind::None, AssetKind::DialogBank) &&
+	            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
+	            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank) &&
+	            !not_followed(plan, ReferenceKind::None, AssetKind::MusicBank) && !not_followed(plan, ReferenceKind::Particle) &&
 	            !not_followed(plan, ReferenceKind::Item) && !not_followed(plan, ReferenceKind::Weapon));
 	TEST_EXPECT(plan.file_count() >= 18 && plan.total_bytes() > mission_bytes.size());
 	// Stepped a byte at a time: the same plan.

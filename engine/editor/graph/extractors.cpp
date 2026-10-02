@@ -23,10 +23,12 @@
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def.h>
+#include <formats/lwf/lwf.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/particle/parser.h>
+#include <formats/trn/trn_io.h>
 #include <runtime/renderer/particle_atlas.h>
 
 namespace opennova::editor {
@@ -197,6 +199,53 @@ bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, 
 	return true;
 }
 
+// A terrain (.trn, ADR 0046 S14): its height data, the maps and detail textures its keys name, its
+// tile atlas and each foliage block's model [orig: Terrain_ParseConfigCallback @0x60f330]. A config
+// the game refuses (load_trn's admission gate) is one the graph does not read. Two files a terrain
+// has no edge to: the atlas's .TSD twin, optional and in no shipped game (formats/til/til_tsd.h),
+// and its tile placement, which the game finds by the mission's name (mission::sidecars).
+bool extract_terrain(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	std::istringstream input(std::string(bytes.begin(), bytes.end()));
+	TrnConfig config;
+	std::string message;
+	if (!load_trn(input, config, message)) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
+		return false;
+	}
+	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const std::string &value) {
+		if (!value.empty()) out.edges.push_back(edge_of(name, record, field, kind, value));
+	};
+	edge(std::string(), "polytrn_polydata", ReferenceKind::TerrainData, config.polydata);
+	edge(std::string(), "polytrn_colormap", ReferenceKind::Texture, config.colormap);
+	edge(std::string(), "polytrn_detailmap", ReferenceKind::Texture, config.detailmap);
+	edge(std::string(), "polytrn_detailmap_c1", ReferenceKind::Texture, config.detailmap_c1);
+	edge(std::string(), "polytrn_detailmap_c2", ReferenceKind::Texture, config.detailmap_c2);
+	edge(std::string(), "polytrn_detailmap_c3", ReferenceKind::Texture, config.detailmap_c3);
+	edge(std::string(), "polytrn_detailmap2", ReferenceKind::Texture, config.detailmap2);
+	edge(std::string(), "polytrn_detailmapdist", ReferenceKind::Texture, config.detailmapdist);
+	edge(std::string(), "polytrn_detailmapdist2", ReferenceKind::Texture, config.detailmapdist2);
+	edge(std::string(), "polytrn_detailblendmap", ReferenceKind::Texture, config.detailblendmap);
+	edge(std::string(), "polytrn_tilestrip", ReferenceKind::Texture, config.tilestrip);
+	edge(std::string(), "polytrn_charmap", ReferenceKind::Texture, config.charmap);
+	edge(std::string(), "polytrn_foliagemap", ReferenceKind::Texture, config.foliagemap);
+	for (size_t i = 0; i < config.foliage_defs.size(); ++i)
+		edge("foliage " + std::to_string(i + 1), "graphic", ReferenceKind::Model, config.foliage_defs[i].graphic);
+	return true;
+}
+
+// A sound bank (.lwf, ADR 0046 S14): the wave each of its singles names (formats/lwf).
+bool extract_sound_bank(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	lwf::File bank;
+	std::string message;
+	if (!lwf::parse_lwf_buffer(bytes.data(), bytes.size(), bank, message)) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
+		return false;
+	}
+	for (const lwf::Single &single : bank.singles)
+		if (!single.path.empty()) out.edges.push_back(edge_of(name, single.name, "wave", ReferenceKind::Wave, single.path));
+	return true;
+}
+
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
@@ -283,6 +332,8 @@ struct NativeKind {
 };
 constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::HudPosDefs, extract_hudpos},
+	{AssetKind::Terrain, extract_terrain},
+	{AssetKind::SoundBank, extract_sound_bank},
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},

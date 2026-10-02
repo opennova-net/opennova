@@ -61,6 +61,7 @@
 #include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
+#include <formats/lwf/lwf.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_mis.h>
@@ -1528,7 +1529,7 @@ static int test_reference_kind_rows() {
 		// A Record reference names its collection, and the graph finds none missing (S13 D8).
 		TEST_EXPECT(record == (*row.collection != '\0') && (!row.none || record));
 		TEST_EXPECT((row.missing_message != nullptr) == (file || (row.names_symbol() && !record)));
-		const bool tolerated = kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
+		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
 		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint;
@@ -1619,9 +1620,80 @@ static int test_reference_file_candidates() {
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "trim.tga", 3, has({"trim.dds"})) == Names({"trim.dds"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall.bmp", 0, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::SoundBank, "click.lwf", -1, none) == Names({"click.lwf"}));
+	// S14: a terrain's height data by the name as written; a sound bank's wave by the file name of
+	// the path its single holds, either separator.
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::TerrainData, "isle.cpt", -1, none) == Names({"isle.cpt"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "SFX\\MENU\\click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "sfx/menu/click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "click.wav", -1, none) == Names({"click.wav"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Wave, "sfx\\", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Weapon, "M16", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Sound, "shot", -1, none).empty());
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Model, "", -1, none).empty());
+	return 0;
+}
+
+// S14: a terrain and a sound bank through the engine's parsers. A terrain names its height data,
+// its maps, its tile atlas and each foliage block's model; a bank the wave of each single, found
+// by the file name of the path it holds. A terrain's height data the project lacks is an error
+// (the game refuses the terrain), a wave it lacks a warning (nothing plays); a terrain the game's
+// gate refuses is a file the graph does not read.
+static int test_terrain_and_bank_extractors() {
+	editor_test::TempProjectDir dir("opennova_asset_graph_terrain_bank");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Terrain"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_text(root + "/isle.trn",
+	                                    "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\npolytrn_polydata isle.cpt\r\n"
+	                                    "polytrn_tilestrip tiles.tga\r\npolytrn_charmap isle_m.pcx\r\npolytrn_sectorcount 1\r\n"
+	                                    "polytrn_sectors 1\r\nfoliage\r\n  graphic palm\r\nend\r\n"));
+	TEST_EXPECT(editor_test::write_text(root + "/isle_c.tga", "x") && editor_test::write_text(root + "/shot.wav", "RIFF"));
+	{
+		opennova::lwf::File bank;
+		for (const auto &[name, path] : {std::pair<const char *, const char *>{"SHOT", "SFX\\WEAPON\\shot.wav"}, {"GONE", "gone.wav"}}) {
+			opennova::lwf::Single single;
+			single.name = name;
+			single.path = path;
+			bank.singles.push_back(single);
+		}
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::lwf::encode_lwf(bank, bytes, error) && editor_test::write_bytes(root + "/game.lwf", bytes));
+	}
+	editor_test::handle_to_end(session, request::rescan());
+	const AssetGraph &graph = *session.view().findings.graph;
+	const GraphEdge *heights = edge_to(graph, "isle.trn", ReferenceKind::TerrainData, "isle.cpt");
+	TEST_EXPECT(heights && heights->field == "polytrn_polydata" && !heights->rewritable);
+	for (const char *map : {"isle_c.tga", "det.tga", "tiles.tga", "isle_m.pcx"})
+		TEST_EXPECT(edge_to(graph, "isle.trn", ReferenceKind::Texture, map));
+	const GraphEdge *palm = edge_to(graph, "isle.trn", ReferenceKind::Model, "palm");
+	TEST_EXPECT(palm && palm->record == "foliage 1" && palm->field == "graphic");
+	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Missing &&
+	            graph.resolve(ReferenceKind::Texture, "isle_c.tga") == ReferenceStatus::Present);
+	const GraphEdge *shot = edge_to(graph, "game.lwf", ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav");
+	TEST_EXPECT(shot && shot->record == "SHOT" && shot->field == "wave");
+	TEST_EXPECT(graph.resolve(ReferenceKind::Wave, "SFX\\WEAPON\\shot.wav") == ReferenceStatus::Present &&
+	            graph.resolve(ReferenceKind::Wave, "gone.wav") == ReferenceStatus::Missing &&
+	            !graph.referrers_of_file("shot.wav").empty());
+	const auto missing = [&session](const char *file, const char *name) {
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			if (d.code() == "reference.missing" && d.asset == file && d.message.find(name) != std::string::npos) return &d;
+		return static_cast<const Diagnostic *>(nullptr);
+	};
+	const Diagnostic *no_heights = missing("isle.trn", "isle.cpt"), *no_wave = missing("game.lwf", "gone.wav");
+	TEST_EXPECT(no_heights && no_heights->severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(no_wave && no_wave->severity == DiagnosticSeverity::Warning &&
+	            no_wave->message.find("plays nothing") != std::string::npos && !missing("game.lwf", "shot.wav"));
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
+	// The height data in: the terrain's reference resolves. A terrain with no height data named is
+	// one the game refuses: unread, a warning of the graph's.
+	TEST_EXPECT(editor_test::write_text(root + "/isle.cpt", "x") &&
+	            editor_test::write_text(root + "/bare.trn", "polytrn_colormap isle_c.tga\r\npolytrn_detailmap det.tga\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(graph.resolve(ReferenceKind::TerrainData, "isle.cpt") == ReferenceStatus::Present && !missing("isle.trn", "isle.cpt"));
+	TEST_EXPECT(count_code(session.view().findings.diagnostics, "graph.unreadable") == 1 && graph.references_of("bare.trn").empty());
 	return 0;
 }
 
@@ -3297,6 +3369,7 @@ int main(int argc, char **argv) {
 	failures += test_retail_record_references();
 	failures += test_reference_kind_rows();
 	failures += test_reference_file_candidates();
+	failures += test_terrain_and_bank_extractors();
 	failures += test_model_texture_references();
 	failures += test_rename_keeps_loader_spelling();
 	failures += test_user_point_references();

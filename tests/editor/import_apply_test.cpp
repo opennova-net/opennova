@@ -32,6 +32,7 @@
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -720,9 +721,8 @@ static int test_apply_staging_leftover() {
 // What is known without the planner: the shipped game loads this menu and its stylesheet with
 // every file they name, so the plan finds each of them (none not found, none the project cannot
 // take) and, once imported, every reference of every file imported to a file resolves; and a
-// shell menu's style variables, SCREEN and WINDOW targets and string ids name no file, and its
-// sound bank (menu.lwf) is a file whose own references are not read: exactly those five kinds
-// are not followed.
+// shell menu's style variables, SCREEN and WINDOW targets and string ids are followed to the
+// files defining them and its sound bank (menu.lwf) to its waves (S14): nothing is not followed.
 static int test_apply_retail_menu() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a retail menu imported with the files it needs)");
@@ -747,14 +747,18 @@ static int test_apply_retail_menu() {
 	}
 	TEST_EXPECT(found > 0);
 	// S14: the symbols are followed to their files (the string ids to the tables their windows
-	// name, the screens and windows to their menus, the variables to the stylesheet), so only the
-	// sound bank (a file kind whose references the graph does not read) is not followed; what no
-	// place defines is counted apart and printed.
+	// name, the screens and windows to their menus, the variables to the stylesheet) and the menu's
+	// sound bank to its waves (the graph reads a bank's singles), so nothing is not followed; what
+	// no place defines is counted apart and printed.
 	std::set<std::string> skipped;
 	for (const ImportNotFollowed &entry : plan.not_followed)
 		skipped.insert(entry.reference != ReferenceKind::None ? reference_row(entry.reference).token
 		                                                      : asset_kind_token(entry.kind));
-	TEST_EXPECT(skipped == std::set<std::string>({"sound_bank"}));
+	TEST_EXPECT(skipped.empty());
+	size_t waves = 0;
+	for (const ImportPlanRow &row : plan.rows)
+		waves += row.kind == AssetKind::Wave && normalized_logical_name(row.needed_by.file) == normalized_logical_name("menu.lwf") ? 1 : 0;
+	TEST_EXPECT(waves > 0);
 	for (const ImportNotFollowed &entry : plan.undefined)
 		std::printf("editor_import retail: %zu %s reference(s) no place defines, the first in %s\n", entry.count,
 		            reference_row(entry.reference).token, entry.first.c_str());
@@ -820,7 +824,10 @@ static int test_apply_retail_menu() {
 // The plan is the mission's closure: every file found by its name the install has, its terrain,
 // its environment, the catalogs and the game's manifest, nothing of a kind the graph reads left
 // unfollowed, no Required manifest file not found; the rows and the bytes printed (the numbers
-// the design estimated at 8,700 files and 515 MB from the archives' listing).
+// the design estimated at 8,700 files and 515 MB from the archives' listing). The smaller one is
+// then imported, checked (every file reference resolves or names what the install itself lacks;
+// the checklist is met; the only errors are the shipped files' own unresolved references) and
+// built.
 static int test_apply_retail_mission_closure() {
 	const std::string install = retail::install();
 	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (a shipped mission's closure planned)");
@@ -887,6 +894,75 @@ static int test_apply_retail_mission_closure() {
 			TEST_EXPECT(entry.reference == ReferenceKind::None ||
 			            reference_row(entry.reference).resolution == ReferenceResolution::Unchecked);
 		TEST_EXPECT(found > 100 && plan.total_bytes() > (uint64_t(100) << 20) && problems == 0);
+		// The terrain and the banks are read (S14): the height data and the waves come.
+		TEST_EXPECT(by_kind.count("terrain_polydata") && by_kind["wave"].first > 1000 &&
+		            !not_followed(plan, ReferenceKind::None, AssetKind::Terrain) &&
+		            !not_followed(plan, ReferenceKind::None, AssetKind::SoundBank));
+		if (std::string(name) != "04TR.bms") continue;
+
+		// The smaller mission's closure imported (the menu's videos and the music banks left
+		// unchecked: 236 MB a mission starts without). What the plan did not find is what the
+		// shipped game itself lacks: once imported, every reference to a file, of every file the
+		// project holds, resolves or names one of those.
+		std::set<std::string> lacking;
+		std::vector<ImportChoice> sources;
+		for (const ImportPlanRow &row : plan.rows) {
+			if (row.state == State::NotFound) lacking.insert(normalized_logical_name(row.name));
+			else if (row.selected && row.problem.empty() && row.kind != AssetKind::Video && row.kind != AssetKind::MusicBank)
+				sources.push_back(row.source);
+		}
+		const size_t planned = sources.size();
+		const auto import_started = std::chrono::steady_clock::now();
+		const ActionOutcome imported = import(project.session, sources);
+		const double import_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - import_started).count();
+		TEST_EXPECT(imported.done() && !view.dialogs.import_preview.open);
+		size_t references = 0, unresolved = 0, unplanned = 0;
+		for (const AssetEntry &entry : view.project.scan->entries)
+			for (const GraphEdge *edge : view.findings.graph->references_of(entry.relative_path)) {
+				if (reference_row(edge->kind).resolution != ReferenceResolution::File) continue;
+				++references;
+				if (view.findings.graph->resolve(*edge) == ReferenceStatus::Present) continue;
+				++unresolved;
+				if (lacking.count(normalized_logical_name(edge->value))) continue;
+				++unplanned;
+				std::printf("editor_import retail closure %s: %s: %s %s names %s, which the plan neither brought nor listed\n", name,
+				            entry.relative_path.c_str(), edge->record.c_str(), edge->field.c_str(), edge->value.c_str());
+			}
+		TEST_EXPECT(references > 1000 && unplanned == 0);
+		// With the Missions feature on, the checklist: every Required file of the three phases is in
+		// (the install has each), so "create every missing file" has none to make.
+		editor_test::set_missions(project.session, true);
+		project.session.run_operations();
+		const size_t required_missing = view.project.requirements->required_missing + view.project.requirements->required_wrong_kind;
+		for (const RequirementRow &row : view.project.requirements->rows)
+			if (row.required && row.state != RequirementState::Present)
+				std::printf("editor_import retail closure %s: the required %s is not in the project\n", name, row.name.c_str());
+		TEST_EXPECT(required_missing == 0);
+		// The findings a build gates on: each a reference the shipped game's own files leave
+		// unresolved (a name the install lacks, an effect no particle file of it defines), never a
+		// file the import left behind. They gate the build all the same (printed: the number a
+		// project holding the shipped catalogs starts with).
+		std::map<std::string, size_t> errors;
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.severity == DiagnosticSeverity::Error) ++errors[d.code()];
+		size_t gating = 0;
+		for (const auto &entry : errors) {
+			gating += entry.second;
+			std::printf("editor_import retail closure %s: %zu error(s) %s\n", name, entry.second, entry.first.c_str());
+		}
+		TEST_EXPECT(errors.size() <= 1 && (errors.empty() || errors.begin()->first == "reference.missing"));
+		// The build's plan packs it (asked with no gate finding, as the build tests ask).
+		const ProjectPaths paths = ProjectPaths::for_root(project.root());
+		const auto build_started = std::chrono::steady_clock::now();
+		const BuildReport built = run_build(plan_build(paths, *view.project.scan, *view.project.requirements, {}), project.dir.file("builds"));
+		const double build_seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - build_started).count();
+		for (const Diagnostic &d : built.diagnostics)
+			std::printf("editor_import retail closure build: %s: %s\n", d.code().c_str(), d.message.c_str());
+		TEST_EXPECT(built.ok && built.files_hashed >= planned);
+		std::printf("editor_import retail closure %s: %zu files imported in %.1f s; %zu references to files, %zu unresolved (each a "
+		            "name the install lacks); %zu error(s) gate a build; built %zu files (%.1f MB) in %.1f s\n",
+		            name, planned, import_seconds, references, unresolved, gating, built.files_hashed, built.bytes_hashed / 1e6,
+		            build_seconds);
 	}
 	return 0;
 }

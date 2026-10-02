@@ -66,6 +66,8 @@ enum class ReferenceKind {
 	ModelRegister, // a model's CTRL register by its index in the model's table (a generator's, a track's, a light's)
 	ModelFrame,    // a model's rotation frame by its MTRX row (a part animation's)
 	UserPoint,   // a model's user point by name, on the model file the scope names (an item's particle slot)
+	TerrainData, // a terrain's height data, a .cpt by the name as written (a .trn's polytrn_polydata)
+	Wave,        // a .wav by the file name of the path a sound bank's single holds
 	Powerup,        // a powerup.def row by name (an item's powerupdef)
 	MissionMarker,  // a mission's marker by its index in the file's markers (a waypoint path's stop)
 	MissionTrigger, // a mission's trigger by its index in the file's trigger table (an event's first trigger)
