@@ -347,7 +347,18 @@ std::vector<NodeAddress> Document::outermost(const std::vector<NodeAddress> &rec
 std::string Document::record_name(const NodeAddress &address) const {
 	const Node *top = row(address.row);
 	if (!top) return std::string();
-	if (!address.child) return top->name();
+	if (!address.child) {
+		// A row of a kind with no name of its own (a mission's event): its kind and its place among
+		// the rows of its kind.
+		const std::string name = top->name();
+		if (!name.empty()) return name;
+		size_t place = 1;
+		for (const auto &other : rows_) {
+			if (other.get() == top) break;
+			place += other->kind == top->kind;
+		}
+		return std::string(kind_label(top->kind)) + " " + std::to_string(place);
+	}
 	Placement at;
 	if (!placement(address, at)) return std::string();
 	Value name;

@@ -40,6 +40,7 @@ enum class DocumentTypeId {
 	Model,
 	Animation,
 	AnimationMap,
+	Mission, // a .bms: the mission file's records (ADR 0046 S14)
 	// The text documents (ADR 0046 S13 D9): one TextDocument class, a type per behaviour.
 	Script,      // a .wac: the WAC compiler's findings, its operands' names as references
 	MusicScript, // a music script's SCR0 bytecode, held as its MUS text

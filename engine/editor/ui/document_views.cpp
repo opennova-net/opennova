@@ -49,6 +49,9 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A mission's rows as a tree (its events holding their triggers and actions) until the mission's
+	// Main viewport takes the tab (ADR 0046 S14, the view lane's row).
+	{DocumentTypeId::Mission, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},

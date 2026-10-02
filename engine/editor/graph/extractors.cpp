@@ -6,7 +6,7 @@
 // ACTIONs find it by), and the record sets of the collections a Record reference names (a
 // model's CTRL registers and MTRX rows, by their index); a text type reads the names its text
 // makes, each at its span (a script's operands, S13 D9); the native kinds (an environment, the
-// avatar table, a particle file, a mission) read their parsed structs.
+// avatar table, a particle file) read their parsed structs.
 #include <editor/graph/asset_graph.h>
 
 #include <algorithm>
@@ -25,8 +25,6 @@
 #include <formats/def/def.h>
 #include <formats/lwf/lwf.h>
 #include <formats/env/env.h>
-#include <formats/mission/bms.h>
-#include <formats/mission/bms_edit.h>
 #include <formats/particle/parser.h>
 #include <formats/trn/trn_io.h>
 #include <runtime/renderer/particle_atlas.h>
@@ -299,30 +297,6 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 	return true;
 }
 
-bool extract_mission(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
-	bms::File file;
-	std::string message;
-	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {
-		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, message, name);
-		return false;
-	}
-	if (!file.get_terrain().empty())
-		out.edges.push_back(edge_of(name, std::string(), "terrain", ReferenceKind::Terrain, file.get_terrain()));
-	if (!file.get_environment().empty())
-		out.edges.push_back(edge_of(name, std::string(), "environment", ReferenceKind::Environment, file.get_environment()));
-	struct Pool { const char *label; const std::vector<bms::Entity> *entities; };
-	const Pool pools[] = {{"item", &file.items}, {"building", &file.buildings}, {"marker", &file.markers}, {"organic", &file.organics}};
-	for (const Pool &pool : pools) {
-		for (size_t i = 0; i < pool.entities->size(); ++i) {
-			const int id = mission::entity_item_id((*pool.entities)[i]);
-			if (id <= 0) continue;
-			out.edges.push_back(edge_of(name, std::string(pool.label) + "[" + std::to_string(i) + "]", "item_id",
-			                            ReferenceKind::Item, std::to_string(id)));
-		}
-	}
-	return true;
-}
-
 // The kinds the graph reads through the engine's own parser, not a document type.
 using NativeExtractor = bool (*)(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out,
                                  Diagnostic &error);
@@ -337,7 +311,6 @@ constexpr NativeKind kNativeKinds[] = {
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},
-	{AssetKind::Mission, extract_mission},
 };
 
 NativeExtractor native_extractor(AssetKind kind) {
@@ -443,10 +416,9 @@ bool graph_reads_kind(AssetKind kind) {
 }
 
 bool graph_reads_file(AssetKind kind, const std::string &name) {
-	// A .mis is a mission too, the mission editors' text form (docs/mission/mis-format-re.md),
-	// which no BMS parse reads.
-	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms"))
-		return false;
+	// A file its kind's type does not read (a mission's text form, document_reads_file) gives the
+	// graph nothing.
+	if (is_editable_kind(kind) && !document_reads_file(kind, name)) return false;
 	return graph_reads_kind(kind);
 }
 

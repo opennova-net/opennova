@@ -373,8 +373,8 @@ static int test_native_extractors() {
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
 		TEST_EXPECT(editor_test::write_bytes(root + "/test.bms", bytes));
 		// The same mission in the mission editors' text form (S13 PR0): a mission to the scan,
-		// which the graph does not read (the mission document will), so it is no finding and
-		// names nothing.
+		// which neither the graph nor the mission type reads (document_reads_file), so it is no
+		// finding and names nothing.
 		std::string text;
 		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
 		TEST_EXPECT(editor_test::write_text(root + "/test.mis", text));
@@ -399,8 +399,10 @@ static int test_native_extractors() {
 	TEST_EXPECT(graph.resolve(ReferenceKind::Particle, "boom") == ReferenceStatus::Present);
 	const GraphEdge *puff = edge_to(graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && puff->record == "puff" && puff->field == "graphic1");
+	// The mission's references are its document's fields (S14): rewritable, on its mission row.
 	const GraphEdge *terrain = edge_to(graph, "test.bms", ReferenceKind::Terrain, "island");
-	TEST_EXPECT(terrain && graph.resolve(ReferenceKind::Terrain, "island") == ReferenceStatus::Missing);
+	TEST_EXPECT(terrain && terrain->rewritable && terrain->field == "terrain" &&
+			graph.resolve(ReferenceKind::Terrain, "island") == ReferenceStatus::Missing);
 	TEST_EXPECT(edge_to(graph, "test.bms", ReferenceKind::Environment, "day"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Environment, "day") == ReferenceStatus::Present);
 	TEST_EXPECT(graph.references_of("test.mis").empty());
@@ -424,8 +426,9 @@ static int test_native_extractors() {
 			count_code(session.view().findings.diagnostics, "graph.unreadable") == 0);
 
 	// A native file the graph cannot read is a warning, its references unchecked, kept
-	// while the file is unchanged; a document type's file that does not load is its
-	// validator's error, not the graph's.
+	// while the file is unchanged; a document type's file that does not load (a mission, a model,
+	// a menu) is its validator's error, not the graph's.
+	TEST_EXPECT(editor_test::write_text(root + "/broken.ptl", "[effectdef]\n{\n\tid = OPEN;\n"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.bms", "not a mission"));
 	TEST_EXPECT(editor_test::write_text(root + "/broken.3di", "not a model"));
 	TEST_EXPECT(editor_test::write_bytes(root + "/broken.mnu", {0xFF, 0xFE, 0x41}));
@@ -437,8 +440,12 @@ static int test_native_extractors() {
 			n += d.code() == "graph.unreadable" && d.asset == asset && d.severity == DiagnosticSeverity::Warning ? 1 : 0;
 		return n;
 	};
-	TEST_EXPECT(unreadable("broken.bms") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
-	TEST_EXPECT(graph.stats().files_failed == 3);
+	TEST_EXPECT(unreadable("broken.ptl") == 1 && count_code(diagnostics, "graph.unreadable") == 1);
+	TEST_EXPECT(graph.stats().files_failed == 4);
+	bool mission_error = false;
+	for (const Diagnostic &d : diagnostics)
+		mission_error = mission_error || (d.asset == "broken.bms" && d.severity == DiagnosticSeverity::Error);
+	TEST_EXPECT(mission_error);
 	bool menu_error = false;
 	for (const Diagnostic &d : diagnostics)
 		menu_error = menu_error || (d.asset == "broken.mnu" && d.severity == DiagnosticSeverity::Error);
@@ -448,7 +455,8 @@ static int test_native_extractors() {
 		model_error = model_error || (d.asset == "broken.3di" && d.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(model_error);
 	editor_test::handle_to_end(session, request::rescan());
-	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.bms") == 1);
+	TEST_EXPECT(graph.stats().files_failed == 0 && unreadable("broken.ptl") == 1);
+	fs::remove(fs::path(root) / "broken.ptl");
 	fs::remove(fs::path(root) / "broken.bms");
 	fs::remove(fs::path(root) / "broken.3di");
 	editor_test::handle_to_end(session, request::rescan());
@@ -1532,7 +1540,8 @@ static int test_reference_kind_rows() {
 		const bool tolerated = kind == ReferenceKind::Wave || kind == ReferenceKind::StyleVar || kind == ReferenceKind::TextId ||
 		                       kind == ReferenceKind::SoundBank || kind == ReferenceKind::Credits ||
 		                       kind == ReferenceKind::MenuScreen || kind == ReferenceKind::MenuWindow ||
-		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint;
+		                       kind == ReferenceKind::Animation || kind == ReferenceKind::UserPoint ||
+		                       kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
 		TEST_EXPECT(row.severity_when_missing == (tolerated ? DiagnosticSeverity::Warning : DiagnosticSeverity::Error));
 	}
 	ReferenceKind kind = ReferenceKind::None;
@@ -2561,7 +2570,7 @@ static int test_incremental_equals_fresh() {
 		TEST_EXPECT(step("a string table become a raw table", true));
 	}
 	// A mission that reads (an item the project has and one it lacks), then does not: its edges
-	// gone and a finding of the graph's in their place, gone with the file.
+	// gone (the finding is its type's validation's, S14, not the graph's), then the file.
 	{
 		opennova::bms::File mission;
 		opennova::mission::make_default(mission);
@@ -2575,7 +2584,8 @@ static int test_incremental_equals_fresh() {
 	TEST_EXPECT(step("a mission placing two items", true));
 	TEST_EXPECT(rewrite(root + "/missions/broken.bms", "not a mission"));
 	TEST_EXPECT(step("the mission no longer reads", true));
-	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 1);
+	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0 &&
+			graph.references_of("missions/broken.bms").empty());
 	fs::remove(root + "/missions/broken.bms");
 	TEST_EXPECT(step("the mission gone", true));
 	TEST_EXPECT(count_code(graph.diagnostics(), "graph.unreadable") == 0);

@@ -70,8 +70,11 @@ enum class ReferenceKind {
 	Wave,        // a .wav by the file name of the path a sound bank's single holds
 	Powerup,        // a powerup.def row by name (an item's powerupdef)
 	MissionMarker,  // a mission's marker by its index in the file's markers (a waypoint path's stop)
-	MissionTrigger, // a mission's trigger by its index in the file's trigger table (an event's first trigger)
-	MissionAction,  // a mission's action by its index in the file's action table (an event's first action)
+	MissionEvent,   // a mission's event by its index in the file's event table (an Event trigger's, a ResetEvent action's)
+	MissionGroup,   // a mission's group by its index in the file's 64 (an entity's, a parameter's), 0 none
+	MissionPath,    // a mission's waypoint path by its number among the file's 128, 0 none and 123..127 commands
+	MissionEntity,  // a mission's entity by its SSN, in the mission file the scope names (a parameter's)
+	MissionZone,    // a mission's area trigger by its zone id, in the mission file the scope names (a parameter's)
 };
 
 // Whether the game reads a field on a particular record (Document::field_on). Ignored is

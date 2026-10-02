@@ -80,6 +80,10 @@ const DocumentType *document_type(DocumentTypeId id);
 const DocumentType *registered_document_type(DocumentTypeId id);
 const DocumentType *document_type_for(AssetKind kind);
 bool is_editable_kind(AssetKind kind);
+// Whether the type of a file's kind reads the file itself: every file of an editable kind but a
+// mission's text form (a .mis, a mission by its kind until it has one of its own), which the mission
+// type's parse does not read; what validates a file or extracts its references asks this.
+bool document_reads_file(AssetKind kind, const std::string &name);
 // What the documents a type makes hold: records (DocumentBase::as_records), a text
 // (DocumentBase::as_text, S13 D9), or content of another kind, which the graph's extraction, the
 // validation and the rename read nothing of until it has hooks of its own (a test's blob; a raster

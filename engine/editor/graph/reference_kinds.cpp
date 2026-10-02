@@ -142,6 +142,21 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 	       " does not have among its first 16 user points: the effect attaches to none.";
 }
 
+// The lookups find no record of the SSN: a condition on it reads as its type does for no entity (a
+// SingleDestroyed TRUE), an action on it does nothing [orig: EventTrigger_EvaluateCondition
+// @0x453620; docs/mission/bms-event-runtime-re.md 7.4].
+std::string entity_missing(const AssetGraph &, const GraphEdge &) {
+	return ", an SSN no entity of the mission has: the game's lookups find no record for it.";
+}
+
+// The load neuters a trigger naming a zone the file lacks, which then reads false (a negated one
+// true), and zeroes an action naming one [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
+// EventTrigger_ResolveZoneActionRefs @0x453100].
+std::string zone_missing(const AssetGraph &, const GraphEdge &) {
+	return ", a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
+	       "action naming it do nothing.";
+}
+
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
 
 // A part animation's frame byte (the field holds 0 to 255) names no MTRX row at 0 and at 128 to
@@ -150,6 +165,16 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 // (threedi_panm_frame_row, the pose's rule; whether a row turns through a frame at all is its
 // field's use, ModelDocument's). Any value past the byte names none too.
 bool frame_none(int64_t value) { return value <= 0 || value > 127; }
+
+// A mission's group 0 names none: every witnessed consumer exits or reads false for it [orig:
+// Entity_KillAllByNetId @0x43C8F2, Entity_IsTeamInTriggerBounds @0x43c730, Entity_HandleAlertCommand
+// @0x43CF10, Entity_TeleportAllByNetId @0x43D5D0].
+bool group_none(int64_t value) { return value == 0; }
+
+// A waypoint list's number names a path from 1 to 122; 0 is none and 123 to 127 are commands (go to an
+// SSN, a group, the player) [orig editor: dfx2med Med_ParamWaypointList @0x449c60;
+// docs/world/world-wac-ai-re.md section 11].
+bool path_none(int64_t value) { return value == 0 || (value >= 123 && value <= 127); }
 
 // --- the table -------------------------------------------------------------------------------
 
@@ -347,10 +372,29 @@ constexpr ReferenceKindRow kRows[] = {
 	// runtime reads unbounded: past them it reads the pool's zeroed entry [orig: Pool_GetEntryUnchecked
 	// @0x441FC0, Pool_Clear @0x442060].
 	Row(ReferenceKind::MissionMarker, "mission_marker", "the marker", "marker").record("marker").row,
-	// An event's run of triggers (of actions) starts at the record of its mission's table at that index,
-	// which the loader fixes up into a pointer [orig: EventTrigger_LoadAllData @0x453eb0].
-	Row(ReferenceKind::MissionTrigger, "mission_trigger", "the trigger", "trigger").record("trigger").row,
-	Row(ReferenceKind::MissionAction, "mission_action", "the action", "action").record("action").row,
+	// An Event trigger's and a ResetEvent action's first parameter names an event by its index in the
+	// event table, read with no bound [orig: EventTrigger_EvaluateCondition @0x453620 main type 3,
+	// EventAction_Dispatch @0x4542e0 case 34].
+	Row(ReferenceKind::MissionEvent, "mission_event", "the event", "event").record("event").row,
+	// A group by its index in the file's 64, a path by its number among its 128: fixed tables, which no
+	// edit renumbers.
+	Row(ReferenceKind::MissionGroup, "mission_group", "the group", "group").record("group", group_none).row,
+	Row(ReferenceKind::MissionPath, "mission_path", "the waypoint path", "waypoint path")
+	        .record("waypoint_path", path_none)
+	        .row,
+	// An entity by its SSN and an area trigger by its zone id, each found in its own mission by the id
+	// its record carries, never by an index [orig: EntityPool_FindByNetId @0x4f0a20;
+	// EventTrigger_ResolveZoneTriggerRefs @0x453000]. The game tolerates either missing.
+	Row(ReferenceKind::MissionEntity, "mission_entity", "the entity", "entity")
+	        .symbol(NameCase::Exact)
+	        .scoped(true)
+	        .tolerated(entity_missing)
+	        .row,
+	Row(ReferenceKind::MissionZone, "mission_zone", "the zone", "zone")
+	        .symbol(NameCase::Exact)
+	        .scoped(true)
+	        .tolerated(zone_missing)
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {

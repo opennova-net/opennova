@@ -1,0 +1,725 @@
+#include "mission_document.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <set>
+#include <string>
+#include <utility>
+
+#include <base/io/strutil.h>
+#include <editor/model/diagnostic.h>
+#include <editor/model/staged_rows.h>
+#include <editor/project/project_files.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
+#include <formats/mission/mission_params.h>
+#include <runtime/mission/mission_sidecars.h>
+
+namespace opennova::editor {
+
+using namespace mission;
+
+namespace {
+
+using K = MissionKind;
+constexpr NodeKind k(K kind) { return node_kind(kind); }
+
+// The pool an entity kind's records are in (bms_edit's EntityKind).
+EntityKind pool_of(NodeKind kind) {
+	switch (static_cast<K>(kind)) {
+	case K::Building: return EntityKind::Building;
+	case K::Marker: return EntityKind::Marker;
+	case K::Organic: return EntityKind::Organic;
+	default: return EntityKind::Item;
+	}
+}
+
+// The order the game's lookups scan the pools in: organics, items, buildings, markers [orig:
+// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0: pools 0, 1, 2, 3].
+int lookup_order(NodeKind kind) {
+	switch (static_cast<K>(kind)) {
+	case K::Organic: return 0;
+	case K::Item: return 1;
+	case K::Building: return 2;
+	case K::Marker: return 3;
+	default: return 4;
+	}
+}
+
+// The SSN a parameter holds for the player [orig: 04TR's watchdog SingleIsWithinArea(10000, zone 6),
+// docs/mission/bms-event-runtime-re.md 7.3]: no record of the file carries it (where the engine gives
+// the player that SSN is not in the records read), so it names none of them.
+constexpr int64_t kPlayerSsn = 10000;
+
+// The waypoint list's commands [orig editor: dfx2med Med_ParamWaypointList @0x449c60 names them;
+// docs/world/world-wac-ai-re.md section 11].
+const char *path_command_name(int number) {
+	switch (number) {
+	case 123: return "Goto SSN (not driver, gunner)";
+	case 124: return "Goto SSN (not driver)";
+	case 125: return "Goto SSN (any)";
+	case 126: return "Goto group";
+	case 127: return "Goto player";
+	default: return nullptr;
+	}
+}
+
+// The SSN a new or duplicated entity takes beside the rows as a batch has left them: one past the
+// largest any entity row holds (bms_edit's next_entity_ssn, over the rows).
+int next_ssn_over(const std::vector<std::shared_ptr<const Node>> &rows) {
+	int largest = 0;
+	for (const auto &row : rows)
+		if (is_entity_kind(row->kind)) largest = std::max(largest, static_cast<const EntityRow &>(*row).native.id);
+	return largest + 1;
+}
+
+// The lowest zone id in 1..99 no area trigger row holds [orig editor: dfx2med
+// Med_AreaTriggerDialogProc @0x40f400 lists zones 1..99]; 0 with none free.
+int free_zone_id(const std::vector<std::shared_ptr<const Node>> &rows) {
+	bool taken[100] = {};
+	for (const auto &row : rows)
+		if (row->kind == k(K::Area)) {
+			const int32_t id = static_cast<const AreaRow &>(*row).native.id;
+			if (id >= 1 && id <= 99) taken[id] = true;
+		}
+	for (int id = 1; id <= 99; ++id)
+		if (!taken[id]) return id;
+	return 0;
+}
+
+// A parameter's slot (0 for param1 .. 3 for param4), -1 for another field.
+int param_slot(const std::string &id) {
+	return id.size() == 6 && id.compare(0, 5, "param") == 0 && id[5] >= '1' && id[5] <= '4' ? id[5] - '1' : -1;
+}
+
+std::vector<FieldChoice> choices_of(const MissionChoices &rows) {
+	std::vector<FieldChoice> out;
+	out.reserve(rows.count);
+	for (size_t i = 0; i < rows.count; ++i) out.push_back({rows.rows[i].name, rows.rows[i].value, ""});
+	return out;
+}
+
+// A row's index among the rows of its kind (the file's order, which a Record reference's index counts).
+size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const Node *row) {
+	size_t index = 0;
+	for (const auto &other : rows) {
+		if (other.get() == row) return index;
+		if (other->kind == row->kind) ++index;
+	}
+	return SIZE_MAX;
+}
+
+// The sections of a written mission in the loader's order [orig: Mission_LoadBMSFile @0x40f7b6], as
+// the bytes read lay them out (the two chunks by the lengths the file's header holds, bytes 578 and
+// 582, which the parse derives again from the records it kept; the tables by the records parsed):
+// the first whose bytes differ between the bytes read and the writer's (the header's count and
+// chunk length words apart, which the chunks' own difference explains); "" for none.
+std::string first_differing_section(const bms::File &file, const std::vector<uint8_t> &a, const std::vector<uint8_t> &b) {
+	struct Section {
+		const char *name;
+		size_t size;
+	};
+	const auto word = [&a](size_t at) { return at + 1 < a.size() ? size_t(a[at]) | (size_t(a[at + 1]) << 8) : size_t(0); };
+	const Section sections[] = {
+		{"header", bms::kHeaderSize},
+		{"loadout chunk", word(578)},
+		{"availability chunk", word(582)},
+		{"items", file.items.size() * bms::kEntitySize},
+		{"buildings", file.buildings.size() * bms::kEntitySize},
+		{"markers", file.markers.size() * bms::kEntitySize},
+		{"organics", file.organics.size() * bms::kEntitySize},
+		{"waypoint paths", size_t(bms::kWaypointRecordCount) * bms::kWaypointRecordSize},
+		{"groups", size_t(bms::kGroupRecordCount) * bms::kGroupRecordSize},
+		{"layers", size_t(bms::kLayerRecordCount) * bms::kLayerRecordSize},
+		{"area triggers", file.area_triggers.size() * bms::kAreaTriggerSize},
+		{"event counts", 12},
+		{"events", file.events.size() * bms::kEventSize},
+		{"triggers", file.triggers.size() * bms::kTriggerSize},
+		{"actions", file.actions.size() * bms::kActionSize},
+		{"bounding box count", 4},
+		{"bounding boxes", file.bounding_boxes.size() * bms::kBoundingBoxSize},
+	};
+	// The header's words the chunks' and the tables' sizes decide (its count and chunk lengths, bytes
+	// 576..579 and 582..583: bms.cpp's write).
+	const auto derived = [](size_t offset) { return (offset >= 576 && offset < 580) || (offset >= 582 && offset < 584); };
+	size_t at = 0;
+	for (const Section &section : sections) {
+		if (at + section.size > a.size() || at + section.size > b.size()) return section.name;
+		for (size_t i = 0; i < section.size; ++i)
+			if (a[at + i] != b[at + i] && !(at == 0 && derived(i))) return section.name;
+		at += section.size;
+	}
+	return a.size() == b.size() ? std::string() : std::string("length");
+}
+
+} // namespace
+
+// --- the rows ----------------------------------------------------------------------------------------
+
+template <> std::string MissionRow::name() const { return native.get_mission_name(); }
+template <> std::string EntityRow::name() const { return std::to_string(native.id); }
+template <> std::string PathRow::name() const {
+	if (native.number == 0) return "None";
+	if (const char *command = path_command_name(native.number)) return command;
+	return std::to_string(native.number);
+}
+template <> std::string AreaRow::name() const { return "Zone " + std::to_string(native.id); }
+template <> std::string EventRow::name() const { return std::string(); }
+
+template <> size_t MissionRow::footprint() const {
+	size_t bytes = sizeof(MissionRow) + ids_footprint() + footprint_of(native.loadout.entries) +
+	               footprint_of(native.item_availability) + footprint_of(native.group_records) +
+	               footprint_of(native.layer_records) + footprint_of(native.bounding_boxes);
+	for (const bms::WeaponLoadoutRecord &entry : native.loadout.entries)
+		bytes += footprint_of(entry.name) + footprint_of(entry.ammo_primary) + footprint_of(entry.ammo_secondary) +
+		         footprint_of(entry.flags);
+	for (const bms::ItemAvailabilityEntry &entry : native.item_availability) bytes += footprint_of(entry.name);
+	return bytes;
+}
+template <> size_t EntityRow::footprint() const { return sizeof(EntityRow) + ids_footprint(); }
+template <> size_t PathRow::footprint() const {
+	return sizeof(PathRow) + ids_footprint() + footprint_of(native.record.waypoint_numbers) +
+	       footprint_of(native.record.padding);
+}
+template <> size_t AreaRow::footprint() const { return sizeof(AreaRow) + ids_footprint(); }
+template <> size_t EventRow::footprint() const {
+	return sizeof(EventRow) + ids_footprint() + footprint_of(native.triggers) + footprint_of(native.actions);
+}
+
+bool is_mission_kind(AssetKind kind) { return asset_kind_row(kind).document == DocumentTypeId::Mission; }
+
+std::string mission_scope(const DocumentBase &document) { return strutil::to_upper(basename_of(document.path())); }
+
+// --- the document ------------------------------------------------------------------------------------
+
+const MissionRow *MissionDocument::mission_row() const {
+	for (const auto &row : rows())
+		if (row && row->kind == k(K::Mission)) return static_cast<const MissionRow *>(row.get());
+	return nullptr;
+}
+
+std::vector<const Node *> MissionDocument::rows_of(MissionKind kind) const {
+	std::vector<const Node *> out;
+	for (const auto &row : rows())
+		if (row && row->kind == k(kind)) out.push_back(row.get());
+	return out;
+}
+
+bool MissionDocument::compose(bms::File &out) const { return compose_mission(rows(), out); }
+
+bool compose_mission(const std::vector<std::shared_ptr<const Node>> &rows, bms::File &out) {
+	const MissionRow *mission = nullptr;
+	for (const auto &row : rows)
+		if (row && row->kind == k(K::Mission)) mission = static_cast<const MissionRow *>(row.get());
+	if (!mission) return false;
+	// The mission row's file holds its header and its own tables; every other record is its row's.
+	out = mission->native;
+	out.items.clear();
+	out.buildings.clear();
+	out.markers.clear();
+	out.organics.clear();
+	out.waypoint_records.clear();
+	out.area_triggers.clear();
+	std::vector<EventChain> chains;
+	for (const auto &row : rows) {
+		if (!row) continue;
+		switch (static_cast<K>(row->kind)) {
+		case K::Item: out.items.push_back(static_cast<const EntityRow &>(*row).native); break;
+		case K::Building: out.buildings.push_back(static_cast<const EntityRow &>(*row).native); break;
+		case K::Marker: out.markers.push_back(static_cast<const EntityRow &>(*row).native); break;
+		case K::Organic: out.organics.push_back(static_cast<const EntityRow &>(*row).native); break;
+		case K::WaypointPath: out.waypoint_records.push_back(static_cast<const PathRow &>(*row).native.record); break;
+		case K::Area: out.area_triggers.push_back(static_cast<const AreaRow &>(*row).native); break;
+		case K::Event: chains.push_back(static_cast<const EventRow &>(*row).native); break;
+		default: break;
+		}
+	}
+	join_event_chains(chains, out);
+	sync_counts(out);
+	return true;
+}
+
+SerializeResult MissionDocument::serialize() const {
+	SerializeResult result;
+	if (blocked()) {
+		for (const SourceIssue &issue : issues())
+			if (issue.blocks) result.issues.push_back(issue);
+		return result;
+	}
+	bms::File file;
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!compose(file) || !bms::write(file, bytes, error)) {
+		SourceIssue issue;
+		issue.message = error.empty() ? "The mission could not be written." : error;
+		result.issues.push_back(std::move(issue));
+		return result;
+	}
+	result.text.assign(bytes.begin(), bytes.end());
+	return result;
+}
+
+bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
+                            std::shared_ptr<const FileState> &, std::vector<SourceIssue> &issues,
+                            Diagnostic &error) {
+	if (!is_mission_kind(kind())) {
+		error = make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This file is not a mission.", path());
+		return false;
+	}
+	bms::File file;
+	std::string message;
+	if (!bms::parse(bytes.data(), bytes.size(), file, message)) {
+		error = make_finding(CoreFinding::DocumentParse, DiagnosticSeverity::Error, message, path());
+		return false;
+	}
+	std::vector<MissionFinding> codes;
+	const auto note = [&](MissionFinding code, bool blocks, std::string text) {
+		SourceIssue issue;
+		issue.blocks = blocks;
+		issue.message = std::move(text);
+		issues.push_back(std::move(issue));
+		codes.push_back(code);
+	};
+	// The events' runs as chains. A file the chains cannot hold blocks (its tables are not what the
+	// rows would write back); one laid out otherwise than the events stand loses only its layout.
+	std::vector<EventChain> chains;
+	RunReport report;
+	const bool split = split_event_chains(file, chains, report);
+	if (!split) {
+		const auto holds = [](RunLayout layout) { return layout == RunLayout::Canonical || layout == RunLayout::Reordered; };
+		const bool in_triggers = !holds(report.triggers);
+		const RunLayout layout = in_triggers ? report.triggers : report.actions;
+		const std::string table = in_triggers ? "trigger" : "action";
+		const std::string what = layout == RunLayout::OutOfRange ? "an event's " + table + "s run past the " + table + " table"
+		                         : layout == RunLayout::Shared  ? "a " + table + " lies in two events' runs"
+		                                                        : "a " + table + " lies in no event's run";
+		note(MissionFinding::InvalidInput, true,
+		     "The mission's events cannot be edited: " + what +
+		             " (the game reads each event's run by its first index and its count).");
+		if (report.event >= 0) {
+			const size_t first_event_row = 1 + file.items.size() + file.buildings.size() + file.markers.size() +
+			                               file.organics.size() + size_t(bms::kWaypointRecordCount) +
+			                               file.area_triggers.size();
+			issues.back().record = "Event " + std::to_string(report.event + 1);
+			issues.back().locator = std::to_string(first_event_row + size_t(report.event));
+		}
+		// The events stand, their chains empty: the document is blocked, nothing writes them.
+		chains.clear();
+		for (const bms::Event &event : file.events) chains.push_back({event, {}, {}});
+	} else if (!report.canonical()) {
+		note(MissionFinding::EventOrder, false,
+		     "The mission's triggers and actions are not laid out as its events stand: Save lays them out that "
+		     "way, each event's run where the event is (the game reads either alike).");
+	}
+	// What the writer would write against the bytes read: a difference the game reads alike (a
+	// loadout chunk the game's sanitizer repairs, bytes past a table's records).
+	std::vector<uint8_t> written;
+	if (split && report.canonical() && bms::write(file, written, message) && written != bytes) {
+		const std::string section = first_differing_section(file, bytes, written);
+		note(MissionFinding::RewriteDiffers, false,
+		     section == "length" ? std::string("The file holds bytes past what the writer writes: Save drops them.")
+		                         : "The file's " + section + " holds bytes the writer writes otherwise: Save writes " +
+		                                   "the section as the game reads it.");
+	}
+	issue_codes_ = std::move(codes);
+
+	auto mission = std::make_shared<MissionRow>(k(K::Mission));
+	mission->native = file;
+	mission->native.items.clear();
+	mission->native.buildings.clear();
+	mission->native.markers.clear();
+	mission->native.organics.clear();
+	mission->native.waypoint_records.clear();
+	mission->native.area_triggers.clear();
+	mission->native.events.clear();
+	mission->native.triggers.clear();
+	mission->native.actions.clear();
+	shape(*mission);
+	rows.push_back(mission);
+	const auto entities = [&](K kind, const std::vector<bms::Entity> &records) {
+		for (const bms::Entity &record : records) {
+			auto row = std::make_shared<EntityRow>(k(kind), record);
+			shape(*row);
+			rows.push_back(row);
+		}
+	};
+	entities(K::Item, file.items);
+	entities(K::Building, file.buildings);
+	entities(K::Marker, file.markers);
+	entities(K::Organic, file.organics);
+	for (size_t i = 0; i < file.waypoint_records.size(); ++i) {
+		auto row = std::make_shared<PathRow>(k(K::WaypointPath), MissionPath{file.waypoint_records[i], int(i)});
+		shape(*row);
+		rows.push_back(row);
+	}
+	for (const bms::AreaTrigger &area : file.area_triggers) {
+		auto row = std::make_shared<AreaRow>(k(K::Area), area);
+		shape(*row);
+		rows.push_back(row);
+	}
+	for (EventChain &chain : chains) {
+		auto row = std::make_shared<EventRow>(k(K::Event), std::move(chain));
+		shape(*row);
+		rows.push_back(row);
+	}
+	return true;
+}
+
+std::shared_ptr<Node> MissionDocument::make_node(NodeKind kind, NodeId,
+                                                 const std::vector<std::shared_ptr<const Node>> &rows,
+                                                 std::string &error) {
+	if (is_entity_kind(kind)) {
+		// The item is the Add's field (Edit::field "item"); until it is set the record names item 0.
+		auto row = std::make_shared<EntityRow>(kind, new_entity(pool_of(kind), kItemIdOffset, next_ssn_over(rows)));
+		shape(*row);
+		return row;
+	}
+	if (kind == k(K::Area)) {
+		const int id = free_zone_id(rows);
+		if (!id) {
+			error = "Every zone id 1 to 99 is taken: remove an area trigger first.";
+			return nullptr;
+		}
+		auto row = std::make_shared<AreaRow>(kind, bms::AreaTrigger{id, 0, 0, 0, 0, 0, 0, 0});
+		shape(*row);
+		return row;
+	}
+	if (kind == k(K::Event)) {
+		auto row = std::make_shared<EventRow>(kind);
+		shape(*row);
+		return row;
+	}
+	error = "A mission keeps its mission row and its 128 waypoint paths; it adds entities, area triggers and events.";
+	return nullptr;
+}
+
+size_t MissionDocument::row_position(const Node &row, const std::vector<std::shared_ptr<const Node>> &rows,
+                                     size_t position) const {
+	const int band = mission_band(row.kind);
+	if (band < 0) return position;
+	// The band's bounds among the other rows: after the last row of an earlier band, before the
+	// first of a later one (a moved row is among them: passed over).
+	size_t first = 0, last = 0, others = 0;
+	for (const auto &other : rows) {
+		if (other.get() == &row) continue;
+		++others;
+		const int of = mission_band(other->kind);
+		if (of < band) first = others;
+		if (of <= band) last = others;
+	}
+	return std::min(std::max(position, first), last);
+}
+
+void MissionDocument::prepare_duplicate(Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
+	if (is_entity_kind(copy.kind)) static_cast<EntityRow &>(copy).native.id = next_ssn_over(rows);
+	if (copy.kind == k(K::Area))
+		if (const int id = free_zone_id(rows)) static_cast<AreaRow &>(copy).native.id = id;
+}
+
+bool MissionDocument::accept_list_edit(const Node &row, const ListChange &change, std::string &error) const {
+	if (row.kind != k(K::WaypointPath)) return true;
+	// A stop's path, and for a Move the one it goes to: one whose stored count exceeds its slots
+	// takes no stop edit (D-MIS-6).
+	for (const Located *owner : {change.owner, change.destination}) {
+		if (!owner || owner->record.kind != k(K::WaypointPath)) continue;
+		const MissionPath &path = owner->record.as<MissionPath>();
+		if (path.record.marker_count <= kMaxWaypointPathMarkers) continue;
+		error = "Path " + std::to_string(path.number) + " stores a count of " + std::to_string(path.record.marker_count) +
+		        ", past its 32 slots: what the game's editor writes for such a path is not known, so its stops stay "
+		        "as they are.";
+		return false;
+	}
+	return true;
+}
+
+bool MissionDocument::accept_step(const EditStep &step, const StagedRows &, std::string &error) const {
+	for (const RowSwap &swap : step.swaps) {
+		const NodeKind kind = swap.before ? swap.before->kind : swap.after ? swap.after->kind : -1;
+		if ((kind != k(K::Mission) && kind != k(K::WaypointPath)) || swap.in_place()) continue;
+		error = kind == k(K::Mission) ? "A mission keeps its mission row where it is."
+		                              : "A mission keeps its 128 waypoint paths where they are: edit their stops.";
+		return false;
+	}
+	return true;
+}
+
+void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
+	TableDocument::refine_field(address, use);
+	const std::string &id = use.schema->id;
+	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
+	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
+	const int slot = param_slot(id);
+	if (slot >= 0 && (address.kind == k(K::Trigger) || address.kind == k(K::Action))) {
+		const Node *node = row(address.row);
+		const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+		if (record) {
+			// The parameter as its record's type reads it: its words, and its values by name.
+			ParamKind kind = ParamKind::Raw;
+			if (address.kind == k(K::Trigger)) {
+				const bms::Trigger &trigger = record.as<bms::Trigger>();
+				use.label = trigger_param_label(trigger, slot);
+				kind = trigger_param_kind(trigger, slot);
+			} else {
+				const bms::Action &action = record.as<bms::Action>();
+				use.label = action_param_label(action, slot);
+				kind = action_param_kind(action, slot);
+			}
+			if (use.label && !*use.label) use.label = nullptr;
+			use.own_choices = param_choices(kind).count > 0;
+		}
+	}
+	// What the file defines and names by id is looked up in the mission's own scope; the player's
+	// SSN names no record of it.
+	if (use.reference == ReferenceKind::MissionEntity) {
+		Value value;
+		if (get(address, id, value) && value == Value(kPlayerSsn)) use.reference = ReferenceKind::None;
+	}
+	const auto by_id = [](ReferenceKind kind) {
+		return kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
+	};
+	if (by_id(use.defines) || by_id(use.reference)) use.scope = mission_scope(*this);
+}
+
+bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse &use,
+                                     std::vector<FieldChoice> &out) const {
+	const Node *node = row(address.row);
+	const RecordHandle record = node ? record_in(*node, address) : RecordHandle();
+	if (!record) return false;
+	const std::string &id = use.schema->id;
+	const int slot = param_slot(id);
+	MissionChoices choices;
+	if (address.kind == k(K::Trigger)) {
+		const bms::Trigger &trigger = record.as<bms::Trigger>();
+		if (id == "sub_type") choices = trigger_sub_types(int32_t(trigger.main_type));
+		else if (slot >= 0) choices = param_choices(trigger_param_kind(trigger, slot));
+	} else if (address.kind == k(K::Action)) {
+		const bms::Action &action = record.as<bms::Action>();
+		if (id == "action_sub_type") choices = action_sub_types(int32_t(action.action_type));
+		else if (slot >= 0) choices = param_choices(action_param_kind(action, slot));
+	}
+	if (!choices.count) return false;
+	out = choices_of(choices);
+	return true;
+}
+
+void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
+	const Node *node = row(address.row);
+	if (!node || address.child) return;
+	if (is_entity_kind(node->kind)) {
+		const EntityRow &entity = static_cast<const EntityRow &>(*node);
+		// What the picker shows beside the SSN: the item the record is.
+		facts.value = std::to_string(entity_item_id(entity.native));
+		// The lookups scan the pools in order and take the first row of the SSN [orig:
+		// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0]: a later one is
+		// found by none.
+		bool before = true;
+		for (const auto &other : rows()) {
+			if (other.get() == node) {
+				before = false;
+				continue;
+			}
+			if (!is_entity_kind(other->kind) || static_cast<const EntityRow &>(*other).native.id != entity.native.id)
+				continue;
+			const int theirs = lookup_order(other->kind), mine = lookup_order(node->kind);
+			if (theirs < mine || (theirs == mine && before)) {
+				facts.inert = true;
+				facts.inert_reason = "another entity has this SSN, and the game's lookups find the first in pool order "
+				                     "(organics, items, buildings, markers)";
+				return;
+			}
+		}
+		return;
+	}
+	if (node->kind == k(K::Area)) {
+		const AreaRow &area = static_cast<const AreaRow &>(*node);
+		for (const auto &other : rows()) {
+			if (other.get() == node) break;
+			if (other->kind != k(K::Area) || static_cast<const AreaRow &>(*other).native.id != area.native.id) continue;
+			// The resolver scans the table for the id [orig: EventTrigger_ResolveZoneTriggerRefs
+			// @0x453000]; which of two it takes is not read (D-MIS-5): the later is the one marked.
+			facts.inert = true;
+			facts.inert_reason = "another area trigger has this zone id";
+			return;
+		}
+	}
+}
+
+// --- the references between the rows ------------------------------------------------------------------
+
+bool MissionDocument::renumber_references(const StagedRows &rows, const RecordShift &shift,
+                                          std::vector<Edit> &sites, std::string &error) const {
+	const bool markers = shift.reference == ReferenceKind::MissionMarker;
+	// The groups and the paths are fixed tables: no edit moves them.
+	if (!markers && shift.reference != ReferenceKind::MissionEvent) return true;
+	const auto set = [&sites](const NodeAddress &address, const char *field, size_t now) {
+		Edit edit;
+		edit.address = address;
+		edit.field = field;
+		edit.value = int64_t(now);
+		sites.push_back(std::move(edit));
+	};
+	for (const std::shared_ptr<const Node> &node : rows.rows()) {
+		if (markers && node->kind == k(K::WaypointPath)) {
+			const PathRow &path = static_cast<const PathRow &>(*node);
+			if (path.ids.lists.empty()) continue;
+			const std::vector<RecordIds> &ids = path.ids.lists[0];
+			const std::vector<uint32_t> &stops = path.native.record.waypoint_numbers;
+			for (size_t i = 0; i < stops.size() && i < ids.size(); ++i) {
+				const size_t now = shift.now(int64_t(stops[i]));
+				if (now == size_t(stops[i])) continue;
+				if (now == RecordShift::kRemoved) {
+					error = "Path " + std::to_string(path.native.number) + "'s stop " + std::to_string(i + 1) +
+					        " visits this marker: remove the stop first.";
+					return false;
+				}
+				set({node->id, k(K::Stop), ids[i].id}, "marker", now);
+			}
+		}
+		if (!markers && node->kind == k(K::Event)) {
+			const EventRow &event = static_cast<const EventRow &>(*node);
+			if (event.ids.lists.size() < 2) continue;
+			const auto renumber = [&](NodeKind kind, size_t list, size_t i, int32_t held, const char *what) {
+				const size_t now = shift.now(held);
+				if (now == size_t(held)) return true;
+				if (now == RecordShift::kRemoved) {
+					error = "Event " + std::to_string(index_among(rows.rows(), node.get()) + 1) + "'s " + what + " " +
+					        std::to_string(i + 1) + " names this event: remove that " + what + " first.";
+					return false;
+				}
+				set({node->id, kind, event.ids.lists[list][i].id}, "param1", now);
+				return true;
+			};
+			for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i)
+				if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Event &&
+				    !renumber(k(K::Trigger), 0, i, event.native.triggers[i].param1, "trigger"))
+					return false;
+			for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
+				if (action_param_kind(event.native.actions[i], 0) == ParamKind::Event &&
+				    !renumber(k(K::Action), 1, i, event.native.actions[i].param1, "action"))
+					return false;
+		}
+	}
+	return true;
+}
+
+bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std::vector<Edit> &out,
+                                    std::string &error) const {
+	std::set<NodeId> removed;
+	for (const NodeAddress &record : records) removed.insert(record.child ? record.child : record.row);
+	const auto remove_of = [](const NodeAddress &address) {
+		Edit edit;
+		edit.operation = EditOperation::Remove;
+		edit.address = address;
+		return edit;
+	};
+	std::vector<Edit> namers;
+	for (const NodeAddress &record : records) {
+		const Node *node = row(record.row);
+		if (!node) {
+			error = "The selected record no longer exists.";
+			return false;
+		}
+		if (record.child) continue;
+		const size_t index = index_among(rows(), node);
+		if (node->kind == k(K::Marker)) {
+			// The stops that visit it go first (the core then renumbers the later markers' stops).
+			for (const auto &other : rows()) {
+				if (other->kind != k(K::WaypointPath)) continue;
+				const PathRow &path = static_cast<const PathRow &>(*other);
+				if (path.ids.lists.empty()) continue;
+				const std::vector<uint32_t> &stops = path.native.record.waypoint_numbers;
+				for (size_t i = 0; i < stops.size() && i < path.ids.lists[0].size(); ++i)
+					if (stops[i] == index) namers.push_back(remove_of({other->id, k(K::Stop), path.ids.lists[0][i].id}));
+			}
+		}
+		if (node->kind == k(K::Event)) {
+			// What names the event by its index goes first where the removal takes its event too; a
+			// namer the removal leaves refuses it with its site (S13 D8's convention).
+			for (const auto &other : rows()) {
+				if (other->kind != k(K::Event)) continue;
+				const EventRow &event = static_cast<const EventRow &>(*other);
+				if (event.ids.lists.size() < 2) continue;
+				const auto namer = [&](NodeKind kind, size_t list, size_t i, const char *what) {
+					const NodeId id = event.ids.lists[list][i].id;
+					if (removed.count(id)) return true;
+					if (!removed.count(other->id)) {
+						error = "Event " + std::to_string(index_among(rows(), other.get()) + 1) + "'s " + what + " " +
+						        std::to_string(i + 1) + " names this event: remove that " + what + " first.";
+						return false;
+					}
+					namers.push_back(remove_of({other->id, kind, id}));
+					return true;
+				};
+				for (size_t i = 0; i < event.native.triggers.size() && i < event.ids.lists[0].size(); ++i)
+					if (trigger_param_kind(event.native.triggers[i], 0) == ParamKind::Event &&
+					    event.native.triggers[i].param1 == int32_t(index) && !namer(k(K::Trigger), 0, i, "trigger"))
+						return false;
+				for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
+					if (action_param_kind(event.native.actions[i], 0) == ParamKind::Event &&
+					    event.native.actions[i].param1 == int32_t(index) && !namer(k(K::Action), 1, i, "action"))
+						return false;
+			}
+		}
+	}
+	// The namers, each once, before the records themselves (one the removal names too goes once).
+	std::set<NodeId> listed;
+	for (const Edit &edit : namers)
+		if (listed.insert(edit.address.child).second) out.push_back(edit);
+	for (const NodeAddress &record : records)
+		if (listed.insert(record.child ? record.child : record.row).second) out.push_back(remove_of(record));
+	return true;
+}
+
+// --- the references no field's value is ---------------------------------------------------------------
+
+void mission_references(const Document &document, Extracted &out) {
+	const auto *mission = dynamic_cast<const MissionDocument *>(&document);
+	const MissionRow *header = mission ? mission->mission_row() : nullptr;
+	if (!header) return;
+	// The mission's own table, then the one the game loads in its place when the mission has none
+	// [orig: TextResource_LoadMissionTextBin @0x51ed90]. (The graph tries the second wherever the
+	// first defines no such key, the mission's table there or not.)
+	const std::string table = strutil::to_upper(mission_base_name(basename_of(document.path()))) + ".BIN";
+	const auto text = [&](const NodeAddress &address, const std::string &field, const char *section, const char *key,
+	                      int number) {
+		char name[32];
+		std::snprintf(name, sizeof(name), "%s%03i", key, number);
+		GraphEdge edge;
+		edge.source = document.path();
+		edge.record = document.record_path(address);
+		edge.locator = document.locator(address);
+		edge.address = address;
+		edge.field = field;
+		edge.kind = ReferenceKind::TextId;
+		edge.value = name;
+		edge.scope = table + "/" + section;
+		edge.scopes_after.push_back(std::string("MEDMSSN.BIN/") + section);
+		out.edges.push_back(std::move(edge));
+	};
+	int location = 0;
+	for (const auto &row : document.rows()) {
+		if (!row || !is_entity_kind(row->kind)) continue;
+		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
+		const NodeAddress address{row->id, row->kind, 0};
+		// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
+		// next location name, in spawn order]
+		if (row->kind == k(K::Marker) && entity.type_id == 2044) text(address, std::string(), "Locations", "LOCATION", ++location);
+		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
+		// on the index being nonzero]
+		if (entity.name_index != 0) text(address, "name_index", "PeopleNames", "STRNAME", entity.name_index);
+	}
+	const NodeAddress top{header->id, header->kind, 0};
+	for (int slot = 0; slot < 8; ++slot) {
+		const uint8_t win = header->native.header.win_conditions[slot];
+		const uint8_t lose = header->native.header.lose_conditions[slot];
+		const std::string at = "[" + std::to_string(slot) + "]";
+		if (win != 0 && win != 255) {
+			text(top, "win_conditions" + at, "WinConditions", "STRWINDIRECTIVE", win);
+			text(top, "win_conditions" + at, "WinConditions", "STRWINCOND", win);
+		}
+		if (lose != 0 && lose != 255) text(top, "lose_conditions" + at, "LoseConditions", "STRLOSEDIRECTIVE", lose);
+	}
+}
+
+} // namespace opennova::editor

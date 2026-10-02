@@ -419,6 +419,15 @@ target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_bms_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
 
+# fixtures/bms/synth_logic.bms + synth_logic.bin: the small mission with everything the
+# mission document and its picture read (every row kind, a path, two events naming one
+# another, the text keys its records form) and its string table, written by bms::write and
+# rtxt::write; editor_mission_document and editor_document_contract read them.
+add_executable(mission_set_gen_test fixtures/mission_set_gen.cpp)
+target_link_libraries(mission_set_gen_test PRIVATE opennova_formats)
+target_include_directories(mission_set_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_set_gen COMMAND mission_set_gen_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4205,14 +4214,23 @@ target_link_libraries(editor_model_table_test PRIVATE opennova_editor)
 target_include_directories(editor_model_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_model_table COMMAND editor_model_table_test)
 
-# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10): a mission's records as
-# rows of the one table shape over the format's field rows and bms_edit's typed structure; the rules,
-# the editor's ranges, the lists and the chains over the synthetic dense mission, and (a SKIP-LEG
-# without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
+# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10, S14): a mission's records
+# as rows of the one table shape over the format's field rows, read through the mission document;
+# the rules, the editor's ranges, the lists and the chains over the synthetic dense mission, and (a
+# SKIP-LEG without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
 add_executable(editor_mission_table_test editor/mission_table_test.cpp)
 target_link_libraries(editor_mission_table_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_table COMMAND editor_mission_table_test)
+
+# The mission document (editor/documents/mission_document.h, ADR 0046 S14) over the minted
+# synth_logic mission: the rows in bands, every reference as a graph edge of its kind, the
+# edits and their cascades, the parse's findings, the picture's reads, an item's TYPE on its
+# symbol.
+add_executable(editor_mission_document_test editor/mission_document_test.cpp)
+target_link_libraries(editor_mission_document_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_document COMMAND editor_mission_document_test)
 
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the

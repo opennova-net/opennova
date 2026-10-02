@@ -5,6 +5,8 @@
 #include <editor/documents/catalog_validation.h>
 #include <editor/documents/credits_type.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_document.h>
+#include <editor/documents/mission_validation.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/model_document.h>
@@ -19,8 +21,12 @@
 #include <array>
 #include <atomic>
 
+#include <base/io/strutil.h>
+
 namespace opennova::editor {
 namespace {
+
+std::unique_ptr<DocumentBase> make_mission() { return std::make_unique<MissionDocument>(); }
 
 std::unique_ptr<DocumentBase> make_catalog() { return std::make_unique<DefCatalogDocument>(); }
 std::unique_ptr<DocumentBase> make_strings() { return std::make_unique<StringsDocument>(); }
@@ -48,6 +54,10 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::AnimationMap, "animation_map", make_animation_map,
 			validate_animation_map_file, AnimationMapDocument::schema,
 			animation_map_finding_codes },
+	// The mission (S14): its records' references no field's value is are its record_references (the
+	// text keys a record's number forms).
+	{ DocumentTypeId::Mission, "mission", make_mission, validate_mission_file, MissionDocument::schema,
+			mission_finding_codes, nullptr, nullptr, nullptr, mission_references },
 	// The text types (S13 D9): one TextDocument class, a row per behaviour, none with records
 	// (text_fields) or a project check; the script's text names references, and its compiler's
 	// words are its highlights (S13 V10).
@@ -120,6 +130,13 @@ const DocumentType *document_type_for(AssetKind kind) {
 }
 
 bool is_editable_kind(AssetKind kind) { return document_type_for(kind) != nullptr; }
+
+bool document_reads_file(AssetKind kind, const std::string &name) {
+	// A .mis is a mission by its kind, the mission editors' text form (docs/mission/mis-format-re.md),
+	// which no BMS parse reads.
+	if (kind == AssetKind::Mission && !strutil::ends_with_icase(name, ".bms")) return false;
+	return is_editable_kind(kind);
+}
 
 DocumentContent document_content(const DocumentType &type) {
 	// A registered type is asked once; a stand-in (a test's) each time.

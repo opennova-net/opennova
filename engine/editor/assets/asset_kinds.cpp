@@ -171,6 +171,7 @@ constexpr AssetKindRow kRows[] = {
 	Kind(AssetKind::Mission, "mission", "Mission", ArchiveSlot::Localres)
 	        .runtime("mission")
 	        .names_files()
+	        .edited_by(DocumentTypeId::Mission)
 	        .folder("missions")
 	        .new_name("newmission.bms")
 	        .row,
