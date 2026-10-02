@@ -796,6 +796,42 @@ static void commit_death_state(ClientEntityState &es, int16_t state) {
 	es.net_anim_pending_boundary = -1;
 }
 
+// The corpse leg both organic passes run behind their death edge, every tick
+// the dead bit is latched: the edge seeds moveTimer from the def's deathtime,
+// and a def without LeaveCorpse counts it down (org1 holds at 0; org2 steps
+// by -1 and is reset to 0 once it is not positive) and spawns its decay
+// effect at 186. The LeaveCorpse keep, the 186 spawn and org2's destroy at 0
+// are also gated on section bit 0, which a replica row has no source for
+// (clear: no org2 destroy). What an org1 corpse does at 0 on a session client
+// (the respawn quota leg or Entity_Destroy) is not ported here: the row keeps
+// its corpse.
+// [orig: seeds Entity_UpdateInfantryPlayerBody @0x4b4c3e,
+//  Entity_UpdateInfantryAI @0x4b9c97; org2 tail @0x4b4d63..0x4b4e5f (the -1
+//  step @0x4b4d79, the reset @0x4b4e56, the bit-0 destroy @0x4b4e4f); org1
+//  tail @0x4b9e54..0x4b9f4a (LeaveCorpse @0x4b9e54, the guarded decrement
+//  @0x4b9e6a..0x4b9e77, the 186 spawn @0x4b9e7d..0x4b9f3e)]
+static void row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org1,
+		const ClientReplicaPipeline::ReplicaDeathTraits &traits,
+		std::vector<ClientReplicaPipeline::ReplicaCorpseDecay> &decays) {
+	if (edge_this_tick) es.net_corpse_timer = traits.deathtime_ticks;
+	if ((es.rm_entity_flags & world::kEntityFlagDead) == 0 || traits.leave_corpse) return;
+	if (org1) {
+		if (es.net_corpse_timer != 0) --es.net_corpse_timer;
+	} else {
+		--es.net_corpse_timer;
+	}
+	if (es.net_corpse_timer == 186 && traits.decay_effect) {
+		ClientReplicaPipeline::ReplicaCorpseDecay decay;
+		decay.handle = es.handle;
+		decay.type_id = es.type_id;
+		decay.pos[0] = es.x;
+		decay.pos[1] = es.y;
+		decay.pos[2] = es.z;
+		decays.push_back(decay);
+	}
+	if (es.net_corpse_timer < 0) es.net_corpse_timer = 0;
+}
+
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	if (!remote_motion_mode_) return;
 	const uint32_t rm_key = ++rm_tick_counter_;
@@ -842,6 +878,15 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			                     contact_peers.data(),
 			                     static_cast<int32_t>(contact_peers.size()),
 			                     rm_key, water_z_, has_water_);
+	};
+	// The corpse leg's def source (row_corpse_tail), read only for a row
+	// whose dead bit is latched or latches this tick.
+	auto corpse_leg = [&](ClientEntityState &es, bool edge, bool org1) {
+		if (!edge && (es.rm_entity_flags & world::kEntityFlagDead) == 0) return;
+		ReplicaDeathTraits traits;
+		if (replica_death_traits_resolver_ &&
+				replica_death_traits_resolver_(es.type_id, traits))
+			row_corpse_tail(es, edge, org1, traits, corpse_decays_);
 	};
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.net_has_compact) continue;
@@ -991,6 +1036,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			const int16_t death_state = row_death_edge(es);
 			if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
+			corpse_leg(es, death_state >= 0, /*org1=*/false);
 			organic_chase_tail(es, is_self);
 			commit_death_state(es, death_state);
 			break;
@@ -1051,6 +1097,7 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			}
 			const int16_t death_state = row_death_edge(es);
 			if (death_state >= 0 && !is_self) death_edges_.push_back(es.handle);
+			corpse_leg(es, death_state >= 0, /*org1=*/true);
 			organic_chase_tail(es, is_self);
 			commit_death_state(es, death_state);
 			break;

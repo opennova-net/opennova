@@ -288,6 +288,13 @@ std::vector<uint16_t> ClientReplicaPipeline::drain_death_edges() {
 	return out;
 }
 
+std::vector<ClientReplicaPipeline::ReplicaCorpseDecay>
+ClientReplicaPipeline::drain_corpse_decays() {
+	std::vector<ReplicaCorpseDecay> out;
+	out.swap(corpse_decays_);
+	return out;
+}
+
 void ClientReplicaPipeline::apply_pool_spawn(const std::vector<uint8_t> &body) {
 	PoolSpawnBatch batch;
 	if (!decode_pool_spawn_batch(body.data(), body.size(), batch)) {

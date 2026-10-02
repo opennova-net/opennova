@@ -186,6 +186,30 @@ public:
 	void set_replica_bound_radius_resolver(ReplicaBoundRadiusResolver resolver) {
 		replica_bound_radius_resolver_ = std::move(resolver);
 	}
+	// The def fields the replica dead tail reads, resolved by wire type from
+	// the embedder's items.def: deathtime (def+0x890), LeaveCorpse
+	// (attrib & 0x400000) and whether the def names a decay effect
+	// (particledeath, the +0x412 word). No resolver, or an unknown type, runs
+	// no dead tail.
+	struct ReplicaDeathTraits {
+		int32_t deathtime_ticks = 0;
+		bool leave_corpse = false;
+		bool decay_effect = false;
+	};
+	using ReplicaDeathTraitsResolver =
+			std::function<bool(uint16_t type_id, ReplicaDeathTraits &out)>;
+	void set_replica_death_traits_resolver(ReplicaDeathTraitsResolver resolver) {
+		replica_death_traits_resolver_ = std::move(resolver);
+	}
+	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
+	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
+	// @0x4b4e39 / @0x4b9f36].
+	struct ReplicaCorpseDecay {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		int32_t pos[3] = {};
+	};
+	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
 	// contact resolve grounded it on an entity follows that carrier's
@@ -442,6 +466,8 @@ private:
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
 	std::vector<uint16_t> death_edges_;
+	std::vector<ReplicaCorpseDecay> corpse_decays_;
+	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]

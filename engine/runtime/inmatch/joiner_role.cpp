@@ -820,6 +820,34 @@ void JoinerRole::pump() {
 	kernel.tick_weather();
 	if (!preround_active) {
 		rt.tick_remote_stance_sounds(world);
+		// The replica dead tail's 186-tick decay: the def's particledeath
+		// spawned at the corpse origin, oriented (0, 0, -0.5) and tagged with
+		// the corpse, its group held in the corpse's +0x1CC slot (a group the
+		// corpse owns there is released first) -- the victim-hit emitter's
+		// descriptor shape. [orig: Entity_UpdateInfantryAI @0x4b9ea7..0x4b9f3e
+		//  (release @0x4b9ec9, tag @0x4b9f0f, orientation z 0xFFFF8000
+		//  @0x4b9f24, CEffectWorld_SpawnEmitterAtPosition @0x4b9f36, the slot
+		//  store @0x4b9f3e); the org2 twin @0x4b4e39]
+		const def::DefItemsFile *items = kernel_->items_table();
+		for (const auto &decay : rt.view().drain_corpse_decays()) {
+			const def::DefItemDef *item = items != nullptr
+					? mission::find_item_def(*items,
+							  static_cast<int>(decay.type_id) + mission::kItemIdOffset)
+					: nullptr;
+			if (item == nullptr || item->particledeath[0] == '\0') continue;
+			world::DestructionEffectEvent effect;
+			effect.effect = item->particledeath;
+			effect.pos = {opennova::io::fp16_16_to_float(decay.pos[0]),
+					opennova::io::fp16_16_to_float(decay.pos[1]),
+					opennova::io::fp16_16_to_float(decay.pos[2])};
+			effect.dir = {0.0f, 0.0f, -0.5f};
+			effect.family = 1;
+			effect.attach_wire_handle = decay.handle;
+			effect.attach_spawn_origin = world::kSpawnOriginNone;
+			effect.section_tagged = true;
+			effect.positioned = true;
+			world.out.destruction.effects.push_back(std::move(effect));
+		}
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle());
 		rt.tick_remote_recoil();
 	}
@@ -939,6 +967,25 @@ void JoinerRole::wire_frame_providers() {
 	rt.view().set_replica_bound_radius_resolver(
 			[this](uint16_t type_id) -> int32_t {
 				return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
+			});
+	// The replica dead tail's def fields, from the same items.def the spawn
+	// stream typed the row from: deathtime (the edge's moveTimer seed),
+	// LeaveCorpse, and whether the def names a decay effect.
+	// [orig: Entity_UpdateInfantryAI @0x4b9c97 (seed), @0x4b9e54 (attrib
+	//  0x400000), @0x4b9e9a (the def+0x412 decay word)]
+	rt.view().set_replica_death_traits_resolver(
+			[this](uint16_t type_id,
+					replication::ClientReplicaPipeline::ReplicaDeathTraits &out) {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				if (item == nullptr) return false;
+				out.deathtime_ticks = item->deathtime_ticks;
+				out.leave_corpse = (item->attrib & def::DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
+				out.decay_effect = item->particledeath[0] != '\0';
+				return true;
 			});
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's

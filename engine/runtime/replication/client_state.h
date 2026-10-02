@@ -372,6 +372,11 @@ struct ClientEntityState {
 	// Entity_UpdateInfantryAI @0x4b9c51..0x4b9d3e].
 	int16_t net_death_anim = 0;
 	bool net_health_zero = false;
+	// The corpse timer (moveTimer) the death edge seeds from the def's
+	// deathtime and the dead tail counts down; at 186 the def's decay effect
+	// spawns [orig: seeds @0x4b4c3e / @0x4b9c97; tails @0x4b4d63..0x4b4e5f /
+	// @0x4b9e54..0x4b9f4a].
+	int32_t net_corpse_timer = 0;
 	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
 	uint8_t stance_sound_state = 0; // player body entity+0x304
 	uint8_t radio_request = 0; // entity+885, receive event 0x6D
