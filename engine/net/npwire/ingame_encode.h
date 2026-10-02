@@ -385,6 +385,10 @@ std::vector<uint8_t> encode_medic_request(const MedicRequest &request);
 // byte1 @0x5047CE, the string copy @0x5047F9..0x50480A]
 std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat);
 
+// S2C 0x28 dialog line, the inverse of decode_dialog_line: [cstr name][i16 line].
+// [orig: sub_5038A0 @0x5038A0 — the strcpy @0x5038D1, the word @0x5038F4]
+std::vector<uint8_t> encode_dialog_line(const DialogLine &line);
+
 // S2C 0x32 formatted game text, the inverse of decode_formatted_game_text:
 // [u8 subtype][cstr text], subtypes 1/2 then [u8 team]. Retail builds 1 inline
 // in Server_PlayerAdd and 2 through NetPacket_SerializeMinimapSlot_0 — the

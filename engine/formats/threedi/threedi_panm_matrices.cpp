@@ -386,6 +386,15 @@ int threedi_panm_build_node_matrices(const ThreediPartAnimation *nodes,
         const ThreediPartAnimation *n = &nodes[i];
 
         ThreediMatrix4x4 *dst = &out_matrices[i];
+        // Output slot i receives input i before node i is built, so a node
+        // that names ITSELF as its parent (the PSP flagpole's scale part)
+        // carries its pivot through its own input, not an unwritten slot. The
+        // retail input is the entity's world matrix; this model-local frame
+        // keeps only the input's orientation, as every builder here does.
+        // [orig: Model_TransformBoneMatrices @0x58e451..0x58e46b — `rep movsd`
+        //  of the 16 input dwords into flt_2720160[i] ahead of the parent carry]
+        *dst = in_matrices[i];
+        threedi_mat4_zero_translation(dst);
 
         const ThreediMatrix4x4 *in_sub = &in_matrices[n->subobject_index];
         const ThreediVec3 *pivot_sub = &pivots[n->subobject_index];

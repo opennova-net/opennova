@@ -123,6 +123,10 @@ struct NapiNPProtocol {
 // sprintf format the retail handler fills; empty means the string is absent.
 struct ServerTextTable {
 	std::string medic_request_format; // STRSRV_MEDREQ: "%s" = the requester's name
+	// The team change's system lines, "%s" = the switching player's name
+	// [orig: GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
+	std::string change_to_blue_format;
+	std::string change_to_red_format;
 };
 
 struct NapiNPServerCtx {
@@ -331,20 +335,14 @@ struct NapiNPServerCtx {
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
 	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
-	// SCRK / SK / nwuid randomly at the 0x42 join (make_dev_scrk / make_random_session_u32 /
-	// make_dev_nwuid). For golden 0x82 byte-parity these must be reproducible, so the default
-	// leaves `forced` false (random, exactly as retail) and a golden test seed-injects the captured
-	// values — mirroring the P1 SessionStartup "pass in, don't sample" determinism approach.
+	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_random_session_u32). For golden
+	// 0x82 byte-parity these must be reproducible, so the default leaves `forced` false (random,
+	// exactly as retail) and a golden test seed-injects the captured values — mirroring the P1
+	// SessionStartup "pass in, don't sample" determinism approach.
 	struct ServerKeyMint {
 		bool forced = false;       // false => mint randomly (retail behavior)
 		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
 		uint32_t server_sk = 0;    // forced ServerAuth.sk
-		std::string nwuid;         // forced ServerAuth nwuid (60-char hex)
-		std::string novaworld_name = "NWServer";
-		// Bare host:port — the retail client prefixes "http://" itself
-		// [orig: CNapiGameSession_OnNovaWorldConnected @0x4D1627
-		//  sprintf(url, "http://%s", domain)].
-		std::string novaworld_web_url = "127.0.0.1:8080";
 	};
 	ServerKeyMint server_key_mint;
 
@@ -394,16 +392,18 @@ struct NapiNPServerCtx {
 	//  @0x4C8B88 / @0x4C8CA9, SendPlayEnterRequest @0x4C8BC1, SetGameState(4)
 	//  @0x4C8BCA]
 	bool novaworld_join_tickets_armed = false;
-	// The host's own address string (CNapiNetwork_GetLocalAddress @0x4C4F60):
-	// it prefixes the JOINTICKET key the request looks up in the joiner's CD
-	// identity blob ("<localaddr>JOINTICKET"). Empty = no lookup, an empty
-	// ticket rides the request (retail: GetLocalAddress failed). On a NovaWorld
-	// transport retail's string is the constant "PUB", so the key is the
-	// PUBJOINTICKET cookie; the shell installs kNovaWorldLocalAddress when it arms.
-	// [orig: CNapiGameSession_SendPlayEnterRequest @0x4D0312..0x4D0362;
-	//  CNapiNetwork_GetLocalAddress @0x4C4F60 copies g_LocalNetAddressStr @0x7CA298]
+	// The host's own address string on a NovaWorld transport: it prefixes every
+	// key the host looks up in a joiner's CD identity cookie (PUBPCID,
+	// PUBSQUADINFO, PUBJOINTICKET). get_local_address() below hands it out.
+	// [orig: g_LocalNetAddressStr @0x7CA298]
 	static constexpr const char *kNovaWorldLocalAddress = "PUB";
-	std::string host_local_address;
+	// The cookie-key table the joiners' CD cookies are decrypted under: the
+	// six-slot ring whose current key the Host list advertises as PCIDKey,
+	// installed by the shell's NovaWorld host binding; empty on a LAN host.
+	// [orig: g_NapiCookieKeyTable @0xC87000 — CSessionIdRing_Init @0x51cb8e,
+	//  CSessionIdRing_AdvanceAndGenerate @0x51d93d, read by
+	//  NapiPacket_DecryptAndVerify @0x512d18/@0x512d74]
+	SessionIdRing cookie_key_table;
 	// One ClientPlayerEnterRequest: the joiner's connection id, its UDP source
 	// and the JOINTICKET its JOIN carried. The shell binds the hook to its
 	// NovaWorld host session (ClientSession::build_player_enter_request); an
@@ -461,6 +461,43 @@ struct NapiNPServerCtx {
 // table).
 inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
+}
+
+// The host's local address: "PUB" while it is in a session on the NovaWorld
+// transport; false (no address, no cookie lookups) otherwise.
+// [orig: CNapiNetwork_GetLocalAddress @0x4C4F60 — the gate @0x4c4f75, the copy
+//  of g_LocalNetAddressStr @0x4c4f8f]
+inline bool get_local_address(const NapiNPServerCtx &ctx, std::string &out) {
+	out.clear();
+	if (!ctx.is_in_session || ctx.transport_mode != NetworkType::NovaWorld) return false;
+	out = NapiNPServerCtx::kNovaWorldLocalAddress;
+	return true;
+}
+
+// The JOIN handler's cookie leg for a remote connection: on a NovaWorld session
+// its CD cookie's PCID and SQUADINFO land in the connection's account fields.
+// The host's own loopback skips it (its account is the shell's login PCID).
+// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 — the loopback gate
+//  `!connection+0x2E` @0x512ca2, GetLocalAddress && cookie @0x512cdc]
+inline void load_join_account_from_cookie(const NapiNPServerCtx &ctx, NapiNPConnection &conn) {
+	std::string local_address;
+	if (conn.type == NapiNPConnection::kTypeClientSide || !get_local_address(ctx, local_address) ||
+			conn.join_identity_pairs.empty())
+		return;
+	load_join_account(conn.join_identity_pairs, local_address, ctx.cookie_key_table, conn.account);
+}
+
+// The NovaWorld host binding's account facts: the cookie-key table, and the
+// host's own login PCID on its loopback connection when it is non-empty.
+// [orig: NapiNPServer_HandleNewConnection @0x4c8213..0x4c829f — the local
+//  connection on a NovaWorld session reads the PCID cookie into its net config]
+inline void set_novaworld_account_facts(NapiNPServerCtx &ctx, const SessionIdRing &cookie_keys,
+		const std::string &login_pcid) {
+	ctx.cookie_key_table = cookie_keys;
+	if (login_pcid.empty()) return;
+	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.type == NapiNPConnection::kTypeClientSide) set_join_account_pcid(conn.account, login_pcid);
+	}
 }
 
 } // namespace opennova::inmatch

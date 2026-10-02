@@ -13,6 +13,7 @@
 #include <net/npwire/ingame_message_id.h>
 
 #include <cstdio>
+#include <memory>
 #include <vector>
 
 namespace ns = opennova::replication;
@@ -524,6 +525,34 @@ int main() {
 		aged = find_slot(runtime.state().minimap, 0x2052);
 		CHECK(paused.ticks_run() == 0 && aged != nullptr && aged->remaining_ticks == held,
 				"a paused frame ages nothing");
+	}
+
+	// D-NET-287: S2C 0x3E (empty, the host's join tail) clears every overlay
+	// slot and every linked row. [orig: NapiNPClientMsg_0x03E @0x4226D0 ->
+	// sub_5BE8D0 @0x5BE8D0 — memset of the 1160 slots and the 251 links, each
+	// slot's handle word -1]
+	{
+		auto reset_owner = std::make_unique<ns::ClientReplicaPipeline>();
+		ns::ClientReplicaPipeline &reset_view = *reset_owner;
+		reset_view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2003, 3, 0x09, 0x10));
+		reset_view.apply(opennova::s2c::CAPTURE_ZONE_STATE, zone(0x2004, 3, 0x09, 0));
+		reset_view.apply(opennova::s2c::MINIMAP_OVERLAY,
+				linked_record(0x2005, 1, 2, 3, 30, 1, 4));
+		const auto &map = reset_view.state().minimap;
+		CHECK(find_slot(map, 0x2003) != nullptr && find_slot(map, 0x2004) != nullptr &&
+				find_slot(map, 0x2005) != nullptr, "the banks hold markers before the reset");
+		const auto revision = map.revision;
+		reset_view.apply(opennova::s2c::MAP_OVERLAY_RESET, {});
+		bool any = false;
+		for (const auto &bank : {&map.transient, &map.persistent})
+			for (const auto &s : *bank) any |= s.active || s.handle != 0xFFFF;
+		for (const auto &s : map.special) any |= s.active || s.handle != 0xFFFF;
+		for (const auto &l : map.linked) any |= l.active;
+		CHECK(!any, "0x3E clears every overlay slot and every link");
+		CHECK(map.revision != revision, "the reset is a revision");
+		reset_view.apply(opennova::s2c::MINIMAP_OVERLAY,
+				linked_record(0x2005, 1, 2, 3, 30, 1, 4));
+		CHECK(find_slot(map, 0x2005) != nullptr, "a link after the reset allocates afresh");
 	}
 
 	const auto before = view.state().minimap.revision;

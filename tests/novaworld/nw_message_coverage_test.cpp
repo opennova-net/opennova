@@ -1990,6 +1990,30 @@ int check_squad_and_waypoint_legs() {
 	return 0;
 }
 
+// S2C 0x51 — one team-change list entry: [i16 index] + the 0x50 body. Every
+// field zero-fills and a short read does not advance, so a 3-byte body reads
+// its third byte as the team; the handle defaults to 0.
+// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0]
+int check_S_51_team_change_confirm() {
+	TeamAssign assign;
+	assign.entity_handle = 0x0004;
+	assign.team = 2;
+	assign.net_id = 0x8402;
+	assign.anim_slot = 7;
+	const std::vector<uint8_t> wire = encode_team_change_confirm(3, assign);
+	EXPECT(wire.size() == 8);
+	TeamChangeConfirm out;
+	EXPECT(decode_team_change_confirm(wire.data(), wire.size(), out));
+	EXPECT(out.index == 3 && out.assign.entity_handle == 0x0004 && out.assign.team == 2 &&
+	       out.assign.net_id == 0x8402 && out.assign.anim_slot == 7);
+	const uint8_t shorty[3] = {5, 0, 9};
+	EXPECT(!decode_team_change_confirm(shorty, sizeof(shorty), out));
+	EXPECT(out.index == 5 && out.assign.entity_handle == 0 && out.assign.team == 9 &&
+	       out.assign.net_id == 0 && out.assign.anim_slot == 0);
+	cover('S', 0x51);
+	return 0;
+}
+
 // ---------------------------------------------------------------------------
 // (3) Decoded-set drift guard
 // ---------------------------------------------------------------------------
@@ -2033,6 +2057,26 @@ int check_S_4C_visible_players() {
 	decode_visible_players(nullptr, 0, out, &clean);
 	EXPECT(!clean && out.entries.empty());
 	cover('S', 0x4C);
+	return 0;
+}
+
+// S2C 0x28 — the co-op dialog line [cstr name][i16 line]; the reader clamps
+// the name at the body end and defaults a short line to 0.
+// [orig: sub_5038A0 @0x5038A0; NapiNPClientMsg_0x028 @0x425B40]
+int check_S_28_dialog_line() {
+	DialogLine line;
+	line.dialog_name = "dlg012";
+	line.line = 3;
+	const std::vector<uint8_t> wire = encode_dialog_line(line);
+	EXPECT(wire == std::vector<uint8_t>({'d', 'l', 'g', '0', '1', '2', 0, 3, 0}));
+	DialogLine out;
+	EXPECT(decode_dialog_line(wire.data(), wire.size(), out));
+	EXPECT(out.dialog_name == "dlg012" && out.line == 3);
+	EXPECT(!decode_dialog_line(wire.data(), 7, out));
+	EXPECT(out.dialog_name == "dlg012" && out.line == 0);
+	EXPECT(!decode_dialog_line(wire.data(), 3, out));
+	EXPECT(out.dialog_name == "dlg" && out.line == 0);
+	cover('S', 0x28);
 	return 0;
 }
 
@@ -2187,9 +2231,11 @@ int main() {
     if (check_S_21_explosion_effect()) return 1;
 	if (check_S_4C_visible_players()) return 1;
 	if (check_S_4D_spawn_slot_notice()) return 1;
+	if (check_S_28_dialog_line()) return 1;
 	if (check_emote_pair()) return 1;
 	if (check_squad_and_waypoint_legs()) return 1;
 	if (check_radio_call_request()) return 1;
+	if (check_S_51_team_change_confirm()) return 1;
 	if (test_decoded_drift_guard()) return 1;
 	std::printf("ALL nw_message_coverage tests passed\n");
 	return 0;

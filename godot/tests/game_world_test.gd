@@ -494,9 +494,9 @@ func test_tick_gates_the_runtime_on_its_transport() -> void:
 # Drive a REAL debug-spawned round through the playing world until its impact
 # row lands in the real presentation sinks (a live effect-world group or a
 # fired soundset). Returns the number of world frames run.
-func _tick_until_impact(world: GameWorld) -> int:
+func _tick_until_impact(world: GameWorld, listener := Vector3.ZERO) -> int:
 	for frame in range(30):
-		world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
+		world.tick(listener, Transform3D(), ONE_TICK_DELTA)
 		if not world.get_mission_audio().recent_fired_soundsets().is_empty() \
 				or world.get_effect_world().live_group_count() > 0:
 			return frame + 1
@@ -528,6 +528,27 @@ func test_round_light_move_rows_reach_world_selected_output() -> void:
 	world.unload()
 
 
+# The fired one-shots of one set name, in fire order.
+func _fired_named(audio: MissionAudio, set_name: String) -> Array:
+	var out: Array = []
+	for fired_v in audio.recent_fired_soundsets():
+		var fired: FiredSoundset = fired_v
+		if fired.set_name == set_name:
+			out.append(fired)
+	return out
+
+
+# The retail sound-travel delay of a one-shot heard `distance` units away:
+# none inside 30 units, else (62 * whole units / 330) >> 2 ticks, at least one
+# (world::FireSoundQueue::play_with_distance_delay; world/fire_sound.h).
+func _sound_travel_ticks(distance: float) -> int:
+	var units := int(distance)
+	if units < 30:
+		return 0
+	@warning_ignore("integer_division")
+	return maxi(((62 * units) / 330) >> 2, 1)
+
+
 func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var root_dir := _stage_impact_fixture("impact_generic")
 	var world := WorldFixture.make_world(self)
@@ -538,11 +559,15 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	var audio := world.get_mission_audio()
 	assert_eq(effects.live_group_count(), 0, "the load-time warm leaves no live group behind")
 
+	# The listener far above the lane: the impact's sound has to travel. It
+	# stays well inside the staged set's 2000-unit cull range, past which the
+	# one-shot is not played at all.
+	var far_listener := Vector3(16, 700, -16)
 	var sim := world.get_sim()
 	assert_gte(int(sim.debug_spawn_round(
 			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0,
 			"the real flight sim accepts the staged rifle round")
-	_tick_until_impact(world)
+	_tick_until_impact(world, far_listener)
 	# The fixed ticks the presenting frame banked (a 0.02 s frame banks one,
 	# every fourth frame two): the same-frame particle advance ran once per tick.
 	var ticks_in_frame := int(world.get_runtime().get_perf_counters().ticks)
@@ -551,15 +576,16 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	assert_eq(rows.size(), 1,
 			"one real terrain hit presents exactly one impact transient")
 	var first_id := 0
+	var impact_origin := Vector3.ZERO
 	if rows.size() == 1:
 		var spawn: EffectGroupReport = rows[0]
 		first_id = int(spawn.id)
 		var transform: Transform3D = spawn.transform
+		impact_origin = transform.origin
 		assert_eq(spawn.name, IMPACT_EFFECT,
 				"the surface row's authored .ptl effect reaches the effect world")
 		# Terrain hits omit orientation and use the effect's world +Y default.
-		# [orig: Projectile_HandleTerrainImpact @0x4e92c8;
-		#  CEffectWorld_SpawnEmitterAtPosition @0x5f6e52..0x5f6e5c]
+		# (the engine's terrain impact handler; world/round_sim.cpp)
 		assert_lt(transform.basis.z.distance_to(Vector3.UP), 0.05,
 				"the terrain transient uses the upward default emission axis")
 		# The engine stamps imp.tick DURING the producing tick and bumps
@@ -577,16 +603,11 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 				EffectScene.RENDER_DOMAIN_WORLD)
 		assert_gt(int(spawn.source_tick), 0,
 				"the row carries its production tick for catch-up chronology")
-	var fires := audio.recent_fired_soundsets()
-	assert_eq(fires.size(), 1)
-	if fires.size() == 1 and rows.size() == 1:
-		var fired: FiredSoundset = fires[0]
-		assert_eq(fired.set_name, IMPACT_SOUND,
-				"impact audio fires the same surface row's soundset")
-		assert_true(fired.played, "the staged bank carries the set, so the one-shot plays")
-		var impact_transform: Transform3D = (rows[0] as EffectGroupReport).transform
-		assert_eq(fired.position, impact_transform.origin,
-				"impact audio shares collision presentation with the visual transient")
+	# The engine plays the impact's sound where the impact lands, through the
+	# fire-sound queue: 30 units or more from the listener it waits out the
+	# travel delay, so the impact frame presents the transient but no sound.
+	assert_true(_fired_named(audio, IMPACT_SOUND).is_empty(),
+			"a far impact's sound is still travelling in its impact frame")
 	assert_eq(world.get_effect_light_report().live, 1,
 			"the real light_impact dictionary reaches the EffectLightDirector")
 	var camera := Camera3D.new()
@@ -597,16 +618,59 @@ func test_round_impacts_route_generic_transient_and_audio_legs() -> void:
 	assert_eq(world.get_effect_light_report().selected, 1,
 			"the impact flash reaches camera-global object output")
 
+	# The delayed sound: it plays once, at the impact, after the computed
+	# number of logic ticks (counted from the end of the impact frame; the
+	# impact's own tick may have shared that frame with one countdown tick, and
+	# the play may land on the first of a two-tick frame).
+	var delay := _sound_travel_ticks(impact_origin.distance_to(far_listener))
+	assert_gt(delay, 0, "the far listener puts the impact past the 30-unit leg")
+	var ticks_after := 0
+	for _frame in range(400):
+		world.tick(far_listener, Transform3D(), ONE_TICK_DELTA)
+		ticks_after += int(world.get_runtime().get_perf_counters().ticks)
+		if not _fired_named(audio, IMPACT_SOUND).is_empty():
+			break
+	var fires := _fired_named(audio, IMPACT_SOUND)
+	assert_eq(fires.size(), 1, "the far impact's sound plays exactly once")
+	assert_between(ticks_after, delay - 1, delay + 1,
+			"the far impact's sound plays after its travel delay")
+	if fires.size() == 1:
+		var fired: FiredSoundset = fires[0]
+		assert_true(fired.played, "the staged bank carries the set, so the one-shot plays")
+		assert_false(fired.slot, "the impact sound rides the fire-sound leg")
+		assert_eq(fired.position, impact_origin,
+				"impact audio shares collision presentation with the visual transient")
+
 	# Drained rows cannot accumulate: later frames re-drain an empty queue.
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
-	var later := effects.get_debug_group_report()
-	assert_lte(later.size(), 1,
-			"resolved impact rows cannot accumulate between presentation frames")
-	for row_v in later:
+	world.tick(far_listener, Transform3D(), ONE_TICK_DELTA)
+	world.tick(far_listener, Transform3D(), ONE_TICK_DELTA)
+	for row_v in effects.get_debug_group_report():
 		assert_eq(int((row_v as EffectGroupReport).id), first_id,
 				"no second transient appears once the queue has drained")
-	assert_eq(audio.recent_fired_soundsets().size(), 1)
+	assert_eq(_fired_named(audio, IMPACT_SOUND).size(), 1)
+
+	# Inside 30 units the same impact plays its sound in its impact frame.
+	var near_listener := impact_origin + Vector3(0, 5, 0)
+	var known_ids := {}
+	for row_v in effects.get_debug_group_report():
+		known_ids[int((row_v as EffectGroupReport).id)] = true
+	assert_gte(int(sim.debug_spawn_round(
+			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0,
+			"a second rifle round flies the same lane")
+	var impact_frame_seen := false
+	for _frame in range(30):
+		world.tick(near_listener, Transform3D(), ONE_TICK_DELTA)
+		var landed := false
+		for row_v in effects.get_debug_group_report():
+			if not known_ids.has(int((row_v as EffectGroupReport).id)):
+				landed = true
+		var heard := _fired_named(audio, IMPACT_SOUND).size() == 2
+		if landed or heard:
+			impact_frame_seen = true
+			assert_true(landed and heard,
+					"a near impact's sound plays in the frame its transient appears")
+			break
+	assert_true(impact_frame_seen, "the second round lands")
 	world.unload()
 
 
@@ -616,18 +680,44 @@ func test_round_impacts_route_sound_only_without_a_particle() -> void:
 	assert_eq(WorldFixture.load_mission(world, root_dir, "mnml.bms",
 			func(mission: MissionData) -> void:
 				assert_true(mission.set_header_string("terrain", "Tmap"))), OK)
+	var effects := world.get_effect_world()
+	var audio := world.get_mission_audio()
+
+	# Find the lane's ground with a rifle round (its transient marks the impact),
+	# then listen from just above it, inside the 30-unit leg.
+	assert_gte(int(world.get_sim().debug_spawn_round(
+			Vector3(16, 60, -16), Vector3.DOWN, "AM_556MM")), 0)
+	_tick_until_impact(world, Vector3(16, 2000, -16))
+	var rows := effects.get_debug_group_report()
+	assert_eq(rows.size(), 1, "the locating round presents one transient")
+	if rows.size() != 1:
+		world.unload()
+		return
+	var ground := (rows[0] as EffectGroupReport).transform.origin
+	var near_listener := ground + Vector3(0, 5, 0)
+	var groups_before := rows.size()
 
 	assert_gte(int(world.get_sim().debug_spawn_round(
 			Vector3(16, 60, -16), Vector3.DOWN, "AM_SOUNDONLY")), 0)
-	_tick_until_impact(world)
-
-	assert_true(world.get_effect_world().get_debug_group_report().is_empty(),
+	var heard := false
+	for _frame in range(30):
+		world.tick(near_listener, Transform3D(), ONE_TICK_DELTA)
+		if not _fired_named(audio, SOUND_ONLY_SOUND).is_empty():
+			heard = true
+			break
+	assert_true(heard, "the sound-only round lands and is heard")
+	assert_lte(effects.get_debug_group_report().size(), groups_before,
 			"a 'none' effect column must not spawn an impact particle")
-	var fires := world.get_mission_audio().recent_fired_soundsets()
+	var fires := _fired_named(audio, SOUND_ONLY_SOUND)
 	assert_eq(fires.size(), 1)
 	if fires.size() == 1:
-		assert_eq((fires[0] as FiredSoundset).set_name, SOUND_ONLY_SOUND,
-				"the sound-only surface row retains its authored soundset")
+		var fired: FiredSoundset = fires[0]
+		assert_false(fired.slot, "the impact sound rides the fire-sound leg")
+		assert_almost_eq(fired.position.x, ground.x, 0.5,
+				"the sound-only row plays at its impact on the lane")
+		assert_almost_eq(fired.position.z, ground.z, 0.5,
+				"the sound-only row plays at its impact on the lane")
+	world.unload()
 
 
 func test_fixed_tick_orders_weapon_and_impact_before_particle_advance() -> void:
@@ -2399,8 +2489,10 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 		"a STANDING infantry entity never anchors the silhouette tier")
 
 	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
-	# The SELECT latch crosses the input pump one frame after the request, so
-	# the world loop needs two frames where the bare sim.step() needed one.
+	# The SP listen host's own C2S 0x1D leaves at the press frame's client
+	# frame and latches in the next frame's server tick, and the feed crosses
+	# the input pump one frame after that: three frames.
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	# Whether the crouched body anchors is the occlusion frame's collector
@@ -2411,6 +2503,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 		"tick feeds the occlusion frame's anchors into the dispatcher's silhouette tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_eq(disp.silhouette_anchors, PackedVector3Array(),

@@ -4,6 +4,7 @@
 
 #include <base/io/strutil.h>
 #include <formats/mission/mission.h> // kItemIdOffset (BMS type id -> items.def id)
+#include <runtime/world/world.h>
 
 #include <cstring>
 #include <unordered_map>
@@ -57,6 +58,35 @@ std::vector<EnvsMarker> resolve_envs_markers(
 						def.soundloops[slot];
 			out.push_back(std::move(marker));
 		}
+	}
+	return out;
+}
+
+std::vector<EnvsMarker> resolve_envs_markers(
+		const world::World &world, const DefItemsFile &items) {
+	std::vector<EnvsMarker> out;
+	std::unordered_map<int32_t, const DefItemDef *> by_id;
+	by_id.reserve(items.count);
+	for (size_t i = 0; i < items.count; ++i)
+		by_id.emplace(items.entries[i].id, &items.entries[i]);
+	// The BMS walk's group order as pools: markers, items, buildings, organics.
+	constexpr int kPools[] = {3, 1, 2, 0};
+	for (const int pool : kPools) {
+		world.registry.for_each_in_pool(pool, [&](const world::Entity &entity) {
+			const auto found = by_id.find(entity.item_id + mission::kItemIdOffset);
+			if (found == by_id.end()) return;
+			const DefItemDef &def = *found->second;
+			if (!item_is_envs(def)) return;
+			EnvsMarker marker;
+			marker.x = entity.position.x;
+			marker.y = entity.position.y;
+			marker.z = entity.position.z;
+			marker.bms_id = entity.bms_id;
+			// [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080 — the region slots]
+			for (int slot = 0; slot < 4; ++slot)
+				marker.slot_sets[static_cast<size_t>(slot)] = def.soundloops[slot];
+			out.push_back(std::move(marker));
+		});
 	}
 	return out;
 }

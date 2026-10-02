@@ -40,12 +40,30 @@ struct EntityDeathEvent {
     int16_t death_anim_state_id = 0;
     int16_t hit_section = 0;
     bool item_state = false;
+    // Entity_KillBySlotId's flags, the class callback's third argument: 0 for
+    // the 0x26 kill, 1 (the silent death) for the 0x4E join-window kill
+    // [orig: @0x42EC78 (0x26) / @0x4318b5 (0x4E)].
+    int32_t kill_flags = 0;
 };
 // A chat line on channel 13 (local) names its sender's slot: the sender's
 // person becomes the map's tracked target. The slot resolves at the effect
 // pass, which owns the entities. [orig: Chat_DispatchToChannel @0x42B9CD..
 // 0x42BA09 — slot+0x24, PlayerSlot_IsEntityInGame @0x434220,
 // HUD_SetTrackedEntityTarget @0x59D050]
+// S2C 0x24 "SETFLASH1 [n]": the lightning sequencer's timer A. The effect
+// pass applies it to the world's weather. [orig: NapiNPClientMsg_HandleTextCommand
+// @0x429ecf..0x429ef5 -> g_EnvLightningTimerA]
+struct LightningTimerCommand {
+    int32_t timer_a = 16;
+};
+// S2C 0x37: one door row's state from the host, applied by the effect pass to
+// the world's door records. [orig: NapiNPClientMsg_HandleWeaponSlotAction
+// @0x431250]
+struct DoorRowUpdate {
+    uint16_t entity_handle = 0;
+    int32_t state = 0;  // the i16 wire word, sign-extended [orig: @0x43127e]
+    uint8_t number = 0; // the row number; 0 never lands
+};
 struct LocalChatSpeaker {
     uint8_t slot = 0;
 };
@@ -57,9 +75,27 @@ struct LocalChatSpeaker {
 struct TipEventCommand {
     uint8_t event = 0;
 };
+// S2C 0x0F with the death screen up: the live HUD declutter level goes to the
+// blank level (hud/hud_toggles.h hud_toggles_death_screen). The effect pass
+// hands it to the HUD owner; a 0x0F with the death screen down (every live
+// retail join's first 0x0A carries the death bit clear) leaves the level alone.
+// [orig: NapiNPClientMsg_0x00F `cmp g_DeathScreenActive, 0` @0x42e3f5 /
+//  @0x42e407 -> `mov g_HUDDetailLevel, 3` @0x42e412 ->
+//  CRenderState_SetLayerVisibility(3) @0x42e41c]
+struct HudDetailBlankCommand {};
+// S2C 0x28: one co-op dialog line the authority's playback started. The
+// effect pass hands it to the presentation with the local player's class, the
+// locale the clip resolves by. [orig: NapiNPClientMsg_0x028 @0x425B40 ->
+// Dialog_PlayByNameAndSlot(g_LocalPlayerEntity->playerClass, name, line)
+// @0x425b94 (Dialog_PlayByNameAndSlot @0x44E3F0)]
+struct DialogLineCommand {
+    std::string dialog_name;
+    int16_t line = 0;
+};
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
-        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand>;
+        EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
+        LightningTimerCommand, DoorRowUpdate, DialogLineCommand, HudDetailBlankCommand>;
 
 class ClientReplicaPipeline {
 public:
@@ -91,6 +127,10 @@ public:
 	// not be resolved (the retail bail queues a C2S 0x0F entity request); the
 	// embedding runtime drains and sends them once per frame.
 	std::vector<uint16_t> drain_carrier_repair_requests();
+	// Remote organic rows whose death edge fired in tick_remote_motion since
+	// the last drain (the self row excluded: the local body's own edge
+	// screams). The embedding runtime plays each one's scream.
+	std::vector<uint16_t> drain_death_edges();
 	void tick_recoil();
 	// Age the retained 0x40/0x6B banks by `elapsed` ticks. Persistent 0x10
 	// slots do not age; the transient bank clears on expiry while the special
@@ -105,6 +145,10 @@ public:
 	// known from the decoded entity, mirroring retail's draw-time pool read.
 	// [orig: Render_MinimapSlotBlip @0x5be4ac]
 	void refresh_minimap_live_markers();
+	// S2C 0x3E (empty): every overlay slot and every linked row cleared, the
+	// last message of the host's join tail [orig: NapiNPClientMsg_0x03E
+	// @0x4226D0 -> sub_5BE8D0 @0x5BE8D0; Server_OnPlayerJoin @0x51aaee].
+	void reset_minimap_overlays();
     using GuidedRoundResolver = std::function<world::LiveRound *(int16_t)>;
     void set_guided_round_resolver(GuidedRoundResolver resolver) { guided_round_resolver_ = std::move(resolver); }
     // Fire synchronously at the receive boundary, before a following 0x44.
@@ -163,6 +207,47 @@ public:
 	void set_replica_bound_radius_resolver(ReplicaBoundRadiusResolver resolver) {
 		replica_bound_radius_resolver_ = std::move(resolver);
 	}
+	// The def fields the replica dead tail reads, resolved by wire type from
+	// the embedder's items.def: deathtime (def+0x890), LeaveCorpse
+	// (attrib & 0x400000) and whether the def names a decay effect
+	// (particledeath, the +0x412 word). No resolver, or an unknown type, runs
+	// no dead tail.
+	struct ReplicaDeathTraits {
+		int32_t deathtime_ticks = 0;
+		bool leave_corpse = false;
+		bool decay_effect = false;
+	};
+	using ReplicaDeathTraitsResolver =
+			std::function<bool(uint16_t type_id, ReplicaDeathTraits &out)>;
+	void set_replica_death_traits_resolver(ReplicaDeathTraitsResolver resolver) {
+		replica_death_traits_resolver_ = std::move(resolver);
+	}
+	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
+	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
+	// @0x4b4e39 / @0x4b9f36]; `release` marks an org1 corpse destroyed this
+	// tick, whose held decay group the embedder releases [orig: Entity_Destroy
+	// -> Entity_ReleaseEffectEmitter @0x43E8F5].
+	struct ReplicaCorpseDecay {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		int32_t pos[3] = {};
+		bool release = false;
+	};
+	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
+	// A sound-profile slot one replica body's mover leg played this tick, at
+	// the body's position when it played, with the identity the embedder
+	// resolves it through: the row's items.def type and, for a player, its
+	// packed avatar id (the wire net_id) that picks the female binding
+	// [orig: Entity_GetProfileSlotSound @0x528300 ->
+	// Entity_PlaySound3D_FullVolume @0x528E20].
+	struct ReplicaSlotSound {
+		uint16_t handle = 0xFFFF;
+		uint16_t type_id = 0;
+		uint16_t character_id = 0; // a player's net_id; 0 for an org1 body
+		uint8_t slot = 0;
+		int32_t pos[3] = {};
+	};
+	std::vector<ReplicaSlotSound> drain_slot_sounds();
 
 	// The deck-ride carrier seam (D-NET-196 replica tails): a row whose
 	// contact resolve grounded it on an entity follows that carrier's
@@ -244,6 +329,19 @@ public:
 	// and collision passes both skip).
 	// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — the team store @0x4319ee]
 	void apply_team_assign(uint16_t handle, uint8_t team);
+	// A player's identity pair (Flags & 0x100 rows): the NetId word the
+	// character-slot lookup keys its avatar on and the animSlot byte, as S2C
+	// 0x50 and 0x51 rebind them. An id the character registry does not hold
+	// stays raw here; the presentation resolves it to the per-side default the
+	// same way it resolves a 0x0C record's.
+	// [orig: NapiNPClientMsg_TeamAssign @0x431b3a (animSlot) / @0x431b46
+	//  (NetId), the MinimapSlot_HasEntity fallback @0x431b4d..0x431b77, the
+	//  CharacterEntity rebind @0x431b8c..0x431b91]
+	void apply_player_identity(uint16_t handle, uint16_t net_id, uint8_t anim_slot);
+	// S2C 0x51: one entry of the host's team-change list (the C2S 0x29
+	// continuation is the connection's).
+	// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0]
+	void apply_team_change_confirm(const std::vector<uint8_t> &body);
 
 	const ClientState &state() const { return state_; }
 	ClientState &state() { return state_; }
@@ -405,10 +503,19 @@ private:
 	void apply_spectator_mode(const std::vector<uint8_t> &body); // 0x75
 	void queue_carrier_repair(uint16_t handle);
 	std::vector<uint16_t> carrier_repair_requests_;
+	std::vector<uint16_t> death_edges_;
+	std::vector<ReplicaCorpseDecay> corpse_decays_;
+	std::vector<ReplicaSlotSound> slot_sounds_;
+	ReplicaDeathTraitsResolver replica_death_traits_resolver_;
 	// Shared S2C 0x13 / 0x26 death fold (retail gates + row health + the
 	// surfaced record). [orig: NapiNPClientMsg_EntityDeath @0x42EB50 /
 	// Entity_KillBySlotId @0x42BCE0]
-	void apply_entity_death(uint16_t handle_packed, int16_t value, bool item_state = false);
+	void apply_entity_death(uint16_t handle_packed, int16_t value, bool item_state = false,
+			int32_t kill_flags = 0);
+	// S2C 0x4E: one page of the host's join-window kill list (the C2S 0x28
+	// continuation is the connection's).
+	// [orig: NapiNPClientMsg_HandleBatchKill @0x431870]
+	void apply_batch_kill(const std::vector<uint8_t> &body);
 	void apply_capture_zone_overlay(const std::vector<uint8_t> &body);
 	void apply_minimap_overlay_batch(const std::vector<uint8_t> &body);
 	// The death-screen folds live together in client_replica_death.cpp;
@@ -459,6 +566,10 @@ private:
 	void apply_entity_remove(const std::vector<uint8_t> &body);  // 0x12
 	void apply_objective_entity_state(const std::vector<uint8_t> &body); // 0x2F
 	void erase_entity_tree(uint16_t root_handle);
+	// Entity_DropCarriedObject over a person carrier's row: the carried flag
+	// leaves it and keeps the carrier's pose for the drop the client runs
+	// (ClientWorldMaterializer). True when a flag was dropped.
+	bool drop_carried_objective(uint16_t carrier_handle);
 	uint32_t begin_entity_lifetime(uint16_t handle);
 	void discard_entity_notifications(uint16_t handle);
 	// Land one decoded compact world sample on a row: live snap in snap mode /

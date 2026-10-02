@@ -1,4 +1,5 @@
 #pragma once
+#include <runtime/audio/envs_markers.h>
 #include <runtime/world/minefield.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -101,6 +102,8 @@ class ScoreboardHeader;
 class EndRoundOverlay;
 class EndRoundStatistics;
 class DeployStatus;
+class ConnectionError;   // the joiner connection's error record (network/connection_error.h)
+class JoinScreenStatus;  // one read of the join screen (network/join_screen_status.h)
 class DestructionDrain;  // the destruction drain record (simulation/destruction_events.h)
 class HitboxDebugReport; // the hitbox oracle payload (simulation/hitbox_debug_report.h)
 class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card.h)
@@ -664,11 +667,8 @@ private:
 	// P7 block below). The joiner role drives the connect legs + the per-frame S2C->ClientState fold +
 	// the C2S 0x0C uplink over a dialed UdpPump; its own player L runs run_logic_tick(false), remotes
 	// render wire-direct. (engine: runtime/inmatch/joiner_connection.h) The session kind is the flag.
-	// The joiner's per-frame world<->net frame (S10a, ADR 0028; ADR 0043 d3):
-	// frame sequence, latches (started/spawned/redeploy/tripwire), the join
-	// request, wire-header materializer, per-replica resolver state and every
-	// engine leg live on joiner_role_; this binding keeps the loadout profile
-	// seams (joiner_kit_seams) and reads the role's observer facts.
+	// The joiner's per-frame world<->net frame (S10a, ADR 0028; ADR 0043 d3) lives on joiner_role_;
+	// this binding keeps the loadout profile seams (joiner_kit_seams) and reads its observer facts.
 	// The joiner's streamed pool-1..3 rows with a placed identity, as the
 	// entity dictionaries MissionObjectPlacer.place_entities consumes (kind,
 	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
@@ -1033,8 +1033,10 @@ public:
 	}
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
-	// The gate registration's GSID (0x81 SUS1) and AppId (the status page's key); LAN: empty / 0.
-	void set_novaworld_registration(const String &p_gsid, int p_app_id);
+	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
+	// joiners' CD cookie decrypt) and login PCID (the host's own player's); LAN: empty / 0.
+	void set_novaworld_registration(const String &p_gsid, int p_app_id,
+			const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid);
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
@@ -1042,8 +1044,7 @@ public:
 	// five per-slot vars), keyed by roster slot; the host's own slot is the gate binding's.
 	struct HostPeerSlot {
 		int slot = 0;
-		String player_name;
-		String ip_and_port;         // "a.b.c.d:port"
+		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
 		String team;                // "%ld" of the assigned team; empty until assigned
 	};
 	std::vector<HostPeerSlot> host_peer_slots() const;
@@ -1061,11 +1062,9 @@ public:
 	};
 	ServerCommandResult execute_server_command(const String &p_verb, const String &p_target,
 			const PackedStringArray &p_args);
-	// The NovaWorld join-ticket flow of a gate-registered host. `armed` arms the
-	// in-match watchdog's ClientPlayerEnterRequest leg (a registration whose
-	// ServerHostResult carried HostRequiresJoinTicket); the hook receives each
-	// request (the joiner's ConnectionId, its endpoint as the inet_addr dword +
-	// port, and its JOINTICKET) and an empty hook unbinds. The service's answer
+	// The NovaWorld join-ticket flow: `armed` arms the in-match watchdog's ClientPlayerEnterRequest
+	// leg (ServerHostResult HostRequiresJoinTicket); the hook gets each request (the ConnectionId,
+	// the inet_addr dword + port, the JOINTICKET), an empty hook unbinds, and the service's answer
 	// returns through apply_player_enter_result. All three no-op without a host role.
 	using PlayerEnterRequestHook = std::function<void(uint32_t p_connection_id,
 			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
@@ -1196,6 +1195,7 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
+	void set_join_discovered_session(bool, int64_t, bool, const String &); // the row's 0x81 (C++)
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character/integrity data.
@@ -1227,34 +1227,34 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	String get_join_mission_file() const;
-	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
-	// revision. Empty means no new authoritative sample.
-	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
-	// landed since the last take, else {score, delta, tone} with the tone name
-	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
-	// 2D interface sound behind the enable_slotmachine setting
-	// (engine: runtime/replication/client_state.h).
+	// The S2C 0x81 hit-confirm edge: {} unless a score delta landed since the last take, else
+	// {score, delta, tone}; the presenter plays the tone ("" / "HITTONE" / "KILLTONE" /
+	// "HEADSHOTTONE") behind enable_slotmachine (engine: runtime/replication/client_state.h).
 	Ref<ScoreFeedback> take_score_feedback();
 	// Drain the world's tip events (hud/tip_system.h TipEvent), in raise order.
 	PackedByteArray take_tip_events();
-	// Exact pre-world payloads retained by the joiner from retail's initial
-	// state stream. The mission header is exactly 616 bytes when available. TIL
-	// bytes are exposed only in COMPLETE; the explicit state distinguishes a
-	// valid omitted 0x45 from a partial or malformed stream.
+	// Take the S2C 0x0F's pending death-screen HUD blank (world.out.hud_detail_blank).
+	bool take_hud_detail_blank();
+	// The envs emitters of the streamed world (audio::resolve_envs_markers over the registry).
+	std::vector<opennova::audio::EnvsMarker> envs_markers_from_world(const opennova::def::DefItemsFile &p_items) const;
+	// The deploy keys' event-12 parameter for a Windows VK (inmatch::deploy_key_pick), -1 if not taken.
+	int deploy_key_pick(int p_vk);
+	// Exact pre-world payloads the joiner retained from retail's initial state stream: the
+	// 616-byte mission header when available; the TIL only in COMPLETE, the explicit state
+	// telling a valid omitted 0x45 from a partial or malformed stream.
 	PackedByteArray get_join_mission_header() const;
 	int64_t get_join_terrain_til_state() const;
 	PackedByteArray get_join_terrain_til() const;
 	String get_join_expansion() const;
 	int64_t get_join_game_type() const;
 	String get_join_error() const;
-	// Session loss: empty while healthy, else a player-facing reason the shell surfaces the
-	// way it surfaces a join failure. Two causes — the host's explicit close (the punt
-	// channel) and in-match silence past the reap window. Retail exits the mission with a
-	// mapped exit reason here and shows no in-world dialog.
-	// (engine: net/novaworld/client_session.h)
+	// The joiner connection's error record (retail's reason text) and join-screen status.
+	Ref<ConnectionError> get_connection_error() const;
+	Ref<JoinScreenStatus> get_join_screen_status() const;
+	// Session loss: empty while healthy, else a diagnostic naming the cause (the host's close
+	// or the silence reap); retail exits the mission with a mapped reason, no in-world dialog.
 	String get_session_loss_reason() const;
-	// The same edge as a state test rather than a presentation string: in-world surfaces
-	// (the deploy screen) need to know the session is gone, not what to tell the player.
+	// The same edge as a state test, for the in-world surfaces (the deploy screen).
 	bool is_session_lost() const;
 	// g_MissionExitReason as stored (0 none): the NovaWorld exit, a mapped disconnect record.
 	int get_mission_exit_reason() const;
@@ -1321,10 +1321,11 @@ public:
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
-	// The rtxt "Server" table's STRSRV_MEDREQ format for the host's broadcast.
-	void set_server_text(const String &p_medic_request_format);
-	// The one role-agnostic read of the local player's dead bit.
-	bool local_player_dead() const;
+	// The rtxt "Server" formats for the host's broadcasts (STRSRV_MEDREQ, C2Blue, C2Red).
+	void set_server_text(const String &p_medic, const String &p_to_blue, const String &p_to_red);
+	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
+	bool local_player_dead() const; // the one role-agnostic read of the local player's dead bit
+	void broadcast_dialog_line(const std::string &p_dialog, int p_line); // Server_BroadcastDialogLine
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):
 	// the 0x1D header edge + the 0x56 board through the ONE ClientEndRoundStats
 	// every role's view folds; the overlay text ladder (hud/end_round_overlay.h)

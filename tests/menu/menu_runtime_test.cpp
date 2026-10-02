@@ -49,6 +49,7 @@ struct FakeFrame : MenuFrameSeam {
 	int table_row = -1;
 	int table_col = -1;
 	std::vector<MenuTableRow> table_rows_seen;
+	std::vector<MenuTableColumnDef> table_columns_seen;
 	int hotkey = -1;
 	std::string hotkey_asked;
 	int edit_key_result = 0;
@@ -103,6 +104,10 @@ struct FakeFrame : MenuFrameSeam {
 	void set_widget_table_rows(int i, const std::vector<MenuTableRow> &rows) override {
 		note("rows " + std::to_string(i) + " " + std::to_string(rows.size()));
 		table_rows_seen = rows;
+	}
+	void set_widget_table_columns(int i, const std::vector<MenuTableColumnDef> &columns) override {
+		note("columns " + std::to_string(i) + " " + std::to_string(columns.size()));
+		table_columns_seen = columns;
 	}
 	void set_widget_clip_rect(int i, bool enabled, int l, int t, int r, int b) override {
 		note("clip " + std::to_string(i) + (enabled ? " 1 " : " 0 ") + std::to_string(l) + " " +
@@ -870,11 +875,44 @@ void test_options_screen() {
 
 } // namespace
 
+// A populate's column layout: the count first (below 1 refused; existing
+// columns kept), then one init per column (out of range refused); the layout
+// reaches the frame, is replayed when the screen is shown again, and bounds
+// the cell writes like an authored COLUMN COUNT.
+// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0;
+//  StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
+void test_table_runtime_columns() {
+	const mnu::Document doc = make_document();
+	FakeFrame frame;
+	MenuRuntime rt;
+	seed_counts(frame);
+	rt.set_frame(&frame);
+	rt.open_document(&doc, "main.mnu", "");
+	CHECK(!rt.table_set_column_count(14, 0));
+	CHECK(!rt.table_set_column_count(10, 3)); // not a table
+	CHECK(rt.table_set_column_count(14, 4));
+	CHECK(frame.table_columns_seen.size() == 4);
+	CHECK(rt.table_init_column(14, 0, 150, "Name", -1, 0x20));
+	CHECK(rt.table_init_column(14, 3, 75, "Score", -1, 0x20));
+	CHECK(!rt.table_init_column(14, 4, 75, "Past", -1, 0x20));
+	CHECK(frame.table_columns_seen.size() == 4 && frame.table_columns_seen[0].defined &&
+			frame.table_columns_seen[0].width == 150 && frame.table_columns_seen[0].label == "Name" &&
+			!frame.table_columns_seen[1].defined && frame.table_columns_seen[3].vjustify == 0x20);
+	rt.table_add_row(14, { "ljim", "-", "0", "7" });
+	rt.table_set_cell_text(14, 0, 3, "9");
+	CHECK(rt.table_cell_text(14, 0, 3) == "9"); // column 3 exists in the runtime count
+	frame.table_columns_seen.clear();
+	CHECK(rt.navigate_to_screen("OPTIONS") && rt.navigate_to_screen("MAIN"));
+	// Replayed with the rows when the screen shows again.
+	CHECK(frame.table_columns_seen.size() == 4 && frame.table_columns_seen[3].label == "Score");
+}
+
 int main() {
 	test_index_and_frameless();
 	test_navigation_replay_and_actions();
 	test_radio_spin_tables_scroll();
 	test_table_row_operations();
+	test_table_runtime_columns();
 	test_input();
 	test_shell_flow();
 	test_host_dialog();

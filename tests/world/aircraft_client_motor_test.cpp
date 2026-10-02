@@ -9,6 +9,7 @@
 //  folded here 2026-08-21]
 
 #include <runtime/world/ai.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -492,6 +493,129 @@ bool run_non_drivable_hover_seed() {
 	return ok;
 }
 
+// The occupant leg ahead of the seat sweep: the move bit with a diagonal key
+// on a weathervane hull (or any analog deflection) ORs the free-look bit into
+// the pilot's MoveOrder, and while the hull is airborne the diagonal key yaws
+// it by weathervane * 192426 a tick (keys 1/5 one way, 3/7 the other). The
+// analog-free steer target then holds the hull's own yaw instead of chasing
+// the pilot's. A straight key merges nothing; a grounded hull merges without
+// the yaw. [orig: Entity_UpdateAircraftPhysics @0x490CDA..0x490DBD -- the
+//  merges @0x490D48..0x490D6D, the yaw @0x490D74..0x490DBA; the steer target
+//  @0x4914DD..0x49150F]
+bool run_diagonal_key_pedal_yaw_and_free_look() {
+	bool ok = true;
+	constexpr int32_t kWeathervane = 3;
+	constexpr int32_t kPedal = kWeathervane * 192426;
+	struct Case { int dir; bool airborne; bool merged; int32_t yaw; };
+	for (const Case c : { Case{1, true, true, kPedal}, Case{5, true, true, kPedal},
+			Case{3, true, true, -kPedal}, Case{7, true, true, -kPedal},
+			Case{0, true, false, 0}, Case{1, false, true, 0} }) {
+		Rig r;
+		make_rig(r);
+		r.traits.player_control = true;
+		r.traits.weathervane = kWeathervane;
+		auto *heli = prime(r, true);
+		heli->veh.net_climb = 0x10000; // the analog-free steer leg runs
+		if (c.airborne) heli->flags |= w::kEntityFlagInAir;
+		else heli->flags &= ~w::kEntityFlagInAir;
+		w::Entity pilot;
+		pilot.flags = 0x100u;
+		pilot.player_class = 8;
+		pilot.health = pilot.health_max = 100;
+		pilot.alive = true;
+		pilot.yaw = 45; // a look far from the hull's own yaw
+		pilot.mounted = true;
+		pilot.mount_target = r.heli;
+		pilot.mount_type = w::SeatType::Controller;
+		pilot.net_move_input = static_cast<uint8_t>(w::Entity::kMoveOrderMoving | c.dir);
+		const auto pilot_h = r.world.registry.spawn(0, pilot);
+		heli = r.world.registry.get(r.heli);
+		w::Seat seat;
+		seat.type = w::SeatType::Controller;
+		seat.occupant = pilot_h;
+		heli->seats.push_back(seat);
+		heli->primary_occupant = pilot_h;
+		r.world.cached.local_player = pilot_h; // the joiner's own pilot
+		r.world.vehicles.aircraft_client_tick(*heli, r.traits);
+		const w::Entity *p = r.world.registry.get(pilot_h);
+		ok &= expect(p != nullptr &&
+				((p->net_move_input & w::Entity::kMoveOrderFreeLook) != 0) == c.merged,
+				"a diagonal key on a weathervane hull merges the free-look bit");
+		const int32_t look = w::bam_heading_from_mission_yaw_deg(45);
+		ok &= expect(heli->veh.steer_target_bam == (c.merged ? c.yaw : look),
+				"the merged pilot's steer target holds the pedalled hull yaw");
+	}
+	return ok;
+}
+
+// The merge writes the occupant's MoveOrder word itself, which only the input
+// pack rewrites: a joiner's own pilot keeps the bit through the frames
+// between its send boundaries, so the next frame's burning-hull spin (which
+// reads the word before that frame's merge) leaves the pilot's view alone;
+// the next pack clears it. [orig: Entity_UpdateAircraftPhysics -- the merge
+//  `or [eax+12Ch], 10h` @0x490D6D, the spin's `test byte ptr [eax+12Ch], 10h`
+//  @0x4904B0..0x4904D0; Player_PackInputStateToEntity's full store @0x4df68f,
+//  inside the holdoff-gated send block @0x42c3dd]
+bool run_merged_free_look_holds_until_the_pack() {
+	bool ok = true;
+	Rig r;
+	make_rig(r);
+	r.traits.player_control = true;
+	r.traits.weathervane = 3;
+	r.traits.critical_hp = 50;
+	auto *heli = prime(r, true);
+	heli->health = heli->health_max = 10; // burning: at or below criticalHp
+	heli->flags |= w::kEntityFlagInAir;
+	heli->veh.ground_cache = w::to_fixed(40); // 20 units under the altitude target
+	w::Entity pilot;
+	pilot.flags = 0x100u;
+	pilot.player_class = 8;
+	pilot.health = pilot.health_max = 100;
+	pilot.alive = true;
+	pilot.mounted = true;
+	pilot.mount_target = r.heli;
+	pilot.mount_type = w::SeatType::Controller;
+	const auto pilot_h = r.world.registry.spawn(0, pilot);
+	heli = r.world.registry.get(r.heli);
+	w::Seat seat;
+	seat.type = w::SeatType::Controller;
+	seat.occupant = pilot_h;
+	heli->seats.push_back(seat);
+	heli->primary_occupant = pilot_h;
+	w::AiEntity &body = *r.world.ai.at(r.world.ai.attach(pilot_h));
+	body.inf.active = true;
+	body.inf.is_local_player = true;
+	body.health = 100;
+	r.world.cached.local_player = pilot_h;
+	w::LocalPlayer local(r.world);
+	r.world.local_player_state = &local;
+	const auto free_look = [&] {
+		const w::Entity *p = r.world.registry.get(pilot_h);
+		return p != nullptr && (p->net_move_input & w::Entity::kMoveOrderFreeLook) != 0;
+	};
+	// The pack: forward + strafe-left, the diagonal key 1.
+	local.input.forward = true;
+	local.input.left = true;
+	local.apply_player_input_pre_tick(/*pack_input=*/true);
+	ok &= expect(!free_look(), "the pack leaves the free-look bit clear");
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
+	ok &= expect(free_look() && local.move_order.free_look,
+			"the merge lands on the local pilot's MoveOrder word");
+	// A frame without a pack (a joiner inside its send holdoff).
+	local.apply_player_input_pre_tick(/*pack_input=*/false);
+	ok &= expect(free_look(), "the merged bit holds through a frame without a pack");
+	const int32_t view = body.heading;
+	r.world.vehicles.aircraft_client_tick(*heli, r.traits);
+	ok &= expect(body.heading == view, "the held bit keeps the burning spin off the pilot's view");
+	// The next pack rewrites the whole word.
+	local.input.forward = false;
+	local.input.left = false;
+	local.apply_player_input_pre_tick(/*pack_input=*/true);
+	ok &= expect(!free_look() && !local.move_order.free_look, "the next pack clears the bit");
+	r.world.local_player_state = nullptr;
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -505,6 +629,8 @@ int main() {
 	ok &= run_grounded_damps_twice_as_hard();
 	ok &= run_sideslip_pitch_two_gain_pick();
 	ok &= run_global_rate_clamp_binds();
+	ok &= run_diagonal_key_pedal_yaw_and_free_look();
+	ok &= run_merged_free_look_holds_until_the_pack();
 	if (!ok) {
 		std::fprintf(stderr, "aircraft_client_motor_test FAILED\n");
 		return 1;

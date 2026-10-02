@@ -499,6 +499,32 @@ void test_local_player_death_scream_composite() {
     CHECK(saw_night);
 }
 
+// Every player body screams the org2 composite, not only the local one: the
+// org2 pass runs for each player entity on every machine, and its death edge
+// composes "<prefix>_DEATH" from the anim slot (D-SND-22) [orig:
+// Entity_UpdateInfantryPlayerBody @0x4b4c4a-0x4b4c6a]. Covers a non-local
+// player body on the motor's edge and a host's remote peer on the
+// authority's remote-peer edge.
+void test_every_player_body_screams_the_composite() {
+    const auto scream_of = [](bool remote_peer) {
+        Rig rig(false);
+        rig.e->net_is_remote_peer = remote_peer;
+        if (Entity *ent = rig.world.registry.get(rig.e->handle)) {
+            ent->flags |= kEntityFlagPlayer;
+            ent->engine_flags |= kEntityFlagPlayer;
+            ent->anim_slot = 2; // BM2
+            ent->health = 0;
+        }
+        rig.run(1, 2);
+        std::string out = "<none>";
+        for (const auto &ev : rig.take())
+            if (ev.slot == slot::kSlotDeath) out = ev.set_name;
+        return out;
+    };
+    CHECK(scream_of(false) == "BM2_DEATH");
+    CHECK(scream_of(true) == "BM2_DEATH");
+}
+
 void test_surface_sampler_defaults() {
     using opennova::terrain::SurfaceTypeMap;
     using opennova::terrain::surface_type_at_fixed;
@@ -611,6 +637,7 @@ int main() {
     test_landing_pair_alive_and_dead();
     test_death_scream_day_and_night();
     test_local_player_death_scream_composite();
+    test_every_player_body_screams_the_composite();
     test_surface_sampler_defaults();
     test_surface_sampler_placed_tile_override();
     test_surface_tile_resolvers();

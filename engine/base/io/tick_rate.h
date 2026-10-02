@@ -21,4 +21,13 @@ inline constexpr int32_t kTickMs = 16;
 // integer; do not "correct" one to the other.
 inline constexpr int32_t kTicksPerSecondInt = 62;
 
+// Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
+// time-sync validator compares only unsigned deltas, so a nonzero logical base
+// preserves its clock contract without introducing wall-time into native tests.
+inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
+	return static_cast<uint32_t>(
+			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) /
+					static_cast<uint64_t>(kTicksPerSecondInt));
+}
+
 } // namespace opennova::io

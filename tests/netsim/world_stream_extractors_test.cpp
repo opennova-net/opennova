@@ -356,8 +356,66 @@ bool run_pools_are_disjoint() {
 	return true;
 }
 
+// Three players (the host deployed, joiner A still on its deploy screen, joiner
+// B deployed): the 0x0C batch is the same for every recipient and A's record
+// carries bit0 for all of them — retail copies entity+36 verbatim and keeps
+// bit0 on the player's own entity, never a per-recipient marker [orig:
+// NetPacket_SerializeEntityStatesToBuffer @0x5030a0 (@0x50324c);
+// NetPacket_WritePlayerState @0x4ff6d0/@0x4ff7b8] (D-NET-136).
+bool run_pool0_player_bit0_is_per_entity() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const auto spawn_player = [&](uint32_t flags) {
+		w::Entity player;
+		player.kind = w::EntityKind::Organic;
+		player.item_id = 0x14B9;
+		player.has_item_def = true;
+		player.item_type = 3;
+		player.team = 1;
+		player.flags = flags;
+		return world.registry.spawn(0, player);
+	};
+	const w::EntityHandle host = spawn_player(0);
+	const w::EntityHandle a = spawn_player(1u);
+	const w::EntityHandle b = spawn_player(0);
+	const nw::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
+	uint16_t flags_host = 0, flags_a = 0, flags_b = 0;
+	for (const nw::OrganicSpawnRecord &rec : batch.records) {
+		if (rec.slot_id == host.packed) flags_host = rec.minimap_flags;
+		if (rec.slot_id == a.packed) flags_a = rec.minimap_flags;
+		if (rec.slot_id == b.packed) flags_b = rec.minimap_flags;
+	}
+	std::printf("[bit0] host=%04x a=%04x b=%04x\n", flags_host, flags_a, flags_b);
+	const bool ok = expect(flags_host == 0x0100 && flags_a == 0x0101 && flags_b == 0x0100,
+	                       "bit0 follows each player's own entity, for every recipient");
+	if (ok) std::printf("PASS pool0_player_bit0_is_per_entity\n");
+	return ok;
+}
+
+// A non-player body's 0x0C / 0x18 flags word is its own entity+36 low half: an
+// AI corpse a joiner downloads at join arrives dead, not standing, before its
+// first compact [orig: NetPacket_SerializeEntityStatesToBuffer @0x50324c;
+// NetPacket_SerializeObjectToBuffer @0x504df0..0x504e00] (D-NET-133).
+bool run_nonplayer_records_carry_the_flags_word() {
+	FourPoolWorld world;
+	w::Entity *ai = world.registry.get(w::EntityHandle::make(0, 0));
+	if (!expect(ai != nullptr, "the AI organic spawned")) return false;
+	ai->flags |= w::kEntityFlagDead;
+	ai->engine_flags |= w::kEntityFlagDead | w::kEntityFlagInAir;
+	const nw::OrganicSpawnBatch batch = ns::build_pool0_organic_batch(world);
+	const nw::FullEntitySpawnRecord full = ns::build_full_entity_spawn(*ai);
+	std::printf("[ai-flags] 0x0C=%04x 0x18=%04x\n",
+	            batch.records.empty() ? 0 : batch.records[0].minimap_flags, full.minimap_flags);
+	const bool ok = expect(batch.records.size() == 1 &&
+	                               batch.records[0].minimap_flags == 0x2002 &&
+	                               full.minimap_flags == 0x2002,
+	                       "the AI corpse streams its own Flags word in both records");
+	if (ok) std::printf("PASS nonplayer_records_carry_the_flags_word\n");
+	return ok;
+}
+
 // The S2C 0x18 FULL-ENTITY-SPAWN record (§5.46) — the 0x0F-query reply. A PLAYER record
-// must carry the same wire rules as its 0x0C sibling (per-recipient flags, minimap
+// must carry the same wire rules as its 0x0C sibling (per-entity flags, minimap
 // net_id, playerClass clamp) or the client's rebuild re-breaks what the query was
 // trying to repair. [orig: NapiNPServerMsg_HandlePlayerInfoRequest @0x514180]
 bool run_full_entity_spawn_player() {
@@ -396,9 +454,14 @@ bool run_full_entity_spawn_player() {
 	const uint16_t want_heading = static_cast<uint16_t>(static_cast<uint32_t>(heading_bam(30)) >> 16);
 	if (!expect(rec.heading_hi == want_heading, "heading = engine BAM high word")) return false;
 
-	// Own view (requester == owner): bit 0 set, same everything else.
-	nw::FullEntitySpawnRecord own = ns::build_full_entity_spawn(*e, h);
-	if (!expect(own.minimap_flags == 0x0101, "own player flags 0x0101")) return false;
+	// A player still on its deploy screen (or spectating) carries bit0 on its OWN
+	// entity, and the record copies it for every recipient [orig:
+	// NetPacket_WritePlayerState @0x4ff7a1/@0x4ff7b8; NetPacket_SerializeObjectToBuffer
+	// copies entity+36 @0x504df0..0x504e00] (D-NET-136).
+	world.registry.get(h)->flags |= 1u;
+	nw::FullEntitySpawnRecord pending = ns::build_full_entity_spawn(*e);
+	if (!expect(pending.minimap_flags == 0x0101, "an undeployed player's flags 0x0101")) return false;
+	world.registry.get(h)->flags &= ~1u;
 
 	// And the record survives the wire byte-identically.
 	std::vector<uint8_t> wire = nw::encode_full_entity_spawn(rec);
@@ -460,7 +523,9 @@ bool run_full_entity_spawn_rich_fields() {
 	if (!expect(rec.slot_id == entity.handle.packed, "rich slot id")) return false;
 	if (!expect(rec.item_type_id == 0x050E && rec.item_type == 1,
 	            "resolved item id/type")) return false;
-	if (!expect(rec.team == 2 && rec.minimap_flags == 0 &&
+	// entity+36's low half for a vehicle too: its REFLECTABLE bit [orig:
+	// NetPacket_SerializeObjectToBuffer @0x504df0..0x504e00] (D-NET-133).
+	if (!expect(rec.team == 2 && rec.minimap_flags == 0x0400 &&
 	                    rec.entity_flags == 0x10203040u,
 	            "team/minimap/owner flags")) return false;
 	if (!expect(rec.entity_name == "repair_target", "AIData-gated name")) return false;
@@ -679,7 +744,7 @@ bool run_freed_carrier_row_keeps_the_target_handle() {
 	                         out.records[0].target_handle == carrier_h.packed,
 	                 "a freed carrier row's handle still rides the 0x0D target");
 	const nw::FullEntitySpawnRecord full =
-			ns::build_full_entity_spawn(*world.registry.get(gun_h), w::EntityHandle{});
+			ns::build_full_entity_spawn(*world.registry.get(gun_h));
 	ok &= expect(full.ground_entity_handle == carrier_h.packed,
 	             "and the 0x18 ground field");
 	if (ok) std::printf("PASS freed_carrier_row_keeps_the_target_handle\n");
@@ -702,6 +767,8 @@ int main() {
 	ok = run_pool2_static_slot_alignment() && ok;
 	ok = run_pool3_marker() && ok;
 	ok = run_pools_are_disjoint() && ok;
+	ok = run_pool0_player_bit0_is_per_entity() && ok;
+	ok = run_nonplayer_records_carry_the_flags_word() && ok;
 	ok = run_full_entity_spawn_player() && ok;
 	ok = run_full_entity_spawn_rich_fields() && ok;
 	ok = run_full_entity_spawn_itemdef_gates() && ok;

@@ -149,6 +149,9 @@ void LocalPlayer::update_aim_target() {
         trace.include_wire_proxies = world_.rules.mp_session && !world_.rules.projectile_authority;
         const auto hit = world_.collision->trace_aim(world_, trace);
         body->inf.head_look_target = hit.geometry_entity;
+        // A decoded remote person has no registry entity: the same store names
+        // its wire row instead. [orig: headLookTarget @0x4b4f75 / @0x4b5036]
+        aim_wire_person_ = hit.wire_person_handle;
         for (int i = 0; i < 3; ++i) body->inf.aim_point[i] = hit.position_q16[i];
         const double dx = double(hit.position_q16.x) - body->pos[0];
         const double dy = double(hit.position_q16.y) - body->pos[1];

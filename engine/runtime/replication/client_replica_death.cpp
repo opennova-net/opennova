@@ -15,7 +15,7 @@ namespace opennova::replication {
 // surfaces one record for the embedding sim's class death callback.
 // [orig: NapiNPClientMsg_EntityDeath @0x42EB50 / Entity_KillBySlotId @0x42BCE0]
 void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
-		int16_t value, bool item_state) {
+		int16_t value, bool item_state, int32_t kill_flags) {
 	const world::EntityHandle handle{handle_packed};
 	if (handle_packed == wire_handle::kInvalid ||
 			handle.pool() >= world::kEntityPoolCount ||
@@ -25,6 +25,14 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 	if (ClientEntityState *row = state_.find(handle_packed)) {
 		row->health_word = 0;
 		row->health_known = true;
+		// An organic row's Health reaches zero and the 0x13 word is its
+		// deathAnimStateId (+0x2C0): the mover's death edge takes both on its
+		// next tick (client_state.h net_death_anim) [orig: @0x42ebd6 /
+		// @0x42ebdf; Entity_KillBySlotId Health = 0 @0x42bd33].
+		if (row->cls == EntityClass::Player || row->cls == EntityClass::Infantry) {
+			row->net_health_zero = true;
+			if (!item_state) row->net_death_anim = value;
+		}
 		state_.mark_changed();
 	}
 	EntityDeathEvent death;
@@ -32,7 +40,25 @@ void ClientReplicaPipeline::apply_entity_death(uint16_t handle_packed,
 	death.death_anim_state_id = item_state ? 0 : value;
     death.hit_section = item_state ? value : 0;
     death.item_state = item_state;
+	death.kill_flags = kill_flags;
 	pending_effect_commands_.push_back(death);
+}
+
+// The join-window kill list: the host pages the pool-0..2 entities whose state
+// packet (0x26) went out while this client was still loading, and each page's
+// slots die here through the 0x26 route's Entity_KillBySlotId with flags 1, the
+// silent death (no sound, effect banks, kz blasts or piece trails; a vehicle
+// def clears it). The first word is the host's resume index, never a bound:
+// every following COMPLETE word is a slot, a trailing odd byte is never read,
+// and a body under four bytes kills nothing. No authority gate.
+// [orig: NapiNPClientMsg_HandleBatchKill @0x431870 — the leading word
+//  @0x43188a, remaining = (end - cursor) words @0x431893, the loop
+//  @0x4318a5..0x4318c2 -> Entity_KillBySlotId(slot, 0, 1) @0x4318b5]
+void ClientReplicaPipeline::apply_batch_kill(const std::vector<uint8_t> &body) {
+	for (std::size_t at = 2; at + 2 <= body.size(); at += 2) {
+		const uint16_t slot = static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
+		apply_entity_death(slot, 0, true, 1);
+	}
 }
 
 void ClientReplicaPipeline::apply_death_camera_target(

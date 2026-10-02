@@ -4,6 +4,7 @@
 #include <runtime/devtools/tick_profile.h>
 #include <runtime/hud/hud_chat_entry.h> // ChatSendResult (the C2S 0x0D sender's outcome)
 #include <runtime/hud/net_quality_indicators.h> // g_NetQuality's display state
+#include <runtime/hud/feed_format.h>    // FeedPost (the client-raised ring lines)
 #include <runtime/hud/squad_feed.h>     // SquadFeedLine (the squad folds' HUD lines)
 
 #include <runtime/replication/client_replica_pipeline.h> // ClientReplicaPipeline / ClientState
@@ -16,6 +17,7 @@
 #include <cstdint>
 #include <array>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -89,6 +91,12 @@ public:
 	// False for HostClient or before in-match. [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7]
 	bool queue_stance_change(uint16_t action_id);
+	// Queue one reliable C2S 0x1A door section request {handle, record state,
+	// section} the joiner world's door callback raised; it leaves inside the
+	// next open send boundary in queue order. False for HostClient or before
+	// in-match. [orig: NetPacket_SendWeaponSwitch @0x42D0C0 ->
+	// CNapiNetwork_QueueReliableMessage @0x42d169]
+	bool queue_door_request(uint16_t handle, int16_t state, uint8_t section);
 
 	// Effective gameplay readiness. Every C2S gameplay send (0x0C uplink,
 	// 0x06 fire, 0x2C ping) requires both retail's dword_81474C hold to be open
@@ -169,6 +177,26 @@ public:
 				? joiner_->last_join_reject()
 				: JoinerConnection::JoinRejectRecord{};
 	}
+	// The joiner connection's error record (empty for any other role).
+	ConnectionErrorRecord connection_error_record() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr)
+				? joiner_->connection_error_record()
+				: ConnectionErrorRecord{};
+	}
+	// The join screen's status line inputs (pre_game_menu.h); Joining with an
+	// empty queue for any other role.
+	JoinScreenStage join_screen_stage() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->join_screen_stage()
+		                                                     : JoinScreenStage::Joining;
+	}
+	JoinQueueRecord join_queue() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->join_queue()
+		                                                     : JoinQueueRecord{};
+	}
+	// The joiner's monotonic clock (the queue record's queued-since time base).
+	uint64_t join_clock_ms() const {
+		return (role_ == Role::Joiner && joiner_ != nullptr) ? joiner_->monotonic_now_ms() : 0;
+	}
 	bool has_disconnect_event() const {
 		return role_ == Role::Joiner && joiner_ != nullptr &&
 				joiner_->has_disconnect_event();
@@ -196,6 +224,14 @@ public:
 	// and the send_holdoff_countdown send-block gate — all on the Joiner role (HostClient's own-loopback
 	// housekeeping stays deferred-and-logged). seed_session() replay mode suppresses them for byte-parity.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const PlayerExtendedUplink &uplink,
+	                                                             uint32_t now_tick = 0);
+	// The uplink BUILT at the send block, after this frame's receive fold, as
+	// the writer runs there: the builder fills the body (false = none this
+	// frame) and is called only when the deployed send block opens.
+	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42C228
+	//  ahead of Player_BuildTag0CInputBody @0x42C482]
+	using UplinkBuilder = std::function<bool(PlayerExtendedUplink &)>;
+	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(const UplinkBuilder &build_uplink,
 	                                                             uint32_t now_tick = 0);
 	// No-uplink frame (HostClient, or a pre-deploy Joiner): recv pump + connect-drive only, no 0x0C.
 	std::vector<std::vector<uint8_t>> Client_ProcessNetworkFrame(uint32_t now_tick = 0);
@@ -226,6 +262,19 @@ public:
 	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
+	// The listen host's own client queues a C2S on its local connection, as
+	// every input-side sender does: its client frame sends it and the next
+	// frame's server tick dispatches it (the queue_stance_change path). False
+	// off the HostClient role. [orig: CNapiNetwork_QueueReliableMessage
+	//  @0x4c4fa0 on the local connection]
+	bool queue_host_message(uint8_t tag, std::vector<uint8_t> body);
+	// The HostClient's send block: its held messages onto the loopback. The
+	// client frame runs it after its receive fold, and the host frame again
+	// after apply_received_effects, whose handler sends retail queues inside
+	// the same receive pump, ahead of that frame's send.
+	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42c228,
+	//  PumpClientProtocolSend @0x42c4bc]
+	void flush_host_sends();
 	// One C2S 0x0D chat line `[u8 channel][cstr text]` on the wire channel the
 	// caller's sender picked (hud::chat_dispatch_channel: 13 local, 1 global,
 	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,
@@ -254,6 +303,15 @@ public:
 	//  NetPacket_SendRadioCallRequest @0x42C150 ->
 	//  CNapiNetwork_QueueReliableMessage(tag, 0, 1, payload, 2) @0x4c4fa0]
 	bool queue_voice_menu_pick(uint8_t tag, int16_t value);
+	// The DEATH screen's SWAP_TEAMS click: one reliable C2S 0x4D with no body
+	// and no finite lifetime (the joiner's held one-shot queue; the listen
+	// host's own client over its loopback), then every minimap overlay timer
+	// aged by 0x48A8 (18600) ticks. False when no connection carries it.
+	// [orig: DeathScreen_OnSwapTeams @0x5535B0 — the click event 0x3000001
+	//  @0x5535B0, NetPacket_SendPingRequest @0x5535BA (a misnomer:
+	//  CNapiNetwork_QueueReliableMessage(0x4D, 1, 0, .., 0) @0x42DDB1),
+	//  MapOverlay_UpdateTimers(0x48A8) @0x5535C4]
+	bool queue_team_change_request();
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its
@@ -336,6 +394,10 @@ public:
 	int local_roster_slot() const { return view_.local_roster_slot(); }
 	// The squad folds' HUD lines (hud/squad_feed.h) since the last drain.
 	std::vector<hud::SquadFeedLine> drain_squad_lines();
+	// Ring lines the client's own receive legs raise with their own sink and
+	// colour (a dialog line's "EX Cannot load audio" and subtitle), drained
+	// with the other feed lanes once per frame.
+	std::vector<hud::FeedPost> drain_ring_posts();
 	// THE CMAP SCREEN'S OWN LEGS (client_squad.cpp): the world halves
 	// (world/user_waypoints.h) plus their sends — the placed waypoint's C2S
 	// 0x17 (target 0xFF) [orig: @0x54a1be], each removed one's C2S 0x4F
@@ -406,6 +468,10 @@ public:
 	void set_app_id(std::string token) {
 		if (joiner_) joiner_->set_app_id(std::move(token));
 	}
+	// The browse row's 0x81 record (JoinerConnection::set_discovered_session).
+	void set_discovered_session(JoinerConnection::DiscoveredSession session) {
+		if (joiner_) joiner_->set_discovered_session(std::move(session));
+	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));
@@ -432,10 +498,13 @@ public:
 		if (joiner_)
 			joiner_->set_loaded_model_challenge_snapshot(std::move(values));
 	}
-	// Queue the armory-ACCEPT loadout re-submission; the next frame's send boundary emits
-	// one C2S 0x2F from the current kit seam (see JoinerConnection::frame_loadout_resubmit).
+	// Queue the armory-ACCEPT loadout re-submission: one C2S 0x2F from the current kit seam,
+	// queued now as NetPacket_SendLoadoutSubmit queues it at the ACCEPT, so it leaves at the
+	// next open boundary in queue order [orig: @0x42d085] (JoinerConnection::prepare_loadout_resubmit).
 	void queue_loadout_resubmit() {
-		if (joiner_) pending_loadout_resubmit_ = true;
+		ProtocolMessage resubmit;
+		if (joiner_ && joiner_->prepare_loadout_resubmit(resubmit))
+			send_queue_.push_back(std::move(resubmit));
 	}
 
 	bool deployment_pick_pending() const {
@@ -480,9 +549,10 @@ public:
 	}
 	bool session_lost() const { return joiner_ && joiner_->session_lost(); }
 	// Accept the player's C2S 0x0E pick (0xFFFF default, 0xFFFE auto, else a
-	// spawn-target handle). Input case 12 closes retail's gameplay dword now;
-	// framing waits for the next open send boundary. Re-picks while awaiting the
-	// release are allowed. False means the deployment UI/state cannot accept a pick.
+	// spawn-target handle). Input case 12 closes retail's gameplay dword and queues
+	// the 0x0E now [orig: @0x49b17b]; framing waits for the next open send boundary,
+	// in queue order. Re-picks while awaiting the release are allowed. False means
+	// the deployment UI/state cannot accept a pick.
 	bool queue_deployment_pick(uint16_t wire_value) {
 		if (!joiner_) return false;
 		// Initial admission may finish while the authority still holds the
@@ -492,8 +562,9 @@ public:
 		const bool initial_overlay = joiner_->in_match() &&
 				joiner_->initial_admission_complete() && view_.state().deploy_overlay_active;
 		if (!joiner_->deployment_pick_pending() && !initial_overlay) return false;
-		pending_deployment_pick_ = wire_value;
-		pending_deployment_pick_set_ = true;
+		ProtocolMessage pick;
+		if (!joiner_->prepare_deployment_pick(wire_value, pick)) return false;
+		send_queue_.push_back(std::move(pick));
 		deployed_ = false;
 		return true;
 	}
@@ -659,6 +730,9 @@ public:
 		return authoritative_ammo_pools_;
 	}
 	uint32_t send_holdoff_countdown() const { return send_holdoff_countdown_; }
+	// The network-role clock [orig: g_ClientCurrentTick @0xA8229C]: 0 until a
+	// tick seed lands, then one tick per client frame.
+	uint32_t current_tick() const { return current_tick_; }
 	uint32_t send_holdoff_ticks() const { return send_holdoff_ticks_; }
 	// Whether the next Client_ProcessNetworkFrame opens its send block: the
 	// receive pump decrements a nonzero countdown before the gate tests it for
@@ -684,10 +758,10 @@ public:
 	std::size_t unknown_tags() const { return view_.unknown_tags(); }
 
 private:
-	// Shared body for both Client_ProcessNetworkFrame overloads. `uplink` is nullptr for a no-uplink
-	// frame.
+	// Shared body for the Client_ProcessNetworkFrame overloads. `build_uplink` is nullptr for a
+	// no-uplink frame.
 	std::vector<std::vector<uint8_t>> run_frame(
-			const PlayerExtendedUplink *uplink, uint32_t now_tick);
+			const UplinkBuilder *build_uplink, uint32_t now_tick);
 	devtools::TickProfile *profile_ = nullptr;
 	void stage_reload_notifications_before_body_tick();
 	bool apply_zone_timer_body(uint8_t tag, const std::vector<uint8_t> &body);
@@ -726,17 +800,20 @@ private:
 	replication::ClientReplicaPipeline view_;
 	replication::ISessionTransport *loopback_ = nullptr;   // HostClient only (non-owning)
 	std::deque<std::vector<uint8_t>> recv_fifo_;      // Joiner: framed inbound awaiting the recv pump
-	std::deque<ProtocolMessage> gameplay_send_queue_; // Joiner: typed C2S 0x06/0x25 awaiting SEND
 	// The handshake/admission receive handlers allocate exact wire packets immediately to keep
 	// their retail grouping. They still belong to PumpClientProtocolSend, so hold the already-framed
 	// datagrams behind the same field-3 gate and flush them before any later sequence allocated at
 	// the open boundary. (A 0x84 reconstruction and a 0x45 pong are not held: retail transmits them
 	// from the receive pump, PollResult::immediate_outbound.)
 	std::deque<std::vector<uint8_t>> framed_send_queue_;
-	// 0x34/0x4C, semantic receive replies and the input-side one-shots (the 0x1D stance change, the
-	// medic call, chat, squad sends) are queued before retail reaches the holdoff-gated send pump.
-	// Keep them across held frames, then batch them at the first open boundary beside gameplay.
-	std::deque<ProtocolMessage> pre_send_queue_;
+	// The connection's one C2S queue: every producer (the 0x34 keepalive, the receive handlers'
+	// replies, the 0x4C report, the input-side one-shots, the deploy pick, the loadout
+	// re-submit, the fire / reload / mount gameplay records) appends at the moment it runs, as
+	// each retail producer calls QueueReliableMessage; the next open send boundary frames the
+	// whole queue in that order, then the 0x2C and 0x0C it builds itself.
+	// [orig: CNapiNetwork_QueueReliableMessage @0x4c4fa0 -> CNapiNPConnection_QueueMessage
+	//  @0x628640, one outgoing list per connection]
+	std::deque<ProtocolMessage> send_queue_;
 	// S2C 0x49 handlers run inside the receive pump. Preserve their decoded
 	// notifications for the embedding simulation after applying the remote-Person
 	// handler side effect before this frame's body tick.
@@ -744,6 +821,7 @@ private:
 	// The squad folds' consequences once applied (client_squad.cpp).
 	void apply_squad_event(world::World &world, const replication::ClientSquadEvent &event);
 	std::vector<hud::SquadFeedLine> pending_squad_lines_;
+	std::vector<hud::FeedPost> pending_ring_posts_;
 	std::unordered_map<uint16_t, ZoneState> zone_states_;
 	WeaponLoadout authoritative_loadout_;
 	uint64_t authoritative_loadout_revision_ = 0;
@@ -755,9 +833,6 @@ private:
 	uint64_t authoritative_spawn_release_revision_ = 0;
 	uint64_t self_team_revision_ = 0;           // S2C 0x50 self re-latch edges
 	std::vector<uint8_t> cleared_player_slots_; // S2C 0x46 bit15 roster clears
-	bool pending_loadout_resubmit_ = false;     // one-shot: armory-ACCEPT 0x2F re-send
-	bool pending_deployment_pick_set_ = false;  // one-shot: the player's 0x0E pick below
-	uint16_t pending_deployment_pick_ = 0xFFFF;
 
 	// --- §5.44 per-frame housekeeping counters (P6) — mirror the witnessed per-instance globals of
 	// [orig: Client_ProcessNetworkFrame @0x42c180]. The 0x34 keepalive / 0x4C net-quality / 0x2C RTT
@@ -787,6 +862,16 @@ private:
 	// send_holdoff_ticks; PumpFlags 0x200 reload @0x629802]. 0 = per-tick
 	// (the protocol template default). NovaWorld hosts dictate 12 (~5.2 Hz).
 	uint32_t send_holdoff_ticks_ = 0;
+	// The retail loop the joiner's last frame ran in (a change is that loop's entry) and the
+	// GetTickCount stamp of a timed loop's last send-pump call (step_send_pump_loop).
+	JoinerConnection::SendPumpLoop send_pump_loop_ = JoinerConnection::SendPumpLoop::NetworkFrame;
+	uint32_t send_pump_loop_last_ms_ = 0;
+	// The receive pump's countdown step plus whether this frame's send pump call builds,
+	// per the loop the joiner's admission stage runs in.
+	bool step_send_pump_loop();
+	// The C2S 0x0F self-heal requests the replica fold and the stale-carrier sweep raised,
+	// appended to the one queue where their producer ran.
+	void queue_carrier_repair_requests();
 
 	// seed_session() golden-replay mode: suppress the live per-frame housekeeping (0x34/0x4C/0x2C) so a
 	// seeded single-frame emission reproduces ONLY the captured 0x0C datagram byte-for-byte (the

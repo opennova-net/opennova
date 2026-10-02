@@ -665,8 +665,11 @@ func test_binocular_and_nvg_requests_drive_effective_view_state() -> void:
 
 	sim.set_player_input(true, false, false, false, false, false, false)
 	view = sim.get_local_player_view()
+	# No step yet: the keys only suppress the raised pose. The next frame's
+	# input pack drops the raw toggle itself [orig: Player_PackInputStateToEntity
+	#  @0x4df4c2]; the native local_player_view test pins that leg.
 	assert_true(view.binoculars_requested,
-			"movement suppresses rather than destroys raw intent")
+			"before the next input pack, movement only suppresses the raised pose")
 	assert_false(view.binoculars_raised)
 	assert_false(view.binoculars_view_active)
 	sim.set_player_input(false, false, false, false, false, false, false)

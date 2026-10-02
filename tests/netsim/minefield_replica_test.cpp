@@ -1,5 +1,6 @@
 #include <runtime/replication/client_replica_pipeline.h>
 #include <runtime/replication/client_world_materializer.h>
+#include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/world/world.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -76,5 +77,34 @@ int main() {
     CHECK(actors.size() == 1);
     CHECK(actors[0].handle == 0x12 && actors[0].move_order == 0x1A5);
     CHECK(actors[0].flags == 2 && actors[0].position.z == 30);
+
+    // D-NET-283: the authority's 0x10 record carries a Landmine def's
+    // triggered-mine word when it is nonzero; no other non-door def carries
+    // entity+308. [orig: NetPacket_SerializePool2StaticToBuffer
+    //  @0x5044A6..0x5044B1]
+    {
+        auto host = std::make_unique<world::World>();
+        host->registry.configure_pool(2, 8);
+        world::Entity mines;
+        mines.kind = world::EntityKind::Building;
+        mines.item_id = 1896;
+        mines.has_item_def = true;
+        mines.item_attrib2 = 0x4000u; // Landmine
+        mines.section_mask = 0x6u;
+        host->registry.spawn(2, mines);
+        mines.section_mask = 0;
+        host->registry.spawn(2, mines);
+        world::Entity bunker = mines;
+        bunker.item_attrib2 = 0;
+        bunker.section_mask = 0x6u;
+        host->registry.spawn(2, bunker);
+        const StaticEntityBatch sent = replication::build_pool2_static_batch(*host);
+        CHECK(sent.records.size() == 3);
+        if (sent.records.size() == 3) {
+            CHECK(sent.records[0].section_mask == 6);
+            CHECK(sent.records[1].section_mask == 0 && !sent.records[1].has_section_mask);
+            CHECK(sent.records[2].section_mask == 0 && !sent.records[2].has_section_mask);
+        }
+    }
     return failures ? 1 : 0;
 }

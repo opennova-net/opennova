@@ -192,6 +192,10 @@ int GameWorld::load_mission_as_joiner(const Ref<JoinTarget> &p_target) {
 	return drive_.load_as_joiner(p_target);
 }
 
+String GameWorld::mount_join_expansion(const String &p_expansion) {
+	return drive_.switch_join_expansion(resource_root_, p_expansion);
+}
+
 void GameWorld::adopt_novaworld_client(Node *p_client) {
 	drive_.adopt_nw_client(Object::cast_to<NovaWorldClient>(p_client));
 }
@@ -202,6 +206,14 @@ Node *GameWorld::release_novaworld_client() {
 
 Ref<PostMissionRoute> GameWorld::post_mission_route(int p_reason) const {
 	return drive_.post_mission_route(p_reason);
+}
+
+Ref<ConnectionError> GameWorld::get_last_connection_error() const {
+	return drive_.last_connection_error();
+}
+
+Ref<JoinScreenStatus> GameWorld::get_join_screen_status() const {
+	return drive_.join_screen_status();
 }
 
 bool GameWorld::cancel_join_preload() {
@@ -655,8 +667,11 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_mission_as_host", "options"), &GameWorld::load_mission_as_host);
 	ClassDB::bind_method(D_METHOD("load_mission_as_joiner", "target"), &GameWorld::load_mission_as_joiner);
 	ClassDB::bind_method(D_METHOD("adopt_novaworld_client", "client"), &GameWorld::adopt_novaworld_client);
+	ClassDB::bind_method(D_METHOD("mount_join_expansion", "expansion"), &GameWorld::mount_join_expansion);
 	ClassDB::bind_method(D_METHOD("release_novaworld_client"), &GameWorld::release_novaworld_client);
 	ClassDB::bind_method(D_METHOD("post_mission_route", "reason"), &GameWorld::post_mission_route);
+	ClassDB::bind_method(D_METHOD("get_last_connection_error"), &GameWorld::get_last_connection_error);
+	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &GameWorld::get_join_screen_status);
 	// The exit reasons the shell's own exits store (engine: inmatch/mission_exit.h).
 	ClassDB::bind_integer_constant(get_class_static(), StringName(), "MISSION_EXIT_QUIT",
 			opennova::inmatch::kMissionExitQuit);

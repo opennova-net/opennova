@@ -181,4 +181,12 @@ int32_t vfs_version_crc(const uint8_t *data, size_t size);
 int32_t vfs_expansion_version_checksum(const std::string &game_root,
                                        const std::string &expansion);
 
+// The install's country code: the first two bytes of the game directory's
+// CC.BIN (found case-insensitively), cut at a NUL; "" when the file is absent
+// or empty. The joiner uploads it as the ClientAuth COUNTRYCODE, which retail
+// omits when empty [orig: Game_ReadCCBinFile @ 0x4a5860 into byte_B4C4D8 from
+// Game_InitSubsystems @ 0x4a6d96; UI_JoinSelectedSession @ 0x569b70;
+// CNapiServerInfo_SerializeToSession @ 0x4c385a] (D-NET-296).
+std::string vfs_country_code(const std::string &game_root);
+
 } // namespace opennova

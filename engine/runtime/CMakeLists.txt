@@ -191,6 +191,7 @@ add_library(opennova_runtime STATIC
     # the language front end (lexer, parser/AST, command table, Program model)
     # is engine/formats/wac
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/compiler.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/wac/mission_effect_interns.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/remote_command.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/vm.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/wac/wac_system.cpp
@@ -350,6 +351,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_lifecycle.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_motion.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_guided.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_minimap.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/replication/client_replica_pipeline.cpp
@@ -385,7 +387,14 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_doors.cpp  # the C2S 0x1A door request (S2C 0x37 reply)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_kill_page.cpp  # the C2S 0x28 -> S2C 0x4E kill page
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/disconnect_reason.cpp  # retail's join/disconnect reason text over gameerr.bin
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/pre_game_menu.cpp  # the PreMenu join screen (pre.mnu PRE_GAME_MENU)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_send.cpp  # the C2S framing and send-boundary pump of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp

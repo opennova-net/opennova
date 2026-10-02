@@ -58,6 +58,13 @@ bool player_jump_world_state_blocked(const InfantryState &inf, const Entity *ent
 // [orig: Entity_UpdateInfantryAI @0x4B9C40..0x4B9D55]
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick);
+// The death edge's scream leg, shared by the motor's edge and the authority's
+// remote-peer edge: a player body (org2) composes "<prefix>_DEATH" /
+// "_DEATH_K" from its anim slot, any other body plays its profile slot 7 / 8;
+// the section-bit-0 silent cleanup and a dismemberment piece play nothing.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4b4c19, @0x4b4c4a..0x4b4c6a;
+//  Entity_UpdateInfantryAI @0x4b9c68, @0x4b9ca3..0x4b9cc1]
+void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const Entity *ent);
 bool reset_capsule_bottom_state(int state);
 // The end-notify arm both channels share: the tick the armed channel parks on,
 // where AnimChannel_AdvancePlayback latches the end flag: a loop's next wrap

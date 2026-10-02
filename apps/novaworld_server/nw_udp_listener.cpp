@@ -545,8 +545,16 @@ void NwUdpListener::run_loop() {
 				break;
 			}
 
+			// The row this address's Hello owns may still be Active: a stock client
+			// that died without its goodbye restarts on the same endpoint with the
+			// same CI, and its Hello leaves the live row in place. A 0x42 that is
+			// not the cached retransmit is then a new connection that replaces the
+			// old one, as retail's join handler replaces any node that is not the
+			// same CI+CK retransmit (no Hello state is consulted).
+			// [orig: NapiNPProtocol_HandleClientJoin @0x62beba..0x62bf06]
 			if (!hello_identity_matches ||
-			    hello_owner->state != ConnectionState::Handshaking) {
+			    (hello_owner->state != ConnectionState::Handshaking &&
+			     hello_owner->state != ConnectionState::Active)) {
 				std::printf(
 						"[nwudp] AUTH without matching lobby Hello from %s"
 						" ci=0x%08x pn=%s; dropped\n",
@@ -613,6 +621,13 @@ void NwUdpListener::run_loop() {
 			{
 				std::lock_guard<std::mutex> lk(lobby_states_mu_);
 				LobbyConnState state;
+				// The reply records stay retained for the client's 0x44, bounded by the
+				// NOVAWORLDUDP template's msg_out_max (CS field 11, 500) the 0x82 advertised
+				// [orig: CNapiGameSession_InitNPConnection @0x4d3be0 writes the template;
+				//  NapiNP_HandleResendList @0x623800 resends from the retained nodes].
+				for (const CsField &field : novaworld_service_cs_fields()) {
+					if (field.field_index == 11) state.sequencing.outbound_message_limit = field.value;
+				}
 				state.client_ci = auth.ci;
 				state.client_ck = auth.ck;
 				state.server_sk = server_sk;
@@ -706,6 +721,10 @@ void NwUdpListener::run_loop() {
 			// activity on this connection. Correct-key stale/duplicate packets
 			// still count, but a prior endpoint occupant cannot extend liveness.
 			manager_.notify_seen_addr(peer, now_ms());
+			// The client's ACK retires the retained reply records it covers.
+			if (admission.admitted) {
+				acknowledge_session_packets(lobby_state.sequencing, admission.max_ack_count);
+			}
 			std::printf(
 					"[nwudp]   hdr.session_id=0x%08x seq=%u ack=%u admitted=%d messages=%zu\n",
 					hdr.session_id, hdr.seq_num, hdr.ack_count,
@@ -819,6 +838,7 @@ void NwUdpListener::run_loop() {
 							rpm.full_tag = 0;
 							rpm.length = static_cast<uint32_t>(stream_size);
 							rpm.payload = std::move(stream_bytes);
+							rpm.reliable = true; // retained until ACKed: a 0x44 resends it
 							replies.push_back(std::move(rpm));
 						}
 					}
@@ -852,6 +872,43 @@ void NwUdpListener::run_loop() {
 			auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
 			                                 std::move(body_out));
 			opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
+			break;
+		}
+
+		case SESSION_OPCODE_CLIENT_RESEND_LIST: {
+			// A stock client's NWU connection asks for the sequences missing below its
+			// queued packets: resend each from its retained records under the old
+			// sequence with the current ACK, 0 meaning "send the next one". The list
+			// addresses this receiver by its SK, and it is not receive activity.
+			// [orig: NapiNP_HandleResendList @0x623800 — the key compare, the loop
+			//  @0x6239b6 -> CNapiNPConnection_SendSessionPacket, GetTickCount discarded
+			//  @0x62395f; the requester PumpSendIntervals @0x629032]
+			const auto conn_opt = manager_.registry().find_by_addr(peer);
+			if (!conn_opt || conn_opt->server_scrk.empty()) break;
+			std::lock_guard<std::mutex> resend_lk(lobby_states_mu_);
+			const auto it = lobby_states_.find(peer);
+			if (it == lobby_states_.end()) break;
+			LobbyConnState &state = it->second;
+			std::vector<uint32_t> requested;
+			if (!decode_session_resend_list(body.data(), body.size(), state.server_sk, requested)) {
+				break;
+			}
+			for (const uint32_t requested_sequence : requested) {
+				const uint32_t sequence = requested_sequence == 0
+						? state.sequencing.next_outbound_seq
+						: requested_sequence;
+				std::vector<uint8_t> session_body;
+				if (!frame_session_packet_for_sequence(state.sequencing,
+						SessionCrypto{conn_opt->server_scrk, {}, state.client_ck}, sequence,
+						session_body)) {
+					continue;
+				}
+				const auto packet = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE,
+				                                       std::move(session_body));
+				opennova::net::udp_send_to(socket.get(), from, packet.data(), packet.size());
+			}
+			std::printf("[nwudp] RESEND LIST from %s: %zu sequence(s)\n",
+			            client_label.c_str(), requested.size());
 			break;
 		}
 

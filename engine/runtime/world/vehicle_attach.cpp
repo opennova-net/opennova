@@ -11,6 +11,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/local_player.h> // the local player's stance latch clears
 #include <runtime/world/weapon_fsm.h>
 #include <runtime/world/vehicle_panel_feed.h>
 #include <runtime/world/world.h>
@@ -153,6 +154,8 @@ void attach_apply(World &world, Entity &occ, Entity &veh, int seat_idx, uint8_t 
     // Success clears the movement stance bits [orig: MoveOrder &= ~0x300 @0x435c42 + the
     // prone/crouch latch clears @0x435c54/@0x435c59].
     occ.net_stance_bits = 0;
+    if (occ.handle == world.cached.local_player && world.local_player_state != nullptr)
+        world.local_player_state->clear_stance_latches();
     world.vehicles.claim_primary_occupant(veh, occ.handle, occ.mount_type); // [orig: +368 @0x4946d0]
 }
 
@@ -518,6 +521,9 @@ bool VehicleSystem::detach(EntityHandle player) {
     // detach stop and the +0x1CC smoke release) rides
     // release_primary_occupant. [orig: @0x4356EF..0x435759]
     occ->net_stance_bits = 0;
+    // The local player's prone/crouch latches clear with it [orig: @0x43561e / @0x435624].
+    if (player == world.cached.local_player && world.local_player_state != nullptr)
+        world.local_player_state->clear_stance_latches();
     if (veh != nullptr) {
         for (Seat &s : veh->seats) {
             if (s.occupant == player) s.occupant = EntityHandle{}; // [orig: -> 0xFFFF]

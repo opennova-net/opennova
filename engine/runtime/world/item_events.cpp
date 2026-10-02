@@ -5,11 +5,11 @@
 #include <runtime/world/collision.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <runtime/world/angle.h>
 #include <runtime/terrain_query/height_field.h>
 #include <cstring>
 #include <algorithm>
-#include <chrono>
 #include <iterator>
 #include <runtime/audio/ambient_mixer.h>
 
@@ -236,15 +236,18 @@ void gnrc_death_expiry(World &world, Entity &target, int32_t section) {
 }
 
 // The "gnrc" event callback [orig: sub_407020 — row @0x8130C0].
-void gnrc_death_event(World &world, Entity &target, int phase, int32_t section) {
+void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
+		int32_t flags) {
 	if (!world.rules.logic_authority) {
 		// The client kill leg [orig: @0x40702a phase 4 only; scar clear
-		// @0x40703a, Entity_UpdateDeathTransforms(entity, 0) @0x407045, scar
-		// clear @0x40704b, Flags |= 6 @0x407053, +0x2AC = 0x400 @0x407057].
+		// @0x40703a, Entity_UpdateDeathTransforms(entity, flags) @0x407045 —
+		// the callback's own third argument, [esp+14h] @0x40703f, so the
+		// S2C 0x4E kill's bit 0 silences the death — scar clear @0x40704b,
+		// Flags |= 6 @0x407053, +0x2AC = 0x400 @0x407057].
 		if (phase != 4) return;
         target.class_think_ticks = 1024;
 		world.out.scars.clear_entity(target.handle);
-		entity_update_death_transforms(world, target, /*silent=*/false);
+		entity_update_death_transforms(world, target, (flags & 1) != 0);
 		world.out.scars.clear_entity(target.handle);
 		mark_class_dead(target);
 		land_class_husk(world, target);
@@ -611,9 +614,11 @@ void building_event(World &world, Entity &target) {
 
 void emit_item_state(World &world, Entity &target, int32_t section) {
     if (world.rules.logic_authority && world.rules.mp_session) {
-        // GetTickCount's portable monotonic millisecond equivalent.
-        target.last_state_sent_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count());
+        // The host's GetTickCount seam, the clock its S2C 0x19 / 0x1A / 0x0F
+        // stamps and the C2S 0x28 kill-page window share.
+        // [orig: Server_SendEntityStatePacket @0x509D70 — entity+560 =
+        //  GetTickCount() @0x509D7A]
+        target.last_state_sent_ms = io::host_milliseconds_for_logic_tick(world.logic_tick);
         world.out.entity_events.push_back(ItemStateEvent{target.handle.packed, static_cast<int16_t>(section)});
     }
 }
@@ -678,19 +683,22 @@ void update_item_ambient_sound(World &world, const Entity &entity) {
 // and runs its class event callback with phase 4, which reads that record: an
 // item row's callback takes the section from it, and a brain row's callback is
 // its state machine, whose client arm AiSystem::process_*_state_machine runs.
-// Both routes pass flags 0, so the def-type-1 flags clear (@0x42BD5B..0x42BD5D)
-// has nothing to clear.
+// Those two routes pass flags 0; the S2C 0x4E join-window kill passes 1, the
+// silent death, which a vehicle def clears (@0x42BD5B..0x42BD5D).
 // [orig: Entity_KillBySlotId @0x42BCE0 — the +0x1C gate @0x42BD29, Health = 0
 //  @0x42BD33, the Flags & 2 test @0x42BD3C, hitRecord[14] = section @0x42BD47
 //  (Projectile_GetHitRecord @0x4E7000), entity+0x1C8(entity, 4, flags)
 //  @0x42BD6A; its callers NapiNPClientMsg_0x026 @0x42EC78 and
 //  Entity_SerializeVehicleState @0x460AD9]
-void apply_item_state_event(World &world, Entity &target, int16_t section) {
+void apply_item_state_event(World &world, Entity &target, int16_t section, int32_t flags) {
     if (target.item_type_index == 0) return;
     target.health = 0;
     if ((target.engine_flags & kEntityFlagDead) != 0) return;
     world.round_sim.hit_record.section = section;
-    hit_record_class_event(world, target, 4);
+    // A vehicle def dies loud whatever the caller asked [orig: def+0x5C == 1
+    // @0x42BD5B -> flags &= ~1 @0x42BD5D].
+    if (target.item_type == 1) flags &= ~1;
+    hit_record_class_event(world, target, 4, flags);
 }
 
 void destruction_notify_item_damage(World &world, Entity &target, int phase, ItemHitContext hit) {
@@ -713,7 +721,7 @@ void destruction_notify_item_damage(World &world, Entity &target, int phase, Ite
 	case ItemDeathClass::kNone:
 		return; // [orig: nullsub_65 @0x443650 / nullsub_66 @0x443660 — retn]
 	case ItemDeathClass::kGnrc:
-		gnrc_death_event(world, target, phase, hit.section);
+		gnrc_death_event(world, target, phase, hit.section, hit.event_flags);
 		return;
 	case ItemDeathClass::kGnrl:
 		gnrl_death_event(world, target, phase, hit.section);

@@ -254,6 +254,9 @@ void add_retail_game_environment(opennova::ClientAuth &auth) {
 			std::pair{"DB", "0"},
 			std::pair{"MBN", "20042002"},
 			std::pair{"SOPD", "180"},
+			// A retail joiner's own packet ceiling, which the host negotiates
+			// against (D-NET-234).
+			std::pair{"MPS", "1300"},
 	}) {
 		auth.cu.push_back(opennova::make_client_cu_chunk(
 				2, field.first, field.second));
@@ -1049,11 +1052,10 @@ bool check_host_idle_send_interval_keepalive() {
 	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
 
 	CaptureDatagramSocket socket;
-	// 30000 ms at the 62 Hz host clock: elapsed_ms = ticks*1000/62, strictly
-	// greater than the interval first 1862 ticks after the clock arms on the
-	// first open boundary (tick 0 is the arm sentinel, so arming lands on
-	// tick 1). Quiet pumps through the threshold send nothing.
-	for (int i = 0; i < 1862; ++i)
+	// 30000 ms on the 16 ms host tick: strictly greater than the interval
+	// first 1876 ticks after the leg clock arms (tick 0 is the arm sentinel,
+	// so arming lands on tick 1). Quiet pumps through the threshold send nothing.
+	for (int i = 0; i < 1877; ++i)
 		opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.empty(),
 	            "a quiet connection sends nothing through 30 s"))
@@ -1086,15 +1088,15 @@ bool check_host_idle_send_interval_keepalive() {
 	            "the minted keepalive re-arms the interval"))
 		return false;
 
-	// The ACTIVE leg is tick_connections' preexisting append_active_probe:
-	// with reliable records retained, its 16 ms-per-tick accumulator crosses
-	// 10000 ms on the 626th retained pump and mints the header-only probe
+	// The ACTIVE leg reads the same last-build clock: with reliable records
+	// retained it is due once MORE than 10000 ms (625 ticks) passed since the
+	// keepalive's build, 626 ticks after it, and mints the header-only probe
 	// that drives the peer's 0x44/0x84 NACK machinery. The EMPTY leg must
 	// stay out of its way (retained connections are not "empty").
 	remote.seq.retained_outbound[remote.seq.next_outbound_seq] = {
 			opennova::make_protocol_message(0x49, {0x01, 0x00, 0x07, 0x10})};
 	remote.seq.retained_outbound_message_count = 1;
-	for (int i = 0; i < 625; ++i)
+	for (int i = 0; i < 624; ++i)
 		opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.size() == 1,
 	            "a retained connection stays silent through 10 s"))
@@ -1102,6 +1104,145 @@ bool check_host_idle_send_interval_keepalive() {
 	opennova::inmatch::host_session_pump(owner, socket);
 	return expect(socket.sent.size() == 2,
 	              "the elapsed ACTIVE interval mints the retained-records probe");
+}
+
+// D-NET-256: the host's ACTIVE / EMPTY legs are PumpSendIntervals, which the
+// server send pump runs through PumpStateMachine on EVERY Server_TickUpdate,
+// with no holdoff test: under a dictated 12-tick holdoff a leg fires on the
+// exact tick its interval passes, closed boundary or not, builds every queued
+// record (has_pending_out forced, BuildOutgoingPackets drains the queue) and
+// leaves the countdown alone. The intervals are the connection's cs_dir0
+// fields 5 / 4, measured on the per-connection last-build clock +0x640.
+// [orig: CNapiNetwork_PumpServerProtocolSend @0x4c4f11 (flags 0x2E1), called
+//  unconditionally @0x51e487; PumpFlags 0x40 @0x6297c8 -> PumpStateMachine
+//  case 1 -> PumpSendIntervals @0x62933f; the legs @0x628ff1..0x629017 and
+//  @0x629041..0x629067, the forced build @0x62906f..0x629089;
+//  BuildOutgoingPackets stamps +0x640 @0x628605]
+bool check_host_send_interval_legs_run_every_tick() {
+	opennova::inmatch::HostOwner owner;
+	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
+	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
+	opennova::inmatch::GameConfig config;
+	opennova::inmatch::create_session(
+			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+
+	const opennova::PeerAddr peer{0x0100007Fu, 33117};
+	auto &peer_link = owner.peers[peer];
+	peer_link.transport =
+			std::make_unique<opennova::replication::UdpSessionTransport>(
+					opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.server_scrk = "SERVERPERTICKLEGSSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ012";
+	conn.client_ck = 0x10203041u;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.s2c_send_holdoff_dictated = true;
+	conn.s2c_send_holdoff_ticks = 12;
+	conn.s2c_send_holdoff_countdown = 0;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	auto &remote = owner.ctx.np_protocol.connection_list.front();
+
+	// The boundary opens on every twelfth tick (0, 12, 24, ...); the leg clock
+	// arms on tick 1 (tick 0 is the arm sentinel). The EMPTY leg is due once
+	// MORE than 30000 ms (1875 ticks of 16 ms) passed: tick 1877, a held tick.
+	CaptureDatagramSocket socket;
+	for (int i = 0; i < 1877; ++i)
+		opennova::inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.empty(), "per-tick legs: a quiet connection sends nothing through 30 s"))
+		return false;
+	opennova::inmatch::host_session_pump(owner, socket); // tick 1877
+	if (!expect(socket.sent.size() == 1 && remote.s2c_send_holdoff_countdown == 7,
+			"per-tick legs: the EMPTY leg fires on its own tick, mid-window, without "
+			"reloading the countdown"))
+		return false;
+
+	// With records retained, the ACTIVE leg is due once MORE than its interval
+	// passed since that build. A 50 ms interval (CS field 5) runs out at tick
+	// 1881, still inside the window, and its build carries the queued record.
+	remote.timeouts.active_send_interval_ms = 50;
+	remote.seq.retained_outbound[remote.seq.next_outbound_seq] = {
+			opennova::make_protocol_message(0x49, {0x01, 0x00, 0x07, 0x10})};
+	remote.seq.retained_outbound_message_count = 1;
+	owner.pending_session_messages[peer].push_back(
+			opennova::make_protocol_message(0x32, {0x41, 0x00}));
+	for (int i = 0; i < 3; ++i)
+		opennova::inmatch::host_session_pump(owner, socket); // ticks 1878..1880
+	if (!expect(socket.sent.size() == 1, "per-tick legs: the ACTIVE leg waits out its interval"))
+		return false;
+	opennova::inmatch::host_session_pump(owner, socket); // tick 1881
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	return expect(socket.sent.size() == 2 &&
+	                      opennova::nw_decode_inbound(socket.sent[1].data(), socket.sent[1].size(),
+	                              opcode, session_body) &&
+	                      opennova::decode_protocol_packet_plaintext(session_body.data(),
+	                              session_body.size(), remote.server_scrk, header, messages) &&
+	                      messages.size() == 1 && messages[0].tag == 0x32 &&
+	                      owner.pending_session_messages.count(peer) == 0 &&
+	                      remote.s2c_send_holdoff_countdown == 3,
+			"per-tick legs: the ACTIVE leg builds the queued record mid-window");
+}
+
+// The host's builds obey its connection's CS field 14 the same way: at most that many
+// packets per build (the template's -1 is unbounded), the rest of the queue waiting, in
+// order, for the next build. [orig: BuildOutgoingPackets @0x62844e, @0x62860b..0x628619]
+bool check_host_builds_at_most_field_14_packets() {
+	opennova::inmatch::HostOwner owner;
+	opennova::inmatch::set_connection_mode(owner.ctx, ConnectionMode::HostOnly);
+	opennova::inmatch::set_transport_mode(owner.ctx, SocketMode::Lan);
+	opennova::inmatch::GameConfig config;
+	opennova::inmatch::create_session(
+			owner.ctx, config, opennova::inmatch::SessionStartup{}, nullptr);
+
+	const opennova::PeerAddr peer{0x0100007Fu, 33118};
+	auto &peer_link = owner.peers[peer];
+	peer_link.transport =
+			std::make_unique<opennova::replication::UdpSessionTransport>(
+					opennova::replication::UdpSessionTransport::Role::Host);
+	opennova::inmatch::NapiNPConnection conn;
+	conn.peer = peer;
+	conn.type = 1;
+	conn.phase = opennova::inmatch::ConnectionPhase::InMatch;
+	conn.burst.spawned = true;
+	conn.reply.roster_seen_gen = owner.ctx.np_protocol.roster_generation;
+	conn.server_scrk = "SERVERPACKETBUDGETSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ01";
+	conn.client_ck = 0x10203042u;
+	conn.link.transport = peer_link.transport.get();
+	conn.link.mode = opennova::replication::TransportMode::Client;
+	conn.timeouts.max_packets_per_tick = 1;
+	owner.ctx.np_protocol.connection_list.push_back(std::move(conn));
+	auto &remote = owner.ctx.np_protocol.connection_list.front();
+
+	// Three 600-byte records: two fit one 1300-byte packet, the third needs another.
+	for (uint8_t tag : {uint8_t{0x31}, uint8_t{0x32}, uint8_t{0x33}})
+		owner.pending_session_messages[peer].push_back(
+				opennova::make_protocol_message(tag, std::vector<uint8_t>(600, tag)));
+	CaptureDatagramSocket socket;
+	opennova::inmatch::host_session_pump(owner, socket);
+	if (!expect(socket.sent.size() == 1 && owner.pending_session_messages.count(peer) == 1 &&
+	                    owner.pending_session_messages[peer].size() == 1 &&
+	                    owner.pending_session_messages[peer][0].tag == 0x33,
+			"packet budget: one build sends one packet and keeps the third record queued"))
+		return false;
+	opennova::inmatch::host_session_pump(owner, socket);
+	uint8_t opcode = 0;
+	std::vector<uint8_t> session_body;
+	opennova::ProtocolPacketHeader header;
+	std::vector<opennova::ProtocolMessage> messages;
+	return expect(socket.sent.size() == 2 && owner.pending_session_messages.count(peer) == 0 &&
+	                      opennova::nw_decode_inbound(socket.sent[1].data(), socket.sent[1].size(),
+	                              opcode, session_body) &&
+	                      opennova::decode_protocol_packet_plaintext(session_body.data(),
+	                              session_body.size(), remote.server_scrk, header, messages) &&
+	                      messages.size() == 1 && messages[0].tag == 0x33,
+			"packet budget: the next build sends the record the budget left");
 }
 
 bool check_host_admits_exact_retail_message_prefix() {
@@ -1249,7 +1390,9 @@ bool check_host_admits_exact_retail_message_prefix() {
 
 // The dictated CS field-3 period applies in both directions. The host keeps
 // simulation/C2S full-rate, but remote 0x0A production and the S2C flush open
-// only on the exact decrement-before-gate boundary. The high retail BANDWIDTH
+// only on the exact decrement-before-gate boundary. Its send pump still runs
+// every tick, so +0x64C advances once per host tick, held or open (D-NET-230)
+// [orig: PumpServerProtocolSend @0x51e487 -> PumpFlags increment @0x6297d5]. The high retail BANDWIDTH
 // setting must still fit one 1300-byte session packet after its LEN16 envelope.
 bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::HostOwner owner;
@@ -1319,20 +1462,20 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.empty() && remote.s2c_send_holdoff_countdown == 2,
 	            "first host S2C holdoff tick stays closed") ||
-	    !expect(remote.seq.send_flush_counter == 0,
-	            "closed host boundary does not age finite retention")) return false;
+	    !expect(remote.seq.send_flush_counter == 1,
+	            "the host's send pump ages finite retention on a held tick too")) return false;
 	opennova::inmatch::host_session_pump(owner, socket);
 	if (!expect(socket.sent.empty() && remote.s2c_send_holdoff_countdown == 1,
 	            "second host S2C holdoff tick stays closed") ||
-	    !expect(remote.seq.send_flush_counter == 0,
-	            "second closed host boundary still does not advance the flush counter")) return false;
+	    !expect(remote.seq.send_flush_counter == 2,
+	            "every host tick advances the flush counter once")) return false;
 	opennova::inmatch::host_session_pump(owner, socket);
 	const std::size_t boundary_packet_count = socket.sent.size();
 	if (!expect(boundary_packet_count >= 1 && boundary_packet_count <= 2 &&
 	                    remote.s2c_send_holdoff_countdown == 3,
 	            "third host tick opens one S2C boundary and reloads") ||
-	    !expect(remote.seq.send_flush_counter == 1,
-	            "one open host boundary increments the flush counter exactly once")) return false;
+	    !expect(remote.seq.send_flush_counter == 3,
+	            "an open host boundary, however many packets it builds, advances it once")) return false;
 	if (!expect(world.logic_tick == 3,
 	            "host simulation remains full-rate while S2C is held")) return false;
 
@@ -1384,7 +1527,7 @@ bool check_host_s2c_holdoff_and_frame_envelope() {
 	opennova::inmatch::host_session_pump(owner, socket);
 	return expect(socket.sent.size() == boundary_packet_count &&
 	                      remote.s2c_send_holdoff_countdown == 2 &&
-	                      remote.seq.send_flush_counter == 1,
+	                      remote.seq.send_flush_counter == 4,
 	              "next host S2C boundary remains closed for the full period");
 }
 
@@ -4140,7 +4283,7 @@ bool check_refused_touch_arms_the_nag() {
 	auto touch = [&f](uint32_t age_ms) {
 		const uint32_t frame_tick = f.world.logic_tick;
 		const uint32_t now_ms =
-				opennova::inmatch::host_milliseconds_for_logic_tick(frame_tick);
+				opennova::io::host_milliseconds_for_logic_tick(frame_tick);
 		f.conn().reply.chat_last_ms = age_ms == 0 ? 0 : now_ms - age_ms;
 		f.world.zones.capture.refused_touches.push_back(f.player);
 		opennova::inmatch::Server_TickUpdate(f.ctx);
@@ -4496,7 +4639,7 @@ bool check_periodic_rtt_waits_for_send_boundary_and_retains_62_flushes() {
 	RttSample sample; size_t consumed = 0;
 	if (!expect(decode_rtt_sample(first[0].body.data(), first[0].body.size(), sample, consumed) &&
 			sample.echo_flag == 1 &&
-			sample.timestamp == inmatch::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
+			sample.timestamp == opennova::io::host_milliseconds_for_logic_tick(world.logic_tick - 1u),
 			"periodic RTT requests carry the frame's host clock and echo flag 1")) return false;
 	for (int i = 1; i < 62; ++i) { inmatch::Server_TickUpdate(ctx); if (!expect(drain().empty(), "RTT waits 62 ticks")) return false; }
 	peer.s2c_send_holdoff_countdown = 2;
@@ -4540,6 +4683,8 @@ int main() {
 	ok = check_host_frame_failure_preserves_owner_queue() && ok;
 	ok = check_requeued_fragment_run_overflows_per_node() && ok;
 	ok = check_host_idle_send_interval_keepalive() && ok;
+	ok = check_host_send_interval_legs_run_every_tick() && ok;
+	ok = check_host_builds_at_most_field_14_packets() && ok;
 	ok = check_host_admits_exact_retail_message_prefix() && ok;
 	ok = check_host_s2c_holdoff_and_frame_envelope() && ok;
 	ok = check_host_s2c_holdoff_is_per_connection() && ok;

@@ -86,6 +86,17 @@ void stamp_seat_spec_turret_limits(world::World &world,
 void stamp_minus_one_slot_window(world::Entity &child, float carrier_light_transfer,
 		int32_t slot4_down, int32_t slot4_up, int32_t slot4_right);
 
+// The pools whose streamed rows a joiner re-applies the installed table to:
+// the two item pools, vehicles and emplacements (1) and buildings (2), the
+// rows the host's promote gives their def's seats and "armory*" points at
+// spawn (initialize_item_seats). Retail's label and seat scans walk the
+// player's proximity list over every pool and read an Armory-attrib def's
+// userpoints, so a pool-2 armory building labels on every peer.
+// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a32c1..0x5a32e2 ->
+//  Entity_FindNearestSeatOrArmory over entity+0x1BC/+0x1C0; the armory
+//  walk @0x5a36f5; Game_StartMission -> Entity_InitAllFromModels @0x52567F]
+inline bool pool_takes_item_seat_spec(int pool) { return pool == 1 || pool == 2; }
+
 // Re-apply the installed table to ONE live entity: emplacement-attachment
 // identity (a promoted child on an authority/complete-BMS world preserves
 // its authored slot — p_wire_header_world true disables that, matching the

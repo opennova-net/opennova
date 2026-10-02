@@ -1105,8 +1105,9 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
         if (entry.is_proxy) {
             const WirePersonCollisionProxy &proxy =
                 wire_person_proxies_[entry.index];
-            // The wire identity is used only for ordered projection and the
-            // self gate. In particular it is never assigned to geometry_entity.
+            // The wire identity is used only for ordered projection, the self
+            // gate and the hit's wire_person_handle. In particular it is never
+            // assigned to geometry_entity.
             if ((trace.ammo_flags & 4u) == 0 &&
                 proxy.wire_handle == trace.shooter_wire_handle)
                 continue;
@@ -1128,6 +1129,7 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
                                       proxy.uniform_scale_q16, eh, hit_distance))
                 continue;
             eh.victim_bound_radius_q16 = person_park_radius(proxy.bound_radius_q16);
+            eh.wire_person_handle = proxy.wire_handle; // the row's identity, not a registry handle
             finish_person_hit(eh, hit_distance); // geometry_entity stays invalid
             break;
         }

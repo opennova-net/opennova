@@ -711,6 +711,50 @@ void test_special_keys() {
 	CHECK(hud_toggles_server_status_page_key(d, 0x22, true, true, false));
 }
 
+// The deploy leg: X, SPACE and the team's zone letters queue the pick while
+// the local player is dead in a session (or the overlay is up), nothing else.
+// [orig: Input_HandleSpecialKeys @0x49c9c9..0x49ca73]
+void test_deploy_keys() {
+	const int16_t zones[] = {2, 1, -1, 2};
+	HudDeployKeyInput in;
+	in.in_session = true;
+	in.local_dead = true;
+	in.local_team = 2;
+	in.zone_teams = zones;
+	in.zone_count = 4;
+	in.vk = 'X';
+	CHECK(hud_deploy_key_pick(in) == 0);
+	in.vk = ' ';
+	CHECK(hud_deploy_key_pick(in) == kHudDeployKeyAutoTeam);
+	in.vk = 'A';
+	CHECK(hud_deploy_key_pick(in) == 1);    // zone 0, the player's team
+	in.vk = 'B';
+	CHECK(hud_deploy_key_pick(in) == -1);   // zone 1 is the other team's
+	in.vk = 'C';
+	CHECK(hud_deploy_key_pick(in) == -1);   // zone 2 resolves no entity
+	in.vk = 'D';
+	CHECK(hud_deploy_key_pick(in) == 4);
+	in.vk = 'E';
+	CHECK(hud_deploy_key_pick(in) == -1);   // past the list
+	in.vk = '1';
+	CHECK(hud_deploy_key_pick(in) == -1);
+	// Alive in a session with no overlay: the leg is closed.
+	in.local_dead = false;
+	in.vk = ' ';
+	CHECK(hud_deploy_key_pick(in) == -1);
+	in.deploy_overlay = true;
+	CHECK(hud_deploy_key_pick(in) == kHudDeployKeyAutoTeam);
+	// Out of a session: the overlay opens it, death alone does not, unless the
+	// mission's SinglePlayerRespawn attribute is set.
+	in.in_session = false;
+	CHECK(hud_deploy_key_pick(in) == kHudDeployKeyAutoTeam);
+	in.deploy_overlay = false;
+	in.local_dead = true;
+	CHECK(hud_deploy_key_pick(in) == -1);
+	in.single_player_respawn = true;
+	CHECK(hud_deploy_key_pick(in) == kHudDeployKeyAutoTeam);
+}
+
 int main() {
 	test_edge_latch();
 	test_huddetail_cycle_and_shared_key_shadowing();
@@ -730,6 +774,7 @@ int main() {
 	test_server_status_reroutes();
 	test_quit_dialog_escape_legs();
 	test_special_keys();
+	test_deploy_keys();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

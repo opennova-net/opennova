@@ -302,6 +302,35 @@ void VehicleSystem::aircraft_client_tick(Entity &veh, const VehicleTraits &trait
 		return;
 	}
 
+	// The occupant leg ahead of the seat sweep, on the raw +0x170 claimant: a
+	// player (Flags 0x100) that is the local one, or any on the authority. An
+	// analog deflection, or the move bit with a diagonal key (1/3/5/7) on a
+	// weathervane hull, ORs the free-look bit into the claimant's MoveOrder;
+	// the diagonal key also yaws an airborne hull by weathervane * 192426 a
+	// tick, keys 1/5 one way and 3/7 the other.
+	// [orig: Entity_UpdateAircraftPhysics -- the attrib 0x40 / +0x170 / Flags
+	//  0x100 / local-or-authority gate @0x490CDA..0x490D12, the analog merge
+	//  @0x490D1E..0x490D4D, the diagonal merge @0x490D53..0x490D6D, the yaw
+	//  @0x490D74..0x490DBA (`imul ecx, 2EFAAh` / `imul ecx, 0FFFD1056h`)]
+	if (traits.player_control) {
+		Entity *claimant = world.registry.get(veh.primary_occupant);
+		if (claimant != nullptr &&
+				((claimant->flags | claimant->engine_flags) & kEntityFlagPlayer) != 0 &&
+				(claimant->handle == world.cached.local_player || world.ai.is_authority)) {
+			const uint32_t move_order = claimant->net_move_input;
+			const int dir = static_cast<int>(move_order & Entity::kMoveOrderDirMask);
+			if (int(claimant->net_analog_z) + claimant->net_analog_y + claimant->net_analog_x != 0)
+				merge_occupant_free_look(world, *claimant);
+			if ((move_order & Entity::kMoveOrderMoving) != 0 && traits.weathervane != 0 &&
+					(dir & 1) != 0) {
+				merge_occupant_free_look(world, *claimant);
+				if ((veh.flags & kEntityFlagInAir) != 0)
+					m.yaw_bam = io::bam_add(m.yaw_bam, bam_mul_wrap(traits.weathervane,
+							dir == 1 || dir == 5 ? kAnalogSteerScale : -kAnalogSteerScale));
+			}
+		}
+	}
+
 	// +0x45C follows the pilot's relative pitch. The unoccupied arm adds
 	// its own signed step without the occupied clamp; this odd sign is
 	// present in retail. [orig: @0x490E66..0x490EF3]

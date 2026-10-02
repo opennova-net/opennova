@@ -298,6 +298,7 @@ void test_member_join_pushes_each_entry() {
 			c.world.user_waypoints.entries[1].handle.slot() == 0);
 	const w::UserWaypointRow stale = w::user_waypoint_row(c.world, placed);
 	CHECK(stale.x == 0 && stale.y == 0 && stale.z == 0 && stale.name.empty());
+	c.runtime.flush_host_sends(); // the placements' own shares leave first
 	c.wire.clear();
 	// Mate joins the local player's squad: the push.
 	SquadJoin join;
@@ -305,6 +306,7 @@ void test_member_join_pushes_each_entry() {
 	join.member = 1;
 	c.runtime.view().apply(s2c::SQUAD_JOIN, encode_squad_join(join));
 	c.runtime.apply_received_effects(c.world);
+	c.runtime.flush_host_sends(); // the host frame's post-effects send
 	std::vector<WaypointShare> shares;
 	replication::Datagram d;
 	while (c.wire.host_recv(d)) {

@@ -8,6 +8,9 @@
 //  soundloop parse ItemDef_ParseProperty @0x49fec4]
 
 #include <runtime/audio/envs_markers.h>
+#include <runtime/world/world.h>
+
+#include <memory>
 
 #include <cstdio>
 #include <cstring>
@@ -117,6 +120,33 @@ int main() {
 						rows[1].slot_sets[2].empty() &&
 						rows[1].slot_sets[3] == "NIGHT_AMB",
 				"building slots pass through unfiltered, gaps stay silent");
+	}
+	// A header-only join: the same rows from the streamed registry, in the
+	// same pool walk, at the registry's mission-frame positions.
+	// [orig: Entity_UpdateEnvSoundEmitter @0x4a8080 on streamed entities]
+	auto world_heap = std::make_unique<world::World>();
+	world::World &world = *world_heap;
+	for (int pool = 0; pool < 4; ++pool) world.registry.configure_pool(pool, 8);
+	const auto spawn = [&](int pool, int32_t type, int32_t bms_id, float x) {
+		world::Entity seed;
+		seed.item_id = type;
+		seed.bms_id = bms_id;
+		seed.position = world::Vec3{x, 5.0f, 2.0f};
+		world.registry.spawn(pool, seed);
+	};
+	spawn(2, 1, 7, 10.0f);  // envs building
+	spawn(3, 2, 9, 20.0f);  // envs marker
+	spawn(3, 3, 11, 30.0f); // not envs
+	spawn(0, 4242, 13, 0.0f);
+	const std::vector<audio::EnvsMarker> streamed = audio::resolve_envs_markers(world, items);
+	ok &= expect(streamed.size() == 2, "streamed: two envs rows");
+	if (streamed.size() == 2) {
+		ok &= expect(streamed[0].bms_id == 9 && streamed[0].x == 20.0f &&
+						streamed[0].y == 5.0f && streamed[0].z == 2.0f &&
+						streamed[0].slot_sets[0] == "MARKER_AMB",
+				"streamed: the marker pool walks first, at the registry position");
+		ok &= expect(streamed[1].bms_id == 7 && streamed[1].slot_sets[3] == "NIGHT_AMB",
+				"streamed: the building row follows with its slots");
 	}
 	def_free_items(&items);
 	if (!ok) return 1;

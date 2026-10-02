@@ -424,6 +424,9 @@ public:
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
 	void set_table_cell_painter(int index, MenuTableCellPainter painter);
+	// The table's runtime column layout (MenuTableColumnDef), kept across
+	// configure() and applied over the authored COLUMN layout.
+	void set_table_columns(int index, const std::vector<MenuTableColumnDef> &columns);
 	// Non-mutating front-most hit (the pump's claim walk without the state
 	// writes) — editor/preview picking.
 	int hit_widget(const MenuFrameState &state, float mx, float my, float sx,
@@ -757,6 +760,8 @@ private:
 	std::map<int, EditScroll> edit_scroll_;
 	std::map<int, MarqueeScroll> marquee_scroll_;
 	std::map<int, MenuTableCellPainter> table_painters_;
+	std::map<int, std::vector<MenuTableColumnDef>> table_column_defs_;
+	void apply_table_column_defs_(int index, WidgetNode &node) const;
 	MenuDrawList draw_list_;
 };
 

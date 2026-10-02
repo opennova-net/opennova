@@ -62,52 +62,17 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 			static_cast<unsigned>(event.dc), static_cast<unsigned>(event.dpc),
 			event.ddstr.c_str(), event.dstr.c_str(), post_auth_stage_name());
 	// The client's exit-reason switch keys on DPC and only runs for the DC == 2 family; both
-	// therefore belong in the reason, alongside the sender's own tag and text (for the
-	// witnessed deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35").
-	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569]
-	// The game-layer join gate answers its spectator failures through this
-	// same record with empty strings — DPC 14 disabled / 15 full / 16 bad
-	// password. [orig: Server_ValidatePlayerJoinRequest @0x512100 via
-	// CNapiNPConnection_SendChatMessage @0x4c7ef0]
-	if (event.dc == 2) {
-		switch (event.dpc) {
-		case 14:
-			host_disconnect_reason_ = "Spectators are disabled on this server";
-			fail(host_disconnect_reason_);
-			return;
-		case 15:
-			host_disconnect_reason_ = "The spectator slots are full";
-			fail(host_disconnect_reason_);
-			return;
-		case 16:
-			host_disconnect_reason_ = "The spectator password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 18:
-			host_disconnect_reason_ = "The team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 19:
-			host_disconnect_reason_ = "The blue team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 20:
-			host_disconnect_reason_ = "The red team password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 21:
-			host_disconnect_reason_ = "The squad password is incorrect";
-			fail(host_disconnect_reason_);
-			return;
-		case 22:
-			host_disconnect_reason_ = "The requested team is invalid";
-			fail(host_disconnect_reason_);
-			return;
-		default:
-			break;
-		}
-	}
-	host_disconnect_reason_ = "the host closed the session (reason " +
+	// therefore belong in the diagnostic, alongside the gameerr entry retail's reason text
+	// reads (disconnect_reason.h) and the sender's own tag and text (for the witnessed
+	// deploy-screen idle punt: DPC 33, DC 2, "LogPuntEvent", "t35"). The game-layer join
+	// gate answers its spectator / side-password / team failures through this same record
+	// (DPC 14..22), shown as their GDC text.
+	// [orig: the DC gate @0x4c6563 and the DPC switch @0x4c6569;
+	//  Server_ValidatePlayerJoinRequest @0x512100 via CNapiNPConnection_SendChatMessage
+	//  @0x4c7ef0]
+	const ConnectionErrorRecord record = connection_error_record();
+	host_disconnect_reason_ = "the host closed the session (" +
+			disconnect_reason_key(&record).key + "; reason " +
 			std::to_string(event.dpc) + ", class " + std::to_string(event.dc) + ")";
 	if (!event.ddstr.empty()) host_disconnect_reason_ += ": " + event.ddstr;
 	if (!event.dstr.empty()) host_disconnect_reason_ += " " + event.dstr;
@@ -118,36 +83,36 @@ void JoinerConnection::on_host_disconnect(const DisconnectEvent &event) {
 //  @0x4ca4a0 -> CNapiNetwork_OnDisconnectedFromServer @0x4c63d0, which clears the
 //  session strings and maps the disconnect code onto g_MissionExitReason]
 bool JoinerConnection::session_lost() const {
-	// An explicit close is terminal at any stage; the silence reap runs for the whole
-	// accepted-0x82 state (Driving = every join/deploy stage, InMatch) with no gameplay gate,
-	// and a negative timeout (the host's `_NSTMOUT.TXT` NEVER) disables it.
-	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 case 5 @0x6295a2..0x62961c —
-	//  `timeout_ms >= 0` @0x6295a2, elapsed = now - conn+0x5E8 @0x6295b2, strictly `>`]
+	// An explicit close is terminal at any stage, and so is a silence the reap latched.
 	if (!host_disconnect_reason_.empty() || silence_timeout_latched_) return true;
 	// A self-initiated teardown (the pool-overflow MSGCRE) is terminal with its record latched.
-	if (phase_ == Phase::Error && disconnect_event_set_) return true;
+	return phase_ == Phase::Error && disconnect_event_set_;
+}
+
+// The silence reap is the connected state's arm of PumpStateMachine, which only the send
+// pump runs (PumpFlags 0x40): it is evaluated when the send pump is, ahead of the
+// send-interval legs, never on its own. It runs for the whole accepted-0x82 state (Driving =
+// every join/deploy stage, InMatch) with no gameplay gate, and a negative timeout (the host's
+// `_NSTMOUT.TXT` NEVER) disables it. The reap's own record is latched before the teardown so
+// a later leave burst carries it.
+// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 case 5 — `timeout_ms >= 0` @0x6295a2,
+//  elapsed = now - conn+0x5E8 @0x6295b2, strictly `>`, the record {role, 3, elapsed, timeout,
+//  "", 0, "NP.C:PT:CLNTTMOUT"} @0x629605..0x62961c, latch-if-invalid @0x6293f4..0x629406,
+//  RequestDisconnect @0x62940a and return before PumpSendIntervals @0x629628;
+//  CNapiNPConnection_PumpFlags 0x40 @0x6297c8]
+bool JoinerConnection::reap_silent_session() {
 	if (!receive_clock_armed_ || conn_.timeouts.timeout_ms < 0 ||
 	    (phase_ != Phase::Driving && phase_ != Phase::InMatch)) {
 		return false;
 	}
-	return milliseconds_since_last_receive() >
-			static_cast<uint64_t>(static_cast<uint32_t>(conn_.timeouts.timeout_ms));
-}
-
-bool JoinerConnection::poll_session_loss() {
-	if (!session_lost()) return false;
-	if (phase_ != Phase::Error) {
-		const std::string reason = session_loss_reason();
-		// The reap's own record, latched before the teardown so a later leave burst
-		// carries it. [orig: {role, 3, elapsed, timeout, "", 0, "NP.C:PT:CLNTTMOUT"}
-		//  @0x629605..0x62961c, latch-if-invalid @0x6293f4..0x629406]
-		latch_disconnect_event(make_disconnect_event(2, 3,
-				static_cast<uint32_t>(milliseconds_since_last_receive()),
-				static_cast<uint32_t>(conn_.timeouts.timeout_ms), "", 0,
-				"NP.C:PT:CLNTTMOUT"), 2);
-		silence_timeout_latched_ = true;
-		fail(reason);
-	}
+	const uint64_t elapsed = milliseconds_since_last_receive();
+	if (elapsed <= static_cast<uint64_t>(static_cast<uint32_t>(conn_.timeouts.timeout_ms)))
+		return false;
+	latch_disconnect_event(make_disconnect_event(2, 3, static_cast<uint32_t>(elapsed),
+			static_cast<uint32_t>(conn_.timeouts.timeout_ms), "", 0,
+			"NP.C:PT:CLNTTMOUT"), 2);
+	silence_timeout_latched_ = true;
+	fail(session_loss_reason());
 	return true;
 }
 
@@ -208,7 +173,8 @@ std::vector<std::vector<uint8_t>> JoinerConnection::disconnect() {
 	std::vector<uint8_t> datagram = nw_encode_outbound(
 			SESSION_OPCODE_CLIENT_GOODBYE,
 			client_goodbye_to_bytes(conn_.server_sk, last_disconnect_event_));
-	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
+	return std::vector<std::vector<uint8_t>>(
+			disconnect_burst_count(conn_.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
 // [orig: Nwu_HandleServerGoodbye @0x624310 -> Nwu_HandleDisconnect(type 2) @0x623CE0]: the

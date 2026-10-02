@@ -162,30 +162,15 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 	// parent link cleared until its own remove arrives.
 	// [orig: Entity_Destroy @0x43e810 — occupant detach @0x43e9e9, per-mount
 	//  detach loop @0x43ea38..0x43ea59, memset(entity, 0, 0x2B4) @0x43ea70]
-	bool detached = false;
-	// A dying person first drops the flag it carries, off its own last pose:
-	// the flag's row keeps that pose for the drop the client runs
-	// (ClientWorldMaterializer).
+	// A dying person first drops the flag it carries, off its own last pose.
 	// [orig: Entity_Destroy @0x43E8AA..0x43E8B8 — def type 3 ->
 	//  Entity_DropCarriedObject]
 	const ClientEntityState *root = state_.find(root_handle);
-	const bool person_root = root != nullptr &&
-			(root->cls == EntityClass::Player || root->cls == EntityClass::Infantry);
-	const int32_t root_x = root != nullptr ? root->x : 0;
-	const int32_t root_y = root != nullptr ? root->y : 0;
-	const int32_t root_z = root != nullptr ? root->z : 0;
-	const int32_t root_heading = root != nullptr ? root->heading_bam : 0;
-	const int32_t root_pitch = root != nullptr ? root->pitch_bam : 0;
+	bool detached = root != nullptr &&
+			(root->cls == EntityClass::Player || root->cls == EntityClass::Infantry) &&
+			drop_carried_objective(root_handle);
 	for (ClientEntityState &entity : state_.entities) {
 		if (entity.parent_handle != root_handle) continue;
-		if (person_root && is_carry_objective(entity.type_id)) {
-			entity.objective_drop_x = root_x;
-			entity.objective_drop_y = root_y;
-			entity.objective_drop_z = root_z;
-			entity.objective_drop_heading_bam = root_heading;
-			entity.objective_drop_pitch_bam = root_pitch;
-			entity.objective_drop_serial = ++entity.objective_state_serial;
-		}
 		entity.parent_handle = wire_handle::kInvalid;
 		entity.parent_pose_valid = false;
 		detached = true;
@@ -199,6 +184,35 @@ void ClientReplicaPipeline::erase_entity_tree(uint16_t root_handle) {
 			state_.entities.end());
 	if (detached || state_.entities.size() != before)
 		state_.mark_topology_changed();
+}
+
+// The carried flag leaves its person carrier, keeping the carrier's pose
+// for the drop the client runs (ClientWorldMaterializer reads it for a
+// carrier that names no native row): the flag's state serial moves, so the
+// materializer takes it as the state that dropped it.
+// [orig: Entity_DropCarriedObject @0x439DF0 — the +0x268 read and clear
+//  @0x439DF7..0x439E01, the occupant clear @0x439E17]
+bool ClientReplicaPipeline::drop_carried_objective(uint16_t carrier_handle) {
+	const ClientEntityState *carrier = state_.find(carrier_handle);
+	if (carrier == nullptr) return false;
+	const int32_t x = carrier->x, y = carrier->y, z = carrier->z;
+	const int32_t heading = carrier->heading_bam, pitch = carrier->pitch_bam;
+	bool dropped = false;
+	for (ClientEntityState &entity : state_.entities) {
+		if (entity.parent_handle != carrier_handle || !is_carry_objective(entity.type_id))
+			continue;
+		entity.objective_drop_x = x;
+		entity.objective_drop_y = y;
+		entity.objective_drop_z = z;
+		entity.objective_drop_heading_bam = heading;
+		entity.objective_drop_pitch_bam = pitch;
+		entity.objective_drop_serial = ++entity.objective_state_serial;
+		entity.parent_handle = wire_handle::kInvalid;
+		entity.parent_pose_valid = false;
+		dropped = true;
+	}
+	if (dropped) state_.mark_topology_changed();
+	return dropped;
 }
 
 // [orig: NapiNPClientMsg_DestroyEntityList @0x429730 — the body carries RAW pool-0
@@ -221,6 +235,42 @@ void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	entity.team = team;
 	entity.team_known = true;
 	state_.mark_changed();
+}
+
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 — entity->animSlot = the
+//  fourth field @0x431b3a, entity->NetId = the third @0x431b46, then the
+//  avatar rebind MinimapSlot_FindOrAllocByEntityId @0x431b8c into
+//  CharacterEntity @0x431b91]
+void ClientReplicaPipeline::apply_player_identity(uint16_t handle, uint16_t net_id,
+		uint8_t anim_slot) {
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
+	ClientEntityState &entity = state_.upsert(handle);
+	if (entity.net_id == net_id && entity.spawn_anim_slot == anim_slot) return;
+	entity.net_id = net_id;
+	entity.spawn_anim_slot = anim_slot;
+	state_.mark_changed();
+}
+
+// One team-change list entry: the addressed slot takes the entry's team off
+// the authority, and a player its identity pair, the 0x50 record's fields
+// without the 0x50 handler's slot-table, loadout and refresh legs.
+// [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — the handle gates
+//  @0x431c1a..0x431c49, Team @0x431c6d (!is_authority), the C2S 0x29
+//  {index + 1} @0x431c88..0x431c99, the player gate @0x431ca5, NetId
+//  @0x431cad with the MinimapSlot_HasEntity fallback @0x431cb4..0x431cde,
+//  CharacterEntity @0x431cfc, animSlot @0x431cff]
+void ClientReplicaPipeline::apply_team_change_confirm(const std::vector<uint8_t> &body) {
+	TeamChangeConfirm entry;
+	if (!decode_team_change_confirm(body.data(), body.size(), entry)) ++malformed_bodies_;
+	const uint16_t handle = entry.assign.entity_handle;
+	const world::EntityHandle h{handle};
+	if (!h.valid() || h.pool() >= world::kEntityPoolCount ||
+			static_cast<std::size_t>(h.slot()) >= world::retail_pool_capacity(h.pool()))
+		return;
+	if (!authority_recipient_) apply_team_assign(handle, entry.assign.team);
+	if (is_player_entity(handle))
+		apply_player_identity(handle, entry.assign.net_id, entry.assign.anim_slot);
 }
 
 } // namespace opennova::replication

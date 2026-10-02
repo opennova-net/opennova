@@ -1,6 +1,8 @@
 #pragma once
 
 #include <runtime/inmatch/charattr_challenge.h>
+#include <runtime/inmatch/disconnect_reason.h>
+#include <runtime/inmatch/pre_game_menu.h>
 #include <runtime/inmatch/integrity_challenge_profile.h>
 #include <runtime/inmatch/join_role.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -12,6 +14,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <ctime>
 #include <array>
 #include <functional>
 #include <string>
@@ -56,6 +59,26 @@
 // [orig: Player_FindLocalPlayerEntity @0x4E0090; NapiNPClientMsg_0x00C @0x42E730;
 // NapiNP_GetLocalConnectionId @0x4C6D40]. The owner pumps bytes; no socket I/O here.
 namespace opennova::inmatch {
+
+// The OS time-zone bias in minutes, UTC = local + bias, of standard (not
+// daylight) time: the standard-library equivalent of TIME_ZONE_INFORMATION.Bias.
+// UTC's broken-down fields read back as local standard time (tm_isdst = 0) lie
+// exactly `bias` after the instant they came from.
+// [orig: UI_JoinSelectedSession @0x5699d0 — GetTimeZoneInformation @0x569da1,
+//  net_config.tzb = Bias @0x569dbd]
+inline int32_t local_time_zone_bias_minutes() {
+	const std::time_t now = std::time(nullptr);
+	std::tm utc{};
+#ifdef _WIN32
+	if (gmtime_s(&utc, &now) != 0) return 0;
+#else
+	if (gmtime_r(&now, &utc) == nullptr) return 0;
+#endif
+	utc.tm_isdst = 0;
+	const std::time_t as_local = std::mktime(&utc);
+	if (as_local == static_cast<std::time_t>(-1)) return 0;
+	return static_cast<int32_t>(std::difftime(as_local, now) / 60.0);
+}
 
 enum class TerrainTilState : uint8_t {
 	Absent = 0,
@@ -112,10 +135,14 @@ public:
 		//  @0x6239b6 -> CNapiNPManager_SendTo @0x61f039; Nwu_HandlePing @0x623a70 ->
 		//  CNapiNPConnection_SendPing @0x623c6f -> CNapiNPManager_SendTo @0x61f261]
 		std::vector<std::vector<uint8_t>> immediate_outbound;
-		// Receive handlers queue reliable semantic replies here. ClientRuntime folds all state
-		// from this receive boundary first, then places these behind the shared send-holdoff gate
-		// so they batch with same-frame housekeeping/gameplay at PumpClientProtocolSend.
+		// Receive handlers queue reliable semantic replies here, in the order they ran.
+		// ClientRuntime appends them to its one C2S queue as it folds the reducer stream.
 		std::vector<ProtocolMessage> queued_send_messages;
+		// For each queued reply, how many inbound_reducer entries its handler's message
+		// follows: the reply joins the queue right after the fold of that many entries, so
+		// the replies of a datagram keep its messages' wire order beside the fold's own
+		// requests (the 0x16 handler's 0x22, the 0x0A handler's 0x0F).
+		std::vector<std::size_t> queued_send_after;
 		// DIAGNOSTIC VIEW ONLY: raw S2C 0x0A bodies. ClientRuntime applies
 		// nothing from this vector — the reducer stream below is the sole
 		// applied stream; per-family tests assert against these views.
@@ -151,6 +178,13 @@ public:
 		//  <- @0x4297fd; a short body seeds 0 @0x4297eb]
 		bool tick_seed_set = false;
 		uint32_t tick_seed = 0;
+		// The final mission-data chunk ended InitRandomSeedOrRequest's spin:
+		// Game_StartMission runs on to its globals reset, which clears the
+		// round-over gate a reset or round end received earlier in the join
+		// had raised. [orig: Game_StartMission @0x524a10..0x524a1f —
+		//  Chat_ClearAllChannels, `mov g_SpawnSuccessGate, ebx` (0), after the
+		//  InitRandomSeedOrRequest call @0x5248a7]
+		bool mission_started = false;
 		bool send_holdoff_set = false;
 		uint32_t send_holdoff = 0;
 		std::vector<WeaponLoadout> loadout_grants;
@@ -189,13 +223,30 @@ public:
 
 	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello).
 	std::vector<uint8_t> start();
+	// The browse row's record of the host's 0x81 (a LAN row the player picked):
+	// a join from a discovered session goes straight to the 0x42 with the row's
+	// HK and SF -- no new 0x41 -- as retail's connect takes HK, address and port
+	// from the session record into the connect state. Configure before start();
+	// `present == false` (a bare dial) sends the 0x41 first.
+	// [orig: UI_JoinSelectedSession @0x5699d0 -> CNapiNetwork_StartClientConnection
+	//  @0x4ca160 -> CNapiNPConnection_InitFromSession @0x626320 (the record's HK
+	//  @0x62639c, address/port @0x6263ae..0x6263b7, state 3 @0x626496)]
+	struct DiscoveredSession {
+		bool present = false;
+		uint32_t host_key = 0;
+		bool password_required = false;
+		std::string expansion; // the 0x81 SUS2, echoed in the C2S JOIN EXP TLV
+	};
+	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
 	// any surfaced 0x0A bodies + whether this datagram learned H.
 	PollResult handle_datagram(const uint8_t *raw, std::size_t len);
 
-	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram on retail's active
-	// send interval measured by the monotonic wall clock (independent of render/simulation cadence).
+	// While awaiting 0x81/0x82, re-emit the exact pending 0x41/0x42 wire datagram, measured by the
+	// monotonic wall clock (independent of render/simulation cadence): the 0x41 every 1000 ms, the
+	// 0x42 once more than 2000 ms passed, failing the join with connect error 2 (NCC002) once the
+	// 0x42 leg has waited more than 30000 ms.
 	// Once Driving, flush deferred ACKs, the active-interval header-only probes, and the held C2S
 	// 0x0A after local world readiness. Semantic admission transitions are emitted reactively from
 	// handle_datagram(); the 0x44 missing-sequence request belongs to finish_receive_pump().
@@ -210,6 +261,30 @@ public:
 	//  -> CNapiNPConnection_SendMissingSeqList(conn, 0) @0x6269ce -> CNapiNPManager_SendTo
 	//  @0x62376d; the latch is set by NapiNPProtocol_HandleSessionPacket @0x626c3a]
 	std::vector<uint8_t> finish_receive_pump();
+
+	// The retail loop whose passes call this connection's send pump at the current admission
+	// stage. A stock client reaches its holdoff-gated Client_ProcessNetworkFrame only when
+	// mission loading ends; until then each stage waits inside its own loop, and each loop
+	// calls PumpClientProtocolSend (flags 738, whose build still needs the holdoff countdown at
+	// zero) its own way. NetworkFrame is one receive + one send per frame (the join state
+	// machine's UI frames, then the in-match frame); the busy spins pass receive + send every
+	// few microseconds, so a running countdown is out before the next datagram; the timed
+	// loops call the send pump only once MORE than their pace passed since the last call.
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 5/6 (@0x56a5dd, sub_424740
+	//  @0x424767); SaveFile_SendAndWaitForServerAck @0x5204b0; InitRandomSeedOrRequest
+	//  @0x51e8f0; NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
+	//  Game_StartMission's 0x0F wait @0x52628d..0x5262df; Client_ProcessNetworkFrame @0x42c3dd]
+	enum class SendPumpLoop : uint8_t {
+		NetworkFrame,    // a send per frame behind the countdown (UI frames, the in-match frame)
+		ServerInfoWait,  // SaveFile_SendAndWaitForServerAck: the send after > 50 ms
+		MissionDataWait, // CNapiGameSession_InitRandomSeedOrRequest: a busy spin
+		SyncTailWait,    // NapiClient_WaitForDisconnect: the send after > 100 ms
+		WorldStreamWait, // NapiClient_WaitForGameStart: a busy spin
+		WorldStateWait,  // Game_StartMission's final wait for S2C 0x0F: a busy spin
+	};
+	SendPumpLoop send_pump_loop() const;
+	// A timed loop's pace in GetTickCount milliseconds (strictly more must pass); 0 otherwise.
+	static int32_t send_pump_loop_pace_ms(SendPumpLoop loop);
 
 	// Frame the retail leave: a burst of identical 0x46 ClientGoodBye datagrams for the owner to
 	// ship before dropping the socket (the host's only non-timeout teardown trigger). Empty until
@@ -253,13 +328,41 @@ public:
 		// [framed_count, admitted_count) remains owned by the caller.
 		std::size_t framed_count = 0;
 		bool frame_failed = false;
+		// Admitted nodes the build's packet budget left queued, in queue order (a split
+		// message's remaining pieces first): the caller keeps them at the head of its queue
+		// for the next build.
+		std::vector<ProtocolMessage> unbuilt;
 	};
+	// The one-argument forms frame under this connection's packet ceiling: cs_dir0 field 13
+	// (the template's 1300, overlaid by the host's 0x82 and its 0x2000 CS update, the
+	// negotiated mpmaxpacketsize) [orig: BuildOutgoingPackets @0x628436, min 26 @0x628446].
+	// Every form but the three-argument one builds at most cs_dir0 field 14's packets
+	// (max_packets_per_build; the template's -1 is unbounded) [orig: @0x62844e].
 	FrameMessagesResult frame_messages_detailed(
-			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_bytes = 1300);
+			const std::vector<ProtocolMessage> &messages) {
+		return frame_messages_detailed(messages, packet_ceiling_bytes());
+	}
+	FrameMessagesResult frame_messages_detailed(
+			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes) {
+		return frame_messages_detailed(messages, max_packet_bytes,
+				max_packets_per_build(conn_.timeouts.max_packets_per_tick));
+	}
+	// `max_packets` is what remains of this build's packet budget (at least 1).
+	FrameMessagesResult frame_messages_detailed(const std::vector<ProtocolMessage> &messages,
+			std::size_t max_packet_bytes, std::size_t max_packets);
 	std::vector<std::vector<uint8_t>> frame_messages(
-			const std::vector<ProtocolMessage> &messages,
-			std::size_t max_packet_bytes = 1300);
+			const std::vector<ProtocolMessage> &messages) {
+		return frame_messages(messages, packet_ceiling_bytes());
+	}
+	std::vector<std::vector<uint8_t>> frame_messages(
+			const std::vector<ProtocolMessage> &messages, std::size_t max_packet_bytes);
+	// cs_dir0 field 13 as a byte count; a negative stored value reads as BuildOutgoingPackets'
+	// signed compare does, below its 26-byte floor.
+	std::size_t packet_ceiling_bytes() const {
+		return conn_.timeouts.max_packet_bytes < 26
+				? std::size_t{26}
+				: static_cast<std::size_t>(conn_.timeouts.max_packet_bytes);
+	}
 
 	// Deterministic golden replay: force the in-match connection state so frame_c2s_uplink
 	// reproduces a CAPTURED C2S 0x0C datagram byte-for-byte (the ROADMAP "Determinism" seed-inject).
@@ -349,9 +452,13 @@ public:
 	// g_ExpansionChecksum [orig: Expansion_LoadAssets @0x4a4885;
 	// NapiNP_WriteClientAuthPayload @0x42a287]. Unset (empty) keeps the golden
 	// "0" — the no-version.txt install every capture used.
+	// The same root's CC.BIN is the ClientAuth COUNTRYCODE (vfs_country_code).
 	void set_expansion_version_root(std::string game_root) {
 		expansion_version_root_ = std::move(game_root);
 	}
+	// The ClientAuth TZB: the OS time-zone bias in minutes (UTC = local + bias),
+	// sent only when nonzero; defaults to local_time_zone_bias_minutes().
+	void set_time_zone_bias(int32_t bias_minutes) { time_zone_bias_ = bias_minutes; }
 
 	// The game-session APPID — the decimal the retail client recovers from the
 	// NWJoin .joi CK and uploads as the ClientAuth APPID conn-tag; a NovaWorld
@@ -453,8 +560,16 @@ public:
 	const DisconnectEvent &last_disconnect_event() const {
 		return last_disconnect_event_;
 	}
+	// The error record retail's reason text is built from: the CR=0 join
+	// failure fields and the latched disconnect record (disconnect_reason.h).
+	ConnectionErrorRecord connection_error_record() const;
+	// The join screen's status (pre_game_menu.h): the dial until ServerAuth
+	// accepts, the connect until S2C 0x00, the verification until the S2C 0x01
+	// value reads 1, then the host's queue until S2C 0x05 starts the game.
+	JoinScreenStage join_screen_stage() const;
+	const JoinQueueRecord &join_queue() const { return join_queue_; }
 	// The cs_dir0 values this connection runs under: the template, overlaid by the host's 0x82 CS
-	// block at acceptance (CS field 0 = timeout_ms, field 11 = msg_out_max).
+	// block at acceptance and by later cs_dir0 H:0x00 updates (fields 0, 1, 4, 5, 11, 13).
 	const SessionTimeoutConfig &session_timeouts() const { return conn_.timeouts; }
 
 	// Inbound-gap diagnostics: how many future S2C packets are queued behind an
@@ -546,7 +661,8 @@ public:
 	// that vanishes without a goodbye. Armed from the accepted 0x82 (retail state 5) onward
 	// with no gameplay gate: the join stages, the world stream, the deploy screen and the
 	// in-match phases all reap the same way; the shell's 60 s admission watchdogs merely
-	// run alongside it. (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
+	// run alongside it. The reap is evaluated by the send pump (pump()), so in match it
+	// fires at the first open send boundary past the window (reap_silent_session). (3) The host's 0x86 SERVER_GOODBYE burst (its reap, StopServer, a
 	// replacement, its answer to our own leave) is the third cause, handled like (1).
 	//
 	// Neither raises an in-world dialog in retail: the disconnect handler clears the
@@ -559,10 +675,6 @@ public:
 	//  the cs_dir0.timeout_ms reap @0x4ca4a0 (stores @0x4caa81/@0x4cab54); both land in
 	//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
 	bool session_lost() const;
-	// Owner-pump form of session_lost(): once the silence predicate trips,
-	// latch it and enter Phase::Error so no later input or producer can revive
-	// the connection. Explicit host closes have already made that transition.
-	bool poll_session_loss();
 	// Empty while healthy; a player-facing reason once lost — the decoded reason code, class
 	// and strings for an explicit close, the silence window for the reap.
 	std::string session_loss_reason() const;
@@ -641,6 +753,7 @@ public:
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
+	uint64_t monotonic_now_ms() const { return monotonic_milliseconds_(); }
 	// The client's own ping: the last completed S2C 0x57 round trip and the
 	// ten-entry ring's mean (see rtt_ring_ below) [orig: dword_A860D4;
 	//  CNetStats_GetAveragePing @0x4C2750].
@@ -702,6 +815,12 @@ private:
 	void apply_self_spawn(uint16_t handle, bool has_body, uint32_t owner,
 			uint16_t flags, const SelfSpawn &spawn, PollResult &out);
 	void on_server_resend_list(const std::vector<uint8_t> &body, PollResult &out);
+	// The paged host lists a client walks with its own C2S reply
+	// (joiner_connection_walks.cpp): the team-change list's S2C 0x51 -> C2S 0x29
+	// {index + 1} and the join-window kill list's S2C 0x4E -> C2S 0x28
+	// {0x19 value, 0x1A value, resume}. The pages' entity folds are the
+	// replica pipeline's.
+	void on_list_walk_page(const ProtocolMessage &m, std::vector<ProtocolMessage> &replies);
 	// S2C 0x86 SERVER_GOODBYE: the host's teardown burst — keyed by OUR CK, its record latched
 	// with the peer role 1, answered with the 0x46 burst, then terminal like a description punt.
 	void on_server_goodbye(const std::vector<uint8_t> &body, PollResult &out);
@@ -712,6 +831,9 @@ private:
 	// Store `event` (with `role` as DS) as the connection's disconnect record only while none is
 	// latched — retail's store-if-!valid slot. The 128/32-byte record caps apply.
 	void latch_disconnect_event(const DisconnectEvent &event, uint32_t role);
+	// The send pump's silence reap (PumpStateMachine case 5): past the window it latches the
+	// CLNTTMOUT record, enters Phase::Error and returns true (joiner_connection_disconnect.cpp).
+	bool reap_silent_session();
 	void retain_mission_metadata_chunk(const FileTransferChunk &chunk);
 	// Accumulate the S2C 0x60 server-info transfer and, at its final chunk,
 	// walk the `[key\0][u32 len][bytes]` VarList for EXP_FANFARE.
@@ -740,16 +862,20 @@ private:
 	// payload reaches gameplay dispatch.
 	ProtocolReassemblyState s2c_reassembly_;
 	std::string advertised_expansion_; // ServerHello.SUS2, echoed as C2S JOIN EXP
-	std::string expansion_version_root_; // install root for the JOIN checksum (D-NET-166)
+	std::string expansion_version_root_; // install root: the JOIN checksum (D-NET-166), CC.BIN (D-NET-296)
+	int32_t time_zone_bias_ = local_time_zone_bias_minutes(); // ClientAuth TZB (D-NET-296)
 	std::string app_id_ = "0"; // ClientAuth APPID (decoded .joi CK); "0" = LAN default
 	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
+	DiscoveredSession discovered_; // the browse row's 0x81 record (survives start())
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
 	// retrying never regenerates identity/session material (especially ClientAuth CK/SCRK).
 	MonotonicMilliseconds monotonic_milliseconds_;
 	std::vector<uint8_t> handshake_retry_datagram_;
 	uint64_t handshake_last_send_ms_ = 0;
+	// When the 0x42 connect state began (the ServerHello): its 30000 ms window's start.
+	uint64_t client_join_start_ms_ = 0;
 	bool handshake_retry_clock_armed_ = false;
 	// Wall-clock stamp of the last IN-ORDER admitted 0x83 (a zero-message keepalive counts;
 	// duplicates, futures, 0x84 resend lists and every other opcode do not) or of a
@@ -803,12 +929,17 @@ private:
 	bool initial_admission_complete_ = false;
 	bool deployment_pick_sent_ = false;
 	uint32_t deployment_pick_sequence_ = 0; // release 0x5A must cumulatively ACK this C2S 0x0E
+	bool deployment_pick_sequence_unbound_ = false; // queued, its packet not yet built
 	bool deployment_reply_seen_ = false; // applicable spawn release seen; pairs with self H
 	bool pending_spawn_menu_request_ = false; // S2C 0x11 arrived while the local world was held
 	// S2C 0x19 supplies dword 0 of the post-world C2S 0x28 request. Retail clears
 	// this scalar on a malformed body and retains the latest valid value.
 	// [orig: NapiNPClientMsg_0x019 @0x425e80 -> dword_A82360]
 	uint32_t spawn_ack_timestamp_ = 0;
+	// S2C 0x1A's dword, the window max of the 0x4E continuation's C2S 0x28;
+	// a body under four bytes stores 0. [orig: NapiNPClientMsg_0x01A @0x425eb0
+	// -> dword_A82364 @0x425ec3/@0x425ecb; read @0x4318e8]
+	uint32_t game_start_ack_timestamp_ = 0;
 	// The client's own round-trip measurement: every S2C 0x57 with the echo
 	// flag CLEAR is the pong of our C2S 0x2C ping, and its `now - timestamp`
 	// lands in a ten-entry ring (the index wraps at 10) plus the current-ping
@@ -858,6 +989,12 @@ private:
 	std::string host_disconnect_reason_;
 	ChallengeDiagnostics challenge_diagnostics_{};
 	JoinRejectRecord last_join_reject_{};
+	// The S2C 0x01 verification value (4 bytes, 0 when short) and the S2C 0x03
+	// join-queue record the join screen reads.
+	// [orig: NapiNPClientMsg_0x001 @0x425360 -> +0x30C; NapiNPClientMsg_0x003
+	//  @0x425390 -> +0x2F4..+0x300]
+	uint32_t verification_value_ = 0;
+	JoinQueueRecord join_queue_{};
 	DisconnectEvent last_disconnect_event_{};
 	bool disconnect_event_set_ = false;
 };

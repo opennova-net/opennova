@@ -1,6 +1,9 @@
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
+#include <runtime/inmatch/server_doors.h>
+#include <runtime/inmatch/server_team_change.h>
+#include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
@@ -294,11 +297,12 @@ std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	return payload;
 }
 
-// tag=0x7A: the player's PCID string (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
-// copies player+0x250]. Empty on a dev host -> a single NUL (golden frame 134 = len 1, body 00).
-std::vector<uint8_t> build_tag7a_pcid(const GameConfig &cfg) {
+// tag=0x7A: the recipient's own PCID (NOT the player name). [orig: NetPacket_WritePCID @0x5076e0 —
+// copies player+0x250, the 0x002 handler's target player @0x5130c2]. Empty on a LAN host -> a
+// single NUL (golden frame 134 = len 1, body 00).
+std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
-	append_cstr(payload, cfg.pcid);
+	append_cstr(payload, conn.account.pcid);
 	return payload;
 }
 
@@ -318,7 +322,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 					: cfg.mission_name;
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
-	append_cstr(payload, cfg.pcid);        // [orig entity+592] PCID
+	append_cstr(payload, conn.account.pcid); // [orig player+0x250 @0x5077ac] the recipient's PCID
 	append_cstr(payload, cfg.server_name); // [orig g_ServerNameStr]
 	append_cstr(payload, advertised_mission);
 	append_cstr(payload, cfg.mission_file);// [orig g_MapFileName]
@@ -592,8 +596,14 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 		ctx.player_slot = conn.reply.player_slot;
 		ctx.entity_handle = conn.link.owned_entity.packed;
 		ctx.quality = conn.reply.client_quality;
+		ctx.account_pcid = conn.account.pcid;         // field 0x0010 [orig: player+0x250 @0x506070]
+		ctx.account_squad_id = conn.account.squad_id; // field 0x0800 [orig: player+0x270 @0x506257]
 		ctx.squad_leader = conn.squad_leader; // +100576 (field 0x0040)
 		ctx.fireteam = conn.fireteam;         // +100577 (field 0x0080)
+		// Field 0x1000: the spectator latch of a slot past its load, the
+		// loading byte being the port's incomplete initial-state burst
+		// [orig: NetPacket_SerializePlayerSync0x46 @0x506199..0x5061bc].
+		ctx.spectator_in_game = conn.link.spectator && is_in_match(conn) ? 1 : 0;
 		if (world != nullptr) {
 			if (const world::Entity *e = world->registry.get(conn.link.owned_entity)) {
 				ctx.team = e->team;
@@ -709,7 +719,7 @@ bool emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	conn.s2c_send_holdoff_ticks = clamp_send_holdoff_ticks(configured_holdoff);
 	reset_s2c_send_holdoff_counter(conn);
 	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
-	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(cfg)));
+	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
 	out.push_back(make_protocol_message(
 			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
@@ -1098,6 +1108,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// the local loopback bypasses the complete remote validator.
 				// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512aa0;
 				// Server_ValidatePlayerJoinRequest @0x5121ab..0x5121af -> @0x512a76 (conn+0x2E set = accept unvalidated)]
+				// Its TLV walk keeps the CD cookie, whose PCID / SQUADINFO a remote
+				// connection on a NovaWorld session decrypts before the validator.
+				conn.join_identity_pairs = parse_join_identity_pairs(admission_message->payload);
+				if (inputs.server_ctx != nullptr) load_join_account_from_cookie(*inputs.server_ctx, conn);
 				if (conn.type != NapiNPConnection::kTypeClientSide) {
 					conn.link.spectator = conn.join_spectator_request != 0;
 					uint32_t reject_dpc = validate_join_environment(conn.join_environment);
@@ -1198,6 +1212,16 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(m));
 				break;
 			}
+			case c2s::DOOR_SLOT_REQUEST: // [orig: NapiNPServerMsg_HandleVoteUpdate @0x514B20]
+				if (world == nullptr || inputs.server_ctx == nullptr || !inputs.server_ctx->is_authority) break;
+				for (ProtocolMessage &m : Server_HandleDoorRowRequest(conn, msg.payload, *world))
+					replies.push_back(std::move(m));
+				break;
+			case c2s::TEAM_CHANGE_REQUEST: // [orig: NapiNPServerMsg_0x04D_ChangeTeam @0x518F70]
+				if (world != nullptr && inputs.server_ctx != nullptr)
+					Server_HandleTeamChangeRequest(*inputs.server_ctx, conn, *world,
+							io::host_milliseconds_for_logic_tick(now_tick));
+				break;
 			case c2s::RADIO_CALL_REQUEST: { // [orig: NapiNPServerMsg_HandleRadioCall @0x514330]
 				if (world == nullptr) break;
 				RadioCallRequest request;
@@ -1236,7 +1260,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					} else {
 						st.time_sync_latest_client_ms = client_ms;
 						st.time_sync_current_host_ms =
-								host_milliseconds_for_logic_tick(now_tick);
+								io::host_milliseconds_for_logic_tick(now_tick);
 						const bool round_ok = client_delta_fits_retail_time_window(
 								client_ms - st.time_sync_previous_client_ms,
 								st.time_sync_current_host_ms -
@@ -1565,8 +1589,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
+				// The body is the host's GetTickCount, the 0x28 window's floor.
 				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
-				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP, build_tag1a_tick(now_tick)));
+				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP,
+						build_tag1a_tick(io::host_milliseconds_for_logic_tick(
+								world != nullptr ? world->logic_tick : now_tick))));
 				break;
 			case c2s::TEAM_SPAWN_ACK: { // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
@@ -1802,6 +1829,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (code == 169) pe->net_stance_bits = 2;      // crouch (0x200) [orig: @0x501d01]
 				else if (code == 170) pe->net_stance_bits = 1; // prone  (0x100) [orig: @0x501ce7]
 				else if (code == 172) pe->net_stance_bits = 0; // stand          [orig: @0x501cc9]
+				// The authority's own player latches the bits it just wrote
+				// [orig: `cmp g_LocalPlayerEntity` @0x501d0d, @0x501d1b / @0x501d2d].
+				if (pe->handle == world->cached.local_player && world->local_player_state != nullptr)
+					world->local_player_state->latch_stance(pe->net_stance_bits);
 				break;
 			}
 			case c2s::VEHICLE_ATTACH_REQUEST: { // VEHICLE ATTACH [u16 senderHandle][u16 vehicleHandle][u8 bone][u8 pad]
@@ -1877,7 +1908,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					replies.push_back(std::move(pong));
 				} else if (conn.link.owned_entity.valid()) {
 					Server_RecordPingSample(config, conn, ts,
-							host_milliseconds_for_logic_tick(now_tick),
+							io::host_milliseconds_for_logic_tick(now_tick),
 							inputs.server_ctx != nullptr && inputs.server_ctx->is_in_session != 0);
 				}
 				break;
@@ -1902,7 +1933,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				}
 				std::vector<ProtocolMessage> chat = Server_HandleChatMessage(
 						*inputs.server_ctx, conn, uplink,
-						host_milliseconds_for_logic_tick(now_tick), *world);
+						io::host_milliseconds_for_logic_tick(now_tick), *world);
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
@@ -2302,6 +2333,12 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// entity forever (the retail-join DBuggy-host-player + ~1000/session C 0x0F flood).
 				// An in-capacity EMPTY slot still replies: retail serializes the empty pool slot
 				// (itemDef null -> type 0), which the client answers by clearing its stale entity.
+				// The requester must already be an added player: retail reads the
+				// connection's session player (conn+0x160) and its server player
+				// slot (+0xC0, bound by Server_PlayerAdd @0x51CD51) and drops the
+				// query when either is null [orig: @0x514191..0x5141A8]; our
+				// analogue of the bound slot is the PlayerAdded phase.
+				if (conn.phase < ConnectionPhase::PlayerAdded) break;
 				const uint16_t handle =
 						msg.payload.size() >= 2
 								? static_cast<uint16_t>(msg.payload[0] | (msg.payload[1] << 8))
@@ -2312,7 +2349,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					if (static_cast<size_t>(h.slot()) < world->registry.pool_capacity(pool)) {
 						FullEntitySpawnRecord frec;
 						if (const world::Entity *e = world->registry.get(h)) {
-							frec = replication::build_full_entity_spawn(*e, conn.link.owned_entity);
+							frec = replication::build_full_entity_spawn(*e);
 						} else {
 							frec.slot_id = handle; // empty slot: type-0 record clears the client's entity
 						}
@@ -2390,24 +2427,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								config.game_type, peer)));
 				break;
 			}
-			case c2s::LOADOUT_REQUEST: { // §5.33 burst -> S2C 0x4E.
-				// Every witnessed reply to the join-burst 0x28 is the 2-byte
-				// sentinel `FF FF` (count 0xFFFF, no slots — nw_pp:
-				// "batch-despawn count=65535 slots=0" in all three retail
-				// goldens). Real kill batches ride the event-driven despawn
-				// stream (D-NET-66), not this request reply; a non-sentinel
-				// reply form is unwitnessed.
-				// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550]
-				BurstLoadoutRequest loadout_req;
-				std::size_t consumed = 0;
-				if (!decode_burst_loadout_request(
-						msg.payload.data(), msg.payload.size(), loadout_req,
-						consumed))
-					break;
-				replies.push_back(make_protocol_message(
-						s2c::KILL_BY_SLOT, {0xFF, 0xFF}));
+			case c2s::LOADOUT_REQUEST: // the join-window kill page -> S2C 0x4E (server_kill_page.h)
+				for (ProtocolMessage &m : Server_HandleKillPageRequest(
+						inputs.server_ctx, conn, msg.payload, world))
+					replies.push_back(std::move(m));
 				break;
-			}
 			default:
 				// The command map's squad / waypoint / punt legs (server_squad.h); 0x09
 				// checksum / 0x48 + per-frame client updates: consumed (no reactive reply).

@@ -23,6 +23,8 @@ inline std::string encode_ap(const std::vector<uint8_t> &data) {
 // The bytes of an A-P string. False (`out` emptied) on an odd length or a character
 // outside A-P: a value off the wire is input, so a bad one is a result, never a throw
 // (ADR 0049 d5).
+// [orig: NetPacket_WriteStringAndShort @0x4d6fb0 (the host's cookie decoder,
+//  misnamed) — odd length -1 @0x4d6fcd, 'A'..'P' gates @0x4d6ff8/@0x4d700f]
 inline bool decode_ap(const std::string &encoded, std::vector<uint8_t> &out) {
 	out.clear();
 	if (encoded.size() % 2 != 0) {

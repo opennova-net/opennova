@@ -570,6 +570,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# order they were raised, then the countdown by the HUD clock's main
 	# frames since the last frame (paused or not), then the draw feed.
 	_toggles.apply_tip_events(sim.take_tip_events())
+	# The 0x0F's death-screen HUD blank: the replica fold queues it only with
+	# the death screen up (the engine's gate); this drain applies it.
+	if sim.take_hud_detail_blank():
+		apply_death_screen_hud_detail()
 	var tip_ticks := _hud_ticks()
 	if _tip_ticks_seen >= 0:
 		_toggles.advance_tip_frames(maxi(tip_ticks - _tip_ticks_seen, 0))
@@ -1387,8 +1391,9 @@ func hud_hidden_capture_witness() -> HudHiddenCaptureWitness:
 	return witness
 
 
-## The death-screen edge forces the declutter level to max through the same
-## seam the cycle uses (the engine's rule; restamped like every live write).
+## The 0x0F's death-screen leg forces the declutter level to max through the
+## same seam the cycle uses (the engine's rule, queued by the replica fold only
+## with the death screen up; restamped like every live write).
 func apply_death_screen_hud_detail() -> void:
 	_toggles.force_death_screen_hud_detail()
 	_push_hud_detail_level()

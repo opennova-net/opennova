@@ -1053,6 +1053,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
+                    play_round_impact_sound(world, imp);
                     impacts.push_back(imp);
                     // The knife leaf feeds the same impact-effect processor,
                     // so a stab into an entity leaves the same scar by the
@@ -1063,7 +1064,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         scar_add_entry(world, hit, *struck, ammo->scar_type);
                 }
             }
-        } else if (impacts.size() < kMaxPendingImpacts) {
+        } else {
             // the detonation's obj-row effect [orig: AmmoDef_ProcessImpactEffect
             // tag 4 at the descriptor position in every think handler]
             RoundImpact imp;
@@ -1073,7 +1074,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
             imp.effect_tag = 4;
             imp.tick = world.logic_tick;
             imp.source_order = next_impact_order++;
-            impacts.push_back(imp);
+            play_round_impact_sound(world, imp);
+            if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
         }
         return -1;
     }
@@ -1714,16 +1716,15 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             const AmmoTableEntry *fuze_ammo = world.tables.ammo.by_index(r.ammo_index);
             if (fuze_ammo != nullptr && r.det_at_expiry && fuze_ammo->kztype != 0) {
                 if (authoritative) detonate_round(world, r, r.pos, *fuze_ammo);
-                if (impacts.size() < kMaxPendingImpacts) {
-                    RoundImpact imp;
-                    imp.position = r.pos;
-                    imp.direction = Vec3{0.0f, 0.0f, 1.0f};
-                    imp.ammo_index = r.ammo_index;
-                    imp.effect_tag = 4; // the ammo obj row
-                    imp.tick = world.logic_tick;
-                    imp.source_order = next_impact_order++;
-                    impacts.push_back(imp);
-                }
+                RoundImpact imp;
+                imp.position = r.pos;
+                imp.direction = Vec3{0.0f, 0.0f, 1.0f};
+                imp.ammo_index = r.ammo_index;
+                imp.effect_tag = 4; // the ammo obj row
+                imp.tick = world.logic_tick;
+                imp.source_order = next_impact_order++;
+                play_round_impact_sound(world, imp);
+                if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
             }
             if (r.trail_slot >= 0) {
                 trails.append(r.trail_slot, r.pos);
@@ -2241,9 +2242,11 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             armor.present_effect = true;
             armor.present_sound = true;
             armor.source_order = next_impact_order++;
+            play_round_impact_sound(world, armor);
             if (impacts.size() < kMaxPendingImpacts) impacts.push_back(armor);
         }
         imp.source_order = next_impact_order++;
+        play_round_impact_sound(world, imp);
         if (impacts.size() < kMaxPendingImpacts) impacts.push_back(imp);
 
         // The impact scar: a round stop on an ENTITY (item, vehicle, building

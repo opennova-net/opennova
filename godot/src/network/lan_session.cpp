@@ -29,6 +29,8 @@ Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	out->set_server_flags(static_cast<int64_t>(row.server.server_flags));
 	out->set_session_id(opennova::to_gd(row.server.session_id));
 	out->set_expansion(opennova::to_gd(row.server.expansion));
+	out->set_host_key(static_cast<int64_t>(row.server.host_key));
+	out->set_password_required(row.server.password_required);
 	return out;
 }
 
@@ -44,9 +46,10 @@ LanSession::~LanSession() {
 
 void LanSession::_bind_methods() {
 	ClassDB::bind_method(
-			D_METHOD("start_browsing", "destination", "port_min", "port_max"),
+			D_METHOD("start_browsing", "destination", "port_min", "port_max", "connect_type"),
 			&LanSession::start_browsing,
-			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)));
+			DEFVAL(String(DEFAULT_BROADCAST)), DEFVAL(int(opennova::kRetailLanPortMin)), DEFVAL(int(opennova::kRetailLanPortMax)),
+			DEFVAL(int(opennova::kLanConnectTypeLan)));
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
@@ -62,19 +65,27 @@ void LanSession::_ready() {
 	set_process(browser_.browsing());
 }
 
-int LanSession::start_browsing(const String &destination, int port_min, int port_max) {
+int LanSession::start_browsing(const String &destination, int port_min, int port_max,
+		int connect_type) {
 	stop();
 	servers_.clear();
 	emit_signal("servers_changed", get_servers());
 
 	const String target = destination.strip_edges();
-	if (target.is_empty() || !browser_.begin(pick_random_uint32(), port_min, port_max)) {
+	if (target.is_empty() ||
+			!browser_.begin(pick_random_uint32(), port_min, port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}
 
 	socket_.instantiate();
-	const Error bind_error = socket_->bind(0, "0.0.0.0");
+	// The browse socket is the client arm's: the authored client port range,
+	// scanned from its min (net_ports.h lan_client_bind_ports, D-NET-294).
+	Error bind_error = ERR_CANT_OPEN;
+	for (const uint16_t candidate : opennova::lan_client_bind_ports()) {
+		bind_error = socket_->bind(candidate, "0.0.0.0");
+		if (bind_error == OK) break;
+	}
 	if (bind_error != OK) {
 		socket_.unref();
 		browser_.stop();

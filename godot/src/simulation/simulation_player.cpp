@@ -101,19 +101,16 @@ void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 }
 
 bool Simulation::request_local_player_stance(Stance p_stance) {
-	// The SELECT gates and the mutual-exclusion latch are the kernel's
-	// [orig: NapiNPServerMsg_HandleStanceChange @ 0x501c60].
-	if (!kernel_->local.request_stance(p_stance)) return false;
-	// A joiner also SENDS the select — the witnessed key handlers queue one C2S
-	// 0x1D with the action id for the next send boundary; without it a retail host
-	// (and every other client) never sees this player crouch or go prone.
-	// [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/@0x4e0e3e]
-	if (joiner_role_ != nullptr && runtime_) {
-		static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
-		(void)joiner_role_->queue_stance_change(
-				kStanceActionIds[static_cast<size_t>(p_stance)]);
-	}
-	return true;
+	// A session's player only SENDS the select (C2S 0x1D): a joiner's latch
+	// follows the authority's 0x0A echo, the host's own its server's handler
+	// on the next frame (engine: JoinerRole / HostRole::request_stance,
+	// LocalPlayer::latch_stance). The bare kernel applies it at once
+	// (engine: LocalPlayer::request_stance).
+	if (joiner_role_ != nullptr && runtime_)
+		return joiner_role_->request_stance(static_cast<int>(p_stance));
+	if (host_role_ != nullptr && host_role_->client_runtime() != nullptr)
+		return host_role_->request_stance(static_cast<int>(p_stance));
+	return kernel_->local.request_stance(p_stance);
 }
 
 Vector3 Simulation::get_local_player_position() const {

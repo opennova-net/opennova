@@ -56,6 +56,18 @@ struct PlayerReplicationState {
 	// first report. [orig: sub_5006E0 @0x5006E0 store; NetPacket_SerializePlayerSync0x46
 	//  @0x506213 read]
 	uint8_t quality = 1;
+	// Field 0x1000: 1 for an active slot whose spectator latch (slot+100567) is
+	// set and whose loading byte (slot+100579) is clear, else 0; the client
+	// lands it as the roster slot's spectator byte.
+	// [orig: NetPacket_SerializePlayerSync0x46 @0x506197..0x5061cc;
+	//  NapiNPClientMsg_PlayerSync @0x431370 (slot +46)]
+	uint8_t spectator_in_game = 0;
+	// Fields 0x0010 / 0x0800: the slot's player's NovaWorld account, its PCID
+	// (net config +0x184) and squad id (+0x1A4); "" / 0 on LAN. The client keys
+	// its clan-roster TAG lookup on the squad id.
+	// [orig: NetPacket_SerializePlayerSync0x46 @0x506046..0x5060ac, @0x506238..0x506268]
+	std::string account_pcid;
+	uint32_t account_squad_id = 0;
 	// Spawn-point/menu labels for tag=0x0F. Empty preserves the retail ASH_I5A witness tail; configured
 	// sessions set this from their selected mission so a non-ASH host does not advertise the ASH names.
 	std::vector<std::string> spawn_names;

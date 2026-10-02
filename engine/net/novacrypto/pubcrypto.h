@@ -48,4 +48,10 @@ std::string encode_pub_value(const std::string &plaintext,
 bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
                       std::vector<uint8_t> &out, std::string *error = nullptr);
 
+// The non-throwing per-key probe over already A-P-decoded bytes: false for an
+// empty key, fewer than four bytes or a CRC mismatch; `payload` is the bytes
+// before the CRC.
+bool try_decrypt_pub_bytes(std::vector<uint8_t> data, const std::string &pcid_key,
+                           std::vector<uint8_t> &payload);
+
 } // namespace opennova

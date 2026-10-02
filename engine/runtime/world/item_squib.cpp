@@ -4,6 +4,7 @@
 #include <runtime/world/destruction.h>
 #include <runtime/world/world.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/fire_sound.h> // play_round_impact_sound (full volume)
 #include <runtime/world/angle.h>
 #include <base/io/bam.h>
 #include "collision_detail.h"
@@ -164,7 +165,9 @@ void tick_squib(World &world, Entity &entity) {
             impact.position=floating(point); impact.direction=floating(direction);
             impact.ammo_index=state.ammo_index; impact.effect_tag=tag;
             impact.tick=world.logic_tick; impact.source_order=world.round_sim.next_impact_order++;
-            // The ordinary impact presenter applies its full-volume positional sound.
+            // The squib travel plays the row's sound at full volume, undelayed
+            // [orig: @0x4495FF..0x44960F -> Entity_PlaySound3D_FullVolume].
+            play_round_impact_sound(world, impact, /*full_volume=*/true);
             if (world.round_sim.impacts.size() < RoundSim::kMaxPendingImpacts)
                 world.round_sim.impacts.push_back(impact);
         }

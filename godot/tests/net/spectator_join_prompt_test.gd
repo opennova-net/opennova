@@ -169,18 +169,18 @@ func test_team_password_and_team_choice_prompt_before_admission() -> void:
 	assert_false(target.role_explicit)
 
 
-func test_team_choice_without_password_keeps_credentials_absent() -> void:
-	var layer := Control.new()
-	add_child_autofree(layer)
-	var controller := _controller(layer)
+# TeamChoose alone (a plain team game; a stock host advertises 0x904) offers no
+# join choice: retail tests the discovered word against 0x6038 (passwords and
+# spectators) and joins at once, so the entry dials without a prompt and with
+# no credentials (the engine's join_entry_step, ctest join_entry).
+func test_team_choice_alone_dials_without_a_prompt() -> void:
 	var target := _target(JoinTarget.FLAG_TEAM_CHOICE)
-	controller.join_lan_server(target)
-	var prompt := layer.get_node_or_null("JoinRolePrompt")
-	assert_not_null(prompt)
-	if prompt != null:
-		assert_not_null(prompt.find_child("TeamChoice", true, false))
-		assert_null(prompt.find_child("JoinPassword", true, false))
+	assert_eq(target.entry_step(false), JoinTarget.ENTRY_DIAL,
+			"a plain team game opens no join choice")
+	assert_eq(_target(0x904).entry_step(true), JoinTarget.ENTRY_DIAL,
+			"a stock LAN team game (P2 0x904) dials")
 	assert_eq(target.team_request, -1, "automatic is the default")
+	assert_eq(target.join_password, "", "no credential is invented")
 
 
 # The NovaWorld lobby session survives the panel at the in-match handoff

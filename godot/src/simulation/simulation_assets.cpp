@@ -218,12 +218,14 @@ void Simulation::finalize_installed_seat_specs() {
 	stamp_seat_spec_turret_limits();
 
 	// The production header-only join resolves model metadata after network rows
-	// can already exist. Refresh live pool-1 rows immediately and preserve any
-	// occupant by retail's fixed mountHandles slot, never by dense vector index.
+	// can already exist. Refresh the live item-pool rows (vehicles and buildings,
+	// mission::pool_takes_item_seat_spec) immediately and preserve any occupant
+	// by retail's fixed mountHandles slot, never by dense vector index.
 	if (kernel_) {
 		std::vector<opennova::world::EntityHandle> items;
 		kernel_->world.registry.for_each([&](const opennova::world::Entity &entity) {
-			if (entity.handle.pool() == 1) items.push_back(entity.handle);
+			if (opennova::mission::pool_takes_item_seat_spec(entity.handle.pool()))
+				items.push_back(entity.handle);
 		});
 		for (const opennova::world::EntityHandle handle : items) {
 			opennova::world::Entity *entity = kernel_->wire_header_world && joiner_role_ != nullptr

@@ -11,6 +11,7 @@
 #include "network/net_session_policy.h"
 #include "object/character_join_profile.h"
 #include "player/player_spawn_loadout.h"
+#include "network/join_screen_status.h"
 #include "world/post_mission_route.h"
 #include "resource_index/resource_root.h"
 #include "simulation/simulation.h"
@@ -131,6 +132,17 @@ public:
 	// The post-mission router's verdict for an exit reason (inmatch::route_mission_exit) on
 	// this world's session; a NovaWorld network type rides an adopted NovaWorld session.
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The error record of the join that last failed (null until one did): the preload's
+	// refusal or timeout, or the admission tail's loss.
+	Ref<ConnectionError> last_connection_error() const { return last_connection_error_; }
+	// Where the join under the join screen stands: the preload's status from the
+	// dial until the session is identified (null when no join preload runs).
+	Ref<JoinScreenStatus> join_screen_status() const;
+	// Switch `p_root` in place to the host's expansion (keep / remount / fail,
+	// inmatch::decide_join_expansion): the post-auth reconcile and the pre-dial
+	// leg (GameWorld::mount_join_expansion) share it. Returns the failure text,
+	// empty on success.
+	String switch_join_expansion(const Ref<ResourceRoot> &p_root, const String &p_host_expansion);
 
 	// The bound signal targets of the hosting session (the world forwards).
 	// A ServerCommand from the NovaWorld service: run it on the in-match host,
@@ -201,6 +213,7 @@ private:
 	// is never restarted.
 	Ref<Simulation> join_preload_sim_;
 	Ref<ResourceRoot> join_preload_root_;
+	Ref<ConnectionError> last_connection_error_;
 };
 
 } // namespace godot

@@ -151,6 +151,31 @@ struct GameConfig {
 	bool voting_enabled = false;
 	int32_t voting_min_players = 6;
 	float voting_percent = 0.66f;
+	// The death screen's team change (C2S 0x4D): a player may switch again
+	// only `change_team_interval_seconds` after its last accepted request,
+	// and each switch holds its respawn for `change_team_penalty_seconds`.
+	// cfg keys `mpchangeteam_interval` / `mpchangeteam_penalty`, stock 300 /
+	// 60. (The sibling cfg word changeTeamEnabled_4F0 reaches a live global,
+	// dword_24D227C, that no handler reads: TeamChoose gates the request.)
+	// [orig: g_GameConfigState.changeTeamInterval_4F4 / changeTeamPenalty_4F8
+	//  (Config_SetDefaults @0x54D396 / @0x54D3A0, Config_ParseSettingsLine
+	//  @0x550A67 / @0x550A92) -> dword_24D2280 / dword_24D2284
+	//  (Game_ApplySessionSettingsToGlobals @0x551DEB / @0x551DF1)]
+	int32_t change_team_interval_seconds = 300;
+	int32_t change_team_penalty_seconds = 60;
+	// The autobalance thresholds the team change consults: off by default; on,
+	// a switch is refused while the two teams' slot counts differ by more than
+	// one and by at least both thresholds (stock 1 / 1). cfg keys
+	// `autobalanceonmissionrecycleenabled` / `...numplayerdiffmin` /
+	// `...numplayerdiffmax`.
+	// [orig: g_GameConfigState.autoBalanceOnRecycle_528 / autoBalanceMinDifference_52C
+	//  / autoBalanceMaxDifference_530 (Config_SetDefaults @0x54D210..0x54D21C,
+	//  ebx = 0 / esi = 1; Config_ParseSettingsLine @0x54F8B8 / @0x54F8E3) ->
+	//  g_AutoBalanceEnabled / g_AutoBalanceMinDiff / g_AutoBalanceTriggerDiff
+	//  (Game_ApplySessionSettingsToGlobals @0x551BCE..0x551BEB)]
+	bool auto_balance_enabled = false;
+	int32_t auto_balance_min_difference = 1;
+	int32_t auto_balance_trigger_difference = 1;
 
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire
@@ -221,11 +246,12 @@ struct GameConfig {
 	// [orig: g_GameConfigState.multiplayerReset_344; the SetMPReset arm of the
 	//  ServerCommand handler @0x4D2E28 -> Game_SaveConfig @0x4D2E2D]
 	int32_t multiplayer_reset = 0;
-	// game.cfg `mpmaxpacketsize`: the datagram ceiling this host advertises as
-	// CS field 13 of both connection templates in its 0x82 (the SIGNED ladder
-	// of cs_max_packet_bytes: 0 -> 1300, below 100 -> 100, above 0x4000 ->
-	// 0x4000). The host's own packet builder keeps the fixed
-	// kGameSessionMaxPacketBytes above; nothing configures a non-stock value.
+	// game.cfg `mpmaxpacketsize`: the datagram ceiling of both connection
+	// templates, CS field 13 (the SIGNED ladder of cs_max_packet_bytes: 0 ->
+	// 1300, below 100 -> 100, above 0x4000 -> 0x4000). Each connection then
+	// negotiates it down to the joiner's MPS tag before its 0x82, and that
+	// negotiated value is the connection's S2C packet ceiling (D-NET-234);
+	// nothing configures a non-stock value yet.
 	// [orig: g_GameConfigState.maxPacketSize_338, cfg var "mpmaxpacketsize" row
 	//  @0x833380, default "1300" @0x7D268C; Config_SetDefaults clamp
 	//  @0x54D060..0x54D090; read by CNapiNetwork_Init @0x4CAA53]
@@ -302,8 +328,6 @@ struct GameConfig {
 	// installs with the same expansion name can carry different patched data.
 	std::string integrity_profile;
 	std::string player_name = "DevUser";                    // host identity/roster name; remote 0x7B uses recipient ClientAuth.NA
-	std::string pcid;                                       // [orig entity+592] PCID (0x7A body / 0x7B field 2);
-	                                                        // empty on a dev host -> the 0x7A body is a single NUL
 	uint32_t spawn_x = 0xfe56f854u;
 	uint32_t spawn_y = 0x0049f5f0u;
 	uint32_t spawn_z = 0x003a5e6au;

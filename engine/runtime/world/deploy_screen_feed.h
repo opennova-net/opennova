@@ -174,6 +174,27 @@ DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
 
 
 
+// The DEATH screen's team-service pair, BUTTON_TEAMLIST and SWAP_TEAMS, shown
+// together: never outside a session, in a co-op or non-team game type, for a
+// local player on team 0, or for a dead one under permanent death; else by the
+// TeamChoose bit (0x4) of the session rules word: the hosting process's own
+// game settings (ctx+0x68, the hosted-session latch, is set) or, on a joiner,
+// the S2C 0x08 copy. (SWAP_TEAMS is the only
+// one with a DEATH callback; BUTTON_TEAMLIST's action is the menu's.)
+// [orig: DeathScreen_UpdateUI @0x553150 — the gates @0x553412..0x553443, the
+//  ctx+0x68 pick @0x553445 between multiplayerAttributeFlags_34C @0x55344D and
+//  dword_A821E4 @0x55345C, the shows @0x553489 / @0x5534AA;
+//  UI_RegisterDeathScreenCallbacks @0x554610 (SWAP_TEAMS @0x554683)]
+struct DeployTeamButtonsInput {
+    bool in_session = false;      // g_NapiNPCtx.is_in_session
+    uint32_t game_type = 0;       // g_GameType
+    uint8_t team = 0;             // g_LocalPlayerEntity->Team (+0x162)
+    bool permanent_death = false; // byte_A821EF
+    bool dead = false;            // g_LocalPlayerEntity->Flags & 2
+    uint32_t rules_word = 0;      // the host's mp_attributes / a joiner's 0x08 word
+};
+bool deploy_team_buttons_shown(const DeployTeamButtonsInput &in);
+
 // Both instruction widgets and the permanent-death status pair. A secured
 // spawn leaves the first widget's prior text intact and hides the second;
 // the later RESPawn1 assignment overwrites the intermediate RESPawn2 text.
@@ -224,6 +245,7 @@ struct DeployScreenStatus {
     std::string respawn_text;
     int medic_cooldown_ticks = 0;
     int medic_request_serial = 0;
+    bool team_buttons_shown = false; // deploy_team_buttons_shown
 };
 
 } // namespace opennova::world

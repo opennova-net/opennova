@@ -16,6 +16,7 @@
 #include <runtime/inmatch/joiner_role.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_kernel.h>
+#include <runtime/mission/promote.h> // mission::ItemSeatSpec
 #include <runtime/replication/client_state.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
@@ -318,6 +319,43 @@ bool run_unresolved_attachment_follows_its_target_carrier() {
 
 } // namespace
 
+// A streamed pool-2 building takes its def's "armory*" points on the joiner,
+// as the host's promote installs them on every spawned record: retail's label
+// pass walks the proximity list over every pool, so an armory building labels
+// "UseArmory" on a joiner too. Before, only pool-1 rows were refreshed and a
+// joiner's armory tent never labelled.
+// [orig: HUD_DrawVehicleSeatAndArmoryLabels @0x5a32c1..0x5a32e2; the armory
+//  walk @0x5a36f5; Entity_InitAllFromModels @0x52567F]
+bool run_streamed_building_takes_its_armory_points() {
+	constexpr int32_t kArmoryType = 1125; // "Armory Version #1"
+	constexpr int kSlot = 3;
+	Harness h;
+	h.kernel->wire_header_world = true;
+	h.kernel->world.registry.configure_pool(2, 16);
+	mission::ItemSeatSpec spec;
+	spec.type_id = kArmoryType;
+	spec.armory_points = {w::Vec3{0.5f, 1.0f, 0.25f}, w::Vec3{-0.5f, 1.0f, 0.25f}};
+	h.kernel->seat_specs.push_back(spec);
+	StaticEntityBatch batch;
+	batch.start_index = kSlot;
+	StaticEntityRecord rec;
+	rec.item_type_id = static_cast<uint16_t>(kArmoryType);
+	rec.pos_x = 40 * 65536;
+	rec.pos_y = 40 * 65536;
+	rec.pos_z = 2 * 65536;
+	batch.records.push_back(rec);
+	batch.entity_count = 1;
+	h.role.runtime->view().apply(s2c::STATIC_ENTITY_BATCH, encode_static_entity_batch(batch));
+	h.role.run_tick(h.input);
+	const w::Entity *tent = h.kernel->world.registry.get(
+			w::EntityHandle{static_cast<uint16_t>(0x2000u | kSlot)});
+	if (!expect(tent != nullptr && tent->item_id == kArmoryType,
+			"armory: the streamed pool-2 row materializes"))
+		return false;
+	return expect(tent->armory_points.size() == 2,
+			"armory: the streamed building takes its def's armory points");
+}
+
 int main() {
 	bool ok = true;
 	ok &= run_record_tail_mirrors_flags_and_health();
@@ -325,6 +363,7 @@ int main() {
 	ok &= run_freeze_predicate_and_pivot_clear();
 	ok &= run_remote_driver_is_the_claimant();
 	ok &= run_unresolved_attachment_follows_its_target_carrier();
+	ok &= run_streamed_building_takes_its_armory_points();
 	if (!ok || failures != 0) {
 		std::fprintf(stderr, "joiner_vehicle_replica_test: %d failure(s)\n", failures);
 		return 1;

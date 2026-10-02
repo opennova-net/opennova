@@ -213,7 +213,7 @@ void run_brain_class_event(World &world, const Entity &e, int event) {
 // recorded round. [orig: WacCmd_KillSsn @0x4F1EC7..0x4F1ED2;
 // Entity_KillByNetId @0x43DC2A..0x43DC31 (pool 0), @0x43DCE6..0x43DCF2 (pool 3,
 // phase 4); Entity_KillAllByNetId @0x43C936..0x43C93F]
-void hit_record_class_event(World &world, Entity &e, int phase) {
+void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
     const HitRecord &record = world.round_sim.hit_record;
     if (e.kind == EntityKind::Organic) {
         const uint32_t flags = e.flags | e.engine_flags;
@@ -266,7 +266,7 @@ void hit_record_class_event(World &world, Entity &e, int phase) {
     //  WeaponOverlay_HandleDamage @0x53C53B]
     destruction_notify_item_damage(world, e, phase,
             {record.section, record.damage, record.round_yaw_bam,
-             record.round_pitch_bam, record.round_roll_bam});
+             record.round_pitch_bam, record.round_roll_bam, flags});
 }
 
 bool EntityCommands::kill_ssn(EntityTarget ssn) {

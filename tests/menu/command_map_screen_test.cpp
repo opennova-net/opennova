@@ -48,6 +48,7 @@ struct Frame : MenuFrameSeam {
 	void set_widget_scroll_range(int, int, int, int, int) override {}
 	void set_widget_selected_set(int, const std::vector<int> &) override {}
 	void set_widget_table_rows(int, const std::vector<MenuTableRow> &) override {}
+	void set_widget_table_columns(int, const std::vector<MenuTableColumnDef> &) override {}
 	void set_widget_clip_rect(int, bool, int, int, int, int) override {}
 	void set_widget_hover_item(int, int) override {}
 	void set_widget_popup_open(int, bool) override {}

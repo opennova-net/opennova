@@ -1,5 +1,6 @@
 #include "client_replica_body_arbitration.h"
 
+#include <runtime/world/entity.h>
 #include <runtime/world/infantry.h>
 #include <runtime/anim/remote_body_state.h>
 
@@ -20,17 +21,37 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		}
 	};
 	if (wire_dead) {
-		// A dead record on a live row PARKS the byte (retail's +0x2C0 store,
-		// consumed by the death dispatch) and leaves the FSM pair untouched
-		// [orig: @0x4c10f1 / @0x4c0509]; the raw anim_state_id plus the
-		// frozen-row presentation fallback carry the parked byte's visible
-		// outcome. A dead record on an already-dead row commits directly
-		// [orig: the entity-dead tests @0x4c1109 / @0x4c04f9 -> @0x4c0635].
-		if (row_was_dead) direct_commit();
+		// A dead record on a live row PARKS the byte in deathAnimStateId
+		// (+0x2C0) for the mover's death edge and leaves the FSM pair untouched
+		// [orig: @0x4c10f1 / @0x4c0509]; the fold stores the park. A dead
+		// record on an already-dead row stores current and clears pending, and
+		// no phase seed: the dead leg jumps past the +0x377 store
+		// [orig: @0x4c1015..0x4c1021 -> @0x4c11d7; infantry @0x4c0635]. The
+		// row-dead test is the entity's own Flags & 2 [orig: @0x4c100b;
+		// infantry @0x4c04f9].
+		if (row_was_dead) {
+			es.net_anim_current = static_cast<int16_t>(decoded);
+			es.net_anim_pending = 0;
+			es.net_anim_pending_boundary = -1;
+		}
 		return;
 	}
-	// The respawn edge and a row's first-ever record take the spawn-leg
-	// direct commit [orig: @0x4c110f..0x4c1151 / @0x4c05b8..0x4c063b].
+	// A player's respawn leg commits nothing: it snaps the pose and resets the
+	// body while the dead bit is still set, so Entity_ResetToSpawnState only
+	// clears pending (its 44/153 reset is gated on !(Flags & 2)), and the leg
+	// jumps past the arbitration. The death state stays current until the
+	// next record arbitrates it away [orig: @0x4c1109..0x4c114a ->
+	// @0x4c11b4, the local player's jump @0x4c1151 -> @0x4c11ac;
+	// Entity_ResetToSpawnState pending = 0, the
+	// Flags & 2 gate @0x4b96ed..0x4b96f7].
+	if (respawned_this_record && is_player) {
+		es.net_anim_pending = 0;
+		es.net_anim_pending_boundary = -1;
+		return;
+	}
+	// The org1 respawn leg and a row's first-ever record take the spawn-leg
+	// direct commit [orig: @0x4c05b8..0x4c063b, current = the wire state at
+	// LABEL_58 @0x4c063b].
 	if (respawned_this_record || es.net_anim_current < 0) {
 		direct_commit();
 		return;
@@ -50,6 +71,27 @@ void apply_record_body_arbitration(ClientEntityState &es, uint8_t decoded,
 		return;
 	}
 	direct_commit();
+}
+
+// The death edge both organic movers run on every machine, the client's remote
+// rows included (no authority gate before it): a body whose Health reached zero
+// without the dead latch takes deathAnimStateId, or the generic death_pungi
+// selection when nothing parked one, or death_drown while afloat; latches Flags
+// bit 2, drops bits 0xC0 and the pending state, and consumes the park. The
+// scream, the corpse timer, the detach and the drop are the same block's other
+// legs. [orig: Entity_UpdateInfantryPlayerBody @0x4b4bf1 gate, @0x4b4c72..
+// 0x4b4cdb; Entity_UpdateInfantryAI @0x4b9937 gate, @0x4b9cc9..0x4b9d3e;
+// Entity_ComputeAnimSlotIndex(.., 0, 0, 4) @0x4b4c87 / @0x4b9cd6]
+int16_t replica_death_edge(ClientEntityState &es) {
+	int state = es.net_death_anim != 0
+			? es.net_death_anim
+			: world::compute_death_anim_state(0, 0, world::death_cause::kGeneric);
+	if ((es.rm_entity_flags & world::kEntityFlagDrowning) != 0)
+		state = world::anim_state::kDeathDrown; // [orig: @0x4b4c96 / @0x4b9cf9]
+	es.rm_entity_flags = (es.rm_entity_flags | world::kEntityFlagDead) &
+			~(world::kEntityFlagMounted | world::kEntityFlagAiClimb);
+	es.net_death_anim = 0;
+	return static_cast<int16_t>(state);
 }
 
 } // namespace opennova::replication

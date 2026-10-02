@@ -114,6 +114,20 @@ PackedByteArray Simulation::take_tip_events() {
 	return out;
 }
 
+std::vector<opennova::audio::EnvsMarker> Simulation::envs_markers_from_world(
+		const opennova::def::DefItemsFile &p_items) const {
+	if (!kernel_) return {};
+	return opennova::audio::resolve_envs_markers(kernel_->world, p_items);
+}
+
+bool Simulation::take_hud_detail_blank() {
+	if (kernel_ == nullptr) return false;
+	bool &pending = kernel_->world.out.hud_detail_blank;
+	const bool out = pending;
+	pending = false;
+	return out;
+}
+
 String Simulation::get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const {
 	// The CMAP show's RULELIST text (engine inmatch::command_map_rules_text,
 	// where the witness is cited); "" when nothing is built, and the presenter
@@ -239,6 +253,7 @@ void Simulation::drain_feed_posts(const opennova::hud::GameTextLookup &p_gametex
 				post.system_ring ? opennova::hud::ChatSink::System : opennova::hud::ChatSink::Chat,
 				post.argb, std::move(post.text), false});
 	}
+	for (opennova::hud::FeedPost &post : runtime_->drain_ring_posts()) r_posts.push_back(std::move(post));
 	const uint32_t game_type = runtime_->game_type();
 	for (const opennova::replication::ClientGameText &text : runtime_->view().drain_game_texts()) {
 		std::string line = opennova::hud::formatted_game_text_line(

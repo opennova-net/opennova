@@ -7,6 +7,7 @@
 #include <runtime/hud/hud_minimap.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/ammo_table.h>
+#include <runtime/world/fire_sound.h> // play_round_impact_sound (the zip)
 #include <runtime/world/geom.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/player_view.h>
@@ -264,7 +265,7 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	// [orig: @0x40a20d; @0x40a22f; @0x40a280].
 	const bool clipped = (ammo->flags & kAmmoFlagClipWaterFx) != 0 &&
 			start.z <= world.env.water_z && prev_z <= world.env.water_z;
-	if (!clipped && world.round_sim.impacts.size() < RoundSim::kMaxPendingImpacts) {
+	if (!clipped) {
 		RoundImpact zip;
 		zip.position = Vec3{
 				static_cast<float>(from_fixed(start.x + retail_q16_mul_rhu(t, dir[0]))),
@@ -276,7 +277,9 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 		zip.present_sound = true;
 		zip.tick = world.logic_tick;
 		zip.source_order = world.round_sim.next_impact_order++;
-		world.round_sim.impacts.push_back(zip);
+		play_round_impact_sound(world, zip);
+		if (world.round_sim.impacts.size() < RoundSim::kMaxPendingImpacts)
+			world.round_sim.impacts.push_back(zip);
 	}
 	// The shooter of a non-silenced round (ammo flag 8) lights its own bearing
 	// unless it is a teammate in a team game [orig: @0x4e5c4f..0x4e5c80]; a class-6

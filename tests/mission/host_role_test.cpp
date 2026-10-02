@@ -13,6 +13,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/server_message_dispatch.h>
+#include <runtime/inmatch/server_tick.h>
 #include <runtime/world/angle.h>
 #include <runtime/inmatch/napi_np_connection.h>
 #include <base/gameprofile/game_type.h>
@@ -173,9 +174,11 @@ int main() {
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// The host's own medic call (action 217 -> C2S 0x2E) rides the same
-		// queue and must reach the dispatcher, not the movement-only drain.
-		// [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
+		// queue, sent by its client frame, and must reach the dispatcher, not
+		// the movement-only drain. [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
 		CHECK(role.send_medic_request());
+		CHECK(host.host_loop.c2s_pending() == 0);
+		host.client_runtime->Client_ProcessNetworkFrame();
 		CHECK(host.host_loop.c2s_pending() == 1);
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
@@ -524,6 +527,179 @@ int main() {
 		const int32_t last = (world.out.rounds.cursor + w::RoundRing::kCapacity - 1) %
 				w::RoundRing::kCapacity;
 		CHECK(world.out.rounds.records[static_cast<size_t>(last)].shooter_handle == npc.packed);
+	}
+
+	// --- the authority-local fire gate on an MP listen host ------------------
+	// The host's own client takes its looped-back tick seed, and its own shot
+	// reaches the server only while its own slot is active against that clock:
+	// refused on the frame the seed lands (tick == floor), then admitted; a
+	// disarm opens the 3-period grace, then refuses; a zero seed parks the
+	// clock and refuses. Single player has no gate.
+	// [orig: NapiNPClientMsg_HandleSessionKey @0x4297c0;
+	//  Entity_FireWeaponAndSendPacket @0x42be12..0x42be44 -> PlayerSlot_IsActive
+	//  @0x4FC760; Server_SendRandomSeedToPlayer @0x5101A0]
+	{
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "fire_gate", source_over(&files));
+		ms::KernelBootOptions options;
+		options.mp_session = true;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] {
+			inmatch::HostConfig cfg;
+			cfg.config.server_name = "fire_gate";
+			cfg.config.max_players = 4;
+			cfg.config.game_type = options.game_type;
+			cfg.socket_mode = inmatch::SocketMode::Lan;
+			cfg.serve_and_play = true; // a listen host: HostClient + its own player
+			inmatch::HostBringup bringup;
+			bringup.host_cfg = cfg;
+			role.bring_up(bringup);
+		};
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		CHECK(host.host_owner.serve_and_play && host.client_runtime != nullptr);
+		CHECK(kernel.local.has_local_player());
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		inmatch::NapiNPConnection *own = nullptr;
+		for (inmatch::NapiNPConnection &conn : host.host_owner.ctx.np_protocol.connection_list)
+			if (conn.link.owned_entity == kernel.world.cached.local_player) own = &conn;
+		CHECK(own != nullptr);
+		if (own != nullptr && host.client_runtime != nullptr) {
+			CHECK(own->fire_tick_mode && own->tick_seed != 0);
+			// The seed rode the loopback to the host's own client.
+			role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() != 0);
+			for (int i = 0; i < 3; ++i) role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() > own->fire_tick_floor);
+			CHECK(role.local_fire_admitted());
+			CHECK(kernel.local.authority_fire_admitted);
+			// The tick on the floor is refused.
+			const uint32_t floor = own->fire_tick_floor;
+			own->fire_tick_floor = host.client_runtime->current_tick();
+			CHECK(!role.local_fire_admitted());
+			own->fire_tick_floor = floor;
+			// A disarm: the grace admits, then refuses past three periods.
+			(void)inmatch::Server_DisarmPlayerTickSeed(*own, kernel.world.logic_tick);
+			CHECK(role.local_fire_admitted());
+			const uint32_t holdoff = host.host_owner.ctx.config.effective_send_holdoff_ticks();
+			kernel.world.logic_tick += 3 * holdoff;
+			CHECK(!role.local_fire_admitted());
+			role.run_tick(tick_input(0));
+			CHECK(!kernel.local.authority_fire_admitted);
+			// A re-arm admits again; the disarm's zero seed then parks the
+			// host client's clock and refuses.
+			(void)inmatch::Server_RerollPlayerTickSeed(*own);
+			own->fire_tick_floor = 1;
+			CHECK(role.local_fire_admitted());
+			host.host_loop.host_send(s2c::TICK_SEED, {0, 0, 0, 0});
+			role.run_tick(tick_input(0));
+			CHECK(host.client_runtime->current_tick() == 0);
+			CHECK(!role.local_fire_admitted());
+		}
+	}
+
+	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
+	// The server handler latches the host's own player from the 0x1D its own
+	// client sent: the datagram the press frame's client frame flushed is read
+	// at the next frame's head, so the stance lands in that frame's server
+	// tick, ahead of its body update.
+	// [orig: Game_ProcessMainFrame -- CNapiNetwork_PumpManagerReceive @0x526528,
+	//  Client_ProcessNetworkFrame @0x526692, Server_TickUpdate @0x5266b6 ->
+	//  CNapiNetwork_PumpServerProtocolRecv @0x51d895;
+	//  NapiNPServerMsg_HandleStanceChange @0x501c60, latches @0x501d1b / @0x501d2d]
+	{
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "stance", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		auto &lp = kernel.local;
+		const auto body_stance = [&] {
+			const w::AiEntity *body = lp.player_ai();
+			return body != nullptr ? body->inf.stance : w::InfantryState::Stance::kStand;
+		};
+		CHECK(lp.has_local_player() && lp.stance_latch() == 0);
+		// A looped-back crouch (action 169) reaches the dispatcher and latches.
+		host.host_loop.client_send(c2s::STANCE_CHANGE, std::vector<uint8_t>{0xA9, 0x00});
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 1 && lp.input.crouch && !lp.input.prone);
+		CHECK(body_stance() == w::InfantryState::Stance::kCrouch);
+		CHECK(lp.player() != nullptr && lp.player()->net_stance_bits == 2);
+		// The key only queues the 0x1D (action 170, prone) on the host's own
+		// client: the press frame's body stays crouched, its client frame
+		// flushes the datagram, and the next frame's server tick latches it.
+		// [orig: Input_HandleActionBinding_0 case 170 @0x4e0df3 ->
+		//  CNapiNetwork_QueueReliableMessage, no latch write]
+		CHECK(role.request_stance(2));
+		CHECK(lp.stance_latch() == 1);
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 1 && body_stance() == w::InfantryState::Stance::kCrouch);
+		CHECK(host.host_loop.c2s_pending() == 1);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2 && lp.input.prone && !lp.input.crouch);
+		CHECK(body_stance() == w::InfantryState::Stance::kProne);
+		CHECK(host.host_loop.c2s_pending() == 0);
+		// Every press sends, the selected stance included; the stand (172)
+		// then clears both bits the same way.
+		CHECK(role.request_stance(2));
+		role.run_tick(tick_input(0));
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2);
+		CHECK(role.request_stance(0));
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
+		CHECK(body_stance() == w::InfantryState::Stance::kStand);
+		// The host's chat line, emote and radio call take the same path as
+		// its 0x1D: queued on its own client connection at the press, sent by
+		// that frame's client frame, dispatched by the next frame's server
+		// tick. [orig: Chat_SendTeamMessage QueueReliableMessage(0xD) @0x49a9b4;
+		//  NetPacket_SendEmoteRequest @0x42c147 (0x14); NetPacket_SendRadioCallRequest
+		//  @0x42c177 (0x13); the manager FIFO drained @0x526528]
+		inmatch::ClientRuntime &own = *host.client_runtime;
+		std::string line = "on me";
+		CHECK(own.queue_chat_message(1, line, 0) == hud::ChatSendResult::Sent);
+		CHECK(own.queue_voice_menu_pick(c2s::EMOTE_REQUEST, 3));
+		CHECK(own.queue_voice_menu_pick(c2s::RADIO_CALL_REQUEST, 5));
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 3);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 0);
+		// So do its medic call, its team change and its command-map squad
+		// sends: each sender queues on the local connection with no authority
+		// branch. [orig: action 217 -> QueueReliableMessage(0x2E) @0x49b50c;
+		//  DeathScreen_OnSwapTeams @0x5535ba -> 0x4D @0x42ddac; the squad
+		//  senders 0x17 @0x42ddf2, 0x43 @0x42dc37, 0x44 @0x42dcac, 0x45 @0x42dcf7,
+		//  0x46 @0x42dd2f, 0x4B @0x42dd7f, 0x4F @0x42de2d, 0x3F @0x5488b9]
+		CHECK(role.send_medic_request());
+		CHECK(own.queue_team_change_request());
+		FireteamAssign assign;
+		assign.fireteam = 1;
+		CHECK(own.queue_squad_message(c2s::FIRETEAM_ASSIGN, encode_fireteam_assign(assign)));
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 3);
+		role.run_tick(tick_input(0));
+		// Dispatched; what remains is the handlers' own follow-up traffic.
+		replication::Datagram left;
+		while (host.host_loop.host_recv(left))
+			CHECK(left.tag != c2s::MEDIC_REQUEST && left.tag != c2s::TEAM_CHANGE_REQUEST &&
+					left.tag != c2s::FIRETEAM_ASSIGN);
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

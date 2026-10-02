@@ -494,7 +494,7 @@ bool run_confirmed_vehicle_drive(int occupancy, bool server_feedback = false,
 				w::EntityHandle{self_handle}, vh, 1), "authority confirms driver")) return false;
 	}
 	// NovaWorld dictates a 12-tick uplink period. Add six ticks each way
-	// (~194 ms RTT at 62 Hz); only newly emitted controls reach the authority.
+	// (a 192 ms round trip: 12 ticks of 16 ms); only newly emitted controls reach the authority.
 	// Re-sending the last observed packet every tick would hide a pacing bug.
 	const int period = internet_conditions ? 12 : 4;
 	const int delay = internet_conditions ? 6 : 0;
@@ -1211,6 +1211,92 @@ bool run_uplink_carries_same_frame_input() {
 			"the forward key held THIS frame rides this frame's uplink");
 }
 
+// The session hands the main loop's frame statistics to the role ahead of the
+// drain; the next C2S 0x0C carries their low bytes. [orig: Game_MainLoop
+// @0x52B948 / @0x52B98F ahead of the drain @0x52BA08; NetPacket_SerializePlayerState
+// case 3 @0x4C1BA2 / @0x4C1BBC]
+bool run_uplink_carries_the_frame_statistics() {
+	Harness h;
+	h.kernel->world.load_systems();
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input); // the spawn frame
+	if (!expect(h.role.local_spawned(), "frame statistics: L spawned")) return false;
+	h.role.observe_frame_rate(0x13A);
+	h.role.observe_cpu_share(37);
+	h.role.run_tick(h.input);
+	ProtocolMessage message;
+	EntityPacketSubHeader sub;
+	PlayerExtendedUplink uplink;
+	size_t header_bytes = 0, body_bytes = 0;
+	if (!expect(h.socket.last_message(0x0C, message) &&
+					decode_entity_packet_sub_header(message.payload.data(),
+							message.payload.size(), sub, header_bytes) &&
+					decode_player_extended_uplink(message.payload.data() + header_bytes,
+							message.payload.size() - header_bytes, uplink, body_bytes),
+			"frame statistics: the frame shipped a decodable 0x0C"))
+		return false;
+	return expect(uplink.stat_byte_0 == 0x3A && uplink.stat_byte_1 == 37,
+			"the 0x0C stat bytes carry the frame rate and CPU share low bytes");
+}
+
+// A joiner's stance key only sends the C2S 0x1D (every press, the current
+// stance included); the latch follows the authority's 0x0A tail echo, which
+// re-latches it on every frame that carries the tail. [orig:
+// Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87 (no latch
+// write); NapiNPClientMsg_0x00A @0x4303e5 -> @0x430562..0x43058f]
+bool run_stance_follows_the_authority_echo() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	if (!expect(h.role.local_spawned(), "stance echo: L spawned")) return false;
+	if (!expect(h.role.request_stance(1), "stance echo: the crouch press sends")) return false;
+	h.role.run_tick(h.input);
+	ProtocolMessage select;
+	if (!expect(h.socket.last_message(0x1D, select) && select.payload.size() == 2 &&
+					select.payload[0] == 0xA9 && select.payload[1] == 0x00,
+			"stance echo: the C2S 0x1D carries action 169"))
+		return false;
+	if (!expect(h.kernel->local.stance_latch() == 0,
+			"stance echo: the press does not latch before the echo"))
+		return false;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	const auto deliver = [&](uint8_t state_byte) {
+		FrameUpdate fu;
+		fu.local_tail_present = true;
+		fu.state_flag_byte = state_byte;
+		fu.health = 150;
+		fu.complete = true;
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	deliver(0x02); // the authority's copy: crouched
+	const w::AiEntity *body = h.kernel->local.player_ai();
+	if (!expect(h.kernel->local.stance_latch() == 1 && body != nullptr &&
+					body->inf.stance == w::InfantryState::Stance::kCrouch,
+			"stance echo: the 0x0A tail latches crouch"))
+		return false;
+	// A second press of the same key still sends.
+	const size_t before = h.socket.datagrams.size();
+	if (!expect(h.role.request_stance(1), "stance echo: a repeat press sends again"))
+		return false;
+	h.role.run_tick(h.input);
+	if (!expect(h.socket.datagrams.size() > before && h.socket.last_message(0x1D, select),
+			"stance echo: the repeat 0x1D left"))
+		return false;
+	deliver(0x00); // the authority stood the player up
+	return expect(h.kernel->local.stance_latch() == 0 &&
+					body->inf.stance == w::InfantryState::Stance::kStand,
+			"stance echo: the next tail re-latches stand");
+}
+
 // Every C2S 0x0C body the role shipped from datagram `from` on, decoded.
 std::vector<PlayerExtendedUplink> uplinks_since(const CountingSocket &socket, std::size_t from) {
 	std::vector<PlayerExtendedUplink> out;
@@ -1469,6 +1555,8 @@ int main() {
 	ok &= run_rules_stamp_from_mp_attributes(0x10000u, true);
 	ok &= run_rules_stamp_from_mp_attributes(0x3A02u, false);
 	ok &= run_uplink_carries_same_frame_input();
+	ok &= run_uplink_carries_the_frame_statistics();
+	ok &= run_stance_follows_the_authority_echo();
 	ok &= run_holdoff_window_taps_reach_the_boundary_uplink();
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();

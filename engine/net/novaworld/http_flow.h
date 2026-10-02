@@ -62,7 +62,7 @@ struct JoinResult {
 	enum class Kind { NeedRequest, Resolved, Failed };
 	Kind kind = Kind::Failed;
 	HttpRequestSpec request;  // when NeedRequest
-	std::string host_ip;      // when Resolved: the decoded-NK relay endpoint (fallback NI/NP)
+	std::string host_ip;      // when Resolved: the decoded-NK endpoint (NK is the only dial authority)
 	uint16_t host_port = 0;   // when Resolved
 	// The .joi lobby number. Nonzero means the retail transport dials the
 	// LAN-discovered endpoint for this session instead of host_ip/host_port

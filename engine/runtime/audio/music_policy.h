@@ -24,7 +24,8 @@ inline constexpr int kMenuMusicVarSlot = 2;
 inline constexpr int kGameMusicSeededVarFirst = 1;
 inline constexpr int kGameMusicSeededVarLast = 12;
 // Var1 = g_MusicMissionStateSeed — never written by retail, so always 0
-// (gamemus loops its Multiplayerstart P0 track) [orig: @ 0x5255b3].
+// (gamemus plays its Multiplayerstart section: a silent NULLS lead-in, the
+// GAMINT intro sting once, then silence) [orig: @ 0x5255b3].
 inline constexpr int kGameMusicMissionStateVarSlot = 1;
 // Var7 = health percent, seeded 100 [orig: seed @ 0x5255f0; per-frame @ 0x4b6324].
 inline constexpr int kGameMusicHealthPctVarSlot = 7;

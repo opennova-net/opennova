@@ -34,6 +34,7 @@
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_view.h>   // the fullscreen damage-feedback words + the shake arm
 #include <runtime/world/player_weapon.h>
+#include <runtime/world/powerup.h>       // powerup_pickup_by (a remote player's pickup)
 #include <runtime/world/vehicle_attach.h>
 #include <runtime/world/vehicle_motor.h> // carrier_pose_fixed (the deck-ride pose reader)
 #include <runtime/world/vehicle_mount.h> // resolve_mounted_ammo_slot (phase-8 route)
@@ -238,13 +239,8 @@ world::VehicleSeatOccupancy JoinerRole::seat_occupancy(
 	result.health = result.max_health = item->hp;
 	if (rider->cls == EntityClass::Player && rider->net_has_compact) {
 		// The compact's health/class byte reconstructs a tier midpoint, not
-		// an exact health fraction. Preserve retail's two rounded products.
-		// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580..0x4AD68C]
-		const int32_t upper = static_cast<int32_t>((int64_t(49152) * item->hp + 0x8000) >> 16);
-		const int32_t lower = static_cast<int32_t>((int64_t(28671) * item->hp + 0x8000) >> 16);
-		const uint8_t tier = (rider->health_class_byte >> 4) & 3u;
-		result.health = tier == 2 ? (upper + item->hp) >> 1
-				: tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+		// an exact health fraction (replication::replica_tier_health).
+		result.health = replication::replica_tier_health(rider->health_class_byte, item->hp);
 	}
 	return result;
 }
@@ -371,6 +367,12 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 	return runtime && runtime->queue_stance_change(action_id);
 }
 
+bool JoinerRole::request_stance(int stance) {
+	if (!kernel_ || stance < 0 || stance > 2) return false;
+	if (!kernel_->local.stance_request_allowed()) return false;
+	return queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);
+}
+
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
 // type once per row; -1 = no adm (the row stays chase-only, truthful). The
 // kernel resolves and caches per type (adm_id_for_runtime_type).
@@ -417,7 +419,7 @@ void JoinerRole::on_replica_world_changed(const replication::ClientWorldSyncResu
 	kernel.resweep_item_traits();
 	auto refresh_seats = [&](const std::vector<world::EntityLifetime> &rows) {
 		for (const world::EntityLifetime lifetime : rows) {
-			if (lifetime.handle.pool() != 1) continue;
+			if (!mission::pool_takes_item_seat_spec(lifetime.handle.pool())) continue;
 			if (world::Entity *entity = kernel.world.registry.get(lifetime))
 				mission::refresh_item_seat_spec(kernel.world, kernel.seat_specs, *entity,
 						kernel.wire_header_world);
@@ -729,6 +731,16 @@ void JoinerRole::pump() {
 	//  NapiNPClientMsg_GameReset @0x422843; Game_InitNewRound @0x422790]
 	world::screen_flash_track_revive(kernel.local.view.flash,
 			rt.state().local_medic_reviving);
+	// Every 0x0A header carrying the recipient tail re-latches L's stance from
+	// the authority's copy, ahead of that frame's records (the mount echo
+	// below). Before L exists there is nothing to latch. [orig:
+	// NapiNPClientMsg_0x00A @0x430549 `test g_LocalPlayerEntity` ->
+	// @0x430562..0x43058f, ahead of the record loop]
+	if (rt.state().health_updates_applied != stance_echo_seen_) {
+		stance_echo_seen_ = rt.state().health_updates_applied;
+		if (local_spawned_ && world.cached.local_player.valid())
+			kernel.local.latch_stance(rt.state().local_stance_bits);
+	}
 	sync_authoritative_mount();
 	apply_mounted_ammo_update();
 	lap.mark(devtools::Slot::SIM_CLIENT_MATERIALIZE);
@@ -770,6 +782,11 @@ void JoinerRole::pump() {
 			preround_active ? world::TickPhase::PreRound
 			                : world::TickPhase::Gameplay);
 	lap.mark(devtools::Slot::SIM_CLIENT_WORLD);
+	// The door callback's C2S 0x1A requests this tick raised, queued in raise
+	// order for the next send boundary (world/doors.cpp carries the witness).
+	for (const world::DoorRowEvent &request : world.out.door_requests)
+		rt.queue_door_request(request.handle, request.state, request.number);
+	world.out.door_requests.clear();
 	if (!preround_active)
 		mirror_predicted_vehicles(); // predicted boat poses -> presented rows
 	lap.mark(devtools::Slot::SIM_CLIENT_MIRROR);
@@ -799,6 +816,43 @@ void JoinerRole::pump() {
 	kernel.tick_weather();
 	if (!preround_active) {
 		rt.tick_remote_stance_sounds(world);
+		// The replica dead tail's 186-tick decay: the def's particledeath
+		// spawned at the corpse origin, oriented (0, 0, -0.5) and tagged with
+		// the corpse, its group held in the corpse's +0x1CC slot (a group the
+		// corpse owns there is released first) -- the victim-hit emitter's
+		// descriptor shape. [orig: Entity_UpdateInfantryAI @0x4b9ea7..0x4b9f3e
+		//  (release @0x4b9ec9, tag @0x4b9f0f, orientation z 0xFFFF8000
+		//  @0x4b9f24, CEffectWorld_SpawnEmitterAtPosition @0x4b9f36, the slot
+		//  store @0x4b9f3e); the org2 twin @0x4b4e39]
+		const def::DefItemsFile *items = kernel_->items_table();
+		for (const auto &decay : rt.view().drain_corpse_decays()) {
+			if (decay.release) {
+				world::DestructionEffectEvent release;
+				release.family = 1;
+				release.attach_wire_handle = decay.handle;
+				release.attach_spawn_origin = world::kSpawnOriginNone;
+				release.release = true;
+				world.out.destruction.effects.push_back(std::move(release));
+				continue;
+			}
+			const def::DefItemDef *item = items != nullptr
+					? mission::find_item_def(*items,
+							  static_cast<int>(decay.type_id) + mission::kItemIdOffset)
+					: nullptr;
+			if (item == nullptr || item->particledeath[0] == '\0') continue;
+			world::DestructionEffectEvent effect;
+			effect.effect = item->particledeath;
+			effect.pos = {opennova::io::fp16_16_to_float(decay.pos[0]),
+					opennova::io::fp16_16_to_float(decay.pos[1]),
+					opennova::io::fp16_16_to_float(decay.pos[2])};
+			effect.dir = {0.0f, 0.0f, -0.5f};
+			effect.family = 1;
+			effect.attach_wire_handle = decay.handle;
+			effect.attach_spawn_origin = world::kSpawnOriginNone;
+			effect.section_tagged = true;
+			effect.positioned = true;
+			world.out.destruction.effects.push_back(std::move(effect));
+		}
 		tick_replica_emplaced_channels(rt.state(), kernel.seat_specs, world, self_wire_handle());
 		rt.tick_remote_recoil();
 	}
@@ -919,6 +973,25 @@ void JoinerRole::wire_frame_providers() {
 			[this](uint16_t type_id) -> int32_t {
 				return kernel_->wire_collision_shape_for_type(type_id).bound_radius_q16;
 			});
+	// The replica dead tail's def fields, from the same items.def the spawn
+	// stream typed the row from: deathtime (the edge's moveTimer seed),
+	// LeaveCorpse, and whether the def names a decay effect.
+	// [orig: Entity_UpdateInfantryAI @0x4b9c97 (seed), @0x4b9e54 (attrib
+	//  0x400000), @0x4b9e9a (the def+0x412 decay word)]
+	rt.view().set_replica_death_traits_resolver(
+			[this](uint16_t type_id,
+					replication::ClientReplicaPipeline::ReplicaDeathTraits &out) {
+				const def::DefItemsFile *items = kernel_->items_table();
+				const def::DefItemDef *item = items != nullptr
+						? mission::find_item_def(*items,
+								  static_cast<int>(type_id) + mission::kItemIdOffset)
+						: nullptr;
+				if (item == nullptr) return false;
+				out.deathtime_ticks = item->deathtime_ticks;
+				out.leave_corpse = (item->attrib & def::DEF_ITEM_ATTRIB_LEAVECORPSE) != 0;
+				out.decay_effect = item->particledeath[0] != '\0';
+				return true;
+			});
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model
@@ -962,6 +1035,9 @@ void JoinerRole::wire_frame_providers() {
 						replica_peer_scratch_tick_ = q.tick;
 					}
 					world::EntityHandle ground;
+					const world::Vec3 resolve_pos{opennova::io::fp16_16_to_float(q.pos[0]),
+							opennova::io::fp16_16_to_float(q.pos[1]),
+							opennova::io::fp16_16_to_float(q.pos[2])};
 					const int32_t clearance = col->resolve_replica(
 							*world_, st, q.pos, q.vel_xy, q.vel_z,
 							q.capsule_bottom, q.capsule_top,
@@ -969,6 +1045,36 @@ void JoinerRole::wire_frame_providers() {
 							q.tick, q.anim_state_id, q.anim_state_flags,
 							peers.data(), static_cast<int32_t>(peers.size()),
 							q.row_handle, &q.entity_flags, &ground);
+					// A remote player's powerup contact runs the pickup on this
+					// peer's copy of the row, for a transient copy of the body at
+					// the pose the resolve read (its integrated position): the
+					// def hp until the first compact, the class byte's tier after,
+					// zero once dead. The pickup's sound plays there and the row
+					// hides or is destroyed here, as on every peer.
+					// [orig: Entity_MovementCollisionResolver @0x4B2FB8..0x4B2FCC
+					//  (no authority gate) -> PowerupAction_Pickup @0x4428A0;
+					//  Entity_InitFromItemDef @0x49E550; the dead zero @0x4C10FB]
+					const auto pickups = col->take_replica_powerup_contacts();
+					if (!pickups.empty()) {
+						const replication::ClientEntityState *row =
+								runtime->state().find(q.row_handle);
+						world::Entity picker;
+						picker.has_item_def = true;
+						picker.item_id = q.type_id;
+						picker.position = resolve_pos;
+						picker.health_max = world_->tables.player.item_hp;
+						picker.health = picker.health_max;
+						if (row != nullptr && row->net_health_zero) picker.health = 0;
+						else if (row != nullptr && row->net_has_compact)
+							picker.health = replication::replica_tier_health(
+									row->health_class_byte, picker.health_max);
+						world::TickContext ctx;
+						ctx.world = world_;
+						ctx.logic_tick = world_->logic_tick;
+						ctx.is_authority = false;
+						for (const auto &contact : pickups)
+							world::powerup_pickup_by(*world_, contact.target, picker, ctx);
+					}
 					q.out_ground = ground.valid() ? ground.packed
 					                              : world::EntityHandle::kInvalid;
 					return clearance;
@@ -1059,9 +1165,32 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 			e->alive && e->health > 0 && (e->flags & 2u) == 0u &&
 			!redeploy_release_pending_;
 	if (can_offer_uplink) {
-		const PlayerExtendedUplink up =
-				replication::build_player_uplink(world, *e, *ae);
-		outs = rt.Client_ProcessNetworkFrame(up, now);
+		// The interest list scores the decoded entities against L; the HUD
+		// target cursor is the aim acquisition's combat target, else its
+		// aim-ray entity, named by its wire handle (a materialized pool-1..3
+		// row sits at its own; L answers to its self handle).
+		// [orig: HUD_BuildEntityInfo @0x4B87DA..0x4B882D -> g_HUDTargetCursorEntity
+		//  (HUD+0x168), read @0x50E1C6 / @0x50E42C]
+		// It is built at the send block, after this frame's receive, whose fold
+		// of L's own record (its compact revision moved) re-points L's ground
+		// link first [orig: @0x42C228 ahead of @0x42C482; case 2 @0x4C1346].
+		const uint16_t self = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
+		const replication::ClientEntityState *self_row = rt.state().find(self);
+		const uint32_t self_revision = self_row != nullptr ? self_row->compact_revision : 0;
+		outs = rt.Client_ProcessNetworkFrame([&](PlayerExtendedUplink &up) {
+			replication::UplinkClientInputs interest;
+			interest.replica = &rt.state();
+			interest.self_wire_handle = self;
+			interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
+					world, *ae, self, kernel.local.aim_wire_person());
+			interest.avg_fps = uplink_avg_fps_;
+			interest.cpu_percent = uplink_cpu_percent_;
+			self_row = rt.state().find(self);
+			if (self_row != nullptr && self_row->compact_revision != self_revision)
+				interest.self_echo = self_row;
+			up = replication::build_player_uplink(world, *e, *ae, interest);
+			return true;
+		}, now);
 	} else {
 		outs = rt.Client_ProcessNetworkFrame(now);
 	}
@@ -1808,30 +1937,24 @@ void JoinerRole::mirror_mission_entities() {
 					local->engine_flags ^= (local->engine_flags ^ wire_flags) & 0xB9u;
 					local->health = health_word;
 				}
-				// The mover freezes: the dead-pose/wreck form and a carried row
-				// riding a MOVING deck (a pool-1 carrier: LCAC/ship) stop the
-				// prediction motor — the row keeps its snapped wire pose (wreck
-				// eulers included) / its per-tick seat-follow, and the mirror-back
-				// below yields via net_predicted [orig: the dead-pose short form's
-				// frozen live stores @0x460930..0x460A50]. D-NET-66: death stays a
-				// snap. Wire bit0 is not a vehicle freeze: no vehicle mover tests it
-				// and the pool-1 update calls the mover ungated [orig:
-				// Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
-				// A vehicle whose §5.13 carrier is a STATIC (pool 2/3: the
-				// bridge, roof or ramp its groundEntity resolves to while it
-				// drives over a structure) is not a deck ride: the fold composed
-				// the record into a world sample, and the family mover predicts
-				// from it exactly as the 0xFFFF form — retail's reader composes
-				// the carrier form and still runs the not-driven client leg for
-				// it [orig: Entity_TransformLocalToWorld @0x4608ce; the
-				// not-driven leg @0x48B7F0].
-				const bool deck_ride = es.net_seat_valid &&
-						es.carrier_handle != 0xFFFFu &&
-						world::EntityHandle{es.carrier_handle}.pool() == 1;
-				const bool wire_frozen =
-						(es.state_flags_known &&
-								(es.state_flags & replication::kVehicleFlagDeadPose) != 0u) ||
-						deck_ride;
+				// The mover freezes on the dead-pose/wreck form alone: the row
+				// keeps its snapped wire pose (wreck eulers included) and the
+				// mirror-back below yields via net_predicted [orig: the dead-pose
+				// short form's frozen live stores @0x460930..0x460A50]. D-NET-66:
+				// death stays a snap. Wire bit0 is not a vehicle freeze: no
+				// vehicle mover tests it and the pool-1 update calls the mover
+				// ungated [orig: Entity_UpdatePool1Slot @0x4B8E41..0x4B8E53].
+				// A carried record is not a freeze either, whatever its carrier
+				// (a pool-1 deck, or the static a bridge, roof or ramp
+				// resolves to): the reader composes it into a world sample,
+				// stages that and lands the carrier as groundEntity, and the
+				// family mover predicts from the sample while its carrier block
+				// rides the ground link [orig: Entity_TransformLocalToWorld
+				// @0x4608ce -> the staging @0x4607cd..0x4607fb, groundEntity
+				// @0x460802; the not-driven leg @0x48B7F0; the carrier blocks
+				// (vehicle_follow_carrier)].
+				const bool wire_frozen = es.state_flags_known &&
+						(es.state_flags & replication::kVehicleFlagDeadPose) != 0u;
 				if (wire_frozen) {
 					// The row holds its snapped/followed pose; the registry
 					// entity adopts it below like any un-predicted row so
@@ -1873,6 +1996,18 @@ void JoinerRole::mirror_mission_entities() {
 				if (es.compact_revision != m.net_seen_revision) {
 					const bool prediction_arming = !m.net_predicted;
 					m.net_seen_revision = es.compact_revision;
+					// Every live record lands its carrier as the ground link, or
+					// null for the 0xFFFF form; the mover's own ground refresh
+					// rewrites it every eighth tick [orig: Entity_SerializeVehicleState
+					// @0x460802 (esi = the carrier, 0 @0x4607AF)].
+					const world::Entity *record_carrier =
+							es.carrier_handle != 0xFFFFu
+									? replica_world_entity(world,
+											  world::EntityHandle{es.carrier_handle})
+									: nullptr;
+					local->ground_target = record_carrier != nullptr
+							? record_carrier->handle
+							: world::EntityHandle{};
 					// The fold live-snapped the row to the wire sample (rows
 					// whose first compact landed before this flag flipped stage
 					// their pre-compact pose for one record — self-corrected by

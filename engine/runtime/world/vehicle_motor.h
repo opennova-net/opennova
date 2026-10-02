@@ -145,6 +145,8 @@ struct VehicleTraits {
     int32_t climb_speed = 0;   // itemDef+0x920 — air vertical clamp [+cs, -2cs]
     int32_t turn_roll = 0;     // itemDef+0x90C raw — air roll-rate cap (*192426)
     int32_t speed_pitch = 0;   // itemDef+0x910 raw — air pitch-rate cap (*192426)
+    int32_t weathervane = 0;   // itemDef+0x914 raw — the air occupant leg's diagonal-key
+                               // pedal yaw (*192426) [orig: store @0x49dcb2]
     int32_t max_slope = 0;     // itemDef+0x8F4 BAM (deg token * 11930464) — the
                                // platform slope-soft threshold (cos22 at use)
     int32_t slip_slope = 0;    // itemDef+0x8F8 BAM — the slope-hard threshold

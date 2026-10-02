@@ -1,9 +1,13 @@
 #include <runtime/replication/entity_wire_bridge.h>
 
+#include <algorithm>  // std::min / std::sort (the uplink interest list)
+#include <climits>    // INT32_MIN (the _ftol2_sse indefinite)
 #include <cmath>      // std::lround
 
 #include <net/npwire/ingame_decode.h> // network_transform_local_to_world (grounded uplink lift)
 #include <net/npwire/wire_handle.h>   // the wire-side handle packing (pinned below)
+#include <runtime/replication/client_state.h>  // the decoded rows the uplink interest list scores
+#include <runtime/replication/connection_fan.h> // view_distance_units (word_26C681E)
 #include <runtime/terrain_query/height_field.h>  // TerrainHeightField::valid
 #include <runtime/world/ai.h>          // AiEntity / AiSystem (engine-frame mirror)
 #include <runtime/world/angle.h>       // spawn_angle_bam (the placement angle)
@@ -307,23 +311,41 @@ namespace {
 // original serializers [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0 writes
 // *(u16)(entity+36); NetPacket_SerializeObjectToBuffer @0x504d10 likewise]. bit 0x100 =
 // player/minimap-register (set for EVERY player so the client's handler re-resolves the model
-// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01: WITNESSED to be PER-ENTITY host
-// state, not per-recipient — Server_PlayerAdd @0x51cbc0 sets `entity+36 |= 1` once at add time
-// (@0x51d0da, gated on add_event+108 = NapiNPPlayer+0x37, remote adds only; the host's LOCAL
-// player takes the early-return path @0x51cc31 and never gets it), and the serializer copies
-// entity+36 verbatim with no recipient-conditional logic, so retail cannot vary this bit per
-// recipient. The same-map ASH_I5A capture (0x0101 on the joiner's record, 0x0100 on the host's)
-// is fully explained by remote-vs-local add. Our per-recipient computation below is wire-
-// identical for a host+1-joiner session but DIVERGES for >=3 players (retail would send 0x0101
-// for OTHER remote players too) — kept until the NapiNPPlayer+0x37 gate semantics is witnessed;
-// docs/net/novaworld-net-re.md (D-NET-136). Carry the movement/spawn gate (0x02) through while
-// the entity is still spawning [orig: entity+36 bit 1].
-uint16_t player_wire_flags(const world::Entity &e, world::EntityHandle recipient_own) {
-	uint16_t flags = 0x0100u | static_cast<uint16_t>(
-            (e.flags | e.engine_flags) & world::kEntityFlagParachute);
-	if (recipient_own.valid() && e.handle == recipient_own) flags |= 0x01u;
-	if ((e.flags & 0x2u) != 0) flags |= 0x2u;
-	return flags;
+// at round-load, NapiNPClientMsg_0x00C @0x42e91a). bit 0x01 is PER-ENTITY host state, the same
+// for every recipient (the serializer copies entity+36 verbatim): it marks a player still on its
+// deploy screen or spectating. Every player is born 0x101 [orig: Entity_SpawnFromAnimSlotProperty
+// @0x43c433/@0x43c508]; the join clears bit0 for a non-spectator [orig: Server_OnPlayerJoin
+// @0x51a7da] and a spectator add sets it [orig: Server_PlayerAdd @0x51d0da, gated on
+// NapiNPPlayer+0x37 = the joiner's JSR join var, the PRE_GAME_MENU SPECTATE box:
+// UI_PreGameMenuStateMachine @0x568bf0 -> UI_JoinSelectedSession @0x569c77, parsed
+// @0x4c7604, latched @0x512e60 / @0x4c81ff; the host's own player binds through the
+// local branch @0x51cc31 and never reaches the stamp]; and every 0x0A the host writes for a player clears
+// that player's own bit0, then sets it again while it spectates or its deploy screen holds
+// [orig: NetPacket_WritePlayerState @0x4ff6d0, @0x4ff7a1, @0x4ff7b8]. The host keeps that bit on
+// the entity (server_spawn.cpp), so the record reads it from there (D-NET-136). Carry the
+// movement/spawn gate (0x02) through while the entity is still spawning [orig: entity+36 bit 1].
+uint16_t player_wire_flags(const world::Entity &e) {
+	return static_cast<uint16_t>(0x0100u |
+			((e.flags | e.engine_flags) & world::kEntityFlagParachute) | (e.flags & 0x3u));
+}
+
+// The entity's one retail Flags dword as the load-stream serializers read it,
+// raw: the runtime word and the spawn-composed word the port splits it into,
+// plus the REFLECTABLE bit every vehicle's init sets, which the port keeps as
+// the ItemDefType-1 trait. [orig: Entity_InitFromModel @0x40e204..0x40e20a]
+uint32_t load_stream_flags_dword(const world::Entity &e) {
+	return e.flags | e.engine_flags | (e.item_type == 1 ? world::kEntityFlagReflective : 0u);
+}
+
+// The 0x0C / 0x18 record's u16 flags word: entity+36's low half for EVERY entity
+// [orig: NetPacket_SerializeEntityStatesToBuffer @0x50324c; NetPacket_SerializeObjectToBuffer
+// @0x504df0..0x504e00] - the player composition above for a player, the load-stream dword
+// for every other body (an AI corpse streams its dead bit, a vehicle its REFLECTABLE bit;
+// D-NET-133).
+uint16_t record_flags_word(const world::Entity &e) {
+	return e.item_id == kPlayerPersonTypeId
+			? player_wire_flags(e)
+			: static_cast<uint16_t>(load_stream_flags_dword(e) & 0xFFFFu);
 }
 
 // entity+348 (0x15C) — the wire "net_id" is the player's MINIMAP slot id, NOT the WAC SSN
@@ -361,7 +383,7 @@ uint16_t player_wire_net_id(const world::Entity &e) {
 	return e.minimap_net_id != 0 ? e.minimap_net_id : player_minimap_net_id(e);
 }
 
-OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::EntityHandle recipient_own) {
+OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 	OrganicSpawnBatch batch;
 	w.registry.for_each([&](const world::Entity &e) {
 		if (e.handle.pool() != 0) return;
@@ -383,8 +405,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 		rec.entity_name = e.display_name;
 		// Player-record wire rules (flags/minimap net_id/playerClass) are shared with the
 		// S2C 0x18 repair record — see the witness comments on the helpers above.
-		rec.minimap_flags =
-				(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e, recipient_own) : 0;
+		rec.minimap_flags = record_flags_word(e);
 		rec.pos_x = world::to_fixed(e.position.x);
 		rec.pos_y = world::to_fixed(e.position.y);
 		rec.pos_z = world::to_fixed(e.position.z);
@@ -408,8 +429,7 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w, world::Entity
 	return batch;
 }
 
-FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
-                                              world::EntityHandle recipient_own) {
+FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e) {
 	FullEntitySpawnRecord rec;
 	rec.slot_id = e.handle.packed;
 	// Both fields are dereferenced from entity+0x20 ItemDef. A null def writes zero for each,
@@ -419,8 +439,7 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	rec.item_type_id = e.has_item_def ? static_cast<uint16_t>(e.item_id) : 0;
 	rec.item_type = e.has_item_def ? e.item_type : 0;
 	rec.team = e.team;
-	rec.minimap_flags =
-			(e.item_id == kPlayerPersonTypeId) ? player_wire_flags(e, recipient_own) : 0;
+	rec.minimap_flags = record_flags_word(e);
 	rec.entity_flags = e.owner_connection_id;
 	// The name rides only when the resolved ItemDef carries AIData. Use the raw attrib source,
 	// rather than name presence or a pool heuristic, so a null/non-AI def emits the required
@@ -479,13 +498,6 @@ FullEntitySpawnRecord build_full_entity_spawn(const world::Entity &e,
 	return rec;
 }
 
-// The entity's one retail Flags dword as the load-stream serializers read it,
-// raw: the runtime word and the spawn-composed word the port splits it into,
-// plus the REFLECTABLE bit every vehicle's init sets, which the port keeps as
-// the ItemDefType-1 trait. [orig: Entity_InitFromModel @0x40e204..0x40e20a]
-static uint32_t load_stream_flags_dword(const world::Entity &e) {
-	return e.flags | e.engine_flags | (e.item_type == 1 ? world::kEntityFlagReflective : 0u);
-}
 
 // The vehicle brain's +0x318 state byte the 0x0D record streams under field
 // 0x1000, rebuilt from the latches the port keeps on the motor state (bit 0
@@ -679,6 +691,21 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
 		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
 		rec.team_byte = e->team;
+		// A door def's section word: entity+308 with bits 1..count re-read from
+		// its door rows, carried whenever the def's signed door byte (the low
+		// byte of def+0x890) is nonzero. [orig: NetPacket_SerializePool2StaticToBuffer
+		// @0x504432..0x5044B3 — the attrib-byte sign test @0x50443F]
+		if ((e->item_attrib & 0x80u) != 0) {
+			const int count = static_cast<int8_t>(e->deathtime_ticks & 0xFF);
+			rec.section_mask = static_cast<int32_t>(
+					w.doors.wire_section_mask(*e, e->section_mask, count));
+			rec.has_section_mask = count != 0;
+		} else if ((e->item_attrib2 & 0x4000u) != 0) {
+			// Any other def carries entity+308 only as a Landmine def (its
+			// triggered mines), and only a nonzero word.
+			// [orig: @0x5044A6..0x5044B1 — `test [def+58h], 4000h`, `test ebx, ebx`]
+			rec.section_mask = static_cast<int32_t>(e->section_mask);
+		}
 		// The D-NET-147 building/armory fields: the composed entity Flags dword (entity+36,
 		// gates 0x0020), the BMS ammo byte (entity+290, always present), refNum (entity+533,
 		// gates 0x0040) and subType (entity+532, gates 0x0080 — 0xFF on indestructible defs).
@@ -902,9 +929,218 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	return true;
 }
 
-PlayerExtendedUplink build_player_uplink(const world::World &world,
+namespace {
+
+// _ftol2_sse: the x87 top is stored as a double and converted with cvttsd2si,
+// a truncation whose out-of-range result is the integer indefinite 0x80000000.
+int32_t retail_ftol(double v) {
+	if (!(v > -2147483649.0 && v < 2147483648.0)) return INT32_MIN;
+	return static_cast<int32_t>(v);
+}
+
+// The `cdq; xor; sub` absolute value: abs(INT32_MIN) stays INT32_MIN.
+int32_t retail_abs32(int32_t v) {
+	const uint32_t sign = static_cast<uint32_t>(v >> 31);
+	return static_cast<int32_t>((static_cast<uint32_t>(v) ^ sign) - sign);
+}
+
+struct InterestPair {
+	int32_t key = 0;
+	uint16_t handle = 0xFFFF;
+};
+
+// [orig: CPairList_ShellSortByValue @0x526CF0 -- the Knuth gap sequence and the
+//  signed `cmp; jge` that stops the insertion at an equal key, so the sort is
+//  descending and NOT stable]
+void retail_shell_sort_descending(std::vector<InterestPair> &rows) {
+	size_t gap = 1;
+	while (gap <= rows.size() / 9)
+		gap = 3 * gap + 1;
+	do {
+		for (size_t i = gap; i < rows.size(); ++i) {
+			const InterestPair insert = rows[i];
+			size_t j = i;
+			while (j >= gap && rows[j - gap].key < insert.key) {
+				rows[j] = rows[j - gap];
+				j -= gap;
+			}
+			rows[j] = insert;
+		}
+		gap /= 3;
+	} while (gap != 0);
+}
+
+// The client's own top-N interest list, scored against the uplinking player.
+// Pool 0 then pool 1, each in slot order, admitting a live entity with an
+// items.def network callback, Flags bit 0 clear, that is not the player.
+// [orig: Server_BuildEntityPriorityListForPlayer @0x50DF20]
+void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
+		const world::AiEntity &ae, const UplinkClientInputs &interest,
+		uint16_t out_handles[4], uint16_t out_scores[4]) {
+	// The caller's pre-fill and the builder's tail: an unused pair is
+	// (0xFFFF, 0). [orig: @0x4C1BC7..0x4C1BD8; @0x50E546..0x50E563]
+	for (int i = 0; i < 4; ++i) {
+		out_handles[i] = 0xFFFF;
+		out_scores[i] = 0;
+	}
+	if (interest.replica == nullptr) return;
+	// The player's carrier: groundEntity (+0x28), overridden by parentEntity
+	// (+0x16C). [orig: @0x50DF88..0x50DF99]
+	const world::EntityHandle player_target =
+			e.mounted && e.mount_target.valid() ? e.mount_target : e.ground_target;
+	const int32_t player_yaw = ae.heading;   // +0x10 [orig: @0x50DFA6]
+	const int32_t player_pitch = ae.pitch;   // +0x14 [orig: @0x50DF9D]
+	const int view_distance = static_cast<int16_t>(view_distance_units()); // movsx word_26C681E
+	constexpr double kMaxDistance = 2147418112.0;        // flt_7C19E0
+	constexpr double kRadiansToBam = -683565275.5764316; // dbl_7C57B8 (-2^31 / pi)
+
+	// The walk order: pool 0 then pool 1, each by slot. [orig: @0x50DFAF / @0x50E231]
+	std::vector<const ClientEntityState *> rows;
+	rows.reserve(interest.replica->entities.size());
+	for (const ClientEntityState &row : interest.replica->entities) {
+		const int pool = row.handle >> 12;
+		if (pool == 0 || pool == 1) rows.push_back(&row);
+	}
+	std::sort(rows.begin(), rows.end(),
+			[](const ClientEntityState *a, const ClientEntityState *b) {
+				return a->handle < b->handle;
+			});
+
+	std::vector<InterestPair> list;
+	list.reserve(rows.size());
+	for (const ClientEntityState *row : rows) {
+		const int pool = row->handle >> 12;
+		// The admission: a callback-bearing items.def class, Flags bit 0
+		// clear (a carried/attached body), not the player itself.
+		// [orig: @0x50DFED ItemTypeIndex, @0x50DFF7 Flags & 1, @0x50DFFD
+		//  itemDef, @0x50E004 entity != player, @0x50E008 itemDef+0x164]
+		if (row->cls != EntityClass::Player && row->cls != EntityClass::Infantry &&
+				row->cls != EntityClass::Vehicle && row->cls != EntityClass::Guided)
+			continue;
+		const uint32_t flags = row->state_flags_known ? row->state_flags : row->spawn_entity_flags;
+		if ((flags & 1u) != 0) continue;
+		if (row->handle == interest.self_wire_handle) continue;
+		// A pool-1 row is materialized at its own wire handle; a pool-0
+		// person lives only in the replica.
+		const world::Entity *native =
+				pool == 1 ? world.registry.get(world::EntityHandle{row->handle}) : nullptr;
+
+		// Distance in tiles: |d| with z halved, less the entity's boundRadius.
+		// [orig: @0x50E033..0x50E0B3]
+		const int32_t dx = static_cast<int32_t>(static_cast<uint32_t>(row->x) -
+				static_cast<uint32_t>(ae.pos[0]));
+		const int32_t dy = static_cast<int32_t>(static_cast<uint32_t>(row->y) -
+				static_cast<uint32_t>(ae.pos[1]));
+		const int32_t dz = static_cast<int32_t>(static_cast<uint32_t>(row->z) -
+				static_cast<uint32_t>(ae.pos[2]));
+		const int32_t dz_half = dz >> 1;
+		const double dxd = dx, dyd = dy, dzhd = dz_half;
+		const double dist3 = std::min(std::sqrt(dzhd * dzhd + dxd * dxd + dyd * dyd), kMaxDistance);
+		// entity+0 boundRadius: a pool-1 row's materialized twin carries it; a
+		// pool-0 person is its decoded collision proxy's (the same model bound
+		// the retail client's own pool-0 entity holds).
+		const int32_t bound_q16 = native != nullptr ? world::to_fixed(native->bound_radius)
+				: (pool == 0 && world.collision != nullptr
+						? world.collision->wire_person_bound_radius_q16(row->handle) : 0);
+		int32_t distance = static_cast<int32_t>(static_cast<uint32_t>(retail_ftol(dist3)) -
+				static_cast<uint32_t>(bound_q16)) >> 16;
+		if (distance > 2048) continue;
+		if (distance < 0) distance = 0;
+		int32_t distance_score = 1124 - distance;
+		if (distance_score < 0) distance_score = 0;
+
+		// The view angle: bearing and elevation against Yaw/Pitch.
+		// [orig: @0x50E0BB..0x50E13A]
+		const double planar = std::min(std::sqrt(dyd * dyd + dxd * dxd), kMaxDistance);
+		const int32_t planar_int = retail_ftol(planar);
+		const int32_t bearing = retail_ftol(std::atan2(dyd, dxd) * kRadiansToBam);
+		int32_t yaw_term = retail_abs32(static_cast<int32_t>(
+				0u - static_cast<uint32_t>(player_yaw) - static_cast<uint32_t>(bearing))) >> 24;
+		if (yaw_term > 64) yaw_term += 64;
+		const int32_t elevation = retail_ftol(
+				std::atan2(static_cast<double>(dz), static_cast<double>(planar_int)) * kRadiansToBam);
+		const int32_t pitch_term = retail_abs32(static_cast<int32_t>(
+				0u - static_cast<uint32_t>(player_pitch) - static_cast<uint32_t>(elevation))) >> 25;
+		const int32_t angle = 256 - pitch_term - yaw_term;
+
+		const uint8_t team = row->team_known ? row->team : 0;
+		const int32_t enemy = team != 0 && team != e.team ? 1 : 0;
+		int32_t los = 0;
+		if (angle > 128 && distance < view_distance) {
+			// [orig: Entity_CheckLineOfSightTerrainAndEntities(player, entity,
+			//  player+4, entity+4, 0, 0) @0x50E179]
+			const int32_t end[3] = {row->x, row->y, row->z};
+			if (world.collision == nullptr) {
+				los = 1;
+			} else if (pool == 0) {
+				// A decoded person is the endpoint entity through its row: the
+				// Flags indoors bit and the parent slot (its seat mount).
+				world::CollisionWorld::LosWireEndpoint person;
+				person.indoors = (row->rm_entity_flags & world::kEntityFlagIndoors) != 0;
+				if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0)
+					person.parent = world::EntityHandle{row->carrier_handle};
+				los = world.collision->wire_person_los_clear(world, e.handle, person, ae.pos, end, 0,
+						false) ? 1 : 0;
+			} else {
+				los = world.collision->entity_los_clear(world, e.handle,
+						native != nullptr ? native->handle : world::EntityHandle{},
+						ae.pos, end, 0, false) ? 1 : 0;
+			}
+		}
+		const int32_t target = row->handle == player_target.packed ? 1 : 0;
+		const int32_t cursor = row->handle == interest.hud_target_wire_handle ? 1 : 0;
+		int32_t key = 0;
+		if (pool == 0) {
+			// Standing or riding an EWeap: parentEntity null, else the parent
+			// def's attrib bit 0x20 (no def: 0). [orig: @0x50E187..0x50E1B0]
+			int32_t visible = 1;
+			if (row->carrier_handle != world::EntityHandle::kInvalid && row->mount_bone != 0) {
+				const world::Entity *parent =
+						world.registry.get(world::EntityHandle{row->carrier_handle});
+				visible = parent != nullptr && parent->has_item_def &&
+						(parent->item_attrib & world::kItemAttribEweap) != 0 ? 1 : 0;
+			}
+			// The player-class bit, Flags 0x100 -- the Player class row
+			// (present_rows.cpp's same mapping). [orig: @0x50E1CF]
+			const int32_t is_player = row->cls == EntityClass::Player ? 1 : 0;
+			key = distance_score + 2 * (angle + 25 * (enemy + 15 * cursor +
+					2 * (los + visible + 10 * target) + is_player));
+		} else {
+			// occupantEntity (+0x170). [orig: @0x50E40A]
+			const int32_t occupied =
+					native != nullptr && native->primary_occupant.valid() ? 1 : 0;
+			key = distance_score + 2 * (angle + 25 * (enemy + 15 * cursor +
+					2 * (los + 2 * (target + occupied + 4 * target))));
+		}
+		if (distance < view_distance) key += 200; // [orig: @0x50E1F9 / @0x50E457]
+		if ((flags & 1u) != 0) key >>= 4;         // [orig: @0x50E208] (unreachable past the filter)
+		list.push_back({key, row->handle});
+	}
+	retail_shell_sort_descending(list);
+	// The top entries: a key above 0xFFFF saturates. [orig: @0x50E4C0..0x50E53C]
+	const size_t count = std::min<size_t>(list.size(), 4);
+	for (size_t i = 0; i < count; ++i) {
+		out_handles[i] = list[i].handle;
+		out_scores[i] = list[i].key > 0xFFFF ? 0xFFFF : static_cast<uint16_t>(list[i].key);
+	}
+}
+
+} // namespace
+
+uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
+		uint16_t self_wire_handle, uint16_t aim_wire_person) {
+	const world::EntityHandle cursor =
+			ae.inf.combat_target.valid() ? ae.inf.combat_target : ae.inf.head_look_target;
+	if (cursor == world.cached.local_player) return self_wire_handle;
+	if (cursor.valid()) return cursor.pool() >= 1 && cursor.pool() <= 3 ? cursor.packed : 0xFFFF;
+	// The head-look store named a decoded remote person: its wire row.
+	return aim_wire_person;
+}
+
+PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::Entity &e,
-                                         const world::AiEntity &ae) {
+                                         const world::AiEntity &ae,
+                                         const UplinkClientInputs &interest) {
 	PlayerExtendedUplink up; // wire defaults include the no-carrier handle 0xFFFF
 	// Live engine-frame pose (the AiEntity store apply_player_intent SNAPs back on receive):
 	// pos[] is already i32 16.16; heading/pitch are BAM32 whose HIGH half is the i16 wire field
@@ -915,14 +1151,34 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	up.pos_z = ae.pos[2];
 	up.heading = static_cast<int16_t>(ae.heading >> 16);
 	up.pitch = static_cast<int16_t>(ae.pitch >> 16);
-	// Retail's op-3 builder uses the mounted parent first, else groundEntity. A
-	// resolved carrier changes both position and heading into its local frame;
-	// pitch passes through unchanged. A stale relationship cannot exist as a raw
-	// pointer in retail, so the handle port safely falls back to FFFF/world pose.
-	// [orig: Player_BuildTag0CInputBody @0x42A550 ->
-	// Entity_TransformWorldToLocal @0x43BB50; heading subtraction @0x43bb7b]
+	// Retail's op-3 builder reads groundEntity (+0x28) alone, which the player
+	// body points at parentEntity on every update while mounted; the native
+	// player body keeps no such store, so the mount is taken first here -- the
+	// same entity in steady state. A resolved carrier changes both position and
+	// heading into its local frame; pitch passes through unchanged. A stale
+	// relationship cannot exist as a raw pointer in retail, so the handle port
+	// safely falls back to FFFF/world pose.
+	// [orig: NetPacket_SerializePlayerState case 3 `mov ecx, [edi+28h]` @0x4C141D;
+	//  Entity_UpdateInfantryPlayerBody @0x4B41A2..0x4B41B4 `groundEntity =
+	//  parentEntity`; Entity_TransformWorldToLocal @0x43BB50; heading
+	//  subtraction @0x43bb7b]
 	world::EntityHandle carrier_handle;
-	if (e.mounted && e.mount_target.valid())
+	// A receive that folded the player's own record ahead of this send block
+	// re-pointed the link first: the record's seat leaves the seat's own
+	// ground link (a vehicle on open ground has none). The seat resolves to
+	// its materialized row; a record whose seat has no row was dropped before
+	// that store, so the link stands. The standing record's carrier store
+	// (@0x4C1358) is not modeled: an unmounted player keeps its own link.
+	// [orig: NetPacket_SerializePlayerState case 2 -- the carrier resolve and
+	//  its no-itemDef drop @0x4C105E..0x4C10C7, Entity_TryAttachOrDetach
+	//  @0x4C1329, `parentEntity->groundEntity` @0x4C1346..0x4C1353]
+	const world::Entity *echo_seat = nullptr;
+	if (interest.self_echo != nullptr && interest.self_echo->mount_bone != 0 &&
+			interest.self_echo->carrier_handle != wire_handle::kInvalid)
+		echo_seat = world.registry.get(world::EntityHandle{interest.self_echo->carrier_handle});
+	if (echo_seat != nullptr)
+		carrier_handle = echo_seat->ground_target;
+	else if (e.mounted && e.mount_target.valid())
 		carrier_handle = e.mount_target;
 	else if (e.ground_target.valid())
 		carrier_handle = e.ground_target;
@@ -964,6 +1220,13 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	// over: the original does not mask on the write side, and the receiver already does.
 	// [orig: NetPacket_SerializePlayerState case 3 @0x4c1b17 `mov cl, [edi+24h]`]
 	up.state_flags_byte = static_cast<uint8_t>(e.flags & 0xFFu);
+	// The self-check byte ahead of the movement-input byte starts from the
+	// scope bit (Flags 0x10) moved to 0x80; the rotating debugger / hook /
+	// movement probes the same byte ORs in stay clear here. A retail host
+	// skips the byte on read. [orig: NetPacket_SerializePlayerState case 3
+	//  `movsx ebx, cl; and ebx, 10h` + three `add ebx, ebx` @0x4C1432..0x4C1447,
+	//  the probe switch @0x4C145E.., stored @0x4C1AF0; case 4 advances past it]
+	up.anticheat_flags = static_cast<uint8_t>((e.flags & 0x10u) << 3);
 	// Preserve the signed control bytes as wire bit patterns. The authority
 	// consumes these for analog throttle and steering. Dropping them loses
 	// controls that may already have affected local vehicle prediction.
@@ -976,6 +1239,24 @@ PlayerExtendedUplink build_player_uplink(const world::World &world,
 	// and echoes it at our 0x0A off-16 so other clients resolve our weapon-anim def.
 	// [orig: the client fills byte 24 from entity+0x2B0; case-4 store @0x4C20A3] (D-NET-143)
 	up.equipped_adm_index = e.equipped_adm_index;
+	// The low bytes of the main loop's FR-counter frame rate and its window's
+	// CPU share [orig: case 3 `mov dl, byte ptr g_StatsAvgFps` @0x4C1BA2,
+	// `mov dl, byte ptr g_StatsCpuPercent` @0x4C1BBC].
+	up.stat_byte_0 = static_cast<uint8_t>(interest.avg_fps);
+	up.stat_byte_1 = static_cast<uint8_t>(interest.cpu_percent);
+	// The four interest pairs: the client's own top-4 list, handle then score
+	// per pair [orig: case 3 @0x4C1BC7..0x4C1C9B -- Server_BuildEntityPriorityListForPlayer
+	// (entity, handles, scores, 4) @0x4C1BE9].
+	uint16_t handles[4], scores[4];
+	build_uplink_interest_pairs(world, e, ae, interest, handles, scores);
+	up.priority_handle_0 = handles[0];
+	up.priority_score_0 = scores[0];
+	up.priority_handle_1 = handles[1];
+	up.priority_score_1 = scores[1];
+	up.priority_handle_2 = handles[2];
+	up.priority_score_2 = scores[2];
+	up.priority_handle_3 = handles[3];
+	up.priority_score_3 = scores[3];
 	return up;
 }
 

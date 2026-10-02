@@ -204,6 +204,11 @@ String NovaWorldClient::get_join_proxy_relay() const {
 	       String::num_int64(static_cast<int64_t>(join_proxy_.relay_port));
 }
 
+std::string NovaWorldClient::get_login_pcid() const {
+	const std::string *pcid = flow_.cookies().find("PCID");
+	return pcid != nullptr ? *pcid : std::string();
+}
+
 void NovaWorldClient::trace(const String &line) {
 	UtilityFunctions::print_verbose(line);
 }
@@ -303,6 +308,7 @@ void NovaWorldClient::stop() {
 	authenticated_ = false;
 	server_entries_.clear();
 	server_pings_ = Dictionary();
+	++ping_generation_; // a sweep still running reports into a list that is gone
 	total_servers_ = 0;
 	total_players_ = 0;
 	flow_.reset();
@@ -716,27 +722,20 @@ void NovaWorldClient::start_ping_sweep() {
 		emit_signal("server_pings_updated");
 		return;
 	}
-	if (!ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
-	                        ping_generation_)) {
-		// One sweep at a time: the in-flight one is now stale (its generation
-		// no longer matches), and its landing re-issues this one.
-		ping_resweep_pending_ = true;
-	}
+	// A refreshed list's sweep supersedes the running one at once (the engine's
+	// PingSweepRunner, net/novaworld/ping_sweep_runner.h).
+	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
+	                   ping_generation_);
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
-	if (generation == ping_generation_) {
-		const Array rids = results.keys();
-		for (int i = 0; i < rids.size(); ++i)
-			server_pings_[rids[i]] = results[rids[i]];
-		emit_signal("server_pings_updated");
-	}
-	// A pass from a superseded sweep (the list refreshed underneath it) is
-	// stale; if that refresh asked for a sweep while this one ran, run it now.
-	if (ping_resweep_pending_) {
-		ping_resweep_pending_ = false;
-		start_ping_sweep();
-	}
+	// A result of an older generation (its list was replaced or the session
+	// stopped while its deferred call was queued) is stale.
+	if (generation != ping_generation_) return;
+	const Array rids = results.keys();
+	for (int i = 0; i < rids.size(); ++i)
+		server_pings_[rids[i]] = results[rids[i]];
+	emit_signal("server_pings_updated");
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------
@@ -1019,6 +1018,14 @@ void NovaWorldClient::stop_playing() {
 // hello and stop" dead-end that never reached gameplay). LAN, NW-routed, and env joins now converge
 // on the one joiner seam (ADR 0009; .agents/README.md "do not create a second gameplay network path").
 void NovaWorldClient::resolve_join_target() {
+	// The in-match join refuses an NK endpoint whose port reads 0 or whose host
+	// string is under eight characters (the engine's joi_endpoint_usable); the
+	// player is back in the lobby, which leaves the play.
+	if (!opennova::joi_endpoint_usable(pending_join_.host_ip, pending_join_.host_port)) {
+		stop_playing();
+		emit_signal("join_failed", String(opennova::kJoinEndpointRejectTag));
+		return;
+	}
 	// The .joi endpoint and APPID are the service's bytes.
 	const String host = opennova::cp1252_to_gd(pending_join_.host_ip);
 	const uint16_t port = pending_join_.host_port;

@@ -21,6 +21,48 @@ bool org1_owns_death_transaction(const World &world, EntityHandle victim) {
            ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) == 0;
 }
 
+// The death scream, played by the edge of whichever pass runs the body.
+// NPC (org1): profile slot 7 (sounddeath), or 8 (SSNightDead) on a night
+// mission — the runtime reads the mission's EnableNVG attribute as the night
+// gate. [orig: @0x4b9ca3-0x4b9cc1 g_BmsAttribFlags & 0x100000 pick; play at
+// &entity->pos]
+// Player body (org2), the local player AND every other player body, a host's
+// remote peers included: the body-model composite set "<prefix>_DEATH"
+// ("_DEATH_K" at night) from the entity's anim-slot byte — NOT the profile
+// slots; a bank without the set is the id-0 silence with no slot fallback.
+// The org2 pass runs for every player entity on every machine, so the leg has
+// no local or authority gate. [orig: @0x4b4c4a-0x4b4c6a ->
+// SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
+// Entity_PlaySound3D_FullVolume]
+// Section bit 0 (the silent, shortened cleanup) skips the scream in both
+// passes [orig: @0x4b4c19 / @0x4b9c68].
+void infantry_death_scream(AiSystem &ai, const AiEntity &e, World &world, const Entity *ent) {
+    if (ent != nullptr && ((ent->section_mask & 1u) != 0 || ent->dismemberment_piece)) return;
+    const bool night_death =
+        (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
+    const bool player_body = e.inf.is_local_player || e.net_is_remote_peer ||
+        (ent != nullptr && ((ent->flags | ent->engine_flags) & kEntityFlagPlayer) != 0);
+    if (player_body) {
+        SoundSlotEvent scream;
+        scream.source_handle = e.handle.packed;
+        scream.pos[0] = e.pos[0];
+        scream.pos[1] = e.pos[1];
+        scream.pos[2] = e.pos[2];
+        scream.slot = static_cast<uint8_t>(
+                night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
+        audio::compose_entity_sound_set(
+                ent != nullptr ? ent->anim_slot : 0,
+                night_death ? audio::kEntitySoundDeathNight
+                            : audio::kEntitySoundDeath,
+                scream.set_name, sizeof(scream.set_name));
+        world.out.slot_sounds.push_back(scream);
+    } else {
+        ai.emit_slot_sound(world, e,
+                           night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
+                           e.pos);
+    }
+}
+
 void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, bool org1,
                          uint32_t logic_tick) {
     InfantryState &inf = e.inf;
@@ -38,39 +80,7 @@ void infantry_death_edge(AiSystem &ai, AiEntity &e, World &world, Entity *ent, b
                 uint32_t(ent->deathtime_ticks) - (silent_cleanup ? 61u : 0u));
         if (silent_cleanup) ent->npc_respawns = 0;
     }
-    // The death scream. NPC (org1): profile slot 7 (sounddeath), or 8
-    // (SSNightDead) on a night mission — the runtime reads the mission's
-    // EnableNVG attribute as the night gate. [orig: @0x4b9ca3-0x4b9cc1
-    // g_BmsAttribFlags & 0x100000 pick; play at &entity->pos]
-    // Player body (org2): the body-model composite set "<prefix>_DEATH"
-    // ("_DEATH_K" at night) from the entity's anim-slot byte — NOT the
-    // profile slots; a bank without the set is the id-0 silence with no
-    // slot fallback. [orig: @0x4b4c4a-0x4b4c6a ->
-    // SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
-    // Entity_PlaySound3D_FullVolume]
-    if (!silent_cleanup && (ent == nullptr || !ent->dismemberment_piece)) {
-        const bool night_death =
-            (world.tables.mission_attrib_flags & MissionTables::kMissionAttribEnableNVG) != 0;
-        if (inf.is_local_player) {
-            SoundSlotEvent scream;
-            scream.source_handle = e.handle.packed;
-            scream.pos[0] = e.pos[0];
-            scream.pos[1] = e.pos[1];
-            scream.pos[2] = e.pos[2];
-            scream.slot = static_cast<uint8_t>(
-                    night_death ? audio::kSlotNightDeath : audio::kSlotDeath);
-            audio::compose_entity_sound_set(
-                    ent != nullptr ? ent->anim_slot : 0,
-                    night_death ? audio::kEntitySoundDeathNight
-                                : audio::kEntitySoundDeath,
-                    scream.set_name, sizeof(scream.set_name));
-            world.out.slot_sounds.push_back(scream);
-        } else {
-            ai.emit_slot_sound(world, e,
-                               night_death ? audio::kSlotNightDeath : audio::kSlotDeath,
-                               e.pos);
-        }
-    }
+    infantry_death_scream(ai, e, world, ent);
     // Consume the kill's selection; none staged -> the generic death
     // (cause 4 -> 174 death_pungi) AND the attacker slot (+0x178) is
     // cleared, so a death nothing stamped (script/WAC) reports as

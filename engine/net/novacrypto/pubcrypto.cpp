@@ -138,6 +138,24 @@ std::string encode_pub_value(const std::string &plaintext, const std::string &pc
 		std::vector<uint8_t>(plaintext.begin(), plaintext.end()), pcid_key);
 }
 
+// One key's probe: decipher a copy, then compare the trailing LE CRC with the
+// CRC of the bytes before it. [orig: NapiPacket_DecryptAndVerify @0x4c2ad0 —
+//  copy @0x4c2bcb, NetPacket_EncryptPayload (the decipher) @0x4c2bde, the
+//  embedded dword @0x4c2be3 against Cipher_ComputeCRC @0x4c2bfa]
+bool try_decrypt_pub_bytes(std::vector<uint8_t> data, const std::string &pcid_key,
+                           std::vector<uint8_t> &payload) {
+	payload.clear();
+	if (pcid_key.empty() || data.size() < 4) return false;
+	ticket_transform(data, pcid_key, /*decrypt=*/true);
+	const uint32_t expected_crc =
+		static_cast<uint32_t>(data[data.size() - 4])
+		| (static_cast<uint32_t>(data[data.size() - 3]) <<  8)
+		| (static_cast<uint32_t>(data[data.size() - 2]) << 16)
+		| (static_cast<uint32_t>(data[data.size() - 1]) << 24);
+	payload.assign(data.begin(), data.end() - 4);
+	return crc32_be(payload) == expected_crc;
+}
+
 // [orig: NapiNP_DecodeEncryptedString @ 0x619130 (retail) — A-P decode -> per-key NWU-decrypt + CRC check]
 bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
                       std::vector<uint8_t> &out, std::string *error) {
@@ -153,18 +171,11 @@ bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
 	if (!decode_ap(encoded, data)) {
 		return fail("not an A-P value (odd length or a character outside A-P)");
 	}
-	ticket_transform(data, pcid_key, /*decrypt=*/true);
 	if (data.size() < 4) {
 		return fail("decoded payload too short");
 	}
-	std::vector<uint8_t> payload(data.begin(), data.end() - 4);
-	const uint32_t expected_crc =
-		static_cast<uint32_t>(data[data.size() - 4])
-		| (static_cast<uint32_t>(data[data.size() - 3]) <<  8)
-		| (static_cast<uint32_t>(data[data.size() - 2]) << 16)
-		| (static_cast<uint32_t>(data[data.size() - 1]) << 24);
-	const uint32_t actual_crc = crc32_be(payload);
-	if (actual_crc != expected_crc) {
+	std::vector<uint8_t> payload;
+	if (!try_decrypt_pub_bytes(std::move(data), pcid_key, payload)) {
 		return fail("crc mismatch");
 	}
 	out = std::move(payload);

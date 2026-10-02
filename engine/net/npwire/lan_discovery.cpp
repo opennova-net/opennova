@@ -63,6 +63,11 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	parsed.server_flags = hello.p2;
 	parsed.current_players = hello.np;
 	parsed.max_players = hello.mp;
+	// The session record keeps the HK and SF a join from this row connects with
+	// [orig: Nwu_HandleServerHello @0x626d20 — HK into session+0x1F8 and SF into
+	//  session+0x2C0 (e.g. @0x62776f / @0x6277c2), the fields InitFromSession @0x62639c reads]
+	parsed.host_key = hello.hk;
+	parsed.password_required = (hello.sf & 1u) != 0;
 	out = std::move(parsed);
 	return true;
 }
@@ -81,7 +86,17 @@ std::string endpoint_key(const std::string &address, int port) {
 
 } // namespace
 
-bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_max) {
+// [orig: NetPacket_ValidateChannelType @0x4c49b0 — the flags arrive as int16]
+bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
+	const uint16_t flags = static_cast<uint16_t>(server_flags);
+	if ((flags & 0x400u) != 0) return connect_type == kLanConnectTypeNovaWorld;
+	if ((flags & 0x100u) != 0) return connect_type == kLanConnectTypeLan;
+	if ((flags & 0x200u) != 0) return connect_type == kLanConnectTypeInternet;
+	return true;
+}
+
+bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_max,
+                                int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
 	stop();
 	servers_.clear();
@@ -90,6 +105,7 @@ bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_ma
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
 	client_index_ = client_index;
+	connect_type_ = connect_type;
 	probe_ = build_lan_discovery_probe(client_index);
 	port_min_ = port_min;
 	port_max_ = port_max;
@@ -134,6 +150,12 @@ LanRowChange LanDiscoveryBrowser::accept_reply(const uint8_t *data, size_t size,
 		return LanRowChange::kNone;
 	LanDiscoveryServer server;
 	if (!parse_lan_discovery_reply(data, size, client_index_, server)) return LanRowChange::kNone;
+	// The discovery callback drops a session whose P2 does not admit the browse's
+	// network connect type before it ever becomes a session node, so it takes no
+	// row and no slot under the cap. [orig: CNapiNetwork_OnSessionDiscovered
+	//  @0x4c84a3..0x4c84ba -> NetPacket_ValidateChannelType @0x4c49b0]
+	if (!lan_session_admits_connect_type(connect_type_, server.server_flags))
+		return LanRowChange::kNone;
 	const std::string key = endpoint_key(source_ip, source_port);
 	// A listed host re-announcing: the row table hit adds and updates nothing
 	// (the row text was built at first sighting) @0x5593c4..0x5593e3.

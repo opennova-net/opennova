@@ -596,6 +596,12 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		std::vector<uint8_t> text;
 		text_source = resolve_mission_text(files_, mission_basename, text);
 		text_size = text.size();
+		// g_TextMission, the table the dialog lines' subtitles read.
+		world.tables.mission_text = nullptr;
+		mission_text_table = rtxt::File{};
+		std::string text_error;
+		if (!text.empty() && rtxt::parse(text.data(), text.size(), mission_text_table, text_error))
+			world.tables.mission_text = &mission_text_table;
 	}
 	// Load + promote the mission; a failure aborts the boot (nothing later
 	// runs). (The shell re-stamps its presentation/PANM clock right after the
@@ -624,6 +630,15 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 		step("script_catalogs");
 		wac::load_script_sound_sets(files_, mission_basename, script_sound_catalog);
 		world.tables.sound_sets = &script_sound_catalog;
+		// The mission's dialog bank, <mission>.dbf when it exists.
+		// [orig: DialogSystem_Init @0x527640..0x527659 -> DialogManager_LoadFromFile]
+		world.tables.dialog_bank = nullptr;
+		dialog_bank = dbf::File{};
+		std::vector<uint8_t> dbf_bytes;
+		std::string dbf_error;
+		if (files_.read_file(mission_basename + ".dbf", dbf_bytes) &&
+				dbf::parse_dbf_memory(dbf_bytes.data(), dbf_bytes.size(), dialog_bank, dbf_error))
+			world.tables.dialog_bank = &dialog_bank;
 		// SndProf.def -> the footstep/foley/landing/scream slot table. The
 		// parse appends, so it runs only over an EMPTY table: a table the
 		// embedder filled before the boot (Simulation::set_sound_profiles,
@@ -781,7 +796,7 @@ void MissionKernel::carry_across_load_from(MissionKernel &previous) {
 	seat_specs = std::move(previous.seat_specs);
 	mounted_graphics = std::move(previous.mounted_graphics);
 	local.look_settings = previous.local.look_settings;
-	local.carry_scoped_aim_drift_from(previous.local);
+	local.carry_process_globals_from(previous.local);
 	world.script.vars.carry_declared_from(previous.world.script.vars);
 	// [orig: g_EntityUpdateCounter, whose one writer is
 	// Entity_UpdateAllEntities @0x4C2639]

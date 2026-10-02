@@ -49,6 +49,8 @@ inline int32_t bam_mul_wrap(int32_t lhs, int32_t rhs) {
 Entity *resolve_piloting_player(World &world, Entity &veh, const VehicleTraits &traits);
 
 int32_t turn_pilot_view(World &, Entity &, int32_t delta);
+// The movers' MoveOrder 0x10 merge onto an occupant (defined in vehicle_motor.cpp).
+void merge_occupant_free_look(World &, Entity &occupant);
 void stage_player_vehicle_input(World &, Entity &, Entity &, const VehicleTraits &);
 // The client chase template of each mover family (defined in vehicle_motor.cpp).
 enum class VehicleChaseFamily : uint8_t { Plain, Ground, Bike, Tank };

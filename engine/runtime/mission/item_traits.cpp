@@ -383,11 +383,22 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
             std::memcpy(e->door_open_sound, def->door_open_sound, sizeof(e->door_open_sound));
             std::memcpy(e->door_close_sound, def->door_close_sound, sizeof(e->door_close_sound));
         }
+        // The mission spawn allocates closed rows for a building or decoration
+        // door; a joiner's pool-2 rows are the S2C 0x10 record's instead: any
+        // door def, its open sections from the record's section word.
+        // [orig: Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA (types 5/2, attrib
+        //  0x80); NapiNPClientMsg_0x010 @0x4336B5..0x433745 (attrib 0x80 alone)]
+        const bool wire_doors = !world.rules.logic_authority && e->handle.pool() == 2;
         if (def != nullptr && (def->attrib & DEF_ITEM_ATTRIB_DOOR) != 0 &&
-                (def->type == DEF_ITEM_TYPE_BUILDING || def->type == DEF_ITEM_TYPE_DECORATION)) {
+                (wire_doors || def->type == DEF_ITEM_TYPE_BUILDING ||
+                 def->type == DEF_ITEM_TYPE_DECORATION)) {
             e->door_count = static_cast<int8_t>(def->deathtime_ticks);
             e->door_first_bone = static_cast<int8_t>(static_cast<uint32_t>(def->deathtime_ticks) >> 8);
-            world.doors.initialize(*e, def->door_open_rate_q16, def->door_max_angle_bam);
+            if (wire_doors)
+                world.doors.initialize_from_wire(*e, def->door_open_rate_q16,
+                        def->door_max_angle_bam, e->section_mask);
+            else
+                world.doors.initialize(*e, def->door_open_rate_q16, def->door_max_angle_bam);
         }
         // The item's display name, once per distinct id (tooling: the
         // inspection records name an entity by its item, not only its label).
@@ -478,6 +489,7 @@ void resolve_item_traits(world::World &world, const DefItemsFile &items,
                 vt.climb_speed = def->climb_speed;
                 vt.turn_roll = def->turn_roll;
                 vt.speed_pitch = def->speed_pitch;
+                vt.weathervane = def->weathervane;
                 // The platform slope thresholds + tuning block. The def parser's
                 // "pitch"/"pitch_velocity" tokens are the traits' bow-lift pair
                 // (pitch_lift/pitch_lift_vel) — speed_pitch above is the distinct

@@ -109,6 +109,13 @@ public:
 	// inside the next open send boundary [orig: cases 169/170/172 @0x4e0d77/@0x4e0df3/
 	// @0x4e0e3e -> CNapiNetwork_QueueReliableMessage @0x4e0de7].
 	bool queue_stance_change(uint16_t action_id);
+	// A stance key on a non-authority client: the key's own refusals, then the
+	// C2S 0x1D alone -- every press sends, the selected stance included, and
+	// the latch waits for the authority's 0x0A echo (LocalPlayer::latch_stance).
+	// 0 stand / 1 crouch / 2 prone -> action 172 / 169 / 170.
+	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
+	//  no latch write; the latch @0x430562 / @0x430570]
+	bool request_stance(int stance);
 	// Choose the use-item seat request without mutating the local body.
 	// The caller applies the equipped weapon's busy gate before this action.
 	bool queue_mount_toggle();
@@ -127,6 +134,14 @@ public:
 	void close() override;
 	ClientRuntime *client_runtime() override { return runtime.get(); }
 	int64_t last_net_us() const override { return last_net_us_; }
+	// The frame statistics the C2S 0x0C's two stat bytes carry; the frame rate
+	// also reaches the replica runtime's quality window through the base.
+	// [orig: NetPacket_SerializePlayerState case 3 @0x4C1BA2 / @0x4C1BBC]
+	void observe_frame_rate(int32_t fps) override {
+		Role::observe_frame_rate(fps);
+		uplink_avg_fps_ = fps;
+	}
+	void observe_cpu_share(int32_t cpu_percent) override { uplink_cpu_percent_ = cpu_percent; }
 
 	// The exact-handle materialized world twin of a decoded wire row (null when
 	// the handle has no truthful local carrier). Header-only joins read the
@@ -268,6 +283,11 @@ private:
 	PeerAddr proxy_node_addr_{};
 	uint64_t proxy_last_send_ms_ = 0;
 	int64_t last_net_us_ = 0;
+	// g_StatsAvgFps / g_StatsCpuPercent as the session last handed them over.
+	int32_t uplink_avg_fps_ = 0;
+	int32_t uplink_cpu_percent_ = 0;
+	// The last folded 0x0A tail whose stance echo L has latched.
+	uint32_t stance_echo_seen_ = 0;
 	// The wire-leg clock: the frame's start, stamped where the uplink ships
 	// (before the decoded-state folds) so the stats board measures exactly the
 	// wire leg.
