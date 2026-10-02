@@ -29,6 +29,18 @@ void check(bool cond, const char *what) {
 	}
 }
 
+// The decrypted field, or "<rejected>" where epask_decrypt returns false.
+std::string epask_decrypt(const std::string &ciphertext, const opennova::EpaskParams &params) {
+	std::string out;
+	return opennova::epask_decrypt(ciphertext, params, out) ? out : std::string("<rejected>");
+}
+
+// The parsed bundle (default params where epask_from_string rejects it).
+opennova::EpaskParams epask_from_string(const std::string &text) {
+	opennova::EpaskParams out;
+	return opennova::epask_from_string(text, out) ? out : opennova::EpaskParams{};
+}
+
 // Mirror of apps/novaworld_server/http_listener.cpp url_decode (the body is
 // emitted raw by the helpers, so this only collapses '+' and '%XX' if present).
 std::string url_decode(const std::string &s) {

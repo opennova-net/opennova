@@ -66,13 +66,19 @@ void require_modexp_params(uint32_t exponent, uint32_t modulus) {
 // Returns the recovered byte stream (1/4 the input length). Used by
 // epask_decrypt when we don't know the private exponent — feasible
 // because mod < 300_000 means worst case is 256 modexp per byte.
-std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
-                                       uint32_t exponent, uint32_t modulus) {
-	require_modexp_params(exponent, modulus);
-	if (data.size() % 4 != 0) {
-		throw std::runtime_error("EPASK modexp data length must be a multiple of 4");
+// False (`error` named) on rejected params, a length not a multiple of 4, or a word with
+// no 0..255 inverse: the ciphertext is input, a bad one a result (ADR 0049 d5).
+bool modexp_decrypt_bf(const std::vector<uint8_t> &data, uint32_t exponent, uint32_t modulus,
+                       std::vector<uint8_t> &out, std::string &error) {
+	out.clear();
+	if (modulus <= 258u || exponent == 0u) { // the gate (require_modexp_params)
+		error = "EPASK params rejected: modulus must exceed 258 and exponent be positive";
+		return false;
 	}
-	std::vector<uint8_t> out;
+	if (data.size() % 4 != 0) {
+		error = "EPASK modexp data length must be a multiple of 4";
+		return false;
+	}
 	out.reserve(data.size() / 4);
 	for (size_t i = 0; i < data.size(); i += 4) {
 		const uint32_t word = static_cast<uint32_t>(data[i])
@@ -88,10 +94,12 @@ std::vector<uint8_t> modexp_decrypt_bf(const std::vector<uint8_t> &data,
 			}
 		}
 		if (!found) {
-			throw std::runtime_error("EPASK ciphertext word has no plaintext inverse — wrong params");
+			out.clear();
+			error = "EPASK ciphertext word has no plaintext inverse — wrong params";
+			return false;
 		}
 	}
-	return out;
+	return true;
 }
 
 // [orig: EPASK_ModexpEncrypt @ 0x666600 (retail) — per byte Crypto_ModularExponentiation(byte+2,exp,mod)
@@ -174,27 +182,33 @@ std::string epask_to_string(const EpaskParams &p) {
 //  returns -1 when the first (@0x66679b) or second (@0x6667e3) ':' is missing
 //  or a numeric field reaches 512 bytes (@0x66678e / @0x6667d5). A missing
 //  separator is therefore a rejected bundle, not a zero field.]
-EpaskParams epask_from_string(const std::string &s) {
+bool epask_from_string(const std::string &s, EpaskParams &out, std::string *error) {
 	constexpr size_t kNumericFieldCap = 512;
+	const auto fail = [error](const char *why) {
+		if (error != nullptr) *error = why;
+		return false;
+	};
 	const auto first = s.find(':');
 	if (first == std::string::npos) {
-		throw std::runtime_error("EPASK bundle rejected: missing first ':'");
+		return fail("EPASK bundle rejected: missing first ':'");
 	}
 	const auto second = s.find(':', first + 1);
 	if (second == std::string::npos) {
-		throw std::runtime_error("EPASK bundle rejected: missing second ':'");
+		return fail("EPASK bundle rejected: missing second ':'");
 	}
 	if (first >= kNumericFieldCap || second - first - 1 >= kNumericFieldCap) {
-		throw std::runtime_error("EPASK bundle rejected: numeric field too long");
+		return fail("EPASK bundle rejected: numeric field too long");
 	}
 	EpaskParams p;
 	p.exponent = atoi64_u32(std::string_view{s}.substr(0, first));
 	p.modulus = atoi64_u32(std::string_view{s}.substr(first + 1, second - first - 1));
 	p.key = s.substr(second + 1);
-	return p;
+	out = std::move(p);
+	return true;
 }
 
-std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &params) {
+bool epask_decrypt(const std::string &ciphertext, const EpaskParams &params, std::string &out,
+                   std::string *error) {
 	// Mirror onnw/protocol/crypto.py::epask_decrypt:
 	//   step1 = epask_decode_nibbles(ciphertext)
 	//   step2 = nwu_decrypt(step1, key)
@@ -205,11 +219,22 @@ std::string epask_decrypt(const std::string &ciphertext, const EpaskParams &para
 	// Naming swap: onnet's nwu_decrypt == our nwu_encrypt (per memory
 	// reference_nwu_names_swapped — the labels are reversed but the
 	// transform pair is symmetric).
-	auto step1 = decode_ap(ciphertext);
+	out.clear();
+	std::vector<uint8_t> step1;
+	if (!decode_ap(ciphertext, step1)) {
+		if (error != nullptr) *error = "EPASK field is not an A-P value (odd length or a character outside A-P)";
+		return false;
+	}
 	if (!step1.empty()) nwu_encrypt(step1.data(), step1.size(), params.key);
-	auto step3 = modexp_decrypt_bf(step1, params.exponent, params.modulus);
+	std::vector<uint8_t> step3;
+	std::string why;
+	if (!modexp_decrypt_bf(step1, params.exponent, params.modulus, step3, why)) {
+		if (error != nullptr) *error = why;
+		return false;
+	}
 	if (!step3.empty()) nwu_encrypt(step3.data(), step3.size(), params.key);
-	return std::string(step3.begin(), step3.end());
+	out.assign(step3.begin(), step3.end());
+	return true;
 }
 
 std::string epask_encrypt(const std::string &plaintext, const EpaskParams &params) {

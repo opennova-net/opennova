@@ -139,15 +139,23 @@ std::string encode_pub_value(const std::string &plaintext, const std::string &pc
 }
 
 // [orig: NapiNP_DecodeEncryptedString @ 0x619130 (retail) — A-P decode -> per-key NWU-decrypt + CRC check]
-std::vector<uint8_t> decode_pub_value(const std::string &encoded,
-                                      const std::string &pcid_key) {
+bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
+                      std::vector<uint8_t> &out, std::string *error) {
+	out.clear();
+	const auto fail = [error](const char *why) {
+		if (error != nullptr) *error = why;
+		return false;
+	};
 	if (pcid_key.empty()) {
-		throw std::runtime_error("pcid_key is required");
+		return fail("pcid_key is required");
 	}
-	std::vector<uint8_t> data = decode_ap(encoded);
+	std::vector<uint8_t> data;
+	if (!decode_ap(encoded, data)) {
+		return fail("not an A-P value (odd length or a character outside A-P)");
+	}
 	ticket_transform(data, pcid_key, /*decrypt=*/true);
 	if (data.size() < 4) {
-		throw std::runtime_error("decoded payload too short");
+		return fail("decoded payload too short");
 	}
 	std::vector<uint8_t> payload(data.begin(), data.end() - 4);
 	const uint32_t expected_crc =
@@ -157,9 +165,10 @@ std::vector<uint8_t> decode_pub_value(const std::string &encoded,
 		| (static_cast<uint32_t>(data[data.size() - 1]) << 24);
 	const uint32_t actual_crc = crc32_be(payload);
 	if (actual_crc != expected_crc) {
-		throw std::runtime_error("crc mismatch");
+		return fail("crc mismatch");
 	}
-	return payload;
+	out = std::move(payload);
+	return true;
 }
 
 } // namespace opennova

@@ -35,15 +35,19 @@ void check_foo_player_payloads_round_trip() {
 	};
 	check(payloads.pcid == expected_pcid, "PUBPCID plaintext is pcid plus NUL");
 
-	const auto decoded_name = opennova::decode_pub_value(
-		opennova::encode_pub_value(payloads.name_info, key), key);
+	std::vector<uint8_t> decoded_name;
+	check(opennova::decode_pub_value(opennova::encode_pub_value(payloads.name_info, key), key,
+	                                 decoded_name),
+	      "PUBNAMEINFO decodes");
 	check(decoded_name == payloads.name_info, "PUBNAMEINFO round-trips");
 	check(cstr_at(decoded_name, 0) == "FooPlayer", "PUBNAMEINFO carries nwhandle");
 	check(!decoded_name.empty() && decoded_name.back() == 0,
 	      "PUBNAMEINFO is NUL-terminated");
 
-	const auto decoded_squad = opennova::decode_pub_value(
-		opennova::encode_pub_value(payloads.squad_info, key), key);
+	std::vector<uint8_t> decoded_squad;
+	check(opennova::decode_pub_value(opennova::encode_pub_value(payloads.squad_info, key), key,
+	                                 decoded_squad),
+	      "PUBSQUADINFO decodes");
 	check(decoded_squad == payloads.squad_info, "PUBSQUADINFO round-trips");
 	check(decoded_squad.size() == 4 + 10 + 9,
 	      "PUBSQUADINFO has u32 prefix, full name, short name");
