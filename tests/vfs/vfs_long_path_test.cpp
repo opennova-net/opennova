@@ -46,6 +46,21 @@ bool write_pff(const std::string &scratch, const std::string &utf8_path, const c
 	return !bytes.empty() && write_bytes(utf8_path, bytes);
 }
 
+// Removes a tree level by level through io::os_path, so each long descendant gets its own
+// \\?\ prefix (std::filesystem::remove_all from a short root walks into the long paths
+// without one, and fails there on Windows).
+void remove_tree(const std::string &utf8) {
+	std::error_code ec;
+	const fs::path path = io::os_path(utf8);
+	if (fs::is_directory(path, ec)) {
+		std::vector<std::string> children;
+		for (fs::directory_iterator it(path, ec), end; !ec && it != end; it.increment(ec))
+			children.push_back(utf8 + "/" + io::utf8_path(it->path().filename()));
+		for (const std::string &child : children) remove_tree(child);
+	}
+	fs::remove(path, ec);
+}
+
 std::string read_vfs(const opennova::Vfs &vfs, const std::string &name,
                      opennova::VfsLookupPolicy policy = opennova::VfsLookupPolicy::SessionDefault) {
 	std::vector<uint8_t> out;
@@ -64,11 +79,13 @@ int main() {
 	fs::create_directories(scratch, ec);
 	// The base as UTF-8: the temp directory itself may hold a name outside the code page.
 	const std::string base = io::utf8_generic_path(temp) + "/opennova_vfs_long_path";
-	fs::remove_all(io::os_path(base), ec);
+	remove_tree(base);
+	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 
 	std::string root = base + "/" + kJose + "/" + kModel;
 	while (root.size() <= 300) root += "/install_directory_component_0123456789";
-	TEST_EXPECT(fs::create_directories(io::os_path(root), ec) && !ec);
+	fs::create_directories(io::os_path(root), ec);
+	TEST_EXPECT(!ec && fs::is_directory(io::os_path(root), ec));
 
 	TEST_EXPECT(write_pff(scratch, root + "/resource.pff", "archived.txt", "ARCHIVE"));
 	TEST_EXPECT(write_bytes(root + "/loose.txt", "LOOSE"));
@@ -76,7 +93,8 @@ int main() {
 	TEST_EXPECT(write_bytes(root + "/skies.env", "fog_level 640\r\n"));
 	TEST_EXPECT(write_bytes(root + "/_NSTMOUT.TXT", "NEVER"));
 	const std::string exp_dir = root + "/expansion/x";
-	TEST_EXPECT(fs::create_directories(io::os_path(exp_dir), ec) && !ec);
+	fs::create_directories(io::os_path(exp_dir), ec);
+	TEST_EXPECT(!ec && fs::is_directory(io::os_path(exp_dir), ec));
 	TEST_EXPECT(write_pff(scratch, exp_dir + "/x.pff", "expansion.txt", "EXPANSION"));
 	TEST_EXPECT(write_bytes(exp_dir + "/version.txt", "1"));
 
@@ -135,7 +153,8 @@ int main() {
 	// The session's connection template reads the install's _NSTMOUT.TXT.
 	TEST_EXPECT(opennova::inmatch::load_session_timeout_config(root).timeout_ms == -1);
 
-	fs::remove_all(io::os_path(base), ec);
+	remove_tree(base);
+	TEST_EXPECT(!fs::exists(io::os_path(base), ec));
 	fs::remove_all(scratch, ec);
 	std::printf("OK: a %zu-byte UTF-8 install root mounts and reads\n", root.size());
 	return 0;
