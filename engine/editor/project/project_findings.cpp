@@ -1,6 +1,7 @@
 #include <editor/project/project_findings.h>
 
 #include <iterator>
+#include <set>
 
 #include <base/gameprofile/required_resources.h>
 #include <editor/assets/asset_kind.h>
@@ -32,16 +33,23 @@ Diagnostic boot_finding(const std::string &name) {
 // fixed name (game.wac, server.wac). What a mission's rename leaves behind, or an import of the
 // file without its mission: a note on the file, never a gate.
 void sidecar_notes(const AssetScan &scan, const AssetGraph &graph, std::vector<Diagnostic> &rows) {
+	// The base names of the project's missions, as every reader takes them (to the first dot: a
+	// mission "op.v2.bms" opens "op.wac").
+	std::set<std::string> missions;
+	for (const AssetEntry &entry : scan.entries)
+		if (entry.kind == AssetKind::Mission) missions.insert(normalized_logical_name(mission::mission_base_name(entry.logical_name)));
 	for (const AssetEntry &entry : scan.entries) {
 		if (entry.kind != AssetKind::Script && entry.kind != AssetKind::TileInfo && entry.kind != AssetKind::DialogBank)
 			continue;
 		if (gameprofile::gameprofile_required_resource_find(entry.logical_name.c_str()) != nullptr) continue;
-		const std::string mission = mission::mission_base_name(entry.logical_name) + ".bms";
+		const std::string base = mission::mission_base_name(entry.logical_name);
+		const std::string mission = base + ".bms";
 		const std::string wanted = normalized_logical_name(entry.logical_name);
 		bool by_name = false;
 		for (const mission::Sidecar &sidecar : mission::sidecars())
 			by_name = by_name || normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted;
-		if (!by_name || scan.find(mission) != nullptr || !graph.referrers_of_file(entry.relative_path).empty()) continue;
+		if (!by_name || missions.count(normalized_logical_name(base)) || !graph.referrers_of_file(entry.relative_path).empty())
+			continue;
 		rows.push_back(make_finding(CoreFinding::MissionSidecarUnused, DiagnosticSeverity::Info,
 		                            "The game opens " + entry.logical_name + " with the mission " + mission +
 		                                    ", which the project does not hold, and no file names it: nothing reads it.",

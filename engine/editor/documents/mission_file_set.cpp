@@ -15,14 +15,17 @@ namespace {
 // 115 shipped missions have one: the game runs without); the loading image (else loadscrn.pcx); the
 // tile placement (every shipped mission has one; the game loads the terrain's own without it, a
 // warning); the dialog bank and its sounds (17 of 115: the game plays no dialog without them; a
-// record that uses a dialog names the bank itself, tolerated as a warning).
+// record that uses a dialog names the bank itself, tolerated as a warning). The sounds are read only
+// beside the .dbf (GraphEdge::needs): without one they are no reference at all, and with one they are
+// no longer optional, the bank's dialogs playing silent without them (a warning, the sound bank
+// kind's: review F5, the data lane's m13).
 constexpr MissionFileSetRow kRows[] = {
 	{"text", ReferenceKind::MissionStrings, false, "its string table"},
 	{"script", ReferenceKind::Script, true, "its script"},
 	{"loading_image", ReferenceKind::LoadingImage, true, "its loading image"},
 	{"tiles", ReferenceKind::TilePlacement, false, "its tile placement"},
 	{"dialog", ReferenceKind::DialogBank, true, "its dialog bank"},
-	{"dialog_sounds", ReferenceKind::SoundBank, true, "its dialog bank's sounds"},
+	{"dialog_sounds", ReferenceKind::SoundBank, false, "its dialog bank's sounds"},
 };
 
 } // namespace
@@ -51,6 +54,13 @@ std::vector<MissionFileSetMember> mission_file_set_members(const AssetScan &scan
 	for (const MissionFileSetRow &row : mission_file_set()) {
 		const mission::Sidecar *sidecar = mission::sidecar_for_role(row.role);
 		if (!sidecar) continue;
+		// A row the reader reads only beside another's file (the dialog's sounds, beside its .dbf
+		// [orig: DialogSystem_Init @ 0x5275e0, the exists check @ 0x527648]): without that file a file
+		// of its name is no member (a game bank a mission is named like).
+		if (sidecar->needs) {
+			const mission::Sidecar *needed = mission::sidecar_for_role(sidecar->needs);
+			if (!needed || !scan.find(mission::sidecar_name(mission, *needed))) continue;
+		}
 		for (const std::string &name : {mission::sidecar_name(mission, *sidecar), mission::sidecar_alternate_name(mission, *sidecar)}) {
 			if (name.empty()) continue;
 			const AssetEntry *entry = scan.find(name);

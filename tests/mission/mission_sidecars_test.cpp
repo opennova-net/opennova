@@ -49,7 +49,11 @@ int main() {
 	TEST_EXPECT(mission_base_name("missions/00TRa.bms") == "00TRa");
 	TEST_EXPECT(mission_base_name("missions\\ASP_G7.BMS") == "ASP_G7");
 	TEST_EXPECT(mission_base_name("noextension") == "noextension");
-	TEST_EXPECT(mission_base_name("two.dots.bms") == "two.dots");
+	// The first dot, as the game's extension swap (Path_ReplaceOrAppendExtension) cuts it: a
+	// mission named with an inner dot finds its files by the name before it (review F8).
+	TEST_EXPECT(mission_base_name("two.dots.bms") == "two");
+	TEST_EXPECT(mission_base_name("maps.v2/op.v2.bms") == "op");
+	TEST_EXPECT(script && sidecar_name("op.v2.bms", *script) == "op.wac");
 	TEST_EXPECT(sidecar_name("00TRa.bms", *script) == "00TRa.wac");
 	TEST_EXPECT(sidecar_name("missions/00TRa.bms", *text) == "00TRa.bin");
 	TEST_EXPECT(sidecar_name("ASP_G7.BMS", *image) == "ASP_G7.pcx");

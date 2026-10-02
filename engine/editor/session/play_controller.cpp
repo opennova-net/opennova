@@ -36,15 +36,28 @@ std::string play_mission_for(const SessionView &view) {
 	};
 	const std::string name = fs::path(view.documents.active).filename().string();
 	if (strutil::ends_with_icase(name, ".bms")) return mission_named(name);
-	// A file the game finds by a mission's name: that mission, when the project holds it.
-	const std::string mission = fs::path(name).stem().string() + ".bms";
+	// A file the game finds by a mission's name: that mission, when the project holds it. The readers
+	// cut a mission's name at its first dot ("op.v2.bms" opens "op.wac"), so the mission is any of the
+	// project's whose base name the file's is (the first in the scan's order), and a row read only
+	// beside another's file (the dialog's sounds, beside its .dbf) only when the project has that one.
 	const std::string wanted = normalized_logical_name(name);
-	for (const mission::Sidecar &sidecar : mission::sidecars()) {
-		const std::string alternate = mission::sidecar_alternate_name(mission, sidecar);
-		if (normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted ||
-		    (!alternate.empty() && normalized_logical_name(alternate) == wanted))
-			return mission_named(mission);
-	}
+	const std::string base = normalized_logical_name(mission::mission_base_name(name));
+	const auto names_it = [&](const std::string &mission) {
+		for (const mission::Sidecar &sidecar : mission::sidecars()) {
+			if (const mission::Sidecar *needed = sidecar.needs ? mission::sidecar_for_role(sidecar.needs) : nullptr)
+				if (!scan.find(mission::sidecar_name(mission, *needed))) continue;
+			const std::string alternate = mission::sidecar_alternate_name(mission, sidecar);
+			if (normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted ||
+			    (!alternate.empty() && normalized_logical_name(alternate) == wanted))
+				return true;
+		}
+		return false;
+	};
+	if (!names_it(base + ".bms")) return std::string();
+	for (const AssetEntry &entry : scan.entries)
+		if (entry.kind == AssetKind::Mission && strutil::ends_with_icase(entry.logical_name, ".bms") &&
+		    normalized_logical_name(mission::mission_base_name(entry.logical_name)) == base && names_it(entry.logical_name))
+			return entry.logical_name;
 	return std::string();
 }
 
@@ -361,8 +374,16 @@ void PlayController::absorb_mission_report(const std::string &line) {
 	const size_t at = line.find(marker);
 	if (at == std::string::npos) return;
 	const size_t start = at + marker.size();
+	// The mission's name, which may hold a space ("my map.bms"): the one Play started the game in,
+	// where the line names it (case aside), else the text to the first space.
+	const std::string &launched = view_.activity.play_mission;
 	size_t end = start;
-	while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	if (!launched.empty() && line.size() >= start + launched.size() &&
+	    strutil::iequals(line.substr(start, launched.size()), launched) &&
+	    (line.size() == start + launched.size() || std::isspace(static_cast<unsigned char>(line[start + launched.size()]))))
+		end = start + launched.size();
+	else
+		while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
 	const std::string name = line.substr(start, end - start);
 	if (name.empty()) return;
 	if (!view_.project.open || view_.project.root != boot_project_) return;

@@ -2079,7 +2079,15 @@ static int test_play_mission() {
 		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
 		view.documents.active = "strings/second.bin";
 		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		// The dialog's sounds are the mission's only beside its dialog bank (review F5).
 		view.documents.active = "second.pwf";
+		TEST_EXPECT(play_mission_for(view).empty());
+		AssetEntry bank;
+		bank.logical_name = "Second.dbf";
+		bank.relative_path = "missions/Second.dbf";
+		bank.kind = AssetKind::DialogBank;
+		editor_test::own(view.project.scan).entries = {mission, text, bank};
+		editor_test::own(view.project.scan).index();
 		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
 		view.documents.active = "strings/other.bin";
 		TEST_EXPECT(play_mission_for(view).empty());
@@ -2092,6 +2100,24 @@ static int test_play_mission() {
 		TEST_EXPECT(play_mission_for(view).empty());
 	}
 
+	// A mission whose name holds a space: the game's report names it whole, the row on its file
+	// (review F11).
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/my map.bms", mission_bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::play("my map.bms"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "my map.bms");
+	const std::string spaced = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
+	                           "my map.bms the terrain did not load.\r\n";
+	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + spaced));
+	session.poll();
+	session.run_operations();
+	const Diagnostic *spaced_failed = finding_in(v.findings.diagnostics, "play.mission.failed", "missions/my map.bms");
+	TEST_EXPECT(spaced_failed && spaced_failed->message.find("could not load my map.bms: the terrain did not load.") != std::string::npos);
+	session.handle(request::stop_play());
+	session.poll();
+
 	const std::string install = dir.file("install");
 	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
 	            editor_test::write_text(install + "/game.cfg", "settings"));
@@ -2101,7 +2127,7 @@ static int test_play_mission() {
 	editor_test::apply_settings(session, in_install);
 	session.handle(request::play("First.bms"));
 	session.run_operations();
-	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_mission.empty() &&
+	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_mission.empty() &&
 	            platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}) &&
 	            output_has(v, "The game install starts at its menu: choose First.bms there.") &&
 	            v.activity.status == "Game install running.");

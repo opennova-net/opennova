@@ -802,6 +802,9 @@ static int test_plan_mission_closure() {
 	                       // A second mission with none of its own set but its loading image.
 	                       {"n.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
 	                       {"n.pcx", "pcx"},
+                       // A bank of its name, which the game reads as its dialog's sounds only beside a .dbf it
+                       // lacks (review F5).
+                       {"n.lwf", bank_text({{"LINE9", "nine.wav"}})},
 	                       {"m.wac", "// the mission's script\r\n"},
 	                       {"m.dbf", "dbf"},
 	                       {"m.lwf", bank_text({{"LINE1", "SFX\\VOICE\\line1.wav"}, {"LINE2", "gone.wav"}})},
@@ -970,7 +973,8 @@ static int test_plan_mission_closure() {
 	const ImportPlan alone = project.plan({mission}, false, install);
 	TEST_EXPECT(alone.rows.size() == 1 && alone.rows[0].name == "m.bms" && alone.undefined.empty());
 	// A mission with none of its own set but its loading image: the files the game runs without
-	// (its script, its dialog bank and the bank's sounds) are no row; its text table is served by
+	// (its script, its dialog bank and the bank's sounds) are no row, the sounds' bank of its name the
+	// install has never read without the .dbf (review F5); its text table is served by
 	// the name its lookup takes next (medmssn.bin, which the manifest brings), no row of its own;
 	// the tile placement, which every shipped mission has, is not found.
 	ImportChoice bare = mission;

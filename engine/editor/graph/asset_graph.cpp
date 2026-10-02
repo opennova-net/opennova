@@ -45,7 +45,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
-			a.scope_owner == b.scope_owner;
+			a.scope_owner == b.scope_owner && a.needs == b.needs;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -109,10 +109,11 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 
 // An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
 // whether its menu file is one), and one whose scope a file decides (its table there or not, its
-// owner there or not).
+// owner there or not), or whose reading at all does (GraphEdge::needs).
 bool reads_file_set(const GraphEdge &edge) {
 	return reference_row(edge.kind).resolution == ReferenceResolution::File ||
-			edge.kind == ReferenceKind::MenuScreen || !edge.scope_alternate.empty() || !edge.scope_owner.empty();
+			edge.kind == ReferenceKind::MenuScreen || !edge.scope_alternate.empty() || !edge.scope_owner.empty() ||
+			!edge.needs.empty();
 }
 
 } // namespace
@@ -794,6 +795,11 @@ bool AssetGraph::rewrites(const GraphEdge &edge) const {
 }
 
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
+	// A file the reader reads only beside another the project lacks: no reference (GraphEdge::needs).
+	if (!edge.needs.empty() && !has_file(edge.needs)) {
+		if (file_out) file_out->clear();
+		return ReferenceStatus::NotAReference;
+	}
 	const FirstScope first = first_scope(*this, edge);
 	const ReferenceStatus status = resolve(edge.kind, edge.value, first.scope(), file_out, edge.loader_arg);
 	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && (edge.scopes_after.empty() || !first.then_after)))

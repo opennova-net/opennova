@@ -63,6 +63,12 @@ struct GraphEdge {
 	// ADR 0046 S14): the graph makes no finding of it missing; the resolver, the pickers, References
 	// and the import read the edge as any other.
 	bool optional = false;
+	// The file whose presence the reader needs before it reads this one at all (a mission's dialog
+	// sounds, read only when its .dbf exists [orig: DialogManager_LoadFromFile @ 0x44e650, opened
+	// from DialogSystem_Init @ 0x5275e0 only when the .dbf exists @ 0x527648]); while the project
+	// lacks it the edge is no reference (NotAReference: no finding, no user, no rename companion,
+	// nothing the import follows). "" for none. A file kind's edge only.
+	std::string needs;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on

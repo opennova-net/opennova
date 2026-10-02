@@ -1332,6 +1332,7 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!edge.scope_alternate.empty()) out.set("scope_alternate", json_string(edge.scope_alternate));
 	if (!edge.scope_owner.empty()) out.set("scope_owner", json_string(edge.scope_owner));
 	if (edge.optional) out.set("optional", boolean(true));
+	if (!edge.needs.empty()) out.set("needs", json_string(edge.needs));
 	out.set("rewritable", boolean(graph.rewrites(edge)));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
 	if (edge.loader_arg >= 0) out.set("loader_arg", json_number(double(edge.loader_arg)));

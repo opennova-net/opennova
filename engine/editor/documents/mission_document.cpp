@@ -857,6 +857,9 @@ void mission_references(const Document &document, Extracted &out) {
 		edge.value = mission::sidecar_name(file, *sidecar);
 		edge.fallback = sidecar->fallback ? std::string(sidecar->fallback) : mission::sidecar_alternate_name(file, *sidecar);
 		edge.optional = row.optional;
+		// A row the reader reads only beside another's file (the dialog's sounds, beside its .dbf).
+		if (const mission::Sidecar *needed = sidecar->needs ? mission::sidecar_for_role(sidecar->needs) : nullptr)
+			edge.needs = mission::sidecar_name(file, *needed);
 		out.edges.push_back(std::move(edge));
 	}
 	// A dialog a trigger or an action names (a PlayWavList's, a PlayerDialogDone's) plays from the

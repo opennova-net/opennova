@@ -895,6 +895,10 @@ private:
 			note(edge.kind, AssetKind::Unknown, file);
 			return;
 		}
+		// A file the reader reads only beside another (GraphEdge::needs: a mission's dialog sounds, beside
+		// its .dbf): followed only when the project or the plan has that one (the mission's edges come in
+		// the table's order, the .dbf's first).
+		if (!edge.needs.empty() && !scan_.find(edge.needs) && !provided_.count(key(edge.needs))) return;
 		const std::string name = resolve_name(edge.value);
 		if (is_style_reference(name)) return; // no stylesheet defines it: its variable's reference is listed
 		// The name, then the one its loader takes next where it has one (a mission's text table, then

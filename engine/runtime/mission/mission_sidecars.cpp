@@ -3,7 +3,7 @@
 namespace opennova::mission {
 
 const std::vector<Sidecar> &sidecars() {
-	// One row a reader, in mission-start order [orig: Game_StartMission @ 0x524360].
+	// One row a reader, each opened from Game_StartMission's load [orig: Game_StartMission @ 0x524360].
 	static const std::vector<Sidecar> rows = {
 		// [orig: TextResource_LoadMissionTextBin @ 0x51ed90]
 		{"text", ".bin", nullptr, "medmssn.bin", nullptr},
@@ -31,7 +31,9 @@ const Sidecar *sidecar_for_role(const std::string &role) {
 std::string mission_base_name(const std::string &mission_file) {
 	const size_t slash = mission_file.find_last_of("/\\");
 	const std::string name = slash == std::string::npos ? mission_file : mission_file.substr(slash + 1);
-	const size_t dot = name.find_last_of('.');
+	// Every reader replaces the extension from the name's first dot [orig: Path_ReplaceOrAppendExtension
+	// @ 0x53c780, the scan @ 0x53c7c4; DialogManager_LoadFromFile's strtok @ 0x44e7bb].
+	const size_t dot = name.find('.');
 	return dot == std::string::npos ? name : name.substr(0, dot);
 }
 

@@ -43,6 +43,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/model/text_document.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
@@ -258,7 +259,10 @@ int test_references() {
 	TEST_EXPECT(sidecar(ReferenceKind::LoadingImage, "synth_logic.pcx", "loadscrn.pcx", true, "loading_image"));
 	TEST_EXPECT(sidecar(ReferenceKind::TilePlacement, "synth_logic.til", "", false, "tiles"));
 	TEST_EXPECT(sidecar(ReferenceKind::DialogBank, "synth_logic.dbf", "", true, "dialog"));
-	TEST_EXPECT(sidecar(ReferenceKind::SoundBank, "synth_logic.lwf", "synth_logic.pwf", true, "dialog_sounds"));
+	TEST_EXPECT(sidecar(ReferenceKind::SoundBank, "synth_logic.lwf", "synth_logic.pwf", false, "dialog_sounds"));
+	// The dialog's sounds read only beside its .dbf (review F5); no other row needs one.
+	for (const GraphEdge &e : extracted.edges)
+		TEST_EXPECT(e.needs == (e.field == "dialog_sounds" && e.record.empty() ? "synth_logic.dbf" : ""));
 	TEST_EXPECT(count_edges(extracted, ReferenceKind::DialogBank) == 1);
 	// A record that plays a dialog names the bank itself, which the game needs for it.
 	{
@@ -1104,6 +1108,83 @@ int test_rename_companions() {
 	return 0;
 }
 
+// A mission named like a game sound bank (menu.bms beside the menus' menu.lwf), with no dialog bank:
+// the game reads <stem>.lwf only beside <stem>.dbf (review F5), so the mission's dialog sounds name no
+// file: the bank is not the mission's (no use of it, no companion of a rename); with a .dbf it is.
+int test_mission_named_like_a_bank() {
+	editor_test::TempProjectDir dir("opennova_mission_named_like_a_bank");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Banks"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/menu.bms", fixture_bytes()));
+	TEST_EXPECT(editor_test::write_text(root + "/sounds/menu.lwf", "lwf"));
+	editor_test::handle_to_end(session, request::rescan());
+	const SessionView &view = session.view();
+	const auto sounds = [&view]() -> const GraphEdge * {
+		for (const GraphEdge *edge : view.findings.graph->references_of("missions/menu.bms"))
+			if (edge->field == "dialog_sounds" && edge->record.empty()) return edge;
+		return nullptr;
+	};
+	const auto users = [&view]() {
+		size_t n = 0;
+		for (const GraphEdge *edge : view.findings.graph->referrers_of_file("sounds/menu.lwf"))
+			n += edge->source == "missions/menu.bms" ? 1 : 0;
+		return n;
+	};
+	const auto takes_bank = [&](const RenamePlan &plan) {
+		for (const auto &companion : plan.companions)
+			if (companion.old_name == "menu.lwf") return true;
+		return false;
+	};
+	TEST_EXPECT(sounds() && sounds()->needs == "menu.dbf" &&
+	            view.findings.graph->resolve(*sounds()) == ReferenceStatus::NotAReference && users() == 0);
+	RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "menu.bms", "walk.bms");
+	TEST_EXPECT(plan.ok() && !takes_bank(plan));
+	// With its dialog bank, the bank of its name is its dialog's sounds.
+	TEST_EXPECT(editor_test::write_text(root + "/missions/menu.dbf", "dbf"));
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(sounds() && view.findings.graph->resolve(*sounds()) == ReferenceStatus::Present && users() == 1);
+	plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "menu.bms", "walk.bms");
+	TEST_EXPECT(plan.ok() && takes_bank(plan));
+	// With its dialog bank and no sounds of its name, the sounds are missing (the dialogs play silent):
+	// a warning, the sound bank kind's, no longer an optional row (the data lane's m13).
+	std::filesystem::remove(root + "/sounds/menu.lwf");
+	editor_test::handle_to_end(session, request::rescan());
+	size_t silent = 0;
+	for (const Diagnostic &d : view.findings.diagnostics)
+		if (d.code() == "reference.missing" && d.asset == "missions/menu.bms" && d.field == "dialog_sounds")
+			silent += d.severity == DiagnosticSeverity::Warning ? 1 : 100;
+	TEST_EXPECT(silent == 1);
+	return 0;
+}
+
+// A mission named with an inner dot finds its files by its name to the first dot, as the game's
+// readers cut it (review F8): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
+// it, and Play mission from op.wac starts op.v2.bms.
+int test_mission_first_dot() {
+	editor_test::TempProjectDir dir("opennova_mission_first_dot");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Dots"));
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/op.v2.bms", fixture_bytes()));
+	TEST_EXPECT(editor_test::write_text(root + "/missions/op.wac", "; the op\r\n"));
+	editor_test::handle_to_end(session, request::rescan());
+	const SessionView &view = session.view();
+	const GraphEdge *script = edge_to_file(*view.findings.graph, "missions/op.v2.bms", ReferenceKind::Script);
+	TEST_EXPECT(script && script->value == "op.wac" && view.findings.graph->resolve(*script) == ReferenceStatus::Present);
+	for (const Diagnostic &d : view.findings.diagnostics) TEST_EXPECT(d.code() != "mission.sidecar.unused");
+	const RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "op.v2.bms", "raid.bms");
+	TEST_EXPECT(plan.ok() && plan.companions.size() == 1 && plan.companions[0].old_name == "op.wac" &&
+	            plan.companions[0].new_name == "raid.wac");
+	editor_test::handle_to_end(session, request::open_document("op.wac"));
+	TEST_EXPECT(play_mission_for(view) == "op.v2.bms");
+	return 0;
+}
+
 // What the shipped missions reference (OPENNOVA_JO_DIR, base and each expansion through the VFS): each
 // opened as a document, unblocked, its runs canonical (the five with a damaged loadout chunk noted,
 // mission_corpus's); the references counted: the entity parameters and those naming no SSN of their
@@ -1235,5 +1316,7 @@ int main(int argc, char **argv) {
 	if (test_validation() != 0) return 1;
 	if (test_pool_check() != 0) return 1;
 	if (test_rename_companions() != 0) return 1;
+	if (test_mission_named_like_a_bank() != 0) return 1;
+	if (test_mission_first_dot() != 0) return 1;
 	return test_retail();
 }
