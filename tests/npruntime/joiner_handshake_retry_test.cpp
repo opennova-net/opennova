@@ -8,6 +8,7 @@
 
 #include "host_test_setup.h"
 
+#include <net/npwire/lan_discovery.h>
 #include <net/npwire/nw_session_framing.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
@@ -238,6 +239,61 @@ bool run_unanswered_client_join_fails_after_30000_ms() {
 				client.phase() == inmatch::JoinerConnection::Phase::Error &&
 				client.last_join_reject().set && client.last_join_reject().jfc == 2,
 			"past 30000 ms the join fails with connect error 2 (NCC002) and stops sending");
+}
+
+// A join from a discovered row goes straight to the 0x42: the browse record already holds the
+// host's 0x81, so the connection starts in the connect state with the record's HK (no new 0x41),
+// and the host admits it. A bare dial still sends the 0x41 first.
+// [orig: UI_JoinSelectedSession @0x5699d0 -> CNapiNetwork_StartClientConnection @0x4ca160 ->
+//  CNapiNPConnection_InitFromSession @0x626320 (HK @0x62639c, state 3 @0x626496)]
+bool run_discovered_row_join_skips_the_hello() {
+	const PeerAddr scanner{0x0100007Fu, 32771};
+	const PeerAddr joiner_peer{0x0100007Fu, 32772};
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+			inmatch::SocketMode::Socketless, 0x0FE0E114u);
+	// The browse: one probe, one 0x81, projected into the row record.
+	const std::vector<uint8_t> probe = build_lan_discovery_probe(0x00C0FFEEu);
+	const inmatch::HandleResult browse = inmatch::handle_server_datagram(
+			host, scanner, probe.data(), probe.size(), 0);
+	LanDiscoveryServer row;
+	if (!expect(browse.outbound.size() == 1 &&
+	                    parse_lan_discovery_reply(browse.outbound[0].data(), browse.outbound[0].size(),
+	                                              0x00C0FFEEu, row) &&
+	                    row.host_key == 0x0FE0E114u && !row.password_required,
+	            "the browse row records the host's HK and SF")) {
+		return false;
+	}
+	uint64_t now_ms = 7000;
+	inmatch::ClientRuntime client("RowJoiner", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = row.host_key;
+	session.password_required = row.password_required;
+	session.expansion = row.expansion;
+	client.set_discovered_session(session);
+	const std::vector<uint8_t> first = client.start();
+	if (!expect(is_opcode(first, SESSION_OPCODE_CLIENT_AUTH) &&
+	                    client.phase() == inmatch::JoinerConnection::Phase::Auth,
+	            "a discovered-row join's first datagram is the 0x42, not a 0x41")) {
+		return false;
+	}
+	const inmatch::HandleResult admitted = inmatch::handle_server_datagram(
+			host, joiner_peer, first.data(), first.size(), 0);
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ServerAuth sa;
+	if (!expect(!admitted.outbound.empty() &&
+	                    nw_decode_inbound(admitted.outbound[0].data(), admitted.outbound[0].size(),
+	                                      opcode, body) &&
+	                    opcode == SESSION_OPCODE_SERVER_AUTH &&
+	                    parse_server_auth(body.data(), body.size(), sa) && sa.cr == 1u,
+	            "the host admits the row's HK with an accepting 0x82")) {
+		return false;
+	}
+	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
+	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
+	              "a bare dial (no row record) still sends the 0x41 first");
 }
 
 // D-NET-232: the joiner runs on its cs_dir0 block, overlaid by the host's 0x82 CS TLVs and by
@@ -627,6 +683,7 @@ int main() {
 	if (!run_idle_keepalive_waits_while_a_packet_is_held()) return 1;
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
+	if (!run_discovered_row_join_skips_the_hello()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;
 	if (!run_client_active_probe_recovers_join()) return 1;
 	if (!run_server_active_probe_recovers_settings()) return 1;

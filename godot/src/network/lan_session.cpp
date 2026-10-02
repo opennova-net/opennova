@@ -29,6 +29,8 @@ Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	out->set_server_flags(static_cast<int64_t>(row.server.server_flags));
 	out->set_session_id(opennova::to_gd(row.server.session_id));
 	out->set_expansion(opennova::to_gd(row.server.expansion));
+	out->set_host_key(static_cast<int64_t>(row.server.host_key));
+	out->set_password_required(row.server.password_required);
 	return out;
 }
 

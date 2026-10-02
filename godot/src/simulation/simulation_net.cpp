@@ -571,6 +571,18 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	install_join_cd_cookie();
 }
 
+void Simulation::set_join_discovered_session(bool p_present, int64_t p_host_key,
+		bool p_password_required, const String &p_expansion) {
+	opennova::inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = p_present;
+	session.host_key = static_cast<uint32_t>(p_host_key);
+	session.password_required = p_password_required;
+	session.expansion = opennova::to_std(p_expansion);
+	net_.join_discovered_session = std::move(session);
+	// Applied to a live joiner runtime now and on each (re)load in enable_join.
+	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
+}
+
 void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
@@ -620,6 +632,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
+	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.

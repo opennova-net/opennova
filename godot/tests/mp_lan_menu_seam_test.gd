@@ -480,6 +480,8 @@ func test_lan_join_emits_selected_server() -> void:
 	var biggy := LanServerRow.make("biggy", "192.168.1.10", 32768)
 	biggy.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS | JoinTarget.FLAG_SPECTATOR_PASSWORD
 	biggy.expansion = "jox01"
+	biggy.host_key = 0x0FE0E112
+	biggy.password_required = true
 	session.servers_changed.emit([biggy])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
@@ -501,6 +503,12 @@ func test_lan_join_emits_selected_server() -> void:
 	assert_true(target.expansion_known, "a discovered row's expansion is known")
 	assert_false(JoinTarget.new().expansion_known,
 			"a bare target (--lan-join) knows no expansion and keeps the mount")
+	# The row's record already holds the 0x81: the join goes straight to the 0x42
+	# with its HK and SF.
+	assert_true(target.discovered_session, "a LAN row's join connects from its session record")
+	assert_eq(target.session_host_key, 0x0FE0E112, "the row's HK rides the join target")
+	assert_true(target.session_password_required, "the row's SF rides the join target")
+	assert_false(JoinTarget.new().discovered_session, "a bare dial sends the 0x41 first")
 
 
 func test_refreshed_lan_rows_require_a_fresh_selection() -> void:

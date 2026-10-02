@@ -189,6 +189,21 @@ public:
 
 	// Begin the handshake. Returns the ClientHello datagram to send (Idle -> Hello).
 	std::vector<uint8_t> start();
+	// The browse row's record of the host's 0x81 (a LAN row the player picked):
+	// a join from a discovered session goes straight to the 0x42 with the row's
+	// HK and SF -- no new 0x41 -- as retail's connect takes HK, address and port
+	// from the session record into the connect state. Configure before start();
+	// `present == false` (a bare dial) sends the 0x41 first.
+	// [orig: UI_JoinSelectedSession @0x5699d0 -> CNapiNetwork_StartClientConnection
+	//  @0x4ca160 -> CNapiNPConnection_InitFromSession @0x626320 (the record's HK
+	//  @0x62639c, address/port @0x6263ae..0x6263b7, state 3 @0x626496)]
+	struct DiscoveredSession {
+		bool present = false;
+		uint32_t host_key = 0;
+		bool password_required = false;
+		std::string expansion; // the 0x81 SUS2, echoed in the C2S JOIN EXP TLV
+	};
+	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
 	// any surfaced 0x0A bodies + whether this datagram learned H.
@@ -769,6 +784,7 @@ private:
 	std::vector<uint8_t> cd_cookie_; // 0x00 JOIN CD identity cookie (packed PUB* blob)
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
+	DiscoveredSession discovered_; // the browse row's 0x81 record (survives start())
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
 	// retrying never regenerates identity/session material (especially ClientAuth CK/SCRK).
 	MonotonicMilliseconds monotonic_milliseconds_;

@@ -305,11 +305,26 @@ std::vector<uint8_t> JoinerConnection::start() {
 	disconnect_event_set_ = false;
 	conn_.timeouts = SessionTimeoutConfig{}; // the template; the accepted 0x82 overlays it
 	silence_timeout_latched_ = false;
-	phase_ = Phase::Hello;
 	// Arm the receive clock at connect: the reap window is measured from the moment
 	// this connection started expecting traffic, not from the first reply.
 	last_receive_ms_ = monotonic_milliseconds_();
 	receive_clock_armed_ = true;
+	if (discovered_.present) {
+		// A join from a discovered session: the record already holds the 0x81, so the
+		// connection starts in the connect state with its HK and SF and sends the 0x42
+		// [orig: CNapiNPConnection_InitFromSession @0x626320, state 3 @0x626496, its
+		//  window's start @0x62648a; PumpStateMachine case 3 @0x629508].
+		server_hk_ = discovered_.host_key;
+		server_password_required_ = discovered_.password_required;
+		advertised_expansion_ = discovered_.expansion;
+		phase_ = Phase::Auth;
+		handshake_retry_datagram_ = build_client_auth();
+		handshake_last_send_ms_ = monotonic_milliseconds_();
+		client_join_start_ms_ = handshake_last_send_ms_;
+		handshake_retry_clock_armed_ = true;
+		return handshake_retry_datagram_;
+	}
+	phase_ = Phase::Hello;
 	handshake_retry_datagram_ = build_client_hello();
 	handshake_last_send_ms_ = monotonic_milliseconds_();
 	handshake_retry_clock_armed_ = true;

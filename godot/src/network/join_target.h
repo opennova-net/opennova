@@ -90,6 +90,15 @@ public:
 #undef JOIN_TARGET_TEXT
 	bool get_expansion_known() const { return expansion_known_; }
 	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
+	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
+	// from it goes straight to the 0x42 (JoinerConnection::DiscoveredSession).
+	// `discovered_session` false = a bare dial that sends the 0x41 first.
+	bool get_discovered_session() const { return discovered_session_; }
+	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
+	int64_t get_session_host_key() const { return session_host_key_; }
+	void set_session_host_key(int64_t p_value) { session_host_key_ = p_value; }
+	bool get_session_password_required() const { return session_password_required_; }
+	void set_session_password_required(bool p_value) { session_password_required_ = p_value; }
 
 	int get_port() const { return port_; }
 	void set_port(int p_port) { port_ = p_port; }
@@ -186,6 +195,9 @@ private:
 	String join_password_;
 	String expansion_;
 	bool expansion_known_ = false;
+	bool discovered_session_ = false;
+	int64_t session_host_key_ = 0;
+	bool session_password_required_ = false;
 	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
 	String proxy_node_;

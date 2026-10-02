@@ -18,12 +18,17 @@ struct LanDiscoveryServer {
 	uint32_t server_flags = 0;
 	uint32_t current_players = 0;
 	uint32_t max_players = 0;
+	// The session record a join from this row connects with: the 0x81 HK the
+	// 0x42 echoes and its SF (a server password is set).
+	uint32_t host_key = 0;
+	bool password_required = false;
 
 	bool operator==(const LanDiscoveryServer &o) const {
 		return server_name == o.server_name && session_id == o.session_id &&
 		       expansion == o.expansion && gametype == o.gametype &&
 		       server_flags == o.server_flags &&
-		       current_players == o.current_players && max_players == o.max_players;
+		       current_players == o.current_players && max_players == o.max_players &&
+		       host_key == o.host_key && password_required == o.password_required;
 	}
 	bool operator!=(const LanDiscoveryServer &o) const { return !(*this == o); }
 };

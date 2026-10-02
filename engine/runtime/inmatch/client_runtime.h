@@ -412,6 +412,10 @@ public:
 	void set_app_id(std::string token) {
 		if (joiner_) joiner_->set_app_id(std::move(token));
 	}
+	// The browse row's 0x81 record (JoinerConnection::set_discovered_session).
+	void set_discovered_session(JoinerConnection::DiscoveredSession session) {
+		if (joiner_) joiner_->set_discovered_session(std::move(session));
+	}
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN. Joiner only.
 	void set_join_cd_cookie(std::vector<uint8_t> cookie) {
 		if (joiner_) joiner_->set_cd_cookie(std::move(cookie));

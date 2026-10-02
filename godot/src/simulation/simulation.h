@@ -1196,6 +1196,7 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
+	void set_join_discovered_session(bool, int64_t, bool, const String &); // the row's 0x81 (C++)
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character/integrity data.

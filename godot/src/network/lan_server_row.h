@@ -12,8 +12,9 @@ namespace godot {
 // One LAN browser row (LanSession.get_servers / servers_changed): the
 // endpoint the 0x81 reply came from and the ServerHello facts it carried —
 // the cp1252-decoded server name, the player counts, the game type word,
-// the P2 server flags (JoinTarget.FLAG_*), the session id and the
-// advertised expansion. Map identity is deliberately absent: retail LAN
+// the P2 server flags (JoinTarget.FLAG_*), the session id, the
+// advertised expansion, and the session record a join from this row
+// connects with (the 0x81 HK and its SF password bit). Map identity is deliberately absent: retail LAN
 // enumeration has not joined the session yet (engine:
 // net/npwire/lan_discovery.h LanDiscoveryRow).
 #define LAN_SERVER_ROW_FIELDS(X)        \
@@ -25,7 +26,9 @@ namespace godot {
 	X(int64_t, gametype, -1)            \
 	X(int64_t, server_flags, -1)        \
 	X(String, session_id, String())     \
-	X(String, expansion, String())
+	X(String, expansion, String())      \
+	X(int64_t, host_key, 0)             \
+	X(bool, password_required, false)
 
 class LanServerRow : public RefCounted {
 	GDCLASS(LanServerRow, RefCounted)

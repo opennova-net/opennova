@@ -63,6 +63,11 @@ bool parse_lan_discovery_reply(const uint8_t *data, size_t size, uint32_t client
 	parsed.server_flags = hello.p2;
 	parsed.current_players = hello.np;
 	parsed.max_players = hello.mp;
+	// The session record keeps the HK and SF a join from this row connects with
+	// [orig: Nwu_HandleServerHello @0x626d20 — HK into session+0x1F8 and SF into
+	//  session+0x2C0 (e.g. @0x62776f / @0x6277c2), the fields InitFromSession @0x62639c reads]
+	parsed.host_key = hello.hk;
+	parsed.password_required = (hello.sf & 1u) != 0;
 	out = std::move(parsed);
 	return true;
 }
