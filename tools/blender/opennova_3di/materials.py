@@ -25,11 +25,7 @@
 # The Shader property names the engine shader; left empty, export picks one
 # (automatic_shader). An image loaded unchanged from a file the game reads is
 # that file: its row names it and export copies it beside the .3di; any other
-# image is written as a TGA named after the model. A model writing DDS
-# textures (its root's Texture files) writes a diffuse or detail .tga, copied
-# or made, as the .dds beside it that the game reads first, with its mip
-# chain, through `opennova-3di texture`; a texture past the model's Max
-# texture size is halved or refused (ModelMaterials.plan). The texture list carries
+# image is written as a TGA named after the model. The texture list carries
 # only what the nodes cannot say (flipbook frames, row flags, a normal map
 # file, a file Blender cannot open); a slot it lists is taken from it.
 
@@ -42,7 +38,7 @@ from collections import namedtuple
 import bpy
 import numpy as np
 
-from . import export, o3dtext
+from . import export
 from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, flipbook_reads_register, fmt, quoted
 
 
@@ -393,78 +389,6 @@ def face_flags(mat):
             (0x800 if p.face_front_only else 0) | (p.face_other_flags & ~0x901))
 
 
-# A bullet face keeps its material's surface and flags unless its polygon says
-# otherwise: two integer face attributes of the collision LOD's meshes, each
-# holding the polygon's own value plus one, 0 (or none) taking the material's.
-# The +1 is what keeps a polygon Blender makes on its own the material's: a new
-# face, a fill, a mesh joined in without the attribute get 0, and 0 must not
-# read as surface 0 (Object) and no flags. Import writes them where a retail
-# face disagrees with its material's vote (the file keeps a surface and flags
-# per face, so a material's faces may differ), so a re-export keeps each face
-# as it was; the material panel counts them and Make all clears them. The
-# API below speaks in values (-1: the material's); the +1 is the attributes'.
-FACE_SURFACE = "o3d_own_surface"
-FACE_FLAGS = "o3d_own_face_flags"
-# An own value past this does not fit the INT attribute with its +1.
-FACE_VALUE_MAX = 0x7FFFFFFE
-
-
-def face_attribute(mesh, name):
-    """The mesh's per-polygon integer attribute `name`, or None."""
-    attr = mesh.attributes.get(name)
-    return attr if attr is not None and attr.domain == "FACE" and attr.data_type == "INT" else None
-
-
-def face_overrides(mesh, name):
-    """Each polygon's own value of a face attribute (-1: the material's), or
-    None when the mesh has none."""
-    attr = face_attribute(mesh, name)
-    if attr is None:
-        return None
-    stored = [0] * len(mesh.polygons)
-    attr.data.foreach_get("value", stored)
-    return [v - 1 if v > 0 else -1 for v in stored]
-
-
-def set_face_overrides(mesh, name, values):
-    """Write a face attribute's values (-1: the material's); the attribute is
-    made where some polygon holds its own value, and taken off where none
-    does."""
-    attr = face_attribute(mesh, name)
-    if all(v < 0 or v > FACE_VALUE_MAX for v in values):
-        if attr is not None:
-            mesh.attributes.remove(attr)
-        return
-    if attr is None:
-        attr = mesh.attributes.new(name, "INT", "FACE")
-    attr.data.foreach_set("value", [v + 1 if 0 <= v <= FACE_VALUE_MAX else 0 for v in values])
-
-
-def material_face_overrides(meshes, mat):
-    """Over `meshes` (the collision LOD's), the polygons drawn with `mat` that
-    keep a surface or flags of their own: {(mesh object, polygon index):
-    (surface or -1, flags or -1)}, and how many polygons draw with it."""
-    found, drawn = {}, 0
-    for ob in meshes:
-        me = ob.data
-        slots = [i for i, s in enumerate(ob.material_slots) if s.material == mat]
-        if not slots:
-            continue
-        surfaces = face_overrides(me, FACE_SURFACE)
-        flags = face_overrides(me, FACE_FLAGS)
-        index = [0] * len(me.polygons)
-        me.polygons.foreach_get("material_index", index)
-        for pi, slot in enumerate(index):
-            if slot not in slots:
-                continue
-            drawn += 1
-            s = surfaces[pi] if surfaces is not None else -1
-            f = flags[pi] if flags is not None else -1
-            if (s >= 0 and s != mat.o3d.surface) or (f >= 0 and f != face_flags(mat)):
-                found[(ob, pi)] = (s, f)
-    return found, drawn
-
-
 # --- images -----------------------------------------------------------------
 
 def check_image(image, what):
@@ -566,8 +490,8 @@ def check_pixels(image, what):
 
 # --- texture names ------------------------------------------------------------
 
-# A texture row's name holds what the retail target takes (16 bytes, its MTRL
-# row: opennova-3di's lowering says so at the row); a file the export
+# A texture row's name field holds 16 characters and a NUL (the MTRL row,
+# formats/threedi/threedi_3di3.h ThreediMaterialTexture); a file the export
 # writes is named in at most export.FILE_NAME_BYTES (15), as every texture
 # retail packs is (a PFF entry's 16-byte name field, formats/pff/pff.h). The
 # game asks for a row's name cut three characters past its first dot
@@ -576,6 +500,7 @@ def check_pixels(image, what):
 # Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B598;
 # renderer::material_texture_query, material_dds_sibling]: a written file's
 # name has one dot.
+ROW_NAME_BYTES = 16
 WRITTEN_EXTENSIONS = (".tga", ".mdt")
 # The files the game reads a texture from: .tga and .mdt through its TGA
 # reader, .pcx through its PCX reader, a .dds sibling [orig:
@@ -587,14 +512,16 @@ MATERIAL_ROWS = 24
 
 
 def check_row_name(name, what):
-    """An ExportError unless `name` is a texture row name the game reads:
-    printable ASCII, a file name without a folder (its length is the CLI's to
-    check, against the target it builds for). An empty
+    """An ExportError unless `name` is a texture row name opennova-3di takes:
+    printable ASCII, at most 16 bytes, a file name without a folder. An empty
     name is a row that names no file, which the format holds: 63 rows of the
     JO models are empty (M24_1st's VS_BMTXMIRRT material keeps one in slot 2,
     Chair3's FF_ST_OP one in slot 1)."""
     if any(not " " <= c <= "~" for c in name):
         raise ExportError(f"{what}: the texture name '{name}' is not printable ASCII")
+    if len(name) > ROW_NAME_BYTES:
+        raise ExportError(f"{what}: the texture name '{name}' exceeds {ROW_NAME_BYTES} characters (its row's "
+                          "field)")
     if any(c in name for c in "/\\"):
         raise ExportError(f"{what}: the texture name '{name}' names a folder; the game finds a texture by its "
                           "file name alone")
@@ -667,114 +594,6 @@ def file_reference(image):
 
 # --- texture files ------------------------------------------------------------
 
-# A diffuse or detail row's loader opens the .dds sibling of the name it
-# reads before that name, so a row naming <stem>.tga loads <stem>.dds when it
-# is there [orig: Texture_LoadByNameWithChannel @ 0x58B53C..0x58B598 (the
-# sibling), from Material_LoadStageTexture @ 0x5B16F0 for runtime types 0, 2
-# and 8; renderer::material_texture_source]. A model writing DDS textures
-# keeps its rows naming <stem>.tga and writes <stem>.dds beside the .3di:
-# - the .3di is the same whichever form its textures ship in;
-# - a row naming <stem>.dds takes the plain path once a loose-first search
-#   finds the loose file (the /d launch), and the plain path
-#   reads .tga, .mdt and .pcx alone [orig: @ 0x58B4FE..0x58B5AD]: the texture
-#   would not load; a <stem>.tga row with no loose .tga probes the sibling and
-#   loads the .dds;
-# - retail's rows name their .tga beside the .dds it ships.
-# Only the colour slots (1 diffuse, 2 detail) take a DDS: a normal map (slots
-# 3 and 4) stays the 32-bit TGA retail ships every normal map as (498 .mdt
-# files), since a DXT block's four colours bend the normals.
-DDS_SLOTS = (1, 2)
-# A .dds is read by D3DX at D3DX_DEFAULT sides, which it rounds up to powers of
-# two, the texels placed top left and the rest transparent, so a model's UVs
-# would reach the padding (docs/render/render-material-re.md D-RMAT-18):
-# export writes a texture whose sides are not powers of two as a TGA.
-# The game halves a normal map (row type 4 or 5) until it fits 512 a side
-# when it loads it [orig: Material_LoadStageTexture @ 0x5B1782, flag 0x1000;
-# GTexture_DownsampleToLimits @ 0x687170].
-NORMAL_MAP_SIDE = 512
-
-
-def runtime_type(typ):
-    """The row type the game's loader takes (renderer::material_texture_runtime_type):
-    3, 9 to 15 and anything past 18 load as 0 [orig: Material_ConvertDefinition
-    @ 0x5B045B..0x5B04A0]."""
-    return 0 if typ == 3 or 9 <= typ <= 15 or typ > 18 else typ
-
-
-def reads_dds_sibling(slot, typ):
-    """Whether a row is a colour row whose loader opens a .dds sibling first:
-    slot 1 or 2, runtime type 0, 2 or 8 (the stage loader)."""
-    return slot in DDS_SLOTS and runtime_type(typ) in (0, 2, 8)
-
-
-def power_of_two(side):
-    return side > 0 and side & (side - 1) == 0
-
-
-def halved_to(size, cap):
-    """The sides a texture of `size` takes halved while a side exceeds `cap`
-    (0: no cap), as `opennova-3di texture --max-size` halves it."""
-    w, h = size
-    while cap and (w > cap or h > cap):
-        w, h = max(1, w // 2), max(1, h // 2)
-    return w, h
-
-
-def file_size(path):
-    """(width, height) a texture file's header states (a TGA or .mdt, a DDS, a
-    PCX), None for a file it cannot tell."""
-    try:
-        with open(path, "rb") as f:
-            head = f.read(128)
-    except OSError:
-        return None
-    ext = os.path.splitext(path)[1].lower()
-    if ext in (".tga", ".mdt") and len(head) >= 18:
-        return struct.unpack_from("<HH", head, 12)
-    if ext == ".dds" and len(head) >= 20 and head[:4] == b"DDS ":
-        h, w = struct.unpack_from("<II", head, 12)
-        return w, h
-    if ext == ".pcx" and len(head) >= 12:
-        x0, y0, x1, y1 = struct.unpack_from("<HHHH", head, 4)
-        return x1 - x0 + 1, y1 - y0 + 1
-    return None
-
-
-def sides(size):
-    return f"{size[0]} x {size[1]}"
-
-
-class TextureOut:
-    """A texture file the model writes beside its .3di: the row name its rows
-    give (`name`), what it is written from (an ImageFile, NormalMapFile,
-    CopiedFile or SwatchFile), the rows that name it (slot, type) and, once
-    planned (ModelMaterials.plan), the file written (`written`: `name`, or its
-    .dds sibling), the form (`dds`), and the sides it is written at."""
-
-    def __init__(self, name, file, what):
-        self.name, self.file, self.what = name, file, what
-        self.rows = []
-        self.written, self.dds, self.size, self.cap = name, False, None, 0
-
-    def other_form(self):
-        """The file of the other form under the written one's stem (<stem>.tga
-        for <stem>.dds and back): the game reads the .dds before the .tga, and a
-        loose-first search the .tga first, so a stale one of them is removed."""
-        stem, ext = os.path.splitext(self.written)
-        return stem + {".dds": ".tga", ".tga": ".dds"}[ext.lower()] if ext.lower() in (".dds", ".tga") else None
-
-
-def convert(exporter, source, out_path, out):
-    """`opennova-3di texture` over a source TGA, .mdt or PNG file: `out_path`
-    written as `out` plans it (a .dds by the CLI's auto rule, DXT1 for an
-    opaque image and DXT5 otherwise, with its full mip chain; or a 32-bit TGA),
-    halved while a side exceeds its cap."""
-    args = ["texture", source, "-o", out_path]
-    if out.cap:
-        args += ["--max-size", str(out.cap)]
-    o3dtext.run_cli(exporter.context, args, ExportError)
-
-
 class ImageFile:
     """A texture file export writes from an image, as the game draws it
     (image_rows)."""
@@ -793,25 +612,8 @@ class ImageFile:
         check_image(self.image, what)
         check_pixels(self.image, what)
 
-    def size(self):
-        return tuple(self.image.size)
-
-    def rows_of(self):
-        """The pixels written, image_rows' chunks."""
-        return image_rows(self.image)
-
-    def write(self, path, exporter, out):
-        rows = self.rows_of()
-        first = next(rows)  # its checks run before the file is opened
-        rows = itertools.chain([first], rows)
-        if not out.dds and not out.cap:
-            write_rows(path, self.image.size[0], self.image.size[1], rows)
-            return
-        # The CLI writes the .dds or the halved file from the TGA of its texels.
-        with o3dtext.scratch() as tmp:
-            source = os.path.join(tmp, "source.tga")
-            write_rows(source, self.image.size[0], self.image.size[1], rows)
-            convert(exporter, source, path, out)
+    def write(self, path, exporter):
+        write_tga(self.image, path)
 
 
 class NormalMapFile(ImageFile):
@@ -824,17 +626,20 @@ class NormalMapFile(ImageFile):
     def describe(self):
         return f"the normal map {self.image.name}"
 
-    def rows_of(self):
-        for values in image_rows(self.image):
-            values[:, 1] = 1.0 - values[:, 1]
-            yield values
+    def write(self, path, exporter):
+        rows = image_rows(self.image)
+        first = next(rows)  # its checks run before the file is opened
+
+        def flipped(chunks):
+            for values in chunks:
+                values[:, 1] = 1.0 - values[:, 1]
+                yield values
+        write_rows(path, self.image.size[0], self.image.size[1], flipped(itertools.chain([first], rows)))
 
 
 class CopiedFile:
     """A texture file as it stands (file_reference), copied beside the .3di
-    under its own name unless a file of that name is already there; a .tga
-    the model writes as a DDS is converted to its .dds sibling instead, and one
-    over the model's cap halved."""
+    under its own name unless a file of that name is already there."""
 
     def __init__(self, path):
         self.path = path
@@ -848,21 +653,11 @@ class CopiedFile:
     def check(self, what):
         pass  # its row names it whether or not the file is there to copy
 
-    def size(self):
-        return file_size(self.path)
-
-    def convertible(self):
-        """Whether the CLI reads it (a TGA or an .mdt), so it can be made a DDS
-        or halved."""
-        return os.path.splitext(self.path)[1].lower() in (".tga", ".mdt")
-
-    def write(self, path, exporter, out):
+    def write(self, path, exporter):
         if os.path.normcase(os.path.abspath(path)) == os.path.normcase(self.path):
             return
         if not os.path.isfile(self.path):
             exporter.note(f"the texture {os.path.basename(path)} is not copied: {self.path} is missing")
-        elif out.dds or out.cap:
-            convert(exporter, self.path, path, out)
         elif os.path.exists(path):
             with open(path, "rb") as a, open(self.path, "rb") as b:
                 if a.read() != b.read():
@@ -873,9 +668,7 @@ class CopiedFile:
 
 class SwatchFile:
     """A texture of one colour (linear RGBA), for a material whose Base Color
-    has no image: 8 by 8 pixels, the size of retail's smallest textures, a
-    32-bit TGA in either form (a DXT block would round its colour to 16
-    bits)."""
+    has no image: 8 by 8 pixels, the size of retail's smallest textures."""
 
     SIDE = 8
 
@@ -896,10 +689,7 @@ class SwatchFile:
     def check(self, what):
         check_working_space(what)
 
-    def size(self):
-        return (self.SIDE, self.SIDE)
-
-    def write(self, path, exporter, out):
+    def write(self, path, exporter):
         write_rows(path, self.SIDE, self.SIDE, [np.tile(self.pixel(), (self.SIDE * self.SIDE, 1))])
 
 
@@ -926,7 +716,6 @@ class TextureRun:
 
     def __init__(self):
         self.names = {}  # name (lower case) -> (model, content, description)
-        self.forms = {}  # a .tga's stem (lower case) -> (model, the file written for it)
 
     def claim(self, name, model, content, description, what):
         have = self.names.setdefault(name.lower(), (model, content, description))
@@ -934,19 +723,6 @@ class TextureRun:
             owner = "this model" if have[0] == model else f"the model {have[0]}"
             raise ExportError(f"{what}: its texture {name} would be {description}, but {owner} names {name} for "
                               f"{have[2]} (the game finds a texture by its name alone): give one another name")
-
-    def claim_form(self, out, model):
-        """One form for a .tga row name across the run: a model writing
-        <stem>.dds and another writing <stem>.tga would each remove the
-        other's (TextureOut.other_form), and the game reads the .dds."""
-        stem, ext = os.path.splitext(out.name)
-        if ext.lower() != ".tga":
-            return
-        have = self.forms.setdefault(stem.lower(), (model, out.written))
-        if have[1].lower() != out.written.lower():
-            raise ExportError(f"{out.what}: its texture {out.name} is written as {out.written}, but the model "
-                              f"{have[0]} writes it as {have[1]} (the game reads a .dds before the .tga of its name): "
-                              "give both models one Texture files setting")
 
 
 # --- export -----------------------------------------------------------------
@@ -971,7 +747,7 @@ class ModelMaterials:
         self.first_use = {}  # material name (None) -> its index in first-use order
         self.meshes = {}     # material name (None) -> [MeshUse]
         self.choices = {}    # material name (None) -> (shader, named by the material, what it draws otherwise)
-        self.textures = {}   # file name (lower case) -> TextureOut, the file to write
+        self.textures = {}   # file name (lower case) -> (file name, the file) to write
 
     def index_of(self, mat):
         """The material's first-use index, which a strip carries until
@@ -1125,58 +901,12 @@ class ModelMaterials:
                 self.run.claim(file_name, model, row.file.content(), row.file.describe(), what)
                 if file_name.lower() not in self.textures:
                     row.file.check(what)
-                    self.textures[file_name.lower()] = TextureOut(file_name, row.file, what)
-                self.textures[file_name.lower()].rows.append((row.slot, row.type))
+                    self.textures[file_name.lower()] = (file_name, row.file)
                 if isinstance(row.file, SwatchFile):
                     self.exporter.note(f"{what}: no image feeds its Base Color, so it draws with the colour "
                                        f"swatch {row.name}")
-        for out in self.textures.values():
-            self.plan(out)
-            self.run.claim_form(out, model)
         for mat, material_rows in zip(self.used, rows):
             self.emit_material(lines, mat, material_rows)
-
-    def plan(self, out):
-        """The file a texture is written as, by the model's texture settings
-        (its root's Texture files, Max texture size and Larger textures): its
-        sides, halved past the cap or refused; a .tga name every row of which
-        reads a .dds sibling first written as that .dds where the model writes
-        DDS textures and its sides are powers of two; a normal map past the 512
-        the game halves it to, noted."""
-        props = self.exporter.props
-        what, name = out.what, out.name
-        size = out.file.size()
-        if size is None or not size[0] or not size[1]:
-            return  # a copied file that is missing or not read: copied as it stands
-        cap = int(props.texture_max_size)
-        copied = isinstance(out.file, CopiedFile)
-        if cap and (size[0] > cap or size[1] > cap):
-            if props.texture_oversize == "REFUSE":
-                raise ExportError(f"{what}: its texture {name} is {sides(size)}, larger than the model's Max texture "
-                                  f"size {cap}: make it smaller, or set Larger textures to Halve")
-            if copied and not out.file.convertible():
-                raise ExportError(f"{what}: its texture {name} is {sides(size)}, larger than the model's Max texture "
-                                  f"size {cap}, and export copies {os.path.basename(out.file.path)} as it stands: "
-                                  "make it smaller")
-            out.cap = cap
-            self.exporter.note(f"{what}: its texture {name} is {sides(size)}; it is written at "
-                               f"{sides(halved_to(size, cap))}, the model's Max texture size {cap}")
-        out.size = halved_to(size, out.cap)
-        stem, ext = os.path.splitext(name)
-        source_tga = not copied or os.path.splitext(out.file.path)[1].lower() == ".tga"
-        if props.texture_files == "DDS" and ext.lower() == ".tga" and source_tga and \
-                not isinstance(out.file, SwatchFile) and all(reads_dds_sibling(*row) for row in out.rows):
-            if power_of_two(out.size[0]) and power_of_two(out.size[1]):
-                out.dds, out.written = True, stem + ".dds"
-            else:
-                self.exporter.note(f"{what}: its texture {name} is {sides(out.size)}, whose sides are not powers of "
-                                   "two, so it is written as a TGA: the game pads a .dds of such sides to the next "
-                                   "powers of two, and the model's UVs would reach the padding")
-        if any(runtime_type(t) in (4, 5) for _, t in out.rows) and max(out.size) > NORMAL_MAP_SIDE:
-            self.exporter.note(f"{what}: its normal map {name} is {sides(out.size)}; the game halves a normal map "
-                               f"until it fits {NORMAL_MAP_SIDE} a side when it loads it, so the file carries texels "
-                               f"it never draws: give it {NORMAL_MAP_SIDE} a side (its image, or the model's Max "
-                               "texture size)")
 
     def rows(self, mat):
         """A material's texture rows: its texture list's, then for each slot
@@ -1471,40 +1201,15 @@ class ModelMaterials:
     def write_textures(self, out_dir):
         """Write the model's texture files beside its .3di, when the scene's
         Write textures setting is on; the exporter calls it once the model is
-        built, so a model that fails writes none. A file it writes or converts
-        takes the place of the other form of its name there (a .dds of its
-        .tga, a .tga of its .dds: TextureOut.other_form), which is removed
-        unless an image of the scene reads it."""
+        built, so a model that fails writes none."""
         if not self.exporter.settings.write_textures:
             return
-
-        def key(path):
-            return os.path.normcase(os.path.abspath(path))
-        read = {key(bpy.path.abspath(img.filepath, library=img.library)) for img in bpy.data.images
-                if img.source == "FILE" and img.filepath}
-        read |= {key(out.file.path) for out in self.textures.values() if isinstance(out.file, CopiedFile)}
-        written = {out.written.lower() for out in self.textures.values()}
-        for out in self.textures.values():
-            path = os.path.join(out_dir, out.written)
+        for name, file in self.textures.values():
+            path = os.path.join(out_dir, name)
             try:
-                out.file.write(path, self.exporter, out)
+                file.write(path, self.exporter)
             except OSError as e:
                 raise ExportError(f"could not write the texture {path}: {e}") from e
-            other = out.other_form()
-            # A .dds copied as it stands leaves a .tga of its name be: the game reads the .dds first anyway.
-            if other is None or other.lower() in written or (isinstance(out.file, CopiedFile) and not out.dds and
-                                                             out.written.lower().endswith(".dds")):
-                continue
-            stale = os.path.join(out_dir, other)
-            if os.path.isfile(stale) and key(stale) not in read:
-                try:
-                    os.remove(stale)
-                except OSError as e:
-                    raise ExportError(f"could not remove {stale}, which the game would read for {out.name}: {e}") \
-                        from e
-                self.exporter.note(f"removed {other} beside the model: {out.name} is written as {out.written}, and "
-                                   + ("the game reads a .dds before the .tga of its name" if other.lower().endswith(
-                                       ".dds") else "a loose-first search (/d, Play) reads a .tga before its .dds"))
 
 
 # --- import -----------------------------------------------------------------
