@@ -114,6 +114,14 @@ PackedByteArray Simulation::take_tip_events() {
 	return out;
 }
 
+bool Simulation::take_hud_detail_blank() {
+	if (kernel_ == nullptr) return false;
+	bool &pending = kernel_->world.out.hud_detail_blank;
+	const bool out = pending;
+	pending = false;
+	return out;
+}
+
 String Simulation::get_command_map_rules_text(const Ref<RtxtStringFile> &p_gametext) const {
 	// The CMAP show's RULELIST text (engine inmatch::command_map_rules_text,
 	// where the witness is cited); "" when nothing is built, and the presenter

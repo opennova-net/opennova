@@ -1019,14 +1019,10 @@ func _on_join_admission_ready() -> void:
 func _on_join_deploy_pick_required() -> void:
 	# Initial admission transitions from loading to the player-paced DEATH screen;
 	# on a later death the presentation is already down and the same screen simply
-	# reopens on the new pending edge.
-	# The DEATH-screen edge forces the declutter level to max through the same
-	# seam the huddetail cycle uses (it writes the persisted global like
-	# retail; the death.mnu screen itself draws outside the blanked gameplay
-	# overlay pass). [orig: NapiNPClientMsg_0x00F @0x42E410..0x42E41C —
-	# level = 3 -> CRenderState_SetLayerVisibility @0x59B0F0]
-	if _hud_presenter != null:
-		_hud_presenter.apply_death_screen_hud_detail()
+	# reopens on the new pending edge. The HUD declutter blank is NOT this
+	# edge's: retail's 0x0F forces it only with the death screen up (the replica
+	# fold queues it, the HUD presenter's drain applies it; a fresh join leaves
+	# the level alone, hud-re.md "Forced levels").
 	_finish_world_load_presentation()
 	if _deploy_presenter.open():
 		return

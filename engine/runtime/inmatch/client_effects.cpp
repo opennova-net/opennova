@@ -396,6 +396,10 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // The receive legs' tip events join the world's in arrival order
             // (replication::TipEventCommand carries the witness).
             world.out.tip_events.push_back(tip->event);
+        } else if (std::get_if<replication::HudDetailBlankCommand>(&request) != nullptr) {
+            // The 0x0F's death-screen HUD blank (replication::HudDetailBlankCommand
+            // carries the witness); the HUD owner applies it to the live level.
+            world.out.hud_detail_blank = true;
         } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
             // A local-channel line: the sender slot's person becomes the
             // tracked target (the fold already ran the dispatcher's slot

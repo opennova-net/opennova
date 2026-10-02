@@ -1227,8 +1227,6 @@ public:
 	String get_join_server_name() const;
 	String get_join_mission_name() const;
 	String get_join_mission_file() const;
-	// Consume the latest decoded S2C 0x0A phase-2 state once per receive
-	// revision. Empty means no new authoritative sample.
 	// The S2C 0x81 hit-confirm edge: {} unless a positive/negative score delta
 	// landed since the last take, else {score, delta, tone} with the tone name
 	// ("" / "HITTONE" / "KILLTONE" / "HEADSHOTTONE") the presenter plays as a
@@ -1237,6 +1235,8 @@ public:
 	Ref<ScoreFeedback> take_score_feedback();
 	// Drain the world's tip events (hud/tip_system.h TipEvent), in raise order.
 	PackedByteArray take_tip_events();
+	// Take the S2C 0x0F's pending death-screen HUD blank (world.out.hud_detail_blank).
+	bool take_hud_detail_blank();
 	// Exact pre-world payloads retained by the joiner from retail's initial
 	// state stream. The mission header is exactly 616 bytes when available. TIL
 	// bytes are exposed only in COMPLETE; the explicit state distinguishes a

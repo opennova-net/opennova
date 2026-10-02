@@ -75,6 +75,14 @@ struct LocalChatSpeaker {
 struct TipEventCommand {
     uint8_t event = 0;
 };
+// S2C 0x0F with the death screen up: the live HUD declutter level goes to the
+// blank level (hud/hud_toggles.h hud_toggles_death_screen). The effect pass
+// hands it to the HUD owner; a 0x0F with the death screen down (every live
+// retail join's first 0x0A carries the death bit clear) leaves the level alone.
+// [orig: NapiNPClientMsg_0x00F `cmp g_DeathScreenActive, 0` @0x42e3f5 /
+//  @0x42e407 -> `mov g_HUDDetailLevel, 3` @0x42e412 ->
+//  CRenderState_SetLayerVisibility(3) @0x42e41c]
+struct HudDetailBlankCommand {};
 // S2C 0x28: one co-op dialog line the authority's playback started. The
 // effect pass hands it to the presentation with the local player's class, the
 // locale the clip resolves by. [orig: NapiNPClientMsg_0x028 @0x425B40 ->
@@ -87,7 +95,7 @@ struct DialogLineCommand {
 using ClientEffectCommand = std::variant<PlaySoundCommand, MedicVoiceRequest,
         TrackedPlayerVoice, GameEventRecord, ExplosionEffectRecord, EntityDeathEvent,
         EmoteBroadcast, LocalChatSpeaker, ClientSquadEvent, TipEventCommand,
-        LightningTimerCommand, DoorRowUpdate, DialogLineCommand>;
+        LightningTimerCommand, DoorRowUpdate, DialogLineCommand, HudDetailBlankCommand>;
 
 class ClientReplicaPipeline {
 public:

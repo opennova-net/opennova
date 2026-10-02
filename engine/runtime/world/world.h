@@ -742,6 +742,10 @@ struct WorldOutbox {
 	// HUD owner drains them into its tip [orig: the CTipSystem_HandleEvent
 	// call sites; docs/interface/hud-re.md "The tip"].
 	std::vector<uint8_t> tip_events;
+	// The S2C 0x0F's death-screen HUD blank pending the HUD owner's apply: the
+	// live declutter level goes to the blank level (hud/hud_toggles.h
+	// hud_toggles_death_screen) [orig: NapiNPClientMsg_0x00F @0x42e3f5..0x42e41c].
+	bool hud_detail_blank = false;
     // The destruction presentation events (world/destruction.h) the host drains.
     DestructionEvents destruction;
 	std::vector<VehicleEffectEvent> vehicle_effects; // fixed-tick movement particles

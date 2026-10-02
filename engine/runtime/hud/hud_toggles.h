@@ -267,9 +267,11 @@ uint32_t hud_toggles_poll(HudToggleState &state, const HudKeyPoll &keys);
 // keeping the color, detail, showhud and friendly-tag globals.
 void hud_toggles_reset_mission(HudToggleState &state);
 
-// The death-screen edge forces the declutter level to the blank level through
-// the same live seam the cycle uses [orig: NapiNPClientMsg_0x00F
-// @0x42E410..0x42E41C — level = 3, then the visibility rebuild].
+// An S2C 0x0F folded with the death screen up forces the declutter level to
+// the blank level through the same live seam the cycle uses (the replica's
+// HudDetailBlankCommand; a join's 0x0F with the death screen down leaves it)
+// [orig: NapiNPClientMsg_0x00F `cmp g_DeathScreenActive` @0x42E3F5 / @0x42E407
+//  -> @0x42E410..0x42E41C — level = 3, then the visibility rebuild].
 void hud_toggles_death_screen(HudToggleState &state);
 
 // The escape action's HUD-window close chain: out of a session the key is

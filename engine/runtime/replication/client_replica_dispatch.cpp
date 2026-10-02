@@ -129,6 +129,14 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			ws.waypoints_set = game_type::is_waypoint_family(game_type_);
 			ws.waypoints = wsl.waypoints;
 			++ws.revision;
+			// The HUD blank rides the death screen, not the spawn: only with
+			// g_DeathScreenActive up does the 0x0F force the live declutter
+			// level to 3 (HudDetailBlankCommand carries the witness). The
+			// death screen is the 0x0A's bit-0 edge / the 0x3B, folded in
+			// arrival order like retail's pump, so a fresh join's 0x0F never
+			// blanks. [orig: @0x42e3f5 / @0x42e407 -> @0x42e412..0x42e41c]
+			if (state_.death_screen_active)
+				pending_effect_commands_.push_back(HudDetailBlankCommand{});
 			state_.mark_changed();
 		} else {
 			++malformed_bodies_;
