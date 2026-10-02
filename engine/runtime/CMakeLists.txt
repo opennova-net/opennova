@@ -387,6 +387,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_doors.cpp  # the C2S 0x1A door request (S2C 0x37 reply)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_send.cpp  # the C2S framing and send-boundary pump of JoinerConnection

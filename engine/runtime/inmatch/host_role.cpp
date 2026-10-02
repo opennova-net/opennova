@@ -184,6 +184,9 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// are a session peer's QueueReliableMessage(0xD) too); its handler
 		// reads the server context [orig: NapiNPServer_HandleChatMessage
 		// @0x513760].
+		// Its death screen's team change rides it too
+		// [orig: DeathScreen_OnSwapTeams @0x5535BA -> NetPacket_SendPingRequest
+		//  @0x42DD90 (a misnomer), QueueReliableMessage(0x4D) @0x42DDB1].
 		// The listen client's visible-players refreshes (the C2S 0x22 / 0x23
 		// pair its 0x0F / 0x4D / 0x50 handlers queue) and its emote request
 		// ride the same queue [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab;
@@ -212,15 +215,17 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
-				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST) {
+				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
+				dg.tag != c2s::TEAM_CHANGE_REQUEST) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
 		// The chat handler, the snapshot builder, the radio call (its
-		// designation table and zone test) and the squad handlers read the
-		// host context.
+		// designation table and zone test), the squad handlers and the team
+		// change read the host context.
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
-				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST;
+				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
+				dg.tag == c2s::TEAM_CHANGE_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;

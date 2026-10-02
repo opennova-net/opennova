@@ -151,6 +151,31 @@ struct GameConfig {
 	bool voting_enabled = false;
 	int32_t voting_min_players = 6;
 	float voting_percent = 0.66f;
+	// The death screen's team change (C2S 0x4D): a player may switch again
+	// only `change_team_interval_seconds` after its last accepted request,
+	// and each switch holds its respawn for `change_team_penalty_seconds`.
+	// cfg keys `mpchangeteam_interval` / `mpchangeteam_penalty`, stock 300 /
+	// 60. (The sibling cfg word changeTeamEnabled_4F0 reaches a live global,
+	// dword_24D227C, that no handler reads: TeamChoose gates the request.)
+	// [orig: g_GameConfigState.changeTeamInterval_4F4 / changeTeamPenalty_4F8
+	//  (Config_SetDefaults @0x54D396 / @0x54D3A0, Config_ParseSettingsLine
+	//  @0x550A67 / @0x550A92) -> dword_24D2280 / dword_24D2284
+	//  (Game_ApplySessionSettingsToGlobals @0x551DEB / @0x551DF1)]
+	int32_t change_team_interval_seconds = 300;
+	int32_t change_team_penalty_seconds = 60;
+	// The autobalance thresholds the team change consults: off by default; on,
+	// a switch is refused while the two teams' slot counts differ by more than
+	// one and by at least both thresholds (stock 1 / 1). cfg keys
+	// `autobalanceonmissionrecycleenabled` / `...numplayerdiffmin` /
+	// `...numplayerdiffmax`.
+	// [orig: g_GameConfigState.autoBalanceOnRecycle_528 / autoBalanceMinDifference_52C
+	//  / autoBalanceMaxDifference_530 (Config_SetDefaults @0x54D210..0x54D21C,
+	//  ebx = 0 / esi = 1; Config_ParseSettingsLine @0x54F8B8 / @0x54F8E3) ->
+	//  g_AutoBalanceEnabled / g_AutoBalanceMinDiff / g_AutoBalanceTriggerDiff
+	//  (Game_ApplySessionSettingsToGlobals @0x551BCE..0x551BEB)]
+	bool auto_balance_enabled = false;
+	int32_t auto_balance_min_difference = 1;
+	int32_t auto_balance_trigger_difference = 1;
 
 	// --- §6.9 rule globals — the S2C 0x08 ServerConfig block [orig: ServerConfig_SerializeToPacket
 	// @0x505bd0]. dword[3] is `game_type` above; the rest are the standalone g_* rule globals in wire

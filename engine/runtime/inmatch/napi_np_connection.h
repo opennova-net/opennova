@@ -314,6 +314,11 @@ struct SessionReplyState {
 	// [orig: slot+100360, NapiNPServer_HandleChatMessage @0x5137FF;
 	//  GameEvent_FlagCapture @0x50F912; Server_OnPlayerJoin @0x51A6CD]
 	uint32_t chat_last_ms = 0;
+	// Host ms of this player's last team change request that passed the gates
+	// (0 = never): the next is refused until change_team_interval_seconds
+	// have passed. [orig: slot+96484, NapiNPServerMsg_0x04D_ChangeTeam
+	//  @0x518FBA..0x518FDF (the test), @0x5190F3 (the stamp)]
+	uint32_t team_change_ms = 0;
 	// Two bits of the player-slot state byte (+89912). 0x04 asks the per-tick
 	// slot pass for the S2C 0x1E event 58 frontier hint once the slot has
 	// played 1240 ticks; 0x08 holds off a second refused-touch nag until a

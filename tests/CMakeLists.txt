@@ -3315,6 +3315,11 @@ add_executable(npruntime_door_relay_test npruntime/door_relay_test.cpp)
 target_link_libraries(npruntime_door_relay_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_door_relay COMMAND npruntime_door_relay_test)
 
+# D-NET-281: the death screen's team change (C2S 0x4D), host side.
+add_executable(npruntime_team_change_request_test npruntime/team_change_request_test.cpp)
+target_link_libraries(npruntime_team_change_request_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_team_change_request COMMAND npruntime_team_change_request_test)
+
 # D-NET-127: the host's S2C 0x46 per-field values (the 0x1000 spectator byte).
 add_executable(npruntime_player_sync_fields_test npruntime/player_sync_fields_test.cpp)
 target_link_libraries(npruntime_player_sync_fields_test PRIVATE opennova_runtime)

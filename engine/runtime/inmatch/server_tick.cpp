@@ -404,261 +404,10 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 	}
 }
 
-// Drain each transport-free RoundDeath through the one retail player-death
-// transaction: 0x13 remote fan, victim 0x61 seed, victim 0x52 camera, optional
-// 0x1E active-player feed, conditional 0x54 Medic state, scoring, and respawn
-// holds. AI victims stop after the 0x13/scoring leg. That transaction is the
-// organic body's alone: its only callers are the player body, the infantry AI
-// and the console kill. Vehicles and items keep only the score ledger and the SP
-// tally here; their class death paths own Flags and the S2C 0x26 kill record.
-// [orig: Entity_CheckAndProcessDeath @0x51B550, called only from
-// Entity_UpdateInfantryPlayerBody @0x4B4CEA, Entity_UpdateInfantryAI @0x4B9D4D
-// and the console kill @0x4D29EC -> GameEvent_PlayerDeath @0x516DD0; the only
-// 0x13 sends are GameEvent_PlayerDeath @0x516E8E and
-// Entity_CheckAndProcessDeath @0x51B58F]
+// Drain the queued deaths in order, each through Server_ProcessPlayerDeath.
 void route_round_deaths(NapiNPServerCtx &ctx, world::World &world) {
-	if (world.round_sim.deaths.empty()) return;
-	auto tally_kill = [&](const world::RoundDeath &d) {
-		// The kill accounting of a damage-pass lethal edge: scorer event 12 in
-		// every session, then the SP tallies behind world.rules.mp_session (our
-		// SP listen server always runs ctx.is_in_session = 1).
-		// [orig: Score_ProcessKillEvent @0x4fd400]
-		world.match.process_kill_event(world, d);
-	};
-	for (const world::RoundDeath &d : world.round_sim.deaths) {
-		// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
-		// damage-time record for it only tallies and leaves the dead bit to the edge.
-		// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
-		//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
-		if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
-			tally_kill(d);
-			if (world::Entity *victim_entity = world.registry.get(d.victim))
-				victim_entity->alive = false; // health is already <= 0
-			continue;
-		}
-		world::Entity *victim_entity = world.registry.get(d.victim);
-		const world::Entity *killer_entity = world.registry.get(d.killer);
-		const bool victim_is_player = victim_entity != nullptr &&
-				(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
-		// An edge record's victim is a person even when its corpse leg removed the row.
-		const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
-				victim_entity->kind == world::EntityKind::Organic);
-		// The revive-window and resend gates read the victim's live entity+44
-		// cause word BEFORE the classifier clears the bit it reports.
-		// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
-		const uint32_t victim_cause_bits =
-				victim_entity != nullptr ? victim_entity->cause_flags : 0u;
-		NapiNPConnection *victim_connection = nullptr;
-		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-			if (!c.link.owned_entity.valid() ||
-					c.link.owned_entity.packed != d.victim_handle)
-				continue;
-			victim_connection = &c;
-			break;
-		}
-		// Match drops a carried objective, so capture the retail classifier's
-		// mountedChild and player-slot inputs before handing the transaction to
-		// its score ledger.
-		const PlayerDeathFeed feed = victim_is_player
-				? classify_player_death(
-						world, d, victim_entity, killer_entity,
-						victim_connection != nullptr
-								? victim_connection->link.underwater_breath_samples
-								: 0u)
-				: PlayerDeathFeed{};
-		// The authoritative score ledger consumes the same death transaction as
-		// the kill-feed; non-roster actors are ignored by Match.
-		world.match.record_death(world, d.victim, d.killer, d.event_flags);
-		// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
-		// victim's OWN client learns of its death from its record byte13 bit 0x02
-		// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
-		// screen + the redeploy flow), and everyone else's dead-state masks read it too.
-		// Cleared by entity_reset_to_spawn_state at the deploy — the wire 1->0 edge IS
-		// the client spawn hook (pose snap + reset). Without this bit the victim never
-		// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
-		// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
-		// An edge record's row carries the edge's own latch (or a respawned life).
-		if (organic_victim && !d.motor_edge) {
-			victim_entity->flags |= 2u;
-			victim_entity->alive = false;
-			// The dead/protection latch is the player leg's alone.
-			// [orig: Entity_CheckAndProcessDeath tests Flags & 0x100
-			// @0x51B555..0x51B55D before GameEvent_PlayerDeath]
-			if (victim_is_player) victim_entity->damage_state = -1;
-		}
-		if (victim_connection != nullptr) {
-			// A normal other-player kill opens the exact 120-second revive
-			// window. Self/environment and knife/headshot cause bits clear it.
-			// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
-			victim_connection->link.downed_revive_seconds =
-					d.killer.valid() && d.killer != d.victim &&
-					(victim_cause_bits & 0xC00u) == 0u
-							? 120u
-							: 0u;
-			victim_connection->link.medic_request_active = false;
-			// The team-mode 1 Hz 0x46 downed resend reads only the cause bits,
-			// never the killer: self/environment deaths ARE resent (with a zero or
-			// request-only downed byte). [orig: Server_TickUpdate @0x51e333 tests
-			//  `(entity+44 & 0xC00) == 0`; the 0x800 writer is Weapon_CalcImpactDamage
-			//  @0x4ec9c6/@0x4ec994]
-			victim_connection->link.death_cause_revivable =
-					(victim_cause_bits & 0xC00u) == 0u;
-		}
-
-		if (ctx.is_in_session && organic_victim) {
-			std::vector<uint8_t> body13;
-			put_u16le(body13, d.victim_handle);
-			// word1 = the victim's entity+0x2C0 death-anim slot AS THE SENDER
-			// SEES IT — never the killer. Both infantry death edges consume the
-			// slot into the anim state and ZERO it before the authority-gated
-			// Entity_CheckAndProcessDeath call, so an edge-driven infantry
-			// death always ships 0 (every 0x13 in the retail capture carries
-			// 0); only the direct third sender ships a live slot. An org1
-			// body's record comes from its own edge, after the consume; a
-			// player body's death routing runs in the damage tick, before the
-			// next body update's edge consumes the staged selection, so a person
-			// victim reports the post-edge zero here rather than the selection
-			// its edge still owns; every other kind ships the slot as stored.
-			// The retail receiver stores the word sign-extended into +0x2C0.
-			// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
-			//  @0x503733, store @0x50374A); edges @0x4B9D38 -> @0x4B9D4D (AI)
-			//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct sender
-			//  @0x4D29EC; receiver NapiNPClientMsg_EntityDeath @0x42EB8D/@0x42EBDF]
-			const bool edge_consumes_slot = victim_entity != nullptr &&
-					(victim_entity->item_type == 3 ||
-					 (victim_entity->item_type == 0 &&
-					  victim_entity->kind == world::EntityKind::Organic));
-			put_u16le(body13, victim_entity != nullptr && !edge_consumes_slot
-					? static_cast<uint16_t>(victim_entity->death_anim_state)
-					: uint16_t{0});
-			std::vector<uint8_t> body1e;
-			if (victim_is_player) {
-				body1e.push_back(feed.event_type);
-				body1e.push_back(feed.attacker);
-				body1e.push_back(feed.victim);
-				body1e.push_back(feed.aux);
-				// Every PlayerDeath call passes literal zero/zero; positions belong
-				// to other 0x1E producers, not this feed family.
-				// [orig: GameEvent_PlayerDeath @0x516DD0 (the GameEvent_BuildPayload
-				//  call @0x517362; 0x51737b is the payload-length store)]
-				put_u16le(body1e, 0);
-				put_u16le(body1e, 0);
-			}
-			// First broadcast the ordinary death record with mask 0x90
-			// (active players, not the listen host).
-			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-				if (!is_in_match(c) || c.link.transport == nullptr) continue;
-				if (c.link.mode == replication::TransportMode::Loopback) continue;
-				c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
-			}
-
-			// Retail DISARMS the victim immediately after 0x13 and before the
-			// camera/feed tail: the death sender passes enable=0, which zeroes the
-			// slot's seed/freshness stamp and ships the four-zero 0x61. The zero
-			// seed freezes the client's network-role tick until the deploy release
-			// re-arms it with a fresh roll. [orig: GameEvent_PlayerDeath @0x516EF4
-			// -> Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
-			if (victim_connection != nullptr &&
-					is_in_match(*victim_connection) &&
-					victim_connection->link.transport != nullptr) {
-				victim_connection->link.transport->host_send(
-						s2c::TICK_SEED,
-						Server_DisarmPlayerTickSeed(*victim_connection, world.logic_tick));
-			}
-
-			// Then target the victim with the fixed-point position used by the
-			// third-person death camera: killer position when one resolves, else
-			// the victim position. Mask 0x20 includes the listen host.
-			// [orig: GameEvent_PlayerDeath @0x516DD0 ->
-			// NetPacket_WriteThreeInt32s @0x506CB0]
-			if (victim_connection != nullptr &&
-					is_in_match(*victim_connection) &&
-					victim_connection->link.transport != nullptr) {
-				const world::Entity *camera_entity = d.killer.valid()
-						? world.registry.get(d.killer) : nullptr;
-				if (camera_entity == nullptr) camera_entity = victim_entity;
-				DeathCameraTarget target;
-				if (camera_entity != nullptr) {
-					target.x = world::to_fixed(camera_entity->position.x);
-					target.y = world::to_fixed(camera_entity->position.y);
-					target.z = world::to_fixed(camera_entity->position.z);
-				}
-				victim_connection->link.transport->host_send(
-						s2c::DEATH_CAMERA_TARGET,
-						encode_death_camera_target(target));
-			}
-
-			// The kill feed uses mask 0x80 (every active player, including the
-			// listen host), unlike 0x13's 0x90 host exclusion. `deathmes=0`
-			// suppresses this record only; seed/camera/medic state still flow.
-			// [orig: GameEvent_PlayerDeath @0x51725F/@0x51734E]
-			if (!body1e.empty() && ctx.config.death_messages != 0u) {
-				for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
-					if (!is_in_match(c) || c.link.transport == nullptr)
-						continue;
-					c.link.transport->host_send(s2c::GAME_EVENT, body1e);
-				}
-			}
-
-			// Finally publish the revive window to in-match same-team Medics
-			// (mask 0x580 tests slot state 6/7, the team byte and the Medic
-			// class — never the medic's own health or dead bit, so a dead
-			// medic is a recipient too). Manual Auto-Medic preference first
-			// clears their marker and sends the live window to the victim
-			// alone; automatic mode sends the window directly to the Medic
-			// group. Mask 0x580 does include the host.
-			// [orig: GameEvent_PlayerDeath @0x516DD0 (mask @0x51739C, team
-			//  filter @0x5173AF); NapiNPServer_SendFiltered @0x4C87E0]
-			if (victim_connection != nullptr && victim_entity != nullptr &&
-					victim_connection->link.downed_revive_seconds != 0u) {
-				auto send_downed = [&](NapiNPConnection &recipient,
-						uint8_t seconds) {
-					PlayerDownedState state;
-					state.entity_handle = d.victim_handle;
-					state.revive_seconds = seconds;
-					recipient.link.transport->host_send(
-							s2c::PLAYER_DOWNED_STATE,
-							encode_player_downed_state(state));
-				};
-				for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
-					if (!is_medic_recipient(candidate, world, victim_entity->team))
-						continue;
-					send_downed(candidate,
-							victim_connection->link.auto_medic_enabled
-									? static_cast<uint8_t>(
-											victim_connection->link.downed_revive_seconds)
-									: uint8_t{0});
-				}
-				if (!victim_connection->link.auto_medic_enabled &&
-						is_in_match(*victim_connection) &&
-						victim_connection->link.transport != nullptr) {
-					send_downed(*victim_connection,
-							static_cast<uint8_t>(
-									victim_connection->link.downed_revive_seconds));
-				}
-			}
-		}
-
-		if (!d.motor_edge) tally_kill(d);
-
-		if (victim_connection != nullptr) {
-			// Every player slot gets the same two whole-second counters. A
-			// configured timeout below three is floored; a spawn less than 620
-			// authority ticks ago forces exactly three. +364 retains the greater
-			// value only when a spawn-target registry exists.
-			// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb]
-			replication::Connection &link = victim_connection->link;
-			uint32_t hold = std::max(ctx.config.respawn_timeout, 3u);
-			if (link.last_deploy_tick_valid &&
-					static_cast<uint32_t>(world.logic_tick - link.last_deploy_tick) < 620u)
-				hold = 3;
-			link.respawn_delay_seconds = hold;
-			link.spawn_target_hold_seconds = world.zones.has_spawn_zone()
-					? std::max(link.spawn_target_hold_seconds, hold)
-					: 0u;
-			link.respawn_hold_armed = true;
-		}
-	}
+	for (const world::RoundDeath &d : world.round_sim.deaths)
+		Server_ProcessPlayerDeath(ctx, world, d);
 	world.round_sim.deaths.clear();
 }
 
@@ -1144,6 +893,247 @@ std::string join_ticket_for(const NapiNPServerCtx &ctx, const NapiNPConnection &
 }
 
 } // namespace
+
+// See header. [orig: GameEvent_PlayerDeath @0x516DD0]
+void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
+		const world::RoundDeath &d) {
+	// The kill accounting of a damage-pass lethal edge (process_kill_event):
+	// scorer event 12 in every session, then the SP tallies behind
+	// world.rules.mp_session (our SP listen server always runs
+	// ctx.is_in_session = 1). [orig: Score_ProcessKillEvent @0x4fd400]
+	// An org1 (NPC) body's transaction is its motor edge's motor_edge record; a
+	// damage-time record for it only tallies and leaves the dead bit to the edge.
+	// [orig: Entity_UpdateInfantryAI @0x4B9D4D -> Entity_CheckAndProcessDeath
+	//  @0x51B550; Score_ProcessKillEvent @0x4FD400 is called from damage paths only]
+	if (!d.motor_edge && world::org1_owns_death_transaction(world, d.victim)) {
+		world.match.process_kill_event(world, d);
+		if (world::Entity *victim_entity = world.registry.get(d.victim))
+			victim_entity->alive = false; // health is already <= 0
+		return;
+	}
+	world::Entity *victim_entity = world.registry.get(d.victim);
+	const world::Entity *killer_entity = world.registry.get(d.killer);
+	const bool victim_is_player = victim_entity != nullptr &&
+			(victim_entity->flags & world::kEntityFlagPlayer) != 0u;
+	// An edge record's victim is a person even when its corpse leg removed the row.
+	const bool organic_victim = d.motor_edge || (victim_entity != nullptr &&
+			victim_entity->kind == world::EntityKind::Organic);
+	// The revive-window and resend gates read the victim's live entity+44
+	// cause word BEFORE the classifier clears the bit it reports.
+	// [orig: GameEvent_PlayerDeath @0x516f4d precedes the ladder @0x517180]
+	const uint32_t victim_cause_bits =
+			victim_entity != nullptr ? victim_entity->cause_flags : 0u;
+	NapiNPConnection *victim_connection = nullptr;
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (!c.link.owned_entity.valid() ||
+				c.link.owned_entity.packed != d.victim_handle)
+			continue;
+		victim_connection = &c;
+		break;
+	}
+	// Match drops a carried objective, so capture the retail classifier's
+	// mountedChild and player-slot inputs before handing the transaction to
+	// its score ledger.
+	const PlayerDeathFeed feed = victim_is_player
+			? classify_player_death(
+					world, d, victim_entity, killer_entity,
+					victim_connection != nullptr
+							? victim_connection->link.underwater_breath_samples
+							: 0u)
+			: PlayerDeathFeed{};
+	// The authoritative score ledger consumes the same death transaction as
+	// the kill-feed; non-roster actors are ignored by Match.
+	world.match.record_death(world, d.victim, d.killer, d.event_flags);
+	// Mark the victim DEAD on the entity: Flags bit1 is the wire-dead signal — the
+	// victim's OWN client learns of its death from its record byte13 bit 0x02
+	// (the LOCAL apply's dead path stores the anim + zeroes Health -> the death
+	// screen + the redeploy flow), and everyone else's dead-state masks read it too.
+	// Cleared by entity_reset_to_spawn_state at the deploy — the wire 1->0 edge IS
+	// the client spawn hook (pose snap + reset). Without this bit the victim never
+	// knows it died (v33). [orig: the death path sets entity+36 bit1; §5.10 off-13
+	// "bit 0x02 = DEAD/UNDEPLOYED", apply @0x4c1005-0x4c1027, edge @0x4c1109]
+	// An edge record's row carries the edge's own latch (or a respawned life).
+	if (organic_victim && !d.motor_edge) {
+		victim_entity->flags |= 2u;
+		victim_entity->alive = false;
+		// The dead/protection latch is the player leg's alone.
+		// [orig: Entity_CheckAndProcessDeath tests Flags & 0x100
+		// @0x51B555..0x51B55D before GameEvent_PlayerDeath]
+		if (victim_is_player) victim_entity->damage_state = -1;
+	}
+	if (victim_connection != nullptr) {
+		// A normal other-player kill opens the exact 120-second revive
+		// window. Self/environment and knife/headshot cause bits clear it.
+		// [orig: GameEvent_PlayerDeath @0x516DD0: playerSlot+368]
+		victim_connection->link.downed_revive_seconds =
+				d.killer.valid() && d.killer != d.victim &&
+				(victim_cause_bits & 0xC00u) == 0u
+						? 120u
+						: 0u;
+		victim_connection->link.medic_request_active = false;
+		// The team-mode 1 Hz 0x46 downed resend reads only the cause bits,
+		// never the killer: self/environment deaths ARE resent (with a zero or
+		// request-only downed byte). [orig: Server_TickUpdate @0x51e333 tests
+		//  `(entity+44 & 0xC00) == 0`; the 0x800 writer is Weapon_CalcImpactDamage
+		//  @0x4ec9c6/@0x4ec994]
+		victim_connection->link.death_cause_revivable =
+				(victim_cause_bits & 0xC00u) == 0u;
+	}
+
+	if (ctx.is_in_session && organic_victim) {
+		std::vector<uint8_t> body13;
+		put_u16le(body13, d.victim_handle);
+		// word1 = the victim's entity+0x2C0 death-anim slot AS THE SENDER
+		// SEES IT — never the killer. Both infantry death edges consume the
+		// slot into the anim state and ZERO it before the authority-gated
+		// Entity_CheckAndProcessDeath call, so an edge-driven infantry
+		// death always ships 0 (every 0x13 in the retail capture carries
+		// 0); only the direct third sender ships a live slot. An org1
+		// body's record comes from its own edge, after the consume; a
+		// player body's death routing runs in the damage tick, before the
+		// next body update's edge consumes the staged selection, so a person
+		// victim reports the post-edge zero here rather than the selection
+		// its edge still owns; every other kind ships the slot as stored.
+		// The retail receiver stores the word sign-extended into +0x2C0.
+		// [orig: NetPacket_BuildDeathNotifyPayload @0x5036E0 (movzx word [esi+2C0h]
+		//  @0x503733, store @0x50374A); edges @0x4B9D38 -> @0x4B9D4D (AI)
+		//  and @0x4B4CD5 -> @0x4B4CEA (player body); direct sender
+		//  @0x4D29EC; receiver NapiNPClientMsg_EntityDeath @0x42EB8D/@0x42EBDF]
+		const bool edge_consumes_slot = victim_entity != nullptr &&
+				(victim_entity->item_type == 3 ||
+				 (victim_entity->item_type == 0 &&
+				  victim_entity->kind == world::EntityKind::Organic));
+		put_u16le(body13, victim_entity != nullptr && !edge_consumes_slot
+				? static_cast<uint16_t>(victim_entity->death_anim_state)
+				: uint16_t{0});
+		std::vector<uint8_t> body1e;
+		if (victim_is_player) {
+			body1e.push_back(feed.event_type);
+			body1e.push_back(feed.attacker);
+			body1e.push_back(feed.victim);
+			body1e.push_back(feed.aux);
+			// Every PlayerDeath call passes literal zero/zero; positions belong
+			// to other 0x1E producers, not this feed family.
+			// [orig: GameEvent_PlayerDeath @0x516DD0 (the GameEvent_BuildPayload
+			//  call @0x517362; 0x51737b is the payload-length store)]
+			put_u16le(body1e, 0);
+			put_u16le(body1e, 0);
+		}
+		// First broadcast the ordinary death record with mask 0x90
+		// (active players, not the listen host).
+		for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+			if (!is_in_match(c) || c.link.transport == nullptr) continue;
+			if (c.link.mode == replication::TransportMode::Loopback) continue;
+			c.link.transport->host_send(s2c::ENTITY_DEATH, body13);
+		}
+
+		// Retail DISARMS the victim immediately after 0x13 and before the
+		// camera/feed tail: the death sender passes enable=0, which zeroes the
+		// slot's seed/freshness stamp and ships the four-zero 0x61. The zero
+		// seed freezes the client's network-role tick until the deploy release
+		// re-arms it with a fresh roll. [orig: GameEvent_PlayerDeath @0x516EF4
+		// -> Server_SendRandomSeedToPlayer @0x5101A0, enable==0 arm @0x510237]
+		if (victim_connection != nullptr &&
+				is_in_match(*victim_connection) &&
+				victim_connection->link.transport != nullptr) {
+			victim_connection->link.transport->host_send(
+					s2c::TICK_SEED,
+					Server_DisarmPlayerTickSeed(*victim_connection, world.logic_tick));
+		}
+
+		// Then target the victim with the fixed-point position used by the
+		// third-person death camera: killer position when one resolves, else
+		// the victim position. Mask 0x20 includes the listen host.
+		// [orig: GameEvent_PlayerDeath @0x516DD0 ->
+		// NetPacket_WriteThreeInt32s @0x506CB0]
+		if (victim_connection != nullptr &&
+				is_in_match(*victim_connection) &&
+				victim_connection->link.transport != nullptr) {
+			const world::Entity *camera_entity = d.killer.valid()
+					? world.registry.get(d.killer) : nullptr;
+			if (camera_entity == nullptr) camera_entity = victim_entity;
+			DeathCameraTarget target;
+			if (camera_entity != nullptr) {
+				target.x = world::to_fixed(camera_entity->position.x);
+				target.y = world::to_fixed(camera_entity->position.y);
+				target.z = world::to_fixed(camera_entity->position.z);
+			}
+			victim_connection->link.transport->host_send(
+					s2c::DEATH_CAMERA_TARGET,
+					encode_death_camera_target(target));
+		}
+
+		// The kill feed uses mask 0x80 (every active player, including the
+		// listen host), unlike 0x13's 0x90 host exclusion. `deathmes=0`
+		// suppresses this record only; seed/camera/medic state still flow.
+		// [orig: GameEvent_PlayerDeath @0x51725F/@0x51734E]
+		if (!body1e.empty() && ctx.config.death_messages != 0u) {
+			for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+				if (!is_in_match(c) || c.link.transport == nullptr)
+					continue;
+				c.link.transport->host_send(s2c::GAME_EVENT, body1e);
+			}
+		}
+
+		// Finally publish the revive window to in-match same-team Medics
+		// (mask 0x580 tests slot state 6/7, the team byte and the Medic
+		// class — never the medic's own health or dead bit, so a dead
+		// medic is a recipient too). Manual Auto-Medic preference first
+		// clears their marker and sends the live window to the victim
+		// alone; automatic mode sends the window directly to the Medic
+		// group. Mask 0x580 does include the host.
+		// [orig: GameEvent_PlayerDeath @0x516DD0 (mask @0x51739C, team
+		//  filter @0x5173AF); NapiNPServer_SendFiltered @0x4C87E0]
+		if (victim_connection != nullptr && victim_entity != nullptr &&
+				victim_connection->link.downed_revive_seconds != 0u) {
+			auto send_downed = [&](NapiNPConnection &recipient,
+					uint8_t seconds) {
+				PlayerDownedState state;
+				state.entity_handle = d.victim_handle;
+				state.revive_seconds = seconds;
+				recipient.link.transport->host_send(
+						s2c::PLAYER_DOWNED_STATE,
+						encode_player_downed_state(state));
+			};
+			for (NapiNPConnection &candidate : ctx.np_protocol.connection_list) {
+				if (!is_medic_recipient(candidate, world, victim_entity->team))
+					continue;
+				send_downed(candidate,
+						victim_connection->link.auto_medic_enabled
+								? static_cast<uint8_t>(
+										victim_connection->link.downed_revive_seconds)
+								: uint8_t{0});
+			}
+			if (!victim_connection->link.auto_medic_enabled &&
+					is_in_match(*victim_connection) &&
+					victim_connection->link.transport != nullptr) {
+				send_downed(*victim_connection,
+						static_cast<uint8_t>(
+								victim_connection->link.downed_revive_seconds));
+			}
+		}
+	}
+
+	if (!d.motor_edge) world.match.process_kill_event(world, d);
+
+	if (victim_connection != nullptr) {
+		// Every player slot gets the same two whole-second counters. A
+		// configured timeout below three is floored; a spawn less than 620
+		// authority ticks ago forces exactly three. +364 retains the greater
+		// value only when a spawn-target registry exists.
+		// [orig: GameEvent_PlayerDeath @0x516ec4..0x516eeb]
+		replication::Connection &link = victim_connection->link;
+		uint32_t hold = std::max(ctx.config.respawn_timeout, 3u);
+		if (link.last_deploy_tick_valid &&
+				static_cast<uint32_t>(world.logic_tick - link.last_deploy_tick) < 620u)
+			hold = 3;
+		link.respawn_delay_seconds = hold;
+		link.spawn_target_hold_seconds = world.zones.has_spawn_zone()
+				? std::max(link.spawn_target_hold_seconds, hold)
+				: 0u;
+		link.respawn_hold_armed = true;
+	}
+}
 
 // The join-phase validation watchdog, once per periodic second, over every
 // accepted 0x42 that has not completed its admission (NetPlayer game states

@@ -123,6 +123,10 @@ struct NapiNPProtocol {
 // sprintf format the retail handler fills; empty means the string is absent.
 struct ServerTextTable {
 	std::string medic_request_format; // STRSRV_MEDREQ: "%s" = the requester's name
+	// The team change's system lines, "%s" = the switching player's name
+	// [orig: GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
+	std::string change_to_blue_format;
+	std::string change_to_red_format;
 };
 
 struct NapiNPServerCtx {
