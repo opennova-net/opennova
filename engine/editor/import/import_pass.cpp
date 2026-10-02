@@ -122,7 +122,9 @@ bool ImportPass::step(uint64_t budget) {
 			pass_began_ = io::file_clock_now_ticks();
 			cache_ = load_cache(paths_.import_cache_file, cache_text_);
 			std::error_code ec;
-			walk_ = fs::recursive_directory_iterator(root_, fs::directory_options::skip_permission_denied, ec);
+			// Through the system's paths (project_files.h): a source past MAX_PATH is found and read.
+			walk_ = fs::recursive_directory_iterator(system_path(root_.generic_string()),
+					fs::directory_options::skip_permission_denied, ec);
 			if (ec) {
 				// No project to walk: nothing imported, and the cache as it was.
 				phase_ = Phase::Done;
@@ -143,9 +145,10 @@ bool ImportPass::step(uint64_t budget) {
 			const fs::directory_entry &entry = *walk_;
 			const fs::path path = entry.path();
 			if (entry.is_directory(ec)) {
-				if (is_dot_directory(path) || fs::equivalent(path, export_dir_, ec)) walk_.disable_recursion_pending();
+				if (is_dot_directory(path) || fs::equivalent(path, system_path(export_dir_.generic_string()), ec))
+					walk_.disable_recursion_pending();
 			} else if (entry.is_regular_file(ec) && importer_for(path.filename().string(), *table_)) {
-				std::string relative = fs::relative(path, root_, ec).generic_string();
+				std::string relative = fs::relative(path, system_path(root_.generic_string()), ec).generic_string();
 				if (ec) relative = path.filename().string();
 				listed_.emplace_back(std::move(relative), path);
 			}
@@ -210,8 +213,9 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 	source.importer = importer->id;
 	source.output_dir = import_output_dir(paths_, source.source);
 	const std::string sidecar_path = (root_ / source.sidecar).generic_string();
-	// Where the files an import reads are named from: the source's folder.
-	const std::string folder = path.parent_path().generic_string();
+	// Where the files an import reads are named from: the source's folder, under the project's root as
+	// given (the walk's path is the system's, which the context's checks would not find under it).
+	const std::string folder = (root_ / relative).parent_path().generic_string();
 	const std::string root = root_.generic_string();
 	ImportSidecar sidecar;
 	Diagnostic error;

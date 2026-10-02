@@ -48,7 +48,7 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 		// The report may be older than the tree: a file that has appeared where this one
 		// would go since is left as it is.
 		std::error_code ec;
-		if (fs::exists(target, ec) || ec) {
+		if (fs::exists(system_path(target.generic_string()), ec) || ec) { // a project past MAX_PATH too
 			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingExists, DiagnosticSeverity::Error,
 			                                          relative + " is on disk already: nothing was created. Refresh to "
 			                                                     "see it.",

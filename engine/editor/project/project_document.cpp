@@ -53,7 +53,7 @@ bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error) {
 	if (!ensure_directory(paths.cache_dir, error)) return false;
 	const std::string gitignore = (fs::path(paths.cache_dir) / ".gitignore").generic_string();
 	std::error_code ec;
-	if (fs::is_regular_file(gitignore, ec)) return true;
+	if (fs::is_regular_file(system_path(gitignore), ec)) return true;
 	return write_file_atomic(gitignore, std::string("*\n"), error);
 }
 
@@ -121,7 +121,7 @@ bool load_project_document(const std::string &project_file, ProjectDocument &out
 	std::string io_error;
 	if (!read_file_text(project_file, text, io_error)) {
 		std::error_code ec;
-		if (!fs::exists(project_file, ec))
+		if (!fs::exists(system_path(project_file), ec))
 			return fail(error, CoreFinding::ProjectFileMissing, "No project file at " + project_file + ".");
 		return fail(error, CoreFinding::ProjectFileUnreadable, io_error);
 	}
@@ -161,7 +161,7 @@ bool can_create_project(const std::string &root, const std::string &target_game,
 		return fail(error, CoreFinding::ProjectTargetGameUnknown, "Unknown target game \"" + target_game + "\".");
 	const ProjectPaths paths = ProjectPaths::for_root(root);
 	std::error_code ec;
-	if (fs::exists(paths.project_file, ec))
+	if (fs::exists(system_path(paths.project_file), ec)) // a project past MAX_PATH too
 		return fail(error, CoreFinding::ProjectExists, "There is already a project at " + paths.root + ".");
 	return true;
 }

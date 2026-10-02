@@ -19,6 +19,12 @@ namespace opennova::editor {
 
 namespace {
 
+// `relative` ('/'-separated) under `root`, a system path (system_path): an extended-length path is
+// taken as spelled, its separators backslashes alone.
+fs::path under(const fs::path &root, const std::string &relative) {
+	return root / fs::path(relative).make_preferred();
+}
+
 bool same_path(const fs::path &a, const fs::path &b) {
 	std::error_code ec;
 	const fs::path ca = fs::weakly_canonical(a, ec);
@@ -57,7 +63,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		const std::string source_relative = key.substr(0, key.size() - sidecar_suffix.size());
 		// A record whose source is gone lists nothing: its outputs would otherwise
 		// outlive the source and still pack.
-		if (!fs::is_regular_file(root / source_relative, ec)) {
+		if (!fs::is_regular_file(under(root, source_relative), ec)) {
 			out.findings.push_back(make_finding(CoreFinding::ImportOrphanRecord, DiagnosticSeverity::Warning, "The import record names " + source_relative + ", which is not in the project: delete the record.",
 					key));
 			return;
@@ -131,8 +137,9 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	// A file an importer converts is an import source while its `.import` record is there,
 	// whatever its name makes it otherwise (S13 A8): the build packs its outputs, never it. One
 	// without is the kind its name gives (a PNG a texture the game loads as it is).
-	if (importer_for(filename) && fs::is_regular_file(fs::path(path.generic_string() + sidecar_suffix), ec))
-		asset.kind = AssetKind::ImportSource;
+	fs::path record = path;
+	record += sidecar_suffix;
+	if (importer_for(filename) && fs::is_regular_file(record, ec)) asset.kind = AssetKind::ImportSource;
 	out.entries.push_back(std::move(asset));
 }
 
@@ -148,22 +155,25 @@ std::string listed_key(const fs::path &root, const fs::path &path) {
 bool scan_project_file(const ProjectPaths &paths, const ProjectDocument &doc, const std::string &relative,
 		std::string &key, AssetScan::Visit &out, uint64_t *bytes_read) {
 	out = AssetScan::Visit();
-	const fs::path root(paths.root);
-	const fs::path asked = root / fs::path(relative);
+	// Through the system's paths (project_files.h): a project file past MAX_PATH is read as well.
+	const fs::path root = system_path(paths.root);
+	const fs::path asked = under(root, relative);
 	std::error_code ec;
-	if (!fs::is_regular_file(asked, ec) || !walk_reaches(root, fs::path(paths.export_dir(doc)), asked)) return false;
+	if (!fs::is_regular_file(asked, ec) || !walk_reaches(root, system_path(paths.export_dir(doc)), asked)) return false;
 	// The file as the walk meets it: its path and its name as the file system spells them (a path
 	// asked for in another case names the same file on a file system that ignores case).
 	key = listed_key(root, asked);
-	const fs::path path = root / fs::path(key);
+	const fs::path path = under(root, key);
 	uint64_t read = 0;
 	visit_file(paths, root, path, key, out, read);
 	if (bytes_read) *bytes_read = read;
 	return true;
 }
 
+// The walk goes through the system's paths (project_files.h, system_path): a project whose own files
+// lie past MAX_PATH is walked, listed and read whole.
 ProjectScan::ProjectScan(const ProjectPaths &paths, const ProjectDocument &doc) :
-		paths_(paths), root_(paths.root), export_dir_(paths.export_dir(doc)) {}
+		paths_(paths), root_(system_path(paths.root)), export_dir_(system_path(paths.export_dir(doc))) {}
 
 bool ProjectScan::step(uint64_t budget) {
 	uint64_t spent = 0;

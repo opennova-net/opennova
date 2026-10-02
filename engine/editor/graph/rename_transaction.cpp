@@ -898,8 +898,12 @@ void RenameTransaction::commit() {
 // record and its old outputs removed; a copy refused leaves everything as it was.
 void RenameTransaction::commit_file_rename() {
 	const RenamePlan &plan = file_plan_;
-	const fs::path old_path = fs::path(paths_.root) / plan.path;
-	const fs::path new_path = fs::path(paths_.root) / plan.new_path;
+	// Every call through the system's path (project_files.h): a project file past MAX_PATH renames too.
+	const auto at = [this](const std::string &relative) {
+		return system_path((fs::path(paths_.root) / relative).generic_string());
+	};
+	const fs::path old_path = at(plan.path);
+	const fs::path new_path = at(plan.new_path);
 	std::error_code ec;
 	const bool same_file = key(plan.old_name) == key(plan.new_name);
 	if (!same_file) {
@@ -925,7 +929,7 @@ void RenameTransaction::commit_file_rename() {
 		// The import record travels with its source (a stray record already at the new
 		// name, whose source was never there, is replaced).
 		if (!plan.sidecar.empty()) {
-			fs::copy_file(fs::path(paths_.root) / plan.sidecar, fs::path(paths_.root) / plan.new_sidecar,
+			fs::copy_file(at(plan.sidecar), at(plan.new_sidecar),
 			              fs::copy_options::overwrite_existing, ec);
 			if (ec) {
 				findings_.push_back(refusal(CoreFinding::RenameCopy, "The import record could not be copied to its new name: " +
@@ -939,9 +943,9 @@ void RenameTransaction::commit_file_rename() {
 		// one that cannot be copied takes every copy back.
 		std::vector<fs::path> copied;
 		for (const RenameOutput &companion : plan.companions) {
-			const fs::path to = fs::path(paths_.root) / companion_path(companion);
+			const fs::path to = at(companion_path(companion));
 			std::string dated;
-			fs::copy_file(fs::path(paths_.root) / companion.path, to, ec);
+			fs::copy_file(at(companion.path), to, ec);
 			if (!ec && !refresh_last_write(to.generic_string(), dated)) ec = std::make_error_code(std::errc::io_error);
 			if (ec) {
 				findings_.push_back(refusal(CoreFinding::RenameCopy, companion.old_name + " could not be copied to its new name: " +
@@ -949,7 +953,7 @@ void RenameTransaction::commit_file_rename() {
 				std::error_code ignored;
 				for (const fs::path &made : copied) fs::remove(made, ignored);
 				fs::remove(new_path, ignored);
-				if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.new_sidecar, ignored);
+				if (!plan.sidecar.empty()) fs::remove(at(plan.new_sidecar), ignored);
 				return;
 			}
 			copied.push_back(to);
@@ -976,22 +980,23 @@ void RenameTransaction::commit_file_rename() {
 			findings_.push_back(refusal(CoreFinding::RenameRemove, "The old file could not be removed: " + ec.message(), plan.path));
 			return;
 		}
-		if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.sidecar, ec);
-		for (const RenameOutput &companion : plan.companions) fs::remove(fs::path(paths_.root) / companion.path, ec);
+		if (!plan.sidecar.empty()) fs::remove(at(plan.sidecar), ec);
+		for (const RenameOutput &companion : plan.companions) fs::remove(at(companion.path), ec);
 	} else {
-		fs::rename(old_path, new_path, ec);
-		if (ec) {
+		// A rename an indexer or a scanner holding the file refuses for a moment is tried again
+		// (rename_with_retry: a bounded few ms), as a save's replace and the build's publish are.
+		if (!rename_with_retry(old_path, new_path, ec)) {
 			findings_.push_back(refusal(CoreFinding::RenameMove, "The file could not be renamed: " + ec.message(), plan.path));
 			return;
 		}
-		if (!plan.sidecar.empty()) fs::rename(fs::path(paths_.root) / plan.sidecar, fs::path(paths_.root) / plan.new_sidecar, ec);
+		if (!plan.sidecar.empty()) rename_with_retry(at(plan.sidecar), at(plan.new_sidecar), ec);
 		for (const RenameOutput &companion : plan.companions)
-			fs::rename(fs::path(paths_.root) / companion.path, fs::path(paths_.root) / companion_path(companion), ec);
+			rename_with_retry(at(companion.path), at(companion_path(companion)), ec);
 	}
 	// The old outputs are disposable: the next import pass makes the new ones. (A rename
 	// that only changes the case keeps its output directory, which is keyed case-blind.)
 	if (!plan.output_dir.empty() && plan.output_dir != plan.new_output_dir)
-		fs::remove_all(fs::path(paths_.root) / plan.output_dir, ec);
+		fs::remove_all(at(plan.output_dir), ec);
 	ok_ = true;
 }
 

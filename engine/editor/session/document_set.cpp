@@ -268,7 +268,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	if (!existing) {
 		const auto target = fs::path(paths_.root) / relative;
 		std::error_code ec;
-		if (fs::exists(target, ec) || ec) {
+		if (fs::exists(system_path(target.generic_string()), ec) || ec) { // a project past MAX_PATH too
 			refuse(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Error, "Refresh before creating this file.", request.path));
 			return;
 		}
@@ -297,7 +297,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				const std::string text_relative = (fs::path(asset_kind_row(AssetKind::Strings).folder) / table).generic_string();
 				const auto text_target = fs::path(paths_.root) / text_relative;
 				std::vector<uint8_t> text_bytes;
-				if (!fs::exists(text_target, ec) && text_factory->make(text_blank, text_bytes, error) &&
+				if (!fs::exists(system_path(text_target.generic_string()), ec) && text_factory->make(text_blank, text_bytes, error) &&
 				    ensure_directory(text_target.parent_path().generic_string(), message) &&
 				    write_file_atomic(text_target.generic_string(), text_bytes.data(), text_bytes.size(), message)) {
 					made.push_back(text_relative);
