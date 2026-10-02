@@ -90,6 +90,12 @@ public:
 
 	// The camera on the selected marks, else on everything (F, a double click, the toolbar's Frame).
 	void frame_selected(int width, int height, CanvasRequests &out) const;
+	// The Place tool (ADR 0046 S14): while an item is set (its id; 0 none), a click on the picture
+	// places one of it there (an EditInViewport drop of the item, which the viewport plans) instead of
+	// selecting; a press takes no mark and draws no marquee, Alt still orbits and the middle button
+	// pans.
+	void set_place(int64_t item) { place_ = item; }
+	int64_t place() const { return place_; }
 
 private:
 	void keys_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
@@ -108,6 +114,7 @@ private:
 	std::vector<MissionPressed> nudge_;
 	std::vector<NodeAddress> nudged_;
 	double nudge_east_ = 0.0, nudge_north_ = 0.0, nudge_up_ = 0.0;
+	int64_t place_ = 0;
 };
 
 } // namespace opennova::editor

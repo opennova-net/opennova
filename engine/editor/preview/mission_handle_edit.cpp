@@ -99,6 +99,11 @@ bool mission_ground_point(const ViewportContext &context, const OrbitCamera &cam
 		preview_to_mission(from, start);
 		preview_to_mission(far, end);
 		if (context.device->surface_between(start, end, out)) {
+			// The march's stop is the ray's point over the ground (the terrain raycast steps); its height
+			// the ground's there, as a move's `stick` and the ground command read it, so what lands on
+			// the point lies on the ground.
+			double height = 0.0;
+			if (context.device->ground_at(out[0], out[1], height)) out[2] = height;
 			if (on_terrain) *on_terrain = true;
 			return true;
 		}

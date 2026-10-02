@@ -378,9 +378,10 @@ func test_the_mission_builds_over_frames() -> void:
 	assert_eq(String(state.get("status", "")), "ready")
 
 
-## S14 V8: the ground is the terrain's. A move of the first item with `stick` (the default) keeps its
-## height over TerrainData.get_height_world_bilinear at the new place; the build generation stands;
-## a vertical ray through the moved item meets the terrain where the height says.
+## S14 V8, V10: the ground is the terrain's. A move of the first item with `stick` (the default) keeps
+## its height over TerrainData.get_height_world_bilinear at the new place; the build generation
+## stands; a vertical ray through the moved item meets the terrain where the height says; an item
+## dropped at the picture's middle lands on the terrain with its model's ground point baked in.
 func test_the_ground() -> void:
 	if _app == null:
 		return
@@ -426,6 +427,36 @@ func test_the_ground() -> void:
 	assert_true(bool(lifted.get("outcome", {}).get("done", false)), str(lifted))
 	var still := _vector(_mark_of(_state(), int(item["id"])).get("at"))
 	assert_almost_eq(still.z, after.z, 0.0001, "stick off: the height stands")
+	# S14 V10: a drop lands on the terrain. The item the crate draws, let go at the picture's middle, is
+	# one item more, stored at the ground point less the crate's `ground` user point (an author-time
+	# bake): its stored position plus that anchor lies on the terrain. (The synth crate's point is its
+	# origin; editor_mission_viewport's ctest mints one off it for the bake's arithmetic.)
+	state = _state()
+	var ids := {}
+	for row: Variant in state.get("items", []):
+		ids[int((row as Dictionary).get("id", 0))] = true
+	var size: Dictionary = state.get("device", {})
+	var dropped: Dictionary = _ask({"kind": "edit_in_viewport", "drop": {"reference": "item", "name": "106100",
+			"at": [float(size.get("width", 1024)) * 0.5, float(size.get("height", 768)) * 0.5], "kind": "mission"}})
+	assert_true(bool(dropped.get("outcome", {}).get("done", false)), str(dropped))
+	var placed := {}
+	for row: Variant in _state().get("items", []):
+		if not ids.has(int((row as Dictionary).get("id", 0))):
+			placed = row
+	assert_eq(String(placed.get("kind", "")), "item", "one item more: %s" % str(placed))
+	if placed.is_empty():
+		return
+	var crate: ObjectData = _app.get_mission_placer("missions/synth_logic.bms").object_data_for("crate")
+	assert_not_null(crate)
+	if crate == null:
+		return
+	var anchor := Vector3.ZERO
+	for i in crate.get_user_point_count():
+		var point: ModelUserPoint = crate.get_user_point_info(i)
+		if point != null and point.get_name().to_lower() == "ground":
+			anchor = MissionObjectPlacer.godot_to_bms_position(point.get_position())
+	var on := _vector(placed.get("at")) + anchor
+	assert_almost_eq(on.z, _ground(data, on.x, on.y), 0.02, "the anchor on the terrain")
 
 
 ## S14 V8: a file the mission names that the project lacks is a note. A project with the mission alone

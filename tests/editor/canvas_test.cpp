@@ -82,7 +82,7 @@ constexpr NodeKind kScreenKind = node_kind(MenuKind::Screen);
 // --- a canvas's requests, recorded ---------------------------------------------------------
 
 struct Request {
-	enum class Kind { Select, Edits, EndEdit, Viewport };
+	enum class Kind { Select, Edits, EndEdit, Viewport, Drop };
 	Kind kind = Kind::Select;
 	std::string path;
 	NodeAddress record;
@@ -90,6 +90,7 @@ struct Request {
 	CanvasJoin join = CanvasJoin::Replace;
 	std::vector<Edit> edits;
 	std::string viewport; // a SetViewport's change
+	ViewportDrop drop; // an EditInViewport's drop (the mission's Place tool)
 };
 
 // What the canvas raises, by kind; a kind a canvas never raises fails the test.
@@ -118,6 +119,14 @@ struct Recorder final : CanvasRequests {
 			case EditorRequestKind::SetViewport:
 				out.kind = Request::Kind::Viewport;
 				out.viewport = raised.viewport;
+				break;
+			case EditorRequestKind::EditInViewport:
+				if (raised.drop.file.empty() && raised.drop.reference.empty()) {
+					unexpected = true;
+					return;
+				}
+				out.kind = Request::Kind::Drop;
+				out.drop = raised.drop;
 				break;
 			default:
 				unexpected = true;
@@ -1394,6 +1403,7 @@ struct MissionRig {
 			case Request::Kind::Edits: session.handle(request::edit_record(path, request.edits)); break;
 			case Request::Kind::EndEdit: session.handle(request::end_edit(path)); break;
 			case Request::Kind::Viewport: session.handle(request::set_viewport(path, request.viewport)); break;
+			case Request::Kind::Drop: session.handle(request::edit_in_viewport(path, request.drop)); break;
 			}
 			served += session.outcome().done() ? 1 : 0;
 		}
@@ -1741,6 +1751,52 @@ int test_mission_delete() {
 	return 0;
 }
 
+// The Place tool (S14 V10): with an item set, a click on the picture is one EditInViewport drop of
+// that item at the click (the mission's kind), a click on a mark too (it selects nothing); a drag
+// raises nothing (no marquee, no move), Alt and a drag still orbit; held by an operation, a click
+// places nothing; the tool off, a click selects again.
+int test_mission_place() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open());
+	rig.canvas.set_place(106101);
+	TEST_EXPECT(rig.canvas.place() == 106101);
+	std::vector<Request> requests = rig.click(100.0f, 120.0f);
+	TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Drop && requests[0].path == rig.path);
+	if (requests.size() == 1) {
+		const ViewportDrop &drop = requests[0].drop;
+		TEST_EXPECT(drop.reference == "item" && drop.name == "106101" && drop.file.empty() && drop.x == 100.0f &&
+				drop.y == 120.0f && drop.kind == ViewportKind::Mission);
+	}
+	const std::vector<int> picks = rig.pickable();
+	TEST_EXPECT(!picks.empty());
+	if (!picks.empty()) {
+		const MissionMark mark = rig.marks()[size_t(picks[0])];
+		requests = rig.click(mark.x, mark.y);
+		TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Drop && count_of(requests, Request::Kind::Select) == 0);
+		requests = rig.drag(CanvasPoint{ mark.x, mark.y }, CanvasPoint{ mark.x + 40.0f, mark.y }, 2);
+		TEST_EXPECT(requests.empty());
+	}
+	CanvasKeys alt;
+	alt.alt = true;
+	requests = rig.drag(CanvasPoint{ 2.0f, 2.0f }, CanvasPoint{ 52.0f, 2.0f }, 2, alt);
+	TEST_EXPECT(!requests.empty() && count_of(requests, Request::Kind::Viewport) == requests.size());
+	// Held: nothing placed.
+	TEST_EXPECT(rig.session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	TEST_EXPECT(rig.click(100.0f, 120.0f).empty());
+	rig.session.run_operations();
+	// Off: a click on nothing with nothing selected raises nothing, on a mark selects it.
+	rig.canvas.set_place(0);
+	TEST_EXPECT(rig.click(2.0f, 2.0f).empty());
+	if (!picks.empty()) {
+		const MissionMark mark = rig.marks()[size_t(picks[0])];
+		requests = rig.click(mark.x, mark.y);
+		TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && requests[0].record == mark.record);
+	}
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_place passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -1773,6 +1829,8 @@ int main() {
 	if (test_mission_nudge() != 0)
 		return 1;
 	if (test_mission_delete() != 0)
+		return 1;
+	if (test_mission_place() != 0)
 		return 1;
 	std::printf("editor_canvas: all tests passed\n");
 	return 0;

@@ -14,9 +14,14 @@ namespace opennova::editor {
 // Stick (a move keeps each entity's height over the ground), Show (the layers the device draws, the
 // marks the canvas draws, the labels, how far a mark is drawn), Time (the mission's start time or an
 // hour of the day), Frame and Top (the camera on the selection or everything, straight down over its
-// target). Every change is a request: the options a SetViewport, the camera's gestures SetViewports,
-// a drag's samples EditRecord batches under one gesture, a click or a marquee a SelectRecord. Under
-// the canvas, the files the picture asked the project for and did not find (an Import mends them).
+// target), Place (an item picked from the project's catalogs, then each click on the picture places
+// one of it there: an EditInViewport drop the viewport plans; Esc or Stop placing ends it), Ground
+// (the selected entities set down on the ground under them), Play mission. A Files row let go over
+// the picture is a drop of that file (a model, whose item the viewport finds). Every change is a
+// request: the options a SetViewport, the camera's gestures SetViewports, a drag's samples EditRecord
+// batches under one gesture, a click or a marquee a SelectRecord, a placing click or a drop an
+// EditInViewport. Under the canvas, the files the picture asked the project for and did not find (an
+// Import mends them).
 class MissionViewportView final : public ViewportView {
 public:
 	MissionViewportView();

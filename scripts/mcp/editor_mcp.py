@@ -700,7 +700,9 @@ def build_parser() -> argparse.ArgumentParser:
                                "the samples of one gesture are consecutive drags of one handle on its document)")
     viewport.add_argument("--end", choices=("true", "false"), default=None,
                           help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
-    viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame")
+    viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame; "
+                                                       "a mission's frame, top or ground (the entities set down on the "
+                                                       "ground under them)")
     viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
                                                       "others follow)")
     viewport.add_argument("--timeout", type=float, default=120.0)

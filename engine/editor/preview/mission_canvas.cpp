@@ -183,6 +183,12 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 	if (in.pressed) {
 		gesture_.press(subject_of(frame_), in.screen, out);
 		grab_ = mission_canvas_grab(frame_, context, in, under);
+		// Placing: a press takes no mark and draws no marquee (its click places).
+		if (place_ != 0 && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
+			const CanvasPoint from = grab_.from;
+			grab_ = MissionGrab();
+			grab_.from = grab_.to = from;
+		}
 	}
 	if (gesture_.pressed() && !in.down) {
 		release_(out);
@@ -326,6 +332,17 @@ void MissionCanvas::release_(CanvasRequests &out) {
 				out.request(request::select_record(path, boxed.back(), select_mode(grab_.join), boxed));
 			else if (replace && !frame_.records.empty())
 				out.request(request::select_record(path, NodeAddress()));
+		}
+	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current && place_ != 0) {
+		// Placing: one of the item where the click was (the viewport plans the drop).
+		if (frame_.editable && frame_.viewport) {
+			ViewportDrop drop;
+			drop.reference = "item";
+			drop.name = std::to_string(place_);
+			drop.x = grab_.from.x;
+			drop.y = grab_.from.y;
+			drop.kind = ViewportKind::Mission;
+			out.request(request::edit_in_viewport(frame_.viewport->path(), std::move(drop)));
 		}
 	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current) {
 		// A click: the mark under it selected, joined as the keys say; on nothing, nothing selected.

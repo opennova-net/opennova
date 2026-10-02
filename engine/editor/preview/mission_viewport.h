@@ -113,9 +113,18 @@ public:
 	bool drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
 			std::string &error) const override;
 	// `frame` (the first named record, else the selection, else everything) and `top` (straight down
-	// over the target, north up): each a SetViewport of the camera.
+	// over the target, north up): each a SetViewport of the camera. `ground`: each named entity (else
+	// each selected one) set down on the device's ground under it, its z the ground's less its model's
+	// anchor height (preview/mission_items), one batch; refused with no ground under one.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
+	// A drop (a model file, or an item by its id: the Place tool's): the item's entity added to the
+	// pool its TYPE puts it in where the point meets the ground (the device's terrain, its model's
+	// ground anchor baked in; else the plane through the camera's target), one batch (an Add, then
+	// its x, y and z through batch_made). Refused: a file that is no model, a model no item draws or
+	// several do (naming them), an item no catalog of the project defines, a point over no ground.
+	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+			std::string &error) const override;
 	io::JsonValue options_json() const override;
 	io::JsonValue camera_json() const override;
 	io::JsonValue body_json(const ViewportInput &input) const override;

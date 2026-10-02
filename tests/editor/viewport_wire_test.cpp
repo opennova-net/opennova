@@ -17,7 +17,9 @@
 // (the plane through it) moves it on the file's axes, one undo step whose undo gives the bytes back;
 // four samples under one gesture one step; its height and yaw handles; a drag of a selected entity
 // takes the selected with it; refused as the planner says (an unknown handle, a record the picture
-// does not show, an area's yaw, an operation holding the documents); the frame and top commands.
+// does not show, an area's yaw, an operation holding the documents); the frame and top commands. A
+// mission's drop (S14 V10): an item or a model file let go at a point, one batch, one undo step; its
+// refusals; the ground command refused with no ground.
 
 #include <cmath>
 #include <cstdint>
@@ -149,9 +151,12 @@ struct Wired {
 		const std::string root = session.view().project.root;
 		editor_test::write_text(root + "/layout.mnu", kLayoutMenu);
 		editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di")));
-		if (mission)
+		if (mission) {
 			editor_test::write_bytes(root + "/missions/synth_logic.bms",
 					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
+			// The item a drop places: the armory, a building.
+			editor_test::write_text(root + "/defs/items.def", "begin \"Wire Armory\"\nid 106101\ntype building\ngraphic armory\nend\n");
+		}
 		session.handle(request::rescan());
 		session.run_operations();
 		session.handle(request::open_document("layout.mnu"));
@@ -689,6 +694,50 @@ static int test_mission_edits() {
 	return 0;
 }
 
+// A mission's drop over the wire (S14 V10): an item by its id let go at the picture's middle is one
+// batch adding a building there (its TYPE's pool), one undo step whose undo gives the bytes back; the
+// armory's model file drops its one item alike; refused and nothing written: an item no catalog
+// defines (named), a file that is no model, the ground command with no device's ground.
+static int test_mission_drop() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_mission_drop", platform, true);
+	ProjectSession &session = wired.session;
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	session.run_operations();
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string path = document->path();
+	const auto *viewport = static_cast<const MissionViewport *>(
+			session.viewports().follow_one(session.view(), path, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	const std::string middle = "[" + std::to_string(viewport->size().width / 2) + ", " +
+			std::to_string(viewport->size().height / 2) + "]";
+	const auto dropped = [&](const std::string &members) {
+		return wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "drop": {)" + members + ", \"at\": " +
+				middle + "}}");
+	};
+	const std::string bytes = document->serialize().text;
+	const size_t buildings = document->rows_of(MissionKind::Building).size();
+	for (const std::string &members : { std::string(R"("reference": "item", "name": "106101")"), std::string(R"("file": "armory.3di")") }) {
+		const JsonValue answer = dropped(members);
+		TEST_EXPECT(done(answer));
+		TEST_EXPECT(document->rows_of(MissionKind::Building).size() == buildings + 1);
+		session.handle(request::undo(path));
+		TEST_EXPECT(session.outcome().done() && !document->can_undo() && document->serialize().text == bytes);
+	}
+	TEST_EXPECT(refused(dropped(R"("reference": "item", "name": "999999")"), "999999"));
+	TEST_EXPECT(refused(dropped(R"("file": "layout.mnu")"), "is no model"));
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path +
+									R"(", "command": {"name": "ground", "ids": [)" +
+									std::to_string(document->rows_of(MissionKind::Item).front()->id) + "]}}"),
+			"no ground"));
+	TEST_EXPECT(document->serialize().text == bytes && !document->dirty());
+	std::printf("test_mission_drop passed\n");
+	return 0;
+}
+
 // The preview clock set with no document named: a change of the clock alone, pathless, sets it
 // whatever is active (a stylesheet, which shows in no viewport; nothing at all); one with another
 // member beside it names the active document's viewport, refused for a stylesheet (naming the types
@@ -1000,6 +1049,7 @@ int main() {
 	TEST_EXPECT(test_menu_drags() == 0);
 	TEST_EXPECT(test_model_edits() == 0);
 	TEST_EXPECT(test_mission_edits() == 0);
+	TEST_EXPECT(test_mission_drop() == 0);
 	TEST_EXPECT(test_pathless_clock() == 0);
 	TEST_EXPECT(test_canvas_sized_reads() == 0);
 	std::printf("editor_viewport_wire: all tests passed\n");

@@ -50,9 +50,10 @@ struct MissionPressed {
 inline constexpr double kMissionPickReach = 16384.0;
 
 // Where the ray through picture pixel (x, y) meets the ground, a mission point: the surface the
-// context's device draws (its terrain: ViewportDevice::surface_between along the camera's ray), else
-// the horizontal plane at mission height `plane_z`. `on_terrain` says which. False when neither is
-// met (a ray level with the plane or away from it, over no terrain).
+// context's device draws (its terrain: ViewportDevice::surface_between along the camera's ray, the
+// height there ViewportDevice::ground_at's), else the horizontal plane at mission height `plane_z`.
+// `on_terrain` says which. False when neither is met (a ray level with the plane or away from it, over
+// no terrain).
 bool mission_ground_point(const ViewportContext &context, const OrbitCamera &camera, float x, float y,
 		double plane_z, double out[3], bool *on_terrain = nullptr);
 

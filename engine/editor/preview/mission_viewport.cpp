@@ -5,14 +5,18 @@
 #include <variant>
 
 #include <base/io/bam.h>
+#include <base/io/strutil.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/assets/project_asset_source.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_items.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_source.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mission/bms.h>
 
 namespace opennova::editor {
 
@@ -47,6 +51,24 @@ JsonValue mission_point(const MissionMark &mark) {
 	JsonValue out = JsonValue::make_array();
 	for (const double value : at) out.push(json_number(value));
 	return out;
+}
+
+// The scan's entry of a file a drop names: by its logical name, else by its project-relative path
+// (what a Files row carries).
+const AssetEntry *dropped_file(const SessionView &view, const std::string &file) {
+	if (!view.project.scan) return nullptr;
+	if (const AssetEntry *entry = view.project.scan->find(file)) return entry;
+	for (const AssetEntry &entry : view.project.scan->entries)
+		if (strutil::iequals(entry.relative_path, file)) return &entry;
+	return nullptr;
+}
+
+Edit set_of(const NodeAddress &record, const char *field, Value value) {
+	Edit edit;
+	edit.address = record;
+	edit.field = field;
+	edit.value = std::move(value);
+	return edit;
 }
 
 } // namespace
@@ -500,15 +522,135 @@ bool MissionViewport::drag(const ViewportContext &context, const ViewportDrag &d
 	return true;
 }
 
+bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	const Document *document = planned_(context, error);
+	if (!document) return false;
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	const SessionView &view = context.input.view;
+	// The item: named, else the one item whose graphic the dropped model is.
+	int64_t item = 0;
+	if (!drop.reference.empty()) {
+		const std::optional<int> id = strutil::parse_int(drop.name);
+		if (drop.reference != "item" || !id) {
+			error = "A mission viewport takes an item by its id (reference \"item\") or a model file.";
+			return false;
+		}
+		item = *id;
+	} else {
+		const AssetEntry *entry = dropped_file(view, drop.file);
+		if (!entry) {
+			error = "The project has no file \"" + drop.file + "\".";
+			return false;
+		}
+		if (entry->kind != AssetKind::Model) {
+			error = entry->logical_name + " is no model: a mission viewport takes a model file or an item.";
+			return false;
+		}
+		const std::vector<int64_t> items = mission_items_of_model(view, entry->relative_path);
+		if (items.empty()) {
+			error = "No item of the project draws " + entry->logical_name + ": add one to an item catalog, or drop an item.";
+			return false;
+		}
+		if (items.size() > 1) {
+			error = "Several items draw " + entry->logical_name + ":";
+			for (size_t i = 0; i < items.size(); ++i) {
+				MissionItemFacts facts;
+				std::string ignored;
+				mission_item_facts(view, items[i], facts, ignored);
+				error += std::string(i ? ", " : " ") + (facts.name.empty() ? std::string() : facts.name + " ") + "(" +
+						std::to_string(items[i]) + ")";
+			}
+			error += ". Drop one of them by its item.";
+			return false;
+		}
+		item = items.front();
+	}
+	MissionItemFacts facts;
+	if (!mission_item_facts(view, item, facts, error)) return false;
+	// Where the point meets the ground (the device's terrain, else the plane through the camera's
+	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
+	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
+	double target[3], at[3];
+	preview_to_mission(camera_.target, target);
+	bool on_terrain = false;
+	if (!mission_ground_point(context, camera_, drop.x, drop.y, target[2], at, &on_terrain)) {
+		error = "The point is not over the ground.";
+		return false;
+	}
+	if (on_terrain)
+		for (int i = 0; i < 3; ++i) at[i] -= facts.anchor[i];
+	// One batch: the entity of the item added to the pool its TYPE puts it in, then placed.
+	const NodeKind kind = node_kind(facts.pool);
+	std::vector<Edit> edits;
+	Edit add;
+	add.operation = EditOperation::Add;
+	add.address = NodeAddress{ 0, kind, 0 };
+	add.field = "item";
+	add.value = item;
+	edits.push_back(std::move(add));
+	const NodeAddress made{ batch_made(0), kind, 0 };
+	edits.push_back(set_of(made, "x", at[0]));
+	edits.push_back(set_of(made, "y", at[1]));
+	edits.push_back(set_of(made, "z", at[2]));
+	out.request(request::edit_record(document->path(), std::move(edits)));
+	return true;
+}
+
 bool MissionViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 		CanvasRequests &out, std::string &error) const {
-	if (name != "frame" && name != "top") {
-		error = "Unknown mission command \"" + name + "\" (frame, top).";
+	if (name != "frame" && name != "top" && name != "ground") {
+		error = "Unknown mission command \"" + name + "\" (frame, top, ground).";
 		return false;
 	}
 	if (reason_ != MissionViewStatus::Ready) {
 		error = "The viewport shows no mission.";
 		return false;
+	}
+	if (name == "ground") {
+		// Each named entity (else each selected one) set down on the ground under it: its height the
+		// ground's less its model's anchor height (the game's vertical terrain conform: only the
+		// height, docs/world/world-wac-ai-re.md section 12), one batch.
+		const Document *document = planned_(context, error);
+		if (!document) return false;
+		if (!context.editable()) {
+			error = context.not_editable();
+			return false;
+		}
+		std::vector<NodeId> rows = ids;
+		if (rows.empty())
+			if (const Selection *selection = selection_of(context.input, *document))
+				for (const NodeAddress &record : selection->records)
+					if (scene_.entity(record.row)) rows.push_back(record.row);
+		if (rows.empty()) {
+			error = "No entity to set down: name one, or select one.";
+			return false;
+		}
+		std::vector<Edit> edits;
+		for (const NodeId row : rows) {
+			const MissionEntityMark *entity = scene_.entity(row);
+			if (!entity) {
+				error = "Record " + std::to_string(row) + " is no entity of the mission.";
+				return false;
+			}
+			double ground = 0.0;
+			if (!context.device || !context.device->ground_at(entity->x, entity->y, ground)) {
+				error = "The picture has no ground under record " + std::to_string(row) + " (no terrain built there).";
+				return false;
+			}
+			MissionItemFacts facts;
+			std::string ignored;
+			mission_item_facts(context.input.view, entity->item, facts, ignored);
+			const double z = ground - facts.anchor[2];
+			// Where its 16.16 word moves.
+			if (bms::to_fixed_16_16(z) != bms::to_fixed_16_16(entity->z))
+				edits.push_back(set_of(NodeAddress{ row, entity->kind, 0 }, "z", z));
+		}
+		if (!edits.empty()) out.request(request::edit_record(document->path(), std::move(edits)));
+		return true;
 	}
 	if (name == "top") {
 		OrbitCamera camera = camera_;

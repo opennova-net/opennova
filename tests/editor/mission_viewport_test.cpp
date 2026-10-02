@@ -10,7 +10,8 @@
 // the Viewports concern once, a SetViewport of its camera and options, refused members named); its
 // hits and boxes (each entity at its projected pixel, the front-most, a kind's marks off and the
 // mark range dropping marks, a box's records); and its envelope (the body's counts, a page of items,
-// the notes).
+// the notes). S14 V10: a drop's item facts and its one batch (on the plane, over a device's ground
+// with the model's anchor baked in), its refusals; the ground command.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -22,7 +23,10 @@
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_items.h>
 #include <editor/preview/mission_viewport.h>
+#include <formats/threedi/threedi_3di3.h>
 #include <editor/preview/preview_clock.h>
 #include <editor/preview/viewport_json.h>
 #include <editor/preview/viewport_kinds.h>
@@ -52,9 +56,17 @@ using editor_test::NoProcess;
 
 constexpr const char *kMission = "missions/synth_logic.bms";
 
-std::string fixture(const char *rel) {
+std::string fixture(const std::string &rel) {
 	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
 }
+
+// An item catalog for the drop: the pump drawn by two items, the armory a building, the shed a
+// person, the crate (a model with a `ground` user point) an object.
+constexpr const char *kDropItems = "begin \"Drop Pump\"\nid 106100\ntype object\ngraphic pump\nend\n"
+								   "begin \"Drop Scaled Pump\"\nid 106103\ntype object\ngraphic pump\nscale 1.5\nend\n"
+								   "begin \"Drop Armory\"\nid 106101\ntype building\ngraphic armory\nend\n"
+								   "begin \"Drop Rifleman\"\nid 106102\ntype person\ngraphic shed\nend\n"
+								   "begin \"Drop Crate\"\nid 106190\ntype object\ngraphic crate\nend\n";
 
 // A session over a project holding the minted mission, the mission open and its viewport followed
 // once through the fake devices.
@@ -68,13 +80,21 @@ struct Rig {
 
 	explicit Rig(const char *name) : dir(name) {}
 
-	bool open(bool open_mission = true) {
+	// `items`: the drop's item catalog and the synth models it draws, written into the project too.
+	bool open(bool open_mission = true, bool items = false) {
 		session.handle(request::new_project(dir.file("project"), "Missions"));
 		session.run_operations();
 		editor_test::create_missing_files(session);
 		const SessionView &view = session.view();
 		if (!editor_test::write_bytes(view.project.root + "/" + kMission, test_io::read_file(fixture("bms/synth_logic.bms"))))
 			return false;
+		if (items) {
+			if (!editor_test::write_text(view.project.root + "/defs/items.def", kDropItems)) return false;
+			for (const char *model : { "pump.3di", "armory.3di", "shed.3di", "crate.3di" })
+				if (!editor_test::write_bytes(view.project.root + "/models/" + model,
+							test_io::read_file(fixture(std::string("threedi/synth/") + model))))
+					return false;
+		}
 		session.handle(request::rescan());
 		session.run_operations();
 		if (!open_mission) return true;
@@ -294,7 +314,6 @@ static int test_camera_frame() {
 	Rig rig("opennova_editor_mission_viewport_camera");
 	TEST_EXPECT(rig.open());
 	const MissionViewport *viewport = rig.viewport();
-	const SessionView &view = rig.session.view();
 	// The first framing: north, 35 degrees down, within the frame distance; the state moved once.
 	const uint64_t state = viewport->state_serial();
 	TEST_EXPECT(near(mission_camera_heading(viewport->camera()), 0.0) && near(mission_camera_pitch(viewport->camera()), 35.0, 0.01));
@@ -427,6 +446,204 @@ static int test_envelope() {
 	return 0;
 }
 
+// The synth crate with its `ground` user point moved off the origin (every synth model has it at the
+// origin), minted through the engine's own 3DI writer into the project's models/crate.3di and
+// rescanned: the point authored at (0.25, -0.5, 0.75) (x forward, y left, z up), which is the mission
+// frame's (-0.5, -0.25, 0.75) as the drop bakes it (threedi_user_point_position, the placer's
+// godot_vec3, godot_to_bms_position).
+constexpr double kCrateAnchor[3] = { -0.5, -0.25, 0.75 };
+static bool mint_anchored_crate(Rig &rig) {
+	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/crate.3di"));
+	opennova::threedi::Threedi3di3 model{};
+	if (opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) != 0) return false;
+	bool moved = false;
+	for (size_t i = 0; i < model.user_point_count; ++i) {
+		opennova::threedi::ThreediUserPoint &point = model.user_points[i];
+		if (std::string(point.name) != "ground") continue;
+		point.x = int32_t(0.25 * 65536.0);
+		point.y = int32_t(-0.5 * 65536.0);
+		point.z = int32_t(0.75 * 65536.0);
+		moved = true;
+	}
+	std::vector<uint8_t> written;
+	const bool wrote = moved && opennova::threedi::threedi_3di3_write_memory(&model, written) == 0;
+	opennova::threedi::threedi_3di3_free(&model);
+	if (!wrote || !editor_test::write_bytes(rig.session.view().project.root + "/models/crate.3di", written)) return false;
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	rig.pump();
+	return true;
+}
+
+// A drop (S14 V10): the item facts the project's graph gives (its name, its TYPE's pool, its model,
+// that model's ground anchor), the items a model draws; an item dropped at the picture's middle over
+// no device is one batch (an Add of the pool its TYPE puts it in with the item, then x, y and z on
+// batch_made(0)) placing it on the plane through the camera's target, one undo step; a model file of
+// one item drops that item; one several items draw is refused naming them, a file that is no model
+// and an item no catalog defines too, nothing written; over a device's ground the stored position is
+// the ground point less the model's anchor.
+static int test_drop() {
+	Rig rig("opennova_editor_mission_viewport_drop");
+	TEST_EXPECT(rig.open(true, true));
+	TEST_EXPECT(mint_anchored_crate(rig));
+	const MissionViewport *viewport = rig.viewport();
+	const SessionView &view = rig.session.view();
+	std::string error;
+	MissionItemFacts facts;
+	TEST_EXPECT(mission_item_facts(view, 106190, facts, error) && facts.name == "Drop Crate" && facts.pool == MissionKind::Item);
+	TEST_EXPECT(facts.model == "models/crate.3di");
+	const double *crate = kCrateAnchor;
+	for (int i = 0; i < 3; ++i) TEST_EXPECT(near(facts.anchor[i], crate[i], 1e-5));
+	// A model whose `ground` point is its origin: no anchor.
+	TEST_EXPECT(mission_item_facts(view, 106101, facts, error) && facts.pool == MissionKind::Building && facts.model == "models/armory.3di");
+	TEST_EXPECT(facts.anchor[0] == 0.0 && facts.anchor[1] == 0.0 && facts.anchor[2] == 0.0);
+	TEST_EXPECT(mission_item_facts(view, 106102, facts, error) && facts.pool == MissionKind::Organic);
+	TEST_EXPECT(!mission_item_facts(view, 999999, facts, error) && error.find("999999") != std::string::npos);
+	TEST_EXPECT(mission_items_of_model(view, "models/pump.3di") == std::vector<int64_t>({ 106100, 106103 }));
+	TEST_EXPECT(mission_items_of_model(view, "crate.3di") == std::vector<int64_t>({ 106190 }));
+
+	// The armory by its item at the picture's middle, over no device: the camera's target.
+	const ViewportContext context = rig.context();
+	const Document &document = *rig.document();
+	const size_t buildings = static_cast<const MissionDocument &>(document).rows_of(MissionKind::Building).size();
+	ViewportDrop drop;
+	drop.reference = "item";
+	drop.name = "106101";
+	drop.x = float(context.width) * 0.5f;
+	drop.y = float(context.height) * 0.5f;
+	editor_test::Gathered gathered;
+	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1);
+	if (gathered.requests.size() != 1) return 1;
+	const std::vector<Edit> &edits = gathered.requests[0].edits;
+	TEST_EXPECT(edits.size() == 4 && edits[0].operation == EditOperation::Add &&
+			edits[0].address.kind == node_kind(MissionKind::Building) && edits[0].field == "item" &&
+			std::get<int64_t>(edits[0].value) == 106101);
+	double target[3];
+	preview_to_mission(viewport->camera().target, target);
+	for (size_t i = 1; i < edits.size() && edits.size() == 4; ++i) {
+		TEST_EXPECT(edits[i].address.row == batch_made(0) && edits[i].operation == EditOperation::Set);
+		TEST_EXPECT(near(std::get<double>(edits[i].value), target[i - 1], 1e-2));
+	}
+	TEST_EXPECT(edits.size() == 4 && edits[1].field == "x" && edits[2].field == "y" && edits[3].field == "z");
+	const std::string before = rig.document()->serialize().text;
+	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+	TEST_EXPECT(static_cast<const MissionDocument &>(*rig.document()).rows_of(MissionKind::Building).size() == buildings + 1);
+	rig.session.handle(request::undo(kMission));
+	TEST_EXPECT(rig.session.outcome().done() && rig.document()->serialize().text == before);
+	// A model file of one item drops that item.
+	drop.reference.clear();
+	drop.name.clear();
+	drop.file = "armory.3di";
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->drop(context, drop, gathered, error) && gathered.requests.size() == 1 &&
+			gathered.requests[0].edits.size() == 4 && std::get<int64_t>(gathered.requests[0].edits[0].value) == 106101);
+	// Refused, nothing planned: a model two items draw (naming both), a file that is no model, an item
+	// no catalog defines.
+	gathered.requests.clear();
+	drop.file = "pump.3di";
+	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("Drop Pump (106100)") != std::string::npos &&
+			error.find("Drop Scaled Pump (106103)") != std::string::npos);
+	drop.file = "synth_logic.bms";
+	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("is no model") != std::string::npos);
+	drop.file.clear();
+	drop.reference = "item";
+	drop.name = "999999";
+	TEST_EXPECT(!viewport->drop(context, drop, gathered, error) && error.find("999999") != std::string::npos);
+	TEST_EXPECT(gathered.requests.empty());
+
+	// Over a device's ground (z = 5 + x / 100): the crate stored at the ground point less its anchor.
+	rig.session.viewports().set_devices(&rig.devices.cache);
+	FakeDevice *device = rig.device();
+	TEST_EXPECT(device != nullptr);
+	if (!device) return 1;
+	device->ground = [](double x, double) { return 5.0 + x / 100.0; };
+	const ViewportContext grounded = rig.context();
+	TEST_EXPECT(grounded.device == device);
+	double point[3];
+	bool on_terrain = false;
+	TEST_EXPECT(mission_ground_point(grounded, viewport->camera(), drop.x, drop.y, target[2], point, &on_terrain) && on_terrain);
+	drop.name = "106190";
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->drop(grounded, drop, gathered, error) && gathered.requests.size() == 1);
+	if (gathered.requests.size() == 1 && gathered.requests[0].edits.size() == 4) {
+		const std::vector<Edit> &placed = gathered.requests[0].edits;
+		TEST_EXPECT(std::get<int64_t>(placed[0].value) == 106190 && placed[0].address.kind == node_kind(MissionKind::Item));
+		for (int i = 0; i < 3; ++i) TEST_EXPECT(near(std::get<double>(placed[size_t(i) + 1].value), point[i] - crate[i], 1e-6));
+	}
+	rig.session.viewports().set_devices(nullptr);
+	std::printf("test_drop passed\n");
+	return 0;
+}
+
+// The ground command (S14 V10): each named entity set down on the device's ground under it, its z the
+// ground's less its model's anchor height, one batch; the selection when none is named; refused with
+// no ground under it (no device) and with nothing named or selected.
+static int test_ground_command() {
+	Rig rig("opennova_editor_mission_viewport_ground");
+	TEST_EXPECT(rig.open(true, true));
+	TEST_EXPECT(mint_anchored_crate(rig));
+	const MissionViewport *viewport = rig.viewport();
+	const Document &document = *rig.document();
+	const NodeAddress item = first_of(document, MissionKind::Item);
+	const NodeAddress building = first_of(document, MissionKind::Building);
+	std::string error;
+	editor_test::Gathered gathered;
+	// No device: no ground.
+	TEST_EXPECT(!viewport->command(rig.context(), "ground", { item.row }, gathered, error) &&
+			error.find("no ground") != std::string::npos);
+	rig.session.viewports().set_devices(&rig.devices.cache);
+	FakeDevice *device = rig.device();
+	TEST_EXPECT(device != nullptr);
+	if (!device) return 1;
+	device->ground = [](double, double) { return 7.0; };
+	// The pump's `ground` point is its origin: set down at the ground's height.
+	TEST_EXPECT(viewport->command(rig.context(), "ground", { item.row }, gathered, error) && gathered.requests.size() == 1);
+	if (gathered.requests.size() == 1) {
+		const std::vector<Edit> &edits = gathered.requests[0].edits;
+		TEST_EXPECT(edits.size() == 1 && edits[0].address.row == item.row && edits[0].field == "z" &&
+				near(std::get<double>(edits[0].value), 7.0, 1e-9));
+	}
+	TEST_EXPECT(editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	TEST_EXPECT(near(viewport->scene().entity(item.row)->z, 7.0, 1.0 / 65536.0));
+	// Set down already: nothing planned.
+	gathered.requests.clear();
+	TEST_EXPECT(viewport->command(rig.context(), "ground", { item.row }, gathered, error) && gathered.requests.empty());
+	// The anchored crate dropped, then set down: its height the ground's less its anchor's (only the
+	// height: the game's vertical terrain conform).
+	ViewportDrop drop;
+	drop.reference = "item";
+	drop.name = "106190";
+	drop.x = float(rig.context().width) * 0.5f;
+	drop.y = float(rig.context().height) * 0.5f;
+	TEST_EXPECT(viewport->drop(rig.context(), drop, gathered, error) && editor_test::serve(rig.session, gathered.requests));
+	rig.pump();
+	NodeId crate = 0;
+	for (const Node *row : static_cast<const MissionDocument &>(*rig.document()).rows_of(MissionKind::Item)) {
+		const MissionEntityMark *mark = viewport->scene().entity(row->id);
+		if (mark && mark->item == 106190) crate = row->id;
+	}
+	TEST_EXPECT(crate != 0);
+	if (crate == 0) return 1;
+	gathered.requests.clear();
+	TEST_EXPECT(near(viewport->scene().entity(crate)->z, 7.0 - kCrateAnchor[2], 1.0 / 65536.0));
+	device->ground = [](double, double) { return 9.0; };
+	TEST_EXPECT(viewport->command(rig.context(), "ground", { crate }, gathered, error) && gathered.requests.size() == 1 &&
+			gathered.requests[0].edits.size() == 1 &&
+			near(std::get<double>(gathered.requests[0].edits[0].value), 9.0 - kCrateAnchor[2], 1e-9));
+	gathered.requests.clear();
+	// The selection when none is named.
+	rig.session.handle(request::select_record(kMission, building));
+	TEST_EXPECT(viewport->command(rig.context(), "ground", {}, gathered, error) && gathered.requests.size() == 1 &&
+			gathered.requests[0].edits.size() == 1 && gathered.requests[0].edits[0].address.row == building.row);
+	rig.session.handle(request::select_record(kMission, NodeAddress()));
+	gathered.requests.clear();
+	TEST_EXPECT(!viewport->command(rig.context(), "ground", {}, gathered, error) && error.find("No entity") != std::string::npos);
+	rig.session.viewports().set_devices(nullptr);
+	std::printf("test_ground_command passed\n");
+	return 0;
+}
+
 int main() {
 	TEST_EXPECT(test_kind_row() == 0);
 	TEST_EXPECT(test_status_and_follow() == 0);
@@ -436,6 +653,8 @@ int main() {
 	TEST_EXPECT(test_camera_frame() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
 	TEST_EXPECT(test_envelope() == 0);
+	TEST_EXPECT(test_drop() == 0);
+	TEST_EXPECT(test_ground_command() == 0);
 	std::printf("editor_mission_viewport: all tests passed\n");
 	return 0;
 }

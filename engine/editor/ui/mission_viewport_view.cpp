@@ -8,6 +8,9 @@
 #include <imgui.h>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_viewport.h>
@@ -15,6 +18,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
 
@@ -37,14 +41,19 @@ void camera_command(Workspace &workspace, const MissionViewport &mission, const 
 
 } // namespace
 
-// What the view keeps of its own: the snaps.
+// What the view keeps of its own: the snaps, the item the Place tool places (0: off) and its name,
+// the Place popup's filter.
 struct MissionViewportView::Tools {
 	int snap = 2; // kMissionSnaps: 1 m
 	int turn = 2; // kMissionTurns: 15 degrees
+	int64_t place = 0;
+	std::string place_name;
+	char filter[64] = {};
 
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
+	void place_popup(const SessionView &view);
 	void notes(const MissionViewport &mission);
 };
 
@@ -57,10 +66,60 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 	tools_->toolbar(workspace, mission, context);
 	snap = kMissionSnaps[std::clamp(tools_->snap, 0, 4)];
 	context.snap = snap;
+	if (CanvasHalf *canvas_half = half()) static_cast<MissionCanvas *>(canvas_half)->set_place(tools_->place);
 	// The notes under the canvas: a line while the picture lacks a file.
 	const float notes = mission.missing().empty() ? 0.0f : ImGui::GetFrameHeightWithSpacing();
-	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - notes));
+	// A Files row let go over the picture: a drop of the file there (a model; the viewport finds its
+	// item and refuses another file, naming why).
+	const SessionView &view = workspace.view();
+	const std::string path = mission.path();
+	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - notes),
+			[&workspace, &view, path](const CanvasInput &in) {
+				if (!ImGui::BeginDragDropTarget()) return;
+				const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+				const AssetEntry *entry = nullptr;
+				if (dragged && dragged->IsDataType(kFileDragPayload) && dragged->Data && view.project.scan) {
+					const std::string file(static_cast<const char *>(dragged->Data));
+					for (const AssetEntry &candidate : view.project.scan->entries)
+						if (candidate.relative_path == file) entry = &candidate;
+				}
+				// Only a model is taken: another file is never accepted.
+				if (entry && entry->kind == AssetKind::Model && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
+					ViewportDrop drop;
+					drop.file = entry->logical_name;
+					drop.x = in.mouse.x;
+					drop.y = in.mouse.y;
+					drop.kind = ViewportKind::Mission;
+					workspace.request(request::edit_in_viewport(path, std::move(drop)));
+				}
+				ImGui::EndDragDropTarget();
+			});
 	if (notes > 0.0f) tools_->notes(mission);
+}
+
+void MissionViewportView::Tools::place_popup(const SessionView &view) {
+	ui_kit::filter_box("##place_filter", filter, sizeof(filter), "Filter items");
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return;
+	// The items the project's catalogs define where a lookup finds them, by name or id.
+	const std::string wanted = strutil::to_lower(filter);
+	if (ImGui::BeginChild("items", ImVec2(ImGui::GetFontSize() * 18.0f, ImGui::GetFontSize() * 14.0f))) {
+		for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::Item)) {
+			if (symbol->inert) continue;
+			const std::string label = symbol->record + " (" + symbol->display + ")";
+			if (!wanted.empty() && strutil::to_lower(label).find(wanted) == std::string::npos) continue;
+			const std::optional<int> id = strutil::parse_int(symbol->name);
+			if (!id) continue;
+			ImGui::PushID(*id);
+			if (ImGui::Selectable(ui_kit::fit(label, ImGui::GetContentRegionAvail().x).c_str(), place == *id)) {
+				place = *id;
+				place_name = symbol->record;
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::PopID();
+		}
+	}
+	ImGui::EndChild();
 }
 
 void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionViewport &mission,
@@ -106,6 +165,30 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		camera_command(workspace, mission, context, "frame");
 	if (ui_kit::tool(row, "Top", true, "Look straight down over the camera's target, north up."))
 		camera_command(workspace, mission, context, "top");
+	// The Place tool: an item picked, then each click on the picture places one of it there.
+	const bool edits = context.editable();
+	if (place == 0) {
+		if (ui_kit::tool(row, "Place", edits,
+					edits ? "Pick an item, then click the picture to place one of it there (Esc stops)."
+						  : context.not_editable()))
+			ImGui::OpenPopup("place");
+	} else if (ui_kit::tool(row, "Stop placing", true, "Placing " + place_name + " (" + std::to_string(place) +
+					") at each click on the picture. Click to stop (or Esc).")) {
+		place = 0;
+	}
+	if (ImGui::BeginPopup("place")) {
+		place_popup(workspace.view());
+		ImGui::EndPopup();
+	}
+	if (place != 0 && (!edits || (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
+								  ImGui::IsKeyPressed(ImGuiKey_Escape, false))))
+		place = 0;
+	// What the ground under the selected entities is: each set down on it.
+	if (ui_kit::tool(row, "Ground", edits && mission.ground(),
+				!edits ? context.not_editable()
+				: mission.ground() ? std::string("Set each selected entity down on the ground under it.")
+								   : std::string("The picture has no ground yet (its terrain is not built).")))
+		camera_command(workspace, mission, context, "ground");
 	// Play mission: the build, then the game started in this mission (the session's own rule for
 	// the active document, play_mission_for: Ctrl+F5 is the same request).
 	const SessionView &view = workspace.view();
