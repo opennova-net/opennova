@@ -306,7 +306,7 @@ bool StringsDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 // name's stem (its trailing digits dropped), cut where the number would not fit the field (the
 // bytes are cp1252, one per character), and the first number whose name no section has.
 void StringsDocument::prepare_duplicate(
-		Node &copy, const std::vector<std::shared_ptr<const Node>> &rows) const {
+		Node &copy, const Node &, const std::vector<std::shared_ptr<const Node>> &rows) const {
 	std::set<std::string> taken;
 	for (const auto &row : rows) taken.insert(strutil::to_upper(row->name()));
 	std::string &name = section_of(copy).section_name;

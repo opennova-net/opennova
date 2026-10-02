@@ -34,7 +34,10 @@ SelectMode select_mode(CanvasJoin join);
 
 // The keys a canvas acts on in one frame. `focused`: the canvas's window has the keyboard and no
 // text field takes it (the rest reads nothing otherwise). The arrows pressed this frame, their key
-// repeat included, -1, 0 or 1 on each axis, and whether one is held down; Esc and F pressed.
+// repeat included, -1, 0 or 1 on each axis, and whether one is held down; Esc and F pressed. The
+// keys a camera flies by, held, -1, 0 or 1 on each of its axes (A and D: left and right; Q and E:
+// down and up; S and W: back and forward), Shift held with them (fast); Delete pressed; PgUp and
+// PgDn pressed, their key repeat included (1 up, -1 down).
 struct CanvasKeyboard {
 	bool focused = false;
 	int arrow_x = 0;
@@ -42,6 +45,12 @@ struct CanvasKeyboard {
 	bool arrow_held = false;
 	bool escape = false;
 	bool frame = false; // F
+	int move_x = 0;
+	int move_y = 0;
+	int move_z = 0;
+	bool fast = false;
+	bool remove = false; // Delete
+	int page = 0;
 };
 
 // One frame of the pointer and the keyboard over a canvas's picture: the editor's canvas reads it
@@ -63,8 +72,13 @@ struct CanvasInput {
 	bool pressed = false;
 	bool middle = false;
 	bool down = false;
+	// The right button went down on a picture that fills its canvas this frame, and whether it is
+	// still down (a camera's look; a design picture's right button is its menu's alone).
+	bool right_pressed = false;
+	bool right_down = false;
 	bool double_clicked = false; // the left button clicked twice
 	float wheel = 0.0f; // the wheel's notches the canvas leaves to its kind
+	float dt = 0.0f; // the frame's time, seconds (what a held key moves a camera by)
 	CanvasKeys keys;
 	CanvasKeyboard keyboard;
 };
