@@ -222,7 +222,8 @@ static int test_type_tables() {
 	            Tokens({ "menu.render.appearance_custom", "menu.render.font_missing",
 	                     "menu.render.frame_stencil_unloaded", "menu.render.marquee_runtime_content",
 	                     "menu.render.scroll_extent_default", "menu.render.state_fallback",
-	                     "menu.render.style_var_unresolved", "menu.render.table_no_columns",
+	                     "menu.render.style_var_unresolved", "menu.render.table_cells_custom",
+	                     "menu.render.table_no_columns",
 	                     "menu.render.text_id_missing", "menu.render.text_table_missing",
 	                     "menu.render.texture_missing" }));
 	TEST_EXPECT(noted(FindingProblem::Info) ==

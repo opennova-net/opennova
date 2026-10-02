@@ -71,6 +71,7 @@ constexpr FindingCodeEntry<Note> kNoteEntries[] = {
 	{ Note::TypeInteriorDeferred, note_row("menu.render.type_interior_deferred", P::Info) },
 	{ Note::ItemKindNotDrawn, note_row("menu.render.item_kind_not_drawn", P::Info) },
 	{ Note::TableCellsDeferred, note_row("menu.render.table_cells_deferred", P::Info) },
+	{ Note::TableCellsCustom, note_row("menu.render.table_cells_custom", P::None) },
 	{ Note::ScrollExtentDefault, note_row("menu.render.scroll_extent_default", P::None) },
 	{ Note::FontMissing, note_row("menu.render.font_missing", P::None) },
 	{ Note::FontUnreadable, note_row("menu.render.font_unreadable", P::Warning) },

@@ -79,6 +79,10 @@ std::string menu_note_message(const menu::MenuFrameNote &note) {
 		       " row is not drawn.";
 	case Code::TableCellsDeferred:
 		return "OpenNova does not draw a table's " + s + " row images yet (D-MNU-13).";
+	case Code::TableCellsCustom:
+		return "The game hands this " + s +
+		       " column's cells to the menu's own code to draw (the table's custom-draw event); the preview draws "
+		       "nothing for them.";
 	case Code::ScrollExtentDefault:
 		return "No HEIGHT or WIDTH sets this scroll bar's arrow length, so the game makes each arrow " + s +
 		       " long along the bar.";

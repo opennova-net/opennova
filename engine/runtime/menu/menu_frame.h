@@ -311,6 +311,7 @@ enum class MenuFrameNoteCode : uint16_t {
 	TypeInteriorDeferred,   // RADIOEDIT: drawn as a generic window (D-MNU-13)
 	ItemKindNotDrawn,       // a list or combo row of TYPE IMAGE or COLOR (D-MNU-5)
 	TableCellsDeferred,     // a table's ITEMS IMAGEROW row, not drawn (D-MNU-13)
+	TableCellsCustom,       // a CUSTOM_DRAW column: the menu's code draws its cells; the compile, none
 	ScrollExtentDefault,    // a SCROLL with no HEIGHT or WIDTH: its arrows are the default 20 long
 	// the loader's
 	FontMissing,         // the FONT's .fnt is not in the files

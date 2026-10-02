@@ -38,6 +38,7 @@ const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::TypeInteriorDeferred, "type_interior_deferred", Basis::Deferred },
 	{ Code::ItemKindNotDrawn, "item_kind_not_drawn", Basis::Deferred },
 	{ Code::TableCellsDeferred, "table_cells_deferred", Basis::Deferred },
+	{ Code::TableCellsCustom, "table_cells_custom", Basis::Witnessed },
 	{ Code::ScrollExtentDefault, "scroll_extent_default", Basis::Witnessed },
 	{ Code::FontMissing, "font_missing", Basis::Witnessed },
 	{ Code::FontUnreadable, "font_unreadable", Basis::Witnessed },
@@ -257,9 +258,31 @@ void MenuFrameCompiler::note_window_(const mnu::Window &w) const {
 			}
 		}
 	}
-	// A table's bitmap, bitmap-and-text and custom cells and its SUBST images are drawn
-	// (menu_frame_table.cpp, emit_table): only an ITEMS IMAGEROW row stays deferred, noted where
-	// its appearance row is read (note_appearance_row_).
+	// A table's bitmap and bitmap-and-text cells and its SUBST images are drawn
+	// (menu_frame_table.cpp, emit_table); an ITEMS IMAGEROW row stays deferred, noted where its
+	// appearance row is read (note_appearance_row_). A CUSTOM_DRAW column is the menu's code's to
+	// draw: its header and body cells raise the table's custom-draw event to the handler the code
+	// binds, with no ITEMS pass behind them [orig: CUITable_Render @ 0x6411d0, the header event
+	// @ 0x6413b3..0x641419, the body event @ 0x641730..0x6417bc; CUIScene_RegisterControlCallback
+	// @ 0x63c060], so a compile with none bound (the editor's) draws nothing there. Noted at the
+	// BODY that makes the column custom: the last one its running column index reaches, as
+	// build_table_columns_ reads them.
+	if (w.type == mnu::WindowType::Table) {
+		const mnu::TableColumn &xml = w.table_data.column;
+		const int count = xml.has_count && xml.count >= 1 ? xml.count : 1;
+		std::vector<int> last(static_cast<size_t>(count), -1);
+		int running = 0;
+		for (size_t i = 0; i < xml.bodies.size(); ++i) {
+			if (xml.bodies[i].has_column) running = xml.bodies[i].column;
+			if (running >= 0 && running < count) last[static_cast<size_t>(running)] = static_cast<int>(i);
+		}
+		for (const int i : last) {
+			if (i >= 0 && iequals(xml.bodies[static_cast<size_t>(i)].display, "CUSTOM_DRAW")) {
+				note_(Code::TableCellsCustom, xml.bodies[static_cast<size_t>(i)].display, "column.body", i,
+						"display");
+			}
+		}
+	}
 }
 
 // A part node (a spin arrow, or a window inside one) is its list's SPINUP or SPINDOWN
