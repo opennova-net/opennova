@@ -26,6 +26,7 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/view/viewport_kind.h>
 
+#include "authoring/mission_viewport_applier.h"
 #include "authoring/viewport_device.h"
 #include "authoring/viewport_devices.h"
 #include "object/object_model.h"
@@ -65,6 +66,9 @@ void EditorApp::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "first_picture_budget_ms"), "set_first_picture_budget_ms",
 			"get_first_picture_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
+	ClassDB::bind_method(D_METHOD("get_mission_placer", "path"), &EditorApp::get_mission_placer);
+	ClassDB::bind_method(D_METHOD("get_mission_device_count", "path", "what"), &EditorApp::get_mission_device_count);
+	ClassDB::bind_method(D_METHOD("get_mission_entity_key", "path", "row"), &EditorApp::get_mission_entity_key);
 	ClassDB::bind_method(D_METHOD("start_mcp_endpoint", "port"), &EditorApp::start_mcp_endpoint);
 	ClassDB::bind_method(D_METHOD("get_mcp_port"), &EditorApp::get_mcp_port);
 	ClassDB::bind_method(D_METHOD("get_status_text"), &EditorApp::get_status_text);
@@ -507,6 +511,38 @@ SubViewport *EditorApp::get_viewport_device(const String &p_path, const String &
 	// The Shell's cache makes its devices by the kinds' table alone (authoring/viewport_devices).
 	auto *device = static_cast<ViewportDevice *>(devices_->held(opennova::to_std(p_path), kind));
 	return device ? device->sub_viewport() : nullptr;
+}
+
+namespace {
+
+// The applier of the mission device over the mission at `path` (null: none held).
+const MissionViewportApplier *mission_applier(opennova::editor::ViewportDeviceCache *devices, const String &path) {
+	auto *device = devices ? static_cast<ViewportDevice *>(devices->held(opennova::to_std(path), ViewportKind::Mission))
+						   : nullptr;
+	return device ? dynamic_cast<const MissionViewportApplier *>(&device->applier()) : nullptr;
+}
+
+} // namespace
+
+Ref<MissionObjectPlacer> EditorApp::get_mission_placer(const String &p_path) const {
+	const MissionViewportApplier *applier = mission_applier(devices_.get(), p_path);
+	return applier ? applier->placer() : Ref<MissionObjectPlacer>();
+}
+
+int64_t EditorApp::get_mission_device_count(const String &p_path, const String &p_what) const {
+	const MissionViewportApplier *applier = mission_applier(devices_.get(), p_path);
+	if (!applier) return -1;
+	if (p_what == "placements") return applier->placements();
+	if (p_what == "placed") return applier->placed_count();
+	if (p_what == "lifted") return applier->lifted_count();
+	if (p_what == "hidden") return applier->hidden_count();
+	if (p_what == "place_us") return applier->last_place_us();
+	return -1;
+}
+
+int EditorApp::get_mission_entity_key(const String &p_path, int64_t p_row) const {
+	const MissionViewportApplier *applier = mission_applier(devices_.get(), p_path);
+	return applier ? applier->key_of(opennova::editor::NodeId(p_row)) : 0;
 }
 
 void EditorApp::_notification(int p_what) {

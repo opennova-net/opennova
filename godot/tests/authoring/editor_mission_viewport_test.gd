@@ -164,8 +164,13 @@ func _mint_project(root: String) -> void:
 		_write(root.path_join("terrain").path_join(name + ".tga"), _tga(2048 if name == "mnml_c" or name == "mnml_d1" else 32))
 	for name in ["synth_full.env", "cloud01.pcx", "cloud01b.pcx"]:
 		_copy_fixture("env/" + name, root.path_join("env").path_join(name))
-	_copy_fixture("def/items.def", root.path_join("defs").path_join("items.def"))
-	for name in ["pump.3di", "armory.3di", "shed.3di"]:
+	# The item table, its pump drawn by the synth crate (one box, no live PANM, no occlusion records):
+	# a model the placer batches, so the mission's items are retained statics beside its individual
+	# models (the armory's buildings, the persons).
+	var items := FileAccess.get_file_as_string(ProjectSettings.globalize_path(FIXTURES + "def/items.def"))
+	assert_true(items.contains("graphic pump\n"))
+	_write(root.path_join("defs").path_join("items.def"), items.replace("graphic pump\n", "graphic crate\n").to_utf8_buffer())
+	for name in ["crate.3di", "armory.3di", "shed.3di"]:
 		_copy_fixture("threedi/synth/" + name, root.path_join("models").path_join(name))
 
 
@@ -321,11 +326,11 @@ func test_the_camera_on_the_wire_and_a_move_as_an_update() -> void:
 	assert_gt(shown, 0, "framed: marks on the picture again")
 
 
-## S14 V8: the mission builds over the Shell's frames. Opened at a budget of 0, its viewport is
+## S14 V8, V9: the mission builds over the Shell's frames. Opened at a budget of 0, its viewport is
 ## `loading` at the pump that takes it, one unit a frame, its progress never going back, the units'
 ## labels in the build's order (the environment, the terrain's files, the terrain a tile a step, the
-## sky, the water, the pose), then `ready` with the layers under its device, the terrain built (the
-## body's `ground`) and no file missing.
+## sky, the water, the item table, a unit per graphic, the placement's units, the pose), then `ready`
+## with the layers under its device, the terrain built (the body's `ground`) and no file missing.
 func test_the_mission_builds_over_frames() -> void:
 	if _app == null:
 		return
@@ -350,7 +355,8 @@ func test_the_mission_builds_over_frames() -> void:
 		frames += 1
 		state = _state()
 	assert_eq(String(state.get("status", "")), "ready", str(state))
-	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "pose"]))
+	assert_eq(labels, PackedStringArray(["environment", "terrain files", "terrain", "sky", "water", "items", "models",
+			"place", "pose"]))
 	var build: Dictionary = state.get("device", {}).get("build", {})
 	gut.p("the mission at 0 ms a frame: %d frames awaited, its build %s" % [frames, str(build)])
 	assert_eq(int(build.get("done", 0)), int(build.get("total", 0)), str(build))
@@ -463,3 +469,265 @@ func test_two_missions_keep_two_devices() -> void:
 	assert_not_null(_app.get_viewport_device("missions/b.bms", "mission"))
 	assert_not_null(_app.get_viewport_device("missions/a.bms", "mission"), "the second mission's device stands")
 	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's, least recently used, given up")
+
+
+const MISSION_PATH := "missions/synth_logic.bms"
+
+
+## The mission device's read-back through EditorApp's typed seams: its placer, its counts, each
+## entity's key by row (empty: no mission device).
+func _mission_device() -> Dictionary:
+	if int(_app.get_mission_device_count(MISSION_PATH, "placements")) < 0:
+		return {}
+	var out := {"placer": _app.get_mission_placer(MISSION_PATH)}
+	for what in ["placements", "placed", "lifted", "hidden", "place_us"]:
+		out[what] = int(_app.get_mission_device_count(MISSION_PATH, what))
+	var keys := {}
+	for row: Variant in _state().get("items", []):
+		var id := int((row as Dictionary).get("id", 0))
+		keys[id] = int(_app.get_mission_entity_key(MISSION_PATH, id))
+	out["keys"] = keys
+	return out
+
+
+## The placer's individual models by the key each carries.
+func _models_by_key(placer: MissionObjectPlacer) -> Dictionary:
+	var out := {}
+	for model: Variant in placer.get_placed_models():
+		var ref: EntityRef = (model as ObjectModel).get_entity_ref()
+		if ref != null:
+			out[ref.get_bms_id()] = model
+	return out
+
+
+## The transform the placement draws the entity of mark `mark` at (its position, its yaw, its item's
+## scale; the fixture's pitch and roll are 0).
+func _placed_transform(placer: MissionObjectPlacer, mark: Dictionary) -> Transform3D:
+	return placer.item_entity_transform(_vector(mark.get("at")), Vector3(0.0, float(mark.get("yaw", 0)), 0.0),
+			int(mark.get("item", 0)))
+
+
+## The first entity mark of `kind` whose entity the placement drew `drawn` ("static": a retained
+## static, "model": an individual model); empty for none.
+func _placed_mark(state: Dictionary, device: Dictionary, drawn: String, kind := "") -> Dictionary:
+	var placer: MissionObjectPlacer = device.get("placer")
+	var models := _models_by_key(placer)
+	var keys: Dictionary = device.get("keys", {})
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		var mark_kind := String(mark.get("kind", ""))
+		if mark_kind == "area" or mark_kind == "marker" or (not kind.is_empty() and mark_kind != kind):
+			continue
+		var key := int(keys.get(int(mark.get("id", 0)), 0))
+		if key == 0:
+			continue
+		if drawn == "model" and models.has(key):
+			return mark
+		if drawn == "static" and not models.has(key) and placer.get_static_instance_lod(key) > -2:
+			return mark
+	return {}
+
+
+## S14 V9: the entities are the game's placer's. Ready, the device holds one whole placement, every
+## entity placed (none lifted or hidden) under its MissionObjects container; each one that draws is
+## a retained static or an individual model, at the transform the placement draws its item at
+## (MissionObjectPlacer.item_entity_transform), and the fixture has both.
+func test_the_entities_are_placed() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _mission_device()
+	assert_false(device.is_empty(), "the mission device")
+	var placer: MissionObjectPlacer = device.get("placer")
+	assert_not_null(placer, "its placer, the item table read")
+	if placer == null:
+		return
+	assert_eq(int(device.get("placements", 0)), 1)
+	assert_eq(int(device.get("placed", 0)), 12, "every entity placed")
+	assert_eq(int(device.get("lifted", -1)), 0)
+	assert_eq(int(device.get("hidden", -1)), 0)
+	assert_not_null(_device(state).find_child("MissionObjects", true, false), "the placer's container")
+	var models := _models_by_key(placer)
+	var keys: Dictionary = device.get("keys", {})
+	var statics := 0
+	var individuals := 0
+	for row: Variant in state.get("items", []):
+		var mark: Dictionary = row
+		var kind := String(mark.get("kind", ""))
+		if kind == "area" or kind == "marker":
+			continue
+		var key := int(keys.get(int(mark.get("id", 0)), 0))
+		assert_gt(key, 0, "placed: a key of the placement's (%s)" % str(mark))
+		if models.has(key):
+			individuals += 1
+			assert_true((models[key] as ObjectModel).transform.is_equal_approx(_placed_transform(placer, mark)),
+					"the individual model where the placement draws it: %s" % str(mark))
+		else:
+			statics += 1
+			assert_gt(placer.get_static_instance_lod(key), -2, "a retained static: %s" % str(mark))
+			var at: Variant = placer.get_static_instance_transform(key)
+			assert_true(at is Transform3D and (at as Transform3D).is_equal_approx(_placed_transform(placer, mark)),
+					"the static where the placement draws it: %s" % str(mark))
+	assert_gt(statics, 0, "the fixture's statics")
+	assert_gt(individuals, 0, "the fixture's individual models (its persons)")
+
+
+## S14 V9: a move updates in place and never places again. A wire drag of a retained static and of an
+## individual model each moves it where the placement would draw it now (the static's rows rewritten,
+## its read-back the new transform; the model's node), the build generation and the placement count
+## standing. A building's terrain shadow source follows at the gesture's end, not each sample: with
+## the gesture open its revision stands, the last sample ends it and the revision moves.
+func test_a_move_updates_and_never_places_again() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _mission_device()
+	var placer: MissionObjectPlacer = device.get("placer")
+	assert_not_null(placer)
+	if placer == null:
+		return
+	var keys: Dictionary = device.get("keys", {})
+	var builds := int(state.get("builds", 0))
+	var still := _placed_mark(state, device, "static")
+	var person := _placed_mark(state, device, "model")
+	assert_false(still.is_empty(), "a retained static")
+	assert_false(person.is_empty(), "an individual model")
+	if still.is_empty() or person.is_empty():
+		return
+	var key := int(keys.get(int(still["id"]), 0))
+	var moved: Dictionary = _ask({"kind": "edit_in_viewport",
+			"drag": {"id": int(still["id"]), "handle": "move", "by": [40, 0], "kind": "mission"}})
+	assert_true(bool(moved.get("outcome", {}).get("done", false)), str(moved))
+	state = _state()
+	assert_eq(int(state.get("builds", 0)), builds, "a move is an Update")
+	var now := _mark_of(state, int(still["id"]))
+	assert_false(_vector(now.get("at")).is_equal_approx(_vector(still.get("at"))), "the static moved")
+	var at: Variant = placer.get_static_instance_transform(key)
+	assert_true(at is Transform3D and (at as Transform3D).is_equal_approx(_placed_transform(placer, now)),
+			"its rows where the placement would draw it now")
+	assert_false(placer.get_static_instance_live_populations(key).is_empty(), "its rows stand in their populations")
+	var model: ObjectModel = _models_by_key(placer)[int(keys.get(int(person["id"]), 0))]
+	moved = _ask({"kind": "edit_in_viewport", "drag": {"id": int(person["id"]), "handle": "move", "by": [0, 30],
+			"kind": "mission"}})
+	assert_true(bool(moved.get("outcome", {}).get("done", false)), str(moved))
+	state = _state()
+	assert_true(model.transform.is_equal_approx(_placed_transform(placer, _mark_of(state, int(person["id"])))),
+			"the individual model's node where the placement would draw it now")
+	assert_eq(int(state.get("builds", 0)), builds)
+	assert_eq(int(_mission_device().get("placements", 0)), 1, "placed once")
+	# A building's terrain shadow source: at the gesture's end.
+	var building := {}
+	for row: Variant in state.get("items", []):
+		if String((row as Dictionary).get("kind", "")) == "building":
+			building = row
+			break
+	assert_false(building.is_empty())
+	if building.is_empty():
+		return
+	var revision := placer.get_static_terrain_shadow_source_revision()
+	var first: Dictionary = _ask({"kind": "edit_in_viewport", "drag": {"id": int(building["id"]), "handle": "move",
+			"by": [20, 0], "end": false, "kind": "mission"}})
+	var gesture := int(first.get("outcome", {}).get("gesture", 0))
+	assert_gt(gesture, 0, str(first))
+	_app.pump()
+	assert_eq(placer.get_static_terrain_shadow_source_revision(), revision, "a gesture open: the shadow source waits")
+	var last: Dictionary = _ask({"kind": "edit_in_viewport", "drag": {"id": int(building["id"]), "handle": "move",
+			"by": [20, 0], "gesture": gesture, "end": true, "kind": "mission"}})
+	assert_true(bool(last.get("outcome", {}).get("done", false)), str(last))
+	_app.pump()
+	assert_ne(placer.get_static_terrain_shadow_source_revision(), revision, "the gesture ended: the source follows")
+
+
+## S14 V9: an add lifts, a remove hides. A duplicate of an item (a graphic already warm) is made whole
+## as it is taken (ready at the pump that takes it, one build more, nothing placed again): one model
+## lifted under Lifted. Removed, the lifted model is hidden; a retained static removed is hidden (its
+## rows out of every population), and the removal undone shows it again.
+func test_an_add_lifts_and_a_remove_hides() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var builds := int(state.get("builds", 0))
+	var ids := {}
+	for row: Variant in state.get("items", []):
+		ids[int((row as Dictionary).get("id", 0))] = true
+	var item := _first_item(state)
+	assert_true(_seam.duplicate_record(int(item.get("id", 0))))
+	_app.pump()
+	state = _state()
+	assert_eq(String(state.get("status", "")), "ready", "made whole as it is taken: %s" % str(state.get("progress")))
+	assert_eq(int(state.get("builds", 0)), builds + 1)
+	var device := _mission_device()
+	assert_eq(int(device.get("lifted", 0)), 1, str(device))
+	assert_eq(int(device.get("placements", 0)), 1, "nothing placed again")
+	var lifted: Node = _device(state).find_child("Lifted", true, false)
+	assert_not_null(lifted)
+	if lifted == null:
+		return
+	assert_eq(lifted.get_child_count(), 1, "one model lifted")
+	var copy := 0
+	for row: Variant in state.get("items", []):
+		var id := int((row as Dictionary).get("id", 0))
+		if not ids.has(id) and String((row as Dictionary).get("kind", "")) == "item":
+			copy = id
+	assert_gt(copy, 0, "the copy's mark")
+	assert_true(_seam.remove_record(copy))
+	_app.pump()
+	device = _mission_device()
+	assert_eq(int(device.get("lifted", -1)), 0)
+	assert_eq(int(device.get("hidden", 0)), 1, "the lifted model hidden")
+	assert_false((lifted.get_child(0) as Node3D).visible)
+	var placer: MissionObjectPlacer = device.get("placer")
+	var still := _placed_mark(_state(), device, "static")
+	assert_false(still.is_empty())
+	if still.is_empty():
+		return
+	var key := int((device.get("keys", {}) as Dictionary).get(int(still["id"]), 0))
+	assert_true(_seam.remove_record(int(still["id"])))
+	_app.pump()
+	assert_true(placer.is_static_instance_hidden(key), "the static hidden")
+	assert_true(placer.get_static_instance_live_populations(key).is_empty(), "its rows out of every population")
+	assert_eq(int(_mission_device().get("hidden", 0)), 2)
+	_seam.undo()
+	_app.pump()
+	assert_false(placer.is_static_instance_hidden(key), "the removal undone: shown again")
+	assert_eq(int(_mission_device().get("placements", 0)), 1, "still the one placement")
+
+
+## S14 V9: a file the entities read that moves places them again, the layers that did not read it
+## kept. The items' model written again (a new stamp) and the project rescanned: the device mounts its
+## files afresh and places every entity again (a second whole placement over a new placer), its
+## terrain data the same as before.
+func test_a_file_change_places_again() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var terrain: Terrain = _device_node(state, "Terrain")
+	var data: TerrainData = terrain.get_terrain_data()
+	assert_not_null(data)
+	var placer: MissionObjectPlacer = _mission_device().get("placer")
+	var root: String = _seam.get_project_root()
+	var crate := root.path_join("models").path_join("crate.3di")
+	var bytes := FileAccess.get_file_as_bytes(crate)
+	# A new stamp: the size moves with a byte past the end the reader never reads.
+	_write(crate, bytes + PackedByteArray([0]))
+	_app.request_json(JSON.stringify({"kind": "rescan"}))
+	assert_true(_seam.settle(), "a Rescan steps across pumps")
+	state = await _await_ready()
+	for _frame in 600:
+		if int(_mission_device().get("placements", 0)) >= 2 and String(state.get("status", "")) == "ready":
+			break
+		await get_tree().process_frame
+		state = _state()
+	var device := _mission_device()
+	assert_eq(int(device.get("placements", 0)), 2, "a second whole placement")
+	assert_ne(device.get("placer"), placer, "the entities placed again over the files mounted afresh")
+	assert_eq(terrain.get_terrain_data(), data, "the terrain, which read nothing that moved, kept")
+	assert_eq(String(state.get("status", "")), "ready", str(state))

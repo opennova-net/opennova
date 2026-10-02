@@ -1635,3 +1635,21 @@ func test_a_stepped_placement_is_the_whole_placement() -> void:
 	assert_eq(empty.step(), MissionPlacementRun.STEP_DONE)
 	assert_eq(empty.get_stats().placed, 0)
 	assert_null(bare_parent.get_node_or_null("MissionObjects"))
+
+
+# ADR 0046 S14: the transform the placement draws an item's entity at (item_entity_transform): the
+# entity transform for an item of no scale, scaled by the item's `scale` (106103, 1.5) otherwise;
+# what the editor's moves hand move_static_instance and an individual model's node.
+func test_item_entity_transform_carries_the_item_scale() -> void:
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	root.set_root_dir(_abs("res://../fixtures/def"))
+	var placer := MissionObjectPlacer.create(root, item_db)
+	var position := Vector3(10, -40, 3)
+	var rotation := Vector3(0, 90, 0)
+	var plain := MissionObjectPlacer.entity_transform(position, rotation)
+	assert_eq(placer.item_entity_transform(position, rotation, 106100), plain, "no scale: the entity transform")
+	var scaled := placer.item_entity_transform(position, rotation, 106103)
+	assert_eq(scaled.origin, plain.origin)
+	assert_true(scaled.basis.is_equal_approx(plain.basis.scaled(Vector3(1.5, 1.5, 1.5))), "scale 1.5")

@@ -311,6 +311,11 @@ public:
 	// The entity transform a retained static's rows draw at now (null for a
 	// bms id that is no retained static): the move's read-back.
 	Variant get_static_instance_transform(int p_bms_id) const;
+	// The transform a placement draws an entity of the item at: its entity
+	// transform with the item's model scale (items.def `scale`), what a move
+	// hands move_static_instance or an individual model's node.
+	Transform3D item_entity_transform(const Vector3 &p_position,
+			const Vector3 &p_rotation_deg, int p_item_id) const;
 	// The graphic's static batches harvested and cached (the template model's
 	// one-off harvest under `p_tree_parent`), so a placement that names it
 	// later finds them warm; true when the graphic resolves to batches.

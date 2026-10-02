@@ -263,6 +263,11 @@ Variant MissionObjectPlacer::get_static_instance_transform(int p_bms_id) const {
 	return static_lod_instances_[rec->lod_instance].xform;
 }
 
+Transform3D MissionObjectPlacer::item_entity_transform(const Vector3 &p_position,
+		const Vector3 &p_rotation_deg, int p_item_id) const {
+	return _entity_transform_for_item(p_position, p_rotation_deg, p_item_id);
+}
+
 bool MissionObjectPlacer::warm_static_graphic(const String &p_graphic, Node *p_tree_parent) {
 	_check_epoch();
 	if (p_graphic.is_empty()) {

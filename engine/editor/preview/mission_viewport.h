@@ -69,6 +69,9 @@ public:
 	// its device holds a surface a ray lands on (its terrain, built).
 	const std::vector<std::string> &missing() const { return missing_; }
 	bool ground() const { return ground_; }
+	// A gesture is open in its document, as it last followed (the Shell's pump each frame): what its
+	// device defers to the gesture's end (a moved entity's terrain shadow).
+	bool gesture_open() const { return gesture_open_; }
 
 	// The marks on a picture `width` x `height` (mission_scene.h), an area's anchor on the ground of
 	// `device` where it answers.
@@ -148,6 +151,7 @@ private:
 	MissionScene scene_;
 	std::vector<std::string> missing_;
 	bool ground_ = false;
+	bool gesture_open_ = false;
 };
 
 } // namespace opennova::editor

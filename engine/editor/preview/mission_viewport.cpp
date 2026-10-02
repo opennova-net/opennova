@@ -193,6 +193,7 @@ ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 
 ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock &) {
 	const SessionView &view = input.view;
+	gesture_open_ = view.documents.gesture_in(path()).open();
 	if (!view.project.open || !view.findings.assets) return stop_(MissionViewStatus::NoProject);
 	const Document *document = document_of(input);
 	const std::unique_ptr<MissionSceneSource> source = document ? mission_scene_source(*document) : nullptr;

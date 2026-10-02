@@ -171,6 +171,8 @@ void MissionObjectPlacer::_bind_methods() {
 			&MissionObjectPlacer::move_static_instance);
 	ClassDB::bind_method(D_METHOD("get_static_instance_transform", "bms_id"),
 			&MissionObjectPlacer::get_static_instance_transform);
+	ClassDB::bind_method(D_METHOD("item_entity_transform", "position", "rotation_deg", "item_id"),
+			&MissionObjectPlacer::item_entity_transform);
 	ClassDB::bind_method(D_METHOD("warm_static_graphic", "graphic", "tree_parent"),
 			&MissionObjectPlacer::warm_static_graphic);
 	ClassDB::bind_method(
