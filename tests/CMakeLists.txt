@@ -2780,6 +2780,12 @@ add_executable(ping_sweep_fold_test novaworld/ping_sweep_fold_test.cpp)
 target_link_libraries(ping_sweep_fold_test PRIVATE opennova_net)
 target_include_directories(ping_sweep_fold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME ping_sweep_fold COMMAND ping_sweep_fold_test)
+# The ping-sweep lifecycle: a refresh's sweep supersedes the running one at once.
+find_package(Threads REQUIRED)
+add_executable(ping_sweep_runner_test novaworld/ping_sweep_runner_test.cpp)
+target_link_libraries(ping_sweep_runner_test PRIVATE opennova_net Threads::Threads)
+target_include_directories(ping_sweep_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ping_sweep_runner COMMAND ping_sweep_runner_test)
 
 # Retail dispatcher semantics (D-NET-190..193): SVRS accumulation, the gated
 # "GSB " reset, undersized-record skips, and the XXXX-terminator hardening.

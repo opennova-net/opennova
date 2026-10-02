@@ -277,15 +277,14 @@ private:
 	int total_servers_ = 0;                 // GSB TS — list-wide server count
 	int total_players_ = 0;                 // GSB TP — service-wide player count
 	// The browse-time ping sweep (retail pings every row's IPv4 on the list
-	// finalize; the semantics live in engine/net/novaworld/ping_sweep.h and
-	// the device leg in network/ping_sweep_worker.cpp). The generation stamps
-	// each sweep so a late pass from a superseded list is dropped; one worker
-	// runs at a time, and a list refreshed underneath it re-sweeps when its
-	// stale results land.
+	// finalize; the semantics live in engine/net/novaworld/ping_sweep.h, the
+	// lifecycle in ping_sweep_runner.h and the device leg in
+	// network/ping_sweep_worker.cpp). A refreshed list's sweep supersedes the
+	// running one at once; the generation stamps each sweep so a deferred
+	// result of a replaced list is dropped.
 	Dictionary server_pings_;               // rid (int) -> ping ms / -2 / -3
 	int64_t ping_generation_ = 0;
 	PingSweepWorker ping_worker_;
-	bool ping_resweep_pending_ = false;
 	void start_ping_sweep();
 	void apply_ping_results(const Dictionary &results, int64_t generation);
 

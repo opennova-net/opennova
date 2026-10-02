@@ -303,6 +303,7 @@ void NovaWorldClient::stop() {
 	authenticated_ = false;
 	server_entries_.clear();
 	server_pings_ = Dictionary();
+	++ping_generation_; // a sweep still running reports into a list that is gone
 	total_servers_ = 0;
 	total_players_ = 0;
 	flow_.reset();
@@ -716,27 +717,20 @@ void NovaWorldClient::start_ping_sweep() {
 		emit_signal("server_pings_updated");
 		return;
 	}
-	if (!ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
-	                        ping_generation_)) {
-		// One sweep at a time: the in-flight one is now stale (its generation
-		// no longer matches), and its landing re-issues this one.
-		ping_resweep_pending_ = true;
-	}
+	// A refreshed list's sweep supersedes the running one at once (the engine's
+	// PingSweepRunner, net/novaworld/ping_sweep_runner.h).
+	ping_worker_.start(std::move(targets), Callable(this, "_apply_ping_results"),
+	                   ping_generation_);
 }
 
 void NovaWorldClient::apply_ping_results(const Dictionary &results, int64_t generation) {
-	if (generation == ping_generation_) {
-		const Array rids = results.keys();
-		for (int i = 0; i < rids.size(); ++i)
-			server_pings_[rids[i]] = results[rids[i]];
-		emit_signal("server_pings_updated");
-	}
-	// A pass from a superseded sweep (the list refreshed underneath it) is
-	// stale; if that refresh asked for a sweep while this one ran, run it now.
-	if (ping_resweep_pending_) {
-		ping_resweep_pending_ = false;
-		start_ping_sweep();
-	}
+	// A result of an older generation (its list was replaced or the session
+	// stopped while its deferred call was queued) is stale.
+	if (generation != ping_generation_) return;
+	const Array rids = results.keys();
+	for (int i = 0; i < rids.size(); ++i)
+		server_pings_[rids[i]] = results[rids[i]];
+	emit_signal("server_pings_updated");
 }
 
 // ---- Account login (EPASK) — ADR 0010 Phase 3 --------------------------
