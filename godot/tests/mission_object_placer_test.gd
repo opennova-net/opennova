@@ -1648,6 +1648,62 @@ func test_a_stepped_placement_is_the_whole_placement() -> void:
 	assert_null(bare_parent.get_node_or_null("MissionObjects"))
 
 
+# S14 review m13: the stepped run is the whole placement over a mission that crosses its unit sizes:
+# 600 statics of one graphic (two bucket units of 512 rows) and 6 individual models (two models units
+# of four): the labels in order, the same census and as many individual models as place() makes.
+func _crossing_placer(root: ResourceRoot, item_db: ItemDatabase, data: ObjectData) -> MissionObjectPlacer:
+	var placer := MissionObjectPlacer.create(root, item_db)
+	assert_true(placer.register_resolved_static_graphic("StaticCrate1", data, [{
+		"mesh": BoxMesh.new(), "material": null, "offset": Transform3D.IDENTITY, "submesh": 0,
+	}]))
+	placer.register_object_data("pump", data)
+	placer.register_occlusion_verdict(106103, true)
+	return placer
+
+
+func test_a_stepped_placement_crossing_its_units_is_the_whole_placement() -> void:
+	var item_db := ItemDatabase.new()
+	assert_eq(item_db.load(_abs(ITEMS_PATH)), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(_abs("res://../fixtures/threedi/synth")), OK)
+	var data := ObjectData.new()
+	assert_eq(data.open_from_resource_root(root, "crate.3di"), OK)
+	var mission := MissionData.new()
+	assert_eq(mission.create_default(), OK)
+	for i in 600:
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 105004, Vector3(float(i % 30) * 40.0, float(i / 30) * 40.0, 0.0),
+				Vector3.ZERO))
+	for i in 6:
+		assert_not_null(mission.add_entity(MissionData.KIND_ITEM, 106103, Vector3(float(i) * 10.0, -50.0, 0.0), Vector3.ZERO))
+	var whole_parent := Node3D.new()
+	add_child_autofree(whole_parent)
+	var whole := _crossing_placer(root, item_db, data)
+	var whole_stats := whole.place(mission, whole_parent)
+	assert_eq(whole_stats.batched, 600)
+	assert_eq(whole_stats.animated, 6)
+	var parent := Node3D.new()
+	add_child_autofree(parent)
+	var placer := _crossing_placer(root, item_db, data)
+	var run := placer.begin_place(mission, parent)
+	var labels: Array = []
+	var step := MissionPlacementRun.STEP_MORE
+	while step == MissionPlacementRun.STEP_MORE:
+		var label := run.get_step_label()
+		if labels.is_empty() or labels[labels.size() - 1] != label:
+			labels.append(label)
+		step = run.step()
+	assert_eq(labels, ["bucket", "statics", "models", "finish"])
+	assert_eq(run.get_steps_done(), 2 + 1 + 2 + 1, "two buckets of 512 rows, one static group, two models units of four")
+	var stats := run.get_stats()
+	for field in ["placed", "batched", "animated", "unresolved", "graphics", "batches", "markers",
+			"static_bins", "static_binned_batches", "static_global_batches",
+			"static_instances_retained", "static_lod_populations", "static_live_populations",
+			"static_shadow_batches"]:
+		assert_eq(stats.get(field), whole_stats.get(field), "%s as the whole placement's" % field)
+	assert_eq(placer.get_placed_models().size(), whole.get_placed_models().size())
+	assert_eq(placer.get_placed_models().size(), 6)
+
+
 # ADR 0046 S14: the transform the placement draws an item's entity at (item_entity_transform): the
 # entity transform for an item of no scale, scaled by the item's `scale` (106103, 1.5) otherwise;
 # what the editor's moves hand move_static_instance and an individual model's node.

@@ -506,6 +506,29 @@ func test_two_missions_keep_two_devices() -> void:
 	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's, least recently used, given up")
 
 
+## S14 review m13: a device given up while it builds. Three missions over the whole minted project
+## opened in turn at a budget of 0, each a few units into its build when the next opens: the third
+## gives up the first's device mid-build (nothing of its build runs on, no error), and the third builds
+## to ready.
+func test_a_device_given_up_mid_build() -> void:
+	if _app == null:
+		return
+	_app.build_budget_ms = 0
+	assert_true(_open_mission(true, PackedStringArray(["a.bms", "b.bms"])))
+	for _frame in 12:
+		await get_tree().process_frame
+	assert_eq(String(_state().get("status", "")), "loading", "the first mid-build")
+	assert_true(_seam.open_document("missions/a.bms"))
+	for _frame in 12:
+		await get_tree().process_frame
+	assert_true(_seam.open_document("missions/b.bms"))
+	_app.pump()
+	assert_null(_app.get_viewport_device("missions/synth_logic.bms", "mission"), "the first's device given up mid-build")
+	var state := await _await_ready("missions/b.bms")
+	assert_eq(String(state.get("status", "")), "ready", str(state).left(300))
+	assert_true(bool(state.get("body", {}).get("ground", false)), "the third built whole")
+
+
 const MISSION_PATH := "missions/synth_logic.bms"
 
 
