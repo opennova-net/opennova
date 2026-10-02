@@ -693,6 +693,9 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	w.def.heat_decay_per_tick = data.heat_decay_per_tick;
 	w.def.heat_glow_threshold = data.heat_glow_threshold;
 	w.scope_max_mag = data.scope_max_mag;
+	// The arms dip's edge reads the category held before this mount (below).
+	const bool was_active = w.active;
+	const int previous_category = w.hud_category;
     w.hud_category = data.hud_category;
     w.emplaced_stance = data.emplaced_stance;
     w.pitch_min_bam = data.pitch_min_bam;
@@ -720,20 +723,23 @@ void local_weapon_install(World &world, LocalPlayerWeapon &w,
 	// ForceCrouch (0x40000): idle_mortar promotion + stance-change refusal.
 	w.run_anim = data.run_anim;
 	w.force_crouch = (flags & weapon_flag::kForceCrouch) != 0;
-	// A held-AnimMap CHANGE advances a binding serial; the local InfantryState observes
-	// that edge pre-tick and stamps its own 20-tick arms-dip window. Compare the
-	// resolved map identity, not the weapon name: two weapon records sharing one
-	// AnimMap do NOT dip. A fresh mount advances even when the map key is empty.
-	// [orig: previous/current g_AdmDefs record +0 comparison @0x4b46d0..0x4b4701].
 	// A mount binds the table the weapon's load resolved (default.adm for a
 	// missing file). [orig: Anim_InitActions @0x541FEF -> AnimMap_LoadAdmFile]
-	const std::string &anim_map = data.table_baked && installed >= 0
+	w.anim_map = data.table_baked && installed >= 0
 			? world.tables.weapons.entries[static_cast<size_t>(installed)].animadm
 			: data.animadm;
-	if (!w.active || !strutil::iequals(anim_map, w.anim_map)) {
-		w.anim_map = anim_map;
-		++w.anim_map_serial;
-		if (w.anim_map_serial == 0) ++w.anim_map_serial; // reserve 0 = none
+	// A weapon CATEGORY change advances a binding serial; the local InfantryState
+	// observes that edge pre-tick and stamps its own 20-tick arms-dip window. The
+	// game compares the held and the previously held g_AdmDefs records' +0, the
+	// weapon.def category, never their AnimMap: two weapons of one category do not
+	// dip, whatever map each names, and two categories over one map do.
+	// [orig: Entity_UpdateInfantryPlayerBody @0x4b46cb..0x4b46f5: mov edx,
+	// g_AdmDefs[cur*460h] @0x4b46e7, cmp edx, g_AdmDefs[prev*460h] @0x4b46ed, jz,
+	// else byte +0x371 = 14h @0x4b46f5; the previous index +0x370 = the held one
+	// @0x4b4701]. A fresh mount (no weapon held before) advances too.
+	if (!was_active || data.hud_category != previous_category) {
+		++w.category_serial;
+		if (w.category_serial == 0) ++w.category_serial; // reserve 0 = none
 	}
 	const int32_t clipsize = data.clipsize;
 	w.def.clip_capacity = clipsize > 0 ? clipsize : -1; // no clipsize key = no clip tracking

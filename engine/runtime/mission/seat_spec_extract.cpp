@@ -50,7 +50,7 @@ std::string user_point_name(const ThreediUserPoint &point) {
 // seats. [orig: Entity_GetBoneSlotType @ 0x434ED0 — the strnicmp legs
 //  @ 0x434F16 / @ 0x434F34 / @ 0x434F52, the _stricmp @ 0x434F6E]
 world::SeatType seat_type_for_user_point(const std::string &name) {
-	if (strutil::starts_with_icase(name, "sitex")) return world::SeatType::Passenger;
+	if (threedi_user_point_is_sitex(name)) return world::SeatType::Passenger;
 	if (strutil::starts_with_icase(name, "ctrlx")) return world::SeatType::Controller;
 	if (strutil::starts_with_icase(name, "drvrx")) return world::SeatType::Driver;
 	if (strutil::iequals(name, "UseGun")) return world::SeatType::Gunner;
@@ -60,7 +60,7 @@ world::SeatType seat_type_for_user_point(const std::string &name) {
 // sitexNN / ctrlxNN / drvrxNN select the numbered sit pose (0..30); UseGun
 // always poses 0. Leading ASCII digits only, breaking at the first non-digit.
 int seat_pose_index_for_user_point(const std::string &name) {
-	if (!(strutil::starts_with_icase(name, "sitex") ||
+	if (!(threedi_user_point_is_sitex(name) ||
 			strutil::starts_with_icase(name, "ctrlx") ||
 			strutil::starts_with_icase(name, "drvrx")))
 		return 0;
@@ -135,7 +135,7 @@ void extract_seats(const Threedi3di3 &model,
 	for (size_t i = 0; model.user_points != nullptr &&
 			i < model.user_point_count; ++i) {
 		const std::string name = user_point_name(model.user_points[i]);
-		if (strutil::starts_with_icase(name, "sitex")) {
+		if (threedi_user_point_is_sitex(name)) {
 			row_for_slot[static_cast<size_t>(passengers)] = i + 1; // [orig: @ 0x43A4F0]
 			++passengers;
 		} else if (strutil::starts_with_icase(name, "ctrlx") ||
@@ -144,7 +144,7 @@ void extract_seats(const Threedi3di3 &model,
 		} else if (strutil::iequals(name, "UseGun")) {
 			row_for_slot[9] = i + 1; // [orig: @ 0x43A5A9]
 		}
-		if (passengers > 8) break;
+		if (passengers > THREEDI_SITEX_SEAT_LIMIT) break;
 	}
 	for (size_t i = 0; model.user_points != nullptr &&
 			i < model.user_point_count; ++i) {

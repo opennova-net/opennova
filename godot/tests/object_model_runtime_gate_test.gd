@@ -274,6 +274,49 @@ func test_a_dds_stage_texture_keeps_its_authored_chain() -> void:
 			"the missing armry_o.tga detail binds the pixel-built checkerboard")
 
 
+# armory material 0 as a model opened at `path` submits it.
+func _armory_exterior(path: String) -> ShaderMaterial:
+	var data := ObjectData.new()
+	assert_eq(data.open_file(path), OK)
+	var model := ObjectModel.new()
+	add_child_autofree(model)
+	model.set_process(false)
+	model.set_object_data(data)
+	var indices := model.get_surface_material_indices()
+	var materials := model.get_surface_materials()
+	for index in range(indices.size()):
+		if int(indices[index]) == 0:
+			return materials[index] as ShaderMaterial
+	return null
+
+
+func test_a_dds_stage_file_decodes_by_its_content() -> void:
+	# armory material 0 names armry.tga; its DDS sibling armry.dds holds a TGA
+	# here. The DDS reader hands the file whole to D3DX, which takes an image by
+	# its content (renderer::dds_reader_format, retail's D3DXTex CImage::Load
+	# order), so the TGA binds, with the full chain D3DX builds. The same in a
+	# res:// folder: its file is decoded by the row's reader too, never by an
+	# importer that goes by the name.
+	var stamp := Time.get_ticks_usec()
+	for dir in [OS.get_cache_dir().path_join("opennova_dds_content_%d" % stamp),
+			"res://.godot/opennova_dds_content_%d" % stamp]:
+		var native := ProjectSettings.globalize_path(dir)
+		assert_eq(DirAccess.make_dir_recursive_absolute(native), OK)
+		TestFs.copy(self, ARMRY_3DI, native.path_join("armory.3di"))
+		TestFs.write_bytes(self, native.path_join("armry.dds"), TestFs.tga_bytes(Vector2i(8, 8), Color.RED))
+		var exterior := _armory_exterior(dir.path_join("armory.3di"))
+		assert_not_null(exterior, "the armory exterior material is submitted from %s" % dir)
+		if exterior != null:
+			var diffuse := exterior.get_shader_parameter("u_diffuse") as Texture2D
+			assert_true(diffuse != null and diffuse.get_width() == 8,
+					"the TGA in armry.dds binds as Diffuse1 from %s" % dir)
+			if diffuse != null:
+				assert_eq(diffuse.get_image().get_pixel(0, 0), Color.RED)
+			assert_eq(exterior.get_shader_parameter("u_diffuse_max_lod"), 1000.0,
+					"D3DX builds the whole chain")
+		TestFs.remove_dir_recursive(native)
+
+
 func _mesh_instances_below(root: Node) -> Array[MeshInstance3D]:
 	var out: Array[MeshInstance3D] = []
 	for child in root.get_children():

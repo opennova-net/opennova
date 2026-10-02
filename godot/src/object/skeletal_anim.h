@@ -86,6 +86,13 @@ public:
 			const PackedVector3Array &p_model_bone_origins = PackedVector3Array(),
 			const PackedInt32Array &p_model_bone_parents = PackedInt32Array());
 
+	// A rig an embedder loaded itself (the editor's preview, over the project's files) through
+	// the same loader (anim::SkeletalClips); null unloads it.
+	void set_rig(opennova::assets::SkeletalRig p_rig) {
+		rig_ = std::move(p_rig);
+		last_error_ = String();
+	}
+
 	bool is_loaded() const { return rig_ != nullptr; }
 	String get_last_error() const { return last_error_; }
 

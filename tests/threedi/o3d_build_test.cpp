@@ -491,15 +491,23 @@ int main(int argc, char **argv) {
 				"note: texture 'skin.png' loads only as 'skin.dds'");
 		builds_saying("texture-cut", swap(base, "texture skin.tga", "texture a.bmp.tga"),
 				"note: texture 'a.bmp.tga' loads only as 'a.dds': the game opens 'a.bmp'");
+		// Only the rows that loader reads: a chunk producer (type 16) reads the
+		// name as written, and type 1 takes the plain path on the whole name.
+		builds_saying("texture-chunk", swap(base, "texture skin.tga", "texture field.nq8 1 16"), "note: texture", false);
+		builds_saying("texture-plain", swap(base, "texture skin.tga", "texture skin.png 1 1"), "note: texture", false);
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
 		for (int i = 0; i < 33; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
 		refuses("strict-occ-planes", planes);
 		std::string verts = base + "occ 0 0 0\n";
 		for (int i = 0; i < 129; ++i) verts += "ov " + std::to_string(i) + " 0 0\n";
 		refuses("strict-occ-verts", verts);
+		// A ninth `sitex` seat (any case) takes the control seat and the game still
+		// loads the model: a note, never a refusal; eight say nothing.
 		std::string seats = base;
-		for (int i = 0; i < 9; ++i) seats += "userpoint SiteX0" + std::to_string(i) + " 0 0 0 1 0 0 0\n";
-		refuses("strict-seats", seats);
+		for (int i = 0; i < 8; ++i) seats += "userpoint SiteX0" + std::to_string(i) + " 0 0 0 1 0 0 0\n";
+		builds_saying("seats-eight", seats, "sitex seats", false);
+		builds_saying("seats-nine", seats + "userpoint sitex08 0 0 0 1 0 0 0\n",
+				"note: more than 8 sitex seats: the game takes the ninth for the control seat");
 		refuses("strict-volume-planes", base + "cvolume 1 0 0 0 0 1 1 1\ncp 1 0 0 -1\ncp -1 0 0 0\ncp 0 1 0 -1\n");
 		// Accepted: a UTF-8 byte order mark, and a name holding a vertical tab
 		// (the scene quotes it, so it comes back).

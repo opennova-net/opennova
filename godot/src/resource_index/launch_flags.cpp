@@ -4,7 +4,10 @@
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace godot {
@@ -41,6 +44,7 @@ void LaunchFlags::_bind_methods() {
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("no_hud"), &LaunchFlags::no_hud);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("set_args_override", "args"),
 			&LaunchFlags::set_args_override);
+	ClassDB::bind_static_method("LaunchFlags", D_METHOD("working_dir"), &LaunchFlags::working_dir);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("clear_args_override"),
 			&LaunchFlags::clear_args_override);
 	ClassDB::bind_static_method("LaunchFlags", D_METHOD("has_args_override"),
@@ -170,6 +174,17 @@ void LaunchFlags::set_args_override(const PackedStringArray &args) {
 	args_override_.reserve(static_cast<size_t>(args.size()));
 	for (int64_t i = 0; i < args.size(); ++i) args_override_.push_back(to_std(args[i]));
 	args_override_set_ = true;
+}
+
+String LaunchFlags::working_dir() {
+	// The flag's UTF-8 text as given, '/'-separated (a narrow std::filesystem::path would read it
+	// in the ANSI code page).
+	std::string given = parse().working_dir;
+	std::replace(given.begin(), given.end(), '\\', '/');
+	if (!given.empty()) return to_gd(given);
+	std::error_code ec;
+	const std::filesystem::path cwd = std::filesystem::current_path(ec);
+	return ec ? String() : to_gd(cwd.generic_u8string());
 }
 
 void LaunchFlags::clear_args_override() {

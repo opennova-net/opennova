@@ -120,7 +120,7 @@ inline bool player_view_narrow_aspect(int viewport_w, int viewport_h) {
 // The MOUNTED camera's inputs, resolved by the hosting simulation from the
 // local player's carrier each tick: a control seat (mount state +0x168 == 2
 // or 5 — Entity::is_vehicle_control_seat()) with the carrier's position,
-// heading, look-ahead target and bound radius, its watercraft class
+// heading, look-ahead target and bound radius, its air class
 // (itemDef+0x196 in {3,4}), and the water plane the clearances read.
 // `control_seat` false = on foot or a passenger/gunner seat, which keeps the
 // on-foot chase.
@@ -136,7 +136,7 @@ struct MountedCameraInput {
     //  parentMatrix(+0xB4) x (0x60000, 0, 0), called @0x438855].
     int32_t lookahead_target_q16[3] = {0, 0, 0};
     float bound_radius = 0.0f;              // carrier +0, mission units
-    bool watercraft = false;                // unit_type 3/4 [orig: @0x43861D]
+    bool aircraft = false;                  // unit_type 3/4 [orig: @0x43861D]
     // The water plane every chase eye clears, on foot as well as mounted
     // [orig: g_EnvWaterHeightFixed + 0x4000 @0x438409..0x43841E].
     float water_z = 0.0f;                   // g_EnvWaterHeightFixed, units
@@ -930,11 +930,11 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
 // R*(nudge,nudge,nudge) is the look-at target; the clearances apply to every
 // chase eye; roll 0. Mounted (`v.mount.control_seat`) [orig: the mounted arm
 // of mode 1 — yaw @0x438138..0x43814A, pitch @0x438150, distance
-// @0x438121..0x438136, the slope march @0x43846E..0x438619, the watercraft
+// @0x438121..0x438136, the slope march @0x43846E..0x438619, the aircraft
 // drop @0x43861D..0x43864C, the look-ahead @0x438811..0x4388AF]: the eye sits
 // mount_distance(r) behind the eased mounted anchor along the quarter-damped
 // look yaw at the fixed downward pitch, is floored by the clearances and the
-// slope raise, dropped r/2 on a watercraft, and the final angles look at the
+// slope raise, dropped r/2 on an aircraft, and the final angles look at the
 // pivot plus the eased look-ahead (world/tp_camera_mount.h carries the
 // constants).
 // Mode 4 [orig: the lerp @0x4389eb..0x438b49]: the death camera's FROM/TO

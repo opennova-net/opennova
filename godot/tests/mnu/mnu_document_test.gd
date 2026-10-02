@@ -25,7 +25,8 @@ func test_screen_structure() -> void:
 	var main_id: int = screens[0]
 	assert_eq(doc.get_screen_name(main_id), "MAIN", "screen 0 name")
 	assert_eq(doc.get_screen_music_var(main_id), 3, "screen 0 music_var")
-	assert_eq(doc.get_screen_text_rsrc(main_id), "menutxt.BIN", "screen 0 text_rsrc")
+	# The text table is the root window's own: a SCREEN reads none.
+	assert_eq(doc.get_widget_text_rsrc(doc.get_screen_root_id(main_id)), "menutxt.BIN", "root TEXT_RSRC")
 	assert_true(doc.is_screen(main_id), "screen id is a screen")
 
 
@@ -51,7 +52,7 @@ func test_root_window_and_children() -> void:
 	assert_eq(types[1], MnuDocument.TYPE_BUTTON, "StartBtn is button")
 	assert_eq(types[2], MnuDocument.TYPE_CHECKBOX, "SoundChk is checkbox")
 	assert_eq(types[3], MnuDocument.TYPE_SPINLIST, "Difficulty is spinlist")
-	assert_eq(types[4], MnuDocument.TYPE_LABEL, "Version is label")
+	assert_eq(types[4], MnuDocument.TYPE_STATIC, "Version is static")
 
 
 func test_widget_rect_and_properties() -> void:
@@ -111,7 +112,7 @@ func test_datasource_orientation_round_trip() -> void:
 	var marquee := _find_widget(doc, "Credits")
 	var scroll := _find_widget(doc, "VolumeBar")
 	assert_eq(doc.get_widget_type(marquee), MnuDocument.TYPE_MARQUEE, "Credits is a marquee")
-	assert_eq(doc.get_widget_datasource(marquee), "credits.txt", "parsed DATASOURCE")
+	assert_eq(doc.get_widget_datasources(marquee), PackedStringArray(["credits.txt"]), "parsed DATASOURCE")
 	assert_eq(doc.get_widget_orientation(marquee), "VERTICAL", "parsed marquee ORIENTATION")
 	assert_eq(doc.get_widget_orientation(scroll), "VERTICAL", "parsed scroll ORIENTATION")
 
@@ -132,7 +133,7 @@ func test_mns_stylesheet() -> void:
 # The shipped style sheet's bytes, empty (after pending) without the reference set.
 func test_mns_diagnostics_report_line_and_severity() -> void:
 	var sheet := MnsStyleSheet.new()
-	sheet.set_source_text("FOO a\nFOO b\n#if 2\nBAR c\n")
+	sheet.set_source_text("FOO a\r\nFOO b\r\n#if 2\r\nBAR c\r\n")
 	var diagnostics := sheet.get_diagnostics()
 	assert_gt(diagnostics.size(), 0, "problems surface as diagnostics")
 	var codes := PackedStringArray()
@@ -149,23 +150,64 @@ func test_mns_diagnostics_report_line_and_severity() -> void:
 
 func test_mns_runtime_evaluation_validity_is_distinct_from_repairable_load() -> void:
 	var sheet := MnsStyleSheet.new()
-	assert_eq(sheet.load_from_bytes("#else\nOK value\n".to_utf8_buffer()), OK,
+	# The game's reader stops at a name holding '%' and keeps what it read before.
+	assert_eq(sheet.load_from_bytes("OK value\r\nBAD%NAME x\r\nLATER 1\r\n".to_utf8_buffer()), OK,
 		"lossless editor load remains permissive")
-	assert_false(sheet.is_runtime_valid(), "retail evaluator failure is runtime-visible")
-	assert_eq(sheet.get_variable("OK"), "value", "partial evaluated view remains inspectable")
+	assert_false(sheet.is_runtime_valid(), "the reader's stop is runtime-visible")
+	assert_eq(sheet.get_variable("OK"), "value", "what the game read before the stop stays")
+	assert_false(sheet.has_variable("LATER"), "nothing after the stop is read")
 	var diagnostics := sheet.get_evaluation_diagnostics()
 	assert_gt(diagnostics.size(), 0, "evaluation diagnostics are exposed")
 	var codes := PackedStringArray()
 	for value in diagnostics:
 		codes.append(String((value as Dictionary).get("code", "")))
-	assert_has(codes, "unbalanced-else", "runtime failure reports the evaluator code")
-	sheet.set_source_text("OK value\n")
+	assert_has(codes, "invalid-name-char", "the stop reports the evaluator code")
+	sheet.set_source_text("OK value\r\n")
 	assert_true(sheet.is_runtime_valid(), "repairing source refreshes runtime validity")
+	# A stray #else is no failure: the game switches the lines after it off.
+	sheet.set_source_text("#else\r\nOFF value\r\n")
+	assert_true(sheet.is_runtime_valid(), "a stray #else reads to the end")
+	assert_false(sheet.has_variable("OFF"), "the lines after a stray #else are off")
+
+
+# The shell's stylesheets: menu_style.mns, then brand.mns onto it, as the game
+# loads them; a later definition wins, and a brand.mns the reader stops in keeps
+# what it read before the stop (the game ignores the result).
+func test_mns_load_shell_layers_brand_over_menu_style() -> void:
+	var dir := OS.get_temp_dir().path_join("mns_load_shell_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(dir)
+	var style_file := FileAccess.open(dir.path_join("menu_style.mns"), FileAccess.WRITE)
+	style_file.store_buffer("DEF_TEXT_FG FFFFFFFF\r\nTRIM_COLOR FF808080\r\n".to_utf8_buffer())
+	style_file.close()
+	var brand_file := FileAccess.open(dir.path_join("brand.mns"), FileAccess.WRITE)
+	brand_file.store_buffer("TRIM_COLOR FF102030\r\nBAD%NAME x\r\nLATER 1\r\n".to_utf8_buffer())
+	brand_file.close()
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(dir), OK, "the loose root mounts")
+	var sheet: MnsStyleSheet = MnsStyleSheet.load_shell(root)
+	assert_not_null(sheet, "the shell's stylesheets load")
+	if sheet != null:
+		assert_eq(sheet.get_variable("TRIM_COLOR"), "FF102030", "brand.mns overrides menu_style.mns")
+		assert_eq(sheet.get_variable("DEF_TEXT_FG"), "FFFFFFFF", "menu_style.mns keeps the rest")
+		assert_false(sheet.has_variable("LATER"), "the reader stops in brand.mns")
+		assert_false(sheet.is_runtime_valid(), "a sheet the reader stops in is reported")
+	assert_null(MnsStyleSheet.load_shell(null), "no root: null")
+	var empty := ResourceRoot.new()
+	var empty_dir := dir.path_join("none")
+	DirAccess.make_dir_recursive_absolute(empty_dir)
+	if empty.set_root_dir(empty_dir) == OK:
+		assert_null(MnsStyleSheet.load_shell(empty), "no stylesheet: null, every %VAR% literal")
+	root.clear()
+	empty.clear()
+	DirAccess.remove_absolute(empty_dir)
+	DirAccess.remove_absolute(dir.path_join("menu_style.mns"))
+	DirAccess.remove_absolute(dir.path_join("brand.mns"))
+	DirAccess.remove_absolute(dir)
 
 
 func test_mns_entry_add_rename_remove_move() -> void:
 	var sheet := MnsStyleSheet.new()
-	sheet.set_source_text("A 1\nB 2\nC 3\n")
+	sheet.set_source_text("A 1\r\nB 2\r\nC 3\r\n")
 	assert_true(sheet.add_variable("MID", "x", "A"), "insert after a named entry")
 	assert_eq(String((sheet.get_entries()[1] as Dictionary).get("name", "")), "MID", "MID landed after A")
 	assert_false(sheet.add_variable("mid", "y"), "duplicate names reject (case-insensitive)")
@@ -184,7 +226,7 @@ func test_mns_entry_add_rename_remove_move() -> void:
 
 func test_mns_remove_rejects_control_flow_owning_entry_without_dirtying() -> void:
 	var sheet := MnsStyleSheet.new()
-	sheet.set_source_text("#if 1\nFOO bar \\\n#endif\nbaz\nQUX 7\n")
+	sheet.set_source_text("#if 1\r\nFOO bar \\\r\n#endif\r\nbaz\r\nQUX 7\r\n")
 	var before := sheet.get_source_text()
 	watch_signals(sheet)
 	assert_false(sheet.remove_variable("FOO"),
@@ -231,7 +273,7 @@ func test_item_combo_uses_list_box_and_round_trips() -> void:
 func test_item_combo_top_level_items_with_empty_list_box() -> void:
 	var src := """
 <SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT">
-  <WINDOW type="combo" name="ModeBox">
+  <WINDOW type="combobox" name="ModeBox">
     <ITEMS justify="LEFT">
       <ITEM value="0">Solo</ITEM>
       <ITEM value="1">Team</ITEM>
@@ -264,7 +306,8 @@ func test_widget_sounds_read_the_authored_row() -> void:
 
 
 func test_widget_actions_read_the_authored_row() -> void:
-	# StartBtn carries <ACTION type="screen" target="OPTIONS">.
+	# StartBtn carries <ACTION type="screen" file="widgets.mnu">OPTIONS</ACTION>: the
+	# target is the element text (retail reads no TARGET attribute).
 	var doc := _load_doc()
 	var start := _find_widget(doc, "StartBtn")
 	var actions := doc.get_widget_actions(start)
@@ -272,7 +315,7 @@ func test_widget_actions_read_the_authored_row() -> void:
 	var action: MnuActionRow = actions[0]
 	assert_eq(action.type, "screen", "screen verb read")
 	assert_eq(action.target, "OPTIONS", "screen target read")
-	assert_eq(action.file, "", "same-file action has no file")
+	assert_eq(action.file, "widgets.mnu", "a SCREEN action names its file")
 	assert_eq(action.state, "", "screen action has no window state")
 
 
@@ -280,8 +323,7 @@ func test_widget_actions_read_the_authored_row() -> void:
 func test_explicit_zero_musicvar_reads_as_present() -> void:
 	var src := """
 <SCREEN><NAME>S</NAME><MUSICVAR>0</MUSICVAR>
-<WINDOW type="window" name="ROOT"/>
-</SCREEN>
+<WINDOW type="window" name="ROOT"></WINDOW></SCREEN>
 """
 	var doc := MnuDocument.new()
 	assert_eq(doc.load_from_bytes(src.to_utf8_buffer()), OK)
@@ -303,10 +345,12 @@ func _ascii_utf16(text: String, big_endian: bool) -> PackedByteArray:
 
 
 func test_document_bridge_preserves_bom_and_utf16_source_encoding() -> void:
-	var src := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT"/></SCREEN>'
+	var src := '<SCREEN><NAME>S</NAME><WINDOW type="window" name="ROOT"><POSITION><LEFT>0</LEFT></POSITION></WINDOW></SCREEN>'
 	var utf8_bom := PackedByteArray([0xEF, 0xBB, 0xBF])
 	utf8_bom.append_array(src.to_utf8_buffer())
-	for encoded in [utf8_bom, _ascii_utf16(src, false), _ascii_utf16(src, true)]:
+	# Retail reads a big-endian file as little-endian: it loads nothing.
+	assert_ne(MnuDocument.new().load_from_bytes(_ascii_utf16(src, true)), OK, "UTF-16 BE does not load")
+	for encoded in [utf8_bom, _ascii_utf16(src, false)]:
 		var doc := MnuDocument.new()
 		assert_eq(doc.load_from_bytes(encoded), OK)
 		var saved := doc.to_byte_array()

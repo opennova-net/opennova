@@ -1,14 +1,18 @@
 // The compiled-menu interaction runtime (menu/menu_runtime.h), pinned where it
 // used to live in the GDScript MenuDriver / MenuInputDispatch pair (ADR 0040
-// ladder E5): the positional id tree, the first-match name seam, navigation
-// and the back stack, the state store's authored fallbacks and its replay,
-// ACTION dispatch (and the skipped dispatch when an observer swaps the
-// document), radio groups, the spin wrap, the exclusive combo popup, the
-// hover edges, the double-click latch, CTRL multi-select, edit focus and the
-// key routing.
+// ladder E5) and ported to retail's dispatch by the 2026-09-23 grill (sets A2,
+// B1, B3, C2, C3a): the positional id tree, the per-screen control lookup,
+// navigation and the history, the state store's authored fallbacks and its
+// replay, the activation (the class step, the ACTION rows last-authored first,
+// the parent bubble, then the callbacks, then the cross-file requests), the WINDOW /
+// URL / SCREEN / POP_SCREEN rows, the MODAL popup, radio groups among siblings,
+// the spin arrows, the exclusive combo popup, the hover edges, the press-time
+// list / table / spin picks with the double-click latch, the focus, and the key
+// routing with the hotkey table.
 // [orig: CUIWidget_HandleScriptedAction @0x6497f0; UI_DispatchMouseEvent
 //  @0x63ab00; CWnd_ProcessMouseEvent @0x647a00;
-//  CEditWnd_HandleInputEvent @0x661510]
+//  CEditWnd_HandleInputEvent @0x661510; UI_DispatchKeyboardEventToChildren
+//  @0x63ad10; CWnd_IsVisibleInHierarchy @0x646290]
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/menu_flow.h>
@@ -39,22 +43,25 @@ struct FakeFrame : MenuFrameSeam {
 	std::map<int, std::string> texts;
 	std::map<int, int> carets;
 	std::map<int, int> counts;
+	std::map<int, std::vector<MenuTableRow>> table_rows;
+	std::map<int, std::string> mnemonics;
 	std::set<int> disabled;
 	int claim = -1;
+	bool scroll_owned = false;
 	bool popup_mouse = false;
 	bool wheel = true;
 	int popup_row = -1;
 	bool popup_contains = false;
 	int list_row = -1;
 	int spin_arrow = 0;
+	bool table_ok = true;
 	int table_row = -1;
-	int table_col = -1;
-	std::vector<MenuTableRow> table_rows_seen;
-	std::vector<MenuTableColumnDef> table_columns_seen;
-	int hotkey = -1;
-	std::string hotkey_asked;
+	int table_column = -1;
+	int popup_root = -1;
+	std::vector<MenuTableColumn> table_columns_seen;
 	int edit_key_result = 0;
 	int last_edit_key = 0;
+	int edit_chars = 0;
 	bool edit_char_result = true;
 	MenuRectF rect{ 10.0f, 20.0f, 100.0f, 40.0f };
 
@@ -66,7 +73,10 @@ struct FakeFrame : MenuFrameSeam {
 	}
 
 	bool is_configured() const override { return configured; }
-	void configure_screen(const std::string &screen) override { note("configure " + screen); }
+	void configure_screen(const std::string &screen) override {
+		note("configure " + screen);
+		popup_root = -1;
+	}
 	void screen_configured() override { note("configured"); }
 	void set_widget_shown_override(int i, bool v) override {
 		note("shown " + std::to_string(i) + (v ? " 1" : " 0"));
@@ -104,10 +114,12 @@ struct FakeFrame : MenuFrameSeam {
 	}
 	void set_widget_table_rows(int i, const std::vector<MenuTableRow> &rows) override {
 		note("rows " + std::to_string(i) + " " + std::to_string(rows.size()));
-		table_rows_seen = rows;
+		table_rows[i] = rows;
 	}
-	void set_widget_table_columns(int i, const std::vector<MenuTableColumnDef> &columns) override {
-		note("columns " + std::to_string(i) + " " + std::to_string(columns.size()));
+	void set_widget_table_columns(int i, bool installed, const std::vector<MenuTableColumn> &columns,
+			int sort_column) override {
+		note("columns " + std::to_string(i) + (installed ? " 1 " : " 0 ") +
+				std::to_string(columns.size()) + " " + std::to_string(sort_column));
 		table_columns_seen = columns;
 	}
 	void set_widget_clip_rect(int i, bool enabled, int l, int t, int r, int b) override {
@@ -149,7 +161,10 @@ struct FakeFrame : MenuFrameSeam {
 		sx = 2.0f;
 		sy = 2.0f;
 	}
-	int process_mouse(float, float, bool) override { return claim; }
+	int process_mouse(float, float, bool, bool &owned) override {
+		owned = scroll_owned;
+		return claim;
+	}
 	bool process_popup_mouse(int, float, float, bool) override { return popup_mouse; }
 	bool process_mouse_wheel(float, float, int) override { return wheel; }
 	void set_cursor_state(bool, float, float) override {}
@@ -161,17 +176,25 @@ struct FakeFrame : MenuFrameSeam {
 	int spin_arrow_at(int, float, float) const override { return spin_arrow; }
 	bool table_hit(int, float, float, int *row, int *column) const override {
 		*row = table_row;
-		*column = table_col;
-		return true;
+		*column = table_column;
+		return table_ok;
 	}
 	std::string item_display_text(int i, int row) const override {
 		return "display " + std::to_string(i) + " " + std::to_string(row);
 	}
-	int hotkey_widget(const std::string &key, bool) const override {
-		const_cast<FakeFrame *>(this)->hotkey_asked = key;
-		return hotkey;
+	std::string widget_mnemonic(int i) const override {
+		const auto it = mnemonics.find(i);
+		return it != mnemonics.end() ? it->second : std::string();
 	}
-	bool edit_char(int, int) override { return edit_char_result; }
+	void set_open_popup(int index) override {
+		popup_root = index;
+		note("popup_root " + std::to_string(index));
+	}
+	bool edit_char(int i, int unicode) override {
+		++edit_chars;
+		texts[i] += static_cast<char>(unicode);
+		return edit_char_result;
+	}
 	int edit_key(int, int key, bool) override {
 		last_edit_key = key;
 		return edit_key_result;
@@ -203,6 +226,13 @@ mnu::Item item(const char *text, const char *value) {
 	return i;
 }
 
+mnu::Hotkey hotkey(const char *value, bool virtual_key) {
+	mnu::Hotkey h;
+	h.value = value;
+	h.virtual_key = virtual_key;
+	return h;
+}
+
 // MAIN: screen 1, ROOT 2, PLAY 3, PANEL 4, R1 5, R2 6, R3 7, COMBO 8, SPIN 9,
 // NAME 10, RO 11, EXT 12, MULTI 13, TABLE 14, QUIT 15, VOL 16;
 // OPTIONS: screen 17, ROOT 18, BACK 19, PLAY (duplicate name) 20.
@@ -212,10 +242,10 @@ mnu::Document make_document() {
 	main.name = "MAIN";
 	main.has_music_var = true;
 	main.music_var = 3;
-	main.root_window = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window main_root = widget("ROOT", mnu::WindowType::Window);
 	mnu::Window play = widget("PLAY", mnu::WindowType::Button);
 	play.string_data.value = "Play";
-	play.actions = { action("WINDOW", "PANEL", "SHOW"), action("screen", "OPTIONS") };
+	play.actions = { action("WINDOW", "PANEL", "SHOW"), action("screen", "OPTIONS", "", "main.mnu") };
 	play.sounds = { mnu::Sound{ "selected", "CLICK_SELECT", "menu.lwf" },
 		mnu::Sound{ "MOUSEIN", "MOUSE_OVER", "menu.lwf" },
 		mnu::Sound{ "mouseout", "MOUSE_OUT", "menu.lwf" } };
@@ -230,32 +260,39 @@ mnu::Document make_document() {
 	r3.group = 2;
 	r3.checked = true;
 	mnu::Window combo = widget("COMBO", mnu::WindowType::Combo);
-	combo.list_box.present = true;
-	combo.list_box.items.present = true;
-	combo.list_box.items.items = { item("a", "10"), item("b", "20"), item("c", "30") };
+	mnu::Window &combo_list = combo.list_box.author(mnu::WindowType::List);
+	combo_list.items.present = true;
+	combo_list.items.items = { item("a", "10"), item("b", "20"), item("c", "30") };
 	combo.items.items = { item("ignored", "0") };
 	mnu::Window spin = widget("SPIN", mnu::WindowType::SpinList);
 	spin.items.items = { item("x", "1"), item("y", "2"), item("z", "3") };
+	mnu::Window &up = spin.spinup.author(mnu::WindowType::Button);
+	up.sounds = { mnu::Sound{ "SELECTED", "UP_CLICK", "menu.lwf" } };
+	spin.spindown.author(mnu::WindowType::Button);
 	mnu::Window name = widget("NAME", mnu::WindowType::Edit);
 	mnu::Window ro = widget("RO", mnu::WindowType::Edit);
 	ro.readonly = true;
 	mnu::Window ext = widget("EXT", mnu::WindowType::Button);
 	ext.actions = { action("SCREEN", "X", "", "other.mnu") };
-	mnu::Window multi = widget("MULTI", mnu::WindowType::Multi);
+	// A LIST whose ITEMS are MULTISELECT keeps a selection set.
+	mnu::Window multi = widget("MULTI", mnu::WindowType::List);
+	multi.items.multiselect = true;
 	multi.items.items = { item("m0", ""), item("m1", ""), item("m2", "") };
 	mnu::Window table = widget("TABLE", mnu::WindowType::Table);
 	table.items.multiselect = true;
 	mnu::Window quit = widget("QUIT", mnu::WindowType::Button);
 	quit.actions = { action("quit_game", "") };
 	mnu::Window vol = widget("VOL", mnu::WindowType::Scroll);
-	main.root_window.children = { play, panel, r1, r2, r3, combo, spin, name, ro, ext, multi,
+	main_root.children = { play, panel, r1, r2, r3, combo, spin, name, ro, ext, multi,
 		table, quit, vol };
+	main.roots.push_back(main_root);
 	mnu::Screen options;
 	options.name = "OPTIONS";
-	options.root_window = widget("ROOT2", mnu::WindowType::Window);
+	mnu::Window options_root = widget("ROOT2", mnu::WindowType::Window);
 	mnu::Window back = widget("BACK", mnu::WindowType::Button);
 	back.actions = { action("POP_SCREEN", "") };
-	options.root_window.children = { back, widget("play", mnu::WindowType::Button) };
+	options_root.children = { back, widget("play", mnu::WindowType::Button) };
+	options.roots.push_back(options_root);
 	doc.screens = { main, options };
 	return doc;
 }
@@ -281,7 +318,24 @@ struct Recorder {
 			if (it->kind == kind) return &*it;
 		return nullptr;
 	}
+	int first_index(MenuEvent::Kind kind) const {
+		for (size_t i = 0; i < events.size(); ++i)
+			if (events[i].kind == kind) return static_cast<int>(i);
+		return -1;
+	}
 };
+
+MenuKeyInput vk(int code) {
+	MenuKeyInput k;
+	k.vk = code;
+	return k;
+}
+
+MenuKeyInput typed(int ch) {
+	MenuKeyInput k;
+	k.unicode = ch;
+	return k;
+}
 
 void test_index_and_frameless() {
 	const mnu::Document doc = make_document();
@@ -304,9 +358,12 @@ void test_index_and_frameless() {
 	CHECK(rt.index().screen(1) != nullptr && rt.index().screen(2) == nullptr &&
 			rt.index().screen_root_id(2) == -1 && rt.index().node(0) == nullptr &&
 			rt.index().node(21) == nullptr);
-	// The name seam: case-insensitive, first match in document order.
+	// The name seam: the current screen's control first (case-insensitive), else
+	// the first screen holding one.
 	CHECK(rt.widget_id("play") == 3 && rt.widget_id("PLAY") == 3);
+	CHECK(rt.widget_id("BACK") == 19); // off-screen: the OPTIONS screen's
 	CHECK(rt.widget_id("missing") == -1);
+	CHECK(rt.find_control("OPTIONS", "PLAY") == 20 && rt.find_control("", "BACK") == -1);
 	CHECK(rt.widget_name_of(8) == "COMBO" && rt.widget_screen_of(19) == "OPTIONS");
 	CHECK(rt.widget_kind_of(8) == static_cast<int>(mnu::WindowType::Combo));
 	CHECK(rt.widget_kind_of(99) == -1);
@@ -343,7 +400,7 @@ void test_index_and_frameless() {
 	CHECK(rt.get_widget_text(-1).empty());
 }
 
-void test_navigation_replay_and_actions() {
+void test_navigation_and_replay() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
 	MenuRuntime rt;
@@ -362,56 +419,262 @@ void test_navigation_replay_and_actions() {
 	CHECK(rt.navigate_to_screen("OPTIONS"));
 	CHECK(frame.saw("disabled 1 1"));
 	CHECK(rec.last(MenuEvent::Kind::MusicVar)->value == 0); // unauthored MUSICVAR pushes 0
-	// BACK pops to MAIN; popping past the root is the shell's quit.
-	rt.activate(19);
-	CHECK(rt.current_screen() == "MAIN"); // the authored spelling, whatever the caller used
-	CHECK(!rt.pop_screen() && rec.count(MenuEvent::Kind::QuitRequested) == 1);
+	// An unknown screen changes nothing and pushes nothing.
+	CHECK(!rt.navigate_to_screen("NOWHERE") && rt.current_screen() == "OPTIONS");
+	CHECK(rt.pop_screen() && rt.current_screen() == "MAIN");
+	// The select pushes even the screen it leaves for itself.
+	CHECK(rt.navigate_to_screen("MAIN") && rt.current_screen() == "MAIN");
+	CHECK(rt.pop_screen() && rt.current_screen() == "MAIN");
+	// POP_SCREEN past the file's own history is the embedder's cross-file pop.
+	CHECK(!rt.pop_screen() && rec.count(MenuEvent::Kind::PopRequested) == 1);
+	CHECK(rt.current_screen() == "MAIN");
+}
 
-	// activate: the activation event first, then the ACTION rows in order.
-	rec.events.clear();
+// The activation [orig: CWnd_EmitEventToNamedHandlerAndCallbacks @ 0x646970;
+// CUIWidget_HandleScriptedAction @ 0x6497f0].
+void test_activation_order() {
+	const mnu::Document doc = make_document();
+	FakeFrame frame;
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	rt.open_document(&doc, "main.mnu", "");
+	// PLAY authors WINDOW SHOW PANEL, then SCREEN OPTIONS (its own file): the rows
+	// run last-authored first (the screen changes, then the WINDOW row still finds
+	// PANEL on PLAY's own screen), and the callbacks come after the rows.
 	rt.activate(3);
-	CHECK(rec.events.size() >= 3 && rec.events[0].kind == MenuEvent::Kind::WidgetActivated &&
-			rec.events[0].id == 3 && rec.events[0].text == "PLAY");
-	CHECK(rec.events[1].kind == MenuEvent::Kind::ShownChanged && rec.events[1].id == 4 &&
-			rec.events[1].flag);
+	const int changed = rec.first_index(MenuEvent::Kind::ScreenChanged);
+	const int shown = rec.first_index(MenuEvent::Kind::ShownChanged);
+	const int activated = rec.first_index(MenuEvent::Kind::WidgetActivated);
+	CHECK(changed >= 0 && shown > changed && activated > shown);
+	CHECK(rec.events[static_cast<size_t>(activated)].id == 3 &&
+			rec.events[static_cast<size_t>(activated)].text == "PLAY");
 	CHECK(rt.current_screen() == "OPTIONS" && rt.is_widget_shown(4));
 	rt.pop_screen();
 
-	// A cross-file SCREEN action is the shell's; QUIT and URL relay.
+	// A cross-file SCREEN row is raised after the callbacks, so they read the
+	// screen they fired on.
 	rec.events.clear();
 	rt.activate(12);
-	CHECK(rec.last(MenuEvent::Kind::MenuRequested) != nullptr &&
-			rec.last(MenuEvent::Kind::MenuRequested)->text == "other.mnu" &&
-			rec.last(MenuEvent::Kind::MenuRequested)->text2 == "X");
-	CHECK(rt.dispatch_action(action("URL", "http://x")) &&
-			rec.last(MenuEvent::Kind::UrlRequested)->text == "http://x");
-	CHECK(!rt.dispatch_action(action("FORM_POST", "X"))); // a service verb is not the runtime's
-	// The same-file spelling (the menu's own filename, any case) navigates.
-	CHECK(rt.dispatch_action(action("screen", "OPTIONS", "", "main.mnu")));
-	CHECK(rt.current_screen() == "OPTIONS");
-	// WINDOW actions address the CURRENT screen only.
-	CHECK(!rt.handle_window_action("PANEL", "show", false));
-	rt.pop_screen();
-	CHECK(rt.handle_window_action("PANEL", "hide", false) && !rt.is_widget_shown(4));
-	CHECK(rt.handle_window_action("PANEL", "hide", true) && rt.is_widget_shown(4));
-	CHECK(rt.handle_window_action("PANEL", "toggle", false) && !rt.is_widget_shown(4));
-	CHECK(rt.handle_window_action("PLAY", "disable", false) && rt.is_widget_disabled(3));
-	CHECK(rt.handle_window_action("PLAY", "enable", true) && !rt.is_widget_disabled(3));
-	CHECK(!rt.handle_window_action("PLAY", "explode", false));
-	// TAB focuses a shown, enabled edit target.
-	CHECK(rt.dispatch_action(action("TAB", "NAME")) && rt.focused_widget() == 10);
+	const int requested = rec.first_index(MenuEvent::Kind::MenuRequested);
+	CHECK(rec.first_index(MenuEvent::Kind::WidgetActivated) >= 0 &&
+			requested > rec.first_index(MenuEvent::Kind::WidgetActivated));
+	CHECK(requested >= 0 && rec.events[static_cast<size_t>(requested)].text == "other.mnu" &&
+			rec.events[static_cast<size_t>(requested)].text2 == "X");
+	// An unknown TYPE (quit_game) is code 0: nothing; the callbacks still fire.
+	rec.events.clear();
+	rt.activate(15);
+	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 1 && rec.events.size() == 1);
 
-	// An observer that swaps the document under the activation skips the rows.
+	// An observer that swaps the document during the callbacks drops the jump.
 	const mnu::Document other = make_document();
 	MenuRuntime rt2;
-	int shown_events = 0;
+	int requests = 0;
 	rt2.set_sink([&](const MenuEvent &e) {
 		if (e.kind == MenuEvent::Kind::WidgetActivated) rt2.open_document(&other, "main.mnu", "");
-		if (e.kind == MenuEvent::Kind::ShownChanged) ++shown_events;
+		if (e.kind == MenuEvent::Kind::MenuRequested) ++requests;
 	});
 	rt2.open_document(&doc, "main.mnu", "");
-	rt2.activate(3);
-	CHECK(shown_events == 0 && rt2.document() == &other && rt2.current_screen() == "MAIN");
+	rt2.activate(12);
+	CHECK(requests == 0 && rt2.document() == &other && rt2.current_screen() == "MAIN");
+	// A POP_SCREEN past the file's own history is held like a cross-file jump: the
+	// earlier-authored rows and the callbacks run first, then the embedder's pop.
+	mnu::Document pops = make_document();
+	pops.screens[0].roots[0].children[0].actions = { action("WINDOW", "PANEL", "SHOW"),
+		action("POP_SCREEN", "") };
+	MenuRuntime rt3;
+	Recorder rec3;
+	bool panel_shown_at_pop = false;
+	rt3.set_sink([&](const MenuEvent &e) {
+		rec3.events.push_back(e);
+		if (e.kind == MenuEvent::Kind::PopRequested) {
+			panel_shown_at_pop = rt3.is_widget_shown(4);
+			rt3.open_document(&other, "main.mnu", "");
+		}
+	});
+	rt3.open_document(&pops, "main.mnu", "");
+	rec3.events.clear();
+	rt3.activate(3);
+	const int popped = rec3.first_index(MenuEvent::Kind::PopRequested);
+	CHECK(rec3.count(MenuEvent::Kind::WidgetActivated) == 1 && popped >= 0 &&
+			popped > rec3.first_index(MenuEvent::Kind::WidgetActivated));
+	CHECK(panel_shown_at_pop && rt3.document() == &other);
+	// A row that swaps the document stops the walk: an observer reopening on the
+	// in-place SCREEN row's screen change leaves PLAY's earlier-authored WINDOW row
+	// and the callbacks unrun.
+	MenuRuntime rt4;
+	int activations = 0;
+	bool swapped = false;
+	rt4.set_sink([&](const MenuEvent &e) {
+		if (e.kind == MenuEvent::Kind::ScreenChanged && e.text == "OPTIONS" && !swapped) {
+			swapped = true;
+			rt4.open_document(&other, "main.mnu", "");
+		}
+		if (e.kind == MenuEvent::Kind::WidgetActivated) ++activations;
+	});
+	rt4.open_document(&doc, "main.mnu", "");
+	rt4.activate(3);
+	CHECK(swapped && activations == 0 && rt4.document() == &other && !rt4.is_widget_shown(4));
+	// The held requests keep the walk's order, and once one is held every later
+	// SCREEN and POP_SCREEN row is held behind it (retail runs them on the screen
+	// the held one leaves current): OPTIONS selects in place, then after the
+	// callbacks the jump to other.mnu and the pop that returns from it.
+	mnu::Document mixed = make_document();
+	mixed.screens[0].roots[0].children[0].actions = { action("POP_SCREEN", ""),
+		action("SCREEN", "X", "", "other.mnu"), action("SCREEN", "OPTIONS", "", "main.mnu") };
+	MenuRuntime rt5;
+	Recorder rec5;
+	rt5.set_sink([&rec5](const MenuEvent &e) { rec5.events.push_back(e); });
+	rt5.open_document(&mixed, "main.mnu", "");
+	rec5.events.clear();
+	rt5.activate(3);
+	const int activated5 = rec5.first_index(MenuEvent::Kind::WidgetActivated);
+	const int requested5 = rec5.first_index(MenuEvent::Kind::MenuRequested);
+	CHECK(rt5.current_screen() == "OPTIONS" && activated5 >= 0 && requested5 > activated5 &&
+			rec5.first_index(MenuEvent::Kind::PopRequested) > requested5);
+}
+
+// A document for the retail row rules. S: screen 1, ROOT 2, GO 3, TARGET 4,
+// NAMELESS 5 (no NAME) > HIDDEN_KID 6, DLG 7 (MODAL, hidden) > DLG_OK 8, EDIT 9,
+// BOX 10 > INNER 11; T: screen 12, ROOT_T 13, TARGET 14.
+mnu::Document rows_document() {
+	mnu::Document doc;
+	mnu::Screen s;
+	s.name = "S";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window go = widget("GO", mnu::WindowType::Button);
+	mnu::Window target = widget("TARGET", mnu::WindowType::Button);
+	mnu::Window nameless = widget("", mnu::WindowType::Window);
+	nameless.children = { widget("HIDDEN_KID", mnu::WindowType::Button) };
+	mnu::Window dlg = widget("DLG", mnu::WindowType::Window);
+	dlg.modal = true;
+	dlg.hidden = true;
+	dlg.children = { widget("DLG_OK", mnu::WindowType::Button) };
+	mnu::Window edit = widget("EDIT", mnu::WindowType::Edit);
+	mnu::Window box = widget("BOX", mnu::WindowType::Window);
+	box.children = { widget("INNER", mnu::WindowType::Button) };
+	root.children = { go, target, nameless, dlg, edit, box };
+	s.roots.push_back(root);
+	mnu::Screen t;
+	t.name = "T";
+	mnu::Window root_t = widget("ROOT_T", mnu::WindowType::Window);
+	root_t.children = { widget("TARGET", mnu::WindowType::Button) };
+	t.roots.push_back(root_t);
+	doc.screens = { s, t };
+	return doc;
+}
+
+void test_rows() {
+	const mnu::Document doc = rows_document();
+	FakeFrame frame;
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	CHECK(rt.open_document(&doc, "rows.mnu", "S"));
+	// SCREEN: no FILE does nothing; the menu's own file selects in place.
+	CHECK(!rt.dispatch_action(action("SCREEN", "T")) && rt.current_screen() == "S");
+	CHECK(rt.dispatch_action(action("SCREEN", "T", "", "ROWS.MNU")) && rt.current_screen() == "T");
+	// A WINDOW row finds its target on the screen it runs for: here the current.
+	CHECK(rt.dispatch_action(action("WINDOW", "TARGET", "HIDE")) && !rt.is_widget_shown(14) &&
+			rt.is_widget_shown(4));
+	CHECK(rt.pop_screen() && rt.current_screen() == "S");
+	// A nameless window ends its branch: its named child is unreachable.
+	CHECK(rt.find_control("", "HIDDEN_KID") == -1 && rt.widget_id("HIDDEN_KID") == -1);
+	CHECK(!rt.dispatch_action(action("WINDOW", "HIDDEN_KID", "HIDE")));
+	// HIDE / SHOW, TOGGLE flips; another STATE does nothing.
+	CHECK(rt.dispatch_action(action("WINDOW", "TARGET", "HIDE")) && !rt.is_widget_shown(4));
+	CHECK(rt.dispatch_action(action("WINDOW", "TARGET", "HIDE", "", true)) && rt.is_widget_shown(4));
+	CHECK(rt.dispatch_action(action("WINDOW", "TARGET", "SHOW", "", true)) && !rt.is_widget_shown(4));
+	CHECK(!rt.dispatch_action(action("WINDOW", "TARGET", "toggle")) && !rt.is_widget_shown(4));
+	rt.set_widget_shown(4, true);
+	// ENABLE / DISABLE reach the whole subtree; TOGGLE goes to the opposite of
+	// the target's own.
+	CHECK(rt.dispatch_action(action("WINDOW", "BOX", "DISABLE")) && rt.is_widget_disabled(10) &&
+			rt.is_widget_disabled(11));
+	CHECK(rt.dispatch_action(action("WINDOW", "BOX", "ENABLE", "", true)) &&
+			!rt.is_widget_disabled(10) && !rt.is_widget_disabled(11));
+	// A MODAL target opens and closes the popup; the pump serves it alone.
+	CHECK(rt.open_popup() == -1);
+	CHECK(rt.dispatch_action(action("WINDOW", "DLG", "SHOW")) && rt.open_popup() == 7 &&
+			frame.popup_root == rt.frame_index(7));
+	CHECK(rt.dispatch_action(action("WINDOW", "DLG", "HIDE")) && rt.open_popup() == -1 &&
+			frame.popup_root == -1);
+	CHECK(rt.dispatch_action(action("WINDOW", "DLG", "SHOW", "", true)) && rt.open_popup() == 7);
+	CHECK(rt.dispatch_action(action("WINDOW", "DLG", "SHOW", "", true)) && rt.open_popup() == -1);
+	// A shown MODAL window claims the popup when it draws, whoever showed it; a
+	// screen change closes it.
+	rt.set_widget_shown(7, true);
+	rt.handle_key(vk(0x7B)); // any input syncs the draw's claim
+	CHECK(rt.open_popup() == 7);
+	rt.show_screen("T");
+	CHECK(rt.open_popup() == -1 && frame.popup_root == -1);
+	rt.set_widget_shown(7, false);
+	rt.show_screen("S");
+	CHECK(rt.open_popup() == -1);
+	// The focus drops for a WINDOW row.
+	rt.focus_edit(9);
+	CHECK(rt.focused_widget() == 9);
+	rt.dispatch_action(action("WINDOW", "TARGET", "SHOW"));
+	CHECK(rt.focused_widget() == -1);
+	// URL: the row's text trimmed; EXTERNAL_BROWSER or the URL's own flag opens
+	// the external browser; a FIELD slot reads that control's text (none: nothing).
+	rec.events.clear();
+	mnu::Action url = action("URL", "  www.novalogic.com/x \r\n");
+	CHECK(rt.dispatch_action(url));
+	CHECK(rec.last(MenuEvent::Kind::UrlRequested)->text == "www.novalogic.com/x" &&
+			!rec.last(MenuEvent::Kind::UrlRequested)->flag);
+	url.external_browser = true;
+	rt.dispatch_action(url);
+	CHECK(rec.last(MenuEvent::Kind::UrlRequested)->flag);
+	rt.dispatch_action(action("URL", "a.com/?EXTERNAL_BROWSER=1"));
+	CHECK(rec.last(MenuEvent::Kind::UrlRequested)->flag);
+	frame.texts[rt.frame_index(9)] = " typed.example ";
+	mnu::Action field = action("URL", "ignored");
+	field.field = "EDIT";
+	rt.dispatch_action(field);
+	CHECK(rec.last(MenuEvent::Kind::UrlRequested)->text == "typed.example");
+	field.field = "NO_SUCH";
+	rec.events.clear();
+	rt.dispatch_action(field);
+	CHECK(rec.count(MenuEvent::Kind::UrlRequested) == 0);
+	// Codes 0, 7, 8 and 11 do nothing on activation; service verbs are the embedder's.
+	CHECK(!rt.dispatch_action(action("GLB_FILTER", "TARGET")) &&
+			!rt.dispatch_action(action("TAB", "TARGET")) && !rt.dispatch_action(action("bogus", "")) &&
+			!rt.dispatch_action(action("LAN_SEARCH", "TARGET")) &&
+			!rt.dispatch_action(action("FORM_POST", "")));
+	// The OpenNova-only tokens are gone: pop and quit are code 0.
+	rec.events.clear();
+	CHECK(!rt.dispatch_action(action("pop", "")) && !rt.dispatch_action(action("quit", "")) &&
+			rec.count(MenuEvent::Kind::PopRequested) == 0);
+}
+
+// The parent bubble and a nameless widget [orig: @ 0x649805, @ 0x649c5d].
+void test_bubble() {
+	mnu::Document doc;
+	mnu::Screen s;
+	s.name = "S";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window twin = widget("TWIN", mnu::WindowType::Window);
+	twin.actions = { action("WINDOW", "FLAG", "HIDE") };
+	mnu::Window inner = widget("TWIN", mnu::WindowType::Button);
+	mnu::Window nameless = widget("", mnu::WindowType::Button);
+	nameless.actions = { action("WINDOW", "FLAG2", "HIDE") };
+	twin.children = { inner };
+	root.children = { twin, nameless, widget("FLAG", mnu::WindowType::Static),
+		widget("FLAG2", mnu::WindowType::Static) };
+	s.roots.push_back(root);
+	doc.screens.push_back(s);
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	rt.open_document(&doc, "b.mnu", "");
+	// screen 1, ROOT 2, TWIN 3, TWIN (button) 4, nameless 5, FLAG 6, FLAG2 7.
+	rt.activate(4);
+	CHECK(!rt.is_widget_shown(6)); // the parent of the same NAME ran its row
+	rt.activate(5);
+	CHECK(rt.is_widget_shown(7) && rec.count(MenuEvent::Kind::WidgetActivated) == 1);
 }
 
 void test_radio_spin_tables_scroll() {
@@ -423,10 +686,10 @@ void test_radio_spin_tables_scroll() {
 	rt.set_frame(&frame);
 	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
 	rt.open_document(&doc, "main.mnu", "");
-	// Radio exclusivity: same screen, same GROUP only.
+	// Radio exclusivity: the siblings of the same nonzero GROUP only.
 	rt.select_radio(6);
 	CHECK(rt.is_widget_checked(6) && !rt.is_widget_checked(5) && rt.is_widget_checked(7));
-	// The spin cycle wraps both ways and relays the value.
+	// The spin step wraps both ways and relays the value.
 	rt.spin_cycle(9, -1);
 	CHECK(rt.selected_row(9) == 2);
 	const MenuEvent *v = rec.last(MenuEvent::Kind::ValueChanged);
@@ -511,7 +774,15 @@ void test_table_row_operations() {
 	CHECK(rows.empty());
 }
 
-void test_input() {
+// Press, then release over the claimed widget (the frame's click signal).
+void click(MenuRuntime &rt, FakeFrame &frame, int index, uint32_t now) {
+	frame.claim = index;
+	rt.process_mouse(5, 5, true, now);
+	rt.process_mouse(5, 5, false, now);
+	rt.on_widget_clicked(index);
+}
+
+void test_mouse() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
 	MenuRuntime rt;
@@ -524,93 +795,118 @@ void test_input() {
 	// Hover edges: MOUSEIN entering, MOUSEOUT + MOUSEIN moving, nothing into a
 	// disabled widget.
 	frame.claim = 1;
-	rt.process_mouse(5, 5, false);
+	rt.process_mouse(5, 5, false, 0);
 	CHECK(rec.last(MenuEvent::Kind::Sound)->text2 == "MOUSE_OVER" &&
 			rec.last(MenuEvent::Kind::HoverChanged)->id == 3 &&
 			rec.last(MenuEvent::Kind::HoverChanged)->flag);
 	rt.set_widget_disabled(12, true);
 	rec.events.clear();
 	frame.claim = 10;
-	rt.process_mouse(5, 5, false);
+	rt.process_mouse(5, 5, false, 0);
 	CHECK(rec.count(MenuEvent::Kind::HoverChanged) == 1 && !rec.events.back().flag &&
 			rec.last(MenuEvent::Kind::Sound)->text2 == "MOUSE_OUT");
 	frame.claim = -1;
-	rt.process_mouse(5, 5, false);
+	rt.process_mouse(5, 5, false, 0);
 
-	// A disabled widget's click does nothing; a button's fires SELECTED + activation.
+	// A disabled widget's click does nothing; any other fires SELECTED and the
+	// activation.
 	rec.events.clear();
-	rt.on_widget_clicked(10, 0, false);
+	rt.on_widget_clicked(10);
 	CHECK(rec.events.empty());
-	rt.on_widget_clicked(13, 0, false);
-	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 1 &&
-			rec.count(MenuEvent::Kind::QuitRequested) == 1);
+	rt.on_widget_clicked(13);
+	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 1);
 
 	// The single open dropdown: a click opens, a second combo click closes.
 	frame.log.clear();
-	rt.on_widget_clicked(6, 0, false);
+	rt.on_widget_clicked(6);
 	CHECK(rt.is_combo_popup_open(8) && frame.saw("popup 6 1"));
-	rt.on_widget_clicked(6, 0, false);
+	rt.on_widget_clicked(6);
 	CHECK(!rt.is_combo_popup_open(8) && frame.saw("popup 6 0"));
 	// While open it owns the mouse: a row press selects and closes...
-	rt.on_widget_clicked(6, 0, false);
+	rt.on_widget_clicked(6);
 	frame.popup_row = 1;
 	frame.claim = 3; // the main pump must NOT run
 	rec.events.clear();
-	rt.process_mouse(50, 50, true);
+	rt.process_mouse(50, 50, true, 0);
 	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 1);
 	CHECK(rec.last(MenuEvent::Kind::ValueChanged)->text2 == "combo" &&
 			rec.last(MenuEvent::Kind::ValueChanged)->text3 == "b" &&
 			rec.count(MenuEvent::Kind::HoverChanged) == 0);
-	rt.process_mouse(50, 50, false);
+	rt.process_mouse(50, 50, false, 0);
 	// ...a press on the closed cell (design rect 10,20 100x40 at scale 2) is dead...
-	rt.on_widget_clicked(6, 0, false);
+	rt.on_widget_clicked(6);
 	frame.popup_row = -1;
-	rt.process_mouse(40, 60, true);
+	rt.process_mouse(40, 60, true, 0);
 	CHECK(rt.is_combo_popup_open(8));
-	rt.process_mouse(40, 60, false);
+	rt.process_mouse(40, 60, false, 0);
 	// ...and a press outside both dismisses.
-	rt.process_mouse(900, 900, true);
+	rt.process_mouse(900, 900, true, 0);
 	CHECK(!rt.is_combo_popup_open(8));
-	rt.process_mouse(900, 900, false);
+	rt.process_mouse(900, 900, false, 0);
 	// A screen switch closes it too.
-	rt.on_widget_clicked(6, 0, false);
+	rt.on_widget_clicked(6);
 	rt.show_screen("OPTIONS");
 	CHECK(!rt.is_combo_popup_open(8));
 	rt.show_screen("MAIN");
 
-	// The double-click latch: the second click of a row inside 400 ms
-	// activates, and the third re-arms from scratch.
+	// A list picks on the press, activating first: the double-click latch fires
+	// on the second press of a row inside 400 ms and re-arms from scratch.
 	frame.list_row = 2;
 	rec.events.clear();
-	rt.on_widget_clicked(11, 1000, false);
-	rt.on_widget_clicked(11, 1300, false);
+	frame.claim = 11;
+	rt.process_mouse(5, 5, true, 1000);
+	CHECK(rec.first_index(MenuEvent::Kind::WidgetActivated) >= 0 &&
+			rec.first_index(MenuEvent::Kind::WidgetActivated) < rec.first_index(MenuEvent::Kind::ValueChanged));
+	rt.process_mouse(5, 5, false, 1000);
+	rt.process_mouse(5, 5, true, 1300);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1 &&
 			rec.last(MenuEvent::Kind::ListActivated)->id == 13 &&
 			rec.last(MenuEvent::Kind::ListActivated)->value == 2);
-	rt.on_widget_clicked(11, 1400, false);
+	rt.process_mouse(5, 5, false, 1300);
+	rt.process_mouse(5, 5, true, 1400);
+	rt.process_mouse(5, 5, false, 1400);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1);
-	rt.on_widget_clicked(11, 2000, false); // 600 ms later: not a double
-	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1);
-	// MULTI: a plain click replaces the set, CTRL toggles into it.
+	// A press a scrollbar part took never reaches the list.
+	rec.events.clear();
+	frame.scroll_owned = true;
+	rt.process_mouse(5, 5, true, 9000);
+	CHECK(rec.count(MenuEvent::Kind::ValueChanged) == 0);
+	rt.process_mouse(5, 5, false, 9000);
+	frame.scroll_owned = false;
+	// MULTISELECT toggles the pressed row in the set, no modifier needed.
+	rt.set_selected_set(13, {});
 	frame.list_row = 0;
-	rt.on_widget_clicked(11, 5000, false);
+	click(rt, frame, 11, 20000);
 	CHECK(rt.selected_set(13) == (std::vector<int>{ 0 }));
 	frame.list_row = 2;
-	rt.on_widget_clicked(11, 6000, true);
+	click(rt, frame, 11, 30000);
 	CHECK(rt.selected_set(13) == (std::vector<int>{ 0, 2 }));
-	rt.on_widget_clicked(11, 7000, true);
-	CHECK(rt.selected_set(13) == (std::vector<int>{ 0 }) && rt.selected_row(13) == 2);
-	// TABLE: a MULTISELECT table toggles the pressed row with or without
-	// CTRL, then raises the cell event with the row's new state and the
-	// column's cell value [orig: CTableWnd_HandleNamedEvent @0x642400].
+	// A row the toggle took out neither draws nor reads as selected: the list's
+	// selected row is the first still in the set, none once it is empty [orig:
+	// UIList_GetSelectedValue @ 0x644660], and the value change reports it.
+	frame.log.clear();
+	click(rt, frame, 11, 40000);
+	CHECK(rt.selected_set(13) == (std::vector<int>{ 0 }) && rt.selected_row(13) == 0 &&
+			frame.saw("selection 11 0 -1 0") && !frame.saw("selection 11 2 -1 0") &&
+			rec.last(MenuEvent::Kind::ValueChanged)->value == 0);
+	frame.list_row = 0;
+	frame.log.clear();
+	click(rt, frame, 11, 45000);
+	CHECK(rt.selected_set(13).empty() && rt.selected_row(13) == -1 &&
+			frame.saw("selection 11 -1 -1 0") && rec.last(MenuEvent::Kind::ValueChanged)->value == -1);
+	// TABLE: the hit's row selects (MULTISELECT toggles), column -1 or not, and
+	// the press raises the cell event with the row's new state and the column's
+	// cell value [orig: CTableWnd_HandleNamedEvent @0x642400]; the header strip
+	// (row -1) and a failed test pick nothing.
 	rt.table_add_row(14, { "a" });
 	rt.table_add_row(14, { "b" });
 	rt.table_set_cell_value(14, 1, 0, 77);
 	frame.table_row = 0;
-	frame.table_col = 0;
-	rt.on_widget_clicked(12, 8000, false);
+	frame.table_column = -1;
+	click(rt, frame, 12, 50000);
 	frame.table_row = 1;
-	rt.on_widget_clicked(12, 9000, false);
+	frame.table_column = 0;
+	click(rt, frame, 12, 60000);
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0, 1 }));
 	{
 		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
@@ -618,75 +914,281 @@ void test_input() {
 				cell->column == 0 && cell->state == kTableRowSelected && cell->cell_value == 77 &&
 				!cell->flag);
 	}
-	rt.on_widget_clicked(12, 9100, false); // the same row again: toggled off, a double click
+	click(rt, frame, 12, 60100); // the same row again: toggled off, a double click
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
 	{
 		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
 		CHECK(cell != nullptr && cell->value == 1 && cell->state == kTableRowDefault && cell->flag);
 	}
-	// SPINLIST arrows.
-	frame.spin_arrow = 2;
-	rt.on_widget_clicked(7, 0, false);
-	CHECK(rt.selected_row(9) == 2);
+	frame.table_row = -1;
+	frame.table_column = 0;
+	click(rt, frame, 12, 70000);
+	frame.table_ok = false;
+	frame.table_row = 0;
+	click(rt, frame, 12, 80000);
+	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
+	frame.table_ok = true;
 
-	// Edit focus: read-only refuses; focus parks the caret after the text
-	// (characters, not bytes); leaving persists the text and relays it.
-	rt.on_widget_clicked(9, 0, false);
+	// SPINLIST: a press on the list activates it and steps to the next value; an
+	// arrow is its own button: UP steps next and DOWN previous on its click, with
+	// the arrow's own SELECTED sound.
+	rec.events.clear();
+	frame.spin_arrow = 0;
+	frame.claim = 7;
+	rt.process_mouse(5, 5, true, 0);
+	CHECK(rt.selected_row(9) == 1 && rec.count(MenuEvent::Kind::WidgetActivated) == 1);
+	rt.process_mouse(5, 5, false, 0);
+	frame.spin_arrow = 1;
+	rt.process_mouse(5, 5, true, 0); // an arrow press: nothing yet
+	CHECK(rt.selected_row(9) == 1);
+	rt.process_mouse(5, 5, false, 0);
+	rt.on_widget_clicked(7);
+	CHECK(rt.selected_row(9) == 2 && rec.last(MenuEvent::Kind::Sound)->text2 == "UP_CLICK");
+	frame.spin_arrow = 2;
+	rt.on_widget_clicked(7);
+	CHECK(rt.selected_row(9) == 1);
+	frame.spin_arrow = 0;
+
+	// Edit focus: a press focuses (read-only refuses); focus parks the caret after
+	// the text (characters, not bytes).
+	frame.claim = 9;
+	rt.process_mouse(5, 5, true, 0);
+	rt.process_mouse(5, 5, false, 0);
 	CHECK(rt.focused_widget() == -1);
 	frame.texts[8] = "h\xC3\xA9";
 	frame.log.clear();
-	rt.on_widget_clicked(8, 0, false);
+	frame.claim = 8;
+	rt.process_mouse(5, 5, true, 0);
+	rt.process_mouse(5, 5, false, 0);
 	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 2"));
-	MenuKeyInput key;
-	key.key = MenuKeyInput::Key::Backspace;
-	frame.edit_key_result = static_cast<int>(EditKeyResult::kChanged);
-	rec.events.clear();
-	CHECK(rt.handle_key(key, 0, false) && frame.last_edit_key == kEditKeyBackspace);
-	CHECK(rec.last(MenuEvent::Kind::ValueChanged)->text == "NAME" &&
-			rec.last(MenuEvent::Kind::ValueChanged)->text2 == "edit" &&
-			rec.last(MenuEvent::Kind::ValueChanged)->value == -1);
-	key = MenuKeyInput();
-	key.unicode = 'a';
-	CHECK(rt.handle_key(key, 0, false)); // a typed character is the edit's
-	key = MenuKeyInput();
-	key.key = MenuKeyInput::Key::Enter;
-	frame.edit_key_result = static_cast<int>(EditKeyResult::kCommit);
-	rec.events.clear();
-	CHECK(rt.handle_key(key, 0, false) && rt.focused_widget() == -1 && frame.saw("focused 8 0"));
-	// The commit reaches the edit's own callback (event 0x7000002).
-	CHECK(rec.last(MenuEvent::Kind::EditCommitted) != nullptr &&
-			rec.last(MenuEvent::Kind::EditCommitted)->id == 10 &&
-			rec.last(MenuEvent::Kind::EditCommitted)->text == "NAME");
-	// A moved widget keeps its rect across a screen round trip.
+	// A moved widget keeps its rect across a screen round trip [orig: CWnd_SetRect
+	// @0x646560], and the typed text survives it (the focus drops into the store).
 	frame.log.clear();
 	rt.set_widget_rect(10, 5, 6, 205, 56);
 	CHECK(frame.saw("rect 8 5 6 205 56"));
-	// The committed text survives a screen round trip through the store.
 	rt.show_screen("OPTIONS");
-	CHECK(rt.get_widget_text(10) == "h\xC3\xA9");
+	CHECK(rt.focused_widget() == -1 && rt.get_widget_text(10) == "h\xC3\xA9");
 	frame.log.clear();
 	rt.show_screen("MAIN");
 	CHECK(frame.saw("rect 8 5 6 205 56"));
-
-	// Hotkeys: the virtual-key scan, then the character scan (with the
-	// printable-keycode fallback); a disabled target consumes without firing;
-	// an edit target takes focus.
-	key = MenuKeyInput();
-	key.key = MenuKeyInput::Key::Escape;
-	frame.hotkey = -1;
-	CHECK(!rt.handle_key(key, 0, false) && frame.hotkey_asked == "VK_ESCAPE");
-	frame.hotkey = 10; // EXT, disabled above
-	rec.events.clear();
-	CHECK(rt.handle_key(key, 0, false) && rec.count(MenuEvent::Kind::WidgetActivated) == 0);
-	frame.hotkey = 13;
-	CHECK(rt.handle_key(key, 0, false) && rec.count(MenuEvent::Kind::WidgetActivated) == 1);
-	key = MenuKeyInput();
-	key.printable_keycode = '=';
-	frame.hotkey = 8;
-	CHECK(rt.handle_key(key, 0, false) && frame.hotkey_asked == "=" && rt.focused_widget() == 10);
 	// An unconfigured frame takes no input.
 	frame.configured = false;
-	CHECK(!rt.handle_key(key, 0, false) && !rt.process_wheel(0, 0, 1));
+	CHECK(!rt.handle_key(vk(27)) && !rt.process_wheel(0, 0, 1));
+}
+
+// The hotkey table and the key routing [orig: UI_DispatchKeyboardEventToChildren
+// @ 0x63ad10; CWnd_RegisterHotkeysRecursive @ 0x649d90; CEditWnd_HandleKeyEvent
+// @ 0x6623a0].
+// K: screen 1, ROOT 2, HIDDEN_GROUP 3 (hidden) > HIDDEN_ESC 4, BACK 5, GO 6, SPACE 7,
+// TAB_A 8 (radio), OFF_PANEL 9 (disabled) > OFF_BTN 10, NAME 11 (edit: TAB rows and
+// a GLB filter), NEXT 12 (edit), MODAL_DLG 13 (MODAL, hidden) > DLG_OK 14, LIST 15.
+mnu::Document key_document() {
+	mnu::Document doc;
+	mnu::Screen s;
+	s.name = "K";
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	mnu::Window hidden_group = widget("HIDDEN_GROUP", mnu::WindowType::Window);
+	hidden_group.hidden = true;
+	mnu::Window hidden_esc = widget("HIDDEN_ESC", mnu::WindowType::Button);
+	hidden_esc.hotkeys = { hotkey("VK_ESCAPE", true) };
+	hidden_group.children = { hidden_esc };
+	mnu::Window back = widget("BACK", mnu::WindowType::Button);
+	back.hotkeys = { hotkey("vk_escape", true), hotkey("Vx", false), hotkey("V", false) };
+	mnu::Window go = widget("GO", mnu::WindowType::Button);
+	go.hotkeys = { hotkey("VK_ENTER", true), hotkey("VK_RETURN ", true) };
+	mnu::Window space = widget("SPACE", mnu::WindowType::Button);
+	space.hotkeys = { hotkey("VK_SPACE", true) };
+	mnu::Window tab = widget("TAB_A", mnu::WindowType::Radio);
+	tab.group = 1;
+	mnu::Window off = widget("OFF_PANEL", mnu::WindowType::Window);
+	off.disabled = true;
+	mnu::Window off_btn = widget("OFF_BTN", mnu::WindowType::Button);
+	off_btn.hotkeys = { hotkey("q", false) };
+	off.children = { off_btn };
+	mnu::Window name = widget("NAME", mnu::WindowType::Edit);
+	mnu::Action filter = action("GLB_FILTER_NUM", "LIST");
+	filter.field = "3";
+	filter.test = "GE";
+	name.actions = { action("TAB", "NEXT"), action("TAB", "GO"), filter };
+	mnu::Window next = widget("NEXT", mnu::WindowType::Edit);
+	next.actions = { action("TAB", "BACK") };
+	mnu::Window dlg = widget("MODAL_DLG", mnu::WindowType::Window);
+	dlg.modal = true;
+	dlg.hidden = true;
+	mnu::Window dlg_ok = widget("DLG_OK", mnu::WindowType::Button);
+	dlg_ok.hotkeys = { hotkey("VK_RETURN", true), hotkey("o", false) };
+	dlg.children = { dlg_ok };
+	root.children = { hidden_group, back, go, space, tab, off, name, next, dlg,
+		widget("LIST", mnu::WindowType::List) };
+	s.roots.push_back(root);
+	doc.screens.push_back(s);
+	return doc;
+}
+
+void test_keys() {
+	const mnu::Document doc = key_document();
+	FakeFrame frame;
+	// Keyed by frame index: BACK 3 ("B{hot}ack"), SPACE 5 (a second 'v' row, later
+	// in the table), TAB_A 6 ("{hot}Tab": a radio's STRING registers too).
+	frame.mnemonics[3] = "a";
+	frame.mnemonics[5] = "v";
+	frame.mnemonics[6] = "t";
+	MenuRuntime rt;
+	Recorder rec;
+	rt.set_frame(&frame);
+	rt.set_sink([&rec](const MenuEvent &e) { rec.events.push_back(e); });
+	CHECK(rt.open_document(&doc, "k.mnu", ""));
+	// The table: pre-order, a window's HOTKEYs then its mnemonic; VK_ENTER and a
+	// trailing space name no key; a (key, widget) pair registers once.
+	const std::vector<MenuHotkeyRow> &rows = rt.hotkey_rows();
+	std::vector<std::string> shape;
+	for (const MenuHotkeyRow &row : rows)
+		shape.push_back(std::to_string(row.id) + (row.virtual_key ? "v" : "c") + std::to_string(row.key));
+	CHECK(shape == (std::vector<std::string>{ "4v27", "5v27", "5c86", "5c97", "7v32", "7c118", "8c116",
+				"10c113", "14v13", "14c111" }));
+	const auto activated = [&rec]() {
+		const MenuEvent *e = rec.last(MenuEvent::Kind::WidgetActivated);
+		return e != nullptr ? e->text : std::string();
+	};
+	// ESC: the hidden subtree's row is skipped, BACK's fires.
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(27)) && activated() == "BACK");
+	// VK_ENTER is dead: GO has no row; Enter goes unanswered.
+	rec.events.clear();
+	CHECK(!rt.handle_key(vk(13)) && rec.count(MenuEvent::Kind::WidgetActivated) == 0);
+	// VK_SPACE fires; the typed ' ' matches no character row.
+	rec.events.clear();
+	MenuKeyInput space = vk(32);
+	space.unicode = ' ';
+	CHECK(rt.handle_key(space) && activated() == "SPACE");
+	// A character row is its first character, both sides folded: 'v' finds BACK
+	// (the "Vx" row) first.
+	rec.events.clear();
+	CHECK(rt.handle_key(typed('v')) && activated() == "BACK" &&
+			rec.count(MenuEvent::Kind::WidgetActivated) == 1);
+	// A radio's label mnemonic selects it.
+	CHECK(rt.handle_key(typed('T')) && rt.is_widget_checked(8));
+	// A row under a disabled window is skipped; then nothing: not consumed.
+	rec.events.clear();
+	CHECK(!rt.handle_key(typed('q')) && rec.count(MenuEvent::Kind::WidgetActivated) == 0);
+	// A synthetic key with no character falls back to its printable keycode.
+	MenuKeyInput printable;
+	printable.printable_keycode = 'A';
+	CHECK(rt.handle_key(printable) && activated() == "BACK");
+	// A MODAL popup: only its subtree's rows fire.
+	rt.set_widget_shown(13, true);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(13)) && activated() == "DLG_OK" && rt.open_popup() == 13);
+	CHECK(!rt.handle_key(vk(27)) && !rt.handle_key(typed('v')));
+	rt.dispatch_action(action("WINDOW", "MODAL_DLG", "HIDE"));
+	CHECK(rt.open_popup() == -1);
+
+	// The focus: while an edit has it the scan is skipped and ESC does nothing (the
+	// edit took the key); typing goes to it and runs its GLB filter rows.
+	rt.focus_edit(11);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(27)) && rec.count(MenuEvent::Kind::WidgetActivated) == 0 &&
+			rt.focused_widget() == 11);
+	CHECK(rt.handle_key(typed('7')) && frame.texts[rt.frame_index(11)] == "7");
+	const MenuEvent *filter = rec.last(MenuEvent::Kind::FilterRequested);
+	CHECK(filter != nullptr && filter->id == rt.widget_id("LIST") && filter->value == 3 &&
+			filter->text == "7" && filter->flag && filter->text2 == "GE");
+	// Tab runs its TAB rows: the first authored decides the focus.
+	CHECK(rt.handle_key(vk(9)) && rt.focused_widget() == 12);
+	// Enter in an edit commits, drops the focus, then scans VK_RETURN (no row
+	// here: VK_ENTER is dead and DLG_OK's row sits under the hidden dialog).
+	rec.events.clear();
+	frame.edit_key_result = static_cast<int>(EditKeyResult::kCommit);
+	CHECK(rt.handle_key(vk(13)) && frame.last_edit_key == kEditKeyEnter && rt.focused_widget() == -1);
+	CHECK(rec.last(MenuEvent::Kind::ValueChanged) != nullptr &&
+			rec.last(MenuEvent::Kind::ValueChanged)->text == "NEXT" &&
+			rec.count(MenuEvent::Kind::WidgetActivated) == 0);
+	// The commit reaches the edit's own callback (event 0x7000002).
+	CHECK(rec.last(MenuEvent::Kind::EditCommitted) != nullptr &&
+			rec.last(MenuEvent::Kind::EditCommitted)->id == 12 &&
+			rec.last(MenuEvent::Kind::EditCommitted)->text == "NEXT");
+	rt.set_widget_shown(13, true);
+	rt.dispatch_action(action("WINDOW", "MODAL_DLG", "SHOW"));
+	rt.focus_edit(12);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(13)) && activated() == "DLG_OK");
+	// The keydown still runs the edit's GLB filter rows after the commit, and the
+	// VK_RETURN click comes after them [orig: CEditWnd_HandleInputEvent
+	// @ 0x661510 falls from the key handler into the filter walk; the scan's
+	// winner clicks on the next pump].
+	rt.focus_edit(11);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(13)) && activated() == "DLG_OK");
+	const int committed = rec.first_index(MenuEvent::Kind::ValueChanged);
+	const int commit_event = rec.first_index(MenuEvent::Kind::EditCommitted);
+	const int filtered = rec.first_index(MenuEvent::Kind::FilterRequested);
+	CHECK(committed >= 0 && commit_event > committed && filtered > commit_event &&
+			filtered < rec.first_index(MenuEvent::Kind::WidgetActivated) &&
+			rec.events[static_cast<size_t>(filtered)].id == rt.widget_id("LIST"));
+	frame.edit_key_result = 0;
+	rt.dispatch_action(action("WINDOW", "MODAL_DLG", "HIDE"));
+	// Other edit keys change the text and relay it.
+	rt.focus_edit(11);
+	frame.edit_key_result = static_cast<int>(EditKeyResult::kChanged);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(8)) && frame.last_edit_key == kEditKeyBackspace &&
+			rec.last(MenuEvent::Kind::ValueChanged)->text == "NAME");
+	frame.edit_key_result = 0;
+	// A TAB row may name any control: NEXT's names BACK. A button with the focus
+	// takes the keys (nothing happens), so the scan stays off.
+	rt.handle_key(vk(9));
+	CHECK(rt.focused_widget() == 12);
+	rt.handle_key(vk(9));
+	CHECK(rt.focused_widget() == 5);
+	rec.events.clear();
+	CHECK(rt.handle_key(vk(27)) && rec.count(MenuEvent::Kind::WidgetActivated) == 0);
+	CHECK(rt.handle_key(vk(9)) && rt.focused_widget() == 5); // BACK has no TAB rows
+	// A WINDOW row drops it.
+	rt.dispatch_action(action("WINDOW", "GO", "SHOW"));
+	CHECK(rt.focused_widget() == -1);
+}
+
+// Every root window of the screen delivers the key to the focus [orig: the
+// broadcast of UI_DispatchKeyboardEventToChildren @ 0x63ad10 calls each root's
+// UI_EmitEventToFocusWnd @ 0x6461f0]: with two roots a typed character lands twice.
+void test_two_root_keys() {
+	mnu::Document doc;
+	mnu::Screen s;
+	s.name = "S";
+	mnu::Window first = widget("FIRST", mnu::WindowType::Window);
+	first.children = { widget("EDIT", mnu::WindowType::Edit) };
+	s.roots = { first, widget("SECOND", mnu::WindowType::Window) };
+	doc.screens.push_back(s);
+	FakeFrame frame;
+	MenuRuntime rt;
+	rt.set_frame(&frame);
+	rt.open_document(&doc, "two.mnu", "");
+	rt.focus_edit(3);
+	CHECK(rt.handle_key(typed('x')) && frame.edit_chars == 2);
+}
+
+// Duplicate screen names: the last is the one every lookup finds.
+void test_duplicate_screens() {
+	mnu::Document doc;
+	mnu::Screen a;
+	a.name = "DUP";
+	mnu::Window ra = widget("RA", mnu::WindowType::Window);
+	ra.children = { widget("ONLY_A", mnu::WindowType::Button) };
+	a.roots.push_back(ra);
+	mnu::Screen b;
+	b.name = "dup";
+	mnu::Window rb = widget("RB", mnu::WindowType::Window);
+	rb.children = { widget("ONLY_B", mnu::WindowType::Button) };
+	b.roots.push_back(rb);
+	doc.screens = { a, b };
+	FakeFrame frame;
+	MenuRuntime rt;
+	rt.set_frame(&frame);
+	CHECK(rt.open_document(&doc, "d.mnu", "DUP"));
+	CHECK(rt.current_screen() == "dup" && frame.saw("configure dup"));
+	CHECK(rt.find_control("DUP", "ONLY_B") >= 0 && rt.find_control("DUP", "ONLY_A") == -1);
+	CHECK(rt.widget_id("ONLY_B") >= 0 && rt.frame_index(rt.widget_id("ONLY_B")) >= 0);
+	CHECK(rt.frame_index(rt.widget_id("ONLY_A")) == -1);
 }
 
 
@@ -694,12 +1196,12 @@ mnu::Document flow_document(bool options = false) {
 	mnu::Document doc;
 	mnu::Screen screen;
 	screen.name = "MAIN";
-	screen.root_window = widget("ROOT", mnu::WindowType::Window);
-	screen.root_window.children = {
+	mnu::Window root = widget("ROOT", mnu::WindowType::Window);
+	root.children = {
 		widget("IA_LIST", mnu::WindowType::List),
 		widget("BRIEFING", mnu::WindowType::Static),
 		widget("ACCEPT", mnu::WindowType::Button),
-		widget("MISSION_LIST", mnu::WindowType::Multi),
+		widget("MISSION_LIST", mnu::WindowType::List),
 		widget("SELECTED_MISSIONS", mnu::WindowType::Table),
 		widget("START_GAME", mnu::WindowType::Button),
 		widget("MAIN_WRAPPER", mnu::WindowType::Window),
@@ -707,17 +1209,18 @@ mnu::Document flow_document(bool options = false) {
 	auto filter = widget("GAME_TYPE", mnu::WindowType::SpinList);
 	filter.items.present = true;
 	filter.items.items = {item("All", "255"), item("Team", "1")};
-	screen.root_window.children.push_back(filter);
+	root.children.push_back(filter);
 	auto country = widget("GAME_LOCATION", mnu::WindowType::SpinList);
 	country.items.present = true;
 	country.items.items = {item("CAN Canada", "0"), item("USA United States", "1"),
 		item("USA second", "2")};
-	screen.root_window.children.push_back(country);
+	root.children.push_back(country);
 	if (options) {
-		screen.root_window.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
-		screen.root_window.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
-		screen.root_window.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
+		root.children.push_back(widget("CONTROL_MAPPING", mnu::WindowType::Table));
+		root.children.push_back(widget("KEYBOARD", mnu::WindowType::Radio));
+		root.children.push_back(widget("MOUSE", mnu::WindowType::Radio));
 	}
+	screen.roots.push_back(root);
 	doc.screens.push_back(screen);
 	return doc;
 }
@@ -806,6 +1309,69 @@ void test_host_dialog() {
 	CHECK(!host.can_start() && host.selected_missions().empty());
 }
 
+// The shipped MISSION_LIST is a LIST whose ITEMS are MULTISELECT: a click keeps a
+// selection set, ADD takes the picked mission, and the rebuilt rows drop the set (its
+// indexes named the old rows), so a second ADD adds nothing and no row stays
+// highlighted [orig: HostDialog_AddRemoveSelectedMissions @0x557c10 reads
+// CListWnd_IsRowSelected @ 0x645150, false for a hidden row].
+void test_host_dialog_multiselect() {
+	auto doc = flow_document();
+	for (mnu::Window &w : doc.screens[0].roots[0].children)
+		if (w.name == "MISSION_LIST") w.items.multiselect = true;
+	FakeFrame frame;
+	MenuRuntime menu;
+	menu.set_frame(&frame);
+	menu.open_document(&doc, "mp.mnu", "");
+	HostDialog host;
+	host.seed(menu, {{"team.bms", "Team", "", game_type::kTeamDeathmatch},
+			{"obj.bms", "Objective", "", game_type::kObjectiveCoop},
+			{"dm.bms", "Deathmatch", "", game_type::kDeathmatch}});
+	const int list = menu.widget_id("MISSION_LIST");
+	const int index = menu.frame_index(list);
+	CHECK(index >= 0 && menu.item_count(list) == 3);
+	const auto key = [](const char *, const char *, const char *fallback) { return std::string(fallback); };
+	frame.list_row = 0;
+	frame.claim = index;
+	menu.process_mouse(5, 5, true, 1000);
+	menu.process_mouse(5, 5, false, 1000);
+	CHECK(menu.selected_rows(list) == (std::vector<int>{ 0 }));
+	frame.log.clear();
+	host.add_selected(menu, key);
+	CHECK(host.selected_missions() == (std::vector<std::string>{ "team.bms" }));
+	CHECK(menu.item_count(list) == 2 && menu.selected_rows(list).empty());
+	CHECK(frame.saw("set " + std::to_string(index))); // the frame's highlight cleared too
+	host.add_selected(menu, key);
+	CHECK(host.selected_missions() == (std::vector<std::string>{ "team.bms" }));
+}
+
+// A screen with several root windows: every root is indexed in document order, a
+// control in a later root is found and mapped to its frame index, and a name both
+// roots use finds the first.
+void test_multiple_roots() {
+	mnu::Document doc;
+	mnu::Screen screen;
+	screen.name = "MULTI";
+	mnu::Window first = widget("FIRST", mnu::WindowType::Window);
+	first.children = { widget("SHARED", mnu::WindowType::Button),
+		widget("ONLY_FIRST", mnu::WindowType::Button) };
+	mnu::Window second = widget("SECOND", mnu::WindowType::Window);
+	second.children = { widget("SHARED", mnu::WindowType::Button),
+		widget("ONLY_SECOND", mnu::WindowType::Static) };
+	screen.roots = { first, second };
+	doc.screens = { screen };
+	FakeFrame frame;
+	MenuRuntime rt;
+	rt.set_frame(&frame);
+	CHECK(rt.open_document(&doc, "multi.mnu", ""));
+	// screen 1, FIRST 2, SHARED 3, ONLY_FIRST 4, SECOND 5, SHARED 6, ONLY_SECOND 7.
+	CHECK(rt.index().node(1) != nullptr &&
+			rt.index().node(1)->child_ids == (std::vector<int>{ 2, 5 }));
+	CHECK(rt.index().screen_root_id(1) == 2 && rt.index().node(5)->parent_id == 1);
+	CHECK(rt.widget_id("ONLY_SECOND") == 7 && rt.widget_screen_of(7) == "MULTI");
+	CHECK(rt.widget_id("SHARED") == 3);
+	CHECK(rt.current_screen_ids().size() == 6 && rt.frame_index(7) == 5 && rt.frame_index(5) == 3);
+}
+
 void test_options_screen() {
 	auto doc = flow_document(true);
 	MenuRuntime menu;
@@ -876,11 +1442,12 @@ void test_options_screen() {
 
 } // namespace
 
-// A populate's column layout: the count first (below 1 refused), then one init
-// per column (out of range refused); the layout reaches the frame, is replayed
-// when the screen is shown again, and bounds the cell writes like an authored
-// COLUMN COUNT. [orig: CTableWnd_ResizeColumnCount @0x63f6c0; CTableWnd_InitRow
-// @0x63f9c0; StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
+// A populate's column layout: the count first (below 1 refused; existing
+// columns kept), then one init per column (out of range refused); the layout
+// reaches the frame, is replayed when the screen is shown again, and bounds
+// the cell writes like an authored COLUMN COUNT.
+// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0;
+//  StatScreen_PopulateStatResultsList @0x5622fa..0x56237a]
 void test_table_runtime_columns() {
 	const mnu::Document doc = make_document();
 	FakeFrame frame;
@@ -907,44 +1474,58 @@ void test_table_runtime_columns() {
 	CHECK(frame.table_columns_seen.size() == 4 && frame.table_columns_seen[3].label == "Score");
 }
 
-// The column records a count leaves [orig: CTableWnd_ResizeColumnCount @0x63f6c0]:
-// one that does not grow the table keeps them (the authored columns, which an init
-// then sets up in place [orig: CTableWnd_InitRow @0x63f9c0]); one that grows it
-// starts every record over, zeroed, the authored ones too (the grow path copies
-// the old count in bytes @0x63f724).
-void test_table_column_records() {
+// The stat table's fill [orig: StatScreen_PopulateStatResultsList @ 0x562240]: installed
+// columns, rows with a colour override and a selection, then the sort on a
+// numeric column, descending [orig: CTableWnd_SortByColumn @ 0x640900 ->
+// CTableWnd_CompareRows @ 0x63e9c0]: the rows move with their colours and selection,
+// and the sorted column is the one showing the indicator.
+void test_table_columns_and_sort() {
 	mnu::Document doc = make_document();
-	mnu::Window &authored = doc.screens[0].root_window.children[11];
-	CHECK(authored.name == "TABLE");
-	authored.table_data.column.has_count = true;
-	authored.table_data.column.count = 3;
-	FakeFrame frame;
 	MenuRuntime rt;
-	seed_counts(frame);
+	FakeFrame frame;
 	rt.set_frame(&frame);
 	rt.open_document(&doc, "main.mnu", "");
-	// An init over the authored count: the three records stand, the one set up in place.
-	CHECK(rt.table_init_column(14, 1, 80, "Kills", -1, -1));
-	const std::vector<MenuTableColumnDef> &seen = frame.table_columns_seen;
-	CHECK(seen.size() == 3 && seen[0].kept && !seen[0].defined && seen[2].kept && !seen[2].defined);
-	CHECK(seen.size() == 3 && seen[1].kept && seen[1].defined && seen[1].label == "Kills" &&
-			seen[1].width == 80 && seen[1].justify == -1 && seen[1].vjustify == -1);
-	// A smaller count and the same one keep the records.
-	CHECK(rt.table_set_column_count(14, 2));
-	CHECK(seen.size() == 2 && seen[0].kept && seen[1].kept && seen[1].defined && seen[1].label == "Kills");
-	CHECK(rt.table_set_column_count(14, 2));
-	CHECK(seen.size() == 2 && seen[1].kept && seen[1].label == "Kills");
-	// A larger one starts every record over: zero, the authored ones lost.
-	CHECK(rt.table_set_column_count(14, 4));
-	bool zeroed = seen.size() == 4;
-	for (const MenuTableColumnDef &c : seen)
-		zeroed = zeroed && !c.kept && !c.defined && c.label.empty() && c.width == 0 && c.justify == 0 &&
-				c.vjustify == 0;
-	CHECK(zeroed);
-	// An init over a started record defines it; the others stay zero.
-	CHECK(rt.table_init_column(14, 3, 75, "Score", -1, 0x20));
-	CHECK(seen.size() == 4 && !seen[3].kept && seen[3].defined && seen[3].label == "Score" &&
-			!seen[2].defined);
+	const int table = rt.widget_id("TABLE");
+	CHECK(table > 0);
+	const int index = rt.frame_index(table);
+	std::vector<MenuTableColumn> columns(3);
+	columns[0].label = "Name";
+	columns[0].width = 150;
+	columns[1].label = "Squad";
+	columns[1].width = 100;
+	columns[2].label = "Kills";
+	columns[2].width = 100;
+	columns[2].numeric_sort = true;
+	rt.table_set_columns(table, columns);
+	CHECK(frame.saw("columns " + std::to_string(index) + " 1 3 -1"));
+	rt.table_add_row(table, { "ann", "-", "5" });
+	rt.table_add_row(table, { "bob", "-", "12" });
+	rt.table_add_row(table, { "cat", "-", "x" });
+	rt.table_add_row(table, { "dan", "-", "" });
+	rt.table_set_row_color(table, 1, true, 0xFF00BFFFu);
+	rt.table_select_row(table, 0, false);
+	rt.table_set_column_ascending(table, 2, false);
+	rt.table_sort_by_column(table, 2);
+	// Descending numeric: "x" reads 0x7FFFFFFF, "" reads atol("") = 0.
+	CHECK(rt.table_cell_text(table, 0, 0) == "cat");
+	CHECK(rt.table_cell_text(table, 1, 0) == "bob");
+	CHECK(rt.table_cell_text(table, 2, 0) == "ann");
+	CHECK(rt.table_cell_text(table, 3, 0) == "dan");
+	CHECK(rt.table_selected_rows(table) == std::vector<int>{ 2 });
+	CHECK(rt.table_sort_column(table) == 2);
+	CHECK(frame.saw("columns " + std::to_string(index) + " 1 3 2"));
+	const std::vector<MenuTableRow> &rows = frame.table_rows[index];
+	CHECK(rows.size() == 4 && (rows[1].flags & kTableRowFlagColor) != 0 &&
+			rows[1].color == 0xFF00BFFFu && (rows[0].flags & kTableRowFlagColor) == 0);
+	// A text column sorts by stricmp, ascending.
+	rt.table_sort_by_column(table, 0);
+	CHECK(rt.table_cell_text(table, 0, 0) == "ann" && rt.table_cell_text(table, 3, 0) == "dan");
+	CHECK(rt.table_sort_column(table) == 0);
+	// The key stack keeps the earlier key behind the new one.
+	std::vector<int> keys(3, -1);
+	table_push_sort_key(keys, 2, 3);
+	table_push_sort_key(keys, 0, 3);
+	CHECK(keys.size() == 3 && keys[0] == 0 && keys[1] == 2 && keys[2] == -1);
 }
 
 // The STARTUP screen's activate sets its VERSION label to the build's version text,
@@ -958,13 +1539,13 @@ void test_startup_version() {
 	mnu::Document doc;
 	mnu::Screen other;
 	other.name = "OTHER";
-	other.root_window = widget("ROOT0", mnu::WindowType::Window);
+	other.roots = { widget("ROOT0", mnu::WindowType::Window) };
 	mnu::Window other_version = widget("VERSION", mnu::WindowType::Static);
 	other_version.string_data.value = "other";
-	other.root_window.children = { other_version };
+	other.roots[0].children = { other_version };
 	mnu::Screen startup;
 	startup.name = "Startup";
-	startup.root_window = widget("MAIN", mnu::WindowType::Window);
+	startup.roots = { widget("MAIN", mnu::WindowType::Window) };
 	mnu::Window unnamed;
 	unnamed.type = mnu::WindowType::Window;
 	mnu::Window hidden = widget("VERSION", mnu::WindowType::Static);
@@ -975,7 +1556,7 @@ void test_startup_version() {
 	mnu::Window copyright = widget("VERSION", mnu::WindowType::Static);
 	copyright.string_data.value = "(c) 2009, NovaLogic, Inc.";
 	buttons.children = { version, copyright };
-	startup.root_window.children = { unnamed, buttons };
+	startup.roots[0].children = { unnamed, buttons };
 	doc.screens = { other, startup };
 	// OTHER: screen 1, ROOT0 2, VERSION 3; Startup: screen 4, MAIN 5, unnamed 6,
 	// hidden VERSION 7, BUTTONS 8, version 9, copyright VERSION 10.
@@ -1023,8 +1604,9 @@ void test_startup_version() {
 	mnu::Document bare;
 	mnu::Screen bare_startup;
 	bare_startup.name = "STARTUP";
-	bare_startup.root_window.type = mnu::WindowType::Window;
-	bare_startup.root_window.children = { widget("VERSION", mnu::WindowType::Static) };
+	bare_startup.roots.resize(1);
+	bare_startup.roots[0].type = mnu::WindowType::Window;
+	bare_startup.roots[0].children = { widget("VERSION", mnu::WindowType::Static) };
 	bare.screens = { bare_startup };
 	MenuRuntime bare_rt;
 	CHECK(bare_rt.open_document(&bare, "main.mnu", ""));
@@ -1033,16 +1615,24 @@ void test_startup_version() {
 }
 
 int main() {
+	test_table_columns_and_sort();
 	test_index_and_frameless();
 	test_startup_version();
-	test_navigation_replay_and_actions();
+	test_navigation_and_replay();
+	test_activation_order();
+	test_rows();
+	test_bubble();
 	test_radio_spin_tables_scroll();
 	test_table_row_operations();
 	test_table_runtime_columns();
-	test_table_column_records();
-	test_input();
+	test_mouse();
+	test_keys();
+	test_two_root_keys();
+	test_duplicate_screens();
 	test_shell_flow();
 	test_host_dialog();
+	test_host_dialog_multiselect();
+	test_multiple_roots();
 	test_options_screen();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);

@@ -60,6 +60,13 @@ void scr_decrypt(uint8_t *data, size_t size, uint32_t key) {
     xor_with_keystream(data, size, key);
 }
 
+void scr_encrypt(uint8_t *data, size_t size, uint32_t key) {
+    /* The inverse of [orig: Scr_DecryptBuffer @ 0x53D090]: the keystream depends on the key
+       alone, so XORing it first and reversing after undoes the reverse-then-XOR. */
+    xor_with_keystream(data, size, key);
+    reverse_bytes(data, size);
+}
+
 int scr_decrypt_buf(const uint8_t *data, size_t size,
                     uint8_t *out, size_t *out_size, uint32_t key) {
     size_t payload;

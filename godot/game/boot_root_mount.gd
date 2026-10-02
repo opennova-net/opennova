@@ -56,8 +56,8 @@ static func mount_bundled(dir: String) -> ResourceRoot:
 # partial, so the same report warns instead of erroring.
 static func report_missing_boot_resources(root: ResourceRoot) -> void:
 	for name in root.list_missing_boot_resources():
-		var text := "BootRootMount: boot-required resource missing: %s — retail: %s" \
-				% [name, root.boot_resource_failure_text(name)]
+		var text := "BootRootMount: %s%s — retail: %s" \
+				% [ResourceRoot.boot_resource_missing_marker(), name, root.boot_resource_failure_text(name)]
 		if root.is_runtime_mount():
 			push_error(text)
 		else:

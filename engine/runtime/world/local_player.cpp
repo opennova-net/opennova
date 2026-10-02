@@ -720,7 +720,7 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	const bool scope_promoted = weapon.active && w::player_view_scope_settled(view);
 	p->inf.aimed_shot_available = false;
 	if (p->inf.active) {
-		if (weapon.active) w::infantry_weapon_switch_stamp(p->inf, weapon.anim_map_serial);
+		if (weapon.active) w::infantry_weapon_switch_stamp(p->inf, weapon.category_serial);
 		p->inf.scope_raised = scope_promoted;
 		p->inf.binoculars_raised = view.binoculars_raised;
 		p->inf.wpn_run_anim = weapon.active ? weapon.run_anim : 0;

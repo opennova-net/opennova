@@ -68,7 +68,7 @@ from mathutils import Matrix, Vector
 
 from . import assembly, materials
 from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ModelSpace, Notes, at_world_origin, cli_notes,
-                      export_text, fmt, quoted)
+                      export_text, flipbook_reads_register, fmt, quoted)
 from .rig import (PART_RE, WEIGHT_EPS, clean_name, descendants, hung_elsewhere, ignored, is_lod_root, is_model_root,
                   lod_of, lod_parts, lod_roots, model_of, model_roots, part_bones, part_of, rig_of)
 
@@ -318,7 +318,7 @@ class Exporter(Notes):
                                       (p.rgb_style, p.rgb_register, "the RGB gen")):
                 if style > CTRL_REFERENCE_THRESHOLD:
                     self.register(name, f"{mat.name}: {what}")
-            if p.anim_type == 1:
+            if flipbook_reads_register(p.anim_frames, p.anim_type):
                 self.register(p.anim_register, f"{mat.name} texture flipbook")
         for lod in lods:
             for part in lod.parts:
@@ -864,11 +864,8 @@ class Exporter(Notes):
     # --- user points, lights, occlusion -------------------------------------
     def emit_points(self, lod, lines):
         # USRP order: each helper's `order` (the imported index), then label.
-        # The seat scan reads `sitex` without case and stops at 8 [orig:
-        # Entity_GetBoneSlotType @ 0x434ED0; the scan end @ 0x43A5AF].
-        seats = [ob.name for _, _, label, ob in lod.points if label.lower().startswith("sitex")]
-        if len(seats) > 8:
-            raise ExportError(f"{len(seats)} sitex seats ({', '.join(sorted(seats))}); the game reads 8")
+        # More than 8 `sitex` seats is opennova-3di's note: the game loads
+        # such a model (THREEDI_SITEX_SEAT_LIMIT).
         for letter, part, label, ob in sorted(lod.points, key=lambda e: point_key(e[2], e[3])):
             pos = self.space.mission(self.world(ob).translation)
             d = self.space.mission((self.world(ob).to_3x3() @ Vector((0.0, 0.0, 1.0))).normalized())

@@ -16,7 +16,7 @@ Models, clips and textures ride Git LFS; everything else is a plain git blob.
 | File | What it is |
 |---|---|
 | `main.mnu` | The placeholder main menu: one `STARTUP` screen with literal text, `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT`. Hand-written. |
-| `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `tests/fixtures/minimal_fnt_builder.h`; `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
+| `opennova.fnt` | The menu's one font (uppercase 5x7 stroke art drawn at 2x). Minted by `engine/editor/blank/blank_font_art.h` (the same art as the editor's blank font); `minimal_fnt_gen_test --write` regenerates it and the `minimal_fnt_gen` ctest keeps it byte-identical to the builder. |
 | `on_ar15.3di` | A first-person AR-15-pattern carbine, 64 parts on one rig. Exported from `art/on_ar15/on_ar15.blend`, like every `on_ar15*` and `on_arms*` file below. |
 | `on_arms.3di` | The first-person arms skinned to `on_ar15`'s rig (its first 55 parts). |
 | `on_ar15.adm` | `on_ar15`'s animation table: the eight weapon slots and the clip each plays. |
@@ -44,9 +44,10 @@ means adding it to this table.
   starts. Every visitor downloads all of it first, so the unreferenced
   `on_ar15`/`on_arms` art stays out of the site until the game uses it (drop
   it from the script's excludes and `game-web.yml`'s LFS pull then).
-- `PLAY_RETAIL` and `CHANGE_FOLDER` are wired by control name in
-  `godot/game/bundled_menu_companion.gd`. `MainGame` mounts the picked install,
+- `PLAY_RETAIL`, `CHANGE_FOLDER` and `EXIT` are wired by control name in
+  `godot/game/bundled_menu_companion.gd` (retail wires its own `EXIT` by name
+  too; its menus have no quit `ACTION`). `MainGame` mounts the picked install,
   saves it as `[resources] retail_dir` in `user://opennova.cfg`, and switches
-  to that install's own menus. `EXIT` quits through the document's own action.
+  to that install's own menus; `EXIT` quits.
   On the web build the page's `WebRetailPicker` stages the pick, which is never
   saved, and `EXIT` does nothing (ADR 0049).

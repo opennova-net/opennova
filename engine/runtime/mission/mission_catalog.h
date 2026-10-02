@@ -52,9 +52,10 @@ struct Row {
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 — the loose walk, then
 //  Mission_BuildMapListFromPFF @ 0x562910 over (slot 1, slot 0) and (slot 3,
 //  slot 2) @ 0x5635a5..0x5635d8, the qsort @ 0x5635f0]
-// The .npj/.npz map-project legs are not ported (D-MNU-25, D-MIS-7: the
+// The .npj/.npz map-project legs are not ported (D-MNU-25, D-MIS-7): retail's
+// archive walk matches a .npj or .npz entry as it does a .bms, and the
 // shipped localres.pff carries ASP_G7.npz and the JOX jox01.pff nine more,
-// which retail lists and OpenNova cannot load).
+// which retail lists and OpenNova cannot load.
 std::vector<Row> build(const ResourceIndex &index);
 
 // The SP screen's row filter — (code_word & 0xFFFDFFFF) == 0x10020, i.e. the

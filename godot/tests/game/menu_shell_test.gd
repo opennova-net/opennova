@@ -204,7 +204,7 @@ func test_failed_cross_mnu_jump_does_not_change_back_stack() -> void:
 	_cleanup(dir)
 
 
-func test_top_level_quit_requests_exit() -> void:
+func test_top_level_exit_control_requests_exit() -> void:
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
@@ -212,25 +212,42 @@ func test_top_level_quit_requests_exit() -> void:
 		_cleanup(dir)
 		return
 	watch_signals(shell)
-	shell.get_driver().quit_requested.emit()  # main menu, empty stack -> exit to desktop
+	var driver: MenuDriver = shell.get_driver()
+	driver.widget_activated.emit(driver.widget_id("EXIT"), "EXIT")  # the EXIT Command
 	assert_signal_emitted(shell, "exit_to_desktop_requested")
 	_cleanup(dir)
 
 
-func test_in_game_back_requests_resume() -> void:
+func test_pop_screen_with_no_history_does_nothing() -> void:
+	# POP_SCREEN pops a history that is not empty and otherwise does nothing: it
+	# never exits the game or resumes the mission (docs/mnu/menu-re.md).
 	var dir := _make_dir()
 	var shell = _make_shell(dir)
 	if shell == null:
 		pending("temp resource root unavailable")
 		_cleanup(dir)
 		return
-	# Enter the pause context. game.mnu is absent so the overlay fails to load, but
-	# the in-game flag is set, so a top-level back now means resume, not exit.
-	shell.open_ingame_menu()
 	watch_signals(shell)
-	shell.get_driver().quit_requested.emit()
-	assert_signal_emitted(shell, "resume_requested")
+	shell.get_driver().pop_screen()
+	assert_eq(shell.get_current_menu_file(), "main.mnu", "the main menu stays")
+	shell.open_ingame_menu()
+	shell.get_driver().pop_screen()
 	assert_signal_not_emitted(shell, "exit_to_desktop_requested")
+	assert_signal_not_emitted(shell, "resume_requested")
+	_cleanup(dir)
+
+
+func test_cross_mnu_jump_to_a_missing_screen_changes_nothing() -> void:
+	var dir := _make_dir()
+	var shell = _make_shell(dir)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	shell.get_driver().menu_requested.emit("sp.mnu", "NO_SUCH_SCREEN")
+	assert_eq(shell.get_current_menu_file(), "main.mnu",
+		"a target the file does not hold keeps the current menu")
+	assert_eq(shell.get_menu_stack_depth(), 0, "and pushes no Back step")
 	_cleanup(dir)
 
 

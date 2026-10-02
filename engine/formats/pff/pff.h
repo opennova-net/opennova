@@ -86,7 +86,20 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
 /* Check if raw data starts with a valid PFF header. */
 int pff_is_pff(const uint8_t *data, size_t size);
 
+/* Normalize a PFF name into an uppercase, trailing-space-trimmed C string (the engine's
+   strupr + 0x20-trim used for sort/lookup; PFF_SortEntries @ 0x768280 / PFF_FindEntry
+   @ 0x7685d0). Reads up to raw_cap bytes or until a NUL; result capped to out_sz - 1 chars.
+   The reader's lookup, the writer's directory sort + duplicate detection and the editor's
+   asset registry (ADR 0046 d6: one flat identity per logical name) all key on it. */
+void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz);
+
 /* --- Write API --- */
+
+/* The writers' own version: bumped whenever pff_write_archive and PffStreamWriter would write other
+   bytes for the same entries (their order, the header, the directory), so a build that keys an
+   archive by its entries' content keys it by the writer too, and never takes an archive the older
+   writer packed for one this writer would pack (ADR 0046 S13 A8). */
+inline constexpr uint32_t PFF_WRITER_VERSION = 1;
 
 /* Container format selector for a written archive (legacy is read-only; not authored here). */
 typedef enum PffFormat {
@@ -140,7 +153,7 @@ int pff_write_archive(const char *path, PffFormat format,
    read_entry must fill `out` with exactly `size` bytes for the entry at `index` (the ORIGINAL
    array index, not the sorted write position) and return 0 on success, non-zero on failure. Same
    header/payload/directory layout, name validation, sort, and atomic temp-rename as
-   pff_write_archive (which is a thin wrapper over this). */
+   pff_write_archive: both run PffStreamWriter (pff_stream_writer.h) to the end in one call. */
 typedef int (*PffReadEntryFn)(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
 
 typedef struct PffWriteStreamEntry {

@@ -20,22 +20,24 @@ mnu::Document document(std::initializer_list<const char *> names) {
 	mnu::Document doc;
 	mnu::Screen screen;
 	screen.name = "LOADOUT";
-	screen.root_window.name = "ROOT";
-	screen.root_window.type = mnu::WindowType::Window;
+	mnu::Window root;
+	root.name = "ROOT";
+	root.type = mnu::WindowType::Window;
 	for (const char *name : names) {
 		mnu::Window w;
 		w.name = name;
 		w.type = mnu::WindowType::Combo;
-		w.list_box.present = true;
-		w.list_box.items.present = true;
+		mnu::Window &list = w.list_box.author(mnu::WindowType::List);
+		list.items.present = true;
 		for (const char *value : {"2", "0", "1"}) {
 			mnu::Item row;
 			row.text = std::string("type ") + value;
 			row.value = value;
-			w.list_box.items.items.push_back(row);
+			list.items.items.push_back(row);
 		}
-		screen.root_window.children.push_back(w);
+		root.children.push_back(w);
 	}
+	screen.roots.push_back(root);
 	doc.screens.push_back(screen);
 	return doc;
 }

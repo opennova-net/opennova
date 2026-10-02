@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
 #include <vector>
 
 using namespace opennova::defscan; // the shared .def scanner, unqualified as before
@@ -56,6 +57,23 @@ static const struct { const char *name; int id; } k_ammo_tracer_type_names[] = {
     {"grenade", 5},  {"rapidred", 6},   {"rapidgreen", 7},  {"sniperred", 9},
     {"snipergreen", 10}, {"df1red", 11}, {"df1green", 12},
 };
+
+const char *def_ammo_flag_keyword(size_t index) {
+    return index < 28 ? k_ammo_flag_names[index].name : nullptr;
+}
+uint32_t def_ammo_flag_bit(size_t index) {
+    return index < 28 ? k_ammo_flag_names[index].bit : 0;
+}
+const char *def_ammo_kz_keyword(size_t index) {
+    return index > 0 && index < 8 ? k_ammo_kz_names[index] : nullptr;
+}
+
+const char *def_ammo_tracer_keyword(size_t index) {
+    return index < sizeof(k_ammo_tracer_type_names) / sizeof(k_ammo_tracer_type_names[0]) ? k_ammo_tracer_type_names[index].name : nullptr;
+}
+int def_ammo_tracer_value(size_t index) {
+    return def_ammo_tracer_keyword(index) ? k_ammo_tracer_type_names[index].id : 0;
+}
 
 static int ammo_tracer_type_from_name(const char *s, size_t len) {
     char nm[48];
@@ -107,7 +125,8 @@ static int32_t packed_rgb(const io::ConfigTokens &tokens) {
    drag +0x1C @0x409A7B, the pie slice +0x3C @0x409A93, recoil +0xE3..+0xE5
    @0x409AAF..0x409ABB, the turn rates and boresight +0x50/+0x54/+0x58
    @0x409AC1..0x409AC7); AmmoDef_LoadAll's memset @0x40B106] */
-static void reset_ammo_def(DefAmmoDef *d) {
+void def_init_ammo(DefAmmoDef &value) {
+    DefAmmoDef *d = &value;
     memset(d, 0, sizeof(*d));
     d->velocity = -1;
     d->max_age_ticks = -1;
@@ -151,13 +170,14 @@ static void inherit_ammo_defaults(DefAmmoDef *d, const DefAmmoFile *out) {
    [orig: AmmoDef_InitEffectsTable @0x409F20, called only @0x40A433, installs
    when def+0x68 and word +0x6C are both 0]: a second table in one def, and a
    table the file never closes, give the def nothing. */
-static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out) {
+static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report) {
     size_t entries_cap = 0;
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
     int in_block = 0, in_effects = 0, table_installed = 0;
-    size_t raw_cap = 0, eff_cap = 0;
+    size_t eff_cap = 0;
     std::vector<DefEffectTableEntry> staged;
+    size_t number = 0; // the line a finding names, counting from 1
 
     /* The first load walks the file twice, a count of its `ammo` lines and
        then the parse, so the parse's first lines read the slots the count
@@ -169,24 +189,36 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
     for_each_def_line(buf, file_len, tokens_state,
                       [](const io::ConfigTokens &, const char *, size_t, size_t) {});
     for_each_def_line(buf, file_len, tokens_state, [&](const io::ConfigTokens &tokens,
-                                                       const char *line, size_t line_len,
-                                                       size_t) {
+                                                       const char *, size_t,
+                                                       size_t line_index) {
         const char *key = tokens.tokens[0];
         const char *v = tokens.token(1); // the first value token, "" when none
         const size_t vl = strlen(v);
+        number = line_index + 1;
+        const std::string as_read = line_as_read(tokens);
 
         if (key_is(key, "ammo")) {
-            if (in_block) return true; // "definition missing end": the walk ends
-            reset_ammo_def(&current);
-            raw_cap = 0; eff_cap = 0;
+            if (in_block) {
+                // "definition missing end": the walk ends, so nothing from here
+                // on is read, which a save cannot give back.
+                authoring_issue(out->unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size(),
+                                DefIssueCode::MalformedBlock);
+                return true;
+            }
+            def_init_ammo(current);
+            eff_cap = 0;
             table_installed = 0;
             copy_token(current.name, 32, tokens, 1);
+            validate_header(as_read.c_str(), as_read.size(), 4, 32, current.unmodeled_count, report, number, current.name);
             in_block = 1;
             return false;
         }
 
         if (key_is(key, "end")) {
-            if (!in_block) return false;
+            if (!in_block) {
+                authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size());
+                return false;
+            }
             if (in_effects) {
                 in_effects = 0;
                 if (!table_installed) {
@@ -200,17 +232,28 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
             inherit_ammo_defaults(&current, out);
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
-            raw_cap = 0; eff_cap = 0;
+            eff_cap = 0;
             in_block = 0;
             return false;
         }
 
-        if (!in_block) return false;
+        if (!in_block) {
+            // A table outside an ammo is a misplaced block; any other line there is read for nothing.
+            authoring_issue(out->unmodeled_count, report, number, "", as_read.c_str(), as_read.size(),
+                            key_is(key, "effects_table") ? DefIssueCode::MalformedBlock : DefIssueCode::UnknownProperty);
+            return false;
+        }
 
         /* Effects table rows: four tokens or more, tag / hit effect / impact
            sound / value [orig: the table gate @0x40A316, `cmp [tokens],4`
            @0x40A323, the row @0x40A46A..0x40A531] */
         if (in_effects) {
+            // A second table gives the def nothing: its rows are read for nothing.
+            if (table_installed) {
+                authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
+                return false;
+            }
+            validate_property(DefRecordKind::Effect, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.name);
             if (tokens.count >= 4) {
                 DefEffectTableEntry e;
                 memset(&e, 0, sizeof(e));
@@ -224,13 +267,21 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
         }
 
         if (key_is(key, "effects_table")) {
+            // A word after the keyword, which the writer's table header leaves out.
+            if (tokens.count > 1)
+                authoring_issue(out->unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size(), DefIssueCode::MalformedBlock);
+            else if (table_installed)
+                authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
             in_effects = 1;
             staged.clear();
             return false;
         }
 
         int parsed = 0;
-        if (key_is(key, "velocity")) {
+        if (key_is(key, "dopplerdiv")) {
+            current.doppler_divisor = static_cast<uint8_t>(parse_int_n(v, vl));
+            parsed = 1;
+        } else if (key_is(key, "velocity")) {
             current.velocity = parse_int_n(v, vl);
             parsed = 1;
         } else if (key_is(key, "heat_det_range")) {
@@ -439,42 +490,46 @@ static int parse_ammo_buffer(const char *buf, size_t file_len, DefAmmoFile *out)
             parsed = 1;
         }
 
+        if (parsed) validate_property(DefRecordKind::Ammo, as_read.c_str(), as_read.size(), current.unmodeled_count, report, number, current.name);
         if (!parsed) {
-            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+            authoring_issue(current.unmodeled_count, report, number, current.name, as_read.c_str(), as_read.size());
         }
         return false;
     });
 
     /* The def the walk stopped in, or that the file never closes, was allocated
        at its `ammo` line and stays in the table [orig: AmmoDef_AllocateSlot
-       @0x409A20 from the `ammo` arm]. */
-    if (in_block) DA_PUSH(out->entries, out->count, entries_cap, current);
+       @0x409A20 from the `ammo` arm]; its `end` (or its table's) is missing,
+       which the writer's form of it would add. */
+    if (in_block) {
+        authoring_issue(out->unmodeled_count, report, number, current.name, "end", 3, DefIssueCode::MalformedBlock);
+        DA_PUSH(out->entries, out->count, entries_cap, current);
+    }
 
     return 0;
 }
 
-int def_parse_ammo(const char *path, DefAmmoFile *out) {
+int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_ammo_buffer(buf, file_len, out);
+    int rc = parse_ammo_buffer(buf, file_len, out, report);
     free(buf);
     return rc;
 }
 
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
-    return parse_ammo_buffer((const char *)data, size, out);
+    return parse_ammo_buffer((const char *)data, size, out, report);
 }
 
 void def_free_ammo(DefAmmoFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         free(f->entries[i].effects_table);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
     memset(f, 0, sizeof(*f));

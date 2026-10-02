@@ -66,6 +66,7 @@ void ObjectData::_clear() {
 	source_path = String();
 	source_dir = String();
 	resource_root.unref();
+	texture_files_.reset();
 	object_name = "untitled";
 	last_error = String();
 }
@@ -119,6 +120,20 @@ Error ObjectData::open_from_resource_root(
 	register_network_challenge_model(file, p_include_in_network_challenge);
 	_notify_object_changed();
 	return OK;
+}
+
+void ObjectData::open_from_model(const opennova::assets::Model &p_model, const String &p_name,
+		std::shared_ptr<const opennova::TextureFiles> p_textures) {
+	_clear();
+	if (p_model) {
+		source_model_ = p_model;
+		source_path = p_name.get_file();
+		object_name = p_model->header.name[0] ? from_native(p_model->header.name) : filename_stem(p_name);
+		texture_files_ = std::move(p_textures);
+	} else {
+		last_error = "No model";
+	}
+	_notify_object_changed();
 }
 
 void ObjectData::mark_cached_network_challenge_foliage_model(

@@ -4,6 +4,7 @@
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/core/class_db.hpp>
+#include <godot_cpp/variant/array.hpp>
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
@@ -13,11 +14,17 @@
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
 
-#include <formats/fnt/fnt.h>
+#include <base/vfs/file_source.h>
+#include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_frame_assets.h>
 
+#include "resource_index/resource_root_file_source.h"
+
+#include <cstdint>
 #include <map>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace godot {
@@ -26,7 +33,26 @@ class MenuDrawListStats;
 
 class MnuDocument;
 class MnsStyleSheet;
-class ResourceRoot;
+class RtxtStringFile;
+
+// The Godot half of the menu textures the engine's loader keeps (MenuFrameAssets): the
+// pixels decoded by the format retail's dispatch picked (TGA / DDS / PNG through Godot's
+// decoders, PCX through the engine's port of retail's loader) and their upload, kept
+// under the loader's key until it lets them go.
+class MenuFrameTextures : public opennova::menu::MenuTextureDecoder {
+public:
+	struct Entry {
+		Ref<Image> image;
+		Ref<Texture2D> texture;
+	};
+	bool decode(const std::string &p_key, opennova::menu::MenuTextureFormat p_format,
+			const std::vector<uint8_t> &p_bytes, int &r_width, int &r_height) override;
+	void release(const std::string &p_key) override;
+	const Entry *find(const std::string &p_key) const;
+
+private:
+	std::map<std::string, Entry> entries_;
+};
 
 // The compiled-menu device leg (ADR 0033 R2) over the engine's
 // MenuFrameCompiler (engine/runtime/menu): the engine owns the witnessed .mnu
@@ -79,14 +105,41 @@ public:
 	};
 
 	// Build the compiler against a parsed document's screen (empty name = the
-	// first screen), loading widget art and every referenced .fnt through the
-	// mounted VFS root. `text_lookup` maps string-table ids to display text
-	// (String/Item type=="id"); `style` supplies the %VAR% stylesheet. The
-	// document Ref is retained; re-configure after document edits.
+	// last of that name; empty = the first screen), loading through the mounted
+	// VFS root what the screen reads: the widget art (by retail's extension
+	// dispatch, engine menu_assets.h), every FONT's .fnt, and every TEXT_RSRC
+	// string table; `style` supplies the %VAR% stylesheet; `override_text` is
+	// the expansion's table every string lookup tries first (null: none). The
+	// document Ref is retained; re-configure after document edits. A null
+	// document lets everything go.
 	bool configure(const Ref<MnuDocument> &p_document,
 			const String &p_screen_name, const Ref<ResourceRoot> &p_root,
-			const Ref<MnsStyleSheet> &p_style, const Dictionary &p_text_lookup);
+			const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text);
+	// The C++ core (not bound): `p_screen` of `p_document` through any file source
+	// (the game's root, the editor's project files), the engine's loader
+	// (runtime/menu/menu_frame_assets.h) keeping what it loaded by (file, stamp)
+	// across configures. The document, the screen, the file source and the
+	// override table are borrowed until the next configure.
+	bool configure_screen(const opennova::mnu::Document *p_document,
+			const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
+			const std::map<std::string, std::string> &p_vars,
+			const opennova::rtxt::File *p_override_text);
+	// Let everything go (configure over nothing).
+	void clear_screen();
 	bool is_configured() const;
+	// Forget the texture loads earlier configures made (the band height a
+	// texture's first load fixed; engine menu_frame.h note_texture_loads): the
+	// editor preview's every configure is a first load; the game keeps them for
+	// the session, as retail keeps its texture cache.
+	void reset_loads();
+	// C++ siblings (not bound): the configured compiler, its frame state and the
+	// loader, for the editor preview's picking, rects and JSON.
+	const opennova::menu::MenuFrameCompiler &native_compiler() const { return compiler_; }
+	const opennova::menu::MenuFrameState &native_state() const { return state_; }
+	const opennova::menu::MenuFrameAssets &native_assets() const { return assets_; }
+	// The editor viewport's frame state (it never pumps): what its options hold on the
+	// configured screen (editor/preview apply_menu_options), set after each configure.
+	void set_native_state(const opennova::menu::MenuFrameState &p_state);
 
 	// Typed per-widget per-frame state, keyed by the widget's pre-order index
 	// in the screen tree (0 = the root window; children in authored order).
@@ -123,18 +176,33 @@ public:
 	// CUSTOM_DRAW cells' control callback), C++ only.
 	void set_widget_table_rows(int p_index,
 			const std::vector<opennova::menu::MenuTableRow> &p_rows);
+	// The same rows from GDScript (a test's, a GDScript shell's): each an Array or a
+	// PackedStringArray of its cells' texts, the rest of the row as CTableWnd_AddRow
+	// leaves it (column 0's value 0, state 0, no flags).
+	void set_widget_table_cells(int p_index, const Array &p_rows);
 	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
-	void set_widget_table_columns(int p_index,
-			const std::vector<opennova::menu::MenuTableColumnDef> &p_columns);
 	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
 	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
-	void set_widget_marquee_lines(int p_index, const PackedStringArray &p_lines);
+	// The runtime's installed table columns and a marquee's credits (C++ only: the
+	// menu driver's frame seam).
+	void set_widget_table_columns(int p_index, bool p_installed,
+			const std::vector<opennova::menu::MenuTableColumn> &p_columns, int p_sort_column);
+	void set_widget_marquee(int p_index, const opennova::menu::MarqueeCredits &p_credits);
+	// Whether a menu texture name loads through the configured file source
+	// (retail's dispatch, menu_assets.h): the marquee's image nodes ask.
+	bool texture_loads(const String &p_name);
+	// A texture the next configure over `p_files` names, decoded and kept ahead of it (C++ only:
+	// the editor's menu device spreads a screen's first configure over its steps, ADR 0046 S13 V6;
+	// native_assets().texture_kept says what is not kept yet).
+	bool load_texture_ahead(const std::string &p_name, const opennova::FileSource &p_files);
 
 	// Widget queries over the configured screen (design-space rects; the
 	// pre-order index space matches a document DFS of the same screen).
 	int widget_count() const;
 	String widget_name(int p_index) const;
 	int widget_kind(int p_index) const;
+	// A widget's text as the game draws it: each byte a glyph of the font's code page,
+	// Windows-1252 (a retail VERSION line's copyright sign is its 0xA9 byte), decoded as such.
 	String widget_authored_text(int p_index) const;
 	bool is_widget_disabled(int p_index) const;
 	// Effective draw/hit visibility (own flag + ancestors + overrides) —
@@ -156,7 +224,7 @@ public:
 	RID get_custom_slot_canvas_item();
 	bool is_custom_slot_drawn() const { return custom_slot_drawn_; }
 	int item_count(int p_index) const;
-	String get_widget_text(int p_index) const; // effective: runtime else authored
+	String get_widget_text(int p_index) const; // effective: runtime else authored; cp1252 as authored
 	int get_widget_caret(int p_index) const;
 
 	// Interaction geometry (positions in this control's local coordinates;
@@ -168,9 +236,14 @@ public:
 	int spin_arrow_at(int p_index, const Vector2 &p_position) const; // 0/1 up/2 down
 	// A list-like widget's displayed row text (C++ only).
 	std::string item_display_text(int p_index, int p_row) const;
-	// CTableWnd_HitTest: the data row (-1 the header) and column (-1 none).
+	// The table hit test (MenuFrameCompiler::table_hit, CTableWnd_HitTest): the
+	// data row (-1 the header strip) and column (-1 none); false where retail fails.
 	bool table_hit(int p_index, const Vector2 &p_position, int *r_row, int *r_column) const;
-	int hotkey_widget(const String &p_key, bool p_virtual) const;
+	// A widget's parse-time {hot} mnemonic (MenuFrameCompiler::widget_mnemonic).
+	std::string widget_mnemonic(int p_index) const;
+	// The open popup (a shown MODAL window's index, -1 none): the pump serves
+	// its subtree alone (MenuFrameState::popup_root).
+	void set_open_popup(int p_index);
 
 	// Edit-input routing over the engine module (menu/menu_edit.h): applies
 	// the witnessed insert/key ops to the widget's effective text/caret
@@ -195,6 +268,9 @@ public:
 	// cursor position, and returns the claimed widget index (-1 = none).
 	// Local control coordinates; the pump scales by this control's size.
 	int process_mouse(const Vector2 &p_position, bool p_button_down);
+	// True when a scrollbar part took the last process_mouse sample (its press
+	// never reaches the owner widget).
+	bool last_sample_scrolled() const { return last_sample_scrolled_; }
 
 	// The open-dropdown sample: only the popup's scrollbar interaction runs,
 	// restricted to the open combo. True when the scrollbar owns the sample
@@ -241,43 +317,50 @@ protected:
 	void _notification(int p_what);
 
 private:
-	struct LoadedFont {
-		opennova::fnt::fnt_font_t font = {};
-		bool valid = false;
-		std::vector<Ref<Texture2D>> pages;
-		~LoadedFont() {
-			if (valid) {
-				opennova::fnt::fnt_free(&font);
-			}
-		}
-	};
-
 	opennova::menu::MenuWidgetState &widget_(int p_index);
 	Ref<Texture2D> texture_for_quad_(const opennova::menu::MenuQuad &p_quad);
-	void collect_font_names_(const void *p_window,
-			std::vector<String> &r_names) const;
-	void free_fonts_();
+	// A composed frame texture by key, kept across configures while drawn (the
+	// cache lets go of what two configures in a row did not draw).
+	Ref<Texture2D> cached_frame_texture_(const std::string &p_key) const;
+	void keep_frame_texture_(const std::string &p_key, const Ref<Texture2D> &p_texture);
+	// The uploaded pages of the font a compiler slot draws with (null: none).
+	const std::vector<Ref<Texture2D>> *font_pages_(int32_t p_slot);
+	void adopt_slots_();
 	Vector2 design_scale_() const;
 
 	Ref<MnuDocument> document_;
 	int press_claim_ = -1;      // widget owning the current press, -1 = none
 	bool mouse_button_down_ = false;
+	bool last_sample_scrolled_ = false;
 	int32_t cursor_slot_ = -1;  // last claim's cursor texture slot
-	int unresolved_assets_ = 0;
-	Ref<ResourceRoot> root_;
 	bool configured_ = false;
 	opennova::menu::MenuFrameCompiler compiler_;
 	opennova::menu::MenuFrameState state_;
+	// The engine's loader: the string tables, the fonts (their parsed storage the
+	// compiler borrows) and the textures, kept by (file, stamp).
+	opennova::menu::MenuFrameAssets assets_;
+	MenuFrameTextures texture_store_;
+	// The root the bound configure reads through, and the file source of the last
+	// configure (borrowed; a marquee's fonts and images load through it later).
+	ResourceRootFileSource root_files_;
+	const opennova::FileSource *files_ = nullptr;
+	// Per texture slot of the configured screen: the loader's key and the kept
+	// texture and pixels. Source pixels are retained for the frame material
+	// adapter. Retail's border is a fixed-function two-texture material, not
+	// either authored texture by itself; derived textures are cached by the
+	// textures' keys, UV and destination.
+	std::vector<std::string> texture_keys_;
 	std::vector<Ref<Texture2D>> textures_;
-	// Source pixels are retained for the frame material adapter. Retail's
-	// border is a fixed-function two-texture material, not either authored
-	// texture by itself; derived textures are cached by slots/UV/destination.
 	std::vector<Ref<Image>> texture_images_;
-	std::map<std::string, Ref<Texture2D>> frame_texture_cache_;
-	// The parsed .fnt storage the compiler borrows.
-	std::vector<std::unique_ptr<LoadedFont>> owned_fonts_;
-	// fonts_[i] backs the compiler's font slot i (slot 0 = the default).
-	std::vector<LoadedFont *> fonts_;
+	struct FrameTexture {
+		Ref<Texture2D> texture;
+		uint64_t used = 0; // the configure that last drew it
+	};
+	mutable std::map<std::string, FrameTexture> frame_texture_cache_;
+	uint64_t configure_count_ = 0;
+	// Each kept font's pages, uploaded on first draw, by the load's serial.
+	std::map<uint64_t, std::vector<Ref<Texture2D>>> font_pages_by_serial_;
+	Ref<RtxtStringFile> override_text_;
 	// The menu-top overlay: a child canvas item one z above this Control, so
 	// the compiled draw list's popup + cursor ops (MenuDrawList
 	// overlay_op_start) paint over any Control a companion mounts as a frame child

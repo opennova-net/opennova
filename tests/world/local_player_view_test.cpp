@@ -21,6 +21,7 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/infantry.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/local_player.h>
 #include <runtime/world/collision.h>
@@ -979,6 +980,45 @@ void test_scope_zoom_clamps_and_weapon_category_fov_reset() {
     data.flags = DEF_WEAPON_FLAG_FORCESCOPED;
     local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
     CHECK(channels.camera_fov_target_fp == (35 << 16));
+}
+
+// The arms dip's edge is the weapon category, never the AnimMap: the game compares the
+// held and the previously held g_AdmDefs records' +0 (the category) [orig:
+// Entity_UpdateInfantryPlayerBody @0x4b46e7..0x4b46f5]. The two rules differ both ways:
+// one category over another map does not dip, another category over one map does.
+void test_arms_dip_follows_the_weapon_category_not_the_anim_map() {
+    LocalWorld lw;
+    LocalPlayerWeapon weapon;
+    PlayerViewState view;
+    WeaponInstallData data;
+    data.name = "DIP_RIFLE";
+    data.animadm = "dip_rifle.adm";
+    data.hud_category = 1;
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    const uint32_t mounted = weapon.category_serial;
+    CHECK(mounted != 0); // a fresh mount dips
+    InfantryState inf;
+    infantry_weapon_switch_stamp(inf, weapon.category_serial);
+    CHECK(inf.arms_dip_ticks == 20);
+    inf.arms_dip_ticks = 0;
+
+    // The same category over another AnimMap: the map binds, no dip.
+    data.name = "DIP_CARBINE";
+    data.animadm = "dip_carbine.adm";
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(weapon.anim_map == "dip_carbine.adm");
+    CHECK(weapon.category_serial == mounted);
+    infantry_weapon_switch_stamp(inf, weapon.category_serial);
+    CHECK(inf.arms_dip_ticks == 0);
+
+    // Another category over the same AnimMap: a dip.
+    data.name = "DIP_PISTOL";
+    data.hud_category = 2;
+    local_weapon_install(lw.w, weapon, data, false, false, nullptr, view);
+    CHECK(weapon.anim_map == "dip_carbine.adm");
+    CHECK(weapon.category_serial != mounted && weapon.category_serial != 0);
+    infantry_weapon_switch_stamp(inf, weapon.category_serial);
+    CHECK(inf.arms_dip_ticks == 20);
 }
 
 // The weapon-cycle actions' dispatcher leg [orig: Input_HandleActionBinding_0
@@ -2707,6 +2747,7 @@ int main() {
     test_scope_fov_target_and_render_queries_share_weather_state();
     test_frame_publishes_the_fp_draw_gates();
     test_scope_zoom_clamps_and_weapon_category_fov_reset();
+    test_arms_dip_follows_the_weapon_category_not_the_anim_map();
     test_weapon_cycle_route_steps_the_zoom_and_the_mount_clamp();
     test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();

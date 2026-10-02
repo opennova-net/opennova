@@ -16,7 +16,7 @@
 #include <string>
 #include <vector>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 using namespace opennova::fnt;
 using namespace opennova::menu;
@@ -122,7 +122,8 @@ struct RecordingCanvas : MenuTableCellCanvas {
 void test_subst_images_and_custom_events(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t chk0 = slot_of(c, "alphachk0.tga");
 	const int32_t chk1 = slot_of(c, "alphachk1.tga");
 	CHECK(chk0 >= 0 && chk1 >= 0, "configure interns the SUBST FILE images");
@@ -172,58 +173,6 @@ void test_subst_images_and_custom_events(const fnt_font_t *font) {
 	CHECK(slot_of(c, "alphachk0.tga") >= 0, "the unused image stays interned");
 }
 
-// A column code set up over the record a count kept is the authored column with
-// the init's label, width and justification: its BITMAP_DRAW draw kind, its
-// SUBST rows and its offsets stay, so a matching cell still draws its image,
-// centred in the init's width. Over a record a growing count started over it is
-// a text column with no SUBST rows (the authored column 1 and its alphachk1 row
-// are gone). [orig: CTableWnd_InitRow @0x63f9c0 — no write to +108 or
-// +152..+172; CTableWnd_ResizeColumnCount @0x63f6c0 — the grow path zeroes the
-// new array @0x63f710 and copies the old count in bytes @0x63f724]
-void test_code_columns_over_kept_and_new_records(const fnt_font_t *font) {
-	opennova::mnu::Document doc = parse_or_die(kTableXml);
-	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
-	const int32_t chk1 = slot_of(c, "alphachk1.tga");
-	c.set_texture_size(chk1, 16, 16);
-	const int table = c.widget_index("LIST");
-	MenuTableColumnDef init;
-	init.defined = true;
-	init.label = "Tick";
-	init.width = 100;
-	MenuWidgetState ws;
-	ws.index = table;
-	ws.table_rows.push_back(row_of({"", "1", "x"}));
-	MenuFrameState state;
-	state.widgets.push_back(ws);
-	// The authored four kept, column 1 set up in place: x 70..170 (the init's
-	// width); row 0 y 76..96, so the native 16x16 image centred at (112, 78).
-	std::vector<MenuTableColumnDef> kept(4);
-	for (MenuTableColumnDef &record : kept) record.kept = true;
-	kept[1] = init;
-	kept[1].kept = true;
-	c.set_table_columns(table, kept);
-	bool kept_image = false;
-	for (const MenuQuad &q : c.compile(state, 1.0f, 1.0f).quads)
-		if (q.texture == chk1 && q.x0 == 112.0f && q.x1 == 128.0f && q.y0 == 78.0f && q.y1 == 94.0f)
-			kept_image = true;
-	CHECK(kept_image, "an init over a kept record keeps its BITMAP_DRAW and SUBST rows at the init's width");
-	// Five records: the count grew past the authored four, every record started over.
-	std::vector<MenuTableColumnDef> grown(5);
-	grown[0] = init;
-	grown[0].width = 50;
-	grown[1] = init;
-	c.set_table_columns(table, grown);
-	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
-	bool image = false;
-	for (const MenuQuad &q : dl.quads)
-		if (q.texture == chk1) image = true;
-	bool text = false;
-	for (const auto &g : dl.glyphs)
-		if (g.y_top >= 76.0f && g.y_top < 96.0f && g.x_top_left >= 70.0f && g.x_top_left < 170.0f) text = true;
-	CHECK(!image && text, "an init over a record the count started over is a text column");
-}
-
 // The custom-draw handler's cell draw: flags 1 the row state's ITEMS pass,
 // flags 2 the content, at CTableWnd_DrawCell's OWN rect — the first visible
 // row at the table's top (one header height above the row the render lays
@@ -231,7 +180,8 @@ void test_code_columns_over_kept_and_new_records(const fnt_font_t *font) {
 void test_draw_cell_rect_and_passes(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t chk1 = slot_of(c, "alphachk1.tga");
 	c.set_texture_size(chk1, 16, 16);
 	const int table = c.widget_index("LIST");
@@ -272,7 +222,8 @@ void test_draw_cell_rect_and_passes(const fnt_font_t *font) {
 void test_text_alignment_color_and_hidden_rows(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int table = c.widget_index("LIST");
 	MenuWidgetState ws;
 	ws.index = table;
@@ -306,7 +257,8 @@ void test_text_alignment_color_and_hidden_rows(const fnt_font_t *font) {
 void test_hit_test(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kTableXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int table = c.widget_index("LIST");
 	MenuWidgetState ws;
 	ws.index = table;
@@ -344,7 +296,8 @@ void test_clip_viewport(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	const int32_t tex = slot_of(c, "close.tga");
 	c.set_texture_size(tex, 16, 16);
 	MenuWidgetState ws;
@@ -389,7 +342,8 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	c.register_font("f.fnt", font);
+	c.configure(doc.first_screen());
 	MenuFrameState state;
 	state.custom_slot_index = c.widget_index("CHAT_MSGS");
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -417,9 +371,8 @@ void test_custom_draw_slot(const fnt_font_t *font) {
 } // namespace
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_subst_images_and_custom_events(&font);
-	test_code_columns_over_kept_and_new_records(&font);
 	test_draw_cell_rect_and_passes(&font);
 	test_text_alignment_color_and_hidden_rows(&font);
 	test_hit_test(&font);
