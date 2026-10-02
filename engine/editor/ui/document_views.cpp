@@ -2,6 +2,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
@@ -29,7 +30,16 @@ bool catalog_file_values(const Document &document, OutlineFileValues &out) {
 	return true;
 }
 
+// A mission's 128 waypoint paths are the file's own, most of them empty: one with no stop is not
+// listed until the outline's switch lists them.
+bool mission_row_listed(const Document &, const Node &row) {
+	return row.kind != node_kind(MissionKind::WaypointPath) || (!row.collections.empty() && !row.collections[0].empty());
+}
+
 constexpr OutlineSpec kCatalogOutline{OutlineMode::List, "", catalog_file_values};
+// A mission's rows as a tree (an event holding its triggers and its actions), a chip per kind of
+// row (the four pools, the paths, the areas, the events), the empty paths left out.
+constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, mission_row_listed, "Empty paths"};
 constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }
@@ -49,6 +59,9 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr},
 	{DocumentTypeId::AnimationMap, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A mission's 3D viewport fills the tab beside its outline (ADR 0046 S14: the Main role,
+	// ui/main_viewport_view over the Mission viewport kind).
+	{DocumentTypeId::Mission, DocumentViewRole::MainViewport, &kMissionOutline, nullptr},
 	{DocumentTypeId::Script, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::MusicScript, DocumentViewRole::MainViewport, nullptr, make_script_view},
 	{DocumentTypeId::Credits, DocumentViewRole::MainViewport, nullptr, make_script_view},

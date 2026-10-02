@@ -62,22 +62,30 @@ bool OrbitCamera::project(const PreviewVec3 &point, int width, int height, float
 	return true;
 }
 
-bool OrbitCamera::on_view_plane(float x, float y, int width, int height, const PreviewVec3 &through,
-                                PreviewVec3 &out) const {
+bool OrbitCamera::ray(float x, float y, int width, int height, PreviewVec3 &from, PreviewVec3 &direction) const {
 	if (width <= 0 || height <= 0) return false;
 	PreviewVec3 right, up, back;
 	axes(right, up, back);
 	const float focal = focal_pixels(width);
 	const float sx = (x - 0.5f * static_cast<float>(width)) / focal;
 	const float sy = (0.5f * static_cast<float>(height) - y) / focal;
-	const PreviewVec3 ray{right.x * sx + up.x * sy - back.x, right.y * sx + up.y * sy - back.y,
-	                      right.z * sx + up.z * sy - back.z};
-	const float facing = dot(ray, back);
+	from = eye();
+	direction = PreviewVec3{right.x * sx + up.x * sy - back.x, right.y * sx + up.y * sy - back.y,
+	                        right.z * sx + up.z * sy - back.z};
+	return true;
+}
+
+bool OrbitCamera::on_view_plane(float x, float y, int width, int height, const PreviewVec3 &through,
+                                PreviewVec3 &out) const {
+	PreviewVec3 from, along;
+	if (!ray(x, y, width, height, from, along)) return false;
+	PreviewVec3 right, up, back;
+	axes(right, up, back);
+	const float facing = dot(along, back);
 	if (!(facing < 0.0f)) return false;
-	const PreviewVec3 from = eye();
 	const float t = dot(sub(through, from), back) / facing;
 	if (!(t > 0.0f)) return false;
-	out = PreviewVec3{from.x + ray.x * t, from.y + ray.y * t, from.z + ray.z * t};
+	out = PreviewVec3{from.x + along.x * t, from.y + along.y * t, from.z + along.z * t};
 	return true;
 }
 

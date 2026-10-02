@@ -213,6 +213,11 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 	use.scope = strutil::to_upper(model);
 }
 
+void DefCatalogDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
+	if (address.child || def_kind(address.kind) != DefRecordKind::Item) return;
+	if (const void *item = record(address)) facts.value = std::to_string(static_cast<const DefItemDef *>(item)->type);
+}
+
 bool DefCatalogDocument::record_choices(const NodeAddress &address, const FieldUse &use,
 		std::vector<FieldChoice> &out) const {
 	if (use.schema->id != "vehicle_spawn_mask" || def_kind(address.kind) != DefRecordKind::Item)

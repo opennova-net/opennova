@@ -8,6 +8,7 @@
 #include <vector>
 
 #include <editor/model/document.h>
+#include <editor/session/editor_request.h>
 
 namespace opennova::editor {
 
@@ -60,13 +61,32 @@ struct OutlineFileValues {
 // The hook of a type whose files hold such values: false for a document that has none.
 using OutlineFileValuesHook = bool (*)(const Document &document, OutlineFileValues &out);
 
+// Whether a list or a tree lists `row` while its "all rows" switch is off: the hook of a type whose
+// files hold rows most of which stand empty (a mission's 128 paths: one with no stop is not listed).
+using OutlineRowListedHook = bool (*)(const Document &document, const Node &row);
+
 // What an outline view of a type is (its DocumentViewRow's outline, ui/document_views): its mode,
-// the heading of the master column (master and detail: the rows' words, "Sections"), and the hook
-// of a type whose files hold file-wide values a list shows after its rows (null: none).
+// the heading of the master column (master and detail: the rows' words, "Sections"), the hook
+// of a type whose files hold file-wide values a list shows after its rows (null: none), whether a
+// list or a tree filters its rows by kind (a chip per kind of row the file holds, each listing or
+// leaving out its kind's rows: a mission's pools, paths, areas and events), and the hook of a type
+// some of whose rows are left out until the view's switch lists them (null: every row is listed),
+// with the switch's words ("Empty paths").
 struct OutlineSpec {
 	OutlineMode mode = OutlineMode::Tree;
 	const char *rows = "";
 	OutlineFileValuesHook file_values = nullptr;
+	bool by_kind = false;
+	OutlineRowListedHook row_listed = nullptr;
+	const char *unlisted = "";
+};
+
+// What a click on a record's line selects (OutlineModel::click): the record, how it joins the
+// selection, and the records named with it (a Shift click's range).
+struct OutlineClick {
+	NodeAddress record;
+	SelectMode mode = SelectMode::Replace;
+	std::vector<NodeAddress> records;
 };
 
 // The portable half of a document's outline (S13 V3; ImGui-free, as ui/problems_list and
@@ -74,7 +94,7 @@ struct OutlineSpec {
 // filter, the order, and in master and detail the columns; the view's filter box, sort and Every
 // read and write the model's. The lines are made again only when what they read moves: the
 // document (its identity, load and revision), what is open, the filter, the order, the "every row"
-// switch, and in master and detail the master row; drawing reads them as they stand. Each row's
+// switch, the kinds listed and the "all rows" switch, and in master and detail the master row; drawing reads them as they stand. Each row's
 // lines are kept apart (S13 V8), so when the document's revision alone moved (an edit, an undo, a
 // redo) the lines follow its change set: a changed or added row's lines made again, a removed row's
 // dropped, the rows put in the document's order again where they moved (a list in name order sorted
@@ -83,7 +103,7 @@ struct OutlineSpec {
 class OutlineModel {
 public:
 	explicit OutlineModel(OutlineMode mode = OutlineMode::Tree,
-			OutlineFileValuesHook file_values = nullptr);
+			OutlineFileValuesHook file_values = nullptr, OutlineRowListedHook row_listed = nullptr);
 
 	OutlineMode mode() const { return mode_; }
 
@@ -103,6 +123,15 @@ public:
 	void set_every(bool every);
 	bool every() const { return every_; }
 	bool every_row() const { return every_ && filtered(); }
+	// The kinds of row a list or a tree lists: a bit per kind in the document's kinds() order
+	// (kind_bit), every one set until a view clears one; a row whose kind's bit is clear has no line.
+	// And the rows the type's listed hook leaves out (OutlineSpec::row_listed), listed too while the
+	// "all rows" switch is on.
+	void set_kinds(uint64_t mask);
+	uint64_t kinds() const { return kinds_; }
+	static uint64_t kind_bit(const Document &document, NodeKind kind);
+	void set_all_rows(bool all);
+	bool all_rows() const { return all_rows_; }
 
 	// A tree's line opened or closed: a record's (its collections under it), a collection's (its
 	// records under it); one the filter holds open (OutlineLine::forced) is left as it is.
@@ -113,7 +142,8 @@ public:
 	bool values_open() const { return values_open_; }
 	// The selection a Go to, a find or a Problems row moves to, shown (`path`: the records holding
 	// it, the row first, then the record: RecordReveal's): in a tree every record and collection
-	// holding it opened; a filter that would hide its line cleared, the reveal winning over it. Its
+	// holding it opened; a filter that would hide its line cleared, its kind listed and the rows left
+	// out listed where either hid it, the reveal winning over them. Its
 	// line among lines(document, master) as they are then (a list's: the row holding it; a tree's and
 	// master and detail's: the record), SIZE_MAX for none (master and detail's rows are its master
 	// column's, which lists every one).
@@ -132,6 +162,13 @@ public:
 	const std::vector<const FieldSchema *> &columns() const { return columns_; }
 	// Which line among lines() is the record `address` (SIZE_MAX: none).
 	size_t line_of(const NodeAddress &address) const;
+	// What a click on the record line `clicked` of lines() selects, `primary` the selection's primary
+	// record: its record alone; with Ctrl its record joining the selection or leaving it; with Shift
+	// every record line from the primary's to it, both ends in (the collections' headings between them
+	// left out), the clicked one the primary, one selection. A Shift click with no primary on the lines
+	// (none selected, or its line not listed) selects the record alone. An empty record for a line
+	// that is no record's.
+	OutlineClick click(size_t clicked, const NodeAddress &primary, bool ctrl, bool shift) const;
 	// The document's file-wide values (the hook's); false for none.
 	bool file_values(const Document &document, OutlineFileValues &out) const;
 
@@ -157,13 +194,15 @@ private:
 		bool made = false;
 		uint64_t document = 0, load = 0, revision = 0, open = 0;
 		std::string filter;
-		bool sort = false, every = false;
+		bool sort = false, every = false, all_rows = false;
+		uint64_t kinds = 0;
 		NodeId master = 0;
 		// Everything but the revision the same: the lines may follow the document's change set.
 		bool same_but_revision(const Key &other) const {
 			return made == other.made && document == other.document && load == other.load &&
 			       open == other.open && filter == other.filter && sort == other.sort &&
-			       every == other.every && master == other.master;
+			       every == other.every && all_rows == other.all_rows && kinds == other.kinds &&
+			       master == other.master;
 		}
 		bool operator==(const Key &other) const { return same_but_revision(other) && revision == other.revision; }
 	};
@@ -200,9 +239,15 @@ private:
 	OutlineLine record_line(const Document &document, const NodeAddress &record, int depth, size_t index,
 			bool branch) const;
 	bool matches(const std::string &text) const;
+	// Whether a list or a tree lists the row: its kind's bit set, and the listed hook keeping it or the
+	// "all rows" switch on.
+	bool row_listed(const Document &document, const Node &row) const;
 
 	OutlineMode mode_ = OutlineMode::Tree;
 	OutlineFileValuesHook file_values_ = nullptr;
+	OutlineRowListedHook row_listed_ = nullptr;
+	uint64_t kinds_ = ~uint64_t(0);
+	bool all_rows_ = false;
 	std::string filter_;
 	std::string needle_; // the filter as names compare (normalized_logical_name)
 	bool sort_ = false;
