@@ -1076,7 +1076,8 @@ constexpr VerbRow kRows[] = {
 	     "--with-dependencies also copies the files they need, found beside them or in the\n"
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
-	     "the loose files the game ships beside them), with no walk and nothing else named;\n"
+	     "the loose files the game ships beside them), with no walk and nothing else named:\n"
+	     "the default for a project that holds missions;\n"
 	     "--dry-run prints the plan (what is not found, the files by kind, the plan's line;\n"
 	     "--rows each file too) and writes nothing (no import pass either; --install is that\n"
 	     "run's alone) (--json: the import_preview query, the plan)")

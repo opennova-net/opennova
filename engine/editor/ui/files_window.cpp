@@ -316,6 +316,19 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ui_kit::tooltip("Files from the disk, or what a PFF archive holds.");
 		const bool game_data =
 		        !view.project.retail_directory.empty() && view.allows(EditorRequestKind::PreviewInstallImport);
+		// A project that holds missions is offered the whole game install first (ADR 0046 S14).
+		const bool missions = view.project.document && view.project.document->features.mission;
+		const auto whole_install = [&] {
+			ImGui::BeginDisabled(!game_data);
+			if (ImGui::Selectable("The whole game install...") && game_data)
+				workspace_.request(request::import_whole_install());
+			ImGui::EndDisabled();
+			ui_kit::tooltip(!view.project.retail_directory.empty()
+			                        ? "Every file of the game install, copied into the project: what a mission project needs to "
+			                          "play, build and resolve every name."
+			                        : "Choose the game install folder in File > Project settings... first.");
+		};
+		if (missions) whole_install();
 		ImGui::BeginDisabled(!game_data);
 		if (ImGui::Selectable("From the game data...") && game_data)
 			workspace_.request(
@@ -323,14 +336,7 @@ void FilesWindow::draw_toolbar(const SessionView &view) {
 		ImGui::EndDisabled();
 		ui_kit::tooltip(!view.project.retail_directory.empty() ? "Files of the game install, copied into the project."
 		                                               : "Choose the game install folder in File > Project settings... first.");
-		ImGui::BeginDisabled(!game_data);
-		if (ImGui::Selectable("The whole game install...") && game_data)
-			workspace_.request(request::import_whole_install());
-		ImGui::EndDisabled();
-		ui_kit::tooltip(!view.project.retail_directory.empty()
-		                        ? "Every file of the game install, copied into the project: what a mission project needs to "
-		                          "play, build and resolve every name."
-		                        : "Choose the game install folder in File > Project settings... first.");
+		if (!missions) whole_install();
 		const bool reimports =
 				!view.project.imports->empty() && view.allows(EditorRequestKind::Reimport);
 		ImGui::BeginDisabled(!reimports);

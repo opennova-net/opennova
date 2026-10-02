@@ -305,15 +305,22 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (menu_item("Import files...", nullptr, imports)) request(request::pick_file(PickPurpose::ImportFiles));
 	const bool lists = v.project.open && !v.project.retail_directory.empty() &&
 	                   v.allows(EditorRequestKind::PreviewInstallImport);
+	// A project that holds missions is offered the whole game install first (ADR 0046 S14: a
+	// mission's closure is most of the game); any other the files it chooses, with what they need.
+	const bool missions = v.project.open && v.project.document && v.project.document->features.mission;
+	const auto whole_install = [&] {
+		if (menu_item("Import the whole game install...", nullptr, lists)) request(request::import_whole_install());
+		ui_kit::tooltip(v.project.open && v.project.retail_directory.empty()
+		                        ? "Choose the game install folder in File > Project settings... first."
+		                        : "Every file of the game install, copied into the project: what a mission project needs to "
+		                          "play, build and resolve every name.");
+	};
+	if (missions) whole_install();
 	if (menu_item("Import from the game data...", nullptr, lists))
 		request(request::preview_install_import({}, v.project.import_dependencies));
 	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
-	if (menu_item("Import the whole game install...", nullptr, lists)) request(request::import_whole_install());
-	ui_kit::tooltip(v.project.open && v.project.retail_directory.empty()
-	                        ? "Choose the game install folder in File > Project settings... first."
-	                        : "Every file of the game install, copied into the project: what a mission project needs to "
-	                          "play, build and resolve every name.");
+	if (!missions) whole_install();
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		settings_.open(v);
