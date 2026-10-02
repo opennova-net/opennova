@@ -17,7 +17,7 @@ namespace opennova::editor {
 namespace {
 
 std::string join(const std::string &root, const char *leaf) {
-	return (fs::path(root) / leaf).generic_string();
+	return join_path(root, leaf);
 }
 
 bool fail(Diagnostic &error, CoreFinding code, std::string message) {
@@ -29,29 +29,29 @@ bool fail(Diagnostic &error, CoreFinding code, std::string message) {
 
 ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	ProjectPaths p;
-	p.root = fs::path(root).generic_string();
+	p.root = utf8_of(path_of(root));
 	p.project_file = join(p.root, kProjectFileName);
 	p.cache_dir = join(p.root, kProjectCacheDirName);
-	p.local_settings_file = (fs::path(p.cache_dir) / kLocalSettingsFileName).generic_string();
-	p.imported_dir = (fs::path(p.cache_dir) / "imported").generic_string();
-	p.import_cache_file = (fs::path(p.cache_dir) / kImportCacheFileName).generic_string();
-	p.index_dir = (fs::path(p.cache_dir) / "index").generic_string();
-	p.build_dir = (fs::path(p.cache_dir) / "build").generic_string();
-	p.build_cache_file = (fs::path(p.cache_dir) / kBuildCacheFileName).generic_string();
-	p.run_dir = (fs::path(p.cache_dir) / "run").generic_string();
-	p.staging_dir = (fs::path(p.cache_dir) / "staging").generic_string();
+	p.local_settings_file = join(p.cache_dir, kLocalSettingsFileName);
+	p.imported_dir = join(p.cache_dir, "imported");
+	p.import_cache_file = join(p.cache_dir, kImportCacheFileName);
+	p.index_dir = join(p.cache_dir, "index");
+	p.build_dir = join(p.cache_dir, "build");
+	p.build_cache_file = join(p.cache_dir, kBuildCacheFileName);
+	p.run_dir = join(p.cache_dir, "run");
+	p.staging_dir = join(p.cache_dir, "staging");
 	return p;
 }
 
 std::string ProjectPaths::export_dir(const ProjectDocument &doc) const {
-	const fs::path output(doc.export_settings.output);
-	if (output.is_absolute()) return output.generic_string();
-	return (fs::path(root) / output).lexically_normal().generic_string();
+	const fs::path output = path_of(doc.export_settings.output);
+	if (output.is_absolute()) return utf8_of(output);
+	return utf8_of((path_of(root) / output).lexically_normal());
 }
 
 bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error) {
 	if (!ensure_directory(paths.cache_dir, error)) return false;
-	const std::string gitignore = (fs::path(paths.cache_dir) / ".gitignore").generic_string();
+	const std::string gitignore = join(paths.cache_dir, ".gitignore");
 	std::error_code ec;
 	if (fs::is_regular_file(system_path(gitignore), ec)) return true;
 	return write_file_atomic(gitignore, std::string("*\n"), error);
@@ -176,7 +176,7 @@ bool create_project(const std::string &root, const std::string &title, const std
 		return fail(error, CoreFinding::ProjectWrite, io_error);
 	ProjectDocument doc;
 	doc.project_id = make_project_id();
-	doc.title = title.empty() ? fs::path(paths.root).filename().string() : title;
+	doc.title = title.empty() ? utf8_of(path_of(paths.root).filename()) : title;
 	doc.target_game = code;
 	if (!save_project_document(paths.project_file, doc, error)) return false;
 	out = std::move(doc);

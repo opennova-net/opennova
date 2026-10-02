@@ -22,7 +22,7 @@ namespace {
 // `relative` ('/'-separated) under `root`, a system path (system_path): an extended-length path is
 // taken as spelled, its separators backslashes alone.
 fs::path under(const fs::path &root, const std::string &relative) {
-	return root / fs::path(relative).make_preferred();
+	return root / path_of(relative).make_preferred();
 }
 
 bool same_path(const fs::path &a, const fs::path &b) {
@@ -56,7 +56,7 @@ bool walk_reaches(const fs::path &root, const fs::path &export_dir, const fs::pa
 void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path &path, const std::string &key,
 		AssetScan::Visit &out, uint64_t &read) {
 	const std::string sidecar_suffix = kImportSidecarSuffix;
-	const std::string filename = path.filename().string();
+	const std::string filename = utf8_of(path.filename());
 	std::error_code ec;
 	if (strutil::ends_with_icase(filename, sidecar_suffix)) {
 		// An import record: its outputs are project files that live under the cache.
@@ -72,7 +72,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		if (!ec) read += static_cast<uint64_t>(record_size);
 		ImportSidecar sidecar;
 		Diagnostic error;
-		if (!load_import_sidecar(path.generic_string(), sidecar, error)) {
+		if (!load_import_sidecar(utf8_of(path), sidecar, error)) {
 			if (!error.code().empty()) {
 				error.asset = key;
 				out.findings.push_back(error);
@@ -83,7 +83,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		for (const std::string &output : sidecar.outputs) {
 			// Under the cache, deeper than its source: asked and read through the system path, so a
 			// project whose own files fit MAX_PATH lists outputs that pass it (S13 A8).
-			const fs::path output_path = system_path((root / output_dir / output).generic_string());
+			const fs::path output_path = under(root, join_path(output_dir, output));
 			if (!fs::is_regular_file(output_path, ec)) {
 				// Only the import pass makes outputs: one missing after it ran means the
 				// last import did not finish (its finding says why).
@@ -93,7 +93,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 			}
 			AssetEntry produced;
 			produced.logical_name = output;
-			produced.relative_path = (fs::path(output_dir) / output).generic_string();
+			produced.relative_path = join_path(output_dir, output);
 			produced.imported_from = source_relative;
 			const auto produced_size = fs::file_size(output_path, ec);
 			if (!ec) produced.size_bytes = static_cast<uint64_t>(produced_size);
@@ -101,7 +101,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 			std::vector<uint8_t> bytes;
 			std::string io_error;
 			const bool peek = asset_classification_needs_bytes(output) &&
-					read_file_bytes(output_path.string(), bytes, io_error);
+					read_file_bytes(utf8_of(output_path), bytes, io_error);
 			read += bytes.size();
 			produced.kind = peek ? classify_asset(output, &bytes) : classify_asset(output, nullptr);
 			out.entries.push_back(std::move(produced));
@@ -118,7 +118,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 	if (asset_classification_needs_bytes(filename)) {
 		std::vector<uint8_t> bytes;
 		std::string io_error;
-		if (read_file_bytes(path.string(), bytes, io_error)) {
+		if (read_file_bytes(utf8_of(path), bytes, io_error)) {
 			read += bytes.size();
 			asset.kind = classify_asset(filename, &bytes);
 		} else {
@@ -131,7 +131,7 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 		// A name no rule types is a material chunk when the file holds one (a model's chunk row
 		// reads a file of any name as one), asked of its chunk headers alone: the build packs a
 		// material chunk and leaves a file of no kind the game knows out (S13 A8).
-		if (asset.kind == AssetKind::Unknown && is_material_chunk_file(path.string(), read))
+		if (asset.kind == AssetKind::Unknown && is_material_chunk_file(utf8_of(path), read))
 			asset.kind = AssetKind::MaterialChunk;
 	}
 	// A file an importer converts is an import source while its `.import` record is there,
@@ -146,8 +146,8 @@ void visit_file(const ProjectPaths &paths, const fs::path &root, const fs::path 
 // The path the walk lists a file by: project-relative, '/'-separated, as the file system spells it.
 std::string listed_key(const fs::path &root, const fs::path &path) {
 	std::error_code ec;
-	std::string key = fs::relative(path, root, ec).generic_string();
-	return ec ? path.filename().string() : key;
+	std::string key = utf8_of(fs::relative(path, root, ec));
+	return ec ? utf8_of(path.filename()) : key;
 }
 
 } // namespace

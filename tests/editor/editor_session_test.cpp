@@ -372,6 +372,99 @@ static int test_lifecycle() {
 	return 0;
 }
 
+// A project under folders named outside ASCII (a user's own folder, C:/Users/José/..., a name in
+// another script): the editor keeps every path as UTF-8, as the Shell hands it over (String.utf8())
+// and the process seam widens it (CP_UTF8), so the project is made, listed, imported into, built and
+// played where its path says, and a file named so is listed by that name. Checked through the
+// system's own UTF-16 names (base/io/os_path.h), not the editor's conversions.
+static int test_utf8_project_path() {
+	namespace io = opennova::io;
+	editor_test::TempProjectDir dir("opennova_editor_Jos\xC3\xA9_\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB"); // José_モデル
+	FakePlatform platform;
+	FilePreferencesStore preferences(dir.file("settings/editor.json"));
+	ProjectSession session(platform, preferences);
+	const std::string root = dir.file("Mon jeu \xC3\xA9t\xC3\xA9"); // "Mon jeu été"
+	TEST_EXPECT(session.handle(request::new_project(root, "Mon jeu")));
+	session.run_operations();
+	const SessionView &v = session.view();
+	TEST_EXPECT(session.project_open() && v.project.root == root);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/" + kProjectFileName)));
+	TEST_EXPECT(fs::is_regular_file(io::os_path(dir.file("settings/editor.json"))));
+	TEST_EXPECT(v.project.recent_projects.size() == 1 && v.project.recent_projects[0] == root);
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(v.project.requirements->required_missing == 0 && v.project.requirements->required_wrong_kind == 0);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/menus/main.mnu")));
+
+	// A file named outside ASCII is listed by its name; a loose file and an archive's member, both
+	// from a folder named so, are imported.
+	const std::string note = "notes_\xE3\x83\xA2.txt"; // notes_モ.txt
+	TEST_EXPECT(editor_test::write_text(root + "/" + note, "a note"));
+	const std::string loose = dir.file("sources \xC3\xA9/loose.txt");
+	const std::string packed = dir.file("sources \xC3\xA9/source.pff");
+	TEST_EXPECT(editor_test::write_text(loose, "loose file"));
+	const uint8_t data[] = {'p', 'a', 'c', 'k', 'e', 'd'};
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", data, sizeof(data), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive(packed.c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(packed)));
+	EditorRequest importing = request::of(EditorRequestKind::ImportFiles);
+	importing.imports = {{loose, {}}, {packed, "note.txt"}};
+	session.handle(importing);
+	session.run_operations();
+	TEST_EXPECT(session.outcome().done());
+	TEST_EXPECT(v.project.scan->find(note) && v.project.scan->find(note)->relative_path == note);
+	TEST_EXPECT(v.project.scan->find("loose.txt") && v.project.scan->find("note.txt"));
+	std::string text, error;
+	TEST_EXPECT(read_file_text(root + "/note.txt", text, error) && text == "packed");
+	TEST_EXPECT(fs::is_regular_file(io::os_path(root + "/loose.txt")));
+
+	// The build lands under the project, and Play stages and spawns there: every path the plan
+	// hands the process is the project's own UTF-8 path.
+	TEST_EXPECT(editor_test::handle_to_end(session, request::build()).done());
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	const std::string built = v.activity.has_build ? v.activity.last_build->build_dir : std::string();
+	TEST_EXPECT(built.rfind(root + "/.opennova/build/play/", 0) == 0);
+	TEST_EXPECT(fs::is_regular_file(io::os_path(built + "/localres.pff")));
+	const std::string runtime = dir.file("runtime \xC3\xA9/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8999;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running);
+	const std::string run_dir = root + "/.opennova/run/1";
+	const LaunchPlan &plan = platform.last_plan;
+	TEST_EXPECT(plan.executable == runtime && plan.working_dir == run_dir && plan.build_dir == built);
+	TEST_EXPECT(plan.log_file == run_dir + "/session.log");
+	const auto follows = [&](const char *flag, const std::string &value) {
+		const auto at = std::find(plan.args.begin(), plan.args.end(), flag);
+		return at != plan.args.end() && std::next(at) != plan.args.end() && *std::next(at) == value;
+	};
+	TEST_EXPECT(follows("--log-file", run_dir + "/session.log") && follows("--resource-dir", built));
+	TEST_EXPECT(fs::is_directory(io::os_path(run_dir)) && fs::is_regular_file(io::os_path(run_dir + "/run.json")));
+	TEST_EXPECT(output_has(v, "Running: "));
+	platform.codes[500] = 0;
+	platform.exit_child(500);
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+
+	// Closed and opened again from the editor's settings file, by the path it keeps.
+	session.handle(request::close_project());
+	{
+		FakePlatform other;
+		FilePreferencesStore again_preferences(dir.file("settings/editor.json"));
+		ProjectSession again(other, again_preferences);
+		TEST_EXPECT(again.view().project.recent_projects.size() == 1 && again.view().project.recent_projects[0] == root);
+		TEST_EXPECT(again.handle(request::open_project(root)));
+		again.run_operations();
+		TEST_EXPECT(again.project_open() && again.view().project.document->title == "Mon jeu");
+		TEST_EXPECT(again.view().project.scan->find(note) != nullptr);
+	}
+	return 0;
+}
+
 static int test_import() {
 	editor_test::TempProjectDir dir("opennova_editor_import_test");
 	FakePlatform platform;
@@ -4071,6 +4164,7 @@ int main() {
 	failures += test_retail_play();
 	failures += test_import();
 	failures += test_lifecycle();
+	failures += test_utf8_project_path();
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();
 	failures += test_requests_that_cannot_run();

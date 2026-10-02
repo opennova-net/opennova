@@ -30,7 +30,7 @@ DocumentSet::DocumentSet(SessionCore &core) : core_(core), view_(core.view()), p
 DocumentBase *DocumentSet::document_for(const std::string &path) {
 	const std::string &wanted = path.empty() ? view_.documents.active : path;
 	for (auto &document : documents_)
-		if (document->path() == wanted || normalized_logical_name(fs::path(document->path()).filename().string()) == normalized_logical_name(wanted))
+		if (document->path() == wanted || normalized_logical_name(basename_of(document->path())) == normalized_logical_name(wanted))
 			return document.get();
 	return nullptr;
 }
@@ -124,7 +124,7 @@ std::shared_ptr<DocumentBase> DocumentSet::load(const std::string &relative, Ass
 		return nullptr;
 	}
 	std::shared_ptr<DocumentBase> document = type->make();
-	if (!document->load((fs::path(paths_.root) / relative).generic_string(), relative, kind, view_.project.document->target_game,
+	if (!document->load(join_path(paths_.root, relative), relative, kind, view_.project.document->target_game,
 	                    error))
 		return nullptr;
 	return document;
@@ -264,18 +264,18 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		return;
 	}
 	const auto *existing = view_.project.scan->find(request.path);
-	const std::string relative = (fs::path(folder) / request.path).generic_string();
+	const std::string relative = join_path(folder, request.path);
 	if (!existing) {
-		const auto target = fs::path(paths_.root) / relative;
+		const auto target = path_of(paths_.root) / path_of(relative);
 		std::error_code ec;
-		if (fs::exists(system_path(target.generic_string()), ec) || ec) { // a project past MAX_PATH too
+		if (fs::exists(system_path(utf8_of(target)), ec) || ec) { // a project past MAX_PATH too
 			refuse(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Error, "Refresh before creating this file.", request.path));
 			return;
 		}
 		std::vector<uint8_t> bytes; Diagnostic error;
 		if (!make_blank(blank, kind, bytes, error)) { refuse(error); return; }
-		if (!ensure_directory(target.parent_path().generic_string(), message) ||
-			!write_file_atomic(target.generic_string(), bytes.data(), bytes.size(), message)) {
+		if (!ensure_directory(utf8_of(target.parent_path()), message) ||
+			!write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), message)) {
 			refuse(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
 			return;
 		}
@@ -294,12 +294,12 @@ void DocumentSet::create_file(const EditorRequest &request) {
 				text_blank.role = kBlankMissionTextRole;
 				text_blank.project_title = blank.project_title;
 				text_blank.values = {{"title", blank_mission_title(blank)}};
-				const std::string text_relative = (fs::path(asset_kind_row(AssetKind::Strings).folder) / table).generic_string();
-				const auto text_target = fs::path(paths_.root) / text_relative;
+				const std::string text_relative = join_path(asset_kind_row(AssetKind::Strings).folder, table);
+				const auto text_target = path_of(paths_.root) / path_of(text_relative);
 				std::vector<uint8_t> text_bytes;
-				if (!fs::exists(system_path(text_target.generic_string()), ec) && text_factory->make(text_blank, text_bytes, error) &&
-				    ensure_directory(text_target.parent_path().generic_string(), message) &&
-				    write_file_atomic(text_target.generic_string(), text_bytes.data(), text_bytes.size(), message)) {
+				if (!fs::exists(system_path(utf8_of(text_target)), ec) && text_factory->make(text_blank, text_bytes, error) &&
+				    ensure_directory(utf8_of(text_target.parent_path()), message) &&
+				    write_file_atomic(utf8_of(text_target), text_bytes.data(), text_bytes.size(), message)) {
 					made.push_back(text_relative);
 					core_.note("Created " + text_relative);
 				} else {
@@ -384,7 +384,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
-		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(),
+		if (!document->load(join_path(paths_.root, asset.relative_path),
 					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
 			refuse(error);
 			return;

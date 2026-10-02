@@ -34,7 +34,7 @@ std::string play_mission_for(const SessionView &view) {
 		const AssetEntry *entry = scan.find(file);
 		return entry && entry->kind == AssetKind::Mission ? entry->logical_name : std::string();
 	};
-	const std::string name = fs::path(view.documents.active).filename().string();
+	const std::string name = basename_of(view.documents.active);
 	if (strutil::ends_with_icase(name, ".bms")) return mission_named(name);
 	// A file the game finds by a mission's name: that mission, when the project holds it. The readers
 	// cut a mission's name at its first dot ("op.v2.bms" opens "op.wac"), so the mission is any of the
@@ -181,7 +181,7 @@ void PlayController::start(const std::string &mission) {
 	const PlayLauncher launcher = source_ ? source_(!in_install) : launcher_;
 	follow_launcher(launcher);
 	const std::string executable = in_install ? std::string() : resolve_runtime_executable();
-	if (!in_install && (executable.empty() || !fs::is_regular_file(executable, ec))) {
+	if (!in_install && (executable.empty() || !fs::is_regular_file(system_path(executable), ec))) {
 		core_.report(make_finding(CoreFinding::PlayRuntimeMissing, DiagnosticSeverity::Error,
 		                          executable.empty()
 		                                  ? "No game runtime is set; choose opennova.exe in File > Project settings..."
@@ -318,7 +318,7 @@ ProtectedDirs PlayController::protected_dirs(const std::string &output_root) {
 // Append whatever the game wrote to its log since the last poll, line by line.
 void PlayController::tail_game_log() {
 	if (game_log_file_.empty()) return;
-	std::ifstream in(game_log_file_, std::ios::binary);
+	std::ifstream in(system_path(game_log_file_), std::ios::binary);
 	if (!in) return;
 	in.seekg(0, std::ios::end);
 	const std::streamoff size = in.tellg();

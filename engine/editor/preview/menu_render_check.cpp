@@ -1,7 +1,6 @@
 #include <editor/preview/menu_render_check.h>
 
 #include <algorithm>
-#include <filesystem>
 #include <iterator>
 #include <variant>
 
@@ -9,6 +8,7 @@
 #include <editor/documents/project_checks.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -34,7 +34,7 @@ std::shared_ptr<const MnuDocument> read_menu(
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
 	if (!document->load(
-				(std::filesystem::path(input.paths.root) / asset.relative_path).generic_string(),
+				join_path(input.paths.root, asset.relative_path),
 				asset.relative_path, asset.kind, input.project.target_game, error) ||
 			document->blocked())
 		return nullptr;

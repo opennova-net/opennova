@@ -1,11 +1,11 @@
 #include "validation_cache.h"
 
-#include <filesystem>
 #include <iterator>
 #include <utility>
 
 #include <editor/documents/document_types.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
 
 namespace opennova::editor {
 
@@ -94,7 +94,7 @@ const std::vector<Diagnostic> &ValidationCache::file_findings(
 	loaded_.push_back(document);
 	Diagnostic error;
 	if (!document->load(
-				(std::filesystem::path(input.paths.root) / asset.relative_path).generic_string(),
+				join_path(input.paths.root, asset.relative_path),
 				asset.relative_path, asset.kind, input.project.target_game, error)) {
 		++stats_.files_failed;
 		entry.findings.push_back(std::move(error));
