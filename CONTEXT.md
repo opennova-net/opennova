@@ -542,7 +542,21 @@ image, else `loadscrn.pcx`), `.til` (its tiles), `.dbf` (its dialog bank) and th
 (`.lwf`, else `.pwf`). One witnessed table (`mission::sidecars`), which the runtime's loaders and
 the editor's Play mission read, and of which the editor's mission document makes the mission's own
 edges (its file set), which the graph, Rename and the import follow.
-_Avoid_: companion, attachment, import sidecar (a source's `.import` record)
+_Avoid_: companion (the members of a mission set a rename takes with the mission), attachment,
+import sidecar (a source's `.import` record)
+
+**Mission set**:
+A mission and its sidecars as the editor holds them (ADR 0046 S14): each sidecar a reference the
+mission's file makes (its string table, script, loading image, tile placement, dialog bank and the
+bank's sounds), those the game runs without optional (no finding when the project lacks one), so the
+graph, References, the import and Problems see the set; a mission renamed takes the members the
+project has with it, its **companions**.
+_Avoid_: bundle, package (a set is the files a name finds, not a container)
+
+**Mission text**:
+A `.mis`: the original mission editor's interchange text (`dfx2med.exe`), which the game never reads.
+Its own kind, packed nowhere; never a mission.
+_Avoid_: mission (the `.bms` the game loads), mission file
 
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
@@ -592,7 +606,8 @@ _Avoid_: configuration (its kind before it had its own), score config
 
 **Map project**:
 A `.npj` or `.npz`: the mission editor's project for a mission, which the game's mission list
-scans for beside the `.bms` files.
+scans for beside the `.bms` files and loads through an XML loader not yet read (D-MIS-7): packed as
+it is, opened by no editor yet.
 _Avoid_: mission (the `.bms` the game loads), map pack
 
 **Material chunk**:
@@ -745,8 +760,9 @@ _Avoid_: node (the core's type for a row), child (an identity field, not a relat
 **Record reference / record set**:
 A field naming a record of its own file by its index among the file's records of one kind, in
 the file's order: a model's generator, track or light naming one of its CTRL registers, a part
-animation's frame byte naming a rotation frame (a mission's entity, waypoint or group index,
-later). Those records are the file's record set of that kind, each found by its index: the
+animation's frame byte naming a rotation frame, a mission's stop naming a marker or a parameter an
+event (a mission's entity and area are named by their SSN and zone id instead, which no edit
+renumbers). Those records are the file's record set of that kind, each found by its index: the
 picker offers them by index and name, and each shows what names it (Referenced by). An edit that
 adds, removes or moves one of them changes, in the same undo step, every index that named a
 record it moved (an index past the set staying past it), and is refused while a field the game
@@ -768,6 +784,15 @@ field or a new family of a catalog (a def table the editor did not open) is rows
 a document.
 _Avoid_: schema (one kind's fields: the part of the table the Inspector reads), property table (the
 per-format tables the shape replaced), plugin (there are none: the tables are compiled in)
+
+**Band**:
+The run of a document's rows of one kind where its file fixes their order (a mission's: the mission
+row, then its items, buildings, markers and organics, its 128 waypoint paths, its area triggers and
+its events, the order its writer writes them). A row added, duplicated, pasted or moved lands inside
+its kind's band, never outside it; a band the file holds fixed (the mission row, the paths) takes no
+row and gives none up.
+_Avoid_: section (a part of the file's bytes), group (a mission's AI group), pool (the runtime's
+entity storage an entity's kind spawns into)
 
 **Menu preview**:
 The menu's viewport in the Preview window: the editor's render of the previewed screen (the last
