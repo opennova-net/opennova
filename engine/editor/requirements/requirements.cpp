@@ -31,7 +31,9 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
-		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+		// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
+		// project's, ADR 0046 S14) is no row of the checklist.
+		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 		if (!requirement_phase_enabled(doc, resource->phase)) continue;
 
 		RequirementRow row;

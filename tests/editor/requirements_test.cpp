@@ -37,7 +37,7 @@ static int test_row_set_follows_the_manifest_and_features() {
 	int expected_rows = 0, expected_required = 0;
 	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
 		const RequiredResource *r = gameprofile_required_resource_at(i);
-		if (r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+		if (r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 		if (r->phase == BOOT_PHASE_MISSION) continue;
 		++expected_rows;
 		if (r->severity != RES_OPTIONAL) ++expected_required;
@@ -67,8 +67,12 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->required);
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->expected_kind == AssetKind::Menu);
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->state == RequirementState::Missing);
-	TEST_EXPECT(row_named(menu_only, "hiscore.txt") != nullptr);
-	TEST_EXPECT(!row_named(menu_only, "hiscore.txt")->required); // optional rows are listed, not demanded
+	TEST_EXPECT(row_named(menu_only, "brand.mns") != nullptr);
+	TEST_EXPECT(!row_named(menu_only, "brand.mns")->required); // optional rows are listed, not demanded
+	// The player's own files (a save, a configuration, the stored credentials) are no project's: no
+	// row lists one (ADR 0046 S14).
+	for (const char *player : {"hiscore.txt", "game.cfg", "player.sav", "epass.bin"})
+		TEST_EXPECT(row_named(menu_only, player) == nullptr);
 	// Rows keep the manifest's phase-major order.
 	int last_phase = BOOT_PHASE_BOOT;
 	for (const RequirementRow &row : menu_only.rows) {

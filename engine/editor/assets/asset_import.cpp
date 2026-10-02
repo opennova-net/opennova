@@ -17,6 +17,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/player_files.h>
 #include <editor/assets/project_scan.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/import/converter.h>
@@ -83,7 +84,8 @@ std::vector<std::string> list_install_loose_files(const std::string &retail_root
 		try {
 			if (!it->is_regular_file(status)) continue;
 			const std::string name = it->path().filename().string();
-			if (install_loose_kind(classify_asset(name, nullptr))) names.push_back(name);
+			// The kinds the game ships loose, never a player's own file beside them.
+			if (install_loose_kind(classify_asset(name, nullptr)) && !is_player_file(name)) names.push_back(name);
 		} catch (const std::exception &) {
 			// A name the narrow encoding cannot carry is no file the game ships.
 		}
@@ -118,6 +120,7 @@ bool list_install_names(const std::string &retail_root, const ProjectDocument &d
 	std::set<std::string> known;
 	for (const VfsFileLocation &file : game.list_files()) {
 		if (strutil::ends_with_icase(file.logical_name, ".pff")) continue; // the archives themselves
+		if (is_player_file(file.logical_name)) continue;                   // never the game's
 		names.push_back(file.logical_name);
 		known.insert(normalized_logical_name(file.logical_name));
 	}
@@ -386,6 +389,10 @@ private:
 		std::string message, io_error;
 		if (!check_project_file_name(paths_.root, std::string(), name, AssetKind::Unknown, problem, message))
 			return refuse(name_refused(problem), message, name);
+		// The player's or this machine's own file is never the project's (assets/player_files.h).
+		if (is_player_file(name))
+			return refuse(CoreFinding::ImportPlayerFile,
+			              name + " is " + player_file_words(name) + ": an import never takes the player's own files.", name);
 		if (!selected_names_.insert(normalized_logical_name(name)).second)
 			return refuse(CoreFinding::ImportDuplicate, "More than one selected file has the name " + name + ".", name);
 		const AssetEntry *old = existing_.find(name);

@@ -67,6 +67,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildCopy, code("build.copy", G::Build) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
+	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,
+	// assets/player_files.h).
+	{ C::BuildPlayerFile, code("build.player_file", G::Build) },
 	{ C::BuildRead, code("build.read", G::Build) },
 	{ C::BuildVerify, code("build.verify", G::Build) },
 	{ C::BuildWrite, code("build.write", G::Build) },
@@ -124,6 +127,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportOrphanRecord, code("import.orphan_record", G::Imports) },
 	{ C::ImportOutputMissing, code("import.output_missing", G::Imports, F::Reimport) },
 	{ C::ImportPath, code("import.path", G::Imports) },
+	// A player's or this machine's file, which an import never takes (ADR 0046 S14).
+	{ C::ImportPlayerFile, code("import.player_file", G::Imports) },
 	{ C::ImportPublish, code("import.publish", G::Imports) },
 	{ C::ImportRead, code("import.read", G::Imports) },
 	{ C::ImportRecord, code("import.record", G::Imports) },

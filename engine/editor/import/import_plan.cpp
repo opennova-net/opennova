@@ -17,6 +17,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_type_registry.h>
+#include <editor/assets/player_files.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
@@ -543,7 +544,10 @@ private:
 			const int count = gameprofile_required_resource_count();
 			for (int i = 0; i < count; ++i) {
 				const RequiredResource *resource = gameprofile_required_resource_at(i);
-				if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+				// A pattern, a boot archive, or the player's own file (a save, a configuration, the
+				// stored credentials: never a resource the game is made of, and in a game's folder
+				// beside the missions found loose there) is never brought.
+				if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 				const ImportNeed need{file, std::string(),
 				                      std::string("the game, ") + requirement_phase_label(resource->phase),
 				                      ReferenceKind::None, resource->name, -1};
@@ -754,7 +758,11 @@ private:
 		if (!row.problem.empty()) return;
 		FileNameProblem problem = FileNameProblem::None;
 		std::string message;
-		if (row.kind == AssetKind::Unknown || row.kind == AssetKind::Archive)
+		// The player's or this machine's own file is never the project's (assets/player_files.h).
+		const std::string player = player_file_words(row.name);
+		if (!player.empty())
+			row.problem = row.name + " is " + player + ": an import never takes the player's own files.";
+		else if (row.kind == AssetKind::Unknown || row.kind == AssetKind::Archive)
 			row.problem = "Unsupported asset type: " + row.name;
 		else if (!check_project_file_name(paths_.root, fs::path(row.destination).parent_path().generic_string(), row.name,
 		                                  row.kind, problem, message))

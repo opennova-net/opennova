@@ -13,6 +13,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_kinds.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_type_registry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/import_choice.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/assets/player_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_asset_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/project_scan.cpp
     # blank — the from-scratch files behind New, the required files' Create fixes and a

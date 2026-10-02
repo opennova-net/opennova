@@ -1077,11 +1077,12 @@ static int test_over_a_session() {
 	TEST_EXPECT(section(ViewSection::GraphCounts).get_int("missing", -1) == 0);
 	TEST_EXPECT(diagnostics_to_json(view.findings.diagnostics).array.size() ==
 			view.findings.diagnostics.size());
-	// The first row, the manifest's first: an optional file the game does without, a note.
+	// The first row, the manifest's first a project holds (game.cfg before it is this machine's own,
+	// no row): an optional file the game does without, a note.
 	const JsonValue first_finding = diagnostics_to_json(view.findings.diagnostics).array.front();
 	TEST_EXPECT(first_finding.get_string("severity", "") == "info" &&
 	            first_finding.get_string("code", "") == "requirement.optional_missing" &&
-	            first_finding.get_string("role", "") == "game_cfg" && first_finding.get_string("target", "") == "game.cfg");
+	            first_finding.get_string("role", "") == "fgn2_bin" && first_finding.get_string("target", "") == "fgn2.bin");
 
 	// Problems through the wire: every finding counted, the errors shown, each required file
 	// the project lacks naming its role and file (no file of the project's) with its fixes.

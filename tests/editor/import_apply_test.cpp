@@ -24,6 +24,7 @@
 #include <vector>
 
 #include <editor/assets/asset_import.h>
+#include <editor/assets/player_files.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/asset_graph.h>
@@ -37,6 +38,8 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -974,8 +977,81 @@ static int test_apply_retail_mission_closure() {
 	return 0;
 }
 
+// ADR 0046 S14 (review F1): a mission found loose in a game's folder sits beside the player's and
+// this machine's own files. Planned with what it needs, a resource the manifest names comes from
+// that folder and none of the player's files does (every row of player_files(), a save, a
+// screenshot); each picked by hand is a row the project cannot take, the import refuses it, and the
+// game install's listing never holds one. A project that holds them anyway builds without packing
+// one, each said.
+static int test_apply_never_player_files() {
+	Project project("opennova_editor_apply_player_files");
+	const std::string game = project.dir.file("game");
+	std::vector<uint8_t> bms;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, bms, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(game + "/m.bms", bms) && editor_test::write_text(game + "/menu_style.mns", "X 1\r\n"));
+	std::vector<std::string> players;
+	for (const PlayerFile &file : player_files()) players.push_back(file.name);
+	players.push_back("extra.sav");
+	players.push_back("SS00001.tga");
+	for (const std::string &name : players) TEST_EXPECT(editor_test::write_text(game + "/" + name, "the player's"));
+	TEST_EXPECT(players.size() >= 18 && is_player_file("PLAYER.SAV") && is_player_file("dir/SS12345.bmp") &&
+	            !is_player_file("SS1234.tga") && !is_player_file("items.def") && !is_player_file("cc.bin"));
+	const ImportPlan plan = project.plan({{game + "/m.bms", {}}});
+	const ImportPlanRow *sheet = row_named(plan, "menu_style.mns");
+	TEST_EXPECT(sheet && sheet->state == State::Found && sheet->selected);
+	for (const std::string &name : players) {
+		if (row_named(plan, name)) std::printf("player file %s planned\n", name.c_str());
+		TEST_EXPECT(!row_named(plan, name));
+	}
+	std::vector<ImportChoice> picked;
+	for (const std::string &name : players) picked.push_back({game + "/" + name, {}});
+	const ImportPlan chosen = project.plan(picked, false);
+	for (const std::string &name : players) {
+		const ImportPlanRow *row = row_named(chosen, name);
+		TEST_EXPECT(row && row->problem.find("never takes the player's own files") != std::string::npos);
+	}
+	const ActionOutcome refused = import(project.session, {{game + "/player.sav", {}}, {game + "/epass.bin", {}}});
+	TEST_EXPECT(!refused.done() && !project.view().project.scan->find("player.sav") && !project.view().project.scan->find("epass.bin"));
+	bool said = false;
+	for (const Diagnostic &d : project.view().activity.last_operation.findings) said = said || d.code() == "import.player_file";
+	TEST_EXPECT(said);
+	// The game install's listing: its loose files the game ships, never one of the player's.
+	TEST_EXPECT(editor_test::write_text(game + "/menumus.sbf", "music"));
+	const uint8_t member[] = {'x'};
+	const opennova::pff::PffWriteEntry entries[] = {{"note.txt", member, sizeof(member), 0, 0, 0}};
+	TEST_EXPECT(opennova::pff::pff_write_archive((game + "/localres.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3, entries, 1) ==
+	            opennova::pff::PFF_WRITE_OK);
+	std::vector<Diagnostic> listing_findings;
+	const std::vector<ImportChoice> listed = list_retail_import_choices(game, *project.view().project.document, listing_findings);
+	bool music = false;
+	for (const ImportChoice &choice : listed) {
+		music = music || choice.entry == "menumus.sbf";
+		TEST_EXPECT(!is_player_file(choice.entry));
+	}
+	TEST_EXPECT(music && listed.size() == 2);
+	// Held by the project anyway (copied by hand): the build leaves each out and says so.
+	editor_test::create_missing_files(project.session);
+	for (const std::string &name : players) TEST_EXPECT(editor_test::write_text(project.root() + "/" + name, "the player's"));
+	editor_test::handle_to_end(project.session, request::rescan());
+	const SessionView &view = project.view();
+	const BuildPlan build = plan_build(ProjectPaths::for_root(project.root()), *view.project.scan, *view.project.requirements, {});
+	size_t told = 0;
+	for (const Diagnostic &d : build.diagnostics) told += d.code() == "build.player_file" && d.severity == DiagnosticSeverity::Warning;
+	TEST_EXPECT(build.ok && told == players.size());
+	for (const BuildEntry &entry : build.loose) TEST_EXPECT(!is_player_file(entry.logical_name));
+	for (const BuildArchive &archive : build.archives)
+		for (const BuildEntry &entry : archive.entries) TEST_EXPECT(!is_player_file(entry.logical_name));
+	return 0;
+}
+
 int run_import_apply_tests() {
 	int failures = 0;
+	failures += test_apply_never_player_files();
 	failures += test_apply_retail_mission_closure();
 	failures += test_apply_closure();
 	failures += test_apply_unchecked();

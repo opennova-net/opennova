@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <filesystem>
 
+#include <editor/assets/player_files.h>
 #include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;
@@ -40,6 +41,17 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			        CoreFinding::BuildArchiveInProject, DiagnosticSeverity::Error,
 			        asset.logical_name + " is an archive; the build packs the project's files itself, so "
 			                             "unpack it into the project or remove it.",
+			        asset.relative_path));
+			continue;
+		}
+		// The player's or this machine's own file (a save, a configuration, the stored credentials,
+		// what the game writes) is never packed: said, and left out (ADR 0046 S14,
+		// assets/player_files.h).
+		if (is_player_file(asset.logical_name)) {
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
+			        asset.logical_name + " is " + player_file_words(asset.logical_name) +
+			                ": a build never packs the player's own files, so it is left out.",
 			        asset.relative_path));
 			continue;
 		}

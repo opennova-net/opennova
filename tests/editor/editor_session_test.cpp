@@ -599,20 +599,23 @@ static int test_retail_play() {
 	session.poll();
 	TEST_EXPECT(session.view().activity.play_state == PlayState::Stopped);
 
-	// Ordinary installs use the plain Bink DLL, and the project's own game.cfg (a file the build
-	// copies loose) is the one the game reads. The run directory, its game gone, is taken again
-	// and emptied: what the last game wrote there goes. A missing source cannot launch the
-	// executable a run staged before.
+	// Ordinary installs use the plain Bink DLL. A game.cfg the project holds is this machine's
+	// configuration, never the project's: the build leaves it out and says so (ADR 0046 S14,
+	// assets/player_files.h), and the game reads the install's. The run directory, its game gone, is
+	// taken again and emptied: what the last game wrote there goes. A missing source cannot launch
+	// the executable a run staged before.
 	fs::remove(fs::path(install) / "binkw32_.dll");
 	TEST_EXPECT(editor_test::write_text(project + "/game.cfg", "project video settings"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && platform.last_plan.working_dir == run);
 	const std::string rebuilt = session.view().activity.last_build->build_dir;
-	TEST_EXPECT(rebuilt != built && read_file_text(rebuilt + "/game.cfg", copied, io_error) &&
-	            copied == "project video settings");
+	bool left_out = false;
+	for (const Diagnostic &d : session.view().activity.last_build->diagnostics)
+		left_out = left_out || (d.code() == "build.player_file" && d.asset == "game.cfg");
+	TEST_EXPECT(left_out && !fs::exists(rebuilt + "/game.cfg"));
 	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "project video settings");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
 	TEST_EXPECT(!fs::exists(run + "/_filelog.txt"));
 	const std::string rebuilt_tree = editor_test::tree_digest(rebuilt);
 	session.handle(request::stop_play());
