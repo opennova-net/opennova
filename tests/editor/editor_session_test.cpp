@@ -2184,6 +2184,61 @@ static int test_new_mission() {
 	return 0;
 }
 
+// S14: the two notes of a project that holds missions. A mission while the Missions feature is off
+// is one warning on the project, gone with the feature on. A file the game finds by a mission's
+// name alone (a script, a tile placement, a dialog bank) whose mission the project does not hold is
+// a note on it; a mission's own files and the scripts the game opens by a fixed name are none.
+// Neither gates a build.
+static int test_mission_notes() {
+	editor_test::TempProjectDir dir("opennova_editor_session_mission_notes");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "Notes"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 0 &&
+	            count_code(v.findings.diagnostics, "mission.sidecar.unused") == 0);
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
+	for (const char *file : {"missions/First.wac", "missions/lost.wac", "game.wac"})
+		TEST_EXPECT(editor_test::write_text(root + "/" + file, "// a script\r\n"));
+	for (const char *file : {"missions/first.til", "missions/lost.til", "missions/lost.dbf"})
+		TEST_EXPECT(editor_test::write_text(root + "/" + file, "x"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 1);
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "project.mission.feature_off")
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && d.asset.empty() && d.message.find("First.bms") != std::string::npos);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "mission.sidecar.unused") == 3);
+	for (const char *file : {"missions/lost.wac", "missions/lost.til", "missions/lost.dbf"}) {
+		const Diagnostic *note = finding_in(v.findings.diagnostics, "mission.sidecar.unused", file);
+		TEST_EXPECT(note && note->severity == DiagnosticSeverity::Info && note->message.find("lost.bms") != std::string::npos);
+	}
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	// The mission the files wait for comes: their notes go. The feature on: its warning goes.
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/Lost.bms", mission_bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "mission.sidecar.unused") == 0 &&
+	            count_code(v.findings.diagnostics, "project.mission.feature_off") == 1);
+	editor_test::set_missions(session, true);
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 0);
+	return 0;
+}
+
 // S11b: an optional file the project lacks is a note naming its row, counted apart from the
 // required ones and never a build's gate; made by name (its fix), its note goes.
 static int test_optional_rows() {
@@ -3911,6 +3966,7 @@ int main() {
 	failures += test_boot_findings();
 	failures += test_play_mission();
 	failures += test_new_mission();
+	failures += test_mission_notes();
 	failures += test_optional_rows();
 	failures += test_create_missing_roles();
 	failures += test_rewrite_closed_file();

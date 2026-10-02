@@ -38,7 +38,9 @@ struct ProjectFindingsInput {
 };
 
 // `rows`: every finding, the Problems rows the editor shows and `opennova-project validate`
-// prints, in order: the scan's, the requirements', the boot report's, the last Play's, the
+// prints, in order: the scan's, the requirements' (with the note of a mission in a project whose
+// Missions feature is off), the notes of the files the game finds by a mission's name that
+// nothing reads (ADR 0046 S14: mission.sidecar.unused), the boot report's, the last Play's, the
 // documents' (each file's own, the use checks', the asset graph's: graph/project_validation.h)
 // and the open documents' own, the document types' project checks' (documents/project_check.h,
 // in the registry's order: the menu type's render check's notes) and the last build's. The rows
