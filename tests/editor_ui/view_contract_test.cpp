@@ -98,6 +98,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Model, "armory.3di", file("threedi/synth/armory.3di")},
 	        {AssetKind::Animation, "walk.bad", file("anim/walk.bad")},
 	        {AssetKind::AnimationMap, "soldier.adm", file("anim/soldier.adm")},
+	        // A mission (S14): the minted one, its 3D viewport the tab's main view beside its outline.
+	        {AssetKind::Mission, "synth_logic.bms", file("bms/synth_logic.bms")},
 	        // The text types (S13 D9): a script, a music script, a credits file (whose lines its text
 	        // form cannot carry: held read only, drawn all the same), a plain shader and a
 	        // configuration.
@@ -226,10 +228,15 @@ void test_every_view() {
 			CHECK(!title.empty() && shown.find(title.substr(0, 8)) != std::string::npos,
 			      (where + ": the view draws its document (" + title + ")").c_str());
 			// A view that draws its records has no main viewport, nor does a text's where no device draws
-			// it (the workspace here has none); the frame it is asked in draws nothing.
+			// it (the workspace here has none); the frame it is asked in draws nothing. A row of an
+			// outline beside a Main-role viewport (the mission's, S14) draws its viewport's view in that
+			// frame: with no viewport kept for the document, its kind's message, raising nothing.
+			const bool main_beside_outline = row->role == DocumentViewRole::MainViewport && row->outline;
 			ImGui::NewFrame();
-			CHECK(!view->main_viewport(workspace, *document), (where + ": no main viewport drawn").c_str());
+			CHECK(view->main_viewport(workspace, *document) == main_beside_outline,
+			      (where + (main_beside_outline ? ": the main viewport drawn beside the outline" : ": no main viewport drawn")).c_str());
 			ImGui::Render();
+			CHECK(workspace.requests.empty(), (where + ": the main viewport raises nothing").c_str());
 			// A RevealRecord held until the view draws, taken as it draws.
 			ViewEvent reveal;
 			reveal.kind = ViewEventKind::RevealRecord;
@@ -261,7 +268,8 @@ void test_every_view() {
 		types += drawn > 0 ? 1 : 0;
 	}
 	CHECK(types == kDocumentTypeCount, "every document type's view drawn");
-	CHECK(main_rows == 5 && scripts == 5, "every text type's row the Main role's, its view the script view");
+	CHECK(main_rows == 6 && scripts == 5,
+	      "every text type's row the Main role's, its view the script view, and the mission's row the Main role's too");
 	std::printf("%zu document types, %zu views over their files, %zu frames drawn, %zu script views\n", types, views,
 	            frames, scripts);
 }

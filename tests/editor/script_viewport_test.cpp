@@ -107,7 +107,7 @@ std::unique_ptr<DocumentBase> document_of(AssetKind kind, const std::string &tex
 // --- the kinds' table --------------------------------------------------------------------------------
 
 int test_kind_table() {
-	TEST_EXPECT(kViewportKindCount == 3);
+	TEST_EXPECT(kViewportKindCount == 4); // the menu's, the model's, the script's, the mission's (S14)
 	TEST_EXPECT(std::string(viewport_kind_token(ViewportKind::Script)) == "script");
 	ViewportKind named = ViewportKind::kCount;
 	TEST_EXPECT(viewport_kind_from_token("script", named) && named == ViewportKind::Script);
@@ -130,8 +130,10 @@ int test_kind_table() {
 	}
 	for (size_t i = 1; i <= kDocumentTypeCount; ++i) mains += main_viewport_kind(static_cast<DocumentTypeId>(i)) != ViewportKind::kCount;
 	for (size_t i = 0; i < kViewportKindCount; ++i)
-		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) == (i == size_t(ViewportKind::Script)));
-	TEST_EXPECT(shown == 5 && mains == 5);
+		// The Main-role kinds: the script's and the mission's (S14).
+		TEST_EXPECT((viewport_kind_row(static_cast<ViewportKind>(i)).role == ViewportRole::Main) ==
+		            (i == size_t(ViewportKind::Script) || i == size_t(ViewportKind::Mission)));
+	TEST_EXPECT(shown == 5 && mains == 6); // the five text types and the mission (S14) have a Main-role kind
 	// Its viewport: no options, no camera, no canvas; the empty one's reason.
 	std::unique_ptr<ViewportModel> made = row.make("t.wac");
 	TEST_EXPECT(made && made->kind() == ViewportKind::Script && !made->make_canvas() && made->options_json().is_object() &&

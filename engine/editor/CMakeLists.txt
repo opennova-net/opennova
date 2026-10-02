@@ -118,10 +118,13 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_screen_render.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_camera.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_options.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_scene.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_source.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/mission_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_handle_edit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/model_overlay.cpp
@@ -225,6 +228,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/main_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/menu_viewport_view.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/mission_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/model_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_model.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/outline_view.cpp

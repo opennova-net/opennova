@@ -4062,6 +4062,16 @@ target_link_libraries(editor_mission_scene_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_scene_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
 
+# The mission viewport (editor/preview/mission_viewport, ADR 0046 S14) over a real session, a
+# project holding the minted mission (fixtures/bms/synth_logic.bms) and fake devices: the kind's
+# row, its status and follow, what each change set comes to (an entity's transform an Update, an
+# event's field Keep with no row read, an Add and the header's terrain a Rebuild), a Rebuild held for
+# a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope.
+add_executable(editor_mission_viewport_test editor/mission_viewport_test.cpp)
+target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mission_viewport COMMAND editor_mission_viewport_test)
+
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
 add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)

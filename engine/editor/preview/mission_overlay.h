@@ -10,10 +10,6 @@
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 
-// STAGED, NOT WIRED: the mission viewport (preview/mission_viewport.cpp, ADR 0046 S14 V6) is the live
-// owner, drawing these shapes for its canvas; until it lands, the overlays' test (editor_mission_scene)
-// draws them over a scene it holds.
-
 namespace opennova::editor {
 
 class ViewportDevice;
