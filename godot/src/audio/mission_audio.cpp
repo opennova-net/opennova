@@ -249,6 +249,33 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		marker_rows = opennova::audio::resolve_envs_markers(
 				p_mission->native_file(), item_db_->native_items());
 	}
+	// A header-only join's document has no entities: its emitters arrive with
+	// the host's world stream, built once the joiner is in the match (tick).
+	world_envs_pending_ = ambient_markers_enabled_ && item_db_.is_valid() &&
+			p_mission->is_wire_header_only();
+	_add_envs_markers(marker_rows);
+
+	// Silence here has historically gone unnoticed (a bare stats print) -- warn on
+	// the two states that mean "no ambience will play" so they surface in logs.
+	if (stats_->get_banks_loaded() == 0) {
+		UtilityFunctions::push_warning(vformat(
+				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
+				mission_base, global_chain_text));
+	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
+		UtilityFunctions::push_warning(vformat(
+				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
+				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
+	}
+
+	_feed_mixer();
+	_apply_reverb(mission_info.is_valid() ? mission_info->get_reverb() : 0);
+	_apply_music(mission_info.is_valid() ? mission_info->get_music() : 0);
+	return stats_;
+}
+
+// One marker per envs row whose authored slot sets the loaded bank chain
+// carries (the bank-presence filter is this shell's stream concern).
+void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMarker> &marker_rows) {
 	for (const opennova::audio::EnvsMarker &row : marker_rows) {
 		stats_->set_markers_total(stats_->get_markers_total() + 1);
 		// Authored slot names -> playable slots: only sets the loaded bank chain
@@ -309,23 +336,6 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		stats_->set_markers_resolved(stats_->get_markers_resolved() + 1);
 		stats_->set_ambient_candidates(stats_->get_ambient_candidates() + candidate_count);
 	}
-
-	// Silence here has historically gone unnoticed (a bare stats print) -- warn on
-	// the two states that mean "no ambience will play" so they surface in logs.
-	if (stats_->get_banks_loaded() == 0) {
-		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
-				mission_base, global_chain_text));
-	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
-		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
-				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
-	}
-
-	_feed_mixer();
-	_apply_reverb(mission_info.is_valid() ? mission_info->get_reverb() : 0);
-	_apply_music(mission_info.is_valid() ? mission_info->get_music() : 0);
-	return stats_;
 }
 
 TypedArray<int64_t> MissionAudio::active_ambient_candidate_ids() const {
@@ -739,6 +749,16 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		perf_voice_writes_ = 0;
 		perf_tick_us_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - start);
 		return;
+	}
+	// A header-only join's envs emitters, once the host's world stream has
+	// landed (pool 3, the markers, streams last, before the match opens).
+	if (world_envs_pending_) {
+		const Ref<Simulation> sim = _simulation();
+		if (sim.is_valid() && sim->is_joined_in_match() && item_db_.is_valid()) {
+			world_envs_pending_ = false;
+			_add_envs_markers(sim->envs_markers_from_world(item_db_->native_items()));
+			_feed_mixer();
+		}
 	}
 	// Autonomous owners register at the current clock before consuming this
 	// render frame's elapsed time. World-driven callers normally flush chronologically

@@ -1,4 +1,5 @@
 #pragma once
+#include <runtime/audio/envs_markers.h>
 #include <runtime/world/minefield.h>
 
 #include <godot_cpp/classes/ref_counted.hpp>
@@ -664,11 +665,8 @@ private:
 	// P7 block below). The joiner role drives the connect legs + the per-frame S2C->ClientState fold +
 	// the C2S 0x0C uplink over a dialed UdpPump; its own player L runs run_logic_tick(false), remotes
 	// render wire-direct. (engine: runtime/inmatch/joiner_connection.h) The session kind is the flag.
-	// The joiner's per-frame world<->net frame (S10a, ADR 0028; ADR 0043 d3):
-	// frame sequence, latches (started/spawned/redeploy/tripwire), the join
-	// request, wire-header materializer, per-replica resolver state and every
-	// engine leg live on joiner_role_; this binding keeps the loadout profile
-	// seams (joiner_kit_seams) and reads the role's observer facts.
+	// The joiner's per-frame world<->net frame (S10a, ADR 0028; ADR 0043 d3) lives on joiner_role_;
+	// this binding keeps the loadout profile seams (joiner_kit_seams) and reads its observer facts.
 	// The joiner's streamed pool-1..3 rows with a placed identity, as the
 	// entity dictionaries MissionObjectPlacer.place_entities consumes (kind,
 	// index, bms_id, item_id, position, rotation_deg, team, group, ai_flags).
@@ -1235,6 +1233,8 @@ public:
 	PackedByteArray take_tip_events();
 	// Take the S2C 0x0F's pending death-screen HUD blank (world.out.hud_detail_blank).
 	bool take_hud_detail_blank();
+	// The envs emitters of the streamed world (audio::resolve_envs_markers over the registry).
+	std::vector<opennova::audio::EnvsMarker> envs_markers_from_world(const opennova::def::DefItemsFile &p_items) const;
 	// The deploy keys' event-12 parameter for a Windows VK (inmatch::deploy_key_pick), -1 if not taken.
 	int deploy_key_pick(int p_vk);
 	// Exact pre-world payloads retained by the joiner from retail's initial

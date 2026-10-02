@@ -114,6 +114,12 @@ PackedByteArray Simulation::take_tip_events() {
 	return out;
 }
 
+std::vector<opennova::audio::EnvsMarker> Simulation::envs_markers_from_world(
+		const opennova::def::DefItemsFile &p_items) const {
+	if (!kernel_) return {};
+	return opennova::audio::resolve_envs_markers(kernel_->world, p_items);
+}
+
 bool Simulation::take_hud_detail_blank() {
 	if (kernel_ == nullptr) return false;
 	bool &pending = kernel_->world.out.hud_detail_blank;

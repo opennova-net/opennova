@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <runtime/audio/dialog_queue.h>
+#include <runtime/audio/envs_markers.h>
 #include <runtime/world/script_voice.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
@@ -255,6 +256,9 @@ private:
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
+	// A header-only join defers its envs markers to the streamed world (tick).
+	bool world_envs_pending_ = false;
+	void _add_envs_markers(const std::vector<opennova::audio::EnvsMarker> &p_rows);
 	ObjectID simulation_id_; // occlusion LOS; optional
 	// Test-injection seam (Callable(listener, source, dist_q16, source_id) -> int),
 	// forwarded to the bank and every fresh mixer; production uses the sim.
