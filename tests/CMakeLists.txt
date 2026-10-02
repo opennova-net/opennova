@@ -3341,6 +3341,12 @@ add_executable(npruntime_door_relay_test npruntime/door_relay_test.cpp)
 target_link_libraries(npruntime_door_relay_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_door_relay COMMAND npruntime_door_relay_test)
 
+# D-NET-284: the host's join-window kill page (C2S 0x28 -> S2C 0x4E).
+add_executable(npruntime_kill_page_test npruntime/kill_page_test.cpp)
+target_link_libraries(npruntime_kill_page_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_kill_page_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_kill_page COMMAND npruntime_kill_page_test)
+
 # D-NET-281: the death screen's team change (C2S 0x4D), host side.
 add_executable(npruntime_team_change_request_test npruntime/team_change_request_test.cpp)
 target_link_libraries(npruntime_team_change_request_test PRIVATE opennova_runtime)

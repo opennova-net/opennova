@@ -141,12 +141,22 @@ std::vector<uint8_t> serialize_class_allow_mask(uint16_t class_allow_mask) {
 	return b;
 }
 
-// [orig: NetPacket_WriteTimestamp @0x5046c0] S2C 0x1A: a 4-byte timestamp. The original writes
-// GetTickCount() (an OS primitive — excluded from the faithful-port rule); the headless host uses
-// its monotonic logic tick.
-std::vector<uint8_t> serialize_timestamp(uint32_t now_tick) {
+// The host's GetTickCount: the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes
+// back as its C2S 0x28 kill-page window, in the domain the 0x26 sender stamps
+// entity+560 with (the world's logic tick through the deterministic seam; the
+// connection clock only on the World-less unit path).
+// [orig: NetPacket_WriteTimestamp @0x5046C0 / NetPacket_WriteTimestampB
+//  @0x5046F0 / NetPacket_WriteWorldStateLoad0x0F @0x502D27 — GetTickCount();
+//  Server_SendEntityStatePacket @0x509D7A]
+uint32_t host_tick_count(const NapiNPServerCtx &ctx, uint32_t now_tick) {
+	return io::host_milliseconds_for_logic_tick(
+			ctx.world != nullptr ? ctx.world->logic_tick : now_tick);
+}
+
+// [orig: NetPacket_WriteTimestamp @0x5046c0] S2C 0x1A: the 4-byte GetTickCount.
+std::vector<uint8_t> serialize_timestamp(uint32_t tick_count) {
 	std::vector<uint8_t> b;
-	put_u32(b, now_tick);
+	put_u32(b, tick_count);
 	return b;
 }
 
@@ -203,7 +213,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	}
 	std::vector<uint8_t> b;
 	b.reserve(640);
-	put_u32(b, now_tick);                        // sessionTick
+	put_u32(b, host_tick_count(ctx, now_tick)); // GetTickCount @0x502D27
 	put_u32(b, static_cast<uint32_t>(px));        // spawn pos (16.16)
 	put_u32(b, static_cast<uint32_t>(py));
 	put_u32(b, static_cast<uint32_t>(pz));
@@ -591,7 +601,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		} else if (tag == s2c::CLASS_ALLOW_MASK) {
 			body = serialize_class_allow_mask(ctx.config.class_allow_mask);
 		} else if (tag == s2c::WAIT_FOR_GAME_START_ACK) {
-			body = serialize_timestamp(now_tick);
+			body = serialize_timestamp(host_tick_count(ctx, now_tick));
 		} else if (tag == s2c::SERVER_CONFIG_STRINGS) {
 			body = serialize_briefing_text(ctx);
 		}

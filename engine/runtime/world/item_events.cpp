@@ -5,11 +5,11 @@
 #include <runtime/world/collision.h>
 #include <base/io/bam.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <runtime/world/angle.h>
 #include <runtime/terrain_query/height_field.h>
 #include <cstring>
 #include <algorithm>
-#include <chrono>
 #include <iterator>
 #include <runtime/audio/ambient_mixer.h>
 
@@ -614,9 +614,11 @@ void building_event(World &world, Entity &target) {
 
 void emit_item_state(World &world, Entity &target, int32_t section) {
     if (world.rules.logic_authority && world.rules.mp_session) {
-        // GetTickCount's portable monotonic millisecond equivalent.
-        target.last_state_sent_ms = uint32_t(std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count());
+        // The host's GetTickCount seam, the clock its S2C 0x19 / 0x1A / 0x0F
+        // stamps and the C2S 0x28 kill-page window share.
+        // [orig: Server_SendEntityStatePacket @0x509D70 — entity+560 =
+        //  GetTickCount() @0x509D7A]
+        target.last_state_sent_ms = io::host_milliseconds_for_logic_tick(world.logic_tick);
         world.out.entity_events.push_back(ItemStateEvent{target.handle.packed, static_cast<int16_t>(section)});
     }
 }

@@ -3,6 +3,7 @@
 #include <runtime/inmatch/server_visible_players.h>
 #include <runtime/inmatch/server_doors.h>
 #include <runtime/inmatch/server_team_change.h>
+#include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
 #include <runtime/inmatch/server_loadout_grant.h> // the 0x2F grant family (GrantedWeaponLoadout, grant_weapon_loadout, ...)
@@ -1588,8 +1589,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// dword_81474C (the deploy gate) via NapiClient_WaitForGameStart @0x42cc10,
 				// re-blocking deploy after 0x0F cleared it. The 0x16 pushes are proactive
 				// (post-handshake + periodic during world-stream), not reactive to 0x0A.
+				// The body is the host's GetTickCount, the 0x28 window's floor.
 				// [orig: NetPacket_WriteTimestampB @0x5046f0 -> S2C 0x19 @0x5132f1]
-				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP, build_tag1a_tick(now_tick)));
+				replies.push_back(make_protocol_message(s2c::SPAWN_ACK_TIMESTAMP,
+						build_tag1a_tick(io::host_milliseconds_for_logic_tick(
+								world != nullptr ? world->logic_tick : now_tick))));
 				break;
 			case c2s::TEAM_SPAWN_ACK: { // team/spawn ack [u16 team_change_index] — NO reply on a plain join.
 				// [orig: NapiNPServerMsg_0x029 @0x514F10] replies S2C 0x51 ONLY when the index
@@ -2423,24 +2427,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 								config.game_type, peer)));
 				break;
 			}
-			case c2s::LOADOUT_REQUEST: { // §5.33 burst -> S2C 0x4E.
-				// Every witnessed reply to the join-burst 0x28 is the 2-byte
-				// sentinel `FF FF` (count 0xFFFF, no slots — nw_pp:
-				// "batch-despawn count=65535 slots=0" in all three retail
-				// goldens). Real kill batches ride the event-driven despawn
-				// stream (D-NET-66), not this request reply; a non-sentinel
-				// reply form is unwitnessed.
-				// [orig: NapiNPServerMsg_HandleWeaponLoadoutRequest @0x51A550]
-				BurstLoadoutRequest loadout_req;
-				std::size_t consumed = 0;
-				if (!decode_burst_loadout_request(
-						msg.payload.data(), msg.payload.size(), loadout_req,
-						consumed))
-					break;
-				replies.push_back(make_protocol_message(
-						s2c::KILL_BY_SLOT, {0xFF, 0xFF}));
+			case c2s::LOADOUT_REQUEST: // the join-window kill page -> S2C 0x4E (server_kill_page.h)
+				for (ProtocolMessage &m : Server_HandleKillPageRequest(
+						inputs.server_ctx, conn, msg.payload, world))
+					replies.push_back(std::move(m));
 				break;
-			}
 			default:
 				// The command map's squad / waypoint / punt legs (server_squad.h); 0x09
 				// checksum / 0x48 + per-frame client updates: consumed (no reactive reply).
