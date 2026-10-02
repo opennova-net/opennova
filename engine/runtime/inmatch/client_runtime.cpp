@@ -1103,6 +1103,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 				current_tick_ = pr.tick_seed;
 				last_keepalive_tick_ = pr.tick_seed;
 			}
+			// The mission start's globals reset follows the whole receive pass
+			// that ended the mission-data spin, so a reset folded in the same
+			// pass is cleared with the rest (JoinerConnection::mission_started).
+			// [orig: Game_StartMission `mov g_SpawnSuccessGate, ebx` @0x524a1f]
+			if (pr.mission_started) view_.state().spawn_success_gate = false;
 			if (pr.send_holdoff_set) {
 				// The CS handler stores the dictated period only. The earlier
 				// join-response leg reset this connection's counter to zero, so
@@ -1233,7 +1238,19 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// [orig: Client_ProcessNetworkFrame @0x42c3ab..0x42c3d3 -- `cmp
 	//  is_in_session` / `cmp is_authority` / `cmp g_SpawnSuccessGate` /
 	//  `sub eax, ebp` / `mov g_MissionExitReason, 4`]
-	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() &&
+	// Retail reads the gate only from the game loop's frame and from the two
+	// join waits that run after the mission start cleared it; either wait
+	// returns on it into the game loop, whose frame then runs this countdown.
+	// The earlier join stages never read it (the mission start clears what
+	// they let through: JoinerConnection's mission_started).
+	// [orig: NapiClient_WaitForDisconnect @0x42cbc5 -> "Mission loading
+	//  aborted 1" @0x524db0..0x524dd1; NapiClient_WaitForGameStart @0x42cca1
+	//  -> "aborted 3" @0x524e2e..0x524e4f; both push g_GameModeGameLoop]
+	const bool gate_read = joiner_ != nullptr &&
+			(joiner_->in_match() ||
+			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::SyncTailWait ||
+			 joiner_->send_pump_loop() == JoinerConnection::SendPumpLoop::WorldStreamWait);
+	if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session() && gate_read &&
 			view_.state().spawn_success_gate) {
 		int32_t &linger = view_.state().end_round_linger_ticks;
 		linger -= 1;

@@ -30,6 +30,7 @@
 //  Client_ProcessNetworkFrame @0x42c3dd]
 
 #include <runtime/inmatch/client_runtime.h>
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
 
 #include <net/npwire/ingame_decode.h>
@@ -477,11 +478,47 @@ bool run_an_in_match_joiner_keeps_the_frame_gate() {
 
 } // namespace
 
+// A host's round reset that lands before the mission data is done does not
+// survive the mission start: Game_StartMission clears the round-over gate
+// after the mission-data spin, so the joiner goes on into the match instead of
+// running the end-round linger out.
+// [orig: NapiNPClientMsg_GameReset @0x422849 (the gate); Game_StartMission
+//  @0x524a1f (the clear) after InitRandomSeedOrRequest @0x5248a7]
+bool run_a_reset_before_the_mission_start_is_cleared() {
+	Harness h;
+	if (!expect(h.handshake(), "reset: handshake")) return false;
+	h.frame({settings_record(0), settings_record(1)});
+	h.frame({make_protocol_message(0x00, {})});
+	std::vector<uint8_t> probe(64, 0);
+	probe[8] = 16;
+	h.frame({make_protocol_message(0x02, probe)});
+	h.frame({make_protocol_message(0x03, {0x01})});
+	h.frame({make_protocol_message(0x05, {0x01}),
+			make_protocol_message(0x04, slot_assignment(0x02)),
+			make_protocol_message(0x7B, full_player_info())});
+	for (int i = 0; i < 4; ++i) h.frame();
+	h.frame({make_protocol_message(0x60, transfer_chunk(1, 171, 0, 171, 0xA5))});
+	h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 0, 100, 0x5A))});
+	// The host resets its round while the mission data is still arriving.
+	h.frame({make_protocol_message(0x25, {})});
+	if (!expect(h.client.state().spawn_success_gate,
+			"reset: the 0x25 raises the round-over gate"))
+		return false;
+	h.frame({make_protocol_message(0x64, transfer_chunk(1, 180, 100, 80, 0x5A))});
+	if (!expect(!h.client.state().spawn_success_gate,
+			"reset: the mission start clears the gate"))
+		return false;
+	for (int i = 0; i < 8; ++i) h.frame();
+	return expect(h.client.mission_exit_reason() == inmatch::kMissionExitNone,
+			"reset: the joiner does not leave the match it is loading");
+}
+
 int main() {
 	bool ok = true;
 	ok = run_admission_follows_the_retail_loading_loops() && ok;
 	ok = run_timed_loops_pace_an_undictated_connection() && ok;
 	ok = run_an_in_match_joiner_keeps_the_frame_gate() && ok;
+	ok = run_a_reset_before_the_mission_start_is_cleared() && ok;
 	if (ok) std::printf("client_loading_pump_test: OK\n");
 	return ok ? 0 : 1;
 }

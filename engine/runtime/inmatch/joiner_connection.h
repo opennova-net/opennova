@@ -176,6 +176,13 @@ public:
 		//  <- @0x4297fd; a short body seeds 0 @0x4297eb]
 		bool tick_seed_set = false;
 		uint32_t tick_seed = 0;
+		// The final mission-data chunk ended InitRandomSeedOrRequest's spin:
+		// Game_StartMission runs on to its globals reset, which clears the
+		// round-over gate a reset or round end received earlier in the join
+		// had raised. [orig: Game_StartMission @0x524a10..0x524a1f —
+		//  Chat_ClearAllChannels, `mov g_SpawnSuccessGate, ebx` (0), after the
+		//  InitRandomSeedOrRequest call @0x5248a7]
+		bool mission_started = false;
 		bool send_holdoff_set = false;
 		uint32_t send_holdoff = 0;
 		std::vector<WeaponLoadout> loadout_grants;

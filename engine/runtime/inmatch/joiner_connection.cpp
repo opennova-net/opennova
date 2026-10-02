@@ -1163,6 +1163,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 							0x37, le32_pair(chunk.transfer_id, next_offset)));
 				} else {
 					post_auth_stage_ = PostAuthStage::AwaitPlayerList;
+					out.mission_started = true;
 					if (player_list_seen_) {
 						out.outbound.push_back(frame_session({
 								make_protocol_message(c2s::CHECKSUM_RESPONSE, {}),
