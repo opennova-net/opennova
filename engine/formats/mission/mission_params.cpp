@@ -435,6 +435,21 @@ MissionChoices trigger_sub_types(int32_t main_type) {
 	return {};
 }
 
+bool trigger_reads_sub_type(int32_t main_type) {
+	switch (static_cast<bms::TriggerMainType>(main_type)) {
+	case bms::TriggerMainType::Group:
+	case bms::TriggerMainType::Single:
+	case bms::TriggerMainType::MissionVariable:
+	case bms::TriggerMainType::Teammate:
+	case bms::TriggerMainType::Player: return true;
+	// The event's latch whatever the sub-type [orig: EventTrigger_EvaluateCondition cat 3 @0x453a75];
+	// the load parity, returned raw [orig: cat 5 @0x453B24].
+	case bms::TriggerMainType::Event:
+	case bms::TriggerMainType::SecondTimeThrough: return false;
+	}
+	return false;
+}
+
 MissionChoices action_sub_types(int32_t action_type) {
 	switch (static_cast<bms::ActionType>(action_type)) {
 	case A::ChangeGroupAI:

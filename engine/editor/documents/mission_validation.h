@@ -11,11 +11,14 @@ namespace opennova::editor {
 // The mission document type's validator over one mission (DocumentType::validate_file), an open
 // document standing in for its file: what the game makes of what the file holds, from the document
 // alone. The source findings first (a rewrite that differs, the events' runs); then the records:
-// an SSN or a zone id two records carry, a degenerate zone, a zone id outside the editor's 1..99,
+// an SSN or a zone id two records carry (an SSN's second worded by what reaches it: the lookups by
+// SSN never, an area check every organic and item), an alive test's SSN only markers carry, a
+// degenerate zone, a zone id outside the editor's 1..99,
 // an event index past the table, a stop naming a marker the file lacks, a path's stored count past
 // its slots, a one-stop path, an entity on an empty path or starting past its count, a group past
 // the 64 the tables hold, a pool past the game's limits, two game mode bits, a trigger type the
-// evaluator lacks, a bounding box with a corner past the other. References to other files are the
+// evaluator lacks (a sub-type only where its main type's case reads one), a bounding box with a
+// corner past the other. References to other files are the
 // asset graph's; what an entity's pool makes of its item's TYPE is the mission's use check
 // (graph/use_checks.cpp, mission.pool), which reads the item through the graph.
 std::vector<Diagnostic> validate_mission_file(const DocumentBase &document);
@@ -27,6 +30,7 @@ enum class MissionFinding {
 	InvalidInput, // the events' runs the chains cannot hold (mission.invalid_input, blocks the save)
 	EventOrder,
 	SsnDuplicate,
+	SsnMarker, // an alive test's SSN only markers carry, which the test never scans
 	ZoneDuplicate,
 	ZoneDegenerate,
 	ZoneId,

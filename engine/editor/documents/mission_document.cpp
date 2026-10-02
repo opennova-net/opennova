@@ -553,9 +553,9 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 		const EntityRow &entity = static_cast<const EntityRow &>(*node);
 		// What the picker shows beside the SSN: the item the record is.
 		facts.value = std::to_string(entity_item_id(entity.native));
-		// The lookups scan the pools in order and take the first row of the SSN [orig:
+		// The lookups by SSN scan the pools in order and take the first row of the SSN [orig:
 		// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0]: a later one is
-		// found by none.
+		// found by none of them (the graph resolves to the first).
 		bool before = true;
 		for (const auto &other : rows()) {
 			if (other.get() == node) {
@@ -567,8 +567,13 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 			const int theirs = lookup_order(other->kind), mine = lookup_order(node->kind);
 			if (theirs < mine || (theirs == mine && before)) {
 				facts.inert = true;
-				facts.inert_reason = "another entity has this SSN, and the game's lookups find the first in pool order "
-				                     "(organics, items, buildings, markers)";
+				// An area check tests every organic and item of the SSN [orig: Entity_IsBmsRefInTriggerBounds
+				// @0x43e510]: this one too.
+				facts.inert_reason = node->kind == k(K::Organic) || node->kind == k(K::Item)
+				                             ? "another entity has this SSN, and the game's lookups by SSN find the first in "
+				                               "pool order (organics, items, buildings, markers); an area check tests this one too"
+				                             : "another entity has this SSN, and the game's lookups by SSN find the first in "
+				                               "pool order (organics, items, buildings, markers)";
 				return;
 			}
 		}

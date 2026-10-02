@@ -818,9 +818,44 @@ int test_validation() {
 	const NodeAddress path1 = row_at(*document, MissionKind::WaypointPath, 1);
 	const NodeAddress stop0 = first_child(*document, path1, MissionKind::Stop);
 	const int walker_ssn = static_cast<const EntityRow *>(document->row(organic0.row))->native.id;
-	// An SSN a second record carries: the one the lookups find (the organic) stands, the item is noted.
+	// An SSN a second record carries: the one the lookups find (the organic) stands, the item is noted,
+	// worded by what reaches it (the lookups by SSN never, an area check every organic and item).
 	TEST_EXPECT(one(edit_of(EditOperation::Set, item0, "id", int64_t(walker_ssn)), "mission.ssn_duplicate",
 	                DiagnosticSeverity::Warning, item0, "id"));
+	{
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, item0, "id", int64_t(walker_ssn)), error));
+		const std::vector<Diagnostic> found = type.validate_file(*document);
+		document->undo();
+		TEST_EXPECT(found.size() == 1 && found[0].message.find("never this, but an area check (SingleIsWithinArea) tests "
+		                                                       "every organic and item carrying it, this one too.") !=
+		                                         std::string::npos);
+	}
+	// An alive test's SSN only a marker carries: the test never scans the markers (SingleAlive false,
+	// SingleDestroyed true). The trigger made SingleAlive on the first marker's SSN.
+	{
+		const int marker_ssn = static_cast<const EntityRow *>(document->row(row_at(*document, MissionKind::Marker, 0).row))->native.id;
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(bms::SingleTriggerType::SingleAlive)), error) &&
+		            document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(marker_ssn)), error));
+		const std::vector<Diagnostic> found = type.validate_file(*document);
+		TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.ssn_marker" && found[0].severity == DiagnosticSeverity::Warning &&
+		            found[0].child_id == trigger0.child && found[0].field == "param1");
+		// On the walker's SSN it reads as written: no finding.
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(walker_ssn)), error) &&
+		            type.validate_file(*document).empty());
+		while (document->can_undo()) document->undo();
+	}
+	// Event's and SecondTimeThrough's cases read no sub-type: any is theirs, and the Inspector shows it
+	// unread.
+	{
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "main_type", int64_t(bms::TriggerMainType::SecondTimeThrough)), error) &&
+		            document->apply(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(3)), error));
+		TEST_EXPECT(type.validate_file(*document).empty());
+		FieldUse sub;
+		for (const FieldSchema &schema : document->fields(trigger0.kind))
+			if (schema.id == "sub_type") sub = document->field_on(trigger0, schema);
+		TEST_EXPECT(sub.applies == Applicability::Ignored);
+		while (document->can_undo()) document->undo();
+	}
 	TEST_EXPECT(one(edit_of(EditOperation::Set, area1, "id", int64_t(20)), "mission.zone_duplicate", DiagnosticSeverity::Warning,
 	                area1, "id"));
 	TEST_EXPECT(one(edit_of(EditOperation::Set, area0, "x_max", -150.0), "mission.zone_degenerate", DiagnosticSeverity::Warning,
@@ -1041,7 +1076,11 @@ int test_retail() {
 				default: break;
 				}
 			}
-			for (const Diagnostic &d : type.validate_file(*document)) ++findings_by_code[d.code()];
+			for (const Diagnostic &d : type.validate_file(*document)) {
+				++findings_by_code[d.code()];
+				if (d.code() == "mission.ssn_marker")
+					std::printf("  %s, %s: %s\n", file.logical_name.c_str(), d.record.c_str(), d.message.c_str());
+			}
 		}
 	}
 	if (missions == 0) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
@@ -1056,8 +1095,8 @@ int test_retail() {
 	// parameters with 140 missing, before the waypoint riders and the Redirect actions' entity slot
 	// were parameters of that kind; the rest as it counted): no event reference past its table, no
 	// stop past the markers, and the findings the validator makes over the shipped missions, one
-	// path counted past its slots (CP19), 36 SSNs carried twice, every mission with an entity on an
-	// empty path.
+	// path counted past its slots (CP19), 36 SSNs carried twice, one alive test on a marker's SSN
+	// (CP13's SSN 2072), every mission with an entity on an empty path.
 	TEST_EXPECT(missions == 115 && differing == 5);
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
 	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 1574);
@@ -1066,9 +1105,10 @@ int test_retail() {
 	                                            {"STRNAME", 544},      {"STRWINCOND", 130},      {"STRWINDIRECTIVE", 133},
 	                                            {"STRWINMSG", 140}};
 	TEST_EXPECT(text_by_key == keys);
-	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},  {"mission.path_empty", 115},
-	                                                {"mission.path_one_shot", 72}, {"mission.path_start", 95},
-	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36}};
+	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},      {"mission.path_empty", 115},
+	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 95},
+	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36},
+	                                                {"mission.ssn_marker", 1}};
 	TEST_EXPECT(findings_by_code == expected);
 	return 0;
 }

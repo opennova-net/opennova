@@ -80,6 +80,11 @@ MissionChoices param_choices(ParamKind kind);
 // sub-type selects nothing (its sub-type is 0, "Null").
 MissionChoices trigger_sub_types(int32_t main_type);
 MissionChoices action_sub_types(int32_t action_type);
+// Whether the evaluator reads a trigger's sub-type under its main type: every case but Event's, which
+// tests the event's latch whatever the sub-type, and SecondTimeThrough's, which returns the load
+// parity; a main type with no case reads nothing [orig: EventTrigger_EvaluateCondition @0x453620;
+// docs/mission/bms-event-runtime-re.md 1.4, 7.4].
+bool trigger_reads_sub_type(int32_t main_type);
 
 // The waypoint path numbers that name no path: 0 none, and the commands 123..127.
 inline constexpr int32_t kFirstPathCommand = 123, kLastPathCommand = 127;

@@ -525,7 +525,14 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 			                                                                              : Applicability::Reads;
 		};
 	}
-	if (field.record == MissionRecord::Trigger && same_text(field.key, "sub_type")) entry.open_choices = true;
+	if (field.record == MissionRecord::Trigger && same_text(field.key, "sub_type")) {
+		entry.open_choices = true;
+		// Event's and SecondTimeThrough's cases never read it (mission_params.h).
+		out.applies = [](const RecordHandle &record, const RecordOwners &) {
+			return trigger_reads_sub_type(int32_t(record.as<bms::Trigger>().main_type)) ? Applicability::Reads
+			                                                                           : Applicability::Ignored;
+		};
+	}
 	if (field.record == MissionRecord::Action && same_text(field.key, "action_sub_type")) entry.open_choices = true;
 	if (field.record == MissionRecord::Entity) {
 		// The number beside a waypoint list that is a command 123..125 is the SSN of the entity to go

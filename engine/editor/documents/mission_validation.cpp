@@ -1,7 +1,8 @@
 // The mission type's findings (mission_validation.h): its table, and validate_file over a mission
 // document: the source findings its parse made (a rewrite that differs, the events' runs and their
 // order), then what the game makes of the records (ADR 0046 S14): an SSN or a zone id two records
-// carry, a degenerate zone, a zone id outside the editor's range, an event index past the table, a
+// carry, an alive test's SSN only markers carry, a degenerate zone, a zone id outside the editor's
+// range, an event index past the table, a
 // stop naming a marker the file lacks, a path counted past its slots or holding one stop, an entity on
 // an empty path or starting past its count, a group past the tables, a pool past the game's limits,
 // two game mode bits, a trigger type the evaluator lacks, a bounding box with a corner past the other.
@@ -9,6 +10,7 @@
 // mission.pool), which reads the item through the graph.
 #include "mission_validation.h"
 
+#include <algorithm>
 #include <iterator>
 #include <map>
 #include <string>
@@ -35,6 +37,7 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::InvalidInput, { "mission.invalid_input", FindingFix::None, nullptr, true } },
 	{ MissionFinding::EventOrder, { "mission.event_order", FindingFix::Rewrite, kRewriteRuns } },
 	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate" } },
+	{ MissionFinding::SsnMarker, { "mission.ssn_marker" } },
 	{ MissionFinding::ZoneDuplicate, { "mission.zone_duplicate" } },
 	{ MissionFinding::ZoneDegenerate, { "mission.zone_degenerate" } },
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
@@ -92,6 +95,8 @@ int lookup_order(NodeKind kind) {
 struct Checker {
 	const MissionDocument &document;
 	std::vector<Diagnostic> &findings;
+	// The SSNs only markers carry, each to its first marker (entities(), before events()).
+	std::map<int32_t, const Node *> marker_ssns;
 
 	Diagnostic &on(const NodeAddress &address, MissionFinding code, DiagnosticSeverity severity, std::string message,
 	               const char *field = "") {
@@ -142,16 +147,27 @@ struct Checker {
 			}
 		}
 		for (auto &[ssn, rows] : by_ssn) {
+			// An SSN no organic, item or building carries: what the alive test finds none of (events()).
+			if (std::none_of(rows.begin(), rows.end(), [](const Node *row) { return row->kind != k(K::Marker); }))
+				marker_ssns.emplace(ssn, rows[0]);
 			if (rows.size() < 2) continue;
 			const Node *found = rows[0];
 			for (const Node *row : rows)
 				if (lookup_order(row->kind) < lookup_order(found->kind)) found = row;
+			// The lookups by SSN take the first row in pool order [orig: Entity_KillByNetId @0x43DBD0]; an
+			// area check tests every organic and item carrying it, not stopping at the first [orig:
+			// Entity_IsBmsRefInTriggerBounds @0x43e510; docs/mission/bms-event-runtime-re.md 7.2a].
 			for (const Node *row : rows)
 				if (row != found)
 					on({row->id, row->kind, 0}, MissionFinding::SsnDuplicate, DiagnosticSeverity::Warning,
 					   "SSN " + std::to_string(ssn) + " is also " + document.kind_label(found->kind) + " " +
 					           document.record_name({found->id, found->kind, 0}) +
-					           "'s: the game's lookups find that one (organics, items, buildings, markers first) and never this.",
+					           "'s: the game's lookups by SSN find that one (organics, items, buildings, markers first) and "
+					           "never this" +
+					           (row->kind == k(K::Organic) || row->kind == k(K::Item)
+					                    ? std::string(", but an area check (SingleIsWithinArea) tests every organic and item "
+					                                  "carrying it, this one too.")
+					                    : std::string(".")),
 					   "id");
 		}
 		const auto limit = [&](size_t count, size_t max, const char *pool) {
@@ -237,7 +253,8 @@ struct Checker {
 					on(address, MissionFinding::TriggerType, DiagnosticSeverity::Warning,
 					   "Main type " + std::to_string(main) + " is none the game's evaluator has a case for: the trigger reads false.",
 					   "main_type");
-				else {
+				else if (trigger_reads_sub_type(main)) {
+					// Event's and SecondTimeThrough's cases read no sub-type: any is theirs.
 					const MissionChoices subs = trigger_sub_types(main);
 					bool known = subs.count == 0;
 					for (size_t s = 0; s < subs.count; ++s) known = known || subs.rows[s].value == trigger.sub_type;
@@ -247,6 +264,20 @@ struct Checker {
 						           std::to_string(main) + ": the trigger reads false.",
 						   "sub_type");
 				}
+				// The alive test scans the organics, items and buildings for the SSN, never the markers:
+				// a marker's SSN reads not alive [orig: EventTrigger_EvaluateCondition cat 2 subs 4, 5
+				// @0x453985 / @0x45399D -> Entity_IsAliveByBmsRef @0x43e640, pools 0/1/2;
+				// docs/mission/bms-event-runtime-re.md 7.4].
+				if (trigger.main_type == bms::TriggerMainType::Single &&
+				    (trigger.sub_type == int32_t(bms::SingleTriggerType::SingleAlive) ||
+				     trigger.sub_type == int32_t(bms::SingleTriggerType::SingleDestroyed)))
+					if (const auto marker = marker_ssns.find(trigger.param1); marker != marker_ssns.end())
+						on(address, MissionFinding::SsnMarker, DiagnosticSeverity::Warning,
+						   "SSN " + std::to_string(trigger.param1) + " is marker " +
+						           document.record_name({marker->second->id, marker->second->kind, 0}) +
+						           "'s, and the alive test scans the organics, items and buildings alone: SingleAlive reads "
+						           "false and SingleDestroyed true for it.",
+						   "param1");
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
 					const ParamKind kind = trigger_param_kind(trigger, slot);
