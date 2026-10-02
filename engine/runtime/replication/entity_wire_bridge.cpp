@@ -700,6 +700,11 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 			rec.section_mask = static_cast<int32_t>(
 					w.doors.wire_section_mask(*e, e->section_mask, count));
 			rec.has_section_mask = count != 0;
+		} else if ((e->item_attrib2 & 0x4000u) != 0) {
+			// Any other def carries entity+308 only as a Landmine def (its
+			// triggered mines), and only a nonzero word.
+			// [orig: @0x5044A6..0x5044B1 — `test [def+58h], 4000h`, `test ebx, ebx`]
+			rec.section_mask = static_cast<int32_t>(e->section_mask);
 		}
 		// The D-NET-147 building/armory fields: the composed entity Flags dword (entity+36,
 		// gates 0x0020), the BMS ammo byte (entity+290, always present), refNum (entity+533,
