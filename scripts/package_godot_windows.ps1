@@ -1,8 +1,10 @@
-# Build and export the Windows runtime. Produces
-# dist/opennova-game-windows-v<version>.zip with opennova.exe, its matching
-# native dependencies and the bundled assets/ placeholder game (ADR 0048).
-# Retail game data is supplied by the player. Debug exports include the game's
-# ImGui tools.
+# Build and export the Windows products. Produces
+# dist/opennova-game-windows-v<version>.zip (opennova.exe, its matching native
+# dependencies and the bundled assets/ placeholder game, ADR 0048) and
+# dist/opennova-editor-windows-v<version>.zip (editor/ = the OpenNova Editor,
+# runtime/ = the game it plays a project with, ADR 0046 d4). Retail game data is
+# supplied by the player. Debug exports include the game's ImGui tools; the
+# editor carries ImGui in both.
 # Usage: pwsh -File scripts/package_godot_windows.ps1 [-ExportMode release|debug] [-SkipBuild]
 
 param(
@@ -12,9 +14,9 @@ param(
     # .github/workflows/ci.yml build-gdextension-windows.
     [switch]$SkipBuild,
     # Godot export mode. "release" (default; what the release workflow ships):
-    # --export-release, and the packaged exe loads the template_release
-    # GDExtension. "debug" (pull-request CI): --export-debug, and the packaged exe
-    # loads the template_debug GDExtension — the development flavour — so a PR
+    # --export-release, and the packaged exes load the template_release
+    # GDExtensions. "debug" (pull-request CI): --export-debug, and the packaged exes
+    # load the template_debug GDExtensions — the development flavour — so a PR
     # only has to compile one flavour. The Godot editor itself
     # always loads template_debug while it scans scripts for the export, so that
     # DLL is required in both modes.
@@ -28,7 +30,7 @@ $ProgressPreference = "SilentlyContinue"  # keeps Invoke-WebRequest fast on larg
 $ROOT = (Resolve-Path "$PSScriptRoot\..").Path
 Set-Location $ROOT
 
-# Install the game dev-tools bridge; the release export strips it.
+# Install the ImGui bridge: the game's dev tools (debug) and the editor's windows.
 Write-Host "=== Installing the imgui-godot addon ==="
 & bash "scripts/bootstrap_imgui_godot.sh"
 if ($LASTEXITCODE -ne 0) { throw "bootstrap_imgui_godot.sh failed (exit $LASTEXITCODE)" }
@@ -46,7 +48,7 @@ $versionParts = @($Version.Split("."))
 while ($versionParts.Count -lt 4) { $versionParts += "0" }
 $WinVersion = $versionParts -join "."
 
-# Stamp version into the runtime export preset so Godot embeds it in the .exe VERSIONINFO
+# Stamp version into the export presets so Godot embeds it in the .exe VERSIONINFO
 $presetsPath = "$ROOT\godot\export_presets.cfg"
 $presets = Get-Content $presetsPath -Raw
 $presets = $presets -replace 'application/file_version="[^"]*"',    "application/file_version=`"$WinVersion`""
@@ -96,47 +98,63 @@ if (-not (Test-Path "$TEMPLATES_DIR\version.txt")) {
 }
 
 # ---------------------------------------------------------------------------
-# 3. Build GDExtension binaries
+# 3. Build GDExtension binaries: both variants of one flavour per configure
+#    (ADR 0046 d4): libopennova.* (runtime-only: the game, the Play child) and
+#    libopennova_editor.* (the editor).
 # ---------------------------------------------------------------------------
 function Invoke-GDExtensionBuild {
     param(
         [string]$GodotCppTarget,
         [string]$BuildDir,
         [string]$Config,
-        [string]$ExpectedDll
+        [string[]]$ExpectedDlls
     )
 
-    Write-Host "=== Building $GodotCppTarget GDExtension ==="
+    Write-Host "=== Building $GodotCppTarget GDExtensions ==="
     cmake -S godot/src -B $BuildDir "-DGODOTCPP_TARGET=$GodotCppTarget"
     if ($LASTEXITCODE -ne 0) { throw "CMake configure failed for $GodotCppTarget (exit $LASTEXITCODE)" }
 
-    cmake --build $BuildDir --config $Config --target opennova
+    cmake --build $BuildDir --config $Config --target opennova opennova_editor_gdext
     if ($LASTEXITCODE -ne 0) { throw "CMake build failed for $GodotCppTarget (exit $LASTEXITCODE)" }
 
-    if (-not (Test-Path $ExpectedDll)) {
-        throw "GDExtension DLL missing after $GodotCppTarget build: $ExpectedDll"
+    foreach ($dll in $ExpectedDlls) {
+        if (-not (Test-Path $dll)) {
+            throw "GDExtension DLL missing after $GodotCppTarget build: $dll"
+        }
     }
 }
 
-$DEBUG_DLL = "$ROOT\godot\bin\libopennova.windows.template_debug.x86_64.dll"
-$RELEASE_DLL = "$ROOT\godot\bin\libopennova.windows.template_release.x86_64.dll"
+$RUNTIME_DEBUG_DLL = "$ROOT\godot\bin\libopennova.windows.template_debug.x86_64.dll"
+$RUNTIME_RELEASE_DLL = "$ROOT\godot\bin\libopennova.windows.template_release.x86_64.dll"
+$EDITOR_DEBUG_DLL = "$ROOT\godot\bin\libopennova_editor.windows.template_debug.x86_64.dll"
+$EDITOR_RELEASE_DLL = "$ROOT\godot\bin\libopennova_editor.windows.template_release.x86_64.dll"
 
-# Two DLL roles. The Godot editor loads the debug/editor library (template_debug)
-# while scanning scripts for ANY export, so it is always required. The packaged
-# exe loads the library matching its export mode — a --export-release exe
-# resolves the .gdextension windows.release entry (template_release), a
-# --export-debug exe the windows.debug entry (template_debug) — and only that
-# shipped library is boot-smoked and zipped.
-$EDITOR_DLL = $DEBUG_DLL
-if ($ExportMode -eq "debug") { $SHIPPED_DLL = $DEBUG_DLL } else { $SHIPPED_DLL = $RELEASE_DLL }
+# DLL roles. The Godot editor loads the plain windows.debug row of
+# bin/opennova.gdextension (the editor-enabled template_debug library, the superset)
+# while scanning scripts for ANY export, so it is always required. Each packaged exe
+# loads the library its feature tag and export mode select: the game and the Play
+# child the runtime-only one, the editor the editor-enabled one — and only those
+# shipped libraries are boot-smoked and zipped.
+$SCAN_DLL = $EDITOR_DEBUG_DLL
+if ($ExportMode -eq "debug") {
+    $SHIPPED_RUNTIME_DLL = $RUNTIME_DEBUG_DLL
+    $SHIPPED_EDITOR_DLL = $EDITOR_DEBUG_DLL
+} else {
+    $SHIPPED_RUNTIME_DLL = $RUNTIME_RELEASE_DLL
+    $SHIPPED_EDITOR_DLL = $EDITOR_RELEASE_DLL
+}
 $NeedsReleaseDll = ($ExportMode -eq "release")
-Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_DLL -Leaf)) ==="
+Write-Host "=== Export mode: $ExportMode (ships $(Split-Path $SHIPPED_RUNTIME_DLL -Leaf) and $(Split-Path $SHIPPED_EDITOR_DLL -Leaf)) ==="
 
 if ($SkipBuild) {
     Write-Host "=== -SkipBuild: using prebuilt GDExtension DLLs in godot\bin ==="
-    if (-not (Test-Path $EDITOR_DLL)) { throw "Expected prebuilt debug DLL missing: $EDITOR_DLL" }
-    if ($NeedsReleaseDll -and -not (Test-Path $RELEASE_DLL)) {
-        throw "Expected prebuilt release DLL missing: $RELEASE_DLL"
+    foreach ($dll in @($SCAN_DLL, $RUNTIME_DEBUG_DLL)) {
+        if (-not (Test-Path $dll)) { throw "Expected prebuilt debug DLL missing: $dll" }
+    }
+    if ($NeedsReleaseDll) {
+        foreach ($dll in @($RUNTIME_RELEASE_DLL, $EDITOR_RELEASE_DLL)) {
+            if (-not (Test-Path $dll)) { throw "Expected prebuilt release DLL missing: $dll" }
+        }
     }
 }
 else {
@@ -147,14 +165,14 @@ else {
         -GodotCppTarget "template_debug" `
         -BuildDir "build-godot-debug" `
         -Config "RelWithDebInfo" `
-        -ExpectedDll $DEBUG_DLL
+        -ExpectedDlls @($RUNTIME_DEBUG_DLL, $EDITOR_DEBUG_DLL)
 
     if ($NeedsReleaseDll) {
         Invoke-GDExtensionBuild `
             -GodotCppTarget "template_release" `
             -BuildDir "build-godot-release" `
             -Config "Release" `
-            -ExpectedDll $RELEASE_DLL
+            -ExpectedDlls @($RUNTIME_RELEASE_DLL, $EDITOR_RELEASE_DLL)
     }
 }
 
@@ -165,10 +183,14 @@ $DIST = "$ROOT\dist"
 New-Item -ItemType Directory -Force -Path $DIST | Out-Null
 
 $RUNTIME_EXE = "$DIST\opennova.exe"
+$PLAY_EXE = "$DIST\play\opennova.exe"
+$EDITOR_EXE = "$DIST\editor\opennova-editor.exe"
 $GAME_ZIP = "$DIST\opennova-game-windows-v$Version.zip"
+$EDITOR_ZIP = "$DIST\opennova-editor-windows-v$Version.zip"
 
 function Invoke-GodotExport {
     param([string]$PresetName, [string]$OutputPath)
+    New-Item -ItemType Directory -Force -Path (Split-Path $OutputPath -Parent) | Out-Null
     # Pass as a single command-line string so spaces in $PresetName survive.
     # Start-Process -Wait blocks until Godot exits; plain `&` has shown to return
     # before Godot finishes writing the .exe under some output-redirection setups.
@@ -288,6 +310,26 @@ function Test-GodotAppBoot {
     }
 }
 
+# The editor zip's two exes (ADR 0046 d4). The Play child ships no assets/ (Play
+# always hands it --resource-dir), so it proves its scene and variant load
+# through the same usage error; the editor loads its variant and says so.
+function Test-EditorAppBoot {
+    param([string]$EditorExe, [string]$PlayExe)
+
+    Write-Host "=== Boot smoke: opennova-play-runtime ==="
+    $usage = Invoke-GodotAppBoot -ExePath $PlayExe -ExtraArgs "-- --resource-dir" -ExpectedExit 2
+    if ($usage -notmatch "--resource-dir needs a path") {
+        Write-Host $usage.TrimEnd()
+        throw "Boot smoke did not report the Play runtime's --resource-dir usage error"
+    }
+    Write-Host "=== Boot smoke: opennova-editor ==="
+    $editor = Invoke-GodotAppBoot -ExePath $EditorExe -ExtraArgs "-- --editor-smoke" -ExpectedExit 0
+    if ($editor -notmatch "OpenNova Editor: smoke ok") {
+        Write-Host $editor.TrimEnd()
+        throw "Boot smoke did not report 'OpenNova Editor: smoke ok'"
+    }
+}
+
 # Stage the TRACKED files of assets/ (never a wildcard copy: a working checkout
 # may hold untracked local data there that must never ship). The models, clips
 # and textures ride LFS, so a checkout without them pulled holds pointer files,
@@ -319,32 +361,50 @@ function Copy-BundledAssets {
     Write-Host "    staged $($names.Count) tracked asset files"
 }
 
+# A staging directory under dist/, wiped and recreated; never a data directory.
+function New-StageDir {
+    param([string]$Name)
+    $stage = Join-Path $DIST $Name
+    $stagePath = [IO.Path]::GetFullPath($stage)
+    $distPrefix = [IO.Path]::GetFullPath($DIST).TrimEnd('\') + '\'
+    if (-not $stagePath.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Unexpected stage path: $stagePath"
+    }
+    if (Test-Path -LiteralPath $stagePath) {
+        if ((Get-Item -LiteralPath $stagePath).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing to remove a linked stage directory: $stagePath"
+        }
+        Remove-Item -LiteralPath $stagePath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $stagePath | Out-Null
+    return $stagePath
+}
+
+# The ImGui addon's native library the export placed beside an exe (the game's
+# debug tools; the editor's windows in every mode).
+function Copy-ImGuiLibs {
+    param([string]$ExeDir, [string]$Destination, [bool]$Required)
+    $imguiLibs = @(Get-ChildItem -LiteralPath $ExeDir -Filter "libimgui-godot-native.*" -File)
+    if ($Required -and $imguiLibs.Count -eq 0) { throw "Export in $ExeDir is missing the ImGui addon library" }
+    foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $Destination }
+}
+
 Write-Host "=== Exporting opennova.exe ==="
 Invoke-GodotExport -PresetName "OpenNova Runtime" -OutputPath $RUNTIME_EXE
 
-# Stage this export's runtime dependencies plus the bundled assets/.
-$gameStage = Join-Path $DIST ".stage-opennova-game-windows"
-$stagePath = [IO.Path]::GetFullPath($gameStage)
-$distPrefix = [IO.Path]::GetFullPath($DIST).TrimEnd('\') + '\'
-if (-not $stagePath.StartsWith($distPrefix, [StringComparison]::OrdinalIgnoreCase)) {
-    throw "Unexpected stage path: $stagePath"
-}
-if (Test-Path -LiteralPath $stagePath) {
-    if ((Get-Item -LiteralPath $stagePath).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw "Refusing to remove a linked stage directory: $stagePath"
-    }
-    Remove-Item -LiteralPath $stagePath -Recurse -Force
-}
-New-Item -ItemType Directory -Path $stagePath | Out-Null
+Write-Host "=== Exporting the editor's Play runtime ==="
+Invoke-GodotExport -PresetName "OpenNova Play Runtime" -OutputPath $PLAY_EXE
+
+Write-Host "=== Exporting opennova-editor.exe ==="
+Invoke-GodotExport -PresetName "OpenNova Editor" -OutputPath $EDITOR_EXE
+
+# --- the game zip: opennova.exe + its runtime DLL + the bundled assets/ ---
+$stagePath = New-StageDir ".stage-opennova-game-windows"
 try {
     $stagedExe = Join-Path $stagePath "opennova.exe"
     Copy-Item -LiteralPath $RUNTIME_EXE -Destination $stagedExe
-    Copy-Item -LiteralPath $SHIPPED_DLL -Destination $stagePath
-    if ($ExportMode -eq "debug") {
-        $imguiLibs = @(Get-ChildItem -LiteralPath $DIST -Filter "libimgui-godot-native.*" -File)
-        if ($imguiLibs.Count -eq 0) { throw "Debug export is missing the ImGui addon library" }
-        foreach ($lib in $imguiLibs) { Copy-Item -LiteralPath $lib.FullName -Destination $stagePath }
-    }
+    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $stagePath
+    Copy-ImGuiLibs -ExeDir $DIST -Destination $stagePath -Required ($ExportMode -eq "debug")
     Copy-BundledAssets -AssetsStageDir (Join-Path $stagePath "assets")
     $launchHelp = @"
 OpenNova
@@ -368,5 +428,39 @@ Use /game <code> and /exp <name> to select a game or expansion.
 finally {
     Remove-Item -LiteralPath $stagePath -Recurse -Force
 }
+
+# --- the editor zip: editor/ (the editor + its DLL + ImGui) and runtime/ (the Play
+#     child + the runtime DLL), the layout the editor's Play looks for ---
+$stagePath = New-StageDir ".stage-opennova-editor-windows"
+try {
+    $editorDir = Join-Path $stagePath "editor"
+    $runtimeDir = Join-Path $stagePath "runtime"
+    New-Item -ItemType Directory -Path $editorDir, $runtimeDir | Out-Null
+    $stagedEditorExe = Join-Path $editorDir "opennova-editor.exe"
+    $stagedPlayExe = Join-Path $runtimeDir "opennova.exe"
+    Copy-Item -LiteralPath $EDITOR_EXE -Destination $stagedEditorExe
+    Copy-Item -LiteralPath $SHIPPED_EDITOR_DLL -Destination $editorDir
+    Copy-ImGuiLibs -ExeDir (Split-Path $EDITOR_EXE -Parent) -Destination $editorDir -Required $true
+    Copy-Item -LiteralPath $PLAY_EXE -Destination $stagedPlayExe
+    Copy-Item -LiteralPath $SHIPPED_RUNTIME_DLL -Destination $runtimeDir
+    Copy-ImGuiLibs -ExeDir (Split-Path $PLAY_EXE -Parent) -Destination $runtimeDir -Required ($ExportMode -eq "debug")
+    $editorHelp = @"
+OpenNova Editor (experimental).
+
+  editor\opennova-editor.exe   the editor: create or open a project, fill in the
+                               files the game needs, build, play
+  runtime\opennova.exe         the game the editor's Play runs your project with
+
+Keep the two folders side by side: Play looks for runtime\opennova.exe next to
+the editor folder (or set another runtime in the editor's File > Project settings...).
+"@
+    Set-Content -LiteralPath (Join-Path $stagePath "README.txt") -Value $editorHelp -Encoding UTF8
+    Test-EditorAppBoot -EditorExe $stagedEditorExe -PlayExe $stagedPlayExe
+    Compress-Archive -Path (Join-Path $stagePath "*") -DestinationPath $EDITOR_ZIP -Force
+    if (-not (Test-Path -LiteralPath $EDITOR_ZIP)) { throw "Packaging produced no editor zip" }
+}
+finally {
+    Remove-Item -LiteralPath $stagePath -Recurse -Force
+}
 Write-Host "=== Done ==="
-Get-Item -LiteralPath $GAME_ZIP | Select-Object Name, Length
+Get-Item -LiteralPath $GAME_ZIP, $EDITOR_ZIP | Select-Object Name, Length
