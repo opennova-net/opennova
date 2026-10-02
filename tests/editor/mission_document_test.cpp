@@ -864,17 +864,32 @@ int test_validation() {
 		                                                       "every organic and item carrying it, this one too.") !=
 		                                         std::string::npos);
 	}
-	// An alive test's SSN only a marker carries: the test never scans the markers (SingleAlive false,
-	// SingleDestroyed true). The trigger made SingleAlive on the first marker's SSN.
+	// An SSN a lookup scanning fewer pools finds no row of: an alive test's only a marker carries (the
+	// test never scans the markers: SingleAlive false, SingleDestroyed true), a ChangeSingleAI's too, a
+	// teammate operation's patient an item carries (the patient is looked up among the organics).
 	{
 		const int marker_ssn = static_cast<const EntityRow *>(document->row(row_at(*document, MissionKind::Marker, 0).row))->native.id;
+		const int item_ssn = static_cast<const EntityRow *>(document->row(item0.row))->native.id;
+		const auto unscanned = [&](const NodeAddress &on, const char *needle) {
+			const std::vector<Diagnostic> found = type.validate_file(*document);
+			return found.size() == 1 && found[0].code() == "mission.ssn_unscanned" &&
+			       found[0].severity == DiagnosticSeverity::Warning && found[0].child_id == on.child &&
+			       found[0].field == "param1" && found[0].message.find(needle) != std::string::npos;
+		};
 		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(bms::SingleTriggerType::SingleAlive)), error) &&
 		            document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(marker_ssn)), error));
-		const std::vector<Diagnostic> found = type.validate_file(*document);
-		TEST_EXPECT(found.size() == 1 && found[0].code() == "mission.ssn_marker" && found[0].severity == DiagnosticSeverity::Warning &&
-		            found[0].child_id == trigger0.child && found[0].field == "param1");
+		TEST_EXPECT(unscanned(trigger0, "among the organics, items and buildings alone: SingleAlive reads false"));
 		// On the walker's SSN it reads as written: no finding.
 		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(walker_ssn)), error) &&
+		            type.validate_file(*document).empty());
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action1, "action_type", int64_t(bms::ActionType::ChangeSingleAI)), error) &&
+		            document->apply(edit_of(EditOperation::Set, action1, "action_sub_type", int64_t(1)), error) &&
+		            document->apply(edit_of(EditOperation::Set, action1, "param1", int64_t(marker_ssn)), error));
+		TEST_EXPECT(unscanned(action1, "it finds no record and does nothing."));
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action1, "action_type", int64_t(bms::ActionType::Teammates)), error) &&
+		            document->apply(edit_of(EditOperation::Set, action1, "param1", int64_t(item_ssn)), error));
+		TEST_EXPECT(unscanned(action1, "among the organics alone: it finds no patient"));
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, action1, "param1", int64_t(walker_ssn)), error) &&
 		            type.validate_file(*document).empty());
 		while (document->can_undo()) document->undo();
 	}
@@ -1164,7 +1179,7 @@ int test_retail() {
 			}
 			for (const Diagnostic &d : type.validate_file(*document)) {
 				++findings_by_code[d.code()];
-				if (d.code() == "mission.ssn_marker")
+				if (d.code() == "mission.ssn_unscanned")
 					std::printf("  %s, %s: %s\n", file.logical_name.c_str(), d.record.c_str(), d.message.c_str());
 			}
 		}
@@ -1196,7 +1211,7 @@ int test_retail() {
 	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},      {"mission.path_empty", 115},
 	                                                {"mission.path_one_shot", 72},   {"mission.path_start", 95},
 	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36},
-	                                                {"mission.ssn_marker", 1}};
+	                                                {"mission.ssn_unscanned", 1}};
 	TEST_EXPECT(findings_by_code == expected);
 	return 0;
 }

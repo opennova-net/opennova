@@ -225,8 +225,11 @@ std::string mission_scope(const DocumentBase &document);
 // read by a slot's id: SubGoalWon's STRWINMSG%03i, SubGoalLost's STRLOSEMSG%03i, a shown
 // ShowWinSubgoal's STRWINDIRECTIVE%03i and ShowLoseSubgoal's STRLOSEDIRECTIVE%03i, OutputText's
 // Triggered Text ID%03i. None is rewritable. A marker's waypoint name (WPNames STRWPNAME%03i of its
-// record's +0x60) is read only for the waypoints the HUD lists, which markers those are not traced:
-// no edge (NEEDS-RE). Then the files the mission's name finds and a dialog's bank.
+// record's +0x60, for the markers of the player route, the first path with flags & 2) makes no edge:
+// its key is the raw id out of a session and the id + 1 in a waypoint session after gametext's
+// specials, a miss showing STRWPNAMEDEFAULT [orig: HUD_GetWaypointName @0x594630;
+// docs/interface/hud-re.md, the waypoint HUD], so which key a mission reads is how it is played.
+// Then the files the mission's name finds and a dialog's bank.
 void mission_references(const Document &document, Extracted &out);
 
 } // namespace opennova::editor

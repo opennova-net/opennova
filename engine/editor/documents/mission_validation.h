@@ -12,7 +12,8 @@ namespace opennova::editor {
 // document standing in for its file: what the game makes of what the file holds, from the document
 // alone. The source findings first (a rewrite that differs, the events' runs); then the records:
 // an SSN or a zone id two records carry (an SSN's second worded by what reaches it: the lookups by
-// SSN never, an area check every organic and item), an alive test's SSN only markers carry, a
+// SSN never, an area check every organic and item), an SSN a lookup scanning fewer pools finds no row
+// of (an alive test's, a ChangeSingleAI's, a teleport's, a teammate operation's patient), a
 // degenerate zone, a zone id outside the editor's 1..99,
 // an event index past the table, a stop naming a marker the file lacks, a path's stored count past
 // its slots, a one-stop path, an entity on an empty path or starting past its count, a group past
@@ -30,7 +31,7 @@ enum class MissionFinding {
 	InvalidInput, // the events' runs the chains cannot hold (mission.invalid_input, blocks the save)
 	EventOrder,
 	SsnDuplicate,
-	SsnMarker, // an alive test's SSN only markers carry, which the test never scans
+	SsnUnscanned, // an SSN only rows of pools its lookup does not scan carry (an alive test's marker)
 	ZoneDuplicate,
 	ZoneDegenerate,
 	ZoneId,

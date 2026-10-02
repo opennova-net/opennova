@@ -1,8 +1,8 @@
 // The mission type's findings (mission_validation.h): its table, and validate_file over a mission
 // document: the source findings its parse made (a rewrite that differs, the events' runs and their
 // order), then what the game makes of the records (ADR 0046 S14): an SSN or a zone id two records
-// carry, an alive test's SSN only markers carry, a degenerate zone, a zone id outside the editor's
-// range, an event index past the table, a
+// carry, an SSN a lookup scanning fewer pools finds no row of, a degenerate zone, a zone id outside
+// the editor's range, an event index past the table, a
 // stop naming a marker the file lacks, a path counted past its slots or holding one stop, an entity on
 // an empty path or starting past its count, a group past the tables, a pool past the game's limits,
 // two game mode bits, a trigger type the evaluator lacks, a bounding box with a corner past the other.
@@ -10,7 +10,7 @@
 // mission.pool), which reads the item through the graph.
 #include "mission_validation.h"
 
-#include <algorithm>
+#include <initializer_list>
 #include <iterator>
 #include <map>
 #include <string>
@@ -37,7 +37,7 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	{ MissionFinding::InvalidInput, { "mission.invalid_input", FindingFix::None, nullptr, true } },
 	{ MissionFinding::EventOrder, { "mission.event_order", FindingFix::Rewrite, kRewriteRuns } },
 	{ MissionFinding::SsnDuplicate, { "mission.ssn_duplicate" } },
-	{ MissionFinding::SsnMarker, { "mission.ssn_marker" } },
+	{ MissionFinding::SsnUnscanned, { "mission.ssn_unscanned" } },
 	{ MissionFinding::ZoneDuplicate, { "mission.zone_duplicate" } },
 	{ MissionFinding::ZoneDegenerate, { "mission.zone_degenerate" } },
 	{ MissionFinding::ZoneId, { "mission.zone_id" } },
@@ -95,8 +95,31 @@ int lookup_order(NodeKind kind) {
 struct Checker {
 	const MissionDocument &document;
 	std::vector<Diagnostic> &findings;
-	// The SSNs only markers carry, each to its first marker (entities(), before events()).
-	std::map<int32_t, const Node *> marker_ssns;
+	// Each SSN's rows, in the file's order (entities(), before events()).
+	std::map<int32_t, std::vector<const Node *>> by_ssn;
+
+	// A lookup of an SSN that scans some pools alone (`pools`): where the SSN's rows are all of other
+	// pools, it finds none, which `outcome` says.
+	void unscanned(const NodeAddress &address, int32_t ssn, std::initializer_list<K> pools, const char *what,
+	               const char *outcome) {
+		const auto rows = by_ssn.find(ssn);
+		// SSN 0 names none; no row at all is the reference's own finding (reference.missing).
+		if (ssn == 0 || rows == by_ssn.end()) return;
+		for (const Node *row : rows->second)
+			for (const K pool : pools)
+				if (row->kind == k(pool)) return;
+		const Node *first = rows->second.front();
+		std::string scanned;
+		for (const K pool : pools) {
+			if (!scanned.empty()) scanned += pool == *(pools.end() - 1) ? " and " : ", ";
+			scanned += pool == K::Organic ? "organics" : pool == K::Item ? "items" : pool == K::Building ? "buildings" : "markers";
+		}
+		on(address, MissionFinding::SsnUnscanned, DiagnosticSeverity::Warning,
+		   "SSN " + std::to_string(ssn) + " is " + document.kind_label(first->kind) + " " +
+		           document.record_name({first->id, first->kind, 0}) + "'s, and " + what + " looks it up among the " +
+		           scanned + " alone: " + outcome,
+		   "param1");
+	}
 
 	Diagnostic &on(const NodeAddress &address, MissionFinding code, DiagnosticSeverity severity, std::string message,
 	               const char *field = "") {
@@ -115,7 +138,6 @@ struct Checker {
 	void entities() {
 		// Each SSN's rows: the one the lookups find (first in pool order, then in the file), then the
 		// others, which no lookup reaches.
-		std::map<int32_t, std::vector<const Node *>> by_ssn;
 		size_t items = 0, buildings = 0, markers = 0, organics = 0;
 		const std::vector<const Node *> paths = document.rows_of(K::WaypointPath);
 		for (const auto &row : document.rows()) {
@@ -147,9 +169,6 @@ struct Checker {
 			}
 		}
 		for (auto &[ssn, rows] : by_ssn) {
-			// An SSN no organic, item or building carries: what the alive test finds none of (events()).
-			if (std::none_of(rows.begin(), rows.end(), [](const Node *row) { return row->kind != k(K::Marker); }))
-				marker_ssns.emplace(ssn, rows[0]);
 			if (rows.size() < 2) continue;
 			const Node *found = rows[0];
 			for (const Node *row : rows)
@@ -271,13 +290,8 @@ struct Checker {
 				if (trigger.main_type == bms::TriggerMainType::Single &&
 				    (trigger.sub_type == int32_t(bms::SingleTriggerType::SingleAlive) ||
 				     trigger.sub_type == int32_t(bms::SingleTriggerType::SingleDestroyed)))
-					if (const auto marker = marker_ssns.find(trigger.param1); marker != marker_ssns.end())
-						on(address, MissionFinding::SsnMarker, DiagnosticSeverity::Warning,
-						   "SSN " + std::to_string(trigger.param1) + " is marker " +
-						           document.record_name({marker->second->id, marker->second->kind, 0}) +
-						           "'s, and the alive test scans the organics, items and buildings alone: SingleAlive reads "
-						           "false and SingleDestroyed true for it.",
-						   "param1");
+					unscanned(address, trigger.param1, {K::Organic, K::Item, K::Building}, "the alive test",
+					          "SingleAlive reads false and SingleDestroyed true for it.");
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
 					const ParamKind kind = trigger_param_kind(trigger, slot);
@@ -288,6 +302,28 @@ struct Checker {
 			for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i) {
 				const bms::Action &action = event.native.actions[i];
 				const NodeAddress address{row->id, k(K::Action), event.ids.lists[1][i].id};
+				// The actions whose SSN lookup scans fewer pools than the lookups by SSN do
+				// (docs/mission/bms-event-runtime-re.md 7.5, 10): ChangeSingleAI, ChangeSteam, SingleChangeGroup
+				// and SingleTeleport the organics, items and buildings [orig: Entity_HandleAlertStateEvent
+				// @0x43DEE0, pools 0, 1, 2 @0x43DF20 / @0x43DF41 / @0x43DF69; Entity_FindByDCBAndSetFlag
+				// @0x43DB30; Entity_SetNetIdByParentRef @0x43D6C0; EventAction_TeleportEntityToSpawn
+				// @0x43DFC0, @0x43E02D / @0x43E0DD / @0x43E180]; a medevac or a pickup its patient among the
+				// organics [orig: HeliLift_SpawnPickup @0x4525E0; docs/world/world-wac-ai-re.md 33.32].
+				switch (action.action_type) {
+				case bms::ActionType::ChangeSingleAI:
+				case bms::ActionType::ChangeSteamAction:
+				case bms::ActionType::SingleChangeGroup:
+				case bms::ActionType::SingleTeleportAction:
+					unscanned(address, action.param1, {K::Organic, K::Item, K::Building}, "the action",
+					          "it finds no record and does nothing.");
+					break;
+				case bms::ActionType::Teammates:
+					if (action_param_kind(action, 0) == ParamKind::Entity)
+						unscanned(address, action.param1, {K::Organic}, "the operation's patient lookup",
+						          "it finds no patient and starts no operation.");
+					break;
+				default: break;
+				}
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? action.param1 : slot == 1 ? action.param2 : slot == 2 ? action.param3 : action.param4;
 					const ParamKind kind = action_param_kind(action, slot);
