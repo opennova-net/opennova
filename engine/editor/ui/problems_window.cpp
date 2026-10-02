@@ -5,6 +5,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/project/project_files.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/view/session_view.h>
@@ -275,8 +276,11 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	}
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
-	const std::string where = ProblemsList::location_of(d, false);
-	const std::string whole = ProblemsList::location_of(d, true);
+	// The record in the words its document shows it by where it is open (a mission's trigger as what it
+	// tests, S15), its path in the tooltip.
+	const std::string title = finding_record_title(d, view);
+	const std::string where = title.empty() ? ProblemsList::location_of(d, false) : basename_of(d.asset) + " - " + title;
+	const std::string whole = ProblemsList::location_of(d, true) + (title.empty() ? std::string() : "\n" + title);
 	ui_kit::clipped_text(where, whole != where ? whole : std::string());
 	ImGui::TableNextColumn();
 	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes);

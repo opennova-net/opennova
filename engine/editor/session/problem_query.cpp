@@ -154,6 +154,19 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 	return location;
 }
 
+std::string finding_record_title(const Diagnostic &diagnostic, const SessionView &view) {
+	if (!diagnostic.row_id || diagnostic.asset.empty()) return std::string();
+	for (const auto &open : view.documents.open) {
+		if (!open || open->path() != diagnostic.asset) continue;
+		const Document *document = records_of(*open);
+		if (!document) return std::string();
+		const NodeAddress address{diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
+		const std::string title = document->record_title(address);
+		return title == document->record_name(address) ? std::string() : title;
+	}
+	return std::string();
+}
+
 EditorRequest ProblemLocation::request() const {
 	if (in_files) return request::show_in_files(path);
 	if (!locator.empty()) return request::open_document(path, locator);

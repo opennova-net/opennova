@@ -126,6 +126,17 @@ public:
 	// The mission row (null before a load); the rows of each kind in their band's order.
 	const MissionRow *mission_row() const;
 	std::vector<const Node *> rows_of(MissionKind kind) const;
+	// The row the game's lookups find for an SSN (the first in pool order: organics, items, buildings,
+	// markers [orig: Entity_KillByNetId @0x43DBD0]) and for a zone id (the first in file order [orig:
+	// EventTrigger_ResolveZoneTriggerRefs @0x453000]); 0 for none.
+	NodeId entity_holder(int64_t ssn) const;
+	NodeId zone_holder(int64_t id) const;
+	// What the windows show for a record (S15, Events and scripts): an event as its sentence, "When
+	// <trigger> and <trigger>, then <action>; <action>." (documents/mission_sentence.h), a trigger as its
+	// words after the join that ties it to the one before ("or Hostage #10034 is destroyed"), an action
+	// as its words; any other record as the core titles it. The graph, the Problems rows and the editor
+	// MCP keep record_name.
+	std::string record_title(const NodeAddress &address) const override;
 	// The file as the writer takes it: the mission row's file with every band's records and the
 	// chains joined, its counts synced. False before a load.
 	bool compose(bms::File &out) const;

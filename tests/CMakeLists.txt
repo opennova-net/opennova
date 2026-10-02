@@ -4348,6 +4348,15 @@ target_link_libraries(editor_mission_document_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_document COMMAND editor_mission_document_test)
 
+# A mission's logic in words (editor/documents/mission_sentence.h, ADR 0046 S15): each trigger and
+# action worded from its type and its typed parameters, the chain's fold, an event's flags, delay and
+# repeat, a type or a value naming nothing said so; the minted mission's titles; the types "Add
+# trigger" and "Add action" offer; and (a SKIP-LEG without OPENNOVA_JO_DIR) every shipped event worded.
+add_executable(editor_mission_sentence_test editor/mission_sentence_test.cpp)
+target_link_libraries(editor_mission_sentence_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_sentence_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_sentence COMMAND editor_mission_sentence_test)
+
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
 # choice, the labelled field, the record handle and the list ops over a file of each; the cost of a

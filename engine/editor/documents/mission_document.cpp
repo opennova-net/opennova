@@ -10,6 +10,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
+#include <editor/documents/mission_sentence.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
@@ -205,6 +206,41 @@ std::vector<const Node *> MissionDocument::rows_of(MissionKind kind) const {
 	for (const auto &row : rows())
 		if (row && row->kind == k(kind)) out.push_back(row.get());
 	return out;
+}
+
+NodeId MissionDocument::entity_holder(int64_t ssn) const {
+	if (ssn < INT32_MIN || ssn > INT32_MAX) return 0;
+	const FirstHolders &first = first_holders();
+	const auto found = first.ssns.find(int32_t(ssn));
+	return found == first.ssns.end() ? 0 : found->second;
+}
+
+NodeId MissionDocument::zone_holder(int64_t id) const {
+	if (id < INT32_MIN || id > INT32_MAX) return 0;
+	const FirstHolders &first = first_holders();
+	const auto found = first.zones.find(int32_t(id));
+	return found == first.zones.end() ? 0 : found->second;
+}
+
+std::string MissionDocument::record_title(const NodeAddress &address) const {
+	const Node *node = row(address.row);
+	if (!node || node->kind != k(K::Event)) return TableDocument::record_title(address);
+	const EventRow &event = static_cast<const EventRow &>(*node);
+	const MissionRow *mission = mission_row();
+	const bms::Header *header = mission ? &mission->native.header : nullptr;
+	const DocumentMissionNames names(*this);
+	if (!address.child) return event_sentence(event.native, names, header);
+	// A trigger or an action by its place in its event's lists.
+	if (event.ids.lists.size() < 2) return TableDocument::record_title(address);
+	const std::vector<RecordIds> &triggers = event.ids.lists[0], &actions = event.ids.lists[1];
+	for (size_t i = 0; i < triggers.size() && i < event.native.triggers.size(); ++i)
+		if (triggers[i].id == address.child) {
+			const std::string words = trigger_words(event.native.triggers[i], names);
+			return i == 0 ? words : std::string(logic_join_words(trigger_join(event.native.triggers[i - 1]))) + " " + words;
+		}
+	for (size_t i = 0; i < actions.size() && i < event.native.actions.size(); ++i)
+		if (actions[i].id == address.child) return action_words(event.native.actions[i], names, header);
+	return TableDocument::record_title(address);
 }
 
 bool MissionDocument::compose(bms::File &out) const { return compose_mission(rows(), out); }

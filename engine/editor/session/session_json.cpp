@@ -282,7 +282,12 @@ JsonValue collections_to_json(const Document &document, const NodeAddress &owner
 			record.set("id", json_number(double(id)));
 			// A list of several kinds names each record's own.
 			if (!collection.kinds.empty()) record.set("kind_name", json_string(document.kind_token(address.kind)));
-			record.set("name", json_string(document.record_name(address)));
+			const std::string name = document.record_name(address);
+			record.set("name", json_string(name));
+			// What the windows show for it where its type words it otherwise (a mission's trigger or action
+			// in words, S15).
+			const std::string title = document.record_title(address);
+			if (title != name) record.set("title", json_string(title));
 			record.set("change", json_string(record_change_token(document.record_change(address))));
 			JsonValue nested = collections_to_json(document, address);
 			if (!nested.array.empty()) record.set("collections", std::move(nested));
@@ -1108,7 +1113,11 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	}
 	JsonValue problems = JsonValue::make_array();
 	for (size_t i = first; i < last; ++i) {
-		JsonValue row = diagnostic_to_json(view.findings.diagnostics[answer.rows[i]]);
+		const Diagnostic &d = view.findings.diagnostics[answer.rows[i]];
+		JsonValue row = diagnostic_to_json(d);
+		// The record in the words the windows show for it, where its document is open (S15).
+		const std::string title = finding_record_title(d, view);
+		if (!title.empty()) row.set("record_title", json_string(title));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));
@@ -1186,6 +1195,10 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 		entry.set("kind", json_number(double(row->kind)));
 		entry.set("kind_label", json_string(document.kind_label(row->kind)));
 		entry.set("name", json_string(row->name()));
+		// What the windows show for it where its type words it otherwise (a mission's event as its
+		// sentence, S15).
+		const std::string title = document.record_title({row->id, row->kind, 0});
+		if (title != document.record_name({row->id, row->kind, 0})) entry.set("title", json_string(title));
 		entry.set("change", json_string(record_change_token(document.record_change({row->id, row->kind, 0}))));
 		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0});
 		entry.set("collections", std::move(collections));
@@ -1204,7 +1217,12 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 	out.set("kind", json_number(double(address.kind)));
 	out.set("child", json_number(double(address.child)));
 	out.set("kind_label", json_string(document.kind_label(address.kind)));
-	out.set("name", json_string(document.record_name(address)));
+	const std::string name = document.record_name(address);
+	out.set("name", json_string(name));
+	// What the windows show for it where its type words it otherwise (a mission's event as its
+	// sentence, a trigger or an action in words, S15).
+	const std::string title = document.record_title(address);
+	if (title != name) out.set("title", json_string(title));
 	out.set("path", json_string(document.record_path(address)));
 	out.set("locator", json_string(document.locator(address)));
 	out.set("change", json_string(record_change_token(document.record_change(address))));

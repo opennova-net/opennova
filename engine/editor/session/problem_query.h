@@ -106,4 +106,9 @@ struct ProblemLocation {
 };
 ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView &view);
 
+// What the record a finding is about reads as in the windows (Document::record_title: a mission's
+// trigger or action in words, ADR 0046 S15) where its document is open and its type words it
+// otherwise than its name; "" where it does not (the finding's record path stands alone).
+std::string finding_record_title(const Diagnostic &diagnostic, const SessionView &view);
+
 } // namespace opennova::editor
