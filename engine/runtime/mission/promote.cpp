@@ -58,7 +58,7 @@ std::string ai_profile_name_for(
         for (char c : d.default_aip) def_name.push_back(lower(c));
         return def_name;
     }
-    return "helo1";
+    return kFallbackAiProfile;
 }
 
 // The profile loader's class-walk order: four {class index, key} pairs with the

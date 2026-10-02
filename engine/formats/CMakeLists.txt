@@ -83,10 +83,12 @@ add_library(opennova_formats STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/authoring.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/bms_edit.cpp         # the document's edit operations + typed views over bms::File
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_chains.cpp   # an event's triggers and actions as the records it owns
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_field.cpp    # every mission record's fields as rows (the setters by name, the editor's table)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_parser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_mis_writer.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_names.cpp    # BMS event-logic enum display names
+    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_params.cpp   # what each trigger's and action's parameters are, as rows
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_records.cpp  # bms:: structs <-> typed mission records
     # mns — menu stylesheet
     ${CMAKE_CURRENT_SOURCE_DIR}/mns/mns.cpp

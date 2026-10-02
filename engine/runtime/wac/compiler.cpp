@@ -307,9 +307,18 @@ private:
 		if (f.decl_mode == 0) note_word(f, WordUse::Kind::Operand);
 	}
 
-	// The current token read as a word of the language: a keyword, a command it names or an operand
-	// it looked up (tooling metadata: Program::word_uses), once however often the loop takes the
-	// token again.
+	// A file the current token names (tooling metadata: Program::file_uses): `name` as its reader
+	// loads it; the bytes of the name in the source past a leading quote, which the string legs skip
+	// (pool_string) and a RUN's name keeps (run_path).
+	void note_file(const File &f, FileUse::Kind kind, std::string name) {
+		const size_t quoted = kind == FileUse::Kind::Wave && f.token_length != 0 && f.locals[kTokenAt] == '"' ? 1 : 0;
+		prog_.file_uses.push_back({kind, std::move(name), f.source, f.token_start + quoted, f.token_length - quoted});
+		note_word(f, WordUse::Kind::Operand);
+	}
+
+	// The current token read as a word of the language: a keyword, a command it names, an operand
+	// it looked up or a file it names (tooling metadata: Program::word_uses), once however often the
+	// loop takes the token again.
 	void note_word(const File &f, WordUse::Kind kind) {
 		if (!prog_.word_uses.empty() && prog_.word_uses.back().source == f.source &&
 				prog_.word_uses.back().offset == f.token_start)
@@ -489,8 +498,10 @@ private:
 			} else if (run_depth_ > 1) {
 				error(f, f.line, "A run file can't run more files");
 			} else {
+				const std::string path = run_path(f);
+				note_file(f, FileUse::Kind::Run, path);
 				++run_depth_;
-				const bool loaded = run_file(run_path(f));
+				const bool loaded = run_file(path);
 				--run_depth_;
 				if (!loaded) error(f, f.line, "Unable to run file");
 			}
@@ -1266,7 +1277,15 @@ private:
 			}
 			return pooled(f, index, int(ParamType::Ammo), expected, "AMMO:" + ammo);
 		}
-		if (expected == int(ParamType::Text) || expected == int(ParamType::Filename)) return pool_string(f);
+		if (expected == int(ParamType::Text) || expected == int(ParamType::Filename)) {
+			// A Filename slot's string is a wave's file name (the table's four Filename slots are
+			// the wave, pwave, SSNwave and SSNradio commands'), read from the archives as written.
+			if (expected == int(ParamType::Filename)) {
+				const char *s = token(f);
+				note_file(f, FileUse::Kind::Wave, std::string(*s == '"' ? s + 1 : s));
+			}
+			return pool_string(f);
+		}
 
 		// The number leg, a digit, '-' or '.' first. An F suffix scales by
 		// 21501, an M suffix or a Distance slot by 65536; else a ':' makes

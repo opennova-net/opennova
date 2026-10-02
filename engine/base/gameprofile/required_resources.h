@@ -39,7 +39,13 @@ enum {
        archives open [orig: PFF_OpenAllArchives @ 0x4a4310 over the name
        table @ 0x829f90; fatal check @ 0x4a6f44]. Any individual archive may
        be absent. */
-    RES_F_PFF_TABLE_ANY = 1 << 1
+    RES_F_PFF_TABLE_ANY = 1 << 1,
+    /* The player's or this machine's own file, read from the working directory
+       and written there by the game or by its setup: a save, a configuration,
+       the stored NovaWorld credentials, the high-score table. Never a resource
+       a game is made of: the editor never imports one nor packs one into a
+       build (ADR 0046 S14), and its checklist does not list one. */
+    RES_F_PLAYER_FILE = 1 << 2
 };
 
 typedef struct RequiredResource {
@@ -75,5 +81,12 @@ const RequiredResource *gameprofile_required_resource_by_role(const char *role);
    through ResourceRoot.boot_resource_missing_marker()), and the editor's Play reads the
    names back from that log (editor/session/project_session). */
 inline constexpr const char *kBootResourceMissingMarker = "boot-required resource missing: ";
+
+/* The launch mission's report: a game started in a mission (`--mission`) that does not load
+   says so on a line of its log where the mission's file name, a space and the reason follow
+   this text (godot/game/main_game.gd writes it through
+   ResourceRoot.launch_mission_failed_marker()), and the editor's Play reads it back from that
+   log (editor/session/play_controller). */
+inline constexpr const char *kLaunchMissionFailedMarker = "launch mission failed: ";
 
 } // namespace opennova::gameprofile

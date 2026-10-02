@@ -633,6 +633,21 @@ bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out) cons
     return true;
 }
 
+bool Vfs::file_size(const std::string &name, uint64_t &out) const {
+    out = 0;
+    const ResolvedEntry *e = impl_->find(name);
+    if (!e) return false;
+    if (e->source == VfsSource::Archive) {
+        out = e->entry->size;
+        return true;
+    }
+    std::error_code ec;
+    const auto size = fs::file_size(fs::path(e->loose_full_path), ec);
+    if (ec) return false;
+    out = static_cast<uint64_t>(size);
+    return true;
+}
+
 bool Vfs::read_file_raw(const std::string &name, std::vector<uint8_t> &out,
                         VfsLookupPolicy policy) const {
     out.clear();

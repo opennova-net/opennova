@@ -400,6 +400,14 @@ target_include_directories(mission_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 target_compile_features(mission_catalog_test PRIVATE cxx_std_17)
 add_test(NAME mission_catalog COMMAND mission_catalog_test)
 
+# The files the game finds by a mission's name (mission/mission_sidecars.h): the
+# six witnessed rows and the names they build.
+add_executable(mission_sidecars_test mission/mission_sidecars_test.cpp)
+target_link_libraries(mission_sidecars_test PRIVATE opennova_runtime)
+target_include_directories(mission_sidecars_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(mission_sidecars_test PRIVATE cxx_std_17)
+add_test(NAME mission_sidecars COMMAND mission_sidecars_test)
+
 # The mission load plan (mission/mission_load_plan.h): the stage order and the
 # witnessed loading-screen anchors the shell presents.
 add_executable(mission_load_plan_test mission/mission_load_plan_test.cpp)
@@ -414,10 +422,35 @@ target_link_libraries(minimal_bms_gen_test PRIVATE opennova_formats)
 target_include_directories(minimal_bms_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_bms_gen COMMAND minimal_bms_gen_test)
 
+# fixtures/bms/synth_logic.bms + synth_logic.bin: the small mission with everything the
+# mission document and its picture read (every row kind, a path, two events naming one
+# another, the text keys its records form) and its string table, written by bms::write and
+# rtxt::write; editor_mission_document and editor_document_contract read them.
+add_executable(mission_set_gen_test fixtures/mission_set_gen.cpp)
+target_link_libraries(mission_set_gen_test PRIVATE opennova_formats)
+target_include_directories(mission_set_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_set_gen COMMAND mission_set_gen_test)
+
 add_executable(mission_bms_test mission/mission_bms_test.cpp)
 target_link_libraries(mission_bms_test PRIVATE opennova_formats)
 target_include_directories(mission_bms_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME mission_bms COMMAND mission_bms_test)
+
+# An event's runs split out of the file's tables and joined back
+# (formats/mission/mission_chains.h): the identity on a canonical file, a
+# reordered one joined canonical, the refusals, an empty run's running offset.
+add_executable(mission_chains_test mission/mission_chains_test.cpp)
+target_link_libraries(mission_chains_test PRIVATE opennova_formats)
+target_include_directories(mission_chains_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_chains COMMAND mission_chains_test)
+
+# What each trigger's and action's parameters are, as rows
+# (formats/mission/mission_params.h): a row per sub-type and action type, the
+# references they make, the sub-type names the typed views give.
+add_executable(mission_params_test mission/mission_params_test.cpp)
+target_link_libraries(mission_params_test PRIVATE opennova_formats)
+target_include_directories(mission_params_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mission_params COMMAND mission_params_test)
 
 add_executable(mission_mis_test mission/mission_mis_test.cpp)
 target_link_libraries(mission_mis_test PRIVATE opennova_formats)
@@ -947,6 +980,14 @@ add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cp
 target_link_libraries(resource_index_mus_test PRIVATE opennova_base)
 target_include_directories(resource_index_mus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME resource_index_mus COMMAND resource_index_mus_test)
+
+# ResourceIndex over an embedder's own file set (mount_source, ADR 0046 S14: the editor's project
+# files in place of an install): what it has and reads, what it does not index, its revision, and an
+# AssetStore parsing a model through it.
+add_executable(resource_index_source_test resource_index/resource_index_source_test.cpp)
+target_link_libraries(resource_index_source_test PRIVATE opennova_runtime)
+target_include_directories(resource_index_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME resource_index_source COMMAND resource_index_source_test)
 
 # The presented-model lookup (world/entity_index.h): the BMS-id and origin
 # candidates, groups and area-trigger zones an embedder resolves its presented

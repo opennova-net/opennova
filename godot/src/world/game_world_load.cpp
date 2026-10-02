@@ -10,6 +10,8 @@
 
 #include <cmath>
 
+#include <runtime/environment/environment_state.h>
+
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -555,12 +557,12 @@ void GameWorld::load_environment(const String &p_env_path) {
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
-	// The overcast table the overcast blend cross-fades against: overcast.def
-	// appended after the .trn pass (stock .trn files carry no TOD blocks)
-	// (retail Environment_LoadTimeOfDayConfig @ 0x57db30).
+	// The overcast table the overcast blend cross-fades against, appended after
+	// the .trn pass (stock .trn files carry no TOD blocks); the engine's
+	// env::kOvercastFile carries the name and the witness.
 	Ref<EnvFile> overcast;
 	overcast.instantiate();
-	if (overcast->load_from_resource_root(resource_root_, "overcast.def") == OK) {
+	if (overcast->load_from_resource_root(resource_root_, opennova::env::kOvercastFile) == OK) {
 		env_->set_overcast_data(overcast);
 	} else {
 		env_->set_overcast_data(Ref<EnvFile>());
