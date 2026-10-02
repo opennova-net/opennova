@@ -114,6 +114,8 @@ void ImportDialog::draw(Workspace &workspace) {
 	if (preview.open && !previewing_) {
 		if (!preview.changed) {
 			filter_[0] = '\0';
+			rows_filter_[0] = '\0';
+			kind_shown_ = AssetKind::kCount;
 			replace_existing_ = false;
 		}
 		retake_ = true;
@@ -285,15 +287,20 @@ void ImportDialog::draw_choices(Workspace &workspace, const DialogsView::ImportP
 	ImGui::EndTable();
 }
 
-// "Include the files these need", then the rows: the chosen files first, then what they need.
+// "Include the files these need", the plan in short (its files and bytes, each kind a toggle that
+// shows its rows alone, a filter over the names, Check shown and Uncheck shown), then the rows:
+// the chosen files first, then what they need.
 void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	const ImportPlan &plan = *preview.plan;
 	size_t found = 0;
 	std::vector<size_t> rows;
+	const std::string wanted = normalized_logical_name(rows_filter_);
 	for (size_t i = 0; i < plan.rows.size(); ++i) {
 		if (plan.rows[i].state == State::NotFound) continue;
-		rows.push_back(i);
 		if (plan.rows[i].state == State::Found) ++found;
+		if (kind_shown_ != AssetKind::kCount && plan.rows[i].kind != kind_shown_) continue;
+		if (!wanted.empty() && normalized_logical_name(plan.rows[i].name).find(wanted) == std::string::npos) continue;
+		rows.push_back(i);
 	}
 	// The check box's label cut to the dialog's width (whole in its tooltip).
 	bool with = preview.with_dependencies;
@@ -312,13 +319,47 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	                (preview.all ? std::string("Every file of the game install is chosen: there is nothing more to look for.")
 	                             : std::string("Look for the files the chosen ones name (fonts, textures, models...) beside them "
 	                                           "and in the game install, and import those found too. The editor remembers it.")));
-	if (rows.empty()) {
+	if (plan.file_count() == 0) {
 		if (preview.roots.empty()) ui_kit::empty_state("No file chosen.", "Choose the files to import above.");
 		else ui_kit::empty_state("Nothing to import.", plan.diagnostics.empty() ? nullptr : "See why below.");
 		return;
 	}
+	// The plan in short: its files and bytes, then each kind with its count and size, a toggle that
+	// shows that kind's rows alone (the videos of a mission's closure unchecked in two clicks).
+	ImGui::TextWrapped("%s", (counted(plan.file_count(), "file") + ", " + ui_kit::size_text(plan.total_bytes()) + ":").c_str());
+	ui_kit::WrapRow kinds;
+	for (const ImportPlanKind &entry : plan.by_kind()) {
+		const std::string label = std::string(asset_kind_label(entry.kind)) + " " + std::to_string(entry.files) + " (" +
+		                          ui_kit::size_text(entry.bytes) + ")";
+		const std::string id = label + "###kind_" + asset_kind_token(entry.kind);
+		const float width = ui_kit::text_width(label.c_str()) + ImGui::GetStyle().FramePadding.x * 2.0f;
+		kinds.next(width);
+		const bool shown = kind_shown_ == entry.kind;
+		if (ImGui::Selectable(id.c_str(), shown, ImGuiSelectableFlags_None, ImVec2(width, 0.0f)))
+			kind_shown_ = shown ? AssetKind::kCount : entry.kind;
+		ui_kit::tooltip(shown ? std::string("Every kind's rows again.")
+		                      : "Only the rows of this kind, " + counted(entry.files, "file") + ".");
+	}
+	// A filter over the rows' names (Ctrl+F is the listing's filter's where one is drawn), and the
+	// shown rows checked or unchecked together.
+	ui_kit::WrapRow controls;
+	const float filter_width = ImGui::GetFontSize() * 18.0f;
+	controls.next(filter_width);
+	ui_kit::filter_box("##rows_filter", rows_filter_, sizeof(rows_filter_), "Filter the rows", filter_width, nullptr,
+	                   preview.choices.empty());
+	if (ui_kit::tool(controls, "Check shown", !rows.empty(), "Take every row the table shows that the project can take.")) {
+		for (const size_t i : rows)
+			if (why_not_[i].empty()) checked_[i] = true;
+	}
+	if (ui_kit::tool(controls, "Uncheck shown", !rows.empty(), "Leave every row the table shows out.")) {
+		for (const size_t i : rows) checked_[i] = false;
+	}
+	if (rows.empty()) {
+		ui_kit::empty_state("No row matches.", "Clear the filter, or show every kind.");
+		return;
+	}
 	const float lines = static_cast<float>(std::min<size_t>(rows.size(), 10)) + 1.5f;
-	if (!ImGui::BeginTable("import_plan", 5,
+	if (!ImGui::BeginTable("import_plan", 6,
 	                       ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable |
 	                               ImGuiTableFlags_BordersInnerV,
 	                       ImVec2(0, ImGui::GetFrameHeightWithSpacing() * lines)))
@@ -327,6 +368,7 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 	                        ImGui::GetFrameHeight());
 	ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch, 1.0f);
+	ImGui::TableSetupColumn("Size", ImGuiTableColumnFlags_WidthFixed, ui_kit::text_width("999.9 KB"));
 	ImGui::TableSetupColumn("Needed by", ImGuiTableColumnFlags_WidthStretch, 3.0f);
 	ImGui::TableSetupColumn("Found in", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 	ImGui::TableSetupScrollFreeze(0, 1);
@@ -364,6 +406,8 @@ void ImportDialog::draw_plan(Workspace &workspace, const DialogsView::ImportPrev
 		ImGui::TableNextColumn();
 		ui_kit::clipped_text(asset_kind_label(row.kind));
 		ImGui::TableNextColumn();
+		ui_kit::clipped_text(ui_kit::size_text(row.size), std::to_string(row.size) + " bytes as stored");
+		ImGui::TableNextColumn();
 		if (row.state == State::Found)
 			ui_kit::clipped_text(need_words(row.needed_by), need_words(row.needed_by) + " names " + row.needed_by.name);
 		else
@@ -382,8 +426,10 @@ void ImportDialog::draw_notes(const DialogsView::ImportPreview &preview) {
 	std::vector<const ImportPlanRow *> missing;
 	for (const ImportPlanRow &row : plan.rows)
 		if (row.state == State::NotFound) missing.push_back(&row);
+	// Open by default while they are few; a mission's closure names dozens the install itself lacks.
 	const std::string header = "Not found (" + std::to_string(missing.size()) + ")###not_found";
-	if (!missing.empty() && ImGui::CollapsingHeader(header.c_str(), ImGuiTreeNodeFlags_DefaultOpen) &&
+	const ImGuiTreeNodeFlags open_by_default = missing.size() <= 20 ? ImGuiTreeNodeFlags_DefaultOpen : ImGuiTreeNodeFlags_None;
+	if (!missing.empty() && ImGui::CollapsingHeader(header.c_str(), open_by_default) &&
 	    ImGui::BeginTable("import_missing", 3, ImGuiTableFlags_RowBg | ImGuiTableFlags_Resizable)) {
 		ImGui::TableSetupColumn("File", ImGuiTableColumnFlags_WidthStretch, 2.0f);
 		ImGui::TableSetupColumn("Kind", ImGuiTableColumnFlags_WidthStretch, 1.0f);

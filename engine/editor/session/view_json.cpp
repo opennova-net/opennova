@@ -638,7 +638,7 @@ JsonValue events_page_to_json(const ViewEvents &events, uint64_t cursor, size_t 
 	return out;
 }
 
-JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) {
+JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, AssetKind kind) {
 	const DialogsView::ImportPreview &preview = view.dialogs.import_preview;
 	const ImportPlan &plan = *preview.plan;
 	JsonValue out = JsonValue::make_object();
@@ -647,15 +647,29 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page) 
 	if (preview.all) out.set("all", boolean(true));
 	if (preview.changed)
 		out.set("changed", boolean(true));
-	// The plan's importable rows (the paged list) and the rows not found, apart, in plan order.
+	// The plan's importable rows (the paged list; those of one kind when one is asked) and the
+	// rows not found, apart, in plan order.
+	const bool one_kind = kind != AssetKind::kCount;
+	if (one_kind) out.set("kind", json_string(asset_kind_token(kind)));
 	std::vector<const ImportPlanRow *> rows, not_found;
-	for (const ImportPlanRow &row : plan.rows)
-		(row.state == ImportPlanRow::State::NotFound ? not_found : rows).push_back(&row);
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == ImportPlanRow::State::NotFound) not_found.push_back(&row);
+		else if (!one_kind || row.kind == kind) rows.push_back(&row);
+	}
 	// `count` the rows'; the page runs on while any list it covers has entries past it.
 	set_page(out, page, rows.size(),
 			std::max({ preview.choices.size(), preview.roots.size(), not_found.size() }));
-	// What the whole plan copies, whatever the page shows of it.
+	// What the whole plan copies, whatever the page shows of it: in all, and by kind.
 	out.set("total_bytes", json_number(double(plan.total_bytes())));
+	JsonValue summary = JsonValue::make_array();
+	for (const ImportPlanKind &entry : plan.by_kind()) {
+		JsonValue line = JsonValue::make_object();
+		line.set("kind", json_string(asset_kind_token(entry.kind)));
+		line.set("files", json_number(double(entry.files)));
+		line.set("bytes", json_number(double(entry.bytes)));
+		summary.push(std::move(line));
+	}
+	out.set("summary", std::move(summary));
 	JsonValue planned = JsonValue::make_array();
 	for (size_t i = page.first(rows.size()); i < page.last(rows.size()); ++i)
 		planned.push(plan_row_to_json(*rows[i]));

@@ -1,6 +1,7 @@
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
+#include <cstdio>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -148,6 +149,14 @@ bool filter_box(const char *id, char *text, size_t size, const char *hint, float
 	tooltip(empty ? std::string() : "Clear the filter.");
 	ImGui::PopID();
 	return changed;
+}
+
+std::string size_text(uint64_t bytes) {
+	char text[32];
+	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
+	else if (bytes < 1024 * 1024) std::snprintf(text, sizeof(text), "%.1f KB", static_cast<double>(bytes) / 1024.0);
+	else std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+	return text;
 }
 
 std::string fit(const std::string &text, float width) {

@@ -33,13 +33,7 @@ namespace {
 const ImVec4 kOpenColor(0.55f, 0.78f, 1.0f, 1.0f);
 const ImVec4 kRefusalColor(0.95f, 0.55f, 0.45f, 1.0f);
 
-std::string size_text(uint64_t bytes) {
-	char text[32];
-	if (bytes < 1024) std::snprintf(text, sizeof(text), "%llu B", static_cast<unsigned long long>(bytes));
-	else if (bytes < 1024 * 1024) std::snprintf(text, sizeof(text), "%.1f KB", static_cast<double>(bytes) / 1024.0);
-	else std::snprintf(text, sizeof(text), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
-	return text;
-}
+using ui_kit::size_text;
 
 // What a blank factory makes, as its menu entry's tooltip.
 std::string makes(const BlankFactory &factory) { return std::string("Makes ") + factory.summary + "."; }

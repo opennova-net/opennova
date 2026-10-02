@@ -175,6 +175,13 @@ struct ImportNotFollowed {
 	std::string first;
 };
 
+// The files a plan takes of one kind: how many, and their bytes as stored where they come from.
+struct ImportPlanKind {
+	AssetKind kind = AssetKind::Unknown;
+	size_t files = 0;
+	uint64_t bytes = 0;
+};
+
 struct ImportPlan {
 	std::vector<ImportPlanRow> rows; // in the walk's order, the selected sources first
 	std::vector<ImportNotFollowed> not_followed;
@@ -194,6 +201,10 @@ struct ImportPlan {
 	// The files the plan takes (every row but those not found) and their bytes as stored.
 	size_t file_count() const;
 	uint64_t total_bytes() const;
+	// Those files by kind, the largest kind first (by bytes, then by files, then by the kind's
+	// token): the dialog's summary line and the wire's `summary` (ADR 0046 S14: a mission's closure
+	// is thousands of rows, read by kind before one by one).
+	std::vector<ImportPlanKind> by_kind() const;
 };
 
 // A guard, not a limit a real import meets (ADR 0046 S14: a mission's closure is most of a game

@@ -1277,7 +1277,11 @@ void test_import_dialog() {
 	ui.frames(2);
 	std::string text = logged_frame(ui);
 	const std::string stopped = "The plan stopped at " + std::to_string(kImportPlanFileCap) + " files";
-	CHECK(in_order(text, {"Include the files these need (3 found)", "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font",
+	// S14: the plan in short first, its files and bytes, then each kind with its count and size, the
+	// largest first (alike: by token), each a toggle; then the rows, each with its size.
+	CHECK(in_order(text, {"Include the files these need (3 found)", "6 files, 0 B:", "Texture 2 (0 B)", "Animation 1 (0 B)",
+	                      "Animation map 1 (0 B)", "Font 1 (0 B)", "Menu 1 (0 B)", "Check shown", "Uncheck shown",
+	                      "menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "Font", "0 B",
 	                      "menu.mnu: MAIN/TITLE font.name", "the folder assets", "logo.tga", "a_long_texture_name.tga",
 	                      "Not found (1)", "gone.tga", "menu.mnu: MAIN/KEEP/Appearance 1 value",
 	                      "arial99.fnt: found in both the folder C:/assets and the game install; using the folder C:/assets",
@@ -1285,10 +1289,28 @@ void test_import_dialog() {
 	                      "References that name no file are not followed: sound.",
 	                      "Named by the files but defined nowhere: 1 screen.", stopped.c_str(),
 	                      "broken.mnu: The file could not be read.", "Replace existing files", "Import 5 files", "Cancel"}),
-	      "the plan: the rows, then what is not found, found twice, not followed, the cap, the finding");
+	      "the plan: the summary, the rows, then what is not found, found twice, not followed, the cap, the finding");
 	CHECK(same_line(text, "menu.mnu", "chosen") && same_line(text, "CHECK.adm", "made from walk.o3a, the folder assets"),
 	      "a chosen file says so; a converter's output, what it is made from");
 	const ImGuiID dialog = ImHashStr("Import files");
+	// A kind's toggle shows its rows alone; Uncheck shown and Check shown take the shown rows
+	// together (one the project cannot take never); the toggle again shows every kind.
+	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"Texture 2 (0 B)", "logo.tga", "a_long_texture_name.tga", "Not found (1)"}) &&
+	              text.find("CHECK.adm") == std::string::npos && text.find("Import 5 files") != std::string::npos,
+	      "the texture toggle: the two texture rows alone, the checks kept");
+	ui.activate(item_id(import_body_id(), {"Uncheck shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 4 files") != std::string::npos, "Uncheck shown: the shown texture left out");
+	ui.activate(item_id(import_body_id(), {"Check shown"}));
+	ui.away();
+	CHECK(logged_frame(ui).find("Import 5 files") != std::string::npos, "Check shown: the one the project can take back");
+	ui.activate(item_id(import_body_id(), {"###kind_texture"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(in_order(text, {"menu.mnu", "CHECK.adm", "walk.bad", "arial99.fnt", "logo.tga"}), "the toggle again: every kind");
 	const auto sources = [](const EditorRequest &request) {
 		std::vector<std::string> out;
 		for (const ImportChoice &source : request.imports) out.push_back(source.path);

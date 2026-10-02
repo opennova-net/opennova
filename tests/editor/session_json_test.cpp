@@ -1812,6 +1812,19 @@ static int test_import_plan_json() {
 	const JsonValue *import = &json;
 	TEST_EXPECT(import->get_bool("open", false) && import->get_bool("with_dependencies", false) && import->get_bool("changed", false));
 	TEST_EXPECT(import->get("serial") == nullptr && import->get_int("count", 0) == 3 && import->get_int("offset", -1) == 0);
+	// S14: the plan by kind, the largest first (alike in bytes and files: by token), and a page of
+	// one kind's rows alone, count theirs.
+	{
+		const JsonValue *summary = import->get("summary");
+		TEST_EXPECT(summary && summary->array.size() == 3 && summary->array[0].get_string("kind", "") == "font" &&
+		            summary->array[1].get_string("kind", "") == "menu" && summary->array[2].get_string("kind", "") == "texture" &&
+		            summary->array[0].get_int("files", 0) == 1 && summary->array[0].get_int("bytes", -1) == 0);
+		const JsonValue fonts = import_preview_to_json(view, JsonPage{}, AssetKind::Font);
+		const JsonValue *rows = fonts.get("rows");
+		TEST_EXPECT(fonts.get_string("kind", "") == "font" && fonts.get_int("count", 0) == 1 && rows && rows->array.size() == 1 &&
+		            rows->array[0].get_string("name", "") == "arial99.fnt" && fonts.get_int("not_found_count", 0) == 1 &&
+		            fonts.get("summary")->array.size() == 3);
+	}
 	// The import section: the dialog in short, the editor's setting, no lists.
 	const JsonValue summary = view_section_to_json(view, ViewSection::Import);
 	TEST_EXPECT(summary.get_bool("open", false) && summary.get_bool("changed", false) &&

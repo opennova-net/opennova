@@ -12,7 +12,7 @@
 //   opennova-project validate <dir>
 //   opennova-project create-missing <dir> [--role <token>]
 //   opennova-project import <dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]
-//                    [--all] [--dry-run]
+//                    [--all] [--dry-run [--rows]]
 //   opennova-project reimport <dir> [--force] [--source <path>]
 //   opennova-project build <dir> [--out <dir>]
 //   opennova-project request <dir> <json>

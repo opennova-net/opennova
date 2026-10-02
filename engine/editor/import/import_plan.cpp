@@ -1,9 +1,11 @@
 #include <editor/import/import_plan.h>
 
+#include <algorithm>
 #include <deque>
 #include <exception>
 #include <filesystem>
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <system_error>
@@ -1054,6 +1056,25 @@ uint64_t ImportPlan::total_bytes() const {
 	uint64_t bytes = 0;
 	for (const ImportPlanRow &row : rows) bytes += row.state != ImportPlanRow::State::NotFound ? row.size : 0;
 	return bytes;
+}
+
+std::vector<ImportPlanKind> ImportPlan::by_kind() const {
+	std::map<AssetKind, ImportPlanKind> kinds;
+	for (const ImportPlanRow &row : rows) {
+		if (row.state == ImportPlanRow::State::NotFound) continue;
+		ImportPlanKind &entry = kinds[row.kind];
+		entry.kind = row.kind;
+		++entry.files;
+		entry.bytes += row.size;
+	}
+	std::vector<ImportPlanKind> out;
+	for (const auto &entry : kinds) out.push_back(entry.second);
+	std::sort(out.begin(), out.end(), [](const ImportPlanKind &a, const ImportPlanKind &b) {
+		if (a.bytes != b.bytes) return a.bytes > b.bytes;
+		if (a.files != b.files) return a.files > b.files;
+		return std::string(asset_kind_token(a.kind)) < asset_kind_token(b.kind);
+	});
+	return out;
 }
 
 bool same_import(const ImportPlan &a, const ImportPlan &b) {

@@ -211,6 +211,14 @@ constexpr QueryParam kCursorParams[] = {
 	{ "limit", J::Integer, false, "100", kLimitDoc },
 };
 
+constexpr QueryParam kImportPreviewParams[] = {
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+	{ "kind", J::String, false, nullptr,
+			"An asset kind's token (the summary's): the page holds the plan's rows of that kind alone, "
+			"count theirs; every kind when left out." },
+};
+
 // --- helpers -------------------------------------------------------------------------------------
 
 constexpr bool same_text(const char *a, const char *b) {
@@ -813,8 +821,16 @@ JsonValue answer_viewport(const QueryContext &context, const QueryArgs &args, st
 	return read->answer(ViewportReadContext{ core.view(), *model, args, page_of(args) }, error);
 }
 
-JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &) {
-	return import_preview_to_json(context.core.view(), page_of(args));
+JsonValue answer_import_preview(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	AssetKind kind = AssetKind::kCount;
+	if (args.has("kind")) {
+		kind = asset_kind_from_token(args.text("kind"));
+		if (kind == AssetKind::Unknown && args.text("kind") != asset_kind_token(AssetKind::Unknown)) {
+			error = "no asset kind \"" + args.text("kind") + "\".";
+			return JsonValue::make_null();
+		}
+	}
+	return import_preview_to_json(context.core.view(), page_of(args), kind);
 }
 
 JsonValue answer_output(const QueryContext &context, const QueryArgs &args, std::string &) {
@@ -1066,16 +1082,17 @@ constexpr EditorQueryRow kRows[] = {
 			.pages("items, notes or render's widgets")
 			.chooses(kViewportChoices)
 			.row,
-	Query(K::ImportPreview, "import_preview", answer_import_preview, kPageParams,
+	Query(K::ImportPreview, "import_preview", answer_import_preview, kImportPreviewParams,
 			concern_set({ C::Dialogs, C::Preferences, C::Files }),
 			"The import dialog's preview: open, with_dependencies, all (every file of the game "
 			"install chosen, with no walk), a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, size, "
-			"made_from, needed_by, found_in, selected, problem, rivals), total_bytes (what the "
-			"whole plan copies), by the same page what it "
-			"offers and chose (choices, roots) and the files not found, each list with its own "
-			"count (next_offset runs to the end of the longest), then the kinds not followed, the "
-			"symbols no place defines (undefined), truncated and the plan's findings.")
+			"made_from, needed_by, found_in, selected, problem, rivals; those of one kind alone "
+			"with kind, count theirs), total_bytes (what the whole plan copies) and summary (the "
+			"whole plan's files by kind, the largest first: kind, files, bytes), by the same page "
+			"what it offers and chose (choices, roots) and the files not found, each list with its "
+			"own count (next_offset runs to the end of the longest), then the kinds not followed, "
+			"the symbols no place defines (undefined), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
 	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),

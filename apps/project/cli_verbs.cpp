@@ -530,15 +530,17 @@ void print_not_found(std::FILE *to, const JsonValue &row) {
 	             row.get_string("kind", "").c_str(), need_words(at(row, "needed_by")).c_str());
 }
 
-// An import's plan, one line per file (the import_preview query's pages): what it takes, where it
-// puts it, what wanted it, where it comes from and the other places that have it; what it cannot
-// take and why; what is not found; the kinds not followed; whether the cap stopped it.
-void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
+// An import's plan (the import_preview query's pages): with `rows`, one line per file (what it
+// takes, where it puts it, what wanted it, where it comes from and the other places that have it;
+// what it cannot take and why); what is not found; the plan by kind (its files and bytes); the
+// kinds not followed; whether the cap stopped it; and the plan's own line.
+void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 	size_t take = 0;
 	for (const JsonValue &page : pages) {
 		for (const JsonValue &row : items(page, "rows")) {
 			const bool selected = row.get_bool("selected", false);
 			take += selected ? 1 : 0;
+			if (!rows) continue;
 			std::string line = std::string(selected ? "take " : "skip ") + row.get_string("name", "") + " (" +
 			                   row.get_string("kind", "") + ") -> " + row.get_string("destination", "");
 			line += row.get_string("state", "") == "found" ? ", needed by " + need_words(at(row, "needed_by"))
@@ -557,6 +559,9 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages) {
 	for (const JsonValue &page : pages)
 		for (const JsonValue &row : items(page, "not_found")) print_not_found(to, row);
 	const JsonValue &plan = pages.front();
+	for (const JsonValue &entry : items(plan, "summary"))
+		std::fprintf(to, "  %s: %zu file(s), %.1f MB\n", entry.get_string("kind", "").c_str(), count_at(entry, "files"),
+		             entry.get_number("bytes", 0.0) / 1e6);
 	for (const JsonValue &entry : items(plan, "not_followed")) {
 		const std::string reference = entry.get_string("reference", "");
 		if (reference.empty())
@@ -621,7 +626,7 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		if (cli.json)
 			print_json(cli.out, plan);
 		else
-			print_plan(cli.out, pages);
+			print_plan(cli.out, pages, args.has("--rows"));
 		return plan_errors || truncated ? 1 : 0;
 	}
 	if (plan_errors) {
@@ -1025,7 +1030,8 @@ constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
 	                                     { "--with-dependencies" },
 	                                     { "--all" },
-	                                     { "--dry-run" } };
+	                                     { "--dry-run" },
+	                                     { "--rows" } };
 constexpr CliOption kReimportOptions[] = { { "--force" }, { "--source", "a source" } };
 constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash" } };
 
@@ -1061,7 +1067,7 @@ constexpr VerbRow kRows[] = {
 	        .row,
 	Verb(V::Import, "import",
 	     "<dir> [<source>] [--entry <name>]... [--replace] [--with-dependencies]\n"
-	     "                               [--all] [--dry-run]",
+	     "                               [--all] [--dry-run [--rows]]",
 	     kImportRequests, kImportArgs, run_import,
 	     "copy files in (a loose file, PFF members, or the game install's files by --entry\n"
 	     "names), the whole selection or none of it; an .o3d (a model) or an .o3a (a clip\n"
@@ -1070,8 +1076,9 @@ constexpr VerbRow kRows[] = {
 	     "game install (a mission's closure is most of a game install); an .o3d's textures come only with\n"
 	     "--with-dependencies; --all copies every file of the game install (its archives' and\n"
 	     "the loose files the game ships beside them), with no walk and nothing else named;\n"
-	     "--dry-run prints the plan and writes nothing (no import pass\n"
-	     "either; --install is that run's alone) (--json: the import_preview query, the plan)")
+	     "--dry-run prints the plan (what is not found, the files by kind, the plan's line;\n"
+	     "--rows each file too) and writes nothing (no import pass either; --install is that\n"
+	     "run's alone) (--json: the import_preview query, the plan)")
 	        .takes(kImportOptions)
 	        .checked_by(check_import)
 	        .answers(Q::ImportPreview)
