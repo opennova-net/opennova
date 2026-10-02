@@ -14,6 +14,7 @@
 #include <base/io/cp1252.h>
 #include <base/io/strutil.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_file_set.h>
 #include <editor/graph/graph_names.h>
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
@@ -132,6 +133,10 @@ std::string value_text(const Value &value) {
 
 } // namespace
 
+std::string companion_path(const RenameOutput &companion) {
+	return (fs::path(companion.path).parent_path() / companion.new_name).generic_string();
+}
+
 RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const AssetGraph &graph, const std::string &file,
                        const std::string &new_name) {
 	RenamePlan plan;
@@ -161,11 +166,13 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		plan.refusals.push_back(refusal(CoreFinding::RenameExists, "The project already has a file named '" + new_name + "'.",
 		                                taken->relative_path));
 	}
-	// Every field naming `target` (the file, or an output renamed with it), planned as a
-	// site that takes `renamed`, or a refusal.
-	const auto plan_sites = [&](const AssetEntry &target, const std::string &renamed) {
+	// Every field naming `target` (the file, or an output or a companion renamed with it), planned
+	// as a site that takes `renamed`, or a refusal; the edges of `derived_from` pass (a mission names
+	// its companions by its own name, which the rename changes with it).
+	const auto plan_sites = [&](const AssetEntry &target, const std::string &renamed, const std::string &derived_from = std::string()) {
 		std::vector<const GraphEdge *> through_styles;
 		for (const GraphEdge *edge : graph.referrers_of_file(target.relative_path)) {
+			if (!derived_from.empty() && edge->source == derived_from) continue;
 			// Of two files of one name, a reference reaches the one the game finds (the scan's
 			// first): renaming the other rewrites none.
 			std::string resolved;
@@ -221,6 +228,46 @@ RenamePlan plan_rename(const ProjectPaths &paths, const AssetScan &scan, const A
 		}
 	};
 	plan_sites(*asset, new_name);
+	// A mission takes the files the game finds by its name that the project has (ADR 0046 S14): each
+	// to the new base name with its own extension, held to the file name rules, its sites planned (its
+	// mission's own, derived from the name, pass). An import's output goes only with its source (the
+	// next import pass makes it again under the old name). A file the game would find by the new name
+	// already (one of no mission, which the renamed mission would take as its own) refuses the rename.
+	if (asset->kind == AssetKind::Mission && strutil::ends_with_icase(asset->logical_name, ".bms")) {
+		for (const MissionFileSetMember &member : mission_file_set_members(scan, asset->logical_name, new_name)) {
+			const AssetEntry *entry = find_asset(scan, member.path);
+			if (!entry) continue;
+			if (!entry->imported_from.empty()) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameImported, entry->logical_name + " goes with the mission, and is imported from " +
+				                                                                     entry->imported_from + ": rename the source first.",
+				                                entry->relative_path));
+				continue;
+			}
+			const std::string member_dir = fs::path(entry->relative_path).parent_path().generic_string();
+			FileNameProblem member_problem = FileNameProblem::None;
+			std::string why;
+			if (!check_project_file_name(paths.root, member_dir, member.new_name, entry->kind, member_problem, why)) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameName, entry->logical_name + " goes with the mission, and " +
+				                                                                 why, entry->relative_path));
+				continue;
+			}
+			plan_sites(*entry, member.new_name, asset->relative_path);
+			plan.companions.push_back({entry->relative_path, entry->logical_name, member.new_name});
+		}
+		for (const MissionFileSetMember &stale : mission_file_set_members(scan, new_name, new_name)) {
+			// A name its case alone changes finds the mission's own files.
+			if (std::any_of(plan.companions.begin(), plan.companions.end(),
+			                [&](const RenameOutput &companion) { return companion.path == stale.path; }))
+				continue;
+			const MissionFileSetRow *row = mission_file_set_row(stale.role);
+			std::string what = row ? row->words : "file";
+			if (what.rfind("its ", 0) == 0) what.erase(0, 4);
+			plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+			                                "The project already has " + stale.old_name + ", which the game would take as " + new_name +
+			                                        "'s " + what + ": rename or remove it first.",
+			                                stale.path));
+		}
+	}
 	// An import source takes its record and the outputs its importer names after it
 	// (ADR 0046 d6): the sidecar moves beside the new name, each such output is renamed
 	// with every site naming it rewritten, and the old outputs go; the next import pass
@@ -359,9 +406,10 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		if (listed) continue; // a field naming it twice (a font through a variable) is one site
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
-		if (!edge->rewritable || !source) {
-			// A text's use is at its span; the file is the editor's to write, that use not yet (a
-			// script's text key, whose lookup the graph does not order as the game does).
+		if (!graph.rewrites(*edge) || !source) {
+			// A text's use is at its span; the file is the editor's to write, that use not (a key of a
+			// script that runs with whichever mission's table plays: game.wac's, server.wac's, one of a
+			// mission the project lacks, AssetGraph::rewrites).
 			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
 			                                edge->span.line ? where + " names " + what + " at " + edge->locator +
 			                                                          ", a use the editor cannot rewrite yet."
@@ -754,6 +802,10 @@ std::vector<std::string> RenameTransaction::touched() const {
 	if (!symbol_) {
 		for (const std::string *path : {&file_plan_.path, &file_plan_.new_path, &file_plan_.sidecar, &file_plan_.new_sidecar})
 			if (!path->empty()) paths.push_back(*path);
+		for (const RenameOutput &companion : file_plan_.companions) {
+			paths.push_back(companion.path);
+			paths.push_back(companion_path(companion));
+		}
 	}
 	for (const auto &[file, sites] : files_) paths.push_back(file);
 	return paths;
@@ -883,6 +935,25 @@ void RenameTransaction::commit_file_rename() {
 				return;
 			}
 		}
+		// A mission's companions copied under their new names with it (each dated now, as the file);
+		// one that cannot be copied takes every copy back.
+		std::vector<fs::path> copied;
+		for (const RenameOutput &companion : plan.companions) {
+			const fs::path to = fs::path(paths_.root) / companion_path(companion);
+			std::string dated;
+			fs::copy_file(fs::path(paths_.root) / companion.path, to, ec);
+			if (!ec && !refresh_last_write(to.generic_string(), dated)) ec = std::make_error_code(std::errc::io_error);
+			if (ec) {
+				findings_.push_back(refusal(CoreFinding::RenameCopy, companion.old_name + " could not be copied to its new name: " +
+				                                    (dated.empty() ? ec.message() : dated), companion.path));
+				std::error_code ignored;
+				for (const fs::path &made : copied) fs::remove(made, ignored);
+				fs::remove(new_path, ignored);
+				if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.new_sidecar, ignored);
+				return;
+			}
+			copied.push_back(to);
+		}
 	}
 	bool ok = staged_ok_;
 	for (const auto &staged : staged_) {
@@ -906,6 +977,7 @@ void RenameTransaction::commit_file_rename() {
 			return;
 		}
 		if (!plan.sidecar.empty()) fs::remove(fs::path(paths_.root) / plan.sidecar, ec);
+		for (const RenameOutput &companion : plan.companions) fs::remove(fs::path(paths_.root) / companion.path, ec);
 	} else {
 		fs::rename(old_path, new_path, ec);
 		if (ec) {
@@ -913,6 +985,8 @@ void RenameTransaction::commit_file_rename() {
 			return;
 		}
 		if (!plan.sidecar.empty()) fs::rename(fs::path(paths_.root) / plan.sidecar, fs::path(paths_.root) / plan.new_sidecar, ec);
+		for (const RenameOutput &companion : plan.companions)
+			fs::rename(fs::path(paths_.root) / companion.path, fs::path(paths_.root) / companion_path(companion), ec);
 	}
 	// The old outputs are disposable: the next import pass makes the new ones. (A rename
 	// that only changes the case keeps its output directory, which is keyed case-blind.)

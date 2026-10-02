@@ -161,4 +161,24 @@ io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit
 	return out;
 }
 
+io::JsonValue viewport_box_to_json(const SessionView &view, const ViewportModel &model,
+		const std::vector<ViewportHit> &hits) {
+	JsonValue out = JsonValue::make_object();
+	out.set("viewport", json_string(viewport_kind_token(model.kind())));
+	out.set("path", json_string(model.path()));
+	out.set("current", JsonValue::make_bool(model.current(input_of(view, model, clock_of(view)))));
+	JsonValue records = JsonValue::make_array();
+	for (const ViewportHit &hit : hits) {
+		JsonValue record = JsonValue::make_object();
+		record.set("kind", json_string(hit.kind));
+		record.set("index", json_number(hit.index));
+		record.set("id", json_number(double(hit.id)));
+		record.set("name", json_string(hit.name));
+		records.push(std::move(record));
+	}
+	out.set("records", std::move(records));
+	out.set("count", json_number(double(hits.size())));
+	return out;
+}
+
 } // namespace opennova::editor

@@ -24,8 +24,8 @@ const RecordKindRow *own_kind(const Document &document) {
 
 } // namespace
 
-OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values)
-    : mode_(mode), file_values_(file_values) {}
+OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, OutlineRowListedHook row_listed)
+    : mode_(mode), file_values_(file_values), row_listed_(row_listed) {}
 
 void OutlineModel::set_filter(const std::string &filter) {
 	if (filter == filter_) return;
@@ -36,6 +36,25 @@ void OutlineModel::set_filter(const std::string &filter) {
 void OutlineModel::set_sort(bool by_name) { sort_ = by_name; }
 
 void OutlineModel::set_every(bool every) { every_ = every; }
+
+void OutlineModel::set_kinds(uint64_t mask) { kinds_ = mask; }
+
+void OutlineModel::set_all_rows(bool all) { all_rows_ = all; }
+
+uint64_t OutlineModel::kind_bit(const Document &document, NodeKind kind) {
+	const std::vector<RecordKindRow> &kinds = document.kinds();
+	for (size_t i = 0; i < kinds.size() && i < 64; ++i)
+		if (kinds[i].kind == kind) return uint64_t(1) << i;
+	return 0;
+}
+
+bool OutlineModel::row_listed(const Document &document, const Node &row) const {
+	if (mode_ == OutlineMode::MasterDetail) return true;
+	// A kind the table does not name has no chip: its rows are listed.
+	const uint64_t bit = kind_bit(document, row.kind);
+	if (bit && !(kinds_ & bit)) return false;
+	return all_rows_ || !row_listed_ || row_listed_(document, row);
+}
 
 void OutlineModel::set_open(const OutlineLine &line, bool open) {
 	if (line.forced) return;
@@ -64,6 +83,14 @@ size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddr
 		lines(document, master);
 		at = line_of(shown);
 	}
+	// Its row's kind not listed, or its row one the listed hook leaves out: listed.
+	const Node *row = at == SIZE_MAX ? document.row(path.front().row) : nullptr;
+	if (row && !row_listed(document, *row)) {
+		kinds_ |= kind_bit(document, row->kind);
+		if (!row_listed(document, *row)) all_rows_ = true;
+		lines(document, master);
+		at = line_of(shown);
+	}
 	return at;
 }
 
@@ -81,6 +108,8 @@ const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, No
 	key.filter = filter_;
 	key.sort = sort_;
 	key.every = every_;
+	key.all_rows = all_rows_;
+	key.kinds = kinds_;
 	key.master = mode_ == OutlineMode::MasterDetail ? master : 0;
 	if (key == key_) return lines_;
 	// The revision alone moved (an edit, an undo, a redo): the rows the document's change set names.
@@ -173,6 +202,7 @@ void OutlineModel::make_row(const Document &document, size_t index, NodeId maste
 	if (!node) return;
 	++rows_made_;
 	out.row = node->id;
+	if (!row_listed(document, *node)) return;
 	const NodeAddress row{node->id, node->kind, 0};
 	switch (mode_) {
 	case OutlineMode::Tree:
@@ -263,6 +293,25 @@ size_t OutlineModel::line_of(const NodeAddress &address) const {
 	for (size_t i = 0; i < lines_.size(); ++i)
 		if (!lines_[i].collection && lines_[i].address == address) return i;
 	return SIZE_MAX;
+}
+
+OutlineClick OutlineModel::click(size_t clicked, const NodeAddress &primary, bool ctrl, bool shift) const {
+	OutlineClick out;
+	if (clicked >= lines_.size() || lines_[clicked].collection) return out;
+	out.record = lines_[clicked].address;
+	if (ctrl) {
+		out.mode = SelectMode::Toggle;
+		return out;
+	}
+	size_t from = shift ? line_of(primary) : SIZE_MAX;
+	// A list's lines are its rows: the primary's row's where the primary is a record it holds.
+	if (shift && from == SIZE_MAX && mode_ == OutlineMode::List)
+		for (size_t i = 0; i < lines_.size() && from == SIZE_MAX; ++i)
+			if (lines_[i].address.row == primary.row) from = i;
+	if (from == SIZE_MAX || from == clicked) return out;
+	for (size_t i = std::min(from, clicked); i <= std::max(from, clicked); ++i)
+		if (i != clicked && !lines_[i].collection) out.records.push_back(lines_[i].address);
+	return out;
 }
 
 bool OutlineModel::file_values(const Document &document, OutlineFileValues &out) const {

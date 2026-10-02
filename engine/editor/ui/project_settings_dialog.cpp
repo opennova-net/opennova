@@ -131,7 +131,8 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	ImGui::SetNextItemWidth(field_width());
 	ImGui::InputText("Name", fields_.title, sizeof(fields_.title));
 	ImGui::Checkbox("Missions", &fields_.mission);
-	ui_kit::tooltip("The game then needs the files a mission reads: Problems lists the missing ones.");
+	ui_kit::tooltip("The game then needs the files a mission reads: Problems lists the missing ones. A mission is most "
+	                "of the game, so File > Import the whole game install... is the way to bring them in.");
 	ImGui::Checkbox("Multiplayer", &fields_.multiplayer);
 
 	ImGui::SeparatorText("This computer");
