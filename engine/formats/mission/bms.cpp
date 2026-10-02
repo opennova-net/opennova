@@ -2,6 +2,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 #include <cstdlib>
@@ -947,7 +948,7 @@ bool parse_header_blob(const uint8_t* data, size_t size, Header& out, std::strin
 }
 
 bool parse_file(const std::string& path, File& out, std::string& error) {
-    std::ifstream file(path, std::ios::binary | std::ios::ate);
+    std::ifstream file(io::os_path(path), std::ios::binary | std::ios::ate); // UTF-8, long-path safe
     if (!file) {
         error = "Cannot open file: " + path;
         return false;
