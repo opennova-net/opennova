@@ -70,6 +70,10 @@ void AiSystem::remote_player_body_anim(AiEntity &e, World &world, uint32_t logic
         // [orig: infantry death detach @0x4b9c57..0x4b9c60]
         if (ent->mounted) world.vehicles.detach(e.handle);
         if (infantry_anim_flags(inf.anim_state) != 0x82u) {
+            // The edge's scream: the org2 pass runs for this peer's body on the
+            // authority as well, so its player composite plays here too
+            // [orig: @0x4b4c4a..0x4b4c6a] (D-SND-22).
+            infantry_death_scream(*this, e, world, ent);
             if (ent->death_anim_state == 0) ent->last_attacker = EntityHandle{};
             int death = ent->death_anim_state != 0
                                 ? ent->death_anim_state
