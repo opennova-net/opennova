@@ -16,15 +16,20 @@
 // right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
 // until the header's menu shows it, a filter's flat list, a click and a double click, New
 // and its name prompt, Rename...); the import dialog; the OS window's title; and the view
-// events' mailboxes (each event held until its window draws, taken once).
+// events' mailboxes (each event held until its window draws, taken once). The mission's view
+// in the Document window (ADR 0046 S14): its toolbar raises SetViewports alone, a marquee over
+// its picture one SelectRecord across the four pools, which the Inspector shows as one shared
+// form whose change is one batch over every record.
 #include <algorithm>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -33,6 +38,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
@@ -1858,6 +1864,114 @@ void test_preview_model_pane_input() {
 			"the camera's gestures raise SetViewports of it, nothing else");
 }
 
+// The mission's view in the Document window over a real session, its devices the Shell's (ADR 0046
+// S14): the toolbar's Frame and Top raise SetViewports of the camera and nothing else; a marquee over
+// the picture (the areas' marks off) is one SelectRecord of every entity in the box, across the
+// pools, which the session holds and the Inspector shows as their shared form (E9), where a change
+// of Team is one batch over every one of them, ended once.
+void test_mission_view_input() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_input");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	const DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0 && device->width > 0,
+	      "the mission drawn in its tab through its device");
+	if (!viewport || !device) return;
+	// The viewport's column beside the outline, whose items the toolbar's buttons are.
+	const ImGuiWindow *column = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+	CHECK(column != nullptr, "the viewport column beside the outline, drawn");
+	if (!column) return;
+	const auto press = [&](const char *button) {
+		ui.activate(item_id(column->ID, { button }));
+		run.settle();
+		return run.take();
+	};
+	run.camera(path, R"({"kind": "mission", "camera": {"distance": 5000}})");
+	std::vector<EditorRequest> raised = press("Frame");
+	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size() &&
+	              viewport->camera().distance < 5000.0f,
+	      "Frame: SetViewports of the camera alone, the entities framed");
+	raised = press("Top");
+	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size() &&
+	              viewport->camera().pitch >= kOrbitPitchLimit - 1e-4f,
+	      "Top: a SetViewport, the camera straight down");
+	raised = press("Frame");
+	CHECK(!raised.empty() && count_of_kind(raised, EditorRequestKind::SetViewport) == raised.size(), "framed again");
+	// The areas' marks off: a box over the whole picture takes the entities alone.
+	run.camera(path, R"({"kind": "mission", "options": {"marks": {"areas": false}}})");
+	run.settle();
+	run.take();
+	const ImVec2 from(device->origin.x + 2.0f, device->origin.y + 2.0f);
+	const ImVec2 to(device->origin.x + float(device->width) - 2.0f, device->origin.y + float(device->height) - 2.0f);
+	ui.mouse(from.x, from.y);
+	ui.button(true);
+	ui.mouse((from.x + to.x) * 0.5f, (from.y + to.y) * 0.5f);
+	ui.mouse(to.x, to.y);
+	ui.button(false);
+	run.settle();
+	raised = run.take();
+	const EditorRequest *boxed = only(raised, EditorRequestKind::SelectRecord);
+	std::set<NodeKind> kinds;
+	if (boxed)
+		for (const NodeAddress &record : boxed->records) kinds.insert(record.kind);
+	CHECK(boxed && boxed->records.size() >= 4 && kinds.size() >= 2 && count_of_kind(raised, EditorRequestKind::EditRecord) == 0,
+	      "a marquee over the picture: one SelectRecord of the entities in it, across the pools, no edit");
+	if (!boxed) return;
+	const size_t selected = v.documents.selection.records.size();
+	CHECK(selected == boxed->records.size() && v.documents.selection.document == path, "the session holds them");
+	// The Inspector's shared form over them: Team changed there is one batch over every record.
+	ui.focus("Inspector");
+	ui.frames(3);
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("records selected (") != std::string::npos && text.find("Team") != std::string::npos,
+	      "the Inspector's shared form over the pools");
+	run.take();
+	const ImGuiID team = item_id(Ui::window_id("Inspector"), { "", "fields", "team", "##value" });
+	ImGui::ActivateItemByID(team);
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	CHECK(GImGui->ActiveId == team, "the Team field has the keyboard");
+	ImGui::GetIO().AddInputCharactersUTF8("1");
+	ui.frames(2);
+	ui.key(ImGuiKey_Enter, true);
+	ui.key(ImGuiKey_Enter, false);
+	run.settle();
+	raised = run.take();
+	const EditorRequest *batch = nullptr;
+	for (const EditorRequest &request : raised)
+		if (request.kind == EditorRequestKind::EditRecord && request.edits.size() == selected) batch = &request;
+	bool teams = batch != nullptr;
+	for (size_t i = 0; batch && i < batch->edits.size(); ++i)
+		teams = teams && batch->edits[i].field == "team" && v.documents.selection.holds(batch->edits[i].address);
+	CHECK(batch && teams && count_of_kind(raised, EditorRequestKind::EndEdit) >= 1 && mission->dirty(),
+	      "a change of Team: one batch over every selected record, ended, applied");
+}
+
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
 // button is apart from a press (right_pressed, right_down; never pressed or down), a click of it
 // only when it comes up having travelled less than a drag; the left button is a press; the keys a
@@ -2271,6 +2385,7 @@ void run_workspace_tests() {
 	test_preview_follows();
 	test_preview_model_gestures();
 	test_preview_model_pane_input();
+	test_mission_view_input();
 	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();

@@ -372,12 +372,13 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 			tools.locked = "It is one of the file's own records: none is added, duplicated, removed or moved.";
 	}
 	ui_kit::WrapRow row;
+	const float line = ImGui::GetContentRegionAvail().x; // the row's whole line (a narrow column's)
 	for (const RecordKindRow &kind : document.kinds())
 		if (*kind.add_label && ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file.", true))
 			edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 	if (placed) {
 		const std::string title = document.record_title(selection), name = document.record_name(selection);
-		const std::string shown = ui_kit::fit(title, ImGui::GetFontSize() * 12.0f);
+		const std::string shown = ui_kit::fit(title, std::min(ImGui::GetFontSize() * 12.0f, line));
 		row.next(ui_kit::text_width(shown.c_str()));
 		ImGui::TextUnformatted(shown.c_str());
 		std::string tip = shown != title ? title : std::string();

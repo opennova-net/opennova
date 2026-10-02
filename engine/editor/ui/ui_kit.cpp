@@ -77,9 +77,15 @@ float field_width(float width, const char *label) { return width + label_width(l
 float text_width(const char *text) { return ImGui::CalcTextSize(text).x; }
 
 bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip, bool small) {
-	row.next(button_width(label));
+	const float width = button_width(label);
+	row.next(width);
+	// A label wider than the whole of its line (a row wraps whole controls, so one wider than a line
+	// would run past the window) is cut to the line, the button's id the whole label's (###).
+	const float room = ImGui::GetContentRegionAvail().x;
+	const std::string shown = width > room ? fit(label, room - ImGui::GetStyle().FramePadding.x * 2.0f) + "###" + label
+	                                       : std::string(label);
 	ImGui::BeginDisabled(!enabled);
-	const bool pressed = small ? ImGui::SmallButton(label) : ImGui::Button(label);
+	const bool pressed = small ? ImGui::SmallButton(shown.c_str()) : ImGui::Button(shown.c_str());
 	// Held back by an enclosing BeginDisabled too (a view the busy gate holds back, S13 A3), however
 	// the button was activated.
 	const bool held = (ImGui::GetItemFlags() & ImGuiItemFlags_Disabled) != 0;

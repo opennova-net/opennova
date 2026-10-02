@@ -12,7 +12,12 @@
 // documents. The clock set with no document named, whatever is active. A model read at a size a
 // canvas set: its markers' pixels and its hit agree. ADR 0046 S14: the device a planner with no
 // canvas reads (Viewports::set_devices, a peek that uses nothing); a drop, the third thing an edit in
-// a viewport names, which a menu's and a model's viewports refuse; and the viewport query's box.
+// a viewport names, which a menu's and a model's viewports refuse; and the viewport query's box. A
+// mission's edits over the wire (S14 V7): a drag of an entity's move handle by pixels over no device
+// (the plane through it) moves it on the file's axes, one undo step whose undo gives the bytes back;
+// four samples under one gesture one step; its height and yaw handles; a drag of a selected entity
+// takes the selected with it; refused as the planner says (an unknown handle, a record the picture
+// does not show, an area's yaw, an operation holding the documents); the frame and top commands.
 
 #include <cmath>
 #include <cstdint>
@@ -23,8 +28,11 @@
 #include <vector>
 
 #include <base/io/json.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewport_device.h>
@@ -125,7 +133,8 @@ uint64_t gesture_of(const JsonValue &answer) {
 	return outcome ? uint64_t(outcome->get_number("gesture", 0)) : 0;
 }
 
-// A session over a new project with layout.mnu (kLayoutMenu) and models/armory.3di, the menu open.
+// A session over a new project with layout.mnu (kLayoutMenu) and models/armory.3di (and, asked, the
+// minted mission as missions/synth_logic.bms), the menu open.
 struct Wired {
 	editor_test::TempProjectDir dir;
 	MemoryPreferencesStore preferences;
@@ -134,12 +143,15 @@ struct Wired {
 	NodeAddress box, other, tiny;
 	std::string id_box, id_other, id_tiny;
 
-	Wired(const char *name, ProcessPlatform &platform) : dir(name), session(platform, preferences) {
+	Wired(const char *name, ProcessPlatform &platform, bool mission = false) : dir(name), session(platform, preferences) {
 		session.handle(request::new_project(dir.file("project"), "Wire"));
 		session.run_operations();
 		const std::string root = session.view().project.root;
 		editor_test::write_text(root + "/layout.mnu", kLayoutMenu);
 		editor_test::write_bytes(root + "/models/armory.3di", test_io::read_file(synth("armory.3di")));
+		if (mission)
+			editor_test::write_bytes(root + "/missions/synth_logic.bms",
+					test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"));
 		session.handle(request::rescan());
 		session.run_operations();
 		session.handle(request::open_document("layout.mnu"));
@@ -570,6 +582,113 @@ static int test_model_edits() {
 	return 0;
 }
 
+// A mission's edits over the wire (S14): a drag of an entity's move handle by 64 pixels across, over
+// no device, moves it on the plane through it (x moved, z standing) in one undo step, the undo giving
+// the file's bytes back; four samples under one gesture one step, each going on from the last; a
+// drag of a selected entity moves the selected with it; the height handle lifts, the yaw handle
+// turns; refused and nothing written: an unknown handle, a record the picture does not show, an
+// area's yaw, a drag while an operation holds the documents; the frame and top commands move the
+// camera and make no undo step.
+static int test_mission_edits() {
+	NoProcess platform;
+	Wired wired("opennova_editor_viewport_wire_mission", platform, true);
+	ProjectSession &session = wired.session;
+	session.handle(request::open_document("missions/synth_logic.bms"));
+	session.run_operations();
+	auto *document = dynamic_cast<MissionDocument *>(session.document_for("missions/synth_logic.bms"));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	const std::string path = document->path();
+	const std::vector<const Node *> items = document->rows_of(MissionKind::Item);
+	const std::vector<const Node *> areas = document->rows_of(MissionKind::Area);
+	TEST_EXPECT(items.size() == 3 && areas.size() == 2);
+	if (items.size() < 3 || areas.empty()) return 1;
+	// The viewport followed once (no device pumps it here): its scene read, its camera framed.
+	const auto *viewport = static_cast<const MissionViewport *>(
+			session.viewports().follow_one(session.view(), path, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr && viewport->status() == ViewportStatus::Ready);
+	if (!viewport) return 1;
+	const auto drag = [&](NodeId id, const std::string &members) {
+		return wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "drag": {"id": )" + std::to_string(id) +
+				", " + members + "}}");
+	};
+	// The scene as the viewport reads it now (no device pumps it: followed before each read).
+	const auto entity = [&](NodeId id) {
+		session.viewports().follow_one(session.view(), path, ViewportKind::Mission);
+		return viewport->scene().entity(id);
+	};
+	const auto undo_all = [&]() {
+		int steps = 0;
+		while (document->can_undo() && steps < 16) {
+			session.handle(request::undo(path));
+			++steps;
+		}
+		return steps;
+	};
+	const NodeId first = items[0]->id, second = items[1]->id, third = items[2]->id;
+	const std::string bytes = document->serialize().text;
+	TEST_EXPECT(!bytes.empty() && !document->dirty());
+	// Looking north from the first framing, 64 pixels across is east: x moves, y and z stand.
+	const double x = entity(first)->x, y = entity(first)->y, z = entity(first)->z;
+	TEST_EXPECT(std::fabs(mission_camera_heading(viewport->camera())) < 1e-3);
+	JsonValue answer = drag(first, R"("handle": "move", "by": [64, 0])");
+	TEST_EXPECT(done(answer));
+	TEST_EXPECT(entity(first)->x > x && entity(first)->z == z && std::fabs(entity(first)->y - y) < 1.0);
+	TEST_EXPECT(document->dirty() && undo_all() == 1 && !document->dirty() && document->serialize().text == bytes);
+	TEST_EXPECT(entity(first)->x == x);
+	// Four samples under one gesture: one step, each going on from where the last left the handle.
+	answer = drag(first, R"("handle": "move", "by": [16, 0], "end": false)");
+	const uint64_t gesture = gesture_of(answer);
+	TEST_EXPECT(done(answer) && gesture != 0);
+	const double after_one = entity(first)->x;
+	for (int sample = 1; sample < 4; ++sample) {
+		answer = drag(first, R"("handle": "move", "by": [16, 0], "gesture": )" + std::to_string(gesture) +
+				(sample == 3 ? ", \"end\": true" : ", \"end\": false"));
+		TEST_EXPECT(done(answer));
+	}
+	TEST_EXPECT(std::fabs((entity(first)->x - x) - 4.0 * (after_one - x)) < 1.0 && session.view().documents.gestures.empty());
+	TEST_EXPECT(undo_all() == 1 && document->serialize().text == bytes);
+	// The selected move together: the second and third selected, the second dragged moves both.
+	session.handle(request::select_record(path, NodeAddress{ second, items[1]->kind, 0 }, SelectMode::Replace,
+			{ NodeAddress{ third, items[2]->kind, 0 } }));
+	const double third_x = entity(third)->x;
+	answer = drag(second, R"("handle": "move", "by": [32, 0])");
+	TEST_EXPECT(done(answer) && entity(third)->x > third_x && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1);
+	session.handle(request::select_record(path, NodeAddress()));
+	// The height handle, dragged up the picture, lifts; the yaw handle, dragged round, turns.
+	answer = drag(first, R"("handle": "height", "by": [0, -30])");
+	TEST_EXPECT(done(answer) && entity(first)->z > z && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1);
+	const int yaw = entity(first)->yaw;
+	answer = drag(first, R"("handle": "yaw", "by": [40, 40])");
+	TEST_EXPECT(done(answer) && entity(first)->yaw != yaw && entity(first)->x == x);
+	TEST_EXPECT(undo_all() == 1 && document->serialize().text == bytes);
+	// Refused, nothing written.
+	TEST_EXPECT(refused(drag(first, R"("handle": "spin", "by": [8, 0])"), "Unknown handle"));
+	TEST_EXPECT(refused(drag(999999, R"("handle": "move", "by": [8, 0])"), "no entity or area the viewport shows"));
+	TEST_EXPECT(refused(drag(areas[0]->id, R"("handle": "yaw", "by": [8, 0])"), "An area has no yaw handle"));
+	TEST_EXPECT(refused(drag(first, R"("handle": "x_min", "by": [8, 0])"), "An entity has no x_min handle"));
+	TEST_EXPECT(session.start_operation(std::make_unique<editor_test::HoldingOperation>()) != 0);
+	TEST_EXPECT(refused(session.handle_json(parse(R"({"kind": "edit_in_viewport", "path": ")" + path +
+										R"(", "drag": {"id": )" + std::to_string(first) + R"(, "handle": "move", "by": [8, 0]}})")),
+			"an operation holds the documents"));
+	session.run_operations();
+	TEST_EXPECT(!document->dirty() && document->serialize().text == bytes);
+	// The commands: top (straight down, north up) and frame (the first named record), each a
+	// set_viewport and no undo step.
+	answer = wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "top"}})");
+	TEST_EXPECT(done(answer) && viewport->camera().pitch >= kOrbitPitchLimit - 1e-4f);
+	session.handle(request::set_viewport(path, R"({"kind": "mission", "camera": {"distance": 5000}})"));
+	answer = wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "frame", "ids": [)" +
+			std::to_string(first) + "]}}");
+	TEST_EXPECT(done(answer) && viewport->camera().distance < 5000.0f && !document->can_undo());
+	TEST_EXPECT(refused(wired.wire(R"({"kind": "edit_in_viewport", "path": ")" + path + R"(", "command": {"name": "frame", "ids": [999999]}})"),
+			"999999"));
+	std::printf("test_mission_edits passed\n");
+	return 0;
+}
+
 // The preview clock set with no document named: a change of the clock alone, pathless, sets it
 // whatever is active (a stylesheet, which shows in no viewport; nothing at all); one with another
 // member beside it names the active document's viewport, refused for a stylesheet (naming the types
@@ -880,6 +999,7 @@ int main() {
 	TEST_EXPECT(test_gesture_lapses() == 0);
 	TEST_EXPECT(test_menu_drags() == 0);
 	TEST_EXPECT(test_model_edits() == 0);
+	TEST_EXPECT(test_mission_edits() == 0);
 	TEST_EXPECT(test_pathless_clock() == 0);
 	TEST_EXPECT(test_canvas_sized_reads() == 0);
 	std::printf("editor_viewport_wire: all tests passed\n");

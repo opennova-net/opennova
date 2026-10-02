@@ -487,11 +487,14 @@ struct HandViewports {
 		v.documents.viewports = viewports;
 		if (!v.findings.assets) v.findings.assets = std::make_shared<const ProjectAssetSource>();
 	}
-	// A SetViewport's change applied to the viewport at `path` (the session's set_viewport).
+	// A SetViewport's change applied to the viewport at `path` (the session's set_viewport): one the
+	// windows raised that the viewport refuses fails the test, naming why.
 	bool set(const SessionView &v, const std::string &path, const char *change) {
 		opennova::io::JsonValue json;
 		std::string error;
-		return opennova::io::json_parse(change, json, error) && viewports->set(v, path, json, error);
+		const bool applied = opennova::io::json_parse(change, json, error) && viewports->set(v, path, json, error);
+		CHECK(applied, (std::string("a window's SetViewport applies: ") + error + " (" + change + ")").c_str());
+		return applied;
 	}
 	// The Shell's pump: the windows' SetViewports served, the viewports tracked to the view (as the
 	// session does after each change) and their devices synced.

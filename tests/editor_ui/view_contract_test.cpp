@@ -26,6 +26,7 @@
 // that filters its rows by kind and leaves out the rows its type says hold nothing, its chips, its
 // switch, and a Shift or Ctrl click on a line.
 #include <cfloat>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -34,10 +35,9 @@
 
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
-#include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/model/text_document.h>
-#include <editor/preview/model_viewport.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/session/session_operation.h>
 #include <editor/preview/script_viewport.h>
@@ -515,72 +515,77 @@ void test_outline_kinds_and_clicks() {
 	}
 }
 
-// S13 V5: the MainViewport role's view (ui/main_viewport_view), which no type's row plays yet: the
-// document's outline in a column, the viewport beside it, its canvas filling the rest of the tab,
-// drawn through the workspace's device of (document, kind) once the Shell's pump has made it; the
-// viewport the one kept for the document (a model's here, until a Main-role kind ships).
+// The minted mission (fixtures/bms/synth_logic.bms) as its type's document.
+std::shared_ptr<const DocumentBase> load_mission(const std::string &repo) {
+	std::shared_ptr<DocumentBase> made = document_type_for(AssetKind::Mission)->make();
+	Diagnostic error;
+	CHECK(made && made->load_bytes(test_io::read_file(repo + "/fixtures/bms/synth_logic.bms"), "synth_logic.bms",
+	                               AssetKind::Mission, "jo", error),
+	      "the mission loads");
+	return made;
+}
+
+// S13 V5, S14: the MainViewport role's view (ui/main_viewport_view), the mission type's row's (its
+// kMissionOutline beside the mission kind, make_view): the document's outline in a column, the
+// viewport beside it, its canvas filling the rest of the tab, drawn through the workspace's device of
+// (document, kind) once the Shell's pump has made it; the viewport the one kept for the document.
 void test_main_viewport_view() {
 	const std::string repo = test_paths_repo_root(__FILE__);
-	auto model = std::make_shared<ModelDocument>();
-	Diagnostic error;
-	CHECK(model->load_bytes(test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model,
-	                        "jo", error),
-	      "a model");
-	const DocumentViewRow *row = document_view_row(DocumentTypeId::Model);
-	CHECK(row && row->outline, "the model's row names an outline");
+	const std::shared_ptr<const DocumentBase> mission = load_mission(repo);
+	if (!mission) return;
+	const DocumentViewRow *row = document_view_row(DocumentTypeId::Mission);
+	CHECK(row && row->role == DocumentViewRole::MainViewport && row->outline,
+	      "the mission's row: the MainViewport role over an outline");
 	if (!row || !row->outline) return;
 	NullBackend backend;
 	TestWorkspace workspace;
-	seed(workspace.seeded, model);
+	seed(workspace.seeded, mission);
 	HandViewports shell;
 	shell.bind(workspace.seeded);
-	shell.viewports->ensure(model->path(), ViewportKind::Model);
+	shell.viewports->ensure(mission->path(), ViewportKind::Mission);
 	workspace.source = &shell.devices.cache;
-	MainViewportView view(*row->outline, ViewportKind::Model);
-	CHECK(view.kind() == ViewportKind::Model && view.outline() && view.outline()->mode() == row->outline->mode,
-	      "its outline in its row's mode, beside the kind's viewport");
+	std::unique_ptr<DocumentView> made = make_view(*mission);
+	auto *view = dynamic_cast<MainViewportView *>(made.get());
+	CHECK(view && view->kind() == ViewportKind::Mission && view->outline() && view->outline()->mode() == row->outline->mode,
+	      "its view: the outline in its row's mode, beside the mission kind's viewport");
+	if (!view) return;
 	// The Shell's pump before each frame: the device the canvas asked for made; the canvas sizes the
 	// device as it draws it, raising nothing (the device reports its size at the pump).
 	for (int i = 0; i < 4; ++i) {
 		shell.devices.sync(*shell.viewports, workspace.seeded);
-		view_frame(workspace, view, *model, 720.0f);
-		view.end_frame(workspace);
+		view_frame(workspace, *view, *mission, 720.0f);
+		view->end_frame(workspace);
 		CHECK(workspace.requests.empty(), "the canvas raises nothing as it draws");
 		workspace.requests.clear();
 	}
 	shell.devices.sync(*shell.viewports, workspace.seeded);
-	const ViewportModel *viewport = shell.find(model->path(), ViewportKind::Model);
-	const DrawnDevice *device = shell.device(model->path(), ViewportKind::Model);
-	CHECK(viewport && viewport->status() == ViewportStatus::Ready, "the viewport shows the model");
+	const ViewportModel *viewport = shell.find(mission->path(), ViewportKind::Mission);
+	const DrawnDevice *device = shell.device(mission->path(), ViewportKind::Mission);
+	CHECK(viewport && viewport->status() == ViewportStatus::Ready, "the viewport shows the mission");
 	CHECK(device && device->draws > 0 && device->width > 0 && device->width < 720 && device->origin.x > 100.0f,
 	      "the viewport drawn on its device beside the outline");
 	CHECK(device && viewport && device->width == viewport->size().width && device->height == viewport->size().height &&
 	              viewport->canvas_sized(),
 	      "the viewport at the canvas's size, its device's as drawn");
-	const std::string title = first_title(*model);
-	CHECK(!title.empty() && view_frame(workspace, view, *model, 720.0f, true).find(title.substr(0, 8)) != std::string::npos,
+	const std::string title = first_title(*mission);
+	CHECK(!title.empty() && view_frame(workspace, *view, *mission, 720.0f, true).find(title.substr(0, 8)) != std::string::npos,
 	      "the outline drawn beside it");
 }
 
-// The MainViewport role's view in the Document window, as its tab draws it, while an operation holds
-// the documents (a refresh, S13 A3): its outline column is held back (a click on a line selects
-// nothing), its canvas is not (a drag on the picture orbits the camera, a SetViewport that runs
-// beside any operation); with no operation, the same click on the line selects its record.
+// The MainViewport role's view in the Document window, as its tab draws it (the mission's, S14),
+// while an operation holds the documents (a refresh, S13 A3): its outline column is held back (a
+// click on a line selects nothing), its canvas is not (Alt and a drag on the picture orbit the
+// camera, a SetViewport that runs beside any operation); with no operation, the same click on the
+// line selects its record.
 void test_main_viewport_held() {
 	const std::string repo = test_paths_repo_root(__FILE__);
-	auto model = std::make_shared<ModelDocument>();
-	Diagnostic error;
-	CHECK(model->load_bytes(test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model,
-	                        "jo", error),
-	      "a model");
-	const DocumentViewRow *row = document_view_row(DocumentTypeId::Model);
-	CHECK(row && row->outline, "the model's row names an outline");
-	if (!row || !row->outline) return;
+	const std::shared_ptr<const DocumentBase> mission = load_mission(repo);
+	if (!mission) return;
 	SessionView v;
-	seed(v, model);
+	seed(v, mission);
 	HandViewports shell;
 	shell.bind(v);
-	shell.viewports->ensure(model->path(), ViewportKind::Model);
+	shell.viewports->ensure(mission->path(), ViewportKind::Mission);
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.windows.set_devices(&shell.devices.cache);
@@ -591,13 +596,13 @@ void test_main_viewport_held() {
 		documents = dynamic_cast<DocumentWindow *>(&ui.windows.pass().window(i));
 	CHECK(documents != nullptr, "the Document window");
 	if (!documents) return;
-	documents->set_view(*model, std::make_unique<MainViewportView>(*row->outline, ViewportKind::Model));
+	documents->set_view(*mission, make_view(*mission));
 	ui.focus("Document");
 	ui.frames(4);
 	ui.away();
 	ui.drain();
-	const auto *viewport = static_cast<const ModelViewport *>(shell.find(model->path(), ViewportKind::Model));
-	const DrawnDevice *device = shell.device(model->path(), ViewportKind::Model);
+	const auto *viewport = static_cast<const MissionViewport *>(shell.find(mission->path(), ViewportKind::Mission));
+	const DrawnDevice *device = shell.device(mission->path(), ViewportKind::Mission);
 	CHECK(viewport && viewport->status() == ViewportStatus::Ready && device && device->draws > 0,
 	      "the viewport drawn in the tab through its device");
 	if (!viewport || !device) return;
@@ -645,14 +650,30 @@ void test_main_viewport_held() {
 	}
 	ui.away();
 	const float yaw = viewport->camera().yaw;
-	const ImVec2 from(device->origin.x + 16.0f, device->origin.y + 16.0f);
+	// A press on nothing: a point of the picture clear of every shown mark.
+	ImVec2 from(device->origin.x + 16.0f, device->origin.y + 16.0f);
+	{
+		const std::vector<MissionMark> marks = viewport->marks(device->width, device->height, nullptr);
+		for (float y = 16.0f; y < float(device->height) - 16.0f; y += 24.0f) {
+			bool clear = false;
+			for (float x = 16.0f; x < float(device->width) - 16.0f && !clear; x += 24.0f) {
+				clear = true;
+				for (const MissionMark &mark : marks)
+					clear = clear && !(mark.shown && std::fabs(mark.x - x) < 16.0f && std::fabs(mark.y - y) < 16.0f);
+				if (clear) from = ImVec2(device->origin.x + x, device->origin.y + y);
+			}
+			if (clear) break;
+		}
+	}
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, true);
 	ui.mouse(from.x, from.y);
 	ui.button(true);
 	ui.mouse(from.x + 40.0f, from.y + 8.0f);
 	ui.mouse(from.x + 90.0f, from.y + 16.0f);
 	ui.button(false);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Alt, false);
 	ui.frames(2);
-	CHECK(viewport->camera().yaw != yaw, "held: a drag on the picture orbits the camera");
+	CHECK(viewport->camera().yaw != yaw, "held: Alt and a drag on the picture orbit the camera");
 	CHECK(selects(ui.drain()) == 0, "the drag selects nothing");
 	ui.away();
 }

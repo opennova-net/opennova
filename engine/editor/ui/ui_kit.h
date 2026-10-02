@@ -42,7 +42,8 @@ float text_width(const char *text);
 
 // A button of a row of tools, on `row`: pressed only while `enabled` (a disabled one never
 // acts, however it is activated), its tooltip what it does, or while it cannot act, why
-// not. Small: the tools of a list inside a panel (the inspector's, the outline's).
+// not. Small: the tools of a list inside a panel (the inspector's, the outline's). A label
+// wider than the row's whole line is cut to it ("..."), the button then found by "###label".
 bool tool(WrapRow &row, const char *label, bool enabled, const std::string &tip, bool small = false);
 
 // The tools of a list's selected record: Add, Duplicate, Remove, Up and Down, each disabled
