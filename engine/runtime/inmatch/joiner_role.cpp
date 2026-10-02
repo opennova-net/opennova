@@ -374,8 +374,7 @@ bool JoinerRole::queue_stance_change(uint16_t action_id) {
 bool JoinerRole::request_stance(int stance) {
 	if (!kernel_ || stance < 0 || stance > 2) return false;
 	if (!kernel_->local.stance_request_allowed()) return false;
-	static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
-	return queue_stance_change(kStanceActionIds[stance]);
+	return queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);
 }
 
 // Stamp each decoded Player/Infantry row's .adm registry id from its wire
@@ -744,7 +743,7 @@ void JoinerRole::pump() {
 	if (rt.state().health_updates_applied != stance_echo_seen_) {
 		stance_echo_seen_ = rt.state().health_updates_applied;
 		if (local_spawned_ && world.cached.local_player.valid())
-			kernel.local.latch_stance_from_echo(rt.state().local_stance_bits);
+			kernel.local.latch_stance(rt.state().local_stance_bits);
 	}
 	sync_authoritative_mount();
 	apply_mounted_ammo_update();

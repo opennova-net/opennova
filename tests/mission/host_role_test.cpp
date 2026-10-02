@@ -600,6 +600,70 @@ int main() {
 		}
 	}
 
+	// --- the authority's own stance rides its looped-back C2S 0x1D ----------
+	// The server handler latches the host's own player from the 0x1D its own
+	// client sent: the datagram the press frame's client frame flushed is read
+	// at the next frame's head, so the stance lands in that frame's server
+	// tick, ahead of its body update.
+	// [orig: Game_ProcessMainFrame -- CNapiNetwork_PumpManagerReceive @0x526528,
+	//  Client_ProcessNetworkFrame @0x526692, Server_TickUpdate @0x5266b6 ->
+	//  CNapiNetwork_PumpServerProtocolRecv @0x51d895;
+	//  NapiNPServerMsg_HandleStanceChange @0x501c60, latches @0x501d1b / @0x501d2d]
+	{
+		ms::MissionKernel kernel;
+		inmatch::HostRole role;
+		role.bind(kernel);
+		inmatch::ListenHostState &host = role.state;
+		kernel.open_document(two_entity_mission(), "stance", source_over(&files));
+		ms::KernelBootOptions options;
+		options.game_type = mission_game_type(kernel.mission);
+		options.bringup_net_session = [&] { role.bring_up_singleplayer(); };
+		std::string error;
+		CHECK(kernel.boot(options, error));
+		opennova::inmatch::NullDatagramSocket socket;
+		role.set_socket(&socket);
+		for (int i = 0; i < 4; ++i) role.run_tick(tick_input(0));
+		auto &lp = kernel.local;
+		const auto body_stance = [&] {
+			const w::AiEntity *body = lp.player_ai();
+			return body != nullptr ? body->inf.stance : w::InfantryState::Stance::kStand;
+		};
+		CHECK(lp.has_local_player() && lp.stance_latch() == 0);
+		// A looped-back crouch (action 169) reaches the dispatcher and latches.
+		host.host_loop.client_send(c2s::STANCE_CHANGE, std::vector<uint8_t>{0xA9, 0x00});
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 1 && lp.input.crouch && !lp.input.prone);
+		CHECK(body_stance() == w::InfantryState::Stance::kCrouch);
+		CHECK(lp.player() != nullptr && lp.player()->net_stance_bits == 2);
+		// The key only queues the 0x1D (action 170, prone) on the host's own
+		// client: the press frame's body stays crouched, its client frame
+		// flushes the datagram, and the next frame's server tick latches it.
+		// [orig: Input_HandleActionBinding_0 case 170 @0x4e0df3 ->
+		//  CNapiNetwork_QueueReliableMessage, no latch write]
+		CHECK(role.request_stance(2));
+		CHECK(lp.stance_latch() == 1);
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 1 && body_stance() == w::InfantryState::Stance::kCrouch);
+		CHECK(host.host_loop.c2s_pending() == 1);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2 && lp.input.prone && !lp.input.crouch);
+		CHECK(body_stance() == w::InfantryState::Stance::kProne);
+		CHECK(host.host_loop.c2s_pending() == 0);
+		// Every press sends, the selected stance included; the stand (172)
+		// then clears both bits the same way.
+		CHECK(role.request_stance(2));
+		role.run_tick(tick_input(0));
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2);
+		CHECK(role.request_stance(0));
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 2);
+		role.run_tick(tick_input(0));
+		CHECK(lp.stance_latch() == 0 && !lp.input.prone && !lp.input.crouch);
+		CHECK(body_stance() == w::InfantryState::Stance::kStand);
+	}
+
 	if (failures == 0) std::printf("host_role: all checks passed\n");
 	return failures == 0 ? 0 : 1;
 }

@@ -2379,8 +2379,10 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 		"a STANDING infantry entity never anchors the silhouette tier")
 
 	assert_true(sim.request_local_player_stance(1))  # crouch (SELECT 169)
-	# The SELECT latch crosses the input pump one frame after the request, so
-	# the world loop needs two frames where the bare sim.step() needed one.
+	# The SP listen host's own C2S 0x1D leaves at the press frame's client
+	# frame and latches in the next frame's server tick, and the feed crosses
+	# the input pump one frame after that: three frames.
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	# Whether the crouched body anchors is the occlusion frame's collector
@@ -2391,6 +2393,7 @@ func test_tick_feeds_dispatcher_silhouette_anchors_from_the_sim() -> void:
 		"tick feeds the occlusion frame's anchors into the dispatcher's silhouette tier")
 
 	assert_true(sim.request_local_player_stance(0))  # stand (SELECT 172)
+	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	world.tick(Vector3.ZERO, Transform3D(), ONE_TICK_DELTA)
 	assert_eq(disp.silhouette_anchors, PackedVector3Array(),

@@ -198,6 +198,12 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// waypoint / punt sender is a bare QueueReliableMessage on the local
 		// client's connection, and the server handlers read the host
 		// context (server_squad.h).
+		// So does its stance key's 0x1D: the handler latches the host's own
+		// player on the frame after the press, ahead of that frame's body
+		// update. Retail's pack runs before it and is overwritten by it; here
+		// the pack follows and rewrites MoveOrder's stance from the same latches.
+		// [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 from
+		//  Server_TickUpdate's receive pump @0x51d895]
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -216,7 +222,7 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
 				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
-				dg.tag != c2s::TEAM_CHANGE_REQUEST) {
+				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
@@ -247,6 +253,12 @@ bool HostRole::send_medic_request() {
 	request.entity_index = kernel_->world.cached.local_player.packed;
 	state.host_loop.client_send(opennova::c2s::MEDIC_REQUEST, opennova::encode_medic_request(request));
 	return true;
+}
+
+bool HostRole::request_stance(int stance) {
+	if (kernel_ == nullptr || stance < 0 || stance > 2 || !state.client_runtime) return false;
+	if (!kernel_->local.stance_request_allowed()) return false;
+	return state.client_runtime->queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);
 }
 
 // The listen frame: input -> the local player's body input, Server_TickUpdate

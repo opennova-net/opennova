@@ -108,9 +108,15 @@ public:
     // retail MountSlot+8). Returns whether the zero changed.
     bool request_scope_zero(int delta);
     void set_view_keys(bool free_look, bool up, bool down, bool left, bool right);
-    // Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
-    // at apply, REFUSED while the equipped weapon has ForceCrouch or the
-    // player sits in the UseGun seat. Returns whether the latch changed.
+    // The stance keys' action ids, the C2S 0x1D body: 0 stand / 1 crouch /
+    // 2 prone -> 172 / 169 / 170. [orig: Input_HandleActionBinding_0 cases
+    //  172 @0x4e0e3e, 169 @0x4e0d77 (`push 0A9h` @0x4e0dbb), 170 @0x4e0df3]
+    static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
+    // The bare kernel's stance SELECT (0 stand / 1 crouch / 2 prone), which
+    // has no session to loop the C2S 0x1D through: the keys' refusals, then
+    // the handler's mutual-exclusion apply at once. Returns whether the latch
+    // changed. A session's players send the 0x1D instead (HostRole /
+    // JoinerRole::request_stance).
     // [orig: input cases 169/170/172 @0x4e0d77.. -> NapiNPServerMsg_HandleStanceChange
     // @0x501c60; the ForceCrouch gate Entity_CheckWeaponSeatFlags(equipped,
     // 0x40000) @0x4e0d8a; the `parentSlot == 3` gate @0x4e0da0..0x4e0db5]
@@ -118,11 +124,14 @@ public:
     // The stance keys' own refusals, ahead of the C2S 0x1D send: a ForceCrouch
     // weapon or the UseGun seat. [orig: @0x4e0d8a; @0x4e0da0..0x4e0db5]
     bool stance_request_allowed() const;
-    // A non-authority client's stance comes from the authority: every 0x0A
-    // whose header carries the recipient tail re-latches it from the tail's
-    // state byte (bit 0 prone, bit 1 crouch) and replaces MoveOrder's stance
-    // bits. [orig: NapiNPClientMsg_0x00A @0x430549..0x43058f]
-    void latch_stance_from_echo(uint8_t bits);
+    // The stance latches and MoveOrder's stance bits from one stance pair
+    // (bit 0 prone, bit 1 crouch), written together by both their writers:
+    // the authority's 0x1D handler when the sender is its own player, and on
+    // a non-authority client every 0x0A whose header carries the recipient
+    // tail. [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 -- MoveOrder
+    //  @0x501cc9..0x501d01, the latches @0x501d1b / @0x501d2d;
+    //  NapiNPClientMsg_0x00A @0x430549..0x43058f]
+    void latch_stance(uint8_t bits);
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
     // dword_B76484 prone-latch equivalent the render-slot drape gate reads.
     int stance_latch() const { return stance_latch_; }

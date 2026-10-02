@@ -537,7 +537,11 @@ bool ClientRuntime::queue_medic_request() {
 //  (the connection's outgoing list only); applied by
 //  NapiNPServerMsg_HandleStanceChange @0x501c60]
 bool ClientRuntime::queue_stance_change(uint16_t action_id) {
-	if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()) return false;
+	// The authority's own client queues it too: the senders carry no
+	// is_authority test, and its connection is the local one.
+	const bool host_path = role_ == Role::HostClient && loopback_ != nullptr;
+	if (!host_path && (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_match()))
+		return false;
 	std::vector<uint8_t> body;
 	io::append_u16_le(body, action_id);
 	pre_send_queue_.push_back(make_protocol_message(c2s::STANCE_CHANGE, std::move(body)));
@@ -1176,7 +1180,24 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		                                 : 0xFFFFu);
 	lap.mark(devtools::Slot::SIM_CLIENT_MAINTENANCE);
 
-	if (role_ == Role::HostClient) return outbound; // host: no connect-drive, no housekeeping send, no 0x0C
+	if (role_ == Role::HostClient) {
+		// host: no connect-drive, no housekeeping send, no 0x0C. Its send block
+		// opens every frame (it receives no holdoff), so the held one-shots
+		// leave here, after the receive fold. The local connection has no peer
+		// address: its datagram lands in the manager's FIFO, which only the
+		// NEXT frame's head drains toward the server tick's receive pump.
+		// [orig: Client_ProcessNetworkFrame @0x42c3dd -> PumpClientProtocolSend
+		//  @0x42c4bc; CNapiNPConnection_SendSessionPacket @0x61f039 ->
+		//  CNapiNPManager_SendTo `addr == 0` @0x61ec59 -> NapiFifo_WritePacketAtomic
+		//  @0x61eccd; CNapiGameSession_CreateSession @0x4c9b9c..0x4c9c67 sets no
+		//  address; Game_ProcessMainFrame -> CNapiNetwork_PumpManagerReceive @0x526528]
+		while (!pre_send_queue_.empty()) {
+			ProtocolMessage &held = pre_send_queue_.front();
+			loopback_->client_send(held.tag, std::move(held.payload));
+			pre_send_queue_.pop_front();
+		}
+		return outbound;
+	}
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
 	// is_mp_session_peer (a Joiner in-match satisfies both). [orig @0x42c23e..0x42c279]

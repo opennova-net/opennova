@@ -97,6 +97,13 @@ public:
 	bool local_fire_admitted() const;
 
 	bool send_medic_request() override;
+	// A stance key on the authority: the key's own refusals, then the C2S 0x1D
+	// on its own client connection -- every press sends, the selected stance
+	// included, and nothing latches until its own server handles the 0x1D on
+	// the next frame. 0 stand / 1 crouch / 2 prone.
+	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
+	//  CNapiNetwork_QueueReliableMessage @0x4e0de7 with no is_authority test]
+	bool request_stance(int stance);
 	void run_tick(const TickInput &input) override;
 	// A HostOnly (dedicated) host reports the mission exit once its round-end
 	// linger has closed the session; a listen host's shell observes the closed

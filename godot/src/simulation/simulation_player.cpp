@@ -101,12 +101,15 @@ void Simulation::set_local_player_mouse(int p_sensitivity, bool p_invert_y) {
 }
 
 bool Simulation::request_local_player_stance(Stance p_stance) {
-	// A joiner only SENDS the select; its latch follows the authority's 0x0A
-	// echo (engine: JoinerRole::request_stance, LocalPlayer::latch_stance_from_echo).
-	// The authority's SELECT gates and mutual-exclusion latch are the kernel's
+	// A session's player only SENDS the select (C2S 0x1D): a joiner's latch
+	// follows the authority's 0x0A echo, the host's own its server's handler
+	// on the next frame (engine: JoinerRole / HostRole::request_stance,
+	// LocalPlayer::latch_stance). The bare kernel applies it at once
 	// (engine: LocalPlayer::request_stance).
 	if (joiner_role_ != nullptr && runtime_)
 		return joiner_role_->request_stance(static_cast<int>(p_stance));
+	if (host_role_ != nullptr && host_role_->client_runtime() != nullptr)
+		return host_role_->request_stance(static_cast<int>(p_stance));
 	return kernel_->local.request_stance(p_stance);
 }
 

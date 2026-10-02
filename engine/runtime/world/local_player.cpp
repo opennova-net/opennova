@@ -75,7 +75,7 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.lean_left = lean_left;
 	input.lean_right = lean_right;
 	input.jump = jump;
-	// Stance comes from the sim-owned SELECT latches (request_stance — the
+	// Stance comes from the sim-owned SELECT latches (latch_stance — the
 	// C2S 0x1D apply semantics [orig: @0x501c60]).
 	input.crouch = stance_latch_ == 1;
 	input.prone = stance_latch_ == 2;
@@ -141,10 +141,12 @@ bool LocalPlayer::stance_request_allowed() const {
 	return true;
 }
 
-void LocalPlayer::latch_stance_from_echo(uint8_t bits) {
+void LocalPlayer::latch_stance(uint8_t bits) {
 	// [orig: NapiNPClientMsg_0x00A @0x430549..0x43058f -- prone latch = bit 8,
 	//  crouch latch = bit 9 of (tail byte << 8), and MoveOrder's 0x300 replaced
-	//  from the same word; the body tests prone ahead of crouch @0x4b59ce]
+	//  from the same word; NapiNPServerMsg_HandleStanceChange @0x501d0d..0x501d2d
+	//  latches the same two bits of the MoveOrder it just wrote; the body tests
+	//  prone ahead of crouch @0x4b59ce]
 	const bool prone = (bits & 0x01u) != 0;
 	const bool crouch = (bits & 0x02u) != 0;
 	stance_latch_ = prone ? 2 : (crouch ? 1 : 0);

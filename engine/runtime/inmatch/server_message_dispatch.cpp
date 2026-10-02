@@ -1818,6 +1818,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				if (code == 169) pe->net_stance_bits = 2;      // crouch (0x200) [orig: @0x501d01]
 				else if (code == 170) pe->net_stance_bits = 1; // prone  (0x100) [orig: @0x501ce7]
 				else if (code == 172) pe->net_stance_bits = 0; // stand          [orig: @0x501cc9]
+				// The authority's own player latches the bits it just wrote
+				// [orig: `cmp g_LocalPlayerEntity` @0x501d0d, @0x501d1b / @0x501d2d].
+				if (pe->handle == world->cached.local_player && world->local_player_state != nullptr)
+					world->local_player_state->latch_stance(pe->net_stance_bits);
 				break;
 			}
 			case c2s::VEHICLE_ATTACH_REQUEST: { // VEHICLE ATTACH [u16 senderHandle][u16 vehicleHandle][u8 bone][u8 pad]

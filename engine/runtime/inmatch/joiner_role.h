@@ -111,7 +111,7 @@ public:
 	bool queue_stance_change(uint16_t action_id);
 	// A stance key on a non-authority client: the key's own refusals, then the
 	// C2S 0x1D alone -- every press sends, the selected stance included, and
-	// the latch waits for the authority's 0x0A echo (latch_stance_from_echo).
+	// the latch waits for the authority's 0x0A echo (LocalPlayer::latch_stance).
 	// 0 stand / 1 crouch / 2 prone -> action 172 / 169 / 170.
 	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
 	//  no latch write; the latch @0x430562 / @0x430570]
