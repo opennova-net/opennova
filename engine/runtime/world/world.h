@@ -21,6 +21,7 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/destruction.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/epilog_cine.h>
 #include <runtime/world/doors.h>
 #include <runtime/world/facial_animation.h>
 #include <runtime/world/teammate_operations.h>
@@ -242,19 +243,6 @@ struct WacNamedValues {
     int32_t local_location = 0;
     int32_t random_result = 0; // RND @0xC6B23C, written by random and named-variable stores
 };
-
-// The epilog/debrief exit timeout: both end screens (WIN score epilog and the
-// LOSE debrief) force g_MissionExitReason = 1 after 18600 ticks (~297.6 s at
-// the 62.5 Hz tick) when the player never presses ESC.
-// [orig: Cine_EpilogStateMachineUpdate @0x576240 — the tick compares
-//  @0x57621d/@0x5744ea]
-inline constexpr int32_t kEpilogExitTimeoutTicks = 18600;
-
-// The epilog/debrief screens fade in over the cine fade pair: two 48-tick fade
-// events back to back (96 ticks, ~1.536 s at the 62.5 Hz tick). The shell
-// drives its screen alpha from this, not from a wall-clock stand-in.
-// [orig: the 48+48-tick cine fade pair @0x574512]
-inline constexpr int32_t kEpilogFadeInTicks = 48 + 48;
 
 // The def+0x196 unit-class split the SP score block keys on: 3 and 4 are
 // vehicles, 9 aircraft, anything else (0 included) infantry. The census and
@@ -927,6 +915,17 @@ public:
     // Multiplayer and WAC/BMS outcomes share Match's one double-run latch.
     Match match;
     MissionKillStats kill_stats;
+    // The SP end-of-round cine (world/epilog_cine.h): the round end's SP tail
+    // starts it, the entity update steps it.
+    EpilogCine epilog;
+    // Why the mission loop ends, as the world-side writers store it: the end
+    // screens' timeouts (1), the round-over RESTART key and the in-game
+    // RESTART command (4, the single-player restart), the round-over ESC (1).
+    // The session reports a nonzero reason as its mission exit; the net
+    // writers (the NovaWorld exit, a disconnect record) keep theirs on the
+    // server context and the client runtime, the values of
+    // inmatch/mission_exit.h. [orig: g_MissionExitReason @0x24C1918]
+    int32_t mission_exit_reason = 0;
 
 
 
@@ -955,8 +954,6 @@ public:
     // it. [orig: g_EntityUpdateCounter, `add g_EntityUpdateCounter,esi` in
     //  Entity_UpdateAllEntities @0x4C2639]
     uint32_t entity_update_counter = 0;
-    // The tick process_round_end ran on (the SP epilog gate's reference).
-    uint32_t round_end_tick = 0;
 
     // May the mission script advance this tick? Retail wraps its WAC tick, the
     // idle-timer sweep and the BMS event pump in ONE condition, and the half that
@@ -994,23 +991,15 @@ public:
             return false;
         return !(rules.mp_session && match.outcome().ended);
     }
-    // The SP end-of-round screen's gate over the script tick. A single-player
-    // round that ends against the player (`Server_ProcessRoundEnd` with any
-    // winner but 1) starts the LOSE cine on the spot (`Cine_StartPlayback
-    // @0x577840`, the SP tail @0x51691d..0x51698f); the next frame's cine
-    // dispatch enters lose state 1 and the frame after builds the MISSION
-    // FAILED screen, raising `g_EpilogScreenActive @0xA87054`
-    // (`Cinematic_EpilogUpdate @0x577950`, the mode-2 leg @0x5744fd..0x57450c).
-    // From then on the WAC and the BMS quarter pass never run again, so a
-    // `Lose` line reaches the chat exactly once. The WIN epilog raises the flag
-    // only after its flyaway (state 4 @0x5764ec) — that flow is unported
-    // (D-AI-10), so a won SP round keeps the script running as before.
-    // [orig: g_EpilogScreenActive writers @0x57450c (lose) / @0x5764ec (win);
-    //  the gate read @0x51d8b7]
-    bool epilog_screen_active() const {
-        return !rules.mp_session && match.outcome().ended && match.outcome().winner_team != 1 &&
-               logic_tick > round_end_tick;
-    }
+    // The SP end screen is up: the round end's SP tail started the cine, and
+    // its stage machine built the MISSION FAILED screen (the lose cine's
+    // first dispatch after a rendered cine frame) or the win's score screen
+    // (95 timeline frames in). From then on the WAC tick, the BMS quarter pass
+    // and most of the entity update hold, so a `Lose` line reaches the chat
+    // exactly once (world/epilog_cine.h carries the stage machines).
+    // [orig: g_EpilogScreenActive @0xA87054 — the writers @0x57450C (lose) /
+    //  @0x5764EC (win); the gate read @0x51D8B7]
+    bool epilog_screen_active() const { return epilog.screen_active; }
     // Authoritative whole-second pre-round phase. Networking and the frame
     // clock remain live while World gameplay systems are frozen; phase-0 0x0A
     // projects its low byte to each client. Joiners retain the same field from
@@ -1102,6 +1091,26 @@ public:
     // the server win-condition check. [orig: Server_ProcessRoundEnd @0x5164f0]
     void process_round_end(int32_t winning_team);
 
+    // The round-over RESTART key's world half (hud::hud_round_over_key took
+    // it): the end screen comes down and the mission exits for the SP
+    // restart. The splash re-run before it and the queued input event 12 are
+    // the embedder's. [orig: Input_HandleSpecialKeys — g_EpilogScreenActive = 0
+    //  @0x49c879, g_MissionExitReason = 4 @0x49c8ad]
+    void round_over_restart();
+    // The round-over ESC: the mission exits to the Post Menu.
+    // [orig: Input_HandleSpecialKeys @0x49c8e2 — g_MissionExitReason = 1]
+    void round_over_exit();
+    // The in-game menu's RESTART command: out of a session the mission exits
+    // for the SP restart; in a session nothing happens. The in-game screens'
+    // close, the unpause and the action-12 dispatch it runs first are the
+    // embedder's. Returns whether it took.
+    // [orig: UI_IngameRestartCommand @0x555410 — the is_in_session gate
+    //  @0x555417, Game_CloseInGameScreens @0x555419, Input_HandleActionBinding(12)
+    //  @0x555428, dword_A87050 &= ~1 @0x555430, g_MissionExitReason = 4
+    //  @0x555437; registered on INGAME/RESTART by UI_RegisterIngameCallbacks
+    //  @0x555529]
+    bool ingame_restart_command();
+
     // An objective shown or hidden by BMS actions 35/36, or relayed by S2C 0x3F
     // on a joiner: an active notice posts the two chat lines (the "objective"
     // presentation effect: a = slot, b = win, c = the header text id) on a
@@ -1165,6 +1174,10 @@ public:
         //  -> Mission_ResetBmsState -> EventSystem_FreeAll @0x453356..0x453368,
         //  then Game_StartMission @0x5263db]
         MissionKillStats kill_stats;
+        // The idle play-start cine and no exit (restore keeps the
+        // process-lifetime EpilogCine::frame_drawn).
+        EpilogCine epilog;
+        int32_t mission_exit_reason = 0;
         SubgoalState subgoals;
         SpawnWaveList spawn_waves;
         ZoneCaptureState zone_capture_state;

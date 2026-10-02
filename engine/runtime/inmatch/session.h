@@ -345,6 +345,7 @@ private:
 	void consume_pending_one_shots();
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
+	void step_cine_render_frame();
 	void step_hud_radar_frame();
 	static int64_t now_us();
 

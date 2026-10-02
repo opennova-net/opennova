@@ -307,6 +307,15 @@ TickOutcome Session::run_one_tick(const TickInput &input) {
 	return out;
 }
 
+void Session::step_cine_render_frame() {
+	// The rendered frame's cine pass, after the frame's logic updates: the SP
+	// end-of-round cine marks its frame drawn, or stops past its last event
+	// (world/epilog_cine.h) [orig: Game_MainLoop's Game_ProcessMainFrame
+	// drain, then Render_ProcessMainSceneFrame @0x5CADFC -> sub_575A50].
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	role_->kernel()->world.epilog.render_pass();
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -329,9 +338,12 @@ FrameOutcome Session::advance(const FrameInput &input) {
 	if (state_ != State::Running) {
 		out.status = FrameStatus::NotRunning;
 		last_perf_ = out.perf;
-		// The paused frame still runs its HUD pass: no tick ran, so nothing
-		// ages, and the menu pause holds the lock tone.
-		if (state_ == State::Paused) step_hud_radar_frame();
+		// The paused frame still renders and runs its HUD pass: no tick ran,
+		// so nothing ages, and the menu pause holds the lock tone.
+		if (state_ == State::Paused) {
+			step_cine_render_frame();
+			step_hud_radar_frame();
+		}
 		return out;
 	}
 	latch_input(input);
@@ -380,9 +392,13 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		rebase_clock_ = true;
 	}
 	last_perf_ = out.perf;
-	// The frame's HUD pass follows the drain [orig: Game_MainLoop's
-	// Game_ProcessMainFrame drain, then the render's HUD_RenderAllOverlays].
-	if (!out.terminal()) step_hud_radar_frame();
+	// The frame's render follows the drain: the cine pass, then the HUD pass
+	// [orig: Game_MainLoop's Game_ProcessMainFrame drain, then the render's
+	// cine pass and HUD_RenderAllOverlays].
+	if (!out.terminal()) {
+		step_cine_render_frame();
+		step_hud_radar_frame();
+	}
 	return out;
 }
 
@@ -398,6 +414,7 @@ FrameOutcome Session::step_once(const FrameInput &input) {
 	latch_input(input);
 	out = run_ticks(1, input);
 	last_perf_ = out.perf;
+	if (!out.terminal()) step_cine_render_frame();
 	return out;
 }
 
@@ -414,6 +431,7 @@ FrameOutcome Session::drive_one(const FrameInput &input) {
 	latch_input(input);
 	out = run_ticks(1, input);
 	last_perf_ = out.perf;
+	if (!out.terminal()) step_cine_render_frame();
 	return out;
 }
 

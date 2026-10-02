@@ -1,6 +1,9 @@
 #include <runtime/inmatch/local_role.h>
 
+#include <runtime/inmatch/mission_exit.h>
 #include <runtime/mission/mission_kernel.h>
+
+#include <string>
 
 namespace opennova::inmatch {
 
@@ -53,6 +56,17 @@ void LocalRole::run_tick(const TickInput &) {
 	tail.mark(devtools::Slot::SIM_ADM_RESOLVE);
 	kernel.local.tick_medic_cooldown(kernel.local.local_player_dead()); // Player_UpdatePerFrame's cooldown leg
 	tail.mark(devtools::Slot::SIM_PLAYER_TAIL);
+}
+
+// The world's two exit values are the session layer's [orig: g_MissionExitReason].
+static_assert(world::kWorldMissionExitQuit == kMissionExitQuit, "the quit reason");
+static_assert(world::kWorldMissionExitRestart == kMissionExitRoundOver, "the SP restart reason");
+
+bool LocalRole::session_lost(SessionError &error) const {
+	if (kernel_ == nullptr || kernel_->world.mission_exit_reason == 0) return false;
+	error = {SessionErrorCode::SessionLost,
+			"mission exit " + std::to_string(kernel_->world.mission_exit_reason)};
+	return true;
 }
 
 bool LocalRole::reset_to_baseline(SessionError &error) {

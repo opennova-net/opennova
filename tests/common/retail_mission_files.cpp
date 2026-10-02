@@ -41,6 +41,9 @@ bool RetailMissionRig::boot(const BootOptions &options, std::string &error) {
 
 void RetailMissionRig::tick() {
 	role().run_tick(inmatch::TickInput{});
+	// The frame's render follows its tick: the SP end-of-round cine's render
+	// pass (inmatch::Session runs it after each frame's drain).
+	world.epilog.render_pass();
 }
 
 void RetailMissionRig::tick(int count) {

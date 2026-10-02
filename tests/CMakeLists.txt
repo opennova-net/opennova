@@ -2665,6 +2665,15 @@ target_include_directories(mission_kernel_lifecycle_test PRIVATE ${CMAKE_CURRENT
 target_compile_features(mission_kernel_lifecycle_test PRIVATE cxx_std_17)
 add_test(NAME mission_kernel_lifecycle COMMAND mission_kernel_lifecycle_test)
 
+# The SP mission lifecycle after the round end: the win epilog's and the lose
+# screen's stage machines, the round-over keys, the in-game RESTART, the main
+# frame's exit router and the SP restart as a fresh launch (ungated).
+add_executable(sp_mission_lifecycle_test mission/sp_mission_lifecycle_test.cpp)
+target_link_libraries(sp_mission_lifecycle_test PRIVATE opennova_runtime)
+target_include_directories(sp_mission_lifecycle_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(sp_mission_lifecycle_test PRIVATE cxx_std_17)
+add_test(NAME sp_mission_lifecycle COMMAND sp_mission_lifecycle_test)
+
 # inmatch::HostRole over the kernel (ADR 0043 d3), ungated: the SP listen
 # bring-up and its per-tick frame over a null socket, the local C2S gameplay
 # drain, and the dedicated (HostOnly) bring-up.

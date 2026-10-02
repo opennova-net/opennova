@@ -250,7 +250,12 @@ static void finish_entity_update(World &world, const TickContext &ctx, devtools:
     // callback has no authority gate before the pickup [orig: the branch
     //  @0x4B2FB8..0x4B2FE5 -> PowerupAction_Pickup @0x4428A0].
     powerup_process_contacts(world, ctx);
-    if (!world.epilog_screen_active()) ++world.entity_update_counter;
+    // Re-read after the walk: on the frame the cine's own dispatch built the
+    // end screen the tail dispatches it a second time instead of counting.
+    if (world.epilog_screen_active())
+        world.epilog.update(world);
+    else
+        ++world.entity_update_counter;
 }
 
 void World::update_pool1_slot(Entity &row, const TickContext &ctx) {
@@ -493,6 +498,9 @@ void World::update_all_entities(const TickContext &ctx) {
     // [orig: Entity_UpdateAllEntities @0x4C2226 (j_AIEvent_ProcessTimedEntries)]
     ai.events.process_timed(ai, *this);
     lap.mark(devtools::Slot::SIM_UPDATE_PIECES_EVENTS);
+    // The SP end-of-round cine's dispatch [orig: Entity_UpdateAllEntities
+    //  @0x4C2230 -> Cinematic_EpilogUpdate @0x577950].
+    epilog.update(*this);
     // The weather particles and emitters [orig: @0x4C222B / @0x4C2235].
     rotor_wash.tick();
     // The projectiles, then the explosion queue once per frame [orig: the
@@ -698,25 +706,43 @@ void World::process_round_end(int32_t winning_team) {
     // reason 4; SP never drains it — the epilog owns the SP exit).
     // Match::finish sets the sole outcome latch before the network/presentation
     // tails, matching retail's double-run guard without copying its global.
-    // The tick the round ended on: the SP lose cine that the tail starts halts
-    // the script from the following frames on (World::epilog_screen_active).
-    round_end_tick = logic_tick;
     // The SP tail [orig: @0x51691d..0x51698f]: stop the dialog audio channel
     // (DialogAudio_PlayNextChunkOrStop(0) @0x51694b) + Dialog_ResetAll + park the
-    // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390:
-    // <mission>.cne if present, else a static camera; the flyaway + jo_Epil.tga
-    // score screen) + MusicCtx_SelectEndTrack(1) @0x51696b; anything else -> the
-    // LOSE cine (Cine_StartPlayback @0x577840 letterbox/fade + the jo_Epil2.tga
-    // MISSION FAILED screen) + MusicCtx_SelectEndTrack(2) @0x51698f. The end
-    // track is the value the gamemus MessageHandler receives through the VM's
-    // restart frame (mus_vm_signal: sub_672E50 @0x672e95; retail gamemus.bin
-    // dispatches 1 -> Missionwin, 2 -> Missionlose); the gamemus context is
-    // open in SP (Game_StartMission @0x525581 opens it on the is_client bit,
-    // which mode 3 single player carries). All host presentation: the effect
-    // carries the winner (a) and the end track (b); the shell selects the flow
-    // and, in SP only, signals the track after the cine starts.
+    // mission music, then winner==1 -> the WIN epilog (Cine_InitPlayback @0x578390)
+    // + MusicCtx_SelectEndTrack(1) @0x51696b; anything else -> the LOSE cine
+    // (Cine_StartPlayback @0x577840) + MusicCtx_SelectEndTrack(2) @0x51698f. The
+    // cine is the world's (world/epilog_cine.h); the entity update steps it from
+    // this frame on. The end track is the value the gamemus MessageHandler
+    // receives through the VM's restart frame (mus_vm_signal: sub_672E50
+    // @0x672e95; retail gamemus.bin dispatches 1 -> Missionwin, 2 ->
+    // Missionlose); the gamemus context is open in SP (Game_StartMission
+    // @0x525581 opens it on the is_client bit, which mode 3 single player
+    // carries). The dialog and music legs are host presentation: the effect
+    // carries the winner (a) and the end track (b); the shell, in SP only,
+    // resets the dialog and signals the track.
+    if (!rules.mp_session) {
+        if (winning_team == 1)
+            epilog.begin_win(registry.get(cached.local_player)); // [orig: @0x516965]
+        else
+            epilog.begin_lose(); // [orig: @0x51697b]
+    }
     const int32_t end_track = winning_team == 1 ? 1 : 2;
     out.effects.push({"round_end", winning_team, end_track, 0, 0, std::string()});
+}
+
+void World::round_over_restart() {
+    epilog.screen_active = false;                  // [orig: @0x49c879]
+    mission_exit_reason = kWorldMissionExitRestart; // [orig: @0x49c8ad]
+}
+
+void World::round_over_exit() {
+    mission_exit_reason = kWorldMissionExitQuit; // [orig: @0x49c8e2]
+}
+
+bool World::ingame_restart_command() {
+    if (rules.mp_session) return false; // [orig: @0x555417]
+    mission_exit_reason = kWorldMissionExitRestart; // [orig: @0x555437]
+    return true;
 }
 
 void World::show_objective_notification(int32_t slot, int32_t is_win, int32_t is_active,
@@ -832,6 +858,8 @@ World::Snapshot World::snapshot() const {
     s.vehicle_ai_spawn_phase = vehicle_ai_spawn_phase;
     s.match = match;
     s.kill_stats = kill_stats;
+    s.epilog = epilog;
+    s.mission_exit_reason = mission_exit_reason;
     s.subgoals = script.subgoals;
     s.spawn_waves = zones.spawn_waves;
     s.zone_capture_state = zones.capture;
@@ -857,6 +885,13 @@ void World::restore(const Snapshot &s) {
     doors = s.doors;
     facials = s.facials;
     match = s.match;
+    // The cine's drawn flag is process-lifetime (only the cine render pass
+    // writes it), so the rewind keeps it. [orig: dword_26970F4 — sub_570BB0
+    //  @0x570C66]
+    const bool cine_frame_drawn = epilog.frame_drawn;
+    epilog = s.epilog;
+    epilog.frame_drawn = cine_frame_drawn;
+    mission_exit_reason = s.mission_exit_reason;
     zones.spawn_waves = s.spawn_waves;
     zones.capture = s.zone_capture_state;
     zones.spawn_cycle_counter = s.spawn_cycle_counter;

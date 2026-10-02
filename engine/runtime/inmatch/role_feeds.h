@@ -78,6 +78,14 @@ bool local_player_dead(const RoleView &view);
 // parameter, or -1.
 int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk);
 
+// The round-over leg of the special-key handler over this role (the rule and
+// its witness are hud::hud_round_over_key): behind the round-over gate, out of
+// a session, the RESTART key takes the world's restart half
+// (World::round_over_restart) and ESC its exit (World::round_over_exit).
+// Returns the hud_round_over bits (0 before the round ends); the embedder
+// runs the RESTART arm's splash re-run when the bits carry kRestart.
+uint32_t round_over_key(const RoleView &view, int vk, int restart_vk);
+
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 //  g_SpawnSuccessGate, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
 //  g_EndRoundDrawFlag, dword_A81B2C = GetTickCount; the 0x56 board

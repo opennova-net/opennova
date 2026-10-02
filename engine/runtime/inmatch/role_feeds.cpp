@@ -59,6 +59,31 @@ int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones,
 	return hud::hud_deploy_key_pick(in);
 }
 
+uint32_t round_over_key(const RoleView &view, int vk, int restart_vk) {
+	if (view.kernel == nullptr) return 0;
+	world::World &w = view.kernel->world;
+	// The leg runs only behind the round-over gate: the authority's round end,
+	// a joiner's 0x1D [orig: `cmp g_SpawnSuccessGate, 0` @0x49c7cf; the writers
+	// Server_ProcessRoundEnd @0x5168E4 and NapiNPClientMsg_0x01D @0x430858].
+	const bool gate = view.joiner
+			? view.runtime != nullptr && view.runtime->state().spawn_success_gate
+			: w.match.outcome().ended;
+	if (!gate) return 0;
+	hud::HudRoundOverKeyInput in;
+	in.vk = vk;
+	in.restart_vk = restart_vk;
+	in.in_session = w.rules.mp_session; // g_NapiNPCtx.is_in_session
+	in.game_type = w.match.rules().game_type;
+	const uint32_t bits = hud::hud_round_over_key(in);
+	// The world halves of the SP arm; the co-op in-session arm's exits are
+	// not wired (docs/divergence-ledger.md D-NET-340).
+	if (!in.in_session) {
+		if ((bits & hud::hud_round_over::kRestart) != 0) w.round_over_restart();
+		if ((bits & hud::hud_round_over::kExit) != 0) w.round_over_exit();
+	}
+	return bits;
+}
+
 namespace {
 
 // Authority: the Match clock; joiner: the folded 0x0A sub-block-1 copy

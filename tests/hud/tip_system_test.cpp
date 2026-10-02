@@ -148,7 +148,8 @@ void test_countdown_fade_reset() {
 	tip_handle_event(t, kTipEventBoardBoat);
 	tip_begin_fade(t);
 	CHECK(t.countdown == 64 && t.tip == kTipBoat);
-	// The mission start clears the tip, the SP restart the counters too.
+	// The SP restart clears the tip, a start from the menu the counters too
+	// [orig: Game_StartMission @0x525dec -- CTipSystem_Reset(first start)].
 	t.nvg_count = 1;
 	t.scope_count = 3;
 	tip_reset(t, false);
@@ -231,11 +232,13 @@ void test_escape_tip_leg() {
 	CHECK(s.tips.countdown == 1200);
 	hud_toggles_tip_frames(s, 1000000);
 	CHECK(s.tips.countdown == 0);
-	// The mission reset keeps the counters; the restart clears them.
+	// The SP restart keeps the counters; a start from the menu clears them
+	// [orig: CTipSystem_Reset @0x525df2 -- 0 on Game_StartMission(1), 1 on
+	//  Game_StartMission(0)].
 	tip_handle_event(s.tips, kTipEventBoardBoat);
-	hud_toggles_reset_mission(s);
-	CHECK(s.tips.tip == 0 && s.tips.countdown == 0 && s.tips.nvg_count == 1);
 	hud_toggles_restart_round(s);
+	CHECK(s.tips.tip == 0 && s.tips.countdown == 0 && s.tips.nvg_count == 1);
+	hud_toggles_reset_mission(s);
 	CHECK(s.tips.nvg_count == 0 && s.tips.binoculars_count == 0);
 }
 
