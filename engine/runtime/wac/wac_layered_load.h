@@ -48,8 +48,10 @@ void load_script_sound_sets(const mission::BootFileSource &files,
 
 // The effect NAMES the mounted .ptl files plus the regional .ptu/.ptg table
 // define, in the effect world's load order (first registration wins)
-// [orig: CEffectSystem_Init @0x5F6070]. Native hosts can also retain the
-// parsed documents to run callback-owned effects without a renderer.
+// [orig: CEffectSystem_Init @0x5F6070], then the names the mission start
+// pools before the WAC compile (mission_effect_interns.h), so the compile's
+// FX handles are retail's. Native hosts can also retain the parsed documents
+// to run callback-owned effects without a renderer.
 void load_script_effect_catalog(const mission::BootFileSource &files,
         particle::EffectCatalogNames &effects, particle::EffectSceneConfig *scene = nullptr);
 
