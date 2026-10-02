@@ -176,10 +176,11 @@ static int test_menu_references() {
 		    d.child_id == second_action.child && d.record == "STARTUP/MAIN/EXIT/Action 2")
 			located = true;
 	TEST_EXPECT(located);
-	// A saved menu with a missing texture is blocked by the build (an error).
+	// A saved menu with a missing texture builds (S14: a missing reference is listed and gates no
+	// build), its error still a Problems row after the build.
 	editor_test::handle_to_end(session, request::save_all());
 	editor_test::handle_to_end(session, request::build());
-	TEST_EXPECT(!view.activity.last_build->ok);
+	TEST_EXPECT(view.activity.last_build->ok && has_missing(view.findings.diagnostics, "value", DiagnosticSeverity::Error));
 	return 0;
 }
 

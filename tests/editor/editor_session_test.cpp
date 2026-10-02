@@ -6,6 +6,7 @@
 // the edits a pump holds), the menu screen the preview follows, (S11a) the save
 // contract, the unsaved prompt and the selection each open document keeps, and (S13 V8)
 // the gestures a canvas's batches open, one per document, and what ends each.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iterator>
@@ -26,6 +27,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
@@ -36,8 +38,12 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
 #include <editor/project/project_files.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
+#include <formats/mission/mission.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pff/pff.h>
+#include <formats/rtxt/rtxt.h>
 
 #include "common/test_expect.h"
 #include "editor/editor_test_support.h"
@@ -593,20 +599,23 @@ static int test_retail_play() {
 	session.poll();
 	TEST_EXPECT(session.view().activity.play_state == PlayState::Stopped);
 
-	// Ordinary installs use the plain Bink DLL, and the project's own game.cfg (a file the build
-	// copies loose) is the one the game reads. The run directory, its game gone, is taken again
-	// and emptied: what the last game wrote there goes. A missing source cannot launch the
-	// executable a run staged before.
+	// Ordinary installs use the plain Bink DLL. A game.cfg the project holds is this machine's
+	// configuration, never the project's: the build leaves it out and says so (ADR 0046 S14,
+	// assets/player_files.h), and the game reads the install's. The run directory, its game gone, is
+	// taken again and emptied: what the last game wrote there goes. A missing source cannot launch
+	// the executable a run staged before.
 	fs::remove(fs::path(install) / "binkw32_.dll");
 	TEST_EXPECT(editor_test::write_text(project + "/game.cfg", "project video settings"));
 	session.handle(request::play());
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == 2 && platform.last_plan.working_dir == run);
 	const std::string rebuilt = session.view().activity.last_build->build_dir;
-	TEST_EXPECT(rebuilt != built && read_file_text(rebuilt + "/game.cfg", copied, io_error) &&
-	            copied == "project video settings");
+	bool left_out = false;
+	for (const Diagnostic &d : session.view().activity.last_build->diagnostics)
+		left_out = left_out || (d.code() == "build.player_file" && d.asset == "game.cfg");
+	TEST_EXPECT(left_out && !fs::exists(rebuilt + "/game.cfg"));
 	TEST_EXPECT(read_file_text(run + "/binkw32.dll", copied, io_error) && copied == "ordinary Bink");
-	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "project video settings");
+	TEST_EXPECT(read_file_text(run + "/game.cfg", copied, io_error) && copied == "video settings");
 	TEST_EXPECT(!fs::exists(run + "/_filelog.txt"));
 	const std::string rebuilt_tree = editor_test::tree_digest(rebuilt);
 	session.handle(request::stop_play());
@@ -1954,6 +1963,314 @@ static int test_boot_findings() {
 	return 0;
 }
 
+// S14: Play takes a mission. One the project does not hold is refused before anything is built;
+// one it holds, named without case, starts the game in it (the runtime's --mission, the file as
+// the project spells it; the run section and the status line say so). The game's report that the
+// mission did not load is a Problems row on the mission's file, once, kept by a validation and
+// gone with the next Play; a plain Play starts at the menu. A Play onto a running build starts the
+// game in the mission it names. The active document's mission is the one Play mission starts
+// (play_mission_for: the mission itself, or a file the game finds by its name). Play in the game
+// install starts at its menu whatever is named, and says so.
+static int test_play_mission() {
+	editor_test::TempProjectDir dir("opennova_editor_session_play_mission");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "Mission"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes) &&
+	            editor_test::write_text(root + "/missions/First.wac", "// the mission's script\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8999;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+
+	session.handle(request::play("nowhere.bms"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown") &&
+	            !v.activity.operation.running());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 0 && !v.activity.has_build);
+	// A file of the project that is no mission is none either.
+	session.handle(request::play("First.wac"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown"));
+
+	session.handle(request::play("FIRST.BMS"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "First.bms");
+	{
+		const std::vector<std::string> &args = platform.last_plan.args;
+		TEST_EXPECT(args.size() >= 2 && args[args.size() - 2] == "--mission" && args.back() == "First.bms");
+		TEST_EXPECT(view_section_to_json(v, ViewSection::Run).get_string("mission", "") == "First.bms" &&
+		            v.activity.status == "Game running: First.bms.");
+	}
+	const std::string report = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
+	                           "First.bms the terrain did not load.\r\n";
+	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + report + report));
+	session.poll();
+	session.run_operations(); // the validation the report left due
+	TEST_EXPECT(count_code(v.findings.diagnostics, "play.mission.failed") == 1);
+	const Diagnostic *failed = finding_in(v.findings.diagnostics, "play.mission.failed", "missions/First.bms");
+	TEST_EXPECT(failed && failed->severity == DiagnosticSeverity::Error &&
+	            failed->message.find("First.bms: the terrain did not load. It went back") != std::string::npos);
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "play.mission.failed") == 1);
+	session.handle(request::stop_play());
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 2 && v.activity.play_mission.empty() && v.activity.status == "Game running." &&
+	            !has_code(v.findings.diagnostics, "play.mission.failed"));
+	TEST_EXPECT(std::find(platform.last_plan.args.begin(), platform.last_plan.args.end(), "--mission") ==
+	            platform.last_plan.args.end());
+	session.handle(request::stop_play());
+	session.poll();
+
+	session.handle(request::build());
+	TEST_EXPECT(v.activity.operation.running() && v.activity.operation.kind == OperationKind::Build);
+	session.handle(request::play("First.bms"));
+	TEST_EXPECT(session.outcome().done() && session.outcome().operation == v.activity.operation.id);
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_mission == "First.bms" && platform.last_plan.args.back() == "First.bms");
+	// A Play of an unknown mission onto a running build is refused, the build left to land alone.
+	session.handle(request::stop_play());
+	session.poll();
+	session.handle(request::build());
+	session.handle(request::play("nowhere.bms"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Stopped);
+
+	session.handle(request::open_document("First.wac"));
+	TEST_EXPECT(v.documents.active == "missions/First.wac" && play_mission_for(v) == "First.bms");
+	session.handle(request::open_document("items.def"));
+	TEST_EXPECT(play_mission_for(v).empty());
+	{
+		// The rule over a view alone: the mission itself; a file found by a name no mission of the
+		// project has; no project.
+		SessionView view;
+		view.project.open = true;
+		AssetEntry mission, text;
+		mission.logical_name = "Second.BMS";
+		mission.relative_path = "missions/Second.BMS";
+		mission.kind = AssetKind::Mission;
+		text.logical_name = "other.bin";
+		text.relative_path = "strings/other.bin";
+		text.kind = AssetKind::Strings;
+		editor_test::own(view.project.scan).entries = {mission, text};
+		editor_test::own(view.project.scan).index();
+		view.documents.active = "missions/Second.BMS";
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		view.documents.active = "strings/second.bin";
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		// The dialog's sounds are the mission's only beside its dialog bank (review F5).
+		view.documents.active = "second.pwf";
+		TEST_EXPECT(play_mission_for(view).empty());
+		AssetEntry bank;
+		bank.logical_name = "Second.dbf";
+		bank.relative_path = "missions/Second.dbf";
+		bank.kind = AssetKind::DialogBank;
+		editor_test::own(view.project.scan).entries = {mission, text, bank};
+		editor_test::own(view.project.scan).index();
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		view.documents.active = "strings/other.bin";
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active = "second.mnu";
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active.clear();
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active = "missions/Second.BMS";
+		view.project.open = false;
+		TEST_EXPECT(play_mission_for(view).empty());
+	}
+
+	// A mission whose name holds a space: the game's report names it whole, the row on its file
+	// (review F11).
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/my map.bms", mission_bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::play("my map.bms"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "my map.bms");
+	const std::string spaced = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
+	                           "my map.bms the terrain did not load.\r\n";
+	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + spaced));
+	session.poll();
+	session.run_operations();
+	const Diagnostic *spaced_failed = finding_in(v.findings.diagnostics, "play.mission.failed", "missions/my map.bms");
+	TEST_EXPECT(spaced_failed && spaced_failed->message.find("could not load my map.bms: the terrain did not load.") != std::string::npos);
+	session.handle(request::stop_play());
+	session.poll();
+
+	const std::string install = dir.file("install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "settings"));
+	editor_test::set_game_install(session, install);
+	ProjectSettingsChange in_install;
+	in_install.play_in_install = true;
+	editor_test::apply_settings(session, in_install);
+	session.handle(request::play("First.bms"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 5 && v.activity.play_state == PlayState::Running && v.activity.play_mission.empty() &&
+	            platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}) &&
+	            output_has(v, "The game install starts at its menu: choose First.bms there.") &&
+	            v.activity.status == "Game install running.");
+	session.handle(request::stop_play());
+	session.poll();
+	return 0;
+}
+
+// S14: New > Mission. create_file with the values its blank takes makes the mission (its header on
+// the terrain and under the environment named, files of the project) in missions/ and, beside the
+// string tables, the text table the game finds by its name (its title, an empty briefing), both in
+// the scan; a table of the name the project has already is left as it is. A value the blank does
+// not take, a required one left out, or a terrain the project lacks: refused (document.values),
+// nothing made. A new script is made in missions/ and opened.
+static int test_new_mission() {
+	editor_test::TempProjectDir dir("opennova_editor_session_new_mission");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "New mission"));
+	session.run_operations();
+	using Values = std::vector<std::pair<std::string, std::string>>;
+	const auto refused = [&](const EditorRequest &request, const char *words) {
+		session.handle(request);
+		const bool said = !session.outcome().done() && has_code(session.outcome().findings, "document.values") &&
+		                  session.outcome().findings.back().message.find(words) != std::string::npos;
+		return said && !fs::exists(root + "/missions/first.bms") && !fs::exists(root + "/strings/first.bin");
+	};
+	// The project has no terrain yet: a project is its own files.
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}),
+	                    "The project has no terrain named island"));
+	TEST_EXPECT(editor_test::write_text(root + "/terrain/island.trn", "trn") && editor_test::write_text(root + "/day.env", "env"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("island.trn") && v.project.scan->find("island.trn")->kind == AssetKind::Terrain &&
+	            v.project.scan->find("day.env") && v.project.scan->find("day.env")->kind == AssetKind::Environment);
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}}), "first.bms needs its environment."));
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "night"}}),
+	                    "The project has no environment named night"));
+	TEST_EXPECT(refused(request::create_file("first.bms", "", Values{{"terrain", "island"}, {"environment", "day"}, {"sky", "x"}}),
+	                    "takes no value \"sky\""));
+	TEST_EXPECT(refused(request::create_file("first.mnu", "", Values{{"title", "x"}}), "takes no value \"title\" (it takes none)"));
+
+	// The file names as the pickers give them (their extensions on), a title.
+	session.handle(request::create_file("first.bms", "", Values{{"terrain", "ISLAND.TRN"}, {"environment", "day.env"}, {"title", "The first"}}));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	const AssetEntry *mission = v.project.scan->find("first.bms");
+	const AssetEntry *text = v.project.scan->find("first.bin");
+	TEST_EXPECT(mission && mission->relative_path == "missions/first.bms" && mission->kind == AssetKind::Mission && text &&
+	            text->relative_path == "strings/first.bin" && text->kind == AssetKind::Strings);
+	TEST_EXPECT(output_has(v, "Created missions/first.bms") && output_has(v, "Created strings/first.bin"));
+	std::vector<uint8_t> bytes;
+	std::string error;
+	opennova::bms::File file;
+	TEST_EXPECT(read_file_bytes(root + "/missions/first.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error));
+	const opennova::mission::MissionInfo info = opennova::mission::mission_info(file);
+	TEST_EXPECT(info.mission_name == "The first" && info.terrain == "ISLAND" && info.environment == "day");
+	opennova::rtxt::File table;
+	TEST_EXPECT(read_file_bytes(root + "/strings/first.bin", bytes, error) && opennova::rtxt::parse(bytes.data(), bytes.size(), table, error) &&
+	            table.entries.size() == 2 && table.entries[0].key == "TITLE" && table.entries[0].text == "The first");
+	// Its terrain, its environment and its text table resolve: the mission names nothing the project
+	// lacks but a tile placement (S14: every shipped mission has one, a warning).
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "reference.missing" && d.asset == "missions/first.bms")
+			TEST_EXPECT(d.field == "tiles" && d.severity == DiagnosticSeverity::Warning);
+	// A mission whose text table the project holds already keeps that table.
+	TEST_EXPECT(editor_test::write_text(root + "/strings/second.bin", "mine"));
+	session.handle(request::rescan());
+	session.run_operations();
+	session.handle(request::create_file("second.bms", "", Values{{"terrain", "island"}, {"environment", "day"}}));
+	session.run_operations();
+	std::string kept;
+	TEST_EXPECT(v.project.scan->find("second.bms") && read_file_text(root + "/strings/second.bin", kept, error) && kept == "mine");
+	TEST_EXPECT(read_file_bytes(root + "/missions/second.bms", bytes, error) && opennova::bms::parse(bytes.data(), bytes.size(), file, error) &&
+	            opennova::mission::mission_info(file).mission_name == "second");
+
+	// A new script: made beside the missions and opened (the editor edits a script).
+	session.handle(request::create_file("patrol.wac"));
+	TEST_EXPECT(session.outcome().done());
+	session.run_operations();
+	TEST_EXPECT(v.project.scan->find("patrol.wac") && v.project.scan->find("patrol.wac")->relative_path == "missions/patrol.wac" &&
+	            v.documents.active == "missions/patrol.wac");
+	return 0;
+}
+
+// S14: the two notes of a project that holds missions. A mission while the Missions feature is off
+// is one warning on the project, gone with the feature on. A file the game finds by a mission's
+// name alone (a script, a tile placement, a dialog bank) whose mission the project does not hold is
+// a note on it; a mission's own files and the scripts the game opens by a fixed name are none.
+// Neither gates a build.
+static int test_mission_notes() {
+	editor_test::TempProjectDir dir("opennova_editor_session_mission_notes");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "Notes"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 0 &&
+	            count_code(v.findings.diagnostics, "mission.sidecar.unused") == 0);
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes));
+	for (const char *file : {"missions/First.wac", "missions/lost.wac", "game.wac"})
+		TEST_EXPECT(editor_test::write_text(root + "/" + file, "// a script\r\n"));
+	for (const char *file : {"missions/first.til", "missions/lost.til", "missions/lost.dbf"})
+		TEST_EXPECT(editor_test::write_text(root + "/" + file, "x"));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 1);
+	for (const Diagnostic &d : v.findings.diagnostics)
+		if (d.code() == "project.mission.feature_off")
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && d.asset.empty() && d.message.find("First.bms") != std::string::npos);
+	TEST_EXPECT(count_code(v.findings.diagnostics, "mission.sidecar.unused") == 3);
+	for (const char *file : {"missions/lost.wac", "missions/lost.til", "missions/lost.dbf"}) {
+		const Diagnostic *note = finding_in(v.findings.diagnostics, "mission.sidecar.unused", file);
+		TEST_EXPECT(note && note->severity == DiagnosticSeverity::Info && note->message.find("lost.bms") != std::string::npos);
+	}
+	session.handle(request::build());
+	session.run_operations();
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok);
+	// The mission the files wait for comes: their notes go. The feature on: its warning goes.
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/Lost.bms", mission_bytes));
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "mission.sidecar.unused") == 0 &&
+	            count_code(v.findings.diagnostics, "project.mission.feature_off") == 1);
+	editor_test::set_missions(session, true);
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "project.mission.feature_off") == 0);
+	return 0;
+}
+
 // S11b: an optional file the project lacks is a note naming its row, counted apart from the
 // required ones and never a build's gate; made by name (its fix), its note goes.
 static int test_optional_rows() {
@@ -2853,9 +3170,9 @@ static int test_view_revisions() {
 	return 0;
 }
 
-// S12: the import guard looks at every file the import writes, past the import plan's cap: a
-// replacement of more files than the cap, the last an edited catalog's, waits on the unsaved
-// prompt for that catalog, nothing written.
+// S12: the import guard looks at every file the import writes, however many (its plan has no cap,
+// where the dialog's stops at kImportPlanFileCap): a replacement of a thousand and one files, the
+// last an edited catalog's, waits on the unsaved prompt for that catalog, nothing written.
 static int test_import_guard_past_the_cap() {
 	editor_test::TempProjectDir dir("opennova_editor_session_import_cap");
 	FakePlatform platform;
@@ -2879,7 +3196,7 @@ static int test_import_guard_past_the_cap() {
 	session.handle(edit);
 	TEST_EXPECT(items->dirty());
 	std::vector<std::string> names;
-	for (size_t i = 0; i < kImportPlanFileCap; ++i) {
+	for (size_t i = 0; i < 1000; ++i) {
 		char name[16];
 		std::snprintf(name, sizeof(name), "t%04zu.txt", i);
 		names.push_back(name);
@@ -3634,8 +3951,9 @@ static int test_no_request_validates() {
 	TEST_EXPECT(!v.dialogs.import_preview.open);
 	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
 	TEST_EXPECT(!v.project.import_dependencies && !v.dialogs.import_preview.open);
+	// An import naming nothing is refused (review F14), after the validation all the same.
 	TEST_EXPECT(after_an_edit(request::import_files({})));
-	TEST_EXPECT(v.activity.status == "Nothing to import." && !v.dialogs.import_preview.open);
+	TEST_EXPECT(has_code(session.outcome().findings, "import.request") && !v.dialogs.import_preview.open);
 	// Refused before its rename (no requirement has the role).
 	TEST_EXPECT(after_an_edit(request::assign_requirement("no_such_role", items->path())));
 	TEST_EXPECT(has_code(session.outcome().findings, "requirement.unknown"));
@@ -3679,6 +3997,9 @@ int main() {
 	failures += test_import_guard_past_the_cap();
 	failures += test_build_findings_stay();
 	failures += test_boot_findings();
+	failures += test_play_mission();
+	failures += test_new_mission();
+	failures += test_mission_notes();
 	failures += test_optional_rows();
 	failures += test_create_missing_roles();
 	failures += test_rewrite_closed_file();

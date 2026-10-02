@@ -172,14 +172,20 @@ static int test_new_status_validate() {
 		            built.find(" file(s) hashed)") != std::string::npos);
 	}
 
-	// Generic native file import uses the same core and requires explicit replacement.
+	// Generic native file import uses the same core; a file the project holds already is kept as it
+	// is, whatever its bytes, unless --replace writes it over (review F2).
 	TEST_EXPECT(run({"import", root}) == 2);
 	const std::string source = dir.file("source.txt");
 	TEST_EXPECT(editor_test::write_text(source, "imported file"));
 	TEST_EXPECT(run({"import", root, source}) == 0);
 	TEST_EXPECT(std::filesystem::is_regular_file(root + "/source.txt"));
-	TEST_EXPECT(run({"import", root, source}) == 1);
-	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0);
+	TEST_EXPECT(run({"import", root, source}) == 0);
+	TEST_EXPECT(editor_test::write_text(source, "changed file"));
+	std::string held_text, held_error;
+	TEST_EXPECT(run({"import", root, source}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	            held_text == "imported file");
+	TEST_EXPECT(run({"import", root, source, "--replace"}) == 0 && opennova::editor::read_file_text(root + "/source.txt", held_text, held_error) &&
+	            held_text == "changed file");
 
 	// A file with the wrong content behind a required name is an error too.
 	TEST_EXPECT(editor_test::write_text(root + "/strings/gametext.bin", "raw"));
@@ -300,14 +306,19 @@ static int test_import_with_dependencies() {
 	const std::string capture = dir.file("out.txt");
 	std::string text;
 	const auto has = [&text](const std::string &line) { return text.find(line) != std::string::npos; };
-	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
+	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run", "--rows"}, text) == 0);
 	TEST_EXPECT(has("take a.mnu (menu) -> menus/a.mnu, chosen, from the folder " + art + "\n"));
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the folder " + art + "\n"));
 	TEST_EXPECT(has("take b.mnu (menu) -> menus/b.mnu, needed by a.mnu: A/GO"));
 	TEST_EXPECT(has("not found gone.tga (texture), needed by a.mnu: A/GO/Appearance 1"));
-	TEST_EXPECT(has("not followed: menu_screen references, which name no file (1, the first in a.mnu)"));
-	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found"));
+	// S14: the screen B is a symbol the planned b.mnu defines, followed to nothing; the plan by kind.
+	TEST_EXPECT(!has("not followed: menu_screen") && !has("undefined:"));
+	TEST_EXPECT(has("  menu: 2 file(s), 0.0 MB\n") && has("  font: 1 file(s), 0.0 MB\n"));
+	TEST_EXPECT(has("plan: 3 file(s) to import, 1 not found, 0.0 MB"));
 	TEST_EXPECT(!fs::exists(root + "/menus") && !fs::exists(root + "/fonts")); // written nowhere
+	// Without --rows, the summary alone.
+	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
+	TEST_EXPECT(!has("take ") && has("not found gone.tga") && has("  menu: 2 file(s)") && has("plan: 3 file(s) to import"));
 	// The source alone without --with-dependencies.
 	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--dry-run"}, text) == 0);
 	TEST_EXPECT(has("plan: 1 file(s) to import, 0 not found") && !has("arial99") && !fs::exists(root + "/menus"));
@@ -371,7 +382,7 @@ static int test_dry_run_writes_nothing() {
 	TEST_EXPECT(opennova::editor::read_file_text(record, stale, error));
 	const auto before = snapshot(root);
 	std::string text;
-	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt"), "--with-dependencies", "--dry-run"},
+	TEST_EXPECT(run_capture(dir.file("out.txt"), {"import", root, dir.file("notes.txt"), "--with-dependencies", "--dry-run", "--rows"},
 	                        text) == 0);
 	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && text.find("imported ") == std::string::npos);
 	TEST_EXPECT(snapshot(root) == before);
@@ -379,7 +390,7 @@ static int test_dry_run_writes_nothing() {
 	// .opennova/local.json is made or changed.
 	fs::create_directories(dir.file("install"), ec);
 	TEST_EXPECT(run_capture(dir.file("out.txt"),
-	                        {"import", root, dir.file("notes.txt"), "--dry-run", "--install", dir.file("install")}, text) == 0);
+	                        {"import", root, dir.file("notes.txt"), "--dry-run", "--rows", "--install", dir.file("install")}, text) == 0);
 	TEST_EXPECT(text.find("take notes.txt") != std::string::npos && snapshot(root) == before);
 	TEST_EXPECT(!fs::exists(root + "/.opennova/local.json"));
 	// The import itself: the pass first (the changed source's record written again), then the file.
@@ -422,11 +433,11 @@ static int test_scene_textures() {
 	return 0;
 }
 
-// The cap binds the command line as it binds the dialog: 1001 members of an archive with
-// --with-dependencies make a plan cut at 1000, and the command imports those the plan holds, not
-// the one past it, and says so.
-static int test_cap() {
-	editor_test::TempProjectDir dir("opennova_editor_project_cli_cap");
+// ADR 0046 S14: the plan's cap is a guard (kImportPlanFileCap, fifty thousand), not a limit an
+// import meets: 1001 members of an archive with --with-dependencies plan whole, and the command
+// imports every one and says nothing of a stop.
+static int test_many() {
+	editor_test::TempProjectDir dir("opennova_editor_project_cli_many");
 	const std::string root = dir.file("game");
 	TEST_EXPECT(run({"new", root}) == 0);
 	std::vector<std::string> names;
@@ -447,9 +458,9 @@ static int test_cap() {
 		args.push_back(name);
 	}
 	std::string text;
-	TEST_EXPECT(run_list(dir.file("err.txt"), args, text) == 1);
-	TEST_EXPECT(text.find("the plan stopped at 1000 files") != std::string::npos);
-	TEST_EXPECT(fs::is_regular_file(root + "/t0999.txt") && !fs::exists(root + "/t1000.txt"));
+	TEST_EXPECT(run_list(dir.file("err.txt"), args, text) == 0);
+	TEST_EXPECT(text.find("the plan stopped at") == std::string::npos);
+	TEST_EXPECT(fs::is_regular_file(root + "/t0999.txt") && fs::is_regular_file(root + "/t1000.txt"));
 	return 0;
 }
 
@@ -583,8 +594,25 @@ static int test_one_game_install() {
 	std::string text;
 	const auto has = [&text](const std::string &line) { return text.find(line) != std::string::npos; };
 	TEST_EXPECT(run_capture(capture, {"status", root}, text) == 0 && has("game install: " + install + "\n"));
-	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run"}, text) == 0);
+	TEST_EXPECT(run_capture(capture, {"import", root, art + "/a.mnu", "--with-dependencies", "--dry-run", "--rows"}, text) == 0);
 	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, needed by a.mnu: A/GO font.name, from the game install"));
+	// Everything the install has (ADR 0046 S14): its archives' files and the loose files the game
+	// ships beside them, chosen at once, with no walk and nothing else named; imported as the plan
+	// has them.
+	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "music") && editor_test::write_text(install + "/game.cfg", "cfg"));
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--entry", "arial99.fnt"}, text) == 2 &&
+	            text.find("--all") != std::string::npos);
+	// Every file and a walk at once: a usage error, never a flag left unread (review F14).
+	TEST_EXPECT(run_usage(dir.file("err.txt"), {"import", root, "--all", "--with-dependencies"}, text) == 2 &&
+	            text.find("--with-dependencies") != std::string::npos);
+	TEST_EXPECT(run_capture(capture, {"import", root, "--all", "--dry-run", "--rows"}, text) == 0);
+	TEST_EXPECT(has("take arial99.fnt (font) -> fonts/arial99.fnt, chosen, from the game install") &&
+	            has("take menumus.sbf (music_bank) -> ") && !has("game.cfg") && has("plan: 2 file(s) to import, 0 not found"));
+	TEST_EXPECT(!fs::exists(root + "/fonts/arial99.fnt"));
+	TEST_EXPECT(run_capture(capture, {"import", root, "--all"}, text) == 0);
+	TEST_EXPECT(has("imported fonts/arial99.fnt") && has("imported ") && fs::is_regular_file(root + "/fonts/arial99.fnt"));
+	std::string music, io_error;
+	TEST_EXPECT(opennova::editor::read_file_text(root + "/menumus.sbf", music, io_error) && music == "music");
 
 	// Another project names none: the editor opens it on the install it last chose.
 	const std::string other = dir.file("Other");
@@ -658,7 +686,7 @@ int main() {
 	failures += test_import_with_dependencies();
 	failures += test_dry_run_writes_nothing();
 	failures += test_scene_textures();
-	failures += test_cap();
+	failures += test_many();
 	if (failures == 0) std::printf("project_cli: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

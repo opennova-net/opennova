@@ -162,7 +162,7 @@ protected:
 	bool paste_records(Node &row, const Edit &edit, const IdAllocator &allocate, std::vector<NodeId> &added,
 	                   std::string &error) override;
 	// A duplicated screen takes a name no other screen of `rows` has (OPTIONS then OPTIONS2).
-	void prepare_duplicate(Node &copy,
+	void prepare_duplicate(Node &copy, const Node &original,
 	                       const std::vector<std::shared_ptr<const Node>> &rows) const override;
 	// A menu keeps at least one screen: a step that removes its last one is refused.
 	bool accept_step(const EditStep &step, const StagedRows &rows,

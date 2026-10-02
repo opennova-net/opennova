@@ -1,15 +1,24 @@
 #include <editor/graph/use_checks.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 #include <base/io/strutil.h>
+#include <editor/documents/mission_table.h>
+#include <editor/documents/mission_validation.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <formats/def/def.h>
+#include <formats/mission/authoring.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/menu_style.h>
@@ -104,8 +113,85 @@ void check_style_uses(
 	}
 }
 
+// The pool an item's TYPE puts a record in, as the game's editor places it (formats/mission/
+// authoring.h: a vehicle, an object and a powerup among the items, a decoration, foliage and a
+// building among the buildings, a person among the organics, a marker among the markers).
+NodeKind pool_of_type(int type) {
+	switch (mission::authoring::entity_kind_for_item_type(type)) {
+	case mission::EntityKind::Building: return node_kind(MissionKind::Building);
+	case mission::EntityKind::Marker: return node_kind(MissionKind::Marker);
+	case mission::EntityKind::Organic: return node_kind(MissionKind::Organic);
+	default: return node_kind(MissionKind::Item);
+	}
+}
+
+const char *pool_words(NodeKind kind) {
+	switch (static_cast<MissionKind>(kind)) {
+	case MissionKind::Building: return "buildings";
+	case MissionKind::Marker: return "markers";
+	case MissionKind::Organic: return "organics";
+	default: return "items";
+	}
+}
+
+// What a mission's records make of their items' TYPE (ADR 0046 S14): an entity in another pool than
+// the one the game's editor places its item's TYPE in (one to one over the shipped missions,
+// D-MIS-1; what the game makes of such a record is not known), read through the graph: each
+// entity's item edge and the item symbol it reaches, whose value is the item's TYPE
+// (DefCatalogDocument::refine_symbol). An item the project lacks is the reference's own finding.
+void pool_findings(const AssetGraph &graph, const std::string &path, std::vector<Diagnostic> &out) {
+	for (const GraphEdge *edge : graph.references_of(path)) {
+		if (edge->kind != ReferenceKind::Item || edge->field != "item" || !is_entity_kind(edge->address.kind)) continue;
+		const GraphSymbol *item = graph.symbol_reached(*edge);
+		const std::optional<int> type = item ? strutil::parse_int(item->value) : std::nullopt;
+		if (!type || *type < 0) continue;
+		const NodeKind placed = pool_of_type(*type);
+		if (placed == edge->address.kind) continue;
+		Diagnostic d = make_finding(finding_code(MissionFinding::Pool), DiagnosticSeverity::Warning,
+		                            "Item " + edge->value + " is a " + def::def_item_type_name(*type) +
+		                                    ", which the game's editor places among the " + pool_words(placed) +
+		                                    "; this record is among the " + pool_words(edge->address.kind) +
+		                                    ". What the game makes of it is not known.",
+		                            path, edge->field);
+		d.record = edge->record;
+		d.row_id = edge->address.row;
+		d.child_id = edge->address.child;
+		d.record_kind = edge->address.kind;
+		out.push_back(std::move(d));
+	}
+}
+
+// Every mission's pool_findings, made once per state of the graph (AssetGraph::generation: while it
+// stands, every edge and symbol is where it was), not at every composition of the rows (the editor
+// composes them after every edit that validates a file); a composition takes those of each mission
+// whose records its validation checked.
+void check_mission_pools(const AssetGraph &graph, const ValidationCache &files, std::vector<Diagnostic> &out) {
+	struct Made {
+		std::mutex mutex;
+		uint64_t generation = 0; // no graph's (the counter starts at 1)
+		std::vector<std::pair<std::string, std::vector<Diagnostic>>> missions; // each mission's path, its findings
+	};
+	static Made made;
+	const std::lock_guard<std::mutex> lock(made.mutex);
+	if (made.generation != graph.generation()) {
+		made.missions.clear();
+		std::string last;
+		for (const GraphSymbol *symbol : graph.symbols_of_kind(ReferenceKind::MissionEntity)) {
+			const std::string &path = symbol->file;
+			if (path == last) continue;
+			last = path;
+			made.missions.emplace_back(path, std::vector<Diagnostic>());
+			pool_findings(graph, path, made.missions.back().second);
+		}
+		made.generation = graph.generation();
+	}
+	for (const auto &[path, findings] : made.missions)
+		if (files.records_checked(path)) out.insert(out.end(), findings.begin(), findings.end());
+}
+
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
+	{ AssetKind::Mission, check_mission_pools },
 	{ AssetKind::MenuStyle, check_style_uses },
 };
 

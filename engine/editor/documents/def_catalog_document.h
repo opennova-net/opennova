@@ -49,6 +49,10 @@ public:
 	// An item's vehicle spawn slots: the bits of the file's registry, each named by its id.
 	bool record_choices(const NodeAddress &address, const FieldUse &use,
 			std::vector<FieldChoice> &out) const override;
+	// An item's symbol carries its TYPE (the DefItemType number, as text): the pool a mission puts a
+	// record of the item in is its TYPE's (mission::authoring::entity_kind_for_item_type), which a
+	// drop into a mission reads from the graph (ADR 0046 S14).
+	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<DefCatalogDocument>(*this);

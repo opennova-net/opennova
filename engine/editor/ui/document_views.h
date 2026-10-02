@@ -22,7 +22,7 @@ enum class DocumentViewRole {
 	// A Main-role viewport fills the tab: main_viewport is its hook, drawing the viewport of the
 	// Main-role kind that shows the type (S13 V5). Its row names the records' outline (its
 	// OutlineSpec), which ui/main_viewport_view draws beside the viewport with the Inspector (the
-	// mission's 3D view, to come), or a view of its own, which draws the viewport its way (every text
+	// mission's 3D view), or a view of its own, which draws the viewport its way (every text
 	// type's script view, S13 V10: its toolbar above the script device, ui/script_view).
 	MainViewport,
 };
