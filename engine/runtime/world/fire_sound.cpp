@@ -220,6 +220,66 @@ void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
         world.script.waypoints.select_nearest_enemy_base(world.registry, local, game_type);
 }
 
+void play_zone_event_sound(World &world, uint8_t event, const Entity &local) {
+    const char *cue = nullptr;
+    const char *voice = nullptr;
+    switch (event) {
+    case 48: // the mortar request [orig: @0x426387 -> @0x4263c4]
+        cue = "MORTAR_REQ";
+        break;
+    case 41: case 42: case 54: case 55: {
+        // The BLUE (41/54) or RED (42/55) zone's warning: the threatened
+        // team hears its threat cue, every other player the other-team cue
+        // and its voice. [orig: @0x427527 / @0x427725 (the team tests),
+        //  @0x427684 PSP_THREAT_T, @0x42769e PSP_THREAT_OT, @0x4276bf the
+        //  PSP_THREATVX_OT voice]
+        const uint8_t threatened = (event == 41 || event == 54) ? 1 : 2;
+        if (local.team == threatened) {
+            cue = "PSP_THREAT_T";
+        } else {
+            cue = "PSP_THREAT_OT";
+            voice = "PSP_THREATVX_OT";
+        }
+        break;
+    }
+    case 43: case 44: case 56: case 57: {
+        // The zone taken by BLUE (43/56) or RED (44/57): the taker's team
+        // hears the win cue, every other player the loss cue and its voice.
+        // [orig: @0x427775 / @0x427973 (the team tests), @0x4278d3 PSP_WIN,
+        //  @0x4278ed PSP_LOST, @0x42790e the PSP_LOSTVX voice]
+        const uint8_t taker = (event == 43 || event == 56) ? 1 : 2;
+        if (local.team == taker) {
+            cue = "PSP_WIN";
+        } else {
+            cue = "PSP_LOST";
+            voice = "PSP_LOSTVX";
+        }
+        break;
+    }
+    default:
+        return;
+    }
+    // The fixed names resolve against the loaded bank chain at dialog init; a
+    // missing set is the null id the interface play and the hold refuse.
+    // [orig: DialogSystem_Init @ 0x5275E0, table @ 0x82F590: PSP_THREAT_T
+    //  @0x82FE00 .. PSP_THREATVX_OT @0x82FEB4, MORTAR_REQ @0x8300AC]
+    const auto exists = [&world](const char *name) {
+        return name && world.tables.sound_sets && world.tables.sound_sets->has(name);
+    };
+    if (exists(cue)) {
+        // [orig: Sound_PlayInterfaceTriggerSet @ 0x527BE0]
+        ScriptSoundEvent sound;
+        sound.kind = ScriptSoundEvent::Kind::Interface;
+        sound.name = cue;
+        world.out.script_sounds.push_back(std::move(sound));
+    }
+    // The voice holds 3720 ticks and plays 62 ticks later at the local body
+    // [orig: Server_TrackEntityInTable(voice, 3720) -> EffectSlot_AllocateAndInit
+    //  (voice, local +4, 62, 2)]
+    if (exists(voice))
+        world.out.fire_sounds.play_throttled_interface(voice, local.position, 62, 3720);
+}
+
 // [orig: WeaponAction_Fire @0x542ccc..0x542ce9;
 // WeaponAction_ProcessFrame @0x541262..0x54132a]
 void weapon_sound_publish(World &world, const Entity &owner,

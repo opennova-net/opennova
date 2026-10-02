@@ -126,7 +126,11 @@ void ClientReplicaPipeline::apply_game_event(const std::vector<uint8_t> &body) {
 		ev.aux_index = 0xFF;
 	}
 
-	if (rec.event_type >= 19 && rec.event_type <= 21)
+	// The events whose receive plays a sound: the flag cues (19..21), the
+	// zone warnings and captures (41..44, 54..57) and the mortar request (48)
+	// [orig: NetPacket_HandleGameEvent @0x426270 — the cases' sound legs].
+	const uint8_t t = rec.event_type;
+	if ((t >= 19 && t <= 21) || (t >= 41 && t <= 44) || t == 48 || (t >= 54 && t <= 57))
 		pending_effect_commands_.push_back(rec);
 	ev.feed_order = next_feed_order_++;
 	pending_game_events_.push_back(ev);

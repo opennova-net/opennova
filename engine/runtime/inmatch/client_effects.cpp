@@ -297,6 +297,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                     sound_actor(*this, world, event->attacker_index, actor))
                 world::play_flag_event_sound(world, event->event_type, actor, *local,
                         game_type(), event->pos_x, event->pos_y);
+            // The zone and mortar cues read only the local player's team.
+            if (local) world::play_zone_event_sound(world, event->event_type, *local);
         } else if (const auto *call = std::get_if<TrackedPlayerVoice>(&request)) {
             // Pool-0 byte is a raw entity index. Chat and voice have separate
             // local mute flags; an unbound speaker can still play a voice.

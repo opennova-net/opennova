@@ -6445,6 +6445,56 @@ bool run_flag_event_audio_and_feed_drain_independently() {
             "flag voice uses the shared pending slot after 62 ticks");
 }
 
+// The zone-control and mortar-request events play their interface cues on
+// the receiving client, keyed on the local player's team alone: a capture
+// by the local team plays PSP_WIN, by the other team PSP_LOST plus the
+// PSP_LOSTVX voice 62 ticks later; a warning on the other team's zone plays
+// PSP_THREAT_OT plus its voice; event 48 plays MORTAR_REQ.
+// [orig: NetPacket_HandleGameEvent @0x426270 — cases 41..44 / 54..57,
+//  event 48 @0x4263c4; DialogSystem_Init table @0x82F590]
+bool run_zone_event_cues_play_on_the_client() {
+    inmatch::ClientRuntime runtime("ZoneAudio");
+    w::World world;
+    world.registry.configure_pool(0, 4);
+    w::Entity person;
+    person.item_id = 11; person.has_item_def = true; person.team = 1;
+    world.cached.local_player = world.registry.spawn(0, person);
+    world.out.fire_sounds.set_listener({});
+    opennova::lwf::File bank;
+    for (const char *name : {"PSP_WIN", "PSP_LOST", "PSP_LOSTVX", "PSP_THREAT_T",
+                             "PSP_THREAT_OT", "PSP_THREATVX_OT", "MORTAR_REQ"}) {
+        opennova::lwf::Multi set; set.name = name; bank.multis.push_back(set);
+    }
+    opennova::audio::SoundSetIndex sets;
+    sets.add_bank(0, bank); world.tables.sound_sets = &sets;
+    const auto cues_of = [&](uint8_t event) {
+        world.out.script_sounds.clear();
+        runtime.view().apply(s2c::GAME_EVENT, {event, 255, 255, 255, 0, 0, 0, 0});
+        runtime.apply_received_effects(world);
+        std::string out;
+        for (const auto &sound : world.out.script_sounds) out += sound.name + ";";
+        return out;
+    };
+    const std::string won = cues_of(43);     // PSP taken by blue: the local team
+    const std::string lost = cues_of(57);    // LFP taken by red
+    for (int i = 0; i < 62; ++i) world.out.fire_sounds.tick();
+    const auto voices = world.out.fire_sounds.drain();
+    const std::string threat = cues_of(42);  // red's zone threatened
+    const std::string own_threat = cues_of(54);
+    const std::string mortar = cues_of(48);
+    std::fprintf(stderr, "[zone-cues] won=%s lost=%s threat=%s own=%s mortar=%s voices=%zu\n",
+            won.c_str(), lost.c_str(), threat.c_str(), own_threat.c_str(), mortar.c_str(),
+            voices.size());
+    return expect(won == "PSP_WIN;", "the local team's capture plays PSP_WIN") &&
+           expect(lost == "PSP_LOST;", "the other team's capture plays PSP_LOST") &&
+           expect(voices.size() == 1 && voices[0].set_name == "PSP_LOSTVX" &&
+                          voices[0].interface_set,
+                   "the loss voice plays 62 ticks later") &&
+           expect(threat == "PSP_THREAT_OT;", "the other team's zone warning plays THREAT_OT") &&
+           expect(own_threat == "PSP_THREAT_T;", "the local team's zone warning plays THREAT_T") &&
+           expect(mortar == "MORTAR_REQ;", "a mortar request plays MORTAR_REQ");
+}
+
 bool run_medic_reviving_plays_both_receive_cues() {
 	inmatch::ClientRuntime runtime("MedicAudio");
 	runtime.view().set_mp_session(true);
@@ -7252,6 +7302,7 @@ int main() {
 	                run_reverse_rtt_probe_is_echoed() &&
 	                run_medic_reviving_plays_both_receive_cues() &&
                     run_flag_event_audio_and_feed_drain_independently() &&
+                    run_zone_event_cues_play_on_the_client() &&
                     run_explosion_sound_reads_the_pool_twin_damage_ammo() &&
                     run_explosion_sound_falls_back_to_ammo_zero_bank_row_five() &&
                     run_remote_stance_sound_parent_is_the_mount_only() &&

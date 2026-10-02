@@ -164,6 +164,15 @@ private:
 void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
         const Entity &local, uint32_t game_type, int16_t x, int16_t y);
 
+// The zone-control and mortar-request events' interface cues, keyed on the
+// LOCAL player's team alone (no actor): a PSP/LFP warning plays the
+// team's threat cue, or the other team's plus its delayed voice; a capture
+// plays the win cue, or the loss cue plus its delayed voice; event 48 plays
+// the mortar request. Other events return.
+// [orig: NetPacket_HandleGameEvent @ 0x426270, cases 41..44 / 54..57
+//  @0x42759b..0x42790e, event 48 @0x426387..0x4263c4]
+void play_zone_event_sound(World &world, uint8_t event, const Entity &local);
+
 // The per-spawn fire-sound dispatch, called beside the FireEvent record — the
 // inline-presentation moment of the original. The local player's own fire
 // keeps its action-slot presentation (the shell self-filter, applied here at
