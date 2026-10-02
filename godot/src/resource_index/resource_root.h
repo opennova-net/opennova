@@ -72,11 +72,10 @@ private:
 	static String lookup_name(const String &name);
 	static opennova::VfsLookupPolicy to_vfs_lookup_policy(LookupPolicy policy);
 
-	// Shared validate-and-scan body for both mount entry points. `game_code` selects the SCR
-	// decode policy (gameprofile code, e.g. "jo"/"jodemo"); an empty/unknown code is the JO default.
-	// `discovery` selects the witnessed retail boot table or an explicit archive scan.
-	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+	// The body both mount entry points share before their scan: the caches keyed to the old
+	// root dropped, the old mount discarded, `path` validated; `r_clean` the directory to
+	// scan, root_dir_ set to it.
+	Error begin_mount(const String &path, String &r_clean);
 
 	String expansion_;
 
@@ -146,10 +145,10 @@ public:
 	bool has_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	PackedByteArray read_file(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
 	Ref<Texture2D> load_texture(const String &name, LookupPolicy policy = LOOKUP_SESSION_DEFAULT) const;
+	// One material row's texture of runtime `type`: the one file retail's loader
+	// opens for it, decoded by that loader's reader and prepared as the
+	// dispatcher does; the checkerboard when it does not load.
 	Ref<Texture> load_material_texture(const String &name, uint8_t type) const;
-	// A diffuse-family material row (runtime types 0, 1, 2, 8) decoded from the
-	// one file retail's loader selects for it; null when that file is absent.
-	Ref<Texture2D> load_material_image(const String &name, uint8_t type) const;
 	Ref<Resource> load_font(const String &name) const;
 
 	// The witnessed boot-required manifest (ENG-6, engine/base/gameprofile
@@ -163,6 +162,9 @@ public:
 	// so owners can raise honest missing-resource errors.
 	PackedStringArray list_missing_boot_resources() const;
 	String boot_resource_failure_text(const String &name) const;
+	// The text the boot report's line puts before a missing file's name, the one the editor's
+	// Play reads the name back by (gameprofile::kBootResourceMissingMarker).
+	static String boot_resource_missing_marker();
 
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.

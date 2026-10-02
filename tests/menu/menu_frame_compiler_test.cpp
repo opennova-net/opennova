@@ -9,13 +9,17 @@
 
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/menu_frame.h>
+#include <runtime/menu/menu_text_tables.h>
 #include <formats/mnu/mnu.h>
 
 #include <cstdio>
 #include <cstring>
+#include <initializer_list>
+#include <memory>
 #include <string>
+#include <utility>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 using namespace opennova::fnt;
 
@@ -46,6 +50,30 @@ int failures = 0;
 			++failures;                                                        \
 		}                                                                      \
 	} while (0)
+
+// There is no default menu font: a widget draws with the nearest FONT that
+// loaded. Every fixture FONT name registers the one synthetic font.
+void configure_with(MenuFrameCompiler &c, const opennova::mnu::Screen *screen,
+		const fnt_font_t *font) {
+	for (const char *name : { "test.fnt", "f.fnt", "t.fnt" }) {
+		c.register_font(name, font);
+	}
+	c.configure(screen);
+}
+
+// A string table whose "Menu" section holds `rows`.
+std::shared_ptr<opennova::rtxt::File> menu_table(
+		std::initializer_list<std::pair<const char *, const char *>> rows) {
+	auto file = std::make_shared<opennova::rtxt::File>();
+	file->sections.push_back({ "Menu", static_cast<uint32_t>(rows.size()) });
+	for (const auto &row : rows) {
+		opennova::rtxt::Entry entry;
+		entry.key = row.first;
+		entry.text = row.second;
+		file->entries.push_back(entry);
+	}
+	return file;
+}
 
 opennova::mnu::Document parse_or_die(const char *xml) {
 	opennova::mnu::Document doc;
@@ -124,7 +152,7 @@ const char *kScreenXml = R"(
 void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
 	const int32_t brush = slot_of(c, "tile.tga");
 	const int32_t ok_idle = slot_of(c, "ok_idle.tga");
@@ -204,23 +232,31 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 	}
 	CHECK(found_red, "hover text uses the mouseover fg");
 
-	// Pressed (state 3) has no authored appearance: the availability
-	// fallback draws the DEFAULT slot [orig: CWnd_SetVisualState @ 0x646340].
+	// Pressed (state 3) has no authored appearance: the pump's availability
+	// fallback leaves DEFAULT in +236, which the appearance AND the label read
+	// [orig: CWnd_ProcessMouseEvent @ 0x647c89..0x647cb5; the label color
+	// switch @ 0x653445].
 	state.widgets[0].hovered = false;
 	state.widgets[0].pressed = true;
 	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
 	CHECK(count_quads_with_texture(dl3, ok_idle) == 1,
 			"missing selected appearance falls back to default");
+	bool found_default = false;
 	bool found_green = false;
 	for (const auto &g : dl3.glyphs) {
+		if ((g.color & 0xFFFFFFu) == 0xAABBCCu) {
+			found_default = true;
+		}
 		if ((g.color & 0xFFFFFFu) == 0x00FF00u) {
 			found_green = true;
 		}
 	}
-	CHECK(found_green, "pressed text still uses the selected fg pair");
+	CHECK(found_default && !found_green,
+			"pressed text follows the resolved state: the default pair");
 
-	// Disabled (state 1): no disabled appearance -> default art, disabled fg.
+	// Disabled (state 1): no disabled appearance -> default art and colors.
 	state.widgets[0].pressed = false;
+	state.widgets[0].has_disabled = true;
 	state.widgets[0].disabled = true;
 	const MenuDrawList &dl4 = c.compile(state, 1.0f, 1.0f);
 	bool found_gray = false;
@@ -229,7 +265,7 @@ void test_draw_order_and_state_selection(const fnt_font_t *font) {
 			found_gray = true;
 		}
 	}
-	CHECK(found_gray, "disabled text uses the disabled fg");
+	CHECK(!found_gray, "an unauthored disabled state keeps the default colors");
 
 	// A hidden widget skips its draw but the sibling still renders.
 	MenuWidgetState hide;
@@ -265,7 +301,7 @@ void test_image_appearance_crops_authored_map_state(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t atlas = slot_of(c, "tab_atlas.tga");
 	CHECK(atlas >= 0, "the Options tab atlas is interned");
 	c.set_texture_size(atlas, 100, 80);
@@ -316,7 +352,7 @@ void test_scroll_draws_authored_visual_parts(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t track = slot_of(c, "track.tga");
 	const int32_t up = slot_of(c, "left.tga");
 	const int32_t down = slot_of(c, "right.tga");
@@ -392,7 +428,7 @@ void test_spin_arrow_uses_cropped_atlas_extent(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t up = slot_of(c, "spin_up_atlas.tga");
 	CHECK(up >= 0, "the spin-arrow atlas is interned");
 	c.set_texture_size(up, 16, 80);
@@ -461,7 +497,7 @@ void test_list_scrollbar_uses_authored_geometry_and_range(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t track = slot_of(c, "list_track.tga");
 	const int32_t shuttle = slot_of(c, "list_shuttle.tga");
 	const int32_t up = slot_of(c, "list_up_atlas.tga");
@@ -546,7 +582,7 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
   <NAME>COMBO_SCROLL</NAME>
   <WINDOW type="window" name="ROOT">
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -570,7 +606,7 @@ void test_combo_scrollbar_offsets_rows_and_hit(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	for (const char *name : { "combo_track.tga", "combo_shuttle.tga",
 				 "combo_up.tga", "combo_down.tga" }) {
 		c.set_texture_size(slot_of(c, name), 20, 20);
@@ -650,7 +686,7 @@ void test_table_scrollbar_separates_header_and_body_row_heights(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t shuttle = slot_of(c, "table_shuttle.tga");
 	const int32_t up = slot_of(c, "table_up.tga");
 	CHECK(shuttle >= 0 && up >= 0,
@@ -718,7 +754,7 @@ void test_table_visible_count_floors_to_one(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t up = slot_of(c, "tiny_up.tga");
 	CHECK(up >= 0, "the tiny-table scrollbar visual is interned");
 	c.set_texture_size(up, 16, 16);
@@ -761,7 +797,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState table_state;
 	table_state.index = 1;
 	table_state.hovered = true; // the widget-level visual must not tint cells
@@ -823,7 +859,7 @@ void test_table_rows_draw_row_state_not_widget_hover(const fnt_font_t *font) {
 void test_text_placement_and_truncation(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	// The OK button: rect (10,20)-(110,40) in MAIN at (0,0); "OK" measures
@@ -858,7 +894,7 @@ void test_text_placement_and_truncation(const fnt_font_t *font) {
 void test_scale_truncation(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t ok_idle = slot_of(c, "ok_idle.tga");
 	c.set_texture_size(ok_idle, 100, 20);
 	MenuFrameState state;
@@ -902,7 +938,7 @@ void test_radio_checkbox_forcing(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t r_off = slot_of(c, "r_off.tga");
 	const int32_t r_on = slot_of(c, "r_on.tga");
 	const int32_t c_off = slot_of(c, "c_off.tga");
@@ -973,7 +1009,7 @@ void test_edit_caret(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState edit;
 	edit.index = 1;
@@ -1060,7 +1096,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState list;
 	list.index = 1;
@@ -1111,7 +1147,7 @@ void test_list_rows_and_item_cell(const fnt_font_t *font) {
 void test_mouse_pump(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuFrameState state;
 	// Over the OK button (design rect 10,20..110,40 under the root at 0,0),
@@ -1162,6 +1198,7 @@ void test_mouse_pump(const fnt_font_t *font) {
 	// (visual state 1 wins).
 	MenuWidgetState disabled_row;
 	disabled_row.index = 1;
+	disabled_row.has_disabled = true;
 	disabled_row.disabled = true;
 	state.widgets.clear();
 	state.widgets.push_back(disabled_row);
@@ -1209,7 +1246,7 @@ void test_table_interior(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	MenuWidgetState grid;
 	grid.index = 1;
@@ -1225,7 +1262,7 @@ void test_table_interior(const fnt_font_t *font) {
 			divider = true;
 		}
 	}
-	CHECK(!divider, "an unsorted column draws no rule beside its header label");
+	CHECK(!divider, "an unsorted table draws no sort indicator");
 	// Second column starts after width 200: some glyph must anchor at x>=200.
 	bool second_col = false;
 	for (const auto &g : dl.glyphs) {
@@ -1242,9 +1279,10 @@ void test_table_interior(const fnt_font_t *font) {
 			"the scroll window drops rows above first-visible");
 }
 
-// The marquee credits roll [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]:
-// seeded lines draw centered, the roll advances with time_ms, and the whole
-// roll resets after the last line passes the top.
+// The marquee credits roll [orig: CMarqueeWnd_RenderScrollingCredits @ 0x65ca00]: the
+// nodes start at the rect's bottom edge plus their offset, fall SCROLL_RATE
+// pixels a rendered frame (a compile whose clock moved), draw centred in their
+// own font, and the whole roll resets once the last node passes the top.
 void test_marquee_roll(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
@@ -1252,7 +1290,7 @@ void test_marquee_roll(const fnt_font_t *font) {
   <WINDOW type="window" name="MAIN">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>t.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="marquee" name="ROLL">
+    <WINDOW type="marquee_wnd" name="ROLL">
       <POSITION><LEFT>100</LEFT><TOP>100</TOP><RIGHT>700</RIGHT><BOTTOM>300</BOTTOM></POSITION>
     </WINDOW>
   </WINDOW>
@@ -1260,18 +1298,27 @@ void test_marquee_roll(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
+	const char *config = "[ENV]\r\nSCROLL_RATE=50\r\nVERTICAL_SPACE=20\r\n[TEXT]\r\n"
+			"TEXT=CREDITS, t.fnt\r\nTEXT=<CR>\r\nTEXT=OPEN_NOVA\r\n";
+	opennova::menu::MarqueeCredits credits;
+	CHECK(opennova::menu::marquee_load_credits(reinterpret_cast<const uint8_t *>(config),
+				  std::strlen(config), credits, nullptr),
+			"a text config loads");
+	CHECK(credits.scroll_rate == 50.0f && credits.vertical_space == 20 &&
+					credits.nodes.size() == 2 && credits.nodes[1].offset == 40,
+			"[ENV] and the <CR> spacing");
+	CHECK(credits.nodes.size() == 2 &&
+					opennova::menu::marquee_node_text(credits, credits.nodes[1]) == "OPEN NOVA",
+			"'_' draws as a space");
 	MenuFrameState state;
 	MenuWidgetState roll;
 	roll.index = 1;
-	roll.marquee_lines = {"CREDITS", "", "OPENNOVA"};
+	roll.marquee = credits;
 	state.widgets.push_back(roll);
-	// The roll enters from the BOTTOM: nothing draws at t=0.
-	state.time_ms = 0;
-	const MenuDrawList &dl0 = c.compile(state, 1.0f, 1.0f);
-	CHECK(dl0.glyphs.empty(), "the roll starts below the rect (enters from the bottom)");
-	// After the clock advances, the first line has scrolled into view.
-	state.time_ms = 3000;
+	// The first frame steps once: the first node sits at 300 - 50, the second at
+	// 340 - 50 (still below the rect); glyph vertices sit half a pixel up-left.
+	state.time_ms = 1;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	float first_y = -1.0f;
 	for (const auto &g : dl.glyphs) {
@@ -1279,25 +1326,33 @@ void test_marquee_roll(const fnt_font_t *font) {
 			first_y = g.y_top;
 		}
 	}
-	CHECK(first_y >= 0.0f, "seeded credits lines draw");
-	const size_t early_glyphs = dl.glyphs.size();
-	(void)early_glyphs;
-	// Further advance WITHIN one roll cycle (the whole-roll reset fires
-	// once the offset exceeds the 3-line roll height): the roll scrolls UP.
-	state.time_ms = 4400;
+	CHECK(first_y == 249.5f, "a node starts at the bottom edge and falls one step a frame");
+	// A compile on the same clock is the same frame: no step.
+	const MenuDrawList &same = c.compile(state, 1.0f, 1.0f);
+	CHECK(!same.glyphs.empty() && same.glyphs[0].y_top == 249.5f, "one step a rendered frame");
+	state.time_ms = 2;
 	const MenuDrawList &dl2 = c.compile(state, 1.0f, 1.0f);
-	float second_y = 1.0e9f;
-	for (const auto &g : dl2.glyphs) {
-		if (g.y_top < second_y) {
-			second_y = g.y_top;
-		}
+	CHECK(!dl2.glyphs.empty() && dl2.glyphs[0].y_top == 199.5f, "the roll moves up SCROLL_RATE");
+	// The last node starts at 340: the fifth frame takes it to 90, above the top
+	// (100), and that frame the whole roll goes back to its initial layout (the
+	// first node on the bottom edge, not drawn); the next frame steps again.
+	for (uint32_t t = 3; t <= 4; ++t) {
+		state.time_ms = t;
+		c.compile(state, 1.0f, 1.0f);
 	}
-	CHECK(!dl2.glyphs.empty() && second_y < first_y,
-			"the roll advances upward with time_ms");
-	// A reset restarts the roll below the rect: nothing draws again.
-	state.widgets[0].marquee_reset = true;
+	state.time_ms = 5;
+	const MenuDrawList &reset = c.compile(state, 1.0f, 1.0f);
+	CHECK(reset.glyphs.empty(), "the roll starts over once the last node passes the top");
+	state.time_ms = 6;
 	const MenuDrawList &dl3 = c.compile(state, 1.0f, 1.0f);
-	CHECK(dl3.glyphs.empty(), "marquee_reset restarts the roll from the bottom");
+	CHECK(!dl3.glyphs.empty() && dl3.glyphs[0].y_top == 249.5f, "and rolls again");
+	// A reset restarts the roll from its initial layout (one step on).
+	state.time_ms = 7;
+	c.compile(state, 1.0f, 1.0f);
+	state.widgets[0].marquee_reset = true;
+	state.time_ms = 8;
+	const MenuDrawList &dl4 = c.compile(state, 1.0f, 1.0f);
+	CHECK(!dl4.glyphs.empty() && dl4.glyphs[0].y_top == 249.5f, "marquee_reset restarts the roll");
 }
 
 // DRAW_FRAME gating [orig: CStaticWnd_Render @ 0x657b10 — field +0x134 guards
@@ -1325,7 +1380,7 @@ void test_draw_frame_gate(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	const int32_t border = slot_of(c, "border.tga");
 	const int32_t brush = slot_of(c, "tile.tga");
 	CHECK(border >= 0 && brush >= 0, "the parent's FRAME textures intern");
@@ -1460,7 +1515,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuWidgetState list;
 	list.index = 1;
@@ -1489,7 +1544,7 @@ void test_runtime_items_and_multiselect(const fnt_font_t *font) {
 void test_widget_queries(const fnt_font_t *font) {
 	opennova::mnu::Document doc = parse_or_die(kScreenXml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	CHECK(c.widget_count() == 3, "widget_count covers the pre-order tree");
 	CHECK(c.widget_name(1) == "OK", "widget_name reads the authored NAME");
@@ -1515,7 +1570,7 @@ void test_widget_queries(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document edoc = parse_or_die(edit_xml);
 	MenuFrameCompiler ec;
-	ec.configure(edoc.first_screen(), font);
+	configure_with(ec, edoc.first_screen(), font);
 	opennova::menu::EditLimits lim;
 	CHECK(ec.widget_edit_limits(1, &lim) && lim.numeric &&
 					lim.min_value == 1 && lim.max_value == 99 &&
@@ -1542,7 +1597,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
       </ITEMS>
       <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
-    <WINDOW type="combo" name="C1">
+    <WINDOW type="combobox" name="C1">
       <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>300</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ONE</ITEM>
@@ -1570,7 +1625,7 @@ void test_interaction_geometry(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState st;
 
 	// List rows: 20 high from the top; the scroll window offsets.
@@ -1624,7 +1679,7 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
   <NAME>K</NAME>
   <WINDOW type="window" name="ROOT">
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>111111</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="C1">
+    <WINDOW type="combobox" name="C1">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <LIST_BOX>
         <POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>100</RIGHT><BOTTOM>80</BOTTOM></POSITION>
@@ -1648,7 +1703,7 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	// No authored items, no runtime rows: the swapped row text is empty and
 	// the face draws NOTHING — never the widget's own authored TEXT
@@ -1701,13 +1756,19 @@ void test_combo_face_and_outside_arrow_claim(const fnt_font_t *font) {
 			"hit_widget mirrors the arrow claim");
 }
 
-// The accelerator scan [orig: the screen hotkey registration family
-// @ 0x5674a8; hidden subtrees prune — a hidden BACK must not eat ESC].
-void test_hotkey_widget(const fnt_font_t *font) {
+// The label mnemonic [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30 ->
+// CButtonWnd_SetLabel @ 0x6572F0]: the byte after the first {hot} of the label as
+// the parse resolved it (the string table looked up), drawn as the caret leg's
+// '_' and never as text; a runtime relabel does not re-register it (the scan's
+// table is the parse's). The runtime builds the hotkey table from it (the
+// menu_runtime ctest).
+void test_label_mnemonic(const fnt_font_t *font) {
 	const char *xml = R"(
 <SCREEN>
   <NAME>H</NAME>
   <WINDOW type="window" name="ROOT">
+    <FONT><NAME>f.fnt</NAME></FONT>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
     <WINDOW type="window" name="HIDDEN_GROUP" HIDDEN>
       <WINDOW type="button" name="HIDDEN_ESC">
         <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>10</RIGHT><BOTTOM>10</BOTTOM></POSITION>
@@ -1729,21 +1790,16 @@ void test_hotkey_widget(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.set_text_lookup({ { "BACK_TEXT", "B{hot}ack" } });
-	c.configure(doc.first_screen(), font);
+	opennova::menu::MenuTextTables tables;
+	tables.set_table("menutxt.bin", menu_table({ { "BACK_TEXT", "B{hot}ack" } }));
+	c.set_text_tables(&tables);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState st;
 	CHECK(c.widget_authored_text(3) == "Back",
 			"the localized marker is absent from the display label");
-	// The hidden subtree's ESC never matches; the shown BACK does.
-	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 3,
-			"a hidden subtree prunes; the shown widget matches");
-	// Explicit character rows and label mnemonics coexist in their namespace.
-	CHECK(c.hotkey_widget("v", false, st) == 3,
-			"character hotkeys match case-insensitively");
-	CHECK(c.hotkey_widget("a", false, st) == 3,
-			"a localized {hot} marker supplies a case-insensitive mnemonic");
-	CHECK(c.hotkey_widget("VK_ESCAPE", false, st) == -1,
-			"a virtual name never matches as a character");
+	CHECK(c.widget_mnemonic(3) == "a", "a localized {hot} marker supplies the mnemonic");
+	CHECK(c.widget_mnemonic(4).empty() && c.widget_mnemonic(0).empty(),
+			"no marker, or a generic window: none");
 	const MenuDrawList &draw = c.compile(st, 1.0f, 1.0f);
 	// The mnemonic rides retail's caret leg: no underline markup, one extra
 	// '_' glyph stretched to the marked char, at prefix width + the two gap
@@ -1756,29 +1812,13 @@ void test_hotkey_widget(const fnt_font_t *font) {
 		CHECK(draw.glyphs[4].x_top_left == 11.5f,
 				"the '_' lands at the marked byte's prefix offset");
 	}
-	// VK_RETURN and VK_ENTER are interchangeable.
-	CHECK(c.hotkey_widget("VK_RETURN", true, st) == 4,
-			"VK_RETURN matches an authored VK_ENTER");
-	// Runtime relabeling replaces the derived mnemonic without disturbing
-	// authored HOTKEY rows.
+	// A runtime relabel draws its own marker but registers nothing new.
 	MenuWidgetState relabel;
 	relabel.index = 3;
 	relabel.has_text = true;
 	relabel.text = "E{hot}xit";
 	st.widgets.push_back(relabel);
-	CHECK(c.hotkey_widget("a", false, st) == -1,
-			"a runtime label removes the prior derived mnemonic");
-	CHECK(c.hotkey_widget("x", false, st) == 3,
-			"a runtime label supplies its replacement mnemonic");
-	CHECK(c.hotkey_widget("v", false, st) == 3,
-			"runtime relabeling preserves explicit character hotkeys");
-	// A runtime show override un-prunes the subtree; pre-order then prefers it.
-	MenuWidgetState shown;
-	shown.index = 1;
-	shown.show = true;
-	st.widgets.push_back(shown);
-	CHECK(c.hotkey_widget("VK_ESCAPE", true, st) == 2,
-			"a shown-override subtree joins the scan in pre-order");
+	CHECK(c.widget_mnemonic(3) == "a", "the parse-time mnemonic stays the registered one");
 }
 
 // The wrapped multiline-edit drawer [orig: CMEditWnd_Render @ 0x6608e0 ->
@@ -1799,7 +1839,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	// 9 px advance per glyph: 12 chars measure 106 > 100, so the line breaks
 	// at the LAST SPACE (index 9) — "AAAA BBBB" then "CCCC".
@@ -1860,7 +1900,7 @@ void test_multiline_wrap(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document sdoc = parse_or_die(short_xml);
 	MenuFrameCompiler sc;
-	sc.configure(sdoc.first_screen(), font);
+	configure_with(sc, sdoc.first_screen(), font);
 	MenuFrameState sst;
 	MenuWidgetState sbody;
 	sbody.index = 1;
@@ -1904,7 +1944,7 @@ void test_draw_list_preserves_interleaved_primitive_order(
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
@@ -1953,7 +1993,7 @@ void test_scroll_interaction_hits_and_drag(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	c.set_texture_size(slot_of(c, "track.tga"), 76, 20);
 	c.set_texture_size(slot_of(c, "left.tga"), 12, 20);
 	c.set_texture_size(slot_of(c, "right.tga"), 12, 20);
@@ -2029,7 +2069,7 @@ void test_table_embedded_scrollbar_scrolls_rows(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState table;
 	table.index = 1;
 	for (int i = 0; i < 10; ++i) {
@@ -2078,7 +2118,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="WATER">
+    <WINDOW type="combobox" name="WATER">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <STRING edge="5" justify="CENTER" vjustify="CENTER"></STRING>
       <LIST_BOX>
@@ -2096,7 +2136,7 @@ void test_combo_face_shows_list_box_selection(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.selected_item = 1; // NORMAL
@@ -2128,7 +2168,7 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="WATER">
+    <WINDOW type="combobox" name="WATER">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>152</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <LIST_BOX>
         <APPEARANCE type="color" state="default">445566</APPEARANCE>
@@ -2149,7 +2189,7 @@ void test_open_combo_popup_draws_over_later_widgets(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.popup_open = true;
@@ -2211,7 +2251,7 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState gamma;
 	gamma.index = 1;
 	gamma.has_scroll_range = true;
@@ -2251,6 +2291,7 @@ void test_scroll_pump_owns_press_capture_and_value(const fnt_font_t *font) {
 	c.pump_mouse(state, 500.0f, 80.0f, false, 1.0f, 1.0f);
 
 	// A disabled owner claims (blocking beneath) but takes no action.
+	state.widgets[0].has_disabled = true;
 	state.widgets[0].disabled = true;
 	claim = c.pump_mouse(state, 295.0f, 80.0f, true, 1.0f, 1.0f);
 	CHECK(claim.scroll_index == 1 && !claim.scroll_value_changed,
@@ -2272,7 +2313,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
   <WINDOW type="window" name="ROOT">
     <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>600</BOTTOM></POSITION>
     <FONT><NAME>f.fnt</NAME><DEFAULT_FG>FFFFFF</DEFAULT_FG></FONT>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -2296,7 +2337,7 @@ void test_combo_popup_scrollbar_scrolls_through_pump(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuWidgetState combo;
 	combo.index = 1;
 	combo.popup_open = true;
@@ -2382,7 +2423,7 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
       </ITEMS>
       <MIN_ITEM_HEIGHT>20</MIN_ITEM_HEIGHT>
     </WINDOW>
-    <WINDOW type="combo" name="COMBO">
+    <WINDOW type="combobox" name="COMBO">
       <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>100</RIGHT><BOTTOM>20</BOTTOM></POSITION>
       <ITEMS>
         <ITEM type="ID" value="0">ZERO</ITEM><ITEM type="ID" value="1">ONE</ITEM>
@@ -2399,7 +2440,7 @@ void test_wheel_ticks_scroll_popup_and_row_owners(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 
 	// The 4-row list shows 2 rows: wheel over it scrolls, clamped 0..2.
@@ -2464,7 +2505,7 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 )";
 	opennova::mnu::Document doc = parse_or_die(xml);
 	MenuFrameCompiler c;
-	c.configure(doc.first_screen(), font);
+	configure_with(c, doc.first_screen(), font);
 	MenuFrameState state;
 	const MenuDrawList &dl = c.compile(state, 1.0f, 1.0f);
 	bool shuttle_drawn = false;
@@ -2481,8 +2522,64 @@ void test_degenerate_list_draws_no_dead_scrollbar(const fnt_font_t *font) {
 
 } // namespace
 
+// Several root windows: the current screen's roots draw in document order [orig:
+// CUIScene_DrawScreensAndCursor @ 0x63bf60], the mouse pump runs them in reverse so the
+// last root wins a point it shares, and where the widget under the mouse has no cursor
+// the first root with one supplies it [orig: CUIScene_EndFrame @ 0x63e600].
+void test_multiple_roots(const fnt_font_t *font) {
+	const char *xml = R"(
+<SCREEN>
+  <NAME>R</NAME>
+  <WINDOW type="window" name="A">
+    <POSITION><LEFT>0</LEFT><TOP>0</TOP><RIGHT>400</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">111111</APPEARANCE>
+  </WINDOW>
+  <WINDOW type="window" name="B">
+    <POSITION><LEFT>200</LEFT><TOP>0</TOP><RIGHT>600</RIGHT><BOTTOM>300</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">222222</APPEARANCE>
+    <CURSOR><FILE>b.tga</FILE></CURSOR>
+  </WINDOW>
+  <WINDOW type="window" name="C">
+    <POSITION><LEFT>700</LEFT><TOP>0</TOP><RIGHT>800</RIGHT><BOTTOM>100</BOTTOM></POSITION>
+    <APPEARANCE type="color" state="default">333333</APPEARANCE>
+    <CURSOR><FILE>c.tga</FILE></CURSOR>
+  </WINDOW>
+</SCREEN>
+)";
+	opennova::mnu::Document doc = parse_or_die(xml);
+	MenuFrameCompiler c;
+	configure_with(c, doc.first_screen(), font);
+	MenuFrameState st;
+	const MenuDrawList &dl = c.compile(st, 1.0f, 1.0f);
+	CHECK(dl.widgets_drawn == 3 && dl.quads.size() == 3, "every root draws");
+	CHECK(dl.quads.size() == 3 && (dl.quads[0].color & 0xFFFFFFu) == 0x111111u &&
+					(dl.quads[1].color & 0xFFFFFFu) == 0x222222u &&
+					(dl.quads[2].color & 0xFFFFFFu) == 0x333333u,
+			"the roots draw in document order");
+	CHECK(c.hit_widget(st, 300.0f, 100.0f, 1.0f, 1.0f) == 1,
+			"the later root wins the point both cover");
+	CHECK(c.hit_widget(st, 100.0f, 100.0f, 1.0f, 1.0f) == 0,
+			"the first root where it alone is");
+	const int32_t b = slot_of(c, "b.tga");
+	const int32_t cc = slot_of(c, "c.tga");
+	CHECK(b >= 0 && cc >= 0, "both cursors are interned");
+	// A cursor counts once its texture loaded [orig: CTextureManager_LoadOrFindTexture
+	// @ 0x654980 zeroes a failed load's handle].
+	c.set_texture_size(b, 16, 16);
+	c.set_texture_size(cc, 16, 16);
+	MenuFrameCompiler::MouseClaim claim =
+			c.pump_mouse(st, 100.0f, 100.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 0 && claim.cursor == b,
+			"a root with no cursor shows the first root's that has one");
+	claim = c.pump_mouse(st, 750.0f, 50.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == 2 && claim.cursor == cc, "a root's own cursor");
+	claim = c.pump_mouse(st, 5000.0f, 5000.0f, false, 1.0f, 1.0f);
+	CHECK(claim.hovered == -1 && claim.cursor == b,
+			"off every root: the first root with a cursor");
+}
+
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_draw_order_and_state_selection(&font);
 	test_image_appearance_crops_authored_map_state(&font);
 	test_scroll_draws_authored_visual_parts(&font);
@@ -2506,7 +2603,7 @@ int main() {
 	test_widget_queries(&font);
 	test_interaction_geometry(&font);
 	test_combo_face_and_outside_arrow_claim(&font);
-	test_hotkey_widget(&font);
+	test_label_mnemonic(&font);
 	test_multiline_wrap(&font);
 	test_draw_list_preserves_interleaved_primitive_order(&font);
 	test_scroll_interaction_hits_and_drag(&font);
@@ -2517,6 +2614,7 @@ int main() {
 	test_table_embedded_scrollbar_scrolls_rows(&font);
 	test_combo_face_shows_list_box_selection(&font);
 	test_open_combo_popup_draws_over_later_widgets(&font);
+	test_multiple_roots(&font);
 	fnt_free(&font);
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

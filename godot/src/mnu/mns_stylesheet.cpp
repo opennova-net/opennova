@@ -1,4 +1,5 @@
 #include "mnu/mns_stylesheet.h"
+#include "resource_index/resource_root.h"
 #include "util/data_format.h"
 
 #include "util/string_convert.h"
@@ -27,6 +28,36 @@ void MnsStyleSheet::_refresh() {
 	runtime_valid_ = result.success;
 }
 
+Ref<MnsStyleSheet> MnsStyleSheet::load_shell(const Ref<ResourceRoot> &p_root) {
+	if (p_root.is_null()) return Ref<MnsStyleSheet>();
+	const opennova::menu::ShellStyle style = opennova::menu::load_shell_style(
+	        [&](const std::string &name, std::string &bytes) {
+		        const PackedByteArray packed = p_root->read_file(to_gd(name));
+		        if (packed.is_empty()) return false;
+		        bytes.assign(reinterpret_cast<const char *>(packed.ptr()), size_t(packed.size()));
+		        return true;
+	        });
+	return style.any_present() ? from_shell_style(style) : Ref<MnsStyleSheet>();
+}
+
+Ref<MnsStyleSheet> MnsStyleSheet::from_shell_style(const opennova::menu::ShellStyle &p_style) {
+	Ref<MnsStyleSheet> sheet;
+	sheet.instantiate();
+	sheet->sheet_ = p_style.list.sheet();
+	sheet->runtime_valid_ = true;
+	for (const opennova::menu::ShellSheetRead &read : p_style.sheets) {
+		if (!read.present || read.read.status == opennova::mns::ReadStatus::Read) continue;
+		sheet->runtime_valid_ = false;
+		const bool hangs = read.read.status == opennova::mns::ReadStatus::Hangs;
+		sheet->evaluation_diagnostics_.push_back(opennova::mns::Diagnostic{
+		        read.stopped_line, opennova::mns::Severity::Error,
+		        hangs ? opennova::mns::DiagnosticCode::Hangs : opennova::mns::DiagnosticCode::Stops,
+		        read.name + (hangs ? ": the game stops responding reading this line"
+		                           : ": the game stops reading the stylesheet on this line")});
+	}
+	return sheet;
+}
+
 String MnsStyleSheet::get_variable(const String &p_name) const {
 	return to_gd(sheet_.get(to_std(p_name)));
 }
@@ -35,13 +66,10 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 	return sheet_.has(to_std(p_name));
 }
 
-// [orig: NapiXML_ExpandVariablesInText @ 0x63a000, see docs/mnu/menu-re.md]  ARCHITECTURE DIVERGENCE: the
-// original expands %VAR% over the whole raw .mnu byte buffer BEFORE the XML parse;
-// the reimpl substitutes per-field, post-parse, on every consumed field the
-// engine's whole-buffer pass would cover -- colors, fonts, textures, and literal
-// text (engine: formats/mns/mns.h substitute). Matching for the shipped corpus;
-// the remaining gap is shell-supplied variables in non-themed fields (D-MNU-1,
-// ADR 0005).
+// A text-level %VAR% helper for tools and tests, not the runtime path: the original
+// expands %VAR% over the whole raw .mnu buffer before the XML parse [orig:
+// NapiXML_ExpandVariablesInText @ 0x63a000]; the menus resolve whole field values
+// through MenuFrameCompiler::resolve_var (D-MNU-1, ADR 0005; docs/mnu/menu-re.md).
 String MnsStyleSheet::substitute(const String &p_text) const {
 	return to_gd(sheet_.substitute(to_std(p_text)));
 }
@@ -141,7 +169,7 @@ Array MnsStyleSheet::get_diagnostics() const {
 		Dictionary row;
 		row["line"] = d.line;
 		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(d.code);
+		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
 		row["message"] = to_gd(d.message);
 		out.append(row);
 	}
@@ -154,7 +182,7 @@ Array MnsStyleSheet::get_evaluation_diagnostics() const {
 		Dictionary row;
 		row["line"] = d.line;
 		row["severity"] = (d.severity == opennova::mns::Severity::Error) ? "error" : "warning";
-		row["code"] = to_gd(d.code);
+		row["code"] = to_gd(opennova::mns::diagnostic_code_token(d.code));
 		row["message"] = to_gd(d.message);
 		out.append(row);
 	}
@@ -241,8 +269,8 @@ bool MnsStyleSheet::is_valid_variable_value(const String &p_value) const {
 }
 
 Error MnsStyleSheet::load_from_bytes(const PackedByteArray &p_bytes) {
-	// Keep the lossless document load permissive so malformed source remains
-	// repairable in the editor. Runtime callers must check is_runtime_valid().
+	// The lossless document load is permissive, so a malformed source stays repairable;
+	// the variables are what the game reads of it (is_runtime_valid: all of it).
 	doc_ = opennova::mns::Document::parse(reinterpret_cast<const char *>(p_bytes.ptr()),
 			static_cast<size_t>(p_bytes.size()));
 	_refresh();
@@ -276,6 +304,7 @@ Error MnsStyleSheet::save_to_path(const String &p_path) const {
 }
 
 void MnsStyleSheet::_bind_methods() {
+	ClassDB::bind_static_method("MnsStyleSheet", D_METHOD("load_shell", "root"), &MnsStyleSheet::load_shell);
 	ClassDB::bind_method(D_METHOD("get_variable", "name"), &MnsStyleSheet::get_variable);
 	ClassDB::bind_method(D_METHOD("has_variable", "name"), &MnsStyleSheet::has_variable);
 	ClassDB::bind_method(D_METHOD("substitute", "text"), &MnsStyleSheet::substitute);

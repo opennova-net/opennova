@@ -1,5 +1,6 @@
 #include <runtime/renderer/material_texture.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <string>
@@ -24,10 +25,6 @@ std::vector<uint8_t> rgba_from_bgra_hex(const char *text) {
 // kernel); Texture_ApplyNormalMapFilter @0x58BD90..0x58C06C (its uncalled
 // instruction-for-instruction twin)]
 int main() {
-    expect(normal_material_filename("brick.TGA", false, true) == "brick.dds", "packed normals prefer the DDS sibling");
-    expect(normal_material_filename("brick.TGA", true, true) == "brick.TGA", "loose TGA override wins");
-    expect(normal_material_filename("brick.TGA", false, false) == "brick.TGA", "missing DDS uses the authored TGA");
-    expect(normal_material_filename("brick.MDT", false, true) == "brick.MDT", "MDT has no extension fallback");
 	{
 		const auto source = rgba_from_bgra_hex("113377bb725888f0d37d992534a2aa5a95c7bb8ff6ecccc45711ddf9b836ee2e195bff637a801098dba521cd3cca32029def4337fe14546c5f3965a1c05e76d6");
 		const auto expected = rgba_from_bgra_hex("f28648bbc58315f0f286b625c583e95af278488ff278b6c4f278b6f9f278482ef2784863c57b1598f278b6cdc57be902f2864837f286b66cf286b6a1f28648d6");
@@ -95,9 +92,8 @@ int main() {
 			pixel_texture_mip_levels(3, 8) == 1 && pixel_texture_mip_levels(2, 2) == 0 &&
 			pixel_texture_mip_levels(48, 48) == 5,
 			"pixel-built mip chains end at the last level above min-dim 2");
-	// Texture_LoadByNameWithChannel's single-file resolution.
-	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B6E6;
-	// Texture_LoadAndRegister @0x58B80E..0x58B881]
+	// The name cut and the DDS sibling the loaders build.
+	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B598]
 	expect(material_texture_query("Jbark_2.dds.tga") == "Jbark_2.dds" &&
 			material_texture_query("wall.tga") == "wall.tga" &&
 			material_texture_query("noext") == "noext",
@@ -106,26 +102,127 @@ int main() {
 			material_dds_sibling("Jbark_2.dds") == "Jbark_2.dds" &&
 			material_dds_sibling("noext") == "noext.dds",
 			"the DDS sibling replaces the last extension");
+	// The one file a row's loader opens and the reader that decodes it, by the
+	// runtime type, the name, the files there and the loose-first hits.
+	// [orig: Material_LoadStageTexture @0x5B16F0; Texture_LoadByNameWithChannel
+	// @0x58B4E1..0x58B6E6; Texture_LoadAndRegister @0x58B80E..0x58B881;
+	// Texture_LoadAsNormalMap @0x58C480; sub_58A430 @0x58A430]
 	{
-		const MaterialImageSource dds = material_image_source("wall.tga", false, true);
-		expect(dds.file == "wall.dds" && dds.decoder == MaterialImageDecoder::Dds,
-				"an existing DDS sibling wins");
-		const MaterialImageSource loose = material_image_source("wall.tga", true, true);
-		expect(loose.file == "wall.tga" && loose.decoder == MaterialImageDecoder::Tga,
-				"a loose-first hit takes the plain path");
-		const MaterialImageSource mdt = material_image_source("Body.MDT", false, true);
-		expect(mdt.file == "Body.MDT" && mdt.decoder == MaterialImageDecoder::Tga,
-				"an upper-case .MDT query skips the DDS probe");
-		const MaterialImageSource lower_mdt = material_image_source("body.mdt", false, true);
-		expect(lower_mdt.decoder == MaterialImageDecoder::Dds,
-				"the .MDT probe is case-sensitive");
-		expect(material_image_source("flag.pcx", false, false).decoder == MaterialImageDecoder::Pcx,
-				"PCX takes the PCX reader");
-		expect(material_image_source("photo.png", false, false).decoder == MaterialImageDecoder::None,
-				"any other extension fails");
-		const MaterialImageSource plain = plain_material_image_source("wall.tga");
-		expect(plain.file == "wall.tga" && plain.decoder == MaterialImageDecoder::Tga,
-				"type 1 never probes a DDS sibling");
+		using Reader = MaterialTextureReader;
+		struct SourceCase {
+			uint8_t type;
+			const char *name;
+			std::vector<std::string> files, loose;
+			const char *file;
+			Reader reader;
+			const char *why;
+		};
+		const SourceCase cases[] = {
+			{0, "wall.tga", {"wall.dds"}, {}, "wall.dds", Reader::Dds, "a diffuse row's DDS sibling wins"},
+			{0, "wall.tga", {"wall.dds", "wall.tga"}, {"wall.tga"}, "wall.tga", Reader::Tga,
+					"a loose-first hit on the query takes the plain path"},
+			{0, "wall.tga", {}, {}, "wall.tga", Reader::Tga, "no sibling: the query through the TGA reader"},
+			{2, "Jbark_2.dds.tga", {"Jbark_2.dds"}, {}, "Jbark_2.dds", Reader::Dds,
+					"the query, cut after the first dot, is its own sibling"},
+			{8, "Body.MDT", {"Body.dds"}, {}, "Body.MDT", Reader::Tga, "an upper-case .MDT query skips the DDS probe"},
+			{0, "body.mdt", {"body.dds"}, {}, "body.dds", Reader::Dds, "the diffuse .MDT test is case-sensitive"},
+			{0, "body.mdt", {}, {}, "body.mdt", Reader::Tga, "the plain path reads an .mdt through the TGA reader"},
+			{0, "flag.pcx", {}, {}, "flag.pcx", Reader::Pcx, "a .pcx through the PCX reader"},
+			{0, "photo.png", {}, {}, "", Reader::None, "any other name fails"},
+			{0, "a.tga.pcx", {}, {}, "a.tga", Reader::Tga, "a diffuse row reads a.tga.pcx as its query a.tga"},
+			{1, "wall.tga", {"wall.dds"}, {}, "wall.tga", Reader::Tga, "type 1 never probes a DDS sibling"},
+			{1, "a.tga.pcx", {}, {}, "a.tga.pcx", Reader::Tga, "the plain path tests .TGA before .PCX"},
+			{1, "flag.pcx", {"flag.dds"}, {}, "flag.pcx", Reader::Pcx, "type 1 reads a .pcx as a PCX"},
+			{4, "brick.TGA", {"brick.dds"}, {}, "brick.dds", Reader::Dds, "a normal map's .TGA takes its DDS sibling"},
+			{5, "brick.TGA", {"brick.dds", "brick.TGA"}, {"brick.TGA"}, "brick.TGA", Reader::Tga,
+					"a loose-first hit on the name keeps the .TGA"},
+			{4, "brick.TGA", {}, {}, "brick.TGA", Reader::Tga, "no sibling: the .TGA through the TGA reader"},
+			{4, "brick.mdt", {"brick.dds"}, {}, "brick.mdt", Reader::Tga, "a normal .MDT, any case, skips the DDS probe"},
+			{5, "a.mdt.tga", {"a.mdt.dds"}, {}, "a.mdt.tga", Reader::Tga, "the normal maps test .MDT before .TGA"},
+			{5, "a.tga.pcx", {"a.tga.dds"}, {}, "a.tga.dds", Reader::Dds, "the sibling cuts the name at its last dot"},
+			{4, "a.tga.pcx", {}, {}, "a.tga.pcx", Reader::Tga, "a .TGA name is read by the TGA reader, never as a PCX"},
+			{4, "bump.pcx", {"bump.dds"}, {}, "", Reader::None, "a normal map's PCX test reads the empty second path"},
+			{5, "bump.dds", {"bump.dds"}, {}, "", Reader::None, "a normal map named .dds loads nothing"},
+			{6, "height.tga", {"height.dds"}, {}, "height.dds", Reader::Dds, "the horizon volume takes the sibling"},
+			{7, "height.tga", {"height.dds", "height.tga"}, {"height.tga"}, "height.tga", Reader::Tga,
+					"the occlusion map keeps a loose-first .TGA"},
+			{7, "height.tga", {}, {}, "height.tga", Reader::Tga, "no sibling: the .TGA"},
+			{6, "height.mdt", {"height.dds"}, {}, "", Reader::None, "the height producers read no .MDT"},
+			{7, "height.pcx", {}, {}, "", Reader::None, "nor a .PCX"},
+			{16, "field.nq8", {"field.dds"}, {}, "field.nq8", Reader::Chunk, "a chunk row reads the name as written"},
+			{17, "hrz.tga", {"hrz.dds"}, {}, "hrz.tga", Reader::Chunk, "whatever it is called"},
+			{18, "ao.bin", {}, {}, "ao.bin", Reader::Chunk, "and whether or not it is there"},
+			{3, "wall.tga", {"wall.dds", "wall.tga"}, {}, "", Reader::None, "a type the dispatcher has no case for fails"},
+			{12, "wall.tga", {"wall.tga"}, {}, "", Reader::None, "(the loader never stores one)"},
+		};
+		for (const SourceCase &c : cases) {
+			const auto in = [](const std::vector<std::string> &names) {
+				return [names](const std::string &file) {
+					return std::find(names.begin(), names.end(), file) != names.end();
+				};
+			};
+			const MaterialTextureSource source = material_texture_source(c.name, c.type, in(c.files), in(c.loose));
+			if (source.file != c.file || source.reader != c.reader)
+				std::fprintf(stderr, "type %u %s -> %s\n", unsigned(c.type), c.name, source.file.c_str());
+			expect(source.file == c.file && source.reader == c.reader, c.why);
+		}
+		expect(material_texture_source("wall.tga", 0, {}).file == "wall.tga" &&
+				material_texture_source("brick.tga", 4, {}, {}).reader == Reader::Tga,
+				"an empty test answers false");
+	}
+	// What the DDS reader decodes a file as: D3DX's loader takes the first
+	// format of its order whose test the bytes pass, of those the port decodes.
+	// [orig: D3DXTex::CImage::Load @0x6DF1DC, the order @0x6DF212..0x6DF242]
+	{
+		using Format = DdsReaderFormat;
+		const auto format = [](std::vector<uint8_t> bytes) { return dds_reader_format(bytes.data(), bytes.size()); };
+		const auto tga = [](uint8_t map_type, uint8_t image_type, uint8_t depth, uint16_t side) {
+			std::vector<uint8_t> bytes(18 + 4 * 4 * 4, 0);
+			bytes[1] = map_type;
+			bytes[2] = image_type;
+			bytes[12] = static_cast<uint8_t>(side);
+			bytes[14] = static_cast<uint8_t>(side);
+			bytes[16] = depth;
+			return bytes;
+		};
+		std::vector<uint8_t> dds(4 + 124, 0);
+		dds[0] = 'D', dds[1] = 'D', dds[2] = 'S', dds[3] = ' ';
+		expect(format(dds) == Format::Dds, "\"DDS \" and its 124-byte header");
+		expect(format(std::vector<uint8_t>(dds.begin(), dds.begin() + 20)) == Format::None, "a DDS cut short");
+		expect(format(tga(0, 2, 32, 4)) == Format::Tga && format(tga(0, 3, 8, 4)) == Format::Tga &&
+				format(tga(0, 10, 24, 4)) == Format::Tga,
+				"true-colour, grey and run-length TGA headers");
+		expect(format(tga(2, 2, 32, 4)) == Format::None && format(tga(0, 0, 32, 4)) == Format::None &&
+				format(tga(0, 2, 32, 0)) == Format::None && format(tga(0, 1, 8, 4)) == Format::None &&
+				format(tga(0, 3, 32, 4)) == Format::None && format(tga(0, 2, 12, 4)) == Format::None,
+				"D3DX's TGA test: the colour-map type, the image type, the sides, a mapped image's map, the depth");
+		expect(format({0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0}) == Format::Png, "the PNG signature");
+		expect(format({0xFF, 0xD8, 0xFF, 0xE0}) == Format::Jpeg, "the JPEG SOI marker");
+		std::vector<uint8_t> bmp(14, 0);
+		bmp[0] = 'B', bmp[1] = 'M', bmp[2] = 14;
+		expect(format(bmp) == Format::Bmp, "\"BM\" with a file size that fits");
+		bmp[2] = 15;
+		expect(format(bmp) == Format::None, "a BMP's file size past the bytes");
+		const std::string ppm = "P6\n4 4\n255\n";
+		expect(format(std::vector<uint8_t>(ppm.begin(), ppm.end())) == Format::None &&
+				dds_reader_format(nullptr, 0) == Format::None,
+				"a PPM (decoded by D3DX, not the port) passes no later test");
+	}
+	// A row that loads only as a DDS sibling: a runtime 0/2/8 query no reader
+	// of the plain path decodes.
+	{
+		std::string opens, loads;
+		expect(material_texture_dds_only("photo.png", 0, opens, loads) && opens == "photo.png" && loads == "photo.dds",
+				"a diffuse .png loads only as its .dds");
+		expect(material_texture_dds_only("photo.png", 3, opens, loads),
+				"an authored type the loader zeroes is a diffuse row");
+		expect(!material_texture_dds_only("wall.tga", 0, opens, loads) &&
+				!material_texture_dds_only("photo.png", 1, opens, loads) &&
+				!material_texture_dds_only("photo.png", 4, opens, loads) &&
+				!material_texture_dds_only("photo.png", 16, opens, loads) &&
+				!material_texture_dds_only("photo.dds", 0, opens, loads) &&
+				!material_texture_dds_only("", 0, opens, loads),
+				"a readable name, another loader, a name that is its own sibling or no name");
 	}
 	// The loader never stores those runtime values: authored 3, 9..15 and
 	// > 18 keep the memset zero and load as ordinary diffuse rows.

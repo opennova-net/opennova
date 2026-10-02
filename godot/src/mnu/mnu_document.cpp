@@ -175,10 +175,6 @@ int MnuDocument::get_screen_music_var(int p_screen_id) const {
 	return screen != nullptr ? screen->music_var : 0;
 }
 
-String MnuDocument::get_screen_text_rsrc(int p_screen_id) const {
-	const opennova::mnu::Screen *screen = index_.screen(p_screen_id);
-	return screen != nullptr ? to_gd(screen->text_rsrc) : String();
-}
 
 // --- Widget property read/write ---
 
@@ -197,9 +193,17 @@ String MnuDocument::get_widget_font(int p_id) const {
 	return w ? to_gd(w->font.name) : String();
 }
 
-String MnuDocument::get_widget_datasource(int p_id) const {
+String MnuDocument::get_widget_text_rsrc(int p_id) const {
 	const opennova::mnu::Window *w = index_.window(p_id);
-	return w ? to_gd(w->datasource) : String();
+	return w ? to_gd(w->text_rsrc) : String();
+}
+
+PackedStringArray MnuDocument::get_widget_datasources(int p_id) const {
+	PackedStringArray out;
+	if (const opennova::mnu::Window *w = index_.window(p_id)) {
+		for (const std::string &source : w->datasources) out.push_back(to_gd(source));
+	}
+	return out;
 }
 
 String MnuDocument::get_widget_orientation(int p_id) const {
@@ -360,12 +364,12 @@ void MnuDocument::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_screen_name", "screen_id"), &MnuDocument::get_screen_name);
 	ClassDB::bind_method(D_METHOD("get_screen_has_music_var", "screen_id"), &MnuDocument::get_screen_has_music_var);
 	ClassDB::bind_method(D_METHOD("get_screen_music_var", "screen_id"), &MnuDocument::get_screen_music_var);
-	ClassDB::bind_method(D_METHOD("get_screen_text_rsrc", "screen_id"), &MnuDocument::get_screen_text_rsrc);
 
 	ClassDB::bind_method(D_METHOD("get_widget_text", "id"), &MnuDocument::get_widget_text);
 	ClassDB::bind_method(D_METHOD("get_widget_string_type", "id"), &MnuDocument::get_widget_string_type);
 	ClassDB::bind_method(D_METHOD("get_widget_font", "id"), &MnuDocument::get_widget_font);
-	ClassDB::bind_method(D_METHOD("get_widget_datasource", "id"), &MnuDocument::get_widget_datasource);
+	ClassDB::bind_method(D_METHOD("get_widget_text_rsrc", "id"), &MnuDocument::get_widget_text_rsrc);
+	ClassDB::bind_method(D_METHOD("get_widget_datasources", "id"), &MnuDocument::get_widget_datasources);
 	ClassDB::bind_method(D_METHOD("get_widget_orientation", "id"), &MnuDocument::get_widget_orientation);
 
 	ClassDB::bind_method(D_METHOD("is_widget_multiselect", "id"), &MnuDocument::is_widget_multiselect);
@@ -394,12 +398,11 @@ void MnuDocument::_bind_methods() {
 	BIND_ENUM_CONSTANT(TYPE_SCROLL);
 	BIND_ENUM_CONSTANT(TYPE_TABLE);
 	BIND_ENUM_CONSTANT(TYPE_SPINLIST);
-	BIND_ENUM_CONSTANT(TYPE_MULTI);
-	BIND_ENUM_CONSTANT(TYPE_LABEL);
-	BIND_ENUM_CONSTANT(TYPE_GOTO);
 	BIND_ENUM_CONSTANT(TYPE_MARQUEE);
 	BIND_ENUM_CONSTANT(TYPE_GLB_TABLE);
+	BIND_ENUM_CONSTANT(TYPE_RADIOEDIT);
 	BIND_ENUM_CONSTANT(TYPE_LAN_LIST);
+	BIND_ENUM_CONSTANT(TYPE_GOPHER);
 
 	BIND_ENUM_CONSTANT(COLOR_DEFAULT_FG);
 

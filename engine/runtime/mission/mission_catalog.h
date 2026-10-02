@@ -46,8 +46,10 @@ struct Row {
 // archives). The title is the .bin's [Info] TITLE; when NO .bin exists the
 // BMS header's embedded mission_name stands in; either miss leaves it empty
 // [orig: MissionList_ScanAndBuildFromFiles @ 0x563170 title/briefing arm].
-// The .npj/.npz map-project legs are not ported (no shipped JO archive
-// carries either).
+// The .npj/.npz map-project legs are not ported: retail's archive walk
+// matches a .npj or .npz entry as it does a .bms [orig:
+// Mission_BuildMapListFromPFF @ 0x562910], and JO's localres.pff carries one
+// (ASP_G7.npz), which retail lists and this catalog does not.
 std::vector<Row> build(const ResourceIndex &index);
 
 // The SP screen's row filter — (code_word & 0xFFFDFFFF) == 0x10020, i.e. the

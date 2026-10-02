@@ -14,7 +14,7 @@
 #include <runtime/hud/hud_capture_labels.h>
 #include <runtime/hud/hud_frame.h>
 
-#include "../fixtures/minimal_fnt_builder.h"
+#include "../common/test_font.h"
 
 using namespace opennova;
 using namespace opennova::hud;
@@ -145,7 +145,7 @@ size_t count_page_glyphs(const HudDrawList &d, size_t begin, size_t end) {
 // [orig: HUD_DrawEntityMarker @0x5931b9..0x5937cb; Render_CapturePointLabels
 //  @0x5a2ac1..0x5a2bbd]
 void element() {
-	const fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
+	const fnt::fnt_font_t font = test_font::uniform_test_font();
 	HudLayout layout;
 	layout.lfp_tile_own_texture_valid = true;
 	layout.lfp_tile_other_texture_valid = true;
@@ -247,7 +247,7 @@ void element() {
 // [orig: GameFont_MeasureCharHeight @0x580a80; CGameFont_GetCharExtent
 //  @0x674e2c..0x674e44, @0x674e57]
 void char_height() {
-	fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt::fnt_font_t font = test_font::uniform_test_font();
 	font.design_width = 1024; // 16 texels * 800 / 1024 = 12.5 -> 12
 	font.glyphs['A' - fnt::FNT_FIRST_CHAR].uv.v1 = 30.0f / 256.0f; // never read
 	GameFont f;

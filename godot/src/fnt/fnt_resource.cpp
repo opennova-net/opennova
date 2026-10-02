@@ -1,6 +1,6 @@
 #include "fnt/fnt_resource.h"
 
-#include "util/cp1252.h"
+#include <base/io/cp1252.h>
 
 #include <godot_cpp/classes/text_server.hpp>
 #include <godot_cpp/core/class_db.hpp>

@@ -13,6 +13,19 @@
 
 namespace opennova::hud {
 
+// The game-text table (loaded at boot [orig: Game_InitSubsystems @ 0x4A6CD0]) and the
+// sections the game reads from it by name, each witnessed where it is read: the HUD's
+// overlay lines, the weapon names, the waypoint names, the kill-feed sentences, the
+// client lines, the loading-screen text and the objective header.
+inline constexpr const char *kGameTextTable = "gametext.bin";
+inline constexpr const char *kGameTextOverlays = "Overlays";
+inline constexpr const char *kGameTextWepDes = "WepDes";
+inline constexpr const char *kGameTextWPNames = "WPNames";
+inline constexpr const char *kGameTextCannedMsg = "Canned Msg";
+inline constexpr const char *kGameTextClient = "Client";
+inline constexpr const char *kGameTextLoadingText = "LoadingText";
+inline constexpr const char *kGameTextMisc = "Misc";
+
 // An EMPTY function is the "no string table" binding: every consumer answers
 // the fallback through it, so a builder never tests the target before calling
 // (call through game_text or the same guard, never the bare function).

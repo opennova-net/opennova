@@ -111,11 +111,34 @@ static int test_known_row_lookups(void) {
           "the hardcoded HUD font set is menu-phase required");
     const RequiredResource *failsafe = gameprofile_required_resource_find("failsafe.bad");
     CHECK(failsafe != NULL && failsafe->phase == BOOT_PHASE_MISSION &&
-              failsafe->severity == RES_REQUIRED,
-          "failsafe.bad is the mission-phase anim fallback");
+              failsafe->severity == RES_OPTIONAL,
+          "failsafe.bad is the mission-phase anim fallback, optional (retail JO ships none)");
     const RequiredResource *scan = gameprofile_required_resource_find("*.npj/*.npz");
     CHECK(scan != NULL && (scan->flags & RES_F_PATTERN) != 0,
           "the mission-list wildcard scan is a pattern row");
+    return 1;
+}
+
+static int test_roles_are_unique_snake_case_tokens(void) {
+    /* The editor keys its requirements checklist on the role token (ADR 0046 d5/d7):
+     * one per row, lower-case snake_case, never empty, never shared. */
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        CHECK(row->role != NULL && row->role[0] != '\0', "row has a role token");
+        for (const char *c = row->role; *c; ++c) {
+            CHECK((*c >= 'a' && *c <= 'z') || (*c >= '0' && *c <= '9') || *c == '_',
+                  "role token is lower-case snake_case");
+        }
+        CHECK(gameprofile_required_resource_by_role(row->role) == row,
+              "by_role(role) resolves to its own row (tokens are unique)");
+    }
+    CHECK(gameprofile_required_resource_by_role(NULL) == NULL, "NULL role -> NULL");
+    CHECK(gameprofile_required_resource_by_role("not_a_role") == NULL, "unknown role -> NULL");
+    CHECK(gameprofile_required_resource_by_role("MAIN_MENU") == NULL, "roles match exactly");
+    const RequiredResource *menu = gameprofile_required_resource_by_role("main_menu");
+    CHECK(menu != NULL && strcmp(menu->name, "main.mnu") == 0, "main_menu is main.mnu");
+    const RequiredResource *strings = gameprofile_required_resource_by_role("gametext");
+    CHECK(strings != NULL && strcmp(strings->name, "gametext.bin") == 0, "gametext is gametext.bin");
     return 1;
 }
 
@@ -125,6 +148,7 @@ int main(void) {
     RUN_TEST(test_names_are_unique);
     RUN_TEST(test_the_witnessed_fatal_set);
     RUN_TEST(test_known_row_lookups);
+    RUN_TEST(test_roles_are_unique_snake_case_tokens);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

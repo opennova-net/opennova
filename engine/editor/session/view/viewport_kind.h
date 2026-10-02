@@ -1,0 +1,41 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+
+namespace opennova::editor {
+
+// The kinds of viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport") and where each is drawn, as the
+// session's view names them: what the Preview window follows (DocumentsView::previews) is kept per
+// kind. The enums and their wire tokens alone, so a reader of the view holds them without the
+// preview layer; what a kind is (the document types it shows, what makes one) is the kinds' table,
+// preview/viewport_kinds. A kind is one value here and one row in each of three tables, none of
+// which builds without it: preview/viewport_kinds.cpp (what it is to the session),
+// ui/viewport_views.cpp (the view a window draws it with) and godot/src/authoring/viewport_devices.cpp
+// (the Shell's device for it).
+enum class ViewportKind : uint8_t {
+	Menu, // a menu's screen as the game draws it (the Shell's MenuFrame)
+	Model, // a model, or a clip or an animation table played on its rig's model (ObjectModel)
+	// A text document's text, edited in place (S13 V10, the script device: the Shell's CodeEdit, a
+	// Control placed in the rect the tab reserves, which owns the input there)
+	Script,
+	kCount,
+};
+
+inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::kCount);
+
+// Where a viewport of the kind is drawn: in the Preview window beside the Document tab (the
+// menu's and the model's), or as the Document tab's main view (ui/document_views' MainViewport
+// role: a text document's script device, S13 V10; the mission's 3D view to come, with ImGui
+// overlays, the document's outline and the Inspector beside it). A document type is shown by one
+// Main-role kind at most and fed by one Preview-role kind at most: a mission's 3D view and its map
+// are one Main and one Preview.
+enum class ViewportRole : uint8_t { Preview, Main };
+
+// A kind's token on the wire ("menu", "model", "script"; "" past the last kind), and the kind a
+// token names (false for none).
+const char *viewport_kind_token(ViewportKind kind);
+bool viewport_kind_from_token(const std::string &token, ViewportKind &out);
+
+} // namespace opennova::editor

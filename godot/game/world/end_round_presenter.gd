@@ -212,33 +212,16 @@ func _populate(sim: Simulation) -> void:
 
 # One table fill: the columns the populate defines (stat.mnu's RESULTLIST
 # authors none), then the rows the engine's tab filter admits (0 all, 1 team
-# 2, 2 team 1), the local player's row selected. The header is the columns'
-# labels, not a row. [orig: StatScreen_PopulateStatResultsList @0x562240 —
-# the clear @0x56227a, the column count through vtable +0x6C @0x5622fa, one
-# CTableWnd_InitRow per column (justify -1, vjustify 0x20) @0x562346 /
-# @0x56237a / @0x56242b]
+# 2, 2 team 1) with their team colours and the local player's row selected,
+# sorted as the fill sorts. The header is the columns' labels, not a row
+# (MenuDriver fill_stat_results; the witness, the width split's design rect
+# among it, lives at the engine home, inmatch stat_screen_feed.h).
 func _fill_table(sim: Simulation, list_id: int, tab: int) -> void:
-	# The design rect the width split reads [orig: CWnd_GetRect @0x5622c3].
+	# The design rect the width split reads (CWnd_GetRect's, not the scaled one).
 	var rect := _driver.widget_local_rect(list_id)
 	var table_width := int(rect.size.x) if rect.size.x > 0.0 else RESULT_LIST_DEFAULT_WIDTH
-	_driver.table_clear_rows(list_id)
-	var columns: Array = sim.get_end_round_columns(table_width, _gametext())
-	if not columns.is_empty():
-		_driver.table_set_column_count(list_id, columns.size())
-		for i in columns.size():
-			var column: EndRoundColumn = columns[i]
-			_driver.table_init_column(list_id, i, column.width, column.header, -1, 0x20)
-	var row_index := 0
-	var selected_row := -1
-	for row: EndRoundRow in sim.get_end_round_rows(tab):
-		var cells := PackedStringArray([row.name, row.squad])
-		cells.append_array(row.cells)
-		_driver.table_add_row(list_id, cells)
-		if row.selected:
-			selected_row = row_index
-		row_index += 1
-	if selected_row >= 0:
-		_driver.table_select_row(list_id, selected_row)
+	_driver.fill_stat_results(list_id, sim.get_end_round_columns(table_width, _gametext()),
+			sim.get_end_round_rows(tab))
 
 
 func close() -> void:

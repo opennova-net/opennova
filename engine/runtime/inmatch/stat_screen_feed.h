@@ -33,6 +33,21 @@ struct StatScreenColumn {
 	std::string header;
 };
 
+// The fill [orig: StatScreen_PopulateStatResultsList @0x562240]: the rows cleared
+// @0x56227a, the width split read off the table's design rect [orig: CWnd_GetRect
+// @0x5622c3], the column count set through the table's vtable +0x6C @0x5622fa,
+// then one init_table_row per column. How init_table_row sets every column up
+// [orig: @0x562346 / 0x56237a / 0x56242b — justify -1 (read as 1, centred),
+// vjustify 32 (bottom)], and the sort the fill
+// ends with [orig: sub_63EC30(table, 2, 0) then CTableWnd_SortByColumn(table, 2)
+// @0x5626e6..0x5626f9]: the first stat column, descending. Between them the rows
+// go in with their colours, a team row's replacing the table's [orig: the row
+// colour override sub_640110 @0x5625a9], and the local player's row is selected.
+inline constexpr int kStatScreenColumnJustify = 1;
+inline constexpr int kStatScreenColumnVJustify = 32;
+inline constexpr int kStatScreenSortColumn = 2;
+inline constexpr bool kStatScreenSortAscending = false;
+
 // The columns [orig: @0x562280..0x5624a0]: NAME (150 px, the table's rtxt
 // "NAME" string or "!Name"), "Squad", then one per enabled field with the
 // SMALL keys (with the show-disabled toggle: every field, with the large
