@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <variant>
 
 #include <editor/assets/asset_kind.h>
@@ -12,6 +13,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <base/io/cp1252.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
@@ -1128,7 +1130,7 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	return out;
 }
 
-JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
+JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const NameSource *names) {
 	// The record document's rows and records where it is one; a text document's lines (S13 D9); the
 	// lifecycle alone for another kind.
 	const Document *records = records_of(base);
@@ -1195,9 +1197,9 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page) {
 		entry.set("kind", json_number(double(row->kind)));
 		entry.set("kind_label", json_string(document.kind_label(row->kind)));
 		entry.set("name", json_string(row->name()));
-		// What the windows show for it where its type words it otherwise (a mission's event as its
-		// sentence, S15).
-		const std::string title = document.record_title({row->id, row->kind, 0});
+		// What the windows show for it where its type words it otherwise (S15: a mission's event as its
+		// sentence, an entity by its item's name and its SSN with the project's names: record_display).
+		const std::string title = record_display(document, {row->id, row->kind, 0}, names);
 		if (title != document.record_name({row->id, row->kind, 0})) entry.set("title", json_string(title));
 		entry.set("change", json_string(record_change_token(document.record_change({row->id, row->kind, 0}))));
 		JsonValue collections = collections_to_json(document, {row->id, row->kind, 0});
@@ -1213,6 +1215,10 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 	Document::Placement at;
 	if (address.child) document.placement(address, at);
 	JsonValue out = JsonValue::make_object();
+	// The record's words and each value's (S15), with the graph's names.
+	const std::optional<GraphNameSource> names =
+	        view.findings.graph ? std::optional<GraphNameSource>(std::in_place, *view.findings.graph) : std::nullopt;
+	const NameSource *source = names ? &*names : nullptr;
 	out.set("row", json_number(double(address.row)));
 	out.set("kind", json_number(double(address.kind)));
 	out.set("child", json_number(double(address.child)));
@@ -1220,8 +1226,8 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 	const std::string name = document.record_name(address);
 	out.set("name", json_string(name));
 	// What the windows show for it where its type words it otherwise (a mission's event as its
-	// sentence, a trigger or an action in words, S15).
-	const std::string title = document.record_title(address);
+	// sentence, a trigger or an action in words, an entity by its item's name and its SSN: S15).
+	const std::string title = record_display(document, address, source);
 	if (title != name) out.set("title", json_string(title));
 	out.set("path", json_string(document.record_path(address)));
 	out.set("locator", json_string(document.locator(address)));
@@ -1246,6 +1252,15 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 		if (!schema.group.empty()) entry.set("group", json_string(schema.group));
 		entry.set("type", json_string(field_type_token(schema.type)));
 		entry.set("value", value_to_json(value));
+		// What the value names in words beside it (value_display), where it names something:
+		// `display`, `dangling` where it names nothing (the words say so), `display_source` where the
+		// words come from.
+		const DisplayName words = value_display(document, address, field, value, source);
+		if (!words.text.empty()) {
+			entry.set("display", json_string(words.text));
+			if (words.dangling) entry.set("dangling", boolean(true));
+			if (!words.source.empty()) entry.set("display_source", json_string(words.source));
+		}
 		// What the format table says of the field: its unit, its note, the key the file writes,
 		// the range it keeps to, how it holds a colour.
 		if (!schema.unit.empty()) entry.set("unit", json_string(schema.unit));
@@ -1391,9 +1406,15 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 	FieldUse field;
 	Value value;
 	if (!field_of(document, address, id, field, value)) return JsonValue::make_null();
-	const std::vector<ReferenceChoice> choices = view.findings.graph
+	std::vector<ReferenceChoice> choices = view.findings.graph
 			? reference_choices(*view.findings.graph, field)
 			: std::vector<ReferenceChoice>();
+	// Each name by what it names (S15: an item id by its catalog's name, an SSN by its entity's
+	// title), as the picker shows it: its `label`.
+	if (view.findings.graph) {
+		const GraphNameSource names(*view.findings.graph);
+		word_choices(document, address, field, &names, choices);
+	}
 	JsonValue list = JsonValue::make_array();
 	for (size_t i = page.first(choices.size()); i < page.last(choices.size()); ++i) {
 		const ReferenceChoice &choice = choices[i];

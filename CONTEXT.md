@@ -562,6 +562,18 @@ A `.mis`: the original mission editor's interchange text (`dfx2med.exe`), which 
 Its own kind, packed nowhere; never a mission.
 _Avoid_: mission (the `.bms` the game loads), mission file
 
+**Display name**:
+What a value a document holds reads as to a modder where it stands for something with a name (ADR
+0046 S15): an item id by its catalog's name, an SSN by its entity's item and SSN ("Ranger #12"), a
+zone, a path with its stops, an event by its sentence, a text key by its string; one naming nothing
+says so in words (it is **dangling**). The raw value stays beside it, secondary (muted, in a tooltip,
+on the wire). One service makes it for every window and the wire
+(`engine/editor/graph/display_names.h`; a type's own words in its `record_label` and `value_label`
+hooks, the mission's `documents/mission_labels.h`), reading the project's names through a **name
+source** (the asset graph's). A record's display name is its **title**; its **name** stays what the
+graph keys it by (an entity's SSN).
+_Avoid_: label (a field's own name), caption, alias
+
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
 asset graph: its files and the names they define, read once and never edited. A lookup by name

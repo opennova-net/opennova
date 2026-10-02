@@ -114,7 +114,7 @@ int test_forms() {
 	TEST_EXPECT(f.load());
 	const MissionDocument &m = as_mission(*f.document);
 	const DocumentMissionNames names(m);
-	const std::string walker = "Organic " + std::to_string(f.ssn);
+	const std::string walker = "Organic #" + std::to_string(f.ssn);
 	LogicForm form;
 	TEST_EXPECT(logic_form(m, f.trigger, names, form));
 	TEST_EXPECT(!form.action && form.type && same(form.type_words, "Entity is in an area") && same(form.type->group, "Areas and waypoints"));
@@ -186,7 +186,7 @@ int test_retype_move_negate() {
 	Fixture f;
 	TEST_EXPECT(f.load());
 	const MissionDocument &m = as_mission(*f.document);
-	const std::string walker = "Organic " + std::to_string(f.ssn);
+	const std::string walker = "Organic #" + std::to_string(f.ssn);
 	std::vector<Edit> edits;
 	std::string refusal;
 	// Entity is in an area -> Entity is destroyed: the entity kept, the zone (unread now) cleared.
@@ -241,7 +241,7 @@ int test_uses() {
 	TEST_EXPECT(f.load());
 	const MissionDocument &m = as_mission(*f.document);
 	const DocumentMissionNames names(m);
-	const std::string walker = "Organic " + std::to_string(f.ssn);
+	const std::string walker = "Organic #" + std::to_string(f.ssn);
 	MissionUses uses = mission_uses(m, f.walker, names);
 	TEST_EXPECT(same(uses.what, walker) && uses.inert.empty() && uses.uses.size() == 1);
 	TEST_EXPECT(uses.uses[0].record == f.trigger && uses.uses[0].field == "param1" && uses.uses[0].event_index == 0 &&

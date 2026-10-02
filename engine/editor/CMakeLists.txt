@@ -59,6 +59,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_validation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_reads.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_file_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/mission_labels.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/name_source.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/mns_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_document_edits.cpp
@@ -78,8 +80,9 @@ add_library(opennova_editor STATIC
     # their indexes, the one resolver, a base layer's names, the reference queries a document's
     # fields ask, the rename transaction; what other files make of what one defines (the use
     # checks, and what a stylesheet line's value is used as) and the one validation pass over the
-    # project's files
+    # project's files; the display names (a value as a modder reads it, the graph as the names)
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/asset_graph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/display_names.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/extractors.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/graph_layer.cpp

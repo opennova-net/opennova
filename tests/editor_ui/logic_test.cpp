@@ -77,7 +77,7 @@ void test_event_inspector() {
 	const Node *event = mission->rows_of(MissionKind::Event)[0];
 	const NodeAddress first{event->id, event->kind, 0};
 	const Node *organic = mission->rows_of(MissionKind::Organic)[0];
-	const std::string walker = "Organic " + std::to_string(static_cast<const EntityRow &>(*organic).native.id);
+	const std::string walker = "Organic #" + std::to_string(static_cast<const EntityRow &>(*organic).native.id);
 	Ui ui;
 	ui.windows.set_view(&v);
 	LogicRun run{session, ui, {}};

@@ -3,10 +3,12 @@
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <optional>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/graph/display_names.h>
 #include <editor/session/finding_codes.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/request_factories.h>
@@ -161,7 +163,11 @@ std::string finding_record_title(const Diagnostic &diagnostic, const SessionView
 		const Document *document = records_of(*open);
 		if (!document) return std::string();
 		const NodeAddress address{diagnostic.row_id, diagnostic.record_kind, diagnostic.child_id};
-		const std::string title = document->record_title(address);
+		// In the display names' words, the project's names read (S15, Names: an entity by its item's
+		// name and its SSN).
+		std::optional<GraphNameSource> names;
+		if (view.findings.graph) names.emplace(*view.findings.graph);
+		const std::string title = record_display(*document, address, names ? &*names : nullptr);
 		return title == document->record_name(address) ? std::string() : title;
 	}
 	return std::string();

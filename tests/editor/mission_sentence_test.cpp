@@ -194,7 +194,8 @@ std::unique_ptr<Document> open(const std::vector<uint8_t> &bytes, const char *na
 }
 
 // The minted mission's titles: event 1 the walker inside zone 20 re-arming event 2, event 2 event 1
-// having fired killing group 2 after its delay of 5 units; the walker by its kind and SSN.
+// having fired killing group 2 after its delay of 5 units; the walker by its kind and SSN (its title,
+// the display names' "Organic #SSN"), zone 30 as the mission's boundary.
 int test_document_titles() {
 	std::unique_ptr<Document> document =
 	        open(test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms"),
@@ -206,7 +207,7 @@ int test_document_titles() {
 	const int32_t walker = static_cast<const EntityRow &>(*organics[0]).native.id;
 	const NodeAddress first{events[0]->id, k(MissionKind::Event), 0}, second{events[1]->id, k(MissionKind::Event), 0};
 	TEST_EXPECT(m.record_title(first) ==
-	            "When Organic " + std::to_string(walker) + " is in Zone 20, then re-arm event 2.");
+	            "When Organic #" + std::to_string(walker) + " is in Zone 20, then re-arm event 2.");
 	TEST_EXPECT(m.record_title(second) == "When event 1 has fired, then, after 5.1 s, kill group 2.");
 	// The record's name is still its kind and place (the graph's, Problems', the wire's).
 	TEST_EXPECT(m.record_name(first) == "Event 1");
@@ -214,7 +215,7 @@ int test_document_titles() {
 	const std::vector<Document::Collection> lists = m.collections_of(first);
 	TEST_EXPECT(lists.size() == 2 && lists[0].ids.size() == 1 && lists[1].ids.size() == 1);
 	TEST_EXPECT(m.record_title({first.row, k(MissionKind::Trigger), lists[0].ids[0]}) ==
-	            "Organic " + std::to_string(walker) + " is in Zone 20");
+	            "Organic #" + std::to_string(walker) + " is in Zone 20");
 	TEST_EXPECT(m.record_title({first.row, k(MissionKind::Action), lists[1].ids[0]}) == "re-arm event 2");
 	// The document's names: what no record holds said so.
 	const DocumentMissionNames names(m);
@@ -230,7 +231,8 @@ int test_document_titles() {
 	edit.value = int64_t(30);
 	Diagnostic error;
 	TEST_EXPECT(document->apply({edit}, error));
-	TEST_EXPECT(m.record_title(first) == "When Organic " + std::to_string(walker) + " is in Zone 30, then re-arm event 2.");
+	TEST_EXPECT(m.record_title(first) ==
+	            "When Organic #" + std::to_string(walker) + " is in Zone 30 (mission area), then re-arm event 2.");
 	return 0;
 }
 

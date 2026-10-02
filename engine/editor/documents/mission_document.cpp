@@ -1,6 +1,7 @@
 #include "mission_document.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <set>
@@ -10,7 +11,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
-#include <editor/documents/mission_sentence.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
@@ -210,37 +211,49 @@ std::vector<const Node *> MissionDocument::rows_of(MissionKind kind) const {
 
 NodeId MissionDocument::entity_holder(int64_t ssn) const {
 	if (ssn < INT32_MIN || ssn > INT32_MAX) return 0;
-	const FirstHolders &first = first_holders();
+	const Lookups &first = lookups();
 	const auto found = first.ssns.find(int32_t(ssn));
 	return found == first.ssns.end() ? 0 : found->second;
 }
 
 NodeId MissionDocument::zone_holder(int64_t id) const {
 	if (id < INT32_MIN || id > INT32_MAX) return 0;
-	const FirstHolders &first = first_holders();
+	const Lookups &first = lookups();
 	const auto found = first.zones.find(int32_t(id));
 	return found == first.zones.end() ? 0 : found->second;
 }
 
+const Node *MissionDocument::row_of(MissionKind kind, size_t index) const {
+	const Lookups &made = lookups();
+	const size_t at = size_t(kind);
+	return at < made.by_kind.size() && index < made.by_kind[at].size() ? made.by_kind[at][index] : nullptr;
+}
+
+size_t MissionDocument::index_of(const Node &row) const {
+	const Lookups &made = lookups();
+	const auto found = made.places.find(row.id);
+	return found == made.places.end() ? SIZE_MAX : found->second;
+}
+
+int MissionDocument::location_of(const Node &row) const {
+	const Lookups &made = lookups();
+	const auto found = made.locations.find(row.id);
+	return found == made.locations.end() ? 0 : found->second;
+}
+
+size_t MissionDocument::count_of(MissionKind kind) const {
+	const Lookups &made = lookups();
+	return size_t(kind) < made.by_kind.size() ? made.by_kind[size_t(kind)].size() : 0;
+}
+
+size_t MissionDocument::group_members(int64_t group) const {
+	const Lookups &made = lookups();
+	return group >= 0 && size_t(group) < made.groups.size() ? made.groups[size_t(group)] : 0;
+}
+
 std::string MissionDocument::record_title(const NodeAddress &address) const {
-	const Node *node = row(address.row);
-	if (!node || node->kind != k(K::Event)) return TableDocument::record_title(address);
-	const EventRow &event = static_cast<const EventRow &>(*node);
-	const MissionRow *mission = mission_row();
-	const bms::Header *header = mission ? &mission->native.header : nullptr;
-	const DocumentMissionNames names(*this);
-	if (!address.child) return event_sentence(event.native, names, header);
-	// A trigger or an action by its place in its event's lists.
-	if (event.ids.lists.size() < 2) return TableDocument::record_title(address);
-	const std::vector<RecordIds> &triggers = event.ids.lists[0], &actions = event.ids.lists[1];
-	for (size_t i = 0; i < triggers.size() && i < event.native.triggers.size(); ++i)
-		if (triggers[i].id == address.child) {
-			const std::string words = trigger_words(event.native.triggers[i], names);
-			return i == 0 ? words : std::string(logic_join_words(trigger_join(event.native.triggers[i - 1]))) + " " + words;
-		}
-	for (size_t i = 0; i < actions.size() && i < event.native.actions.size(); ++i)
-		if (actions[i].id == address.child) return action_words(event.native.actions[i], names, header);
-	return TableDocument::record_title(address);
+	std::string title = mission_record_label(*this, address, nullptr);
+	return title.empty() ? TableDocument::record_title(address) : title;
 }
 
 bool MissionDocument::compose(bms::File &out) const { return compose_mission(rows(), out); }
@@ -593,7 +606,7 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 		// The lookups by SSN scan the pools in order and take the first row of the SSN [orig:
 		// Entity_KillByNetId @0x43DBD0, Entity_HandleAlertStateEvent @0x43DEE0]: a later one is
 		// found by none of them (the graph resolves to the first).
-		const FirstHolders &first = first_holders();
+		const Lookups &first = lookups();
 		const auto found = first.ssns.find(entity.native.id);
 		if (found != first.ssns.end() && found->second != node->id) {
 			facts.inert = true;
@@ -610,7 +623,7 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 	if (node->kind == k(K::Area)) {
 		// The resolver scans the table for the id [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000];
 		// which of two it takes is not read (D-MIS-5): the later is the one marked.
-		const FirstHolders &first = first_holders();
+		const Lookups &first = lookups();
 		const auto found = first.zones.find(static_cast<const AreaRow &>(*node).native.id);
 		if (found != first.zones.end() && found->second != node->id) {
 			facts.inert = true;
@@ -619,21 +632,31 @@ void MissionDocument::refine_symbol(const NodeAddress &address, SymbolFacts &fac
 	}
 }
 
-const MissionDocument::FirstHolders &MissionDocument::first_holders() const {
-	if (first_holders_.made && first_holders_.load_generation == load_generation() && first_holders_.revision == revision())
-		return first_holders_;
-	FirstHolders made;
+const MissionDocument::Lookups &MissionDocument::lookups() const {
+	if (lookups_.made && lookups_.load_generation == load_generation() && lookups_.revision == revision())
+		return lookups_;
+	Lookups made;
+	made.by_kind.resize(kMissionKindCount);
+	made.groups.assign(256, 0);
 	std::unordered_map<int32_t, int> order; // the pool order of each SSN's first holder so far
+	int location = 0;
 	for (const auto &row : rows()) {
-		if (!row) continue;
+		if (!row || row->kind < 0 || size_t(row->kind) >= kMissionKindCount) continue;
+		std::vector<const Node *> &of_kind = made.by_kind[size_t(row->kind)];
+		made.places.emplace(row->id, of_kind.size());
+		of_kind.push_back(row.get());
 		if (is_entity_kind(row->kind)) {
-			const int32_t ssn = static_cast<const EntityRow &>(*row).native.id;
+			const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
 			const int mine = lookup_order(row->kind);
-			const auto held = order.find(ssn);
+			const auto held = order.find(entity.id);
 			if (held == order.end() || mine < held->second) {
-				order[ssn] = mine;
-				made.ssns[ssn] = row->id;
+				order[entity.id] = mine;
+				made.ssns[entity.id] = row->id;
 			}
+			++made.groups[entity.group_id];
+			// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
+			// next location name, in spawn order] (mission_references' LOCATION keys).
+			if (row->kind == k(K::Marker) && entity.type_id == 2044) made.locations.emplace(row->id, ++location);
 		} else if (row->kind == k(K::Area)) {
 			made.zones.emplace(static_cast<const AreaRow &>(*row).native.id, row->id);
 		}
@@ -641,8 +664,8 @@ const MissionDocument::FirstHolders &MissionDocument::first_holders() const {
 	made.made = true;
 	made.load_generation = load_generation();
 	made.revision = revision();
-	first_holders_ = std::move(made);
-	return first_holders_;
+	lookups_ = std::move(made);
+	return lookups_;
 }
 
 // --- the references between the rows ------------------------------------------------------------------
@@ -795,51 +818,58 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 
 // --- the references no field's value is ---------------------------------------------------------------
 
-void mission_references(const Document &document, Extracted &out) {
-	const auto *mission = dynamic_cast<const MissionDocument *>(&document);
-	const MissionRow *header = mission ? mission->mission_row() : nullptr;
-	if (!header) return;
+void mission_text_edges(const MissionDocument &document, const NodeAddress &address, std::vector<GraphEdge> &out,
+                        bool placed) {
+	const Node *row = document.row(address.row);
+	const MissionRow *header = document.mission_row();
+	if (!row || !header) return;
 	// The mission's own table, else the one the game loads in its place where the mission has none,
 	// never both [orig: TextResource_LoadMissionTextBin @0x51ed90]: the edge's alternate, which the
 	// graph reads only where the project has no table of the mission's name.
 	const std::string table = strutil::to_upper(mission_base_name(basename_of(document.path()))) + ".BIN";
-	const auto text = [&](const NodeAddress &address, const std::string &field, const char *section, const char *key,
-	                      int number) {
+	const auto text = [&](const std::string &field, const char *section, const char *key, int number) {
 		char name[32];
 		std::snprintf(name, sizeof(name), "%s%03i", key, number);
 		GraphEdge edge;
 		edge.source = document.path();
-		edge.record = document.record_path(address);
-		edge.locator = document.locator(address);
+		if (placed) {
+			edge.record = document.record_path(address);
+			edge.locator = document.locator(address);
+		}
 		edge.address = address;
 		edge.field = field;
 		edge.kind = ReferenceKind::TextId;
 		edge.value = name;
 		edge.scope = table + "/" + section;
 		edge.scope_alternate = "MEDMSSN.BIN";
-		out.edges.push_back(std::move(edge));
+		out.push_back(std::move(edge));
 	};
-	int location = 0;
-	for (const auto &row : document.rows()) {
-		if (!row || !is_entity_kind(row->kind)) continue;
+	const bms::Header &head = header->native.header;
+	if (!address.child && is_entity_kind(row->kind)) {
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
-		const NodeAddress address{row->id, row->kind, 0};
 		// [orig: Entity_SpawnFromBMSRecord @0x40f182..0x40f221: each def-type 2044 marker registers the
 		// next location name, in spawn order]
-		if (row->kind == k(K::Marker) && entity.type_id == 2044) text(address, std::string(), "Locations", "LOCATION", ++location);
+		if (const int location = document.location_of(*row)) text(std::string(), "Locations", "LOCATION", location);
 		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
 		// on the index being nonzero]
-		if (entity.name_index != 0) text(address, "name_index", "PeopleNames", "STRNAME", entity.name_index);
+		if (entity.name_index != 0) text("name_index", "PeopleNames", "STRNAME", entity.name_index);
+		return;
 	}
-	const NodeAddress top{header->id, header->kind, 0};
-	const bms::Header &head = header->native.header;
-	// The objectives panel's rows: the win slots 1..8 until a 0 or 255 id, each its STRWINCOND
-	// [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
-	for (int slot = 0; slot < 8; ++slot) {
-		const uint8_t win = head.win_conditions[slot];
-		if (win == 0 || win == 255) break;
-		text(top, "win_conditions[" + std::to_string(slot) + "]", "WinConditions", "STRWINCOND", win);
+	if (!address.child && row->kind == k(K::Mission)) {
+		// The objectives panel's rows: the win slots 1..8 until a 0 or 255 id, each its STRWINCOND
+		// [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
+		for (int slot = 0; slot < 8; ++slot) {
+			const uint8_t win = head.win_conditions[slot];
+			if (win == 0 || win == 255) break;
+			text("win_conditions[" + std::to_string(slot) + "]", "WinConditions", "STRWINCOND", win);
+		}
+		return;
 	}
+	if (address.kind != k(K::Action) || row->kind != k(K::Event)) return;
+	const Document::RecordPath path = document.path_in(*row, address.child);
+	const EventRow &event = static_cast<const EventRow &>(*row);
+	if (path.size() != 1 || path[0].index >= event.native.actions.size()) return;
+	const bms::Action &action = event.native.actions[path[0].index];
 	// What the actions read of the table, each by the text id of the slot (1..8) its first parameter
 	// names: SubGoalWon's chat line STRWINMSG, SubGoalLost's STRLOSEMSG [orig: EventAction_Dispatch
 	// case 14 @0x454500, the key @0x454552; case 15 @0x4545e0, the key @0x45460c]; a shown
@@ -849,35 +879,37 @@ void mission_references(const Document &document, Extracted &out) {
 	// Text's ID%03i [orig: HUD_DisplayTriggeredText @0x51F190]. A slot past the eight reads a byte
 	// outside the header's tables, which the port does not model (runtime/world World::
 	// show_objective_notification): no edge.
-	const auto slot_text = [&](const NodeAddress &address, const uint8_t *ids, int32_t slot, const char *section,
-	                           const char *key) {
-		if (slot >= 1 && slot <= 8) text(address, "param1", section, key, ids[slot - 1]);
+	const auto slot_text = [&](const uint8_t *ids, int32_t slot, const char *section, const char *key) {
+		if (slot >= 1 && slot <= 8) text("param1", section, key, ids[slot - 1]);
 	};
+	switch (action.action_type) {
+	case bms::ActionType::SubGoalWon: slot_text(head.win_conditions, action.param1, "WinConditions", "STRWINMSG"); break;
+	case bms::ActionType::SubGoalLost: slot_text(head.lose_conditions, action.param1, "LoseConditions", "STRLOSEMSG"); break;
+	case bms::ActionType::ShowWinSubgoal:
+		if (action.param2 != 0) slot_text(head.win_conditions, action.param1, "WinConditions", "STRWINDIRECTIVE");
+		break;
+	case bms::ActionType::ShowLoseSubgoal:
+		if (action.param2 != 0) slot_text(head.lose_conditions, action.param1, "LoseConditions", "STRLOSEDIRECTIVE");
+		break;
+	case bms::ActionType::OutputText: text("param1", "Triggered Text", "ID", action.param1); break;
+	default: break;
+	}
+}
+
+void mission_references(const Document &document, Extracted &out) {
+	const auto *mission = dynamic_cast<const MissionDocument *>(&document);
+	const MissionRow *header = mission ? mission->mission_row() : nullptr;
+	if (!header) return;
+	// The text keys the records' numbers form (mission_text_edges): the entities' in the rows' order,
+	// the objectives panel's, then the actions' in the events' order.
+	for (const auto &row : document.rows())
+		if (row && is_entity_kind(row->kind)) mission_text_edges(*mission, {row->id, row->kind, 0}, out.edges, true);
+	mission_text_edges(*mission, {header->id, header->kind, 0}, out.edges, true);
 	for (const Node *row : mission->rows_of(K::Event)) {
 		const EventRow &event = static_cast<const EventRow &>(*row);
 		if (event.ids.lists.size() < 2) continue;
-		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i) {
-			const bms::Action &action = event.native.actions[i];
-			const NodeAddress address{row->id, k(K::Action), event.ids.lists[1][i].id};
-			switch (action.action_type) {
-			case bms::ActionType::SubGoalWon:
-				slot_text(address, head.win_conditions, action.param1, "WinConditions", "STRWINMSG");
-				break;
-			case bms::ActionType::SubGoalLost:
-				slot_text(address, head.lose_conditions, action.param1, "LoseConditions", "STRLOSEMSG");
-				break;
-			case bms::ActionType::ShowWinSubgoal:
-				if (action.param2 != 0)
-					slot_text(address, head.win_conditions, action.param1, "WinConditions", "STRWINDIRECTIVE");
-				break;
-			case bms::ActionType::ShowLoseSubgoal:
-				if (action.param2 != 0)
-					slot_text(address, head.lose_conditions, action.param1, "LoseConditions", "STRLOSEDIRECTIVE");
-				break;
-			case bms::ActionType::OutputText: text(address, "param1", "Triggered Text", "ID", action.param1); break;
-			default: break;
-			}
-		}
+		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i)
+			mission_text_edges(*mission, {row->id, k(K::Action), event.ids.lists[1][i].id}, out.edges, true);
 	}
 	// The files the game finds by the mission's name (documents/mission_file_set.h), one edge each
 	// from the file itself: the name its reader builds, then the alternate or the fallback the reader

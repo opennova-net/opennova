@@ -4368,6 +4368,18 @@ target_link_libraries(editor_mission_logic_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_logic_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_logic COMMAND editor_mission_logic_test)
 
+# The display names (ADR 0046 S15, Names: editor/documents/mission_labels.h and
+# editor/graph/display_names.h) over the minted synth_logic mission: every record and every value
+# that names something in a modder's words, with and without the project's names (an item by its
+# catalog's name, a text key by its string), what names nothing said in words, the picker's
+# choices worded, the cache, the wire's words through a session; and (a SKIP-LEG without
+# OPENNOVA_JO_DIR) every record and reference of the shipped missions worded with the install's
+# catalogs and tables, timed.
+add_executable(editor_mission_labels_test editor/mission_labels_test.cpp)
+target_link_libraries(editor_mission_labels_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_labels_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_labels COMMAND editor_mission_labels_test)
+
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
 # choice, the labelled field, the record handle and the list ops over a file of each; the cost of a

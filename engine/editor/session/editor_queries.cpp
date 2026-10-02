@@ -19,6 +19,7 @@
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/document_search.h>
@@ -392,7 +393,11 @@ JsonValue answer_document(const QueryContext &context, const QueryArgs &args, st
 	if (!document)
 		return JsonValue::make_null();
 	const JsonPage page = page_of(args);
-	return document_to_json(*document, &page);
+	// Each row's title worded with the graph's names (ADR 0046 S15).
+	const AssetGraph *graph = context.core.view().findings.graph.get();
+	if (!graph) return document_to_json(*document, &page);
+	const GraphNameSource names(*graph);
+	return document_to_json(*document, &page, &names);
 }
 
 JsonValue answer_record(const QueryContext &context, const QueryArgs &args, std::string &error) {
@@ -1114,26 +1119,32 @@ constexpr EditorQueryRow kRows[] = {
 			"kinds of row its outline adds (top_kinds); a text document's its line_count.")
 			.pages("documents")
 			.row,
-	Query(K::Document, "document", answer_document, kDocumentParams, kDocumentReads,
+	Query(K::Document, "document", answer_document, kDocumentParams, kRecordReads,
 			"One open document's lifecycle state (as the documents query gives it) and, for a "
-			"record document, a page of its rows, each with its id, kind, name, change since the "
-			"save (unchanged, changed, added) and the collections it holds, their records at "
-			"every depth; for a text document, by the same offset and limit, a page of its lines "
-			"(each its line, from 1, and its text).")
+			"record document, a page of its rows, each with its id, kind, name, title (its words "
+			"as the outline shows them, the project's names read: a mission's entity by its item's "
+			"name and its SSN), change since the save (unchanged, changed, added) and the "
+			"collections it holds, their records at every depth; for a text document, by the same "
+			"offset and limit, a page of its lines (each its line, from 1, and its text).")
 			.pages("rows, or a text document's lines")
 			.row,
 	Query(K::Record, "record", answer_record, kRecordParams, kRecordReads,
 			"One record of an open record document, by its id or by the symbol it defines: its id, "
-			"address (row, kind, child), name, path, locator, change since the save, owner and "
-			"index, every field as it applies to it (value, label, unit, range, choices, whether "
-			"an optional one is present, a reference's status, what it defines, and a changed "
-			"one's saved value) and the collections it holds.")
+			"address (row, kind, child), name, title (its words), path, locator, change since the "
+			"save, owner and index, every field as it applies to it (value, and display, what the "
+			"value names in words where it names something: an item by its catalog's name, an SSN "
+			"by its entity, a zone, an event, a text key by its string; dangling where it names "
+			"nothing; label, unit, range, choices, whether an optional one is present, a "
+			"reference's status, what it defines, and a changed one's saved value) and the "
+			"collections it holds.")
 			.row,
 	Query(K::ReferenceChoices, "reference_choices", answer_reference_choices, kFieldParams,
 			kRecordReads,
 			"A page of the names a record's reference field's picker offers there: each with "
-			"its name, the kind it names, the file and record that define it, the status the "
-			"field set to it would have, and why no lookup of the game finds an inert one.")
+			"its name, its label (what it names in words: an item id by its catalog's name, an "
+			"SSN by its entity's title), the kind it names, the file and record that define it, "
+			"the status the field set to it would have, and why no lookup of the game finds an "
+			"inert one.")
 			.pages("choices")
 			.row,
 	Query(K::ReferenceTargets, "reference_targets", answer_reference_targets, kFieldParams,
