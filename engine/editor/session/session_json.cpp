@@ -1324,7 +1324,15 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	if (!edge.fallback.empty()) out.set("fallback", json_string(written(edge.fallback)));
 	out.set("target", json_string(written(edge.target)));
 	if (!edge.scope.empty()) out.set("scope", json_string(edge.scope));
-	out.set("rewritable", boolean(edge.rewritable));
+	if (!edge.scopes_after.empty()) {
+		JsonValue after = JsonValue::make_array();
+		for (const std::string &scope : edge.scopes_after) after.push(json_string(scope));
+		out.set("scopes_after", std::move(after));
+	}
+	if (!edge.scope_alternate.empty()) out.set("scope_alternate", json_string(edge.scope_alternate));
+	if (!edge.scope_owner.empty()) out.set("scope_owner", json_string(edge.scope_owner));
+	if (edge.optional) out.set("optional", boolean(true));
+	out.set("rewritable", boolean(graph.rewrites(edge)));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
 	if (edge.loader_arg >= 0) out.set("loader_arg", json_number(double(edge.loader_arg)));
 	std::string file;

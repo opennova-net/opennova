@@ -44,8 +44,9 @@ std::vector<Diagnostic> validate_script_file(const DocumentBase &document);
 // sound set (SS:NAME), an ammo (AMMO:NAME, then ammo_NAME [orig: WacScript_ResolveParameter @
 // 0x4F2E21..0x4F2E92]) and a text key (TT:KEY, a string id the game reads from the mission text's
 // table, then gametext.bin [orig: MissionText_GetStringByKeyOrGameText @ 0x51ECD0]: for a script of a
-// mission's name, its table (<stem>.bin, else medmssn.bin) then GAMETEXT.BIN, a use a rename
-// rewrites; for game.wac and server.wac, which run with every mission, any table, and no rename).
+// mission's name, where the project has that mission, its table (<stem>.bin, else medmssn.bin, the
+// one or the other) then GAMETEXT.BIN, a use a rename rewrites; for one of no mission the project has
+// and for game.wac and server.wac, which run with every mission, any table, and no rename).
 // And the files it names (wac::Program::file_uses, ADR 0046 S14): a RUN's script (a Script, by the
 // name written; the compiler's own name, the token to its first '.' plus ".wac", its second name
 // where the written one does not reach it [orig: Script_LoadAndCompileFile @ 0x4EE660]) and a

@@ -44,7 +44,8 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 			a.through == b.through && a.loader_arg == b.loader_arg &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
-			a.scopes_after == b.scopes_after && a.optional == b.optional;
+			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&
+			a.scope_owner == b.scope_owner;
 }
 
 // A symbol as its file's reading makes it, the first one's inert and why given apart (a slot's own
@@ -106,11 +107,12 @@ void changed_names(const GraphSlot &slot, const std::vector<GraphSymbol> &now,
 	}
 }
 
-// An edge whose resolution reads the file set: a file reference, and a screen's (its lookup asks
-// whether its menu file is one).
+// An edge whose resolution reads the file set: a file reference, a screen's (its lookup asks
+// whether its menu file is one), and one whose scope a file decides (its table there or not, its
+// owner there or not).
 bool reads_file_set(const GraphEdge &edge) {
 	return reference_row(edge.kind).resolution == ReferenceResolution::File ||
-			edge.kind == ReferenceKind::MenuScreen;
+			edge.kind == ReferenceKind::MenuScreen || !edge.scope_alternate.empty() || !edge.scope_owner.empty();
 }
 
 } // namespace
@@ -741,22 +743,66 @@ std::string AssetGraph::resolve_style(const std::string &value) const {
 	return binding ? binding->value : value;
 }
 
-// The scopes an edge's lookup tries, in order: its own, then each of scopes_after.
-template <class Try> bool each_scope(const GraphEdge &edge, Try try_scope) {
-	if (try_scope(edge.scope)) return true;
+namespace {
+
+// Where an edge's lookup starts, and whether it goes on to the scopes after it: its own scope; any
+// table, and nothing after, where its owner is a file the project does not have
+// (GraphEdge::scope_owner); its alternate table's section where the project has no file of its own
+// scope's table (GraphEdge::scope_alternate).
+struct FirstScope {
+	const std::string *own = nullptr;
+	std::string made;
+	bool use_made = false;
+	bool then_after = true;
+	const std::string &scope() const { return use_made ? made : *own; }
+};
+
+FirstScope first_scope(const AssetGraph &graph, const GraphEdge &edge) {
+	FirstScope out;
+	out.own = &edge.scope;
+	if (!edge.scope_owner.empty() && !graph.has_file(edge.scope_owner)) {
+		out.use_made = true;
+		out.then_after = false;
+		return out;
+	}
+	if (!edge.scope_alternate.empty()) {
+		const size_t slash = edge.scope.find('/');
+		if (!graph.has_file(edge.scope.substr(0, slash))) {
+			out.made = edge.scope_alternate + (slash == std::string::npos ? std::string() : edge.scope.substr(slash));
+			out.use_made = true;
+		}
+	}
+	return out;
+}
+
+// The scopes an edge's lookup tries, in order: its first (first_scope), then each of scopes_after.
+template <class Try> bool each_scope(const AssetGraph &graph, const GraphEdge &edge, Try try_scope) {
+	const FirstScope first = first_scope(graph, edge);
+	if (try_scope(first.scope(), true)) return true;
+	if (!first.then_after) return false;
 	for (const std::string &scope : edge.scopes_after)
-		if (try_scope(scope)) return true;
+		if (try_scope(scope, false)) return true;
 	return false;
 }
 
+} // namespace
+
+std::string AssetGraph::lookup_scope(const GraphEdge &edge) const { return first_scope(*this, edge).scope(); }
+
+bool AssetGraph::rewrites(const GraphEdge &edge) const {
+	return edge.rewritable && (edge.scope_owner.empty() || has_file(edge.scope_owner));
+}
+
 ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out) const {
-	const ReferenceStatus status = resolve(edge.kind, edge.value, edge.scope, file_out, edge.loader_arg);
-	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && edge.scopes_after.empty())) return status;
+	const FirstScope first = first_scope(*this, edge);
+	const ReferenceStatus status = resolve(edge.kind, edge.value, first.scope(), file_out, edge.loader_arg);
+	if (status != ReferenceStatus::Missing || (edge.fallback.empty() && (edge.scopes_after.empty() || !first.then_after)))
+		return status;
 	// The lookup's second name where the first finds nothing, then each later scope, both names.
 	ReferenceStatus found = status;
-	each_scope(edge, [&](const std::string &scope) {
+	each_scope(*this, edge, [&](const std::string &scope, bool at_first) {
 		for (const std::string *name : {&edge.value, &edge.fallback}) {
-			if (name->empty() || (name == &edge.value && &scope == &edge.scope)) continue;
+			if (name->empty() || (name == &edge.value && at_first)) continue;
 			const ReferenceStatus second = resolve(edge.kind, *name, scope, file_out, edge.loader_arg);
 			if (second != ReferenceStatus::Present) continue;
 			found = second;
@@ -769,7 +815,7 @@ ReferenceStatus AssetGraph::resolve(const GraphEdge &edge, std::string *file_out
 
 const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
 	const std::string *reached = &edge.value;
-	each_scope(edge, [&](const std::string &scope) {
+	each_scope(*this, edge, [&](const std::string &scope, bool) {
 		if (resolve_symbol(edge.kind, edge.value, scope)) return true;
 		if (!edge.fallback.empty() && resolve_symbol(edge.kind, edge.fallback, scope)) {
 			reached = &edge.fallback;
@@ -782,7 +828,7 @@ const std::string &AssetGraph::reached_name(const GraphEdge &edge) const {
 
 const GraphSymbol *AssetGraph::symbol_reached(const GraphEdge &edge) const {
 	const GraphSymbol *found = nullptr;
-	each_scope(edge, [&](const std::string &scope) {
+	each_scope(*this, edge, [&](const std::string &scope, bool) {
 		found = resolve_symbol(edge.kind, edge.value, scope);
 		if (!found && !edge.fallback.empty()) found = resolve_symbol(edge.kind, edge.fallback, scope);
 		return found != nullptr;
@@ -992,7 +1038,7 @@ std::vector<const GraphEdge *> AssetGraph::referrers_of(ReferenceKind kind, cons
 		const GraphEdge &edge = index_.edge(ref);
 		// An edge reads the symbol's scope through its own, or one it tries after it.
 		if (!record && !scope.empty() &&
-		    !each_scope(edge, [&](const std::string &tried) { return scope_matches(scope, tried); }))
+		    !each_scope(*this, edge, [&](const std::string &tried, bool) { return scope_matches(scope, tried); }))
 			continue;
 		out.push_back(&edge);
 	}

@@ -463,15 +463,15 @@ int test_fields() {
 	            set(item, "mission_critical", int64_t(1), error) && entity.mission_critical == 1 &&
 	            set(item, "next_ssn", int64_t(77), error) && entity.next_ssn == 77);
 	TEST_EXPECT(set(item, "crouch_timer", int64_t(0x1234), error) && entity.crouch_timer == 0x34 && entity.unk15a == 0x12);
-	// What the game reads of a member: the blink pairs never, a marker's name index, another pool's
-	// not witnessed.
+	// What the game reads of a member: the blink pairs never, the name index in every pool (the spawn
+	// reads it for each record it places).
 	TEST_EXPECT(schema(MissionKind::Item, "blink_parent_a").applies == Applicability::Ignored &&
-	            schema(MissionKind::Item, "next_ssn").applies == Applicability::Unverified);
+	            schema(MissionKind::Item, "next_ssn").applies == Applicability::Unverified &&
+	            schema(MissionKind::Item, "name_index").applies == Applicability::Reads);
 	const TableKind &entities = *T().kind(k(MissionKind::Item));
 	const size_t name_index = entities.find("name_index");
-	TEST_EXPECT(entities.applies(name_index)(item, RecordOwners{}) == Applicability::Unverified &&
-	            T().kind(k(MissionKind::Marker))->applies(name_index)(rows_of(m, MissionKind::Marker)[0], RecordOwners{}) ==
-	                    Applicability::Reads);
+	TEST_EXPECT(!entities.applies(name_index) &&
+	            !T().kind(k(MissionKind::Marker))->applies(name_index));
 
 	const RecordHandle group = nested(m, MissionKind::Group, 3);
 	TEST_EXPECT(!set(group, "flags", int64_t(4), error) && set(group, "flags", int64_t(3), error) &&

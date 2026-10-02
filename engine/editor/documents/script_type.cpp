@@ -153,10 +153,12 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 	// A text key reads the mission text's table, then gametext.bin [orig:
 	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0: the loaded mission table's entry, else
 	// gametext's; "" with no mission table]. The mission text is the table of the mission's own name,
-	// else medmssn.bin [orig: TextResource_LoadMissionTextBin @ 0x51ed90]: a script of a mission's
-	// name (compiled after game.wac and server.wac [orig: WacScript_InitAndLoad @ 0x4F91F0]) reads
-	// that mission's; those two run with every mission and read the table of whichever plays, so
-	// their keys resolve in any table and no rename rewrites them (its table unknown).
+	// else medmssn.bin, the one or the other [orig: TextResource_LoadMissionTextBin @ 0x51ed90]: a
+	// script of a mission's name (compiled after game.wac and server.wac [orig: WacScript_InitAndLoad @
+	// 0x4F91F0]) reads that mission's, where the project has the mission (its owner, <stem>.bms); one of
+	// no mission's name (a RUN's file, compiled into whichever mission runs it) and game.wac and
+	// server.wac, which run with every mission, read the table of whichever plays, so their keys
+	// resolve in any table and no rename rewrites them.
 	const std::string stem = strutil::to_upper(mission::mission_base_name(document.path()));
 	const bool missions_own = stem != "GAME" && stem != "SERVER";
 	for (const wac::CatalogLookup &lookup : program->catalog_lookups) {
@@ -173,7 +175,9 @@ void script_references(const TextDocument &document, std::vector<TextReference> 
 		if (kind == ReferenceKind::TextId) {
 			if (missions_own) {
 				reference.scope = stem + ".BIN";
-				reference.scopes_after = { "MEDMSSN.BIN", "GAMETEXT.BIN" };
+				reference.scope_alternate = "MEDMSSN.BIN";
+				reference.scope_owner = stem + ".BMS";
+				reference.scopes_after = { "GAMETEXT.BIN" };
 			} else {
 				reference.rewritable = false;
 			}

@@ -69,6 +69,16 @@ std::string value_name(const Value &value) {
 	return std::string();
 }
 
+// The same as the name of a reference or a definition of `kind`: a mission's zone id of 0 is a name
+// too (an area trigger may hold it, and a parameter holding it where none does names an area the
+// load does not find, the trigger then neutered [orig: EventTrigger_ResolveZoneTriggerRefs
+// @0x453000]); no witness makes 0 a zone id that names none.
+std::string value_name(ReferenceKind kind, const Value &value) {
+	if (kind == ReferenceKind::MissionZone)
+		if (const auto *number = std::get_if<int64_t>(&value)) return std::to_string(*number);
+	return value_name(value);
+}
+
 // A record's references and the symbols it defines, each field as it applies to that record
 // (Document::field_on: a menu STRING's value is a string id when its TYPE says so, an
 // APPEARANCE's value a texture or a colour by its TYPE, an ACTION's target a screen or a
@@ -95,7 +105,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		if (field.applies == Applicability::Ignored || !document.present(address, schema.id)) continue;
 		Value value;
 		if (!document.get(address, schema.id, value)) continue;
-		const std::string defined = field.defines == ReferenceKind::None ? std::string() : value_name(value);
+		const std::string defined = field.defines == ReferenceKind::None ? std::string() : value_name(field.defines, value);
 		if (!defined.empty()) {
 			place();
 			GraphSymbol symbol = symbol_of(field.defines, defined, document.path(), record, field.scope);
@@ -342,7 +352,7 @@ bool reference_target(const FieldUse &field, const Value &value, ReferenceKind &
 		scope = field.scope;
 		return true;
 	}
-	name = value_name(value);
+	name = value_name(kind, value);
 	// A text's whole %NAME% names the variable, which has no scope (the field's is what it defines).
 	if (field.reference == ReferenceKind::None) return true;
 	if (name.empty()) return false;
@@ -368,6 +378,8 @@ void extract_from_text(const TextDocument &document, Extracted &out) {
 		edge.span = reference.span;
 		edge.fallback = std::move(reference.fallback);
 		edge.scopes_after = std::move(reference.scopes_after);
+		edge.scope_alternate = std::move(reference.scope_alternate);
+		edge.scope_owner = std::move(reference.scope_owner);
 		out.edges.push_back(std::move(edge));
 	}
 }

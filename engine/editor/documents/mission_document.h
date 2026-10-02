@@ -202,15 +202,17 @@ std::string mission_scope(const DocumentBase &document);
 
 // The mission's references that no field's value is (DocumentType::record_references): the text
 // keys its records' numbers form, each a TextId in the mission's own string table (its base name
-// plus .bin, the table the mission text loads [orig: TextResource_LoadMissionTextBin @0x51ed90]),
-// then in medmssn.bin, the table loaded in its place when the mission has none: LOCATION%03i for
-// each type-2044 marker by its one-based spawn order (section Locations [orig:
+// plus .bin, the table the mission text loads [orig: TextResource_LoadMissionTextBin @0x51ed90]), or
+// in medmssn.bin, the table loaded in its place where the mission has none (the edge's alternate):
+// LOCATION%03i for each type-2044 marker by its one-based spawn order (section Locations [orig:
 // Entity_SpawnFromBMSRecord @0x40f182..0x40f221]), STRNAME%03i for a record's nonzero name_index
-// (PeopleNames [orig: @0x40ecbf..0x40ed0a]), STRWINDIRECTIVE%03i and STRWINCOND%03i for each win
-// condition's id (WinConditions [orig: HUD_ShowObjectiveNotification @0x5BA2E0, HUD_DrawWinConditions
-// @0x5ba940]) and STRLOSEDIRECTIVE%03i for each lose condition's (LoseConditions), an id of 0 or 255
-// naming none [orig: the row walk breaks on either, HUD_DrawWinConditions @0x5ba9e0]. None is
-// rewritable.
+// (PeopleNames [orig: @0x40ecbf..0x40ed0a]), STRWINCOND%03i for each win slot until a 0 or 255 id
+// (WinConditions [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0]), and what the actions
+// read by a slot's id: SubGoalWon's STRWINMSG%03i, SubGoalLost's STRLOSEMSG%03i, a shown
+// ShowWinSubgoal's STRWINDIRECTIVE%03i and ShowLoseSubgoal's STRLOSEDIRECTIVE%03i, OutputText's
+// Triggered Text ID%03i. None is rewritable. A marker's waypoint name (WPNames STRWPNAME%03i of its
+// record's +0x60) is read only for the waypoints the HUD lists, which markers those are not traced:
+// no edge (NEEDS-RE). Then the files the mission's name finds and a dialog's bank.
 void mission_references(const Document &document, Extracted &out);
 
 } // namespace opennova::editor

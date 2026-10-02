@@ -209,8 +209,16 @@ public:
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
 	// texture's rule reads its case), in its scope, by its loader's argument; for a symbol kind's
 	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing; then
-	// each scope the edge tries after its own (GraphEdge::scopes_after), both names in each.
+	// each scope the edge tries after its own (GraphEdge::scopes_after), both names in each. Its own
+	// is where the project's files put it (lookup_scope).
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
+	// The scope an edge's lookup starts in: its own; its alternate table's section where the project
+	// has no file of its own table (GraphEdge::scope_alternate); "" (any table, and no scope after it)
+	// where its owner is a file the project does not have (GraphEdge::scope_owner).
+	std::string lookup_scope(const GraphEdge &edge) const;
+	// Whether Rename everywhere rewrites the edge's use: its source writes it (GraphEdge::rewritable)
+	// and its scope is the lookup's (an owner the project has, where it names one).
+	bool rewrites(const GraphEdge &edge) const;
 	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
 	// fallback's, in the first of its scopes a lookup finds either in; null for none.
 	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;

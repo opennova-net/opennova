@@ -406,9 +406,10 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		if (listed) continue; // a field naming it twice (a font through a variable) is one site
 		const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
 		const AssetEntry *source = find_asset(scan, edge->source);
-		if (!edge->rewritable || !source) {
-			// A text's use is at its span; the file is the editor's to write, that use not yet (a
-			// script's text key, whose lookup the graph does not order as the game does).
+		if (!graph.rewrites(*edge) || !source) {
+			// A text's use is at its span; the file is the editor's to write, that use not (a key of a
+			// script that runs with whichever mission's table plays: game.wac's, server.wac's, one of a
+			// mission the project lacks, AssetGraph::rewrites).
 			plan.refusals.push_back(refusal(CoreFinding::RenameSite,
 			                                edge->span.line ? where + " names " + what + " at " + edge->locator +
 			                                                          ", a use the editor cannot rewrite yet."

@@ -271,7 +271,9 @@ const ReferenceRow *reference_of(MissionRecord record, const char *key) {
 }
 
 // The members no runtime reader is witnessed for (Unverified), and those the game is witnessed never
-// to read (Ignored), whatever their record holds.
+// to read (Ignored), whatever their record holds. (An entity's name_index is read in every pool: the
+// spawn takes each pool's records and reads it for each [orig: Entity_SpawnFromBMSRecord
+// @0x40ecbf..0x40ed0a, the rec+4 gate; runtime/mission/promote.cpp].)
 struct AppliesRow {
 	MissionRecord record;
 	const char *key;
@@ -533,12 +535,6 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 			out.reference = [](const RecordHandle &record, const RecordOwners &) {
 				return path_command_names_entity(record.as<bms::Entity>().waypoint_id) ? ReferenceKind::MissionEntity
 				                                                                       : ReferenceKind::None;
-			};
-		// A marker's name index picks its text [orig: Entity_SpawnFromBMSRecord @0x40e9f0]; what
-		// reads another pool's is not witnessed.
-		if (same_text(field.key, "name_index"))
-			out.applies = [](const RecordHandle &record, const RecordOwners &) {
-				return record.kind == k(K::Marker) ? Applicability::Reads : Applicability::Unverified;
 			};
 	}
 	return out;

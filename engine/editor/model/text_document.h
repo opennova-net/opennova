@@ -42,9 +42,13 @@ struct TextReference {
 	// The scopes the lookup tries after `scope` where the name finds nothing there, in order
 	// (GraphEdge::scopes_after).
 	std::vector<std::string> scopes_after;
+	// The table read in the scope's table's place where the project lacks it, and the file that makes
+	// the scope the lookup's (GraphEdge::scope_alternate, scope_owner).
+	std::string scope_alternate;
+	std::string scope_owner;
 	TextSpan span;
 	// Whether Rename everywhere rewrites it (GraphEdge::rewritable): false for a use whose lookup the
-	// graph does not model as the game makes it (a script's text key).
+	// graph does not model as the game makes it (game.wac's text keys).
 	bool rewritable = true;
 };
 

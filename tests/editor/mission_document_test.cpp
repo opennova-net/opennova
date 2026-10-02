@@ -3,8 +3,9 @@
 // every reference a mission makes as a graph edge of its kind (a file's: the terrain, the environment,
 // each entity's item, each loadout entry's weapon; a record of its own file by index: a stop's marker,
 // an entity's group and path, an Event parameter's event; by id: an entity's SSN and an area's zone id,
-// defined as symbols in the mission's own scope and named by a parameter; the text keys a record's
-// number forms, in the mission's own table then medmssn.bin), the player's SSN naming none, a
+// defined as symbols in the mission's own scope and named by a parameter, a zone of 0 too; the text
+// keys a record's number forms, in the mission's own table else medmssn.bin: the panel's win rows to
+// the first empty slot, an action's chat line, directive or triggered text), the player's SSN naming none, a
 // parameter's label and own choices by its record's type; the edits: an entity added with its item
 // into its band with the next SSN, an area with the lowest free zone id, an event empty, a path or the
 // mission row never added, moved or removed, a duplicate given a fresh id, a marker removed only with
@@ -190,19 +191,57 @@ int test_references() {
 	for (const GraphSymbol &symbol : extracted.symbols)
 		if (symbol.kind == ReferenceKind::MissionEntity || symbol.kind == ReferenceKind::MissionZone)
 			TEST_EXPECT(symbol.scope == "SYNTH_LOGIC.BMS" && !symbol.inert);
-	// The text keys the records' numbers form: the location marker's, the walker's name, the win and
-	// lose directives, in the mission's own table then medmssn.bin, none rewritable.
+	// The text keys the records' numbers form: the location marker's, the walker's name, the objectives
+	// panel's win row, in the mission's own table, else medmssn.bin (never both), none rewritable.
 	const GraphEdge *location = edge(extracted, ReferenceKind::TextId, "LOCATION001");
 	TEST_EXPECT(location && location->scope == "SYNTH_LOGIC.BIN/Locations" && !location->rewritable &&
-	            location->scopes_after == std::vector<std::string>{"MEDMSSN.BIN/Locations"} &&
+	            location->scope_alternate == "MEDMSSN.BIN" && location->scopes_after.empty() &&
 	            location->address == row_at(*document, MissionKind::Marker, 4));
 	const GraphEdge *name = edge(extracted, ReferenceKind::TextId, "STRNAME001");
 	TEST_EXPECT(name && name->scope == "SYNTH_LOGIC.BIN/PeopleNames" && name->field == "name_index" &&
 	            name->address == row_at(*document, MissionKind::Organic, 0));
-	const GraphEdge *win = edge(extracted, ReferenceKind::TextId, "STRWINDIRECTIVE001");
+	const NodeAddress header = row_at(*document, MissionKind::Mission, 0);
+	const GraphEdge *win = edge(extracted, ReferenceKind::TextId, "STRWINCOND001");
 	TEST_EXPECT(win && win->scope == "SYNTH_LOGIC.BIN/WinConditions" && win->field == "win_conditions[0]" &&
-	            win->address == row_at(*document, MissionKind::Mission, 0) && edge(extracted, ReferenceKind::TextId, "STRWINCOND001") &&
-	            edge(extracted, ReferenceKind::TextId, "STRLOSEDIRECTIVE001") && count_edges(extracted, ReferenceKind::TextId) == 5);
+	            win->address == header && count_edges(extracted, ReferenceKind::TextId) == 3);
+	// The panel's rows stop at the first slot of id 0 or 255; an action reads its slot's id: a won or
+	// lost subgoal's chat line, a shown subgoal's directive (none when it hides one), a text's line.
+	{
+		Diagnostic error;
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, header, "win_conditions[1]", int64_t(0)), error) &&
+		            document->apply(edit_of(EditOperation::Set, header, "win_conditions[2]", int64_t(7)), error) &&
+		            document->apply(edit_of(EditOperation::Set, header, "lose_conditions[1]", int64_t(4)), error));
+		const NodeAddress action = first_child(*document, row_at(*document, MissionKind::Event, 1), MissionKind::Action);
+		using Keys = std::vector<std::string>;
+		// The keys the action reads, each "scope key"; one malformed edge, or the panel's rows other
+		// than slot 1's, answers "bad".
+		const auto keys_as = [&](bms::ActionType type, int64_t param1, int64_t param2) {
+			if (!document->apply(edit_of(EditOperation::Set, action, "action_type", int64_t(type)), error) ||
+			    !document->apply(edit_of(EditOperation::Set, action, "param1", param1), error) ||
+			    !document->apply(edit_of(EditOperation::Set, action, "param2", param2), error))
+				return Keys{"bad"};
+			Extracted read;
+			extract_from_document(*document, read);
+			Keys keys;
+			for (const GraphEdge &e : read.edges)
+				if (e.kind == ReferenceKind::TextId && e.address == action) {
+					if (e.field != "param1" || e.scope_alternate != "MEDMSSN.BIN" || e.rewritable) return Keys{"bad"};
+					keys.push_back(e.scope + " " + e.value);
+				}
+			if (count_edges(read, ReferenceKind::TextId) != 3 + keys.size() || edge(read, ReferenceKind::TextId, "STRWINCOND007"))
+				return Keys{"bad"};
+			return keys;
+		};
+		TEST_EXPECT(keys_as(bms::ActionType::SubGoalWon, 1, 0) == Keys{"SYNTH_LOGIC.BIN/WinConditions STRWINMSG001"});
+		TEST_EXPECT(keys_as(bms::ActionType::SubGoalLost, 2, 0) == Keys{"SYNTH_LOGIC.BIN/LoseConditions STRLOSEMSG004"});
+		TEST_EXPECT(keys_as(bms::ActionType::ShowWinSubgoal, 3, 1) == Keys{"SYNTH_LOGIC.BIN/WinConditions STRWINDIRECTIVE007"});
+		TEST_EXPECT(keys_as(bms::ActionType::ShowWinSubgoal, 3, 0).empty());
+		TEST_EXPECT(keys_as(bms::ActionType::ShowLoseSubgoal, 1, 1) == Keys{"SYNTH_LOGIC.BIN/LoseConditions STRLOSEDIRECTIVE001"});
+		TEST_EXPECT(keys_as(bms::ActionType::SubGoalWon, 9, 0).empty());
+		TEST_EXPECT(keys_as(bms::ActionType::OutputText, 12, 0) == Keys{"SYNTH_LOGIC.BIN/Triggered Text ID012"});
+		while (document->can_undo()) document->undo();
+		TEST_EXPECT(bytes_of(*document) == bytes_of(*open(fixture_bytes())));
+	}
 	// The files the game finds by the mission's name, one edge each from the file itself: the name
 	// the reader builds, its alternate or its fallback next; the ones the game runs without optional.
 	const auto sidecar = [&](ReferenceKind kind, const char *value, const char *fallback, bool optional, const char *field) {
@@ -254,6 +293,17 @@ int test_references() {
 	Extracted again;
 	extract_from_document(*document, again);
 	TEST_EXPECT(count_edges(again, ReferenceKind::MissionEntity) == 0 && use(trigger, "param1").reference == ReferenceKind::None);
+	document->undo();
+	// A zone parameter of 0 names a zone like any other (no witness makes 0 name none; the load finds
+	// no area of it and neuters the trigger [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]): an
+	// edge, which no area of the file defines.
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger, "param2", int64_t(0)), error));
+	Extracted unzoned;
+	extract_from_document(*document, unzoned);
+	const GraphEdge *zero = edge(unzoned, ReferenceKind::MissionZone, "0");
+	TEST_EXPECT(zero && zero->field == "param2" && zero->address == trigger && zero->scope == "SYNTH_LOGIC.BMS" &&
+	            count_edges(unzoned, ReferenceKind::MissionZone) == count_edges(extracted, ReferenceKind::MissionZone));
+	for (const GraphSymbol &symbol : unzoned.symbols) TEST_EXPECT(symbol.kind != ReferenceKind::MissionZone || symbol.name != "0");
 	document->undo();
 	std::printf("references: %zu edges, %zu symbols\n", extracted.edges.size(), extracted.symbols.size());
 	return 0;
@@ -928,8 +978,8 @@ int test_rename_companions() {
 // opened as a document, unblocked, its runs canonical (the five with a damaged loadout chunk noted,
 // mission_corpus's); the references counted: the entity parameters and those naming no SSN of their
 // mission, the zone parameters and those naming no zone, the event references and those past the
-// table, the stops and those past the markers, the text keys; and the findings the validator makes
-// over the install, by code.
+// table, the stops and those past the markers, the text keys by key; and the findings the validator
+// makes over the install, by code.
 int test_retail() {
 	const std::string root = retail::install();
 	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission as a document)");
@@ -939,7 +989,7 @@ int test_retail() {
 	size_t missions = 0, differing = 0;
 	size_t entity_refs = 0, entity_missing = 0, zone_refs = 0, zone_missing = 0, event_refs = 0, event_past = 0,
 	       stops = 0, stops_past = 0, text_refs = 0;
-	std::map<std::string, size_t> findings_by_code;
+	std::map<std::string, size_t> findings_by_code, text_by_key;
 	const DocumentType &type = *document_type_for(AssetKind::Mission);
 	for (const std::string &expansion : expansions) {
 		opennova::Vfs game;
@@ -984,7 +1034,10 @@ int test_retail() {
 					++stops;
 					stops_past += number && size_t(*number) >= markers;
 					break;
-				case ReferenceKind::TextId: ++text_refs; break;
+				case ReferenceKind::TextId:
+					++text_refs;
+					++text_by_key[edge.value.substr(0, edge.value.find_first_of("0123456789"))];
+					break;
 				default: break;
 				}
 			}
@@ -997,6 +1050,7 @@ int test_retail() {
 	            "past the markers), %zu text keys\n",
 	            missions, differing, entity_refs, entity_missing, zone_refs, zone_missing, event_refs, event_past, stops,
 	            stops_past, text_refs);
+	for (const auto &[key, count] : text_by_key) std::printf("  %s%%03i: %zu\n", key.c_str(), count);
 	for (const auto &[code, count] : findings_by_code) std::printf("  %s: %zu\n", code.c_str(), count);
 	// What the install holds, measured by this document (the design's emulation counted 3,272 entity
 	// parameters with 140 missing, before the waypoint riders and the Redirect actions' entity slot
@@ -1006,7 +1060,12 @@ int test_retail() {
 	// empty path.
 	TEST_EXPECT(missions == 115 && differing == 5);
 	TEST_EXPECT(entity_refs == 4561 && entity_missing == 162 && zone_refs == 879 && zone_missing == 53);
-	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 1428);
+	TEST_EXPECT(event_refs == 841 && event_past == 0 && stops == 11235 && stops_past == 0 && text_refs == 1574);
+	// The text keys by key: no shipped action outputs a triggered text.
+	const std::map<std::string, size_t> keys = {{"LOCATION", 581},     {"STRLOSEDIRECTIVE", 17}, {"STRLOSEMSG", 29},
+	                                            {"STRNAME", 544},      {"STRWINCOND", 130},      {"STRWINDIRECTIVE", 133},
+	                                            {"STRWINMSG", 140}};
+	TEST_EXPECT(text_by_key == keys);
 	const std::map<std::string, size_t> expected = {{"mission.path_count", 1},  {"mission.path_empty", 115},
 	                                                {"mission.path_one_shot", 72}, {"mission.path_start", 95},
 	                                                {"mission.rewrite_differs", 5}, {"mission.ssn_duplicate", 36}};

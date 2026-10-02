@@ -259,6 +259,32 @@ static int test_menu_text_scope() {
 		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Present && file == menutxt->path());
 		edge.value = "NOPE";
 		TEST_EXPECT(graph.resolve(edge, &file) == ReferenceStatus::Missing && file.empty() && !graph.symbol_reached(edge));
+		// The table loaded in the place of one the project lacks (GraphEdge::scope_alternate: a mission's
+		// medmssn.bin where it has no <stem>.bin, never both [orig: TextResource_LoadMissionTextBin
+		// @0x51ed90]): the alternate's section where the own table is absent, the own table alone where
+		// it is present.
+		GraphEdge mission;
+		mission.kind = ReferenceKind::TextId;
+		mission.value = "GAME_TITLE";
+		mission.scope = "ABSENT.BIN/menu";
+		mission.scope_alternate = "GAMETEXT.BIN";
+		TEST_EXPECT(graph.lookup_scope(mission) == "GAMETEXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Present && file == gametext->path());
+		mission.scope = "MENUTXT.BIN/menu";
+		TEST_EXPECT(graph.lookup_scope(mission) == "MENUTXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Missing && !graph.symbol_reached(mission));
+		// A lookup whose owner the project lacks (GraphEdge::scope_owner: a script of a mission the
+		// project does not have runs with whichever mission's table plays): any table, nothing after,
+		// and no rename rewrites it; with the owner present, its own scope and a rewrite.
+		mission.value = "STATS_ONLY";
+		mission.rewritable = true;
+		mission.scope_owner = "NOSUCH.BMS";
+		mission.scopes_after = {"GAMETEXT.BIN/menu"};
+		TEST_EXPECT(graph.lookup_scope(mission).empty() && graph.resolve(mission, &file) == ReferenceStatus::Present &&
+		            file == menutxt->path() && !graph.rewrites(mission));
+		mission.scope_owner = "MENUTXT.BIN";
+		TEST_EXPECT(graph.lookup_scope(mission) == "MENUTXT.BIN/menu" &&
+		            graph.resolve(mission, &file) == ReferenceStatus::Missing && graph.rewrites(mission));
 	}
 
 	editor_test::handle_to_end(session, request::open_document("main.mnu"));

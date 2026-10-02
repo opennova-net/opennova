@@ -63,6 +63,8 @@
 #include <editor/session/view_json.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/cbin/cbin.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mus/mus.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
@@ -453,9 +455,11 @@ static int test_script_type() {
 	TEST_EXPECT(is(3, ReferenceKind::Ammo, "satchel", 6, 16) && references[3].fallback == "ammo_satchel");
 	TEST_EXPECT(is(4, ReferenceKind::TextId, "MISSION_START", 7, 15) && references[4].fallback.empty());
 	// A text key of a script of a mission's name reads that mission's table (its stem's .bin, else
-	// medmssn.bin) and then gametext.bin (S14): a use Rename everywhere rewrites, as the others are.
-	const std::vector<std::string> tables_after = {"MEDMSSN.BIN", "GAMETEXT.BIN"};
-	TEST_EXPECT(references[4].scope == "TEXT_DOCUMENT.BIN" && references[4].scopes_after == tables_after);
+	// medmssn.bin, never both) and then gametext.bin (S14), where the project has the mission (the
+	// owner): a use Rename everywhere rewrites there, as the others are (the graph's, below).
+	const std::vector<std::string> tables_after = {"GAMETEXT.BIN"};
+	TEST_EXPECT(references[4].scope == "TEXT_DOCUMENT.BIN" && references[4].scope_alternate == "MEDMSSN.BIN" &&
+	            references[4].scope_owner == "TEXT_DOCUMENT.BMS" && references[4].scopes_after == tables_after);
 	TEST_EXPECT(references[4].rewritable && references[0].rewritable && references[3].rewritable);
 	// game.wac runs with every mission: its key reads whichever table plays, any table here, and no
 	// rename rewrites it.
@@ -464,7 +468,8 @@ static int test_script_type() {
 		std::vector<TextReference> keys;
 		script_references(*shared, keys);
 		TEST_EXPECT(keys.size() == 1 && keys[0].kind == ReferenceKind::TextId && keys[0].scope.empty() &&
-		            keys[0].scopes_after.empty() && !keys[0].rewritable);
+		            keys[0].scopes_after.empty() && keys[0].scope_alternate.empty() && keys[0].scope_owner.empty() &&
+		            !keys[0].rewritable);
 	}
 	// The files a script names (S14): a wave by its string (past the quote), a RUN's script by the name
 	// written, the compiler's own name (to the first '.', then ".wac") its second where the written one
@@ -722,14 +727,37 @@ static int test_graph_and_rename() {
 	            has_code(stale, "rename.partial"));
 	editor_test::handle_to_end(project.session, request::undo(script));
 	TEST_EXPECT(open->line(5) == "\tammoarea AMMO_AT_CONTRACT 8");
-	// A text key's use in the script of its table's name is rewritten with its definition (S14: the
-	// graph scopes the lookup as the game makes it): the plan reaches the script's span.
+	// A text key's use in the script of a mission's name the project does not have: the script runs with
+	// whichever mission's table plays, so its key resolves in any table and no rename rewrites it (a
+	// rename of the definition is refused at that use, as game.wac's is).
 	const std::vector<const GraphSymbol *> start = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
 	const GraphEdge *key_now = edge_at(project.graph(), script, "7:15");
-	TEST_EXPECT(start.size() == 1 && key_now && key_now->rewritable);
+	TEST_EXPECT(start.size() == 1 && key_now && key_now->scope_owner == "TEXT_DOCUMENT.BMS" &&
+	            project.graph().lookup_scope(*key_now).empty() && !project.graph().rewrites(*key_now) &&
+	            project.graph().resolve(*key_now) == ReferenceStatus::Present);
 	if (start.empty()) return 1;
-	const SymbolRenamePlan keyed =
+	const SymbolRenamePlan unowned =
 	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *start.front(), "MISSION_GO");
+	TEST_EXPECT(!unowned.ok() && has_code(unowned.refusals, "rename.site") && unowned.refusals.size() == 1 &&
+	            unowned.refusals[0].asset == script && unowned.refusals[0].message.find("at 7:15") != std::string::npos);
+	// With the mission in the project, the key reads its table (S14: the graph scopes the lookup as the
+	// game makes it) and is rewritten with its definition: the plan reaches the script's span.
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::vector<uint8_t> bytes;
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, bytes, error) &&
+		            editor_test::write_bytes(project.root() + "/missions/text_document.bms", bytes));
+		editor_test::handle_to_end(project.session, request::rescan());
+	}
+	const std::vector<const GraphSymbol *> owned = project.graph().symbols_named(ReferenceKind::TextId, "MISSION_START");
+	key_now = edge_at(project.graph(), script, "7:15");
+	TEST_EXPECT(owned.size() == 1 && key_now && project.graph().lookup_scope(*key_now) == "TEXT_DOCUMENT.BIN" &&
+	            project.graph().rewrites(*key_now) && graph_edge_to_json(project.graph(), *key_now).get_bool("rewritable", false));
+	if (owned.empty()) return 1;
+	const SymbolRenamePlan keyed =
+	        plan_symbol_rename_project(*project.view().project.scan, project.graph(), *owned.front(), "MISSION_GO");
 	TEST_EXPECT(keyed.ok() && keyed.sites.size() == 2 && keyed.sites[1].file == script && keyed.sites[1].span.line == 7 &&
 	            keyed.sites[1].span.column == 15 && keyed.sites[1].before == "MISSION_START" && keyed.sites[1].after == "MISSION_GO");
 	// A rename that would take over a use reaching another ammo through its fallback: bomb renamed

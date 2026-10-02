@@ -742,9 +742,9 @@ void mission_references(const Document &document, Extracted &out) {
 	const auto *mission = dynamic_cast<const MissionDocument *>(&document);
 	const MissionRow *header = mission ? mission->mission_row() : nullptr;
 	if (!header) return;
-	// The mission's own table, then the one the game loads in its place when the mission has none
-	// [orig: TextResource_LoadMissionTextBin @0x51ed90]. (The graph tries the second wherever the
-	// first defines no such key, the mission's table there or not.)
+	// The mission's own table, else the one the game loads in its place where the mission has none,
+	// never both [orig: TextResource_LoadMissionTextBin @0x51ed90]: the edge's alternate, which the
+	// graph reads only where the project has no table of the mission's name.
 	const std::string table = strutil::to_upper(mission_base_name(basename_of(document.path()))) + ".BIN";
 	const auto text = [&](const NodeAddress &address, const std::string &field, const char *section, const char *key,
 	                      int number) {
@@ -759,7 +759,7 @@ void mission_references(const Document &document, Extracted &out) {
 		edge.kind = ReferenceKind::TextId;
 		edge.value = name;
 		edge.scope = table + "/" + section;
-		edge.scopes_after.push_back(std::string("MEDMSSN.BIN/") + section);
+		edge.scope_alternate = "MEDMSSN.BIN";
 		out.edges.push_back(std::move(edge));
 	};
 	int location = 0;
@@ -775,15 +775,52 @@ void mission_references(const Document &document, Extracted &out) {
 		if (entity.name_index != 0) text(address, "name_index", "PeopleNames", "STRNAME", entity.name_index);
 	}
 	const NodeAddress top{header->id, header->kind, 0};
+	const bms::Header &head = header->native.header;
+	// The objectives panel's rows: the win slots 1..8 until a 0 or 255 id, each its STRWINCOND
+	// [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
 	for (int slot = 0; slot < 8; ++slot) {
-		const uint8_t win = header->native.header.win_conditions[slot];
-		const uint8_t lose = header->native.header.lose_conditions[slot];
-		const std::string at = "[" + std::to_string(slot) + "]";
-		if (win != 0 && win != 255) {
-			text(top, "win_conditions" + at, "WinConditions", "STRWINDIRECTIVE", win);
-			text(top, "win_conditions" + at, "WinConditions", "STRWINCOND", win);
+		const uint8_t win = head.win_conditions[slot];
+		if (win == 0 || win == 255) break;
+		text(top, "win_conditions[" + std::to_string(slot) + "]", "WinConditions", "STRWINCOND", win);
+	}
+	// What the actions read of the table, each by the text id of the slot (1..8) its first parameter
+	// names: SubGoalWon's chat line STRWINMSG, SubGoalLost's STRLOSEMSG [orig: EventAction_Dispatch
+	// case 14 @0x454500, the key @0x454552; case 15 @0x4545e0, the key @0x45460c]; a shown
+	// ShowWin/LoseSubgoal's directive STRWINDIRECTIVE / STRLOSEDIRECTIVE (one not shown returns before
+	// the lookup) [orig: cases 35, 36 @0x4546af, @0x454724 -> HUD_ShowObjectiveNotification @0x5BA2E0,
+	// the inactive return @0x5ba2f3, the keys @0x5ba316 / @0x5ba34b]; OutputText's line, Triggered
+	// Text's ID%03i [orig: HUD_DisplayTriggeredText @0x51F190]. A slot past the eight reads a byte
+	// outside the header's tables, which the port does not model (runtime/world World::
+	// show_objective_notification): no edge.
+	const auto slot_text = [&](const NodeAddress &address, const uint8_t *ids, int32_t slot, const char *section,
+	                           const char *key) {
+		if (slot >= 1 && slot <= 8) text(address, "param1", section, key, ids[slot - 1]);
+	};
+	for (const Node *row : mission->rows_of(K::Event)) {
+		const EventRow &event = static_cast<const EventRow &>(*row);
+		if (event.ids.lists.size() < 2) continue;
+		for (size_t i = 0; i < event.native.actions.size() && i < event.ids.lists[1].size(); ++i) {
+			const bms::Action &action = event.native.actions[i];
+			const NodeAddress address{row->id, k(K::Action), event.ids.lists[1][i].id};
+			switch (action.action_type) {
+			case bms::ActionType::SubGoalWon:
+				slot_text(address, head.win_conditions, action.param1, "WinConditions", "STRWINMSG");
+				break;
+			case bms::ActionType::SubGoalLost:
+				slot_text(address, head.lose_conditions, action.param1, "LoseConditions", "STRLOSEMSG");
+				break;
+			case bms::ActionType::ShowWinSubgoal:
+				if (action.param2 != 0)
+					slot_text(address, head.win_conditions, action.param1, "WinConditions", "STRWINDIRECTIVE");
+				break;
+			case bms::ActionType::ShowLoseSubgoal:
+				if (action.param2 != 0)
+					slot_text(address, head.lose_conditions, action.param1, "LoseConditions", "STRLOSEDIRECTIVE");
+				break;
+			case bms::ActionType::OutputText: text(address, "param1", "Triggered Text", "ID", action.param1); break;
+			default: break;
+			}
 		}
-		if (lose != 0 && lose != 255) text(top, "lose_conditions" + at, "LoseConditions", "STRLOSEDIRECTIVE", lose);
 	}
 	// The files the game finds by the mission's name (documents/mission_file_set.h), one edge each
 	// from the file itself: the name its reader builds, then the alternate or the fallback the reader

@@ -91,10 +91,12 @@ std::string style_missing(const AssetGraph &graph, const GraphEdge &edge) {
 }
 
 std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
-	const size_t slash = edge.scope.find('/');
-	const std::string table = edge.scope.substr(0, slash);
-	const std::string section = slash == std::string::npos ? std::string() : edge.scope.substr(slash + 1);
-	if (edge.scope.empty()) return ", which no string table defines; the game shows the id.";
+	// The table the lookup reads as the project's files are (a mission's own, else medmssn.bin).
+	const std::string scope = graph.lookup_scope(edge);
+	const size_t slash = scope.find('/');
+	const std::string table = scope.substr(0, slash);
+	const std::string section = slash == std::string::npos ? std::string() : scope.substr(slash + 1);
+	if (scope.empty()) return ", which no string table defines; the game shows the id.";
 	if (table.empty())
 		return ", but its window names no string table (TEXT_RSRC) and neither does the window it falls back to; the "
 		       "game shows the id.";

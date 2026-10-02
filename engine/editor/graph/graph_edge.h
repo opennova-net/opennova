@@ -49,6 +49,16 @@ struct GraphEdge {
 	// kind's edge only: it resolves to the first scope's definition a lookup finds (a fallback is a
 	// second name, this a second place).
 	std::vector<std::string> scopes_after;
+	// The table the lookup reads in the scope's table's place when the project has no file of that
+	// table's name, the scope's section kept: the game loads the one or the other, never both (a
+	// mission's text: <stem>.bin, else medmssn.bin [orig: TextResource_LoadMissionTextBin @0x51ed90]);
+	// "" for none. A symbol kind's edge only.
+	std::string scope_alternate;
+	// The file whose presence makes the scope the lookup's (a script of a mission's name reads that
+	// mission's text: <stem>.bms): without it the name resolves in any table, and no rename rewrites
+	// the use (its table is whichever mission's script compiles it in, AssetGraph::rewrites); "" for
+	// none. A symbol kind's edge only.
+	std::string scope_owner;
 	// The game runs without the file (a mission's script, which 40 of 115 shipped missions have,
 	// ADR 0046 S14): the graph makes no finding of it missing; the resolver, the pickers, References
 	// and the import read the edge as any other.

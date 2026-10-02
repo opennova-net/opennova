@@ -652,9 +652,11 @@ private:
 	// A symbol reference followed to the file that defines it (import_plan.h): nothing when the
 	// project or a planned file defines it; else the first file of the wanting file's origin, then
 	// of the install, that does, planned and queued; else counted as undefined.
-	// The lookup is the graph's (AssetGraph::resolve): the edge's scope, then each scope it tries
-	// after (a mission's text key: its own table, then GAMETEXT.BIN), the value then its fallback
-	// in each.
+	// The lookup is the graph's (AssetGraph::resolve): the scope it starts at (AssetGraph::
+	// lookup_scope: the edge's own; its alternate table's where the project lacks the own table, the
+	// own one tried first, which the import may bring; any table, nothing after, where the project
+	// lacks its owner), then each scope it tries after (a mission script's text key: GAMETEXT.BIN), the
+	// value then its fallback in each.
 	void follow_symbol(const SymbolUse &use) {
 		const GraphEdge &edge = use.edge;
 		if (graph_.resolve(edge) == ReferenceStatus::Present) return;
@@ -662,8 +664,13 @@ private:
 		const bool variable = reference_row(edge.kind).spell == NameSpelling::StyleVariable && is_style_reference(edge.value);
 		std::vector<std::string> names{variable ? style_variable(edge.value) : edge.value};
 		if (!edge.fallback.empty()) names.push_back(edge.fallback);
-		std::vector<const std::string *> scopes{&edge.scope};
-		for (const std::string &scope : edge.scopes_after) scopes.push_back(&scope);
+		const std::string first = graph_.lookup_scope(edge);
+		const bool owned = edge.scope_owner.empty() || graph_.has_file(edge.scope_owner);
+		std::vector<const std::string *> scopes;
+		if (owned && first != edge.scope) scopes.push_back(&edge.scope);
+		scopes.push_back(&first);
+		if (owned)
+			for (const std::string &scope : edge.scopes_after) scopes.push_back(&scope);
 		const ImportNeed need{use.file, edge.record, edge.field, edge.kind, edge.value, edge.loader_arg};
 		const ImportOrigin *own = origin_of(use.file);
 		const ImportOrigin *install = install_ != own ? install_ : nullptr;
