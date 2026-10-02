@@ -70,6 +70,27 @@ struct TodState {
 	Rgb cloudedge;
 };
 
+// The parse's scratch keyframe: where a TOD color line outside every tod_begin block
+// lands (TimeOfDay_ParseProperty writes through the slot pointer, which sits on the
+// scratch slot before the first block and after a tod_end). The load seeds it before the
+// passes [orig: Environment_LoadTimeOfDayConfig @ 0x57db54..0x57db7e: fog and skyfog
+// 0xC0C0FF, ground 0x202020, light 0x646440, sky 0x404064; the moon and the sky/cloud
+// ramps are not seeded: zero on a first load, a previous load's leftovers are not kept],
+// and once the .env parsed its colors become the twelve color blocks' parsed targets
+// [orig: @ 0x57dce0..0x57dd57]. Those are the same values Environment_InitDefaults leaves
+// in the blocks when the .env is skipped [orig: @ 0x57c03a..0x57c17d]. With no keyframe
+// table nothing overwrites them (the per-tick compute is gated off, @ 0x57de8a): they are
+// the colors a world without one runs on. `sun` is the light block.
+inline Keyframe scratch_keyframe_defaults() {
+	Keyframe scratch;
+	scratch.sun = packed_to_rgb01(0x646440);
+	scratch.sky = packed_to_rgb01(0x404064);
+	scratch.ground = packed_to_rgb01(0x202020);
+	scratch.fog = packed_to_rgb01(0xC0C0FF);
+	scratch.skyfog = packed_to_rgb01(0xC0C0FF);
+	return scratch;
+}
+
 // Field defaults mirror the engine's pre-parse state [orig: Environment_InitDefaults
 // @ 0x57c010]: this is what an .env that omits a keyword means to the engine.
 // (sky_height keeps the engine's raw-200 quirk, ~0.003 units; every shipped file
@@ -103,6 +124,11 @@ struct Config {
 	float water_murk = 0.8f;
 	int advanced_clouds = 0;
 	std::vector<Keyframe> keyframes;
+	// The scratch keyframe after the parse (above): its seed, overwritten by the color
+	// lines outside every block, each baked with the envscale read before it as the
+	// parser packs it [orig: Color_ScaleRGBAndPack @ 0x57f890]. The targets a world with
+	// no keyframe table runs on.
+	Keyframe scratch = scratch_keyframe_defaults();
 };
 
 // The engine parses at most 16 TOD keyframes; later tod_begin blocks bleed their

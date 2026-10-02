@@ -1770,13 +1770,19 @@ func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_default
 	# check @ 0x57dca3], and nothing above it reads the outcome [orig:
 	# Game_LoadTerrainDuringConnect @ 0x520710]. What stands is the state every
 	# mission load reset first [orig: Terrain_LoadEnvironmentConfig @ 0x610947 ->
-	# Environment_InitDefaults @ 0x57c010]: the default fields, no keyframe.
-	for staged_env in ["missing", "empty"]:
+	# Environment_InitDefaults @ 0x57c010]: the default fields, no keyframe. With no
+	# keyframe table nothing writes a color block (the compute's gate @ 0x57de8a), so a
+	# world without one, the .env missing or keyframe-less ("untimed"), runs on the
+	# parsed targets the load left: InitDefaults' (@ 0x57c03a..0x57c17d) or the .env's
+	# scratch keyframe (@ 0x57dce0), the same seed (env #39).
+	for staged_env in ["missing", "empty", "untimed"]:
 		var root_dir := _staged(WorldFixture.stage_minimal_root("env_skip_" + staged_env))
 		if staged_env == "missing":
 			assert_eq(DirAccess.remove_absolute(root_dir.path_join("mnml.env")), OK)
-		else:
+		elif staged_env == "empty":
 			TestFs.write_text(self, root_dir.path_join("mnml.env"), "")
+		else:
+			TestFs.write_text(self, root_dir.path_join("mnml.env"), "fog_type 1\r\nwater_murk 0.8\r\n")
 		var world := WorldFixture.make_world(self)
 		await get_tree().process_frame
 		world.set_playable(false)
@@ -1794,6 +1800,16 @@ func test_a_mission_whose_environment_does_not_load_starts_on_the_engine_default
 			assert_eq(env.get_sky_map2(), "cld_day1b.pcx")
 			assert_almost_eq(env.get_water_murk(), 0.8, 0.000001)
 			assert_almost_eq(env.get_iris_percent(), 50.0, 0.000001)
+		if env_node != null:
+			var byte := 1.0 / 255.0
+			assert_almost_eq(env_node.get_sun_light_target(), Vector3(0x64, 0x64, 0x40) * byte,
+				Vector3.ONE * 0.001, "the light block's InitDefaults target (%s .env)" % staged_env)
+			assert_almost_eq(env_node.get_sky_ambient_target(), Vector3(0x40, 0x40, 0x64) * byte,
+				Vector3.ONE * 0.001, "the sky block's InitDefaults target")
+			assert_almost_eq(env_node.get_fill_light_target(), Vector3(0x20, 0x20, 0x20) * byte,
+				Vector3.ONE * 0.001, "the ground block's InitDefaults target")
+			assert_almost_eq(env_node.get_fog_color_target(), Vector3.ONE,
+				Vector3.ONE * 0.001, "the fog block's 0xC0C0FF, doubled and saturated")
 		var timeline: LoadTimeline = world.last_load_timeline()
 		assert_not_null(timeline)
 		if timeline != null:

@@ -87,6 +87,47 @@ int main() {
 			return 1;
 	}
 
+	// The scratch keyframe (env #39): a color line outside every tod_begin block lands there,
+	// packed with the envscale read before it [orig: Color_ScaleRGBAndPack @ 0x57f890], fog
+	// mirroring into the seeded skyfog; the writer puts those lines ahead of the envscale so
+	// they read back as they were, and writes none for the seed.
+	{
+		opennova::env::Config naked;
+		std::string err;
+		std::istringstream lines("envscale 0.5\r\nsky_height 175\r\nsky_rgb 10,20,30\r\nfog_rgb 40,50,60\r\n"
+		                         "tod_begin 1200\r\n    sun_rgb 1,1,1\r\ntod_end\r\n");
+		if (!expect(opennova::env::load_env(lines, naked, err) && naked.keyframes.size() == 1,
+		            "naked color lines parse beside a block"))
+			return 1;
+		const opennova::env::Keyframe seed = opennova::env::scratch_keyframe_defaults();
+		if (!expect(near(naked.scratch.sky.r, 5.0f / 255.0f) && near(naked.scratch.sky.b, 15.0f / 255.0f) &&
+		                    near(naked.scratch.fog.g, 25.0f / 255.0f) && near(naked.scratch.skyfog.g, 25.0f / 255.0f) &&
+		                    near(naked.scratch.sun.r, seed.sun.r) && near(naked.keyframes[0].sun.r, 1.0f / 255.0f),
+		            "naked lines are baked into the scratch keyframe; the block keeps its own"))
+			return 1;
+		std::ostringstream saved;
+		if (!expect(opennova::env::save_env(saved, naked, err), "save with a scratch keyframe")) return 1;
+		const std::string text = saved.str();
+		if (!expect(text.find("sky_rgb 5,10,15") != std::string::npos &&
+		                    text.find("sky_rgb 5,10,15") < text.find("envscale"),
+		            "the scratch lines precede the envscale line"))
+			return 1;
+		opennova::env::Config back;
+		std::istringstream again(text);
+		std::ostringstream resaved;
+		if (!expect(opennova::env::load_env(again, back, err) && opennova::env::save_env(resaved, back, err) &&
+		                    resaved.str() == text && near(back.scratch.sky.b, 15.0f / 255.0f) &&
+		                    near(back.scratch.skyfog.g, 25.0f / 255.0f),
+		            "a saved scratch keyframe reads back and saves the same"))
+			return 1;
+		std::ostringstream plain;
+		if (!expect(opennova::env::save_env(plain, opennova::env::Config(), err) &&
+		                    plain.str().find("_rgb 192,192,255") == std::string::npos &&
+		                    plain.str().find("sky_rgb") == std::string::npos,
+		            "the seed writes no scratch line"))
+			return 1;
+	}
+
 	std::ifstream fixture(fixture_path(), std::ios::binary);
 	if (!fixture) {
 		std::fprintf(stderr, "FAIL: cannot open %s\n", fixture_path().c_str());
