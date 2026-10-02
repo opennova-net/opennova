@@ -17,7 +17,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/local_player_view.h>
 #include <runtime/world/world.h>
-#include "../fixtures/minimal_fnt_builder.h"
+#include "../common/test_font.h"
 using namespace opennova;
 using namespace opennova::hud;
 using namespace opennova::world;
@@ -194,7 +194,7 @@ static void mortar_map_and_world_cues() {
 //  @0x5CA0C0; impact distance measured in slot 0xB4C394 @0x5A897E and drawn in
 //  the hudpos slot 0x2723C74 @0x5A89D0]
 static void combat_text_font_slots() {
-	const fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
+	const fnt::fnt_font_t font = test_font::uniform_test_font();
 	HudLayout layout;
 	layout.alpha_fade_seconds = 1;
 	layout.combat.gear_x = 100;

@@ -848,10 +848,10 @@ void compose_chase_camera(PlayerViewState &v, const float position[3],
             }
         }
 
-        // The watercraft drop: half the carrier radius off the eye AND the
+        // The aircraft drop: half the carrier radius off the eye AND the
         // look-at [orig: @0x43861D..0x43864C, itemDef+0x196 in {3,4} — the
         // eye z and var_AC (the look-at z) both lose boundRadius >> 1].
-        const float drop = m.watercraft ? watercraft_eye_drop(r) : 0.0f;
+        const float drop = m.aircraft ? aircraft_eye_drop(r) : 0.0f;
         eye[2] -= drop;
         target[2] -= drop;
 

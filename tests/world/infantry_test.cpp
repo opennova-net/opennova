@@ -2808,26 +2808,26 @@ void test_weapon_channel_consumer_gate_and_switch_identity() {
     inf.anim_state = anim_state::kWalkProneForward; // flags 0x603: no 0x40
     CHECK(!infantry_weapon_channel_visible(inf, true, false));
 
-    // The observed AnimMap serial is per entity: a repeated map does not restamp,
-    // a changed map does, and a newly spawned entity sees the current map as new.
+    // The observed category serial is per entity: a repeated serial does not restamp,
+    // a new one does, and a newly spawned entity sees the current serial as new.
     InfantryState first;
     infantry_weapon_switch_stamp(first, 7);
-    CHECK(first.wpn_anim_map_serial == 7);
+    CHECK(first.wpn_category_serial == 7);
     CHECK(first.arms_dip_ticks == 20);
     first.arms_dip_ticks = 5;
     infantry_weapon_switch_stamp(first, 7);
     CHECK(first.arms_dip_ticks == 5);
     infantry_weapon_switch_stamp(first, 8);
-    CHECK(first.wpn_anim_map_serial == 8);
+    CHECK(first.wpn_category_serial == 8);
     CHECK(first.arms_dip_ticks == 20);
 
     InfantryState replacement;
     infantry_weapon_switch_stamp(replacement, 8);
-    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.wpn_category_serial == 8);
     CHECK(replacement.arms_dip_ticks == 20);
     replacement.arms_dip_ticks = 3;
     infantry_weapon_switch_stamp(replacement, 0);
-    CHECK(replacement.wpn_anim_map_serial == 8);
+    CHECK(replacement.wpn_category_serial == 8);
     CHECK(replacement.arms_dip_ticks == 3);
 }
 

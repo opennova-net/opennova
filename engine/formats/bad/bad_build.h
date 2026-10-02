@@ -263,4 +263,21 @@ bool bad_build_mint(const BadBuildClip &clip, const BadBuildClip *reset, std::ve
 // head unchecked [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16].
 bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string *error);
 
+// One file a set mints: its name (`<clip>.bad`, or the output's) and its bytes.
+struct BadMintedFile {
+    std::string name;
+    std::vector<uint8_t> bytes;
+};
+
+// Mint a whole set, all or nothing, each clip read back through the reader
+// before any is handed on. `out_name` is the file the set lands in, which the
+// game must be able to pack (bad_build_packable_name): a table's `<name>.adm`,
+// whose clips compose against the set's reset clip and land beside it as
+// `<clip>.bad`, the table minted last (bad_build_mint_table); or a name ending
+// `.bad`, the one clip of a set with no row, composed against its own first
+// key and minted under that name. False with `error` set, and `failed_clip`
+// the index of the clip that failed (-1 when none did).
+bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, std::vector<BadMintedFile> &out,
+                        std::string *error, int *failed_clip = nullptr);
+
 } // namespace opennova::bad

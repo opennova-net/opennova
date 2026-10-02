@@ -1,7 +1,8 @@
 # miniz 2.1.0 (public domain / unlicense, see the end of miniz.c), Rich
-# Geldreich's single-file zlib subset. Vendored as is: the ONE consumer is the
-# BFC1 container decoder (engine/formats/bfc1), which PRIVATE-links this target
-# to inflate the compressed payload; nothing else in the tree includes miniz.h.
+# Geldreich's single-file zlib subset. Vendored as is: its consumers are the BFC1
+# container decoder (engine/formats/bfc1) and the editor's PNG reader
+# (engine/editor/import/png_decode), each PRIVATE-linking this target to inflate a
+# payload; nothing else in the tree includes miniz.h.
 # The engine itself carries no C sources (ADR 0043 d14), so the C toolchain
 # exists for this leaf, bcrypt and sqlite alone. Bump by replacing miniz.c and
 # miniz.h together.

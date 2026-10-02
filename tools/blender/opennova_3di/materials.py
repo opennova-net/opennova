@@ -39,7 +39,7 @@ import bpy
 import numpy as np
 
 from . import export
-from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, fmt, quoted
+from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, flipbook_reads_register, fmt, quoted
 
 
 # Shader capability bits (runtime/renderer/material_descriptor.h
@@ -1144,9 +1144,15 @@ class ModelMaterials:
             if p.anim_type not in (0, 1):
                 raise ExportError(f"{mat.name}: the flipbook's anim type is {p.anim_type}; it is 0 (time) or 1 "
                                   "(register)")
-            if p.anim_type == 1:
+            # Only a flipbook with frames on the register clock names a
+            # register (the loader's gate, threedi_flipbook_reads_register);
+            # any other writes its time word as it stands.
+            if flipbook_reads_register(p.anim_frames, p.anim_type):
                 time_or_register = self.exporter.register(p.anim_register, f"{mat.name} texture flipbook")
             else:
+                if p.anim_register:
+                    self.exporter.note(f"{mat.name}: the flipbook names the register '{p.anim_register}', but only "
+                                       "one with frames on anim type 1 reads a register; its frame time is written")
                 time_or_register = fixed(p.anim_time, 1, -0x8000, 0x7FFF, f"{mat.name}: the flipbook frame time")
             lines.append(f"texanim {p.anim_frames} {p.anim_type} {time_or_register}")
         # A generator's words: an RGB rate a u16 of 1/256 steps, the other
@@ -1208,15 +1214,16 @@ class ModelMaterials:
 
 # --- import -----------------------------------------------------------------
 
-def import_image(builder, name):
-    """The Blender image of texture reference `name`, loaded once per import
-    from the file `opennova-3di scene` resolved beside the model (None, with a
-    note, when it found none; None for an empty name, a row that names no
-    file). An image this load makes is named after the reference, which export
-    names it by (file_reference)."""
-    if name in builder.images:
-        return builder.images[name]
-    path = builder.sc["texfiles"].get(name)
+def import_image(builder, name, typ):
+    """The Blender image of texture reference `name` on a row of type `typ`,
+    loaded once per import from the file `opennova-3di scene` resolved beside
+    the model for that name and type, the one file the row's loader opens
+    (None, with a note, when it found none; None for an empty name, a row that
+    names no file). An image this load makes is named after the reference,
+    which export names it by (file_reference)."""
+    if (name, typ) in builder.images:
+        return builder.images[(name, typ)]
+    path = builder.sc["texfiles"].get((name, typ))
     img = None
     if name and not path:
         builder.note(f"texture {name} not found beside the model")
@@ -1241,7 +1248,7 @@ def import_image(builder, name):
                 builder.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
         except RuntimeError:
             builder.note(f"texture {name}: Blender cannot read {os.path.basename(path)}")
-    builder.images[name] = img
+    builder.images[(name, typ)] = img
     return img
 
 
@@ -1295,7 +1302,7 @@ def import_materials(builder):
         shown = {}  # slot -> the image its node shows
         tangent = caps & FLAG_NORMAL and caps & FLAG_TANGENT
         for slot, rows in by_slot.items():
-            images = [import_image(builder, row[0]) for row in rows]
+            images = [import_image(builder, row[0], row[2]) for row in rows]
             # A slot's lone plain row is its node's image when that image
             # names it as the row does; the normal map's when the shader reads
             # tangent-space normals from an .mdt file (read through a green
@@ -1318,7 +1325,9 @@ def import_materials(builder):
         if m["texanim"]:
             frames, typ, time_or_register = m["texanim"]
             p.anim_frames, p.anim_type = frames, typ
-            if typ == 1:
+            # The time word names a register only under the loader's gate
+            # (threedi_flipbook_reads_register); otherwise it is a plain value.
+            if flipbook_reads_register(frames, typ):
                 p.anim_register = reg[time_or_register] if 0 <= time_or_register < len(reg) else ""
             else:
                 p.anim_time = time_or_register

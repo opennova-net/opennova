@@ -284,7 +284,8 @@ int main(int argc, char **argv) {
 	      world::charfilter_bit("gunner") == 0x04 && world::charfilter_bit("rifleman") == 0x08 &&
 	      world::charfilter_bit("engineer") == 0x10 && world::charfilter_bit("bogus") == 0);
 	CHECK(world::teamfilter_bit("red") == 0x01 && world::teamfilter_bit("BLUE") == 0x02 &&
-	      world::teamfilter_bit("green") == 0);
+	      world::teamfilter_bit("green") == 0 && world::teamfilter_bit("yellow") == 0 &&
+	      world::teamfilter_bit("violet") == 0); // the loadout reader's yellow / violet are not the host's
 
 	// --- C2S 0x2F send-time slot re-resolution. The requested red-only
 	// category-3 slot is corrected to the first populated blue slot for teams

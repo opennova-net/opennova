@@ -7,7 +7,6 @@
 #include <runtime/anim/aim_overlay.h>
 #include <formats/bad/bad.h>
 #include <base/io/strutil.h>
-#include <runtime/assets/asset_store.h>
 #include <runtime/world/body_anim.h>
 
 #include <algorithm>
@@ -96,19 +95,20 @@ void SkeletalClips::clear() {
 }
 
 bool SkeletalClips::load_from_adm(
-		const assets::AssetStore *assets, const std::string &adm_name,
+		const RigFiles *files, const std::string &adm_name,
 		const std::vector<anim::Vec3> &model_bone_origins,
 		const std::vector<int> &model_bone_parents) {
 	clear();
-	if (!assets || adm_name.empty()) return false;
-	const auto map = assets->animation_map(adm_name);
+	if (!files || adm_name.empty()) return false;
+	const auto map = files->animation_map(adm_name);
 	if (!map) return false;
 	// The rig's bind is slot 0's head once the table is read. A row names slot 0
 	// when its key past the first five characters is "reset", in any case (slot
 	// name 0 @0x7c3264). Each clip registered there REPLACES the head instead of
-	// joining a ring, and a variant whose .bad does not load registers nothing, so
-	// the bind is the last variant that loads of the last such row: the head
-	// AnimMap_RegisterEntity pins into channel+44.
+	// joining a ring, and a variant whose .bad does not load registers failsafe.bad in
+	// its place, or nothing without one (adm_token_clip), so the bind is the last
+	// variant that registers of the last such row: the head AnimMap_RegisterEntity
+	// pins into channel+44.
 	// [orig: AnimMap_FindSlotByName @0x40cfa0 (stricmp on key + 5);
 	//  AnimMap_ParseConfigLine @0x40cb60, the null test @0x40cbe7;
 	//  AnimMap_RegisterBoneNode @0x40c2d0, slot 0 @0x40c365 -> the head store
@@ -117,44 +117,60 @@ bool SkeletalClips::load_from_adm(
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
 		if (!adm_key_names_slot(entry.key, "reset")) continue;
-		for (size_t v = 0; v < entry.variant_count; ++v)
-			if (entry.variants[v][0] != '\0' && assets->bone_animation(entry.variants[v]))
-				reset_value = entry.variants[v];
+		for (size_t v = 0; v < entry.variant_count; ++v) {
+			std::string registered;
+			if (entry.variants[v][0] != '\0' && adm_token_clip(*files, entry.variants[v], &registered))
+				reset_value = registered;
+		}
 	}
 	// A table with no slot-0 clip never binds: its load reads slot 0's null head
 	// unchecked, and registration frees the channel it allocated, so no entity
 	// animates through it. [orig: AnimMap_LoadAdmFile @0x40cc40, the read
 	// @0x40ce11..0x40ce16; AnimMap_RegisterEntity @0x40bb60, the free @0x40bbc4]
 	if (reset_value.empty()) return false;
-	std::vector<std::pair<std::string, std::string>> clips;
+	std::vector<ClipRequest> clips;
 	// Every authored token registers a variant, including repeated files, on the
 	// slot its row's key names past the first five characters, so a row keyed
 	// `ANIM_IDLE` or `xxxx_idle` registers under the `anim_idle` every lookup
-	// spells; a key naming none of the 252 slots registers nothing.
+	// spells; a key naming none of the 252 slots registers nothing, and a token
+	// whose file does not load registers failsafe.bad or nothing (load_clips over
+	// adm_token_clip). Each clip keeps the row and token it came from.
 	// [orig: AnimMap_ParseConfigLine @0x40cb60 -> AnimMap_FindSlotByName
-	// @0x40cfa0, the found-slot gate @0x40cba4; AnimMap_RegisterBoneNode @0x40c2d0]
+	// @0x40cfa0, the found-slot gate @0x40cba4, an empty token skipped @0x40cbd6;
+	// AnimMap_RegisterBoneNode @0x40c2d0]
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
 		if (adm_slot_index(entry.key) < 0) continue;
 		const std::string key = adm_slot_key(entry.key);
 		for (size_t v = 0; v < entry.variant_count; ++v)
 			if (entry.variants[v] && entry.variants[v][0])
-				clips.emplace_back(key, entry.variants[v]);
+				clips.push_back({key, {i, v, entry.variants[v]}});
 	}
-	if (!load_from_files(assets, reset_value, clips, model_bone_origins, model_bone_parents))
+	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents))
 		return false;
 	adm_name_ = adm_name;
 	return true;
 }
 
 bool SkeletalClips::load_from_files(
-		const assets::AssetStore *assets, const std::string &skeleton_bad,
+		const RigFiles *files, const std::string &skeleton_bad,
 		const std::vector<std::pair<std::string, std::string>> &clip_bads,
 		const std::vector<anim::Vec3> &model_bone_origins,
 		const std::vector<int> &model_bone_parents) {
+	std::vector<ClipRequest> clips;
+	clips.reserve(clip_bads.size());
+	for (size_t i = 0; i < clip_bads.size(); ++i) clips.push_back({clip_bads[i].first, {i, 0, clip_bads[i].second}});
+	return load_clips(files, skeleton_bad, clips, false, model_bone_origins, model_bone_parents);
+}
+
+bool SkeletalClips::load_clips(
+		const RigFiles *files, const std::string &skeleton_bad,
+		const std::vector<ClipRequest> &requests, bool table_tokens,
+		const std::vector<anim::Vec3> &model_bone_origins,
+		const std::vector<int> &model_bone_parents) {
 	clear();
-	if (!assets) return false;
-	const auto skeleton = assets->bone_animation(skeleton_bad);
+	if (!files) return false;
+	const auto skeleton = files->bone_animation(skeleton_bad);
 	if (!skeleton) return false;
 	const BadFile &skeleton_bf = *skeleton;
 	adm_name_ = skeleton_bad;
@@ -228,8 +244,9 @@ bool SkeletalClips::load_from_files(
 				any_weapon_mask_ = true;
 			}
 			// The FK/rest accumulation assumes topological parent order — the
-			// same validation the binding's collision consumer applied.
-			if (parent < -1 || parent >= static_cast<int>(i)) {
+			// same validation the binding's collision consumer applied (the
+			// format's rule, which the editor's clip validator shares).
+			if (!bad_parent_in_order(parent, i)) {
 				fk_valid_ = false;
 			}
 			if (fk_valid_) {
@@ -246,13 +263,20 @@ bool SkeletalClips::load_from_files(
 	// each clip's own) [orig: AnimMap_RegisterEntity @0x40bb60 pins the rig
 	// skeleton once; AnimMap_PlayAnimBySlot @0x40bda0 never rebuilds it]. The
 	// skeleton .bad is also the bind whose flag gates each clip's translations
-	// [orig: AnimChannel_ComputeBoneMatrices @0x410da0, @0x410de7].
-	for (const auto &kv : clip_bads) {
-		if (kv.first.empty() || kv.second.empty()) continue;
-		const auto file = assets->bone_animation(kv.second);
+	// [orig: AnimChannel_ComputeBoneMatrices @0x410da0, @0x410de7]. A table's token
+	// whose file does not load registers failsafe.bad in its place, the clip that
+	// plays, or nothing without one (adm_token_clip); a clip named outside a table
+	// that does not load registers nothing [orig: AnimMap_ParseConfigLine @0x40cb60,
+	// the null test @0x40cbe7; AnimMap_FindOrLoadBoneFile @0x40c030].
+	for (const ClipRequest &request : requests) {
+		if (request.key.empty() || request.source.file.empty()) continue;
+		ClipSource source = request.source;
+		const auto file = table_tokens ? adm_token_clip(*files, request.source.file, &source.file)
+		                               : files->bone_animation(request.source.file);
 		if (!file) continue;
 		LoadedClip lc;
-		lc.key = kv.first;
+		lc.key = request.key;
+		lc.source = std::move(source);
 		lc.clip = anim::sample_clip(*file, shared_rest, false, &skeleton_bf, rig_parents);
 		clips_.push_back(std::move(lc));
 	}
@@ -297,6 +321,21 @@ const SkeletalClips::LoadedClip *SkeletalClips::find_clip_variant(
 		return nullptr;
 	}
 	return &clips_[it->second[static_cast<size_t>(variant) % it->second.size()]];
+}
+
+const SkeletalClips::ClipSource *SkeletalClips::find_clip_source(const std::string &key, int variant) const {
+	const LoadedClip *clip = find_clip_variant(key, variant);
+	return clip ? &clip->source : nullptr;
+}
+
+int SkeletalClips::variant_of(size_t entry, size_t token, std::string &key) const {
+	for (size_t i = 0; i < clips_.size(); ++i) {
+		if (clips_[i].source.entry != entry || clips_[i].source.token != token) continue;
+		const std::vector<size_t> &ring = clip_index_.at(strutil::to_lower(clips_[i].key));
+		key = clips_[i].key;
+		return static_cast<int>(std::find(ring.begin(), ring.end(), i) - ring.begin());
+	}
+	return -1;
 }
 
 bool SkeletalClips::has_clip(const std::string &key) const {

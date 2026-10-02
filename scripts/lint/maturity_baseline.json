@@ -12,6 +12,8 @@
     "runtime/inmatch/udp_session_transport.cpp",
     "runtime/terrain/terrain_tile_composition_worker.cpp",
     "formats/lwf/wav_pcm.cpp",
+    "formats/bad/bad_o3a_read.cpp",
+    "formats/threedi/scene_text.cpp",
     "formats/threedi/threedi.cpp",
     "formats/threedi/threedi_3di3_ground_anchor.cpp",
     "formats/wac/command_table.cpp",
@@ -22,7 +24,13 @@
     "runtime/world/inspect_markers.cpp",
     "runtime/world/inspect_local_player.cpp",
     "runtime/world/collision_debug_rows.cpp",
-    "runtime/inmatch/net_debug_report.cpp"
+    "runtime/inmatch/net_debug_report.cpp",
+    "editor/",
+    "formats/def/def_schema.cpp",
+    "formats/def/def_schema_records.cpp",
+    "formats/def/def_schema_properties.cpp",
+    "formats/def/def_write.cpp",
+    "formats/def/def_write_record.cpp"
   ],
   "counters": {
     "cpp_binding_console_writes": 0,

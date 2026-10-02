@@ -149,7 +149,7 @@ DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
                                       const std::string &medic_key_label,
                                       const hud::GameTextLookup &lookup) {
     const auto text = [&lookup](const char *key, const char *fallback) {
-        return hud::game_text(lookup, "Overlays", key, fallback);
+        return hud::game_text(lookup, hud::kGameTextOverlays, key, fallback);
     };
     DeployStaticsText out;
     char buf[256];
@@ -178,7 +178,7 @@ DeployInstructions build_deploy_instructions(
         const DeployInstructionsInput &in, const hud::GameTextLookup &lookup) {
     // [orig: UI_UpdateDeathScreenContent @ 0x5536A0]
     const auto text = [&lookup](const char *key, const char *fallback = "") {
-        return hud::game_text(lookup, "Overlays", key, fallback);
+        return hud::game_text(lookup, hud::kGameTextOverlays, key, fallback);
     };
     DeployInstructions out;
     out.permanent_death = in.permanent_death && in.dead;
@@ -194,7 +194,7 @@ DeployInstructions build_deploy_instructions(
             std::snprintf(clock, sizeof clock, " <cFF4040>%i:%02i:%02i",
                     seconds / 3600, seconds / 60 % 60, seconds % 60);
             out.round_text = text("STROVER50") + clock;
-            const std::string label = lookup ? lookup("Client", "STRCLI25", "") : "";
+            const std::string label = lookup ? lookup(hud::kGameTextClient, "STRCLI25", "") : "";
             out.remaining_players_text = label + " <cFF4040>" + std::to_string(in.alive_players);
         }
         return out;

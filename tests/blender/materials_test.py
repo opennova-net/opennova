@@ -688,6 +688,40 @@ def a_copy_never_replaces_another_file():
     assert any("not replaced" in n for n in notes), notes
 
 
+# --- the flipbook: a register only with frames on the register clock ------------
+
+@case
+def a_flipbook_without_frames_keeps_its_time_word():
+    # A flipbook names a CTRL register only with frames on anim type 1 (the
+    # loader's gate, threedi_flipbook_reads_register); any other keeps its
+    # time word. `texanim 0 1 123` declares no register and comes back 123,
+    # and a stale register name on it is noted, not declared.
+    idle = bpy.data.materials.new("Idle")
+    idle.o3d.anim_frames, idle.o3d.anim_type, idle.o3d.anim_time = 0, 1, 123
+    idle.o3d.anim_register = "STALE"
+    flip = bpy.data.materials.new("Flip")
+    for frame in range(2):
+        t = flip.o3d.textures.add()
+        t.name, t.flags, t.frame, t.write = f"flip{frame}.tga", 1, frame, False
+    flip.o3d.anim_frames, flip.o3d.anim_type, flip.o3d.anim_register = 2, 1, "FLIP"
+    root, _ = model("idleflip", idle, flip)
+    notes, sc = export_model(root)
+    assert [m["texanim"] for m in sc["materials"]] == [(0, 1, 123), (2, 1, 0)], sc["materials"]
+    assert sc["registers"] == ["FLIP"], sc["registers"]
+    assert any("Idle" in n and "STALE" in n for n in notes), notes
+    imported, _ = import_model(root.o3d.output_path)
+    mats = {m.o3d.order: m.o3d for ob in imported.children_recursive if ob.type == "MESH" for m in ob.data.materials}
+    assert (mats[0].anim_frames, mats[0].anim_type, mats[0].anim_time, mats[0].anim_register) == (0, 1, 123, ""), \
+        (mats[0].anim_frames, mats[0].anim_type, mats[0].anim_time, mats[0].anim_register)
+    assert (mats[1].anim_frames, mats[1].anim_type, mats[1].anim_register) == (2, 1, "FLIP"), \
+        (mats[1].anim_frames, mats[1].anim_type, mats[1].anim_register)
+    imported.o3d.output_path = os.path.join(OUT, "idleflip2", "idleflip2.3di").replace("\\", "/")
+    notes, again = export_model(imported)
+    assert [m["texanim"] for m in again["materials"]] == [(0, 1, 123), (2, 1, 0)], again["materials"]
+    assert again["registers"] == ["FLIP"], again["registers"]
+    assert not any("flipbook" in n for n in notes), notes
+
+
 # --- geom-11: normal maps ------------------------------------------------------------
 
 def normal_mapped(name, img, space="TANGENT", flip=False, shader="", strength=1.0, uv_map=""):

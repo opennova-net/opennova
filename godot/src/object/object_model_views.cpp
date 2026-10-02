@@ -19,6 +19,7 @@
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/templates/local_vector.hpp>
 
+#include <base/io/hash.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
 
@@ -525,12 +526,9 @@ void ObjectModel::write_twin_point_lights(bool p_all, int p_robj_index, int p_co
 	// The node's packed form (apply_point_light_selection_to_robj): the
 	// count, then four (posr, colour) pairs, zero past the count.
 	const int count = CLAMP(p_count, 0, 4);
-	uint64_t hash = 0xcbf29ce484222325ull;
+	uint64_t hash = opennova::io::kFnv1a64Offset;
 	const auto mix = [&hash](const void *data, size_t size) {
-		const uint8_t *bytes = static_cast<const uint8_t *>(data);
-		for (size_t i = 0; i < size; ++i) {
-			hash = (hash ^ bytes[i]) * 0x100000001b3ull;
-		}
+		hash = opennova::io::fnv1a64_bytes(hash, data, size);
 	};
 	mix(&count, sizeof(count));
 	for (int i = 0; i < count; ++i) {

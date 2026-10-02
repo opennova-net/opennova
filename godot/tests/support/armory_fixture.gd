@@ -43,7 +43,7 @@ static func menu_text() -> String:
 	for name in ["PRIMARY", "SECONDARY", "ACCESSORY", "PRIMARY_AMMO1",
 			"SECONDARY_AMMO1", "ACCESSORY_AMMO1", "GRENADE_AMMO1",
 			"GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		body += MenuDriverFixture.wnd("combo", name, y)
+		body += MenuDriverFixture.wnd("combobox", name, y)
 		y += 24
 	for name in ["PRIMARY_ICON", "SECONDARY_ICON", "ACCESSORY_ICON"]:
 		body += MenuDriverFixture.wnd("window", name, y)

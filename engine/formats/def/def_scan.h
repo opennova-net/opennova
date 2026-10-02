@@ -14,6 +14,7 @@
 // TUs pull it in wholesale, so no call site changes.
 
 #include <formats/def/def.h>
+#include <formats/def/def_schema.h>
 
 #include <stddef.h>
 #include <stdlib.h>
@@ -26,11 +27,12 @@ namespace opennova::defscan {
 typedef struct { const char *s; size_t len; } Token;
 
 /* Line iterator: walks through buf splitting on \n, stripping \r */
-typedef struct {
+struct LineIter {
     const char *buf;
     size_t buf_len;
     size_t pos;
-} LineIter;
+    size_t line = 0;
+};
 
 typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEntry;
 
@@ -54,6 +56,31 @@ typedef struct { const char *name; size_t name_len; int bit; int bit2; } FlagEnt
     (raw_count)++; \
 } while(0)
 
+// Records a finding. A blocking code (def_issue_blocks) also counts against the
+// record or file even when the caller collects no details, and the writers refuse
+// what it counts; an ignored-input or reinterpreted-value finding is reported only.
+// Diagnostics never carry replayable source text; `detail` names the one token concerned
+// (the value the game reads, for a reinterpreted one), if any.
+void authoring_issue(size_t &count, opennova::def::DefParseReport *report,
+                     size_t line, const char *record, const char *key, size_t key_len,
+                     opennova::def::DefIssueCode code = opennova::def::DefIssueCode::UnknownProperty,
+                     const char *detail = nullptr);
+
+// How a block header gives its record's name: Bare, the rest of the line
+// (`ammo AT_M16`); Quoted, a quoted string (`begin "Barrel"`); Token, the line's
+// second token as the retail tokenizer cuts it, the keyword its first, quotes
+// optional (`weapon WPN_M16`, `action "FIRE"`, `action,FIRE`). A header whose
+// name the writer could not give back (none where one is due, one past its
+// field, text after it, a keyword run on into it) is a malformed block.
+enum class DefHeaderName { Bare, Quoted, Token };
+void validate_header(const char *line, size_t length, size_t key_length, size_t capacity, DefHeaderName form,
+                     size_t &issues, opennova::def::DefParseReport *report, size_t number, const char *record);
+void validate_property(opennova::def::DefRecordKind kind, const char *line, size_t length,
+                       size_t &issues, opennova::def::DefParseReport *report,
+                       size_t number, const char *record);
+const FlagEntry *weapon_flag_at(size_t index);
+const char *death_piece_keyword(size_t index);
+const char *trim_def_line(const char *s, size_t len, size_t *out_len);
 char *read_file(const char *path, size_t *out_len);
 
 void safe_copy(char *dst, size_t dst_size, const char *src, size_t src_len);
@@ -68,6 +95,8 @@ const char *consume_value_span(const char *line, size_t line_len, size_t key_len
 
 void consume_value_str(const char *line, size_t line_len, size_t key_len, char *dst, size_t dst_size);
 
+// The game's atol over a token: a whole number saturating at signed 32 bits, the same on every
+// platform (def_scan.cpp has the witness).
 int parse_int_n(const char *s, size_t len);
 
 int signed_i16_value(int value);
@@ -77,6 +106,9 @@ float parse_float_n(const char *s, size_t len);
 int tokenize(const char *s, size_t len, Token *tokens, int max_tok);
 
 int death_piece_type_index(const char *name, size_t len);
+
+/* The table row for a piece name, or -1 when the name is not a row (row 0 is HULL). */
+int death_piece_type_lookup(const char *name, size_t len);
 
 int split_values(const char *s, size_t len, Token *tokens, int max_tok);
 

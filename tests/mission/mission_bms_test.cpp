@@ -57,6 +57,67 @@ bool write_document(opennova::bms::File &file, std::vector<uint8_t> &out) {
 	return opennova::bms::write(file, out, error);
 }
 
+// Each event's runs as the records they hold: what an edit of another event's chain keeps.
+std::vector<std::vector<int32_t>> chains_of(const opennova::bms::File &file) {
+	std::vector<std::vector<int32_t>> out;
+	for (const opennova::bms::Event &event : file.events) {
+		std::vector<int32_t> chain;
+		for (int i = 0; i < event.trigger_count; ++i) chain.push_back(file.triggers[size_t(event.trigger_index + i)].param1);
+		chain.push_back(-999);
+		for (int i = 0; i < event.action_count; ++i) chain.push_back(file.actions[size_t(event.action_index + i)].param2);
+		out.push_back(chain);
+	}
+	return out;
+}
+
+// An event's chain edited in the middle of the file's tables (S13 D10's review: the chain edits keep
+// every other event's runs on their records): a trigger put in mid-chain moves the later runs up one
+// and taken out gives them back; an event removed mid-list takes its chain, and the later events' runs
+// still hold their own records.
+int chain_ranges() {
+	using namespace opennova::mission;
+	opennova::bms::File file;
+	TEST_EXPECT(load_document(read_file(fixture_path()), file));
+	// The event whose chain is edited: the first holding two triggers or more.
+	size_t edited = 0;
+	while (edited < file.events.size() && file.events[edited].trigger_count < 2) ++edited;
+	TEST_EXPECT(file.events.size() >= 3 && edited < file.events.size());
+	// Mark every trigger and action by its place, so a run is known by the records it holds (an action's
+	// second parameter: a removal repairs a ResetEvent action's first).
+	for (size_t i = 0; i < file.triggers.size(); ++i) file.triggers[i].param1 = int32_t(1000 + i);
+	for (size_t i = 0; i < file.actions.size(); ++i) file.actions[i].param2 = int32_t(2000 + i);
+	const std::vector<std::vector<int32_t>> before = chains_of(file);
+	const std::vector<opennova::bms::Event> events = file.events;
+	std::string error;
+	MissionTriggerRecord added;
+	added.param1 = 7777;
+	TEST_EXPECT(insert_event_trigger(file, edited, 1, added, error));
+	std::vector<std::vector<int32_t>> after = chains_of(file);
+	TEST_EXPECT(after[edited].size() == before[edited].size() + 1 && after[edited][1] == 7777);
+	size_t moved = 0;
+	for (size_t e = 0; e < file.events.size(); ++e) {
+		if (e == edited) continue;
+		TEST_EXPECT(after[e] == before[e]);
+		if (events[e].trigger_count && events[e].trigger_index > events[edited].trigger_index) {
+			TEST_EXPECT(file.events[e].trigger_index == events[e].trigger_index + 1);
+			++moved;
+		}
+	}
+	TEST_EXPECT(remove_event_trigger(file, edited, 1, error) && chains_of(file) == before);
+	for (size_t e = 0; e < file.events.size(); ++e) TEST_EXPECT(file.events[e].trigger_index == events[e].trigger_index);
+	TEST_EXPECT(moved > 0); // a run after the edited one moved, and held its records
+	// An event out of the middle: its chain goes with it, the rest keep theirs.
+	TEST_EXPECT(remove_event(file, 1, error) && file.events.size() == events.size() - 1);
+	after = chains_of(file);
+	TEST_EXPECT(after[0] == before[0]);
+	for (size_t e = 1; e < file.events.size(); ++e) TEST_EXPECT(after[e] == before[e + 1]);
+	TEST_EXPECT(file.triggers.size() == size_t(file.trigger_count) && file.actions.size() == size_t(file.action_count));
+	std::vector<uint8_t> bytes;
+	opennova::bms::File back;
+	TEST_EXPECT(write_document(file, bytes) && load_document(bytes, back) && chains_of(back) == after);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -1337,5 +1398,6 @@ int main() {
 		TEST_EXPECT(actual_bytes == expected_bytes);
 	}
 
+	if (chain_ranges() != 0) return 1;
 	return 0;
 }

@@ -8,12 +8,15 @@
 
 #include <formats/mns/mns.h>
 #include <formats/mns/mns_document.h>
+#include <runtime/menu/menu_style.h>
 
 #include <unordered_map>
 #include <string>
 #include <vector>
 
 namespace godot {
+
+class ResourceRoot;
 
 // Godot-facing wrapper around an MNS stylesheet: a table of %VAR% -> value
 // substitutions referenced by .mnu menus (e.g. %DEF_FONTNAME%, %TRIM_COLOR%).
@@ -22,18 +25,21 @@ namespace godot {
 //
 // Document-backed (ADR 0014): the source of truth is a lossless opennova::mns::Document
 // (comments, grouping, alignment, conditionals, authored case all survive a
-// load -> save), and the StyleSheet the runtime substitutes through is its
-// separately evaluated cache. Lookup/substitution serve that evaluated view;
-// mutations and serialization go through the document, so
-// to_byte_array()/save_to_path() are byte-faithful for untouched files and
-// minimal-delta after edits. Runtime callers reject is_runtime_valid()==false;
-// the editor deliberately keeps that source open for repair.
+// load -> save), and the StyleSheet the runtime substitutes through is the game's own
+// read of it (Document::evaluate: what the retail reader reads, up to where it stops).
+// Lookup/substitution serve that evaluated view; mutations and serialization go
+// through the document, so to_byte_array()/save_to_path() are byte-faithful for
+// untouched files and minimal-delta after edits.
+//
+// The runtime loads the shell's stylesheets with load_shell (menu_style.mns, then
+// brand.mns onto it, as the game does): that sheet is a runtime view, its variables
+// the merged list and its document empty (nothing to edit or save).
 class MnsStyleSheet : public Resource {
 	GDCLASS(MnsStyleSheet, Resource)
 
 private:
 	opennova::mns::Document doc_;
-	opennova::mns::StyleSheet sheet_; // successful/partial runtime evaluation cache
+	opennova::mns::StyleSheet sheet_; // the game's read (a runtime view: the shell's merged list)
 	std::vector<opennova::mns::Diagnostic> evaluation_diagnostics_;
 	bool runtime_valid_ = true;
 
@@ -43,6 +49,13 @@ protected:
 	static void _bind_methods();
 
 public:
+	// --- The shell's stylesheets (the runtime path) ---
+	// menu_style.mns then brand.mns from the root, as the game loads them
+	// (runtime/menu/menu_style.h); null when neither file is there.
+	static Ref<MnsStyleSheet> load_shell(const Ref<ResourceRoot> &p_root);
+	// The runtime view of a loaded shell style; native only.
+	static Ref<MnsStyleSheet> from_shell_style(const opennova::menu::ShellStyle &p_style);
+
 	// --- Lookup / substitution (flattened view) ---
 	String get_variable(const String &p_name) const;
 	bool has_variable(const String &p_name) const;
@@ -66,8 +79,8 @@ public:
 	int get_entry_count() const;
 	// {line, severity: "error"|"warning", code, message}
 	Array get_diagnostics() const;
-	// Runtime evaluation is strict even though document loading stays permissive
-	// for the repairable editor workflow.
+	// True when the game reads the whole sheet (for a shell view: every sheet there);
+	// false when its reader stops, or would stop responding, part way.
 	bool is_runtime_valid() const { return runtime_valid_; }
 	Array get_evaluation_diagnostics() const;
 	String get_source_text() const;

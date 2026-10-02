@@ -13,7 +13,7 @@
 # them and the command tests (tests/threedi, tests/anim) call them directly.
 # Weapon timing also links the runtime: its preview runs the real weapon FSM,
 # and its merge reads the result back through the def parser.
-add_library(opennova_3di_commands STATIC scene_text.cpp build.cpp scene.cpp info.cpp compare.cpp
+add_library(opennova_3di_commands STATIC build.cpp scene.cpp info.cpp compare.cpp
     anim_load.cpp anim_build.cpp anim_scene.cpp anim_info.cpp anim_compare.cpp weapon_timing.cpp
     weapon_merge.cpp)
 target_link_libraries(opennova_3di_commands PUBLIC opennova_runtime)

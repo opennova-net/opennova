@@ -67,7 +67,9 @@ workflow runs),
 retail `.ptu` grammar with our own effect), `grm/person.grm` (an authored facial
 rig; `grm_roundtrip` pins it byte-for-byte through the writer),
 `threedi/o3d/*.o3d` (the authored `.o3d` scenes the `opennova-3di` ctests and
-the Blender add-on's package smoke test build), the
+the Blender add-on's package smoke test build), `wac/text_document.wac` (a script
+naming an effect, a sound set, two ammo and a text key, the editor's text document
+test's), the
 `novaworld/run_*/manifest.txt` records, and this README.
 
 ## threedi/synth — the synthetic 3DI model set (minted)

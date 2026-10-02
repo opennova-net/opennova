@@ -53,6 +53,24 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
+# The property table an editor sets a model's fields through: every field set to
+# its own value leaves the bytes (synthetic models; retail models as a SKIP-LEG
+# leg), derived words follow their fields.
+
+# Every retail model through the reader and the writer the editor saves by:
+# byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
+add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
+target_link_libraries(threedi_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(threedi_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(threedi_retail_rewrite COMMAND threedi_retail_rewrite_test)
+
+# Every retail .bad and .adm through the reader and the writer the editor
+# saves by: field-equal and a fixed point (OPENNOVA_JO_ASSETS).
+add_executable(anim_retail_rewrite_test anim/retail_rewrite_test.cpp)
+target_link_libraries(anim_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(anim_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(anim_retail_rewrite COMMAND anim_retail_rewrite_test)
+
 add_executable(threedi_compare_test threedi/compare_test.cpp threedi/threedi_compare.cpp)
 target_link_libraries(threedi_compare_test PRIVATE opennova_formats)
 target_include_directories(threedi_compare_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -604,6 +622,13 @@ target_link_libraries(pff_unit_test PRIVATE opennova_formats)
 target_include_directories(pff_unit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_unit COMMAND pff_unit_test)
 
+# The resumable PFF writer (S13 A1): byte for byte the pre-stream writer's archives at write
+# budgets of 1, 7 and the whole, through the single-call forms too.
+add_executable(pff_stream_writer_test pff/pff_stream_writer_test.cpp)
+target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
+target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
+
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)
@@ -837,7 +862,7 @@ add_test(NAME minimal_rtxt_gen COMMAND minimal_rtxt_gen_test)
 # assets/opennova.fnt and fixtures/fnt/synth_{1,3}page.fnt, byte-compared every
 # run (--write regenerates).
 add_executable(minimal_fnt_gen_test fixtures/minimal_fnt_gen.cpp)
-target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_formats)
+target_link_libraries(minimal_fnt_gen_test PRIVATE opennova_editor) # the art lives with the editor's blank factories
 target_include_directories(minimal_fnt_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME minimal_fnt_gen COMMAND minimal_fnt_gen_test)
 
@@ -887,6 +912,14 @@ target_link_libraries(boot_policy_test PRIVATE opennova_base)
 target_include_directories(boot_policy_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(boot_policy_test PRIVATE cxx_std_17)
 add_test(NAME boot_policy COMMAND boot_policy_test)
+
+# opennova-extract mounts an install as a launch with its flags does (apps/extract).
+add_executable(extract_cli_test resource_index/extract_cli_test.cpp)
+target_link_libraries(extract_cli_test PRIVATE opennova_formats)
+target_include_directories(extract_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(extract_cli_test PRIVATE cxx_std_17)
+add_dependencies(extract_cli_test opennova_extract)
+add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
 
 # The texture candidate order the Godot resolvers and opennova-3di share
 # (base/resource_index/texture_candidates.h).
@@ -1022,6 +1055,19 @@ add_executable(tga_read_test tga/tga_read_test.cpp)
 target_link_libraries(tga_read_test PRIVATE opennova_formats)
 target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME tga_read COMMAND tga_read_test)
+
+# The texture writers the editor's placeholder textures go through (S11h): every header
+# byte and the pixels' order, each read back as the game's readers read the file; and the
+# header size readers the editor measures textures with (S12 A3).
+add_executable(tga_write_test tga/tga_write_test.cpp)
+target_link_libraries(tga_write_test PRIVATE opennova_formats)
+target_include_directories(tga_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_write COMMAND tga_write_test)
+
+add_executable(dds_write_test dds/dds_write_test.cpp)
+target_link_libraries(dds_write_test PRIVATE opennova_formats)
+target_include_directories(dds_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME dds_write COMMAND dds_write_test)
 
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
@@ -1546,6 +1592,31 @@ target_link_libraries(menu_frame_compiler_test PRIVATE opennova_runtime)
 target_include_directories(menu_frame_compiler_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME menu_frame_compiler COMMAND menu_frame_compiler_test)
 
+add_executable(menu_frame_parity_test menu/menu_frame_parity_test.cpp)
+target_link_libraries(menu_frame_parity_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_parity COMMAND menu_frame_parity_test)
+
+# The compiler's notes (ADR 0046 S9j2): one screen per code, the loader's notes, the notes
+# only observe (the same draw list before and after them), solve_local_rect.
+add_executable(menu_frame_notes_test menu/menu_frame_notes_test.cpp)
+target_link_libraries(menu_frame_notes_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_notes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_notes COMMAND menu_frame_notes_test)
+
+# Every shipped screen through the frame compiler: the reference fixture menus
+# (gated) and every .mnu the packed install serves, with its assets (SKIP-LEG).
+add_executable(menu_render_corpus_test menu/menu_render_corpus_test.cpp)
+target_link_libraries(menu_render_corpus_test PRIVATE opennova_runtime)
+target_include_directories(menu_render_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(menu_render_corpus COMMAND menu_render_corpus_test)
+
+# The runtime's keyboard over the grill's census corpus (the .mnu at the
+# OPENNOVA_JO_ASSETS root with menutxt.bin): the shipped hotkey cases (gated).
+add_executable(menu_runtime_corpus_test menu/menu_runtime_corpus_test.cpp)
+target_link_libraries(menu_runtime_corpus_test PRIVATE opennova_runtime)
+target_include_directories(menu_runtime_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(menu_runtime_corpus COMMAND menu_runtime_corpus_test)
 
 add_executable(vehicle_collision_damage_test world/vehicle_collision_damage_test.cpp)
 target_link_libraries(vehicle_collision_damage_test PRIVATE opennova_runtime)
@@ -1555,6 +1626,26 @@ add_test(NAME vehicle_collision_damage COMMAND vehicle_collision_damage_test)
 # The menu backdrop movie policy (engine/runtime/menu/menu_video): the
 # witnessed three-slot table, the STARTUP/strips draw gate, and the
 # expansion-first source resolution (docs/mnu/menu-re.md "The menu backdrop").
+# The shell's stylesheets: menu_style.mns then brand.mns into one list (menu/menu_style.h).
+add_executable(menu_style_test menu/menu_style_test.cpp)
+target_link_libraries(menu_style_test PRIVATE opennova_runtime)
+target_include_directories(menu_style_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_style COMMAND menu_style_test)
+
+# A screen's string tables and the shell's style through a file source, kept by (name,
+# stamp) (menu/menu_screen_inputs.h).
+add_executable(menu_screen_inputs_test menu/menu_screen_inputs_test.cpp)
+target_link_libraries(menu_screen_inputs_test PRIVATE opennova_runtime)
+target_include_directories(menu_screen_inputs_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_screen_inputs COMMAND menu_screen_inputs_test)
+
+# A screen's fonts and textures through a file source, kept by (file, stamp), the
+# two-configure sweep (menu/menu_frame_assets.h).
+add_executable(menu_frame_assets_test menu/menu_frame_assets_test.cpp)
+target_link_libraries(menu_frame_assets_test PRIVATE opennova_runtime)
+target_include_directories(menu_frame_assets_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME menu_frame_assets COMMAND menu_frame_assets_test)
+
 add_executable(menu_video_test menu/menu_video_test.cpp)
 target_link_libraries(menu_video_test PRIVATE opennova_runtime)
 target_include_directories(menu_video_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1727,6 +1818,14 @@ add_executable(mnu_coverage_test mnu/mnu_coverage_test.cpp)
 target_link_libraries(mnu_coverage_test PRIVATE opennova_formats)
 target_include_directories(mnu_coverage_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_gated_test(mnu_coverage COMMAND mnu_coverage_test)
+
+# The format's rules a property table reads (formats/mnu/mnu_schema, ADR 0046 S9h): which
+# window type reads what, what an ACTION's verb reads, the material flag tokens. The table
+# itself is the editor's (editor_menu_table, ADR 0046 S13 D10).
+add_executable(mnu_schema_test mnu/mnu_schema_test.cpp)
+target_link_libraries(mnu_schema_test PRIVATE opennova_formats)
+target_include_directories(mnu_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME mnu_schema COMMAND mnu_schema_test)
 
 add_executable(mns_parse_test mns/mns_parse_test.cpp)
 target_link_libraries(mns_parse_test PRIVATE opennova_formats)
@@ -3758,6 +3857,497 @@ add_executable(hud_combat_test hud/hud_combat_test.cpp)
 target_link_libraries(hud_combat_test PRIVATE opennova_runtime)
 target_compile_features(hud_combat_test PRIVATE cxx_std_17)
 add_test(NAME hud_combat COMMAND hud_combat_test)
+
+# The strict JSON reader/writer behind the editor's project files (ADR 0046 d6).
+add_executable(json_test io/json_test.cpp)
+target_link_libraries(json_test PRIVATE opennova_io)
+target_compile_features(json_test PRIVATE cxx_std_17)
+target_include_directories(json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME json COMMAND json_test)
+
+# The OpenNova Editor's core (ADR 0046): the project file, the asset registry, the
+# requirements checklist, and the opennova-project commands driven end to end.
+add_executable(editor_project_document_test editor/project_document_test.cpp)
+target_link_libraries(editor_project_document_test PRIVATE opennova_editor)
+target_include_directories(editor_project_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_document COMMAND editor_project_document_test)
+
+add_executable(editor_asset_registry_test editor/asset_registry_test.cpp)
+target_link_libraries(editor_asset_registry_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_registry_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_asset_registry COMMAND editor_asset_registry_test)
+
+# The rule the asset kinds' table makes checkable (S13 D5, ADR 0046 S13): every format the
+# runtime's classifier types and every file the required-resources manifest names is a kind the
+# editor knows, with a place in the build.
+add_executable(editor_asset_kinds_test editor/asset_kinds_test.cpp)
+target_link_libraries(editor_asset_kinds_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_kinds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_asset_kinds COMMAND editor_asset_kinds_test)
+
+add_executable(editor_requirements_test editor/requirements_test.cpp)
+target_link_libraries(editor_requirements_test PRIVATE opennova_editor)
+target_include_directories(editor_requirements_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_requirements COMMAND editor_requirements_test)
+
+add_executable(editor_blank_factory_test editor/blank_factory_test.cpp)
+target_link_libraries(editor_blank_factory_test PRIVATE opennova_editor)
+target_include_directories(editor_blank_factory_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_blank_factory COMMAND editor_blank_factory_test)
+
+add_executable(editor_create_missing_test editor/create_missing_test.cpp)
+target_link_libraries(editor_create_missing_test PRIVATE opennova_editor)
+target_include_directories(editor_create_missing_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_create_missing COMMAND editor_create_missing_test)
+
+add_executable(editor_project_build_test editor/project_build_test.cpp)
+target_link_libraries(editor_project_build_test PRIVATE opennova_editor)
+target_include_directories(editor_project_build_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_build COMMAND editor_project_build_test)
+
+add_executable(editor_play_session_test editor/play_session_test.cpp)
+target_link_libraries(editor_play_session_test PRIVATE opennova_editor)
+target_include_directories(editor_play_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_play_session COMMAND editor_play_session_test)
+
+# The neutral editing core at any depth (S9g): a fake document type's walk, placements,
+# locators, structural edits and refusals, batches, gestures, the clipboard seam and the
+# selection model.
+add_executable(editor_document_core_test editor/document_core_test.cpp)
+target_link_libraries(editor_document_core_test PRIVATE opennova_editor)
+target_include_directories(editor_document_core_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_document_core COMMAND editor_document_core_test)
+
+add_executable(editor_session_test editor/editor_session_test.cpp)
+target_link_libraries(editor_session_test PRIVATE opennova_editor)
+target_include_directories(editor_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session COMMAND editor_session_test)
+
+# Per-file validation (S13 D4): each file's own findings kept in the validation cache by what
+# they were made from, a closed file read and let go; what other files make of what one defines
+# (graph/use_checks); the project's rows as the one pass makes them, the trunk's before the
+# split pinned over the fixtures; every finding composed carries a finding code's row (S13 A6).
+# Retail leg (OPENNOVA_JO_DIR): the install's files a document type opens validated, every
+# finding composed a row's, then an edit of one validating it alone.
+add_executable(editor_project_validation_test editor/project_validation_test.cpp)
+target_link_libraries(editor_project_validation_test PRIVATE opennova_editor)
+target_include_directories(editor_project_validation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_project_validation COMMAND editor_project_validation_test)
+
+# Long operations everywhere (S13 A3): the walks stepped by bytes (the scan, the import pass, a
+# scan's targeted update), the validation a file at a time and a rename's commit a file at a time,
+# each equal to its run in one call; the session's Open, Rescan, import and rename stepped a poll
+# at a time (progress only rising, finished once, cancelled leaving nothing, the view a run to the
+# end makes), a Save scanning and validating its one file, a stale import refused without writing.
+# Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
+# editor's budget, its polls and wall time, and the base layer a dependency mount would build.
+add_executable(editor_long_operations_test editor/long_operations_test.cpp)
+target_link_libraries(editor_long_operations_test PRIVATE opennova_editor)
+target_include_directories(editor_long_operations_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_long_operations COMMAND editor_long_operations_test)
+
+# The document types' project checks (S13 V9): a type's own check across the project's files,
+# made by its registry row (the menu type's render check) and kept by whoever validates; a
+# stand-in type's check runs once per validation, its findings after the build's gate, and its
+# answer that they moved is what composes the Problems rows again.
+add_executable(editor_project_checks_test editor/project_checks_test.cpp)
+target_link_libraries(editor_project_checks_test PRIVATE opennova_editor)
+target_include_directories(editor_project_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_checks COMMAND editor_project_checks_test)
+
+# The session's operations (S13 A1): the slot stepping a fake operation within a poll's budget,
+# cancelled between two steps, finished once; the busy gate's four answers over a real build
+# (refused, joined, superseded as the table says, cancelled first); edits during a build.
+add_executable(editor_session_operation_test editor/editor_session_operation_test.cpp)
+target_link_libraries(editor_session_operation_test PRIVATE opennova_editor)
+target_include_directories(editor_session_operation_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session_operation COMMAND editor_session_operation_test)
+
+# The session's parts (S13 A2): the editor's preferences over their store (the memory store's
+# round trip, the file store's settings file byte for byte, a session over each), the open
+# documents' one position rule and remembered selections, and the unsaved-changes prompt driven
+# by the request table's guard column for every request kind.
+add_executable(editor_preferences_test editor/editor_preferences_test.cpp)
+target_link_libraries(editor_preferences_test PRIVATE opennova_editor)
+target_include_directories(editor_preferences_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_preferences COMMAND editor_preferences_test)
+
+add_executable(editor_document_set_test editor/document_set_test.cpp)
+target_link_libraries(editor_document_set_test PRIVATE opennova_editor)
+target_include_directories(editor_document_set_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_document_set COMMAND editor_document_set_test)
+
+# A document type of another kind than records (S13 D6), a test's standing in for the
+# stylesheet's: the graph, the validation, the rename and the session over it.
+add_executable(editor_non_record_document_test editor/non_record_document_test.cpp)
+target_link_libraries(editor_non_record_document_test PRIVATE opennova_editor)
+target_include_directories(editor_non_record_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_non_record_document COMMAND editor_non_record_document_test)
+
+# The text documents and their types (S13 D9): the model's spans, history and change sets; the
+# script's compiler findings and operand references with spans; the graph's span edges, the
+# fallback name, Rename everywhere through a span, a Go to's RevealText; the wire's span edits and
+# pages of lines; the credits, music script and shader codecs byte for byte; and the install's
+# scripts, music scripts, credits and shaders (OPENNOVA_JO_DIR) as the retail leg.
+add_executable(editor_text_document_test editor/text_document_test.cpp)
+target_link_libraries(editor_text_document_test PRIVATE opennova_editor)
+target_include_directories(editor_text_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_text_document COMMAND editor_text_document_test)
+
+add_executable(editor_unsaved_guard_test editor/unsaved_guard_test.cpp)
+target_link_libraries(editor_unsaved_guard_test PRIVATE opennova_editor)
+target_include_directories(editor_unsaved_guard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_unsaved_guard COMMAND editor_unsaved_guard_test)
+
+# The session's wire form (the editor MCP): request tokens both ways, the view, a
+# document and a record as JSON over a real session.
+add_executable(editor_session_json_test editor/session_json_test.cpp)
+target_link_libraries(editor_session_json_test PRIVATE opennova_editor)
+target_include_directories(editor_session_json_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_session_json COMMAND editor_session_json_test)
+
+# The finding codes (S13 A6): every token its own across the editor's table and the document
+# types' as registered (a stand-in hiding none), each row found by its token, a type's rows its
+# group's family, the render check's a row per compiler note and the stylesheet reader's a row
+# per reader code, the columns deciding what the codes' spelling decided before (and the
+# spelling agreeing), a finding keeping its row, and its subject on the wire under the keys it had.
+add_executable(editor_finding_codes_test editor/finding_codes_test.cpp)
+target_link_libraries(editor_finding_codes_test PRIVATE opennova_editor)
+target_include_directories(editor_finding_codes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_finding_codes COMMAND editor_finding_codes_test)
+
+# The Problems core (S11b): the query the window and the editor MCP share (severities,
+# text, scope, only the fixable, grouping), the fixes for each finding and a Fix all
+# merged from them, where a finding takes Problems, and the findings by file and record
+# (S13 V1: FindingsIndex).
+add_executable(editor_problems_test editor/problems_test.cpp)
+target_link_libraries(editor_problems_test PRIVATE opennova_editor)
+target_include_directories(editor_problems_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_problems COMMAND editor_problems_test)
+
+# The menu clipboard's one rule for the tree and the canvas (S13 V1, documents/mnu_clipboard):
+# a window a part holds is copyable from neither, a Paste after the primary's window.
+add_executable(editor_mnu_clipboard_test editor/mnu_clipboard_test.cpp)
+target_link_libraries(editor_mnu_clipboard_test PRIVATE opennova_editor)
+target_include_directories(editor_mnu_clipboard_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_mnu_clipboard COMMAND editor_mnu_clipboard_test)
+
+# The viewports' one canvas with no ImGui (S13 V2, V5: preview/canvas_gesture, menu_canvas,
+# model_canvas): the one gesture machine and its single EndEdit; the menu's canvas over a
+# headless render (a click, a drag of a window and of a handle on the grid, the arrows, Esc,
+# several windows, the marquee's one selection, the clipboard's rule, Arrange, a part's window,
+# what it draws); the model's canvas over a real session's model viewport (F, a click on a marker,
+# a marker's drag ended once, the orbit and the dolly as SetViewports of its camera).
+add_executable(editor_canvas_test editor/canvas_test.cpp)
+target_link_libraries(editor_canvas_test PRIVATE opennova_editor)
+target_include_directories(editor_canvas_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_canvas COMMAND editor_canvas_test)
+
+# The windows' models with no ImGui (S13 V1): what the Problems window lists, folds, proposes
+# and asks (ui/problems_list), where the find bar is among a document's hits (ui/find_cursor),
+# and what a document's outline lists (ui/outline_model, S13 V3). Built with the windows (their
+# sources are ui/'s).
+if(OPENNOVA_IMGUI)
+    add_executable(editor_problems_list_test editor/problems_list_test.cpp)
+    target_link_libraries(editor_problems_list_test PRIVATE opennova_editor)
+    target_include_directories(editor_problems_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_problems_list COMMAND editor_problems_list_test)
+
+    add_executable(editor_find_cursor_test editor/find_cursor_test.cpp)
+    target_link_libraries(editor_find_cursor_test PRIVATE opennova_editor)
+    target_include_directories(editor_find_cursor_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_find_cursor COMMAND editor_find_cursor_test)
+
+    # A document's outline (S13 V3, ui/outline_model): its lines as a list, a tree and master and
+    # detail, what is open, the filter, the order, and the lines made again only when what they read
+    # moves.
+    add_executable(editor_outline_model_test editor/outline_model_test.cpp)
+    target_link_libraries(editor_outline_model_test PRIVATE opennova_editor)
+    target_include_directories(editor_outline_model_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_outline_model COMMAND editor_outline_model_test)
+endif()
+
+# The asset graph (S7): the extractors, the resolver the badges and Problems share,
+# the per-file slots an update patches (an incremental update equals a fresh build, S13 D3),
+# the base layer, and the rename transaction; its retail legs over the JO install.
+add_executable(editor_asset_graph_test editor/asset_graph_test.cpp)
+target_link_libraries(editor_asset_graph_test PRIVATE opennova_editor)
+target_include_directories(editor_asset_graph_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_asset_graph COMMAND editor_asset_graph_test)
+
+# A document's reference queries (S13 D3, graph/reference_queries): the badge, the missing
+# finding, the picker, where Go to leads, and find_definition over the graph's slot or the
+# document alone.
+add_executable(editor_reference_queries_test editor/reference_queries_test.cpp)
+target_link_libraries(editor_reference_queries_test PRIVATE opennova_editor)
+target_include_directories(editor_reference_queries_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_reference_queries COMMAND editor_reference_queries_test)
+
+# Find (S12 D8): every document type's fields found as the Inspector shows them (a def's number
+# in its written units, a choice by its name, any case unless it must match), and the project's
+# files and symbols by name with their usages (editor/model/document_search, AssetGraph::search).
+add_executable(editor_document_search_test editor/document_search_test.cpp)
+target_link_libraries(editor_document_search_test PRIVATE opennova_editor)
+target_include_directories(editor_document_search_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_document_search COMMAND editor_document_search_test)
+
+# Rename everywhere (S12 D9): one test per kind of name (a menu screen used from another menu, a
+# style variable brand.mns defines again, a string key two sections define, a weapon's and an
+# ammo's name, an item id a mission names, a model's user point), each renamed with exactly the
+# uses that reach it, or refused naming the file (graph/rename_transaction, the session's
+# PreviewRename and RenameSymbol).
+add_executable(editor_symbol_rename_test editor/symbol_rename_test.cpp)
+target_link_libraries(editor_symbol_rename_test PRIVATE opennova_editor)
+target_include_directories(editor_symbol_rename_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_symbol_rename COMMAND editor_symbol_rename_test)
+
+# The document type contract (S12 Z, ADR 0046 S12 "Adding a document type"): every registered
+# type over a file of its kinds loads, serializes stably, labels its fields, keeps field_on's
+# read-only, sets a field to its own value with no byte changed, and defines each name as a symbol
+# find resolves, every reference kind with its reference_kinds row.
+add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
+target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
+target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_document_contract COMMAND editor_document_contract_test)
+
+# The project's files by logical name, the open documents standing in for theirs
+# (editor/assets/project_asset_source.h).
+add_executable(editor_project_asset_source_test editor/project_asset_source_test.cpp)
+target_link_libraries(editor_project_asset_source_test PRIVATE opennova_editor)
+target_include_directories(editor_project_asset_source_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_project_asset_source COMMAND editor_project_asset_source_test)
+
+# The viewport seam (S13 V5, editor/preview/viewport_*, viewports, viewport_device_cache) over
+# devices that draw nothing and a real session: the actions a device takes (Keep, Rebuild, Update,
+# Clear) from the document's change, the files its picture read and the viewport's options; the
+# failure latch; the preview clock; two menus' own options; the device cache's four, its least
+# recently used given up and its viewport's camera kept; the envelope and its pages; a SetViewport,
+# a drag and a command through the session; one undo step per gesture; S13 V6's builds over frames
+# (loading then ready, a newer generation cancelling, an Update folded, a Clear and a failure
+# mid-build, the frame's budget). S13 V8: the change sets a viewport follows (a later screen's edit
+# and a variable only a later screen names Keep, a screen before the shown one a Rebuild, a user
+# point's move an Update over the scene that stands, the menu read again everything), the model's
+# scene held until the gesture's end, the menu's caret on the preview clock; its retail leg a
+# shipped screen's edit box blinking its caret on the clock (OPENNOVA_JO_DIR).
+add_executable(editor_viewport_test editor/viewport_test.cpp)
+target_link_libraries(editor_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_viewport COMMAND editor_viewport_test)
+
+# The script device's portable half (S13 V10, editor/preview/script_viewport, shown_text,
+# text_burst): ViewportKind::Script in the kinds' table, the Main role of every text type; the span
+# diff from a control's text, minimal and byte-exact against the TextDocument (an insert, a delete,
+# a replace across lines, CR LF kept, a paste of several lines, a lone CR and a NUL kept, a code
+# page's character stored, one it has none for refused); the keystroke burst; the gutter marks
+# from the findings; the compiler's words highlighted; through a real session, a burst served as one
+# undo step, the follow's actions, a Go to's span selected, a document held read only and the busy
+# gate, the envelope and a SetViewport; and the install's scripts (OPENNOVA_JO_DIR) as the retail
+# leg: their highlights tokens of their lines, their shown text's lines the documents'.
+add_executable(editor_script_viewport_test editor/script_viewport_test.cpp)
+target_link_libraries(editor_script_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_script_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_script_viewport COMMAND editor_script_viewport_test)
+
+# Edits in a viewport over the wire (S13 V7: edit_in_viewport through a session's JSON requests): its
+# refusals, a drag one batch over the selection, a command one request; the wire's gestures (a
+# snapped gesture where a canvas's lands, refused and forged tokens, interleaving, what ends one,
+# the 10 s lapse); the menu's rounding and its drag to a point; a model's drag by nothing, its frame
+# beside any operation; the clock set with no document named; a model read at a canvas's size.
+add_executable(editor_viewport_wire_test editor/viewport_wire_test.cpp)
+target_link_libraries(editor_viewport_wire_test PRIVATE opennova_editor)
+target_include_directories(editor_viewport_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_viewport_wire COMMAND editor_viewport_wire_test)
+
+# The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
+# screen, its reason, when its device configures again, the envelope, its drag and arrange.
+add_executable(editor_menu_viewport_test editor/menu_viewport_test.cpp)
+target_link_libraries(editor_menu_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_viewport COMMAND editor_menu_viewport_test)
+
+# The model's viewport (editor/preview/model_viewport, S10p2, S13 V5): what it shows, when it
+# builds again (a user point's edit builds nothing), the camera's projection, the level Auto picks,
+# the envelope, what a SetViewport sets, the drag of a marker, a clip on its rig.
+add_executable(editor_model_viewport_test editor/model_viewport_test.cpp)
+target_link_libraries(editor_model_viewport_test PRIVATE opennova_editor)
+target_include_directories(editor_model_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_model_viewport COMMAND editor_model_viewport_test)
+
+# What a drag of a menu window's handles writes (editor/preview/menu_layout_edit, S9k1):
+# the plan against the runtime's POSITION solve, the grid, the handles, the edits.
+add_executable(editor_menu_layout_edit_test editor/menu_layout_edit_test.cpp)
+target_link_libraries(editor_menu_layout_edit_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_layout_edit_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_layout_edit COMMAND editor_menu_layout_edit_test)
+
+# Arranging several menu windows (editor/preview/menu_arrange, S9k2): align, distribute
+# and drawing order on synthetic rects, then on a real menu through its compiled screen
+# (the hit walk pins the order), and a move of several windows.
+add_executable(editor_menu_arrange_test editor/menu_arrange_test.cpp)
+target_link_libraries(editor_menu_arrange_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_arrange_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_menu_arrange COMMAND editor_menu_arrange_test)
+
+# The query seam (S13 A5): every list a query serves paged in C++ (the pages make the list,
+# count the whole, an offset or a limit out of range refused naming the query), the state by
+# section and since a revision, the catalog from the tables, the menu reads editor_menu served
+# (its tree, its findings, the render check's render) and its batch as edit_record's wire form
+# (records by identity or label, a list replaced, one undo step), over a real session.
+add_executable(editor_query_test editor/editor_query_test.cpp)
+target_link_libraries(editor_query_test PRIVATE opennova_editor)
+target_include_directories(editor_query_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_query COMMAND editor_query_test)
+
+# The render check (S9j2): every menu screen compiled headless, its notes as Problems rows
+# on their records (never a build's gate, never the graph's findings twice), rendered
+# again only when something it read moved; a SKIP-LEG over OPENNOVA_JO_ASSETS' shipped
+# menus (every screen renders in the document's order, every interned name a graph edge).
+add_executable(editor_menu_render_test editor/menu_screen_render_test.cpp)
+target_link_libraries(editor_menu_render_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_render_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_menu_render COMMAND editor_menu_render_test)
+
+# The imports (S8): the PNG reader, the quantizer, the sidecars, the import pass, the
+# scan and the build over the outputs, and the game install as an import source; the plan
+# of an import with the files it needs (S11f, import_plan_test.cpp) and the session's
+# import of it, staged and published (S11g, import_apply_test.cpp: its retail leg imports a
+# packed install's menu with the files it needs, OPENNOVA_JO_DIR).
+add_executable(editor_import_test editor/import_test.cpp editor/import_plan_test.cpp editor/import_apply_test.cpp)
+target_link_libraries(editor_import_test PRIVATE opennova_editor)
+target_include_directories(editor_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_import COMMAND editor_import_test)
+
+# The editor's ImGui windows over a null backend (ADR 0046 d11): built with the pass. The
+# workspace's shell (S11d: its layout, the Document tabs, Files, the menus, the modals) is
+# workspace_test.cpp's; the change marks, the reveal, Output and the shortcuts (S11e)
+# markers_test.cpp's; the bounds sweep (S11e: nothing runs past what shows of it)
+# bounds_test.cpp's; the field controls (S12 D4) field_widgets_test.cpp's; the reference
+# picker (S12 D7: each field's own filter, the keys, a Files row dropped on a value, a missing
+# value's fixes) reference_picker_test.cpp's; find (S12 D8: the Document window's find bar, Find
+# in project) find_test.cpp's; Rename everywhere from the Inspector (S12 D9) rename_test.cpp's; every
+# control that raises a request enabled exactly when the busy gate takes it (S13 A1) gate_test.cpp's;
+# all share editor_ui/editor_ui_test_support.h. One ctest row per group (S13 V1: a failure names its
+# group, the rows run in parallel), each running `editor_ui_test <group>`; editor_ui_groups holds
+# this list and the program's table of groups to one list.
+if(OPENNOVA_IMGUI)
+    add_executable(editor_ui_test editor_ui/editor_windows_test.cpp editor_ui/workspace_test.cpp
+                                  editor_ui/markers_test.cpp editor_ui/bounds_test.cpp
+                                  editor_ui/field_widgets_test.cpp editor_ui/reference_picker_test.cpp
+                                  editor_ui/find_test.cpp editor_ui/rename_test.cpp editor_ui/gate_test.cpp)
+    target_link_libraries(editor_ui_test PRIVATE opennova_editor opennova_imgui)
+    target_include_directories(editor_ui_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    set(OPENNOVA_EDITOR_UI_GROUPS workspace markers bounds field_widgets reference_picker find rename
+                                  menu inspector preview styles problems gate)
+    foreach(group IN LISTS OPENNOVA_EDITOR_UI_GROUPS)
+        add_test(NAME editor_ui_${group} COMMAND editor_ui_test ${group})
+    endforeach()
+    add_test(NAME editor_ui_groups COMMAND editor_ui_test --groups ${OPENNOVA_EDITOR_UI_GROUPS})
+
+    # The document views' contract (S13 V3, ui/document_views): every DocumentTypeId's view over a
+    # file of its type on the null backend, its row's role, no request raised by drawing, nothing
+    # wider than its tab, a RevealRecord held until it draws; two open documents a view each.
+    add_executable(editor_view_contract_test editor_ui/view_contract_test.cpp)
+    target_link_libraries(editor_view_contract_test PRIVATE opennova_editor opennova_imgui)
+    target_include_directories(editor_view_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME editor_view_contract COMMAND editor_view_contract_test)
+endif()
+
+add_executable(project_cli_test editor/project_cli_test.cpp)
+target_link_libraries(project_cli_test PRIVATE opennova_project_cli)
+target_include_directories(project_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME project_cli COMMAND project_cli_test)
+
+# opennova-project as the editor's session, headless (S13 A7): the verb table against the request
+# and query tables, each verb's --json the session's answer to the same requests, the request and
+# query verbs, --install; its retail leg a project imported from the game install whose Problems
+# the query verb reads as the session does.
+add_executable(project_cli_session_test editor/project_cli_session_test.cpp)
+target_link_libraries(project_cli_session_test PRIVATE opennova_project_cli)
+target_include_directories(project_cli_session_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(project_cli_session COMMAND project_cli_session_test)
+
+add_executable(def_write_test def/def_write_test.cpp)
+target_link_libraries(def_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write COMMAND def_write_test)
+
+add_executable(editor_catalog_test editor/catalog_document_test.cpp)
+target_link_libraries(editor_catalog_test PRIVATE opennova_editor)
+target_include_directories(editor_catalog_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_catalog COMMAND editor_catalog_test)
+
+add_executable(editor_strings_test editor/strings_document_test.cpp)
+target_link_libraries(editor_strings_test PRIVATE opennova_editor)
+target_include_directories(editor_strings_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_strings COMMAND editor_strings_test)
+
+# The menu document (S6c), the edits that must not lose authored data (S9d) and the
+# retail sweep through it: a SKIP-LEG per root (OPENNOVA_JO_DIR's installed menus,
+# OPENNOVA_JO_ASSETS' fifteen revx02 fixtures).
+# The menu's table (editor/documents/mnu_table, ADR 0046 S13 D10): every member reached by
+# exactly one field path or list, over a synthetic every-element menu and (a SKIP-LEG without
+# OPENNOVA_JO_ASSETS) the fifteen reference menus rebuilt through the table.
+add_executable(editor_menu_table_test editor/menu_table_test.cpp)
+target_link_libraries(editor_menu_table_test PRIVATE opennova_editor)
+target_include_directories(editor_menu_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_menu_table COMMAND editor_menu_table_test)
+
+add_executable(editor_menus_test editor/mnu_document_test.cpp)
+target_link_libraries(editor_menus_test PRIVATE opennova_editor)
+target_include_directories(editor_menus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_menus COMMAND editor_menus_test)
+
+# The model document (S10d): untouched saves, edits, structure and refusals, undo,
+# save and reload, the validator (S11h: frames and registers as the runtime reads them);
+# a SKIP-LEG per root: every retail model saved untouched (OPENNOVA_JO_ASSETS), every
+# model of the game install validated with no error (OPENNOVA_JO_DIR).
+# The model's table (editor/documents/model_table.cpp, ADR 0046 S13 D10; the format's
+# threedi_schema test it was): a Set of every field of every record to itself changes no
+# byte, over the synthetic models and (a SKIP-LEG without OPENNOVA_JO_DIR) every model the
+# game install ships; the derived words, the refusals, the lists, the rows.
+add_executable(editor_model_table_test editor/model_table_test.cpp)
+target_link_libraries(editor_model_table_test PRIVATE opennova_editor)
+target_include_directories(editor_model_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_table COMMAND editor_model_table_test)
+
+# The mission's table (editor/documents/mission_table.h, ADR 0046 S13 D10): a mission's records as
+# rows of the one table shape over the format's field rows and bms_edit's typed structure; the rules,
+# the editor's ranges, the lists and the chains over the synthetic dense mission, and (a SKIP-LEG
+# without OPENNOVA_JO_DIR) every mission the game install ships read and set to itself.
+add_executable(editor_mission_table_test editor/mission_table_test.cpp)
+target_link_libraries(editor_mission_table_test PRIVATE opennova_editor)
+target_include_directories(editor_mission_table_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_mission_table COMMAND editor_mission_table_test)
+
+# The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
+# catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
+# choice, the labelled field, the record handle and the list ops over a file of each; the cost of a
+# keystroke in a def catalog (one field's row resolved); and (a SKIP-LEG without OPENNOVA_JO_DIR)
+# the game's powerup.def opened as the catalog's rows, written as its canonical writer writes it.
+add_executable(editor_table_shape_test editor/table_shape_test.cpp)
+target_link_libraries(editor_table_shape_test PRIVATE opennova_editor)
+target_include_directories(editor_table_shape_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_table_shape COMMAND editor_table_shape_test)
+
+add_executable(editor_model_document_test editor/model_document_test.cpp)
+target_link_libraries(editor_model_document_test PRIVATE opennova_editor)
+target_include_directories(editor_model_document_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_model_document COMMAND editor_model_document_test)
+
+# The clip and animation map documents (S10e): untouched saves, engine data edits,
+# the motion refused, rows and clips, the reset row, the validator and the clip edges;
+# a SKIP-LEG saving every retail clip and table untouched.
+add_executable(editor_animation_documents_test editor/animation_documents_test.cpp)
+target_link_libraries(editor_animation_documents_test PRIVATE opennova_editor)
+target_include_directories(editor_animation_documents_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_animation_documents COMMAND editor_animation_documents_test)
+
+# The stylesheet document (S9i): rows per line, edits the game reads as shown, the
+# refusals, the validator; a SKIP-LEG for OPENNOVA_JO_ASSETS' shipped menu_style.mns.
+add_executable(editor_styles_test editor/mns_document_test.cpp)
+target_link_libraries(editor_styles_test PRIVATE opennova_editor)
+target_include_directories(editor_styles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_styles COMMAND editor_styles_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)

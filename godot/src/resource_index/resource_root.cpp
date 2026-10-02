@@ -9,6 +9,7 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/gameprofile/required_resources.h>
+#include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
@@ -92,6 +93,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("load_font", "name"), &ResourceRoot::load_font);
 	ClassDB::bind_method(D_METHOD("list_missing_boot_resources"), &ResourceRoot::list_missing_boot_resources);
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("boot_resource_missing_marker"),
+			&ResourceRoot::boot_resource_missing_marker);
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
@@ -135,6 +138,10 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 		}
 	}
 	return missing;
+}
+
+String ResourceRoot::boot_resource_missing_marker() {
+	return String::utf8(kBootResourceMissingMarker);
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {
@@ -228,11 +235,24 @@ Error ResourceRoot::set_root_dir(const String &path) {
 	expansion_ = String();
 	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
-	const Error err = mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
-			opennova::VfsArchiveDiscovery::ScanAll);
-	if (err == OK) {
+	const Error err = [&]() -> Error {
+		String clean;
+		const Error begun = begin_mount(path, clean);
+		if (begun != OK) {
+			return begun;
+		}
+		if (!index_.scan(clean.utf8().get_data(), std::string(), opennova::VfsMountMode::LooseOnly,
+					opennova::VfsArchiveDiscovery::ScanAll)) {
+			root_dir_ = String();
+			last_error_ = String(index_.last_error().c_str());
+			return ERR_CANT_OPEN;
+		}
+		index_.set_scr_policy(gameprofile_scr_policy_for_code("jo"));
+		game_code_ = "jo";
+		last_error_ = String();
 		mount_kind_ = MountKind::Loose;
-	}
+		return OK;
+	}();
 	emit_signal("mounted");
 	return err;
 }
@@ -259,26 +279,38 @@ Error ResourceRoot::mount_runtime(const String &path, const String &expansion, b
 
 Error ResourceRoot::mount_runtime_archives_(const String &path, const String &expansion,
 		bool allow_loose_override, const String &game_code) {
-	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
+	// Runtime: the install mounted as a launch with these flags mounts it (mount_install): the
+	// witnessed fixed boot table (extra .pff files in the root never mount in retail,
+	// docs/vfs/vfs-pff-mount-re.md D-VFS-2), the packed PFFs the game data, loose files only
+	// shadowing them under `/d`.
 	mount_kind_ = MountKind::None;
-	const opennova::VfsMountMode mode = allow_loose_override
-			? opennova::VfsMountMode::PackedWithLooseOverride
-			: opennova::VfsMountMode::Packed;
-	// The game mounts the witnessed fixed boot table - extra .pff files in the
-	// root never mount in retail (docs/vfs/vfs-pff-mount-re.md D-VFS-2).
-	const Error err = mount_with_mode(path, expansion, mode, game_code,
-			opennova::VfsArchiveDiscovery::RetailTable);
+	opennova::LaunchFlags flags;
+	flags.loose_override = allow_loose_override;
+	flags.expansion = opennova::to_std(expansion);
+	flags.game = opennova::to_std(game_code.to_lower());
+	String clean;
+	const Error err = begin_mount(path, clean);
 	if (err != OK) {
 		expansion_ = String();
 		return err;
 	}
-	// Retail aborts subsystem initialization when the fixed boot table opens no archives.
-	// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
-	if (!index_.has_mounted_archive()) {
+	const opennova::ResourceIndex::InstallScan scanned = index_.scan_install(clean.utf8().get_data(), flags);
+	if (scanned == opennova::ResourceIndex::InstallScan::Unmounted) {
+		expansion_ = String();
+		root_dir_ = String();
+		last_error_ = String(index_.last_error().c_str());
+		return ERR_CANT_OPEN;
+	}
+	if (scanned == opennova::ResourceIndex::InstallScan::NoArchive) {
+		// Retail aborts subsystem initialization when the fixed boot table opens no archives
+		// (a corrupt sole archive included), and the partial loose mount goes with it.
+		// [orig: PFF_OpenAllArchives @ 0x4a4310; Game_InitSubsystems @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]
 		clear();
 		last_error_ = "No game data archives could be opened";
 		return ERR_FILE_NOT_FOUND;
 	}
+	game_code_ = game_code;
+	last_error_ = String();
 	// The expansion that actually mounted, which is NOT necessarily the requested one:
 	// opennova::Vfs::mount_game falls back to base-game mounting for a missing/unknown
 	// expansion and still succeeds. Reporting the request back would make every caller-side
@@ -288,8 +320,7 @@ Error ResourceRoot::mount_runtime_archives_(const String &path, const String &ex
 	return OK;
 }
 
-Error ResourceRoot::mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
-		const String &game_code, opennova::VfsArchiveDiscovery discovery) {
+Error ResourceRoot::begin_mount(const String &path, String &r_clean) {
 	// The resolver's per-session caches are keyed to the previous root; drop them so a
 	// a new or re-scanned resource directory is read fresh. The epoch bump tells
 	// GDScript-side cache holders (placer, veg assets) the same thing.
@@ -312,16 +343,7 @@ Error ResourceRoot::mount_with_mode(const String &path, const String &expansion,
 		return ERR_DOES_NOT_EXIST;
 	}
 	root_dir_ = clean;
-	if (!index_.scan(clean.utf8().get_data(), expansion.utf8().get_data(), mode, discovery)) {
-		root_dir_ = String();
-		last_error_ = String(index_.last_error().c_str());
-		return ERR_CANT_OPEN;
-	}
-	// Game-aware SCR keying: resolve the chosen game's policy once (gameprofile is the single
-	// source) and apply it for subsequent read_file calls. An empty/unknown code is the JO default.
-	index_.set_scr_policy(gameprofile_scr_policy_for_code(game_code.utf8().get_data()));
-	game_code_ = game_code;
-	last_error_ = String();
+	r_clean = clean;
 	return OK;
 }
 
@@ -634,63 +656,40 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader load
 	return result;
 }
 
-Ref<Texture2D> ResourceRoot::load_material_image(const String &name, uint8_t type) const {
-	if (root_dir_.is_empty() || name.is_empty()) {
-		return Ref<Texture2D>();
-	}
-	// The diffuse loaders resolve exactly one file: the DDS sibling or the
-	// row's own name, never an alternate extension or suffix
-	// (renderer::stage_texture_load); type 1 the whole name, an upper-case
-	// .PCX turned white with its blue as alpha (renderer::plain_texture_load).
-	const std::string native = opennova::to_std(name);
-	opennova::renderer::TextureLoad source;
-	if (type == 1) {
-		source = opennova::renderer::plain_texture_load(native);
-	} else {
-		const std::string query = opennova::renderer::material_texture_query(native);
-		source = opennova::renderer::stage_texture_load(query,
-				index_.prefers_loose_file(query),
-				has_file(opennova::to_gd(opennova::renderer::material_dds_sibling(query))));
-	}
-	if (source.reader == opennova::renderer::TextureReader::None) {
-		return Ref<Texture2D>();
-	}
-	const uint64_t epoch = opennova::cache_epoch();
-	if (texture_cache_epoch_ != epoch) {
-		texture_cache_.clear();
-		texture_cache_epoch_ = epoch;
-	}
-	const std::string key = std::string("material-image:") +
-			std::to_string(static_cast<int>(source.transform)) + ":" +
-			opennova::to_std(opennova::to_gd(source.file).to_lower());
-	const auto cached = texture_cache_.find(key);
-	if (cached != texture_cache_.end()) {
-		return cached->second;
-	}
-	const Ref<Texture2D> texture = opennova::load_material_image_from_bytes(
-			source, read_file(opennova::to_gd(source.file)));
-	texture_cache_.emplace(key, texture);
-	return texture;
-}
-
 Ref<Texture> ResourceRoot::load_material_texture(const String &name, uint8_t type) const {
-    if (type >= 16 && type <= 18) return opennova::prepare_material_chunk(read_file(name), type);
-    if (type < 4 || type > 7)
-        return opennova::prepare_material_texture(load_material_image(name, type), name, type);
-    const String dds = name.get_basename() + ".dds";
-    const std::string native_name = opennova::to_std(name);
-    const std::string selected = opennova::renderer::normal_material_filename(native_name,
-            index_.prefers_loose_file(native_name), has_file(dds));
-    const std::string key = "normal-source:" + selected;
-    const uint64_t epoch = opennova::cache_epoch();
-    if (texture_cache_epoch_ != epoch) { texture_cache_.clear(); texture_cache_epoch_ = epoch; }
-    auto cached = texture_cache_.find(key);
-    if (cached == texture_cache_.end()) {
-        const auto source = opennova::load_material_image_from_bytes(
-                opennova::normal_material_load(name, selected), read_file(opennova::to_gd(selected)));
-        cached = texture_cache_.emplace(key, source).first;
-    }
-    return opennova::prepare_material_texture(cached->second, name, type);
+	using opennova::renderer::MaterialTextureReader;
+	// The one file the row's loader opens and the reader that decodes it, never an
+	// alternate extension, suffix or reader (renderer::material_texture_source; a type-1
+	// row's upper-case .PCX turned white with its blue as alpha, renderer::material_texture_load);
+	// the session's loose-first policy decides a loose hit.
+	opennova::renderer::MaterialTextureSource source;
+	if (!root_dir_.is_empty() && !name.is_empty()) {
+		source = opennova::renderer::material_texture_source(opennova::to_std(name), type,
+				[this](const std::string &file) { return has_file(opennova::to_gd(file)); },
+				[this](const std::string &file) { return index_.prefers_loose_file(file); });
+	}
+	if (source.reader == MaterialTextureReader::Chunk) {
+		return opennova::prepare_material_chunk(read_file(opennova::to_gd(source.file)), type);
+	}
+	const opennova::renderer::TextureLoad load = opennova::renderer::material_texture_load(source, type);
+	Ref<Texture2D> image;
+	if (load.reader != opennova::renderer::TextureReader::None) {
+		const uint64_t epoch = opennova::cache_epoch();
+		if (texture_cache_epoch_ != epoch) {
+			texture_cache_.clear();
+			texture_cache_epoch_ = epoch;
+		}
+		const std::string key = "material-image:" + std::to_string(static_cast<int>(load.reader)) + ":" +
+				std::to_string(static_cast<int>(load.transform)) + ":" +
+				opennova::to_std(opennova::to_gd(load.file).to_lower());
+		auto cached = texture_cache_.find(key);
+		if (cached == texture_cache_.end()) {
+			cached = texture_cache_.emplace(key, opennova::load_material_image_from_bytes(
+					load, read_file(opennova::to_gd(load.file)))).first;
+		}
+		image = cached->second;
+	}
+	return opennova::prepare_material_texture(image, name, type);
 }
 
 Ref<Resource> ResourceRoot::load_font(const String &name) const {

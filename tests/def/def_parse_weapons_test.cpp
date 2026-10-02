@@ -38,6 +38,27 @@ int main(int argc, char **argv) {
         }
         def_free_weapons(&parsed);
     }
+    // The loadout list's team mask is the loadout reader's: yellow as blue, violet as red, an
+    // unknown team none [orig: WeaponDef_ParseProperty @ 0x54d730, teamfilter
+    // @ 0x54daae..0x54db08]. (The host's mask, from the weapon def reader's red / blue table,
+    // is world::teamfilter_bit's.) The tokens stay as written.
+    {
+        static const char kTeams[] =
+            "weapon \"WPN_YELLOW\"\nteamfilter yellow\nend\n"
+            "weapon \"WPN_VIOLET\"\nteamfilter violet\nteamfilter green\nend\n"
+            "weapon \"WPN_BOTH\"\nteamfilter RED\nteamfilter blue\nend\n";
+        DefWeaponsFile parsed{};
+        if (def_parse_weapons_memory(reinterpret_cast<const unsigned char *>(kTeams), sizeof(kTeams) - 1, &parsed) != 0 ||
+            parsed.count != 3) return 1;
+        const bool masks = parsed.entries[0].teamfilter_mask == 2 && parsed.entries[1].teamfilter_mask == 1 &&
+                           parsed.entries[2].teamfilter_mask == 3 && parsed.entries[1].teamfilter_count == 2 &&
+                           strcmp(parsed.entries[1].teamfilter[1], "green") == 0;
+        def_free_weapons(&parsed);
+        if (!masks) {
+            fprintf(stderr, "FAIL: the loadout reader's team masks\n");
+            return 1;
+        }
+    }
 
     /* The shipped weapon.def from the reference fixture set (OPENNOVA_JO_ASSETS):
        its field/pos/sights/actions pins and the memory-parse parity are the
@@ -404,7 +425,7 @@ int main(int argc, char **argv) {
        16-B-stride {name, 0, flags1, flags2} table @ 0x830bf0]: auto = 0x100,
        Sighted = 0x2, WhileSwimming = 0x1000000 (the old 7-entry table aliased it
        onto Underwater's 0x4 — corrected), LaserBeam = 0x40000000 (previously
-       unmapped -> raw_lines only), NoAmmoTypes = flags2 0x40.
+       unmapped -> authoring diagnostic), NoAmmoTypes = flags2 0x40.
        [orig: WeaponSlot_CanFireInCurrentState @ 0x53f0b0 auto gate;
        Player_ToggleWeaponScope @ 0x4df0c0 Flags & 3 gate + FOV 80/zoom @ 0x4df401]. */
     if (m4->flags != (0x100 | 0x2 | 0x1000000 | 0x40000000)) {
@@ -976,15 +997,19 @@ int main(int argc, char **argv) {
         const char text[] =
                 "weapon TEST_SOUNDS\n"
                 " soundhead MINI_HEAD\n soundfireloop MINI_LOOP\n"
-                " soundtrailoff MINI_TAIL\n soundlockedtone TARGET_LOCK\nend\n";
+                " soundtrailoff MINI_TAIL\n soundlockedtone TARGET_LOCK\n"
+                " heat_sound OVERHEAT extra\nend\n";
         DefWeaponsFile parsed{};
         if (def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(text),
                 sizeof(text) - 1, &parsed) != 0 || parsed.count != 1) return 1;
         const DefWeaponDef &w = parsed.entries[0];
+        /* heat_sound reads its first value token alone [orig: WeaponDefs_ParseLineCallback
+           'heat_sound' @ 0x543e85, tokens[1] @ 0x543e97 -> +0x368 @ 0x543eac]. */
         const bool ok = strcmp(w.soundhead, "MINI_HEAD") == 0 &&
                 strcmp(w.soundfireloop, "MINI_LOOP") == 0 &&
                 strcmp(w.soundtrailoff, "MINI_TAIL") == 0 &&
-                strcmp(w.soundlockedtone, "TARGET_LOCK") == 0;
+                strcmp(w.soundlockedtone, "TARGET_LOCK") == 0 &&
+                strcmp(w.heat_sound, "OVERHEAT") == 0;
         def_free_weapons(&parsed);
         if (!ok) { fprintf(stderr, "FAIL: weapon-level sound names\n"); return 1; }
     }

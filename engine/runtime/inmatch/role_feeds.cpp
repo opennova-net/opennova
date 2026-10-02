@@ -546,8 +546,8 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 		return hud::game_text(gametext, section, key, fallback);
 	};
 	v.respawn_text = world::deploy_status_text(line,
-			text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
-			text("WPNames", zone_key, "Spawn Point"));
+			text(hud::kGameTextOverlays, "STROVER_PENALTYTIMER", "Respawn penalty"),
+			text(hud::kGameTextWPNames, zone_key, "Spawn Point"));
 	// The team-service pair. The rules word follows the ctx+0x68 pick
 	// [orig: @0x553445]: that word is the hosted-session latch, so a hosting
 	// process reads its own multiplayerAttributeFlags_34C (the staged

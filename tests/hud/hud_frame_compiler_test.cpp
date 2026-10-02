@@ -10,7 +10,7 @@
 #include <runtime/hud/hud_message_log.h>
 #include <runtime/world/friendly_tags.h> // the viewer gate's feed
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <algorithm>
 #include <cmath>
@@ -2769,7 +2769,7 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 }
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);

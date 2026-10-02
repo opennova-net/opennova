@@ -51,7 +51,8 @@ enum class ThreediPanmInputs : uint8_t {
 //   resolved ordinal as their waveform phase byte.
 // - pivots: Per-subobject pivot points (size = max subobject_index + 1)
 // - animation_frames is the model MTRX table. PANM matrix_index (disk +6)
-//   selects a frame when nonzero; zero bypasses the table.
+//   selects the row threedi_panm_frame_row names (a spinner or Euler node's
+//   byte read signed, above zero); zero and 0x80..0xFF bypass the table.
 // - view_inverse is optional; if NULL, identity is used (IDA uses flt_1604CC8).
 // - mul_override is optional 4x4 to post-multiply outputs (NULL to skip).
 // Returns 0 on success, -1 on invalid args.

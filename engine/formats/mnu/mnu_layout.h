@@ -10,11 +10,12 @@
 // CUIElement_InitBorderMaterials @ 0x646f70 tile grid; the three-stage POSITION parse
 // tail in CUIElement_ParseXMLDefinition @ 0x648120 ending in
 // CStaticWnd_AdjustRectToTextSize @ 0x6575f0 (via the shared text-widget parse
-// @ 0x657c30 and the edit override @ 0x661d10); the spin up/down child
-// windows CSpinListWnd_CreateUpDownChildren @ 0x64b8b0; the ITEM color parse
-// CUISpinList_ParseXMLDefinition @ 0x64bd10 + CSpinListWnd_Render @ 0x64b220.]
+// CUIButtonWidget_ParseXMLAttributes @ 0x657c30); the ITEM color parse
+// CUISpinList_ParseXMLDefinition @ 0x64bd10 + CSpinListWnd_Render @ 0x64b220;
+// the APPEARANCE COLOR / OUTLINE value, CRT_wcstoxl base 16 @ 0x648562.]
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -70,21 +71,33 @@ struct RectEdges {
 	int bottom = 0;
 };
 
-// Stage 1+2 [orig: the POSITION branch @ 0x648120 + the parse tail]: missing
-// edges read 0; a degenerate axis (right <= left / bottom <= top) falls back
-// to the largest appearance image (max_image_w/h, measured by the embedder —
-// per image the width contribution is the texture width, the height the
-// authored HEIGHT attr when present else the texture height).
+// Stage 1+2 [orig: the POSITION branch @ 0x648120 + the parse tail @ 0x649736]:
+// missing edges read 0; a degenerate axis (right <= left / bottom <= top) falls
+// back to the largest appearance image (max_image_w/h: the ImageExtents below).
 RectEdges position_rect(bool has_left, int left, bool has_top, int top,
 		bool has_right, int right, bool has_bottom, int bottom,
 		int max_image_w, int max_image_h);
 
-// The per-image height contribution to that fallback.
-int appearance_extent_height(bool has_height, int height, int texture_height);
+// The largest IMAGE extents a window's APPEARANCE rows reach as they are parsed
+// [orig: CUIElement_ParseXMLDefinition @ 0x6485cd..0x648634]: every IMAGE row
+// counts, including one a later row of its state replaces; the width is the
+// texture's; the height is the row's HEIGHT when it is not -1 (the attribute's
+// absence), else the texture's; both maxima compare unsigned (`jbe`), so a
+// HEIGHT of 0 adds nothing and a negative one other than -1 is a huge maximum.
+// A texture that did not load measures 0.
+struct ImageExtents {
+	uint32_t width = 0;
+	uint32_t height = 0;
+	void add(int texture_width, int texture_height, int height_attribute);
+};
 
-// The widget families whose parse ends in the text-extent adjustment
-// [orig: the shared static/button text-widget parse @ 0x657c30 vtable slot
-// and the edit override @ 0x661d10].
+// The widget families whose parse ends in the text-extent adjustment: every
+// type whose parse chain runs the STATIC parse [orig:
+// CUIButtonWidget_ParseXMLAttributes @ 0x657c30 calls CStaticWnd_AdjustRectToTextSize
+// @ 0x658079; CButtonWnd_ParseTooltipXML @ 0x658170 again @ 0x658324]: STATIC,
+// BUTTON, EDIT, MULTILINE_EDIT, RADIO, CHECKBOX, SPINLIST, LIST, LAN_LIST,
+// TABLE, COMBOBOX. The base-only types (SCROLL, MARQUEE_WND, GLB_TABLE, GOPHER,
+// the generic window, RADIOEDIT itself) are never text sized.
 bool window_type_is_text_sized(WindowType t);
 
 // Stage 3 [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0]: a still-degenerate
@@ -95,19 +108,25 @@ bool window_type_is_text_sized(WindowType t);
 RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 		int text_h, const std::string &justify, const std::string &vjustify);
 
-// --- Spin up/down child rects [orig: @ 0x64b8b0] -----------------------------
+// --- Colors -----------------------------------------------------------------
 
-// SPINUP/SPINDOWN POSITION is parent-relative to the spinlist; a missing far
-// edge sizes from the appearance extents (the three-stage fallback), and an
-// extent-less button takes the witnessed nominal 16 x 12 arrow box.
-RectEdges spin_button_rect(bool has_left, int left, bool has_top, int top,
-		bool has_right, int right, bool has_bottom, int bottom,
-		int extent_w, int extent_h);
+// A color the parse reads with wcstoul(text, 16) [orig: CRT_wcstoxl @ 0x76e93b
+// through the APPEARANCE COLOR / OUTLINE arm @ 0x648562 and the spin ITEM
+// @ 0x64bd10]: leading whitespace, an optional sign, an optional 0x, then hex
+// digits up to the first other character (a partly valid value keeps its valid
+// prefix); no digit reads 0 ('#' is not accepted); a value past 32 bits
+// saturates to 0xFFFFFFFF; '-' negates. The result is the 0xAARRGGBB word as it
+// stands, so six digits leave alpha 0.
+std::uint32_t color_value(const std::string &text);
 
-// --- ITEM color swatches -----------------------------------------------------
+// Whether color_value reads the whole text [orig: CRT_wcstoxl @ 0x76e93b through the
+// APPEARANCE COLOR / OUTLINE arm @ 0x648562 and the FONT colours @ 0x648d14..0x648e64]:
+// leading blanks, a sign, 0x, then hex digits to the end (trailing blanks read nothing
+// more); false when no digit is read or another character stops it. `digits_read`, when
+// given, is how many hex digits the read took.
+bool color_reads_whole(const std::string &text, size_t *digits_read = nullptr);
 
-// type="color" reads the element text as base-16 RRGGBB forced opaque
-// [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10 (wcstoul base 16) +
+// type="color" on a spin ITEM: the same word forced opaque [orig:
 // CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
 std::uint32_t item_color_argb(const std::string &hex_text);
 

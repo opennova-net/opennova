@@ -15,16 +15,13 @@
 #pragma once
 
 #include <runtime/anim/anim_sample.h>
+#include <runtime/anim/rig_files.h>
 #include <runtime/anim/skeletal_pose.h>
 
 #include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-namespace opennova {
-namespace assets { class AssetStore; }
-}
 
 namespace opennova::anim {
 
@@ -38,19 +35,20 @@ public:
 		anim::Vec3 origin;
 	};
 
-	// Load the whole rig through the shared native asset store: bind it to the
+	// Load the whole rig through `files` (the mounted store, or an embedder's own): bind it to the
 	// table's reset clip, retail's slot-0 head (the last variant that loads of
 	// the last row whose key past its first five characters is "reset", any
 	// case; a table with none does not load), sample every clip variant of a
 	// row naming one of the 252 slots in file order (a row naming none
-	// registers nothing; continue-on-failure on missing .bads) against that bind, and build
+	// registers nothing; a .bad that does not load registers failsafe.bad in its
+	// place, else nothing: adm_token_clip) against that bind, and build
 	// the skeleton from the model bone table (origins = parent-relative pivots,
 	// parents paired) with one loader for simulation and presentation. Returns
 	// loaded().
-	bool load_from_adm(const assets::AssetStore *assets, const std::string &adm_name,
+	bool load_from_adm(const RigFiles *files, const std::string &adm_name,
 	                   const std::vector<anim::Vec3> &model_bone_origins,
 	                   const std::vector<int> &model_bone_parents);
-	bool load_from_files(const assets::AssetStore *assets, const std::string &skeleton_bad,
+	bool load_from_files(const RigFiles *files, const std::string &skeleton_bad,
 						 const std::vector<std::pair<std::string, std::string>> &clips,
 						 const std::vector<anim::Vec3> &model_bone_origins = {},
 						 const std::vector<int> &model_bone_parents = {});
@@ -119,16 +117,34 @@ public:
 	                        int weapon_variant = 0, int weapon_prev_variant = 0,
 	                        int primary_variant = 0, int source_variant = 0) const;
 
+	// Where a loaded clip comes from: the table's row (its index among the .adm's
+	// entries, file order), the token of that row (its index among the row's clips)
+	// and the file that token names. load_from_files numbers its pairs as rows of
+	// one token each.
+	struct ClipSource {
+		size_t entry = 0;
+		size_t token = 0;
+		std::string file;
+	};
+
 	// The loaded clip records, public for diagnostics/tests (frame counts,
 	// loop flags): the composed-pose path above is the consumer seam.
 	struct LoadedClip {
 		std::string key; // as authored (lookups fold)
+		ClipSource source;
 		anim::Clip clip;
 	};
 
 	const std::vector<LoadedClip> &clips() const { return clips_; }
 	const LoadedClip *find_clip(const std::string &key) const;
 	const LoadedClip *find_clip_variant(const std::string &key, int variant) const;
+	// The source of the clip a key's variant serves (wrapped as find_clip_variant
+	// wraps); null when the key has none.
+	const ClipSource *find_clip_source(const std::string &key, int variant) const;
+	// The other way: the key and variant a row's token registered as; -1 (key
+	// untouched) when it registered nothing, its key naming no slot or its file
+	// not loading.
+	int variant_of(size_t entry, size_t token, std::string &key) const;
 
 	// Compose the channels over an already sampled pose: the weapon-channel
 	// splice, then the aim overlay on top, in the witnessed order
@@ -145,6 +161,16 @@ public:
 			int weapon_variant = 0, int weapon_prev_variant = 0) const;
 
 private:
+	struct ClipRequest {
+		std::string key;
+		ClipSource source;
+	};
+	// `table_tokens`: the requests are a table's tokens, which take failsafe.bad in
+	// place of a file that does not load (adm_token_clip).
+	bool load_clips(const RigFiles *files, const std::string &skeleton_bad,
+	                const std::vector<ClipRequest> &requests, bool table_tokens,
+	                const std::vector<anim::Vec3> &model_bone_origins,
+	                const std::vector<int> &model_bone_parents);
 	void rebuild_clip_index();
 
 	// The upper-body WEAPON channel: sample weapon_key at ITS OWN playhead and hard-override

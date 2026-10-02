@@ -201,10 +201,14 @@ std::string vs(const Vec &v) { return "(" + num(v[0]) + " " + num(v[1]) + " " + 
 
 Vec q16v(const int32_t *v) { return {v[0] * kQ16, v[1] * kQ16, v[2] * kQ16}; }
 
-std::string reg_name(const Threedi3di3 &m, int style, int reg) {
-	if (style <= THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD) return "-";
+// A register by its index in the model's table: its name, or #index past the table.
+std::string register_label(const Threedi3di3 &m, int reg) {
 	if (reg >= 0 && static_cast<uint32_t>(reg) < m.ctrl.count) return m.ctrl.registers[reg].name;
 	return "#" + std::to_string(reg);
+}
+
+std::string reg_name(const Threedi3di3 &m, int style, int reg) {
+	return threedi_generator_names_register(style) ? register_label(m, reg) : "-";
 }
 
 // Everything a material means, as one comparable string (generator rates and
@@ -214,7 +218,7 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	if (mt.material_flags & THREEDI_MATERIAL_FLAG_ALPHA_TEST) k += " at " + std::to_string(mt.alpha_test_value_byte);
 	k += " glass " + std::to_string(mt.is_glass) + " emissive " + std::to_string(mt.emissive_type);
 	k += " reflect";
-	for (int c = 0; c < 4; ++c) k += " " + std::to_string(byte_of(mt.reflect_color[c]));
+	for (int c = 0; c < 4; ++c) k += " " + std::to_string(threedi_build_byte_of(mt.reflect_color[c]));
 	for (uint32_t t = 0; t < mt.texture_count && t < 24; ++t) {
 		const ThreediMaterialTexture &x = mt.textures[t];
 		k += std::string(" [") + x.name + " " + std::to_string(x.slot) + " " + std::to_string(x.type) + " " +
@@ -223,13 +227,13 @@ std::string material_key(const Threedi3di3 &m, const ThreediMaterial &mt) {
 	const ThreediTexAnim &a = mt.animation;
 	if (a.num_frames || a.animation_type || a.cycle_frame_time)
 		k += " anim " + std::to_string(a.num_frames) + "/" + std::to_string(a.animation_type) + "/" +
-				(a.animation_type == 1 ? reg_name(m, THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD + 1, a.cycle_frame_time)
-									 : std::to_string(a.cycle_frame_time));
+				(threedi_flipbook_reads_register(a) ? register_label(m, a.cycle_frame_time)
+												   : std::to_string(a.cycle_frame_time));
 	const ThreediRgbGen &g = mt.rgb_gen;
 	if (g.style) {
 		k += " rgb " + std::to_string(g.style) + " " + reg_name(m, g.style, g.reg) + " " + num(g.rate) + " " + num(g.phase);
-		for (int c = 0; c < 3; ++c) k += " " + std::to_string(byte_of(g.start_color[c]));
-		for (int c = 0; c < 3; ++c) k += " " + std::to_string(byte_of(g.end_color[c]));
+		for (int c = 0; c < 3; ++c) k += " " + std::to_string(threedi_build_byte_of(g.start_color[c]));
+		for (int c = 0; c < 3; ++c) k += " " + std::to_string(threedi_build_byte_of(g.end_color[c]));
 	}
 	const ThreediAlphaGen &ag = mt.alpha_gen;
 	if (ag.style)
@@ -882,9 +886,8 @@ void compare_parts(Diff &d, const std::string &where, const ThreediLod &x, const
 
 std::string track_key(const Threedi3di3 &m, const ThreediTransform &t) {
 	if (t.control == 0 && t.control_param == 0 && t.rate == 0 && t.start == 0 && t.end == 0) return "-";
-	std::string param = threedi_panm_parameter_is_ctrl_reference(t.control)
-			? (t.control_param < m.ctrl.count ? m.ctrl.registers[t.control_param].name : "#" + std::to_string(t.control_param))
-			: std::to_string(t.control_param);
+	std::string param = threedi_generator_names_register(t.control) ? register_label(m, t.control_param)
+																	 : std::to_string(t.control_param);
 	return std::to_string(t.control) + " " + param + " " + std::to_string(t.rate) + " " + std::to_string(t.start) + " " +
 			std::to_string(t.end);
 }
@@ -929,10 +932,10 @@ void compare_panm(Diff &d, const std::string &where, const Threedi3di3 &a, const
 			std::snprintf(buf, sizeof(buf), ": flags 0x%08x vs 0x%08x", x.flags, y.flags);
 			d.add(w + buf);
 		}
-		const auto tx = panm_tracks(x), ty = panm_tracks(y);
-		for (int t = 0; t < kTrackCount; ++t) {
+		const auto tx = threedi_panm_tracks(x), ty = threedi_panm_tracks(y);
+		for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
 			const std::string kx = track_key(a, *tx[t]), ky = track_key(b, *ty[t]);
-			if (kx != ky) d.add(w + " " + track_label(t) + ": " + kx + " vs " + ky);
+			if (kx != ky) d.add(w + " " + threedi_panm_track_label(t) + ": " + kx + " vs " + ky);
 		}
 		// The rotation frame the row selects (a positive matrix_index).
 		const auto frame = [](const Threedi3di3 &m, const ThreediPartAnimation &r) {

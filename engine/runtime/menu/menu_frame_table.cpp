@@ -1,8 +1,9 @@
 // The table widget interior for the menu frame compiler: the column set-up
-// the XML makes, the header cells, the visible-row walk with its per-row-state
-// cell passes, the SUBST images and the custom-draw cells, the cell draw a
-// custom-draw handler calls back into, the row pitch and visible count, and the
-// hit test.
+// the XML makes (or the columns code installs), the header cells with the sort
+// indicator, the visible-row walk with its per-row-state cell passes, the
+// SUBST images and the custom-draw cells, the cell draw a custom-draw handler
+// calls back into, the shared header/body row heights, the row pitch and
+// visible count, and the hit test.
 // [orig: CUITable_Render @ 0x6411d0; CTableWnd_DrawCell @ 0x640be0;
 //  CTableWnd_RecalcLayout @ 0x63f1a0; CTableWnd_HitTest @ 0x63fe90;
 //  CTableWnd_ParseXMLContentDefinition @ 0x6427d0; docs/mnu/menu-re.md
@@ -15,6 +16,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -52,14 +54,15 @@ int vjustify_word(const std::string &token, int current, int *numeric) {
 // COUNT of 1 or more), each zeroed (width 0: not drawn, not hit) until a
 // HEADER sets it up; HEADER, BODY and SUBST share a running column index a
 // COLUMN attribute moves. A HEADER sets the label, the carried WIDTH (100 at
-// the COLUMN element), JUSTIFY 1 / VJUSTIFY 16 unless authored, the cells'
-// justification the same; a BODY then sets the cells' justification (1 / 16
-// unless authored, a numeric token the cell offset), the draw kind (the first
-// authored of CUSTOM_DRAW 2 / BITMAP_DRAW 1 wins: the attribute walk runs last
-// authored first) and SCALE_BITMAP; a SUBST adds a value -> image row, the
-// lookup meeting the LAST authored first (the rows are prepended). The model
-// keeps the three row kinds apart, so the running index restarts per kind
-// (every shipped row authors its COLUMN).
+// the COLUMN element) and SORT, JUSTIFY 1 / VJUSTIFY 16 unless authored, the
+// cells' justification the same (mnu::table_header_setup carries them); a BODY
+// then sets the cells' justification (1 / 16 unless authored, a numeric token
+// the cell offset), the draw kind (the first authored of CUSTOM_DRAW 2,
+// BITMAP_DRAW 1 and BITMAP_TEXT 4: the attribute walk runs last authored
+// first; the model keeps it as BODY's DISPLAY) and SCALE_BITMAP; a SUBST adds
+// a value -> image row, the lookup meeting the LAST authored first (the rows
+// are prepended). The model keeps the three row kinds apart, so the running
+// index restarts per kind (every shipped row authors its COLUMN).
 // [orig: CTableWnd_ParseXMLContentDefinition @ 0x6427d0 — the BODY stores
 //  +108 / +144 / +148 / +152 / +156 / +168 / +172, the SUBST node
 //  {value, file, URL, FILE, next} prepended at column +164; init_table_row
@@ -69,21 +72,21 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 	const int count = xml.has_count && xml.count >= 1 ? xml.count : 1;
 	node.table_columns.assign(static_cast<size_t>(count), TableColumnSetup{});
 	node.table_spacing = xml.has_spacing ? xml.spacing : 0;
-	int running = 0;
-	int carried_width = 100;
-	for (const mnu::TableHeader &h : xml.headers) {
-		if (h.has_column) running = h.column;
-		if (h.has_width) carried_width = h.width;
-		if (running < 0 || running >= count) continue;
-		TableColumnSetup &c = node.table_columns[static_cast<size_t>(running)];
-		c.width = carried_width;
-		c.label = resolve_text_value(h.type, h.text).text;
+	const std::vector<mnu::TableHeaderSetup> setup = mnu::table_header_setup(xml);
+	for (size_t i = 0; i < xml.headers.size(); ++i) {
+		if (!setup[i].set_up) continue;
+		const mnu::TableHeader &h = xml.headers[i];
+		TableColumnSetup &c = node.table_columns[static_cast<size_t>(setup[i].column)];
+		c.width = setup[i].width;
+		c.label = resolve_text_value(node.text_table, h.type, h.text).text;
 		c.header_justify = justify_word(h.justify, 1, nullptr);
 		c.header_vjustify = vjustify_word(h.vjustify, 16, nullptr);
 		c.body_justify = c.header_justify;
 		c.body_vjustify = c.header_vjustify;
+		c.numeric_sort = setup[i].numeric_sort;
+		c.ascending = true;
 	}
-	running = 0;
+	int running = 0;
 	for (const mnu::TableBody &b : xml.bodies) {
 		if (b.has_column) running = b.column;
 		if (running < 0 || running >= count) continue; // retail writes past its array
@@ -92,7 +95,11 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 		c.body_y = 0;
 		c.body_justify = justify_word(b.justify, 1, &c.body_x);
 		c.body_vjustify = vjustify_word(b.vjustify, 16, &c.body_y);
-		c.cell_type = b.custom_draw ? kTableCellCustom : b.bitmap_draw ? kTableCellImage : kTableCellText;
+		c.cell_type = b.display.empty()                          ? kTableCellText
+				: strutil::iequals(b.display, "CUSTOM_DRAW") ? kTableCellCustom
+				: strutil::iequals(b.display, "BITMAP_DRAW") ? kTableCellImage
+				: strutil::iequals(b.display, "BITMAP_TEXT") ? kTableCellImageText
+															 : kTableCellText;
 		c.scale_bitmap = b.scale_bitmap;
 	}
 	running = 0;
@@ -106,37 +113,75 @@ void MenuFrameCompiler::build_table_columns_(WidgetNode &node) {
 	}
 }
 
+// The column set a table draws. Code-installed columns replace the XML ones (the
+// stat RESULTLIST resizes the table and sets every column up [orig:
+// StatScreen_PopulateStatResultsList @ 0x562240 -> init_table_row @ 0x63f9c0]):
+// a code column has no SUBST rows and no cell offsets. A column the populate's
+// resize left in place and no init has set up yet (MenuTableColumn::defined)
+// is the authored one, or a zeroed new one past the authored count
+// [orig: resize_column_count @0x63f6c0 — existing records copied, new ones
+// zeroed].
+std::vector<MenuFrameCompiler::TableColumnSetup> MenuFrameCompiler::table_columns_(
+		const WidgetNode &node, const MenuWidgetState *ws) const {
+	if (ws == nullptr || !ws->has_table_columns) {
+		return node.table_columns;
+	}
+	std::vector<TableColumnSetup> columns;
+	columns.reserve(ws->table_columns.size());
+	for (const MenuTableColumn &m : ws->table_columns) {
+		if (!m.defined) {
+			const size_t at = columns.size();
+			columns.push_back(at < node.table_columns.size() ? node.table_columns[at] : TableColumnSetup{});
+			continue;
+		}
+		TableColumnSetup c;
+		c.width = m.width;
+		c.label = m.label;
+		c.header_justify = m.justify;
+		c.header_vjustify = m.vjustify;
+		c.body_justify = m.body_justify;
+		c.body_vjustify = m.body_vjustify;
+		c.cell_type = m.cell_type;
+		c.numeric_sort = m.numeric_sort;
+		c.ascending = m.ascending;
+		columns.push_back(std::move(c));
+	}
+	return columns;
+}
+
 // The image SetCellText puts beside a cell text: the column's SUBST rows,
 // last authored first, the first whose value matches (stricmp) — a FILE row
 // gives its texture, any other row none.
 // [orig: CTableWnd_SetCellText @ 0x63edf0 — the +164 walk, the texture load
 //  when the node's FILE / URL word is set]
-int32_t MenuFrameCompiler::table_cell_image_(const WidgetNode &node, int column,
-		const std::string &text) const {
-	if (column < 0 || column >= static_cast<int>(node.table_columns.size())) return kMenuTexNone;
-	const std::vector<TableColumnSetup::Subst> &rows =
-			node.table_columns[static_cast<size_t>(column)].subst;
+int32_t MenuFrameCompiler::table_cell_image_(const std::vector<TableColumnSetup> &columns,
+		int column, const std::string &text) const {
+	if (column < 0 || column >= static_cast<int>(columns.size())) return kMenuTexNone;
+	const std::vector<TableColumnSetup::Subst> &rows = columns[static_cast<size_t>(column)].subst;
 	for (auto it = rows.rbegin(); it != rows.rend(); ++it)
 		if (strutil::iequals(it->value, text)) return it->texture;
 	return kMenuTexNone;
 }
 
-// Header height: the "W" height (FIXED_HEADER_HEIGHT is not in this model and
-// no shipped table authors it); body rows: MIN_ITEM_HEIGHT, the "W" height
-// when it is not a positive height.
+// Header height: FIXED_HEADER_HEIGHT when it is 0 or more, else the "W" height;
+// body rows: MIN_ITEM_HEIGHT, the "W" height when it is not a positive height
 // [orig: CUITable_Render @ 0x6411d0 — +816 / +812 against the "W" measure;
-//  CTableWnd_RecalcLayout @ 0x63f1f4 replaces a negative +812]
+// CTableWnd_RecalcLayout @ 0x63f1f4 replaces a negative +812]. A MIN_ITEM_HEIGHT
+// of 0 divides by zero in retail as the table is created (the editor refuses to
+// write it); the runtime measures it as "W".
 void MenuFrameCompiler::table_row_heights_(const WidgetNode &node,
 		int *header_height,
 		int *body_row_height) const {
 	int em_w = 0;
 	int em_h = 0;
 	measure_text(node, "W", &em_w, &em_h);
+	const mnu::TableData &table = node.window->table_data;
 	if (header_height != nullptr) {
-		*header_height = em_h;
+		*header_height = table.has_fixed_header_height && table.fixed_header_height >= 0
+				? table.fixed_header_height
+				: em_h;
 	}
 	if (body_row_height != nullptr) {
-		const mnu::TableData &table = node.window->table_data;
 		*body_row_height = table.has_min_item_height && table.min_item_height > 0
 				? table.min_item_height
 				: em_h;
@@ -146,12 +191,12 @@ void MenuFrameCompiler::table_row_heights_(const WidgetNode &node,
 // The row pitch: one body row height, plus one per time the column widths
 // overflow the table's width (the overflowing column's width is dropped).
 // [orig: CTableWnd_RecalcLayout @ 0x63f1a0 — @0x63f220..0x63f24b]
-int MenuFrameCompiler::table_pitch_(const WidgetNode &node, const mnu::RectEdges &rect,
-		int row_h) const {
+int MenuFrameCompiler::table_pitch_(const std::vector<TableColumnSetup> &columns,
+		const mnu::RectEdges &rect, int row_h) {
 	int pitch = row_h;
 	int accum = 0;
 	const int width = rect.right - rect.left;
-	for (const TableColumnSetup &c : node.table_columns) {
+	for (const TableColumnSetup &c : columns) {
 		accum += c.width;
 		if (accum > width) {
 			pitch += row_h;
@@ -164,12 +209,12 @@ int MenuFrameCompiler::table_pitch_(const WidgetNode &node, const mnu::RectEdges
 // The visible row count: the body height over the pitch, at least 1.
 // [orig: CTableWnd_RecalcLayout @ 0x63f25a..0x63f276]
 int MenuFrameCompiler::table_visible_rows_(const WidgetNode &node,
-		const mnu::RectEdges &rect) const {
+		const mnu::RectEdges &rect, const std::vector<TableColumnSetup> &columns) const {
 	int header_h = 0;
 	int row_h = 0;
 	table_row_heights_(node, &header_h, &row_h);
 	if (row_h <= 0) return 1;
-	const int pitch = table_pitch_(node, rect, row_h);
+	const int pitch = table_pitch_(columns, rect, row_h);
 	return std::max((rect.bottom - rect.top - header_h) / pitch, 1);
 }
 
@@ -190,47 +235,6 @@ int MenuFrameCompiler::table_column_count(int index) const {
 	return static_cast<int>(node.table_columns.size());
 }
 
-void MenuFrameCompiler::set_table_columns(int index,
-		const std::vector<MenuTableColumnDef> &columns) {
-	table_column_defs_[index] = columns;
-	if (index < 0 || index >= static_cast<int>(nodes_.size())) return;
-	WidgetNode &node = nodes_[static_cast<size_t>(index)];
-	if (node.window == nullptr || node.window->type != mnu::WindowType::Table) return;
-	build_table_columns_(node);
-	apply_table_column_defs_(index, node);
-}
-
-// The records code set up over the authored layout (menu_table_row.h
-// MenuTableColumnDef): a kept record is the authored column, any other the
-// runtime's own from zero (a count that grows the table starts every record
-// over, so the authored draw kinds, cell offsets, SUBST rows and scales go with
-// it); an init over either sets the label, the width and the header
-// justification, which the cells copy, and keeps the rest of the record.
-// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the grow path's copy
-//  @0x63f724 takes the old count in bytes; CTableWnd_InitRow @0x63f9c0 —
-//  +0x80 / +0x84 (-1 -> 1 / 0x10) copied to +0x90 / +0x94 @0x63fbdf..0x63fc03,
-//  no write to +108 or +152..+172]
-void MenuFrameCompiler::apply_table_column_defs_(int index, WidgetNode &node) const {
-	const auto it = table_column_defs_.find(index);
-	if (it == table_column_defs_.end() || it->second.empty()) return;
-	const std::vector<MenuTableColumnDef> &defs = it->second;
-	std::vector<TableColumnSetup> authored;
-	authored.swap(node.table_columns);
-	node.table_columns.assign(defs.size(), TableColumnSetup{});
-	for (size_t c = 0; c < defs.size(); ++c) {
-		const MenuTableColumnDef &def = defs[c];
-		TableColumnSetup &col = node.table_columns[c];
-		if (def.kept && c < authored.size()) col = authored[c];
-		if (!def.defined) continue;
-		col.width = def.width;
-		col.label = def.label;
-		col.header_justify = def.justify == -1 ? 1 : def.justify;
-		col.header_vjustify = def.vjustify == -1 ? 16 : def.vjustify;
-		col.body_justify = col.header_justify;
-		col.body_vjustify = col.header_vjustify;
-	}
-}
-
 void MenuFrameCompiler::set_table_cell_painter(int index, MenuTableCellPainter painter) {
 	if (painter)
 		table_painters_[index] = std::move(painter);
@@ -239,19 +243,24 @@ void MenuFrameCompiler::set_table_cell_painter(int index, MenuTableCellPainter p
 }
 
 // CTableWnd_HitTest on the design point: a miss of the table is no row and no
-// column. Above the header's bottom the column under x (from the table's left,
-// SPACING between; a column whose right edge passes the table's fails the
-// test); below it the row is the offset over the pitch, clamped to the last
-// visible row, mapped past the scroll offset over the rows that are not
-// hidden (a row past the last fails), and the column is the one whose span
-// holds x (-1 when none; a width-0 column holds nothing but still steps
-// SPACING). The design point is the raw point over the menu scale, truncated.
-// [orig: CTableWnd_HitTest @ 0x63fe90; UI_DispatchMouseEvent @ 0x63ab00]
+// column. The table's embedded scrollbar is its child and claims its strip
+// before the table sees the point. Above the header's bottom the column under
+// x (from the table's left, SPACING between; a column whose right edge passes
+// the table's fails the test); below it the row is the offset over the pitch,
+// clamped to the last visible row, mapped past the scroll offset over the rows
+// that are not hidden (a row past the last fails), and the column is the one
+// whose span holds x (-1 when none; a width-0 column holds nothing but still
+// steps SPACING). A header point no column holds walks on as visible row -1:
+// the row just above a scrolled view, else nothing. The design point is the
+// raw point over the menu scale, truncated.
+// [orig: CTableWnd_HitTest @0x63fe90; UI_DispatchMouseEvent @0x63ab00;
+//  CWnd_DispatchMouseEventToChildren @ 0x647900 — a hit child clears the
+//  parent's own hit]
 bool MenuFrameCompiler::table_hit(int index, const MenuFrameState &state, float mx, float my,
 		float sx, float sy, int *out_row, int *out_column) const {
 	*out_row = -1;
 	*out_column = -1;
-	if (index < 0 || index >= static_cast<int>(nodes_.size())) return false;
+	if (index < 0 || index >= document_nodes_) return false;
 	const WidgetNode &node = nodes_[static_cast<size_t>(index)];
 	if (node.window == nullptr || node.window->type != mnu::WindowType::Table) return false;
 	mnu::RectEdges rect;
@@ -259,19 +268,28 @@ bool MenuFrameCompiler::table_hit(int index, const MenuFrameState &state, float 
 	const MenuWidgetState *ws = state_for(state, index);
 	const int px = sx > 0.0f ? static_cast<int>(mx / sx) : 0;
 	const int py = sy > 0.0f ? static_cast<int>(my / sy) : 0;
+	// CWnd_HitTestPoint: outside the widget -> S_OK with nothing.
+	if (px < rect.left || px >= rect.right || py < rect.top || py >= rect.bottom) return true;
 	int header_h = 0;
 	int row_h = 0;
 	table_row_heights_(node, &header_h, &row_h);
 	if (row_h <= 0) return false;
-	const int pitch = table_pitch_(node, rect, row_h);
-	// CWnd_HitTestPoint: outside the widget -> S_OK with nothing.
-	if (px < rect.left || px >= rect.right || py < rect.top || py >= rect.bottom) return true;
-	const int visible = table_visible_rows_(node, rect);
+	const std::vector<TableColumnSetup> columns = table_columns_(node, ws);
+	const int visible = table_visible_rows_(node, rect, columns);
+	mnu::RectEdges scrollbar_rect;
+	if (table_live_rows_(ws) > visible &&
+			resolve_scrollbar_rect(node, ScrollbarKind::Embedded, rect, 0, rect.bottom - rect.top,
+					22, &scrollbar_rect) &&
+			px >= scrollbar_rect.left && px < scrollbar_rect.right && py >= scrollbar_rect.top &&
+			py < scrollbar_rect.bottom) {
+		return true;
+	}
+	const int pitch = table_pitch_(columns, rect, row_h);
 	int row = -1;
 	if (py < rect.top + header_h) {
 		int left = rect.left;
-		for (size_t c = 0; c < node.table_columns.size(); ++c) {
-			const int right = left + node.table_columns[c].width;
+		for (size_t c = 0; c < columns.size(); ++c) {
+			const int right = left + columns[c].width;
 			if (right > rect.right) return false;
 			if (px - left >= 0 && px - right < 0) {
 				*out_column = static_cast<int>(c);
@@ -295,8 +313,8 @@ bool MenuFrameCompiler::table_hit(int index, const MenuFrameState &state, float 
 	if (data_row >= count) return false;
 	*out_row = data_row;
 	int left = rect.left;
-	for (size_t c = 0; c < node.table_columns.size(); ++c) {
-		const int right = left + node.table_columns[c].width;
+	for (size_t c = 0; c < columns.size(); ++c) {
+		const int right = left + columns[c].width;
 		if (px - left >= 0 && px - right < 0) {
 			*out_column = static_cast<int>(c);
 			break;
@@ -306,81 +324,51 @@ bool MenuFrameCompiler::table_hit(int index, const MenuFrameState &state, float 
 	return true;
 }
 
-// CTableWnd_CalculateAlignedTextRect: the whole text's measure aligned in
-// the cell (vertical 0 top, 16 centre, 32 bottom; horizontal 0 left, 1
-// centre, 2 right, each centring by a halved difference), then drawn at the
-// aligned corner plus the cell offset through the wrapped drawer's 0x20000
-// mode against the cell's width: a line breaks at its last space (a space at
-// the line's first character counts as none) or before the overflowing
-// character, and the rest of the source line up to its LF is dropped.
+// CTableWnd_CalculateAlignedTextRect: the whole text's measure at scale 1
+// aligned in the cell (vertical 0 keeps the top, 16 centres, 32 bottoms;
+// horizontal 0 keeps the left, 1 centres, 2 rights, each centring by a halved
+// difference), then CFontCache_DrawTextWrapped from the aligned rect's corner
+// plus the cell offset with the cell's width, in the 0x20000 mode (the wrapped
+// drawer, emit_wrapped_text: a line breaks at its last space or before the
+// overflowing character and the rest of the source line up to its LF is
+// dropped). Returns the aligned rect (the sort indicator draws past it).
 // [orig: CTableWnd_CalculateAlignedTextRect @ 0x63ec50; CFontCache_DrawTextWrapped
 //  @ 0x653710 in mode 0x20000 (docs/mnu/menu-re.md "the wrapped drawer")]
-void MenuFrameCompiler::emit_table_text_(const WidgetNode &node, const std::string &text,
+mnu::RectEdges MenuFrameCompiler::emit_table_text_(const WidgetNode &node, const std::string &text,
 		int align, int dx, int dy, const mnu::RectEdges &cell, const WalkScale &s,
 		uint32_t color) {
-	if (text.empty()) return;
-	int tw = 0;
-	int th = 0;
-	measure_text(node, text, &tw, &th);
-	const int cw = cell.right - cell.left;
-	const int ch = cell.bottom - cell.top;
-	int left = cell.left;
-	int top = cell.top;
+	int text_w = 0;
+	int text_h = 0;
+	measure_text(node, text, &text_w, &text_h);
+	const int cell_w = cell.right - cell.left;
+	const int cell_h = cell.bottom - cell.top;
+	mnu::RectEdges aligned = cell;
 	const int v = align & 0xF0;
-	if (v == 16) {
-		top += (ch - th) >> 1;
+	if (v == 0) {
+		aligned.bottom += text_h - cell_h;
+	} else if (v == 16) {
+		const int off = (cell_h - text_h) >> 1;
+		aligned.top += off;
+		aligned.bottom -= off;
 	} else if (v == 32) {
-		top += ch - th;
+		aligned.top += cell_h - text_h;
 	}
 	const int h = align & 0xF;
-	if (h == 1) {
-		left += (cw - tw) >> 1;
+	if (h == 0) {
+		aligned.right += text_w - cell_w;
+	} else if (h == 1) {
+		const int off = (cell_w - text_w) >> 1;
+		aligned.left += off;
+		aligned.right -= off;
 	} else if (h == 2) {
-		left += cw - tw;
+		aligned.left += cell_w - text_w;
 	}
-	const opennova::fnt::fnt_font_t *font = font_for(node);
-	if (font == nullptr) return;
-	hud::GameFont gf;
-	gf.set_font(font);
-	const int threshold = static_cast<int>(static_cast<float>(cw) * s.x);
-	const int len = static_cast<int>(text.size());
-	int y = top + dy;
-	int line_start = 0;
-	while (line_start <= len) {
-		int last_space = 0;
-		int i = line_start;
-		int break_at = len;
-		for (; i < len; ++i) {
-			const char c = text[static_cast<size_t>(i)];
-			if (c == '\n') {
-				break_at = i;
-				break;
-			}
-			if (c == ' ') last_space = i;
-			int aw = 0;
-			int ah = 0;
-			gf.measure(text.substr(static_cast<size_t>(line_start),
-								static_cast<size_t>(i - line_start) + 1)
-							.c_str(),
-					s.x, s.y, &aw, &ah);
-			if (aw > threshold) {
-				break_at = last_space != 0 ? last_space : i;
-				break;
-			}
-		}
-		const std::string line =
-				text.substr(static_cast<size_t>(line_start), static_cast<size_t>(break_at - line_start));
-		if (!line.empty()) emit_glyph_run(node, line, left + dx, y, s, color, -1);
-		// Drop the rest of the source line up to its LF.
-		int next = break_at;
-		while (next < len && text[static_cast<size_t>(next)] != '\n') ++next;
-		if (next >= len) return;
-		int lw = 0;
-		int lh = 0;
-		gf.measure(line.empty() ? "W" : line.c_str(), 1.0f, 1.0f, &lw, &lh);
-		y += lh;
-		line_start = next + 1;
+	if (!text.empty()) {
+		const mnu::RectEdges pen{ aligned.left + dx, aligned.top + dy, aligned.left + dx + cell_w,
+			aligned.top + dy + cell_h };
+		emit_wrapped_text(node, pen, s, color, text, 0, -1, true);
 	}
+	return aligned;
 }
 
 // CTableWnd_DrawAlignedTexture: the texture at its native size aligned in the
@@ -455,6 +443,28 @@ uint32_t MenuFrameCompiler::table_row_color_(const WidgetNode &node, const MenuT
 	return text_state >= 0 && text_state < 4 ? colors[text_state] : colors[0];
 }
 
+// The sort indicator: the sorted column's taper in the 16px past its label
+// [orig: CTableWnd_SortByColumn @ 0x640900 sets "aacceegg" (ascending) or
+// "ggeeccaa" on the sorted column only; CTableWnd_DrawRuleLine @ 0x6410a0 — the
+// rect scaled to device ints; from strlen/2 rows below its top, one centred line
+// per character, (width - (c - 'a' + 1)) >> 1 in from each side, while the row
+// stays above its bottom, 0xFF7F7F7F].
+void MenuFrameCompiler::emit_table_sort_rule_(const TableColumnSetup &column,
+		const mnu::RectEdges &aligned, const WalkScale &s) {
+	const char *rule = column.ascending ? "aacceegg" : "ggeeccaa";
+	const int sl = static_cast<int>(emit_x(aligned.right + 1, s.x));
+	const int sr = static_cast<int>(emit_x(aligned.right + 17, s.x));
+	const int st = static_cast<int>(emit_x(aligned.top, s.y));
+	const int sb = static_cast<int>(emit_x(aligned.bottom, s.y));
+	int y = static_cast<int>(std::strlen(rule) >> 1);
+	for (const char *ch = rule; *ch != '\0' && y + st < sb; ++ch, ++y) {
+		const int wide = *ch - 'a' < 0 ? 1 : *ch - 'a' + 1;
+		const int inset = (sr - sl - wide) >> 1;
+		push_line(MenuLine{ static_cast<float>(sl + inset), static_cast<float>(st + y),
+				static_cast<float>(sr - inset), static_cast<float>(st + y), 0xFF7F7F7Fu });
+	}
+}
+
 // The custom-draw handler's canvas over one table's walk.
 class MenuFrameCompiler::TableCanvas : public MenuTableCellCanvas {
 public:
@@ -508,8 +518,9 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s, const MenuWidgetState *ws, int row,
 		int column, int flags) {
 	(void)index;
-	if (column < 0 || column >= static_cast<int>(node.table_columns.size())) return;
-	const TableColumnSetup &col = node.table_columns[static_cast<size_t>(column)];
+	const std::vector<TableColumnSetup> columns = table_columns_(node, ws);
+	if (column < 0 || column >= static_cast<int>(columns.size())) return;
+	const TableColumnSetup &col = columns[static_cast<size_t>(column)];
 	if (col.width == 0) return;
 	int header_h = 0;
 	int row_h = 0;
@@ -517,12 +528,12 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 	mnu::RectEdges cell = rect;
 	cell.bottom = cell.top + header_h;
 	for (int c = 0; c < column; ++c)
-		cell.left += node.table_spacing + node.table_columns[static_cast<size_t>(c)].width;
+		cell.left += node.table_spacing + columns[static_cast<size_t>(c)].width;
 	cell.right = cell.left + col.width;
 	const int count = ws != nullptr ? static_cast<int>(ws->table_rows.size()) : 0;
 	if (row >= 0) {
 		const int first = ws != nullptr && ws->scroll_row > 0 ? ws->scroll_row : 0;
-		const int visible = table_visible_rows_(node, rect);
+		const int visible = table_visible_rows_(node, rect, columns);
 		int counter = 0;
 		for (int i = 0; i <= row; ++i) {
 			if (counter >= first + visible) break;
@@ -554,7 +565,7 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 	if (r == nullptr) return;
 	const std::string &text = r->cell(column);
 	int kind = col.cell_type;
-	const int32_t image = table_cell_image_(node, column, text);
+	const int32_t image = table_cell_image_(columns, column, text);
 	if (kind == kTableCellCustom) kind = image >= 0 ? kTableCellImage : kTableCellText;
 	const int align = col.body_justify | col.body_vjustify;
 	if (kind == kTableCellImage || kind == kTableCellImageText) {
@@ -570,23 +581,24 @@ void MenuFrameCompiler::emit_table_cell_(int index, const WidgetNode &node,
 // The witnessed table interior [orig: CUITable_Render @ 0x6411d0;
 // docs/mnu/menu-re.md "Table render"]. Header: per column from the table's
 // left, a width-0 column skipped with no pen advance, a column whose right
-// edge passes the table's neither drawn nor advanced; types 0/1/4 draw the
-// label aligned in the header cell with state 0's colour (the rule string
-// beside it is the sort indicator [orig: CTableWnd_DrawRuleLine @ 0x6410a0],
-// which nothing sets here, so an unsorted column draws the two-space rule:
-// nothing); type 2 raises the custom-draw
-// event. Data rows: the scroll window is the first visible row plus the
-// visible count, hidden rows skipped; each row starts at the table's left and
-// a column whose right edge would pass the table's wraps the row down a row
+// edge passes the table's neither drawn nor advanced (a negative width draws
+// into an inverted rect and moves the pen left); types 0/1/4 draw the label
+// aligned in the header cell with state 0's colour, then the sorted column's
+// rule beside it [orig: CTableWnd_DrawRuleLine @ 0x6410a0]; type 2 raises the
+// custom-draw event. Data rows: the scroll window is the first visible row plus
+// the visible count, hidden rows skipped; each row starts at the table's left
+// and a column whose right edge would pass the table's wraps the row down a row
 // height first. Per cell by type: the row state's ITEMS passes behind every
 // non-custom cell, then 0 the text, 1 the SUBST image, 2 the custom-draw
 // event, 4 the image else the text.
 void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		const mnu::RectEdges &rect, const WalkScale &s,
 		const MenuWidgetState *ws) {
+	const std::vector<TableColumnSetup> columns = table_columns_(node, ws);
 	int header_h = 0;
 	int row_h = 0;
 	table_row_heights_(node, &header_h, &row_h);
+	const int sort_column = ws != nullptr ? ws->table_sort_column : -1;
 	const auto painter_it = table_painters_.find(index);
 	const MenuTableCellPainter *painter =
 			painter_it != table_painters_.end() ? &painter_it->second : nullptr;
@@ -608,8 +620,8 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 	mnu::RectEdges cell = rect;
 	cell.bottom = rect.top + header_h;
 	int left = rect.left;
-	for (size_t c = 0; c < node.table_columns.size(); ++c) {
-		const TableColumnSetup &col = node.table_columns[c];
+	for (size_t c = 0; c < columns.size(); ++c) {
+		const TableColumnSetup &col = columns[c];
 		if (col.width == 0) continue;
 		cell.left = left;
 		cell.right = left + col.width;
@@ -617,14 +629,20 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		if (col.cell_type == kTableCellCustom) {
 			raise_custom(-1, static_cast<int>(c), 0, 0, cell);
 		} else {
-			emit_table_text_(node, col.label, col.header_justify | col.header_vjustify, 0, 0, cell,
-					s, node.colors[kStateDefault]);
+			const mnu::RectEdges aligned = emit_table_text_(node, col.label,
+					col.header_justify | col.header_vjustify, 0, 0, cell, s,
+					node.colors[kStateDefault]);
+			// The rule only on the sorted column, with more than 16px of room
+			// past the label.
+			if (cell.right - aligned.right > 16 && static_cast<int>(c) == sort_column) {
+				emit_table_sort_rule_(col, aligned, s);
+			}
 		}
 		left = cell.right + node.table_spacing;
 	}
 	if (ws == nullptr || ws->table_rows.empty() || row_h <= 0) return;
 	const int first = ws->scroll_row > 0 ? ws->scroll_row : 0;
-	const int visible = table_visible_rows_(node, rect);
+	const int visible = table_visible_rows_(node, rect, columns);
 	cell.top = rect.top + header_h;
 	cell.bottom = cell.top + row_h;
 	int visible_index = 0;
@@ -634,8 +652,8 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 		if (row.hidden()) continue;
 		if (visible_index >= first) {
 			left = rect.left;
-			for (size_t c = 0; c < node.table_columns.size(); ++c) {
-				const TableColumnSetup &col = node.table_columns[c];
+			for (size_t c = 0; c < columns.size(); ++c) {
+				const TableColumnSetup &col = columns[c];
 				if (col.width == 0) continue;
 				if (left + col.width > rect.right) {
 					cell.top += row_h;
@@ -656,7 +674,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								table_row_color_(node, row));
 						break;
 					case kTableCellImage:
-						emit_table_texture_(table_cell_image_(node, static_cast<int>(c), text),
+						emit_table_texture_(table_cell_image_(columns, static_cast<int>(c), text),
 								align, col.body_x, col.body_y, col.scale_bitmap, cell, s);
 						break;
 					case kTableCellCustom:
@@ -664,7 +682,7 @@ void MenuFrameCompiler::emit_table(int index, const WidgetNode &node,
 								row.value(static_cast<int>(c)), cell);
 						break;
 					case kTableCellImageText: {
-						const int32_t image = table_cell_image_(node, static_cast<int>(c), text);
+						const int32_t image = table_cell_image_(columns, static_cast<int>(c), text);
 						if (image >= 0)
 							emit_table_texture_(image, align, col.body_x, col.body_y,
 									col.scale_bitmap, cell, s);

@@ -104,24 +104,24 @@ func _loadout_screen_xml() -> String:
 	var body := ""
 	var y := 10
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY"]:
-		body += MenuDriverFixture.wnd("combo", n, y)
-		body += MenuDriverFixture.wnd("combo", n + "_AMMO1", y + 24)
-		body += MenuDriverFixture.wnd("combo", n + "_AMMO2", y + 48)
+		body += MenuDriverFixture.wnd("combobox", n, y)
+		body += MenuDriverFixture.wnd("combobox", n + "_AMMO1", y + 24)
+		body += MenuDriverFixture.wnd("combobox", n + "_AMMO2", y + 48)
 		body += MenuDriverFixture.wnd("window", n + "_ICON", y + 72)
 		y += 100
 	for n in ["PRIMARY", "SECONDARY"]:
 		# player.mnu authors the TYPE statics (FMJ/AP/SP, values 0/1/2); the
 		# companion selects/locks them but never refills.
-		body += MenuDriverFixture.wnd("combo", n + "_AMMO1_TYPE", y, type_items)
+		body += MenuDriverFixture.wnd("combobox", n + "_AMMO1_TYPE", y, type_items)
 		y += 24
 	for n in ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		body += MenuDriverFixture.wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combobox", n, y)
 		y += 24
 	body += MenuDriverFixture.wnd("static", "STATIC_TOTAL_WEIGHT", y)
 	var class_items := ""
 	for v in range(5, 10):  # Medic..Engineer = values 5..9
 		class_items += '<ITEM value="%d">class %d</ITEM>' % [v, v]
-	body += MenuDriverFixture.wnd("combo", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
+	body += MenuDriverFixture.wnd("combobox", "PLAYERCLASS", y + 24, "<ITEMS>%s</ITEMS>" % class_items)
 	return MenuDriverFixture.screen_xml("PLAYER_INFO", body)
 
 

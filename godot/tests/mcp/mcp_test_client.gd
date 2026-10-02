@@ -51,11 +51,12 @@ func request(tree: SceneTree, method: String, path: String, headers := {}, body 
 
 
 ## POST a JSON-RPC payload to /mcp; returns the decoded JSON body (or null for
-## empty/invalid bodies — notifications get empty 202s).
+## empty/invalid bodies — notifications get empty 202s). The keys go in the order written,
+## as a client sends them (JSON.stringify sorts them unless told not to).
 func post_json(tree: SceneTree, payload: Variant, extra_headers := {}) -> Variant:
 	var headers := { "Content-Type": "application/json", "Accept": "application/json" }
 	headers.merge(extra_headers)
-	if not await request(tree, "POST", "/mcp", headers, JSON.stringify(payload).to_utf8_buffer()):
+	if not await request(tree, "POST", "/mcp", headers, JSON.stringify(payload, "", false).to_utf8_buffer()):
 		return null
 	if last_body.is_empty():
 		return null

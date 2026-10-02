@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace opennova {
@@ -28,5 +29,13 @@ enum VfsScrPolicy {
 // This is the payload-codec layer and is intentionally separate from PFF container
 // decryption (which pff_extract applies). All runtime consumers share this routine.
 bool vfs_decode_payload(std::vector<uint8_t> &data, int scr_policy = VFS_SCR_VERSION_DETECT);
+
+// Whether the loader of the file `name` names takes it as stored: the HLSL effects (.fx), which the
+// shader loader takes in the SCR form alone, under a key of its own that it unwraps itself [orig:
+// ScriptFile_LoadAndDecrypt @ 0x5AE060: the sniff for 'S','C','R',1 @ 0x5AE0A9, the key
+// 0xA55B1EED at 0x5AE0C0]. A read of such a file for the bytes its loader is served (an extract, an
+// import) keeps the stored bytes: vfs_decode_payload's version-detected key is the text readers'
+// (a version-1 file's is the game's own), which makes such a file noise.
+bool vfs_loader_takes_stored(const std::string &name);
 
 } // namespace opennova

@@ -406,6 +406,8 @@ int main(int argc, char **argv) {
         TEST_EXPECT(table("other_prefix.adm", "xxxx_reset \"three\"\r\nxxxx_walk_forward \"walk\"\r\n"));
         TEST_EXPECT(table("no_slot.adm", "anim_reset \"three\"\r\nanim_notaslot \"walk\"\r\n"
                 "anim_wpn_fire_x \"walk\"\r\n"));
+        TEST_EXPECT(table("missing_middle.adm", "anim_reset \"rest\"\r\nanim_notaslot \"walk\"\r\n"
+                "anim_idle \"stand\" \"absent\" \"walk\"\r\n"));
 
         opennova::ResourceIndex index;
         TEST_EXPECT(index.scan(dir.string()));
@@ -460,6 +462,22 @@ int main(int argc, char **argv) {
         TEST_EXPECT(rig.find_clip("anim_notaslot") == nullptr);
         TEST_EXPECT(rig.find_clip("anim_wpn_fire_x") == nullptr);
         TEST_EXPECT(rig.clips().size() == 1);
+        // Each clip keeps the row and token it came from, and a token that registered
+        // nothing (its row names no slot, its file does not load) has no variant: the
+        // ring skips it, so the row's third token is the slot's second variant.
+        // [orig: AnimMap_ParseConfigLine @0x40cb60, the slot gate @0x40cba4, the load
+        //  gate @0x40cbe7; AnimMap_FindOrLoadBoneFile @0x40c030, no failsafe @0x40c260]
+        TEST_EXPECT(rig.load_from_adm(&assets, "missing_middle", {}, {}));
+        std::string key;
+        TEST_EXPECT(rig.variant_of(2, 2, key) == 1 && key == "anim_idle");
+        key.clear();
+        TEST_EXPECT(rig.variant_of(2, 1, key) == -1 && rig.variant_of(1, 0, key) == -1 && key.empty());
+        TEST_EXPECT(rig.variant_of(2, 0, key) == 0 && key == "anim_idle");
+        const SkeletalClips::ClipSource *served = rig.find_clip_source("anim_idle", 1);
+        TEST_EXPECT(served && served->entry == 2 && served->token == 2 && served->file == "walk");
+        served = rig.find_clip_source("ANIM_IDLE", 2); // the ring wraps
+        TEST_EXPECT(served && served->token == 0 && served->file == "stand");
+        TEST_EXPECT(rig.find_clip_source("anim_notaslot", 0) == nullptr);
         // A table with no reset row never binds, so the rig does not load.
         // [orig: AnimMap_LoadAdmFile @0x40cc40, @0x40ce11..0x40ce16;
         //  AnimMap_RegisterEntity @0x40bb60, @0x40bbc4]

@@ -193,7 +193,9 @@ struct LocalPlayerWeapon {
     int32_t run_anim = 0;
     bool force_crouch = false;
     std::string anim_map;
-    uint32_t anim_map_serial = 0;
+    // Advanced by a mount whose weapon category differs from the one held before (the
+    // arms-dip edge) [orig: Entity_UpdateInfantryPlayerBody @0x4b46e7..0x4b46f5].
+    uint32_t category_serial = 0;
 
     bool switch_in_flight = false;
     int32_t switch_deferred_action = -1;

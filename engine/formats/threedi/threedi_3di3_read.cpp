@@ -14,6 +14,7 @@
 #include <string.h>
 
 #include <base/io/fixed.h>
+#include <formats/threedi/threedi_panm.h>
 
 namespace opennova::threedi {
 
@@ -802,7 +803,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + 8 <= record_size);
     out->alpha_gen.style = read_u8(base + cursor);
     uint8_t alpha_phase_or_reg = read_u8(base + cursor + 1);
-    if (out->alpha_gen.style <= 112) {
+    if (!threedi_generator_names_register(out->alpha_gen.style)) {
         out->alpha_gen.phase = (float)alpha_phase_or_reg / 256.0f;
         out->alpha_gen.reg = -1;
     } else {
@@ -817,7 +818,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + 12 <= record_size);
     out->rgb_gen.style = read_u8(base + cursor);
     uint8_t rgb_phase_or_reg = read_u8(base + cursor + 1);
-    if (out->rgb_gen.style <= 112) {
+    if (!threedi_generator_names_register(out->rgb_gen.style)) {
         out->rgb_gen.phase = (float)rgb_phase_or_reg / 256.0f;
         out->rgb_gen.reg = -1;
     } else {
@@ -839,7 +840,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + 12 <= record_size);
     out->rgb_gen2.style = read_u8(base + cursor);
     uint8_t rgb2_phase_or_reg = read_u8(base + cursor + 1);
-    if (out->rgb_gen2.style <= 112) {
+    if (!threedi_generator_names_register(out->rgb_gen2.style)) {
         out->rgb_gen2.phase = (float)rgb2_phase_or_reg / 256.0f;
         out->rgb_gen2.reg = -1;
     } else {
@@ -860,7 +861,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + 8 <= record_size);
     out->u_params.style = read_u8(base + cursor);
     uint8_t up_phase_or_reg = read_u8(base + cursor + 1);
-    if (out->u_params.style <= 112) {
+    if (!threedi_generator_names_register(out->u_params.style)) {
         out->u_params.phase = (float)up_phase_or_reg / 256.0f;
         out->u_params.reg = -1;
     } else {
@@ -875,7 +876,7 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
     assert(cursor + 8 <= record_size);
     out->v_params.style = read_u8(base + cursor);
     uint8_t vp_phase_or_reg = read_u8(base + cursor + 1);
-    if (out->v_params.style <= 112) {
+    if (!threedi_generator_names_register(out->v_params.style)) {
         out->v_params.phase = (float)vp_phase_or_reg / 256.0f;
         out->v_params.reg = -1;
     } else {
