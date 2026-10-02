@@ -1225,6 +1225,87 @@ int main() {
 		TEST_EXPECT(!remove_area_trigger(reloaded, 999999, error));
 	}
 
+	// A zone parameter is the area trigger's ID in the file, never its index (the game remaps it at
+	// mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]): removing an area trigger
+	// rewrites no parameter, the ones naming another zone keep naming it, and the ones naming the
+	// removed zone name none (flagged, as the game neuters them).
+	{
+		opennova::bms::File doc;
+		make_default(doc);
+		for (const int id : {7, 3, 9}) {
+			AreaTriggerRecord zone;
+			zone.wp_number = id;
+			zone.max_x = 10;
+			zone.max_y = 10;
+			add_area_trigger(doc, zone);
+		}
+		MissionEventRecord seed;
+		TEST_EXPECT(add_event(doc, seed) == 0);
+		MissionTriggerRecord within;
+		within.main_type = static_cast<int>(opennova::bms::TriggerMainType::Group);
+		within.sub_type = static_cast<int>(opennova::bms::GroupTriggerType::GroupIsWithinArea);
+		within.param1 = 5;
+		within.param2 = 3; // the zone whose id is 3 (at index 1)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 0, within, error));
+		MissionTriggerRecord satchel;
+		satchel.main_type = static_cast<int>(opennova::bms::TriggerMainType::Player);
+		satchel.sub_type = static_cast<int>(opennova::bms::PlayerTriggerType::PlayerSatchel);
+		satchel.param1 = 9; // the zone whose id is 9 (at index 2)
+		TEST_EXPECT(insert_event_trigger(doc, 0, 1, satchel, error));
+		MissionActionRecord area_ai;
+		area_ai.action_type = static_cast<int>(opennova::bms::ActionType::AreaAiRed);
+		area_ai.param1 = 9;
+		TEST_EXPECT(insert_event_action(doc, 0, 0, area_ai, error));
+		MissionEventChain chain;
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty());
+		const auto area_of = [&chain](int slot) {
+			for (const MissionLogicReference &reference : chain.references)
+				if (reference.target_kind == "area_trigger" && reference.param_slot == slot) return reference.target_index;
+			return -99;
+		};
+		TEST_EXPECT(area_of(2) == 1 && area_of(1) == 2);
+		// The first area trigger (id 7) out: the others' indexes move, their ids and every parameter stay.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.area_triggers.size() == 2);
+		TEST_EXPECT(doc.triggers[0].param2 == 3 && doc.triggers[1].param1 == 9 && doc.actions[0].param1 == 9);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.empty() && area_of(2) == 0 && area_of(1) == 1);
+		// The zone a trigger names out: the trigger keeps its id and names none.
+		TEST_EXPECT(remove_area_trigger(doc, 0, error) && doc.triggers[0].param2 == 3);
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.size() == 1 &&
+		            chain.diagnostics[0].code == "logic.area_reference_out_of_range" && area_of(2) == -1 && area_of(1) == 0);
+		// A zone whose box is degenerate (x_min == x_max) is one the game neuters a trigger naming
+		// [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the test @0x453093]: flagged, its index kept.
+		AreaTriggerRecord flat;
+		TEST_EXPECT(area_trigger(doc, 0, flat));
+		flat.max_x = flat.min_x;
+		TEST_EXPECT(set_area_trigger(doc, 0, flat, error));
+		TEST_EXPECT(event_chain(doc, 0, chain) && chain.diagnostics.size() == 2 && area_of(1) == 0);
+	}
+
+	// What names an event by its index: an Event trigger's first parameter [orig:
+	// EventTrigger_EvaluateCondition @0x453620, main type 3 reads events[p1]] and a ResetEvent action's
+	// [orig: EventAction_Dispatch @0x4542e0, case 34]. Removing an event moves those past the hole down
+	// by one and leaves the ones naming it dangling (-1).
+	{
+		opennova::bms::File doc;
+		make_default(doc);
+		MissionEventRecord seed;
+		for (int i = 0; i < 4; ++i) TEST_EXPECT(add_event(doc, seed) == static_cast<size_t>(i));
+		MissionTriggerRecord fired;
+		fired.main_type = static_cast<int>(opennova::bms::TriggerMainType::Event);
+		for (const int named : {0, 1, 2}) {
+			fired.param1 = named;
+			TEST_EXPECT(insert_event_trigger(doc, 3, static_cast<size_t>(named), fired, error));
+		}
+		MissionActionRecord reset;
+		reset.action_type = static_cast<int>(opennova::bms::ActionType::ResetEvent);
+		reset.param1 = 2;
+		TEST_EXPECT(insert_event_action(doc, 3, 0, reset, error));
+		TEST_EXPECT(remove_event(doc, 1, error) && doc.events.size() == 3);
+		TEST_EXPECT(doc.triggers.size() == 3 && doc.triggers[0].param1 == 0 && doc.triggers[1].param1 == -1 &&
+		            doc.triggers[2].param1 == 1);
+		TEST_EXPECT(doc.actions.size() == 1 && doc.actions[0].param1 == 1);
+	}
+
 	// E1: entity-property inspection is portable. A group-only edit must
 	// preserve the complete serialized document for every entity kind.
 	for (const auto kind : {EntityKind::Marker, EntityKind::Item,

@@ -195,24 +195,40 @@ MissionLogicReference logic_reference(const std::string &source_kind,
 	return reference;
 }
 
+// A zone parameter is the area trigger's ID in the file: at mission start the game scans the area
+// table for the first record whose first word is that id and rewrites the parameter to its index; a
+// trigger whose id no record has, or whose record's box is flat (x_min == x_max or y_min == y_max), is
+// neutered (main and sub type zeroed: it reads false, a negated one true) [orig:
+// EventTrigger_ResolveZoneTriggerRefs @0x453000: main 1 / 2 sub 10 -> param2, main 7 sub 37 ->
+// param1, the scan @0x453077, the flat test @0x453093; docs/mission/bms-event-runtime-re.md 7.3].
 void add_trigger_area_reference(const MissionTriggerRecord &trigger,
-                                size_t area_count,
+                                const std::vector<bms::AreaTrigger> &areas,
                                 MissionEventChain &chain) {
-	const bool area_trigger =
+	const bool within_area =
 			(trigger.main_type == static_cast<int>(bms::TriggerMainType::Group) &&
 					trigger.sub_type == static_cast<int>(bms::GroupTriggerType::GroupIsWithinArea)) ||
 			(trigger.main_type == static_cast<int>(bms::TriggerMainType::Single) &&
 					trigger.sub_type == static_cast<int>(bms::SingleTriggerType::SingleIsWithinArea));
-	if (!area_trigger) {
+	const bool satchel = trigger.main_type == static_cast<int>(bms::TriggerMainType::Player) &&
+			trigger.sub_type == static_cast<int>(bms::PlayerTriggerType::PlayerSatchel);
+	if (!within_area && !satchel) {
 		return;
 	}
-	const int area_index = trigger.param2;
-	const bool valid = area_index >= 0 && static_cast<size_t>(area_index) < area_count;
-	chain.references.push_back(logic_reference("trigger", static_cast<int>(trigger.index), "area_trigger", area_index, 2, trigger.param2, "area", valid));
+	const int slot = within_area ? 2 : 1;
+	const int id = within_area ? trigger.param2 : trigger.param1;
+	int area_index = -1;
+	for (size_t i = 0; i < areas.size() && area_index < 0; ++i) {
+		if (areas[i].id == id) area_index = static_cast<int>(i);
+	}
+	const bool flat = area_index >= 0 && (areas[static_cast<size_t>(area_index)].x_min == areas[static_cast<size_t>(area_index)].x_max ||
+	                                      areas[static_cast<size_t>(area_index)].y_min == areas[static_cast<size_t>(area_index)].y_max);
+	const bool valid = area_index >= 0 && !flat;
+	chain.references.push_back(logic_reference("trigger", static_cast<int>(trigger.index), "area_trigger", area_index, slot, id, "area", valid));
 	if (!valid) {
 		chain.diagnostics.push_back(logic_diagnostic(
 				"logic.area_reference_out_of_range",
-				"Trigger references an area trigger index outside the mission area table.",
+				flat ? "Trigger names a zone whose box is flat; the game neuters it."
+				     : "Trigger names a zone id no area trigger of the mission has.",
 				"trigger",
 				static_cast<int>(trigger.index)));
 	}

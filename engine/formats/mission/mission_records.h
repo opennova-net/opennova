@@ -48,8 +48,11 @@ MissionLogicReference logic_reference(const std::string &source_kind,
                                       const std::string &label,
                                       bool valid);
 
+// The area trigger a zone trigger names by its id (a Group or Single IsWithinArea's second parameter,
+// a PlayerSatchel's first), as a reference of the chain: its target the index of the first area
+// trigger of that id, -1 where none has it; a diagnostic where none has it or its box is flat.
 void add_trigger_area_reference(const MissionTriggerRecord &trigger,
-                                size_t area_count,
+                                const std::vector<bms::AreaTrigger> &areas,
                                 MissionEventChain &chain);
 
 int next_entity_id(const bms::File &file);

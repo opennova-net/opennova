@@ -82,6 +82,9 @@ bool area_trigger(const bms::File &file, size_t index, AreaTriggerRecord &out);
 std::vector<AreaTriggerRecord> area_triggers(const bms::File &file);
 size_t add_area_trigger(bms::File &file, const AreaTriggerRecord &record);
 bool set_area_trigger(bms::File &file, size_t index, const AreaTriggerRecord &record, std::string &error);
+// The record taken out. A trigger or an action names a zone by its id, which the game remaps to an
+// index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]: no other zone's id
+// moves, so nothing that names one is rewritten.
 bool remove_area_trigger(bms::File &file, size_t index, std::string &error);
 
 // --- the weapon loadout, the item availability rules, the groups -----------------
@@ -114,8 +117,9 @@ bool move_event_action(bms::File &file, size_t event_index, size_t local_index, 
 // Append a fresh empty event (no triggers/actions; fill it through the inserts
 // above); returns its index.
 size_t add_event(bms::File &file, const MissionEventRecord &record);
-// Drain the event's chains through the single-element removers, repair the
-// ResetEvent references, erase the event.
+// Drain the event's chains through the single-element removers, repair what
+// names an event by its index (an Event trigger's and a ResetEvent action's
+// first parameter: one less past the hole, -1 on it), erase the event.
 bool remove_event(bms::File &file, size_t index, std::string &error);
 
 } // namespace opennova::mission
