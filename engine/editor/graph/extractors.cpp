@@ -9,6 +9,7 @@
 // avatar table, a particle file, a mission) read their parsed structs.
 #include <editor/graph/asset_graph.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <sstream>
 #include <variant>
@@ -21,10 +22,12 @@
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
+#include <formats/def/def.h>
 #include <formats/env/env.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/particle/parser.h>
+#include <runtime/renderer/particle_atlas.h>
 
 namespace opennova::editor {
 
@@ -153,6 +156,47 @@ bool extract_environment(const std::string &name, const std::vector<uint8_t> &by
 	return true;
 }
 
+// The HUD layout (hudpos.def, ADR 0046 S14): the two fonts the HUD draws its text with, each
+// stance's icon, the static frames, the two status icons, the weapon bar's two textures and each
+// vehicle panel's three, by the names the HUD's loaders are handed [orig: HUD_ParseHudposToken
+// @0x59F370].
+bool extract_hudpos(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
+	def::DefHudPosFile file{};
+	if (def::def_parse_hudpos_memory(bytes.data(), bytes.size(), &file) != 0) {
+		error = make_finding(CoreFinding::GraphUnreadable, DiagnosticSeverity::Error, "The HUD layout could not be read.", name);
+		return false;
+	}
+	const def::DefHudPosDef &hud = file.hud;
+	auto edge = [&](const std::string &record, const char *field, ReferenceKind kind, const char *value) {
+		if (value && *value) out.edges.push_back(edge_of(name, record, field, kind, value));
+	};
+	edge(std::string(), "fonthud1_hi", ReferenceKind::Font, hud.font_hi);
+	edge(std::string(), "fonthud1_lo", ReferenceKind::Font, hud.font_lo);
+	// A stance's icon is its slot's (ids 0 to 5), the last record of an id the one read; the static
+	// frame is the last line authored (runtime/hud/hud_frame.h, hud_static_frame_index).
+	for (int id = 0; id < 6; ++id) {
+		const def::DefHudStance *read = nullptr;
+		for (size_t i = 0; i < hud.stances_count; ++i)
+			if (hud.stances[i].id == id) read = &hud.stances[i];
+		if (read) edge("HUDSTANCE " + std::to_string(id), "texture", ReferenceKind::Texture, read->texture);
+	}
+	if (hud.static_frames_count > 0)
+		edge("StaticFrame", "texture", ReferenceKind::Texture, hud.static_frames[hud.static_frames_count - 1].texture);
+	edge(std::string(), "parachute_icon", ReferenceKind::Texture, hud.parachute_icon.texture);
+	edge(std::string(), "armor_icon", ReferenceKind::Texture, hud.armor_icon.texture);
+	edge(std::string(), "hudls_bracket", ReferenceKind::Texture, hud.hudls_bracket);
+	edge(std::string(), "hudls_moreav", ReferenceKind::Texture, hud.hudls_moreav);
+	for (size_t i = 0; i < hud.vehicle_huds_count; ++i) {
+		const def::DefVehicleHudBlock &vehicle = hud.vehicle_huds[i];
+		const std::string record = std::string("VEHICLE_HUD ") + vehicle.sid;
+		edge(record, "icon", ReferenceKind::Texture, vehicle.icon);
+		edge(record, "interface", ReferenceKind::Texture, vehicle.interface_texture);
+		edge(record, "statictexture", ReferenceKind::Texture, vehicle.static_texture);
+	}
+	def::def_free_hudpos(&file);
+	return true;
+}
+
 bool extract_avatars(const std::string &name, const std::vector<uint8_t> &bytes, Extracted &out, Diagnostic &error) {
 	avatars::AvatarsFile file{};
 	if (avatars::avatars_parse_memory(bytes.data(), bytes.size(), &file) != 0) {
@@ -187,8 +231,20 @@ bool extract_particles(const std::string &name, const std::vector<uint8_t> &byte
 		for (size_t g = 0; g < definition.graphics.size(); ++g) {
 			const particle::GraphicLayer &layer = definition.graphics[g];
 			if (!layer.present || layer.texture.empty()) continue;
-			out.edges.push_back(edge_of(name, definition.id, "graphic" + std::to_string(g + 1), ReferenceKind::Texture,
-			                            layer.texture));
+			const std::string field = "graphic" + std::to_string(g + 1);
+			// A flipbook layer loads a file a frame, named from the graphic's (its stem, lower case,
+			// and the frame's number), and never the graphic's own name [orig:
+			// CParticleDef_ReloadGraphicFrameTextures @0x5e4bb0]: each frame is a reference of its
+			// own (ADR 0046 S14).
+			const int frames = std::clamp(layer.flip_frames, 1, particle::kMaxParticleFlipFrames);
+			if (frames <= 1) {
+				out.edges.push_back(edge_of(name, definition.id, field, ReferenceKind::Texture, layer.texture));
+				continue;
+			}
+			for (int frame = 1; frame <= frames; ++frame)
+				out.edges.push_back(edge_of(name, definition.id, field + "[" + std::to_string(frame) + "]",
+				                            ReferenceKind::Texture,
+				                            renderer::retail_particle_frame_name(layer.texture, frames, frame)));
 		}
 	}
 	return true;
@@ -226,6 +282,7 @@ struct NativeKind {
 	NativeExtractor extract;
 };
 constexpr NativeKind kNativeKinds[] = {
+	{AssetKind::HudPosDefs, extract_hudpos},
 	{AssetKind::Environment, extract_environment},
 	{AssetKind::AvatarDefs, extract_avatars},
 	{AssetKind::Particles, extract_particles},

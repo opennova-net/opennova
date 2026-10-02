@@ -388,10 +388,11 @@ static int test_plan_not_followed() {
 // that name files (a face, a map project); a mission's .mis, which the graph does not read, where
 // its .bms is read. A script the graph reads since S13 D9 (its operands' names), but not its RUN,
 // which names another script: it stays not followed. powerup.def left the list when the catalog
-// opened it (S13 D10): the graph reads it through the catalog's records.
+// opened it (S13 D10): the graph reads it through the catalog's records. hudpos.def left it with
+// its extractor (S14): the HUD's fonts and textures are followed.
 static int test_references_unread() {
 	const std::set<AssetKind> unread = {AssetKind::Terrain, AssetKind::Script, AssetKind::MusicBank,
-	        AssetKind::SoundBank, AssetKind::DialogBank, AssetKind::HudPosDefs,
+	        AssetKind::SoundBank, AssetKind::DialogBank,
 	        AssetKind::HudFxDefs, AssetKind::SoundProfileDefs, AssetKind::CharAttrDefs,
 	        AssetKind::OtherDefs, AssetKind::FaceAnimation, AssetKind::MapProject};
 	for (size_t i = 0; i < kAssetKindCount; ++i) {
@@ -753,12 +754,23 @@ static int test_plan_mission_closure() {
 	                       // (the manifest brings the sheet; the menu is followed again once it came).
 	                       {"main.mnu", screen("STARTUP", window("STATIC", "W", font("%FONT_X%")))},
 	                       {"menu_style.mns", "FONT_X styled.fnt\r\n"},
-	                       {"styled.fnt", "fnt"}}));
+	                       {"styled.fnt", "fnt"},
+	                       // The HUD layout the game opens at mission start: its font and its textures (a
+	                       // stance's last record, the last static frame) are its references.
+	                       {"hudpos.def", "fonthud1_hi\thud.fnt\r\nHUDSTANCE 0\t0 0 old.tga STAND\r\nHUDSTANCE 0\t0 0 stand.tga STAND\r\n"
+	                                      "StaticFrame\tfirst.tga 1,2\r\nStaticFrame\tframe.tga 2,570\r\n"},
+	                       {"hud.fnt", "fnt"}}));
 	TEST_EXPECT(write_pff(install + "/language.pff", {{"m.bin", strings}, {"gametext.bin", strings}, {"medmssn.bin", strings}}));
 	TEST_EXPECT(write_pff(install + "/resource.pff",
 	                      {{"island.trn", "trn"}, {"day.env", env_text}, {"cloud.pcx", "pcx"}, {"m.pcx", "pcx"},
-	                       {"m.til", "til"}, {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\tgraphic1 = puff.tga, additive;\n}\n"},
-	                       {"puff.tga", "tga"}, {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
+	                       {"m.til", "til"},
+	                       // An effect of two particles: a plain graphic, and a flipbook of two frames, which
+	                       // loads a file a frame named from the graphic's and never the graphic's own name.
+	                       {"fx.ptl", "[effectdef]\n{\n\tid = BOOM;\n\tpdefs = puff;\n}\n\n[particledef]\n{\n\tid = puff;\n\tpdefs = puff;\n\tgraphic1 = puff.tga, additive;\n}\n\n"
+	                                  "[particledef]\n{\n\tid = flame;\n\tgraphic1 = Flame.TGA, additive;\n\tg1_flip_frames = 2;\n}\n"},
+	                       {"puff.tga", "tga"}, {"Flame.TGA", "never loaded"}, {"flame_01.tga", "tga"}, {"flame_02.tga", "tga"},
+	                       {"stand.tga", "tga"}, {"old.tga", "tga"}, {"frame.tga", "tga"}, {"first.tga", "tga"},
+	                       {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
 	// The music banks the game streams loose from its root (the manifest's, found there), and a
 	// save beside them, which is the player's, never the game's.
 	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "menu music") &&
@@ -793,6 +805,18 @@ static int test_plan_mission_closure() {
 	            fx->needed_by.name == "BOOM" && puff && puff->needed_by.file == "fx.ptl" && !row_named(plan, "other.ptl"));
 	TEST_EXPECT(items && items->needed_by.file == "m.bms" && items->needed_by.reference == ReferenceKind::None &&
 	            items->needed_by.field.find("the game") == 0);
+	// A flipbook's frames, each a file of its own; the graphic's own name is never loaded.
+	const ImportPlanRow *frame_one = found("flame_01.tga"), *frame_two = found("flame_02.tga");
+	TEST_EXPECT(frame_one && frame_two && frame_one->needed_by.file == "fx.ptl" && frame_one->needed_by.record == "flame" &&
+	            frame_one->needed_by.field == "graphic1[1]" && frame_two->needed_by.field == "graphic1[2]" &&
+	            !row_named(plan, "Flame.TGA"));
+	// The HUD layout, which the manifest brings: its font, the stance's icon as read (the last
+	// record of its id) and the last static frame; the ones the game does not read stay.
+	const ImportPlanRow *hud = found("hudpos.def"), *hud_font = found("hud.fnt"), *stand = found("stand.tga"), *frame = found("frame.tga");
+	TEST_EXPECT(hud && hud_font && hud_font->needed_by.file == "hudpos.def" && hud_font->needed_by.reference == ReferenceKind::Font &&
+	            stand && stand->needed_by.record == "HUDSTANCE 0" && frame && frame->needed_by.record == "StaticFrame" &&
+	            !row_named(plan, "old.tga") && !row_named(plan, "first.tga"));
+	TEST_EXPECT(!not_followed(plan, ReferenceKind::None, AssetKind::HudPosDefs));
 	// The manifest: found in the install, each for the game; a Required one the install lacks not
 	// found; an optional one no row.
 	for (const char *name : {"gametext.bin", "weapon.def", "ammo.def", "main.mnu", "menu_style.mns", "medmssn.bin"}) {
