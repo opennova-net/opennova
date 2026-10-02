@@ -48,13 +48,20 @@ std::vector<InspectorSection> plan_inspector(const Document &document, const Nod
 
 // --- several records at once (ADR 0046 S9k2) ---------------------------------------------
 
-// The fields `records` (records of one kind, the first the primary) share, grouped as
+// Whether records of the kinds `a` and `b` of the document take one shared form: the same fields (their
+// ids and types) in the same order (a mission's four entity pools: four kinds over one field table).
+bool kinds_alike(const Document &document, NodeKind a, NodeKind b);
+
+// The fields `records` (records of one kind, or of kinds alike, the first the primary) share, grouped as
 // plan_inspector groups one record's (a block's own yes / no field first in its group, no
 // collections): a field every record has, that the game reads on each of them or that the
 // file writes there, neither read-only nor the name that tells the records apart. Each is
 // as it applies to the primary. A filter keeps the fields whose id, name or key contains it.
 std::vector<InspectorSection> plan_shared_inspector(const Document &document, const std::vector<NodeAddress> &records,
                                                     const std::string &filter);
+// How many records are selected, in words: "3 Window records selected" of one kind; of several,
+// "5 records selected (2 Item, 3 Building)", the kinds as they first come.
+std::string selected_words(const Document &document, const std::vector<NodeAddress> &records);
 // True when the records do not all hold the same value in `field`, or an optional field is
 // written on some of them and left out on others.
 bool field_mixed(const Document &document, const std::vector<NodeAddress> &records, const std::string &field);

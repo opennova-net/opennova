@@ -12,6 +12,12 @@ namespace opennova::editor {
 bool make_blank_empty_strings(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_gametext(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 bool make_blank_menutxt(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_mission_text(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+
+// bms and wac (blank_mission.cpp): a mission on the terrain and under the environment the request
+// names, holding its header alone; an empty script
+bool make_blank_mission(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
+bool make_blank_script(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
 
 // mnu (blank_menu.cpp)
 bool make_blank_main_menu(const BlankRequest &, std::vector<uint8_t> &out, Diagnostic &error);
