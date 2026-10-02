@@ -6,11 +6,32 @@ reloadable = true
 
 [libraries]
 
-windows.debug.x86_64 = "res://bin/libopennova.windows.template_debug.x86_64.dll"
+; Two variants from one source tree (ADR 0046 d4). Godot picks the row whose tags
+; all hold with the most tags: an export tagged `opennova_runtime` (the game, the
+; Play child) loads the runtime-only library, one tagged `opennova_editor` (the
+; OpenNova Editor) the editor-enabled one, and a source run (the Godot editor, GUT,
+; export scanning: no custom feature) loads the editor-enabled debug library, the
+; superset, so the authoring classes are always present there. Nothing ships from
+; a source run.
+windows.debug.x86_64 = "res://bin/libopennova_editor.windows.template_debug.x86_64.dll"
 windows.release.x86_64 = "res://bin/libopennova.windows.template_release.x86_64.dll"
-linux.debug.x86_64 = "res://bin/libopennova.linux.template_debug.x86_64.so"
+windows.debug.x86_64.opennova_runtime = "res://bin/libopennova.windows.template_debug.x86_64.dll"
+windows.release.x86_64.opennova_runtime = "res://bin/libopennova.windows.template_release.x86_64.dll"
+windows.debug.x86_64.opennova_editor = "res://bin/libopennova_editor.windows.template_debug.x86_64.dll"
+windows.release.x86_64.opennova_editor = "res://bin/libopennova_editor.windows.template_release.x86_64.dll"
+linux.debug.x86_64 = "res://bin/libopennova_editor.linux.template_debug.x86_64.so"
 linux.release.x86_64 = "res://bin/libopennova.linux.template_release.x86_64.so"
-macos.debug = "res://bin/libopennova.macos.template_debug.arm64.dylib"
+linux.debug.x86_64.opennova_runtime = "res://bin/libopennova.linux.template_debug.x86_64.so"
+linux.release.x86_64.opennova_runtime = "res://bin/libopennova.linux.template_release.x86_64.so"
+linux.debug.x86_64.opennova_editor = "res://bin/libopennova_editor.linux.template_debug.x86_64.so"
+linux.release.x86_64.opennova_editor = "res://bin/libopennova_editor.linux.template_release.x86_64.so"
+macos.debug = "res://bin/libopennova_editor.macos.template_debug.arm64.dylib"
 macos.release = "res://bin/libopennova.macos.template_release.universal.dylib"
+macos.debug.opennova_runtime = "res://bin/libopennova.macos.template_debug.arm64.dylib"
+macos.release.opennova_runtime = "res://bin/libopennova.macos.template_release.universal.dylib"
+macos.debug.opennova_editor = "res://bin/libopennova_editor.macos.template_debug.arm64.dylib"
+macos.release.opennova_editor = "res://bin/libopennova_editor.macos.template_release.universal.dylib"
+; The Web export (ADR 0049) loads the runtime-only side module, the one web library:
+; the editor has no web build (godot/src/CMakeLists.txt), and a source run is never web.
 web.debug.threads.wasm32 = "res://bin/libopennova.web.template_debug.wasm32.wasm"
 web.release.threads.wasm32 = "res://bin/libopennova.web.template_release.wasm32.wasm"

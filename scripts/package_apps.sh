@@ -19,11 +19,12 @@ apps=(3di extract lan_probe novaworld_server nw_lister serve wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
-# dev tools, so they (and the Dear ImGui fetch they bring) stay off. The
-# server builds without BUILD_NOVAWORLD_HTTP: the HTTP portal ships only in
-# the Linux container image.
+# dev tools or the editor's windows, so they (and the Dear ImGui fetch they
+# bring) stay off. The server builds without BUILD_NOVAWORLD_HTTP: the HTTP
+# portal ships only in the Linux container image.
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF > /dev/null
+    -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF \
+    -DOPENNOVA_EDITOR=OFF > /dev/null
 targets=()
 for dir in "${apps[@]}"; do targets+=("opennova_$dir"); done
 cmake --build "$build" --config Release --target "${targets[@]}"
