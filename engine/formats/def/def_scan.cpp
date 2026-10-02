@@ -1,5 +1,10 @@
 #include "def_scan.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdint>
+#include <string>
 
+#include <base/io/ascii_config.h>
 #include <formats/def/def.h> // DEF_WEAPON_FLAG_* / DEF_ITEM_ATTRIB_* (the tables initialize from them)
 
 // Split out of def.cpp (quality campaign W3-3). Motion only — every body is
@@ -51,19 +56,38 @@ const char *trim_span(const char *s, size_t len, size_t *out_len) {
     return s;
 }
 
+/* The witnessed line tokenizer ends a line at `//` or `;` only OUTSIDE double quotes:
+   a quote flips the quoted state, and an unterminated quote keeps the rest of the
+   line in one token. [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the break on
+   `//` / `;` gated on !inQuote, `"` toggling inQuote] */
+const char *trim_def_line(const char *s, size_t len, size_t *out_len) {
+    int quoted = 0;
+    for (size_t i = 0; i < len; ++i) {
+        if (s[i] == 0) { len = i; break; }
+        if (s[i] == '"') { quoted = !quoted; continue; }
+        if (quoted) continue;
+        if (s[i] == ';' || (i + 1 < len && s[i] == '/' && s[i + 1] == '/')) { len = i; break; }
+    }
+    return trim_span(s, len, out_len);
+}
+
 void to_lower_buf(char *dst, const char *src, size_t len) {
     for (size_t i = 0; i < len; ++i)
         dst[i] = (char)tolower((unsigned char)src[i]);
     dst[len] = '\0';
 }
 
-/* Extract quoted string from line: first "..." pair */
+/* Extract the first quoted string from a line. Without a closing quote the token runs
+   to the end of the line, as the witnessed tokenizer's quoted state never closes
+   [orig: Terrain_TokenizeConfigLine @ 0x53CB60]; retail's items.def carries thirteen
+   such names ("Telephone pole,single pole w", ...). */
 size_t extract_quoted(const char *line, size_t line_len, char *dst, size_t dst_size) {
     const char *q0 = (const char *)memchr(line, '"', line_len);
     if (!q0) { dst[0] = '\0'; return 0; }
     size_t rem = line_len - (size_t)(q0 - line) - 1;
     const char *q1 = (const char *)memchr(q0 + 1, '"', rem);
-    if (!q1 || q1 <= q0 + 1) { dst[0] = '\0'; return 0; }
+    if (!q1) q1 = line + line_len;
+    if (q1 <= q0 + 1) { dst[0] = '\0'; return 0; }
     size_t slen = (size_t)(q1 - q0 - 1);
     safe_copy(dst, dst_size, q0 + 1, slen);
     return slen;
@@ -97,12 +121,32 @@ void consume_value_str(const char *line, size_t line_len, size_t key_len, char *
     safe_copy(dst, dst_size, v, vlen);
 }
 
+/* atol as the game's CRT reads it [orig: _atol @0x76ab0a = strtol(s, NULL, 10) @0x76ab12 ->
+   strtoxl @0x76b0ae]: white space skipped (@0x76b119..0x76b14e), one '-' or '+' (@0x76b158..
+   0x76b165), then decimal digits into an unsigned 32-bit word up to the first other character,
+   a digit past 0xFFFFFFFF marking overflow (@0x76b219 / 0x76b21b; with no end pointer the read
+   stops there @0x76b223). An overflow, or a magnitude past 0x7FFFFFFF (0x80000000 when
+   negative), saturates to 0x7FFFFFFF, or 0x80000000 when negative (@0x76b26f..0x76b295), which
+   the sign then negates (@0x76b2a7): 2147483647 or -2147483648. No digits read 0 (@0x76b236).
+   A host strtol saturates at its own long instead (64 bits on Linux), so the read is ported,
+   the same on every platform, over the whole token. */
 int parse_int_n(const char *s, size_t len) {
-    char buf[32];
-    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
-    memcpy(buf, s, len);
-    buf[len] = '\0';
-    return (int)strtol(buf, NULL, 10);
+    size_t i = 0;
+    while (i < len && isspace((unsigned char)s[i])) ++i;
+    bool negative = false;
+    if (i < len && (s[i] == '-' || s[i] == '+')) negative = s[i++] == '-';
+    uint32_t value = 0;
+    bool overflow = false;
+    for (; i < len && s[i] >= '0' && s[i] <= '9'; ++i) {
+        const uint32_t digit = (uint32_t)(s[i] - '0');
+        if (value > 0xFFFFFFFFu / 10 || (value == 0xFFFFFFFFu / 10 && digit > 0xFFFFFFFFu % 10)) {
+            overflow = true;
+            break;
+        }
+        value = value * 10 + digit;
+    }
+    if (overflow || value > (negative ? 0x80000000u : 0x7FFFFFFFu)) return negative ? INT32_MIN : INT32_MAX;
+    return negative ? (int)(-(int64_t)value) : (int)value;
 }
 
 /* ItemDef healthMax and the two armor classes are signed WORD stores in retail.
@@ -149,7 +193,11 @@ static const char *const k_death_piece_type_names[13] = {
     "CHUNKNP_L", "CACTUS_",   "CHUNKSF_M",
 };
 
-int death_piece_type_index(const char *name, size_t len) {
+const char *death_piece_keyword(size_t index) {
+    return index < 13 ? k_death_piece_type_names[index] : nullptr;
+}
+
+int death_piece_type_lookup(const char *name, size_t len) {
     for (int i = 0; i < 13; ++i) {
         const char *t = k_death_piece_type_names[i];
         size_t j = 0;
@@ -158,7 +206,12 @@ int death_piece_type_index(const char *name, size_t len) {
             ++j;
         if (j == len && t[j] == '\0') return i;
     }
-    return 0; /* unknown -> HULL, the engine's zero-init read */
+    return -1;
+}
+
+int death_piece_type_index(const char *name, size_t len) {
+    const int row = death_piece_type_lookup(name, len);
+    return row < 0 ? 0 : row; /* unknown -> HULL, the engine's zero-init read */
 }
 
 /* Split on commas and/or whitespace */
@@ -194,6 +247,7 @@ int lower_match_key(const char *lower, size_t lower_len, const char *prefix, siz
 
 int next_line(LineIter *it, const char **out, size_t *out_len) {
     if (it->pos >= it->buf_len) return 0;
+    ++it->line;
     const char *start = it->buf + it->pos;
     const char *nl = (const char *)memchr(start, '\n', it->buf_len - it->pos);
     size_t len;
@@ -262,6 +316,35 @@ static const FlagEntry flag_table[] = {
     {"invisible",       9, 0, DEF_WEAPON_FLAG2_INVISIBLE},
 };
 static const int flag_table_count = sizeof(flag_table) / sizeof(flag_table[0]);
+
+const FlagEntry *weapon_flag_at(size_t index) {
+    return index < static_cast<size_t>(flag_table_count) ? &flag_table[index] : nullptr;
+}
+
+void authoring_issue(size_t &count, opennova::def::DefParseReport *report,
+                     size_t line, const char *record, const char *key, size_t key_len,
+                     opennova::def::DefIssueCode code, const char *detail) {
+    using opennova::def::DefIssueCode;
+    if (opennova::def::def_issue_blocks(code)) ++count;
+    if (!report) return;
+    size_t end = 0;
+    while (end < key_len && !isspace(static_cast<unsigned char>(key[end]))) ++end;
+    std::string message;
+    switch (code) {
+    case DefIssueCode::UnknownProperty:
+        message = detail ? "The game ignores the '" + std::string(detail) + "' token here; saving drops it."
+                         : "The game ignores this line; saving drops it.";
+        break;
+    case DefIssueCode::Reinterpreted:
+        message = "The game reads this as " + std::string(detail ? detail : "another value") + "; saving writes " +
+                  std::string(detail ? detail : "that") + ".";
+        break;
+    case DefIssueCode::MalformedBlock: message = "Incomplete or misplaced block."; break;
+    case DefIssueCode::InvalidValue: message = "This value is not one the game reads; correct it before saving."; break;
+    case DefIssueCode::Unrepresentable: message = "The property cannot be represented without losing information."; break;
+    }
+    report->push_back({code, line, record ? record : "", std::string(key, end), message});
+}
 
 const FlagEntry *lookup_flag(const char *name, size_t len) {
     for (int i = 0; i < flag_table_count; ++i) {
@@ -345,6 +428,219 @@ int lookup_item_attrib2(const char *name, size_t len) {
             return item_attrib2_table[i].bit;
     }
     return 0;
+}
+
+
+// A quoted header may lack its closing quote: the witnessed tokenizer then keeps the
+// rest of the line as the name [orig: Terrain_TokenizeConfigLine @ 0x53CB60], and the
+// writer emits the closed form, which reads back identically.
+void validate_header(const char *line, size_t length, size_t key_length, size_t capacity, DefHeaderName form,
+                     size_t &issues, DefParseReport *report, size_t number, const char *record) {
+    bool valid = key_length < length;
+    if (form == DefHeaderName::Token) {
+        // The keyword and the name are the line's first two tokens as the
+        // retail tokenizer cuts them, so a comma or a quote ends the keyword as
+        // a space does (`ACTION,SCOPEUP` and `ACTION"SCOPEUP"` read as `ACTION
+        // SCOPEUP`), and no token follows the name [orig:
+        // WeaponDefs_ParseLineCallback @0x543680 over Terrain_TokenizeConfigLine
+        // @0x53CB60's tokens, the delimiters @0x53CC33..0x53CC70].
+        const std::string copy(line, length);
+        io::ConfigTokens tokens;
+        io::tokenize_config_line(copy.c_str(), tokens);
+        valid &= strlen(tokens.token(0)) == key_length && tokens.count <= 2 && strlen(tokens.token(1)) < capacity;
+    } else {
+        valid = valid && isspace(static_cast<unsigned char>(line[key_length]));
+        size_t size;
+        const char *value = trim_span(line + key_length, length - key_length, &size);
+        if (form == DefHeaderName::Quoted) {
+            valid &= size >= 1 && value[0] == '"';
+            if (valid) {
+                ++value; --size;
+                if (size && value[size - 1] == '"') --size;
+            }
+        }
+        valid &= size < capacity && memchr(value, '"', size) == nullptr;
+    }
+    if (!valid) authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::MalformedBlock);
+}
+
+// Authoring checks supplement the permissive runtime parser. The data still comes
+// exclusively from that parser; this function records input that cannot be saved.
+void validate_property(opennova::def::DefRecordKind kind, const char *line, size_t length,
+                       size_t &issues, opennova::def::DefParseReport *report,
+                       size_t number, const char *record) {
+    using namespace opennova::def;
+    size_t key_length = 0;
+    while (kind != DefRecordKind::Effect && key_length < length && !isspace(static_cast<unsigned char>(line[key_length]))) ++key_length;
+    std::string key(line, key_length);
+    for (char &c : key) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    auto invalid = [&](DefIssueCode code = DefIssueCode::InvalidValue) {
+        authoring_issue(issues, report, number, record, line, key_length, code);
+    };
+    DefRecordKind property_kind = kind;
+    if (kind == DefRecordKind::Weapon && key == "sights") property_kind = DefRecordKind::Sight;
+    if (kind == DefRecordKind::Item && (key == "addeweap" || key == "addeweapg" || key == "addeweapc"))
+        property_kind = DefRecordKind::Attachment;
+    const DefProperty *property = nullptr;
+    for (const auto &p : def_properties(property_kind))
+        if (p.key == key || (property_kind == DefRecordKind::Attachment && p.key == "addeweap") ||
+            (kind == DefRecordKind::Action && key == "delay" && p.key == "delayend")) { property = &p; break; }
+    const bool alias = kind == DefRecordKind::Item &&
+        (key == "sqb_rate" || key == "sqb_distance" || key == "sqb_error" || key == "num_doors" ||
+         key == "first_door" || key == "first_subobject" || key == "door_dir" || key == "rotor_parts" ||
+         key == "aux_parts" ||
+         key == "particletesttime");
+    if (!property && !alias) { invalid(DefIssueCode::UnknownProperty); return; }
+    size_t value_length;
+    const char *value = consume_value_span(line, length, key_length, &value_length);
+    Token tokens[128];
+    // weapon.def's lines arrive as the retail tokenizer read them (a token holding a
+    // delimiter quoted again), so its values split the same way: a quoted run is one
+    // token [orig: Terrain_TokenizeConfigLine @0x53CB60, quote @0x53CC4E..0x53CC70].
+    const bool tokenized = kind == DefRecordKind::Weapon || kind == DefRecordKind::Action ||
+                           kind == DefRecordKind::Carry;
+    io::ConfigTokens config;
+    int count = 0;
+    if (tokenized) {
+        const std::string rest(line + key_length, length - key_length);
+        io::tokenize_config_line(rest.c_str(), config);
+        for (; count < config.count; ++count) tokens[count] = {config.tokens[count], strlen(config.tokens[count])};
+    } else {
+        count = split_values(value, value_length, tokens, 128);
+    }
+    auto numeric = [&](int i) {
+        if (i >= count) return false;
+        const std::string text(tokens[i].s, tokens[i].len);
+        char *end = nullptr;
+        const double result = strtod(text.c_str(), &end);
+        return end != text.c_str() && *end == 0 && std::isfinite(result);
+    };
+    auto word = [&](int i) {
+        std::string text(tokens[i].s, tokens[i].len);
+        for (char &c : text) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+        return text;
+    };
+    if (!property) {
+        if (!count) { invalid(); return; }
+        for (int i = 0; i < count; ++i) if (!numeric(i)) { invalid(); break; }
+        return;
+    }
+    const auto encoding = property->encoding;
+    if (encoding == DefEncoding::ItemAttrib) {
+        // A token outside the witnessed chain is skipped by the game, not an error:
+        // retail's own items.def carries `exp1`, `Good`, `Evil`, `forceasset`,
+        // `neutral`, `PilotOnly`, `Train`, `NoCTool`, `LFP`, `fo`, `pfoil`.
+        // [orig: ItemDef_ParseProperty @ 0x49EB00, the attrib: chain has no else arm]
+        if (!count) invalid();
+        for (int i = 0; i < count; ++i) {
+            const auto text = word(i);
+            if (!lookup_item_attrib(text.data(), text.size()) && !lookup_item_attrib2(text.data(), text.size()) && text != "parent")
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
+        }
+        return;
+    }
+    if (encoding == DefEncoding::AmmoFlags || encoding == DefEncoding::WeaponFlags || encoding == DefEncoding::AmmoKillZone) {
+        bool valid = count == 1;
+        if (valid) {
+            const auto text = word(0); valid = false;
+            if (encoding == DefEncoding::WeaponFlags) valid = lookup_flag(text.data(), text.size()) != nullptr;
+            if (encoding == DefEncoding::AmmoFlags)
+                for (size_t i = 0; const char *name = def_ammo_flag_keyword(i); ++i) if (text == name) valid = true;
+            if (encoding == DefEncoding::AmmoKillZone)
+                for (size_t i = 1; const char *name = def_ammo_kz_keyword(i); ++i) if (text == name) valid = true;
+        }
+        if (!valid) invalid();
+        return;
+    }
+    if (encoding == DefEncoding::ItemType) {
+        const auto *field = def_field(kind, "type");
+        bool valid = false;
+        if (count == 1) {
+            const auto text = word(0);
+            for (const auto &choice : field->choices) if (text == choice.name) valid = true;
+            valid |= text == "foliage" || text == "object";
+        }
+        if (!valid) invalid();
+        return;
+    }
+    if (encoding == DefEncoding::DeathPieces) {
+        // The game's loop skips a token without `_` or with a slot outside 1..16 and
+        // stops after sixteen stored pieces, so those are dropped, not refused; a
+        // name outside the piece table reads as row 0 (HULL) at load time, so it is
+        // reported and written as HULL. [orig: ItemDef_ParseProperty @ 0x49EB00
+        // husk_sub_part_types arm; DeathPieceType_FindByName @ 0x57B310]
+        int stored = 0;
+        for (int i = 0; i < count; ++i) {
+            const auto text = word(i);
+            const size_t split = text.find('_');
+            char *end = nullptr;
+            const long slot = split == std::string::npos ? 0 : strtol(text.c_str(), &end, 10);
+            if (split == std::string::npos || end != text.c_str() + split || slot < 1 || slot > 16 || stored >= 16) {
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
+                continue;
+            }
+            ++stored;
+            const std::string name = text.substr(split + 1);
+            if (death_piece_type_lookup(name.data(), name.size()) < 0)
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
+        }
+        return;
+    }
+    if (kind == DefRecordKind::Ammo && key == "tracer_type") {
+        if (count < 1 || count > 2) invalid();
+        for (int i = 0; i < count; ++i) {
+            bool valid = numeric(i);
+            for (size_t j = 0; const char *name = def_ammo_tracer_keyword(j); ++j)
+                if (word(i) == name) valid = true;
+            if (!valid) invalid();
+        }
+        return;
+    }
+    if (encoding == DefEncoding::SpawnMask || encoding == DefEncoding::DoorType) {
+        for (int i = 0; i < count; ++i) if (!numeric(i)) { invalid(); break; }
+        return;
+    }
+    if (encoding == DefEncoding::ClassRounds) {
+        if (count != 2 || !numeric(1)) invalid();
+        else if (word(0) != "medic" && word(0) != "sniper" && word(0) != "gunner" &&
+                 word(0) != "rifleman" && word(0) != "engineer") invalid();
+        return;
+    }
+    const int minimum = kind == DefRecordKind::Effect ? 4 : kind == DefRecordKind::Carry ? 2 : encoding == DefEncoding::Pose ? 6 : encoding == DefEncoding::Sight ? 5 :
+        encoding == DefEncoding::Attachment || encoding == DefEncoding::ParticleSlot ? 2 : 1;
+    if (count < minimum) {
+        // An empty string remains a serializable draft; semantic validation can
+        // require a symbol. Missing numbers are malformed input.
+        const auto *first = def_field(property_kind, property->fields.front());
+        if (!first || first->type != DefFieldType::Text || minimum != 1) invalid();
+        return;
+    }
+    if (kind == DefRecordKind::Effect && count != 4) invalid();
+    if (kind == DefRecordKind::Carry && count != 2) invalid();
+    if (encoding == DefEncoding::Function && count > 5) invalid();
+    if (encoding == DefEncoding::Sight) {
+        for (int i = 5; i < count; ++i) {
+            const auto option = word(i);
+            if (option == "slide") {
+                if (!numeric(++i)) invalid();
+            } else if (option != "scale" && option != "blend" && option != "add" &&
+                       option != "blendat" && option != "multiply" && option != "addat" && option != "multiplyat") invalid();
+        }
+    }
+    if (encoding == DefEncoding::Pose && count != 6) invalid();
+    if (encoding == DefEncoding::Attachment && count != 2 && count != 6) invalid();
+    size_t columns = property->fields.size();
+    if (encoding == DefEncoding::FloatFixed) columns /= 2;
+    if (encoding == DefEncoding::Attachment) columns = 6;
+    if (encoding == DefEncoding::Sight) columns = 5;
+    for (size_t i = 0; i < std::min(columns, size_t(count)); ++i) {
+        const auto *field = def_field(property_kind, property->fields[i]);
+        if (!field) continue;
+        if (field->type == DefFieldType::Text) {
+            const size_t size = columns == 1 ? value_length : tokens[i].len;
+            if (size >= field->width) invalid();
+        } else if (!numeric(int(i)) && !(encoding == DefEncoding::Delay && word(int(i)) == "auto")) invalid();
+    }
 }
 
 }  // namespace opennova::defscan

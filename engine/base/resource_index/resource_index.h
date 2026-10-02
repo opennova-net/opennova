@@ -9,6 +9,8 @@
 
 namespace opennova {
 
+struct LaunchFlags;
+
 // Process-wide refresh for derived resource caches. ResourceRoot advances this
 // on mount/clear and explicit refresh; native asset consumers observe it too.
 // Individual ResourceIndex revisions also cover mounts in headless embedders.
@@ -56,6 +58,16 @@ public:
 	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
+	// What scan_install came to: the install mounted and indexed; the root mounted but opened
+	// none of the game's archives, which retail's boot refuses (last_error() names an archive
+	// that failed to open, when one did: a corrupt sole archive is this, not Unmounted); or
+	// the root did not mount at all (last_error() says why).
+	enum class InstallScan { Mounted, NoArchive, Unmounted };
+	// Mount and index a game install as a launch with `flags` mounts it (mount_install,
+	// boot_policy.h: the witnessed boot table with the /exp expansion over it, the /game
+	// code's key, the archives alone unless /d puts the loose files first). Replaces the
+	// mount as scan() does.
+	InstallScan scan_install(const std::string &root_dir, const LaunchFlags &flags);
 	void clear();
 	// Mount/decode revision, including failed scans.
 	uint64_t revision() const { return revision_; }
@@ -91,6 +103,9 @@ public:
 	const std::string &last_error() const;
 
 private:
+	// Index the files the Vfs mounted (scan and scan_install, after their mount).
+	void index_mounted();
+
 	uint64_t revision_ = 0;
 	struct Impl;
 	std::unique_ptr<Impl> impl_;

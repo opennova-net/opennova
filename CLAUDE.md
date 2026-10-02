@@ -8,19 +8,22 @@ easier to relay than to rediscover.
 ## Map
 
 - `engine/` — the engine: the portable, Godot-free C++ core (ADR 0028; namespace
-  `opennova`). Four groups, which since ADR 0029 are also the CMake build targets:
-  `base/`, `formats/`, `runtime/` (including `inmatch` and `replication`, ADR 0043 d4)
-  and `net/` (the wire only; it never includes or links `runtime/`). `engine/` is the
-  one public include root: `#include <runtime/world/x.h>` (ADR 0040). See `engine/CLAUDE.md`.
+  `opennova`). Five groups, which since ADR 0029 are also the CMake build targets:
+  `base/`, `formats/`, `runtime/` (including `inmatch` and `replication`, ADR 0043 d4),
+  `net/` (the wire only; it never includes or links `runtime/`) and `editor/` (the
+  OpenNova Editor's portable core above `runtime/`, ADR 0046; nothing below it includes
+  or links it). `engine/` is the one public include root: `#include <runtime/world/x.h>`
+  (ADR 0040). See `engine/CLAUDE.md`.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime),
   `probes/` (the registered `game_probe` runtime probes, source-only and
-  excluded from both export presets, ADR 0041; see `docs/mcp.md`),
+  excluded from every export preset, ADR 0041; see `docs/mcp.md`),
   `web/` (the `OpenNova Web` export's page shell; the site image is
   `deploy/game/`, ADR 0049), `tests/` (GUT suite).
 - `apps/` — `novaworld_server/` (the NovaWorld service), `nw_lan_probe/`, `nw_pp/`,
   `extract/` (`opennova-extract`, ADR 0041), `threedi_cli/` (`opennova-3di`, ADR 0047),
+  `project/` (`opennova-project`, the editor's session on the command line, ADR 0046 S13 A7),
   `common/` (shared socket helpers, deliberately app-layer; pcap I/O lives in
   `engine/base/pcapio`).
 - `tools/blender/opennova_3di/` — the Blender `.3di` and animation import/export add-on (ADR 0047;
@@ -69,7 +72,7 @@ processes.
 
 ```bash
 scripts/build.sh          # C++ build + ctest (Release); --suite core|retail|all (default all), --no-godot, --jobs N
-scripts/build_godot.sh    # GDExtension only -> godot/bin/; fully restart the editor after
+scripts/build_godot.sh    # both GDExtension variants -> godot/bin/ (--runtime-only for one); fully restart the editor after
 scripts/test_godot.sh     # GUT headless; --suite core|retail|all (default all); --windowed runs the RD-only tests/windowed/ + tests/retail/windowed/ scripts (local, no CI job)
 python scripts/lint/<check>.py --enforce   # the CI maturity gates (stdlib Python, no venv)
 python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (docs repo; --write regenerates)
@@ -165,8 +168,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   (every pointer this repo recorded must stay reachable). Two PRs that both move the
   pointer conflict on it; `scripts/land_docs.sh --sync` resolves that (docs `master` holds
   both). `git grep` skips the submodule unless given `--recurse-submodules`.
-- PR CI builds only the `template_debug` desktop GDExtension and packages debug-mode exports
-  (`-ExportMode debug`); `template_release` + release-mode packaging run on master
+- PR CI builds only the `template_debug` desktop GDExtension (both variants) and packages
+  debug-mode exports (`-ExportMode debug`: the game zip and the editor zip);
+  `template_release` + release-mode packaging run on master
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
   `scripts/package_godot_windows.ps1` when touching `godot/src` build glue. The web jobs
   (`build-gdextension-web` in `ci.yml`, and `game-web.yml`'s push/PR triggers) are paused

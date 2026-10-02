@@ -39,7 +39,8 @@ for _name in ("o3dtext", "rig", "materials", "export", "importer", "assembly", "
         importlib.reload(sys.modules[f"{__name__}.{_name}"])
 from . import anim_import, animation, assembly, export, importer, materials, rig, weapon
 from .rig import active_model
-from .o3dtext import CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, bundled_cli_path, cli_path, run_cli
+from .o3dtext import (CTRL_REFERENCE_THRESHOLD, ExportError, ImportFailed, bundled_cli_path, cli_path,
+                      flipbook_reads_register, run_cli)
 
 # The seven PANM tracks, labelled by the axis retail turns them about
 # (threedi_panm_matrices.cpp: rotation_x turns about the model's up axis,
@@ -1766,7 +1767,7 @@ class O3D_PT_material(bpy.types.Panel):
         row = layout.row()
         row.prop(p, "anim_frames")
         row.prop(p, "anim_type")
-        if p.anim_type == 1:
+        if flipbook_reads_register(p.anim_frames, p.anim_type):
             row.prop(p, "anim_register")
         else:
             row.prop(p, "anim_time")

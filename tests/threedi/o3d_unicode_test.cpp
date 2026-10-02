@@ -57,8 +57,8 @@ void run_in(const std::string &cli, const std::filesystem::path &scratch, const 
 	std::filesystem::remove_all(folder);
 	std::filesystem::create_directories(folder);
 	std::ofstream(folder / "in.o3d", std::ios::binary) << kScene;
-	// The texture the model names resolves to its .dds (the runtime's
-	// candidate order); the other file's name only UTF-8 can spell.
+	// The texture the model's diffuse row names loads its .dds sibling (the
+	// row's loader); the other file's name only UTF-8 can spell.
 	std::ofstream(folder / "skin.dds", std::ios::binary) << "x";
 	std::ofstream(folder / std::filesystem::u8path(kKatakanaTexture), std::ios::binary) << "x";
 	const std::string base = (scratch.u8string() + "/" + name + "/");
@@ -68,9 +68,11 @@ void run_in(const std::string &cli, const std::filesystem::path &scratch, const 
 			name + ": scene takes the path beside a file the ANSI code page cannot spell");
 	std::ifstream in(folder / "out.o3d", std::ios::binary);
 	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
-	const size_t at = text.find("texfile skin.tga ");
+	const std::string record = "texfile skin.tga 0 ";
+	const size_t at = text.find(record);
 	const size_t end = at == std::string::npos ? at : text.find_first_of("\r\n", at);
-	const std::string got = at == std::string::npos ? std::string() : text.substr(at + 17, end - at - 17);
+	const std::string got =
+			at == std::string::npos ? std::string() : text.substr(at + record.size(), end - at - record.size());
 	std::error_code ec;
 	check(!got.empty() && std::filesystem::equivalent(std::filesystem::u8path(got), folder / "skin.dds", ec),
 			name + ": texfile names the texture in UTF-8 (got '" + got + "')");

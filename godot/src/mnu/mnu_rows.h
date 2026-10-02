@@ -51,8 +51,9 @@ public:
 	String get_target() const;
 	String get_state() const;
 	String get_file() const;
-	String get_source() const;
+	// FIELD / SOURCE / NAME: the one slot, and the spelling it was authored with.
 	String get_field() const;
+	String get_field_attr() const;
 	String get_test() const;
 	int get_target_form() const { return value_.target_form; }
 	bool is_toggle() const { return value_.toggle; }

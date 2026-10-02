@@ -2,8 +2,9 @@
 
 // The game's texture loaders as rules: which file a loader opens for a name, which
 // reader decodes it, and what the loader does to the pixels before it makes the
-// texture (texture_load_rules.cpp holds the witnesses). The model diffuse rows'
-// own rule is material_texture.h (material_image_source); the embedder reads each
+// texture (texture_load_rules.cpp holds the witnesses). A model texture row's own
+// rule is material_texture.h (material_texture_source, made a load here by
+// material_texture_load); the embedder reads each
 // attempt's file, decodes it through the named reader (the TGA reader
 // formats/tga/tga_read.h; the PCX reader formats/pcx decode_pcx_menu_rgba, which is
 // Texture_LoadPCXFromPFF32's decode as well as the menu's; a DDS through D3DX's
@@ -123,8 +124,16 @@ std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string
 // Texture_LoadByNameWithChannel: the name cut three characters after its first '.',
 // the .dds sibling first unless the cut name holds ".MDT" or a loose file wins under
 // loose-first, else .TGA/.MDT through the TGA reader and .PCX through the PCX reader
-// (material_texture.h material_image_source carries the witnesses).
+// (material_texture.h material_texture_source, runtime type 0, carries the witnesses).
 TextureLoad stage_texture_load(std::string_view query, bool loose_first_hit, bool dds_exists);
+
+// A model texture row's image load: the one file and reader the row's loader picks
+// (`source`, material_texture_source over the row's runtime `type`), with a type-1
+// row's Texture_LoadAndRegister mask (plain_texture_load: an upper-case ".PCX" turns
+// white with its blue as alpha). Reader None when that loader decodes no image: it
+// opens nothing, or it reads a chunk container (types 16 to 18), which the chunk
+// producers decode (material_texture.h load_material_chunk).
+TextureLoad material_texture_load(const MaterialTextureSource &source, uint8_t type);
 
 // Texture_LoadAndRegister (a model row of runtime type 1): the whole name, no DDS
 // probe, .TGA/.MDT through the TGA reader and .PCX through the PCX reader; a name

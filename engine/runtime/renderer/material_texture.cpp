@@ -8,19 +8,6 @@
 
 namespace opennova::renderer {
 
-// [orig: Texture_LoadAsNormalMap @0x58C480]
-std::string normal_material_filename(std::string_view name,
-        bool loose_tga_preferred, bool dds_exists) {
-    const std::string upper = strutil::to_upper(name);
-    std::string result(name);
-    if (upper.find(".MDT") == std::string::npos && upper.find(".TGA") != std::string::npos &&
-            !loose_tga_preferred && dds_exists) {
-        result.resize(result.find_last_of('.'));
-        result += ".dds";
-    }
-    return result;
-}
-
 // [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B4FA — strstr(".")
 // then byte 4 past it = 0]
 std::string material_texture_query(std::string_view name) {
@@ -32,9 +19,10 @@ std::string material_texture_query(std::string_view name) {
 }
 
 // [orig: Texture_LoadByNameWithChannel @0x58B53C..0x58B598 — strrchr('.')
-// cut, then ".dds" @0x7D8AD0]
-std::string material_dds_sibling(std::string_view query) {
-	std::string result(query);
+// cut, then ".dds" @0x7D8AD0; Texture_LoadAsNormalMap @0x58C644;
+// sub_58A430 @0x58A4B4]
+std::string material_dds_sibling(std::string_view name) {
+	std::string result(name);
 	const size_t dot = result.rfind('.');
 	if (dot != std::string::npos)
 		result.resize(dot);
@@ -43,33 +31,139 @@ std::string material_dds_sibling(std::string_view query) {
 
 namespace {
 
+bool holds(const std::string &upper, const char *extension) {
+	return upper.find(extension) != std::string::npos;
+}
+
 // The plain loaders dispatch on the upper-cased path in this order.
 // [orig: Texture_LoadByNameWithChannel @0x58B66F..0x58B6E6;
 // Texture_LoadAndRegister @0x58B80E..0x58B881]
-MaterialImageSource plain_source(std::string_view file) {
+MaterialTextureSource plain_source(std::string_view file) {
 	const std::string upper = strutil::to_upper(file);
-	MaterialImageSource source{std::string(file), MaterialImageDecoder::None};
-	if (upper.find(".TGA") != std::string::npos || upper.find(".MDT") != std::string::npos)
-		source.decoder = MaterialImageDecoder::Tga;
-	else if (upper.find(".PCX") != std::string::npos)
-		source.decoder = MaterialImageDecoder::Pcx;
-	return source;
+	if (holds(upper, ".TGA") || holds(upper, ".MDT"))
+		return {std::string(file), MaterialTextureReader::Tga};
+	if (holds(upper, ".PCX"))
+		return {std::string(file), MaterialTextureReader::Pcx};
+	return {};
+}
+
+// A .TGA name's height source: its DDS sibling unless the name is a
+// loose-first hit or the files lack the sibling, else the name itself.
+// [orig: Texture_LoadAsNormalMap @0x58C635..0x58C6F8; sub_58A430
+// @0x58A4A8..0x58A556]
+MaterialTextureSource tga_or_sibling(std::string_view name, const MaterialTextureFileTest &exists,
+		const MaterialTextureFileTest &loose_first) {
+	const std::string file(name);
+	const std::string sibling = material_dds_sibling(name);
+	if (!(loose_first && loose_first(file)) && exists && exists(sibling))
+		return {sibling, MaterialTextureReader::Dds};
+	return {file, MaterialTextureReader::Tga};
 }
 
 } // namespace
 
-// [orig: Texture_LoadByNameWithChannel @0x58B4FE..0x58B5AD]
-MaterialImageSource material_image_source(std::string_view query,
-		bool loose_first_hit, bool dds_exists) {
-	if (loose_first_hit || query.find(".MDT") != std::string_view::npos)
+// [orig: Material_LoadStageTexture @0x5B16F0 (switch @0x5B1737)]
+MaterialTextureSource material_texture_source(std::string_view name, uint8_t type,
+		const MaterialTextureFileTest &exists, const MaterialTextureFileTest &loose_first) {
+	const std::string upper = strutil::to_upper(name);
+	switch (type) {
+	case 0: case 2: case 8: {
+		// [orig: Texture_LoadByNameWithChannel @0x58B4FE..0x58B5AD]
+		const std::string query = material_texture_query(name);
+		if ((loose_first && loose_first(query)) || query.find(".MDT") != std::string::npos)
+			return plain_source(query);
+		const std::string sibling = material_dds_sibling(query);
+		if (exists && exists(sibling))
+			return {sibling, MaterialTextureReader::Dds};
 		return plain_source(query);
-	if (dds_exists)
-		return {material_dds_sibling(query), MaterialImageDecoder::Dds};
-	return plain_source(query);
+	}
+	case 1:
+		return plain_source(name);
+	case 4: case 5:
+		// [orig: Texture_LoadAsNormalMap @0x58C54C (.MDT), @0x58C612 (.TGA),
+		// @0x58C77D (the PCX test on the empty second path)]
+		if (holds(upper, ".MDT")) return {std::string(name), MaterialTextureReader::Tga};
+		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
+		return {};
+	case 6: case 7:
+		// [orig: sub_58A430 @0x58A496]
+		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
+		return {};
+	case 16: case 17: case 18:
+		// [orig: chunk loaders @0x58F350, @0x58F470, @0x58F590]
+		return {std::string(name), MaterialTextureReader::Chunk};
+	default:
+		return {};
+	}
 }
 
-MaterialImageSource plain_material_image_source(std::string_view name) {
-	return plain_source(name);
+namespace {
+
+uint16_t u16_at(const uint8_t *bytes, size_t at) { return static_cast<uint16_t>(bytes[at] | (bytes[at + 1] << 8)); }
+uint32_t u32_at(const uint8_t *bytes, size_t at) {
+	return static_cast<uint32_t>(u16_at(bytes, at)) | static_cast<uint32_t>(u16_at(bytes, at + 2)) << 16;
+}
+
+// D3DX's TGA test before it reads any pixel: a colour-map type of 0 or 1, an
+// image type of 1..3 (+8 run-length), both sides nonzero, a colour map's
+// entry depth of 15, 16, 24 or 32, the pixel depth the image type takes (a
+// mapped image 8 bits with a map, a true-colour one 15, 16, 24 or 32, a grey
+// one 8), and room for the image ID and the colour map.
+// [orig: CImage_LoadTGA @0x6DCA52..0x6DCB94, the map size @0x6DCBB3]
+bool d3dx_takes_tga(const uint8_t *bytes, size_t size) {
+	if (size < 18) return false;
+	const uint8_t map_type = bytes[1], image_type = bytes[2], map_depth = bytes[7], depth = bytes[16];
+	if ((map_type & 0xFE) != 0 || (image_type & 0xF4) != 0 || u16_at(bytes, 12) == 0 || u16_at(bytes, 14) == 0)
+		return false;
+	const auto true_colour = [](uint8_t bits) { return bits == 15 || bits == 16 || bits == 24 || bits == 32; };
+	if (map_type != 0 && !true_colour(map_depth)) return false;
+	switch (image_type & 3) {
+	case 1:
+		if (map_type == 0 || depth != 8) return false;
+		break;
+	case 2:
+		if (!true_colour(depth)) return false;
+		break;
+	case 3:
+		if (depth != 8) return false;
+		break;
+	default:
+		return false;
+	}
+	const size_t after_header = size - 18;
+	if (after_header < bytes[0]) return false;
+	return after_header - bytes[0] >= static_cast<size_t>((map_depth + 7) >> 3) * u16_at(bytes, 5);
+}
+
+} // namespace
+
+// [orig: D3DXTex::CImage::Load @0x6DF1DC: BMP, PPM, DDS, JPEG, PNG, PFM, HDR,
+// TGA, DIB @0x6DF212..0x6DF242]
+DdsReaderFormat dds_reader_format(const uint8_t *bytes, size_t size) {
+	if (bytes == nullptr) return DdsReaderFormat::None;
+	// [orig: LoadBMP @0x6DE17B..0x6DE195]
+	if (size >= 14 && bytes[0] == 'B' && bytes[1] == 'M' && u32_at(bytes, 2) <= size) return DdsReaderFormat::Bmp;
+	// [orig: LoadDDS @0x6DDA6E..0x6DDA91: "DDS " and a 124-byte header]
+	if (size >= 4 + 124 && u32_at(bytes, 0) == 0x20534444u) return DdsReaderFormat::Dds;
+	// [orig: CImage_LoadJPEG @0x6DC576 -> jpeg_read_header @0x71ACA0; the SOI
+	// marker first, D3DX_JPEG_ReadSOI @0x71BF57]
+	if (size >= 2 && bytes[0] == 0xFF && bytes[1] == 0xD8) return DdsReaderFormat::Jpeg;
+	// [orig: D3DXTex_LoadPNGFromMemory @0x6DD536, D3DX_PNG_SigCmp @0x71D37A]
+	static const uint8_t png[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
+	if (size >= 8 && std::equal(png, png + 8, bytes)) return DdsReaderFormat::Png;
+	if (d3dx_takes_tga(bytes, size)) return DdsReaderFormat::Tga;
+	return DdsReaderFormat::None;
+}
+
+bool material_texture_dds_only(const char *name, uint8_t type, std::string &opens, std::string &loads) {
+	if (name == nullptr || name[0] == '\0') return false;
+	const uint8_t runtime = material_texture_runtime_type(type);
+	const MaterialTextureSource bare = material_texture_source(name, runtime, {});
+	const MaterialTextureSource served = material_texture_source(name, runtime, [](const std::string &) { return true; });
+	if (bare.reader != MaterialTextureReader::None || served.reader != MaterialTextureReader::Dds) return false;
+	opens = material_texture_query(name);
+	loads = served.file;
+	return !strutil::iequals(loads, opens);
 }
 
 // [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]

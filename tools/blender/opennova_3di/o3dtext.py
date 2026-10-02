@@ -41,8 +41,19 @@ class Notes:
 
 
 # Styles above 0x70 carry a CTRL register (the loader's structural rule,
-# threedi_panm_parameter_is_ctrl_reference); the others carry a phase.
+# threedi_generator_names_register); the others carry a phase.
 CTRL_REFERENCE_THRESHOLD = 0x70
+
+
+def flipbook_reads_register(frames, anim_type):
+    """Whether a material's flipbook (texanim) names a CTRL register: one with
+    frames, on the register clock (type 1), the gate the load swaps its time
+    word under and the draw reads it under (threedi_flipbook_reads_register,
+    engine/formats/threedi/threedi_panm.h [orig: ThreediGp_LoadFromFile
+    @ 0x5B5D6E..0x5B5D99; Material_ApplyShaderParameters @ 0x58DBB2..0x58DBC2,
+    @ 0x58DBF0..0x58DC13]). Otherwise its time word is a plain value."""
+    return frames != 0 and anim_type == 1
+
 
 # The CLI reads its tokens with C++ stream extraction, which splits on C's
 # isspace set.

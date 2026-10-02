@@ -952,7 +952,7 @@ void WeaponWindow::draw_header() {
 		if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
 			ImGui::SetTooltip("The weapon.def entry authors no `clipsize`, so the FSM tracks no\n"
 							  "magazine and the reload gate refuses. (The parser key is\n"
-							  "`clipsize`; a `clip` line is not one and lands in raw_lines.)");
+							  "`clipsize`; a `clip` line is not one and is not a recognized property.)");
 		}
 	} else {
 		ImGui::Text("| clip %d/%d  reserve %d", live_.clip, definition_.clip_capacity, live_.reserve);

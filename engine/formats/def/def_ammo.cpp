@@ -58,6 +58,23 @@ static const struct { const char *name; int id; } k_ammo_tracer_type_names[] = {
     {"snipergreen", 10}, {"df1red", 11}, {"df1green", 12},
 };
 
+const char *def_ammo_flag_keyword(size_t index) {
+    return index < 28 ? k_ammo_flag_names[index].name : nullptr;
+}
+uint32_t def_ammo_flag_bit(size_t index) {
+    return index < 28 ? k_ammo_flag_names[index].bit : 0;
+}
+const char *def_ammo_kz_keyword(size_t index) {
+    return index > 0 && index < 8 ? k_ammo_kz_names[index] : nullptr;
+}
+
+const char *def_ammo_tracer_keyword(size_t index) {
+    return index < sizeof(k_ammo_tracer_type_names) / sizeof(k_ammo_tracer_type_names[0]) ? k_ammo_tracer_type_names[index].name : nullptr;
+}
+int def_ammo_tracer_value(size_t index) {
+    return def_ammo_tracer_keyword(index) ? k_ammo_tracer_type_names[index].id : 0;
+}
+
 static int ammo_tracer_type_from_name(const char *s, size_t len) {
     char nm[48];
     size_t n = len < sizeof(nm) - 1 ? len : sizeof(nm) - 1;
@@ -89,32 +106,34 @@ static int parse_age_ticks_n(const char *s, size_t len) {
     return (int)(((long long)opennova::io::kTicksPerSecondInt * parse_fixed16_digits_n(s, len) + 0x8000) >> 16);
 }
 
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out);
+void def_init_ammo(DefAmmoDef &value) { memset(&value, 0, sizeof(value)); }
 
-int def_parse_ammo(const char *path, DefAmmoFile *out) {
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report);
+
+int def_parse_ammo(const char *path, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
 
     size_t file_len;
     char *buf = read_file(path, &file_len);
     if (!buf) return -1;
-    int rc = parse_ammo_buffer(buf, file_len, out);
+    int rc = parse_ammo_buffer(buf, file_len, out, report);
     free(buf);
     return rc;
 }
 
-int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out) {
+int def_parse_ammo_memory(const uint8_t *data, size_t size, DefAmmoFile *out, DefParseReport *report) {
     memset(out, 0, sizeof(*out));
     if (!data) return -1;
     char *buf = (char *)malloc(size + 1);
     if (!buf) return -1;
     memcpy(buf, data, size);
     buf[size] = '\0';
-    int rc = parse_ammo_buffer(buf, size, out);
+    int rc = parse_ammo_buffer(buf, size, out, report);
     free(buf);
     return rc;
 }
 
-static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
+static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out, DefParseReport *report) {
 
     size_t entries_cap = 0;
     LineIter it = {buf, file_len, 0};
@@ -123,13 +142,13 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
     DefAmmoDef current;
     memset(&current, 0, sizeof(current));
     int in_block = 0, in_effects = 0;
-    size_t raw_cap = 0, eff_cap = 0;
+    size_t eff_cap = 0;
 
     char lower[1024];
 
     while (next_line(&it, &line, &line_len)) {
         size_t tlen;
-        const char *trimmed = trim_span(line, line_len, &tlen);
+        const char *trimmed = trim_def_line(line, line_len, &tlen);
         if (tlen == 0) continue;
 
         size_t ll = tlen < sizeof(lower) - 1 ? tlen : sizeof(lower) - 1;
@@ -137,6 +156,10 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
 
         /* Effects table */
         if (lower_starts_with(lower, ll, "effects_table", 13)) {
+            if (!in_block || in_effects || ll != 13) {
+                authoring_issue(out->unmodeled_count, report, it.line, current.name, trimmed, tlen, DefIssueCode::MalformedBlock);
+                continue;
+            }
             in_effects = 1;
             continue;
         }
@@ -145,6 +168,7 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
                 in_effects = 0;
                 continue;
             }
+            validate_property(DefRecordKind::Effect, trimmed, tlen, current.unmodeled_count, report, it.line, current.name);
             Token tok[MAX_TOKENS];
             int n = tokenize(trimmed, tlen, tok, MAX_TOKENS);
             if (n >= 4) {
@@ -162,26 +186,31 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
         /* Block start */
         if (!in_block && lower_starts_with(lower, ll, "ammo ", 5)) {
             memset(&current, 0, sizeof(current));
-            raw_cap = 0; eff_cap = 0;
+            eff_cap = 0;
             size_t nlen;
             const char *nm = trim_span(trimmed + 5, tlen - 5, &nlen);
             safe_copy(current.name, sizeof(current.name), nm, nlen);
+            validate_header(trimmed, tlen, 4, sizeof(current.name), DefHeaderName::Bare, current.unmodeled_count, report, it.line, current.name);
             in_block = 1;
             continue;
         }
 
-        if (!in_block) continue;
+        if (!in_block) { authoring_issue(out->unmodeled_count, report, it.line, "", trimmed, tlen); continue; }
 
         if (ll == 3 && memcmp(lower, "end", 3) == 0) {
             DA_PUSH(out->entries, out->count, entries_cap, current);
             memset(&current, 0, sizeof(current));
-            raw_cap = 0; eff_cap = 0;
+            eff_cap = 0;
             in_block = 0;
             continue;
         }
 
         int parsed = 0;
-        if (lower_starts_with(lower, ll, "velocity", 8)) {
+        if (lower_match_key(lower, ll, "dopplerdiv", 10)) {
+            size_t vl; const char *v = consume_value_span(trimmed, tlen, 10, &vl);
+            current.doppler_divisor = static_cast<uint8_t>(parse_int_n(v, vl));
+            parsed = 1;
+        } else if (lower_starts_with(lower, ll, "velocity", 8)) {
             size_t vl; const char *v = consume_value_span(trimmed, tlen, 8, &vl);
             current.velocity = parse_int_n(v, vl);
             parsed = 1;
@@ -464,11 +493,16 @@ static int parse_ammo_buffer(char *buf, size_t file_len, DefAmmoFile *out) {
             parsed = 1;
         }
 
+        if (parsed) validate_property(DefRecordKind::Ammo, trimmed, tlen, current.unmodeled_count, report, it.line, current.name);
         if (!parsed) {
-            DA_PUSH_RAW(current.raw_lines, current.raw_lines_count, raw_cap, line, line_len);
+            authoring_issue(current.unmodeled_count, report, it.line, current.name, trimmed, tlen);
         }
     }
 
+    if (in_block) {
+        authoring_issue(out->unmodeled_count, report, it.line, current.name, "end", 3, DefIssueCode::MalformedBlock);
+        free(current.effects_table);
+    }
     return 0;
 }
 
@@ -476,7 +510,6 @@ void def_free_ammo(DefAmmoFile *f) {
     if (!f) return;
     for (size_t i = 0; i < f->count; ++i) {
         free(f->entries[i].effects_table);
-        free(f->entries[i].raw_lines);
     }
     free(f->entries);
     memset(f, 0, sizeof(*f));

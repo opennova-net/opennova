@@ -56,4 +56,17 @@ int bad_parse(const char *path, BadFile *out);
 int bad_parse_buffer(const uint8_t *data, size_t data_size, BadFile *out);
 void bad_free(BadFile *bf);
 
+// Whether bone `index`'s parent comes before it: a root's parent is -1, any other
+// bone's a lower index. The rig's forward kinematics walks the bones in index
+// order and builds each on its parent's pose, so a parent numbered after its
+// child is not built yet when the child reads it [orig: BoneAnim_BuildWorldMatrices
+// @0x40C400, the in-order walk @0x40C5EF..0x40C731, the parent's matrix read
+// @0x40C674] (retail then poses the child without its ancestors' motion).
+// runtime/anim's SkeletalClips accumulates its rest globals the same way and
+// poses a rig only when every bone passes (fk_valid); the editor's clip
+// validator reports a bone that does not.
+inline bool bad_parent_in_order(int32_t parent_index, size_t index) {
+    return parent_index == -1 || (parent_index >= 0 && static_cast<size_t>(parent_index) < index);
+}
+
 } // namespace opennova::bad

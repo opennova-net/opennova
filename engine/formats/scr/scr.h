@@ -30,6 +30,12 @@ uint8_t scr_get_version(const uint8_t *data, size_t size);
    Reverses bytes, then XORs with keystream derived from key. */
 void scr_decrypt(uint8_t *data, size_t size, uint32_t key);
 
+/* Encrypt payload in-place: scr_decrypt's inverse (the keystream XOR, then the bytes
+   reversed), so scr_decrypt of what it writes gives the payload back. The game has no
+   writer of its own: this is what a tool writes a file in the SCR form with (the editor's
+   shaders, which the shader loader takes in that form alone). */
+void scr_encrypt(uint8_t *data, size_t size, uint32_t key);
+
 /* Strip SCR header and decrypt into caller-provided buffer.
    On entry, *out_size is the buffer capacity.
    On success, *out_size is set to the actual decrypted size.

@@ -49,17 +49,15 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, const godot::String &filename,
 		renderer::TextureLoader loader);
 
-// Decode one material row's selected file with the loader retail picked for it
-// (renderer::material_image_source / plain_texture_load): a DDS keeps its authored
-// mip chain, the TGA/MDT and PCX readers build theirs, the loader's transform
-// applies. None or undecodable bytes give null.
+// Decode one material row's file with the reader its loader picked for it
+// (renderer::material_texture_source, as a load: renderer::material_texture_load),
+// never by the file's name: the DDS reader takes what D3DX takes by content
+// (renderer::dds_reader_codec_order; a DDS keeps its authored mip chain), the TGA
+// reader (.tga and .mdt files) a TGA alone and the PCX reader a PCX, each building
+// its chain, then the loader's transform. None or bytes the reader cannot decode
+// give null.
 godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 		const renderer::TextureLoad &load, const godot::PackedByteArray &bytes);
-
-// The file a normal-map row (runtime type 4 or 5) opens and its reader
-// (renderer::normal_material_filename picked `selected` for `name`): the .dds
-// sibling through the DXT decode, a .tga or .mdt through the TGA reader.
-renderer::TextureLoad normal_material_load(const godot::String &name, const std::string &selected);
 
 // The highest mip level retail's device samples for a texture bound to an
 // object stage: a DDS row keeps its file's chain (no ceiling), every texture

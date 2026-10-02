@@ -3,25 +3,26 @@
 //   opennova-extract --game <dir> [/exp <name>] [/game <code>] [/d]
 //                    --out <dir> <name>...
 //
-// The root mounts exactly as the game runtime mounts it: the retail .pff table
-// with the optional expansion layered on top, `/d` selecting the loose-override
-// policy (retail's /d), `/game <code>` the game profile's SCR policy. Each
-// named entry is resolved through that mount — so the bytes written are the
-// EFFECTIVE bytes the runtime serves (base + expansion override) — and written
-// to <out>/<basename>. Exit 0 when every entry was written, 1 when any entry
-// was missing, 2 on a usage or mount error.
-#include <base/gameprofile/gameprofile.h>
+// The root mounts exactly as a launch with those flags mounts it (mount_install,
+// the flags read by the runtime's own parser): the retail .pff table with the
+// optional expansion layered on top, `/d` selecting the loose-override policy
+// (retail's /d), `/game <code>` the game profile's SCR policy. Each named entry is
+// resolved through that mount — so the bytes written are the EFFECTIVE bytes the
+// runtime serves (base + expansion override), decoded as its loader is served them
+// (a shader as stored: its loader unwraps its own SCR form, vfs_loader_takes_stored)
+// — and written to <out>/<basename>.
+// Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage
+// or mount error.
+#include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
-#include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 
 #include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <string>
 #include <vector>
-
-using namespace opennova::gameprofile;
 
 namespace {
 
@@ -46,24 +47,37 @@ std::string basename_of(const std::string &name) {
 } // namespace
 
 int main(int argc, char **argv) {
-	std::string game_dir, expansion, game_code, out_dir;
-	bool loose_override = false;
+	using opennova::strutil::iequals;
+	const std::vector<std::string> args(argv + 1, argv + argc);
+	std::string game_dir, out_dir;
 	std::vector<std::string> names;
-	for (int i = 1; i < argc; ++i) {
-		const std::string arg = argv[i];
+	// /d, /exp and /game are the runtime's launch flags: the walk gathers them, with
+	// their values, apart from this tool's own options and their values, and the
+	// runtime's parser reads them.
+	std::vector<std::string> launch;
+	for (size_t i = 0; i < args.size(); ++i) {
+		const std::string &arg = args[i];
+		// The value after a flag, into `into`.
 		const auto value = [&](std::string &into) -> bool {
-			if (i + 1 >= argc) return false;
-			into = argv[++i];
+			if (i + 1 >= args.size()) return false;
+			into = args[++i];
+			return true;
+		};
+		// A launch flag with its value, kept for the runtime's parser.
+		const auto launch_value = [&]() -> bool {
+			if (i + 1 >= args.size()) return false;
+			launch.push_back(arg);
+			launch.push_back(args[++i]);
 			return true;
 		};
 		if (arg == "--game") {
 			if (!value(game_dir)) return usage("--game needs a directory");
-		} else if (arg == "/exp" || arg == "--exp") {
-			if (!value(expansion)) return usage("/exp needs a name");
-		} else if (arg == "/game") {
-			if (!value(game_code)) return usage("/game needs a code");
-		} else if (arg == "/d") {
-			loose_override = true;
+		} else if (iequals(arg, opennova::kLaunchFlagExpansion)) {
+			if (!launch_value()) return usage("/exp needs a name");
+		} else if (iequals(arg, opennova::kLaunchFlagGame)) {
+			if (!launch_value()) return usage("/game needs a code");
+		} else if (iequals(arg, opennova::kLaunchFlagLooseOverride)) {
+			launch.push_back(arg);
 		} else if (arg == "--out") {
 			if (!value(out_dir)) return usage("--out needs a directory");
 		} else if (arg == "-h" || arg == "--help") {
@@ -77,29 +91,27 @@ int main(int argc, char **argv) {
 	if (game_dir.empty()) return usage("--game is required");
 	if (out_dir.empty()) return usage("--out is required");
 	if (names.empty()) return usage("name at least one entry to extract");
+	const opennova::LaunchFlags flags = opennova::parse_launch_flags(launch);
 
-	opennova::ResourceIndex index;
-	const opennova::VfsMountMode mode = loose_override
-			? opennova::VfsMountMode::PackedWithLooseOverride
-			: opennova::VfsMountMode::Packed;
-	if (!index.scan(game_dir, expansion, mode, opennova::VfsArchiveDiscovery::RetailTable)) {
-		std::fprintf(stderr, "opennova-extract: could not mount %s: %s\n", game_dir.c_str(),
-				index.last_error().c_str());
+	opennova::Vfs vfs;
+	if (!opennova::mount_install(vfs, game_dir, flags)) {
+		if (!vfs.last_error().empty())
+			std::fprintf(stderr, "opennova-extract: could not mount %s: %s\n", game_dir.c_str(),
+					vfs.last_error().c_str());
+		else
+			std::fprintf(stderr, "opennova-extract: no game data archives under %s\n", game_dir.c_str());
 		return 2;
 	}
-	if (!index.has_mounted_archive()) {
-		std::fprintf(stderr, "opennova-extract: no game data archives under %s\n", game_dir.c_str());
-		return 2;
-	}
-	index.set_scr_policy(gameprofile_scr_policy_for_code(game_code.c_str()));
 	std::printf("mounted %s (expansion: %s, %s)\n", game_dir.c_str(),
-			index.mounted_expansion().empty() ? "none" : index.mounted_expansion().c_str(),
-			loose_override ? "loose overrides" : "archives only");
+			vfs.mounted_expansion().empty() ? "none" : vfs.mounted_expansion().c_str(),
+			flags.loose_override ? "loose overrides" : "archives only");
 
 	int missing = 0;
 	for (const std::string &name : names) {
 		std::vector<uint8_t> bytes;
-		if (!index.read_file(name, bytes)) {
+		const bool read = opennova::vfs_loader_takes_stored(name) ? vfs.read_file_raw(name, bytes)
+				: vfs.read_file(name, bytes);
+		if (!read) {
 			std::fprintf(stderr, "opennova-extract: %s is not on the mount\n", name.c_str());
 			++missing;
 			continue;

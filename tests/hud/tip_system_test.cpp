@@ -20,7 +20,7 @@
 #include <runtime/world/world.h>
 #include <formats/lwf/lwf.h>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <cstdio>
 #include <cstring>
@@ -459,7 +459,7 @@ int main() {
 	test_expand_macros();
 	test_display_string_for_token();
 	test_escape_tip_leg();
-	fnt::fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt::fnt_font_t font = test_font::uniform_test_font();
 	test_draw(&font);
 	fnt::fnt_free(&font);
 	test_world_boarding();

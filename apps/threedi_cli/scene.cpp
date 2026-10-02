@@ -7,9 +7,10 @@
 // `build(scene(x))` re-mints a builder-made model byte for byte. What the
 // scene text cannot carry is listed as `#` comments and on stderr.
 //
-// `texfile <name> <path|->` records name the file each texture reference
-// resolves to beside the model, by the runtime's own candidate order
-// (base/resource_index/texture_candidates.h); `build` ignores them.
+// `texfile <name> <type> <path|->` records name the file each texture row,
+// by its name and type, loads beside the model: the one file the loader its
+// type picks opens (renderer::material_texture_source, the game's and the
+// editor's rule); `build` ignores them.
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,7 @@
 #include <set>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #include <base/io/strutil.h>
@@ -29,7 +31,8 @@
 #include <formats/threedi/threedi_panm.h>
 #include <formats/threedi/threedi_strip_decode.h>
 
-#include "scene_text.h"
+#include <formats/threedi/scene_text.h>
+#include <runtime/renderer/material_texture.h>
 #include "threedi_cli.h"
 
 using namespace opennova::threedi;
@@ -44,7 +47,7 @@ std::string vec9(const float *model) {
 }
 
 // A generator's register field: the CTRL index for styles above 0x70, else -1.
-int register_field(uint8_t style, int reg) { return style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? reg : -1; }
+int register_field(uint8_t style, int reg) { return threedi_generator_names_register(style) ? reg : -1; }
 
 // The scene text, written out whole once the model has been walked. `note`
 // reports what the text cannot carry (`# dropped: ...`); `remark` what it
@@ -67,36 +70,23 @@ struct Writer {
 	}
 };
 
-// The regular files beside the model, keyed by lower-case name, with their
-// paths in UTF-8 (the importer reads the scene text as UTF-8). Listed once per
-// scene: a retail asset folder holds some 10,000 files. A name UTF-8 cannot
-// carry (an unpaired surrogate) is no texture, so it is skipped, never fatal.
-using FolderListing = std::map<std::string, std::string>;
-
-FolderListing list_folder(const std::filesystem::path &dir) {
-	FolderListing listing;
-	std::error_code ec;
-	for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
-		try {
-			if (!it->is_regular_file(ec)) continue;
-			listing.emplace(opennova::strutil::to_lower(it->path().filename().u8string()), it->path().u8string());
-		} catch (const std::exception &) {
-		}
-	}
-	return listing;
+// The file a texture row loads beside the model: the one file the loader the row's type picks
+// opens (renderer::material_texture_source over the runtime type the loader stores), matched
+// in the folder without case. The folder is loose files alone, so no name is a loose-first
+// hit. "" when that loader opens no file or the folder lacks it.
+std::string row_texture_file(const opennova::TextureFolder &folder, const char *name, uint8_t type) {
+	namespace renderer = opennova::renderer;
+	const auto held = [&folder](const std::string &file) { return folder.count(opennova::strutil::to_lower(file)) != 0; };
+	const renderer::MaterialTextureSource source =
+			renderer::material_texture_source(name, renderer::material_texture_runtime_type(type), held);
+	if (source.reader == renderer::MaterialTextureReader::None) return std::string();
+	const auto it = folder.find(opennova::strutil::to_lower(source.file));
+	return it == folder.end() ? std::string() : it->second;
 }
 
-// Case-insensitive lookup of a texture's candidate names beside the model.
-std::string resolve_texture(const FolderListing &listing, const std::string &name) {
-	for (const std::string &candidate : opennova::texture_candidate_filenames(name)) {
-		const auto it = listing.find(opennova::strutil::to_lower(candidate));
-		if (it != listing.end()) return it->second;
-	}
-	return std::string();
-}
-
-void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folder) {
-	std::set<std::string> resolved;
+void write_materials(Writer &w, const Threedi3di3 &m, const opennova::TextureFolder &folder) {
+	// One record per name and type: one name under two types can load two files.
+	std::set<std::pair<std::string, uint8_t>> resolved;
 	for (uint32_t i = 0; i < m.material_count; ++i) {
 		const ThreediMaterial &mt = m.materials[i];
 		w.line("material " + name_field(w, mt.shader_name[0] != '\0' ? mt.shader_name : "FF_ST_OP") + "  # " +
@@ -106,9 +96,9 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 			const ThreediMaterialTexture &tx = mt.textures[t];
 			w.line("texture " + name_field(w, tx.name) + " " + std::to_string(tx.slot) + " " + std::to_string(tx.type) + " " +
 					std::to_string(tx.flags) + " " + std::to_string(tx.frame));
-			if (resolved.insert(tx.name).second) {
-				const std::string path = resolve_texture(folder, tx.name);
-				w.line("texfile " + name_field(w, tx.name) + " " + (path.empty() ? "-" : path));
+			if (resolved.insert({tx.name, tx.type}).second) {
+				const std::string path = row_texture_file(folder, tx.name, tx.type);
+				w.line("texfile " + name_field(w, tx.name) + " " + std::to_string(tx.type) + " " + (path.empty() ? "-" : path));
 			}
 		}
 		const ThreediTexAnim &a = mt.animation;
@@ -117,8 +107,8 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 					std::to_string(a.cycle_frame_time));
 		const float *rc = mt.reflect_color;
 		if (rc[0] != 0.0f || rc[1] != 0.0f || rc[2] != 0.0f || rc[3] != 0.0f)
-			w.line("reflect " + std::to_string(byte_of(rc[0])) + " " + std::to_string(byte_of(rc[1])) + " " +
-					std::to_string(byte_of(rc[2])) + " " + std::to_string(byte_of(rc[3])));
+			w.line("reflect " + std::to_string(threedi_build_byte_of(rc[0])) + " " + std::to_string(threedi_build_byte_of(rc[1])) + " " +
+					std::to_string(threedi_build_byte_of(rc[2])) + " " + std::to_string(threedi_build_byte_of(rc[3])));
 		if (mt.material_flags != 0) w.line("matflags " + std::to_string(mt.material_flags));
 		if (mt.alpha_test_value_byte != 0) w.line("alphatest " + std::to_string(mt.alpha_test_value_byte));
 		if (mt.is_glass != 0) w.line("glass " + std::to_string(mt.is_glass));
@@ -127,8 +117,8 @@ void write_materials(Writer &w, const Threedi3di3 &m, const FolderListing &folde
 		if (g.style != 0) {
 			std::string s = "rgbgen " + std::to_string(g.style) + " " + std::to_string(register_field(g.style, g.reg)) + " " +
 					f9(g.rate);
-			for (int k = 0; k < 3; ++k) s += " " + std::to_string(byte_of(g.start_color[k]));
-			for (int k = 0; k < 3; ++k) s += " " + std::to_string(byte_of(g.end_color[k]));
+			for (int k = 0; k < 3; ++k) s += " " + std::to_string(threedi_build_byte_of(g.start_color[k]));
+			for (int k = 0; k < 3; ++k) s += " " + std::to_string(threedi_build_byte_of(g.end_color[k]));
 			w.line(s + " " + f9(g.phase));
 			if (g.start_color[3] != 0.0f || g.end_color[3] != 0.0f)
 				w.note("material " + std::to_string(i) + " rgbgen alpha bytes");
@@ -322,7 +312,7 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 	}
 	for (size_t a = 0; a < lod.part_animation_count; ++a) {
 		const ThreediPartAnimation &pa = lod.part_animations[a];
-		const auto tracks = panm_tracks(pa);
+		const auto tracks = threedi_panm_tracks(pa);
 		// The flags word build derives from the tracks; any other is written.
 		const uint8_t axis = threedi_panm_translate_type(pa.flags);
 		const uint32_t derived =
@@ -337,15 +327,15 @@ void write_lod(Writer &w, const Threedi3di3 &m, size_t li, bool uv1) {
 		w.line(s);
 		if (pa.matrix_offset != 0 || pa.bind_matrix_index != 0)
 			w.note("panm part " + std::to_string(pa.subobject_index) + " matrix_offset/bind_matrix_index");
-		for (int t = 0; t < kTrackCount; ++t) {
+		for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) {
 			const ThreediTransform &tr = *tracks[t];
 			if (tr.control == 0 && tr.control_param == 0 && tr.rate == 0 && tr.start == 0 && tr.end == 0) continue;
 			std::string reg = tr.control_param != 0 ? std::to_string(tr.control_param) : "-";
-			if (threedi_panm_parameter_is_ctrl_reference(tr.control)) {
+			if (threedi_generator_names_register(tr.control)) {
 				if (tr.control_param < m.ctrl.count) reg = name_field(w, m.ctrl.registers[tr.control_param].name);
 				else w.note("a track names CTRL " + std::to_string(tr.control_param) + " the model lacks");
 			}
-			std::string line = std::string("track ") + track_label(t) + " " + std::to_string(tr.control) + " " + reg + " " +
+			std::string line = std::string("track ") + threedi_panm_track_label(t) + " " + std::to_string(tr.control) + " " + reg + " " +
 					std::to_string(tr.rate) + " " + std::to_string(tr.start) + " " + std::to_string(tr.end);
 			if (t == 6 && axis != 0) line += " " + std::to_string(axis);
 			w.line(line);
@@ -458,43 +448,11 @@ void write_occlusion(Writer &w, const Threedi3di3 &m) {
 	}
 }
 
-// A spot light's cone half-angle as the float build re-derives the record
-// from: its byte (wrapped), the cosine and the view_proj all follow from it.
-// The float nearest the angle the cosine holds rarely gives back the same
-// cosine, and a small cone leaves thousands of floats with one cosine, so the
-// floats around it are tried for one that reproduces the byte, the cosine
-// and the view_proj, then the byte and the cosine (a retail record whose
-// view_proj another tool built), else the angle itself.
-float cone_half_angle(const ThreediLight &l) {
-	const double cosine = std::max(-1.0, std::min(1.0, static_cast<double>(l.rotation[3])));
-	const float estimate = static_cast<float>(std::acos(cosine) * 57.29577951308232);
-	const auto same_cone = [&l](float falloff, bool with_view_proj) {
-		if (static_cast<uint8_t>(static_cast<int32_t>(falloff) & 0xFF) != l.falloff_byte) return false;
-		const float c = threedi_build_light_cone_cos(falloff);
-		if (std::memcmp(&c, &l.rotation[3], sizeof(c)) != 0) return false;
-		if (!with_view_proj) return true;
-		ThreediLight rebuilt = l;
-		threedi_build_light_view_proj(rebuilt, falloff);
-		return std::memcmp(rebuilt.view_proj, l.view_proj, sizeof(l.view_proj)) == 0;
-	};
-	for (const bool with_view_proj : {true, false}) {
-		if (same_cone(static_cast<float>(l.falloff_byte), with_view_proj)) return static_cast<float>(l.falloff_byte);
-		float up = estimate, down = estimate;
-		for (int step = 0; step < 16384; ++step) {
-			if (same_cone(up, with_view_proj)) return up;
-			if (same_cone(down, with_view_proj)) return down;
-			up = std::nextafter(up, 1000.0f);
-			down = std::nextafter(down, -1000.0f);
-		}
-	}
-	return estimate;
-}
-
 void write_lights(Writer &w, const Threedi3di3 &m) {
 	for (size_t i = 0; i < m.light_count; ++i) {
 		const ThreediLight &l = m.lights[i];
-		const std::string phase = l.style > THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD ? std::to_string(l.phase)
-																						: f9(threedi_build_light_phase_value(l.phase));
+		const std::string phase = threedi_generator_names_register(l.style) ? std::to_string(l.phase)
+																			: f9(threedi_build_light_phase_value(l.phase));
 		char flags[8];
 		std::snprintf(flags, sizeof(flags), "0x%02x", l.flags);
 		std::string s = "light " + std::to_string(l.subobj_index) + " " + vec9(l.offset) + " " + f9(l.atten_start) + " " +
@@ -505,7 +463,7 @@ void write_lights(Writer &w, const Threedi3di3 &m) {
 		// The light's axis and cone, unless they are the omni default.
 		const bool omni = l.rotation[0] == 0.0f && l.rotation[1] == -1.0f && l.rotation[2] == 0.0f &&
 				l.rotation[3] == 1.0f && l.falloff_byte == 0;
-		if (!omni) s += " " + vec9(l.rotation) + " " + f9(cone_half_angle(l));
+		if (!omni) s += " " + vec9(l.rotation) + " " + f9(threedi_build_light_cone_half_angle(l));
 		w.line(s);
 		if (l.unknown1 != 0 || l.color_start[3] != 0 || l.color_end[3] != 0)
 			w.note("light " + std::to_string(i) + " unknown/pad bytes");
@@ -522,7 +480,7 @@ int cmd_scene(const char *model_path, const char *out_path) {
 	}
 	Writer w;
 	std::error_code ec;
-	const FolderListing folder = list_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
+	const opennova::TextureFolder folder = opennova::list_texture_folder(std::filesystem::absolute(std::filesystem::path(model_path), ec).parent_path());
 	w.line("o3d 1");
 	w.line(std::string("# scene of ") + model_path + " (opennova-3di scene)");
 	w.line("model " + name_field(w, m.header.name[0] != '\0' ? m.header.name : "MODEL"));
