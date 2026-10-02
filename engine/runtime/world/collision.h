@@ -1050,6 +1050,10 @@ public:
             std::vector<WirePersonCollisionProxy> persons,
             std::vector<WireDynamicCollisionProxy> dynamics,
             uint16_t local_player_wire_handle = 0xFFFF);
+    // The decoded person's entity+0 boundRadius as its current proxy carries
+    // it (0 when no proxy names the handle): a client's remote person is a
+    // replica row, never a registry entity.
+    int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
 
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision

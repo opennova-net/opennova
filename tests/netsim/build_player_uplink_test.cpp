@@ -17,6 +17,7 @@
 #include <net/npwire/ingame_encode.h> // encode_entity_packet_sub_header / encode_player_extended_uplink
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision.h>
 #include <runtime/world/entity.h>
 #include <runtime/world/geom.h>
 #include <runtime/world/vehicle_attach.h>
@@ -120,6 +121,43 @@ bool run_field_mapping() {
 	                    up.priority_handle_2 == 0xFFFF && up.priority_score_2 == 0 &&
 	                    up.priority_handle_3 == 0xFFFF && up.priority_score_3 == 0,
 	            "an empty interest list is four (0xFFFF, 0) pairs")) return false;
+	return true;
+}
+
+// A remote person's distance is measured to its bound sphere: its decoded
+// collision proxy carries the entity+0 boundRadius the retail client's own
+// pool-0 entity holds. (100,0,0) less a 2.0 radius is 98 tiles: 1026 + 712.
+// [orig: Server_BuildEntityPriorityListForPlayer --
+//  `sub ebp, [esi]` (boundRadius) @0x50E087, `sar ebp, 10h` @0x50E089]
+bool run_interest_person_bound_radius() {
+	ns::ClientState replica;
+	ns::ClientEntityState person;
+	person.handle = 0x0000;
+	person.cls = nw::EntityClass::Player;
+	person.team = 2;
+	person.team_known = true;
+	person.x = w::to_fixed(100.0);
+	replica.entities.push_back(person);
+
+	w::World world;
+	w::CollisionWorld collision;
+	world.collision = &collision;
+	w::WirePersonCollisionProxy proxy;
+	proxy.wire_handle = 0x0000;
+	proxy.position_q16 = w::FixedVec3{person.x, 0, 0};
+	proxy.bound_radius_q16 = 2 << 16;
+	collision.replace_wire_collision_proxies({proxy}, {});
+	w::Entity self{};
+	self.team = 1;
+	w::AiEntity body{};
+	ns::UplinkClientInputs inputs;
+	inputs.replica = &replica;
+	const nw::PlayerExtendedUplink up = ns::build_player_uplink(world, self, body, inputs);
+	if (!expect(up.priority_handle_0 == 0x0000 && up.priority_score_0 == 1738,
+			"a remote person's distance is to its bound sphere")) {
+		std::fprintf(stderr, "  got %04x/%u\n", up.priority_handle_0, up.priority_score_0);
+		return false;
+	}
 	return true;
 }
 
@@ -717,6 +755,7 @@ int main() {
 	ok = run_field_mapping() && ok;
 	ok = run_interest_pairs_top4() && ok;
 	ok = run_stat_bytes() && ok;
+	ok = run_interest_person_bound_radius() && ok;
 	ok = run_roundtrip_to_host_snap() && ok;
 	ok = run_mounted_moving_carrier_roundtrip() && ok;
 	ok = run_seeded_carrier_seat_local_is_attitude_invariant() && ok;
