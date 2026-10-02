@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <filesystem>
 
+#include <editor/assets/player_files.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 
 namespace fs = std::filesystem;
@@ -43,6 +45,17 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			        asset.relative_path));
 			continue;
 		}
+		// The player's or this machine's own file (a save, a configuration, the stored credentials,
+		// what the game writes) is never packed: said, and left out (ADR 0046 S14,
+		// assets/player_files.h).
+		if (is_player_file(asset.logical_name)) {
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildPlayerFile, DiagnosticSeverity::Warning,
+			        asset.logical_name + " is " + player_file_words(asset.logical_name) +
+			                ": a build never packs the player's own files, so it is left out.",
+			        asset.relative_path));
+			continue;
+		}
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
@@ -71,7 +84,9 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 			return normalized_logical_name(a.logical_name) < normalized_logical_name(b.logical_name);
 		});
 	}
-	plan.ok = !diagnostics_have_errors(plan.diagnostics);
+	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
+	// among the plan's findings and refuses nothing (ADR 0046 S14).
+	plan.ok = !diagnostics_block_build(plan.diagnostics);
 	return plan;
 }
 

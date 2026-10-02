@@ -3017,8 +3017,99 @@ static int test_history_counts_state_and_folds() {
 	return 0;
 }
 
+// S14: where a row goes among the rows is the type's (Document::row_position): a type that keeps its
+// rows in bands (here lines titled "z..." after every other) puts an added row at the end of its band
+// whatever position the Add asks, a pasted or duplicated row likewise, and keeps a moved row among
+// its own; a Move the band leaves where it is changes nothing. The default keeps the position asked
+// (every test above). Removing records is the type's too (removal_edits): the default a Remove of each
+// in order; and no type pastes rows unless it says so (pastes_rows).
+class BandedDocument : public FlatDocument {
+public:
+	std::unique_ptr<DocumentBase> snapshot() const override { return std::make_unique<BandedDocument>(*this); }
+
+protected:
+	size_t row_position(const Node &row, const std::vector<std::shared_ptr<const Node>> &rows,
+	                    size_t position) const override {
+		const bool late = row.name().rfind("z", 0) == 0;
+		// The band's bounds among the other rows (a moved row is among them: passed over).
+		size_t first = 0, last = 0, others = 0;
+		for (const auto &other : rows) {
+			if (other.get() == &row) continue;
+			if (other->name().rfind("z", 0) != 0) first = others + 1;
+			++others;
+		}
+		last = others;
+		const size_t low = late ? first : 0, high = late ? last : first;
+		return std::min(std::max(position, low), high);
+	}
+};
+
+static int test_row_order() {
+	BandedDocument document;
+	Diagnostic error;
+	TEST_EXPECT(document.load_bytes(bytes_of("L a1 1 T\nL a2 2 T\nL z1 3 T\n"), "bands.txt", AssetKind::Unknown, "jo", error));
+	const std::string original = document.serialize().text;
+	const auto titles = [&]() {
+		std::string out;
+		for (const auto &row : document.rows()) out += row->name() + " ";
+		return out;
+	};
+	const auto add = [&](const char *title, size_t position) {
+		Edit edit;
+		edit.operation = EditOperation::Add;
+		edit.address = {0, kLine, 0};
+		edit.field = "title";
+		edit.value = std::string(title);
+		edit.position = position;
+		return document.apply(edit, error);
+	};
+	const auto row = [&](const char *title) {
+		for (const auto &node : document.rows())
+			if (node->name() == title) return NodeAddress{node->id, kLine, 0};
+		return NodeAddress();
+	};
+	// An Add at the front of a late row lands where its band starts; one at the end of an early row
+	// before the late ones.
+	TEST_EXPECT(add("z2", 0) && titles() == "a1 a2 z2 z1 ");
+	TEST_EXPECT(add("a3", SIZE_MAX) && titles() == "a1 a2 a3 z2 z1 ");
+	// A Move to the front keeps a late row among its own: z2 stays (no step), z1 goes before z2.
+	const uint64_t revision = document.revision();
+	Edit move;
+	move.operation = EditOperation::Move;
+	move.address = row("z2");
+	move.position = 0;
+	TEST_EXPECT(document.apply(move, error) && document.revision() == revision && titles() == "a1 a2 a3 z2 z1 ");
+	move.address = row("z1");
+	TEST_EXPECT(document.apply(move, error) && titles() == "a1 a2 a3 z1 z2 ");
+	// An early row moved past the band stops at its end.
+	move.address = row("a1");
+	move.position = SIZE_MAX;
+	TEST_EXPECT(document.apply(move, error) && titles() == "a2 a3 a1 z1 z2 ");
+	// A Duplicate goes right after its row (its position SIZE_MAX), or where the band ends when
+	// asked past it.
+	Edit duplicate;
+	duplicate.operation = EditOperation::Duplicate;
+	duplicate.address = row("a2");
+	TEST_EXPECT(document.apply(duplicate, error) && titles() == "a2 a2 a3 a1 z1 z2 ");
+	duplicate.address = row("a3");
+	duplicate.position = 100;
+	TEST_EXPECT(document.apply(duplicate, error) && titles() == "a2 a2 a3 a1 a3 z1 z2 ");
+	while (document.can_undo()) document.undo();
+	TEST_EXPECT(document.serialize().text == original && !document.dirty());
+	// The defaults: a Remove of each record in order, no rows pasted.
+	std::vector<Edit> removes;
+	std::string why;
+	TEST_EXPECT(document.removal_edits({row("z1"), row("a1")}, removes, why) && removes.size() == 2 &&
+	            removes[0].operation == EditOperation::Remove && removes[0].address == row("z1") &&
+	            removes[1].address == row("a1") && why.empty());
+	TEST_EXPECT(!document.pastes_rows("anything"));
+	std::printf("row order: a type's bands kept across Add, Move and Duplicate\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_row_order();
 	failures += test_document_base();
 	failures += test_apply_payload();
 	failures += test_failed_load();

@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <editor/project_build/build_run.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
@@ -304,10 +305,22 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 	if (menu_item("Import files...", nullptr, imports)) request(request::pick_file(PickPurpose::ImportFiles));
 	const bool lists = v.project.open && !v.project.retail_directory.empty() &&
 	                   v.allows(EditorRequestKind::PreviewInstallImport);
+	// A project that holds missions is offered the whole game install first (ADR 0046 S14: a
+	// mission's closure is most of the game); any other the files it chooses, with what they need.
+	const bool missions = v.project.open && v.project.document && v.project.document->features.mission;
+	const auto whole_install = [&] {
+		if (menu_item("Import the whole game install...", nullptr, lists)) request(request::import_whole_install());
+		ui_kit::tooltip(v.project.open && v.project.retail_directory.empty()
+		                        ? "Choose the game install folder in File > Project settings... first."
+		                        : "Every file of the game install, copied into the project: what a mission project needs to "
+		                          "play, build and resolve every name.");
+	};
+	if (missions) whole_install();
 	if (menu_item("Import from the game data...", nullptr, lists))
 		request(request::preview_install_import({}, v.project.import_dependencies));
 	if (v.project.open && v.project.retail_directory.empty())
 		ui_kit::tooltip("Choose the game install folder in File > Project settings... first.");
+	if (!missions) whole_install();
 	ImGui::Separator();
 	if (menu_item("Project settings...", nullptr, v.project.open && v.allows(EditorRequestKind::ApplyProjectSettings)))
 		settings_.open(v);
@@ -337,8 +350,15 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
 		request(request::build());
-	if (menu_item("Play", "F5", v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
-		request(request::play());
+	const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
+	if (menu_item("Play", "F5", plays)) request(request::play());
+	// S14: the game started in the active document's mission (its own file, or the mission the game
+	// finds its file by: play_mission_for); F5 stays the game at its menu.
+	const std::string mission = play_mission_for(v);
+	if (menu_item("Play mission", "Ctrl+F5", plays && !mission.empty())) request(request::play(mission));
+	ui_kit::tooltip(mission.empty() ? std::string("Open a mission, or a file the game finds by its name (its script, its text), to "
+	                                              "start the game in it.")
+	                                : "Build, then start the game in " + mission + ".");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
 	ImGui::Separator();
@@ -393,10 +413,14 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 		request(request::build());
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
+		const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 		if (io.KeyShift && v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
 			request(request::stop_play());
-		} else if (!io.KeyShift && v.project.open && v.activity.play_state == PlayState::Stopped &&
-		           v.allows(EditorRequestKind::Play)) {
+		} else if (io.KeyCtrl && !io.KeyShift && plays) {
+			// Play mission: the active document's mission, nothing where it has none.
+			const std::string mission = play_mission_for(v);
+			if (!mission.empty()) request(request::play(mission));
+		} else if (!io.KeyShift && !io.KeyCtrl && plays) {
 			request(request::play());
 		}
 	}

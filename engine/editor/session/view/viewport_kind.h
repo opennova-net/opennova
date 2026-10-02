@@ -20,6 +20,9 @@ enum class ViewportKind : uint8_t {
 	// A text document's text, edited in place (S13 V10, the script device: the Shell's CodeEdit, a
 	// Control placed in the rect the tab reserves, which owns the input there)
 	Script,
+	// A mission as the game draws it (S14: its terrain, environment and entities, the Shell's own
+	// Terrain, MissionEnvironment and MissionObjectPlacer), its marks drawn over it by its canvas
+	Mission,
 	kCount,
 };
 
@@ -27,13 +30,13 @@ inline constexpr size_t kViewportKindCount = static_cast<size_t>(ViewportKind::k
 
 // Where a viewport of the kind is drawn: in the Preview window beside the Document tab (the
 // menu's and the model's), or as the Document tab's main view (ui/document_views' MainViewport
-// role: a text document's script device, S13 V10; the mission's 3D view to come, with ImGui
+// role: a text document's script device, S13 V10; the mission's 3D view, S14, with ImGui
 // overlays, the document's outline and the Inspector beside it). A document type is shown by one
 // Main-role kind at most and fed by one Preview-role kind at most: a mission's 3D view and its map
 // are one Main and one Preview.
 enum class ViewportRole : uint8_t { Preview, Main };
 
-// A kind's token on the wire ("menu", "model", "script"; "" past the last kind), and the kind a
+// A kind's token on the wire ("menu", "model", "script", "mission"; "" past the last kind), and the kind a
 // token names (false for none).
 const char *viewport_kind_token(ViewportKind kind);
 bool viewport_kind_from_token(const std::string &token, ViewportKind &out);

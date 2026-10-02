@@ -16,6 +16,7 @@
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/session/finding_codes.h>
@@ -269,13 +270,15 @@ static int test_columns() {
 	TEST_EXPECT(fixed_by(FindingFix::Reimport) == Tokens({ "import.output_missing" }));
 	TEST_EXPECT(fixed_by(FindingFix::Rewrite) ==
 	            Tokens({ "animation_map.ignored_input", "catalog.ignored_input", "credits.line_ending",
-	                     "menu.ignored_input", "script.line_ending", "shader.form", "strings.regrouped",
-	                     "style.line_ending" }));
+	                     "menu.ignored_input", "mission.event_order", "mission.rewrite_differs", "script.line_ending",
+	                     "shader.form", "strings.regrouped", "style.line_ending" }));
 	const std::map<std::string, std::string> rewrites = {
 		{ "animation_map.ignored_input", "without the input the game ignores" },
 		{ "catalog.ignored_input", "without the input the game ignores" },
 		{ "credits.line_ending", "with every line ending CR LF" },
 		{ "menu.ignored_input", "without the input the game ignores" },
+		{ "mission.event_order", "with each event's triggers and actions where the event stands" },
+		{ "mission.rewrite_differs", "with its sections as the game reads them" },
 		{ "script.line_ending", "with every line ending CR LF" },
 		{ "shader.form", "in the SCR form the game's shader loader takes" },
 		{ "strings.regrouped", "with its strings grouped by section the way the game reads them" },
@@ -288,11 +291,36 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.blocks_save; }) ==
 	            Tokens({ "animation_map.invalid_input", "catalog.invalid_input", "catalog.unserializable",
 	                     "credits.invalid_input", "credits.unserializable", "document.unserializable",
-	                     "menu.invalid_input", "menu.unserializable", "music_script.invalid_input",
+	                     "menu.invalid_input", "menu.unserializable", "mission.invalid_input", "music_script.invalid_input",
 	                     "music_script.unserializable", "strings.invalid_input" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.place == FindingPlace::File; }) ==
 	            Tokens({ "asset.name.duplicate", "asset.name.empty", "asset.name.too_long", "build.archive_in_project",
 	                     "build.name_unstorable" }));
+	// S14: the one code whose errors gate no build is the missing reference (listed, fixable, never
+	// blocking); a finding of it at any severity does not block, an error of any other row does, as
+	// does an error made from no row. A row that says its file does not serialize always gates.
+	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) == Tokens({ "reference.missing" }));
+	TEST_EXPECT(!blocks_build(make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing")) &&
+	            blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Error, "required")) &&
+	            !blocks_build(make_finding(CoreFinding::RequirementMissing, DiagnosticSeverity::Warning, "a warning")) &&
+	            blocks_build(Diagnostic{}));
+	TEST_EXPECT(!diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing") }) &&
+	            diagnostics_block_build({ make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "missing"),
+	                                      make_finding(CoreFinding::DocumentStale, DiagnosticSeverity::Error, "stale") }));
+	// Review F3: where its kind's row cites the game's refusal (gates_when_missing, the terrain's), a
+	// missing reference gates; one of any other kind does not. A file of the name of the wrong kind
+	// is its own code, which gates.
+	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");
+	terrain.subject = ReferenceSubject{ ReferenceKind::Terrain, "nowhere.trn", "", -1 };
+	Diagnostic sound = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no sound");
+	sound.subject = ReferenceSubject{ ReferenceKind::Sound, "nothing.wav", "", -1 };
+	TEST_EXPECT(blocks_build(terrain) && !blocks_build(sound));
+	TEST_EXPECT(blocks_build(make_finding(CoreFinding::ReferenceWrongKind, DiagnosticSeverity::Error, "wrong kind")));
+	std::vector<std::string> gating_kinds;
+	for (size_t k = 0; k < kReferenceKindCount; ++k)
+		if (reference_row(static_cast<ReferenceKind>(k)).gates_when_missing)
+			gating_kinds.push_back(reference_row(static_cast<ReferenceKind>(k)).token);
+	TEST_EXPECT(gating_kinds == std::vector<std::string>({ "terrain" }));
 	std::set<std::string> keys, titles;
 	for (size_t g = 1; g < kFindingGroupCount; ++g) {
 		const auto group = static_cast<FindingGroup>(g);
@@ -302,6 +330,7 @@ static int test_columns() {
 		for (const FindingCodeRow &row : table.rows) {
 			const std::string token = row.token;
 			TEST_EXPECT(row.blocks_save == (ends_with(token, ".unserializable") || ends_with(token, ".invalid_input")));
+			TEST_EXPECT(!row.blocks_save || row.gates_build);
 			TEST_EXPECT(!starts_with(token, "asset.name.") || row.place == FindingPlace::File);
 			const std::string key = finding_group_key(row.group);
 			TEST_EXPECT(row.group != FindingGroup::None && (token == key || starts_with(token, key + ".")));
@@ -312,13 +341,16 @@ static int test_columns() {
 		}
 	}
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::Graph; }) ==
-	            Tokens({ "graph.unreadable", "reference.missing" }));
+	            Tokens({ "graph.unreadable", "reference.missing", "reference.wrong_kind" }));
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return row.source == FindingSource::RenderCheck; }) ==
 	            tokens_where([](const FindingCodeRow &row) { return starts_with(row.token, "menu.render."); }));
 	TEST_EXPECT(std::string(finding_group_key(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
 	                    "requirement.optional_missing" &&
 	            std::string(finding_group_title(finding_code(CoreFinding::RequirementOptionalMissing).group)) ==
 	                    "Optional files");
+	// The mission type's family (S14), its codes "mission.*".
+	TEST_EXPECT(std::string(finding_group_key(FindingGroup::Missions)) == "mission" &&
+	            std::string(finding_group_title(FindingGroup::Missions)) == "Missions");
 	return 0;
 }
 

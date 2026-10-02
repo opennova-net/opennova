@@ -740,6 +740,28 @@ bool write_item_availability_chunk(const std::vector<ItemAvailabilityEntry>& ent
 // Public API
 // ============================================================================
 
+bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first) {
+    first = 0;
+    std::vector<uint8_t> chunk;
+    std::string error;
+    if (!write_weapon_loadout_chunk(loadout, chunk, error)) return false;
+    WeaponLoadout back;
+    parse_weapon_loadout_chunk(chunk, back);
+    for (; first < loadout.entries.size(); ++first) {
+        if (first >= back.entries.size()) return false;
+        const WeaponLoadoutRecord& written = loadout.entries[first];
+        const WeaponLoadoutRecord& read = back.entries[first];
+        // A record left without its fourth string reads with the sanitizer's "-1", whatever its
+        // latent value.
+        const std::string flags = written.flags.empty() ? "-1" : written.flags;
+        if (read.name != written.name || read.ammo_primary != written.ammo_primary ||
+            read.ammo_secondary != written.ammo_secondary || read.has_flags != written.has_flags ||
+            (written.has_flags && read.flags != flags))
+            return false;
+    }
+    return back.entries.size() == loadout.entries.size();
+}
+
 bool is_bms(const uint8_t* data, size_t size) {
     if (size < 4) return false;
     return data[0] == 'B' && data[1] == 'M' && data[2] == 'S';

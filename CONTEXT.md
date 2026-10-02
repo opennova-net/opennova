@@ -485,7 +485,10 @@ The folder of an installed NovaLogic game (Joint Operations) that a project impo
 plays in, mounted as a stock launch mounts it (the boot archives, no `/d`). Each project names
 its own in `.opennova/local.json` (`game_install`); the editor keeps the one last chosen, where
 a project naming none starts. Its files are copied into a project on request (Import from the
-game data), never redistributed; Play in the game install runs a build there.
+game data: the files chosen, their **import closure**, or the whole install in one action), never
+redistributed: its archives' files, and the loose files the game ships beside them and reads from
+there (its music banks, its videos, the country code, the NovaWorld table and its screens; never
+a save, a configuration or a score). Play in the game install runs a build there.
 _Avoid_: retail directory, retail root, retail files (the names before ADR 0046 S13 A4), resource
 dir (the runtime's `--resource-dir`, which may be a build)
 
@@ -516,12 +519,55 @@ outputs. The files the import dialog offers are **import choices** (`ImportChoic
 _Avoid_: convert (the runtime never converts), asset pipeline (the retired Python route),
 image source (the kind's name before S13 A8)
 
+**Import closure**:
+What an import "with the files these need" brings beside the files chosen (ADR 0046 S14): every
+file they reference, and those files' in turn; the file that defines each name they use (an
+item, a weapon, a particle effect, a string id, a screen, a style variable), where no file of
+the project or the import does; and for a mission its **mission sidecars** and every file the
+game opens by a fixed name at boot, at the menu, at mission start (the required-resources
+manifest) and while a mission runs. It is planned before anything is written, a file a step (the **import plan**: each
+file, where it comes from, what wanted it and its size, the files by kind, what is found
+nowhere, the names no place defines), then written a file a step: every file checked and staged
+before any is published, so a file that cannot be read or converted writes nothing (a failure while
+publishing can leave the files published before it). The player's own files (a save, a
+configuration, the scores, the stored credentials) are never taken. A
+project is its own files: nothing is mounted under it, so a mission plays, previews and builds
+from what its project holds, and a shipped JO mission's closure is some 7,300 files (650 MB:
+most of the game, its sounds included). Importing the whole game install is the one action that
+leaves nothing out.
+_Avoid_: dependency mount, base, parent project (a project builds on nothing but what it holds),
+bundle
+
+**Mission sidecar**:
+A file the game finds by a mission's name rather than by a reference in it, each skipped when
+absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading
+image, else `loadscrn.pcx`), `.til` (its tiles), `.dbf` (its dialog bank) and that bank's sounds
+(`.lwf`, else `.pwf`, read only when the `.dbf` exists), each by the mission's name to its first
+dot. One witnessed table (`mission::sidecars`), which the mission text's loader and the editor's
+Play mission read (the other loaders come to on touch), and of which the editor's mission document
+makes the mission's own edges (its file set), which the graph, Rename and the import follow.
+_Avoid_: companion (the members of a mission set a rename takes with the mission), attachment,
+import sidecar (a source's `.import` record)
+
+**Mission set**:
+A mission and its sidecars as the editor holds them (ADR 0046 S14): each sidecar a reference the
+mission's file makes (its string table, script, loading image, tile placement, dialog bank and the
+bank's sounds), those the game runs without optional (no finding when the project lacks one), so the
+graph, References, the import and Problems see the set; a mission renamed takes the members the
+project has with it, its **companions**.
+_Avoid_: bundle, package (a set is the files a name finds, not a container)
+
+**Mission text**:
+A `.mis`: the original mission editor's interchange text (`dfx2med.exe`), which the game never reads.
+Its own kind, packed nowhere; never a mission.
+_Avoid_: mission (the `.bms` the game loads), mission file
+
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
 asset graph: its files and the names they define, read once and never edited. A lookup by name
 tries the project first, then the base layer, whose file of a name the project also has is
 hidden with the names it defines (project assets win); the base layer makes no reference and no
-finding of its own.
+finding of its own. No project mounts one (ADR 0046 S14: a project imports what it needs).
 _Avoid_: second graph (one graph, the base under it), import (an import copies files in; the
 base layer only answers names)
 
@@ -564,7 +610,8 @@ _Avoid_: configuration (its kind before it had its own), score config
 
 **Map project**:
 A `.npj` or `.npz`: the mission editor's project for a mission, which the game's mission list
-scans for beside the `.bms` files.
+scans for beside the `.bms` files and loads through an XML loader not yet read (D-MIS-7): packed as
+it is, opened by no editor yet.
 _Avoid_: mission (the `.bms` the game loads), map pack
 
 **Material chunk**:
@@ -630,20 +677,20 @@ table, one view per open document, which keeps its filter, its order and what it
 long as the document is open. Most types show their records as an outline (a tree of the rows and
 what they hold, a list of the rows, or master and detail: the rows beside the selected row's
 records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
-menu's screens and windows), or a Main-role viewport filling the tab: a text's script device, or the
-mission's 3D view to come with the outline and the Inspector beside it. The selected record's fields
-are the Inspector's, whatever the type.
+menu's screens and windows), or a Main-role viewport filling the tab: a text's script device, or a
+mission's 3D view with its outline beside it (a tree with a chip per kind of row) and the Inspector's
+form. The selected record's fields are the Inspector's, whatever the type.
 _Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
 generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, and the mission's 3D view to come), kept by the session while the document is
+its script device, a mission's 3D view), kept by the session while the document is
 open: one per document and kind. Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
-picture with the outline and the Inspector beside it);
-a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission's
-3D view and its map are one Main and one Preview). Its state (the size its device draws at where no
+picture with the outline and the Inspector beside it: a mission's);
+a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission has
+its 3D view alone; its top-down look is a camera command of that view, `top`, not a map). Its state (the size its device draws at where no
 canvas sizes the picture, the kind's options and camera) changes by a SetViewport request, every
 change a person or a client makes; three changes alone are derived by its follow instead (a menu's
 held window following the selection, a model framed when another model first shows, the preview
@@ -659,13 +706,34 @@ viewport keeping its state), drawn only by the viewport's canvas, which owns the
 and sizes the picture it draws (a control owns them itself in the rect the canvas reserves). A device
 may make a picture over several of the Shell's frames, a little each frame (a model: its textures,
 its meshes, then its scene and its pose; a menu's screen shown the first time: its textures, then the
-screen); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
+screen; a mission: its environment, its terrain's files and tiles, its sky and water, its item
+table, a model per graphic, its placement and its pose); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
 never a half-made one, and a change that asks for the picture again begins it anew. Headless, it
 answers as its envelope (JSON, the `viewport` query), and a client drags and commands through it as
 its canvas would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it
 moves, a command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
+
+**Mark**:
+A record of a mission as its viewport's overlays draw it and its canvas picks it: an entity's glyph
+by its pool, ringed in its team's colour, or an area's footprint on the ground, at its anchor (an
+entity's stored position, an area's middle) as the viewport's camera projects it. A mark shows within
+the mark range while its kind's marks are on; a click picks the front-most mark within a few pixels
+of its anchor (by its anchor, never the model's shape), a marquee every shown mark inside it, and the
+primary selected mark carries the handles a drag edits it by (move, height, yaw; an area's edges).
+_Avoid_: gizmo (the handles alone), icon, marker (an entity pool of a mission), pin
+
+**Lifted**:
+An entity a mission viewport's device draws apart from the placement it last made: one added (an Add,
+a Duplicate, a Paste, a drop) or given another item, group or attributes since, built as the
+placement builds an entity's own model (its lighting, its mirror flag from its attributes, its
+terrain shadow) until the next placement takes it in, a static item's too where the placement would
+batch it (past 256 lifted rows the device places the whole mission again). Given back what was
+placed (an undo), the placed one shows again. An entity removed is hidden with its terrain shadow,
+and shown where it stands when the removal is undone; a moved one is moved in place. None of these
+places the mission again.
+_Avoid_: spawned (what the game does at run time), dynamic, unplaced
 
 **Script device**:
 A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
@@ -717,8 +785,9 @@ _Avoid_: node (the core's type for a row), child (an identity field, not a relat
 **Record reference / record set**:
 A field naming a record of its own file by its index among the file's records of one kind, in
 the file's order: a model's generator, track or light naming one of its CTRL registers, a part
-animation's frame byte naming a rotation frame (a mission's entity, waypoint or group index,
-later). Those records are the file's record set of that kind, each found by its index: the
+animation's frame byte naming a rotation frame, a mission's stop naming a marker or a parameter an
+event (a mission's entity and area are named by their SSN and zone id instead, which no edit
+renumbers). Those records are the file's record set of that kind, each found by its index: the
 picker offers them by index and name, and each shows what names it (Referenced by). An edit that
 adds, removes or moves one of them changes, in the same undo step, every index that named a
 record it moved (an index past the set staying past it), and is refused while a field the game
@@ -740,6 +809,15 @@ field or a new family of a catalog (a def table the editor did not open) is rows
 a document.
 _Avoid_: schema (one kind's fields: the part of the table the Inspector reads), property table (the
 per-format tables the shape replaced), plugin (there are none: the tables are compiled in)
+
+**Band**:
+The run of a document's rows of one kind where its file fixes their order (a mission's: the mission
+row, then its items, buildings, markers and organics, its 128 waypoint paths, its area triggers and
+its events, the order its writer writes them). A row added, duplicated, pasted or moved lands inside
+its kind's band, never outside it; a band the file holds fixed (the mission row, the paths) takes no
+row and gives none up.
+_Avoid_: section (a part of the file's bytes), group (a mission's AI group), pool (the runtime's
+entity storage an entity's kind spawns into)
 
 **Menu preview**:
 The menu's viewport in the Preview window: the editor's render of the previewed screen (the last
@@ -825,7 +903,8 @@ check renders a menu again only when it, a file its screens read or a variable i
 Its findings are Problems rows after the build's gate, never in it, and never a finding a use check
 or the asset graph makes. A use check is the other cross-file finding, one whose rows are in the
 gate: a function of the asset graph, keeping nothing. Which one a finding is, is chosen by whether
-it may block a build.
+it may block a build (and in the gate an error blocks only when its code's row says so: a missing
+reference's does not, ADR 0046 S14).
 _Avoid_: use check (in the gate, stateless, one per kind of file), validation (a file's own
 findings)
 
@@ -835,7 +914,10 @@ from, which the finding keeps: what Problems offers for it (its fixes; a Rewrite
 the file again does), whether it says the file does not serialize (its Save refused, no Rewrite
 offered), where Problems takes it (the record and field in the file's document, or the file itself
 in Files), the group it shows under (its family), where it comes from (its own part, the asset
-graph, the render check) and, for a compiler note, whether it is a Problems row at all. The
+graph, the render check), for a compiler note, whether it is a Problems row at all, and whether an
+error of it refuses a build (ADR 0046 S14: every code's does but a missing reference's,
+`reference.missing`, which is listed and fixable and blocks nothing: the shipped game carries such
+names and runs; what the game cannot start without is the manifest's rows). The
 editor's own codes are one table and each document type declares its own, a family of its name
 (`menu.`, `style.`); every finding is made from a row, so a code no table declares cannot be made.
 The wire's `code` is the token.
@@ -956,8 +1038,13 @@ _Avoid_: task, job, background work (nothing runs on another thread)
 
 **Play**:
 Build, then launch the game runtime (`opennova.exe -- --resource-dir <build>
---mcp-port <n>`) as the editor's one managed child through a `PlaySession`, in a run directory;
-Stop ends it. The editor tails the session log until the runtime MCP answers, then drives it there.
+--mcp-port <n> [--mission <name.bms>]`) as the editor's one managed child through a
+`PlaySession`, in a run directory; Stop ends it. The editor tails the session log until the
+runtime MCP answers, then drives it there. Play starts the game at its menu; **Play mission**
+(Ctrl+F5) starts it in the active document's mission, a `.bms` of the project (the document
+itself, or the mission whose sidecar it is). A mission the project does not hold is refused
+before anything is built; one that does not load is a Problems row until the next Play. Play in
+the game install starts at its menu whatever is asked (the stock game takes no mission).
 _Avoid_: run (ONED's vocabulary), preview (an in-editor render, not a running game),
 "see in game"
 

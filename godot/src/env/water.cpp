@@ -53,6 +53,10 @@ void Water::_bind_methods() {
 			&Water::set_mission_water_height_override);
 	ClassDB::bind_method(D_METHOD("set_world_rendering_enabled", "value"),
 			&Water::set_world_rendering_enabled);
+	ClassDB::bind_method(D_METHOD("set_mirror_enabled", "value"), &Water::set_mirror_enabled);
+	ClassDB::bind_method(D_METHOD("is_mirror_enabled"), &Water::is_mirror_enabled);
+	ClassDB::bind_method(D_METHOD("is_globals_held"), &Water::is_globals_held);
+	ClassDB::bind_static_method("Water", D_METHOD("get_global_writes"), &Water::get_global_writes);
 	ClassDB::bind_method(D_METHOD("release_runtime_renderer_resources"),
 			&Water::release_runtime_renderer_resources);
 	ClassDB::bind_method(D_METHOD("is_water_active"), &Water::is_water_active);
@@ -161,6 +165,23 @@ void Water::set_world_rendering_enabled(bool p_value) {
 	_sync_render_activity();
 }
 
+void Water::set_mirror_enabled(bool p_value) {
+	if (mirror_enabled_ == p_value) {
+		return;
+	}
+	mirror_enabled_ = p_value;
+	_sync_render_activity();
+}
+
+int64_t Water::global_writes_ = 0;
+
+void Water::publish_absent() {
+	++global_writes_;
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_active", false);
+	RenderingServer::get_singleton()->global_shader_parameter_set("opennova_water_height", 0.0f);
+	ObjectShaderCache::get_singleton()->clear_water_plane();
+}
+
 void Water::release_runtime_renderer_resources() {
 	world_rendering_enabled_ = false;
 	RenderingServer *server = RenderingServer::get_singleton();
@@ -222,10 +243,11 @@ void Water::release_runtime_renderer_resources() {
 // blended world materials can take their far/camera-side rung; cleared when
 // the water node leaves the tree.
 void Water::_push_water_split_height() {
-	if (!built_ || !is_inside_tree()) {
+	if (!built_ || !is_inside_tree() || globals_held_) {
 		return;
 	}
 	const bool active = is_water_pass_active() && is_visible_in_tree();
+	++global_writes_;
 	RenderingServer *rs = RenderingServer::get_singleton();
 	rs->global_shader_parameter_set("opennova_water_active", active);
 	rs->global_shader_parameter_set("opennova_water_height", water_height_);
@@ -289,7 +311,7 @@ void Water::_sync_render_activity() {
 	// off-screen surface. The strip march re-arms this after it produces
 	// rows.
 	const bool reflection_active = world_active && has_drawable_surface_ &&
-			cached_cam_id_.is_valid();
+			cached_cam_id_.is_valid() && mirror_enabled_;
 	if (reflection_viewport_ != nullptr) {
 		reflection_viewport_->set_update_mode(reflection_active
 						? SubViewport::UPDATE_ALWAYS
@@ -367,7 +389,8 @@ void Water::_exit_tree() {
 	// requires `built`): an unconditional call here CREATED the shader-cache
 	// singleton during scene teardown on every quit — the never-freed
 	// extension object behind the packaging boot-smoke teardown AV.
-	if (built_) {
+	if (built_ && !globals_held_) {
+		++global_writes_;
 		ObjectShaderCache::get_singleton()->clear_water_plane();
 		RenderingServer::get_singleton()->global_shader_parameter_set(
 				"opennova_water_active", false);

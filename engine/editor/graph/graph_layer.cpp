@@ -17,7 +17,7 @@ std::shared_ptr<const GraphLayer> GraphLayer::build(
 		const std::string name_key = graph_names::key(name);
 		if (name_key.empty() || layer->index_.first_named(name_key) != GraphIndex::kNone) continue;
 		const uint32_t id = layer->index_.add(name, name, name_key, file.kind);
-		if (!graph_reads_file(file.kind, name)) continue;
+		if (!graph_reads_kind(file.kind)) continue;
 		GraphSlot &slot = layer->index_.slot(id);
 		slot.read = true;
 		++counted.files_extracted;

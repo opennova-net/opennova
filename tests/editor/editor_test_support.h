@@ -159,6 +159,32 @@ inline bool write_text(const std::string &path, const std::string &text) {
 	return write_bytes(path, std::vector<uint8_t>(text.begin(), text.end()));
 }
 
+// A test device's ground (the height at a point of the viewport's space, z up): where the segment
+// from `from` to `to` first meets it, as ViewportDevice::surface_between answers. False where the
+// segment begins under it or never reaches it. The first of 2,048 steps at or under the ground, then
+// the crossing between it and the step before, halved until it stands.
+template <typename Ground>
+bool ground_crossing(const Ground &ground, const double from[3], const double to[3], double point[3]) {
+	const auto at = [&](double t, double out[3]) {
+		for (int i = 0; i < 3; ++i) out[i] = from[i] + (to[i] - from[i]) * t;
+		return out[2] - ground(out[0], out[1]);
+	};
+	double p[3];
+	if (at(0.0, p) < 0.0) return false;
+	const int steps = 2048;
+	for (int i = 1; i <= steps; ++i) {
+		if (at(double(i) / steps, p) > 0.0) continue;
+		double low = double(i - 1) / steps, high = double(i) / steps;
+		for (int pass = 0; pass < 48; ++pass) {
+			const double middle = (low + high) * 0.5;
+			(at(middle, p) > 0.0 ? low : high) = middle;
+		}
+		at(high, point);
+		return true;
+	}
+	return false;
+}
+
 // The file's last write set `age` before now. A file a test writes is younger than the hash caches'
 // settle window (io::kFileStampSettle), so each pass would read it again (S13 A8); one back-dated
 // is a file written a while ago, which a cache keeps by its size and last write.

@@ -130,15 +130,14 @@ void FirePresenter::setup(Simulation *p_sim, Node3D *p_container, MissionAudio *
 	}
 }
 
-// smoktest.pcx, the pool's one texture, with its palette-luminance alpha
-// [orig: CEffectEmitterPool_CreateShaders @ 0x5DC8F0 ->
-// Texture_LoadFromArchive("smoktest.pcx", "smoktest.pcx") @ 0x58B980].
+// The pool's one texture, with its palette-luminance alpha (the engine's
+// renderer::kEmitterPoolTexture carries the name and the witness).
 Ref<Texture2D> FirePresenter::smoke_texture() {
 	if (smoke_texture_loaded_ || resource_root_.is_null()) {
 		return smoke_texture_;
 	}
 	smoke_texture_loaded_ = true;
-	smoke_texture_ = resource_root_->load_texture("smoktest.pcx",
+	smoke_texture_ = resource_root_->load_texture(opennova::renderer::kEmitterPoolTexture,
 			ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
 	return smoke_texture_;
 }
