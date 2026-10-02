@@ -258,10 +258,12 @@ public:
 				if (!queue_.empty() && !plan_.truncated) {
 					PlanNode node = std::move(queue_.front());
 					queue_.pop_front();
+					if (again_queued_ > 0 && followed_.count(node.row)) --again_queued_;
 					follow(node);
 					break;
 				}
 				queue_.clear();
+				again_queued_ = 0;
 				phase_ = Phase::Symbols;
 				break;
 			case Phase::Symbols:
@@ -293,7 +295,9 @@ public:
 
 	bool done() const { return phase_ == Phase::Done; }
 	size_t files_known() const { return known_; }
-	size_t files_done() const { return files_ - std::min(files_, queue_.size()); }
+	// The files followed: a menu queued again after a stylesheet came is done already, so the count
+	// never falls (review F13).
+	size_t files_done() const { return files_ - std::min(files_, queue_.size() - again_queued_); }
 	ImportPlan take() { return std::move(plan_); }
 
 private:
@@ -539,6 +543,7 @@ private:
 	// %NAME%s expand to): each read again.
 	void requeue_menus() {
 		for (const auto &menu : menus_) queue(menu.first, menu.second);
+		again_queued_ += menus_.size();
 	}
 
 	// What a planned file defines, once extracted: the symbol references of other files resolve
@@ -626,7 +631,8 @@ private:
 
 	// A symbol reference followed to the file that defines it (import_plan.h): nothing when the
 	// project or a planned file defines it; else the first file of the wanting file's origin, then
-	// of the install, that does, planned and queued; else counted as undefined.
+	// of the install, that does, planned and queued, or counted as shadowed where the project holds a
+	// file of that name (its own copy, which lacks it, is kept); else counted as undefined.
 	// The lookup is the graph's (AssetGraph::resolve): the scope it starts at (AssetGraph::
 	// lookup_scope: the edge's own; its alternate table's where the project lacks the own table, the
 	// own one tried first, which the import may bring; any table, nothing after, where the project
@@ -657,6 +663,13 @@ private:
 					for (const std::string &candidate : defining_candidates(from, edge.kind, *scope)) {
 						const Definitions *definitions = definitions_of(from, candidate);
 						if (!definitions || !defines(*definitions, edge.kind, name, *scope)) continue;
+						// A file of the name the project holds, its own copy, lacks it (the graph found
+						// it nowhere): the import keeps that file, so the place's copy is not brought and
+						// the name stays undefined where the game reads it (review F6).
+						if (scan_.find(candidate)) {
+							count_into(plan_.shadowed, edge.kind, from->file_kind(candidate), use.file);
+							return;
+						}
 						// Planned already (brought for an earlier symbol, not yet followed): it
 						// defines this one too.
 						if (!provided_.count(key(candidate))) bring(from, candidate, need);
@@ -665,12 +678,18 @@ private:
 				}
 			}
 		}
-		for (ImportNotFollowed &entry : plan_.undefined)
-			if (entry.reference == edge.kind) {
+		count_into(plan_.undefined, edge.kind, AssetKind::Unknown, use.file);
+	}
+
+	// One more reference of a kind in a list kept once per kind (ImportPlan::undefined, shadowed).
+	static void count_into(std::vector<ImportNotFollowed> &list, ReferenceKind reference, AssetKind kind,
+	                       const std::string &file) {
+		for (ImportNotFollowed &entry : list)
+			if (entry.reference == reference) {
 				++entry.count;
 				return;
 			}
-		plan_.undefined.push_back({edge.kind, AssetKind::Unknown, 1, use.file});
+		list.push_back({reference, kind, 1, file});
 	}
 
 	// The place a planned file came from (by its name); null for one the plan does not hold.
@@ -1037,6 +1056,7 @@ private:
 	std::map<std::string, std::vector<std::string>> files_by_kind_; // a place's files of a kind, once
 	std::map<std::string, const ImportOrigin *> origins_by_file_;
 	std::vector<std::pair<size_t, const ImportOrigin *>> menus_;
+	size_t again_queued_ = 0; // the menus in queue_ queued again, followed once already
 	std::set<size_t> followed_;
 	bool sheets_dirty_ = false;
 	std::map<std::string, Provided> provided_;                             // the files the plan takes

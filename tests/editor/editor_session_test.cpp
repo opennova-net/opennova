@@ -3951,8 +3951,9 @@ static int test_no_request_validates() {
 	TEST_EXPECT(!v.dialogs.import_preview.open);
 	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
 	TEST_EXPECT(!v.project.import_dependencies && !v.dialogs.import_preview.open);
+	// An import naming nothing is refused (review F14), after the validation all the same.
 	TEST_EXPECT(after_an_edit(request::import_files({})));
-	TEST_EXPECT(v.activity.status == "Nothing to import." && !v.dialogs.import_preview.open);
+	TEST_EXPECT(has_code(session.outcome().findings, "import.request") && !v.dialogs.import_preview.open);
 	// Refused before its rename (no requirement has the role).
 	TEST_EXPECT(after_an_edit(request::assign_requirement("no_such_role", items->path())));
 	TEST_EXPECT(has_code(session.outcome().findings, "requirement.unknown"));

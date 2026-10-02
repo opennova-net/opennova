@@ -1305,9 +1305,9 @@ void test_files_window() {
 	ui.frames(2);
 	using Values = std::vector<std::pair<std::string, std::string>>;
 	CHECK(one(requests, EditorRequestKind::CreateFile) && requests[0].path == "first.bms" && requests[0].file_kind == "mission" &&
-	              requests[0].values == Values({{"title", "The first"}, {"terrain", "island.trn"}, {"environment", "day.env"}}) &&
+	              requests[0].values == Values({{"environment", "day.env"}, {"terrain", "island.trn"}, {"title", "The first"}}) &&
 	              !modal_open("New file"),
-	      "Create: the mission's name and its values by their tokens");
+	      "Create: the mission's name and its values by their tokens, sorted as the wire reads them (review F10)");
 }
 
 // Whether `second` follows `first` in `text` on the same logged line.

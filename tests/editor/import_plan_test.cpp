@@ -957,8 +957,13 @@ static int test_plan_mission_closure() {
 	const SessionView &v = project.view();
 	ImportPlanner planner({mission}, true, ProjectPaths::for_root(v.project.root), *v.project.document, *v.project.scan,
 	                      *v.findings.graph, install);
-	size_t steps = 0;
-	while (!planner.step(1)) TEST_EXPECT(++steps < 2000);
+	size_t steps = 0, done = 0;
+	bool fell = false; // the files followed never fall, a menu followed again included (review F13)
+	while (!planner.step(1)) {
+		TEST_EXPECT(++steps < 2000);
+		fell = fell || planner.files_done() < done;
+		done = planner.files_done();
+	}
 	const ImportPlan stepped = planner.take();
 	if (!same_import(plan, stepped))
 		for (size_t i = 0; i < std::min(plan.rows.size(), stepped.rows.size()); ++i)
@@ -967,8 +972,17 @@ static int test_plan_mission_closure() {
 				std::printf("row %zu: %s (%d, %s) | %s (%d, %s)\n", i, plan.rows[i].name.c_str(), int(plan.rows[i].selected),
 				            plan.rows[i].problem.c_str(), stepped.rows[i].name.c_str(), int(stepped.rows[i].selected),
 				            stepped.rows[i].problem.c_str());
-	// A step takes one source, the manifest for the missions, or one file followed.
-	TEST_EXPECT(steps > 20 && same_import(plan, stepped));
+	// A step takes one source, the manifest for the missions, or one file followed; the counts kept by
+	// kind come out the same too (review F13).
+	const auto same_counts = [](const std::vector<ImportNotFollowed> &a, const std::vector<ImportNotFollowed> &b) {
+		if (a.size() != b.size()) return false;
+		for (size_t i = 0; i < a.size(); ++i)
+			if (a[i].reference != b[i].reference || a[i].kind != b[i].kind || a[i].count != b[i].count || a[i].first != b[i].first)
+				return false;
+		return true;
+	};
+	TEST_EXPECT(steps > 20 && same_import(plan, stepped) && same_counts(plan.undefined, stepped.undefined) &&
+	            same_counts(plan.not_followed, stepped.not_followed) && same_counts(plan.shadowed, stepped.shadowed) && !fell);
 	// Without dependencies: the .bms alone.
 	const ImportPlan alone = project.plan({mission}, false, install);
 	TEST_EXPECT(alone.rows.size() == 1 && alone.rows[0].name == "m.bms" && alone.undefined.empty());
@@ -988,6 +1002,37 @@ static int test_plan_mission_closure() {
 	TEST_EXPECT(tiles && tiles->state == State::NotFound && tiles->needed_by.file == "n.bms" &&
 	            tiles->needed_by.reference == ReferenceKind::TilePlacement);
 	TEST_EXPECT(fallback && fallback->state == State::Found);
+	return 0;
+}
+
+// A symbol only the install's copy of a file the project holds defines (review F6): the project's
+// edited items.def lacks the item the mission places; the import keeps the project's file, so the
+// install's is not brought, and the plan says so (shadowed), neither silent nor undefined.
+static int test_plan_shadowed() {
+	Project project("opennova_editor_plan_shadowed");
+	const std::string install = project.dir.file("install");
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		opennova::mission::add_entity(mission, opennova::mission::EntityKind::Building, 100100, {});
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_text(project.root() + "/items.def", "begin \"Mine\"\nid 100200\ntype building\nend\n"));
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	TEST_EXPECT(write_pff(install + "/localres.pff", {{"m.bms", std::string(mission_bytes.begin(), mission_bytes.end())},
+	                                                   {"items.def", "begin \"Box\"\nid 100100\ntype building\nend\n"}}));
+	ImportChoice mission;
+	mission.path = install;
+	mission.entry = "m.bms";
+	mission.install = true;
+	const ImportPlan plan = project.plan({mission}, true, install);
+	TEST_EXPECT(!row_named(plan, "items.def"));
+	TEST_EXPECT(plan.shadowed.size() == 1 && plan.shadowed[0].reference == ReferenceKind::Item && plan.shadowed[0].count == 1 &&
+	            plan.shadowed[0].kind == AssetKind::ItemDefs && plan.shadowed[0].first == "m.bms");
+	for (const ImportNotFollowed &entry : plan.undefined) TEST_EXPECT(entry.reference != ReferenceKind::Item);
 	return 0;
 }
 
@@ -1021,6 +1066,7 @@ static int test_mission_fixed_files() {
 int run_import_plan_tests() {
 	int failures = 0;
 	failures += test_mission_fixed_files();
+	failures += test_plan_shadowed();
 	failures += test_plan_mission_closure();
 	failures += test_plan_steps();
 	failures += test_plan_folder();

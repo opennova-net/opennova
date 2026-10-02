@@ -710,6 +710,7 @@ JsonValue import_preview_to_json(const SessionView &view, const JsonPage &page, 
 	};
 	out.set("not_followed", counted(plan.not_followed));
 	out.set("undefined", counted(plan.undefined));
+	out.set("shadowed", counted(plan.shadowed));
 	out.set("truncated", boolean(plan.truncated));
 	out.set("diagnostics", diagnostics_to_json(plan.diagnostics));
 	return out;

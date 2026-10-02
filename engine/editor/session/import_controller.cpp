@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <map>
 #include <set>
 #include <string>
 #include <utility>
@@ -41,6 +42,12 @@ void ImportController::plan(const EditorRequest &request) {
 
 void ImportController::preview_install(const EditorRequest &request) {
 	if (!view_.project.open) return;
+	// Every file chosen takes no names and no walk: a request asking for either too is refused, not
+	// served in part (review F14).
+	if (request.all && (!request.names.empty() || request.with_dependencies))
+		return core_.refuse_now(CoreFinding::ImportRequest,
+		                        "Every file of the game install is chosen with no walk: \"all\" takes neither \"names\" nor "
+		                        "\"with_dependencies\".");
 	std::vector<Diagnostic> diagnostics;
 	std::vector<ImportChoice> sources = list_retail_import_choices(core_.game_install(), *view_.project.document, diagnostics);
 	// Everything: every file chosen, none to choose from, no walk (the closure of everything is
@@ -54,17 +61,18 @@ void ImportController::preview_install(const EditorRequest &request) {
 	// not have is a finding (unless the install itself is the finding). Without, every
 	// file is listed to choose from.
 	std::vector<ImportChoice> named;
+	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
+	if (!request.names.empty())
+		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].entry), i);
 	for (const std::string &name : request.names) {
-		const auto found = std::find_if(sources.begin(), sources.end(), [&name](const ImportChoice &source) {
-			return normalized_logical_name(source.entry) == normalized_logical_name(name);
-		});
-		if (found == sources.end()) {
+		const auto found = by_name.find(normalized_logical_name(name));
+		if (found == by_name.end()) {
 			if (diagnostics.empty())
 				diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,
 				                                   "The game data has no file named " + name + "."));
 			continue;
 		}
-		named.push_back(*found);
+		named.push_back(sources[found->second]);
 	}
 	if (!request.names.empty()) sources.clear();
 	for (const auto &d : diagnostics) core_.report(d);
@@ -99,9 +107,9 @@ void ImportController::preview(std::vector<ImportChoice> choices, std::vector<Im
 		// roots are not looked up one by one.
 		preview.roots = std::move(roots);
 	} else {
+		std::set<ImportChoice> seen; // each root once, in log time
 		for (ImportChoice &root : roots)
-			if (std::find(preview.roots.begin(), preview.roots.end(), root) == preview.roots.end())
-				preview.roots.push_back(std::move(root));
+			if (seen.insert(root).second) preview.roots.push_back(std::move(root));
 	}
 	preview.with_dependencies = with_dependencies;
 	preview.all = all;
@@ -203,6 +211,12 @@ void ImportController::set_dependencies(bool with_dependencies) {
 // the open documents whose files it replaced.
 void ImportController::import_files(const EditorRequest &request) {
 	if (!view_.project.open) return;
+	// An import of nothing named and nothing planned would plan again only to close the dialog: refused
+	// (review F14).
+	if (!request.planned && request.imports.empty())
+		return core_.refuse_now(CoreFinding::ImportRequest,
+		                        "An import names its files (\"imports\") or takes the open preview's plan (\"planned\"): "
+		                        "this one does neither.");
 	DialogsView::ImportPreview &preview = view_.dialogs.import_preview;
 	std::vector<ImportChoice> imports;
 	if (!sources_of(request, imports)) return;
@@ -339,19 +353,19 @@ void ImportController::unsaved_files(const EditorRequest &request, std::vector<s
 				*view_.project.scan, core_.problems().graph(), core_.game_install(), SIZE_MAX));
 	}
 	// A row the request asks for (with planned, one the plan takes), which the plan finds: where
-	// its file lands.
-	const auto writes = [&request](const ImportPlanRow &row) {
+	// its file lands. The places written, gathered once over the rows (a whole install's nine
+	// thousand, each source looked up in log time: review F7), then each unsaved document's.
+	const std::set<ImportChoice> asked(request.imports.begin(), request.imports.end());
+	const auto writes = [&request, &asked](const ImportPlanRow &row) {
 		if (row.state == ImportPlanRow::State::NotFound) return false;
 		if (request.planned) return (row.selected || (row.held && request.replace)) && row.problem.empty();
-		return std::find(request.imports.begin(), request.imports.end(), row.source) != request.imports.end();
+		return asked.count(row.source) > 0;
 	};
-	for (const auto &document : documents.documents()) {
-		if (!document->dirty()) continue;
-		if (std::any_of(plan->rows.begin(), plan->rows.end(), [&](const ImportPlanRow &row) {
-			    return writes(row) && row.destination == document->path();
-		    }))
-			files.push_back(document->path());
-	}
+	std::set<std::string> written;
+	for (const ImportPlanRow &row : plan->rows)
+		if (writes(row)) written.insert(row.destination);
+	for (const auto &document : documents.documents())
+		if (document->dirty() && written.count(document->path())) files.push_back(document->path());
 }
 
 void ImportController::clear() {

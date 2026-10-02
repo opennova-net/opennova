@@ -912,6 +912,18 @@ static int test_retail_source() {
 		// Nothing planned: a planned import is refused.
 		editor_test::handle_to_end(session, request::import_planned());
 		TEST_EXPECT(!session.outcome().done() && view.findings.diagnostics.back().code() == "import.not_planned");
+		// A request asking for two things at once is refused, never served in part (review F14): every
+		// file and some by name, every file and a walk; an import naming nothing and planning nothing.
+		EditorRequest both = request::import_whole_install();
+		both.names = {"note.txt"};
+		editor_test::handle_to_end(session, both);
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1 && !preview.open);
+		EditorRequest walked = request::import_whole_install();
+		walked.with_dependencies = true;
+		editor_test::handle_to_end(session, walked);
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1 && !preview.open);
+		editor_test::handle_to_end(session, request::import_files({}));
+		TEST_EXPECT(!session.outcome().done() && count_code(session.outcome().findings, "import.request") == 1);
 	}
 	// A directory that is no install.
 	editor_test::set_game_install(session, dir.file("empty"));

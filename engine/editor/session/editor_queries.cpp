@@ -1088,12 +1088,14 @@ constexpr EditorQueryRow kRows[] = {
 			"The import dialog's preview: open, with_dependencies, all (every file of the game "
 			"install chosen, with no walk), a page of its plan's rows in "
 			"its order, the chosen files first (state, name, kind, source, destination, size, "
-			"made_from, needed_by, found_in, selected, problem, rivals; those of one kind alone "
+			"made_from, needed_by, found_in, selected, held (a chosen file the project has, kept "
+			"unless the import replaces), problem, rivals; those of one kind alone "
 			"with kind, count theirs), total_bytes (what the whole plan copies) and summary (the "
 			"whole plan's files by kind, the largest first: kind, files, bytes), by the same page "
 			"what it offers and chose (choices, roots) and the files not found, each list with its "
 			"own count (next_offset runs to the end of the longest), then the kinds not followed, "
-			"the symbols no place defines (undefined), truncated and the plan's findings.")
+			"the symbols no place defines (undefined), those only a place's copy of a file the "
+			"project has defines, its own being kept (shadowed), truncated and the plan's findings.")
 			.pages("rows")
 			.row,
 	Query(K::Output, "output", answer_output, kCursorParams, concern_set({ C::Output }),

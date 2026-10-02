@@ -576,6 +576,11 @@ void print_plan(std::FILE *to, const std::vector<JsonValue> &pages, bool rows) {
 	for (const JsonValue &entry : items(plan, "undefined"))
 		std::fprintf(to, "undefined: %s references no place defines (%zu, the first in %s)\n",
 		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
+	for (const JsonValue &entry : items(plan, "shadowed"))
+		std::fprintf(to,
+		             "shadowed: %s references only the source's copy of a file the project has defines; the project's "
+		             "own is kept (import that file with --replace to take the source's) (%zu, the first in %s)\n",
+		             entry.get_string("reference", "").c_str(), count_at(entry, "count"), entry.get_string("first", "").c_str());
 	if (plan.get_bool("truncated", false))
 		std::fprintf(to, "the plan stopped at %zu files: the files past them are not in it\n", count_at(plan, "count"));
 	std::fprintf(to, "plan: %zu file(s) to import, %zu not found, %.1f MB\n", take, count_at(plan, "not_found_count"),
@@ -666,6 +671,13 @@ int run_import(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	if (truncated)
 		std::fprintf(cli.err, "the plan stopped at %zu files: the files past them are not imported (import fewer at once)\n",
 		             count_at(plan, "count"));
+	// Nothing the plan takes (each file the project holds kept): the preview closed, nothing raised (an
+	// import naming no file is refused, review F14).
+	if (!all && taken.array.empty()) {
+		send(cli, editor::request::cancel_import());
+		if (!cli.json) std::fprintf(cli.out, "nothing to import\n");
+		return 0;
+	}
 	// The whole install: the plan's rows as the editor holds them (planned), nine thousand sources
 	// not echoed back.
 	JsonValue request = JsonValue::make_object();
@@ -934,8 +946,9 @@ bool check_query(const CliArgs &args, std::string &why) {
 bool check_import(const CliArgs &args, std::string &why) {
 	const bool source = args.positional.size() > 1;
 	if (args.has("--all")) {
-		if (!source && !args.has("--entry")) return true;
-		why = "--all imports every file of the game install: it takes no source and no --entry";
+		if (!source && !args.has("--entry") && !args.has("--with-dependencies")) return true;
+		why = "--all imports every file of the game install, with no walk: it takes no source, no --entry and no "
+		      "--with-dependencies";
 		return false;
 	}
 	if (!source && !args.has("--entry")) {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <string>
 #include <utility>
 #include <vector>
@@ -155,12 +156,15 @@ inline EditorRequest cancel_operation() {
 // --- files and documents -----------------------------------------------------------------------
 
 // A blank file `path`; `file_kind` (an asset kind's token) where its name cannot say its kind;
-// `values`, what its blank takes (a mission's title, terrain and environment), by token.
+// `values`, what its blank takes (a mission's title, terrain and environment), by token, sorted by
+// it as the wire reads them (an object's keys are written sorted), so a request equals its round
+// trip whatever order its prompt gave them (review F10).
 inline EditorRequest create_file(std::string path, std::string file_kind = std::string(),
 		std::vector<std::pair<std::string, std::string>> values = {}) {
 	EditorRequest request = of(EditorRequestKind::CreateFile);
 	request.path = std::move(path);
 	request.file_kind = std::move(file_kind);
+	std::sort(values.begin(), values.end());
 	request.values = std::move(values);
 	return request;
 }

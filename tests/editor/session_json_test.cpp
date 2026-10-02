@@ -669,7 +669,11 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
 		case F::Mission: out.mission = "04TR.bms"; break;
 		// In its keys' order, as the wire keeps an object's members.
-		case F::Values: out.values = {{"environment", "day"}, {"terrain", "island"}, {"title", "My map"}}; break;
+		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads
+		// them: the request equals its round trip (review F10).
+		case F::Values:
+			out.values = request::create_file("", "", {{"title", "My map"}, {"terrain", "island"}, {"environment", "day"}}).values;
+			break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;

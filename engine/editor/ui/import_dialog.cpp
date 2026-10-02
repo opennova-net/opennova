@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -94,6 +95,17 @@ void not_followed_line(const ImportPlan &plan) {
 	}
 	if (!undefined.empty())
 		line += std::string(line.empty() ? "" : " ") + "Named by the files but defined nowhere: " + joined(undefined) + ".";
+	// The symbols only a place's copy of a file the project holds defines (review F6).
+	std::vector<std::string> shadowed;
+	for (const ImportNotFollowed &entry : plan.shadowed) {
+		const std::string label = reference_row(entry.reference).label;
+		shadowed.push_back(counted(entry.count, label.c_str()));
+		tip += label + ": " + counted(entry.count, "reference") + " only the source's " + asset_kind_label(entry.kind) +
+		       " defines, which the project's own does not, the first in " + entry.first + "\n";
+	}
+	if (!shadowed.empty())
+		line += std::string(line.empty() ? "" : " ") + "Defined only in the source's copy of a file the project has (its own is kept, "
+		        "so these stay undefined; import that file with Replace to take the source's): " + joined(shadowed) + ".";
 	if (line.empty()) return;
 	ImGui::TextWrapped("%s", line.c_str());
 	if (!tip.empty()) tip.pop_back();
@@ -188,12 +200,12 @@ void ImportDialog::draw(Workspace &workspace) {
 	                                           : "Copy the checked files into the project (Undo cannot take the copy back).";
 	if (ui_kit::tool(actions, label.c_str(), count > 0 && blocked.empty() && allowed, why)) {
 		std::vector<ImportChoice> imports;
+		std::set<ImportChoice> sent; // each source once, looked up in log time (a whole install's rows)
 		bool replaces = replace_existing_; // a checked file the project holds is one asked to be replaced
 		for (size_t i = 0; i < checked_.size(); ++i) {
 			const ImportChoice &source = preview.plan->rows[i].source;
 			replaces = replaces || (checked_[i] && preview.plan->rows[i].held);
-			if (checked_[i] && std::find(imports.begin(), imports.end(), source) == imports.end())
-				imports.push_back(source);
+			if (checked_[i] && sent.insert(source).second) imports.push_back(source);
 		}
 		EditorRequest request = request::import_files(std::move(imports), replaces);
 		workspace.request(std::move(request));
@@ -218,17 +230,17 @@ void ImportDialog::take(const DialogsView::ImportPreview &preview) {
 		checked_[i] = (plan.rows[i].selected && (plan.rows[i].state == State::Selected || why_not_[i].empty())) ||
 		              (plan.rows[i].held && replace_existing_ && why_not_[i].empty());
 	chosen_.assign(preview.choices.size(), false);
-	for (size_t i = 0; i < preview.choices.size(); ++i)
-		chosen_[i] = std::find(preview.roots.begin(), preview.roots.end(), preview.choices[i]) != preview.roots.end();
+	const std::set<ImportChoice> roots(preview.roots.begin(), preview.roots.end());
+	for (size_t i = 0; i < preview.choices.size(); ++i) chosen_[i] = roots.count(preview.choices[i]) > 0;
 }
 
 // The files chosen, planned again: the chosen ones that are not in the list, then those
 // checked in it.
 void ImportDialog::choose(Workspace &workspace, const DialogsView::ImportPreview &preview) {
 	EditorRequest request = request::plan_import({}, preview.with_dependencies);
+	const std::set<ImportChoice> listed(preview.choices.begin(), preview.choices.end());
 	for (const ImportChoice &root : preview.roots)
-		if (std::find(preview.choices.begin(), preview.choices.end(), root) == preview.choices.end())
-			request.imports.push_back(root);
+		if (!listed.count(root)) request.imports.push_back(root);
 	for (size_t i = 0; i < preview.choices.size(); ++i)
 		if (chosen_[i]) request.imports.push_back(preview.choices[i]);
 	workspace.request(std::move(request));

@@ -283,6 +283,7 @@ enum class CoreFinding {
 	ImportPublish,
 	ImportRead,
 	ImportRecord,
+	ImportRequest,
 	ImportScene,
 	ImportSceneNote,
 	ImportSidecar,

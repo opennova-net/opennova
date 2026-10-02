@@ -132,6 +132,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ImportPublish, code("import.publish", G::Imports) },
 	{ C::ImportRead, code("import.read", G::Imports) },
 	{ C::ImportRecord, code("import.record", G::Imports) },
+	// An import request whose fields ask for two things at once (every file and some by name; every
+	// file and a walk; an import of nothing named and nothing planned): refused, never half-served.
+	{ C::ImportRequest, code("import.request", G::Imports) },
 	{ C::ImportScene, code("import.scene", G::Imports) },
 	{ C::ImportSceneNote, code("import.scene_note", G::Imports) },
 	{ C::ImportSidecar, code("import.sidecar", G::Imports) },
