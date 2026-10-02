@@ -203,11 +203,14 @@ public:
 	}
 	// A corpse whose dead tail reached 186 this tick: the embedder spawns the
 	// def's decay effect at its body origin [orig: CEffectWorld_SpawnEmitterAtPosition
-	// @0x4b4e39 / @0x4b9f36].
+	// @0x4b4e39 / @0x4b9f36]; `release` marks an org1 corpse destroyed this
+	// tick, whose held decay group the embedder releases [orig: Entity_Destroy
+	// -> Entity_ReleaseEffectEmitter @0x43E8F5].
 	struct ReplicaCorpseDecay {
 		uint16_t handle = 0xFFFF;
 		uint16_t type_id = 0;
 		int32_t pos[3] = {};
+		bool release = false;
 	};
 	std::vector<ReplicaCorpseDecay> drain_corpse_decays();
 

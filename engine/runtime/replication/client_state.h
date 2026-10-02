@@ -374,8 +374,9 @@ struct ClientEntityState {
 	bool net_health_zero = false;
 	// The corpse timer (moveTimer) the death edge seeds from the def's
 	// deathtime and the dead tail counts down; at 186 the def's decay effect
-	// spawns [orig: seeds @0x4b4c3e / @0x4b9c97; tails @0x4b4d63..0x4b4e5f /
-	// @0x4b9e54..0x4b9f4a].
+	// spawns, and an org1 corpse is destroyed at 0 on a session client
+	// [orig: seeds @0x4b4c3e / @0x4b9c97; tails @0x4b4d63..0x4b4e5f /
+	// @0x4b9e54..0x4b9f93].
 	int32_t net_corpse_timer = 0;
 	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
 	uint8_t stance_sound_state = 0; // player body entity+0x304

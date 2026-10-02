@@ -830,6 +830,15 @@ void JoinerRole::pump() {
 		//  store @0x4b9f3e); the org2 twin @0x4b4e39]
 		const def::DefItemsFile *items = kernel_->items_table();
 		for (const auto &decay : rt.view().drain_corpse_decays()) {
+			if (decay.release) {
+				world::DestructionEffectEvent release;
+				release.family = 1;
+				release.attach_wire_handle = decay.handle;
+				release.attach_spawn_origin = world::kSpawnOriginNone;
+				release.release = true;
+				world.out.destruction.effects.push_back(std::move(release));
+				continue;
+			}
 			const def::DefItemDef *item = items != nullptr
 					? mission::find_item_def(*items,
 							  static_cast<int>(decay.type_id) + mission::kItemIdOffset)

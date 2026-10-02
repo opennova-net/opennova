@@ -1521,6 +1521,7 @@ bool run_dead_tail_counts_down_and_decays() {
 	for (int t = 0; t < kDeathtime + 30; ++t) {
 		view.tick_remote_motion(0xFFFF);
 		for (const auto &d : view.drain_corpse_decays()) {
+			if (d.release) continue;
 			if (d.handle == ai) {
 				++decays_ai;
 				ai_decay_tick = t;
@@ -1540,21 +1541,101 @@ bool run_dead_tail_counts_down_and_decays() {
 			             "same tick");
 		}
 	}
-	std::fprintf(stderr, "[dead-tail] ai=%d@%d player=%d keep=%d timers=%d/%d/%d\n",
+	std::fprintf(stderr, "[dead-tail] ai=%d@%d player=%d keep=%d timers=%d/%d\n",
 	             decays_ai, ai_decay_tick, decays_player, decays_keep,
-	             view.state().find(ai)->net_corpse_timer,
 	             view.state().find(player)->net_corpse_timer,
 	             view.state().find(keep)->net_corpse_timer);
 	ok &= expect(decays_ai == 1 && ai_decay_tick == kDeathtime - 1 - 186,
 	             "the org1 corpse spawns its decay once, at 186");
 	ok &= expect(decays_player == 1, "the org2 corpse spawns its decay once");
-	ok &= expect(view.state().find(ai)->net_corpse_timer == 0,
-	             "the org1 timer holds at 0");
 	ok &= expect(view.state().find(player)->net_corpse_timer == 0,
 	             "the org2 timer clamps at 0");
 	ok &= expect(decays_keep == 0 &&
 	                     view.state().find(keep)->net_corpse_timer == kDeathtime,
 	             "a LeaveCorpse def keeps its seeded timer and never decays");
+	return ok;
+}
+
+// An org1 corpse is destroyed on a session client the tick its timer is no
+// longer positive (a client's respawn quota word is always 0, and the session
+// flag skips the watched-corpse hold), through the shared destroy, whose
+// emitter leg releases the decay group it holds; an org2 corpse only clamps
+// (its destroy needs section bit 0, which a replica row never has), and a
+// zero deathtime destroys an org1 corpse at its edge. [orig:
+// Entity_UpdateInfantryAI @0x4b9f44..0x4b9f93; Entity_Destroy @0x43E8EC ->
+// Entity_ReleaseEffectEmitter @0x43E8F5; org2 @0x4b4e47..0x4b4e5f]
+bool run_org1_corpse_is_destroyed_at_zero() {
+	static constexpr uint16_t kAiType = 0x0777, kBareType = 0x0779, kZeroType = 0x077A;
+	static constexpr int32_t kDeathtime = 200;
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		if (type_id == kPlayerType) return nw::EntityClass::Player;
+		return type_id == kAiType || type_id == kBareType || type_id == kZeroType
+		               ? nw::EntityClass::Infantry
+		               : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	view.set_replica_death_traits_resolver(
+			[](uint16_t type_id, ns::ClientReplicaPipeline::ReplicaDeathTraits &out) {
+				out.deathtime_ticks = type_id == kZeroType ? 0 : kDeathtime;
+				out.leave_corpse = false;
+				out.decay_effect = type_id == kAiType || type_id == kPlayerType;
+				return true;
+			});
+	const uint16_t ai = 0x0035, bare = 0x0037, zero = 0x0038, player = 0x0048;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, ai, kAiType);
+	seed_row(view, bare, kBareType);
+	seed_row(view, zero, kZeroType);
+	seed_row(view, player, kPlayerType);
+	nw::FrameUpdate fu = player_frame(player, ax, ay, az, ax);
+	for (const uint16_t h : {ai, bare, zero}) {
+		nw::FrameUpdateRecord r;
+		r.handle = h;
+		r.type_id = h == ai ? kAiType : h == bare ? kBareType : kZeroType;
+		r.cls = nw::EntityClass::Infantry;
+		r.infantry.vehicle_slot_handle = 0xFFFF;
+		r.infantry.anim_byte = opennova::world::anim_state::kIdle;
+		fu.records.push_back(r);
+	}
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF);
+	const int16_t death = opennova::world::anim_state::kDeathBulletBase + 6;
+	for (const uint16_t h : {ai, bare, zero}) {
+		const std::vector<uint8_t> body = {
+				static_cast<uint8_t>(h & 0xFF), static_cast<uint8_t>(h >> 8),
+				static_cast<uint8_t>(death & 0xFF), static_cast<uint8_t>(death >> 8)};
+		view.apply(nw::s2c::ENTITY_DEATH, body);
+	}
+	nw::FrameUpdate dead = player_frame(player, ax, ay, az, ax, 0x02);
+	dead.records[0].player.anim_state_id = opennova::world::anim_state::kDeathFire;
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(dead));
+	(void)view.drain_corpse_decays();
+	bool ok = true;
+	int ai_gone = -1, bare_gone = -1, zero_gone = -1;
+	int ai_release = -1, other_releases = 0;
+	for (int t = 0; t < kDeathtime + 30; ++t) {
+		view.tick_remote_motion(0xFFFF);
+		for (const auto &d : view.drain_corpse_decays()) {
+			if (!d.release) continue;
+			if (d.handle == ai) ai_release = t;
+			else ++other_releases;
+		}
+		if (ai_gone < 0 && view.state().find(ai) == nullptr) ai_gone = t;
+		if (bare_gone < 0 && view.state().find(bare) == nullptr) bare_gone = t;
+		if (zero_gone < 0 && view.state().find(zero) == nullptr) zero_gone = t;
+	}
+	std::fprintf(stderr, "[corpse-expiry] ai=%d release=%d bare=%d zero=%d others=%d\n",
+	             ai_gone, ai_release, bare_gone, zero_gone, other_releases);
+	ok &= expect(ai_gone == kDeathtime - 1 && bare_gone == kDeathtime - 1,
+	             "an org1 corpse is destroyed the tick its timer reaches 0");
+	ok &= expect(ai_release == kDeathtime - 1,
+	             "the destroy releases the decay group the corpse holds");
+	ok &= expect(other_releases == 0,
+	             "a def without a decay effect releases nothing");
+	ok &= expect(zero_gone == 0, "a zero deathtime destroys the corpse at its edge");
+	const ns::ClientEntityState *pl = view.state().find(player);
+	ok &= expect(pl != nullptr && pl->net_corpse_timer == 0,
+	             "an org2 corpse clamps at 0 and stays");
 	return ok;
 }
 
@@ -1593,6 +1674,7 @@ int main() {
 	ok &= run_corpse_follows_its_records();
 	ok &= run_entity_death_parks_the_death_anim();
 	ok &= run_dead_tail_counts_down_and_decays();
+	ok &= run_org1_corpse_is_destroyed_at_zero();
 	if (!ok) {
 		std::fprintf(stderr, "remote_motion_smoothness: FAILED\n");
 		return EXIT_FAILURE;

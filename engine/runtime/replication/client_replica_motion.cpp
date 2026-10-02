@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace opennova::replication {
@@ -802,19 +803,27 @@ static void commit_death_state(ClientEntityState &es, int16_t state) {
 // by -1 and is reset to 0 once it is not positive) and spawns its decay
 // effect at 186. The LeaveCorpse keep, the 186 spawn and org2's destroy at 0
 // are also gated on section bit 0, which a replica row has no source for
-// (clear: no org2 destroy). What an org1 corpse does at 0 on a session client
-// (the respawn quota leg or Entity_Destroy) is not ported here: the row keeps
-// its corpse.
+// (clear: no org2 destroy). An org1 corpse whose timer is not positive is
+// destroyed on a session client: its respawn quota word is always 0 there
+// (the 0x0C slot memset and zeroed AI slot feed the init callback's
+// quota/62 store; a client compiles no WAC, and SSNSpawn/GroupSpawn are not
+// replicated rows), and the session flag skips the watched-corpse hold.
+// Returns true when the row is destroyed.
 // [orig: seeds Entity_UpdateInfantryPlayerBody @0x4b4c3e,
 //  Entity_UpdateInfantryAI @0x4b9c97; org2 tail @0x4b4d63..0x4b4e5f (the -1
 //  step @0x4b4d79, the reset @0x4b4e56, the bit-0 destroy @0x4b4e4f); org1
-//  tail @0x4b9e54..0x4b9f4a (LeaveCorpse @0x4b9e54, the guarded decrement
-//  @0x4b9e6a..0x4b9e77, the 186 spawn @0x4b9e7d..0x4b9f3e)]
-static void row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org1,
+//  tail @0x4b9e54..0x4b9f93 (LeaveCorpse @0x4b9e54, the guarded decrement
+//  @0x4b9e6a..0x4b9e77, the 186 spawn @0x4b9e7d..0x4b9f3e, the quota test
+//  @0x4b9f50, the session test @0x4b9f59, Entity_Destroy @0x4b9f93); the
+//  client quota: NapiNPClientMsg_0x00C memsets @0x42E7E9/@0x42E7F6,
+//  Entity_AllocateAISlot @0x40D2E9, the init callback's store @0x4BFDFD;
+//  WacScript_InitAndLoad @0x4F9437; the replicate test @0x4F5C7A]
+static bool row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org1,
 		const ClientReplicaPipeline::ReplicaDeathTraits &traits,
 		std::vector<ClientReplicaPipeline::ReplicaCorpseDecay> &decays) {
 	if (edge_this_tick) es.net_corpse_timer = traits.deathtime_ticks;
-	if ((es.rm_entity_flags & world::kEntityFlagDead) == 0 || traits.leave_corpse) return;
+	if ((es.rm_entity_flags & world::kEntityFlagDead) == 0 || traits.leave_corpse)
+		return false;
 	if (org1) {
 		if (es.net_corpse_timer != 0) --es.net_corpse_timer;
 	} else {
@@ -829,7 +838,10 @@ static void row_corpse_tail(ClientEntityState &es, bool edge_this_tick, bool org
 		decay.pos[2] = es.z;
 		decays.push_back(decay);
 	}
-	if (es.net_corpse_timer < 0) es.net_corpse_timer = 0;
+	if (es.net_corpse_timer > 0) return false;
+	if (org1) return true;
+	es.net_corpse_timer = 0;
+	return false;
 }
 
 void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
@@ -880,13 +892,16 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 			                     rm_key, water_z_, has_water_);
 	};
 	// The corpse leg's def source (row_corpse_tail), read only for a row
-	// whose dead bit is latched or latches this tick.
+	// whose dead bit is latched or latches this tick, and the org1 corpses it
+	// destroys, which leave the row set after the walk.
+	std::vector<std::pair<uint16_t, bool>> expired; // handle, def names a decay
 	auto corpse_leg = [&](ClientEntityState &es, bool edge, bool org1) {
 		if (!edge && (es.rm_entity_flags & world::kEntityFlagDead) == 0) return;
 		ReplicaDeathTraits traits;
 		if (replica_death_traits_resolver_ &&
-				replica_death_traits_resolver_(es.type_id, traits))
-			row_corpse_tail(es, edge, org1, traits, corpse_decays_);
+				replica_death_traits_resolver_(es.type_id, traits) &&
+				row_corpse_tail(es, edge, org1, traits, corpse_decays_))
+			expired.emplace_back(es.handle, traits.decay_effect);
 	};
 	for (ClientEntityState &es : state_.entities) {
 		if (!es.net_has_compact) continue;
@@ -1188,6 +1203,20 @@ void ClientReplicaPipeline::tick_remote_motion(uint16_t self_handle) {
 	// Seat mounts and persistent no-callback children are a post-mover phase:
 	// all carrier rows above have reached this tick's live pose first. The
 	// per-tick call also advances the pure-client stale-carrier sweep.
+	// The expired corpses go through the shared destroy, whose emitter leg
+	// releases the decay group the corpse holds in +0x1CC (a release with no
+	// group is a no-op, as the destroy's nonzero test is).
+	// [orig: Entity_Destroy @0x43E810, the +0x1CC test @0x43E8EC ->
+	//  Entity_ReleaseEffectEmitter @0x43E8F5]
+	for (const auto &[handle, decay_effect] : expired) {
+		if (decay_effect) {
+			ReplicaCorpseDecay release;
+			release.handle = handle;
+			release.release = true;
+			corpse_decays_.push_back(release);
+		}
+		erase_entity_tree(handle);
+	}
 	refresh_carried_entities(/*tick_sweep=*/true);
 	// Every player row's secondary channel (client_replica_weapon_channel.cpp).
 	tick_row_weapon_channels(self_handle, rm_key);
