@@ -91,13 +91,13 @@ static int test_non_record_type() {
 		TEST_EXPECT(document_content(*document_type(DocumentTypeId::Menu)) == DocumentContent::Records);
 		TEST_EXPECT(document_content(*document_type(DocumentTypeId::Script)) == DocumentContent::Text);
 		// The graph reads none of its files; an import lists the kind as not followed.
-		TEST_EXPECT(!graph_reads_kind(kind) && !graph_reads_file(kind, asset.logical_name));
+		TEST_EXPECT(!graph_reads_kind(kind));
 		Extracted extracted;
 		Diagnostic error;
 		const std::vector<uint8_t> bytes(original.begin(), original.end());
 		TEST_EXPECT(extract_from_bytes(path, kind, bytes, "jo", extracted, error));
 		TEST_EXPECT(extracted.edges.empty() && extracted.symbols.empty());
-		TEST_EXPECT(references_unread(kind, asset.logical_name));
+		TEST_EXPECT(references_unread(kind));
 		// The validation: document.no_records for its file, closed and open, the file unread and
 		// no document of the type made for it.
 		const ProjectPaths paths = ProjectPaths::for_root(dir.file("project"));
@@ -209,7 +209,7 @@ static int test_non_record_type() {
 	}
 	// The stand-in gone, the stylesheet's own type answers, its records read again.
 	TEST_EXPECT(document_type_for(kind)->name == std::string("styles"));
-	TEST_EXPECT(graph_reads_kind(kind) && !references_unread(kind, asset.logical_name));
+	TEST_EXPECT(graph_reads_kind(kind) && !references_unread(kind));
 	return 0;
 }
 

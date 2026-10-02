@@ -37,7 +37,7 @@ static int test_row_set_follows_the_manifest_and_features() {
 	int expected_rows = 0, expected_required = 0;
 	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
 		const RequiredResource *r = gameprofile_required_resource_at(i);
-		if (r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY)) continue;
+		if (r->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
 		if (r->phase == BOOT_PHASE_MISSION) continue;
 		++expected_rows;
 		if (r->severity != RES_OPTIONAL) ++expected_required;
@@ -67,8 +67,12 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->required);
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->expected_kind == AssetKind::Menu);
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->state == RequirementState::Missing);
-	TEST_EXPECT(row_named(menu_only, "hiscore.txt") != nullptr);
-	TEST_EXPECT(!row_named(menu_only, "hiscore.txt")->required); // optional rows are listed, not demanded
+	TEST_EXPECT(row_named(menu_only, "brand.mns") != nullptr);
+	TEST_EXPECT(!row_named(menu_only, "brand.mns")->required); // optional rows are listed, not demanded
+	// The player's own files (a save, a configuration, the stored credentials) are no project's: no
+	// row lists one (ADR 0046 S14).
+	for (const char *player : {"hiscore.txt", "game.cfg", "player.sav", "epass.bin"})
+		TEST_EXPECT(row_named(menu_only, player) == nullptr);
 	// Rows keep the manifest's phase-major order.
 	int last_phase = BOOT_PHASE_BOOT;
 	for (const RequirementRow &row : menu_only.rows) {
@@ -85,6 +89,26 @@ static int test_row_set_follows_the_manifest_and_features() {
 	doc.features.mission = false;
 	TEST_EXPECT(!requirement_phase_enabled(doc, BOOT_PHASE_MISSION));
 	TEST_EXPECT(requirement_phase_enabled(doc, BOOT_PHASE_BOOT));
+
+	// S14: a mission in a project whose Missions feature is off is a warning on the project, said
+	// once whatever the missions' number (the files a mission needs at its start are not checked);
+	// none with the feature on, none with no mission.
+	const auto feature_off = [](const RequirementReport &report) {
+		std::vector<const Diagnostic *> found;
+		for (const Diagnostic &d : report.diagnostics)
+			if (d.code() == "project.mission.feature_off") found.push_back(&d);
+		return found;
+	};
+	TEST_EXPECT(feature_off(menu_only).empty());
+	TEST_EXPECT(editor_test::write_text(paths.root + "/missions/a.bms", "x") &&
+	            editor_test::write_text(paths.root + "/missions/b.bms", "x"));
+	const AssetScan with_missions_in = scan_project_assets(paths, doc);
+	const RequirementReport off = evaluate_requirements(doc, with_missions_in);
+	TEST_EXPECT(feature_off(off).size() == 1 && feature_off(off)[0]->severity == DiagnosticSeverity::Warning &&
+	            feature_off(off)[0]->asset.empty() && feature_off(off)[0]->message.find("a.bms") != std::string::npos);
+	TEST_EXPECT(off.rows.size() == menu_only.rows.size() && off.required_missing == menu_only.required_missing);
+	doc.features.mission = true;
+	TEST_EXPECT(feature_off(evaluate_requirements(doc, with_missions_in)).empty());
 	return 0;
 }
 

@@ -15,6 +15,10 @@ namespace opennova::editor {
 // changed since the last save and selected on a click; the selection a Go to, a find or a Problems
 // row moves there revealed (what holds it opened, a filter hiding it cleared, its line scrolled into
 // view once). Its mode (its row's OutlineSpec):
+// A list or a tree may filter its rows by kind (OutlineSpec::by_kind: a chip per kind of row the file
+// holds) and leave out the rows its type says hold nothing until a switch lists them
+// (OutlineSpec::row_listed); in both a click selects a record, Ctrl joining or leaving the selection
+// and Shift selecting the lines from the primary's to it.
 // - List (a catalog): the rows with a display-only sort by name, each kind's Add (its
 //   RecordKindRow::add_label) and the selected row's Duplicate / Remove / Up / Down, then the file-
 //   wide values (an item table's vehicle spawn registry, marked while it differs from the saved
@@ -41,9 +45,10 @@ private:
 	// The filter's box over the model's filter (`width` 0: the rest of the line), which it shows
 	// as it stands (a reveal clears it) and sets as it is typed.
 	void filter_box(const char *hint, float width, const char *tip);
+	void draw_kinds(const Document &document);
 	void draw_list(Workspace &workspace, const Document &document);
 	void draw_tree(Workspace &workspace, const Document &document);
-	void draw_tree_line(Workspace &workspace, const Document &document, const OutlineLine &line);
+	void draw_tree_line(Workspace &workspace, const Document &document, const OutlineLine &line, size_t index);
 	void draw_tree_tools(Workspace &workspace, const Document &document);
 	void draw_master_detail(Workspace &workspace, const Document &document);
 	void draw_masters(Workspace &workspace, const Document &document);
