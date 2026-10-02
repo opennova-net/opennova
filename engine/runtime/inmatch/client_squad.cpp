@@ -52,11 +52,11 @@ constexpr const char *kMpCommand1 = "MP_COMMAND1";
 
 bool ClientRuntime::queue_squad_message(uint8_t c2s_tag, std::vector<uint8_t> body) {
 	const bool joiner_path = role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session();
-	const bool host_path = role_ == Role::HostClient && loopback_ != nullptr;
-	if (host_path) {
-		loopback_->client_send(c2s_tag, std::move(body));
-		return true;
-	}
+	// The host's sends take its local connection too: every sender queues
+	// with no authority branch [orig: 0x17 @0x42ddf2, 0x3F @0x5488b9, 0x43
+	//  @0x42dc37, 0x44 @0x42dcac, 0x45 @0x42dcf7, 0x46 @0x42dd2f, 0x4B @0x42dd7f,
+	//  0x4F @0x42de2d -- CNapiNetwork_QueueReliableMessage on g_NapiNPCtx].
+	if (role_ == Role::HostClient) return queue_host_message(c2s_tag, std::move(body));
 	if (!joiner_path) return false;
 	// QueueReliableMessage(tag, 1, 0): reliable, no finite lifetime; sent
 	// outside the client net frame, so it rides the held one-shot queue.

@@ -244,15 +244,17 @@ void HostRole::drain_host_client_gameplay_requests() {
 	for (replication::Datagram &preserved : deferred) state.host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));
 }
 
-// The listen host's own call rides its loopback client like the reload
-// request: the server handler broadcasts the 0x1E line to everyone including
-// this client.
+// The listen host's own call queues on its own client's local connection,
+// which its client frame sends: the server handler then broadcasts the 0x1E
+// line to everyone including this client.
+// [orig: Input_HandleActionBinding case 217 -> QueueReliableMessage(0x2E)
+//  @0x49b50c, no is_authority branch]
 bool HostRole::send_medic_request() {
-	if (!state.host_owner.serve_and_play) return false;
+	if (!state.host_owner.serve_and_play || !state.client_runtime) return false;
 	opennova::MedicRequest request;
 	request.entity_index = kernel_->world.cached.local_player.packed;
-	state.host_loop.client_send(opennova::c2s::MEDIC_REQUEST, opennova::encode_medic_request(request));
-	return true;
+	return state.client_runtime->queue_host_message(opennova::c2s::MEDIC_REQUEST,
+			opennova::encode_medic_request(request));
 }
 
 bool HostRole::request_stance(int stance) {
@@ -386,6 +388,7 @@ void HostRole::run_tick(const TickInput &input) {
 		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
+		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
 		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
 	}
 	ctx.net_quality_link_errors = 0;

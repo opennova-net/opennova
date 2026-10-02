@@ -174,9 +174,11 @@ int main() {
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
 		// The host's own medic call (action 217 -> C2S 0x2E) rides the same
-		// queue and must reach the dispatcher, not the movement-only drain.
-		// [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
+		// queue, sent by its client frame, and must reach the dispatcher, not
+		// the movement-only drain. [orig: Input_HandleActionBinding @0x49B4B4..0x49B50C]
 		CHECK(role.send_medic_request());
+		CHECK(host.host_loop.c2s_pending() == 0);
+		host.client_runtime->Client_ProcessNetworkFrame();
 		CHECK(host.host_loop.c2s_pending() == 1);
 		role.drain_host_client_gameplay_requests();
 		CHECK(host.host_loop.c2s_pending() == 0);
@@ -678,6 +680,26 @@ int main() {
 		CHECK(host.host_loop.c2s_pending() == 3);
 		role.run_tick(tick_input(0));
 		CHECK(host.host_loop.c2s_pending() == 0);
+		// So do its medic call, its team change and its command-map squad
+		// sends: each sender queues on the local connection with no authority
+		// branch. [orig: action 217 -> QueueReliableMessage(0x2E) @0x49b50c;
+		//  DeathScreen_OnSwapTeams @0x5535ba -> 0x4D @0x42ddac; the squad
+		//  senders 0x17 @0x42ddf2, 0x43 @0x42dc37, 0x44 @0x42dcac, 0x45 @0x42dcf7,
+		//  0x46 @0x42dd2f, 0x4B @0x42dd7f, 0x4F @0x42de2d, 0x3F @0x5488b9]
+		CHECK(role.send_medic_request());
+		CHECK(own.queue_team_change_request());
+		FireteamAssign assign;
+		assign.fireteam = 1;
+		CHECK(own.queue_squad_message(c2s::FIRETEAM_ASSIGN, encode_fireteam_assign(assign)));
+		CHECK(host.host_loop.c2s_pending() == 0);
+		role.run_tick(tick_input(0));
+		CHECK(host.host_loop.c2s_pending() == 3);
+		role.run_tick(tick_input(0));
+		// Dispatched; what remains is the handlers' own follow-up traffic.
+		replication::Datagram left;
+		while (host.host_loop.host_recv(left))
+			CHECK(left.tag != c2s::MEDIC_REQUEST && left.tag != c2s::TEAM_CHANGE_REQUEST &&
+					left.tag != c2s::FIRETEAM_ASSIGN);
 	}
 
 	if (failures == 0) std::printf("host_role: all checks passed\n");

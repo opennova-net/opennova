@@ -242,6 +242,19 @@ public:
 	// dword_B76804 == 0; NetPacket_WriteEntityIndex32 -> QueueReliableMessage
 	// (0x2E, param 0x136)].
 	bool queue_medic_request();
+	// The listen host's own client queues a C2S on its local connection, as
+	// every input-side sender does: its client frame sends it and the next
+	// frame's server tick dispatches it (the queue_stance_change path). False
+	// off the HostClient role. [orig: CNapiNetwork_QueueReliableMessage
+	//  @0x4c4fa0 on the local connection]
+	bool queue_host_message(uint8_t tag, std::vector<uint8_t> body);
+	// The HostClient's send block: its held messages onto the loopback. The
+	// client frame runs it after its receive fold, and the host frame again
+	// after apply_received_effects, whose handler sends retail queues inside
+	// the same receive pump, ahead of that frame's send.
+	// [orig: Client_ProcessNetworkFrame -- PumpClientProtocolRecv @0x42c228,
+	//  PumpClientProtocolSend @0x42c4bc]
+	void flush_host_sends();
 	// One C2S 0x0D chat line `[u8 channel][cstr text]` on the wire channel the
 	// caller's sender picked (hud::chat_dispatch_channel: 13 local, 1 global,
 	// 2 team, 12 squad, 11 crew; 4 red / 5 blue send only from a non-peer,

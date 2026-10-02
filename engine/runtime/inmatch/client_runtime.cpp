@@ -503,6 +503,21 @@ bool ClientRuntime::queue_reload_request(const WeaponReload &reload) {
 	return true;
 }
 
+void ClientRuntime::flush_host_sends() {
+	if (role_ != Role::HostClient || loopback_ == nullptr) return;
+	while (!send_queue_.empty()) {
+		ProtocolMessage &held = send_queue_.front();
+		loopback_->client_send(held.tag, std::move(held.payload));
+		send_queue_.pop_front();
+	}
+}
+
+bool ClientRuntime::queue_host_message(uint8_t tag, std::vector<uint8_t> body) {
+	if (role_ != Role::HostClient || loopback_ == nullptr) return false;
+	send_queue_.push_back(make_protocol_message(tag, std::move(body)));
+	return true;
+}
+
 bool ClientRuntime::queue_medic_request() {
 	// The retail gate is is_in_session, not the deploy gate: a dead player is
 	// back in the deploy flow (Driving) and the call still ships. It rides the
@@ -643,12 +658,12 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 }
 
 bool ClientRuntime::queue_team_change_request() {
-	if (role_ == Role::HostClient && loopback_ != nullptr) {
-		loopback_->client_send(c2s::TEAM_CHANGE_REQUEST, {});
-	} else if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session()) {
+	// The swap button's sender queues on the local connection on the host
+	// too [orig: DeathScreen_OnSwapTeams @0x5535ba -> NetPacket_SendPingRequest
+	//  @0x42dd90, QueueReliableMessage(0x4D) @0x42ddac].
+	if (!queue_host_message(c2s::TEAM_CHANGE_REQUEST, {})) {
+		if (role_ != Role::Joiner || joiner_ == nullptr || !joiner_->in_session()) return false;
 		send_queue_.push_back(make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {}));
-	} else {
-		return false;
 	}
 	view_.age_minimap_overlays(0x48A8u);
 	return true;
@@ -1228,11 +1243,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		//  CNapiNPManager_SendTo `addr == 0` @0x61ec59 -> NapiFifo_WritePacketAtomic
 		//  @0x61eccd; CNapiGameSession_CreateSession @0x4c9b9c..0x4c9c67 sets no
 		//  address; Game_ProcessMainFrame -> CNapiNetwork_PumpManagerReceive @0x526528]
-		while (!send_queue_.empty()) {
-			ProtocolMessage &held = send_queue_.front();
-			loopback_->client_send(held.tag, std::move(held.payload));
-			send_queue_.pop_front();
-		}
+		flush_host_sends();
 		return outbound;
 	}
 
