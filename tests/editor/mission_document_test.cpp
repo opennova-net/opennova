@@ -879,6 +879,10 @@ int test_validation() {
 		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(bms::SingleTriggerType::SingleAlive)), error) &&
 		            document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(marker_ssn)), error));
 		TEST_EXPECT(unscanned(trigger0, "among the organics, items and buildings alone: SingleAlive reads false"));
+		// The holding test on an item's SSN: it scans the organics alone.
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "sub_type", int64_t(bms::SingleTriggerType::SingleHoldingGroup)), error) &&
+		            document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(item_ssn)), error));
+		TEST_EXPECT(unscanned(trigger0, "among the organics alone: it reads false."));
 		// On the walker's SSN it reads as written: no finding.
 		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, trigger0, "param1", int64_t(walker_ssn)), error) &&
 		            type.validate_file(*document).empty());

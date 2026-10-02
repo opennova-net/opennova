@@ -283,15 +283,37 @@ struct Checker {
 						           std::to_string(main) + ": the trigger reads false.",
 						   "sub_type");
 				}
-				// The alive test scans the organics, items and buildings for the SSN, never the markers:
-				// a marker's SSN reads not alive [orig: EventTrigger_EvaluateCondition cat 2 subs 4, 5
-				// @0x453985 / @0x45399D -> Entity_IsAliveByBmsRef @0x43e640, pools 0/1/2;
-				// docs/mission/bms-event-runtime-re.md 7.4].
-				if (trigger.main_type == bms::TriggerMainType::Single &&
-				    (trigger.sub_type == int32_t(bms::SingleTriggerType::SingleAlive) ||
-				     trigger.sub_type == int32_t(bms::SingleTriggerType::SingleDestroyed)))
-					unscanned(address, trigger.param1, {K::Organic, K::Item, K::Building}, "the alive test",
-					          "SingleAlive reads false and SingleDestroyed true for it.");
+				// The Single tests whose SSN lookup scans fewer pools than the lookups by SSN do
+				// (docs/mission/bms-event-runtime-re.md 3b, 7.2a, 7.4): the alive test the organics, items
+				// and buildings, a marker's SSN reading not alive [orig: cat 2 subs 4, 5 @0x453985 /
+				// @0x45399D -> Entity_IsAliveByBmsRef @0x43e640, pools 0/1/2]; the alert, health and area
+				// tests the organics and items [orig: Entity_IsSsnAtAlertLevel @0x43e780,
+				// Entity_HasDamageCapacity @0x43e3d0, Entity_HasFullHealth @0x43e470,
+				// Entity_HasHealthAboveThreshold @0x43e350, Entity_IsBmsRefInTriggerBounds @0x43e510: pools
+				// 0-1]; the holding test the organics [orig: Entity_IsSsnHoldingItemGroup @0x43e2f0, pool
+				// 0]; each false for an SSN it finds no row of.
+				if (trigger.main_type == bms::TriggerMainType::Single) {
+					using S = bms::SingleTriggerType;
+					switch (static_cast<S>(trigger.sub_type)) {
+					case S::SingleDestroyed:
+					case S::SingleAlive:
+						unscanned(address, trigger.param1, {K::Organic, K::Item, K::Building}, "the alive test",
+						          "SingleAlive reads false and SingleDestroyed true for it.");
+						break;
+					case S::SingleAtRedAlert:
+					case S::SingleAtYellowAlert:
+					case S::SingleHasLostMoreUnits:
+					case S::SingleIntact:
+					case S::SingleHasMoreUnits:
+					case S::SingleIsWithinArea:
+						unscanned(address, trigger.param1, {K::Organic, K::Item}, "the test", "it reads false.");
+						break;
+					case S::SingleHoldingGroup:
+						unscanned(address, trigger.param1, {K::Organic}, "the test", "it reads false.");
+						break;
+					default: break;
+					}
+				}
 				for (int slot = 0; slot < 4; ++slot) {
 					const int32_t value = slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
 					const ParamKind kind = trigger_param_kind(trigger, slot);
