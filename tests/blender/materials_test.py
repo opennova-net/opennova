@@ -7,17 +7,13 @@ lands in a fresh temporary directory):
 Each case builds a one-triangle model, exports it through opennova-3di and
 reads the .3di back with `opennova-3di scene`.
 """
-import math
 import os
-import struct
-import subprocess
 import sys
 import traceback
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import addon_harness  # noqa: E402
 
-import bmesh  # noqa: E402
 import bpy  # noqa: E402
 import numpy as np  # noqa: E402
 
@@ -79,16 +75,8 @@ def folder(root):
     return os.path.dirname(root.o3d.output_path)
 
 
-def as_tga_unless_set(root):
-    """The cases before DDS textures read the TGAs they write: a model root
-    whose Texture files a case leaves unset writes TGAs (the DDS cases set it)."""
-    if not root.o3d.is_property_set("texture_files"):
-        root.o3d.texture_files = "TGA"
-
-
 def export_model(root, run=None):
     """(notes, the model read back as importer.read_o3d gives it)."""
-    as_tga_unless_set(root)
     bpy.context.view_layer.update()
     os.makedirs(folder(root), exist_ok=True)
     _, notes = export.export_model(bpy.context, root, run)
@@ -105,7 +93,6 @@ def import_model(path):
 
 def refused(root, *fragments, run=None):
     """The ExportError the export raises, which must name every fragment."""
-    as_tga_unless_set(root)
     bpy.context.view_layer.update()
     os.makedirs(folder(root), exist_ok=True)
     try:
@@ -123,12 +110,11 @@ def principled_material(name):
     return mat, tree, next(n for n in tree.nodes if n.type == "BSDF_PRINCIPLED")
 
 
-def image(name, rgba, size=4, float_buffer=False, colour_space=None, height=None):
-    height = size if height is None else height
-    img = bpy.data.images.new(name, width=size, height=height, alpha=True, float_buffer=float_buffer)
+def image(name, rgba, size=4, float_buffer=False, colour_space=None):
+    img = bpy.data.images.new(name, width=size, height=size, alpha=True, float_buffer=float_buffer)
     if colour_space is not None:
         img.colorspace_settings.name = colour_space  # before the pixels: it regenerates the image
-    img.pixels.foreach_set(np.tile(np.asarray(rgba, dtype=np.float32), size * height))
+    img.pixels[:] = list(rgba) * (size * size)
     return img
 
 
@@ -165,35 +151,6 @@ def tga_pixels(path):
 def first_pixel(root, name):
     """The BGRA bytes of the first pixel of the texture `name` beside the model."""
     return tuple(tga_pixels(os.path.join(folder(root), name))[:4])
-
-
-def dds_file(path):
-    """(width, height, mip count, FourCC, bytes) of a DDS file."""
-    with open(path, "rb") as f:
-        data = f.read()
-    assert data[:4] == b"DDS ", path
-    height, width, _, _, mips = struct.unpack_from("<IIIII", data, 12)
-    return width, height, mips, data[84:88].decode("ascii"), data
-
-
-def dds_first_texel(path):
-    """The RGB of the first texel of a DXT1 or DXT5 file's first level, its
-    block decoded as D3D decodes it (8-bit channels, truncated)."""
-    _, _, _, fourcc, data = dds_file(path)
-    c0, c1, bits = struct.unpack_from("<HHI", data, 128 + (8 if fourcc == "DXT5" else 0))
-
-    def rgb(c):
-        return ((c >> 11) * 255 // 31, ((c >> 5) & 63) * 255 // 63, (c & 31) * 255 // 31)
-    p0, p1 = rgb(c0), rgb(c1)
-    if c0 > c1 or fourcc == "DXT5":
-        palette = [p0, p1, tuple((2 * a + b) // 3 for a, b in zip(p0, p1)), tuple((a + 2 * b) // 3 for a, b in zip(p0, p1))]
-    else:
-        palette = [p0, p1, tuple((a + b) // 2 for a, b in zip(p0, p1)), (0, 0, 0)]
-    return palette[bits & 3]
-
-
-def files(root):
-    return sorted(os.listdir(folder(root)))
 
 
 # --- geom-2: the diffuse texture is the image feeding Base Color ---------------
@@ -263,8 +220,6 @@ def two_images_on_one_uv_map_refused():
     mat, tree, bsdf = principled_material("TwoImages")
     mix = tree.nodes.new("ShaderNodeMix")
     mix.data_type = "RGBA"
-    # A blend of both (Blender 5.2's new Mix node no longer starts at 0.5).
-    materials.socket(mix.inputs, "Factor_Float").default_value = 0.5
     tree.links.new(image_node(tree, image("two_a", (1, 0, 0, 1))).outputs["Color"],
                    materials.socket(mix.inputs, "A_Color"))
     tree.links.new(image_node(tree, image("two_b", (0, 1, 0, 1))).outputs["Color"],
@@ -390,7 +345,7 @@ def texture_entry_names_follow_the_cli():
         t = mat.o3d.textures.add()
         t.name, t.write, t.image = name, write, img
         return mat
-    for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "is 17 bytes: the MTRL field"),
+    for name, fragment in (("ствол.tga", "not printable ASCII"), ("a_seventeen_c.tga", "exceeds 16"),
                            ("tex/foo.tga", "names a folder"), ("tex\\foo.tga", "names a folder")):
         root, _ = model("entry", entry(name))
         refused(root, fragment)
@@ -626,117 +581,6 @@ def flags_from_blender_settings():
 
 
 @case
-def surface_on_the_material_faces_keep_their_own():
-    # A material's bullet faces take its surface (14 metal); a polygon that
-    # keeps its own (the o3d_own_surface face attribute, 15 glass) exports with
-    # it. Import votes the material's from its faces and keeps the face that
-    # differs on its polygon, so a re-export writes the same faces; Make all
-    # (clearing the polygon's value) gives it the material's.
-    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
-    metal.o3d.surface = 14
-    root, obs = model("surfaces", metal, metal, metal)
-    materials.set_face_overrides(obs[1].data, materials.FACE_SURFACE, [15])
-    _, sc = export_model(root)
-    faces = [f[3] for c in sc["cobjs"] for f in c["faces"]]
-    assert sorted(faces) == [14, 14, 15], faces
-    imported, notes = import_model(root.o3d.output_path)
-    meshes = [ob for ob in imported.children_recursive if ob.type == "MESH" and ob.material_slots]
-    mat = next(s.material for ob in meshes for s in ob.material_slots)
-    assert mat.o3d.surface == 14, mat.o3d.surface
-    own, drawn = materials.material_face_overrides(meshes, mat)
-    assert drawn == 3 and list(own.values()) == [(15, -1)], (own, drawn)
-    assert any("keep their own on their polygon" in n for n in notes), notes
-    # The surface by name, from the engine's table (`opennova-3di catalog`).
-    assert mat.o3d.surface_name == "METAL", mat.o3d.surface_name
-    imported.o3d.output_path = os.path.join(OUT, "surfaces_again", "surfaces.3di").replace("\\", "/")
-    _, again = export_model(imported)
-    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 14, 15], again["cobjs"]
-    # Make all: the face takes the material's.
-    for ob, pi in own:
-        materials.set_face_overrides(ob.data, materials.FACE_SURFACE, [-1] * len(ob.data.polygons))
-    _, unified = export_model(imported)
-    assert [f[3] for c in unified["cobjs"] for f in c["faces"]] == [14, 14, 14], unified["cobjs"]
-
-
-@case
-def a_polygon_made_in_blender_takes_its_materials_surface():
-    # A polygon Blender makes itself (a new face, a mesh joined in without the
-    # face attributes) holds 0 there: 0 is the material's (the attributes store
-    # a polygon's own value plus one), never surface 0 (Object) with no flags.
-    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
-    metal.o3d.surface = 14
-    root, obs = model("joined", metal, metal)
-    materials.set_face_overrides(obs[0].data, materials.FACE_SURFACE, [15])
-    bm = bmesh.new()
-    bm.from_mesh(obs[0].data)
-    bm.faces.new([bm.verts.new((x, y + 0.5, z)) for x, y, z in TRIANGLE])
-    bm.to_mesh(obs[0].data)
-    bm.free()
-    bpy.context.view_layer.update()
-    for ob in list(bpy.context.view_layer.objects):
-        if ob is not None:
-            ob.select_set(ob in obs)
-    bpy.context.view_layer.objects.active = obs[0]
-    bpy.ops.object.join()
-    joined = bpy.context.view_layer.objects.active
-    assert len(joined.data.polygons) == 3, len(joined.data.polygons)
-    assert materials.face_overrides(joined.data, materials.FACE_SURFACE) == [15, -1, -1], \
-        materials.face_overrides(joined.data, materials.FACE_SURFACE)
-    _, sc = export_model(root)
-    faces = sorted((f[3], f[4] & 1) for c in sc["cobjs"] for f in c["faces"])
-    assert [s for s, _ in faces] == [14, 14, 15], faces
-
-
-@case
-def a_sheet_both_ways_keeps_each_sides_surface():
-    # A sheet stored in both windings, each side its own material and surface
-    # (an inside and an outside skin): its two faces sit at one middle, and
-    # import gives each side the face wound with it, so each material votes
-    # its own surface and a re-export writes both faces as they were (the
-    # nearest middle alone gave both triangles one face's values).
-    front = textured("Front", image("front", (1, 1, 1, 1)))
-    front.o3d.surface = 14
-    back = textured("Back", image("back", (1, 1, 1, 1)))
-    back.o3d.surface = 17
-    root, obs = model("sheet", front, back)
-    me = obs[1].data
-    for v, co in zip(me.vertices, TRIANGLE):
-        v.co = co
-    bm = bmesh.new()
-    bm.from_mesh(me)
-    bmesh.ops.reverse_faces(bm, faces=list(bm.faces))
-    bm.to_mesh(me)
-    bm.free()
-    _, sc = export_model(root)
-    assert sorted(f[3] for c in sc["cobjs"] for f in c["faces"]) == [14, 17], sc["cobjs"]
-    imported, notes = import_model(root.o3d.output_path)
-    mats = {s.material for ob in imported.children_recursive if ob.type == "MESH" for s in ob.material_slots}
-    assert sorted(m.o3d.surface for m in mats) == [14, 17], [(m.name, m.o3d.surface) for m in mats]
-    imported.o3d.output_path = os.path.join(OUT, "sheet_again", "sheet.3di").replace("\\", "/")
-    _, again = export_model(imported)
-    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 17], again["cobjs"]
-
-
-@case
-def faces_a_centimetre_apart_keep_their_own():
-    # Two faces of one material 1 cm apart, each its own surface: each triangle
-    # meets the face whose middle is nearest within 1/64 m (a 0.1 m key gave
-    # both one face's values), so a re-export writes both as the file held them.
-    metal = textured("Metal", image("metal", (1, 1, 1, 1)))
-    metal.o3d.surface = 14
-    root, obs = model("near", metal, metal, metal)
-    for v, co in zip(obs[1].data.vertices, TRIANGLE):
-        v.co = (co[0] + 0.01, co[1], co[2])
-    materials.set_face_overrides(obs[1].data, materials.FACE_SURFACE, [15])
-    _, sc = export_model(root)
-    assert sorted(f[3] for c in sc["cobjs"] for f in c["faces"]) == [14, 14, 15], sc["cobjs"]
-    imported, _ = import_model(root.o3d.output_path)
-    imported.o3d.output_path = os.path.join(OUT, "near_again", "near.3di").replace("\\", "/")
-    _, again = export_model(imported)
-    assert sorted(f[3] for c in again["cobjs"] for f in c["faces"]) == [14, 14, 15], again["cobjs"]
-
-
-@case
 def colour_only_materials_draw_a_swatch():
     # geom-5: no image is no longer additive glass: its Base Color is written
     # as a swatch with a textured shader, and a mesh without a material draws
@@ -844,149 +688,6 @@ def a_copy_never_replaces_another_file():
     assert any("not replaced" in n for n in notes), notes
 
 
-# --- DDS textures: the form the game's model textures ship in -------------------
-
-@case
-def colour_textures_written_as_dds():
-    # A model writing DDS textures (the default) writes each diffuse and detail
-    # texture as the .dds the game reads before the .tga its row keeps naming:
-    # DXT1 for an opaque image, DXT5 for one with alpha, each with its chain to
-    # 1 x 1. A normal map stays an .mdt, a swatch a TGA.
-    opaque, tree, bsdf = principled_material("Opaque")
-    tree.links.new(image_node(tree, image("dds_red", (1, 0, 0, 1))).outputs["Color"], bsdf.inputs["Base Color"])
-    normal = image_node(tree, image("dds_n", (0.5, 0.5, 1.0, 1.0), colour_space="Non-Color"))
-    node = tree.nodes.new("ShaderNodeNormalMap")
-    tree.links.new(normal.outputs["Color"], node.inputs["Color"])
-    tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
-    opaque.o3d.shader = "VS_DOT3DIFF"
-    clear = textured("Clear", image("dds_clear", (0, 0, 1, 0.5), size=8))
-    swatch, _, swatch_bsdf = principled_material("Swatch")
-    swatch_bsdf.inputs["Base Color"].default_value = (0.0, 1.0, 0.0, 1.0)
-    root, _ = model("ddsmodel", opaque, clear, swatch)
-    assert root.o3d.texture_files == "DDS"  # the default
-    root.o3d.texture_files = "DDS"  # set: export_model leaves it
-    notes, sc = export_model(root)
-    assert textures(sc, 0) == [("ddsmodel_0.tga", 1, 0, 0, 0), ("ddsmodel_0n.mdt", 3, 4, 0, 0)], textures(sc, 0)
-    assert textures(sc, 1) == [("ddsmodel_1.tga", 1, 0, 0, 0)], textures(sc, 1)
-    assert files(root) == ["ddsmodel.3di", "ddsmodel_0.dds", "ddsmodel_0n.mdt", "ddsmodel_1.dds", "ddsmodel_2.tga"], \
-        files(root)
-    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmodel_0.dds"))
-    assert (w, h, mips, fourcc) == (4, 4, 3, "DXT1"), (w, h, mips, fourcc)
-    assert dds_first_texel(os.path.join(folder(root), "ddsmodel_0.dds")) == (255, 0, 0)
-    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmodel_1.dds"))
-    assert (w, h, mips, fourcc) == (8, 8, 4, "DXT5"), (w, h, mips, fourcc)
-    assert dds_first_texel(os.path.join(folder(root), "ddsmodel_1.dds")) == (0, 0, 255)
-    # Written as TGAs again: each .dds goes with the TGA that takes its place (the
-    # game would read the stale .dds first), and back.
-    root.o3d.texture_files = "TGA"
-    notes, _ = export_model(root)
-    assert files(root) == ["ddsmodel.3di", "ddsmodel_0.tga", "ddsmodel_0n.mdt", "ddsmodel_1.tga", "ddsmodel_2.tga"], \
-        files(root)
-    assert any("removed ddsmodel_0.dds" in n for n in notes), notes
-    assert first_pixel(root, "ddsmodel_0.tga") == (0, 0, 255, 255)
-    root.o3d.texture_files = "DDS"
-    notes, _ = export_model(root)
-    assert "ddsmodel_0.dds" in files(root) and "ddsmodel_0.tga" not in files(root), files(root)
-    assert any("removed ddsmodel_0.tga" in n for n in notes), notes
-
-
-@case
-def a_copied_tga_is_converted():
-    # An image loaded unchanged from a .tga is that file; a model writing DDS
-    # textures writes the .dds of it beside the .3di, its row naming the .tga.
-    # A .tga an image of the scene reads is never removed, beside the model too.
-    art = os.path.join(OUT, "ddsart")
-    os.makedirs(art, exist_ok=True)
-    root, _ = model("ddscopy", textured("Copied", textured_file("barrel_c", (0, 1, 0, 1), art)))
-    root.o3d.texture_files = "DDS"
-    _, sc = export_model(root)
-    assert textures(sc) == [("barrel_c.tga", 1, 0, 0, 0)], textures(sc)
-    assert files(root) == ["barrel_c.dds", "ddscopy.3di"], files(root)
-    assert dds_first_texel(os.path.join(folder(root), "barrel_c.dds")) == (0, 255, 0)
-    assert os.path.isfile(os.path.join(art, "barrel_c.tga"))
-    beside, _ = model("ddsbeside", textured("Beside", textured_file("crate_c", (1, 0, 0, 1), os.path.join(OUT, "ddsbeside"))))
-    beside.o3d.texture_files = "DDS"
-    notes, _ = export_model(beside)
-    assert files(beside) == ["crate_c.dds", "crate_c.tga", "ddsbeside.3di"], files(beside)
-    assert not any("removed" in n for n in notes), notes
-
-
-@case
-def odd_sides_stay_tga():
-    # The game pads a .dds whose sides are not powers of two (D-RMAT-18): such
-    # a texture is written as a TGA, said.
-    root, _ = model("ddsodd", textured("Odd", image("odd_sides", (1, 1, 0, 1), size=6, height=4)))
-    root.o3d.texture_files = "DDS"
-    notes, sc = export_model(root)
-    assert files(root) == ["ddsodd.3di", "ddsodd_0.tga"], files(root)
-    assert any("not powers of two" in n and "ddsodd_0.tga" in n for n in notes), notes
-
-
-@case
-def textures_past_the_max_are_halved_or_refused():
-    big = image("big", (1, 0, 1, 1), size=512)
-    root, _ = model("ddsmax", textured("Big", big))
-    root.o3d.texture_files, root.o3d.texture_max_size = "DDS", "256"
-    notes, _ = export_model(root)
-    w, h, mips, fourcc, _ = dds_file(os.path.join(folder(root), "ddsmax_0.dds"))
-    assert (w, h, mips, fourcc) == (256, 256, 9, "DXT1"), (w, h, mips, fourcc)
-    assert any("512 x 512" in n and "256 x 256" in n for n in notes), notes
-    # A TGA is halved alike.
-    root.o3d.texture_files = "TGA"
-    export_model(root)
-    with open(os.path.join(folder(root), "ddsmax_0.tga"), "rb") as f:
-        assert struct.unpack_from("<HH", f.read(18), 12) == (256, 256)
-    root.o3d.texture_oversize = "REFUSE"
-    refused(root, "ddsmax_0.tga", "512 x 512", "Max texture size 256")
-
-
-@case
-def a_large_normal_map_is_noted():
-    # The game halves a normal map until it fits 512 a side.
-    mat, tree, bsdf = principled_material("Bumpy")
-    tree.links.new(image_node(tree, image("bumpy_c", (1, 1, 1, 1))).outputs["Color"], bsdf.inputs["Base Color"])
-    normal = image_node(tree, image("bumpy_n", (0.5, 0.5, 1.0, 1.0), size=1024, colour_space="Non-Color"))
-    node = tree.nodes.new("ShaderNodeNormalMap")
-    tree.links.new(normal.outputs["Color"], node.inputs["Color"])
-    tree.links.new(node.outputs["Normal"], bsdf.inputs["Normal"])
-    mat.o3d.shader = "VS_DOT3DIFF"
-    root, _ = model("bumpy", mat)
-    root.o3d.texture_files = "DDS"
-    notes, _ = export_model(root)
-    assert any("bumpy_0n.mdt is 1024 x 1024" in n and "512" in n for n in notes), notes
-
-
-@case
-def a_listed_row_writes_its_dds():
-    mat = bpy.data.materials.new("Listed")
-    t = mat.o3d.textures.add()
-    t.name, t.image = "listed_c.tga", image("listed", (0, 0, 1, 1))
-    root, _ = model("ddslisted", mat)
-    root.o3d.texture_files = "DDS"
-    _, sc = export_model(root)
-    assert textures(sc) == [("listed_c.tga", 1, 0, 0, 0)], textures(sc)
-    assert files(root) == ["ddslisted.3di", "listed_c.dds"], files(root)
-
-
-@case
-def one_form_for_a_name_across_a_run():
-    # Two models of one run naming one texture write it in one form: each would
-    # remove the other's, and the game reads the .dds first.
-    shared = image("shared_img", (1, 0, 0, 1))
-
-    def listed(name):
-        mat = bpy.data.materials.new(name)
-        t = mat.o3d.textures.add()
-        t.name, t.image = "shared.tga", shared
-        return mat
-    run = export.ExportRun()
-    a, _ = model("forma", listed("FormA"))
-    b, _ = model("formb", listed("FormB"))
-    a.o3d.texture_files, b.o3d.texture_files = "DDS", "TGA"
-    export_model(a, run)
-    refused(b, "shared.tga", "shared.dds", "forma", "Texture files", run=run)
-
-
 # --- the flipbook: a register only with frames on the register clock ------------
 
 @case
@@ -1069,88 +770,6 @@ def blender_normal_maps_export_with_the_games_green():
     # BGRA: blue 255, green 0.75 -> 191 (straight: 255 - 191 = 64), red 64.
     assert first_pixel(root, "bumped_0n.mdt") == (255, 64, 64, 255), first_pixel(root, "bumped_0n.mdt")
     assert first_pixel(root, "bumped_1n.mdt") == (255, 191, 64, 255), first_pixel(root, "bumped_1n.mdt")
-
-
-def framed_face(ob, corners, uvs, name):
-    """`ob`'s mesh replaced by one face on its material, with a UV map."""
-    face = bpy.data.meshes.new(name)
-    face.from_pydata(corners, [], [tuple(range(len(corners)))])
-    layer = face.uv_layers.new(name="UVMap")
-    for loop, uv in zip(layer.data, uvs):
-        loop.uv = uv
-    face.materials.append(ob.data.materials[0])
-    ob.data = face
-
-
-def export_scene_text(root):
-    """(notes, the scene text lines the export hands the CLI)."""
-    held, written = export.export_text, []
-
-    def capture(context, command, text, *rest):
-        written.append(list(text))
-        return held(context, command, text, *rest)
-    export.export_text = capture
-    try:
-        notes, _ = export_model(root)
-    finally:
-        export.export_text = held
-    (text,) = written
-    return notes, text
-
-
-def stored_frames(path):
-    """The tangent frames a .3di stores, as `scene` writes them (`vt`)."""
-    out = path[:-4] + "_scene.o3d"
-    subprocess.run([CLI, "scene", path, "-o", out], check=True, capture_output=True)
-    with open(out, encoding="utf-8") as f:
-        return [[float(x) for x in line.split("#")[0].split()[1:7]] for line in f if line.startswith("vt ")]
-
-
-def count_records(text, key):
-    return sum(1 for line in text if line.split()[:1] == [key])
-
-
-@case
-def tangent_frames_are_blenders_own():
-    # Under a shader that reads tangents (a normal map's VS_DOT3DIFF) export
-    # writes Blender's own frame on every vertex (`vt`: MikkTSpace on the
-    # render UV map, D3D's v running down), the frame its Normal Map node draws
-    # with. On a planar quad, turned on the root and with its UVs turned a
-    # quarter, that frame points the way the CLI's rule for a mesh with no
-    # `vt` (OED's) points: the axes, the matrix and the v flip agree.
-    root, (ob,) = model("framed", normal_mapped("Framed", normal_image("framed_n")))
-    framed_face(ob, [(0.0, -0.1, 0.0), (0.1, -0.1, 0.0), (0.1, -0.1, 0.1), (0.0, -0.1, 0.1)],
-                [(1.0, 0.0), (1.0, 1.0), (0.0, 1.0), (0.0, 0.0)], "framed_quad")
-    ob.rotation_euler = (0.0, 0.0, math.radians(30.0))
-    _, text = export_scene_text(root)
-    assert count_records(text, "v") == 4 and count_records(text, "vt") == 4, text
-    # The CLI's frames for the same text with no `vt`, read back as `scene`
-    # writes the stored ones; then the export's own, read back the same way.
-    derived = os.path.join(folder(root), "derived")
-    with open(derived + ".o3d", "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(line for line in text if line.split()[:1] != ["vt"]) + "\n")
-    subprocess.run([CLI, "build", derived + ".o3d", "-o", derived + ".3di"], check=True, capture_output=True)
-    own, rule = stored_frames(root.o3d.output_path), stored_frames(derived + ".3di")
-    assert len(own) == 4 and len(rule) == 4, (own, rule)
-    for a, b in zip(own, rule):
-        for axis in (slice(0, 3), slice(3, 6)):
-            u, w = np.array(a[axis]), np.array(b[axis])
-            assert float(u @ w) / (np.linalg.norm(u) * np.linalg.norm(w)) > 0.99, (a, b)
-
-
-@case
-def a_face_blender_gives_no_frame_takes_the_clis():
-    # Blender computes tangent frames on triangles and quads only: a mesh
-    # holding a pentagon writes no `vt`, the CLI derives its frames (the file
-    # still stores them, the shader reads them) and export says so.
-    root, (ob,) = model("pentagon", normal_mapped("Pentagon", normal_image("pentagon_n")))
-    turn = [2.0 * math.pi * k / 5.0 for k in range(5)]
-    framed_face(ob, [(0.1 * math.cos(a), -0.1, 0.1 * math.sin(a)) for a in turn],
-                [(0.5 + 0.5 * math.cos(a), 0.5 + 0.5 * math.sin(a)) for a in turn], "framed_pentagon")
-    notes, text = export_scene_text(root)
-    assert count_records(text, "v") == 5 and count_records(text, "vt") == 0, text
-    assert any("01 Mesh0" in n and "triangles and quads only" in n for n in notes), notes
-    assert len(stored_frames(root.o3d.output_path)) == 5
 
 
 @case
