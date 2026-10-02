@@ -673,20 +673,20 @@ table, one view per open document, which keeps its filter, its order and what it
 long as the document is open. Most types show their records as an outline (a tree of the rows and
 what they hold, a list of the rows, or master and detail: the rows beside the selected row's
 records as a table edited in place); a type may have a view of its own (a stylesheet's lines, a
-menu's screens and windows), or a Main-role viewport filling the tab: a text's script device, or the
-mission's 3D view to come with the outline and the Inspector beside it. The selected record's fields
-are the Inspector's, whatever the type.
+menu's screens and windows), or a Main-role viewport filling the tab: a text's script device, or a
+mission's 3D view with its outline beside it (a tree with a chip per kind of row) and the Inspector's
+form. The selected record's fields are the Inspector's, whatever the type.
 _Avoid_: editor (the application), panel, preview (the Preview window's picture), inspector (the
 generic form beside it)
 
 **Viewport**:
 One document's picture as the game would draw it, of one kind (a menu's screen, a model, a text in
-its script device, and the mission's 3D view to come), kept by the session while the document is
+its script device, a mission's 3D view), kept by the session while the document is
 open: one per document and kind. Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
-picture with the outline and the Inspector beside it);
-a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission's
-3D view and its map are one Main and one Preview). Its state (the size its device draws at where no
+picture with the outline and the Inspector beside it: a mission's);
+a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission has
+its 3D view alone; its top-down look is a camera command of that view, `top`, not a map). Its state (the size its device draws at where no
 canvas sizes the picture, the kind's options and camera) changes by a SetViewport request, every
 change a person or a client makes; three changes alone are derived by its follow instead (a menu's
 held window following the selection, a model framed when another model first shows, the preview
@@ -702,13 +702,31 @@ viewport keeping its state), drawn only by the viewport's canvas, which owns the
 and sizes the picture it draws (a control owns them itself in the rect the canvas reserves). A device
 may make a picture over several of the Shell's frames, a little each frame (a model: its textures,
 its meshes, then its scene and its pose; a menu's screen shown the first time: its textures, then the
-screen); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
+screen; a mission: its environment, its terrain's files and tiles, its sky and water, its item
+table, a model per graphic, its placement and its pose); the viewport is loading meanwhile, its canvas drawing the last picture the device made,
 never a half-made one, and a change that asks for the picture again begins it anew. Headless, it
 answers as its envelope (JSON, the `viewport` query), and a client drags and commands through it as
 its canvas would (`edit_in_viewport`: a drag one batch under one gesture over the selected records it
 moves, a command one request).
 _Avoid_: pane (the Preview window's two, which it replaced), device (the Shell's renderer behind
 it), preview (the Preview window, or the role)
+
+**Mark**:
+A record of a mission as its viewport's overlays draw it and its canvas picks it: an entity's glyph
+by its pool, ringed in its team's colour, or an area's footprint on the ground, at its anchor (an
+entity's stored position, an area's middle) as the viewport's camera projects it. A mark shows within
+the mark range while its kind's marks are on; a click picks the front-most mark within a few pixels
+of its anchor (by its anchor, never the model's shape), a marquee every shown mark inside it, and the
+primary selected mark carries the handles a drag edits it by (move, height, yaw; an area's edges).
+_Avoid_: gizmo (the handles alone), icon, marker (an entity pool of a mission), pin
+
+**Lifted**:
+An entity a mission viewport's device draws apart from the placement it last made: one added (an Add,
+a Duplicate, a Paste, a drop) or given another item since, drawn as the game's placer draws one
+item's model on its own until the next placement takes it in (past 256 lifted rows the device places
+the whole mission again). An entity removed is hidden, and shown where it stands when the removal is
+undone; a moved one is moved in place. None of these places the mission again.
+_Avoid_: spawned (what the game does at run time), dynamic, unplaced
 
 **Script device**:
 A text document's Main view (a script, a music script, a credits file, a shader, a configuration):

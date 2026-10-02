@@ -11,15 +11,20 @@
 // hits and boxes (each entity at its projected pixel, the front-most, a kind's marks off and the
 // mark range dropping marks, a box's records); and its envelope (the body's counts, a page of items,
 // the notes). S14 V10: a drop's item facts and its one batch (on the plane, over a device's ground
-// with the model's anchor baked in), its refusals; the ground command.
+// with the model's anchor baked in), its refusals; the ground command. S14 V11, the retail leg
+// (--retail, OPENNOVA_JO_DIR): every shipped mission in a project, each opened in its viewport.
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <set>
 #include <string>
 #include <vector>
 
 #include <base/io/bam.h>
+#include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
@@ -39,6 +44,7 @@
 #include <runtime/world/presentation_frame.h>
 
 #include "common/file_io.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
@@ -644,7 +650,136 @@ static int test_ground_command() {
 	return 0;
 }
 
-int main() {
+// The retail leg (S14 V11; OPENNOVA_JO_DIR, base and each expansion through the VFS): every shipped
+// mission written into one project (a mission's own file, as an import writes it; its terrain, its
+// environment and its models are the device's, and the fake devices read none), then each opened in
+// its viewport: ready, the scene's pools as many as the document's (each entity pool, the areas);
+// every mark shown on the first framing hit at its pixel answers the front-most record there; the
+// first item framed and moved by a drag of 64 pixels is one edit, and its undo gives the document's
+// bytes back. Prints the largest mission's counts.
+static int test_retail() {
+	const std::string root = retail::install();
+	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission in its viewport)");
+	Rig rig("opennova_editor_mission_viewport_retail");
+	TEST_EXPECT(rig.open(false));
+	const std::string project = rig.session.view().project.root;
+	std::vector<std::string> expansions = opennova::vfs_list_expansions(root);
+	expansions.insert(expansions.begin(), std::string());
+	std::set<std::string> seen;
+	std::vector<std::string> paths;
+	for (const std::string &expansion : expansions) {
+		opennova::Vfs game;
+		game.set_scr_policy(opennova::VFS_SCR_FORCE_JO_DFX2);
+		TEST_EXPECT(game.mount_game(root, expansion, opennova::VfsMountMode::Packed));
+		for (const opennova::VfsFileLocation &file : game.list_files()) {
+			if (retail::lower_ascii(std::filesystem::path(file.logical_name).extension().string()) != ".bms") continue;
+			if (!seen.insert(file.source_path + "|" + retail::lower_ascii(file.logical_name)).second) continue;
+			std::vector<uint8_t> bytes;
+			TEST_EXPECT(game.read_file(file.logical_name, bytes));
+			const std::string path = "missions/" + (expansion.empty() ? std::string("base") : expansion) + "/" +
+					std::filesystem::path(file.logical_name).filename().string();
+			TEST_EXPECT(editor_test::write_bytes(project + "/" + path, bytes));
+			paths.push_back(path);
+		}
+	}
+	if (paths.empty()) return retail::skip_leg("OPENNOVA_JO_DIR with the game's missions in its archives");
+	rig.session.handle(request::rescan());
+	rig.session.run_operations();
+	const auto started = std::chrono::steady_clock::now();
+	size_t opened = 0, hits = 0, moved = 0;
+	std::string largest;
+	size_t largest_entities = 0;
+	std::string largest_counts;
+	for (const std::string &path : paths) {
+		rig.session.handle(request::open_document(path));
+		TEST_EXPECT(rig.session.outcome().done());
+		const DocumentBase *open = rig.session.document_for(path);
+		TEST_EXPECT(open != nullptr);
+		if (!open) continue;
+		const std::string full = open->path();
+		rig.pump();
+		const MissionViewport *viewport =
+				static_cast<const MissionViewport *>(rig.session.viewports().find(full, ViewportKind::Mission));
+		TEST_EXPECT(viewport && viewport->status() == ViewportStatus::Ready);
+		const Document *document = records_of(*open);
+		if (!viewport || !document) continue;
+		++opened;
+		const MissionDocument &mission = static_cast<const MissionDocument &>(*document);
+		const MissionScene &scene = viewport->scene();
+		// The scene's pools, the document's.
+		const MissionKind pools[] = { MissionKind::Item, MissionKind::Building, MissionKind::Marker, MissionKind::Organic };
+		const MissionPool scene_pools[] = { MissionPool::Item, MissionPool::Building, MissionPool::Marker, MissionPool::Organic };
+		size_t entities = 0;
+		for (size_t i = 0; i < 4; ++i) {
+			const size_t rows = mission.rows_of(pools[i]).size();
+			TEST_EXPECT(scene.count(scene_pools[i]) == rows);
+			entities += rows;
+		}
+		TEST_EXPECT(scene.areas().size() == mission.rows_of(MissionKind::Area).size());
+		if (entities > largest_entities) {
+			largest_entities = entities;
+			largest = path;
+			char line[256];
+			std::snprintf(line, sizeof(line), "%zu items, %zu buildings, %zu markers, %zu organics, %zu areas, %zu paths drawn",
+					scene.count(MissionPool::Item), scene.count(MissionPool::Building), scene.count(MissionPool::Marker),
+					scene.count(MissionPool::Organic), scene.areas().size(), scene.paths().size());
+			largest_counts = line;
+		}
+		// Each mark the first framing shows, hit at its pixel: the front-most record there.
+		const ViewportContext context = viewport_context(rig.session.view(), *viewport);
+		const std::vector<MissionMark> marks = viewport->marks(context.width, context.height, context.device);
+		for (const MissionMark &mark : marks) {
+			if (!mark.shown) continue;
+			const ViewportHit hit = viewport->hit(context, mark.x, mark.y);
+			TEST_EXPECT(hit.current && hit.index >= 0 && size_t(hit.index) < marks.size() && hit.id != 0);
+			if (hit.index >= 0 && size_t(hit.index) < marks.size()) TEST_EXPECT(marks[size_t(hit.index)].depth <= mark.depth + 1e-3f);
+			++hits;
+		}
+		// The first item framed, then moved 64 pixels east on the picture: one edit, whose undo gives
+		// the bytes back.
+		const std::vector<const Node *> items = mission.rows_of(MissionKind::Item);
+		if (!items.empty()) {
+			const NodeId item = items.front()->id;
+			ViewportCommand frame;
+			frame.name = "frame";
+			frame.ids = { item };
+			frame.kind = ViewportKind::Mission;
+			rig.session.handle(request::edit_in_viewport(path, frame));
+			TEST_EXPECT(rig.session.outcome().done());
+			rig.pump();
+			const std::string before = records_of(*rig.session.document_for(path))->serialize().text;
+			ViewportDrag drag;
+			drag.id = item;
+			drag.handle = "move";
+			drag.x = 64.0f;
+			drag.kind = ViewportKind::Mission;
+			rig.session.handle(request::edit_in_viewport(path, drag));
+			TEST_EXPECT(rig.session.outcome().done());
+			rig.pump();
+			const Document *after = records_of(*rig.session.document_for(path));
+			TEST_EXPECT(after->dirty() && after->serialize().text != before);
+			rig.session.handle(request::undo(path));
+			TEST_EXPECT(rig.session.outcome().done());
+			rig.pump();
+			const Document *undone = records_of(*rig.session.document_for(path));
+			TEST_EXPECT(!undone->dirty() && undone->serialize().text == before);
+			++moved;
+		}
+		rig.session.handle(request::close_document(path));
+		TEST_EXPECT(rig.session.outcome().done() && rig.session.document_for(path) == nullptr);
+		rig.pump();
+	}
+	const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+	std::printf("retail: %zu missions in their viewports (%zu marks hit, %zu first items moved and undone) in %.1f s; the "
+	            "largest, %s: %zu entities (%s)\n",
+	            opened, hits, moved, seconds, largest.c_str(), largest_entities, largest_counts.c_str());
+	TEST_EXPECT(opened == paths.size() && opened > 0 && hits > 0 && moved > 0);
+	std::printf("test_retail passed\n");
+	return 0;
+}
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	TEST_EXPECT(test_kind_row() == 0);
 	TEST_EXPECT(test_status_and_follow() == 0);
 	TEST_EXPECT(test_change_sets() == 0);
@@ -655,6 +790,7 @@ int main() {
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);
 	TEST_EXPECT(test_ground_command() == 0);
+	TEST_EXPECT(test_retail() == 0);
 	std::printf("editor_mission_viewport: all tests passed\n");
 	return 0;
 }

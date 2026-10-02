@@ -4066,11 +4066,13 @@ add_test(NAME editor_mission_scene COMMAND editor_mission_scene_test)
 # project holding the minted mission (fixtures/bms/synth_logic.bms) and fake devices: the kind's
 # row, its status and follow, what each change set comes to (an entity's transform an Update, an
 # event's field Keep with no row read, an Add and the header's terrain a Rebuild), a Rebuild held for
-# a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope.
+# a gesture, a file the device read moving, its camera on the wire, its hits and boxes, its envelope,
+# a drop and the ground command. Mixed: the retail row opens every shipped mission (OPENNOVA_JO_DIR)
+# in its viewport, hits its marks and moves its first item and back.
 add_executable(editor_mission_viewport_test editor/mission_viewport_test.cpp)
 target_link_libraries(editor_mission_viewport_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_viewport_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME editor_mission_viewport COMMAND editor_mission_viewport_test)
+opennova_add_mixed_test(editor_mission_viewport COMMAND editor_mission_viewport_test)
 
 # The menu's viewport (editor/preview/menu_viewport, S9j, S13 V5) over a headless device: its
 # screen, its reason, when its device configures again, the envelope, its drag and arrange.
