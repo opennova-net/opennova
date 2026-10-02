@@ -310,6 +310,10 @@ struct StaticEntityRecord {
 	int32_t  euler_x = 0;        // 0x02    entity+20  (32-bit BAM)
 	int32_t  euler_y = 0;        // 0x04    entity+24  (32-bit BAM)
 	int32_t  section_mask = 0;   // 0x08    entity+308
+	// A door def carries the section word whenever its door count is nonzero,
+	// even a zero word; any other def only a nonzero one. [orig:
+	// NetPacket_SerializePool2StaticToBuffer @0x5044A2..0x5044B3]
+	bool     has_section_mask = false;
 	uint8_t  team_byte = 0;      // 0x10    entity+354 (BMS team 1=Blue/2=Red)
 	// entity+36 = the entity FLAGS dword, streamed raw (was misread as "parentSlot" — the
 	// D-NET-147 grill witnessed the serializer source @0x50435f: BMS Indestructible/Reflective/

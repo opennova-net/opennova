@@ -691,6 +691,16 @@ StaticEntityBatch build_pool2_static_batch(const world::World &w) {
 		rec.euler_x = engine_axis_bam(e->pitch);   // entity+20 pitch (0x0002 when non-zero)
 		rec.euler_y = engine_axis_bam(e->roll);    // entity+24 roll (0x0004 when non-zero)
 		rec.team_byte = e->team;
+		// A door def's section word: entity+308 with bits 1..count re-read from
+		// its door rows, carried whenever the def's signed door byte (the low
+		// byte of def+0x890) is nonzero. [orig: NetPacket_SerializePool2StaticToBuffer
+		// @0x504432..0x5044B3 — the attrib-byte sign test @0x50443F]
+		if ((e->item_attrib & 0x80u) != 0) {
+			const int count = static_cast<int8_t>(e->deathtime_ticks & 0xFF);
+			rec.section_mask = static_cast<int32_t>(
+					w.doors.wire_section_mask(*e, e->section_mask, count));
+			rec.has_section_mask = count != 0;
+		}
 		// The D-NET-147 building/armory fields: the composed entity Flags dword (entity+36,
 		// gates 0x0020), the BMS ammo byte (entity+290, always present), refNum (entity+533,
 		// gates 0x0040) and subType (entity+532, gates 0x0080 — 0xFF on indestructible defs).

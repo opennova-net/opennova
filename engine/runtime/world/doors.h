@@ -34,6 +34,18 @@ public:
         uint8_t number = 0; // completion/network numbering is 1-based
     };
     void initialize(Entity &, int32_t step, int32_t max_angle);
+    // A joiner's rows come from the S2C 0x10 static record instead: the same
+    // allocation, then every section whose bit (1 << section, 1-based) is set
+    // in the record's section word starts open, its phase the def's max_angle
+    // word (not the 65536 a completion leaves), the rest closed at 0.
+    // [orig: NapiNPClientMsg_0x010 @0x4336B5..0x433745]
+    void initialize_from_wire(Entity &, int32_t step, int32_t max_angle, uint32_t section_mask);
+    // The section word the authority's 0x10 record carries for a door: the
+    // entity's own word with bits 1..count re-read from the rows (opening or
+    // open set, closed or closing clear); `count` is the def's signed door
+    // byte, and a count below 1 leaves the word as it is.
+    // [orig: NetPacket_SerializePool2StaticToBuffer @0x504441..0x50449C]
+    uint32_t wire_section_mask(const Entity &, uint32_t section_mask, int count) const;
     const Slot *slot(const Entity &, int section) const;
     // target event's raw base+section read; unallocated global slots are zero.
     bool target_section_closed(const Entity &, int section) const;

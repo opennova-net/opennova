@@ -310,7 +310,10 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		if (rec.field_flags & kStaticEntityHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
 		if (rec.field_flags & kStaticEntityHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
 		if (rec.field_flags & kStaticEntityHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.field_flags & kStaticEntityHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.field_flags & kStaticEntityHasSectionMask) {
+			rec.has_section_mask = true;
+			rec.section_mask = int32_t(c.u32());
+		}
 		if (rec.field_flags & kStaticEntityHasTeamByte) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
 		if (rec.field_flags & kStaticEntityHasEntityFlags) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional

@@ -217,7 +217,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.euler_z)      f |= kStaticEntityHasEulerZ; // entity+16 yaw heading (32-bit BAM)
 		if (rec.euler_x)      f |= kStaticEntityHasEulerX; // entity+20
 		if (rec.euler_y)      f |= kStaticEntityHasEulerY; // entity+24
-		if (rec.section_mask) f |= kStaticEntityHasSectionMask; // entity+308
+		if (rec.section_mask || rec.has_section_mask) f |= kStaticEntityHasSectionMask; // entity+308
 		if (rec.team_byte)    f |= kStaticEntityHasTeamByte; // entity+354 (D-NET-58/62)
 		if (rec.entity_flags) f |= kStaticEntityHasEntityFlags; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)

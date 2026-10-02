@@ -16,6 +16,9 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/loopback_channel.h>
 #include <runtime/world/world.h>
+#include <runtime/replication/entity_wire_bridge.h>
+#include <runtime/mission/item_traits.h>
+#include <formats/def/def.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -262,6 +265,93 @@ void test_joiner_sends_the_request() {
 	if (sent.size() == 1) CHECK(sent[0] == std::vector<uint8_t>({0x03, 0x20, 0x01, 0x00, 0x02}));
 }
 
+
+// D-DOOR-1, the late join: the authority's 0x10 record carries a door's
+// section word with bits 1..count re-read from its rows (opening/open set,
+// closed/closing clear, the other bits as the entity holds them), and carries
+// it even when it is zero.
+// [orig: NetPacket_SerializePool2StaticToBuffer @0x504432..0x5044B3]
+void test_static_batch_carries_door_sections() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(2, 8);
+	w::Entity e;
+	e.kind = w::EntityKind::Building;
+	e.item_id = 700;
+	e.has_item_def = true;
+	e.item_attrib = 0x80u;   // Door
+	e.deathtime_ticks = 3;    // def+0x890's low byte: three doors
+	e.door_count = 3;
+	e.door_first_bone = 1;
+	e.section_mask = 0x29u;   // bits 0 and 5 outside the doors, bit 3 stale
+	const w::EntityHandle open_door = world.registry.spawn(2, e);
+	e.section_mask = 0;
+	const w::EntityHandle shut_door = world.registry.spawn(2, e);
+	w::Entity &a = *world.registry.get(open_door);
+	world.doors.initialize(a, 529, 0x40000000);
+	world.doors.initialize(*world.registry.get(shut_door), 529, 0x40000000);
+	world.doors.apply_wire_row(a, 1, 2); // open
+	world.doors.apply_wire_row(a, 2, 1); // opening
+	world.doors.apply_wire_row(a, 3, 3); // closing
+	const StaticEntityBatch batch = ns::build_pool2_static_batch(world);
+	CHECK(batch.records.size() == 2);
+	if (batch.records.size() != 2) return;
+	CHECK(batch.records[0].section_mask == 0x27);
+	CHECK(batch.records[1].section_mask == 0 && batch.records[1].has_section_mask);
+	StaticEntityBatch decoded;
+	const std::vector<uint8_t> wire = encode_static_entity_batch(batch);
+	CHECK(decode_static_entity_batch(wire.data(), wire.size(), decoded));
+	CHECK(decoded.records.size() == 2);
+	if (decoded.records.size() == 2) {
+		CHECK(decoded.records[0].section_mask == 0x27);
+		CHECK((decoded.records[1].field_flags & 0x0008u) != 0);
+		CHECK(decoded.records[1].section_mask == 0);
+	}
+}
+
+// A joiner's door rows are the 0x10 record's: a section whose bit is set
+// starts open, its phase the def's max_angle word; the authority's own spawn
+// allocates them closed. [orig: NapiNPClientMsg_0x010 @0x4336B5..0x433745;
+//  Entity_SpawnFromBMSRecord @0x40F25D..0x40F2DA]
+void test_joiner_doors_open_from_the_record() {
+	static const char kItems[] =
+			"begin \"Gate\"\n"
+			"  id 100700\n"
+			"  type building\n"
+			"  attrib: Door\n"
+			"  num_doors 2\n"
+			"end\n";
+	def::DefItemsFile items = {};
+	CHECK(def::def_parse_items_memory(reinterpret_cast<const uint8_t *>(kItems),
+			sizeof(kItems) - 1, &items) == 0);
+	if (items.count != 1) return;
+	items.entries[0].door_open_rate_q16 = 529;
+	items.entries[0].door_max_angle_bam = 0x40000000;
+	const auto wire_class = [](int) -> uint8_t { return 0; };
+	for (const bool authority : {false, true}) {
+		auto heap = std::make_unique<w::World>();
+		w::World &world = *heap;
+		world.registry.configure_pool(2, 8);
+		world.rules.logic_authority = authority;
+		w::Entity e;
+		e.kind = w::EntityKind::Building;
+		e.item_id = 700;
+		e.section_mask = 0x4u; // section 2 open on the wire
+		const w::EntityHandle h = world.registry.spawn(2, e);
+		mission::resolve_item_traits(world, items, wire_class, h);
+		const w::Entity &door = *world.registry.get(h);
+		const w::DoorSystem::Slot *first = world.doors.slot(door, 0);
+		const w::DoorSystem::Slot *second = world.doors.slot(door, 1);
+		CHECK(first != nullptr && second != nullptr);
+		if (first == nullptr || second == nullptr) continue;
+		CHECK(first->state == 0 && first->phase == 0);
+		if (authority) {
+			CHECK(second->state == 0 && second->phase == 0);
+		} else {
+			CHECK(second->state == 2 && second->phase == 0x40000000);
+		}
+	}
+}
 } // namespace
 
 int main() {
@@ -270,6 +360,8 @@ int main() {
 	test_host_answers_door_requests();
 	test_client_command_raises_requests();
 	test_joiner_sends_the_request();
+	test_static_batch_carries_door_sections();
+	test_joiner_doors_open_from_the_record();
 	std::printf("npruntime_door_relay: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

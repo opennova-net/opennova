@@ -28,6 +28,41 @@ void DoorSystem::initialize(Entity &entity, int32_t step, int32_t max_angle) {
     }
 }
 
+void DoorSystem::initialize_from_wire(Entity &entity, int32_t step, int32_t max_angle,
+        uint32_t section_mask) {
+    if (entity.door_initialized) return;
+    initialize(entity, step, max_angle);
+    if (entity.door_slot < 0) return;
+    for (int section = 1; section <= entity.door_count; ++section) {
+        const size_t index = static_cast<size_t>(entity.door_slot) + section - 1;
+        if (index >= slots_.size()) break;
+        // [orig: @0x43371a..0x433745 — `(1 << section) & entity+308` -> state 2,
+        //  phase def+0x8A0; else state 0, phase 0]
+        if (((1u << (section & 31)) & section_mask) != 0) { // `shl` masks the count
+            slots_[index].state = 2;
+            slots_[index].phase = max_angle;
+        }
+    }
+}
+
+uint32_t DoorSystem::wire_section_mask(const Entity &entity, uint32_t section_mask,
+        int count) const {
+    for (int section = 1; section <= count; ++section) {
+        // The raw record walk from entity+0x2B8 [orig: @0x50445b..0x504465];
+        // an unallocated record reads closed.
+        const long index = static_cast<long>(entity.door_slot) + section - 1;
+        const int32_t state = index >= 0 && static_cast<size_t>(index) < slots_.size()
+                ? slots_[static_cast<size_t>(index)].state
+                : 0;
+        const uint32_t bit = 1u << (section & 31); // `shl edx, cl`
+        if (state == 2 || state == 1)
+            section_mask |= bit;
+        else
+            section_mask &= ~bit;
+    }
+    return section_mask;
+}
+
 const DoorSystem::Slot *DoorSystem::slot(const Entity &entity, int section) const {
     if (entity.door_slot < 0 || section < 0 || section >= entity.door_count) return nullptr;
     const size_t index = static_cast<size_t>(entity.door_slot) + section;
