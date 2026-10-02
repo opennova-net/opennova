@@ -23,8 +23,9 @@ class ProblemsService;
 // (ProjectScan, stepped: a change made outside the editor since the view's scan reaches the plan;
 // no import pass, which would write), a copy of the asset graph brought up to that scan (the open
 // documents standing in as they are at that step; it reads again only the files that changed), the
-// game install mounted where the plan looks there for the files the chosen ones need, then the
-// plan (plan_import), each of those three a step. It reads the project's files and writes nothing;
+// game install mounted where the plan looks there for the files the chosen ones need, each of those
+// a step, then the plan a step at a time (ImportPlanner: the chosen files, then each planned file's
+// references within the step's bytes). It reads the project's files and writes nothing;
 // finish() hands the plan to the import dialog (ImportController::absorb_plan). An import's write
 // plans again with one of its own first (ImportOperation), which it steps and never finishes.
 class ImportPlanOperation : public SessionOperation {
@@ -62,6 +63,8 @@ private:
 	AssetScan scan_;
 	std::unique_ptr<AssetGraph> copy_;
 	std::shared_ptr<const ImportOrigin> mounted_;
+	std::unique_ptr<ImportPlanner> planner_; // the plan under way (the Plan phase)
+	uint64_t plan_files_ = 0;                // the files it knew of when it ended
 	ImportPlan plan_;
 	Phase phase_ = Phase::Validation;
 };
