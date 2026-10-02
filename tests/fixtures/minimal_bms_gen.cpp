@@ -9,7 +9,7 @@
 // header names the minted terrain (Tmap) and environment (synth_full)
 // fixtures. No retail mission is carried: the shipped ash_i5b is
 // mission_mis_idempotency's reference-tree leg, and the whole shipped corpus
-// is the gated mission_corpus sweep.
+// is mission_corpus's retail leg.
 //
 // Default: rebuild in memory and byte-compare the committed file. `--write`
 // (re)writes it.

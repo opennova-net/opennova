@@ -412,13 +412,16 @@ target_include_directories(mission_mis_idempotency_test PRIVATE ${CMAKE_CURRENT_
 target_compile_features(mission_mis_idempotency_test PRIVATE cxx_std_17)
 opennova_add_mixed_test(mission_mis_idempotency COMMAND mission_mis_idempotency_test)
 
-# Corpus round-trip: parse->write byte-exact over a directory of real shipped .bms missions.
-# Gated on OPENNOVA_JO_ASSETS (the tree's loose .bms; copyrighted, not committed); skips + passes when unset.
+# The mission writer against the files it must write: parse->write compared with the
+# bytes read, section by section, then the canonical fixed point. The ordinary row
+# reads the minted synth_dense.bms; the retail leg every mission the install ships,
+# out of its archives through the VFS (OPENNOVA_JO_DIR), each rewritten to its own
+# bytes but the named ones whose loadout chunk is damaged (D-EVT-7).
 add_executable(mission_corpus_test mission/mission_corpus_test.cpp)
-target_link_libraries(mission_corpus_test PRIVATE opennova_formats)
+target_link_libraries(mission_corpus_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mission_corpus_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(mission_corpus_test PRIVATE cxx_std_17)
-opennova_add_gated_test(mission_corpus COMMAND mission_corpus_test)
+opennova_add_mixed_test(mission_corpus COMMAND mission_corpus_test)
 
 # LWF sound-profile tests: byte-exact parse->encode round-trip + mutate-reread
 # over the synthetic fixtures/lwf/menu.lwf; the retail profiles are swept

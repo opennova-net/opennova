@@ -774,11 +774,17 @@ struct BoundingBox {
 // load by AIProfile_SanitizeConfigData @ 0x40cfe0; net-re §5.63]: ammo_primary/ammo_secondary
 // are requested clip counts (-1 = the weapon's default fill), and flags is the per-ammo
 // damage-class request byte (1 = x0.9, 2 = x1.1, every other value neutral).
+// A record may write three strings alone: the sanitizer then inserts "-1" and leaves the
+// candidate as the next record's name [orig: AIProfile_SanitizeConfigData @ 0x40cfe0].
+// has_flags is whether the record wrote its fourth string (an optional field's presence,
+// ADR 0002): false reads flags as the "-1" the sanitizer inserts and writes three strings.
+// [corpus: 577 of the 838 shipped records write three]
 struct WeaponLoadoutRecord {
     std::string name;
     std::string ammo_primary;
     std::string ammo_secondary;
     std::string flags = "-1";
+    bool has_flags = true;
 };
 
 struct WeaponLoadout {

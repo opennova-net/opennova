@@ -1026,10 +1026,62 @@ int main() {
 		            parsed.loadout.entries[0].ammo_primary.empty() &&
 		            parsed.loadout.entries[0].ammo_secondary.empty() &&
 		            parsed.loadout.entries[0].flags == "-1");
+
+		// A record that wrote three strings writes three (has_flags, bms.h): the chunk comes back as
+		// its own bytes, where the writer once gave every record a fourth. flags still reads the "-1"
+		// the sanitizer inserts.
+		const std::vector<std::string> mixed = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0",
+		                                        "WPN_ALSO", "2", "3"};
+		TEST_EXPECT(parse_loadout(mixed, parsed));
+		TEST_EXPECT(parsed.loadout.entries.size() == 3);
+		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[0].has_flags &&
+		            !parsed.loadout.entries[1].has_flags && !parsed.loadout.entries[2].has_flags);
+		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[1].flags == "-1" &&
+		            parsed.loadout.entries[2].flags == "-1");
+		std::vector<uint8_t> chunk;
+		for (const std::string &field : mixed) {
+			chunk.insert(chunk.end(), field.begin(), field.end());
+			chunk.push_back(0);
+		}
+		chunk.push_back(0);
+		const auto chunk_of = [](const std::vector<uint8_t> &bytes) {
+			const size_t length = read_u16_le(bytes, offsetof(opennova::bms::Header, weapon_loadout_chunk_len));
+			return std::vector<uint8_t>(bytes.begin() + opennova::bms::kHeaderSize,
+			                            bytes.begin() + opennova::bms::kHeaderSize + static_cast<std::ptrdiff_t>(length));
+		};
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
+		TEST_EXPECT(chunk_of(canonical) == chunk);
+		TEST_EXPECT(parsed.header.weapon_loadout_chunk_len == chunk.size());
+		opennova::mission::sync_counts(parsed);
+		TEST_EXPECT(parsed.header.weapon_loadout_chunk_len == chunk.size());
+		TEST_EXPECT(opennova::bms::parse(canonical.data(), canonical.size(), round_trip, err));
+		TEST_EXPECT(opennova::bms::equal(parsed, round_trip));
+		// The typed view carries it, so a loadout read and set again writes the same chunk.
+		auto entries = weapon_loadout(parsed);
+		TEST_EXPECT(entries.size() == 3 && entries[0].has_flags && !entries[1].has_flags);
+		TEST_EXPECT(set_weapon_loadout(parsed, entries, err));
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err) && chunk_of(canonical) == chunk);
+		opennova::bms::File changed = parsed;
+		changed.loadout.entries[1].has_flags = true;
+		TEST_EXPECT(!opennova::bms::equal(parsed, changed));
+		// A fourth string given to a record that had none is written.
+		entries[1].flags = "2";
+		entries[1].has_flags = true;
+		TEST_EXPECT(set_weapon_loadout(parsed, entries, err));
+		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
+		const std::vector<std::string> set = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0", "2",
+		                                      "WPN_ALSO", "2", "3"};
+		chunk.clear();
+		for (const std::string &field : set) {
+			chunk.insert(chunk.end(), field.begin(), field.end());
+			chunk.push_back(0);
+		}
+		chunk.push_back(0);
+		TEST_EXPECT(chunk_of(canonical) == chunk);
 	}
 
-	// --- Modeling policy: the loader sanitizes the loadout chunk into canonical four-string
-	// records. Bytes after the empty-name terminator are ignored by the retail sanitizer and are
+	// --- Modeling policy: the loader sanitizes the loadout chunk into the records it reads.
+	// Bytes after the empty-name terminator are ignored by the retail sanitizer and are
 	// dropped by the canonical writer. ---
 	{
 		std::string err;
