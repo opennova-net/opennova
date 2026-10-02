@@ -75,8 +75,13 @@ func test_wrong_spectator_password_surfaces_retail_join_failure() -> void:
 			break
 		OS.delay_msec(2)
 
-	assert_string_contains(reason.to_lower(), "spectator password",
-			"the retail DPC 16 description punt becomes an actionable join error")
+	var error := joiner.get_connection_error()
+	assert_true(error.is_set() and error.get_disconnect_code() == 2
+			and error.get_disconnect_param() == 16,
+			"the retail DPC 16 description punt is the join's error record")
+	assert_eq(error.reason_key(), "GDC016",
+			"its reason reads the spectator-password entry GDC016")
+	assert_string_contains(reason, "GDC016", "the join error names the entry")
 	# Retail rejects the spectator AFTER admission (the game-layer join gate),
 	# then the punted joiner answers with CLIENT_GOODBYE and the host reaps the
 	# node. Pump both ends until that teardown completes.
@@ -154,4 +159,8 @@ func test_wrong_side_password_surfaces_retail_join_failure() -> void:
 		if not reason.is_empty():
 			break
 		OS.delay_msec(2)
-	assert_string_contains(reason.to_lower(), "password")
+	var error := joiner.get_connection_error()
+	assert_true(error.get_disconnect_code() == 2 and error.get_disconnect_param() == 18,
+			"the side-password refusal is the DPC 18 description punt")
+	assert_eq(error.reason_key(), "GDC018", "its reason reads the side-password entry")
+	assert_string_contains(reason, "GDC018", "the join error names the entry")
