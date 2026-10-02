@@ -12,6 +12,7 @@
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/join_identity.h>
+#include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
 
 #include <crow.h>
@@ -33,6 +34,16 @@
 namespace opennova::server {
 
 namespace {
+
+// The page link's first-call query on NWJoin.dll / NWHost.dll: any of the
+// fields the join / host page link carries (net/novaworld/relay_request.h).
+bool has_relay_first_call_query(const crow::request &req) {
+	for (const char *name : {"rid", "success", "failure", "relay", "msgbase", "needexpkey",
+	                         "pfid", "mode"}) {
+		if (req.url_params.get(name) != nullptr) return true;
+	}
+	return false;
+}
 
 std::string read_file_text(const std::filesystem::path &p) {
 	std::ifstream in(p, std::ios::binary);
@@ -1620,10 +1631,16 @@ void HttpListener::register_legacy_host_join_routes(
 			if (tag_it != cookies.end()) tag_from_request = tag_it->second;
 		}
 
-		// Treat as first call when there's no tag AND we got a rid (the
-		// first /NWJoin.dll request from retail's host browser carries
-		// rid=NNN). Without these, we'd loop the relay forever.
-		const bool first_call = tag_from_request.empty();
+		// The page link's query (rid=NNN and the page fields) is the first call
+		// even when the client's persistent jar still carries the tag a previous
+		// join or host left: a stock client sends every jar cookie on every GET
+		// (net/novaworld/relay_request.h). Only our client's `?tag=` follow-up and
+		// the relay page's bare refresh resolve a tag.
+		const bool first_call =
+				classify_relay_request(req.url_params.get("tag") != nullptr,
+				                       has_relay_first_call_query(req),
+				                       !tag_from_request.empty()) ==
+				RelayLeg::First;
 
 		if (first_call) {
 			JoinSession s;
@@ -1937,7 +1954,13 @@ void HttpListener::register_legacy_host_join_routes(
 			if (it != cookies.end()) tag = it->second;
 		}
 
-		if (tag.empty()) {
+		// The host page link's query is the first call even with a stale tag
+		// cookie in the client's jar (net/novaworld/relay_request.h).
+		const bool host_first_call =
+				classify_relay_request(req.url_params.get("tag") != nullptr,
+				                       has_relay_first_call_query(req),
+				                       !tag.empty()) == RelayLeg::First;
+		if (host_first_call) {
 			// First call — generate session.
 			HostSession s;
 			s.session_tag = sessions_.generate_tag("NWHost.dll");

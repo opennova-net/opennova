@@ -199,6 +199,47 @@ int spectator_tips(ClientReplicaPipeline &view) {
 	return n;
 }
 
+// The count of HUD-blank commands the pass queued (replication::
+// HudDetailBlankCommand), draining the rest.
+int hud_blanks(ClientReplicaPipeline &view) {
+	int n = 0;
+	for (const ClientEffectCommand &c : view.drain_effect_commands())
+		if (std::get_if<HudDetailBlankCommand>(&c) != nullptr) ++n;
+	return n;
+}
+
+// The 0x0F's HUD blank is gated on the death screen: a fresh join's 0x0F (the
+// 0x0A's death bit clear, as every live retail join carried it) leaves the
+// live declutter level alone; a 0x0F folded with the death screen up queues the
+// blank once; the 0x0A clearing the bit ahead of the 0x0F in the same frame
+// (retail's pump order) queues nothing.
+// [orig: NapiNPClientMsg_0x00F `cmp g_DeathScreenActive, 0` @0x42e3f5 /
+//  @0x42e407 -> `mov g_HUDDetailLevel, 3` @0x42e412]
+void test_world_state_load_blanks_the_hud_only_with_the_death_screen_up() {
+	auto owned = std::make_unique<ClientReplicaPipeline>();
+	ClientReplicaPipeline &view = *owned;
+	FrameUpdate fu;
+	fu.mount_handle = 0xFFFF;
+	fu.health = 150;
+	fu.local_tail_present = true;
+	fu.flags1 = 0x02; // the deploy overlay up, the death screen down
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(!view.state().death_screen_active);
+	CHECK(hud_blanks(view) == 0);
+	fu.flags1 = 0x01;
+	fu.health = 0;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	CHECK(view.state().death_screen_active);
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(hud_blanks(view) == 1);
+	fu.flags1 = 0x00;
+	fu.health = 150;
+	view.apply(s2c::PER_FRAME_UPDATE, encode_frame_update(fu));
+	view.apply(s2c::WORLD_STATE_LOAD, world_state_load_body(0x01));
+	CHECK(hud_blanks(view) == 0);
+}
+
 // The death-screen rising edge raises the spectator tip (event 22) unless the
 // round is over; a held bit raises nothing more.
 // [orig: NapiNPClientMsg_0x00A @0x42ffd0..0x42ffdf — `cmp g_SpawnSuccessGate`
@@ -248,6 +289,7 @@ int main() {
 	test_deploy_overlay_follows_the_host();
 	test_deploy_overlay_open_latch();
 	test_death_edge_raises_the_spectator_tip();
+	test_world_state_load_blanks_the_hud_only_with_the_death_screen_up();
 	test_truncated_known_body_counts_as_malformed();
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

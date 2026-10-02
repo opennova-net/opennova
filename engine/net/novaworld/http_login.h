@@ -100,8 +100,8 @@ struct JoiConnection {
 	//  @0x4c9e6c; CNapiGameSession_ConnectOrHost @0x4d5418]
 	int ln = 0;
 	std::string gs;
-	std::string host_ip;   // decoded NK head, fallback NI
-	std::string host_port; // decoded NK tail, fallback NP
+	std::string host_ip;   // decoded NK head (empty without NK: no join)
+	std::string host_port; // decoded NK tail
 	// The game-session APPID join token: atol(decoded CK), re-serialized as retail
 	// does (an int field). Sent as the ClientAuth APPID conn-tag, which the
 	// NovaWorld host validates (code 9). "0" when no CK is present (the LAN
@@ -118,6 +118,16 @@ struct JoiConnection {
 // matches retail, whose NK/CK decode also terminates at '&'). The host address
 // is taken from decoded NK; NI/NP are preserved but are not the dial authority.
 JoiConnection parse_joi_connection_string(const std::string &body);
+
+// The NovaWorld join's endpoint gate, run when the in-match join starts (after
+// the play request): an NK port that reads 0 or an NK host string shorter than
+// eight characters is refused with gameerr "MP Errors" CVSTATCLIENTERR before
+// any transport opens (so a short dotted address such as "1.2.3.4" is refused
+// too). [orig: UI_EnumerateAndJoinSession @0x569f50 — atol(g_NkExtraBuf)
+//  @0x569fdd, strlen(g_NkBuf) @0x569ff9, the `!port || len < 8` test @0x56a006,
+//  CVSTATCLIENTERR @0x56a145]
+inline constexpr char kJoinEndpointRejectTag[] = "CVSTATCLIENTERR";
+bool joi_endpoint_usable(const std::string &host_ip, long port);
 
 // Truncate an HTTP host to the retail cookie-jar subnet key: a dotted-decimal
 // IPv4 keeps its first two octets ("192.168.1.1" -> "192.168"); any other host

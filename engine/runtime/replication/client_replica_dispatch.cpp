@@ -22,9 +22,11 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// flip moves the revision like every other decoded-state write
 			// (edge-triggered, like the roster and entity-team folds).
 			if (state_.permanent_death != permanent_death ||
-					state_.spectators_allowed != spectators_allowed) {
+					state_.spectators_allowed != spectators_allowed ||
+					state_.session_rules_flags != config.bitflags) {
 				state_.permanent_death = permanent_death;
 				state_.spectators_allowed = spectators_allowed;
+				state_.session_rules_flags = config.bitflags;
 				state_.mark_changed();
 			}
 		} else
@@ -127,6 +129,14 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			ws.waypoints_set = game_type::is_waypoint_family(game_type_);
 			ws.waypoints = wsl.waypoints;
 			++ws.revision;
+			// The HUD blank rides the death screen, not the spawn: only with
+			// g_DeathScreenActive up does the 0x0F force the live declutter
+			// level to 3 (HudDetailBlankCommand carries the witness). The
+			// death screen is the 0x0A's bit-0 edge / the 0x3B, folded in
+			// arrival order like retail's pump, so a fresh join's 0x0F never
+			// blanks. [orig: @0x42e3f5 / @0x42e407 -> @0x42e412..0x42e41c]
+			if (state_.death_screen_active)
+				pending_effect_commands_.push_back(HudDetailBlankCommand{});
 			state_.mark_changed();
 		} else {
 			++malformed_bodies_;
@@ -153,6 +163,10 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// pool-0 index) [orig: NapiNPClientMsg_TeamAssign @0x431a15 (the
 			// player bit), @0x431ab2..0x431b05].
 			if (is_player_entity(assign.entity_handle)) {
+				// A player's identity pair rebinds its avatar on every 0x50,
+				// own row included [orig: @0x431b3a..0x431b91].
+				apply_player_identity(assign.entity_handle, assign.net_id,
+						assign.anim_slot);
 				ClientVisiblePlayersRefresh refresh;
 				refresh.slot = static_cast<uint8_t>(assign.entity_handle & 0xFFu);
 				refresh.fields = kTeamAssignSyncFields;
@@ -163,6 +177,27 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		}
 		break;
 	}
+	case s2c::DOOR_SLOT_ACTION: {
+		// One door row from the host: every field zero-fills on a short body
+		// and still dispatches (a zero number then lands nowhere); the row
+		// write is the effect pass's, which owns the door records.
+		// [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x431250]
+		DoorSlotAction action;
+		size_t consumed = 0;
+		decode_door_slot_action(body.data(), body.size(), action, consumed);
+		DoorRowUpdate update;
+		update.entity_handle = action.entity_handle;
+		update.state = action.state;
+		update.number = action.number;
+		pending_effect_commands_.push_back(update);
+		break;
+	}
+	case s2c::KILL_BY_SLOT: // one join-window kill-list page (0x4E)
+		apply_batch_kill(body);
+		break;
+	case s2c::TEAM_CHANGE_CONFIRM: // one team-change list entry (0x51)
+		apply_team_change_confirm(body);
+		break;
 	case s2c::VISIBLE_PLAYERS:
 		apply_visible_players(body);
 		break;
@@ -262,6 +297,9 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::MINIMAP_OVERLAY:
 		apply_minimap_overlay_batch(body);
 		break;
+	case s2c::MAP_OVERLAY_RESET: // the body is never read
+		reset_minimap_overlays();
+		break;
 	case s2c::END_ROUND_HEADER:
 		apply_end_round_header(body);
 		break;
@@ -280,8 +318,21 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 		if (!authority_recipient_) {
 			state_.round_reset_hold = true;
 			state_.spawn_success_gate = true;
+			// The reset ends the end-round linger: the next client frame's
+			// countdown stores mission exit 4 [orig: `mov g_EndRoundLingerTimer,
+			//  ebx` (0) @0x42281f -> Client_ProcessNetworkFrame @0x42c3d3].
+			state_.end_round_linger_ticks = 0;
 		}
 		break;
+	case s2c::DIALOG_LINE: { // the co-op dialog line (0x28)
+		// The authority's own client never plays it [orig: NapiNPClientMsg_0x028
+		// @0x425b47]; a misshapen body still plays with its defaulted fields.
+		if (authority_recipient_) break;
+		DialogLine line;
+		if (!decode_dialog_line(body.data(), body.size(), line)) ++malformed_bodies_;
+		pending_effect_commands_.push_back(DialogLineCommand{std::move(line.dialog_name), line.line});
+		break;
+	}
 	case s2c::CLAN_ROSTER: // the NovaWorld clan registry (0x6A)
 		apply_clan_roster(body);
 		break;

@@ -242,6 +242,12 @@ public:
 	// hud-re.md "The windowed map views").
 	void set_scroll_row(int p_id, int p_row);
 
+	// The populate's column layout (CTableWnd's column-count resize, then one
+	// InitRow per column; engine MenuRuntime::table_set_column_count /
+	// table_init_column carry the witnesses).
+	bool table_set_column_count(int p_id, int p_count);
+	bool table_init_column(int p_id, int p_column, int p_width, const String &p_label,
+			int p_justify, int p_vjustify);
 	void table_add_row(int p_id, const PackedStringArray &p_cells);
 	void table_clear_rows(int p_id);
 	int table_row_count(int p_id) const;

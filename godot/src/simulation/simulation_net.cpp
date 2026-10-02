@@ -2,6 +2,8 @@
 // bring-up + host pump, the LAN joiner pump family + wire proxies/events, the
 // host session config FFI, and the joiner preload/session API.
 #include "simulation/simulation_internal.h"
+#include "network/join_screen_status.h"
+#include "network/connection_error.h"
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/net_debug_report.h> // the F3 Net window + the joiner diagnostics
 #include "network/udp_pump_datagram_socket.h"
@@ -283,10 +285,13 @@ int Simulation::get_host_peer_count() const {
 	return n;
 }
 
-void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id) {
+void Simulation::set_novaworld_registration(const String &p_gsid, int p_app_id,
+		const opennova::SessionIdRing &p_cookie_keys, const String &p_login_pcid) {
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx()) {
 		ctx->novaworld_gsid = opennova::to_std(p_gsid);
 		ctx->novaworld_app_id = static_cast<uint32_t>(p_app_id);
+		opennova::inmatch::set_novaworld_account_facts(*ctx, p_cookie_keys,
+				opennova::to_std(p_login_pcid));
 	}
 }
 
@@ -327,6 +332,7 @@ std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
 		s.slot = c.reply.player_slot;
 		s.player_name = opennova::to_gd(c.player_name);
 		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
+		s.pcid = opennova::to_gd(c.account.pcid);
 		if (c.assigned_team_valid) s.team = String::num_int64(c.assigned_team);
 		out.push_back(std::move(s));
 	}
@@ -363,10 +369,6 @@ void Simulation::set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook
 	opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
 	if (ctx == nullptr) return;
 	ctx->novaworld_join_tickets_armed = p_armed;
-	// The prefix of the JOINTICKET key the watchdog looks up in the joiner's CD
-	// identity pairs (the engine owns the witnessed constant).
-	ctx->host_local_address =
-			p_armed ? opennova::inmatch::NapiNPServerCtx::kNovaWorldLocalAddress : "";
 	if (!p_hook) {
 		ctx->on_player_enter_request = nullptr;
 		return;
@@ -571,6 +573,18 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	install_join_cd_cookie();
 }
 
+void Simulation::set_join_discovered_session(bool p_present, int64_t p_host_key,
+		bool p_password_required, const String &p_expansion) {
+	opennova::inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = p_present;
+	session.host_key = static_cast<uint32_t>(p_host_key);
+	session.password_required = p_password_required;
+	session.expansion = opennova::to_std(p_expansion);
+	net_.join_discovered_session = std::move(session);
+	// Applied to a live joiner runtime now and on each (re)load in enable_join.
+	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
+}
+
 void Simulation::set_join_expansion_version_root(const String &p_game_root) {
 	// D-NET-166: the JOIN VERSIONCRCSTRING checksum source. The runtime CRCs
 	// the loose expansion/<SUS2>/version.txt under this root at JOIN-build
@@ -620,6 +634,7 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	install_expansion_version_root();
 	install_app_id();
 	install_join_cd_cookie();
+	runtime_->set_discovered_session(net_.join_discovered_session); // the browse row's 0x81
 	install_item_catalog();
 	// The kind-derived world rules (no authority, an mp session) applied with
 	// the role install.
@@ -831,6 +846,22 @@ String Simulation::get_join_error() const {
 	return (is_joiner() && runtime_) ? String(runtime_->last_error().c_str()) : String();
 }
 
+// The record a failed join or a lost session leaves on the joiner connection; the
+// shell builds retail's reason text from it through its gameerr table
+// (engine: inmatch/disconnect_reason.h).
+Ref<ConnectionError> Simulation::get_connection_error() const {
+	return ConnectionError::make((is_joiner() && runtime_)
+					? runtime_->connection_error_record()
+					: opennova::inmatch::ConnectionErrorRecord{});
+}
+
+// Where the join stands for the join screen (engine: inmatch/pre_game_menu.h).
+Ref<JoinScreenStatus> Simulation::get_join_screen_status() const {
+	if (!is_joiner() || !runtime_) return Ref<JoinScreenStatus>();
+	return JoinScreenStatus::make(runtime_->join_screen_stage(), runtime_->join_queue(),
+			runtime_->join_clock_ms());
+}
+
 // The in-match analog of get_join_error: the host closed the session on its own terms
 // (the punt record), or an established session went silent past the witnessed connection
 // reap window. Either way the disconnect event maps a reason code onto g_MissionExitReason
@@ -979,6 +1010,11 @@ const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
 		net_.deploy_zone_registry_sync_serial = sync_serial;
 	}
 	return net_.deploy_zone_registry;
+}
+
+int Simulation::deploy_key_pick(int p_vk) {
+	if (!kernel_) return -1;
+	return opennova::inmatch::deploy_key_pick(role_view(), deploy_zone_registry(), p_vk);
 }
 
 std::vector<opennova::world::DeployZoneRow> Simulation::deploy_zone_rows() {

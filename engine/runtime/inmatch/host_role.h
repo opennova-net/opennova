@@ -88,8 +88,22 @@ public:
 
 	// The C2S drain the host's own client feeds before the server tick.
 	void drain_host_client_gameplay_requests();
+	// The authority-local fire gate for this frame's weapon walk: in an MP
+	// session, the host's own player slot must be active against its own
+	// client's tick (PlayerSlot_IsActive); a host with no slot for its player,
+	// or outside a session, admits. [orig: Entity_FireWeaponAndSendPacket
+	// @0x42be12..0x42be44 -- PlayerSlot_IsActive @0x42be3a over
+	// Entity_ValidatePtr(shooter) @0x42be0a and g_ClientCurrentTick]
+	bool local_fire_admitted() const;
 
 	bool send_medic_request() override;
+	// A stance key on the authority: the key's own refusals, then the C2S 0x1D
+	// on its own client connection -- every press sends, the selected stance
+	// included, and nothing latches until its own server handles the 0x1D on
+	// the next frame. 0 stand / 1 crouch / 2 prone.
+	// [orig: Input_HandleActionBinding_0 cases 169/170/172 @0x4e0d77..0x4e0e87,
+	//  CNapiNetwork_QueueReliableMessage @0x4e0de7 with no is_authority test]
+	bool request_stance(int stance);
 	void run_tick(const TickInput &input) override;
 	// A HostOnly (dedicated) host reports the mission exit once its round-end
 	// linger has closed the session; a listen host's shell observes the closed

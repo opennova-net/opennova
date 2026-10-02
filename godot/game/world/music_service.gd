@@ -149,7 +149,8 @@ func open_menu_context(root, script_override := "", bank_override := "") -> bool
 ## context's globals. The witnessed variable seeding follows the open:
 ## GAME_SEEDED_VAR_FIRST..LAST zeroed except GAME_VAR_HEALTH_PCT =
 ## GAME_HEALTH_SEED (GAME_VAR_MISSION_STATE stays 0 — never written by retail,
-## so gamemus loops its Multiplayerstart P0 track); the slot/seed witnesses
+## so gamemus plays its Multiplayerstart section: a silent NULLS lead-in, the
+## GAMINT intro sting once, then silence); the slot/seed witnesses
 ## live at the engine home, engine/runtime/audio audio/music_policy.h.
 func open_game_context(root) -> bool:
 	var pair := resolve_game_music_pair(root)

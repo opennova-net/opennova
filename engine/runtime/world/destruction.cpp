@@ -1130,7 +1130,7 @@ void process_destructible_death(World &world, Entity &target) {
     emit_death_sounds_and_effects(world, target, /*silent=*/false);
 }
 
-uint32_t spawn_death_pieces(World &world, Entity &target) {
+uint32_t spawn_death_pieces(World &world, Entity &target, bool silent) {
     // A refNum group's children are cleaned up before any gate: their held
     // gun words reset, their ammo re-splits, their gunners detach.
     // [orig: Entity_SpawnDeathPieces @0x493409..0x49344D ->
@@ -1270,7 +1270,9 @@ uint32_t spawn_death_pieces(World &world, Entity &target) {
         p.flags = tp.flags;
         p.settled = false;
         // The per-piece trail effect/looped sound attach [orig: @ 0x493813] is
-        // presented by the host from the type row (trail_fx).
+        // presented by the host from the type row (trail_fx), unless the
+        // death was silent [orig: the (frameFlags & 1) test @ 0x493811].
+        p.trail = !silent;
         mask |= (1u << (s & 31)); // x86 shl wraps the count mod 32 [orig: @ 0x493698]
     }
     target.spawned_piece_mask = mask; // [orig: entity+0x138 @ 0x493983]
@@ -1370,12 +1372,12 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
     // clears 0x20000 [orig: Flags & ~0x20006 | 6 @ 0x493f4b].
     switch (unit_type) {
     case 1: case 2: case 10: case 12:
-        mask = spawn_death_pieces(world, target);
+        mask = spawn_death_pieces(world, target, silent);
         if (target.death_motion == DeathMotionMode::Generic)
             target.death_motion = DeathMotionMode::Falling;
         break;
     case 3:
-        mask = spawn_death_pieces(world, target);
+        mask = spawn_death_pieces(world, target, silent);
         if (target.death_motion == DeathMotionMode::Generic)
             target.death_motion = DeathMotionMode::PiecePhysics;
         break;
@@ -1385,7 +1387,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         // @ 0x49442c wraps ONLY the callback body; Flags |= table flagBits
         // @ 0x493f63 runs regardless].
         if (traits != nullptr && traits->husk_model_loaded) {
-            mask = spawn_death_pieces(world, target);
+            mask = spawn_death_pieces(world, target, silent);
             if (target.veh.slide_z > 0) target.veh.slide_z = 0;
             target.motor_suspended = false;
             target.death_motion = DeathMotionMode::Static;
@@ -1394,7 +1396,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         }
         break;
     case 11:
-        mask = spawn_death_pieces(world, target);
+        mask = spawn_death_pieces(world, target, silent);
         // The callback emits directly in world space: transform every FIRST-
         // husk DEAD point through the complete authored pose, retain x/y, and
         // force z to g_EnvWaterHeightFixed. Zero is a real raw plane here (not
@@ -1421,7 +1423,7 @@ void entity_update_death_transforms(World &world, Entity &target, bool silent) {
         }
         break;
     default:
-        mask = spawn_death_pieces(world, target);
+        mask = spawn_death_pieces(world, target, silent);
         break;
     }
     // The no-row arm's `(Flags & 0xFFFDFFFF) | 6` clears the matrix bit from

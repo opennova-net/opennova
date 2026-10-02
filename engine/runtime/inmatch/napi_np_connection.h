@@ -14,6 +14,7 @@
 #include <net/npwire/peer_addr.h> // opennova::PeerAddr (the transport-addr key)
 #include <net/npwire/protocol_message.h> // opennova::SessionSequencing (the per-connection seq/ack, ADR 0013)
 #include <net/npwire/session_hello.h>    // opennova::DisconnectEvent (the latched disconnect record)
+#include <net/novaworld/join_identity.h> // JoinCookiePairs / JoinAccount (the CD cookie and its account fields)
 
 namespace opennova::inmatch {
 
@@ -40,15 +41,6 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
 inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
 
-// Deterministic GetTickCount seam for the authoritative 62 Hz owner. Retail's
-// time-sync validator compares only unsigned deltas, so a nonzero logical base
-// preserves its clock contract without introducing wall-time into native tests.
-inline uint32_t host_milliseconds_for_logic_tick(uint32_t logic_tick) {
-	return static_cast<uint32_t>(
-			1ull + (static_cast<uint64_t>(logic_tick) * 1000ull) /
-					static_cast<uint64_t>(io::kTicksPerSecondInt));
-}
-
 // Retail's Joint Operations connection template bounds the reliable outbound-message pool at
 // 0x4B0 records.
 // NapiNPMessage_Create rejects a new record when pending + retained + 1 exceeds this field; admitted
@@ -66,14 +58,16 @@ inline constexpr std::size_t JO_GAME_SESSION_OUTBOUND_MESSAGE_MAX =
 // [orig: CNapiNetwork_Init @0x4caa81/@0x4cab54]
 inline constexpr uint32_t JO_GAME_SESSION_TIMEOUT_MS = 120000;
 
-// cs_dir0.recv_max_per_tick (CS field 1) = 4 for the JOINTOPERATIONS template; the teardown of an
-// active connection sends its disconnect packet up to this many times, clamped to [0, 32].
+// The teardown of an active connection sends its disconnect packet cs_dir0.recv_max_per_tick
+// (CS field 1; 4 on the JOINTOPERATIONS template) times, clamped to [0, 32]; the first send
+// goes whatever the count, so a count of 0 still sends one.
 // [orig: CNapiNetwork_Init @0x4cab60; CNapiNPConnection_TeardownActiveConnection @0x6253C0 —
-//  the clamp @0x6253ef..0x625403 and the send loop @0x625406..0x625424 (state 1),
-//  @0x62549e..0x6254d3 (state 5)]
-inline constexpr uint32_t JO_GAME_SESSION_RECV_MAX_PER_TICK = 4;
-inline constexpr std::size_t disconnect_burst_count() {
-	return JO_GAME_SESSION_RECV_MAX_PER_TICK > 32u ? 32u : JO_GAME_SESSION_RECV_MAX_PER_TICK;
+//  the clamp @0x6253ef..0x625403, the first send @0x625406 and the loop @0x625412..0x625424
+//  (state 1), @0x62549e..0x6254d3 (state 5)]
+inline constexpr std::size_t disconnect_burst_count(int32_t recv_max_per_tick) {
+	const int32_t clamped =
+			recv_max_per_tick > 32 ? 32 : (recv_max_per_tick < 0 ? 0 : recv_max_per_tick);
+	return clamped < 1 ? std::size_t{1} : static_cast<std::size_t>(clamped);
 }
 
 // A negative cs_dir msg_out_max (the `_NSTMOUT.TXT` NEVER form) is unbounded: NapiNPMessage_Create
@@ -81,6 +75,25 @@ inline constexpr std::size_t disconnect_burst_count() {
 // session_outbound_message_prefix_count's unbounded sentinel.
 inline std::size_t outbound_message_limit_for(int32_t msg_out_max) {
 	return msg_out_max < 0 ? std::size_t{0} : static_cast<std::size_t>(msg_out_max);
+}
+
+// The cs_dir0 slots the shared session sequencing enforces, pushed onto a connection's
+// sequencing whenever its block changes: the outbound pool bound (field 11) and the
+// out-of-order queue bound (field 10).
+inline void sync_session_sequencing_limits(
+		SessionSequencing &sequencing, const SessionTimeoutConfig &timeouts) {
+	sequencing.outbound_message_limit = outbound_message_limit_for(timeouts.msg_out_max);
+	sequencing.packet_queue_max = timeouts.packet_queue_max;
+}
+
+// BuildOutgoingPackets' packets per call, cs_dir0 field 14: negative is unbounded, and the
+// loop builds one packet before it first tests the count, so 0 still builds one.
+// [orig: BuildOutgoingPackets @0x62844e (the load), @0x62860b..0x628619 (`max < 0` or
+//  `built < max` loops again)]
+inline std::size_t max_packets_per_build(int32_t max_packets_per_tick) {
+	if (max_packets_per_tick < 0) return static_cast<std::size_t>(-1);
+	return max_packets_per_tick < 1 ? std::size_t{1}
+	                                : static_cast<std::size_t>(max_packets_per_tick);
 }
 
 inline SessionSequencing make_jo_game_session_sequencing(
@@ -312,6 +325,11 @@ struct SessionReplyState {
 	// [orig: slot+100360, NapiNPServer_HandleChatMessage @0x5137FF;
 	//  GameEvent_FlagCapture @0x50F912; Server_OnPlayerJoin @0x51A6CD]
 	uint32_t chat_last_ms = 0;
+	// Host ms of this player's last team change request that passed the gates
+	// (0 = never): the next is refused until change_team_interval_seconds
+	// have passed. [orig: slot+96484, NapiNPServerMsg_0x04D_ChangeTeam
+	//  @0x518FBA..0x518FDF (the test), @0x5190F3 (the stamp)]
+	uint32_t team_change_ms = 0;
 	// Two bits of the player-slot state byte (+89912). 0x04 asks the per-tick
 	// slot pass for the S2C 0x1E event 58 frontier hint once the slot has
 	// played 1240 ticks; 0x08 holds off a second refused-touch nag until a
@@ -548,11 +566,17 @@ struct NapiNPConnection {
 	// not armed until NapiNPServer_UpdateHoldoffTicks dictates CS field 3 and
 	// resets the counter. Pre-dictation hello/auth/admission turns stay open.
 	bool s2c_send_holdoff_dictated = false;
-	// Host tick of this connection's most recent framed session send — the
-	// per-connection "last send" clock retail's send-interval pump reads.
-	// Zero = not yet armed; the first open boundary arms it without sending.
-	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0]
+	// Host tick of this connection's most recent built session packet — the
+	// per-connection last-build clock (+0x640) both send-interval legs read.
+	// Zero = not yet armed; the first per-tick read arms it without sending.
+	// [orig: CNapiNPConnection_PumpSendIntervals @0x628FD0 reads +0x640;
+	//  BuildOutgoingPackets stamps it @0x628605]
 	uint32_t last_session_send_tick = 0;
+	// Retail's has_pending_out (+0x650): an admitted C2S packet carried message records, so
+	// the next open S2C boundary builds a packet (header-only if nothing else) to ACK it;
+	// cleared by any packet built at a boundary (D-NET-233).
+	// [orig: ParseMessages @0x625dff; BuildOutgoingPackets clear @0x628629]
+	bool session_ack_owed = false;
 
 	// --- per-connection handshake state (P2: the old HostSessionAccept::PeerState, folded on) ---
 	// SCRK / seq / ack + the session-flow latches, witnessed as fields the original keeps on the
@@ -591,8 +615,6 @@ struct NapiNPConnection {
 	// FIRST/MID/FINAL C2S records share one receive buffer on this peer's
 	// connection. Only a completed semantic message may reach host dispatch.
 	ProtocolReassemblyState c2s_reassembly{};
-	uint32_t active_send_elapsed_ms = 0; // retained-message active-send interval; reset by every
-	                                     // framed S2C packet, ticked by tick_connections
 	// The host-clock millisecond at which the 0x42 join was accepted: the
 	// validation-phase deadline base (netPlayer+0xA4) that reaps a peer which
 	// keeps talking but never completes its admission.
@@ -602,7 +624,15 @@ struct NapiNPConnection {
 	// NovaWorld NAMEINFO / PCID / SQUADINFO / JOINTICKET cookies. Empty on LAN.
 	// [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 "CD" -> the cookie
 	//  buffer; KeyValueBuffer_FindValue @0x4C2A30 walks it by key]
-	std::vector<std::pair<std::string, std::string>> join_identity_pairs;
+	JoinCookiePairs join_identity_pairs;
+	// The NovaWorld account fields of this player's net config: a remote joiner's
+	// decrypted PCID / SQUADINFO cookies (load_join_account_from_cookie), the
+	// host's own loopback its login PCID. Read by the 0x7A / 0x7B PCID, the 0x46
+	// fields 0x0010 / 0x0800 and the NovaWorld PlayerList's PlayerPCID.
+	// [orig: NapiNPPlayer+0xCC NapiNetConfig — NetPacket_WritePCID @0x5076e0,
+	//  NapiNPMsg_0x7B_BuildPayload @0x5077ac, NetPacket_SerializePlayerSync0x46
+	//  @0x506070 / @0x506257, CNapiGameSession_SendPlayerAdded @0x4d006c]
+	JoinAccount account;
 	// NetPlayer game state 4 (the NovaWorld ticket wait): the
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
 	// success (state 6), and the spawn pump holds the player until then. The

@@ -26,7 +26,11 @@ public:
 	LanSession();
 	~LanSession() override;
 
-	int start_browsing(const String &destination, int port_min, int port_max);
+	// `connect_type` is the network connect type the browse runs under
+	// (opennova::kLanConnectType*): the LAN screen browses as LAN, a NovaWorld
+	// endpoint's preflight as NovaWorld; a host whose P2 names another type is
+	// not listed (lan_session_admits_connect_type).
+	int start_browsing(const String &destination, int port_min, int port_max, int connect_type);
 	void stop();
 	TypedArray<LanServerRow> get_servers() const;
 	bool is_browsing() const { return browser_.browsing(); }

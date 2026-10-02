@@ -13,6 +13,7 @@
 #include <net/npwire/idatagram_socket.h>
 #include <runtime/inmatch/charattr_challenge.h>  // CharAttrChallengeTable
 #include <runtime/inmatch/game_config.h>          // GameConfig
+#include <runtime/inmatch/joiner_connection.h>    // JoinerConnection::DiscoveredSession
 #include <runtime/inmatch/napi_np_connection.h>   // CharacterJoinVars
 #include <runtime/inmatch/napi_np_server_ctx.h>   // NetworkType
 #include <runtime/mission/mission_text.h>          // MissionText
@@ -107,6 +108,9 @@ struct SimulationNetState {
 	// The CD identity cookie (packed PUB* blob) for the 0x00 JOIN (codes 23/24/25).
 	// Empty for LAN. Retained across direct-load runtime rebuilds.
 	std::vector<uint8_t> join_cd_cookie;
+	// The browse row's 0x81 record a join from it connects with (no 0x41).
+	// Retained across direct-load runtime rebuilds.
+	opennova::inmatch::JoinerConnection::DiscoveredSession join_discovered_session;
 	// Retail loads this process-scoped table from charattr.def before joining.
 	// The byte image stays outside ClientRuntime so a direct mission load can
 	// reinstall it when a load rebuilds an as-yet-unstarted joiner.

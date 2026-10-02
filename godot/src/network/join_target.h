@@ -81,7 +81,24 @@ public:
 	// ordinary dial uses. Empty = no proxy (LAN, or a .joi without them).
 	JOIN_TARGET_TEXT(proxy_node)
 	JOIN_TARGET_TEXT(proxy_relay)
+	// The host's expansion as the browse row advertised it (the 0x81 SUS2 a
+	// LAN or preflight row carries, the GSB Exp of a NovaWorld row; "" = base
+	// game). Meaningful only when `expansion_known`: the shell switches the
+	// mount to it BEFORE the dial so the join vars come from that expansion's
+	// profile, as retail switches before it connects.
+	JOIN_TARGET_TEXT(expansion)
 #undef JOIN_TARGET_TEXT
+	bool get_expansion_known() const { return expansion_known_; }
+	void set_expansion_known(bool p_value) { expansion_known_ = p_value; }
+	// The browse row's session record (a LAN row's 0x81 HK and SF): a join
+	// from it goes straight to the 0x42 (JoinerConnection::DiscoveredSession).
+	// `discovered_session` false = a bare dial that sends the 0x41 first.
+	bool get_discovered_session() const { return discovered_session_; }
+	void set_discovered_session(bool p_value) { discovered_session_ = p_value; }
+	int64_t get_session_host_key() const { return session_host_key_; }
+	void set_session_host_key(int64_t p_value) { session_host_key_ = p_value; }
+	bool get_session_password_required() const { return session_password_required_; }
+	void set_session_password_required(bool p_value) { session_password_required_ = p_value; }
 
 	int get_port() const { return port_; }
 	void set_port(int p_port) { port_ = p_port; }
@@ -176,6 +193,11 @@ private:
 	String spectator_password_;
 	String server_password_;
 	String join_password_;
+	String expansion_;
+	bool expansion_known_ = false;
+	bool discovered_session_ = false;
+	int64_t session_host_key_ = 0;
+	bool session_password_required_ = false;
 	int team_request_ = -1; // -1 automatic, 0 blue, 1 red
 	bool role_explicit_ = false;
 	String proxy_node_;

@@ -310,7 +310,10 @@ bool decode_static_entity_batch(const uint8_t *body, size_t len,
 		if (rec.field_flags & kStaticEntityHasEulerZ) rec.euler_z = int32_t(c.u32()); // entity+16 yaw heading
 		if (rec.field_flags & kStaticEntityHasEulerX) rec.euler_x = int32_t(c.u32()); // entity+20
 		if (rec.field_flags & kStaticEntityHasEulerY) rec.euler_y = int32_t(c.u32()); // entity+24
-		if (rec.field_flags & kStaticEntityHasSectionMask) rec.section_mask = int32_t(c.u32());
+		if (rec.field_flags & kStaticEntityHasSectionMask) {
+			rec.has_section_mask = true;
+			rec.section_mask = int32_t(c.u32());
+		}
 		if (rec.field_flags & kStaticEntityHasTeamByte) rec.team_byte = c.u8();   // entity+354 (D-NET-58/62)
 		if (rec.field_flags & kStaticEntityHasEntityFlags) rec.entity_flags = c.u32(); // entity+36 Flags (D-NET-147)
 		rec.ammo_count = c.u8();                                  // entity+290, unconditional
@@ -394,7 +397,7 @@ bool decode_player_sync(const uint8_t *body, size_t len, PlayerSync &out) {
 	// Source order: name, clan, id, team, type|subtype, 0x20, 0x1000, 0x40, 0x80, quality, account netId.
 	if (m & kPlayerSyncHasName) out.name = c.cstr();
 	if (m & kPlayerSyncHasTeamString) out.clan = c.cstr();
-	if (m & kPlayerSyncHasVehicleName) out.id_label = c.cstr();
+	if (m & kPlayerSyncHasPcid) out.id_label = c.cstr();
 	if (m & kPlayerSyncHasTeamByte) out.team = c.u8();
 	if (m & kPlayerSyncHasDownedState) out.downed_state = c.u8();
 	if (m & kPlayerSyncHasVehicleScore) out.field_0020 = c.u8();
@@ -1071,6 +1074,32 @@ bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
 	if (c.p + 1 <= c.end) out.anim_slot = c.u8();
 	consumed = size_t(c.p - body);
 	return true;
+}
+
+// S2C 0x51 team-change confirm: every field zero-fills and a short read does
+// not advance, so a later narrower field still reads what remains; the handle
+// defaults to 0, not the 0xFFFF sentinel. [orig: NapiNPClientMsg_HandlePlayerSpawn
+// @0x431BB0 — index @0x431bca, handle @0x431bdd, team @0x431bed, NetId
+// @0x431bfc, animSlot @0x431c11]
+bool decode_team_change_confirm(const uint8_t *body, size_t len, TeamChangeConfirm &out) {
+	out = TeamChangeConfirm{};
+	size_t at = 0;
+	const auto u16 = [&]() -> uint16_t {
+		if (at + 2 > len) return uint16_t{0};
+		const uint16_t v = static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
+		at += 2;
+		return v;
+	};
+	const auto u8 = [&]() -> uint8_t {
+		if (at + 1 > len) return uint8_t{0};
+		return body[at++];
+	};
+	out.index = u16();
+	out.assign.entity_handle = u16();
+	out.assign.team = u8();
+	out.assign.net_id = u16();
+	out.assign.anim_slot = u8();
+	return len >= 8;
 }
 
 // ===========================================================================
@@ -1824,6 +1853,25 @@ bool decode_chat_broadcast(const uint8_t *body, size_t len, ChatBroadcast &out) 
 	out.sender_slot = c.u8();
 	out.text = c.cstr();
 	return c.ok && (c.p == c.end);
+}
+
+// S2C 0x28 — [orig: NapiNPClientMsg_0x028 @0x425B40].
+bool decode_dialog_line(const uint8_t *body, size_t len, DialogLine &out) {
+	out = DialogLine{};
+	const uint8_t *p = body;
+	const uint8_t *const end = body + len;
+	while (p < end && *p != 0) ++p;
+	out.dialog_name.assign(reinterpret_cast<const char *>(body),
+			static_cast<size_t>(p - body));
+	const bool terminated = p < end;
+	if (terminated) ++p;
+	if (p + 2 <= end) {
+		out.line = static_cast<int16_t>(p[0] | (p[1] << 8));
+		p += 2;
+	} else {
+		return false;
+	}
+	return terminated && p == end;
 }
 
 // S2C 0x32 formatted game text. [orig: NapiNPClientMsg_0x032 @0x428060]

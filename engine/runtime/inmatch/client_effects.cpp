@@ -6,7 +6,11 @@
 #include <runtime/world/ai.h>
 #include <runtime/world/infantry.h>
 #include <runtime/hud/hud_minimap.h>
+#include <runtime/audio/footstep_slot.h> // organic_slot_set (the org1 scream slot)
+#include <runtime/audio/sound_profile.h> // compose_entity_sound_set (the player scream)
+#include <runtime/audio/dialog_queue.h>  // resolve_dialog_line (the dialog line's chat legs)
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 #include <cmath>
 #include <variant>
@@ -154,6 +158,61 @@ const replication::ClientRosterSlot *slot_for_pool0(const replication::ClientSta
 } // namespace
 
 void ClientRuntime::tick_remote_stance_sounds(world::World &world) {
+    // The scream leg of every remote body's death edge this tick, at the body
+    // origin: a player body composes "<prefix>_DEATH" ("_DEATH_K" on a night
+    // mission) from its anim-slot byte, an org1 body plays its profile slot 7
+    // (8, SSNightDead, at night). The edge runs on every machine, so a client
+    // screams for its remote rows itself; nothing rides the wire for it.
+    // [orig: Entity_UpdateInfantryPlayerBody @0x4b4c4a..0x4b4c54 ->
+    //  SoundProfile_FindByEntityAndType @0x528180 type 5/0 ->
+    //  Entity_PlaySound3D_FullVolume; Entity_UpdateInfantryAI @0x4b9ca3..0x4b9cb5
+    //  -> Entity_GetProfileSlotSound(entity, 8/7)]
+    const bool night = (world.tables.mission_attrib_flags &
+            world::MissionTables::kMissionAttribEnableNVG) != 0;
+    for (const uint16_t handle : view_.drain_death_edges()) {
+        const replication::ClientEntityState *row = state().find(handle);
+        if (row == nullptr) continue;
+        world::SoundSlotEvent scream;
+        scream.source_handle = handle;
+        scream.pos[0] = row->x;
+        scream.pos[1] = row->y;
+        scream.pos[2] = row->z;
+        if (row->cls == EntityClass::Player) {
+            scream.slot = static_cast<uint8_t>(night ? audio::kSlotNightDeath : audio::kSlotDeath);
+            audio::compose_entity_sound_set(row->spawn_anim_slot,
+                    night ? audio::kEntitySoundDeathNight : audio::kEntitySoundDeath,
+                    scream.set_name, sizeof(scream.set_name));
+        } else {
+            const int slot = night ? audio::kSlotNightDeath : audio::kSlotDeath;
+            const std::string *set = audio::organic_slot_set(world.tables.sound_profiles,
+                    world.tables.organic_sound_profiles, row->type_id, false, slot);
+            if (set == nullptr) continue; // the resolved-id-0 silence
+            scream.slot = static_cast<uint8_t>(slot);
+            std::snprintf(scream.set_name, sizeof(scream.set_name), "%s", set->c_str());
+        }
+        world.out.slot_sounds.push_back(scream);
+    }
+    // The profile-slot plays the remote bodies' mover legs made this tick,
+    // each at the position its leg played it: the slot resolves through the
+    // body's items.def profile, a player's female binding picked by its
+    // packed avatar id (player-only), the resolved-id-0 slot playing nothing.
+    // [orig: Entity_GetProfileSlotSound @0x528300, the female byte
+    //  @0x52831c -> Entity_PlaySound3D_FullVolume @0x528E20]
+    for (const auto &sound : view_.drain_slot_sounds()) {
+        const bool female = sound.character_id != 0 &&
+                world.tables.character_traits.is_female(sound.character_id);
+        const std::string *set = audio::organic_slot_set(world.tables.sound_profiles,
+                world.tables.organic_sound_profiles, sound.type_id, female, sound.slot);
+        if (set == nullptr) continue;
+        world::SoundSlotEvent event;
+        event.source_handle = sound.handle;
+        event.pos[0] = sound.pos[0];
+        event.pos[1] = sound.pos[1];
+        event.pos[2] = sound.pos[2];
+        event.slot = sound.slot;
+        std::snprintf(event.set_name, sizeof(event.set_name), "%s", set->c_str());
+        world.out.slot_sounds.push_back(event);
+    }
     for (auto &row : state().entities) {
         if (row.cls != EntityClass::Player || (row.state_flags & 1u) != 0 ||
                 (has_self_handle() && row.handle == self_handle())) continue;
@@ -185,7 +244,8 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             world::Entity *victim = world.registry.get(handle);
             if (!victim) continue;
             if (death->item_state) {
-                world::apply_item_state_event(world, *victim, death->hit_section);
+                world::apply_item_state_event(world, *victim, death->hit_section,
+                        death->kill_flags);
             } else {
                 victim->health = 0;
                 victim->alive = false;
@@ -193,6 +253,47 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                 victim->last_attacker = world::EntityHandle{};
                 world::destruction_notify_item_damage(world, *victim, 4);
             }
+        } else if (const auto *door = std::get_if<replication::DoorRowUpdate>(&request)) {
+            // The pool row the handle names; an entity this peer never
+            // materialized has no door records to write.
+            // [orig: NapiNPClientMsg_HandleWeaponSlotAction @0x4312bf..0x431326]
+            const world::EntityHandle handle{door->entity_handle};
+            if (!handle.valid() || handle.pool() >= world::kEntityPoolCount) continue;
+            if (const world::Entity *entity = world.registry.get(handle))
+                world.doors.apply_wire_row(*entity, door->number, door->state);
+        } else if (const auto *dialog = std::get_if<replication::DialogLineCommand>(&request)) {
+            // The line rides the presentation's effect log with the local
+            // player's class, the clip's locale. [orig: NapiNPClientMsg_0x028
+            //  @0x425b88..0x425b94]
+            const world::Entity *local = world.registry.get(world.cached.local_player);
+            const int32_t player_class =
+                    local != nullptr ? static_cast<int32_t>(local->player_class) : 0;
+            world.out.effects.push({"dialog_line", dialog->line, player_class, 0, 0,
+                    dialog->dialog_name});
+            // The line's chat legs: with no clip, "EX Cannot load audio: <def
+            // name>" on the SYSTEM ring in -56798 (0xFFFF2222); then the
+            // subtitle on the CHAT ring in -1 (white), both 930 ticks. The
+            // master-volume gate before the subtitle is the shell's.
+            // [orig: Dialog_LoadAudioClipLocalized @0x44DFD1..0x44DFF8
+            //  (Chat_AddMessageChannel2(msg, -56798, 930)), the subtitle
+            //  @0x44E144..0x44E150 -> Chat_AddSystemMessageIfValid @0x5275B0 ->
+            //  Chat_AddMessageChannel1(msg, -1, 930) @0x5275D5]
+            if (world.tables.dialog_bank != nullptr && world.tables.sound_sets != nullptr) {
+                const audio::DialogLinePlayback resolved = audio::resolve_dialog_line(
+                        world.tables.dialog_bank, *world.tables.sound_sets,
+                        world.tables.mission_text, dialog->dialog_name, dialog->line,
+                        player_class);
+                if (resolved.line_found && resolved.set_name.empty())
+                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::System,
+                            0xFFFF2222u, "EX Cannot load audio: " + resolved.def_id_name, false});
+                if (resolved.line_found && !resolved.text.empty())
+                    pending_ring_posts_.push_back({view_.claim_feed_order(), hud::ChatSink::Chat,
+                            0xFFFFFFFFu, resolved.text, false});
+            }
+        } else if (const auto *flash = std::get_if<replication::LightningTimerCommand>(&request)) {
+            // [orig: NapiNPClientMsg_HandleTextCommand SETFLASH1 @0x429eea /
+            //  @0x429ef5 -> g_EnvLightningTimerA]
+            world.weather.command_set_flash_timer(flash->timer_a);
         } else if (const auto *effect=std::get_if<ExplosionEffectRecord>(&request)) {
             if (!world.rules.logic_authority && effect->type==0) {
                 world::Entity snapshot;
@@ -218,6 +319,11 @@ void ClientRuntime::apply_received_effects(world::World &world) {
                     sound_actor(*this, world, event->attacker_index, actor))
                 world::play_flag_event_sound(world, event->event_type, actor, *local,
                         game_type(), event->pos_x, event->pos_y);
+            // The zone, mortar and camp cues read only the local player's team
+            // (a camp event against the team its victim byte names).
+            if (local)
+                world::play_zone_event_sound(world, event->event_type, *local,
+                        event->victim_index);
         } else if (const auto *call = std::get_if<TrackedPlayerVoice>(&request)) {
             // Pool-0 byte is a raw entity index. Chat and voice have separate
             // local mute flags; an unbound speaker can still play a voice.
@@ -290,6 +396,10 @@ void ClientRuntime::apply_received_effects(world::World &world) {
             // The receive legs' tip events join the world's in arrival order
             // (replication::TipEventCommand carries the witness).
             world.out.tip_events.push_back(tip->event);
+        } else if (std::get_if<replication::HudDetailBlankCommand>(&request) != nullptr) {
+            // The 0x0F's death-screen HUD blank (replication::HudDetailBlankCommand
+            // carries the witness); the HUD owner applies it to the live level.
+            world.out.hud_detail_blank = true;
         } else if (const auto *chat = std::get_if<replication::LocalChatSpeaker>(&request)) {
             // A local-channel line: the sender slot's person becomes the
             // tracked target (the fold already ran the dispatcher's slot

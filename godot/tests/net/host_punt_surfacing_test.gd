@@ -30,7 +30,7 @@ const TMP_DIR := "res://.godot/host_punt_surfacing_test"
 const STATE_CONFIG_PATH := ResourceDirSettings.CONFIG_PATH
 # What JoinerConnection composes for the captured punt: the DPC/DC codes the client's own
 # exit-reason switch keys on, plus the sender's tag and formatted mismatch type.
-const PUNT_REASON := "the host closed the session (reason 33, class 2): LogPuntEvent t35"
+const PUNT_REASON := "the host closed the session (GDC033; reason 33, class 2): LogPuntEvent t35"
 # The boot files a menu-only shell needs: the fatal-set string tables plus the front end.
 const LANGUAGE_FILES := ["gameerr.bin", "gametext.bin", "vmacros.bin", "keyhelp.bin",
 		"menutxt.bin"]

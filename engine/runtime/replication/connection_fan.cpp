@@ -509,6 +509,8 @@ void set_view_distance_units(int units) {
 	g_view_distance_units = units < 0 ? 0 : units;
 }
 
+int view_distance_units() { return g_view_distance_units; }
+
 namespace {
 
 // Age-array index for one entity: pool-0 ages [0..255], pool-1 [256..511], slot & 0xFF

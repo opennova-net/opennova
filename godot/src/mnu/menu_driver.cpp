@@ -158,6 +158,10 @@ public:
 			const std::vector<opennova::menu::MenuTableRow> &rows) override {
 		if (MenuFrame *f = frame()) f->set_widget_table_rows(index, rows);
 	}
+	void set_widget_table_columns(int index,
+			const std::vector<opennova::menu::MenuTableColumnDef> &columns) override {
+		if (MenuFrame *f = frame()) f->set_widget_table_columns(index, columns);
+	}
 	void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
 			int bottom) override {
 		if (MenuFrame *f = frame())
@@ -593,6 +597,16 @@ Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 	return out;
 }
 
+bool MenuDriver::table_set_column_count(int p_id, int p_count) {
+	return runtime_.table_set_column_count(p_id, p_count);
+}
+
+bool MenuDriver::table_init_column(int p_id, int p_column, int p_width, const String &p_label,
+		int p_justify, int p_vjustify) {
+	return runtime_.table_init_column(p_id, p_column, p_width, to_std(p_label), p_justify,
+			p_vjustify);
+}
+
 void MenuDriver::table_add_row(int p_id, const PackedStringArray &p_cells) {
 	runtime_.table_add_row(p_id, to_std_strings(p_cells));
 }
@@ -980,6 +994,10 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_widget_scroll_range", "id"),
 			&MenuDriver::get_widget_scroll_range);
 
+	ClassDB::bind_method(D_METHOD("table_set_column_count", "id", "count"),
+			&MenuDriver::table_set_column_count);
+	ClassDB::bind_method(D_METHOD("table_init_column", "id", "column", "width", "label",
+			"justify", "vjustify"), &MenuDriver::table_init_column);
 	ClassDB::bind_method(D_METHOD("table_add_row", "id", "cells"), &MenuDriver::table_add_row);
 	ClassDB::bind_method(D_METHOD("table_clear_rows", "id"), &MenuDriver::table_clear_rows);
 	ClassDB::bind_method(D_METHOD("table_row_count", "id"), &MenuDriver::table_row_count);

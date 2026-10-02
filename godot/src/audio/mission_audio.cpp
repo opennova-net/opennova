@@ -249,6 +249,33 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		marker_rows = opennova::audio::resolve_envs_markers(
 				p_mission->native_file(), item_db_->native_items());
 	}
+	// A header-only join's document has no entities: its emitters arrive with
+	// the host's world stream, built once the joiner is in the match (tick).
+	world_envs_pending_ = ambient_markers_enabled_ && item_db_.is_valid() &&
+			p_mission->is_wire_header_only();
+	_add_envs_markers(marker_rows);
+
+	// Silence here has historically gone unnoticed (a bare stats print) -- warn on
+	// the two states that mean "no ambience will play" so they surface in logs.
+	if (stats_->get_banks_loaded() == 0) {
+		UtilityFunctions::push_warning(vformat(
+				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
+				mission_base, global_chain_text));
+	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
+		UtilityFunctions::push_warning(vformat(
+				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
+				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
+	}
+
+	_feed_mixer();
+	_apply_reverb(mission_info.is_valid() ? mission_info->get_reverb() : 0);
+	_apply_music(mission_info.is_valid() ? mission_info->get_music() : 0);
+	return stats_;
+}
+
+// One marker per envs row whose authored slot sets the loaded bank chain
+// carries (the bank-presence filter is this shell's stream concern).
+void MissionAudio::_add_envs_markers(const std::vector<opennova::audio::EnvsMarker> &marker_rows) {
 	for (const opennova::audio::EnvsMarker &row : marker_rows) {
 		stats_->set_markers_total(stats_->get_markers_total() + 1);
 		// Authored slot names -> playable slots: only sets the loaded bank chain
@@ -309,23 +336,6 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 		stats_->set_markers_resolved(stats_->get_markers_resolved() + 1);
 		stats_->set_ambient_candidates(stats_->get_ambient_candidates() + candidate_count);
 	}
-
-	// Silence here has historically gone unnoticed (a bare stats print) -- warn on
-	// the two states that mean "no ambience will play" so they surface in logs.
-	if (stats_->get_banks_loaded() == 0) {
-		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: no sound banks loaded (probed %s.LWF, %s) — mission ambience will be silent",
-				mission_base, global_chain_text));
-	} else if (stats_->get_markers_total() > 0 && stats_->get_markers_resolved() == 0) {
-		UtilityFunctions::push_warning(vformat(
-				"MissionAudio: 0/%d sound markers resolved (item db %s) — mission ambience will be silent",
-				stats_->get_markers_total(), item_db_.is_null() ? String("missing") : String("loaded")));
-	}
-
-	_feed_mixer();
-	_apply_reverb(mission_info.is_valid() ? mission_info->get_reverb() : 0);
-	_apply_music(mission_info.is_valid() ? mission_info->get_music() : 0);
-	return stats_;
 }
 
 TypedArray<int64_t> MissionAudio::active_ambient_candidate_ids() const {
@@ -534,32 +544,62 @@ bool MissionAudio::play_dialog(int p_wav_id) {
 	if (bank_.is_null() || !root_attached_) {
 		return false;
 	}
-	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
-	if (sets.empty()) {
+	const std::vector<opennova::audio::DialogLineRef> lines = _resolve_dialog_lines(p_wav_id);
+	if (lines.empty()) {
 		UtilityFunctions::push_warning(vformat("MissionAudio: unresolved dialog id %d", p_wav_id));
 		return false;
 	}
-	dialog_queue_.enqueue(sets);
+	dialog_queue_.enqueue(lines);
 	_pump_dialog_queue();
 	return true;
 }
 
-String MissionAudio::resolve_dialog_set(int p_wav_id) {
-	const std::vector<std::string> sets = _resolve_dialog_sets(p_wav_id);
-	return sets.empty() ? String() : opennova::to_gd(sets.front());
+bool MissionAudio::play_dialog_line(const String &p_dialog_name, int p_line,
+		int p_player_class) {
+	if (bank_.is_null() || !root_attached_) {
+		return false;
+	}
+	const opennova::dbf::File *dialog_bank =
+			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
+	const opennova::audio::DialogLinePlayback line = opennova::audio::resolve_dialog_line(
+			dialog_bank, bank_->set_index(), nullptr, opennova::to_std(p_dialog_name), p_line,
+			p_player_class);
+	if (line.set_name.empty()) {
+		return false;
+	}
+	AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
+			StringName(kVoiceBus));
+	if (voice == nullptr) {
+		return false;
+	}
+	voice->connect("finished", Callable(voice, "queue_free"));
+	return true;
 }
 
-std::vector<std::string> MissionAudio::_resolve_dialog_sets(int p_wav_id) const {
+String MissionAudio::resolve_dialog_set(int p_wav_id) {
+	for (const opennova::audio::DialogLineRef &line : _resolve_dialog_lines(p_wav_id)) {
+		if (!line.set_name.empty()) {
+			return opennova::to_gd(line.set_name);
+		}
+	}
+	return String();
+}
+
+std::vector<opennova::audio::DialogLineRef> MissionAudio::_resolve_dialog_lines(
+		int p_wav_id) const {
 	if (bank_.is_null()) {
 		return {};
 	}
 	const opennova::dbf::File *dialog_bank =
 			(dbf_.is_valid() && dbf_->is_loaded()) ? &dbf_->engine_file() : nullptr;
-	return opennova::audio::resolve_dialog_sets(dialog_bank, bank_->set_index(), p_wav_id);
+	return opennova::audio::resolve_dialog_lines(dialog_bank, bank_->set_index(), p_wav_id);
 }
 
-// Start the next queued dialog line if nothing is currently playing. A line that
-// fails to actually spawn is skipped so the queue never stalls.
+// Start the next queued dialog line if nothing is currently playing. Every line
+// the queue hands out is reported to the host's co-op broadcast first (engine:
+// Simulation::broadcast_dialog_line -> Server_BroadcastDialogLine), its clip or
+// not; a line without a clip, or one that fails to spawn, is skipped so the
+// queue never stalls.
 void MissionAudio::_pump_dialog_queue() {
 	if (_dialog_voice_node() != nullptr) {
 		return; // a line is still playing; _on_dialog_finished pumps the next
@@ -569,9 +609,18 @@ void MissionAudio::_pump_dialog_queue() {
 	if (bank_.is_null()) {
 		return;
 	}
-	std::string set_name;
-	while (dialog_queue_.take_next(set_name)) {
-		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(set_name),
+	opennova::audio::DialogLineRef line;
+	while (dialog_queue_.take_next(line)) {
+		if (line.line >= 0) {
+			const Ref<Simulation> sim = _simulation();
+			if (sim.is_valid()) {
+				sim->broadcast_dialog_line(line.dialog_name, line.line);
+			}
+		}
+		if (line.set_name.empty()) {
+			continue;
+		}
+		AudioStreamPlayer *voice = bank_->spawn_oneshot_2d(this, opennova::to_gd(line.set_name),
 				StringName(kVoiceBus));
 		if (voice != nullptr) {
 			dialog_voice_id_ = ObjectID(voice->get_instance_id());
@@ -700,6 +749,16 @@ void MissionAudio::tick(const Vector3 &p_camera_pos, double p_delta) {
 		perf_voice_writes_ = 0;
 		perf_tick_us_ = static_cast<int64_t>(Time::get_singleton()->get_ticks_usec() - start);
 		return;
+	}
+	// A header-only join's envs emitters, once the host's world stream has
+	// landed (pool 3, the markers, streams last, before the match opens).
+	if (world_envs_pending_) {
+		const Ref<Simulation> sim = _simulation();
+		if (sim.is_valid() && sim->is_joined_in_match() && item_db_.is_valid()) {
+			world_envs_pending_ = false;
+			_add_envs_markers(sim->envs_markers_from_world(item_db_->native_items()));
+			_feed_mixer();
+		}
 	}
 	// Autonomous owners register at the current clock before consuming this
 	// render frame's elapsed time. World-driven callers normally flush chronologically

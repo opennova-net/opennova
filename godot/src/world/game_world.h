@@ -208,6 +208,11 @@ public:
 	// the wire-header world load; S2C 0x7B supplies the mission identity).
 	// Returns the same codes as load_mission.
 	int load_mission_as_joiner(const Ref<JoinTarget> &p_target);
+	// Switch the mounted root to a join's host expansion BEFORE the dial, so the
+	// profile the join vars come from is the host expansion's
+	// (SessionDrive::switch_join_expansion). Returns the failure text, empty on
+	// success; the post-auth reconcile remains the authoritative check.
+	String mount_join_expansion(const String &p_expansion);
 	// The NovaWorld session (a NovaWorldClient), handed over by the shell with
 	// a NovaWorld join or host: the world keeps it playing or hosting through
 	// the match (SessionDrive::adopt_nw_client). A normal exit back to the
@@ -217,6 +222,10 @@ public:
 	Node *release_novaworld_client();
 	// The post-mission route for an exit reason (SessionDrive::post_mission_route).
 	Ref<PostMissionRoute> post_mission_route(int p_reason) const;
+	// The error record of the join that last failed (SessionDrive::last_connection_error).
+	Ref<ConnectionError> get_last_connection_error() const;
+	// The join screen's status while a join preload runs (SessionDrive::join_screen_status).
+	Ref<JoinScreenStatus> get_join_screen_status() const;
 	// Load an in-memory mission through the shared world pipeline. This is
 	// retained as a focused engine-test/tool seam; normal game launches always
 	// use a saved .bms through load_mission() or load_loose_mission().

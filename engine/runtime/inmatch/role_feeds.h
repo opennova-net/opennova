@@ -71,6 +71,13 @@ bool local_death_screen_active(const RoleView &view);
 // replica, the authority's entity flags (the kernel).
 bool local_player_dead(const RoleView &view);
 
+// The deploy leg of the special-key handler over this role's facts (the
+// session bit, the mission attribute, the local player's dead bit and team
+// byte, the deploy-map overlay, the spawn-zone list's team bytes); the rule
+// and its witness are hud::hud_deploy_key_pick. Returns the input-event-12
+// parameter, or -1.
+int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk);
+
 // [orig: the S2C 0x1D landing NapiNPClientMsg_0x01D @0x430840 —
 //  g_SpawnSuccessGate, g_EndRoundWinnerTeam, g_ScoreTeamScore0/1,
 //  g_EndRoundDrawFlag, dword_A81B2C = GetTickCount; the 0x56 board

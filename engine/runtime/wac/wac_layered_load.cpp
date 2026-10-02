@@ -5,6 +5,7 @@
 #include <formats/wac/bytecode.h>
 #include <formats/wac/program.h>
 #include <runtime/wac/compiler.h>
+#include <runtime/wac/mission_effect_interns.h>
 #include <runtime/world/ammo_table_build.h>
 #include <runtime/particle/effect_catalog_names.h>
 #include <formats/particle/parser.h>
@@ -55,6 +56,17 @@ void load_script_effect_catalog(const mission::BootFileSource &files,
             }
         }
     }
+    // Then the names the mission start pools before the WAC compile, in
+    // retail's order (mission_effect_interns.h).
+    const auto read_text = [&files](const char *name) {
+        std::vector<uint8_t> bytes;
+        if (!files.has_file(name) || !files.read_file(name, bytes)) return std::string();
+        return std::string(bytes.begin(), bytes.end());
+    };
+    const std::string ammo = read_text("ammo.def");
+    const std::string weapon = read_text("weapon.def");
+    const std::string powerup = read_text("powerup.def");
+    intern_mission_start_effects(effects, {ammo, weapon, powerup});
 }
 
 WacLayeredLoadStatus wac_layered_load(WacSystem &system,

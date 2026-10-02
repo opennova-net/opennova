@@ -11,6 +11,7 @@
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_message_dispatch.h> // host_session_vars
 #include <runtime/inmatch/session_status.h> // the authority's own 0x58 report
+#include <runtime/hud/hud_toggles.h> // hud_deploy_key_pick
 #include <runtime/hud/session_rules_text.h>
 #include <runtime/menu/command_map_screen.h>
 #include <runtime/mission/mission_kernel.h>
@@ -33,6 +34,29 @@ bool local_death_screen_active(const RoleView &view) {
 bool local_player_dead(const RoleView &view) {
 	if (view.joiner) return view.runtime != nullptr && view.runtime->local_player_dead();
 	return view.kernel != nullptr && view.kernel->local.local_player_dead();
+}
+
+int deploy_key_pick(const RoleView &view, const world::SpawnZoneRegistry &zones, int vk) {
+	if (view.kernel == nullptr) return -1;
+	const world::World &w = view.kernel->world;
+	hud::HudDeployKeyInput in;
+	in.vk = vk;
+	in.in_session = w.rules.mp_session; // g_NapiNPCtx.is_in_session
+	in.single_player_respawn =
+			(w.tables.mission_attrib_flags & world::MissionTables::kMissionAttribSinglePlayerRespawn) != 0;
+	in.local_dead = local_player_dead(view);
+	in.deploy_overlay = view.runtime != nullptr && view.runtime->state().deploy_overlay_active;
+	if (const world::Entity *player = w.registry.get(w.cached.local_player))
+		in.local_team = player->team;
+	std::vector<int16_t> teams;
+	teams.reserve(zones.entries.size());
+	for (const world::EntityHandle handle : zones.entries) {
+		const world::Entity *zone = w.registry.get(handle);
+		teams.push_back(zone != nullptr ? static_cast<int16_t>(zone->team) : int16_t{-1});
+	}
+	in.zone_teams = teams.data();
+	in.zone_count = teams.size();
+	return hud::hud_deploy_key_pick(in);
 }
 
 namespace {
@@ -481,6 +505,26 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 	v.respawn_text = world::deploy_status_text(line,
 			text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
 			text("WPNames", zone_key, "Spawn Point"));
+	// The team-service pair. The rules word follows the ctx+0x68 pick
+	// [orig: @0x553445]: that word is the hosted-session latch, so a hosting
+	// process reads its own multiplayerAttributeFlags_34C (the staged
+	// GameConfig::mp_attributes) and a joiner its S2C 0x08 copy (dword_A821E4)
+	// [orig: set by CNapiGameSession_CreateSession @0x4C9D16 (called from the
+	//  host and single-player starts only), cleared by
+	//  CNapiGameSession_ResetActiveSession @0x4C8AC0; the joiner's
+	//  CNapiNetwork_StartClientConnection @0x4CA160 never writes it].
+	world::DeployTeamButtonsInput buttons;
+	buttons.in_session = view.kernel != nullptr && view.kernel->world.rules.mp_session;
+	buttons.team = player != nullptr ? player->team : uint8_t{0};
+	buttons.dead = instructions.dead;
+	buttons.rules_word = view.staged_mp_attributes;
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		buttons.game_type = view.runtime->game_type();
+		buttons.permanent_death = cs.permanent_death;
+		if (view.joiner) buttons.rules_word = cs.session_rules_flags;
+	}
+	v.team_buttons_shown = world::deploy_team_buttons_shown(buttons);
 	return v;
 }
 

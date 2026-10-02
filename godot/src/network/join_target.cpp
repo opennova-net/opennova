@@ -15,6 +15,14 @@ Ref<JoinTarget> JoinTarget::from_lan_row(const Ref<LanServerRow> &p_row) {
 	target->server_name_ = p_row->get_server_name();
 	target->game_type_ = static_cast<int>(p_row->get_gametype());
 	target->server_flags_ = static_cast<int>(p_row->get_server_flags());
+	// The row's 0x81 SUS2 is the host's expansion: the join switches to it
+	// before it connects.
+	target->expansion_ = p_row->get_expansion();
+	target->expansion_known_ = true;
+	// The row's record already holds the 0x81: the join skips the 0x41.
+	target->discovered_session_ = true;
+	target->session_host_key_ = p_row->get_host_key();
+	target->session_password_required_ = p_row->get_password_required();
 	return target;
 }
 
@@ -45,6 +53,11 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::STRING, proxy_relay)
 	JOIN_TARGET_PROPERTY(Variant::INT, proxy_cookie)
 	JOIN_TARGET_PROPERTY(Variant::INT, lobby_number)
+	JOIN_TARGET_PROPERTY(Variant::STRING, expansion)
+	JOIN_TARGET_PROPERTY(Variant::BOOL, expansion_known)
+	JOIN_TARGET_PROPERTY(Variant::BOOL, discovered_session)
+	JOIN_TARGET_PROPERTY(Variant::INT, session_host_key)
+	JOIN_TARGET_PROPERTY(Variant::BOOL, session_password_required)
 #undef JOIN_TARGET_PROPERTY
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &JoinTarget::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("allows_team_choice"), &JoinTarget::allows_team_choice);

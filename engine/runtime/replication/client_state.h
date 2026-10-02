@@ -357,11 +357,27 @@ struct ClientEntityState {
 	// a non-idle (flags bit0 clear) arrival, queues the record as pending;
 	// everything else commits directly (current = decoded, pending = 0).
 	// Retail's own pending sentinel is 0, ambiguity included. -1 current =
-	// no record arbitrated yet. The wire-dead park (+0x2C0) needs no field:
-	// anim_state_id retains the raw byte and the frozen-row presentation
-	// fallback shows it, which is the parked byte's visible outcome.
+	// no record arbitrated yet.
 	int16_t net_anim_current = -1;
 	int16_t net_anim_pending = 0;
+	// The remote death edge's inputs. A wire-dead record on a live row parks
+	// its anim byte in deathAnimStateId (+0x2C0) and zeroes Health; the S2C
+	// 0x13 parks its word there and zeroes Health too; the mover's death edge
+	// then commits the parked state (or the generic 174, or 175 afloat) on the
+	// next tick and latches Flags bit 2 (rm_entity_flags). An alive player
+	// record raises Health again (the health-class apply), and the respawn
+	// edge clears both [orig: parks @0x4c10f5 / @0x4c0509 / @0x42ebdf; Health
+	// zero @0x4c10fb / @0x4c1027 / @0x4c04e1 / @0x42ebd6; the edges
+	// Entity_UpdateInfantryPlayerBody @0x4b4bf1..0x4b4cdb and
+	// Entity_UpdateInfantryAI @0x4b9c51..0x4b9d3e].
+	int16_t net_death_anim = 0;
+	bool net_health_zero = false;
+	// The corpse timer (moveTimer) the death edge seeds from the def's
+	// deathtime and the dead tail counts down; at 186 the def's decay effect
+	// spawns, and an org1 corpse is destroyed at 0 on a session client
+	// [orig: seeds @0x4b4c3e / @0x4b9c97; tails @0x4b4d63..0x4b4e5f /
+	// @0x4b9e54..0x4b9f93].
+	int32_t net_corpse_timer = 0;
 	uint8_t net_stance_bits = 0; // retained MoveOrder bits 8/9, rebit on player receive
 	uint8_t stance_sound_state = 0; // player body entity+0x304
 	uint8_t radio_request = 0; // entity+885, receive event 0x6D
@@ -720,6 +736,18 @@ struct ClientEntityState {
 	bool net_seat_valid = false;
 };
 
+// The Health a client keeps for a remote player from its compact's
+// health/class byte: the tier midpoint of two rounded products of the def hp
+// (tier 2 between 0.75 hp and hp, tier 1 between 0.4375 hp and 0.75 hp, else
+// half of 0.4375 hp), never the exact fraction.
+// [orig: Entity_SetHealthFromDifficultyByte @0x4AD580..0x4AD68C]
+inline int32_t replica_tier_health(uint8_t health_class_byte, int32_t item_hp) {
+	const int32_t upper = static_cast<int32_t>((int64_t(49152) * item_hp + 0x8000) >> 16);
+	const int32_t lower = static_cast<int32_t>((int64_t(28671) * item_hp + 0x8000) >> 16);
+	const uint8_t tier = (health_class_byte >> 4) & 3u;
+	return tier == 2 ? (upper + item_hp) >> 1 : tier == 1 ? (upper + lower) >> 1 : lower >> 1;
+}
+
 // The carrier a compact-less (no-callback) child's pose follows: its 0x0D
 // TARGET (groundEntity, +0x28) when streamed, else a parent outside pool 0.
 // A pool-0 parent is the occupantEntity (+0x170) back-reference of a gunner
@@ -995,6 +1023,13 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// The 0x0A header tail's state byte: the authority's copy of this client's
+	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
+	// client re-latches its stance from it on every frame that carries the tail
+	// (each such frame also advances health_updates_applied).
+	// [orig: NapiNPClientMsg_0x00A -- the tail read @0x4303e5 (`mov dh, al`),
+	//  the latches @0x430562 / @0x430570, MoveOrder bits 8/9 @0x430576..0x43058f]
+	uint8_t local_stance_bits = 0;
 	// Latest phase-0 0x0A projection of the authority's whole-second
 	// pre-round timer. It is the client's Entity_UpdateAllEntities freeze gate;
 	// networking and maintenance remain live while nonzero.
@@ -1019,6 +1054,11 @@ struct ClientState {
 	hud::KillAnnouncement kill_announcement;
 	// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 	bool permanent_death = false;
+	// The 0x08 record's trailing rules word whole (its bits 13/15/16 are the
+	// latches beside it); the death screen reads its TeamChoose bit on a
+	// joiner [orig: dword_A821E4, NapiNPClientMsg_HandleSessionConfig
+	//  @0x4281D0, the store @0x428368; read by DeathScreen_UpdateUI @0x55345C].
+	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
 	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored
@@ -1045,6 +1085,12 @@ struct ClientState {
 	// read it. [orig: NapiNPClientMsg_0x01D @0x430858; NapiNPClientMsg_GameReset
 	// @0x422849; Server_ProcessRoundEnd @0x5168e4; Game_StartMission @0x524a1f]
 	bool spawn_success_gate = false;
+	// g_EndRoundLingerTimer on a client: the 0x1D arms it at INT32_MAX (a
+	// client never times its own linger out), the host's 0x25 zeroes it, and
+	// the client frame's countdown stores mission exit 4 once it is spent
+	// [orig: NapiNPClientMsg_0x01D @0x430862; NapiNPClientMsg_GameReset
+	//  @0x42281f; Client_ProcessNetworkFrame @0x42c3c3..0x42c3d3].
+	int32_t end_round_linger_ticks = 0;
 	// [orig: NapiNPClientMsg_0x00F @ 0x42E200, byte_A860DD]
 	bool deploy_check_secured_spawn = false;
 	// The joiner's copy of the round clock, in 62 Hz ticks (-1 = untimed),

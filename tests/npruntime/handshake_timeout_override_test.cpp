@@ -12,12 +12,15 @@
 //  NapiNPMessage_Create @0x628048]
 
 #include <runtime/inmatch/joiner_connection.h>
+#include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/session_timeout_config.h>
 
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <string>
@@ -64,9 +67,15 @@ bool check_parser_matches_network_init() {
 	return ok;
 }
 
+struct CsOverride {
+	uint32_t field_index;
+	uint32_t value;
+};
+
 // Drive a joiner through 0x41/0x81/0x42 and answer with a 0x82 whose CLIENT-direction CS block
-// carries `timeout_ms` (field 0) and `msg_out_max` (field 11).
-bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint32_t msg_out_max) {
+// is the JOINTOPERATIONS template with `overrides` applied.
+bool accept_with_cs_overrides(inmatch::JoinerConnection &joiner,
+		const std::vector<CsOverride> &overrides) {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientHello client_hello;
@@ -97,8 +106,8 @@ bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint
 	server_auth.client_cs = jointoperations_cs_fields();
 	server_auth.server_cs = jointoperations_cs_fields();
 	for (CsField &field : server_auth.client_cs) {
-		if (field.field_index == 0) field.value = timeout_ms;
-		if (field.field_index == 11) field.value = msg_out_max;
+		for (const CsOverride &override_field : overrides)
+			if (field.field_index == override_field.field_index) field.value = override_field.value;
 	}
 	const std::vector<uint8_t> server_auth_datagram = nw_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(server_auth));
@@ -107,6 +116,77 @@ bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint
 	return expect(auth_result.outbound.empty() &&
 					joiner.phase() == inmatch::JoinerConnection::Phase::Driving,
 			"the accepted 0x82 enters Driving");
+}
+
+// The 0x82 carrying `timeout_ms` (field 0) and `msg_out_max` (field 11).
+bool accept_with_cs(inmatch::JoinerConnection &joiner, uint32_t timeout_ms, uint32_t msg_out_max) {
+	return accept_with_cs_overrides(joiner, {{0, timeout_ms}, {11, msg_out_max}});
+}
+
+std::vector<uint8_t> frame_server_packet(SessionSequencing &server_tx, uint32_t client_key,
+		const std::vector<ProtocolMessage> &messages) {
+	std::vector<uint8_t> body;
+	if (!frame_session_packet(server_tx, SessionCrypto{kServerScrk, {}, client_key}, messages, body))
+		return {};
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body));
+}
+
+// CS field 10 is the connection's out-of-order queue bound: a future packet is held only while
+// fewer than that many are queued, a negative value holding every one. The joiner reads it off
+// the host's 0x82 like every other cs_dir0 slot.
+// [orig: NapiNPProtocol_HandleSessionPacket @0x626c18..0x626c32 - `test eax,eax; jl` to the
+//  insert, `cmp [esi+7A8h], eax; jge` past it; the template's 100 @0x4cabe0;
+//  NapiNP_HandleServerJoinResponse @0x629b4c..0x629b75]
+bool check_joiner_holds_out_of_order_packets_up_to_field_10() {
+	for (const uint32_t bound : {2u, 0xFFFFFFFFu}) {
+		uint64_t now_ms = 1000;
+		inmatch::JoinerConnection joiner("QueueBoundJoiner", [&now_ms] { return now_ms; });
+		if (!accept_with_cs_overrides(joiner, {{10, bound}})) return false;
+		if (!expect(joiner.session_timeouts().packet_queue_max == static_cast<int32_t>(bound),
+				"the 0x82 overlays CS field 10"))
+			return false;
+		// S2C sequence 1 is lost; 101 later packets arrive behind it.
+		SessionSequencing server_tx = inmatch::make_jo_game_session_sequencing(2, 0);
+		for (int i = 0; i < 101; ++i) {
+			const std::vector<uint8_t> dg = frame_server_packet(
+					server_tx, joiner.client_key(), {make_protocol_message(0x03, {0x00})});
+			(void)joiner.handle_datagram(dg.data(), dg.size());
+		}
+		const std::size_t expected = bound == 2u ? 2u : 101u;
+		if (!expect(joiner.inbound_gap_depth() == expected,
+				bound == 2u ? "a field-10 bound of 2 holds two future packets"
+				            : "a negative field 10 holds every future packet, past the template's 100"))
+			return false;
+	}
+	return true;
+}
+
+// CS field 14 caps the packets one build sends: the template's -1 is unbounded, 1 sends one
+// packet and leaves the rest of the queue, in order, for the next build.
+// [orig: BuildOutgoingPackets @0x62844e (the load), @0x62860b..0x628619 (`max < 0` or
+//  `built < max` loops again); the template's -1 @0x4cac18]
+bool check_joiner_builds_at_most_field_14_packets() {
+	uint64_t now_ms = 1000;
+	inmatch::JoinerConnection joiner("PacketBudgetJoiner", [&now_ms] { return now_ms; });
+	if (!accept_with_cs_overrides(joiner, {{14, 1}})) return false;
+	if (!expect(joiner.session_timeouts().max_packets_per_tick == 1,
+			"the 0x82 overlays CS field 14"))
+		return false;
+	// Three 600-byte records: two fit one 1300-byte packet, the third needs another.
+	std::vector<ProtocolMessage> queue;
+	for (uint8_t tag : {uint8_t{0x31}, uint8_t{0x32}, uint8_t{0x33}})
+		queue.push_back(make_protocol_message(tag, std::vector<uint8_t>(600, tag)));
+	const inmatch::JoinerConnection::FrameMessagesResult first =
+			joiner.frame_messages_detailed(queue);
+	if (!expect(first.datagrams.size() == 1 && first.framed_count == 2 &&
+					first.unbuilt.size() == 1 && first.unbuilt[0].tag == 0x33,
+			"a field-14 budget of one builds one packet and leaves the third record queued"))
+		return false;
+	const inmatch::JoinerConnection::FrameMessagesResult second =
+			joiner.frame_messages_detailed(first.unbuilt);
+	return expect(second.datagrams.size() == 1 && second.framed_count == 1 &&
+					second.unbuilt.empty(),
+			"the next build sends the record the budget left");
 }
 
 bool check_joiner_overlays_the_host_cs_block() {
@@ -125,6 +205,9 @@ bool check_joiner_overlays_the_host_cs_block() {
 		if (!expect(!joiner.session_lost(), "120000 ms after acceptance is still inside the window"))
 			return false;
 		now_ms += 1;
+		if (!expect(!joiner.session_lost(), "the reap waits for the send pump that runs it"))
+			return false;
+		(void)joiner.pump(0);
 		if (!expect(joiner.session_lost() &&
 						joiner.session_loss_reason().find("120 seconds") != std::string::npos,
 				"120001 ms of silence after acceptance reaps, before any gameplay"))
@@ -153,7 +236,7 @@ bool check_joiner_overlays_the_host_cs_block() {
 		now_ms += 30000;
 		if (!expect(!joiner.session_lost(), "30000 ms is inside a 30 s window")) return false;
 		now_ms += 1;
-		(void)joiner.pump(0); // the owner pump latches the reap (poll_session_loss)
+		(void)joiner.pump(0); // the send pump runs the reap (PumpStateMachine case 5)
 		return expect(joiner.session_lost() &&
 						joiner.session_loss_reason().find("30 seconds") != std::string::npos &&
 						joiner.has_disconnect_event() &&
@@ -171,5 +254,7 @@ int main() {
 	bool ok = true;
 	ok = check_parser_matches_network_init() && ok;
 	ok = check_joiner_overlays_the_host_cs_block() && ok;
+	ok = check_joiner_holds_out_of_order_packets_up_to_field_10() && ok;
+	ok = check_joiner_builds_at_most_field_14_packets() && ok;
 	return ok ? 0 : 1;
 }

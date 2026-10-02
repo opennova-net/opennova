@@ -72,6 +72,8 @@ struct TerrainHeightField;
 }
 
 namespace opennova::audio { class SoundSetIndex; }
+namespace opennova::dbf { struct File; }
+namespace opennova::rtxt { struct File; }
 
 namespace opennova::world {
 
@@ -532,6 +534,13 @@ struct MissionTables {
     audio::SoundProfileTable sound_profiles;
     // MissionKernel owns this immutable bank catalog for the world's lifetime.
     const audio::SoundSetIndex *sound_sets = nullptr;
+    // And the mission's co-named dialog bank and its mission text table, which
+    // a dialog line's clip and chat lines resolve against (null when the
+    // mission has none). [orig: DialogSystem_Init @0x5275E0 ->
+    // DialogManager_LoadFromFile @0x44E650 (the .dbf); g_TextMission, read by
+    // Dialog_LoadAudioClip @0x44DDCD / Dialog_LoadAudioClipLocalized @0x44E054]
+    const dbf::File *dialog_bank = nullptr;
+    const rtxt::File *mission_text = nullptr;
     CharacterTraitsTable character_traits;
     // charattr.def: each CHARACTER row's tokenized ATTRIBUTES dword (AutoScope 1,
     // SpreadBonus 2, KnifeBonus 4, Medic 8, WaterGirl 0x20), indexed by the
@@ -706,8 +715,13 @@ struct WorldOutbox {
     // and 0x12 removal. The host drains this once, excluding its loopback.
     // [orig: Entity_HandleDeathEvent @ 0x4070F0; Entity_HandleDeathOnAuthority @ 0x407CC0;
     // Server_SendEntityStatePacket @ 0x509D70; Server_RemoveEntityAndNotify @ 0x50A270]
-    using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent>;
+    using EntityNetworkEvent = std::variant<ItemStateEvent, ItemExplosionEvent, EntityRemoveEvent,
+            DoorRowEvent>;
     std::vector<EntityNetworkEvent> entity_events;
+    // A client's door section requests (C2S 0x1A, doors.cpp carries the
+    // witness); the joiner role drains them into its send queue. The authority
+    // never fills it.
+    std::vector<DoorRowEvent> door_requests;
     // HUD relays pending the host's S2C 0x3F fan.
     std::vector<HudRelay> hud_relays;
     // Powerup ammo grants for REMOTE players' connection pools (world/powerup.h);
@@ -728,6 +742,10 @@ struct WorldOutbox {
 	// HUD owner drains them into its tip [orig: the CTipSystem_HandleEvent
 	// call sites; docs/interface/hud-re.md "The tip"].
 	std::vector<uint8_t> tip_events;
+	// The S2C 0x0F's death-screen HUD blank pending the HUD owner's apply: the
+	// live declutter level goes to the blank level (hud/hud_toggles.h
+	// hud_toggles_death_screen) [orig: NapiNPClientMsg_0x00F @0x42e3f5..0x42e41c].
+	bool hud_detail_blank = false;
     // The destruction presentation events (world/destruction.h) the host drains.
     DestructionEvents destruction;
 	std::vector<VehicleEffectEvent> vehicle_effects; // fixed-tick movement particles

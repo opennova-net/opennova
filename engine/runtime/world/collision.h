@@ -765,6 +765,10 @@ struct ProjectileHit {
     // that proxy (geometry_entity stays invalid on a proxy hit): the client's
     // own row of the entity the retail client's table walk would name.
     EntityHandle wire_registry_twin;
+    // A decoded remote person proxy's wire handle, when the hit is that proxy
+    // (geometry_entity stays invalid): the pool-0 row a retail client's own
+    // table walk would name. 0xFFFF otherwise.
+    uint16_t wire_person_handle = 0xFFFF;
 
     constexpr bool hit() const { return hit_class != ProjectileHitClass::None; }
 };
@@ -1050,6 +1054,10 @@ public:
             std::vector<WirePersonCollisionProxy> persons,
             std::vector<WireDynamicCollisionProxy> dynamics,
             uint16_t local_player_wire_handle = 0xFFFF);
+    // The decoded person's entity+0 boundRadius as its current proxy carries
+    // it (0 when no proxy names the handle): a client's remote person is a
+    // replica row, never a registry entity.
+    int32_t wire_person_bound_radius_q16(uint16_t wire_handle) const;
 
     // Segment arbitration shared by authoritative and visual-only projectile
     // loops. The query is read-only: callers must publish/build collision
@@ -1240,6 +1248,19 @@ public:
 	bool entity_los_clear(World &world, EntityHandle query, EntityHandle endpoint,
 			const int32_t start[3], const int32_t end[3], int32_t height_offset,
 			bool all_types = false, bool query_parent_cleared = false);
+	// A decoded remote person as the endpoint ENTITY, for a client that keeps
+	// no registry entity for it: the two endpoint fields the query reads, its
+	// Flags indoors bit and its parent slot. Retail's endpoint is the client's
+	// own pool-0 row, so the no-entity leg's buried-endpoint pass never runs.
+	// [orig: Physics_CheckTerrainLineOfSight `entityB+24h & 800000h` @0x53B0A0;
+	//  Physics_RaycastFindCollisionEntity entity_b[154] / [91] @0x539AE8..0x539B10]
+	struct LosWireEndpoint {
+		bool indoors = false;
+		EntityHandle parent;
+	};
+	bool wire_person_los_clear(World &world, EntityHandle query, const LosWireEndpoint &endpoint,
+			const int32_t start[3], const int32_t end[3], int32_t height_offset,
+			bool all_types = false);
 	// Same exact query with per-target section matrices retained for a caller-
     // declared stable world phase. The server resets the cache after gameplay
     // movement and again before snapshot fan-out; every recipient LOS ray can
@@ -1318,6 +1339,17 @@ public:
     // [orig: the attrib&2 branch @0x4B2FB8, the source Flags&0x100 gate
     //  @0x4B2FBD, Entity_InvokeCollisionCallback @0x4B2FCC]
     std::vector<GameplayContact> take_powerup_contacts();
+
+    // The same Powerup contacts a wire-replica resolve (resolve_replica) made:
+    // the source is the decoded row's wire handle, which names no registry
+    // entity, so the embedder runs the pickup for its transient copy of the
+    // body. [orig: the same branch; a client's resolver moves its remote
+    // bodies through the org2 tail call @0x4B7CF4]
+    struct ReplicaPowerupContact {
+        uint16_t wire_handle = 0xFFFF;
+        EntityHandle target;
+    };
+    std::vector<ReplicaPowerupContact> take_replica_powerup_contacts();
 
     struct ResolveState {
         int32_t prev_pos[3] = {};   // savedLivePose stand-in (updated per resolve)
@@ -1565,6 +1597,11 @@ public:
 private:
     void build_tables(World &world, bool advance_candidate_slices);
     void build_candidate_slices(World &world);
+    // entity_los_clear over an endpoint described by its read fields.
+    bool entity_los_clear_impl(World &world, EntityHandle listener, EntityHandle source,
+            bool endpoint_present, bool endpoint_indoors, EntityHandle parent_b,
+            const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset,
+            bool all_types, bool query_parent_cleared);
     // Contact-flag side effects shared by both resolver passes (DH/DM/DL damage +
     // the CA/CM entity flags). [orig: the dispatch @ 0x4b30b7-0x4b351e]
     void apply_touch_flags(Entity *ent, uint32_t flags, int16_t &health, bool is_authority);
@@ -1575,6 +1612,7 @@ private:
     std::vector<GameplayContact> change_team_contacts_;
     std::vector<GameplayContact> movement_callback_contacts_;
     std::vector<GameplayContact> powerup_contacts_;
+    std::vector<ReplicaPowerupContact> replica_powerup_contacts_;
 
     struct Instance {
         int32_t model_id = -1;

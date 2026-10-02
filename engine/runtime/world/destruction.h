@@ -515,6 +515,9 @@ struct DeathPiece {
     // [piece+132, orig: @ 0x4936a7..0x4936ae].
     int32_t radius_q16 = 0;
     int32_t bounces_left = 0;  // [piece+117] — decremented per ground contact
+    // False for a silent death's piece: the type's trail effect is never
+    // submitted [orig: Entity_SpawnDeathPieces @0x493811..0x49382a].
+    bool trail = true;
     uint32_t flags = 0;        // debris-type flags byte [piece+119]
     bool settled = false;      // exhausted with flags bit0: persistent ground debris
 };
@@ -594,12 +597,22 @@ struct ItemHitContext {
     int32_t section = 0; // hitRecord[14]
     int32_t damage = 0; // hitRecord[12], tower reads its low byte
     int32_t heading = 0, pitch = 0, roll = 0; // hitRecord[3..5]
+    // The event callback's THIRD argument, cb(entity, phase, flags): bit 0 is
+    // the silent death the gnrc client leg forwards to
+    // Entity_UpdateDeathTransforms (no death sound, effect banks, kz blasts or
+    // piece trails). Every caller passes 0 but the S2C 0x4E kill.
+    // [orig: Entity_KillBySlotId @0x42BD6A; the gnrc leg @0x40703f..0x407045]
+    int32_t event_flags = 0;
 };
 // The client's slot kill (the 0x26 route and the vehicle record's destroyed
 // bit): the health clear and Dead guard, then the section into the hit record
 // and the class callback with phase four, a brain row's state machine included.
 // [orig: Entity_KillBySlotId @ 0x42BCE0]
-void apply_item_state_event(World &world, Entity &target, int16_t section);
+// `flags` is the callback's third argument: 0 for the 0x26 kill and the
+// vehicle record's bit, 1 for the S2C 0x4E join-window kill, whose bit 0 a
+// vehicle def (ItemDef+0x5C type 1) clears [orig: @0x42BD5B..0x42BD5D].
+void apply_item_state_event(World &world, Entity &target, int16_t section,
+        int32_t flags = 0);
 
 void destruction_notify_item_damage(World &world, Entity &target, int phase,
         ItemHitContext hit = {});
@@ -630,7 +643,9 @@ void entity_init_aircraft_death(World &world, Entity &target, bool simulate);
 // Death pieces for one entity [orig: Entity_SpawnDeathPieces @ 0x493400]:
 // per husk section 1..N roll the debris-type row, spawn into the pool, record
 // the spawned-section mask on the entity. Returns the mask.
-uint32_t spawn_death_pieces(World &world, Entity &target);
+// `silent` = the callback flags' bit 0: the pieces fly without their type's
+// trail effect [orig: @0x493811 — the spawnEffect submit behind (frameFlags & 1)].
+uint32_t spawn_death_pieces(World &world, Entity &target, bool silent = false);
 
 // Shared generic falling callback, also called explicitly by vehicle states 21/23.
 // [orig: Entity_ProcessFallingDeathPhysics @0x461D30]

@@ -87,6 +87,15 @@ struct HostAcceptEvent {
 
 struct HandleResult {
 	std::vector<std::vector<uint8_t>> outbound; // fully-framed datagrams to send to `peer`
+	// Datagrams retail writes from INSIDE the server receive pump, which every Server_TickUpdate
+	// runs ungated: the 0x83 packets a client 0x44 asks for, each rebuilt from its retained
+	// records with the current ACK. They never wait for the connection's S2C send boundary; the
+	// owner ships them at their datagram's receive position.
+	// [orig: Server_TickUpdate -> CNapiNetwork_PumpServerProtocolRecv @0x51d895 (flags 0x19:
+	//  0x8 = NapiNPProtocol_PumpRecvQueues @0x6266a0, queue_mask & 1 dispatch @0x6266ca..0x6267ad);
+	//  NapiNP_HandleResendList @0x623800 -> CNapiNPConnection_SendSessionPacket @0x6239b6 ->
+	//  CNapiNPManager_SendTo @0x61f039]
+	std::vector<std::vector<uint8_t>> immediate_outbound;
 	// When the host owner asks to defer an in-match reply, these ordinary ProtocolMessages are
 	// framed at the end of the same owner tick beside the per-frame transport output. This is the
 	// retail send-boundary batching seam (for example S2C 0x57 + 0x0A).
@@ -109,10 +118,13 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // Finalize one host socket receive batch. Future packets latch a missing-sequence check while
 // handle_server_datagram drains; only here, after later datagrams could have closed the gap, does
-// the host emit one 0x84 per connection whose ordered queue is still nonempty.
-// [orig: recv latch in HandleSessionPacket @0x626A00; SendMissingSeqList @0x623560 after PumpRecv]
-std::vector<TickOut> flush_server_missing_requests(
-		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary = false);
+// the host emit one 0x84 per connection whose ordered queue is still nonempty. This is the
+// receive pump's own tail, every server tick: the owner sends the result at once, never behind
+// the connection's S2C send boundary.
+// [orig: recv latch in HandleSessionPacket @0x626c3a; the PumpRecvQueues per-connection tail
+//  @0x6269bb..0x6269d6 -> SendMissingSeqList(conn, 0) @0x6269ce -> CNapiNPManager_SendTo
+//  @0x62376d, run from PumpServerProtocolRecv @0x51d895 ahead of PumpFlags' 0x10 decrement]
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx);
 
 // Drive the periodic emitter for every connection NOT yet Spawned (so entity_batch_count climbs and
 // the spawn gate opens) and frame each session's replies. PeerEnteredWorldStreaming surfaces here

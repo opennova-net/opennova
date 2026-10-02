@@ -77,6 +77,26 @@ int main() {
 	check(!empty.ok, "missing connection string -> ok == false");
 	check(empty.ln == 0 && empty.gs.empty(), "LN/GS default to 0/empty");
 
+	// NK is the only dial authority: retail's parser returns 0 when the string has no
+	// "NK=" at all (no PlaySetup, no dial), whatever NI/NP carry; NI/NP only feed the
+	// proxy rendezvous. [orig: URL_ParseConnectionQueryString @0x54e13c strstr "NK=" ->
+	// jz @0x54e146 (return 0); the event-7 caller UI_DispatchScreenEvent tests the result]
+	const JoiConnection no_nk = parse_joi_connection_string(
+	    "<TITLE>[CK=" + ck + "&NI=" + proxy_ip + "&NP=" + proxy_port + "&BK=986119&]</TITLE>");
+	check(!no_nk.ok, "a .joi without NK is no join (NI/NP are not a dial fallback)");
+	check(no_nk.host_ip.empty() && no_nk.host_port.empty(),
+	      "without NK no dial endpoint is recovered from NI/NP");
+
+	// The in-match join's endpoint gate: a 0 port or a host string under eight
+	// characters is refused (CVSTATCLIENTERR), a short dotted address included.
+	// [orig: UI_EnumerateAndJoinSession @0x56a006]
+	check(joi_endpoint_usable("127.0.0.1", 64206), "a full dotted endpoint is usable");
+	check(joi_endpoint_usable("10.0.0.1", 1), "an eight-character host is usable");
+	check(!joi_endpoint_usable("1.2.3.4", 3000), "a seven-character host is refused");
+	check(!joi_endpoint_usable("127.0.0.1", 0), "a 0 port is refused");
+	check(std::string(kJoinEndpointRejectTag) == "CVSTATCLIENTERR",
+	      "the refusal text is gameerr MP Errors CVSTATCLIENTERR");
+
 	if (g_failures == 0) {
 		std::printf("joi_parse: all checks passed\n");
 		return 0;

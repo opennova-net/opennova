@@ -59,16 +59,22 @@ enum class JoinEntryStep {
 // An answered target dials once every password its word demands is given (a
 // spectator never owes a side password); an undiscovered word enumerates the
 // endpoint first, once (`preflighted`: the enumeration already ran, answered
-// or not); a word offering a choice — spectators, a server or side password,
-// team choice — prompts; anything else dials.
+// or not); a word offering a choice — spectators (and their password), a
+// server or side password — prompts; anything else dials. TeamChoose alone
+// (a plain team game, 0x904) is not a choice: retail tests the discovered
+// word against 0x6038 and joins at once (D-NET-268).
+// [orig: UI_EnumerateAndJoinSession @0x56a296 `test dword_25E5898, 6038h` ->
+//  state 8 (PRE_JOINSESSIONCHOICE) or state 4 (join); the choice panels
+//  UI_ShowPreGameMenuByState @0x568d10 (0x8 password, 0x2000 spectate, 0x30
+//  team password)]
 inline JoinEntryStep join_entry_step(const JoinEntryFacts &facts, bool preflighted) {
 	const int32_t flags = facts.server_flags;
 	if (facts.role_explicit && (!server_password_required(flags) || facts.server_password_given) &&
 			(facts.spectator || !server_has_side_password(flags) || facts.side_password_given))
 		return JoinEntryStep::Dial;
 	if (!server_flags_known(flags) && !preflighted) return JoinEntryStep::Preflight;
-	if (server_allows_spectators(flags) || server_password_required(flags) ||
-			server_has_side_password(flags) || server_allows_team_choice(flags))
+	if (server_allows_spectators(flags) || server_spectator_password_required(flags) ||
+			server_password_required(flags) || server_has_side_password(flags))
 		return JoinEntryStep::Prompt;
 	return JoinEntryStep::Dial;
 }

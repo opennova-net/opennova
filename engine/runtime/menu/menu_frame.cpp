@@ -398,7 +398,10 @@ int MenuFrameCompiler::build_node(const mnu::Window &w, int parent) {
 		};
 		build_items(w.items.items, node.items);
 		build_items(w.list_box.items.items, node.popup_items);
-		if (w.type == mnu::WindowType::Table) build_table_columns_(node);
+		if (w.type == mnu::WindowType::Table) {
+			build_table_columns_(node);
+			apply_table_column_defs_(index, node);
+		}
 		nodes_[static_cast<size_t>(index)] = std::move(node);
 	}
 	for (const mnu::Window &child : w.children) {

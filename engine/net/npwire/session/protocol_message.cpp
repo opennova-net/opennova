@@ -422,14 +422,23 @@ void acknowledge_session_packets(SessionSequencing &seq, uint32_t ack_sequence) 
 	}
 }
 
-void complete_session_send_flush(SessionSequencing &seq) {
-	// Exact retail order: packet construction has already stamped the current
-	// counter; pruning sees that same value, then PumpFlags advances it once.
-	// A lifetime of 1 therefore disappears after its first send. A lifetime of
-	// 310 stamped at C survives through C+308 and is removed at C+309.
+void prune_session_send_boundary(SessionSequencing &seq) {
+	// Packet construction has already stamped the current counter; pruning sees
+	// that same value. A lifetime of 1 therefore disappears after its first send.
 	prune_expired_session_messages(seq);
 	seq.transient_outbound_message_count = 0;
+}
+
+void advance_session_send_flush_counter(SessionSequencing &seq) {
 	++seq.send_flush_counter;
+}
+
+void complete_session_send_flush(SessionSequencing &seq) {
+	// Exact retail order: prune at the built counter, then PumpFlags advances it
+	// once. A lifetime of 310 stamped at C survives through C+308 and is removed
+	// at C+309.
+	prune_session_send_boundary(seq);
+	advance_session_send_flush_counter(seq);
 }
 
 std::vector<uint32_t> build_session_missing_sequence_list(
@@ -545,7 +554,8 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 		seq.missing_request_pending = true;
 		const auto existing = seq.queued_inbound.find(hdr_out.seq_num);
 		if (existing == seq.queued_inbound.end() &&
-		    seq.queued_inbound.size() < SESSION_PACKET_QUEUE_MAX) {
+		    (seq.packet_queue_max < 0 ||
+		     seq.queued_inbound.size() < static_cast<size_t>(seq.packet_queue_max))) {
 			seq.queued_inbound.emplace(
 					hdr_out.seq_num, QueuedSessionPacket{hdr_out, std::move(decoded)});
 		}

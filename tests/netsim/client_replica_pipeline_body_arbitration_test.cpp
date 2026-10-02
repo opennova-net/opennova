@@ -211,7 +211,8 @@ void test_gait_transition_insert() {
 }
 
 // Wire-dead records on a live row PARK the byte (no FSM write); a dead record
-// on an already-dead row commits directly; the respawn edge commits directly.
+// on an already-dead row commits directly; a player's respawn edge commits
+// nothing (the next record does).
 void test_dead_park_and_respawn_edges() {
 	ns::ClientReplicaPipeline view;
 	view.set_item_class_resolver(&classify);
@@ -229,10 +230,18 @@ void test_dead_park_and_respawn_edges() {
 	expect(es->net_anim_current == 181,
 			"dead-on-dead commits directly [orig: @0x4c1109 -> @0x4c1153]");
 
+	// A player's respawn leg commits nothing: it snaps the pose and resets
+	// the body (pending = 0) while the dead bit is still set, then jumps past
+	// the arbitration [orig: @0x4c110f..0x4c114a -> @0x4c11b4;
+	// Entity_ResetToSpawnState @0x4b96ed..0x4b96f7]. The next record
+	// arbitrates the death state away.
+	view.apply(0x0A, player_frame(as::kIdle2, 9, 0));
+	expect(es->net_anim_current == 181,
+			"the respawn record keeps the death state current");
+	expect(es->net_anim_pending == 0, "...with the pending cleared");
 	view.apply(0x0A, player_frame(as::kIdle2, 9, 0));
 	expect(es->net_anim_current == as::kIdle2,
-			"the respawn edge direct-commits [orig: @0x4c110f..0x4c1151]");
-	expect(es->net_anim_pending == 0, "...with the pending cleared");
+			"the next record direct-commits over the death state");
 }
 
 } // namespace

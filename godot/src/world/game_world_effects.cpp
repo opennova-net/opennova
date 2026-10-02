@@ -39,6 +39,12 @@ void GameWorld::route_mission_effects(const Array &p_effects) {
 			if (audio != nullptr) {
 				audio->play_dialog(eff->get_a());
 			}
+		} else if (kind == "dialog_line") {
+			// A co-op host's dialog line: name in the text, line in a, the local
+			// player's class in b (engine: client_effects / resolve_dialog_line).
+			if (audio != nullptr) {
+				audio->play_dialog_line(eff->get_text(), eff->get_a(), eff->get_b());
+			}
 		} else if (kind == "dialog_wav") {
 			// WAC wave/pwave: a scripted voice .wav by filename on its own channel.
 			if (audio != nullptr) {
@@ -61,9 +67,13 @@ void GameWorld::route_script_effects() {
     for (const auto &event : events) effects->spawn_script_effect(event, 0);
 }
 
-// Drain the flight sim's resolved round impacts and present both descriptor legs.
-// Impact particles are generic Always transients in the world domain; their
-// production tick/order and catch-up age survive a multi-tick render frame.
+// Drain the flight sim's resolved round impacts and present their effect and
+// light legs. Impact particles are generic Always transients in the world
+// domain; their production tick/order and catch-up age survive a multi-tick
+// render frame. The impact's sound is not played here: the engine plays it
+// where the impact is produced, through the fire-sound queue's distance delay
+// (world::play_round_impact_sound), and it reaches the audio bank through the
+// fire presenter's drain.
 // [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
 //  handler (terrain @ 0x4e9210, entity @ 0x4e9390, person @ 0x4e98f0, water
 //  @ 0x4e9b80) -> AmmoDef_ProcessImpactEffect @ 0x40a170]
@@ -73,7 +83,6 @@ void GameWorld::route_round_impacts() {
 		return;
 	}
 	EffectWorld *effect_world = get_effect_world();
-	MissionAudio *audio = get_mission_audio();
 	std::vector<opennova::world::RoundImpactPresentation> rows;
 	sim->drain_round_impact_rows(rows);
 	for (const opennova::world::RoundImpactPresentation &row : rows) {
@@ -84,9 +93,6 @@ void GameWorld::route_round_impacts() {
 					mission_to_godot(row.direction), static_cast<int64_t>(row.age_ticks),
 					EffectScene::RENDER_DOMAIN_WORLD, static_cast<int64_t>(row.source_tick),
 					static_cast<int64_t>(row.source_order), row.section_tagged);
-		}
-		if (audio != nullptr && !row.sound.empty()) {
-			audio->fire_soundset(opennova::to_gd(row.sound), pos);
 		}
 		// The light_impact flash rides the effect leg's own gate (the row only
 		// carries light fields when the ammo authors it and the effect presents)

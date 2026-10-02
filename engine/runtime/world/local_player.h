@@ -88,18 +88,20 @@ public:
     PlayerInputFlags input_flags;
     // The local player's MoveOrder word (entity+0x12C) as the last pack wrote
     // it. It persists between packs: the motor, the keyboard look rotation and
-    // the wire mirror read it every tick, and only a pack rewrites it.
+    // the wire mirror read it every tick, and only a pack rewrites it; a
+    // vehicle mover's free-look merge ORs into it meanwhile
+    // (merge_occupant_free_look).
     // [orig: Player_PackInputStateToEntity @0x4df68f..0x4df790 -- the sole
     //  writer of the local player's movement bits; Entity_ApplyFreeLookRotation
-    //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick]
+    //  @0x4ae090 and Entity_UpdateInfantryPlayerBody @0x4b40e0 read it per tick;
+    //  the merges @0x48b897 / @0x490d6d]
     PlayerBodyInput move_order;
     // One frame of movement keys: stores the keys plus the sim-owned stance
-    // latch onto `input`, runs the witnessed movement-held unscope (while
-    // SETTLED at scope on a Scoped weapon, any direction key routes through
-    // the full unscope; the ForceScoped pin keeps pinned sights raised), and
-    // refreshes the view aggregates. [orig: Player_PackInputStateToEntity
-    // @0x4df450 — g_MovementKeyHeld @0x4df29c; the unscope route
-    // @0x4df4c9..0x4df4ec; the ForceScoped pin @0x4df12d]
+    // latch onto `input` and refreshes the view aggregates, whose binocular
+    // suppression reads the input word this frame's fold will leave. The
+    // movement-held latch and the unscope-on-move belong to the pack
+    // (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
+    // `test byte ptr g_InputFlags, 1Eh` @0x4de3ae]
     void set_movement_keys(bool forward, bool back, bool left, bool right,
             bool lean_left, bool lean_right, bool jump);
     // The zero-step keys [orig: Player_AdjustWeaponZoomLevel @0x4dbcc0]: the
@@ -109,16 +111,38 @@ public:
     // retail MountSlot+8). Returns whether the zero changed.
     bool request_scope_zero(int delta);
     void set_view_keys(bool free_look, bool up, bool down, bool left, bool right);
-    // Stance SELECT request (0 stand / 1 crouch / 2 prone): mutual exclusion
-    // at apply, REFUSED while the equipped weapon has ForceCrouch or the
-    // player sits in the UseGun seat. Returns whether the latch changed.
+    // The stance keys' action ids, the C2S 0x1D body: 0 stand / 1 crouch /
+    // 2 prone -> 172 / 169 / 170. [orig: Input_HandleActionBinding_0 cases
+    //  172 @0x4e0e3e, 169 @0x4e0d77 (`push 0A9h` @0x4e0dbb), 170 @0x4e0df3]
+    static constexpr uint16_t kStanceActionIds[3] = {0xAC, 0xA9, 0xAA};
+    // The bare kernel's stance SELECT (0 stand / 1 crouch / 2 prone), which
+    // has no session to loop the C2S 0x1D through: the keys' refusals, then
+    // the handler's mutual-exclusion apply at once. Returns whether the latch
+    // changed. A session's players send the 0x1D instead (HostRole /
+    // JoinerRole::request_stance).
     // [orig: input cases 169/170/172 @0x4e0d77.. -> NapiNPServerMsg_HandleStanceChange
     // @0x501c60; the ForceCrouch gate Entity_CheckWeaponSeatFlags(equipped,
     // 0x40000) @0x4e0d8a; the `parentSlot == 3` gate @0x4e0da0..0x4e0db5]
     bool request_stance(int stance);
+    // The stance keys' own refusals, ahead of the C2S 0x1D send: a ForceCrouch
+    // weapon or the UseGun seat. [orig: @0x4e0d8a; @0x4e0da0..0x4e0db5]
+    bool stance_request_allowed() const;
+    // The stance latches and MoveOrder's stance bits from one stance pair
+    // (bit 0 prone, bit 1 crouch), written together by both their writers:
+    // the authority's 0x1D handler when the sender is its own player, and on
+    // a non-authority client every 0x0A whose header carries the recipient
+    // tail. [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 -- MoveOrder
+    //  @0x501cc9..0x501d01, the latches @0x501d1b / @0x501d2d;
+    //  NapiNPClientMsg_0x00A @0x430549..0x43058f]
+    void latch_stance(uint8_t bits);
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone) — the
     // dword_B76484 prone-latch equivalent the render-slot drape gate reads.
     int stance_latch() const { return stance_latch_; }
+    // A vehicle attach or detach of the local player clears both latches
+    // with MoveOrder's stance bits: the player stands on mounting and on
+    // dismounting. [orig: Entity_ProcessVehicleAttach @0x435c42..0x435c59;
+    //  Entity_DetachFromVehicle @0x43560c..0x435624]
+    void clear_stance_latches();
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
     // Point the look straight at a mission-space target from a mission-space
@@ -181,7 +205,9 @@ public:
     // The frame's input onto the local player's body before the logic tick
     // (the view-flag stamps ride along); no local player = no-op. The held
     // keys fold into `input_flags` every frame; `pack_input` runs the pack
-    // (the word into `move_order`, then the clear), which retail runs only
+    // (the word into `move_order` and its movement legs -- the movement-held
+    // latch, the binocular toggle drop, the unscope-on-move and the hip-fire
+    // camera legs -- then the clear), which retail runs only
     // inside the client network frame's send block -- every frame for the
     // host and single player, every send-holdoff period for a joiner. The
     // persisted `move_order` reaches the body every frame either way.
@@ -192,12 +218,17 @@ public:
     // upper-body decay. Writes persistent aim, including the next input fold.
     // [orig: Entity_UpdateInfantryPlayerBody @ 0x4B40E0, block @0x4B5966..0x4B5C97]
     void apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick);
-    // Preserve the retail process-global oscillators across a kernel replacement.
-    // Other local input, weapon and view state still belongs to the new mission.
-    void carry_scoped_aim_drift_from(const LocalPlayer &previous);
+    // Preserve the retail process globals across a kernel replacement: the
+    // scoped-aim oscillators and the input pack's analog hysteresis. Other
+    // local input, weapon and view state still belongs to the new mission.
+    void carry_process_globals_from(const LocalPlayer &previous);
     // The post-tick local view in retail order: the sim-wrote-the-view fold,
     // then the per-frame view promoter and the camera compose.
     void run_local_view_tick();
+    // The authority's own-slot fire gate the embedding role decides each frame
+    // ahead of the weapon walk (true outside an MP listen host).
+    // [orig: Entity_FireWeaponAndSendPacket @0x42be3a]
+    bool authority_fire_admitted = true;
     // The equipped-slot FSM pump: the local player's visit in the world's
     // weapon-action walk (World::pump_weapon_actions calls it at the local
     // player's own pool-0 slot), after run_local_view_tick.
@@ -211,6 +242,12 @@ public:
     // joiner frame runs it between its heading fold and its own weapon pump.
     void tick_view();
     void update_aim_target();
+    // The aim-ray entity when it is a decoded remote person (a joiner's
+    // replica row, which has no registry handle): its wire handle, written
+    // beside the body's head-look target by the same acquisition, else
+    // 0xFFFF. [orig: Entity_UpdateInfantryPlayerBody -- headLookTarget (+0x344)
+    //  @0x4b4f75 / @0x4b5036, the hit of a walk over every pool-0 row]
+    uint16_t aim_wire_person() const { return aim_wire_person_; }
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
@@ -231,6 +268,7 @@ private:
     float look_accum_y_ = 0.0f;
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone).
     int stance_latch_ = 0;
+    uint16_t aim_wire_person_ = 0xFFFF;
     bool medic_dead_edge_seen_ = false;
     // These process globals have no round, weapon, scope-toggle or player-spawn
     // reset writer. Each axis resets its drift only when it observes a changed
@@ -244,6 +282,19 @@ private:
     };
     ScopedAimAxis scope_yaw_;
     ScopedAimAxis scope_pitch_;
+    // The input pack's analog hysteresis: written only by the pack, never
+    // reset. [orig: byte_B79442 (axes latch), byte_B79440 (throttle latch),
+    //  byte_B79445/44/43 (the last stored X/Y/Z), byte_B79441 (the last throttle)]
+    struct AnalogPackState {
+        bool axes_active = false;
+        bool throttle_active = false;
+        int8_t last_x = 0, last_y = 0, last_z = 0;
+        int8_t last_throttle = 0;
+    };
+    AnalogPackState analog_pack_;
+    // The pack's analog legs onto the local player's entity+0x130..+0x133.
+    // [orig: Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+    void pack_analog_axes(Entity &entity, bool moving);
 };
 
 } // namespace opennova::world

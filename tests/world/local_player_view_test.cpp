@@ -581,12 +581,12 @@ void test_binocular_sway_seeds_once_per_activation() {
 
     // Movement suppresses the optical view. Rendering that state clears the
     // latch; the next rendered activation, not the release tick, draws again.
-    v.move_held = true;
+    v.movement_input = true;
     tick();
     CHECK(!v.binoculars_view_active);
     player.present_view_frame();
     CHECK(!t.binocular_sway_latched);
-    v.move_held = false;
+    v.movement_input = false;
     tick();
     CHECK(lw.w.prng16_state == expected);
     player.present_view_frame();
@@ -724,7 +724,7 @@ void test_tip_events_from_scope_nvg_and_binoculars() {
         local_player_view_tick(&lw.w, v, t, s);
         CHECK(events(lw.w) == std::vector<uint8_t>{opennova::hud::kTipEventBinocularsOff});
         // Raised while the view cannot come up (the player moving): the fade.
-        v.move_held = true;
+        v.movement_input = true;
         CHECK(local_player_binoculars_toggle(lw.w, w, v, t));
         local_player_view_tick(&lw.w, v, t, s);
         CHECK(!v.binoculars_view_active);
@@ -2236,7 +2236,7 @@ void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
     ScopedAimFixture previous;
     previous.sample(0, -214, -408);
     ScopedAimFixture replacement;
-    replacement.player.carry_scoped_aim_drift_from(previous.player);
+    replacement.player.carry_process_globals_from(previous.player);
     // A mission reset seeds new aim and PRNG, but not the oscillators. A
     // non-boundary scope raise continues the previous drift and direction.
     replacement.sample(1, -428, -816);
@@ -2245,6 +2245,198 @@ void test_scoped_aim_survives_kernel_replacement_without_sharing_sessions() {
     ScopedAimFixture independent;
     independent.sample(1, 0, 0);
     CHECK(independent.w.prng16_state == World::kMissionPrng16Seed);
+}
+
+// A direction key in the packed word drops the raw binocular toggle: the
+// view lowers and stays down after the key releases. Between a joiner's send
+// boundaries nothing is packed, so the toggle survives until the boundary
+// pack reads the held key. [orig: Player_PackInputStateToEntity @0x4df4b2 --
+// `mov g_BinocularsToggle, 0` @0x4df4c2 when the F/B/L/R word is nonzero;
+// Player_UpdatePerFrame @0x4de37b re-derives the raised pose from it]
+void test_pack_drops_the_binocular_toggle_on_movement() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    CHECK(local_player_binoculars_toggle(f.w, f.player.weapon, f.player.view,
+            f.player.view_tracker));
+    CHECK(f.player.view.binoculars_requested);
+    // Looking around and leaning are not movement.
+    f.player.set_view_keys(false, false, false, true, false);
+    f.player.set_movement_keys(false, false, false, false, true, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.view.binoculars_requested);
+    f.player.set_view_keys(false, false, false, false, false);
+    // A joiner between boundaries: the held key accumulates, nothing packs.
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.view.binoculars_requested);
+    // The boundary pack sees the key and drops the toggle; releasing the key
+    // does not bring the binoculars back.
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.binoculars_requested);
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.binoculars_requested);
+    CHECK(!f.player.view.binoculars_raised);
+}
+
+// The movement-held latch and the unscope-on-move run inside the pack, from
+// the packed word: a joiner between send boundaries keeps its settled scope
+// with a direction key down, and the boundary pack latches g_MovementKeyHeld
+// and routes the unscope; a release clears the latch at the next pack. The
+// binocular suppression instead reads the frame's input word, so it holds
+// from the frame the key goes down. [orig: Player_PackInputStateToEntity
+// @0x4df4b2..0x4df4f9 -- latch @0x4df4bb / @0x4df4f9, the unscope route
+// @0x4df4c9..0x4df4ec; Player_UpdatePerFrame `test byte ptr g_InputFlags, 1Eh`
+// @0x4de3ae]
+void test_pack_owns_the_movement_latch_and_unscope() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = DEF_WEAPON_FLAG_SCOPED;
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    CHECK(f.player.view.scope_settled);
+    CHECK(!f.player.view.move_held);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/false);
+    CHECK(f.player.view.scope_settled);
+    CHECK(!f.player.view.move_held);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.scope_settled);
+    CHECK(f.player.view.move_held);
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.view.move_held);
+
+    ScopedAimFixture b;
+    b.player.weapon.def.flags = 0;
+    b.player.view.scope_engaged = false;
+    b.player.view.scope_settled = false;
+    CHECK(local_player_binoculars_toggle(b.w, b.player.weapon, b.player.view,
+            b.player.view_tracker));
+    CHECK(b.player.view.binoculars_raised);
+    b.player.set_movement_keys(false, true, false, false, false, false, false);
+    CHECK(!b.player.view.binoculars_raised);
+    CHECK(b.player.view.binoculars_requested);
+}
+
+// A NoMove weapon strips the direction and lean bits from the word before the
+// pack reads it; jump, the look keys and free look survive. An OnlyScoped
+// weapon answers the seat-flag query only once promoted (the mortar walks
+// while carried, stands while set up). [orig: Player_PackInputStateToEntity --
+// Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c,
+// `g_InputFlags &= 0xFFFF9FE1` @0x4df482; Entity_CheckWeaponSeatFlags @0x540D00]
+void test_pack_masks_movement_under_a_nomove_weapon() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    f.player.set_movement_keys(true, false, true, false, true, false, true);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.move_order.moving);
+    CHECK(f.player.move_order.direction_bits == 0);
+    CHECK(!f.player.move_order.lean_left);
+    CHECK(f.player.move_order.jump);
+    CHECK(!f.player.view.move_held);
+    CHECK(f.player.input_flags.prev == kInputFlagJump);
+
+    ScopedAimFixture m;
+    m.player.weapon.def.flags =
+            static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE | DEF_WEAPON_FLAG_ONLYSCOPED);
+    m.player.view.scope_engaged = false;
+    m.player.view.scope_settled = false;
+    m.player.set_movement_keys(true, false, false, false, false, false, false);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(m.player.move_order.moving);
+    m.player.view.scope_engaged = true;
+    m.player.view.scope_settled = true;
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving);
+    CHECK(m.player.view.scope_settled);
+}
+
+// The pack's analog legs: the forward/back key handlers also write the X axis
+// word (-1023 / +1023; back's row dispatches after forward's, so it wins when
+// both are held), shifted to a byte; a change of more than 32 latches the
+// axes on, a moving pack latches them off, and only a latched pack stores
+// them (else 0). The throttle has its own latch, a 0x14 deadzone, and drops
+// while a lean key is in the word. [orig: Input_HandleActionBinding_0 cases
+// 151/152 @0x4e0c6e..0x4e0cc5; Input_InitBindingSystem's row-order list;
+// Player_PackInputStateToEntity @0x4df793..0x4df8f8]
+void test_pack_analog_axes_and_their_hysteresis() {
+    ScopedAimFixture f;
+    f.player.weapon.def.flags = 0;
+    f.player.view.scope_engaged = false;
+    f.player.view.scope_settled = false;
+    // Opposing keys: no movement, the X word is back's.
+    f.player.set_movement_keys(true, true, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!f.player.move_order.moving);
+    CHECK(f.entity().net_analog_x == 127);
+    CHECK(f.entity().net_analog_y == 0 && f.entity().net_analog_z == 0);
+    // Released: the latch holds, the axis follows to 0.
+    f.player.set_movement_keys(false, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.entity().net_analog_x == 0);
+    // Forward alone moves: the latch drops and the axes zero.
+    f.player.set_movement_keys(true, false, false, false, false, false, false);
+    f.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(f.player.move_order.moving);
+    CHECK(f.entity().net_analog_x == 0);
+
+    // A set-up mortar masks the movement but not the X word.
+    ScopedAimFixture m;
+    m.player.weapon.def.flags = static_cast<int32_t>(DEF_WEAPON_FLAG_NOMOVE);
+    m.player.set_movement_keys(true, false, false, false, false, false, false);
+    m.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(!m.player.move_order.moving);
+    CHECK(m.entity().net_analog_x == -128);
+
+    // The throttle: inside the deadzone it reads 0; past it the latch stores
+    // it; a lean key drops it.
+    ScopedAimFixture t;
+    t.player.weapon.def.flags = 0;
+    t.player.view.scope_engaged = false;
+    t.player.view.scope_settled = false;
+    t.player.input.analog_throttle = 0x13;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 0);
+    t.player.input.analog_throttle = 64;
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 64);
+    t.player.set_movement_keys(false, false, false, false, true, false, false);
+    t.player.apply_player_input_pre_tick(/*pack_input=*/true);
+    CHECK(t.entity().analog_throttle == 0);
+}
+
+// The authority arm's own-slot gate: a refused local shot spawns no round
+// (no ring record, no live round); an admitted one does. [orig:
+// Entity_FireWeaponAndSendPacket @0x42be3a -> return 0 @0x42c079, ahead of
+// Server_ClientFiredRound @0x42bf34]
+void test_authority_fire_gate_refuses_the_round() {
+    for (const bool admitted : {false, true}) {
+        ScopedAimFixture f;
+        WeaponInstallData data;
+        data.name = "WPN_AIM";
+        data.clipsize = 30;
+        data.rows.resize(3);
+        std::snprintf(data.rows[0].name, sizeof(data.rows[0].name), "idle");
+        std::snprintf(data.rows[1].name, sizeof(data.rows[1].name), "fire");
+        data.rows[1].delayend = 6;
+        std::snprintf(data.rows[2].name, sizeof(data.rows[2].name), "recoil");
+        local_weapon_install(f.w, f.player.weapon, data, false, false, nullptr, f.player.view);
+        f.w.tables.weapons.entries[1].ammo_index = 1;
+        f.w.tables.ammo.entries.resize(2);
+        f.w.tables.ammo.entries[1].valid = true;
+        local_weapon_set_input(f.player.weapon, f.player.view, true, true, false);
+        LocalWeaponPumpIO io;
+        io.view = &f.player.view;
+        io.is_authority = true;
+        io.authority_fire_admitted = admitted;
+        // Off the player-class bit the server's origin-distance test passes
+        // through, leaving the own-slot gate the only refusal in play.
+        // [orig: Server_ClientFiredRound @0x50c172 (`Flags & 0x100`)]
+        f.entity().flags &= ~kEntityFlagPlayer;
+        const int before = f.w.out.rounds.count;
+        local_weapon_pump_tick(f.w, f.player.weapon, io);
+        CHECK(f.w.out.rounds.count == before + (admitted ? 1 : 0));
+    }
 }
 
 void test_scoped_aim_body_input_camera_and_fired_round() {
@@ -2464,6 +2656,11 @@ int main() {
     test_scoped_aim_original_sequences();
     test_scoped_aim_gates_and_independent_stance_resets();
     test_scoped_aim_body_input_camera_and_fired_round();
+    test_pack_drops_the_binocular_toggle_on_movement();
+    test_pack_owns_the_movement_latch_and_unscope();
+    test_pack_masks_movement_under_a_nomove_weapon();
+    test_pack_analog_axes_and_their_hysteresis();
+    test_authority_fire_gate_refuses_the_round();
     test_scoped_aim_survives_kernel_replacement_without_sharing_sessions();
     test_target_lock_cadence_and_audio();
     {

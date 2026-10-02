@@ -330,4 +330,18 @@ void broadcast_player_leaving_text(std::vector<NapiNPConnection> &roster,
 	fan_game_text(roster, leaver, kGameTextPlayerLeaving, world); // [orig: @0x51b6a8]
 }
 
+void Server_BroadcastDialogLine(NapiNPServerCtx &ctx, const std::string &dialog_name,
+		int16_t line) {
+	if (ctx.is_authority == 0) return;
+	DialogLine record;
+	record.dialog_name = dialog_name;
+	record.line = line;
+	const std::vector<uint8_t> body = encode_dialog_line(record);
+	for (NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (!is_in_match(c) || c.link.transport == nullptr) continue;
+		if (c.link.mode == replication::TransportMode::Loopback) continue; // 0x10
+		c.link.transport->host_send(s2c::DIALOG_LINE, body);
+	}
+}
+
 } // namespace opennova::inmatch

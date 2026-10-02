@@ -312,6 +312,8 @@ void MenuRuntime::replay_state_() {
 					state->scroll_range.maximum, state->scroll_range.page,
 					state->scroll_range.value);
 		if (state->has_selected_set) frame_->set_widget_selected_set(index, state->selected_set);
+		if (state->has_table_columns)
+			frame_->set_widget_table_columns(index, state->table_columns);
 		if (state->has_table_rows) frame_->set_widget_table_rows(index, state->table_rows);
 		if (state->has_clip)
 			frame_->set_widget_clip_rect(index, state->clip_enabled, state->clip_left,
@@ -638,8 +640,44 @@ bool MenuRuntime::table_multiselect_(int id) const {
 int MenuRuntime::table_column_count_(int id) const {
 	const mnu::Window *w = index_.window(id);
 	if (w == nullptr) return 0;
+	if (const MenuWidgetRuntimeState *state = saved_state_(id);
+			state != nullptr && state->has_table_columns)
+		return static_cast<int>(state->table_columns.size());
 	const mnu::TableColumn &column = w->table_data.column;
 	return column.has_count && column.count >= 1 ? column.count : 1;
+}
+
+bool MenuRuntime::table_set_column_count(int id, int count) {
+	if (widget_kind_of(id) != kKindTable || count < 1) return false;
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (!state.has_table_columns)
+		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
+				MenuTableColumnDef{});
+	state.table_columns.resize(static_cast<size_t>(count));
+	state.has_table_columns = true;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_table_columns(index, state.table_columns);
+	return true;
+}
+
+bool MenuRuntime::table_init_column(int id, int column, int width, const std::string &label,
+		int justify, int vjustify) {
+	if (widget_kind_of(id) != kKindTable) return false;
+	if (column < 0 || column >= table_column_count_(id)) return false;
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (!state.has_table_columns)
+		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
+				MenuTableColumnDef{});
+	state.has_table_columns = true;
+	MenuTableColumnDef &def = state.table_columns[static_cast<size_t>(column)];
+	def.defined = true;
+	def.width = width;
+	def.label = label;
+	def.justify = justify;
+	def.vjustify = vjustify;
+	const int index = frame_index(id);
+	if (index >= 0) frame_->set_widget_table_columns(index, state.table_columns);
+	return true;
 }
 
 void MenuRuntime::table_add_row(int id, const std::vector<std::string> &cells) {

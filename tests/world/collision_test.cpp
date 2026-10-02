@@ -1099,6 +1099,38 @@ void test_resolver_move_callback_contact_replaces_solid_push() {
     const auto replica_pos = resolve_transition(replica, false);
     CHECK(replica_pos.second == replica_pos.first);
     CHECK(replica.cw.take_movement_callback_contacts().empty());
+
+    // A client's resolver moves its REMOTE player bodies too, and their
+    // Powerup contact runs the pickup on that client's copy of the row: the
+    // wire-replica resolve publishes it on its own stream, keyed by the row's
+    // wire handle (the source names no registry entity).
+    // [orig: Entity_MovementCollisionResolver @0x4B2FB8..0x4B2FCC; the org2
+    //  tail's resolver call @0x4B7CF4]
+    {
+        Rig remote(box_model(1, 0, 2.0, 2.0, 3.0));
+        Entity *pack = remote.world.registry.get(remote.building);
+        pack->has_item_def = true;
+        pack->item_attrib = kItemAttribPowerup;
+        CollisionWorld::ResolveState state;
+        const auto resolve_at = [&](double x, uint32_t tick) {
+            int32_t pos[3] = {fx(x), fx(10.0), 0};
+            int32_t vel[2] = {0, 0};
+            int32_t vel_z = 0;
+            EntityHandle ground;
+            remote.cw.resolve_replica(remote.world, state, pos, vel, vel_z, 0, fx(1.8),
+                                      fx(0.4), true, tick, 43, 1u, nullptr, 0, 0x0042,
+                                      nullptr, &ground);
+        };
+        resolve_at(12.8, 0);
+        resolve_at(11.6, 1);
+        const auto picked = remote.cw.take_replica_powerup_contacts();
+        CHECK(picked.size() == 1);
+        if (!picked.empty()) {
+            CHECK(picked[0].wire_handle == 0x0042);
+            CHECK(picked[0].target == remote.building);
+        }
+        CHECK(remote.cw.take_powerup_contacts().empty());
+    }
 }
 
 // ---------------------------------------------------------------------------

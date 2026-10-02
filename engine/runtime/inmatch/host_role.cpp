@@ -184,6 +184,9 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// are a session peer's QueueReliableMessage(0xD) too); its handler
 		// reads the server context [orig: NapiNPServer_HandleChatMessage
 		// @0x513760].
+		// Its death screen's team change rides it too
+		// [orig: DeathScreen_OnSwapTeams @0x5535BA -> NetPacket_SendPingRequest
+		//  @0x42DD90 (a misnomer), QueueReliableMessage(0x4D) @0x42DDB1].
 		// The listen client's visible-players refreshes (the C2S 0x22 / 0x23
 		// pair its 0x0F / 0x4D / 0x50 handlers queue) and its emote request
 		// ride the same queue [orig: NapiNPClientMsg_0x00F @0x42e66c..0x42e6ab;
@@ -195,6 +198,12 @@ void HostRole::drain_host_client_gameplay_requests() {
 		// waypoint / punt sender is a bare QueueReliableMessage on the local
 		// client's connection, and the server handlers read the host
 		// context (server_squad.h).
+		// So does its stance key's 0x1D: the handler latches the host's own
+		// player on the frame after the press, ahead of that frame's body
+		// update. Retail's pack runs before it and is overwritten by it; here
+		// the pack follows and rewrites MoveOrder's stance from the same latches.
+		// [orig: NapiNPServerMsg_HandleStanceChange @0x501c60 from
+		//  Server_TickUpdate's receive pump @0x51d895]
 		// [orig: NetPacket_SendChatMessage @0x42dde6 (0x17),
 		//  NetPacket_SendWeaponSlotSwitch @0x42dc20 (0x43),
 		//  NetPacket_SendCommandType44 @0x42dca0 (0x44),
@@ -212,15 +221,17 @@ void HostRole::drain_host_client_gameplay_requests() {
 				dg.tag != c2s::MOUNTED_WEAPON_SLOT_SELECT &&
 				dg.tag != c2s::MEDIC_REQUEST && dg.tag != c2s::CHAT_MESSAGE &&
 				dg.tag != c2s::PLAYER_SYNC_REQUEST && dg.tag != c2s::VISIBLE_PLAYERS_REQUEST &&
-				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST) {
+				dg.tag != c2s::EMOTE_REQUEST && dg.tag != c2s::RADIO_CALL_REQUEST &&
+				dg.tag != c2s::TEAM_CHANGE_REQUEST && dg.tag != c2s::STANCE_CHANGE) {
 			deferred.push_back(std::move(dg));
 			continue;
 		}
 		// The chat handler, the snapshot builder, the radio call (its
-		// designation table and zone test) and the squad handlers read the
-		// host context.
+		// designation table and zone test), the squad handlers and the team
+		// change read the host context.
 		const bool reads_ctx = squad || dg.tag == c2s::CHAT_MESSAGE ||
-				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST;
+				dg.tag == c2s::VISIBLE_PLAYERS_REQUEST || dg.tag == c2s::RADIO_CALL_REQUEST ||
+				dg.tag == c2s::TEAM_CHANGE_REQUEST;
 		std::vector<ProtocolMessage> messages;
 		messages.push_back(make_protocol_message(dg.tag, std::move(dg.body)));
 		inmatch::ServerDispatchInputs inputs;
@@ -233,21 +244,48 @@ void HostRole::drain_host_client_gameplay_requests() {
 	for (replication::Datagram &preserved : deferred) state.host_loop.deliver_c2s(preserved.tag, std::move(preserved.body));
 }
 
-// The listen host's own call rides its loopback client like the reload
-// request: the server handler broadcasts the 0x1E line to everyone including
-// this client.
+// The listen host's own call queues on its own client's local connection,
+// which its client frame sends: the server handler then broadcasts the 0x1E
+// line to everyone including this client.
+// [orig: Input_HandleActionBinding case 217 -> QueueReliableMessage(0x2E)
+//  @0x49b50c, no is_authority branch]
 bool HostRole::send_medic_request() {
-	if (!state.host_owner.serve_and_play) return false;
+	if (!state.host_owner.serve_and_play || !state.client_runtime) return false;
 	opennova::MedicRequest request;
 	request.entity_index = kernel_->world.cached.local_player.packed;
-	state.host_loop.client_send(opennova::c2s::MEDIC_REQUEST, opennova::encode_medic_request(request));
-	return true;
+	return state.client_runtime->queue_host_message(opennova::c2s::MEDIC_REQUEST,
+			opennova::encode_medic_request(request));
+}
+
+bool HostRole::request_stance(int stance) {
+	if (kernel_ == nullptr || stance < 0 || stance > 2 || !state.client_runtime) return false;
+	if (!kernel_->local.stance_request_allowed()) return false;
+	return state.client_runtime->queue_stance_change(world::LocalPlayer::kStanceActionIds[stance]);
 }
 
 // The listen frame: input -> the local player's body input, Server_TickUpdate
 // (the C2S drain, ONE logic tick, the 0x0A fan) through the shared owner
 // loop, the local view/weapon pumps, then the local ClientState fold.
 // [orig: Game_ProcessMainFrame @0x5263f0]
+bool HostRole::local_fire_admitted() const {
+	const mission::MissionKernel &kernel = *kernel_;
+	const NapiNPServerCtx &ctx = state.host_owner.ctx;
+	// The gate's session tests: the retail is_in_session fact and the
+	// is_client bit; the shooter is the local player here by construction.
+	// [orig: `cmp is_in_session` @0x42be12, `cmp is_mp_session_peer` @0x42be1e,
+	//  `cmp edi, g_LocalPlayerEntity` @0x42be26]
+	if (!kernel.world.rules.mp_session || ctx.is_mp_session_peer == 0) return true;
+	if (!kernel.world.cached.local_player.valid() || state.client_runtime == nullptr) return true;
+	// Entity_ValidatePtr: the player slot that owns the entity; none admits
+	// [orig: `cmp eax, ebx; jz` @0x42be2e].
+	for (const NapiNPConnection &conn : ctx.np_protocol.connection_list) {
+		if (conn.link.owned_entity != kernel.world.cached.local_player) continue;
+		return Server_AcceptsPlayerFireTick(conn, state.client_runtime->current_tick(),
+				kernel.world.logic_tick, ctx.config.effective_send_holdoff_ticks());
+	}
+	return true;
+}
+
 void HostRole::run_tick(const TickInput &input) {
 	mission::MissionKernel &kernel = *kernel_;
 	// The socketless host (the SP listen server, the headless test rigs):
@@ -274,10 +312,12 @@ void HostRole::run_tick(const TickInput &input) {
 		kernel.world.profile->add(devtools::Slot::SIM_HOST_PREP,
 				static_cast<int64_t>(io::perf_now_us()) - prep_start);
 	drain_host_client_gameplay_requests();
-	// The host dictates send holdoffs but receives none, so its own client
-	// frame's send block -- and the input pack inside it -- opens every frame
-	// [orig: Client_ProcessNetworkFrame @0x42C3DD -> @0x42C3E9; the period
-	//  arrives only as a CS field-3 update, HandleCSConfigUpdate @0x621940].
+	// The host dictates its own client's local connection (no peer address) a
+	// one-tick holdoff, so that client frame's send block -- and the input
+	// pack inside it -- opens every frame [orig: Client_ProcessNetworkFrame
+	//  @0x42C3DD -> @0x42C3E9; NapiNPServer_UpdateHoldoffTicks @0x4c5f53 ->
+	//  1 @0x4c5f59..0x4c5f69; the period arrives as a CS field-3 update,
+	//  HandleCSConfigUpdate @0x621940].
 	kernel.local.apply_player_input_pre_tick(/*pack_input=*/true);
 	// The pending fire-sound slots count down ahead of the server tick's
 	// receive, so a slot this frame's C2S queues starts on the next frame.
@@ -315,6 +355,7 @@ void HostRole::run_tick(const TickInput &input) {
 	// local player's slot pumps at its own pool-0 slot, the gunners around it.
 	// [orig: Game_ProcessMainFrame -- Camera_ComputeThirdPersonView @0x526781,
 	//  the WeaponAction_ProcessAllEntities call @0x526786]
+	kernel.local.authority_fire_admitted = local_fire_admitted();
 	kernel.world.pump_weapon_actions();
 	tail.restart();
 	kernel.resolve_new_infantry_adm_ids();
@@ -347,6 +388,7 @@ void HostRole::run_tick(const TickInput &input) {
 		state.client_runtime->set_net_quality_level(ctx.net_quality_level);
 		state.client_runtime->Client_ProcessNetworkFrame(now);
 		state.client_runtime->apply_received_effects(kernel.world);
+		state.client_runtime->flush_host_sends(); // the receive handlers' own sends
 		state.client_runtime->raise_net_quality_link_errors(ctx.net_quality_link_errors);
 	}
 	ctx.net_quality_link_errors = 0;
@@ -470,8 +512,7 @@ bool HostRole::reset_to_baseline(SessionError &error) {
 		view.apply(0x0D, opennova::encode_pool_spawn_batch(
 				replication::build_pool1_spawn_batch(kernel.world)));
 		view.apply(0x0C, opennova::encode_organic_spawn_batch(
-				replication::build_pool0_organic_batch(
-						kernel.world, kernel.world.cached.local_player)));
+				replication::build_pool0_organic_batch(kernel.world)));
 		view.apply(0x20, opennova::encode_pool3_sync_batch(
 				replication::build_pool3_marker_batch(kernel.world)));
 		inmatch::Server_RearmMinimapInitialScan(state.host_owner.ctx);

@@ -78,51 +78,40 @@ void run_echo_pass(HANDLE icmp, std::vector<opennova::PingEcho *> &chunk) {
 
 #endif // _WIN32
 
-Dictionary fold_to_dictionary(const std::vector<opennova::PingEcho> &echoes) {
-	Dictionary results;
-	for (const auto &[rid, ping] : opennova::fold_ping_sweep(echoes)) results[rid] = ping;
-	return results;
-}
-
 } // namespace
 
-PingSweepWorker::~PingSweepWorker() { cancel(); }
-
-void PingSweepWorker::cancel() {
-	cancel_.store(true);
-	if (thread_.joinable()) thread_.join();
-	cancel_.store(false);
-}
-
-bool PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets,
+void PingSweepWorker::start(std::vector<std::pair<int64_t, std::string>> targets,
                             Callable sink, int64_t generation) {
-	if (running_.load()) return false;
-	if (thread_.joinable()) thread_.join(); // the previous sweep finished; reap it
-	running_.store(true);
-	cancel_.store(false);
-	thread_ = std::thread([this, targets = std::move(targets), sink = std::move(sink),
-	                       generation]() mutable {
-		std::vector<opennova::PingEcho> echoes = opennova::make_ping_echoes(targets);
+	runner_.start(std::move(targets),
+			[](std::vector<opennova::PingEcho> &echoes, const std::function<bool()> &cancelled) {
 #ifdef _WIN32
-		const HANDLE icmp = IcmpCreateFile();
-		if (icmp != INVALID_HANDLE_VALUE) {
-			opennova::run_ping_passes(
-					echoes, [icmp](std::vector<opennova::PingEcho *> &chunk) { run_echo_pass(icmp, chunk); },
-					[this]() { return cancel_.load(); });
-			IcmpCloseHandle(icmp);
-		} else {
-			for (opennova::PingEcho &e : echoes) e.attempted = false; // no facility: never attempted
-		}
+				const HANDLE icmp = IcmpCreateFile();
+				if (icmp != INVALID_HANDLE_VALUE) {
+					// A chunk's echoes complete (or time out) before the pass returns, so
+					// their reply buffers outlive every OS write; the cancel poll sits
+					// between chunks.
+					opennova::run_ping_passes(
+							echoes,
+							[icmp](std::vector<opennova::PingEcho *> &chunk) { run_echo_pass(icmp, chunk); },
+							cancelled);
+					IcmpCloseHandle(icmp);
+				} else {
+					for (opennova::PingEcho &e : echoes) e.attempted = false; // no facility
+				}
 #else
-		// No unprivileged ICMP facility modeled off Windows: every row settles
-		// as retail's never-attempted fold so the browser's pending "..."
-		// terminates.
-		for (opennova::PingEcho &e : echoes) e.attempted = false;
+				// No unprivileged ICMP facility modeled off Windows: every row settles
+				// as retail's never-attempted fold so the browser's pending "..."
+				// terminates.
+				(void)cancelled;
+				for (opennova::PingEcho &e : echoes) e.attempted = false;
 #endif
-		if (!cancel_.load()) sink.call_deferred(fold_to_dictionary(echoes), generation);
-		running_.store(false);
-	});
-	return true;
+			},
+			[sink](std::vector<std::pair<int64_t, int>> rows, int64_t p_generation) {
+				Dictionary results;
+				for (const auto &[rid, ping] : rows) results[rid] = ping;
+				sink.call_deferred(results, p_generation);
+			},
+			generation);
 }
 
 } // namespace godot

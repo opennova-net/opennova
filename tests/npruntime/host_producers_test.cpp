@@ -1058,7 +1058,7 @@ bool check_player_enter_hook() {
 		conn.phase = inmatch::ConnectionPhase::Joined;
 		conn.peer = PeerAddr{0x0100007Fu, port};
 		conn.join_validated_host_ms = 0;
-		conn.join_identity_pairs = {{"PCID", "42"}, {"10.0.0.1JOINTICKET", "T-" + std::to_string(id)}};
+		conn.join_identity_pairs = {{"PCID", "42"}, {"PUBJOINTICKET", "T-" + std::to_string(id)}};
 		f.ctx.np_protocol.connection_list.push_back(std::move(conn));
 	};
 	joined(20, t_a, 4000);
@@ -1073,7 +1073,9 @@ bool check_player_enter_hook() {
 	f.ctx.on_player_enter_request = [&](const inmatch::NapiNPServerCtx::PlayerEnterRequest &r) {
 		requests.push_back(r);
 	};
-	f.ctx.host_local_address = "10.0.0.1";
+	// GetLocalAddress: "PUB" on the NovaWorld transport in session.
+	f.ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+	f.ctx.is_in_session = 1;
 	f.ctx.novaworld_join_tickets_armed = true;
 	f.ctx.np_protocol.host_run_duration_ms = 1000;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);

@@ -426,6 +426,7 @@ private:
 // script kills and the vehicle death's child kill fire it.
 // [orig: g_EntityClassEventCallbackTable @0x813000, resolved per def by
 //  EntityDef_InitAllCallbacks @0x4a5aae]
-void hit_record_class_event(World &world, Entity &e, int phase);
+// `flags` is the callback's third argument (ItemHitContext::event_flags).
+void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags = 0);
 
 } // namespace opennova::world

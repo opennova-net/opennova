@@ -507,28 +507,46 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 bool CollisionWorld::entity_los_clear(World &world, EntityHandle listener, EntityHandle source,
 		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types,
 		bool query_parent_cleared) {
-	const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
     const Entity *se = source.valid() ? world.registry.get(source) : nullptr;
     // The walker's two parent slots: per endpoint entity, parentEntity (+0x16C,
     // the seat mount) wins over mountedChild (+0x268) [orig:
     // Physics_RaycastFindCollisionEntity @0x539ab8..0x539b10 -> ctx[19]/ctx[20]].
+    return entity_los_clear_impl(world, listener, source, se != nullptr,
+            se != nullptr && (se->flags & kEntityFlagIndoors) != 0, los_walker_parent(se),
+            start_in, end_in, height_offset, all_types, query_parent_cleared);
+}
+
+bool CollisionWorld::wire_person_los_clear(World &world, EntityHandle listener,
+		const LosWireEndpoint &endpoint, const int32_t start_in[3], const int32_t end_in[3],
+		int32_t height_offset, bool all_types) {
+	// No registry entity names the endpoint, so the walker's endpoint and
+	// standing-on exclusions have nothing to match; its parent slot is the
+	// row's own.
+	return entity_los_clear_impl(world, listener, EntityHandle{}, true, endpoint.indoors,
+			endpoint.parent, start_in, end_in, height_offset, all_types, false);
+}
+
+bool CollisionWorld::entity_los_clear_impl(World &world, EntityHandle listener,
+		EntityHandle source, bool endpoint_present, bool endpoint_indoors, EntityHandle parent_b,
+		const int32_t start_in[3], const int32_t end_in[3], int32_t height_offset, bool all_types,
+		bool query_parent_cleared) {
+	const Entity *le = listener.valid() ? world.registry.get(listener) : nullptr;
     // The blast sweep nulls the query entity's parentEntity for the call
     // (`mov [edi+16Ch], 0` @0x4eb158, restored @0x4eb16c), so its slot holds
     // only the mountedChild there.
     const EntityHandle parent_a = los_walker_parent(le, query_parent_cleared);
-    const EntityHandle parent_b = los_walker_parent(se);
 
     // --- Terrain leg. [orig: Physics_CheckTerrainLineOfSight @ 0x53b080] ---
     bool terrain_clear = false;
-    if (le != nullptr && se != nullptr && (le->flags & kEntityFlagIndoors) != 0 &&
-        (se->flags & kEntityFlagIndoors) != 0) {
+    if (le != nullptr && endpoint_present && (le->flags & kEntityFlagIndoors) != 0 &&
+        endpoint_indoors) {
         terrain_clear = true; // both indoors: no heightfield test [orig: @ 0x53b0a0]
     }
     if (!terrain_clear && (terrain == nullptr || !terrain->valid())) {
         terrain_clear = true; // unwired terrain: nothing to block (embedder seam)
     }
     if (!terrain_clear) {
-        if (le == nullptr || se == nullptr) {
+        if (le == nullptr || !endpoint_present) {
             // No-entity path: both UNSHIFTED endpoints must sit above the
             // bilinear surface for the ray to run at all — an under-surface
             // endpoint reads as terrain-clear. [orig: @ 0x53b0f1-0x53b100]

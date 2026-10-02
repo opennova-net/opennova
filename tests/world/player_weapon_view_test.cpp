@@ -300,6 +300,43 @@ void test_round_ring_read_back() {
 	CHECK(v.last_round_seq == 100 + RoundRing::kCapacity - 1);
 }
 
+// A local reload request's C2S 0x25 body (player_weapon.h
+// local_reload_request_wire): a UseGun gunner addresses the entity it sits on,
+// its parentEntity, and an EWeap entity's parameter word is 0xFFFF; any other
+// seat, or none, addresses the actor with the slot's parameter.
+// [orig: WeaponAction_Reload `cmp [edi+168h], 3` / `mov ecx, [edi+16Ch]`
+//  @0x5430EA..0x543103; NetPacket_SendEntityDeathNotification `test byte ptr
+//  [eax+54h], 20h` @0x43296C -> 0xFFFF @0x432974]
+void test_reload_request_addresses_the_seat_parent() {
+	Rig rig;
+	rig.w.registry.configure_pool(1, 4);
+	Entity gun;
+	gun.kind = EntityKind::Item;
+	gun.has_item_def = true;
+	gun.item_attrib = kItemAttribEweap;
+	const EntityHandle gun_h = rig.w.registry.spawn(1, gun);
+	Entity seat;
+	seat.kind = EntityKind::Item;
+	seat.has_item_def = true;
+	const EntityHandle seat_h = rig.w.registry.spawn(1, seat);
+	constexpr uint16_t kActor = 0x0002, kParam = 11 * 65 + 2;
+	Entity &actor = *rig.w.registry.get(rig.local);
+	LocalWeaponReloadWire r = local_reload_request_wire(rig.w, kActor, kParam);
+	CHECK(r.valid && r.entity_handle == kActor && r.reload_param == kParam);
+	actor.mounted = true;
+	actor.mount_target = gun_h;
+	actor.mount_type = SeatType::Gunner;
+	r = local_reload_request_wire(rig.w, kActor, kParam);
+	CHECK(r.entity_handle == gun_h.packed && r.reload_param == 0xFFFF);
+	actor.mount_target = seat_h; // a UseGun parent without the EWeap attribute
+	r = local_reload_request_wire(rig.w, kActor, kParam);
+	CHECK(r.entity_handle == seat_h.packed && r.reload_param == kParam);
+	actor.mount_target = gun_h;
+	actor.mount_type = SeatType::Controller; // the armed ctrlx: the actor
+	r = local_reload_request_wire(rig.w, kActor, kParam);
+	CHECK(r.entity_handle == kActor && r.reload_param == kParam);
+}
+
 } // namespace
 
 int main() {
@@ -311,6 +348,7 @@ int main() {
 	test_crosshair_spread_rows();
 	test_heat_clamps();
 	test_round_ring_read_back();
+	test_reload_request_addresses_the_seat_parent();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

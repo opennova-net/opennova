@@ -17,6 +17,10 @@
 //  Entity_UpdateEnvSoundEmitter @ 0x4a8080, which indexes
 //  itemDef.soundLoopId[region]; the soundloop_1..7 parse
 //  ItemDef_ParseProperty @ 0x49fec4]
+namespace opennova::world {
+class World;
+}
+
 namespace opennova::audio {
 
 struct EnvsMarker {
@@ -43,5 +47,15 @@ bool item_is_envs(const opennova::def::DefItemDef &def);
 // time-of-day slot set names.
 std::vector<EnvsMarker> resolve_envs_markers(
 		const bms::File &mission, const opennova::def::DefItemsFile &items);
+
+// A header-only join's mission document carries no entities: a joiner's envs
+// emitters are the entities the host streamed. The same predicate over the
+// registry, in the same walk (pools 3 markers, 1 items, 2 buildings, 0
+// organics), each in slot order; the position is the mission frame the
+// registry keeps, the id the row's placed bms_id.
+// [orig: the class dispatch runs Entity_UpdateEnvSoundEmitter @0x4a8080 for
+//  every envs entity in the pools, loaded or streamed alike]
+std::vector<EnvsMarker> resolve_envs_markers(
+		const world::World &world, const opennova::def::DefItemsFile &items);
 
 } // namespace opennova::audio

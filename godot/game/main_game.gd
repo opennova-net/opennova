@@ -91,6 +91,8 @@ var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expa
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> score screen)
+# The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
+var _join_screen := PreGameMenuPresenter.new()
 var _shutdown_prepared := false
 var _shutdown_resources_released := false
 var _quit_requested := false
@@ -118,6 +120,10 @@ func _init() -> void:
 	add_child(_dev_tools)
 	_pick_session.setup(_dev_tools)
 	_world_load.load_failed.connect(_on_world_load_failed)
+	_join_screen.name = "PreGameMenuPresenter"
+	add_child(_join_screen)
+	_join_screen.cancelled.connect(_on_join_screen_cancelled)
+	_join_screen.game_starting.connect(_on_join_game_starting)
 
 
 func _on_player_options_changed(state: PlayerOptions.State) -> void:
@@ -622,11 +628,7 @@ func _enter_menu(dir: String) -> bool:
 		if root == null:
 			return false
 		_root = root
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
-	if profile_root_key != _profile_root_key:
-		_chosen_avatar = PlayerProfile.load_character_profile(_root)
-		_profile_root_key = profile_root_key
+	refresh_local_profile_for_mount()
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
@@ -798,6 +800,20 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 					% save_error)
 
 
+## Re-read the local player's character profile (weapon.sav) when the mounted
+## root or its expansion changed. The menu entry and a join's pre-dial switch to
+## the host's expansion both land here, so the next spawn kit and the join's
+## character vars come from the mounted expansion's profile.
+func refresh_local_profile_for_mount() -> void:
+	if _root == null:
+		return
+	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower()]
+	if profile_root_key != _profile_root_key:
+		_chosen_avatar = PlayerProfile.load_character_profile(_root)
+		_profile_root_key = profile_root_key
+
+
 # Install the in-memory local-player profile used by the next mission spawn.
 func set_local_player_profile(profile: Dictionary) -> void:
 	_chosen_avatar = profile.duplicate(true)
@@ -948,6 +964,51 @@ func start_world_load(load_info: LoadingScreenInfo, operation: Callable) -> void
 		_on_world_load_failed("mission load handoff could not start")
 
 
+## A join's mission start: the join runs on the join screen (pre.mnu
+## PRE_GAME_MENU) until the host starts the game, and the loading screen takes
+## over only then. The join screen's mode stops the menu music on entry.
+## (engine: inmatch/pre_game_menu.h)
+func start_join_load(load_info: LoadingScreenInfo, operation: Callable) -> void:
+	if not _world_load.can_start():
+		return
+	if not _join_screen.open(_root, self):
+		start_world_load(load_info, operation)
+		return
+	MusicService.stop_context()
+	if _lan_session != null:
+		_lan_session.stop()
+	_world_load_pending = true
+	_world.set_local_player_spawn_loadout(PlayerSpawnLoadout.from_profile(_chosen_avatar))
+	_begin_world_load()
+	_join_screen.follow(_world)
+	if _world_load.start(self, _root, _world, load_info, operation, true) == null:
+		_on_world_load_failed("mission load handoff could not start")
+
+
+## The join screen is up (the probe and test read).
+func is_join_screen_open() -> bool:
+	return _join_screen.is_open()
+
+
+func get_join_screen() -> PreGameMenuPresenter:
+	return _join_screen
+
+
+# The host started the game: the join screen hands over to the loading screen.
+func _on_join_game_starting() -> void:
+	_join_screen.close()
+	_world_load.show_deferred_screen()
+
+
+# Cancel on the join screen: an abandoned join leaves the way a cancelled load
+# does; a failure already shown leaves to the menu it came from.
+func _on_join_screen_cancelled() -> void:
+	_join_screen.close()
+	if _world_load_pending and _world != null and _world.cancel_join_preload():
+		return
+	_teardown_world_to_menu()
+
+
 func _begin_world_load() -> void:
 	_shell_presentation.begin_world_load(
 			_menu_shell, _world, _hud, _on_world_loaded, _on_world_load_failed)
@@ -1009,14 +1070,10 @@ func _on_join_admission_ready() -> void:
 func _on_join_deploy_pick_required() -> void:
 	# Initial admission transitions from loading to the player-paced DEATH screen;
 	# on a later death the presentation is already down and the same screen simply
-	# reopens on the new pending edge.
-	# The DEATH-screen edge forces the declutter level to max through the same
-	# seam the huddetail cycle uses (it writes the persisted global like
-	# retail; the death.mnu screen itself draws outside the blanked gameplay
-	# overlay pass). [orig: NapiNPClientMsg_0x00F @0x42E410..0x42E41C —
-	# level = 3 -> CRenderState_SetLayerVisibility @0x59B0F0]
-	if _hud_presenter != null:
-		_hud_presenter.apply_death_screen_hud_detail()
+	# reopens on the new pending edge. The HUD declutter blank is NOT this
+	# edge's: retail's 0x0F forces it only with the death screen up (the replica
+	# fold queues it, the HUD presenter's drain applies it; a fresh join leaves
+	# the level alone, hud-re.md "Forced levels").
 	_finish_world_load_presentation()
 	if _deploy_presenter.open():
 		return
@@ -1106,6 +1163,19 @@ func _on_session_lost(reason: String) -> void:
 
 
 func _on_world_load_failed(reason: String) -> void:
+	# A join that fails before the game start stays on the join screen with the
+	# connection's reason and only Cancel (inmatch/pre_game_menu.h).
+	if _join_screen.is_open():
+		_world_load_pending = false
+		push_warning("MainGame: join failed: %s" % reason)
+		var error: ConnectionError = _world.get_last_connection_error() if _world != null else null
+		var text := reason
+		if error != null and error.is_set():
+			text = error.reason_text(Strings.get_override_table(),
+					Strings.get_table(Strings.TABLE_GAMEERR))
+		_net.note_join_failure(error)
+		_join_screen.show_failure(text)
+		return
 	# A load-step failure or abort returns to the menu — the witnessed early
 	# return that sets reason=1 and nav-pushes "Post Menu" out of
 	# Game_StartMission [orig: the "Mission loading aborted" legs @ 0x520270
@@ -1134,6 +1204,10 @@ func _on_camera_escape() -> void:
 	# poll [orig: Client_CheckDisconnectOrEscDuringLoad @ 0x520270]. The
 	# SP/host map load remains a single synchronous call the SceneTree cannot
 	# interrupt (docs/interface/loading-screen-re.md D-LOADSCR-7).
+	# The join screen's Cancel answers ESC.
+	if _join_screen.is_open():
+		_join_screen.cancel()
+		return
 	if _world_load_pending:
 		if _world != null and _world.cancel_join_preload():
 			return
@@ -1259,6 +1333,7 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	if route.keep_session:
 		novaworld_client = _world.release_novaworld_client() as NovaWorldClient
 	_world_load.dismiss()
+	_join_screen.close()
 	finish_hud_hidden_capture()
 	_end_flow.reset()
 	if _player_presenter != null:
@@ -1282,7 +1357,7 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 	if _hud_presenter != null:
 		_hud_presenter.teardown()
 	if _root != null and _enter_menu(_root.get_root_dir()):
-		_net.return_from_mission(novaworld_client, route.error, _post_mission_error_text(route))
+		_net.return_from_mission(novaworld_client, route.error, post_mission_error_text(route))
 		return
 	if novaworld_client != null:
 		novaworld_client.stop()
@@ -1294,9 +1369,15 @@ func _teardown_world_to_menu(exit_reason := GameWorld.MISSION_EXIT_QUIT) -> void
 # The error text the post-mission route stores: a gameerr.bin generic error, else the
 # in-match connection's disconnect reason (empty while it was healthy; the dialog then
 # shows its unknown-error text).
-static func _post_mission_error_text(route: PostMissionRoute) -> String:
+static func post_mission_error_text(route: PostMissionRoute) -> String:
 	var key := route.error_key
 	if key.is_empty():
+		# A lost connection reads retail's reason text over its error record
+		# (engine: inmatch/disconnect_reason.h).
+		var connection_error := route.connection_error
+		if connection_error != null and connection_error.is_set():
+			return connection_error.reason_text(Strings.get_override_table(),
+					Strings.get_table(Strings.TABLE_GAMEERR))
 		return route.error_text
 	var text := Strings.lookup_or(Strings.TABLE_GAMEERR, Strings.SECTION_GENERIC_ERRORS, key, "")
 	if text.is_empty() and key == "STRE_BADMISSION":

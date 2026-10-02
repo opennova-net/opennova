@@ -114,6 +114,13 @@ struct PowerupGrant {
 void powerup_pickup(World &world, EntityHandle powerup, EntityHandle picker,
                     const TickContext &ctx);
 
+// The same pickup for a picker the caller supplies: a wire-replica body's
+// transient copy on a client (no registry entity; its handle left invalid so
+// it is never the local player). [orig: PowerupAction_Pickup @0x4428A0, reached
+// from a client's resolver for a remote body]
+void powerup_pickup_by(World &world, EntityHandle powerup, Entity &picker,
+                       const TickContext &ctx);
+
 // Drains the resolver's Powerup contacts in resolver order, on every peer:
 // retail runs the callback inline in whichever machine's resolver produced the
 // contact (the joiner's own body included; no authority gate precedes the

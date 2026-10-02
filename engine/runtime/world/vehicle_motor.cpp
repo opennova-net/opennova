@@ -15,6 +15,7 @@
 #include <runtime/world/collision_detail.h>
 #include <runtime/world/dir_table.h>
 #include <runtime/world/geom.h>
+#include <runtime/world/local_player.h>
 #include <runtime/world/vehicle_part_anim.h>
 #include <runtime/world/world.h>
 #include <base/io/fixed.h>
@@ -251,6 +252,21 @@ int32_t turn_pilot_view(World &world, Entity &pilot, int32_t delta) {
 	return yaw;
 }
 
+// The movers OR the free-look bit into the occupant's MoveOrder word itself,
+// which only the input pack rewrites. A remote occupant's word is its wire
+// byte, rewritten by its next uplink. The local occupant's is LocalPlayer::
+// move_order, re-derived onto the wire byte every pre-tick, so the bit rides
+// it until that player's next pack: every frame on an authority, once per
+// send boundary on a joiner.
+// [orig: `or [ecx+12Ch], 10h` @0x48B889 / @0x48B897 (ground), @0x490D4D /
+//  @0x490D6D (aircraft); Player_PackInputStateToEntity's full store @0x4DF68F
+//  inside the holdoff-gated send block (Client_ProcessNetworkFrame @0x42C3DD)]
+void merge_occupant_free_look(World &world, Entity &occ) {
+	occ.net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
+	if (occ.handle == world.cached.local_player && world.local_player_state != nullptr)
+		world.local_player_state->move_order.free_look = true;
+}
+
 // Entity_UpdateVehiclePhysics's shared player-input block. The authority stages
 // a remote driver's replicated fields through it; the controlling client stages
 // its current local fields instead of replaying delayed compact drive registers.
@@ -279,7 +295,7 @@ void stage_player_vehicle_input(
     // [orig: Entity_UpdateVehiclePhysics @0x48B855..0x48B864; D-VEH-3]
     if (analog_sum != 0 || (moving && free_look_dir != 0)) {
         move_order |= Entity::kMoveOrderFreeLook;
-        occ.net_move_input |= static_cast<uint8_t>(Entity::kMoveOrderFreeLook);
+        merge_occupant_free_look(world, occ);
     }
 
 	// Read the full-precision LOOK word shared by the body and aircraft mover;

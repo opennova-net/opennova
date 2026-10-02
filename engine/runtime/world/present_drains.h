@@ -47,6 +47,8 @@ struct RoundImpactPresentation {
     Vec3 position;
     Vec3 direction;
     std::string effect;
+    // The impact's selected soundset, for observers only: the engine plays it
+    // where the impact is produced (play_round_impact_sound), never the shell.
     std::string sound;
     uint32_t age_ticks = 0;
     uint32_t source_tick = 0;
@@ -114,6 +116,9 @@ struct DeathPieceRow {
     float pitch = 0.0f;
     float roll = 0.0f;
     bool settled = false;
+    // False for a silent death's piece: no trail is ever submitted
+    // [orig: Entity_SpawnDeathPieces @0x493811].
+    bool trail = true;
 };
 
 // One in-flight round glow: the round's presentation generation as the id,

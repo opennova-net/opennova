@@ -131,6 +131,11 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	join_preload_sim_->set_app_id(p_target->get_app_id());
 	join_preload_sim_->set_join_network_type(p_target->get_network_type());
 	join_preload_sim_->set_join_cd_cookie(p_target->get_cd_cookie());
+	// A join from a browse row connects with the row's session record: the 0x42
+	// first, with the row's HK (JoinerConnection::DiscoveredSession).
+	join_preload_sim_->set_join_discovered_session(p_target->get_discovered_session(),
+			p_target->get_session_host_key(), p_target->get_session_password_required(),
+			p_target->get_expansion());
 	// A nonzero .joi LN asks for the LAN-discovered endpoint of the named
 	// session instead of the NK relay the target carries. That endpoint has no
 	// producer on this seam: the NovaWorld panel resolves a join without running
@@ -142,6 +147,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 				"SessionDrive: join LN=%d asks for a LAN-discovered endpoint; none is available, dialing %s:%d",
 				p_target->get_lobby_number(), p_target->get_host_ip(), p_target->get_port()));
 	}
+	last_connection_error_.unref();
 	if (!join_preload_sim_->enable_join(p_target->get_host_ip(), p_target->get_port(),
 				p_target->get_player_name(), p_target->get_join_role(),
 				p_target->get_spectator_password(), p_target->get_server_password(),
@@ -265,11 +271,29 @@ void SessionDrive::step_preload() {
 // keep/remount/fail DECISION is native (inmatch::decide_join_expansion); this
 // executes it against the live mount.
 bool SessionDrive::reconcile_join_expansion() {
-	Ref<ResourceRoot> resource_root = join_preload_root_;
+	const Ref<ResourceRoot> resource_root = join_preload_root_;
 	if (resource_root.is_null()) {
 		return true;
 	}
-	const int action = policy_->decide_expansion(join_preload_sim_->get_join_expansion(),
+	const String error = switch_join_expansion(resource_root, join_preload_sim_->get_join_expansion());
+	if (!error.is_empty()) {
+		fail_join_preload(error);
+		return false;
+	}
+	return true;
+}
+
+// The switch itself, shared by the pre-dial leg (the browse row's expansion,
+// GameWorld::mount_join_expansion) and the post-auth reconcile above. Returns
+// the failure text, or an empty string when the root holds the host's
+// expansion (or is a loose authoring root that cannot switch).
+String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
+		const String &p_host_expansion) {
+	Ref<ResourceRoot> resource_root = p_root;
+	if (resource_root.is_null()) {
+		return String();
+	}
+	const int action = policy_->decide_expansion(p_host_expansion,
 			resource_root->get_expansion(),
 			resource_root->list_expansions(resource_root->get_root_dir()));
 	String decision_name = "keep";
@@ -285,9 +309,9 @@ bool SessionDrive::reconcile_join_expansion() {
 	}
 	UtilityFunctions::print_verbose(vformat(
 			"SessionDrive: join expansion: host='%s' mounted='%s' decision=%s",
-			join_preload_sim_->get_join_expansion(), resource_root->get_expansion(), decision_name));
+			p_host_expansion, resource_root->get_expansion(), decision_name));
 	if (action == NetSessionPolicy::ACTION_KEEP) {
-		return true;
+		return String();
 	}
 	// Only a runtime mount layers expansion archives at all. A loose authoring
 	// root (an explicit --loose-root run mounts the loose game-data tree;
@@ -302,8 +326,8 @@ bool SessionDrive::reconcile_join_expansion() {
 	if (!resource_root->is_runtime_mount()) {
 		UtilityFunctions::push_warning(vformat(
 				"SessionDrive: host expansion '%s' differs from the loose root's '%s'; the authoring mount stands",
-				join_preload_sim_->get_join_expansion(), resource_root->get_expansion()));
-		return true;
+				p_host_expansion, resource_root->get_expansion()));
+		return String();
 	}
 	// A runtime mount that cannot supply the host's expansion aborts the join.
 	// Retail's switch is a no-op when expansion\<name>\<name>.pff is missing
@@ -312,8 +336,7 @@ bool SessionDrive::reconcile_join_expansion() {
 	// index-space corruption D-NET-178 records, so we refuse the join instead
 	// (tracked divergence).
 	if (action == NetSessionPolicy::ACTION_FAIL) {
-		fail_join_preload(policy_->decision_error());
-		return false;
+		return policy_->decision_error();
 	}
 	const String target_expansion = policy_->decided_expansion();
 	const String dir = resource_root->get_root_dir();
@@ -336,9 +359,8 @@ bool SessionDrive::reconcile_join_expansion() {
 		// load_failed, so the live session is torn down too.
 		const String mount_error = resource_root->get_last_error();
 		resource_root->mount_runtime(dir, previous, LaunchFlags::loose_override_enabled(), game_code);
-		fail_join_preload(vformat("join: could not mount host expansion '%s' from %s: %s",
-				target_expansion, dir, mount_error));
-		return false;
+		return vformat("join: could not mount host expansion '%s' from %s: %s",
+				target_expansion, dir, mount_error);
 	}
 	// mount_runtime succeeds even when the expansion never layered
 	// (opennova::Vfs::mount_game falls back to base game silently), so read
@@ -351,12 +373,11 @@ bool SessionDrive::reconcile_join_expansion() {
 		// decision leg uses ("none -- base game only" when empty), so both
 		// abort reasons read identically (one impl -- engine/runtime/inmatch
 		// join_session_policy).
-		fail_join_preload(vformat("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)",
+		return vformat("join: host runs expansion '%s' but %s mounted '%s' (installed: %s)",
 				target_expansion, dir, resource_root->get_expansion(),
-				NetSessionPolicy::describe_installed(resource_root->list_expansions(dir))));
-		return false;
+				NetSessionPolicy::describe_installed(resource_root->list_expansions(dir)));
 	}
-	return true;
+	return String();
 }
 
 // The per-frame admission/deploy/loss observer: read the joiner state,
@@ -404,6 +425,7 @@ void SessionDrive::update_joiner_admission_signals() {
 	}
 	if (pre & NetSessionPolicy::FRAME_DONE) {
 		if (pre & NetSessionPolicy::LOAD_FAILED) {
+			last_connection_error_ = sim->get_connection_error();
 			world_->emit_signal(kSignalLoadFailed, policy_->fail_reason());
 		}
 		return;
@@ -445,7 +467,15 @@ bool SessionDrive::cancel_admission_wait() {
 	return policy_->request_admission_abort();
 }
 
+Ref<JoinScreenStatus> SessionDrive::join_screen_status() const {
+	return join_preload_sim_.is_valid() ? join_preload_sim_->get_join_screen_status()
+	                                    : Ref<JoinScreenStatus>();
+}
+
 void SessionDrive::fail_join_preload(const String &p_reason) {
+	if (join_preload_sim_.is_valid()) {
+		last_connection_error_ = join_preload_sim_->get_connection_error();
+	}
 	cancel_join_preload();
 	clear_pending_session();
 	world_->emit_signal(kSignalLoadFailed, p_reason);
@@ -517,14 +547,16 @@ void SessionDrive::observe_tick(MissionRoot *p_runtime) {
 	}
 	// A hosting NovaWorld session follows the hosted match: one PlayerList slot
 	// per admitted player, the live round clock the TimeLeft column reads at
-	// every refresh, and the session's GSID as the in-match host's 0x81 SUS1
-	// (cleared when its connection tears down, re-supplied by a re-host).
+	// every refresh, the session's GSID as the in-match host's 0x81 SUS1
+	// (cleared when its connection tears down, re-supplied by a re-host), and
+	// the cookie-key ring as it advances.
 	NovaWorldClient *client = nw_client();
 	if (client != nullptr && nw_host_bound_ && !sim->is_joiner()) {
 		NwuHostRole &host = client->host_role();
 		sync_nw_host_roster(host, sim);
 		host.set_round_time_remaining_ticks(sim->round_time_remaining_ticks());
-		sim->set_novaworld_registration(host.gsid(), host.app_id());
+		sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+				opennova::to_gd(client->get_login_pcid()));
 	}
 	sync_nwu_session(sim);
 }
@@ -552,10 +584,9 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 
 // A retail host SetOrCreates the five per-slot PlayerList vars when a player is
 // added and sends ClientHostPlayerAdded / Removed on each roster change. The
-// PlayerPCID (the joiner's NovaWorld PCID) and PlayerType (the player type id)
-// have no in-match source on this seam: the join's CD identity pairs carry the
-// PCID only as the service-encrypted PUBPCID cookie, which the in-match host
-// does not decrypt, so they ride as the retail-shaped empty string and "0".
+// PlayerPCID is the joiner's decrypted PUBPCID (the in-match host's account
+// fields) [orig: CNapiGameSession_SendPlayerAdded @0x4d006c]; PlayerType (the
+// player type id) has no in-match source on this seam and rides as "0".
 // The ClientPlayerEnterRequest is NOT sent from here: the in-match host's
 // join-phase watchdog announces a validating joiner itself (the hook bound in
 // bind_nw_host), before the player is ever added to this roster.
@@ -563,7 +594,8 @@ void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation
 	std::map<int, std::string> live;
 	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
 		const std::string signature = opennova::to_std(slot.player_name) + "|" +
-				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.team);
+				opennova::to_std(slot.ip_and_port) + "|" + opennova::to_std(slot.pcid) + "|" +
+				opennova::to_std(slot.team);
 		live[slot.slot] = signature;
 		auto sent = nw_roster_sent_.find(slot.slot);
 		if (sent != nw_roster_sent_.end() && sent->second == signature) {
@@ -573,6 +605,7 @@ void SessionDrive::sync_nw_host_roster(NwuHostRole &p_host, const Ref<Simulation
 		player.slot = slot.slot;
 		player.player_name = opennova::to_std(slot.player_name);
 		player.ip_and_port = opennova::to_std(slot.ip_and_port);
+		player.pcid = opennova::to_std(slot.pcid);
 		player.team = opennova::to_std(slot.team);
 		player.type = "0";
 		p_host.set_player_slot(player);
@@ -658,6 +691,7 @@ Ref<PostMissionRoute> SessionDrive::post_mission_route(int p_reason) const {
 	out->set_error_key(String(opennova::inmatch::post_mission_error_key(route.error)));
 	if (route.error == opennova::inmatch::PostMissionError::DisconnectReason && sim.is_valid()) {
 		out->set_error_text(sim->get_session_loss_reason());
+		out->set_connection_error(sim->get_connection_error());
 	}
 	return out;
 }
@@ -692,7 +726,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 	}
 	NwuHostRole &host = client->host_role();
 	nw_host_bound_ = true;
-	sim->set_novaworld_registration(host.gsid(), host.app_id());
+	const std::string login_pcid = client->get_login_pcid();
+	sim->set_novaworld_registration(host.gsid(), host.app_id(), host.cookie_keys(),
+			opennova::to_gd(login_pcid));
 	// A service that asked for join tickets arms the in-match host's join-phase
 	// watchdog: it announces each validating joiner through this hook and holds
 	// the player until on_nw_host_player_enter_result answers. The hook resolves
@@ -717,6 +753,7 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		self.slot = 0;
 		self.player_name = opennova::to_std(p_opts->get_player_name());
 		self.ip_and_port = ":" + std::to_string(sim->get_host_listen_port());
+		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		self.team = "0";
 		self.type = "0";
 		host.set_player_slot(self);
@@ -734,7 +771,7 @@ void SessionDrive::unbind_nw_host() {
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
-		sim->set_novaworld_registration(String(), 0);
+		sim->set_novaworld_registration(String(), 0, opennova::SessionIdRing{}, String());
 	}
 }
 

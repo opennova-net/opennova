@@ -16,6 +16,7 @@
 
 #include <runtime/inmatch/session_transport.h> // ISessionTransport::host_send (loopback burst delivery)
 
+#include <base/io/le.h>       // append_u32_le (the CS update dword)
 #include <base/io/strutil.h> // iequals (Napi_StrCaseEqual)
 
 #include <runtime/world/ai.h>
@@ -37,16 +38,6 @@
 namespace opennova::inmatch {
 
 namespace {
-
-// Retail's initialized JOINTOPERATIONS connection-template active-send interval:
-// cs_dir0/cs_dir1.active_send_interval_ms = 10000 (idle 30000). If reliable records remain
-// unacknowledged and no other packet was built for longer than this interval,
-// BuildOutgoingPackets mints a fresh header-only sequence. The induced gap asks the peer's
-// ordinary 0x44/0x84 machinery to reconstruct a lost semantic packet. (1000 ms is the
-// NOVAWORLDUDP service template's value @0x4d3e60, not the game session's.)
-// [orig: CNapiNetwork_Init @0x4ca4a0 stores @0x4caac5/@0x4cab98 -> read by
-// CNapiNPConnection_PumpSendIntervals @0x628FD0 -> BuildOutgoingPackets @0x628430]
-constexpr uint32_t kActiveSendIntervalMilliseconds = 10000;
 
 struct ParsedClientJoinRequest {
 	bool spectator = false;
@@ -154,7 +145,12 @@ NapiNPConnection &find_or_create_connection(NapiNPServerCtx &ctx, const PeerAddr
 	// [orig: CNapiNPConnection_Create @0x62acb0 copies proto+0xE44/+0xE80 (`rep movsd ecx=0Fh`
 	//  @0x62ae7b/@0x62aeb8); NapiNPMessage_Create reads msg_out_max off the node @0x628048]
 	node.timeouts = ctx.np_protocol.connection_template;
-	node.seq = make_jo_game_session_sequencing(1, 0, node.timeouts.msg_out_max);
+	// Both template blocks carry the host's configured `mpmaxpacketsize` as field 13
+	// [orig: CNapiNetwork_Init @0x4caa53..0x4caa7b, stores @0x4cab3c/@0x4cac0c].
+	node.timeouts.max_packet_bytes = static_cast<int32_t>(
+			cs_max_packet_bytes(ctx.config.max_packet_size, kCsMaxPacketCeilingGame));
+	node.seq = make_jo_game_session_sequencing();
+	sync_session_sequencing_limits(node.seq, node.timeouts);
 	ctx.np_protocol.connection_list.push_back(std::move(node));
 	return ctx.np_protocol.connection_list.back();
 }
@@ -185,7 +181,8 @@ std::vector<std::vector<uint8_t>> host_goodbye_burst(const NapiNPServerCtx &ctx,
 			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(conn.client_ck, record));
 	// `n = clamp(recv_max_per_tick, 0, 32)` sends while each SendTo succeeds
 	// [orig: TeardownActiveConnection @0x6253ef..0x625424].
-	return std::vector<std::vector<uint8_t>>(disconnect_burst_count(), std::move(datagram));
+	return std::vector<std::vector<uint8_t>>(
+			disconnect_burst_count(conn.timeouts.recv_max_per_tick), std::move(datagram));
 }
 
 // The one player/session teardown path shared by keyed goodbye, receive timeout, pending
@@ -326,14 +323,15 @@ void reject_client_join(const ClientAuth &auth, const PeerAddr &peer,
 // re-sends the cached packet via CNapiNPConnection_SendSessionInit @0x620ef0 rather than re-minting).
 std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const ClientAuth &auth,
                                                const PeerAddr &peer, const NapiNPConnection &conn) {
-	const std::string nwuid =
-			ctx.server_key_mint.forced ? ctx.server_key_mint.nwuid : make_dev_nwuid();
-	// [D-NET Wave 3] Only a NovaWorld-routed host appends the NovaworldName/url/NWUID CU block (sourced
-	// from the type-3 msg_out queue @0x620ef0); a LAN/SP host queues none and emits no CU.
-	const bool include_cu = ctx.transport_mode == NetworkType::NovaWorld;
+	// A game host's 0x82 carries no CU on any network type: SendSessionInit writes only the
+	// connection's type-3 vars, the host keeps the 0x42's CUs under their own type 1/2, and only a
+	// client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is
+	// the NovaWorld SERVICE's 0x82; Jointops.exe never writes those names (D-NET-261).
+	// [orig: CNapiNPConnection_SendSessionInit @0x621104; NapiNPProtocol_HandleClientJoin
+	//  @0x62c043; NapiNP_HandleServerJoinResponse @0x629ddf]
 	ServerAuth reply = build_server_auth(auth, peer.ip, peer.port, conn.server_sk, conn.server_scrk,
-	                                     ctx.server_key_mint.novaworld_name,
-	                                     ctx.server_key_mint.novaworld_web_url, nwuid, include_cu);
+	                                     kNovaworldNameDefault, "", "",
+	                                     /*include_novaworld_cu=*/false);
 	// [orig: 0x82 MI TLV = conn->connection_id @ CNapiNPConnection_SendSessionInit 0x620ef0] — the
 	// host-assigned dcb the joiner stores as its own ConnectionId and echoes in its 0x48 client-ack.
 	reply.mi = conn.connection_id;
@@ -342,23 +340,25 @@ std::vector<uint8_t> make_server_auth_datagram(const NapiNPServerCtx &ctx, const
 	// A GAME host advertises the JOINTOPERATIONS session template (120 s reap,
 	// 30 s idle keepalive, 10 s active probe, 512/256 pools, 1200 msg cap), not
 	// the NOVAWORLDUDP service block build_server_auth defaults to for the
-	// service, with CS field 13 from the host's configured `mpmaxpacketsize`
-	// [orig: CNapiNetwork_Init @0x4ca4a0 (field 13 @0x4CAA53) ->
-	// CNapiNPConnection_Create @0x62acb0 -> SendSessionInit @0x620ef0].
-	reply.client_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
-	reply.server_cs = jointoperations_cs_fields(ctx.config.max_packet_size);
-	// SendSessionInit emits the host's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
+	// service [orig: CNapiNetwork_Init @0x4ca4a0 -> CNapiNPConnection_Create
+	// @0x62acb0 -> SendSessionInit @0x620ef0].
+	reply.client_cs = jointoperations_cs_fields();
+	reply.server_cs = jointoperations_cs_fields();
+	// SendSessionInit emits the connection's LIVE cs_dir blocks verbatim, so a `_NSTMOUT.TXT`
 	// override of timeout_ms (field 0) / msg_out_max (field 11) reaches the joiner here —
-	// its HandleServerJoinResponse overlays these onto its own template. -1 rides as
+	// its HandleServerJoinResponse overlays these onto its own template — and field 13 is the
+	// ceiling the new-connection callback already negotiated (D-NET-234). -1 rides as
 	// 0xFFFFFFFF. [orig: CNapiNPConnection_SendSessionInit @0x620ef0; CNapiNetwork_Init
-	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0]
-	const SessionTimeoutConfig &tmpl = ctx.np_protocol.connection_template;
+	//  stores @0x4caa81/@0x4cab20/@0x4cab54/@0x4cabf0; NapiNPServer_HandleNewConnection
+	//  stores @0x4c81ca/@0x4c81d0, run first by CNapiNPConnection_OnStateChange @0x6261cd]
 	for (std::vector<CsField> *block : {&reply.client_cs, &reply.server_cs}) {
 		for (CsField &field : *block) {
 			if (field.field_index == 0)
-				field.value = static_cast<uint32_t>(tmpl.timeout_ms);
+				field.value = static_cast<uint32_t>(conn.timeouts.timeout_ms);
 			else if (field.field_index == 11)
-				field.value = static_cast<uint32_t>(tmpl.msg_out_max);
+				field.value = static_cast<uint32_t>(conn.timeouts.msg_out_max);
+			else if (field.field_index == 13)
+				field.value = static_cast<uint32_t>(conn.timeouts.max_packet_bytes);
 		}
 	}
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reply));
@@ -399,7 +399,6 @@ std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
 	                          body_out)) {
 		return {};
 	}
-	conn.active_send_elapsed_ms = 0;
 	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
@@ -418,18 +417,39 @@ std::vector<uint8_t> frame_retained_session_reply(
 			SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(body_out));
 }
 
-// Retail follows ServerAuth with one sequenced packet that installs the 1300-byte packet ceiling
-// in both control-setting directions. The joiner ACKs this as C2S sequence 1 before sending JOIN.
+// The new-connection callback's MTU negotiation: a joiner that uploaded a nonzero MPS CU tag gets
+// the ceiling clamped to [100, the connection's own field 13] stored into both of the node's
+// direction blocks, then one CS update per direction (mask 0x2000) queued — the first sequenced
+// packet after the 0x82, which the joiner ACKs as C2S sequence 1 before sending JOIN. It runs
+// before SendSessionInit, so the 0x82 already carries the negotiated value. A zero (absent) MPS
+// negotiates nothing and queues no update.
+// [orig: NapiNPServer_HandleNewConnection @0x4c8040 — the MPS read @0x4c818d, `< 100 -> 100`
+//  @0x4c8197, `> field 13 -> field 13` @0x4c81a9, `> 0x4000 -> 0x4000` @0x4c81b1, the stores
+//  @0x4c81ca/@0x4c81d0, SendConfigUpdateIfEnabled(conn, 1, 0x2000) @0x4c81d6 then (conn, 0)
+//  @0x4c81e4 (the wire direction byte is `direction == 0`, so 0 then 1); installed as cb_server_1
+//  @0x4c99c0 and run by CNapiNPConnection_OnStateChange @0x6261cd before SendSessionInit
+//  @0x6261fc; the MPS tag NapiNetConfig_LoadFromConnTags @0x4c7260 ("MPS" @0x7ca070)]
 // [wire: host_and_join_lan frames 6-8; flags 0xA0 = settings update + u8 length]
-std::vector<ProtocolMessage> make_game_session_initial_settings() {
-	return {
-			make_protocol_message(
-					0x00, {0x00, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
-					0xA0),
-			make_protocol_message(
-					0x00, {0x01, 0x00, 0x20, 0x00, 0x00, 0x14, 0x05, 0x00, 0x00},
-					0xA0),
-	};
+bool negotiate_max_packet_bytes(NapiNPConnection &conn, long mps) {
+	if (mps == 0) return false;
+	int32_t value = static_cast<int32_t>(mps);
+	if (value < 100) value = 100;
+	else if (value > conn.timeouts.max_packet_bytes) value = conn.timeouts.max_packet_bytes;
+	else if (value > 0x4000) value = 0x4000;
+	conn.timeouts.max_packet_bytes = value;
+	return true;
+}
+
+std::vector<ProtocolMessage> make_game_session_initial_settings(int32_t max_packet_bytes) {
+	std::vector<ProtocolMessage> settings;
+	for (const uint8_t direction : {uint8_t{0}, uint8_t{1}}) {
+		std::vector<uint8_t> body{direction, 0x00, 0x20, 0x00, 0x00};
+		io::append_u32_le(body, static_cast<uint32_t>(max_packet_bytes));
+		settings.push_back(make_protocol_message(
+				hightag::CS_CONFIG_UPDATE, std::move(body),
+				PROTOCOL_MSG_FLAG_SETTINGS_UPDATE | PROTOCOL_MSG_FLAG_LEN8));
+	}
+	return settings;
 }
 
 // ---------------------------------------------------------------------------
@@ -574,6 +594,23 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// client_ip_net: the builders take the IP as the four payload octets in LE packing (so retail's
 	// positional TLV reader prints a.b.c.d) — pass peer.ip verbatim, matching nw_udp_listener.
 	ServerHello reply = build_server_hello(hello, peer.ip, peer.port);
+	// The host writes its OWN protocol identity, not the prober's: the JO identity the
+	// network init installed (no PV3 on the JO protocol, so none is written), and UT, the
+	// uptime, whenever nonzero (D-NET-265). [orig: NapiNPProtocol_SendServerInfoPacket
+	//  @0x620583..0x62078a (CO/AP/BDAT/PN/PG/PV1/PV2/PV3 from the protocol, each gated);
+	//  UT @0x62064f..0x620683; CNapiNetwork_Init @0x4ca4a0]
+	{
+		const ClientHello self = make_jointoperations_client_hello(0);
+		reply.co = self.co;
+		reply.ap = self.ap;
+		reply.bdat = self.bdat;
+		reply.pn = self.pn;
+		reply.pg = self.pg;
+		reply.pv1 = self.pv1;
+		reply.pv2 = self.pv2;
+		reply.pv3 = self.pv3;
+		reply.ut = ctx.np_protocol.host_run_duration_ms;
+	}
 	// A LAN 0x41 is a stateless enumerate/handshake probe. Populate the retail
 	// game-server fields from live host state without registering the source as
 	// a peer; only a validated 0x42 creates the connection node.
@@ -761,6 +798,7 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// NapiNPProtocol_HandleClientJoin @0x62b750 CU loop (type gate @node+20 == 2) ->
 	// NapiNetConfig_LoadFromConnTags @0x4c7260 (Napi_StrCaseEqual match, atol values); D-NET-146]
 	conn.char_vars = CharacterJoinVars{}; // a recreated node starts tag-absent (zero-init)
+	long mps = 0; // the MPS tag: the joiner's own packet ceiling (0 = absent)
 	for (const auto &blob : auth.cu) {
 		uint8_t cu_type = 0;
 		std::string cu_name, cu_value;
@@ -784,6 +822,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 			conn.char_vars.avatar[0] = static_cast<uint8_t>(v);
 		} else if (strutil::iequals(cu_name, "VCB")) {
 			conn.char_vars.avatar[1] = static_cast<uint8_t>(v);
+		} else if (strutil::iequals(cu_name, "MPS")) {
+			mps = v; // [orig: LoadFromConnTags "MPS" @0x7ca070 -> net_cfg.max_packet_bytes]
 		}
 		// The environment tags (DB included) were parsed and validated before allocation.
 		// Stored/display-only fields (VERSIONSTRING/COUNTRYCODE/TZB...) have no retained
@@ -819,10 +859,16 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// The validation-phase deadline base for CheckPlayerTimeouts (netPlayer+0xA4
 	// is stamped with GetTickCount when the node enters the validating state).
 	conn.join_validated_host_ms = ctx.np_protocol.host_run_duration_ms;
+	// The new-connection callback negotiates the packet ceiling before the 0x82 goes out
+	// (D-NET-234) [orig: OnStateChange @0x6261cd -> HandleNewConnection @0x4c818d..0x4c81e4,
+	// then SendSessionInit @0x6261fc].
+	const bool negotiated = negotiate_max_packet_bytes(conn, mps);
 	out.outbound.push_back(make_server_auth_datagram(ctx, auth, peer, conn));
-	std::vector<uint8_t> initial_settings =
-			frame_session_replies(conn, make_game_session_initial_settings());
-	if (!initial_settings.empty()) out.outbound.push_back(std::move(initial_settings));
+	if (negotiated) {
+		std::vector<uint8_t> initial_settings = frame_session_replies(
+				conn, make_game_session_initial_settings(conn.timeouts.max_packet_bytes));
+		if (!initial_settings.empty()) out.outbound.push_back(std::move(initial_settings));
+	}
 
 	HostAcceptEvent ev;
 	ev.kind = HostAcceptEvent::Kind::PeerHandshakeAdvanced;
@@ -859,6 +905,15 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	//  @0x625BC0 stamp @0x625d54; seq 0 @0x626bcc / duplicate @0x626c03 / future @0x626c0c..0x626c3a
 	//  stamp nothing]
 	if (admission.admitted) conn.receive_inactive_ms = 0;
+	// An admitted packet that carried any message record owes the peer an ACK: retail's
+	// ParseMessages raises has_pending_out (+0x650) once its record region is non-empty, and
+	// the next open send boundary builds a packet even with nothing queued — a header-only one
+	// that carries the ACK (D-NET-233). A header-only C2S packet owes nothing.
+	// [orig: ParseMessages @0x625dff (and per record DispatchMessage @0x6225b5);
+	//  PumpEnumeratorAndSend `queued > 0 || has_pending_out` @0x6292a9 -> BuildOutgoingPackets]
+	for (const SessionDeframeAdmission::Packet &packet : admission.packets) {
+		if (!packet.messages.empty()) conn.session_ack_owed = true;
+	}
 
 	// The header's ack_count is the peer's "last of YOUR seqs I received" — the confirm side of the
 	// initial-state backlog throttle (retail clients carry it on every 0x43, including game-message-
@@ -1010,8 +1065,11 @@ void handle_client_session(NapiNPServerCtx &ctx, const PeerAddr &peer,
 
 // 0x44 ClientResendList -> reconstructed 0x83 packets. The request body names this host
 // connection's local SK, followed by requested sequence dwords. Retail retains message records,
-// not encrypted datagrams, so each old sequence is reframed with the current inbound ACK.
-// [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0]
+// not encrypted datagrams, so each old sequence is reframed with the current inbound ACK. The
+// handler writes them to the socket itself, inside the receive pump (HandleResult::
+// immediate_outbound), and neither moves the send boundary nor the send-interval clock.
+// [orig: NapiNP_HandleResendList @0x623800; SendSessionPacket @0x61EDD0, called @0x6239b6;
+//  SendSessionPacket stamps only conn->last_send_tick, not BuildOutgoingPackets' +0x638]
 void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		const std::vector<uint8_t> &body, HandleResult &out) {
 	NapiNPConnection *conn = find_connection(ctx, peer);
@@ -1049,7 +1107,7 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 				sequence, session_body)) {
 			continue;
 		}
-		out.outbound.push_back(nw_encode_outbound(
+		out.immediate_outbound.push_back(nw_encode_outbound(
 				SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(session_body)));
 	}
 }
@@ -1171,12 +1229,10 @@ HandleResult handle_server_datagram(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	return out;
 }
 
-std::vector<TickOut> flush_server_missing_requests(
-		NapiNPServerCtx &ctx, bool respect_s2c_send_boundary) {
+std::vector<TickOut> flush_server_missing_requests(NapiNPServerCtx &ctx) {
 	std::vector<TickOut> out;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide || !conn.seq.missing_request_pending) continue;
-		if (respect_s2c_send_boundary && !conn.s2c_send_boundary_open) continue;
 		conn.seq.missing_request_pending = false;
 		if (conn.seq.queued_inbound.empty()) continue;
 
@@ -1250,16 +1306,6 @@ std::vector<TickOut> tick_connections(
 		out.push_back(std::move(destroyed));
 	}
 
-	auto append_active_probe = [](NapiNPConnection &conn, TickOut &to) {
-		if (conn.type != NapiNPConnection::kTypeServerSide || conn.server_scrk.empty() ||
-		    conn.seq.retained_outbound_message_count == 0 ||
-		    conn.active_send_elapsed_ms <= kActiveSendIntervalMilliseconds) {
-			return;
-		}
-		std::vector<uint8_t> datagram = frame_session_replies(conn, {});
-		if (!datagram.empty()) to.outbound.push_back(std::move(datagram));
-	};
-
 	// P3 World-driven path: the pending-player spawn pump runs on the shared periodic
 	// second — the call sits inside Server_TickUpdate's g_PeriodicSecondTimer block,
 	// not on every tick — before walking the connections to advance their bursts. The
@@ -1269,23 +1315,6 @@ std::vector<TickOut> tick_connections(
 		Server_ProcessPendingPlayerSpawns(ctx, *ctx.world);
 
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
-		// Accumulate the active-send interval before application production, but defer minting its
-		// header probe until afterward. Any semantic packet framed below resets the timer and takes
-		// this sequence slot, matching BuildOutgoingPackets rather than inserting an empty packet
-		// immediately before queued data.
-		if (conn.type == NapiNPConnection::kTypeServerSide && !conn.server_scrk.empty()) {
-			if (conn.seq.retained_outbound_message_count == 0) {
-				conn.active_send_elapsed_ms = 0;
-			} else if (elapsed_ms > 0) {
-				const uint64_t total =
-						static_cast<uint64_t>(conn.active_send_elapsed_ms) +
-						static_cast<uint32_t>(elapsed_ms);
-				conn.active_send_elapsed_ms = static_cast<uint32_t>(
-						total < std::numeric_limits<uint32_t>::max()
-								? total
-								: std::numeric_limits<uint32_t>::max());
-			}
-		}
 		const bool send_boundary_closed =
 				respect_s2c_send_boundary && conn.type == NapiNPConnection::kTypeServerSide &&
 				!conn.s2c_send_boundary_open;
@@ -1307,7 +1336,6 @@ std::vector<TickOut> tick_connections(
 				if (!dg.empty()) to.outbound.push_back(std::move(dg));
 				conn.reply.roster_seen_gen = ctx.np_protocol.roster_generation;
 			}
-			append_active_probe(conn, to);
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
@@ -1364,9 +1392,8 @@ std::vector<TickOut> tick_connections(
 			continue;
 		}
 		if (ctx.world == nullptr) {
-			// No World means no semantic burst, but reliable settings/handshake records still need
-			// the transport-level probe that induces the peer's missing-sequence request.
-			append_active_probe(conn, to);
+			// No World means no semantic burst (the retained-records probe is the send
+			// pump's ACTIVE leg, host_session.cpp's pump_send_interval_legs).
 			if (!to.outbound.empty()) out.push_back(std::move(to));
 			continue;
 		}
@@ -1423,7 +1450,6 @@ std::vector<TickOut> tick_connections(
 		// datagram-driven handle_client_session path — whichever observes the burst change first wins.
 		surface_burst_events(ctx, conn, to.events);
 
-		append_active_probe(conn, to);
 		if (to.outbound.empty() && to.events.empty()) continue;
 		out.push_back(std::move(to));
 	}

@@ -1458,6 +1458,23 @@ target_link_libraries(script_remote_command_test PRIVATE opennova_net opennova_r
 target_include_directories(script_remote_command_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME script_remote_command COMMAND script_remote_command_test)
 
+# The joiner's folds of the retail S2C messages the dispatch audit found without
+# a faithful consumer (docs/net/retail-message-dispatch-audit.md).
+add_executable(client_message_folds_test netsim/client_message_folds_test.cpp)
+target_link_libraries(client_message_folds_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(client_message_folds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME client_message_folds COMMAND client_message_folds_test)
+
+# D-NET-285: the co-op dialog line (S2C 0x28), engine side.
+add_executable(dialog_line_test netsim/dialog_line_test.cpp)
+target_link_libraries(dialog_line_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME dialog_line COMMAND dialog_line_test)
+
+# D-NET-282: the death screen's team change, client side.
+add_executable(team_change_client_test netsim/team_change_client_test.cpp)
+target_link_libraries(team_change_client_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME team_change_client COMMAND team_change_client_test)
+
 # The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
 # and a synthetic document: the id tree, navigation, the state store and its replay,
 # ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.
@@ -2773,6 +2790,12 @@ add_executable(ping_sweep_fold_test novaworld/ping_sweep_fold_test.cpp)
 target_link_libraries(ping_sweep_fold_test PRIVATE opennova_net)
 target_include_directories(ping_sweep_fold_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME ping_sweep_fold COMMAND ping_sweep_fold_test)
+# The ping-sweep lifecycle: a refresh's sweep supersedes the running one at once.
+find_package(Threads REQUIRED)
+add_executable(ping_sweep_runner_test novaworld/ping_sweep_runner_test.cpp)
+target_link_libraries(ping_sweep_runner_test PRIVATE opennova_net Threads::Threads)
+target_include_directories(ping_sweep_runner_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME ping_sweep_runner COMMAND ping_sweep_runner_test)
 
 # Retail dispatcher semantics (D-NET-190..193): SVRS accumulation, the gated
 # "GSB " reset, undersized-record skips, and the XXXX-terminator hardening.
@@ -2897,6 +2920,21 @@ add_test(NAME nw_host_register_e2e COMMAND nw_host_register_e2e_test)
 # manufacture packet timeouts that never reproduce in isolation.
 set_tests_properties(nw_host_register_e2e PROPERTIES RUN_SERIAL TRUE)
 
+# The lobby's answer to a stock client's 0x44 resend request, through the real
+# listener over loopback UDP (same listener-source recipe as above).
+add_executable(nw_lobby_resend_e2e_test
+    novaworld/nw_lobby_resend_e2e_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
+target_link_libraries(nw_lobby_resend_e2e_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_app_common)
+target_include_directories(nw_lobby_resend_e2e_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server
+    ${CMAKE_SOURCE_DIR}/apps/common)
+add_test(NAME nw_lobby_resend_e2e COMMAND nw_lobby_resend_e2e_test)
+set_tests_properties(nw_lobby_resend_e2e PROPERTIES RUN_SERIAL TRUE)
+
 # ADR 0010 Phase 3 — EPASK account-login wire format. Builds the NWLogin.dll
 # credential POST body with the login helpers and decodes it through a copy of
 # the server's parse_form_body + EPASK path, then checks the cookie jar carries
@@ -2912,6 +2950,13 @@ add_executable(joi_parse_test novaworld/joi_parse_test.cpp)
 target_link_libraries(joi_parse_test PRIVATE opennova_net)
 target_include_directories(joi_parse_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME joi_parse COMMAND joi_parse_test)
+
+# The service's NWJoin.dll / NWHost.dll relay leg selection: a stale tag cookie
+# never hijacks a fresh first call.
+add_executable(relay_request_test novaworld/relay_request_test.cpp)
+target_link_libraries(relay_request_test PRIVATE opennova_net)
+target_include_directories(relay_request_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME relay_request COMMAND relay_request_test)
 
 add_executable(join_identity_test novaworld/join_identity_test.cpp)
 target_link_libraries(join_identity_test PRIVATE opennova_net)
@@ -3295,6 +3340,28 @@ add_executable(npruntime_item_state_net_test npruntime/item_state_net_test.cpp)
 target_link_libraries(npruntime_item_state_net_test PRIVATE opennova_runtime)
 add_test(NAME npruntime_item_state_net COMMAND npruntime_item_state_net_test)
 
+# D-DOOR-1: the host's S2C 0x37 door rows (the command's 0-based sections and
+# the 1-based completions) through the server tick and its fan.
+add_executable(npruntime_door_relay_test npruntime/door_relay_test.cpp)
+target_link_libraries(npruntime_door_relay_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_door_relay COMMAND npruntime_door_relay_test)
+
+# D-NET-284: the host's join-window kill page (C2S 0x28 -> S2C 0x4E).
+add_executable(npruntime_kill_page_test npruntime/kill_page_test.cpp)
+target_link_libraries(npruntime_kill_page_test PRIVATE opennova_runtime)
+target_include_directories(npruntime_kill_page_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_kill_page COMMAND npruntime_kill_page_test)
+
+# D-NET-281: the death screen's team change (C2S 0x4D), host side.
+add_executable(npruntime_team_change_request_test npruntime/team_change_request_test.cpp)
+target_link_libraries(npruntime_team_change_request_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_team_change_request COMMAND npruntime_team_change_request_test)
+
+# D-NET-127: the host's S2C 0x46 per-field values (the 0x1000 spectator byte).
+add_executable(npruntime_player_sync_fields_test npruntime/player_sync_fields_test.cpp)
+target_link_libraries(npruntime_player_sync_fields_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_player_sync_fields COMMAND npruntime_player_sync_fields_test)
+
 # D-NET-142: the C2S 0x25 reload-request relay — dispatch broadcasts S2C 0x49 onto every in-match
 # connection's transport (requester included) [orig: @0x514DF0 -> SendFiltered @0x4C87E0]; §5.58.
 add_executable(npruntime_reload_relay_test npruntime/reload_relay_test.cpp)
@@ -3479,11 +3546,38 @@ add_executable(npruntime_session_resend_test npruntime/session_resend_test.cpp)
 target_link_libraries(npruntime_session_resend_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_session_resend COMMAND npruntime_session_resend_test)
 
+# The NP session layer soaked over an impaired link: ClientRuntime joiners and the host owner
+# loop on a virtual clock, each direction through the seeded ImpairedDatagramSocket decorator
+# (2 % loss, reordering, duplication, 100 ms delay) under a 12-tick send holdoff; plus a 20 %-loss
+# join over a 120-marker world, three joiners admitted at once, and three through the 20 % join
+# over a 400-marker world. Asserts every session survives in order, recovers every gap and (at
+# 2 %) never stalls past retail's recovery cadence.
+add_executable(npruntime_session_soak_test npruntime/session_soak_test.cpp)
+target_link_libraries(npruntime_session_soak_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_session_soak COMMAND npruntime_session_soak_test)
+
+# The joiner's admission through retail's loading loops (D-NET-254): each stage's loop calls the
+# send pump its own way (per UI frame, a busy spin, or a 50 / 100 ms wall-clock pace), and only
+# Client_ProcessNetworkFrame gates it on the holdoff countdown. [orig: SaveFile_SendAndWaitForServerAck
+# @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0; NapiClient_WaitForDisconnect
+# @0x42cb20; NapiClient_WaitForGameStart @0x42cc10]
+add_executable(npruntime_client_loading_pump_test npruntime/client_loading_pump_test.cpp)
+target_link_libraries(npruntime_client_loading_pump_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME npruntime_client_loading_pump COMMAND npruntime_client_loading_pump_test)
+
 # The host-initiated close (the connection-description record, settings flag + tag 3) pinned against
 # the 80 captured bytes of a live retail deploy-screen idle punt, plus the S2C 0x30/0x31 anti-cheat
 # CRC challenges a stock host streams at every joiner. [orig: Server_LogCRCMismatchPunt @0x517ed0 ->
 # NapiNPDataTransfer_SendDescription @0x628c80; CNapiNPConnection_HandleDescriptionPacket @0x621ae0;
 # NapiNPClientMsg_HandleChecksumRequest @0x431170; NapiNPClientMsg_0x031 @0x4311e0]
+add_executable(npruntime_pre_game_menu_test npruntime/pre_game_menu_test.cpp)
+target_link_libraries(npruntime_pre_game_menu_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_pre_game_menu COMMAND npruntime_pre_game_menu_test)
+
+add_executable(npruntime_disconnect_reason_test npruntime/disconnect_reason_test.cpp)
+target_link_libraries(npruntime_disconnect_reason_test PRIVATE opennova_runtime)
+add_test(NAME npruntime_disconnect_reason COMMAND npruntime_disconnect_reason_test)
+
 add_executable(npruntime_host_punt_test npruntime/host_punt_test.cpp)
 target_link_libraries(npruntime_host_punt_test PRIVATE opennova_net opennova_runtime)
 add_test(NAME npruntime_host_punt COMMAND npruntime_host_punt_test)

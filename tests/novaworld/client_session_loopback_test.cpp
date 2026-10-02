@@ -27,6 +27,7 @@
 #include <net/napi/session.h>
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
+#include <net/novacrypto/url_cipher.h>
 
 #include <algorithm>
 #include <array>
@@ -734,7 +735,9 @@ void test_play_uses_current_http_cookies() {
 	if (!expect(login.kind == LoginResult::Kind::Succeeded, "cookie refresh: HTTP login succeeds")) return;
 	flow.join(777);
 	flow.on_join_response(true, 200, {"Set-Cookie: NWJOINSESSIONTAG=join"}, {});
-	const std::string joi = "<TITLE>[NI=192.0.2.1&NP=32768&GS=x]</TITLE>";
+	// NK is the .joi's only dial authority (URL_ParseConnectionQueryString @0x54e146).
+	const std::string joi = "<TITLE>[NK=" + url_cipher_encode("192.0.2.1:32768", URL_CIPHER_KEY_NK) +
+			"&NI=192.0.2.1&NP=32768&GS=x]</TITLE>";
 	const auto joined = flow.on_join_response(true, 200,
 			{"Set-Cookie: NWPF=28", "Set-Cookie: NWPF2=0", "Set-Cookie: PUBJOINTICKET=ticket-1"},
 			std::vector<uint8_t>(joi.begin(), joi.end()));

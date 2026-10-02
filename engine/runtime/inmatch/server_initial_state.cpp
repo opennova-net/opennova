@@ -141,12 +141,22 @@ std::vector<uint8_t> serialize_class_allow_mask(uint16_t class_allow_mask) {
 	return b;
 }
 
-// [orig: NetPacket_WriteTimestamp @0x5046c0] S2C 0x1A: a 4-byte timestamp. The original writes
-// GetTickCount() (an OS primitive — excluded from the faithful-port rule); the headless host uses
-// its monotonic logic tick.
-std::vector<uint8_t> serialize_timestamp(uint32_t now_tick) {
+// The host's GetTickCount: the S2C 0x19 / 0x1A / 0x0F stamps a joiner echoes
+// back as its C2S 0x28 kill-page window, in the domain the 0x26 sender stamps
+// entity+560 with (the world's logic tick through the deterministic seam; the
+// connection clock only on the World-less unit path).
+// [orig: NetPacket_WriteTimestamp @0x5046C0 / NetPacket_WriteTimestampB
+//  @0x5046F0 / NetPacket_WriteWorldStateLoad0x0F @0x502D27 — GetTickCount();
+//  Server_SendEntityStatePacket @0x509D7A]
+uint32_t host_tick_count(const NapiNPServerCtx &ctx, uint32_t now_tick) {
+	return io::host_milliseconds_for_logic_tick(
+			ctx.world != nullptr ? ctx.world->logic_tick : now_tick);
+}
+
+// [orig: NetPacket_WriteTimestamp @0x5046c0] S2C 0x1A: the 4-byte GetTickCount.
+std::vector<uint8_t> serialize_timestamp(uint32_t tick_count) {
 	std::vector<uint8_t> b;
-	put_u32(b, now_tick);
+	put_u32(b, tick_count);
 	return b;
 }
 
@@ -203,7 +213,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	}
 	std::vector<uint8_t> b;
 	b.reserve(640);
-	put_u32(b, now_tick);                        // sessionTick
+	put_u32(b, host_tick_count(ctx, now_tick)); // GetTickCount @0x502D27
 	put_u32(b, static_cast<uint32_t>(px));        // spawn pos (16.16)
 	put_u32(b, static_cast<uint32_t>(py));
 	put_u32(b, static_cast<uint32_t>(pz));
@@ -434,10 +444,10 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			break;
 		}
 		case InitialStateBurst::kStreamPool0Organics: { // 0x0C pool-0 organics (carry entity+0x78 dcb for the joiner owner-ID match) [orig: NetPacket_SerializeEntityStatesToBuffer @0x5030a0]
-			// Pass THIS joiner's owned entity so ONLY its own record gets minimap_flags bit 0x01
-			// (recipient's-own marker); the host player + other peers get 0x0100 (retail same-map parity).
+			// The same records for every recipient: each player's flags word carries its own
+			// entity's bit0 (deploy screen / spectating), not a recipient marker (D-NET-136).
 			const opennova::OrganicSpawnBatch full =
-					opennova::replication::build_pool0_organic_batch(*ctx.world, conn.link.owned_entity);
+					opennova::replication::build_pool0_organic_batch(*ctx.world);
 			world_pool_done = emit_paged_pool(0x0C, full.records.size(),
 			                                initial_state_page_limits::pool0_organics(),
 			                                [&](std::size_t off, std::size_t cnt) {
@@ -551,7 +561,9 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 			//  ((rand() & 0xFE) + 1) << 16; join sender @0x51a982]
 			step.messages.push_back(InitialStateMessage{
 					0x61, Server_RerollPlayerTickSeed(conn)}); // per-player tick seed [Server_SendRandomSeedToPlayer @0x5101a0]
-			step.messages.push_back(InitialStateMessage{0x3E, {}}); // terminator
+			// The last of the tail: the joiner clears its map-overlay banks
+			// [orig: Server_OnPlayerJoin @0x51aaee -> NapiNPClientMsg_0x03E @0x4226D0].
+			step.messages.push_back(InitialStateMessage{s2c::MAP_OVERLAY_RESET, {}});
 			opennova::io::logf(opennova::io::LogLevel::kWarn,
 		"[burst] game-start bundle: 0x42(2) 0x0F(%zu) 0x4D(1) 0x61(4) 0x3E(0) -> drives joiner deploy",
 			             wsl_sz);
@@ -591,7 +603,7 @@ void advance_burst_one_phase(NapiNPServerCtx &ctx, NapiNPConnection &conn, Initi
 		} else if (tag == s2c::CLASS_ALLOW_MASK) {
 			body = serialize_class_allow_mask(ctx.config.class_allow_mask);
 		} else if (tag == s2c::WAIT_FOR_GAME_START_ACK) {
-			body = serialize_timestamp(now_tick);
+			body = serialize_timestamp(host_tick_count(ctx, now_tick));
 		} else if (tag == s2c::SERVER_CONFIG_STRINGS) {
 			body = serialize_briefing_text(ctx);
 		}

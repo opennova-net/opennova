@@ -3,8 +3,11 @@
 // absent-layers BMS-only case, and retail's diagnostic policy: the program
 // always installs with its first error recorded.
 
+#include <formats/particle/parser.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/wac/bytecode.h>
+#include <runtime/particle/effect_catalog_names.h>
+#include <runtime/wac/mission_effect_interns.h>
 #include <runtime/wac/wac_layered_load.h>
 #include <runtime/wac/wac_system.h>
 #include <runtime/world/world.h>
@@ -17,6 +20,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -296,7 +300,117 @@ void test_parenthesised_gloop_is_the_unknown_group_leg() {
 	CHECK(unknown_group);
 }
 
+// The def texts the intern-order tests share (CR LF, as every shipped def).
+const char *const kAmmoDef =
+		"ammo AMMO_A\r\n"
+		" velocity 100\r\n"
+		" ai_launcheffect Effect_MuzzleA\r\n"
+		" effects_table\r\n"
+		"  dirt Effect_DirtHit SND_X 3\r\n"
+		"  dirt Effect_Redefined SND_X 3\r\n" // the tag is defined: skipped
+		"  bogus Effect_Bogus SND 1\r\n"      // unknown tag
+		"  grass none none 1\r\n"             // "none" pools nothing
+		"  metal Effect_AirExp none 2\r\n"    // already pooled
+		"  sand Effect_Short\r\n"             // under four columns
+		" end\r\n"
+		" secondary_effect Effect_Blast\r\n"
+		"end\r\n"
+		"ammo AMMO_B\r\n"
+		" effects_table\r\n"
+		"  dirt Effect_DirtHit2 none 1\r\n"   // a new def: the tags reset
+		" end\r\n"
+		"end\r\n"
+		"ai_launcheffect Effect_Outside\r\n"  // no def open
+		"ammo AMMO_C\r\n"
+		"ammo AMMO_D\r\n"                     // missing end: the walk stops
+		" secondary_effect Effect_AfterStop\r\n"
+		"end\r\n";
+const char *const kWeaponDef =
+		"weapon WPN_A\r\n"
+		" particle Effect_NotInAction\r\n"     // a weapon key, not an action's
+		" action fire\r\n"
+		"  particle Effect_WpnFire\r\n"
+		" end\r\n"
+		" action bogus\r\n"                    // invalid: no action opens
+		"  particle Effect_WpnBogus\r\n"
+		" end\r\n"                             // so this end closes the weapon
+		" action fire\r\n"
+		"  particle Effect_AfterClose\r\n"
+		"end\r\n";
+const char *const kPowerupDef =
+		"powerup PWR_A\r\n"
+		" particle Effect_PwrProp\r\n"
+		" action pickup\r\n"
+		"  particle Effect_PwrPickup\r\n"
+		" end\r\n"
+		"end\r\n";
+
+// D-WAC-5 (the Fx half): the mission start pools the 78-name material table,
+// ammo.def, weapon.def, the vehicle fire set and powerup.def before the WAC
+// compile, so a script's first new FX literal compiles to the slot after them.
+// [orig: Game_StartMission @0x52499e / @0x525495 / @0x5254bd / @0x52563d /
+//  @0x5256d2 / @0x525cb3; CEffectWorld_InternEffectHandle @0x5F7310]
+void test_mission_start_intern_order() {
+	opennova::particle::ParticleFile file;
+	file.effects.push_back({"stockeffect", {}});
+	file.effects.push_back({"EFFECT_AIREXP", {}});
+	opennova::particle::EffectCatalogNames effects;
+	effects.add_document(file);
+	wc::intern_mission_start_effects(effects, {kAmmoDef, kWeaponDef, kPowerupDef});
+	const std::vector<std::string> names = effects.interned_names();
+	CHECK(names.size() == 78u + 10u);
+	if (names.size() != 78u + 10u) return;
+	CHECK(names[0] == "EFFECT_AIREXP" && names[1] == "Effect_BigSplash" &&
+			names[77] == "Effect_surfaceRings");
+	const std::vector<std::string> tail(names.begin() + 78, names.end());
+	const std::vector<std::string> expected = {"Effect_MuzzleA", "Effect_DirtHit", "Effect_Blast",
+			"Effect_DirtHit2", "Effect_WpnFire", "Effect_smkSigB", "Effect_vehicleFireLarge",
+			"Effect_vehicleFireMed", "Effect_vehicleFireSmall", "Effect_PwrPickup"};
+	CHECK(tail == expected);
+	CHECK(effects.intern("Effect_ScriptFx").value == 89u);
+	CHECK(effects.intern("effect_blast").value == 81u);
+	// Without stockeffect only a defined name pools: the table's first entry.
+	opennova::particle::ParticleFile plain;
+	plain.effects.push_back({"Effect_AirExp", {}});
+	plain.effects.push_back({"Effect_PwrPickup", {}});
+	opennova::particle::EffectCatalogNames bare;
+	bare.add_document(plain);
+	wc::intern_mission_start_effects(bare, {kAmmoDef, kWeaponDef, kPowerupDef});
+	CHECK((bare.interned_names() == std::vector<std::string>{"Effect_AirExp", "Effect_PwrPickup"}));
+}
+
+// The catalog the kernel builds carries that order: the mounted documents,
+// then the mission-start names, then the compile's.
+void test_effect_catalog_load_seeds_the_mission_start_names() {
+	TempResourceRoot root;
+	opennova::particle::ParticleFile file;
+	opennova::particle::ParticleDef particle;
+	particle.id = "loop";
+	file.particles.push_back(particle);
+	file.effects.push_back({"stockeffect", {"loop"}});
+	std::ostringstream text;
+	std::string error;
+	CHECK(opennova::particle::save_particles(text, file, error));
+	root.write("script.ptl", text.str());
+	root.write("ammo.def", kAmmoDef);
+	root.write("weapon.def", kWeaponDef);
+	root.write("powerup.def", kPowerupDef);
+	mission::BootFileSource files = root.files();
+	files.list_files = [](const std::string &extension) {
+		return extension == ".ptl" ? std::vector<std::string>{"script.ptl"}
+				: std::vector<std::string>{};
+	};
+	opennova::particle::EffectCatalogNames effects;
+	wc::load_script_effect_catalog(files, effects);
+	const std::vector<std::string> names = effects.interned_names();
+	CHECK(names.size() == 88u);
+	if (names.size() == 88u) CHECK(names[78] == "Effect_MuzzleA" && names[87] == "Effect_PwrPickup");
+	CHECK(effects.intern("Effect_ScriptFx").value == 89u);
+}
+
 int main() {
+	test_mission_start_intern_order();
+	test_effect_catalog_load_seeds_the_mission_start_names();
     test_run_files_share_order_symbols_and_diagnostics();
 	test_parenthesised_gloop_is_the_unknown_group_leg();
 	test_wac_layers_execute_in_retail_order();

@@ -47,5 +47,13 @@ int main() {
 	const std::vector<uint16_t> zero_step = lan_host_bind_ports(100, 101, 0);
 	TEST_EXPECT(zero_step.size() == 2u && zero_step[1] == 101u);
 
+	// The client arm (D-NET-294): mplanclientportmin..max by delta from min (random
+	// off), 32768..65535 by 1 on the shipped cfg. [orig: CNapiNetwork_OpenTransportSocket
+	// @ 0x4c6ade..0x4c6af0 -> NapiUdpSocket_CreateAndBind @ 0x62d2a0]
+	const std::vector<uint16_t> client = opennova::lan_client_bind_ports();
+	TEST_EXPECT(client.size() == 32768u);
+	TEST_EXPECT(client.front() == 32768u && client[1] == 32769u);
+	TEST_EXPECT(client.back() == 65535u);
+
 	return 0;
 }

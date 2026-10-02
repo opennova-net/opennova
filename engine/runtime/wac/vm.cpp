@@ -727,6 +727,27 @@ std::vector<world::ScriptRemoteArg> WacVm::resolve_remote_args(opennova::world::
     return out;
 }
 
+// The SoundSet operand a stock receiver can take from this host. Retail's
+// payload loop writes the dword its compiler stored for the literal, the
+// trigger-set POINTER SoundBank_FindSetByNameAnyBank returned in the host's own
+// process, or 0 when the name did not resolve [orig: WacScript_ExecuteBytecode
+// dword arm @0x4f5d59; WacScript_ResolveParameter @0x4f2fe2..0x4f2ff2 stores
+// eax into the pool slot, 0 included]. The receiving client runs the handler
+// with that dword and DEREFERENCES it as a set in its own address space: only
+// 0 is null-tested before the reads [orig: Sound_Play3DPositional @0x527cc6
+// then set+72 @0x527cd1 (SS2SSN, sound2tgt via Entity_PlaySound3D_FullVolume
+// @0x528E20); WacCmd_SoundToTarget @0x4f7fa7; WacCmd_Sound @0x4ED590 ->
+// SoundBank_PlayTriggerEntries @0x75ccdd then set+36/+40 and the set+80 store
+// @0x75cfbb]. This VM holds a 1-based catalog handle, never an address, so a
+// small nonzero handle would fault a retail joiner; the one value with retail
+// meaning it can produce is the unresolved 0 (D-WAC-5). The local handler
+// keeps the handle: the host's own run is unaffected.
+static void clear_soundset_operands(const CommandDef &def,
+                                    std::vector<world::ScriptRemoteArg> &args) {
+    for (size_t i = 0; i < args.size() && i < 4; ++i)
+        if (def.params[i] == ParamType::SoundSet) args[i].value = 0;
+}
+
 // [orig: WacScript_ExecuteBytecode @0x4F58B0 — the registry flags-0x18 arm
 //  @0x4f5ca5..0x4f5ee9]
 int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &def,
@@ -758,6 +779,7 @@ int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &d
                 w.match.player(target) != nullptr) {
             record.targeted = true;
             record.target = target;
+            clear_soundset_operands(def, record.args);
             w.out.script_remote_commands.push_back(std::move(record));
             return 1;
         }
@@ -766,6 +788,7 @@ int32_t WacVm::replicate(opennova::world::World &w, int cmd, const CommandDef &d
     // The broadcast class reaches every in-match remote AND runs here.
     // [@0x4f5ec7..0x4f5ed1, then the call-convention switch @0x4f5ef6]
     const std::vector<world::ScriptRemoteArg> resolved = record.args;
+    clear_soundset_operands(def, record.args);
     w.out.script_remote_commands.push_back(std::move(record));
     return finish(run_remote_command(w, cmd, resolved, names));
 }

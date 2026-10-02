@@ -25,6 +25,7 @@ struct Entity;
 struct WeaponFsmDef;
 struct WeaponFsmEvents;
 struct RoundSpawnParams; // world/round_sim.h
+struct RoundImpact;      // world/round_sim.h
 
 // The wire round-event arm bits, mirrored from the npwire decoder constants
 // (the binding static_asserts the pairing; world never links the net stack).
@@ -163,6 +164,32 @@ private:
 // [orig: NetPacket_HandleGameEvent @ 0x426270, cases 19..21]
 void play_flag_event_sound(World &world, uint8_t event, const Entity &actor,
         const Entity &local, uint32_t game_type, int16_t x, int16_t y);
+
+// One impact's sound leg, played where the impact is produced: the ammo's
+// effects-table row for the impact tag, when the row authors a sound and the
+// impact presents one. The impact-effect processor plays it through the
+// distance-attenuated play (skipped on a dedicated host, a pending slot
+// (62 * dist / 330) >> 2 ticks long past 30 units); the squib sweep plays the
+// same row at full volume, undelayed (`full_volume`).
+// [orig: AmmoDef_ProcessImpactEffect @0x40a170, the sound @0x40a20d..0x40a216
+//  -> Sound_PlayWithDistanceAttenuation @0x528E40; the squib travel
+//  Entity_ProcessProjectileTravel @0x4495FF..0x44960F ->
+//  Entity_PlaySound3D_FullVolume]
+void play_round_impact_sound(World &world, const RoundImpact &impact, bool full_volume = false);
+
+// The zone-control and mortar-request events' interface cues, keyed on the
+// LOCAL player's team alone (no actor): a PSP/LFP warning plays the
+// team's threat cue, or the other team's plus its delayed voice; a capture
+// plays the win cue, or the loss cue plus its delayed voice; event 48 plays
+// the mortar request. A camp event (59 / 60) names its team in the event's
+// victim byte (`team_index`): 59 plays the win cue to that team and the loss
+// cue to everyone else, 60 the reverse, neither with a voice. Other events
+// return.
+// [orig: NetPacket_HandleGameEvent @ 0x426270, cases 41..44 / 54..57
+//  @0x42759b..0x42790e, event 48 @0x426387..0x4263c4, case 59
+//  @0x427387..0x4273a6, case 60 @0x427492..0x4274ad]
+void play_zone_event_sound(World &world, uint8_t event, const Entity &local,
+        uint8_t team_index);
 
 // The per-spawn fire-sound dispatch, called beside the FireEvent record — the
 // inline-presentation moment of the original. The local player's own fire

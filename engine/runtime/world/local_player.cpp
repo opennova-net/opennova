@@ -75,27 +75,17 @@ void LocalPlayer::set_movement_keys(bool forward, bool back, bool left,
 	input.lean_left = lean_left;
 	input.lean_right = lean_right;
 	input.jump = jump;
-	// Stance comes from the sim-owned SELECT latches (request_stance — the
+	// Stance comes from the sim-owned SELECT latches (latch_stance — the
 	// C2S 0x1D apply semantics [orig: @0x501c60]).
 	input.crouch = stance_latch_ == 1;
 	input.prone = stance_latch_ == 2;
-	// The movement-held latch and the unscope-on-move [orig:
-	// Player_PackInputStateToEntity @0x4df450 — any of the four direction keys
-	// sets g_MovementKeyHeld (blocks scope-UP on Scoped weapons @0x4df29c)
-	// and, while SETTLED at scope on a Scoped (flags 1) weapon, routes through
-	// Player_ToggleWeaponScope @0x4df4c9..0x4df4ec = the full unscope. The
-	// toggle's ForceScoped pin (@0x4df12d) keeps pinned sights raised].
-	// Retail runs these legs inside the pack from the accumulated word; here
-	// they still read this frame's held keys, which matches only while the
-	// pack runs every frame (host, single player, a holdoff-1 joiner).
-	const bool move_held = forward || back || left || right;
-	if (w::player_view_move_input(view, move_held,
-				weapon.active ? weapon.def.flags : 0) &&
-			(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
-		if (w::local_player_set_scope(world, weapon, view,
-					*w::active_local_weapon_slot(world, weapon), false))
-			w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
-	}
+	// The binocular suppression reads the input word as this frame's fold will
+	// leave it, so the raised pose drops on the frame a direction key goes
+	// down. The movement-held latch and the unscope-on-move are the pack's
+	// (apply_player_input_pre_tick). [orig: Player_UpdatePerFrame
+	//  `test byte ptr g_InputFlags, 1Eh` @0x4de3ae, ahead of the pack]
+	view.movement_input =
+			(input_flags.folded(w::player_input_flags(input, false)) & w::kInputFlagDirectionMask) != 0;
 	w::local_player_view_refresh(&world, view);
 }
 
@@ -138,8 +128,7 @@ void LocalPlayer::set_view_keys(bool free_look, bool up, bool down, bool left, b
     input.turn_right = right;
 }
 
-bool LocalPlayer::request_stance(int stance) {
-	if (stance < 0 || stance > 2) return false;
+bool LocalPlayer::stance_request_allowed() const {
 	// ForceCrouch weapons refuse stance changes [orig: the case-169/170/172
 	// gate Entity_CheckWeaponSeatFlags(equipped, 0x40000) @0x4e0d8a].
 	if (weapon.active && weapon.force_crouch) return false;
@@ -149,6 +138,28 @@ bool LocalPlayer::request_stance(int stance) {
 	if (const w::Entity *p = player();
 			p != nullptr && p->mounted && p->mount_type == w::SeatType::Gunner)
 		return false;
+	return true;
+}
+
+void LocalPlayer::latch_stance(uint8_t bits) {
+	// [orig: NapiNPClientMsg_0x00A @0x430549..0x43058f -- prone latch = bit 8,
+	//  crouch latch = bit 9 of (tail byte << 8), and MoveOrder's 0x300 replaced
+	//  from the same word; NapiNPServerMsg_HandleStanceChange @0x501d0d..0x501d2d
+	//  latches the same two bits of the MoveOrder it just wrote; the body tests
+	//  prone ahead of crouch @0x4b59ce]
+	const bool prone = (bits & 0x01u) != 0;
+	const bool crouch = (bits & 0x02u) != 0;
+	stance_latch_ = prone ? 2 : (crouch ? 1 : 0);
+	input.prone = prone;
+	input.crouch = crouch;
+	move_order.stance = prone ? w::InfantryState::Stance::kProne
+			: (crouch ? w::InfantryState::Stance::kCrouch : w::InfantryState::Stance::kStand);
+	if (w::AiEntity *p = player_ai()) p->inf.stance = move_order.stance;
+}
+
+bool LocalPlayer::request_stance(int stance) {
+	if (stance < 0 || stance > 2) return false;
+	if (!stance_request_allowed()) return false;
 	if (stance_latch_ == stance) return false;
 	// SELECT with mutual exclusion — the 0x1D apply writes one stance bit and
 	// clears the other [orig: NapiNPServerMsg_HandleStanceChange @0x501c60:
@@ -157,6 +168,17 @@ bool LocalPlayer::request_stance(int stance) {
 	input.crouch = stance_latch_ == 1;
 	input.prone = stance_latch_ == 2;
 	return true;
+}
+
+void LocalPlayer::clear_stance_latches() {
+	// [orig: `g_PlayerStanceProneLatch = 0; g_PlayerStanceCrouchLatch = 0`
+	//  @0x435c54/@0x435c59 and @0x43561e/@0x435624, beside the entity's
+	//  `MoveOrder &= ~0x300` @0x435c42 / @0x43560c]
+	stance_latch_ = 0;
+	input.crouch = false;
+	input.prone = false;
+	move_order.stance = w::InfantryState::Stance::kStand;
+	if (w::AiEntity *p = player_ai()) p->inf.stance = w::InfantryState::Stance::kStand;
 }
 
 // Mouse pixels onto the look angles through the witnessed integer pipeline
@@ -448,9 +470,64 @@ void LocalPlayer::apply_scoped_aim_drift(AiEntity &body, uint32_t logic_tick) {
 	body.inf.target_heading = io::bam_add(body.inf.target_heading, scope_yaw_.drift);
 }
 
-void LocalPlayer::carry_scoped_aim_drift_from(const LocalPlayer &previous) {
+void LocalPlayer::carry_process_globals_from(const LocalPlayer &previous) {
 	scope_yaw_ = previous.scope_yaw_;
 	scope_pitch_ = previous.scope_pitch_;
+	analog_pack_ = previous.analog_pack_;
+}
+
+void LocalPlayer::pack_analog_axes(w::Entity &entity, bool moving) {
+	AnalogPackState &a = analog_pack_;
+	// The axis words, shifted to bytes. The keyboard's only writers are the
+	// forward and back handlers on the X word (-1023 / +1023); back's binding
+	// row follows forward's in the analog dispatch list, so it lands last when
+	// both are held. Y and Z have joystick writers only.
+	// [orig: Input_HandleActionBinding_0 case 151 `word_B3B750 = 1023`
+	//  @0x4e0c75, case 152 `= -1023` @0x4e0cc5; rows 2/3 of the binding table
+	//  @0x8159A8 enter g_InputAnalogBindingIndices in row order
+	//  (Input_InitBindingSystem @0x499b6a..); the shifts @0x4df79a..0x4df7cd]
+	const int16_t word_x = input.back ? int16_t(1023) : (input.forward ? int16_t(-1023) : int16_t(0));
+	const int8_t x = static_cast<int8_t>(word_x >> 3);
+	const int8_t y = 0;
+	const int8_t z = 0;
+	// The throttle byte, zeroed inside its 0x14 deadzone [orig: @0x4df7c2..0x4df7d5].
+	int8_t throttle = input.analog_throttle;
+	if (std::abs(static_cast<int32_t>(throttle)) < 0x14) throttle = 0;
+	// A change of more than 32 from the last stored value latches each group
+	// on; a moving pack latches both off. [orig: @0x4df7d7..0x4df84e]
+	if (std::abs(int32_t(x) - a.last_x) > 32 || std::abs(int32_t(y) - a.last_y) > 32 ||
+			std::abs(int32_t(z) - a.last_z) > 32)
+		a.axes_active = true;
+	if (std::abs(int32_t(throttle) - a.last_throttle) > 32) a.throttle_active = true;
+	if (moving) {
+		a.axes_active = false;
+		a.throttle_active = false;
+	}
+	// A lean key in the word drops the throttle latch; only a latched pack
+	// stores the throttle (and remembers it), else 0. [orig: `test g_InputFlags,
+	//  6000h` @0x4df855; @0x4df861..0x4df86e; @0x4df8bd..0x4df8d1]
+	if ((input_flags.flags & (w::kInputFlagLeanLeft | w::kInputFlagLeanRight)) != 0)
+		a.throttle_active = false;
+	if (a.throttle_active) {
+		entity.analog_throttle = throttle;
+		a.last_throttle = throttle;
+	} else {
+		entity.analog_throttle = 0;
+	}
+	// Only a latched pack stores the three axes (and remembers them), else 0.
+	// [orig: @0x4df875..0x4df8b5; @0x4df8d9..0x4df8f8]
+	if (a.axes_active) {
+		entity.net_analog_x = x;
+		entity.net_analog_y = y;
+		entity.net_analog_z = z;
+		a.last_x = x;
+		a.last_y = y;
+		a.last_z = z;
+	} else {
+		entity.net_analog_x = 0;
+		entity.net_analog_y = 0;
+		entity.net_analog_z = 0;
+	}
 }
 
 void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
@@ -468,7 +545,6 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	w::screen_flash_decay(view.flash);
 	w::AiEntity *p = world.ai.for_handle(world.cached.local_player);
 	if (p == nullptr) return;
-	w::local_player_view_refresh(&world, view);
 	// Look-up/down key bindings are refused while the AbsorbPitch seat
 	// flag answers (an OnlyScoped weapon only once promoted).
 	// [orig: cases 154/155 -- Entity_CheckWeaponSeatFlags @0x4E0EA5 / @0x4E0F73]
@@ -480,15 +556,47 @@ void LocalPlayer::apply_player_input_pre_tick(bool pack_input) {
 	// [orig: Input_ProcessFrame @0x49d541, then the handler dispatch
 	//  Input_HandleActionBinding_0 @0x4e0420]
 	input_flags.fold(w::player_input_flags(input, absorb));
+	// The per-frame binocular refresh reads that folded word, ahead of the
+	// pack [orig: Client_ProcessNetworkFrame -> Player_UpdatePerFrame @0x42c18e,
+	// `test byte ptr g_InputFlags, 1Eh` @0x4de3ae; the pack follows @0x42c3e9].
+	view.movement_input = (input_flags.flags & w::kInputFlagDirectionMask) != 0;
+	w::local_player_view_refresh(&world, view);
 	if (pack_input) {
 		// The pack: the accumulated word onto MoveOrder, then the word is
 		// saved as the previous pack's and cleared. The analog throttle is
 		// the pack's too [orig: Player_PackInputStateToEntity @0x4df450 --
 		// MoveOrder @0x4df68f..0x4df790, analogThrottle @0x4df86e/@0x4df8cb,
 		// the clear @0x4df904/@0x4df909].
+		// A NoMove weapon strips the direction and lean bits from the word
+		// first, the saved copy included; jump, the look keys and free look
+		// survive. An OnlyScoped weapon answers only once promoted.
+		// [orig: Entity_CheckWeaponSeatFlags(EquippedSlot, 0x20000) @0x4df46c;
+		//  `g_InputFlags &= 0xFFFF9FE1` @0x4df482]
+		if (w::local_weapon_seat_flag(weapon, w::player_view_scope_settled(view),
+					DEF_WEAPON_FLAG_NOMOVE))
+			input_flags.flags &= 0xFFFF9FE1u;
 		move_order = w::pack_player_body_input(input_flags.flags, input);
+		// The packed word's direction bits drive the movement legs: the
+		// movement-held latch (it refuses scope-UP on a Scoped weapon
+		// @0x4df29c), the drop of the raw binocular toggle (moving lowers the
+		// binoculars for good), and, while SETTLED at scope on a Scoped
+		// (flags 1) weapon, the full unscope through the toggle -- the
+		// ForceScoped pin (@0x4df12d) keeps pinned sights raised -- else the
+		// hip-fire camera legs. A joiner runs them once per send boundary.
+		// [orig: Player_PackInputStateToEntity @0x4df4b2..0x4df63b --
+		//  g_MovementKeyHeld @0x4df4bb / @0x4df4f9, `mov g_BinocularsToggle, 0`
+		//  @0x4df4c2, Player_ToggleWeaponScope @0x4df4c9..0x4df4ec, the
+		//  entitySlotPtr legs @0x4df500..0x4df63b]
+		const bool direction = move_order.direction_bits != 0;
+		if (direction) view.binoculars_requested = false;
+		if (w::player_view_move_input(view, direction, weapon.active ? weapon.def.flags : 0) &&
+				(weapon.def.flags & DEF_WEAPON_FLAG_FORCESCOPED) == 0) {
+			if (w::local_player_set_scope(world, weapon, view,
+						*w::active_local_weapon_slot(world, weapon), false))
+				w::weapon_fsm_queue_scope_down(*w::active_local_weapon_slot(world, weapon));
+		}
 		if (w::Entity *entity = world.registry.get(p->handle))
-			entity->analog_throttle = input.analog_throttle;
+			pack_analog_axes(*entity, move_order.moving);
 		input_flags.clear_after_pack();
 	}
     // The keyboard turn/look rotation reads the MoveOrder bits the last pack
@@ -559,6 +667,7 @@ void LocalPlayer::pump_local_weapon() {
 	io.view = &view;
 	io.inventory = inventory_valid ? &inventory : nullptr;
 	io.is_authority = true;
+	io.authority_fire_admitted = authority_fire_admitted;
 	w::local_weapon_pump_tick(world, weapon, io);
 	hud_map_control.weapon_command(io.map_command);
 	// The wire-facing outcome for the embedder's relay leg (the local reload

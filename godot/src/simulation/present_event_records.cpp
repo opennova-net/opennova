@@ -310,7 +310,9 @@ Ref<DeathPieceRow> DeathPieceRow::make(int p_slot, int64_t p_generation, int p_t
 
 String DeathPieceRow::get_trail() const {
 	// The debris-type trail effect from the ONE native table (the sim's
-	// fill_death_pieces carries the witness); "" = no trail authored.
+	// fill_death_pieces carries the witness); "" = no trail authored, or a
+	// silent death's piece [orig: @0x493811].
+	if (!value_.trail) return String();
 	return String(opennova::world::death_piece_trail_effect(
 			static_cast<uint8_t>(value_.type_index)));
 }

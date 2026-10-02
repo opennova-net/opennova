@@ -949,6 +949,32 @@ void weapon_trace_record(LocalPlayerWeapon &w, const WeaponSlotState &slot,
 
 } // namespace
 
+// The C2S 0x25 a local reload request ships. A UseGun seat (parentSlot 3)
+// addresses the entity the actor sits on, its parentEntity, whichever slot
+// that gun routes to (the host follows the gun's own redirect); every other
+// seat, the armed ctrlx included, addresses the actor.
+// [orig: WeaponAction_Reload `cmp [edi+168h], 3` / `mov ecx, [edi+16Ch]`
+//  @0x5430EA..0x543103 -> NetPacket_SendEntityDeathNotification @0x432930]
+LocalWeaponReloadWire local_reload_request_wire(const World &world,
+		uint16_t actor_wire_handle, uint16_t param) {
+	const Entity *actor = world.registry.get(world.cached.local_player);
+	const Entity *seat_parent = actor != nullptr && actor->mounted &&
+			actor->mount_type == SeatType::Gunner
+			? world.registry.get(actor->mount_target) : nullptr;
+	LocalWeaponReloadWire out;
+	out.valid = true;
+	out.entity_handle = seat_parent != nullptr ? seat_parent->handle.packed : actor_wire_handle;
+	// The producer replaces the parameter word with 0xFFFF when the addressed
+	// entity is an EWeap; the host refills that entity's own slot route and
+	// never reads the word. [orig: NetPacket_SendEntityDeathNotification
+	//  `test byte ptr [eax+54h], 20h` @0x43296C -> 0xFFFF @0x432974, else the
+	//  caller's parameter @0x43299B; WeaponSlot_ReloadAmmo @0x54172D]
+	const Entity *addressed = seat_parent != nullptr ? seat_parent : actor;
+	out.reload_param = addressed != nullptr && addressed->has_item_def &&
+			(addressed->item_attrib & kItemAttribEweap) != 0 ? uint16_t(0xFFFF) : param;
+	return out;
+}
+
 void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 		LocalWeaponPumpIO &io) {
 	io.map_command = 0;
@@ -1180,8 +1206,12 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
                         player_view_scope_settled(view), pose);
                 const Vec3 origin{float(pose[0])/65536.0f, float(pose[1])/65536.0f, float(pose[2])/65536.0f};
                 const FixedVec3 fire_origin{pose[0], pose[1], pose[2]};
+				// The authority arm first passes its own-slot gate, then the
+				// round validation. [orig: Entity_FireWeaponAndSendPacket
+				//  @0x42be3a ahead of Server_ClientFiredRound @0x42bf34]
 				const bool accepted = !io.is_authority ||
-						(weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
+						(io.authority_fire_admitted &&
+						 weapon_fire_owner_status(world, *shooter, adm, false) == 0 &&
 						 weapon_fire_origin_status(world, *shooter, *adm, fire_origin, false) == 0);
 				if (accepted) {
 				// The round bearing frame IS the engine heading frame: RoundSim's
@@ -1317,21 +1347,18 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 	if (ev.dry_fired) ++w.dry_serial;
 	if (ev.reload_requested) {
 		++w.reload_serial;
+		const uint16_t actor_handle = !io.is_authority
+				? io.self_wire_handle : world.cached.local_player.packed;
 		if (!borrowed_usegun_slot && io.inventory != nullptr &&
 				io.inventory->equipped_combo >= 0) {
-			io.reload.valid = true;
-			io.reload.entity_handle = !io.is_authority
-					? io.self_wire_handle
-					: world.cached.local_player.packed;
-			io.reload.reload_param =
-					static_cast<uint16_t>(io.inventory->equipped_combo);
+			io.reload = local_reload_request_wire(world, actor_handle,
+					static_cast<uint16_t>(io.inventory->equipped_combo));
 		} else if (borrowed_usegun_slot && w.usegun_mount.valid()) {
-			// parentSlot==3 addresses the ENTITY THAT OWNS the selected slot,
-			// not the actor. Wire-header materialization preserves the host's
-			// packed handles, so this path is identical for host and joiner.
-			// Every other seat, the armed ctrlx included, addresses the actor
-			// with the borrowed slot's category * 65 + rank.
-			// [orig: WeaponAction_Reload @0x5430DB..0x543103]
+			// The parameter is the borrowed slot's category * 65 + rank; the
+			// addressed entity is local_reload_request_wire's. Wire-header
+			// materialization preserves the host's packed handles, so this
+			// path is identical for host and joiner.
+			// [orig: WeaponAction_Reload @0x5430DB..0x5430E7]
 			Entity *mount = world.registry.get(w.usegun_mount);
 			WeaponSlotState *mounted_slot = mount != nullptr
 					? world.vehicles.resolve_mounted_ammo_slot(*mount)
@@ -1353,15 +1380,10 @@ void local_weapon_pump_tick(World &world, LocalPlayerWeapon &w,
 					world.tables.weapons.by_index(mounted_adm);
 			if (mounted_slot != nullptr && slot_owner != nullptr &&
 					mounted_def != nullptr) {
-				const Entity *actor = world.registry.get(world.cached.local_player);
-				const bool gunner = actor != nullptr && actor->mount_type == SeatType::Gunner;
-				io.reload.valid = true;
-				io.reload.entity_handle = gunner ? slot_owner->handle.packed
-						: !io.is_authority ? io.self_wire_handle
-						: world.cached.local_player.packed;
-				io.reload.reload_param = static_cast<uint16_t>(
-						static_cast<uint16_t>(mounted_def->category) * 65u +
-						static_cast<uint16_t>(mounted_def->rank));
+				io.reload = local_reload_request_wire(world, actor_handle,
+						static_cast<uint16_t>(
+								static_cast<uint16_t>(mounted_def->category) * 65u +
+								static_cast<uint16_t>(mounted_def->rank)));
 			}
 		}
 	}

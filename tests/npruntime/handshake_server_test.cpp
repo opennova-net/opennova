@@ -1235,7 +1235,7 @@ bool run_inactive_peer_is_reaped() {
 	auto resend = craft(SESSION_OPCODE_CLIENT_RESEND_LIST, std::move(resend_body));
 	auto resend_result = inmatch::handle_server_datagram(
 			ctx, peer, resend.data(), resend.size(), 6);
-	if (!expect(!resend_result.outbound.empty() && live.receive_inactive_ms == 119999,
+	if (!expect(!resend_result.immediate_outbound.empty() && live.receive_inactive_ms == 119999,
 	            "a valid 0x44 resend list is answered but does not reset the inactivity clock"))
 		return false;
 	{
@@ -1401,9 +1401,12 @@ bool run_never_template_disables_reap_and_is_advertised() {
 	              "the silent peer survives ten minutes under a NEVER template");
 }
 
-// The host's configured `mpmaxpacketsize` rides CS field 13 of both 0x82 blocks.
-// [orig: CNapiNetwork_Init @0x4ca4a0 — field 13 @0x4caa53..0x4caa76; SendSessionInit
-//  @0x620ef0 emits the live blocks]
+// The host's configured `mpmaxpacketsize` is the template's CS field 13, and the new-connection
+// callback negotiates it down to the joiner's MPS before SendSessionInit emits the live blocks:
+// a 2000 host and a 1300 joiner advertise 1300 in both 0x82 blocks (D-NET-234).
+// [orig: CNapiNetwork_Init @0x4ca4a0 — field 13 @0x4caa53..0x4caa76; NapiNPServer_
+//  HandleNewConnection @0x4c81a9 (`> field 13 -> field 13` keeps the smaller); OnStateChange
+//  @0x6261cd runs it before SendSessionInit @0x6261fc]
 bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	inmatch::NapiNPServerCtx ctx;
 	inmatch::GameConfig config;
@@ -1428,10 +1431,92 @@ bool run_configured_max_packet_size_lands_in_cs_field_13() {
 	int field13_blocks = 0;
 	for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
 		for (const CsField &field : *block)
-			if (field.field_index == 13 && field.value == 2000u) ++field13_blocks;
+			if (field.field_index == 13 && field.value == 1300u) ++field13_blocks;
 	}
 	return expect(field13_blocks == 2,
-	              "a configured mpmaxpacketsize of 2000 lands in CS field 13 of both 0x82 blocks");
+	              "a 2000 host negotiates the 1300 MPS joiner down to 1300 in both 0x82 blocks");
+}
+
+// D-NET-234: the joiner's MPS tag negotiates the connection's packet ceiling: clamped to
+// [100, the host's field 13], stored, advertised in the 0x82 and installed by the first sequenced
+// packet's two CS updates (mask 0x2000); an absent MPS negotiates nothing and sends no update.
+// [orig: NapiNPServer_HandleNewConnection @0x4c818d..0x4c81e4; LoadFromConnTags "MPS" @0x7ca070]
+bool run_mps_negotiates_the_connection_ceiling() {
+	struct Case {
+		const char *mps; // nullptr = no MPS tag
+		uint32_t expected;
+		bool settings;
+	};
+	const Case cases[] = {{"576", 576u, true}, {"50", 100u, true}, {"5000", 1300u, true},
+			{nullptr, 1300u, false}};
+	uint16_t port = 30750;
+	for (const Case &c : cases) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		const PeerAddr peer{0x0100007Fu, port++};
+		const std::string client_scrk =
+				"MPSNCLIENTSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABC";
+		ClientHello hello = make_jointoperations_client_hello(1);
+		auto hdg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
+		(void)inmatch::handle_server_datagram(ctx, peer, hdg.data(), hdg.size(), 1);
+		ClientAuth auth = make_jointoperations_client_auth(1, 0xC0FFEE60u, kHostKey,
+				"TestJoiner", client_scrk);
+		for (const auto &field : {std::pair{"BT", "0"}, std::pair{"VN", "2"},
+				std::pair{"BN", "1"}, std::pair{"DB", "0"}, std::pair{"MBN", "20042002"},
+				std::pair{"SOPD", "180"}}) {
+			auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
+		}
+		if (c.mps != nullptr) auth.cu.push_back(make_client_cu_chunk(2, "MPS", c.mps));
+		auto adg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto ra = inmatch::handle_server_datagram(ctx, peer, adg.data(), adg.size(), 2);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!ra.outbound.empty() &&
+		                    nw_decode_inbound(ra.outbound[0].data(), ra.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH &&
+		                    parse_server_auth(body.data(), body.size(), sa),
+		            "the MPS host admits the join"))
+			return false;
+		int field13_blocks = 0;
+		for (const std::vector<CsField> *block : {&sa.client_cs, &sa.server_cs}) {
+			for (const CsField &field : *block)
+				if (field.field_index == 13 && field.value == c.expected) ++field13_blocks;
+		}
+		const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.back();
+		if (!expect(field13_blocks == 2 &&
+		                    conn.timeouts.max_packet_bytes == static_cast<int32_t>(c.expected),
+		            "the negotiated ceiling is stored and advertised in both 0x82 blocks"))
+			return false;
+		if (!c.settings) {
+			if (!expect(ra.outbound.size() == 1, "an absent MPS queues no CS update packet"))
+				return false;
+			continue;
+		}
+		ProtocolPacketHeader header;
+		std::vector<ProtocolMessage> settings;
+		std::vector<uint8_t> session_body;
+		if (!expect(ra.outbound.size() == 2 &&
+		                    nw_decode_inbound(ra.outbound[1].data(), ra.outbound[1].size(), op,
+		                            session_body) &&
+		                    op == SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE &&
+		                    decode_protocol_packet_plaintext(session_body.data(), session_body.size(),
+		                            conn.server_scrk, header, settings) &&
+		                    header.seq_num == 1 && settings.size() == 2,
+		            "the first sequenced packet carries the two CS updates"))
+			return false;
+		for (std::size_t i = 0; i < settings.size(); ++i) {
+			const CsConfigUpdate update =
+					decode_cs_config_update(settings[i].payload.data(), settings[i].payload.size());
+			if (!expect(settings[i].flags.raw == 0xA0 && update.mask == 0x2000u &&
+			                    update.to_dir0 == (i == 1) &&
+			                    update.value[13] == static_cast<int32_t>(c.expected),
+			            "each CS update installs the negotiated field 13, direction byte 0 then 1"))
+				return false;
+		}
+	}
+	return true;
 }
 
 bool run_game_environment_and_admission_fsm_are_enforced() {
@@ -1453,7 +1538,10 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		const PeerAddr peer{0x0100007Fu, 31300};
 		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
 		auto result = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
-		if (!expect(result.outbound.size() == 2 && inmatch::connection_count(ctx) == 1,
+		// A CU block without MPS negotiates no packet ceiling, so no CS update packet follows
+		// the 0x82 (D-NET-234) [orig: NapiNPServer_HandleNewConnection @0x4c8195].
+		const std::size_t expected_outbound = *bad.name ? 2u : 1u;
+		if (!expect(result.outbound.size() == expected_outbound && inmatch::connection_count(ctx) == 1,
 				"CU compatibility values do not reject the 0x42 handshake")) return false;
 		replication::UdpSessionTransport transport(replication::UdpSessionTransport::Role::Host);
 		auto &conn = ctx.np_protocol.connection_list.front();
@@ -2499,6 +2587,79 @@ bool run_reconnect_counters_echo_rcnt() {
 		if (!expect(has_tag == (c.echoed != 0), "the 0x82 carries RCNT only when nonzero")) return false;
 		const inmatch::NapiNPConnection &conn = ctx.np_protocol.connection_list.front();
 		if (!expect(conn.dcnt == c.dcnt && conn.rcnt == c.echoed, "the node keeps DCNT and RCNT")) return false;
+	}
+	return true;
+}
+
+// A game host's 0x81 writes its OWN protocol identity -- the JO identity the network init
+// installed (CO, AP "Jointops.exe", the 2009 build stamp, PN, PG, PV1, PV2 "16", and no PV3, an
+// empty string on the JO protocol) -- whatever the prober sent, plus UT, the host's uptime in ms,
+// whenever nonzero. [orig: NapiNPProtocol_SendServerInfoPacket @0x620583..0x62078a (the
+// protocol's identity strings, each gated on non-empty), UT @0x62064f..0x620683; the identity
+// CNapiNetwork_Init @0x4ca4a0 installs]
+bool run_host_server_hello_writes_its_own_identity() {
+	inmatch::NapiNPServerCtx ctx;
+	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+	ctx.np_protocol.host_run_duration_ms = 123456u;
+	// A probe that passes the gate only through retail's own case-insensitive / PM-bypass
+	// leniency: its PN / PV1 / PV2 spellings must not come back.
+	ClientHello probe = make_jointoperations_client_hello(0x0BADF00Du);
+	probe.pn = "jointoperations";
+	probe.pv1 = "0.0.0 1/12/2004 em";
+	probe.pv2 = "17";
+	probe.pv3 = "prober-pv3";
+	probe.ap = "Prober.exe";
+	probe.bdat = "Jan  1 2030 00:00:00";
+	probe.pm = 1; // a host's own announce shape: bypasses the identity check
+	const auto dg = craft(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(probe));
+	auto r = inmatch::handle_server_datagram(ctx, PeerAddr{0x0100007Fu, 32110}, dg.data(), dg.size(), 1);
+	uint8_t op = 0;
+	std::vector<uint8_t> body;
+	ServerHello sh;
+	if (!expect(r.outbound.size() == 1 &&
+	                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+	                    op == SESSION_OPCODE_SERVER_HELLO && parse_server_hello(body.data(), body.size(), sh),
+	            "the probe draws one 0x81")) return false;
+	const ClientHello self = make_jointoperations_client_hello(0);
+	if (!expect(sh.co == self.co && sh.ap == "Jointops.exe" && sh.bdat == "Jul 21 2009 18:54:42",
+	            "the 0x81 carries the host's own CO / AP / BDAT")) return false;
+	if (!expect(sh.pn == "JOINTOPERATIONS" && sh.pv1 == self.pv1 && sh.pv2 == "16" && sh.pg == self.pg,
+	            "the 0x81 carries the host's own PN / PG / PV1 / PV2, not the prober's")) return false;
+	if (!expect(sh.pv3.empty(), "the JO protocol has no PV3, so the 0x81 writes none")) return false;
+	if (!expect(sh.ut == 123456u, "the 0x81 carries the host's uptime as UT")) return false;
+	return true;
+}
+
+// A game host's 0x82 carries no CU on either network type. SendSessionInit writes only the
+// connection's type-3 vars; a host stores the 0x42's CUs under their own type 1/2, and only a
+// client's 0x82 handler creates a type-3 var. The NovaworldName / web-domain / NWUID block is the
+// NovaWorld service's 0x82: Jointops.exe never writes those names, and their one reader sits on
+// the NWU session. [orig: CNapiNPConnection_SendSessionInit @0x621104 (type 3 only);
+//  NapiNPProtocol_HandleClientJoin @0x62c043 (stored as sent, types 1/2);
+//  NapiNP_HandleServerJoinResponse @0x629ddf (the only type-3 create);
+//  CNapiGameSession_OnNovaWorldConnected @0x4d15c3 (the only reader)]
+bool run_game_host_server_auth_carries_no_cu() {
+	uint16_t port = 30950;
+	for (const inmatch::NetworkType type : {inmatch::NetworkType::Lan, inmatch::NetworkType::NovaWorld}) {
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan, kHostKey);
+		ctx.transport_mode = type;
+		const PeerAddr peer{0x0100007Fu, port++};
+		const ClientAuth auth = make_valid_client_auth(1, 0x13572468u, kHostKey, "NoCuJoiner",
+				"NOCUSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGH");
+		const auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		auto r = inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		ServerAuth sa;
+		if (!expect(!r.outbound.empty() &&
+		                    nw_decode_inbound(r.outbound[0].data(), r.outbound[0].size(), op, body) &&
+		                    op == SESSION_OPCODE_SERVER_AUTH && parse_server_auth(body.data(), body.size(), sa) &&
+		                    sa.cr == 1u,
+		            "the join draws an accepting 0x82")) return false;
+		if (!expect(sa.cu.empty(), type == inmatch::NetworkType::NovaWorld
+		                    ? "a NovaWorld game host's 0x82 carries no CU"
+		                    : "a LAN game host's 0x82 carries no CU")) return false;
 	}
 	return true;
 }
@@ -3620,8 +3781,11 @@ int main(int argc, char **argv) {
 	ok = run_full_player_info_selects_retail_mission_title_branch() && ok;
 	ok = run_retransmit_0x42_keeps_keys() && ok;
 	ok = run_reconnect_counters_echo_rcnt() && ok;
+	ok = run_game_host_server_auth_carries_no_cu() && ok;
+	ok = run_host_server_hello_writes_its_own_identity() && ok;
 	ok = run_spectator_admission_codes_match_retail() && ok;
 	ok = run_capacity_rejects_when_full() && ok;
+	ok = run_mps_negotiates_the_connection_ceiling() && ok;
 	ok = run_character_join_vars_parsed() && ok;
 	ok = run_integrity_replies_validate_registered_profile() && ok;
 	ok = run_periodic_scoreboard_repairs_pre_sync_dropped_row() && ok;

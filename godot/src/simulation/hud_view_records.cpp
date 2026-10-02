@@ -246,4 +246,5 @@ void DeployStatus::_bind_methods() {
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::STRING, call_medic_text)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, medic_cooldown_ticks)
 	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::INT, medic_request_serial)
+	OPENNOVA_RECORD_READ_ONLY(DeployStatus, Variant::BOOL, show_team_buttons)
 }

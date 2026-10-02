@@ -48,9 +48,10 @@ namespace opennova::server {
 // across listeners, so teardown is scoped to the peers this listener admitted.
 struct LobbyConnState {
 	LobbyState lobby;
-	// Lobby has no two-way 0x44/0x84 retained-resend pump, so it uses the
-	// shared no-queue high-water policy: newer packets skip a permanent loss,
-	// while zero/stale/duplicate packets never redispatch.
+	// Inbound keeps the shared no-queue high-water policy (newer packets skip a
+	// permanent loss; zero/stale/duplicate packets never redispatch). Outbound
+	// retains every reply's reliable records under its packet sequence until the
+	// client's ACK covers it, so a stock client's 0x44 gets them back (D-NET-291).
 	SessionSequencing sequencing;
 	// Exact ClientAuth fingerprint and the already-enveloped ServerAuth reply.
 	// A lost/delayed 0x82 makes the client retransmit the same 0x42. Replaying

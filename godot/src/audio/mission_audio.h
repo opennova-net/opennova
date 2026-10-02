@@ -22,6 +22,7 @@
 #include <vector>
 
 #include <runtime/audio/dialog_queue.h>
+#include <runtime/audio/envs_markers.h>
 #include <runtime/world/script_voice.h>
 #include <runtime/world/script_sounds.h>
 #include <runtime/world/sound_emitter_mailbox.h> // SoundEmitterEvent
@@ -158,10 +159,15 @@ public:
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
 	// Enqueue a mission dialog by its PlayWavList id (param1): the engine's
-	// resolution (runtime/audio/dialog_queue resolve_dialog_sets) then the
+	// resolution (runtime/audio/dialog_queue resolve_dialog_lines) then the
 	// serialized queue, pumped here by spawning one voice at a time. Returns
 	// true if the id resolved to at least one playable set.
 	bool play_dialog(int p_wav_id);
+	// A co-op dialog line the host sent (the "dialog_line" effect): the
+	// engine's resolution (runtime/audio/dialog_queue resolve_dialog_line)
+	// picks the clip, which plays at once on a voice of its own, outside the
+	// queue. Returns true when a clip spawned.
+	bool play_dialog_line(const String &p_dialog_name, int p_line, int p_player_class);
     void reset_dialog_queue() { dialog_queue_.discard_pending(); }
 	// Resolve-only (no playback) for tests/diagnostics: the first set name a dialog id
 	// maps to that the loaded banks actually contain, or "" if none.
@@ -222,7 +228,7 @@ private:
             int32_t p_bearing, const Transform3D &p_camera_xform);
 	void _attach_under(Node3D *p_container);
 	void _free_voice_nodes();
-	std::vector<std::string> _resolve_dialog_sets(int p_wav_id) const;
+	std::vector<opennova::audio::DialogLineRef> _resolve_dialog_lines(int p_wav_id) const;
 	void _pump_dialog_queue();
 	AudioStreamPlayer *_dialog_voice_node() const;
 	AudioStreamPlayer *_wac_voice_node() const;
@@ -250,6 +256,9 @@ private:
 
 	Ref<ResourceRoot> resource_root_;
 	Ref<ItemDatabase> item_db_;
+	// A header-only join defers its envs markers to the streamed world (tick).
+	bool world_envs_pending_ = false;
+	void _add_envs_markers(const std::vector<opennova::audio::EnvsMarker> &p_rows);
 	ObjectID simulation_id_; // occlusion LOS; optional
 	// Test-injection seam (Callable(listener, source, dist_q16, source_id) -> int),
 	// forwarded to the bank and every fresh mixer; production uses the sim.

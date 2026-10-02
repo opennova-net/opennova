@@ -59,9 +59,11 @@ struct HostOwner {
 	// configured boundary.
 	std::map<PeerAddr, std::vector<ProtocolMessage>, PeerAddrLess>
 			pending_session_messages;
-	// Already-framed established-session packets (0x83 initial stream,
-	// retransmits, and 0x84 missing-sequence requests) also wait on the peer's
-	// send boundary. Their sequence numbers and ciphertext are already fixed.
+	// Already-framed established-session 0x83 packets (the admission replies and
+	// the initial stream) also wait on the peer's send boundary. Their sequence
+	// numbers and ciphertext are already fixed. The receive pump's own sends (the
+	// 0x83 rebuilds a 0x44 asks for, the 0x84 missing-sequence request, the 0x85
+	// pong) never wait here (D-NET-229).
 	std::map<PeerAddr, std::vector<std::vector<uint8_t>>, PeerAddrLess>
 			pending_session_datagrams;
 	uint32_t now_tick = 0;
@@ -81,10 +83,11 @@ void admit_peer(HostOwner &owner, const PeerAddr &peer);
 void dispatch_event(HostOwner &owner, const PeerAddr &peer, const HostAcceptEvent &ev);
 
 // One full owner iteration over `sock` (the §5.44 recv-before-send order):
-//   (1) recv-drain: recv_from -> handle_server_datagram -> ship replies + react to events
+//   (1) recv-drain: recv_from -> handle_server_datagram -> ship replies + react to events; the
+//       receive pump's own sends (0x44 rebuilds, the 0x84 request, the 0x85 pong) leave at once
 //   (2) tick_connections: pre-spawn §5.2a bursts (framed 0x83 for remote peers) + surface F3/spawned
 //   (3) Server_TickUpdate: the single C2S drain + one logic tick + per-connection 0x0A fan
-//   (4) S2C flush: on each peer's send boundary, ship retained 0x83/0x84 packets,
+//   (4) S2C flush: on each peer's send boundary, ship pre-framed 0x83 packets,
 //       then pop its transport's identity [tag][body] -> frame/batch as 0x83 -> send
 //   (5) drain an unused embedder loopback for HostOnly; preserve the HostClient local view
 // `before_server_tick`, when supplied, runs after tick_connections has completed any

@@ -217,7 +217,7 @@ std::vector<uint8_t> encode_static_entity_batch(const StaticEntityBatch &batch) 
 		if (rec.euler_z)      f |= kStaticEntityHasEulerZ; // entity+16 yaw heading (32-bit BAM)
 		if (rec.euler_x)      f |= kStaticEntityHasEulerX; // entity+20
 		if (rec.euler_y)      f |= kStaticEntityHasEulerY; // entity+24
-		if (rec.section_mask) f |= kStaticEntityHasSectionMask; // entity+308
+		if (rec.section_mask || rec.has_section_mask) f |= kStaticEntityHasSectionMask; // entity+308
 		if (rec.team_byte)    f |= kStaticEntityHasTeamByte; // entity+354 (D-NET-58/62)
 		if (rec.entity_flags) f |= kStaticEntityHasEntityFlags; // entity+36 Flags dword (D-NET-147)
 		if (rec.bone_a)       f |= kStaticEntityHasRefNum; // entity+533 (D-NET-94)
@@ -731,16 +731,16 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 		w.cstr_capped(ctx.player_name, 32); // name (variable-length, [orig: slot+40 @0x505f9b])
 	if (field_flags & kPlayerSyncHasTeamString)
 		w.cstr_capped(ctx.clan_tag, 16);    // team-string — retail ALWAYS writes "" here (@0x505ff7)
-	if (field_flags & kPlayerSyncHasVehicleName)
-		w.cstr_capped(std::string(), 16);   // vehicle-name — "" for an on-foot player (@0x50601f)
+	if (field_flags & kPlayerSyncHasPcid)
+		w.cstr_capped(ctx.account_pcid, 32); // the NovaWorld PCID [orig: player+0x250 @0x506070; "" for an inactive slot @0x50601f]
 	if (field_flags & kPlayerSyncHasTeamByte)
 		w.u8(ctx.team); // team byte [orig: slot+416; client -> playerSlot+14 + entity+354]
 	if (field_flags & kPlayerSyncHasDownedState)
 		w.u8(ctx.downed_state);
 	if (field_flags & kPlayerSyncHasVehicleScore)
-		w.u8(0);        // vehicle score byte [orig: vehicle+156 when mounted, else 0 @0x50613b]
+		w.u8(0);        // NapiNPPlayer+0x9C, only ever zeroed [orig: @0x50613b..0x50618b]
 	if (field_flags & kPlayerSyncHasLateJoinFlag)
-		w.u8(0);        // late-join flag [orig: slot+100567 && !slot+100579 @0x506197]
+		w.u8(ctx.spectator_in_game); // spectator in game [orig: slot+4 && slot+100567 && !slot+100579 @0x506197..0x5061cc]
 	if (field_flags & kPlayerSyncHasSquad)
 		w.u8(ctx.squad_leader); // the squad leader [orig: slot+100576, seeded 0xFF by Server_PlayerAdd @0x51cf0a]
 	if (field_flags & kPlayerSyncHasSide)
@@ -748,9 +748,8 @@ std::vector<uint8_t> encode_player_sync(const PlayerReplicationState &ctx, uint1
 	if (field_flags & kPlayerSyncHasQuality)
 		w.u8(ctx.quality); // quality [orig: slot+418 @0x506213; client clamps <=4 @0x431370]
 	if (field_flags & kPlayerSyncHasAccountId)
-		w.u32(0);       // NovaWorld account netId [orig: the slot connection's napi_player_data+420
-		                //  @0x506257, else 0 @0x506246] — 0 = a LAN account (no clan-roster node);
-		                // the NovaWorld-account value rides with the host clan-roster port
+		w.u32(ctx.account_squad_id); // the NovaWorld squad id [orig: player+0x270 @0x506257,
+		                             //  else 0 @0x506246] — 0 on LAN (no clan-roster node)
 
 	return out;
 }
@@ -990,6 +989,14 @@ std::vector<uint8_t> encode_chat_broadcast(const ChatBroadcast &chat) {
 	w.u8(static_cast<uint8_t>(chat.channel));
 	w.u8(chat.sender_slot);
 	w.cstr(chat.text);
+	return out;
+}
+
+std::vector<uint8_t> encode_dialog_line(const DialogLine &line) {
+	std::vector<uint8_t> out;
+	Writer w{out};
+	w.cstr(line.dialog_name);                    // [orig: @0x5038D1]
+	w.u16(static_cast<uint16_t>(line.line));     // [orig: @0x5038F4]
 	return out;
 }
 

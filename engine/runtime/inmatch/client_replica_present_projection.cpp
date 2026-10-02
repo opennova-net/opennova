@@ -149,9 +149,10 @@ void project_client_replica_present_row(
 		return;
 
 	// An armed row presents the same simulation-owned primary channel whose
-	// root delta moves the replica. Frozen/unresolved rows are disarmed by the
-	// fold and fall back to the latest wire state, including death/seat clips
-	// (the retail +0x2C0 park's visible outcome).
+	// root delta moves the replica, a corpse's death clip included (the mover's
+	// death edge commits it). Frozen (bit0/seated) or unresolved rows are
+	// disarmed by the fold and fall back to the latest wire state (the seat
+	// clips).
 	const bool root_motion_armed =
 			entity.rm_adm_id >= 0 && entity.rm_state >= 0;
 	if (root_motion_armed) {

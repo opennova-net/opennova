@@ -457,6 +457,24 @@ void hud_toggles_death_screen(HudToggleState &s) {
 	s.hud_detail_level = kHudDetailLevelBlank;
 }
 
+int hud_deploy_key_pick(const HudDeployKeyInput &in) {
+	// [orig: @0x49c9c9..0x49c9f7 — out of a session (and without the
+	//  SinglePlayerRespawn attribute) only the overlay opens the leg; then the
+	//  player must be dead or the overlay up]
+	if (!in.in_session && !in.single_player_respawn && !in.deploy_overlay) return -1;
+	if (!in.local_dead && !in.deploy_overlay) return -1;
+	if (in.vk == 'X') return 0;                       // [orig: @0x49c9fd -> @0x49c658]
+	if (in.vk == ' ') return kHudDeployKeyAutoTeam;   // [orig: @0x49ca06..0x49ca0d]
+	// [orig: @0x49ca37..0x49ca71 — `lea ecx, [esi-41h]; cmp ecx, 19h`; the
+	//  index against SpawnZoneList_GetCount, a null entry, the team compare]
+	const int index = in.vk - 'A';
+	if (index < 0 || index > 25) return -1;
+	if (static_cast<size_t>(index) >= in.zone_count || in.zone_teams == nullptr) return -1;
+	const int16_t team = in.zone_teams[index];
+	if (team < 0 || team != static_cast<int16_t>(in.local_team)) return -1;
+	return index + 1;
+}
+
 const char *friendly_tag_toast_key(FriendlyTagMode mode) {
 	switch (mode) {
 		case FriendlyTagMode::kOff: return "STRMISC_FRIENDLYTAGS_OFF";

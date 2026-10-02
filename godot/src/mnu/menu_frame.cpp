@@ -553,6 +553,12 @@ void MenuFrame::set_widget_table_rows(int p_index,
 	queue_redraw();
 }
 
+void MenuFrame::set_widget_table_columns(int p_index,
+		const std::vector<opennova::menu::MenuTableColumnDef> &p_columns) {
+	compiler_.set_table_columns(p_index, p_columns);
+	queue_redraw();
+}
+
 void MenuFrame::set_table_cell_painter(int p_index,
 		opennova::menu::MenuTableCellPainter p_painter) {
 	compiler_.set_table_cell_painter(p_index, std::move(p_painter));

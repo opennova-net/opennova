@@ -6,6 +6,7 @@
 
 #include <net/novaworld/gsb.h>
 #include <net/novacrypto/epask.h>
+#include <net/novacrypto/url_cipher.h>
 
 #include <cstdio>
 #include <string>
@@ -344,12 +345,14 @@ static bool test_join_resolves() {
 	if (!expect(r.kind == nw::JoinResult::Kind::NeedRequest, "NWJoin FIRST -> SECOND")) return false;
 	expect(contains(r.request.url, "/NWJoin.dll?rid=777&tag=jtag"), "NWJoin second leg carries rid + tag");
 
-	// SECOND response: the .joi body resolves host:port (NI/NP fallback) and
-	// carries the proxy triple + lobby number verbatim for the transport.
+	// SECOND response: the .joi body resolves host:port from the decoded NK (the
+	// only dial authority) and carries the proxy triple + lobby number verbatim
+	// for the transport.
+	const std::string nk = nw::url_cipher_encode("10.1.2.3:3001", nw::URL_CIPHER_KEY_NK);
 	r = f.on_join_response(true, 200, {},
-			bytes("<TITLE>[NI=192.168.5.9&NP=17479&BK=986119&LN=5&GS=x]</TITLE>"));
+			bytes("<TITLE>[NK=" + nk + "&NI=192.168.5.9&NP=17479&BK=986119&LN=5&GS=x]</TITLE>"));
 	if (!expect(r.kind == nw::JoinResult::Kind::Resolved, "NWJoin SECOND -> resolved")) return false;
-	expect(r.host_ip == "192.168.5.9" && r.host_port == 17479, "join resolved host:port from the .joi");
+	expect(r.host_ip == "10.1.2.3" && r.host_port == 3001, "join resolved host:port from the .joi NK");
 	expect(r.ni == "192.168.5.9" && r.np == "17479" && r.bk == "986119",
 	       "join carries the NI/NP/BK proxy triple verbatim");
 	expect(r.ln == 5, "join carries the .joi lobby number");
