@@ -592,4 +592,17 @@ Vec3 compute_moon_direction(float tod_time) {
 	return dir;
 }
 
+bool load_mission_env(const std::string *text, Config &out) {
+	// The defaults the load reset first stand unless the file parses over them (env.h)
+	// [orig: Environment_InitDefaults @ 0x57c010; Environment_LoadTimeOfDayConfig @ 0x57dca3].
+	out = Config();
+	if (text == nullptr) return false;
+	std::istringstream input(*text);
+	std::string error;
+	Config parsed;
+	if (!load_env(input, parsed, error)) return false;
+	out = std::move(parsed);
+	return true;
+}
+
 } // namespace opennova::env

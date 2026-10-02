@@ -60,6 +60,33 @@ int main() {
 			"the accumulator wraps across midnight, never overflows");
 	if (!clock_ok) return 1;
 
+	// A mission's .env that is not there is skipped and the mission starts on the
+	// pre-parse defaults with no keyframe [orig: Environment_LoadTimeOfDayConfig @ 0x57dca3;
+	// Environment_InitDefaults @ 0x57c010]; one that is there parses over them.
+	{
+		opennova::env::Config mission;
+		mission.fog_level = 1.0f;
+		mission.keyframes.resize(3);
+		const bool skipped = !opennova::env::load_mission_env(nullptr, mission);
+		const opennova::env::Config defaults;
+		if (!expect(skipped && mission.keyframes.empty() && near(mission.fog_level, 1024.0f) &&
+		                    mission.fog_type == 1 && mission.sky_map1 == "cld_day1.pcx" &&
+		                    mission.sun_3di == "msun.3di" && mission.curtime == defaults.curtime &&
+		                    near(mission.water_murk, 0.8f) && near(mission.iris_percent, 50.0f),
+		            "a missing mission .env leaves the engine defaults and no keyframe"))
+			return 1;
+		const std::string empty;
+		if (!expect(opennova::env::load_mission_env(&empty, mission) && mission.keyframes.empty() &&
+		                    near(mission.fog_level, 1024.0f),
+		            "an empty mission .env parses to the same defaults"))
+			return 1;
+		const std::string authored = "fog_level 640\r\nfog_type 2\r\n";
+		if (!expect(opennova::env::load_mission_env(&authored, mission) && near(mission.fog_level, 640.0f) &&
+		                    mission.fog_type == 2 && mission.sky_map1 == "cld_day1.pcx",
+		            "a mission .env parses over the defaults"))
+			return 1;
+	}
+
 	std::ifstream fixture(fixture_path(), std::ios::binary);
 	if (!fixture) {
 		std::fprintf(stderr, "FAIL: cannot open %s\n", fixture_path().c_str());

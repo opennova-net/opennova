@@ -634,7 +634,8 @@ private:
 	// The placer's per-model progress pulse (the load plan's per-model pulse
 	// witness): the loading screen at the object stage's constant value.
 	void pulse_object_stage_progress();
-	bool load_environment(const String &p_env_path);
+	// The named .env, or the engine defaults when it is not there; never fails.
+	void load_environment(const String &p_env_path);
 	void apply_mission_environment_overrides(const Ref<MissionData> &p_mission);
 	void set_mission_water_height_override(float p_world_height);
 	void set_water_world_rendering_enabled(bool p_enabled);

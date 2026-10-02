@@ -121,10 +121,7 @@ int GameWorld::load_world(const String &p_dir) {
 	set_mission_water_height_override(NAN);
 	clear_mission_tile_info();
 	resource_root_ = resource_root;
-	if (!load_environment(env_file_)) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", env_file_));
-		return ERR_CANT_OPEN;
-	}
+	load_environment(env_file_);
 	if (!load_terrain(terrain_file_, String())) {
 		emit_signal(kSignalLoadFailed, vformat("failed to load %s", terrain_file_));
 		return ERR_CANT_OPEN;
@@ -234,8 +231,8 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	join_wire_assets_failed_ = false;
 	join_wire_asset_failure_emitted_ = false;
 	// The local-asset gate holds for wire-header joins too — there is no world
-	// without terrain/env, and retail joiners also resolve both from the local
-	// install by the names the wire supplies (net-re section 5.28: custom
+	// without terrain, and retail joiners also resolve it from the local
+	// install by the name the wire supplies (net-re section 5.28: custom
 	// missions reference stock assets). Only the REPORT is join-aware: a wire
 	// join names the host's stream and the mounted expansion so a live punt
 	// reads as "your install lacks X", not as a bad local file.
@@ -247,12 +244,9 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 				missing_mission_asset_reason(trn, p_bms_name, p_resource_root, wire_header_join));
 		return ERR_FILE_NOT_FOUND;
 	}
+	// The environment gates nothing: a .env that is not there is skipped and the
+	// mission starts on the engine's defaults (load_environment).
 	const String env_name = p_mission->get_environment_ref() + ".env";
-	if (!p_resource_root->has_file(env_name)) {
-		emit_signal(kSignalLoadFailed,
-				missing_mission_asset_reason(env_name, p_bms_name, p_resource_root, wire_header_join));
-		return ERR_FILE_NOT_FOUND;
-	}
 
 	set_weather_world_tick_driven(true);
 	set_water_world_rendering_enabled(false);
@@ -270,11 +264,7 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress,
 			MissionData::load_progress_percent(MissionData::LOAD_STAGE_ENVIRONMENT));
 	timeline->span("environment");
-	if (!load_environment(env_name)) {
-		emit_signal(kSignalLoadFailed, vformat("failed to load %s", env_name));
-		timeline->finish();
-		return ERR_CANT_OPEN;
-	}
+	load_environment(env_name);
 	apply_mission_environment_overrides(p_mission);
 	// Initialize the exact mission clock and the reset weather owner before the
 	// runtime is constructed. The authority publishes this T0 sample after setup
@@ -551,15 +541,17 @@ void GameWorld::unload() {
 
 // --- environment ---------------------------------------------------------------------
 
-bool GameWorld::load_environment(const String &p_env_path) {
+void GameWorld::load_environment(const String &p_env_path) {
 	if (env_ == nullptr) {
-		return true;
+		return;
 	}
 	Ref<EnvFile> env;
 	env.instantiate();
-	if (env->load_from_resource_root(resource_root_, p_env_path) != OK) {
-		UtilityFunctions::push_warning(vformat("GameWorld: failed to load environment '%s'", p_env_path));
-		return false;
+	// A .env that is not there is skipped and the world runs on the engine's
+	// defaults (opennova::env::load_mission_env); the load goes on either way.
+	if (!env->load_mission_environment(resource_root_, p_env_path)) {
+		UtilityFunctions::push_warning(vformat(
+				"GameWorld: environment '%s' did not load; the engine defaults stand", p_env_path));
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
@@ -593,7 +585,6 @@ bool GameWorld::load_environment(const String &p_env_path) {
 	if (environment_cube_ != nullptr) {
 		environment_cube_->force_capture();
 	}
-	return true;
 }
 
 // Apply the mission's attrib-gated water/fog overrides onto the loaded env via

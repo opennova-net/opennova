@@ -124,6 +124,16 @@ float clamp_water_murk_upper(float value);
 bool load_env(std::istream &input, Config &out, std::string &error);
 bool save_env(std::ostream &output, const Config &cfg, std::string &error);
 
+// A mission's environment as the mission load makes it. The load resets every field to the
+// pre-parse defaults first [orig: Terrain_LoadEnvironmentConfig @ 0x610947 ->
+// Environment_InitDefaults @ 0x57c010], then parses the .env over them; a file that does not
+// exist, or does not parse, is skipped before it seeds a color or snapshots a keyframe [orig:
+// Environment_LoadTimeOfDayConfig @ 0x57db30, the FileExists check @ 0x57dca3, the parse's
+// @ 0x57dcbf], and the mission starts all the same [orig: Game_LoadTerrainDuringConnect
+// @ 0x520710 reads no outcome of it]: on Config, with no keyframe. `text` null means no such
+// file. False when the file was skipped.
+bool load_mission_env(const std::string *text, Config &out);
+
 // HHMM (digits clamped positionally: hours <= 23, minutes <= 59) to 16.16
 // fixed-point hours [orig: Environment_ParseTimeString @ 0x57c500].
 int hhmm_to_hours_fp(float hhmm);
