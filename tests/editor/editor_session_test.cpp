@@ -6,6 +6,7 @@
 // the edits a pump holds), the menu screen the preview follows, (S11a) the save
 // contract, the unsaved prompt and the selection each open document keeps, and (S13 V8)
 // the gestures a canvas's batches open, one per document, and what ends each.
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <iterator>
@@ -26,6 +27,7 @@
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/file_preferences_store.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/project_session.h>
@@ -36,6 +38,8 @@
 #include <editor/session/view/session_view.h>
 #include <editor/session/view_json.h>
 #include <editor/project/project_files.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/mnu/mnu.h>
 #include <formats/pff/pff.h>
 
@@ -1954,6 +1958,153 @@ static int test_boot_findings() {
 	return 0;
 }
 
+// S14: Play takes a mission. One the project does not hold is refused before anything is built;
+// one it holds, named without case, starts the game in it (the runtime's --mission, the file as
+// the project spells it; the run section and the status line say so). The game's report that the
+// mission did not load is a Problems row on the mission's file, once, kept by a validation and
+// gone with the next Play; a plain Play starts at the menu. A Play onto a running build starts the
+// game in the mission it names. The active document's mission is the one Play mission starts
+// (play_mission_for: the mission itself, or a file the game finds by its name). Play in the game
+// install starts at its menu whatever is named, and says so.
+static int test_play_mission() {
+	editor_test::TempProjectDir dir("opennova_editor_session_play_mission");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	const std::string root = dir.file("project");
+	session.handle(request::new_project(root, "Mission"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	std::vector<uint8_t> mission_bytes;
+	{
+		opennova::bms::File mission;
+		opennova::mission::make_default(mission);
+		std::string error;
+		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
+	}
+	TEST_EXPECT(editor_test::write_bytes(root + "/missions/First.bms", mission_bytes) &&
+	            editor_test::write_text(root + "/missions/First.wac", "// the mission's script\r\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	launcher.mcp_port = 8999;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+
+	session.handle(request::play("nowhere.bms"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown") &&
+	            !v.activity.operation.running());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 0 && !v.activity.has_build);
+	// A file of the project that is no mission is none either.
+	session.handle(request::play("First.wac"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown"));
+
+	session.handle(request::play("FIRST.BMS"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 1 && v.activity.play_state == PlayState::Running && v.activity.play_mission == "First.bms");
+	{
+		const std::vector<std::string> &args = platform.last_plan.args;
+		TEST_EXPECT(args.size() >= 2 && args[args.size() - 2] == "--mission" && args.back() == "First.bms");
+		TEST_EXPECT(view_section_to_json(v, ViewSection::Run).get_string("mission", "") == "First.bms" &&
+		            v.activity.status == "Game running: First.bms.");
+	}
+	const std::string report = std::string("USER WARNING: MainGame: ") + opennova::gameprofile::kLaunchMissionFailedMarker +
+	                           "First.bms the terrain did not load.\r\n";
+	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\n" + report + report));
+	session.poll();
+	session.run_operations(); // the validation the report left due
+	TEST_EXPECT(count_code(v.findings.diagnostics, "play.mission.failed") == 1);
+	const Diagnostic *failed = finding_in(v.findings.diagnostics, "play.mission.failed", "missions/First.bms");
+	TEST_EXPECT(failed && failed->severity == DiagnosticSeverity::Error &&
+	            failed->message.find("First.bms: the terrain did not load. It went back") != std::string::npos);
+	session.handle(request::rescan());
+	session.run_operations();
+	TEST_EXPECT(count_code(v.findings.diagnostics, "play.mission.failed") == 1);
+	session.handle(request::stop_play());
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 2 && v.activity.play_mission.empty() && v.activity.status == "Game running." &&
+	            !has_code(v.findings.diagnostics, "play.mission.failed"));
+	TEST_EXPECT(std::find(platform.last_plan.args.begin(), platform.last_plan.args.end(), "--mission") ==
+	            platform.last_plan.args.end());
+	session.handle(request::stop_play());
+	session.poll();
+
+	session.handle(request::build());
+	TEST_EXPECT(v.activity.operation.running() && v.activity.operation.kind == OperationKind::Build);
+	session.handle(request::play("First.bms"));
+	TEST_EXPECT(session.outcome().done() && session.outcome().operation == v.activity.operation.id);
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_mission == "First.bms" && platform.last_plan.args.back() == "First.bms");
+	// A Play of an unknown mission onto a running build is refused, the build left to land alone.
+	session.handle(request::stop_play());
+	session.poll();
+	session.handle(request::build());
+	session.handle(request::play("nowhere.bms"));
+	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "play.mission.unknown"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 3 && v.activity.play_state == PlayState::Stopped);
+
+	session.handle(request::open_document("First.wac"));
+	TEST_EXPECT(v.documents.active == "missions/First.wac" && play_mission_for(v) == "First.bms");
+	session.handle(request::open_document("items.def"));
+	TEST_EXPECT(play_mission_for(v).empty());
+	{
+		// The rule over a view alone: the mission itself; a file found by a name no mission of the
+		// project has; no project.
+		SessionView view;
+		view.project.open = true;
+		AssetEntry mission, text;
+		mission.logical_name = "Second.BMS";
+		mission.relative_path = "missions/Second.BMS";
+		mission.kind = AssetKind::Mission;
+		text.logical_name = "other.bin";
+		text.relative_path = "strings/other.bin";
+		text.kind = AssetKind::Strings;
+		editor_test::own(view.project.scan).entries = {mission, text};
+		editor_test::own(view.project.scan).index();
+		view.documents.active = "missions/Second.BMS";
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		view.documents.active = "strings/second.bin";
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		view.documents.active = "second.pwf";
+		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
+		view.documents.active = "strings/other.bin";
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active = "second.mnu";
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active.clear();
+		TEST_EXPECT(play_mission_for(view).empty());
+		view.documents.active = "missions/Second.BMS";
+		view.project.open = false;
+		TEST_EXPECT(play_mission_for(view).empty());
+	}
+
+	const std::string install = dir.file("install");
+	TEST_EXPECT(editor_test::write_text(install + "/Jointops.exe", "exe") && editor_test::write_text(install + "/binkw32.dll", "bink") &&
+	            editor_test::write_text(install + "/game.cfg", "settings"));
+	editor_test::set_game_install(session, install);
+	ProjectSettingsChange in_install;
+	in_install.play_in_install = true;
+	editor_test::apply_settings(session, in_install);
+	session.handle(request::play("First.bms"));
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == 4 && v.activity.play_state == PlayState::Running && v.activity.play_mission.empty() &&
+	            platform.last_plan.args == std::vector<std::string>({"/w", "/d", "/FRISK"}) &&
+	            output_has(v, "The game install starts at its menu: choose First.bms there.") &&
+	            v.activity.status == "Game install running.");
+	session.handle(request::stop_play());
+	session.poll();
+	return 0;
+}
+
 // S11b: an optional file the project lacks is a note naming its row, counted apart from the
 // required ones and never a build's gate; made by name (its fix), its note goes.
 static int test_optional_rows() {
@@ -3679,6 +3830,7 @@ int main() {
 	failures += test_import_guard_past_the_cap();
 	failures += test_build_findings_stay();
 	failures += test_boot_findings();
+	failures += test_play_mission();
 	failures += test_optional_rows();
 	failures += test_create_missing_roles();
 	failures += test_rewrite_closed_file();

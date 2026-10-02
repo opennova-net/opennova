@@ -64,6 +64,8 @@ void ResourceRoot::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("boot_resource_failure_text", "name"), &ResourceRoot::boot_resource_failure_text);
 	ClassDB::bind_static_method("ResourceRoot", D_METHOD("boot_resource_missing_marker"),
 			&ResourceRoot::boot_resource_missing_marker);
+	ClassDB::bind_static_method("ResourceRoot", D_METHOD("launch_mission_failed_marker"),
+			&ResourceRoot::launch_mission_failed_marker);
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
@@ -95,6 +97,10 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 
 String ResourceRoot::boot_resource_missing_marker() {
 	return String::utf8(kBootResourceMissingMarker);
+}
+
+String ResourceRoot::launch_mission_failed_marker() {
+	return String::utf8(kLaunchMissionFailedMarker);
 }
 
 String ResourceRoot::boot_resource_failure_text(const String &name) const {

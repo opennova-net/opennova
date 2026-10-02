@@ -10,16 +10,43 @@
 #include <vector>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
+#include <editor/assets/asset_kind.h>
+#include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
+#include <editor/project/project_files.h>
 #include <editor/run/run_directory.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/session_core.h>
+#include <editor/session/view/session_view.h>
+#include <runtime/mission/mission_sidecars.h>
 
 namespace fs = std::filesystem;
 
 namespace opennova::editor {
+
+std::string play_mission_for(const SessionView &view) {
+	if (!view.project.open || view.documents.active.empty()) return std::string();
+	const AssetScan &scan = *view.project.scan;
+	const auto mission_named = [&scan](const std::string &file) {
+		const AssetEntry *entry = scan.find(file);
+		return entry && entry->kind == AssetKind::Mission ? entry->logical_name : std::string();
+	};
+	const std::string name = fs::path(view.documents.active).filename().string();
+	if (strutil::ends_with_icase(name, ".bms")) return mission_named(name);
+	// A file the game finds by a mission's name: that mission, when the project holds it.
+	const std::string mission = fs::path(name).stem().string() + ".bms";
+	const std::string wanted = normalized_logical_name(name);
+	for (const mission::Sidecar &sidecar : mission::sidecars()) {
+		const std::string alternate = mission::sidecar_alternate_name(mission, sidecar);
+		if (normalized_logical_name(mission::sidecar_name(mission, sidecar)) == wanted ||
+		    (!alternate.empty() && normalized_logical_name(alternate) == wanted))
+			return mission_named(mission);
+	}
+	return std::string();
+}
 
 PlayController::PlayController(SessionCore &core) : core_(core), view_(core.view()), play_(core.platform()) {}
 
@@ -59,9 +86,18 @@ std::string PlayController::resolve_runtime_executable() const {
 	return launcher_.executable;
 }
 
-// Play refused before any build: where nothing can be spawned, and while a game runs (a second
-// one would fight it for its files). True when refused, said why.
-bool PlayController::refused() {
+std::string PlayController::mission_file(const std::string &mission) const {
+	const AssetEntry *entry = core_.project_file(mission);
+	return entry && entry->kind == AssetKind::Mission && strutil::ends_with_icase(entry->logical_name, ".bms")
+	               ? entry->logical_name
+	               : std::string();
+}
+
+// Play refused before any build: where nothing can be spawned, while a game runs (a second
+// one would fight it for its files), and for a mission the project does not hold (the game
+// would start, find no such mission in what it mounts and fall back to its menu). True when
+// refused, said why.
+bool PlayController::refused(const std::string &mission) {
 	if (!core_.platform().can_spawn()) {
 		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
 		                          "Play is Windows-only for now: the editor cannot start the game on this system. "
@@ -73,29 +109,55 @@ bool PlayController::refused() {
 		                          "The game is already running; stop it before starting it again."));
 		return true;
 	}
+	if (!mission.empty() && mission_file(mission).empty()) {
+		core_.report(make_finding(CoreFinding::PlayMissionUnknown, DiagnosticSeverity::Error,
+		                          mission + " is no mission of the project: Play starts the game in a .bms the project "
+		                                    "holds. Import it, or make it, first."));
+		view_.activity.status = "Play mission needs a mission of the project.";
+		core_.touch(ViewConcern::Output);
+		return true;
+	}
 	return false;
 }
 
-void PlayController::start() {
+void PlayController::publish_findings() {
+	core_.problems().set_play_findings(findings_);
+	core_.problems().validate_later();
+}
+
+void PlayController::start(const std::string &mission) {
 	const std::string &build_dir = view_.activity.last_build->build_dir;
 	LaunchPlan plan;
 	Diagnostic error;
 	std::error_code ec;
-	// The last run's boot report and exit go, their rows with them (the next validation would
-	// make none); the game started now reports on this project.
+	// The last run's boot report, its mission's and its exit go, their rows with them (the next
+	// validation would make none); the game started now reports on this project.
 	view_.activity.boot_missing.clear();
+	view_.activity.play_mission.clear();
+	findings_.clear();
 	core_.problems().set_play_findings({});
 	const size_t rows = view_.findings.diagnostics.size();
 	view_.findings.diagnostics.erase(
 			std::remove_if(view_.findings.diagnostics.begin(), view_.findings.diagnostics.end(),
 					[](const Diagnostic &d) {
 						return d.row() == &finding_code(CoreFinding::PlayBootMissing) ||
+						       d.row() == &finding_code(CoreFinding::PlayMissionFailed) ||
 						       d.row() == &finding_code(CoreFinding::PlayCrashed);
 					}),
 			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
 	if (view_.findings.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
 	boot_project_ = view_.project.root;
+	// The mission as the project spells its file now (the build read the project again): one gone
+	// since Play was asked for starts nothing.
+	const std::string in_mission = mission.empty() ? std::string() : mission_file(mission);
+	if (!mission.empty() && in_mission.empty()) {
+		core_.report(make_finding(CoreFinding::PlayMissionUnknown, DiagnosticSeverity::Error,
+		                          mission + " is no longer a mission of the project: the game was not started."));
+		view_.activity.status = "Play mission needs a mission of the project.";
+		core_.touch(ViewConcern::Output);
+		return;
+	}
 	const bool in_install = core_.preferences().values().play_in_install;
 	// What Play launches, asked of its source now that the build has landed: one answer, which the
 	// plan takes whole (the executable, whether the run drives the source checkout, the Godot
@@ -136,13 +198,16 @@ void PlayController::start() {
 			core_.touch(ViewConcern::Output);
 			return;
 		}
+		// The stock game takes no mission on its command line: it starts at its menu, where the
+		// build's mission is listed.
+		if (!in_mission.empty()) core_.note("The game install starts at its menu: choose " + in_mission + " there.");
 	} else {
 		plan = launcher.source_run
 				? make_source_launch_plan(executable, launcher.godot_project_dir, build_dir, run_dir,
-						  view_.project.document->target_game, launcher.mcp_port, std::string(),
+						  view_.project.document->target_game, launcher.mcp_port, in_mission,
 						  launcher.engine_args)
 				: make_play_launch_plan(executable, build_dir, run_dir, view_.project.document->target_game,
-						  launcher.mcp_port, std::string(), launcher.engine_args);
+						  launcher.mcp_port, in_mission, launcher.engine_args);
 	}
 	// The run directory is new (emptied), so the tail starts clean.
 	game_log_file_ = plan.log_file;
@@ -180,11 +245,14 @@ void PlayController::start() {
 	view_.activity.play_state = play_.state();
 	view_.activity.play_pid = play_.pid();
 	view_.activity.play_mcp_port = plan.mcp_port;
+	view_.activity.play_mission = in_install ? std::string() : in_mission;
 	view_.activity.play_command_line = launch_plan_command_line(plan);
 	view_.activity.play_exited_on_its_own = false;
 	view_.activity.play_exit_code = -1;
 	core_.note("Running: " + view_.activity.play_command_line);
-	view_.activity.status = in_install ? "Game install running." : "Game running.";
+	view_.activity.status = in_install                          ? "Game install running."
+	                        : view_.activity.play_mission.empty() ? "Game running."
+	                                                              : "Game running: " + view_.activity.play_mission + ".";
 	core_.touch(ViewConcern::Run);
 }
 
@@ -216,6 +284,7 @@ void PlayController::poll() {
 void PlayController::forget_project() {
 	view_.activity.boot_missing.clear();
 	boot_project_.clear();
+	findings_.clear();
 	core_.problems().set_play_findings({});
 }
 
@@ -252,6 +321,7 @@ void PlayController::tail_game_log() {
 		if (!line.empty() && line.back() == '\r') line.pop_back();
 		core_.note("game: " + line);
 		absorb_boot_report(line);
+		absorb_mission_report(line);
 		start = nl + 1;
 	}
 	game_log_partial_.erase(0, start);
@@ -281,6 +351,35 @@ void PlayController::absorb_boot_report(const std::string &line) {
 	core_.problems().validate_later();
 }
 
+// The runtime says when the mission it was launched in did not load, on one line
+// (`MainGame: <kLaunchMissionFailedMarker><mission> <reason>`, godot/game/main_game.gd): a Problems
+// row (play.mission.failed) on the mission's file, once per Play, kept by every validation until
+// Play starts again or the project closes. Like the boot report it belongs to the project the game
+// was started in: a line read after that project closed, or while another is open, is ignored.
+void PlayController::absorb_mission_report(const std::string &line) {
+	const std::string marker = gameprofile::kLaunchMissionFailedMarker;
+	const size_t at = line.find(marker);
+	if (at == std::string::npos) return;
+	const size_t start = at + marker.size();
+	size_t end = start;
+	while (end < line.size() && !std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	const std::string name = line.substr(start, end - start);
+	if (name.empty()) return;
+	if (!view_.project.open || view_.project.root != boot_project_) return;
+	for (const Diagnostic &d : findings_)
+		if (d.row() == &finding_code(CoreFinding::PlayMissionFailed)) return;
+	while (end < line.size() && std::isspace(static_cast<unsigned char>(line[end]))) ++end;
+	std::string reason = line.substr(end);
+	while (!reason.empty() && (reason.back() == '.' || std::isspace(static_cast<unsigned char>(reason.back())))) reason.pop_back();
+	const AssetEntry *entry = core_.project_file(name);
+	findings_.push_back(make_finding(CoreFinding::PlayMissionFailed, DiagnosticSeverity::Error,
+	                                 "The game could not load " + name + (reason.empty() ? std::string() : ": " + reason) +
+	                                         ". It went back to its menu; its log is in Output.",
+	                                 entry ? entry->relative_path : std::string()));
+	core_.touch(ViewConcern::Run);
+	publish_findings();
+}
+
 // How the game ended, on the poll that saw it end: stopped, quit (exit code 0, or one the
 // platform could not read), or any other code: a crash or an error exit, said in Output with
 // its code and a Problems row (play.crashed) that stays, like the boot report, until Play
@@ -305,10 +404,10 @@ void PlayController::absorb_exit() {
 		}
 		line = "The game exited with code " + code + ".";
 		if (view_.project.open && view_.project.root == boot_project_) {
-			core_.problems().set_play_findings({make_finding(CoreFinding::PlayCrashed, DiagnosticSeverity::Error,
-			                                                 "The game ended with exit code " + code +
-			                                                         ": it crashed or stopped on an error. Its log is in Output.")});
-			core_.problems().validate_later();
+			findings_.push_back(make_finding(CoreFinding::PlayCrashed, DiagnosticSeverity::Error,
+			                                 "The game ended with exit code " + code +
+			                                         ": it crashed or stopped on an error. Its log is in Output."));
+			publish_findings();
 		}
 	}
 	core_.note(line);

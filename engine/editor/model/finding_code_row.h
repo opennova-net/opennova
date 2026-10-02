@@ -290,6 +290,8 @@ enum class CoreFinding {
 	PlayCrashed,
 	PlayInstallCopy,
 	PlayInstallMissing,
+	PlayMissionFailed,
+	PlayMissionUnknown,
 	PlayRunDirectory,
 	PlayRuntimeMissing,
 	PlaySpawn,

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <editor/project/project_files.h>
+#include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/play_controller.h>
@@ -74,11 +75,11 @@ void serve_create_missing(SessionCore &core, const EditorRequest &request) {
 }
 void serve_build(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(false, request.out_dir, request.rehash);
+		core.start_build(PlayIntent(), request.out_dir, request.rehash);
 }
-void serve_play(SessionCore &core, const EditorRequest &) {
+void serve_play(SessionCore &core, const EditorRequest &request) {
 	if (core.view().project.open)
-		core.start_build(true);
+		core.start_build(PlayIntent{ true, request.mission });
 }
 void serve_stop_play(SessionCore &core, const EditorRequest &) {
 	core.play().stop();
@@ -369,8 +370,13 @@ constexpr RequestKindRow kRows[] = {
 			.ends_edit_groups()
 			.row,
 	Request(K::Play, "play", serve_play,
-			"A build, then the game run on it once it lands; a build running already serves it and "
-			"starts the game when it lands.")
+			"A build, then the game run on it once it lands, at its menu, or in mission (a .bms of "
+			"the project by its logical name; one the project does not hold is refused before "
+			"anything is built, play.mission.unknown; Play in the game install starts at its menu "
+			"all the same); a build running already serves it and starts the game when it lands, in "
+			"the mission the last Play named. A mission that does not load is a Problems row "
+			"(play.mission.failed) until the next Play.")
+			.takes(request_params({}, { F::Mission }))
 			.holds(kFilesAndDocuments, kFilesAndDocuments | HoldsSlot, OnBusy::Join)
 			.guarded(GuardScope::AllDirty, "Play", "Save all and play")
 			.acts_on_saved()
@@ -750,10 +756,10 @@ static_assert(viewport_rows_hold(),
 // --------------------------------------------------------------------------------
 
 // A Build or a Play onto the running build: the build serves it (a Play refused before it could,
-// as it would be before any build: no spawn here, or a game running). The outcome names the
-// operation joined.
+// as it would be before any build: no spawn here, a game running, or a mission the project does
+// not hold). The outcome names the operation joined.
 void join_operation(SessionCore &core, const EditorRequest &request) {
-	if (request.kind == EditorRequestKind::Play && core.play().refused())
+	if (request.kind == EditorRequestKind::Play && core.play().refused(request.mission))
 		return;
 	core.operations().running()->join(request);
 	core.outcome().operation = core.operations().status().id;

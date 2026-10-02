@@ -153,6 +153,7 @@ JsonValue run_section(const SessionView &view) {
 	out.set("state", json_string(play_state_label(activity.play_state)));
 	out.set("pid", json_number(double(activity.play_pid)));
 	out.set("mcp_port", json_number(double(activity.play_mcp_port)));
+	out.set("mission", json_string(activity.play_mission));
 	out.set("command_line", json_string(activity.play_command_line));
 	out.set("run_dir", json_string(activity.play_run_dir));
 	out.set("log_file", json_string(activity.play_log_file));
@@ -361,7 +362,8 @@ constexpr ViewSectionRow kSections[] = {
 			"files done of total: the problems are the last composed until it ends) and the last "
 			"build." },
 	{ S::Run, "run", concern_set({ C::Run, C::Preferences }), run_section,
-			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), exit_code, "
+			"Play: the game's state, pid, mcp_port (0 when none with an endpoint runs), the mission "
+			"it was started in (\"\" at its menu), exit_code, "
 			"the run directory it runs in and the log there Play tails (run_dir, log_file: never "
 			"the build directory), the files it reported missing at boot, and what Play runs (the "
 			"game install, in it or not, the runtime)." },

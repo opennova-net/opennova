@@ -667,6 +667,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
+		case F::Mission: out.mission = "04TR.bms"; break;
 		case F::Roles: out.roles = {"main_menu", "gametext"}; break;
 		case F::Names: out.names = {"MAIN.MNU", "menu_style.mns"}; break;
 		case F::Paths: out.paths = {"C:/art/main.mnu"}; break;
@@ -1896,7 +1897,9 @@ static int test_game_install_keys() {
 	view.project.retail_directory = "C:/games/JO";
 	view.project.play_retail = true;
 	view.project.retail_files = {"items.def", "main.mnu"};
+	view.activity.play_mission = "04TR.bms"; // S14: the mission the game was started in
 	const JsonValue run = view_section_to_json(view, ViewSection::Run);
+	TEST_EXPECT(run.get_string("mission", "") == "04TR.bms");
 	const JsonValue import = view_section_to_json(view, ViewSection::Import);
 	const JsonValue preferences = view_section_to_json(view, ViewSection::Preferences);
 	TEST_EXPECT(run.get_bool("in_install", false) && run.get_string("game_install", "") == "C:/games/JO" &&

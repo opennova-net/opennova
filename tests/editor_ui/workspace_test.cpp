@@ -864,7 +864,26 @@ void test_menus() {
 	r = raised("Build", {"Build"}, EditorRequestKind::Build);
 	CHECK(r.kind == EditorRequestKind::Build, "Build > Build");
 	r = raised("Build", {"Play"}, EditorRequestKind::Play);
-	CHECK(r.kind == EditorRequestKind::Play, "Build > Play");
+	CHECK(r.kind == EditorRequestKind::Play && r.mission.empty(), "Build > Play: the game at its menu");
+	// S14: Play mission starts the game in the active document's mission (play_mission_for): none
+	// for a menu; with a mission active (the project holds it), that mission.
+	CHECK(choose(ui, "Build", {"Play mission"}).empty(), "Build > Play mission: the active document is no mission's");
+	{
+		const std::string menu = v.documents.active;
+		editor_test::own(v.project.scan).entries.push_back(file_entry("First.bms", "missions/First.bms", AssetKind::Mission));
+		editor_test::own(v.project.scan).index();
+		v.documents.active = "missions/First.bms";
+		v.revisions.touch(ViewConcern::Files);
+		v.revisions.touch(ViewConcern::Documents);
+		ui.frames(2);
+		ui.drain();
+		r = raised("Build", {"Play mission"}, EditorRequestKind::Play);
+		CHECK(r.kind == EditorRequestKind::Play && r.mission == "First.bms", "Build > Play mission: the active mission");
+		v.documents.active = menu;
+		v.revisions.touch(ViewConcern::Documents);
+		ui.frames(2);
+		ui.drain();
+	}
 	CHECK(choose(ui, "Build", {"Stop"}).empty(), "Build > Stop: nothing runs");
 	r = raised("Build", {"Play in the game install"}, EditorRequestKind::ApplyProjectSettings);
 	CHECK(r.kind == EditorRequestKind::ApplyProjectSettings && r.settings.play_in_install == std::optional<bool>(true) &&

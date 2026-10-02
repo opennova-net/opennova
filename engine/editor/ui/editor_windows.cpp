@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <editor/project_build/build_run.h>
+#include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
@@ -342,8 +343,15 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
 		request(request::build());
-	if (menu_item("Play", "F5", v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play)))
-		request(request::play());
+	const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
+	if (menu_item("Play", "F5", plays)) request(request::play());
+	// S14: the game started in the active document's mission (its own file, or the mission the game
+	// finds its file by: play_mission_for); F5 stays the game at its menu.
+	const std::string mission = play_mission_for(v);
+	if (menu_item("Play mission", "Ctrl+F5", plays && !mission.empty())) request(request::play(mission));
+	ui_kit::tooltip(mission.empty() ? std::string("Open a mission, or a file the game finds by its name (its script, its text), to "
+	                                              "start the game in it.")
+	                                : "Build, then start the game in " + mission + ".");
 	if (menu_item("Stop", "Shift+F5", v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)))
 		request(request::stop_play());
 	ImGui::Separator();
@@ -398,10 +406,14 @@ void EditorWindows::shortcuts(const SessionView &v, const DocumentBase *document
 		request(request::build());
 	}
 	if (ImGui::IsKeyPressed(ImGuiKey_F5, false)) {
+		const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 		if (io.KeyShift && v.activity.play_state == PlayState::Running && v.allows(EditorRequestKind::StopPlay)) {
 			request(request::stop_play());
-		} else if (!io.KeyShift && v.project.open && v.activity.play_state == PlayState::Stopped &&
-		           v.allows(EditorRequestKind::Play)) {
+		} else if (io.KeyCtrl && !io.KeyShift && plays) {
+			// Play mission: the active document's mission, nothing where it has none.
+			const std::string mission = play_mission_for(v);
+			if (!mission.empty()) request(request::play(mission));
+		} else if (!io.KeyShift && !io.KeyCtrl && plays) {
 			request(request::play());
 		}
 	}

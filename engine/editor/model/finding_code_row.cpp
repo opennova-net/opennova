@@ -138,6 +138,8 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlayCrashed, code("play.crashed", G::Play) },
 	{ C::PlayInstallCopy, code("play.install_copy", G::Play) },
 	{ C::PlayInstallMissing, code("play.install_missing", G::Play) },
+	{ C::PlayMissionFailed, code("play.mission.failed", G::Play) },
+	{ C::PlayMissionUnknown, code("play.mission.unknown", G::Play) },
 	{ C::PlayRunDirectory, code("play.run_directory", G::Play) },
 	{ C::PlayRuntimeMissing, code("play.runtime_missing", G::Play) },
 	{ C::PlaySpawn, code("play.spawn", G::Play) },

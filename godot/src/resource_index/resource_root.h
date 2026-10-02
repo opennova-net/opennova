@@ -181,6 +181,9 @@ public:
 	// The text the boot report's line puts before a missing file's name, the one the editor's
 	// Play reads the name back by (gameprofile::kBootResourceMissingMarker).
 	static String boot_resource_missing_marker();
+	// The text the launch mission's report puts before the mission's file name and the reason it
+	// did not load (gameprofile::kLaunchMissionFailedMarker), which the editor's Play reads back.
+	static String launch_mission_failed_marker();
 
 	// C++ siblings only (not bound): direct access to the mounted index without
 	// Variant-boxing its rows through GDScript dictionaries.

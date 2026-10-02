@@ -138,8 +138,12 @@ inline EditorRequest build(std::string out_dir = std::string(), bool rehash = fa
 	request.rehash = rehash;
 	return request;
 }
-inline EditorRequest play() {
-	return of(EditorRequestKind::Play);
+// A build, then the game run on it: at its menu, or in `mission` (a .bms of the project by its
+// logical name; S14).
+inline EditorRequest play(std::string mission = std::string()) {
+	EditorRequest request = of(EditorRequestKind::Play);
+	request.mission = std::move(mission);
+	return request;
 }
 inline EditorRequest stop_play() {
 	return of(EditorRequestKind::StopPlay);

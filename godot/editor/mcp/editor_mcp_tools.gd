@@ -136,8 +136,12 @@ func _tool_editor_play(args: Dictionary, ctx: McpToolContext) -> Variant:
 			if String(_run().get("state", "")) != "stopped":
 				return McpToolResult.error("The game is already running; editor_play op=stop first.")
 			# Play builds first: its build's operation is awaited as editor_build awaits it, and the
-			# game starts on the poll the build lands.
-			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify({"kind": "play"}))))
+			# game starts on the poll the build lands, in `mission` when one is named (S14).
+			var play := {"kind": "play"}
+			var mission := String(args.get("mission", ""))
+			if not mission.is_empty():
+				play["mission"] = mission
+			var answer: Variant = _parsed(String(app.call("request_json", JSON.stringify(play))))
 			var failed := _outcome_error(answer, "editor_play op=start")
 			if failed != null:
 				return failed

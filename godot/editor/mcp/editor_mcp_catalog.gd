@@ -131,9 +131,15 @@ static func definitions(app: Node) -> Array[McpToolDef]:
 			"op=start: build, waiting as editor_build does, then run the game on the build (the runtime beside "
 			+ "the editor, or this Godot binary in a source run) with its own MCP endpoint, its port allocated as "
 			+ "the build lands; the reply is the run section (state, pid, mcp_port: game_state, game_menu and "
-			+ "game_probe on that port drive it, exit_code). op=stop ends the game and waits; op=state reads the "
-			+ "run section.",
-			{"op": {"type": "string", "enum": PLAY_OPS}}, ["op"], true, BUILD_TIMEOUT_MS),
+			+ "game_probe on that port drive it, mission, exit_code). With mission (op=start), a .bms of the "
+			+ "project by its logical name, the game starts in that mission instead of at its menu (one the "
+			+ "project does not hold is refused, play.mission.unknown; one that does not load is a "
+			+ "play.mission.failed Problems row). op=stop ends the game and waits; op=state reads the run "
+			+ "section.",
+			{
+				"op": {"type": "string", "enum": PLAY_OPS},
+				"mission": {"type": "string", "description": "op=start: the mission the game starts in (04TR.bms)"},
+			}, ["op"], true, BUILD_TIMEOUT_MS),
 		_viewport_tool(catalog),
 		McpToolDef.make("editor_screenshot",
 			"Capture the editor window (its ImGui workspace, the Preview window's picture and the Document tab's); "

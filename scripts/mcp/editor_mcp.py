@@ -33,6 +33,7 @@ print JSON. Standard library only; the transport class is game_mcp.py's, so a
     python scripts/mcp/editor_mcp.py build --out-dir "C:/builds/My Game"   # each build a directory under it
     python scripts/mcp/editor_mcp.py play start           # the run section: state, pid, mcp_port
     python scripts/mcp/game_mcp.py call game_menu '{"op": "state"}' --port <that port>
+    python scripts/mcp/editor_mcp.py play start --mission 04TR.bms   # the game started in that mission
     python scripts/mcp/editor_mcp.py call editor_viewport '{"op": "items", "limit": 20}'
     python scripts/mcp/editor_mcp.py stop --pid-file build/editor.pid
 
@@ -231,7 +232,7 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
-                 "out_dir", "mode", "choice", "purpose")
+                 "out_dir", "mission", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned")
@@ -418,8 +419,11 @@ def cmd_play(args: argparse.Namespace) -> int:
     client = client_of(args)
     if args.op == "start":
         # Play builds first: its build's operation is waited on as `build` waits, then the run
-        # section read (the game started on the poll the build landed).
-        outcome, ended = raise_and_wait(client, {"kind": "play"}, args.timeout)
+        # section read (the game started on the poll the build landed, in --mission when given).
+        request = {"kind": "play"}
+        if args.mission:
+            request["mission"] = args.mission
+        outcome, ended = raise_and_wait(client, request, args.timeout)
         if ended is None:
             return EXIT_NOT_DONE
         if not outcome.get("done", False):
@@ -594,6 +598,8 @@ def build_parser() -> argparse.ArgumentParser:
                          help="build: where it lands, each build a directory under it (left out: the project's "
                               ".opennova/build/play; relative: from the project's folder; refused inside the "
                               "project but in its cache or export folder)")
+    request.add_argument("--mission", default=None,
+                         help="play: a mission of the project by its logical name, the one the game starts in")
     request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
     request.add_argument("--names", default=None, help="comma-separated: preview_install_import's files")
     request.add_argument("--paths", action="append", default=None,
@@ -710,6 +716,9 @@ def build_parser() -> argparse.ArgumentParser:
     play = commands.add_parser("play", help="start (build, waiting on its operation, then run), stop or read the game")
     add_endpoint_options(play)
     play.add_argument("op", choices=("start", "stop", "state"))
+    play.add_argument("--mission", default=None,
+                      help="start: a mission of the project by its logical name (04TR.bms), the one the game starts "
+                           "in (left out: its menu)")
     play.add_argument("--timeout", type=float, default=300.0)
     play.set_defaults(func=cmd_play)
 

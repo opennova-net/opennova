@@ -76,4 +76,11 @@ const RequiredResource *gameprofile_required_resource_by_role(const char *role);
    names back from that log (editor/session/project_session). */
 inline constexpr const char *kBootResourceMissingMarker = "boot-required resource missing: ";
 
+/* The launch mission's report: a game started in a mission (`--mission`) that does not load
+   says so on a line of its log where the mission's file name, a space and the reason follow
+   this text (godot/game/main_game.gd writes it through
+   ResourceRoot.launch_mission_failed_marker()), and the editor's Play reads it back from that
+   log (editor/session/play_controller). */
+inline constexpr const char *kLaunchMissionFailedMarker = "launch mission failed: ";
+
 } // namespace opennova::gameprofile
