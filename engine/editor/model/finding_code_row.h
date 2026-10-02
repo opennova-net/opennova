@@ -74,6 +74,7 @@ enum class FindingGroup {
 	MusicScripts,
 	Credits,
 	Shaders,
+	Missions,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -98,7 +99,12 @@ enum class FindingProblem { None, Info, Warning };
 // `blocks_save` that the finding says the file does not serialize (its Save is refused, so no
 // Rewrite is offered for the file); `place` where Problems takes it; `group` the group it shows
 // under; `source` what made it, when not its group's own part; `problem`, on a render check's row
-// alone, whether a finding of it is a Problems row and at what severity.
+// alone, whether a finding of it is a Problems row and at what severity; `gates_build` whether an
+// error of the code, among the rows a build reads, refuses the build (blocks_build,
+// graph/reference_kinds.h): false on a row whose findings are listed and block nothing (ADR 0046
+// S14: a missing reference, which the shipped game's own files carry and run with, but where its
+// kind's row cites the game's refusal, ReferenceKindRow::gates_when_missing; what the game cannot
+// start without is the requirements' rows).
 struct FindingCodeRow {
 	const char *token = nullptr;
 	FindingFix fixes = FindingFix::None;
@@ -108,6 +114,7 @@ struct FindingCodeRow {
 	FindingGroup group = FindingGroup::None;
 	FindingSource source = FindingSource::Own;
 	FindingProblem problem = FindingProblem::None;
+	bool gates_build = true;
 };
 
 // A table's rows, in the order of the enum it answers for.
@@ -164,6 +171,8 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 		if (static_cast<size_t>(entries[i].code) != i || !row.token || !*row.token) return false;
 		if ((row.fixes == FindingFix::Rewrite) != (row.rewrite_does != nullptr)) return false;
 		if (row.blocks_save && row.fixes == FindingFix::Rewrite) return false;
+		// A file that does not serialize cannot be packed as the editor holds it: it gates.
+		if (row.blocks_save && !row.gates_build) return false;
 		for (size_t j = 0; j < i; ++j)
 			if (same_finding_token(row.token, entries[j].row.token)) return false;
 	}
@@ -200,6 +209,7 @@ enum class CoreFinding {
 	BlankDef,
 	BlankFont,
 	BlankMenu,
+	BlankMission,
 	BlankStrings,
 	BlankStyle,
 	BlankTexture,
@@ -211,6 +221,7 @@ enum class CoreFinding {
 	BuildCopy,
 	BuildNameUnstorable,
 	BuildOutDirInProject,
+	BuildPlayerFile,
 	BuildRead,
 	BuildVerify,
 	BuildWrite,
@@ -243,6 +254,7 @@ enum class CoreFinding {
 	DocumentStructure,
 	DocumentUnserializable,
 	DocumentValue,
+	DocumentValues,
 	DocumentWrite,
 	EditorSettingsJson,
 	EditorSettingsSchemaVersionUnsupported,
@@ -267,9 +279,11 @@ enum class CoreFinding {
 	ImportOrphanRecord,
 	ImportOutputMissing,
 	ImportPath,
+	ImportPlayerFile,
 	ImportPublish,
 	ImportRead,
 	ImportRecord,
+	ImportRequest,
 	ImportScene,
 	ImportSceneNote,
 	ImportSidecar,
@@ -281,6 +295,7 @@ enum class CoreFinding {
 	LocalSettingsSchemaVersionUnsupported,
 	LocalSettingsUnreadable,
 	LocalSettingsWrite,
+	MissionSidecarUnused,
 	OperationBusy,
 	OperationNone,
 	OperationNotCancellable,
@@ -289,6 +304,8 @@ enum class CoreFinding {
 	PlayCrashed,
 	PlayInstallCopy,
 	PlayInstallMissing,
+	PlayMissionFailed,
+	PlayMissionUnknown,
 	PlayRunDirectory,
 	PlayRuntimeMissing,
 	PlaySpawn,
@@ -298,6 +315,7 @@ enum class CoreFinding {
 	ProjectFileMissing,
 	ProjectFileUnreadable,
 	ProjectJson,
+	ProjectMissionFeatureOff,
 	ProjectNone,
 	ProjectRootUnreadable,
 	ProjectSchemaVersionUnsupported,
@@ -305,6 +323,7 @@ enum class CoreFinding {
 	ProjectTitleEmpty,
 	ProjectWrite,
 	ReferenceMissing,
+	ReferenceWrongKind,
 	RenameConflict,
 	RenameCopy,
 	RenameExists,

@@ -46,18 +46,19 @@ std::string record_tip(const OutlineLine &line, Document::RecordChange change) {
 }
 
 // A row's line in a list or a master column, cut to what shows of it (whole in its tooltip),
-// marked when it was added or changed since the last save, selected on a click and highlighted
-// while the selection is in it; `id` its item's id after its text.
-void row_line(Workspace &workspace, const Document &document, const RecordReveal &reveal, const OutlineLine &line,
+// marked when it was added or changed since the last save, highlighted while the selection is in
+// it (the primary's row, or a row selected with others); `id` its item's id after its text. True
+// when it was clicked: its caller selects.
+bool row_line(Workspace &workspace, const Document &document, const RecordReveal &reveal, const OutlineLine &line,
               const char *id) {
 	const SessionView &view = workspace.view();
 	ImGui::PushID(static_cast<int>(line.address.row));
 	const float x = ImGui::GetCursorScreenPos().x;
 	const std::string label = ui_kit::kChangeRoom + line.text;
 	const std::string shown = ui_kit::fit(label, ImGui::GetContentRegionAvail().x);
-	const bool selected = view.documents.selection.primary.row == line.address.row;
-	if (ImGui::Selectable((shown + id).c_str(), selected))
-		select(workspace, document, line.address);
+	const bool selected = view.documents.selection.primary.row == line.address.row ||
+	                      view.documents.selection.holds(line.address);
+	const bool clicked = ImGui::Selectable((shown + id).c_str(), selected);
 	reveal.scroll_to(line.address, true);
 	const Document::RecordChange change = document.record_change(line.address);
 	ui_kit::change_dot(change, x);
@@ -66,6 +67,17 @@ void row_line(Workspace &workspace, const Document &document, const RecordReveal
 		return shown != label ? line.text + (words.empty() ? "" : "\n" + words) : words;
 	});
 	ImGui::PopID();
+	return clicked;
+}
+
+// A click on the record line `index` of the model's lines selects as the keys held say
+// (OutlineModel::click): alone, with Ctrl joining or leaving the selection, with Shift the lines
+// from the primary's to it in one selection.
+void select_line(Workspace &workspace, const Document &document, const OutlineModel &model, size_t index) {
+	const ImGuiIO &io = ImGui::GetIO();
+	OutlineClick click = model.click(index, workspace.view().documents.selection.primary, io.KeyCtrl, io.KeyShift);
+	if (!click.record.row) return;
+	workspace.request(request::select_record(document.path(), click.record, click.mode, std::move(click.records)));
 }
 
 // The selected record's Duplicate / Remove / Up / Down, as the tools pressed ask them of `address`
@@ -91,7 +103,7 @@ bool adds_rows_of(const Document &document, NodeKind kind) {
 
 } // namespace
 
-OutlineView::OutlineView(const OutlineSpec &spec) : spec_(spec), model_(spec.mode, spec.file_values) {}
+OutlineView::OutlineView(const OutlineSpec &spec) : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed) {}
 
 void OutlineView::rebind(const DocumentBase &) {
 	// The reveal and the cell being edited name the records of the document it last drew: the next
@@ -128,6 +140,41 @@ void OutlineView::draw(Workspace &workspace, const DocumentBase &base) {
 	}
 }
 
+// The kinds of row the outline lists (OutlineSpec::by_kind): a chip per kind of row the file holds,
+// pressed while its kind's rows are listed, a click listing them or leaving them out; then the
+// switch listing the rows the type leaves out (OutlineSpec::row_listed, its words the spec's).
+void OutlineView::draw_kinds(const Document &document) {
+	if (!spec_.by_kind && !spec_.row_listed) return;
+	ui_kit::WrapRow row;
+	if (spec_.by_kind) {
+		uint64_t kinds = model_.kinds();
+		ImGui::PushID("kinds");
+		for (const RecordKindRow &kind : document.kinds()) {
+			if (!kind.top) continue;
+			const uint64_t bit = OutlineModel::kind_bit(document, kind.kind);
+			const bool listed = (kinds & bit) != 0;
+			row.next(ui_kit::button_width(kind.label));
+			// A chip left out draws as a button does at rest, dimmed; one listed as a button pressed.
+			ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(listed ? ImGuiCol_ButtonActive : ImGuiCol_FrameBg));
+			if (!listed) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			if (ImGui::SmallButton(kind.label)) kinds ^= bit;
+			ImGui::PopStyleColor(listed ? 1 : 2);
+			ui_kit::tooltip_lazy([&] {
+				return std::string(listed ? "Listed: " : "Left out: ") + lower(kind.label) +
+				       " records. Click to " + (listed ? "leave them out." : "list them.");
+			});
+		}
+		ImGui::PopID();
+		model_.set_kinds(kinds);
+	}
+	if (spec_.row_listed) {
+		row.next(ui_kit::checkbox_width(spec_.unlisted));
+		bool all = model_.all_rows();
+		if (ImGui::Checkbox(spec_.unlisted, &all)) model_.set_all_rows(all);
+		ui_kit::tooltip("Lists the ones that hold nothing too.");
+	}
+}
+
 // --- List (a catalog) ---------------------------------------------------------------------------
 
 // The filter and the sort, each kind's Add and the selected row's tools, the rows (clipped), then
@@ -144,6 +191,7 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 		if (ImGui::Checkbox("Sort by name", &sort)) model_.set_sort(sort);
 		ui_kit::tooltip("Lists the records by name; Up and Down still move them in the file's order.");
 	}
+	draw_kinds(document);
 	// The selection moved there: its row shown (a filter hiding it cleared) and scrolled to, however
 	// far down.
 	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
@@ -173,7 +221,8 @@ void OutlineView::draw_list(Workspace &workspace, const Document &document) {
 	if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
 	while (clipper.Step())
 		for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-			row_line(workspace, document, reveal_, lines[size_t(i)], "###record");
+			if (row_line(workspace, document, reveal_, lines[size_t(i)], "###record"))
+				select_line(workspace, document, model_, size_t(i));
 	ImGui::EndDisabled();
 	draw_file_values(workspace, document);
 }
@@ -225,6 +274,7 @@ void OutlineView::draw_file_values(Workspace &workspace, const Document &documen
 // scrolling sideways when deep).
 void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 	filter_box("Filter records", 0.0f, "Lists the records whose name holds the text, and what holds them.");
+	draw_kinds(document);
 	// The selection moved there: the records and collections holding it open (a filter hiding it
 	// cleared), its line scrolled to, however far down.
 	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
@@ -240,18 +290,20 @@ void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 		if (revealed != SIZE_MAX) clipper.IncludeItemByIndex(static_cast<int>(revealed));
 		while (clipper.Step())
 			for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
-				draw_tree_line(workspace, document, lines[size_t(i)]);
+				draw_tree_line(workspace, document, lines[size_t(i)], size_t(i));
 	}
 	ImGui::EndChild();
 	ImGui::EndDisabled();
 }
 
-// One line of the tree at its depth: a record (a node over its collections, or a leaf; marked when
-// it was added or changed since the last save; selected on a click, Ctrl joining or leaving the
-// selection) or a collection (a node over its records, + adding one at its end where it takes
+// One line of the tree at its depth, `index` its place among the model's lines: a record (a node
+// over its collections, or a leaf; marked when it was added or changed since the last save; selected
+// on a click, Ctrl joining or leaving the selection, Shift selecting the lines from the primary's to
+// it) or a collection (a node over its records, + adding one at its end where it takes
 // one). What is open is the model's: the arrow opens or closes the line there (a line the filter
 // holds open stays so).
-void OutlineView::draw_tree_line(Workspace &workspace, const Document &document, const OutlineLine &line) {
+void OutlineView::draw_tree_line(Workspace &workspace, const Document &document, const OutlineLine &line,
+		size_t index) {
 	const SessionView &view = workspace.view();
 	const float indent = ImGui::GetStyle().IndentSpacing * float(line.depth);
 	if (indent > 0.0f) ImGui::Indent(indent);
@@ -284,8 +336,7 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		const Document::RecordChange change = document.record_change(line.address);
 		ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
 		ui_kit::tooltip_lazy([&] { return record_tip(line, change); });
-		if (ImGui::IsItemClicked() && !toggled)
-			select(workspace, document, line.address, ImGui::GetIO().KeyCtrl ? SelectMode::Toggle : SelectMode::Replace);
+		if (ImGui::IsItemClicked() && !toggled) select_line(workspace, document, model_, index);
 	}
 	if (indent > 0.0f) ImGui::Unindent(indent);
 }
@@ -321,12 +372,13 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 			tools.locked = "It is one of the file's own records: none is added, duplicated, removed or moved.";
 	}
 	ui_kit::WrapRow row;
+	const float line = ImGui::GetContentRegionAvail().x; // the row's whole line (a narrow column's)
 	for (const RecordKindRow &kind : document.kinds())
 		if (*kind.add_label && ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file.", true))
 			edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 	if (placed) {
 		const std::string title = document.record_title(selection), name = document.record_name(selection);
-		const std::string shown = ui_kit::fit(title, ImGui::GetFontSize() * 12.0f);
+		const std::string shown = ui_kit::fit(title, std::min(ImGui::GetFontSize() * 12.0f, line));
 		row.next(ui_kit::text_width(shown.c_str()));
 		ImGui::TextUnformatted(shown.c_str());
 		std::string tip = shown != title ? title : std::string();
@@ -407,7 +459,8 @@ void OutlineView::draw_masters(Workspace &workspace, const Document &document) {
 	}
 	row_tool(workspace, document, tool, address, index);
 	if (rows.empty()) ui_kit::empty_state(("No " + lower(spec_.rows) + " yet.").c_str());
-	for (const OutlineLine &line : model_.masters()) row_line(workspace, document, reveal_, line, "###row");
+	for (const OutlineLine &line : model_.masters())
+		if (row_line(workspace, document, reveal_, line, "###row")) select(workspace, document, line.address);
 	ImGui::PopID();
 }
 

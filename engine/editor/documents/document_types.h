@@ -5,6 +5,7 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/graph/graph_edge.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
@@ -63,6 +64,12 @@ struct DocumentType {
 	// the WAC compiler's), which the script device colours; null for a type whose reader the editor
 	// has no port of that says so (nothing is coloured that no reader knows), and for a record type.
 	void (*highlights)(const TextDocument &document, std::vector<TextHighlight> &out) = nullptr;
+	// A record type's references that no field's value is (ADR 0046 S14): the files a mission's own
+	// name finds (its text table, script, loading image, tile placement and dialog bank), a text key
+	// formed from a number (a marker's name index). Added to what the schema's fields give
+	// (extract_from_document), each edge with its record and locator where it has one; null for a
+	// type whose references are all its fields'.
+	void (*record_references)(const Document &document, Extracted &out) = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a

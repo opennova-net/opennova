@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
 #include <formats/wac/param_type.h>
+#include <runtime/mission/mission_sidecars.h>
 #include <runtime/wac/compiler.h>
 
 namespace opennova::editor {
@@ -148,23 +149,55 @@ std::vector<Diagnostic> validate_script_file(const DocumentBase &document) {
 
 void script_references(const TextDocument &document, std::vector<TextReference> &out) {
 	const std::shared_ptr<const wac::Program> program = compiled(document);
+	const std::string &text = document.text();
+	// A text key reads the mission text's table, then gametext.bin [orig:
+	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0: the loaded mission table's entry, else
+	// gametext's; "" with no mission table]. The mission text is the table of the mission's own name,
+	// else medmssn.bin, the one or the other [orig: TextResource_LoadMissionTextBin @ 0x51ed90]: a
+	// script of a mission's name (compiled after game.wac and server.wac [orig: WacScript_InitAndLoad @
+	// 0x4F91F0]) reads that mission's, where the project has the mission (its owner, <stem>.bms); one of
+	// no mission's name (a RUN's file, compiled into whichever mission runs it) and game.wac and
+	// server.wac, which run with every mission, read the table of whichever plays, so their keys
+	// resolve in any table and no rename rewrites them.
+	const std::string stem = strutil::to_upper(mission::mission_base_name(document.path()));
+	const bool missions_own = stem != "GAME" && stem != "SERVER";
 	for (const wac::CatalogLookup &lookup : program->catalog_lookups) {
 		const ReferenceKind kind = lookup_kind(lookup.kind);
 		if (kind == ReferenceKind::None || lookup.source != 0 || lookup.declaration ||
-				lookup.length == 0 || lookup.offset + lookup.length > document.text().size())
+				lookup.length == 0 || lookup.offset + lookup.length > text.size())
 			continue;
 		TextReference reference;
 		reference.kind = kind;
-		reference.value = document.text().substr(lookup.offset, lookup.length);
+		reference.value = text.substr(lookup.offset, lookup.length);
 		// An ammo's name, then the name after "ammo_" [orig: WacScript_ResolveParameter @
 		// 0x4F2E21..0x4F2E92 -> AmmoDef_LookupByName @ 0x409870, twice].
 		if (kind == ReferenceKind::Ammo) reference.fallback = "ammo_" + reference.value;
-		// A text key resolves in any string table here, where the game reads the override table, the
-		// mission's own and then gametext.bin [orig: MissionText_GetStringByKeyOrGameText @
-		// 0x51ECD0]: until the graph scopes that lookup, Rename everywhere leaves its uses alone (a
-		// refusal), lest it rewrite the uses of another table's key of the name.
-		if (kind == ReferenceKind::TextId) reference.rewritable = false;
+		if (kind == ReferenceKind::TextId) {
+			if (missions_own) {
+				reference.scope = stem + ".BIN";
+				reference.scope_alternate = "MEDMSSN.BIN";
+				reference.scope_owner = stem + ".BMS";
+				reference.scopes_after = { "GAMETEXT.BIN" };
+			} else {
+				reference.rewritable = false;
+			}
+		}
 		reference.span = document.span_at(lookup.offset, lookup.length);
+		out.push_back(std::move(reference));
+	}
+	// The files the script names (wac::FileUse): a RUN's script by the name written, which the
+	// kind's extension reaches as the compiler's rule does (the token to its first '.', then ".wac")
+	// but for a name written with another extension, reached through the compiler's name; a wave by
+	// its string.
+	for (const wac::FileUse &use : program->file_uses) {
+		if (use.source != 0 || use.length == 0 || use.offset + use.length > text.size()) continue;
+		TextReference reference;
+		reference.kind = use.kind == wac::FileUse::Kind::Run ? ReferenceKind::Script : ReferenceKind::Wave;
+		reference.value = text.substr(use.offset, use.length);
+		if (use.kind == wac::FileUse::Kind::Run && !strutil::iequals(use.name, reference.value) &&
+				!strutil::iequals(use.name, reference.value + ".wac"))
+			reference.fallback = use.name;
+		reference.span = document.span_at(use.offset, use.length);
 		out.push_back(std::move(reference));
 	}
 }

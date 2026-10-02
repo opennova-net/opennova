@@ -1,6 +1,7 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <base/io/json.h>
 #include <editor/preview/viewport_kinds.h>
@@ -43,5 +44,9 @@ io::JsonValue viewport_notes_to_json(const SessionView &view, const ViewportMode
 // path (its document), kind (the item's: a window's type, a marker's kind), index, id, name,
 // current}, index -1 for none.
 io::JsonValue viewport_hit_to_json(const ViewportModel &model, const ViewportHit &hit);
+// What a box of the picture of `model` takes (S14: a marquee's records, ViewportModel::box):
+// {viewport, path, current, records ([{kind, index, id, name}], each as a hit names one), count}.
+io::JsonValue viewport_box_to_json(const SessionView &view, const ViewportModel &model,
+		const std::vector<ViewportHit> &hits);
 
 } // namespace opennova::editor
