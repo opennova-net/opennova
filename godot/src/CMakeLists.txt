@@ -38,26 +38,40 @@ add_subdirectory(../../third_party/godot-cpp godot-cpp)
 add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
-# rgbcx: the authoring DXT encoder (engine/runtime/renderer/dxt_encode), which the
-# runtime links privately.
-add_subdirectory(../../third_party/rgbcx opennova_rgbcx)
 option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGui)" ON)
 # The imgui-godot addon ships no web binaries, so the web build has no host
 # for the dev-tool windows either.
 if(GODOTCPP_TARGET STREQUAL "template_release" OR EMSCRIPTEN)
     set(OPENNOVA_DEVTOOLS OFF)
 endif()
-# Dear ImGui has no consumer when the game's dev tools are compiled out.
-if(OPENNOVA_DEVTOOLS)
+# Two GDExtension variants from one source tree (ADR 0046 d4): the runtime-only
+# `libopennova.*` the game and the Play child ship, and the editor-enabled
+# `libopennova_editor.*` the OpenNova Editor ships (and every source run loads, as
+# the superset). OFF builds the runtime variant alone.
+option(OPENNOVA_EDITOR "Build the editor-enabled GDExtension variant beside the runtime one" ON)
+# The web build (ADR 0049) is the game's runtime variant alone: the editor's windows
+# ride the same imgui-godot addon (no web binaries), its Play child spawns a desktop
+# process, and leaving the option on would turn OPENNOVA_IMGUI on below, compiling
+# Dear ImGui and the pass into the web side module.
+if(EMSCRIPTEN)
+    set(OPENNOVA_EDITOR OFF)
+endif()
+# Dear ImGui builds when either product wants its pass: the game's dev tools or
+# the editor's windows (OPENNOVA_IMGUI is read by engine/).
+if(OPENNOVA_DEVTOOLS OR OPENNOVA_EDITOR)
+    set(OPENNOVA_IMGUI ON)
     add_subdirectory(../../third_party/imgui opennova_imgui)
+else()
+    set(OPENNOVA_IMGUI OFF)
 endif()
 # The engine (Shape A group targets — see engine/CMakeLists.txt).
 add_subdirectory(../../engine opennova_engine)
 
-set(TARGET_NAME "opennova")
-
-add_library(${TARGET_NAME} SHARED
-    register_types.cpp
+# The bindings, compiled once and shared by both variants: everything but the
+# entry point (register_types.cpp, which differs by what it registers), the
+# ImGui pass node (whose attach leg is per variant) and the editor's authoring
+# layer (editor variant only).
+add_library(opennova_bindings OBJECT
     network/novaworld_client.cpp
     network/host_session_options.cpp
     network/novaworld_server_row.cpp
@@ -94,11 +108,9 @@ add_library(${TARGET_NAME} SHARED
     mission/mission_catalog.cpp
     mission/mission_object_placer.cpp
     mission/mission_placement_stats.cpp
-    mission/mission_placement_run.cpp
     mission/static_population_instance.cpp
     mission/mission_object_placer_static_sources.cpp
     env/celestial.cpp
-    env/celestial_overlay.cpp
     env/environment_cube_capture.cpp
     env/sky_dome.cpp
     env/slot_shadow.cpp
@@ -123,8 +135,6 @@ add_library(${TARGET_NAME} SHARED
     particle/particle_compositor.cpp
     particle/particle_far_pass.cpp
     particle/particle_renderer.cpp
-    particle/particle_atlas_page_upload.cpp
-    render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
     render/frame_fx.cpp
     render/nvg_view_device.cpp
@@ -136,8 +146,6 @@ add_library(${TARGET_NAME} SHARED
     render/scene_overlay_compositor.cpp
     render/slot_capture_adapter.cpp
     render/target_projection_xr_interface.cpp
-    render/texture_filter_device.cpp
-    render/tracer_ribbon_surfaces.cpp
     object/entity_index.cpp
     object/entity_ref.cpp
     object/object_model.cpp
@@ -152,7 +160,6 @@ add_library(${TARGET_NAME} SHARED
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
     object/object_data_runtime_eval.cpp
-    object/object_data_build.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/model_light.cpp
@@ -182,7 +189,6 @@ add_library(${TARGET_NAME} SHARED
     simulation/weapon_kit_entry.cpp
     object/skeletal_anim.cpp
     hud/hud_draw_list_stats.cpp
-    hud/font_page_glyphs.cpp
     hud/hud_overlay.cpp
     hud/hud_overlay_combat.cpp
     hud/hud_overlay_flat.cpp
@@ -197,7 +203,6 @@ add_library(${TARGET_NAME} SHARED
     hud/player_hud_weapon_def.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
-    devtools/imgui_pass_node.cpp
     devtools/dev_tools_overlay.cpp
     devtools/dev_tools_windows.cpp
     devtools/debug_arg_spec.cpp
@@ -237,7 +242,6 @@ add_library(${TARGET_NAME} SHARED
     simulation/simulation_player_loadout.cpp
     simulation/simulation_deploy_screen.cpp
     simulation/simulation_end_round.cpp
-    simulation/simulation_rotation.cpp
     simulation/simulation_player_view.cpp
     simulation/simulation_player_weapon.cpp
     simulation/effect_section_source.cpp
@@ -273,7 +277,6 @@ add_library(${TARGET_NAME} SHARED
     dbf/dbf_data.cpp
     rtxt/rtxt_string_file.cpp
     util/data_format.cpp
-    util/dxt_texture.cpp
     util/paths.cpp
     util/pcx_texture_bridge.cpp
     util/texture_files.cpp
@@ -303,30 +306,19 @@ add_library(${TARGET_NAME} SHARED
     player/local_player_visuals.cpp
     player/player_input_router.cpp
     player/player_move_intent.cpp
-    player/player_profiles.cpp
     player/player_spawn_loadout.cpp
     player/player_viewmodel_def.cpp
     player/player_viewmodel_rig.cpp
     player/player_weapon_effects.cpp
 )
 
-# The ImGui pass node (devtools/imgui_pass_node.cpp) attaches only when the
-# game's dev tools are compiled in.
-if(OPENNOVA_DEVTOOLS)
-    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=1)
-else()
-    target_compile_definitions(${TARGET_NAME} PRIVATE OPENNOVA_IMGUI_NODE=0)
-endif()
-
-target_include_directories(${TARGET_NAME} PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-)
+target_include_directories(opennova_bindings PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # opennova_runtime carries the sim chain (runtime -> formats -> base -> io) the
 # bindings consume directly; opennova_net is the wire only and never links
 # runtime (ADR 0043 d4). The service target is deliberately absent (see the sqlite note
 # above); scripts/lint/link_graph_check.py enforces it.
-target_link_libraries(${TARGET_NAME} PRIVATE
+target_link_libraries(opennova_bindings PUBLIC
     godot-cpp
     opennova_runtime
     opennova_net
@@ -338,7 +330,34 @@ set(OUTPUT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../bin/")
 
 # gersemi: off
 set_target_properties(
-    ${TARGET_NAME}
+    opennova_bindings
+    PROPERTIES
+        CXX_STANDARD 17
+        CXX_EXTENSIONS OFF
+        CXX_VISIBILITY_PRESET ${GODOTCPP_SYMBOL_VISIBILITY}
+        POSITION_INDEPENDENT_CODE ON
+        FOLDER "opennova"
+)
+# gersemi: on
+
+# The runtime-only variant: the game and the Play child. It never links
+# opennova_editor (link_graph_check.py), and its ImGui pass node attaches only when
+# the game's dev tools are compiled in.
+add_library(opennova SHARED
+    register_types.cpp
+    devtools/imgui_pass_node.cpp
+)
+target_include_directories(opennova PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(opennova PRIVATE opennova_bindings)
+if(OPENNOVA_DEVTOOLS)
+    target_compile_definitions(opennova PRIVATE OPENNOVA_EDITOR=0 OPENNOVA_IMGUI_NODE=1)
+else()
+    target_compile_definitions(opennova PRIVATE OPENNOVA_EDITOR=0 OPENNOVA_IMGUI_NODE=0)
+endif()
+
+# gersemi: off
+set_target_properties(
+    opennova
     PROPERTIES
         CXX_STANDARD 17
         CXX_EXTENSIONS OFF
@@ -351,17 +370,62 @@ set_target_properties(
         PDB_OUTPUT_DIRECTORY     "$<1:${OUTPUT_DIR}>"
 
         PREFIX "lib"
-        OUTPUT_NAME "${TARGET_NAME}${GODOTCPP_SUFFIX}"
+        OUTPUT_NAME "opennova${GODOTCPP_SUFFIX}"
 
         FOLDER "opennova"
 )
 # gersemi: on
 
+# The editor-enabled variant (ADR 0046 d4): the same bindings plus the authoring
+# layer (godot/src/authoring) and the editor core, with the ImGui pass always
+# attachable. `libopennova_editor.*`; selected by the `opennova_editor` feature tag
+# and by the plain rows of opennova.gdextension (source runs load the superset).
+if(OPENNOVA_EDITOR)
+    add_library(opennova_editor_gdext SHARED
+        register_types.cpp
+        devtools/imgui_pass_node.cpp
+        authoring/child_process.cpp
+        authoring/editor_app.cpp
+        authoring/menu_viewport_applier.cpp
+        authoring/model_viewport_applier.cpp
+        authoring/script_device.cpp
+        authoring/script_edit.cpp
+        authoring/script_highlighter.cpp
+        authoring/viewport_device.cpp
+        authoring/viewport_devices.cpp
+    )
+    target_include_directories(opennova_editor_gdext PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_link_libraries(opennova_editor_gdext PRIVATE opennova_bindings opennova_editor)
+    target_compile_definitions(opennova_editor_gdext PRIVATE OPENNOVA_EDITOR=1 OPENNOVA_IMGUI_NODE=1)
+
+    # gersemi: off
+    set_target_properties(
+        opennova_editor_gdext
+        PROPERTIES
+            CXX_STANDARD 17
+            CXX_EXTENSIONS OFF
+            CXX_VISIBILITY_PRESET ${GODOTCPP_SYMBOL_VISIBILITY}
+
+            POSITION_INDEPENDENT_CODE ON
+
+            LIBRARY_OUTPUT_DIRECTORY "$<1:${OUTPUT_DIR}>"
+            RUNTIME_OUTPUT_DIRECTORY "$<1:${OUTPUT_DIR}>"
+            PDB_OUTPUT_DIRECTORY     "$<1:${OUTPUT_DIR}>"
+
+            PREFIX "lib"
+            OUTPUT_NAME "opennova_editor${GODOTCPP_SUFFIX}"
+
+            FOLDER "opennova"
+    )
+    # gersemi: on
+endif()
+
 # emsdkHack clears the shared-library suffix; Godot looks the web side module
 # up by the .wasm name opennova.gdextension lists. Every object is already
 # LLVM-optimized; binaryen's -O3 over the whole ~16 MB module ran past an hour,
-# so its link-time pass runs at -O1 (the last -O on the link line wins).
+# so its link-time pass runs at -O1 (the last -O on the link line wins). The web
+# build is the runtime variant alone (OPENNOVA_EDITOR is off there, above).
 if(EMSCRIPTEN)
-    set_target_properties(${TARGET_NAME} PROPERTIES SUFFIX ".wasm")
-    target_link_options(${TARGET_NAME} PRIVATE -O1)
+    set_target_properties(opennova PROPERTIES SUFFIX ".wasm")
+    target_link_options(opennova PRIVATE -O1)
 endif()

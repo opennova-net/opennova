@@ -27,7 +27,6 @@
 #include "env/celestial.h"
 #include "env/environment_cube_capture.h"
 #include "mission/mission_object_placer.h"
-#include "mission/mission_placement_run.h"
 #include "mission/mission_placement_stats.h"
 #include "mission/static_population_instance.h"
 #include "env/sky_dome.h"
@@ -116,6 +115,11 @@
 #include "hud/hud_inset_scope.h"
 #include "devtools/dev_tools.h"
 #include "devtools/imgui_pass_node.h"
+#if OPENNOVA_EDITOR
+#include "authoring/editor_app.h"
+#include "authoring/script_edit.h"
+#include "authoring/script_highlighter.h"
+#endif
 #include "devtools/debug_arg_spec.h"
 #include "devtools/debug_control_records.h"
 #include "devtools/debug_control_table.h"
@@ -184,7 +188,6 @@
 #include "player/local_player_presenter.h"
 #include "player/local_player_visuals.h"
 #include "player/player_move_intent.h"
-#include "player/player_profiles.h"
 #include "player/player_spawn_loadout.h"
 #include "player/player_viewmodel_def.h"
 #include "player/player_viewmodel_rig.h"
@@ -231,7 +234,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(Celestial);
 	GDREGISTER_CLASS(EnvironmentCubeCapture);
 	GDREGISTER_CLASS(MissionPlacementStats);
-	GDREGISTER_CLASS(MissionPlacementRun);
 	GDREGISTER_CLASS(StaticPopulationInstance);
 	GDREGISTER_CLASS(MissionObjectPlacer);
 	GDREGISTER_CLASS(SunShadow);
@@ -300,7 +302,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(PlayerInventory);
 	GDREGISTER_CLASS(WeaponProfileSide);
 	GDREGISTER_CLASS(WeaponProfileSummary);
-	GDREGISTER_CLASS(PlayerProfiles);
 	GDREGISTER_CLASS(ThrowableVisualRow);
 	GDREGISTER_CLASS(VehicleTrailVisualRow);
 	GDREGISTER_CLASS(FirePresentationEvent);
@@ -472,6 +473,14 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(FrameStats);
 	GDREGISTER_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
+#if OPENNOVA_EDITOR
+	// The OpenNova Editor's shell (ADR 0046 d4): the editor-enabled variant only, so
+	// nothing the game ships depends on the editor. The script device's control and its
+	// colours (S13 V10) with it.
+	GDREGISTER_CLASS(EditorApp);
+	GDREGISTER_CLASS(ScriptEdit);
+	GDREGISTER_CLASS(ScriptHighlighter);
+#endif
 	// The debug-control table F3 and MCP share (ADR 0043 d12), in every
 	// flavour: only the ImGui windows are debug-only.
 	GDREGISTER_CLASS(DebugArgSpec);

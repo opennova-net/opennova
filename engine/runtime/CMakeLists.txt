@@ -62,11 +62,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_wrap.cpp # the wrapped-text drawer and the multiline edit
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_style.cpp # the shell's stylesheets, menu_style.mns then brand.mns
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/config_text.cpp # a ConfigFile's text form, as the engine reads it
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_credits.cpp # a marquee DATASOURCE's credits
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_text_tables.cpp # the menu string tables
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_screen_inputs.cpp # a screen's string tables and the shell's style, through a file source
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_assets.cpp # a screen's fonts and textures, kept by (file, stamp)
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_texture_header.cpp # a menu texture's size from its header, no pixels
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
@@ -79,19 +79,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_screen.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/loadout_labels.cpp # the loadout screens' labels, row order and weight readout
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_runtime.cpp # the compiled-menu interaction runtime (id tree, nav, state, actions, input)
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_sound.cpp # the windows' SOUND rows and when the pump plays them
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_click.cpp # the click and the press's mouse capture (D-MNU-30)
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_state_frame.cpp # the frame seam's state writes, and the seam headless
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_commands.cpp # what the game's code does with a control it binds by name
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/screen_history.cpp # the screen history across menu files and a mission (D-MNU-28)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_flow.cpp # SP selection, expansion requests and host rotation
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/mod_list.cpp # the Mods list's rows, its pick's description and ACCEPT's pick (D-MNU-31)
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/options_screen.cpp # options remap and preview decisions
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/command_map_screen.cpp # the CMAP tables and ORDERS composer
-    # profile — the player profile's in-memory image (player.sav + weapon.sav),
-    # its load and save (witness: docs/playerinfo/player-sav-re.md)
-    ${CMAKE_CURRENT_SOURCE_DIR}/profile/player_profiles.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/profile/profile_controls.cpp # the controls words the game reads
     # mission (runtime half) — the BMS event runtime + mission->world promotion,
     # the boot policy, and the ONE mission kernel (boot + state + no-net tick,
     # ADR 0042 d3) evaluated against the shared runtime world
@@ -101,13 +91,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/event_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_catalog.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_kernel.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_sidecars.cpp # the files the game finds by a mission's name, as one table
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/mission_text.cpp # the <mission>.bin RTXT harvest (briefings, locations, people names)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/debug_oracles.cpp # the F3 hitbox view and entity pick over the kernel
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/script_debug_report.cpp # the F3 Script window's WAC/BMS/vars read
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/teammate_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/placement_traits.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/mission/player_start.cpp # a player start placed in a mission (its start markers moved)
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/static_sources.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/promote.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/mission/runtime_boot.cpp
@@ -115,14 +103,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/emitter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_scene.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_catalog_names.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/particle/effect_closure.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/particle/script_effects.cpp
     # hud — the retail game-font text engine + element frame math
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/game_font.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_declutter.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_elements.cpp      # which element of the walk drew each run (a tool's record)
-    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_element_layout.cpp # which hudpos.def values place each element
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_layout_from_hudpos.cpp    # the hudpos.def parse applied to the layout globals
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_game_text.cpp    # the HUD's game-text key compositions and fallbacks
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
@@ -171,23 +156,16 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scar_draw_list.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_terrain_pass.cpp # the per-light terrain projected pass
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_dxt.cpp # the D3DX DXT texture codec
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/dxt_encode.cpp # the tools' authoring DXT encoder (rgbcx's blocks)
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_authoring.cpp # an image made into a texture file (the image import)
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_eval.cpp
     renderer/model_mesh_prepare.cpp
     renderer/model_controls.cpp
     renderer/model_panm_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_texture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_load_rules.cpp   # the game's texture loaders as rules
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_registry.cpp   # the key the game keeps a loaded texture under
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/device_texture.cpp   # the device texture a texture file becomes
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/texture_roles.cpp   # every way the game uses a texture file
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fixed_texture_names.cpp   # the textures the game opens by its own names
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/d3dx_image_codecs.cpp   # D3DX's PPM/PFM/HDR/DIB codecs (D-RMAT-17)
     renderer/material_texture_producers.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/material_classify.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_shader_template.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/shader_effect_info.cpp # the tags a shader file registers
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/object_lod.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
@@ -203,13 +181,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/tracer_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/uv_anim.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/assets/asset_store.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/assets/mission_fixed_files.cpp # the files a running mission opens by a fixed name
     # terrain — runtime terrain collection, rendering, and queries
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/foliage_detail_collector.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/lighting.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/quadtree.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_frame.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_map_source.cpp # a char map and a foliage map made from a picture
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_alpha.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain/terrain_static_shadow_geometry.cpp
@@ -224,7 +200,6 @@ add_library(opennova_runtime STATIC
     # the retail segment raycast (format-free), plus the placed-tile surface
     # resolvers (surface_tiles.cpp — the one TU with .til format access,
     # D-SND-15; the seam headers themselves stay format-free)
-    ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/foliage_mask_raster.cpp # the foliage map as the load keeps it
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/height_field.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/surface_tiles.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/terrain_query/terrain_field_store.cpp
@@ -284,7 +259,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_ladder.cpp         # the D-COL-5 climb legs
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_board.cpp           # the 123..127 command legs (ex-D-INF-2)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_combat.cpp          # the D-AI-4 combat pass
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/organic_fire.cpp             # an NPC body's ammo bytes, launch points and clip fire shots
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_animation.cpp     # motor-head channel update
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_remote_anim.cpp   # remote-player body anim (size gate)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_sound.cpp          # the foley/footstep slot-sound leg
@@ -326,7 +300,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/nvg_laser.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/destruction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_events.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/world/physics_class_table.cpp  # the move_function row lookup
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_squib.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/item_sections.cpp
@@ -418,10 +391,8 @@ add_library(opennova_runtime STATIC
     # inmatch — the in-match session (ex net/inmatch + net/npruntime, ADR 0043
     # d4): the fixed-tick session, the listen-host frame, the IDA-faithful
     # server/client state machines and frame loops, the transports
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console.cpp          # the remote-admin console's verbs (ADR 0051 PR5)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/admin_console_player.cpp   # its slot walks: PLAYER, PETERRABBIT, QUERY
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/character_registry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_table.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/charattr_challenge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_card.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
@@ -431,12 +402,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_weapon_replay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/end_round_protocol.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_file.cpp              # the retail /HOST host file (opennova-serve, ADR 0051)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_config.cpp            # game.cfg onto the host session (opennova-serve, ADR 0051 d2)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_boot.cpp              # the one host boot, both phases (ADR 0051 d4)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/mission_rotation.cpp       # the map rotation and its session words (D-NET-331)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/rotation_admin.cpp         # the admin MISSION verbs over the rotation (ADR 0051 PR5b)
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/map_change.cpp             # the host's round-end map change (D-NET-331)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_challenge_profile.cpp
@@ -460,11 +425,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/minimap_overlays.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/napi_np_protocol.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_admin_command.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_ban_lists.cpp       # banlist.txt / banned.txt on the authority
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_chat.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_console.cpp # the client-less host's CHAT ring, its console chat, the /INOUT lines
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_log_recorder.cpp # the /PROFILE .sph recorder
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/punt_log.cpp # _PUNT.TXT, _CHEAT.TXT and punt.log
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_squad.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_idle_timers.cpp          # the every-32 player breath samples (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_entity_routes.cpp       # the item events, crossings and guidance routes (split off server_tick.cpp)
@@ -510,25 +471,33 @@ target_link_libraries(opennova_runtime PUBLIC opennova_net opennova_base opennov
 # platform thread library explicitly (pthread on a pre-2.34 glibc).
 find_package(Threads REQUIRED)
 target_link_libraries(opennova_runtime PUBLIC Threads::Threads)
-# The tools' DXT textures take rgbcx's blocks (renderer/dxt_encode): private, no
-# consumer of the runtime sees rgbcx.h.
-target_link_libraries(opennova_runtime PRIVATE opennova_rgbcx)
 
 target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
 # Dear ImGui (ADR 0039) links PRIVATE so no ImGui header reaches a consumer: the
-# shell hands the context over as plain pointers (devtools/imgui_abi.h). The
-# game's dev-tool windows compile only when the including root leaves
-# OPENNOVA_DEVTOOLS on (every build but the release GDExtension flavour); the
-# define is PUBLIC so the shell gates its DevTools node on it.
-if(OPENNOVA_DEVTOOLS)
+# shell hands the context over as plain pointers (devtools/imgui_abi.h). The pass
+# itself compiles when either product wants ImGui (OPENNOVA_IMGUI: the game's dev
+# tools or the OpenNova Editor, ADR 0046 d11); the game's dev-tool windows compile
+# only when the including root leaves OPENNOVA_DEVTOOLS on (every build but the
+# release GDExtension flavour). Both defines are PUBLIC so the shell gates its
+# nodes on them.
+if(OPENNOVA_IMGUI)
     target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
+    # The pass owns the overlay registry and draws its layers, so the canvas
+    # builds with it (the editor-only release flavour has no dev-tool windows).
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
+    )
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=1)
+else()
+    target_compile_definitions(opennova_runtime PUBLIC OPENNOVA_IMGUI=0)
+endif()
+if(OPENNOVA_DEVTOOLS)
+    target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
-        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/collision_overlay.cpp
