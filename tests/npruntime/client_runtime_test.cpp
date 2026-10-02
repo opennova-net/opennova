@@ -6981,7 +6981,7 @@ struct StillBodySource final : w::IRootMotionSource {
 // position the leg played it. One remote player row, one mover tick against
 // the given contact clearance, then the client's sound pass.
 std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_z,
-        int32_t clearance) {
+        int32_t clearance, uint32_t chute_carry = 0, int ticks = 1) {
     inmatch::ClientRuntime runtime("ReplicaMoverAudio");
     w::World world;
     static const char kProfiles[] =
@@ -7012,10 +7012,13 @@ std::vector<w::SoundSlotEvent> replica_mover_sounds(uint32_t flags, int32_t vel_
     row.rm_adm_id = 0;
     row.rm_entity_flags = flags;
     row.rm_vel_z = vel_z;
+    row.rm_chute_carry_flags = chute_carry;
     row.x = 7 << 16;
     row.net_smooth_target[0] = row.x;
-    runtime.view().tick_remote_motion(0xFFFF);
-    runtime.tick_remote_stance_sounds(world);
+    for (int t = 0; t < ticks; ++t) {
+        runtime.view().tick_remote_motion(0xFFFF);
+        runtime.tick_remote_stance_sounds(world);
+    }
     std::vector<w::SoundSlotEvent> out;
     for (const w::SoundSlotEvent &event : world.out.slot_sounds)
         if (event.source_handle == 0x0011u && event.slot != 0) out.push_back(event);
@@ -7036,6 +7039,28 @@ bool run_remote_landing_thumps() {
            expect(dead.size() == 1 && std::string(dead[0].set_name) == "T_BODYDROP",
                    "a dead remote body lands with SSFallDead") &&
            expect(grounded.empty(), "a grounded remote body plays no thump");
+}
+
+// A remote player's chute family plays on the client itself: the deployed
+// bit's edge against the carry mirror opens (ChuteOpen 41) or closes
+// (ChuteClose 42) the canopy, and a closed fall under -0x3000 plays FreeFall
+// 44 on each 64th tick. [orig: Entity_UpdateInfantryPlayerBody
+// @0x4b7b18..0x4b7b70, @0x4b7c4c..0x4b7c6f]
+bool run_remote_chute_family_plays() {
+    const uint32_t kAir = 0x2000u, kChute = w::kEntityFlagParachute;
+    const auto open = replica_mover_sounds(kAir | kChute, 0, 0x1000);
+    const auto close = replica_mover_sounds(kAir, 0, 0x1000, 0x20u);
+    const auto fall = replica_mover_sounds(kAir, -0x4000, 0x1000, 0, 64);
+    const auto names = [](const std::vector<w::SoundSlotEvent> &v) {
+        std::string out;
+        for (const w::SoundSlotEvent &e : v) out += std::string(e.set_name) + ";";
+        return out;
+    };
+    std::fprintf(stderr, "[chute] open=%s close=%s fall=%s\n", names(open).c_str(),
+            names(close).c_str(), names(fall).c_str());
+    return expect(names(open) == "T_CHUTE_OPEN;", "a deployed canopy edge plays ChuteOpen") &&
+           expect(names(close) == "T_CHUTE_CLOSE;", "a stowed canopy edge plays ChuteClose") &&
+           expect(names(fall) == "T_FREEFALL;", "a closed fall plays FreeFall on the 64th tick");
 }
 
 // The remote stance latch's prone clear reads only a MOUNT parent's def: a
@@ -7224,6 +7249,7 @@ int main() {
                     run_remote_stance_sound_parent_is_the_mount_only() &&
                     run_remote_death_edge_screams() &&
                     run_remote_landing_thumps() &&
+                    run_remote_chute_family_plays() &&
                     run_radio_zone_context_uses_the_nearest_entry_coverage() &&
 	                run_direct_uplink_framing_is_transient() &&
 	                run_network_spawn_does_not_mutate_loaded_model_snapshot() &&

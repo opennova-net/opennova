@@ -377,18 +377,19 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
                           bool has_water,
                           std::vector<ClientReplicaPipeline::ReplicaSlotSound> &sounds) {
 	if (es.rm_adm_id < 0) return;
-	const auto play_slot = [&](uint8_t slot) {
+	const auto play_slot_at = [&](uint8_t slot, int32_t x, int32_t y, int32_t z) {
 		ClientReplicaPipeline::ReplicaSlotSound sound;
 		sound.handle = es.handle;
 		sound.type_id = es.type_id;
 		sound.character_id = es.cls == EntityClass::Player
 				? static_cast<uint16_t>(es.net_id) : 0;
 		sound.slot = slot;
-		sound.pos[0] = es.x;
-		sound.pos[1] = es.y;
-		sound.pos[2] = es.z;
+		sound.pos[0] = x;
+		sound.pos[1] = y;
+		sound.pos[2] = z;
 		sounds.push_back(sound);
 	};
+	const auto play_slot = [&](uint8_t slot) { play_slot_at(slot, es.x, es.y, es.z); };
 	// Channel state machine (the begin_body_transition mirror). The channel
 	// chases the ARBITRATED current (+0x2BC, written per record by the fold's
 	// @0x4c1153 apply — D-NET-209), never the raw coalesced wire byte; the
@@ -618,6 +619,10 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 		wx = 0;
 		wy = 0;
 	}
+	// The chute family plays at the pose ahead of this integrate (retail runs
+	// it before the position add) [orig: @0x4b7b18..0x4b7c8d ahead of
+	// @0x4b7cbf].
+	const int32_t pre_integrate[3] = {es.x, es.y, es.z};
 	// Integrate: position takes momentum + root together [orig: org2
 	// @0x4b7cbf..0x4b7cd2; org1 @0x4bf684..0x4bf6a2].
 	es.x += es.rm_vel_xy[0] + wx;
@@ -652,9 +657,24 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 			                                             : kGravityStep;
 			if (es.cls != EntityClass::Player && es.rm_vel_z < kTerminalVelZ) es.rm_vel_z = kTerminalVelZ;
 		}
-        if (es.cls == EntityClass::Player)
-            world::parachute_tick(es.rm_parachute, es.rm_entity_flags,
-                    es.rm_chute_carry_flags, es.rm_vel_z, false, tick);
+        if (es.cls == EntityClass::Player) {
+            // The chute family runs every tick on every machine, the
+            // deploy/close admission alone being the authority's: the open
+            // and close edges against the +0x2C mirror play ChuteOpen 41 /
+            // ChuteClose 42, an open canopy ChuteFlap 43 and a closed fall
+            // under -0x3000 FreeFall 44 on each 64th tick.
+            // [orig: @0x4b7b18..0x4b7b70 (the edges), @0x4b7bcd..0x4b7be4
+            //  (the flap), @0x4b7c4c..0x4b7c6f (the free fall)]
+            const world::ParachuteEvents chute = world::parachute_tick(es.rm_parachute,
+                    es.rm_entity_flags, es.rm_chute_carry_flags, es.rm_vel_z, false, tick);
+            const auto chute_slot = [&](uint8_t slot) {
+                play_slot_at(slot, pre_integrate[0], pre_integrate[1], pre_integrate[2]);
+            };
+            if (chute.opened) chute_slot(audio::kSlotChuteOpen);
+            if (chute.closed) chute_slot(audio::kSlotChuteClose);
+            if (chute.flap) chute_slot(audio::kSlotChuteFlap);
+            if (chute.free_fall) chute_slot(audio::kSlotFreeFall);
+        }
 		es.z = io::bam_add(es.z, es.cls == EntityClass::Player
 				? es.rm_vel_z : 2 * es.rm_vel_z);
 		ClientReplicaPipeline::ReplicaContactQuery q;
