@@ -759,6 +759,39 @@ bool run_seeded_carrier_seat_local_is_attitude_invariant() {
 	return true;
 }
 
+// The HUD target cursor the interest list floors: the lock, else the body's
+// head-look target. A decoded remote person on the aim ray has no registry
+// entity, so the head-look target stays empty and the cursor names the aim
+// acquisition's wire row; the lock and a live head-look target win over it.
+// [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825; Entity_UpdateInfantryPlayerBody
+//  headLookTarget @0x4b4f75 / @0x4b5036]
+bool run_hud_cursor_names_a_remote_person() {
+	bool ok = true;
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	w::Entity self;
+	self.kind = w::EntityKind::Organic;
+	world.cached.local_player = world.registry.spawn(0, self);
+	w::Entity crate;
+	crate.kind = w::EntityKind::Item;
+	const w::EntityHandle crate_h = world.registry.spawn(1, crate);
+	w::AiEntity ae;
+	constexpr uint16_t kSelf = 0x0002, kPerson = 0x0007;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kPerson,
+			"an empty head-look target names the aimed-at remote person");
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, 0xFFFF) == 0xFFFF,
+			"no aim-ray row, no cursor");
+	ae.inf.head_look_target = crate_h;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == crate_h.packed,
+			"a live head-look target wins");
+	ae.inf.head_look_target = {};
+	ae.inf.combat_target = world.cached.local_player;
+	ok &= expect(ns::uplink_hud_target_wire_handle(world, ae, kSelf, kPerson) == kSelf,
+			"the lock wins, L answering to its self handle");
+	return ok;
+}
+
 } // namespace
 
 int main() {
@@ -773,5 +806,6 @@ int main() {
 	ok = run_ground_target_carrier_roundtrip() && ok;
 	ok = run_scope_flag_reaches_host() && ok;
 	ok = run_equipped_adm_ingest_gate() && ok;
+	ok = run_hud_cursor_names_a_remote_person() && ok;
 	return ok ? 0 : 1;
 }

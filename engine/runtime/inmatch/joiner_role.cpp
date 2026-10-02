@@ -1145,12 +1145,8 @@ JoinerRole::FrameSignals JoinerRole::run_client_net_frame() {
 		replication::UplinkClientInputs interest;
 		interest.replica = &rt.state();
 		interest.self_wire_handle = rt.has_self_handle() ? rt.self_handle() : 0xFFFF;
-		const world::EntityHandle cursor = ae->inf.combat_target.valid()
-				? ae->inf.combat_target : ae->inf.head_look_target;
-		if (cursor == world.cached.local_player)
-			interest.hud_target_wire_handle = interest.self_wire_handle;
-		else if (cursor.valid() && cursor.pool() >= 1 && cursor.pool() <= 3)
-			interest.hud_target_wire_handle = cursor.packed;
+		interest.hud_target_wire_handle = replication::uplink_hud_target_wire_handle(
+				world, *ae, interest.self_wire_handle, kernel.local.aim_wire_person());
 		interest.avg_fps = uplink_avg_fps_;
 		interest.cpu_percent = uplink_cpu_percent_;
 		const PlayerExtendedUplink up =

@@ -242,6 +242,12 @@ public:
     // joiner frame runs it between its heading fold and its own weapon pump.
     void tick_view();
     void update_aim_target();
+    // The aim-ray entity when it is a decoded remote person (a joiner's
+    // replica row, which has no registry handle): its wire handle, written
+    // beside the body's head-look target by the same acquisition, else
+    // 0xFFFF. [orig: Entity_UpdateInfantryPlayerBody -- headLookTarget (+0x344)
+    //  @0x4b4f75 / @0x4b5036, the hit of a walk over every pool-0 row]
+    uint16_t aim_wire_person() const { return aim_wire_person_; }
     // Reset the frame-input state and seed the look heading from the (auto-)
     // spawned local player's facing — the session bring-up's tail.
     void reset_local_player_input_to_player_facing();
@@ -262,6 +268,7 @@ private:
     float look_accum_y_ = 0.0f;
     // The sim-owned stance latch (0 stand, 1 crouch, 2 prone).
     int stance_latch_ = 0;
+    uint16_t aim_wire_person_ = 0xFFFF;
     bool medic_dead_edge_seen_ = false;
     // These process globals have no round, weapon, scope-toggle or player-spawn
     // reset writer. Each axis resets its drift only when it observes a changed

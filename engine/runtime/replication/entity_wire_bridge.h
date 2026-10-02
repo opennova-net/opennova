@@ -144,4 +144,14 @@ PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::AiEntity &ae,
                                          const UplinkClientInputs &interest = {});
 
+// The HUD target cursor (g_HUDTargetCursorEntity, HUD+0x168) as the uplink's
+// interest list reads it, as a wire handle: the aim runtime's lock, else the
+// body's head-look target. L answers to its self handle and a materialized
+// pool-1..3 row to its own; a decoded remote person, which has no registry
+// entity, answers to the aim acquisition's wire row (`aim_wire_person`).
+// [orig: HUD_BuildEntityInfo @0x4B87ED..0x4B8825 -- the lock (aiRuntime+0xC)
+//  @0x4B87F0, else headLookTarget (+0x344) @0x4B881F; read @0x50E1C6 / @0x50E42C]
+uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
+		uint16_t self_wire_handle, uint16_t aim_wire_person);
+
 } // namespace opennova::replication

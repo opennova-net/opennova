@@ -1116,6 +1116,16 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 
 } // namespace
 
+uint16_t uplink_hud_target_wire_handle(const world::World &world, const world::AiEntity &ae,
+		uint16_t self_wire_handle, uint16_t aim_wire_person) {
+	const world::EntityHandle cursor =
+			ae.inf.combat_target.valid() ? ae.inf.combat_target : ae.inf.head_look_target;
+	if (cursor == world.cached.local_player) return self_wire_handle;
+	if (cursor.valid()) return cursor.pool() >= 1 && cursor.pool() <= 3 ? cursor.packed : 0xFFFF;
+	// The head-look store named a decoded remote person: its wire row.
+	return aim_wire_person;
+}
+
 PlayerExtendedUplink build_player_uplink(world::World &world,
                                          const world::Entity &e,
                                          const world::AiEntity &ae,

@@ -765,6 +765,10 @@ struct ProjectileHit {
     // that proxy (geometry_entity stays invalid on a proxy hit): the client's
     // own row of the entity the retail client's table walk would name.
     EntityHandle wire_registry_twin;
+    // A decoded remote person proxy's wire handle, when the hit is that proxy
+    // (geometry_entity stays invalid): the pool-0 row a retail client's own
+    // table walk would name. 0xFFFF otherwise.
+    uint16_t wire_person_handle = 0xFFFF;
 
     constexpr bool hit() const { return hit_class != ProjectileHitClass::None; }
 };

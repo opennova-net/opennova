@@ -300,6 +300,50 @@ void test_locked_tone_waits_for_the_last_catch_up_tick() {
     CHECK(events.size() == 1 && events[0].set_name == "LOCKED");
 }
 
+// A remote person's decoded proxy on the aim ray is the aim-ray entity a
+// retail client's walk over its pool-0 rows names. The client keeps no
+// registry entity for it, so the local player keeps its wire handle beside the
+// (empty) head-look target; a later miss clears it.
+// [orig: Entity_UpdateInfantryPlayerBody -- Entity_FindNearestByRay @0x4b5021
+//  -> headLookTarget (+0x344) @0x4b5036; Physics_RaycastEntityPoolsAndUpdate
+//  @0x4b4f70 -> @0x4b4f75]
+void test_aim_ray_names_a_remote_persons_proxy() {
+    LocalWorld lw;
+    lw.w.rules.mp_session = true; // a joiner: the decoded proxies join the walk
+    lw.w.rules.projectile_authority = false;
+    CollisionWorld collision;
+    lw.w.collision = &collision;
+    AiEntity &body = lw.body();
+    LocalPlayer local(lw.w);
+    local.weapon.active = false; // the camera leg
+    int32_t fire[6];
+    local_weapon_fire_pose(lw.w, local.weapon, local.weapon.slot.clip, false, fire);
+    // The composed eye on the fire pose: the ray runs down the fire heading.
+    for (int i = 0; i < 3; ++i)
+        local.view_tracker.composed.eye[i] = static_cast<float>(fire[i]) / 65536.0f;
+    local.view_tracker.composed_valid = true;
+    int32_t ahead[3];
+    const int32_t forward[3] = {100 << 16, 0, 0};
+    collision_matrix_from_euler(fire[3], fire[4], fire[5], fire).transform_point(forward, ahead);
+    WirePersonCollisionProxy person;
+    person.wire_handle = 0x0005; // pool 0, slot 5
+    person.position_q16 = {ahead[0], ahead[1], ahead[2] - 58982}; // torso center on the ray
+    person.bound_radius_q16 = 1 << 16;
+    person.uniform_scale_q16 = 1 << 16;
+    collision.replace_wire_collision_proxies({person}, {});
+    collision.build_tick_tables(lw.w);
+    lw.w.logic_tick = 16;
+    local.update_aim_target();
+    CHECK(!body.inf.head_look_target.valid());
+    CHECK(local.aim_wire_person() == 0x0005);
+    // The next acquisition misses: the wire target clears with the ray.
+    collision.replace_wire_collision_proxies({}, {});
+    collision.build_tick_tables(lw.w);
+    lw.w.logic_tick = 32;
+    local.update_aim_target();
+    CHECK(local.aim_wire_person() == 0xFFFF);
+}
+
 } // namespace
 
 int main() {
@@ -307,6 +351,7 @@ int main() {
     test_designator_lock_stores_the_mountable_guns_hull();
     test_locked_tone_waits_for_the_last_catch_up_tick();
     test_camera_leg_aims_the_fire_pose_from_the_composed_eye();
+    test_aim_ray_names_a_remote_persons_proxy();
     if (failures == 0) std::printf("local_player_targeting_test: all checks passed\n");
     return failures == 0 ? 0 : 1;
 }
