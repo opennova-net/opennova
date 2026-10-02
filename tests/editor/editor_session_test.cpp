@@ -941,6 +941,52 @@ static int test_requests_that_cannot_run() {
 	return 0;
 }
 
+// A request's words are its own: Play over the command line's process seam (NullProcessPlatform,
+// which starts no game) says that session starts none, never that Play is Windows-only; an Open,
+// a Reload and a Create say on the status line what they did, or that they did not, never the line
+// an earlier request left.
+static int test_status_says_the_request() {
+	editor_test::TempProjectDir dir("opennova_editor_session_status_line");
+	opennova::editor::NullProcessPlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	session.handle(request::new_project(dir.file("project"), "Status"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+
+	session.handle(request::play());
+	TEST_EXPECT(!session.outcome().done() && !v.findings.diagnostics.empty() &&
+	            v.findings.diagnostics.back().code() == "play.unsupported");
+	const std::string play = v.findings.diagnostics.empty() ? std::string() : v.findings.diagnostics.back().message;
+	TEST_EXPECT(play.find("Windows-only") == std::string::npos && play.find("starts no game") != std::string::npos);
+	TEST_EXPECT(v.activity.status == "Play is not available here: see Problems.");
+
+	// An Open after a line another request left: its own line.
+	session.handle(request::open_document("main.mnu"));
+	const DocumentBase *menu = session.document_base_for("main.mnu");
+	TEST_EXPECT(menu != nullptr && session.outcome().done());
+	if (!menu) return 1;
+	const std::string menu_path = menu->path();
+	TEST_EXPECT(v.activity.status == "Opened " + menu_path + ".");
+	session.handle(request::create_missing({}));
+	session.handle(request::open_document("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Showing " + menu_path + ".");
+	session.handle(request::reload_document("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Reloaded " + menu_path + ".");
+	session.handle(request::open_document("nowhere.mnu"));
+	TEST_EXPECT(!session.outcome().done() && v.activity.status == "nowhere.mnu could not be opened: see Problems.");
+
+	// A Create: made and opened, or refused.
+	session.handle(request::create_file("extra.mnu", "menu"));
+	const DocumentBase *extra = session.document_base_for("extra.mnu");
+	TEST_EXPECT(session.outcome().done() && extra != nullptr);
+	TEST_EXPECT(extra && v.activity.status == "Created " + extra->path() + ".");
+	session.handle(request::create_file("extra.zzq", ""));
+	TEST_EXPECT(!session.outcome().done() && v.activity.status == "extra.zzq was not created: see Problems.");
+	return 0;
+}
+
 // After a rename the document the modder was in stays active: a document the rename
 // reloaded does not take over, an untouched one keeps its selection, and the renamed
 // file's own document follows it to the new name.
@@ -4019,6 +4065,7 @@ int main() {
 	failures += test_outcomes_and_refusals();
 	failures += test_validation_cost();
 	failures += test_requests_that_cannot_run();
+	failures += test_status_says_the_request();
 	failures += test_rename_keeps_the_active_document();
 	failures += test_preview_target();
 	failures += test_project_settings();

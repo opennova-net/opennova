@@ -216,10 +216,16 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	for (const RequirementRow &row : view_.project.requirements->rows)
 		if (row.expected_kind == kind && normalized_logical_name(row.name) == normalized_logical_name(request.path))
 			blank.role = row.role;
+	// A refusal says why in Problems, and the status line that nothing was made.
+	const auto refuse = [&](const Diagnostic &finding) {
+		core_.report(finding);
+		view_.activity.status = request.path + " was not created: see Problems.";
+		core_.touch(ViewConcern::Output);
+	};
 	const BlankFactory *factory = find_blank_factory_for_role(blank.role);
 	if (!factory) factory = find_blank_factory_for_kind(kind);
 	if (!factory) {
-		core_.report(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "The editor cannot create this kind of file.", request.path));
+		refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "The editor cannot create this kind of file.", request.path));
 		return;
 	}
 	// The values its blank takes (ADR 0046 S14): each one a parameter of the blank, a required one
@@ -227,7 +233,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 	// a project is its own files), looked up as its loader looks it up. Nothing is made otherwise.
 	std::string why;
 	if (!blank_values_fit(*factory, blank, why)) {
-		core_.report(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Error, why, request.path));
+		refuse(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Error, why, request.path));
 		return;
 	}
 	for (size_t i = 0; i < factory->param_count; ++i) {
@@ -239,7 +245,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		for (const std::string &candidate : reference_file_candidates(param.reference, value, -1, in_project))
 			found = found || in_project(candidate);
 		if (found) continue;
-		core_.report(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Error,
+		refuse(make_finding(CoreFinding::DocumentValues, DiagnosticSeverity::Error,
 		                          "The project has no " + std::string(param.token) + " named " + value +
 		                                  ": import it first (Files > Import).",
 		                          request.path));
@@ -254,7 +260,7 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		const CoreFinding code = problem == FileNameProblem::Kind   ? CoreFinding::DocumentKind
 		                         : problem == FileNameProblem::Path ? CoreFinding::DocumentPath
 		                                                            : CoreFinding::DocumentName;
-		core_.report(make_finding(code, DiagnosticSeverity::Error, message, request.path));
+		refuse(make_finding(code, DiagnosticSeverity::Error, message, request.path));
 		return;
 	}
 	const auto *existing = view_.project.scan->find(request.path);
@@ -263,14 +269,14 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		const auto target = fs::path(paths_.root) / relative;
 		std::error_code ec;
 		if (fs::exists(target, ec) || ec) {
-			core_.report(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Error, "Refresh before creating this file.", request.path));
+			refuse(make_finding(CoreFinding::DocumentConflict, DiagnosticSeverity::Error, "Refresh before creating this file.", request.path));
 			return;
 		}
 		std::vector<uint8_t> bytes; Diagnostic error;
-		if (!make_blank(blank, kind, bytes, error)) { core_.report(error); return; }
+		if (!make_blank(blank, kind, bytes, error)) { refuse(error); return; }
 		if (!ensure_directory(target.parent_path().generic_string(), message) ||
 			!write_file_atomic(target.generic_string(), bytes.data(), bytes.size(), message)) {
-			core_.report(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
+			refuse(make_finding(CoreFinding::DocumentWrite, DiagnosticSeverity::Error, message, request.path));
 			return;
 		}
 		std::vector<std::string> made{relative};
@@ -307,12 +313,15 @@ void DocumentSet::create_file(const EditorRequest &request) {
 		}
 		core_.update_files(made); // the files made, read into the scan alone
 	}
+	// The status line says what came of it (a kind the editor edits opened as well), never the line
+	// an earlier request left.
+	const std::string made = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
 	if (is_editable_kind(kind)) {
 		open_document(request::open_document(request.path));
-	} else {
-		view_.activity.status = existing ? existing->relative_path + " is in the project already." : "Created " + relative + ".";
-		core_.touch(ViewConcern::Output);
+		if (!document_for(request.path)) return; // the open said why
 	}
+	view_.activity.status = made;
+	core_.touch(ViewConcern::Output);
 }
 
 void DocumentSet::open_document(const EditorRequest &request) {
@@ -347,6 +356,16 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		reveal.field = request.field;
 		view_.events.post(std::move(reveal));
 	};
+	// The status line says what came of the request (never the line an earlier one left): the
+	// document shown, read or read again, or that it was not.
+	const auto say = [this](std::string line) {
+		view_.activity.status = std::move(line);
+		core_.touch(ViewConcern::Output);
+	};
+	const auto refuse = [&](const Diagnostic &finding) {
+		core_.report(finding);
+		say(path + " could not be opened: see Problems.");
+	};
 	if (request.kind == EditorRequestKind::OpenDocument && document_for(path)) {
 		// An open document comes back with the selection it had, unless the request names
 		// a record (a Problems row, a Go to).
@@ -354,19 +373,20 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		activate(document.path());
 		if (request.address.row || !request.locator.empty()) select_named(document);
 		core_.touch(ViewConcern::Selection);
+		say("Showing " + document.path() + ".");
 		return;
 	}
 	for (const auto &asset : view_.project.scan->entries) {
 		if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
-			core_.report(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
+			refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
 			return;
 		}
 		std::shared_ptr<DocumentBase> document = type->make(); Diagnostic error;
 		if (!document->load((fs::path(paths_.root) / asset.relative_path).generic_string(),
 					asset.relative_path, asset.kind, view_.project.document->target_game, error)) {
-			core_.report(error);
+			refuse(error);
 			return;
 		}
 		for (auto it = documents_.begin(); it != documents_.end(); ++it)
@@ -379,9 +399,10 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		select_named(*document);
 		select_first_screen(); // no record named: a menu shows its first screen
 		core_.touch(ViewConcern::Selection);
+		say((request.kind == EditorRequestKind::ReloadDocument ? "Reloaded " : "Opened ") + document->path() + ".");
 		update_view(); core_.problems().validate_later(); return;
 	}
-	core_.report(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
+	refuse(make_finding(CoreFinding::DocumentMissing, DiagnosticSeverity::Error, "The file was not found.", path));
 }
 
 // Files shows the file (and asks its new name when the request says so): a RevealFile event,

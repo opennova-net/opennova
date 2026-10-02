@@ -112,9 +112,11 @@ std::string PlayController::mission_file(const std::string &mission) const {
 // refused, said why.
 bool PlayController::refused(const std::string &mission) {
 	if (!core_.platform().can_spawn()) {
+		// The platform says why (an OS the editor cannot spawn on yet, a session with no process seam).
 		core_.report(make_finding(CoreFinding::PlayUnsupported, DiagnosticSeverity::Error,
-		                          "Play is Windows-only for now: the editor cannot start the game on this system. "
-		                          "Build works here."));
+		                          core_.platform().no_spawn_reason() + " Build works here."));
+		view_.activity.status = "Play is not available here: see Problems.";
+		core_.touch(ViewConcern::Output);
 		return true;
 	}
 	if (play_.state() != PlayState::Stopped) {
