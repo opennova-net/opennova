@@ -1465,6 +1465,11 @@ target_link_libraries(client_message_folds_test PRIVATE opennova_net opennova_ru
 target_include_directories(client_message_folds_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME client_message_folds COMMAND client_message_folds_test)
 
+# D-NET-282: the death screen's team change, client side.
+add_executable(team_change_client_test netsim/team_change_client_test.cpp)
+target_link_libraries(team_change_client_test PRIVATE opennova_net opennova_runtime)
+add_test(NAME team_change_client COMMAND team_change_client_test)
+
 # The compiled-menu interaction runtime (menu/menu_runtime.h) over a fake frame seam
 # and a synthetic document: the id tree, navigation, the state store and its replay,
 # ACTION dispatch, radio groups, the spin wrap, the combo popup, the input machine.

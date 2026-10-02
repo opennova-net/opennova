@@ -1322,8 +1322,9 @@ public:
 	bool request_local_player_medic();
 	int local_medic_request_cooldown_ticks() const;
 	int local_medic_request_serial() const;
-	// The rtxt "Server" table's STRSRV_MEDREQ format for the host's broadcast.
-	void set_server_text(const String &p_medic_request_format);
+	// The rtxt "Server" formats for the host's broadcasts (STRSRV_MEDREQ, C2Blue, C2Red).
+	void set_server_text(const String &p_medic, const String &p_to_blue, const String &p_to_red);
+	bool send_team_change_request(); // DEATH's SWAP_TEAMS (ClientRuntime::queue_team_change_request)
 	// The one role-agnostic read of the local player's dead bit.
 	bool local_player_dead() const;
 	// The end-of-round presentation feed (net-re §5.68; simulation_end_round.cpp):

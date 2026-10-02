@@ -1042,6 +1042,11 @@ struct ClientState {
 	hud::KillAnnouncement kill_announcement;
 	// [orig: NapiNPClientMsg_HandleSessionConfig @ 0x4281D0]
 	bool permanent_death = false;
+	// The 0x08 record's trailing rules word whole (its bits 13/15/16 are the
+	// latches beside it); the death screen reads its TeamChoose bit on a
+	// joiner [orig: dword_A821E4, NapiNPClientMsg_HandleSessionConfig
+	//  @0x4281D0, the store @0x428368; read by DeathScreen_UpdateUI @0x55345C].
+	uint32_t session_rules_flags = 0;
 	// The session's KOTH time limit in minutes, the 0x08 record's second rule
 	// dword — a joiner's GAMEINFO team timers read this copy where the
 	// authority reads its own g_TimeLimitMinutes [orig: dword_A821C0, stored

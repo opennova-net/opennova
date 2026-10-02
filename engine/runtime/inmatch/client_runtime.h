@@ -260,6 +260,15 @@ public:
 	//  NetPacket_SendRadioCallRequest @0x42C150 ->
 	//  CNapiNetwork_QueueReliableMessage(tag, 0, 1, payload, 2) @0x4c4fa0]
 	bool queue_voice_menu_pick(uint8_t tag, int16_t value);
+	// The DEATH screen's SWAP_TEAMS click: one reliable C2S 0x4D with no body
+	// and no finite lifetime (the joiner's held one-shot queue; the listen
+	// host's own client over its loopback), then every minimap overlay timer
+	// aged by 0x48A8 (18600) ticks. False when no connection carries it.
+	// [orig: DeathScreen_OnSwapTeams @0x5535B0 — the click event 0x3000001
+	//  @0x5535B0, NetPacket_SendPingRequest @0x5535BA (a misnomer:
+	//  CNapiNetwork_QueueReliableMessage(0x4D, 1, 0, .., 0) @0x42DDB1),
+	//  MapOverlay_UpdateTimers(0x48A8) @0x5535C4]
+	bool queue_team_change_request();
 	// The main loop's measured frame rate for the quality metric's
 	// frame-pressure term [orig: g_StatsAvgFps (dword_24E1F10), read by
 	// CNetQuality_UpdateMetrics @0x4C5643]: inmatch::Session hands over its

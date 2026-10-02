@@ -639,6 +639,18 @@ bool ClientRuntime::queue_voice_menu_pick(uint8_t tag, int16_t value) {
 	return true;
 }
 
+bool ClientRuntime::queue_team_change_request() {
+	if (role_ == Role::HostClient && loopback_ != nullptr) {
+		loopback_->client_send(c2s::TEAM_CHANGE_REQUEST, {});
+	} else if (role_ == Role::Joiner && joiner_ != nullptr && joiner_->in_session()) {
+		pre_send_queue_.push_back(make_protocol_message(c2s::TEAM_CHANGE_REQUEST, {}));
+	} else {
+		return false;
+	}
+	view_.age_minimap_overlays(0x48A8u);
+	return true;
+}
+
 // [orig: Game_ProcessMainFrame — `if (--dword_24D1DDC <= 0) { dword_24D1DDC =
 //  62; if (is_in_session) { CNetQuality_UpdateMetrics(); CNetQuality_SetLevel
 //  (&g_NetQuality, level); } }`, ahead of the client net frame]. The peer

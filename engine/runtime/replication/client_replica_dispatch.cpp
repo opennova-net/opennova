@@ -22,9 +22,11 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// flip moves the revision like every other decoded-state write
 			// (edge-triggered, like the roster and entity-team folds).
 			if (state_.permanent_death != permanent_death ||
-					state_.spectators_allowed != spectators_allowed) {
+					state_.spectators_allowed != spectators_allowed ||
+					state_.session_rules_flags != config.bitflags) {
 				state_.permanent_death = permanent_death;
 				state_.spectators_allowed = spectators_allowed;
+				state_.session_rules_flags = config.bitflags;
 				state_.mark_changed();
 			}
 		} else

@@ -24,7 +24,8 @@ extends Node
 ##  revive-window pair); UI_RegisterDeathScreenCallbacks @0x554610 (SPAWNPOINTS_LIST
 ##  select -> Input_QueueEvent(12, node) @0x55364d, guarded on node != -1);
 ##  DeathScreen_UpdateUI @0x553150 (map zoom fit from the zone AABB,
-##  SWAP_TEAMS/BUTTON_TEAMLIST only in the TDM family)]
+##  SWAP_TEAMS/BUTTON_TEAMLIST by the engine's deploy_team_buttons_shown);
+##  DeathScreen_OnSwapTeams @0x5535B0 (the SWAP_TEAMS click)]
 ##
 ## The MAP window hosts the windowed map view (MapViewWindow over the engine's
 ## DeathMapView and the HUD compiler's DEATH pass, hud/hud_map_view.h): the
@@ -41,6 +42,9 @@ const SPAWN_LIST := "SPAWNPOINTS_LIST"
 # show-time zoom fit reads (hud/hud_map_view.h DeathMapView::fit).
 const MAP_WIDGET := "MAP"
 const SHROUD_WIDGET := "DEATH_SHROUD"
+# The team-service pair, shown together; only SWAP_TEAMS has a DEATH callback.
+const SWAP_TEAMS := "SWAP_TEAMS"
+const TEAM_LIST := "BUTTON_TEAMLIST"
 
 signal opened
 signal closed
@@ -159,7 +163,9 @@ func open() -> bool:
 		return false
 	if not _ensure_menu():
 		return false
-	_hide_team_service_buttons()
+	_apply_team_service_buttons(sim.get_deploy_status(
+			Strings.get_table(Strings.TABLE_GAMETEXT),
+			ControlsBindings.model().display_text_for_token("MedicReq")).show_team_buttons)
 	# The show hides the shroud; the per-frame reveal shows it and runs the
 	# content refresh (_process).
 	_set_shroud_shown(false)
@@ -345,14 +351,26 @@ func _set_shroud_shown(shown: bool) -> void:
 		_driver.set_widget_shown(id, shown)
 
 
-# The team-change service is unmodeled: hide the swap/team buttons (retail
-# shows them only for the TDM family). [orig: DeathScreen_UpdateUI @0x553150]
-func _hide_team_service_buttons() -> void:
-	for control_name in ["SWAP_TEAMS", "BUTTON_TEAMLIST"]:
+# The swap/team pair's show rule is the engine's (world/deploy_screen_feed.h
+# deploy_team_buttons_shown). [orig: DeathScreen_UpdateUI @0x553489 / @0x5534AA]
+func _apply_team_service_buttons(shown: bool) -> void:
+	for control_name in [SWAP_TEAMS, TEAM_LIST]:
 		# A -1 id means this screen simply does not author the control.
 		var id := _driver.widget_id(control_name)
 		if id >= 0:
-			_driver.set_widget_shown(id, false)
+			_driver.set_widget_shown(id, shown)
+
+
+# SWAP_TEAMS asks the host for the other side (C2S 0x4D; the engine's
+# ClientRuntime::queue_team_change_request carries the witness).
+# [orig: UI_RegisterDeathScreenCallbacks @0x554683 -> DeathScreen_OnSwapTeams
+#  @0x5535B0]
+func _on_widget_activated(_id: int, widget_name: String) -> void:
+	if widget_name.nocasecmp_to(SWAP_TEAMS) != 0:
+		return
+	var sim: Simulation = _view.sim() if _view != null else null
+	if sim != null:
+		sim.send_team_change_request()
 
 
 # The witnessed STATIC show/text rules, refreshed with the list
@@ -369,6 +387,7 @@ func _hide_team_service_buttons() -> void:
 # deploy_statics_text), resolved through gametext by the sim with the MedicReq
 # binding's display string.
 func _apply_statics(status: DeployStatus) -> void:
+	_apply_team_service_buttons(status.show_team_buttons)
 	var instruction_id := _driver.widget_id("STATIC_INSTRUCTIONS_MSG")
 	var instruction2_id := _driver.widget_id("STATIC_INSTRUCTIONS2_MSG")
 	if instruction_id >= 0 and instruction2_id >= 0:
@@ -429,7 +448,8 @@ func _ensure_menu() -> bool:
 			_on_frame_gui_input,
 			func(driver: MenuDriver) -> void:
 				_register_text_tables(root)
-				driver.widget_value_changed.connect(_on_widget_value_changed))
+				driver.widget_value_changed.connect(_on_widget_value_changed)
+				driver.widget_activated.connect(_on_widget_activated))
 	if surface == null:
 		return false
 	_frame = surface.frame

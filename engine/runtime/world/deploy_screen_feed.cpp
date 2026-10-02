@@ -136,6 +136,15 @@ DeployStaticsVisibility deploy_statics_visibility(const DeployStaticsInput &in) 
     return v;
 }
 
+bool deploy_team_buttons_shown(const DeployTeamButtonsInput &in) {
+    // [orig: @0x553412..0x553443]
+    if (!in.in_session || (in.game_type & 0x20000u) != 0 || (in.game_type & 0x10000u) == 0 ||
+            in.team == 0 || (in.permanent_death && in.dead))
+        return false;
+    // [orig: `shr esi, 2; and esi, 1` @0x553454 / @0x553463]
+    return (in.rules_word & 0x4u) != 0;
+}
+
 DeployStaticsText deploy_statics_text(const DeployStaticsInput &in,
                                       const std::string &medic_key_label,
                                       const hud::GameTextLookup &lookup) {

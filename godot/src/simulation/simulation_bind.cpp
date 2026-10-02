@@ -157,8 +157,11 @@ void Simulation::_bind_methods() {
 	                     &Simulation::local_medic_request_cooldown_ticks);
 	ClassDB::bind_method(D_METHOD("local_medic_request_serial"),
 	                     &Simulation::local_medic_request_serial);
-	ClassDB::bind_method(D_METHOD("set_server_text", "medic_request_format"),
+	ClassDB::bind_method(D_METHOD("set_server_text", "medic_request_format",
+	                     "change_to_blue_format", "change_to_red_format"),
 	                     &Simulation::set_server_text);
+	ClassDB::bind_method(D_METHOD("send_team_change_request"),
+	                     &Simulation::send_team_change_request);
 	ClassDB::bind_method(D_METHOD("is_local_player_dead"), &Simulation::local_player_dead);
 	ClassDB::bind_method(D_METHOD("get_end_round_state"), &Simulation::get_end_round_state);
 	ClassDB::bind_method(D_METHOD("is_mp_session"), &Simulation::is_mp_session);

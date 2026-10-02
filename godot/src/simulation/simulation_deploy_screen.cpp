@@ -37,14 +37,21 @@ int Simulation::local_medic_request_serial() const {
 	return kernel_ ? kernel_->local.medic_request_serial : 0;
 }
 
-void Simulation::set_server_text(const String &p_medic_request_format) {
-	// The rtxt "Server" table's STRSRV_MEDREQ format the host's medic
-	// broadcast prints the caller's name into (Server_BroadcastMedicRequest
-	// @0x515390, Lane 1's handler reads NapiNPServerCtx::medic_request_format).
+void Simulation::set_server_text(const String &p_medic_request_format,
+		const String &p_change_to_blue_format, const String &p_change_to_red_format) {
+	// The rtxt "Server" table's formats the host's broadcasts print a player's
+	// name into: STRSRV_MEDREQ (Server_BroadcastMedicRequest @0x515390) and
+	// C2Blue / C2Red (NapiNPServerMsg_0x04D_ChangeTeam @0x51902E / @0x51909C).
 	opennova::inmatch::ServerTextTable text;
 	text.medic_request_format = opennova::to_std(p_medic_request_format);
+	text.change_to_blue_format = opennova::to_std(p_change_to_blue_format);
+	text.change_to_red_format = opennova::to_std(p_change_to_red_format);
 	if (opennova::inmatch::NapiNPServerCtx *ctx = host_ctx())
 		opennova::inmatch::set_server_text(*ctx, std::move(text));
+}
+
+bool Simulation::send_team_change_request() {
+	return runtime_ != nullptr && runtime_->queue_team_change_request();
 }
 
 Ref<DeployStatus> Simulation::get_deploy_status(const Ref<RtxtStringFile> &p_gametext,

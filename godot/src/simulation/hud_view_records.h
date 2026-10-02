@@ -315,6 +315,7 @@ public:
 	String get_call_medic_text() const { return opennova::to_gd(value_.statics_text.call_medic); }
 	int get_medic_cooldown_ticks() const { return value_.medic_cooldown_ticks; }
 	int get_medic_request_serial() const { return value_.medic_request_serial; }
+	bool get_show_team_buttons() const { return value_.team_buttons_shown; }
 };
 
 } // namespace godot

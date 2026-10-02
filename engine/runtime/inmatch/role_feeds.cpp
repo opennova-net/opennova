@@ -481,6 +481,26 @@ world::DeployScreenStatus deploy_screen_status(const RoleView &view,
 	v.respawn_text = world::deploy_status_text(line,
 			text("Overlays", "STROVER_PENALTYTIMER", "Respawn penalty"),
 			text("WPNames", zone_key, "Spawn Point"));
+	// The team-service pair. The rules word follows the ctx+0x68 pick
+	// [orig: @0x553445]: that word is the hosted-session latch, so a hosting
+	// process reads its own multiplayerAttributeFlags_34C (the staged
+	// GameConfig::mp_attributes) and a joiner its S2C 0x08 copy (dword_A821E4)
+	// [orig: set by CNapiGameSession_CreateSession @0x4C9D16 (called from the
+	//  host and single-player starts only), cleared by
+	//  CNapiGameSession_ResetActiveSession @0x4C8AC0; the joiner's
+	//  CNapiNetwork_StartClientConnection @0x4CA160 never writes it].
+	world::DeployTeamButtonsInput buttons;
+	buttons.in_session = view.kernel != nullptr && view.kernel->world.rules.mp_session;
+	buttons.team = player != nullptr ? player->team : uint8_t{0};
+	buttons.dead = instructions.dead;
+	buttons.rules_word = view.staged_mp_attributes;
+	if (view.runtime != nullptr) {
+		const replication::ClientState &cs = view.runtime->state();
+		buttons.game_type = view.runtime->game_type();
+		buttons.permanent_death = cs.permanent_death;
+		if (view.joiner) buttons.rules_word = cs.session_rules_flags;
+	}
+	v.team_buttons_shown = world::deploy_team_buttons_shown(buttons);
 	return v;
 }
 
