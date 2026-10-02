@@ -190,6 +190,39 @@ int MenuFrameCompiler::table_column_count(int index) const {
 	return static_cast<int>(node.table_columns.size());
 }
 
+void MenuFrameCompiler::set_table_columns(int index,
+		const std::vector<MenuTableColumnDef> &columns) {
+	table_column_defs_[index] = columns;
+	if (index < 0 || index >= static_cast<int>(nodes_.size())) return;
+	WidgetNode &node = nodes_[static_cast<size_t>(index)];
+	if (node.window == nullptr || node.window->type != mnu::WindowType::Table) return;
+	build_table_columns_(node);
+	apply_table_column_defs_(index, node);
+}
+
+// The populate's layout over the authored one: the resize keeps the columns it
+// does not drop and zero-fills new ones; each init sets the label, the width
+// and the header justification, which the cells copy.
+// [orig: resize_column_count @0x63f6c0; CTableWnd_InitRow @0x63f9c0 —
+//  +0x80 / +0x84 (-1 -> 1 / 0x10) copied to +0x90 / +0x94 @0x63fbdf..0x63fc03]
+void MenuFrameCompiler::apply_table_column_defs_(int index, WidgetNode &node) const {
+	const auto it = table_column_defs_.find(index);
+	if (it == table_column_defs_.end() || it->second.empty()) return;
+	const std::vector<MenuTableColumnDef> &defs = it->second;
+	node.table_columns.resize(defs.size(), TableColumnSetup{});
+	for (size_t c = 0; c < defs.size(); ++c) {
+		const MenuTableColumnDef &def = defs[c];
+		if (!def.defined) continue;
+		TableColumnSetup &col = node.table_columns[c];
+		col.width = def.width;
+		col.label = def.label;
+		col.header_justify = def.justify == -1 ? 1 : def.justify;
+		col.header_vjustify = def.vjustify == -1 ? 16 : def.vjustify;
+		col.body_justify = col.header_justify;
+		col.body_vjustify = col.header_vjustify;
+	}
+}
+
 void MenuFrameCompiler::set_table_cell_painter(int index, MenuTableCellPainter painter) {
 	if (painter)
 		table_painters_[index] = std::move(painter);

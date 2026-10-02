@@ -35,6 +35,23 @@ inline constexpr uint32_t kTableRowFlagState1Color = 0x1u;
 inline constexpr uint32_t kTableRowFlagColor = 0x4u;
 inline constexpr uint32_t kTableRowHiddenMask = 0xAu;
 
+// One column a populate defines at runtime: CTableWnd_InitRow(column, 0,
+// width, label, justify, vjustify) on a table whose column count the
+// populate first set (vtable +0x6C, resize_column_count). An undefined entry
+// keeps the column the resize left there (the authored one, or a zeroed new
+// one). -1 justify / vjustify takes the init's defaults (1 / 16).
+// [orig: resize_column_count @0x63f6c0 — new records zeroed, existing ones
+//  copied; CTableWnd_InitRow @0x63f9c0 — the label @+0, width +0x7C, header
+//  justify +0x80 / vjustify +0x84 (-1 -> 1 / 0x10) copied to the cells'
+//  +0x90 / +0x94; the draw kind, SUBST list and cell offsets untouched]
+struct MenuTableColumnDef {
+	bool defined = false;
+	int width = 0;
+	std::string label;
+	int justify = -1;
+	int vjustify = -1;
+};
+
 struct MenuTableRow {
 	std::vector<std::string> cells;
 	std::vector<int32_t> values;

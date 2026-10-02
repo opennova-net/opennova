@@ -124,6 +124,8 @@ public:
 	void set_widget_table_rows(int p_index,
 			const std::vector<opennova::menu::MenuTableRow> &p_rows);
 	void set_table_cell_painter(int p_index, opennova::menu::MenuTableCellPainter p_painter);
+	void set_widget_table_columns(int p_index,
+			const std::vector<opennova::menu::MenuTableColumnDef> &p_columns);
 	// CWnd_SetClipRect (absolute design units); `p_enabled` false removes it.
 	void set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &p_rect);
 	void set_widget_marquee_lines(int p_index, const PackedStringArray &p_lines);

@@ -105,6 +105,9 @@ public:
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
 	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
+	// The table's runtime column layout (menu_table_row.h MenuTableColumnDef).
+	virtual void set_widget_table_columns(int index,
+			const std::vector<MenuTableColumnDef> &columns) = 0;
 	// CWnd_SetClipRect: the widget's own passes clipped to an absolute design
 	// rect (`enabled` false removes the clip).
 	virtual void set_widget_clip_rect(int index, bool enabled, int left, int top, int right,
@@ -214,6 +217,8 @@ struct MenuWidgetRuntimeState {
 	std::vector<int> selected_set;
 	bool has_table_rows = false;
 	std::vector<MenuTableRow> table_rows;
+	bool has_table_columns = false;
+	std::vector<MenuTableColumnDef> table_columns;
 	// A runtime rect (CWnd_SetRect), parent-relative design units.
 	bool has_rect = false;
 	int rect_left = 0, rect_top = 0, rect_right = 0, rect_bottom = 0;
@@ -324,6 +329,14 @@ public:
 	void on_frame_scroll_value(int index, int value);
 
 	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
+	// The column count a populate sets before it defines its columns: false
+	// below 1 (the resize fails); existing columns are kept, new ones zeroed.
+	// [orig: CTableWnd vtable +0x6C -> resize_column_count @0x63f6c0]
+	bool table_set_column_count(int id, int count);
+	// CTableWnd_InitRow on one column of the current count: false out of range.
+	// [orig: CTableWnd_InitRow @0x63f9c0 — the bounds @0x63f9c8..0x63f9d9]
+	bool table_init_column(int id, int column, int width, const std::string &label,
+			int justify, int vjustify);
 	// Append a row whose cells are `cells` (column order), cell values 0.
 	void table_add_row(int id, const std::vector<std::string> &cells);
 	// CTableWnd_AddRow: the landed row index (-1 for a widget that is not a
