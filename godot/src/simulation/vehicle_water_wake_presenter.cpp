@@ -3,6 +3,7 @@
 #include "particle/effect_world.h"
 #include "env/water.h"
 #include <runtime/renderer/render_order.h>
+#include <runtime/renderer/water_wake_frame.h>
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
@@ -38,8 +39,8 @@ void VehicleTrailPresenter::sync_water_wakes() {
 		const Callable provider = effects->get_texture_provider();
 		if (!provider.is_valid())
 			return;
-		const Ref<Texture2D> wake = provider.call(String("wake5.tga"));
-		const Ref<Texture2D> gradient = provider.call(String("wakegrad.tga"));
+		const Ref<Texture2D> wake = provider.call(String(opennova::renderer::kWakeTexture));
+		const Ref<Texture2D> gradient = provider.call(String(opennova::renderer::kWakeGradientTexture));
 		if (wake.is_null() || gradient.is_null())
 			return;
 		Ref<Shader> shader =

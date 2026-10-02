@@ -90,6 +90,9 @@ var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO s
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
+# The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
+# line of the log the editor's Play reads back (ResourceRoot.launch_mission_failed_marker()).
+var _launch_mission := ""
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> score screen)
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
@@ -363,6 +366,7 @@ func _ready() -> void:
 	# default; a post-spawn pose rides the game_debug teleport action over MCP.
 	var sp_mission := LaunchFlags.mission()
 	if not sp_mission.is_empty():
+		_launch_mission = sp_mission
 		_on_start_requested(sp_mission)
 		return
 	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
@@ -1038,6 +1042,7 @@ func _on_world_loaded() -> void:
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the pick session curates the shell-owned list from here on.
+	_launch_mission = ""  # the launch's mission loaded: a later load's failure is not its
 	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
@@ -1191,6 +1196,12 @@ func _on_world_load_failed(reason: String) -> void:
 	# (Client_CheckDisconnectOrEscDuringLoad) and the network-wait failure legs;
 	# scene_entry = "Post Menu"] (docs/interface/loading-screen-re.md, the
 	# load-flow case matrix).
+	if not _launch_mission.is_empty():
+		# The launch's own mission (`--mission`, the editor's Play mission): said on a line of
+		# its own, which Play reads back by its marker.
+		push_warning("MainGame: %s%s %s"
+				% [ResourceRoot.launch_mission_failed_marker(), _launch_mission, reason])
+		_launch_mission = ""
 	_abort_to_menu("mission load failed", reason)
 
 

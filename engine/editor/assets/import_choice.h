@@ -32,5 +32,13 @@ inline bool operator==(const ImportChoice &a, const ImportChoice &b) {
 	return a.path == b.path && a.entry == b.entry && a.install == b.install && a.native == b.native;
 }
 inline bool operator!=(const ImportChoice &a, const ImportChoice &b) { return !(a == b); }
+// An order over the same members, so a set of choices looks one up in log time (a whole install's
+// nine thousand, review F7).
+inline bool operator<(const ImportChoice &a, const ImportChoice &b) {
+	if (a.path != b.path) return a.path < b.path;
+	if (a.entry != b.entry) return a.entry < b.entry;
+	if (a.install != b.install) return b.install;
+	return !a.native && b.native;
+}
 
 } // namespace opennova::editor

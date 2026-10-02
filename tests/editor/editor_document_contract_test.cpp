@@ -90,6 +90,7 @@
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
@@ -107,6 +108,7 @@
 #include <formats/bad/bad_write.h>
 #include <formats/cbin/binary_config.h>
 #include <formats/def/def_schema.h>
+#include <formats/mission/bms.h>
 #include <formats/mus/mus.h>
 #include <formats/rtxt/rtxt.h>
 #include <formats/scr/scr.h>
@@ -166,11 +168,15 @@ const RowObject kRowObjects[] = {
         {&typeid(MenuScreen), sizeof(MenuScreen)}, {&typeid(StyleRow), sizeof(StyleRow)},
         {&typeid(ModelRow), sizeof(ModelRow)},     {&typeid(CollisionRow), sizeof(CollisionRow)},
         {&typeid(ClipRow), sizeof(ClipRow)},       {&typeid(AnimationMapRow), sizeof(AnimationMapRow)},
+        {&typeid(MissionRow), sizeof(MissionRow)}, {&typeid(EntityRow), sizeof(EntityRow)},
+        {&typeid(PathRow), sizeof(PathRow)},       {&typeid(AreaRow), sizeof(AreaRow)},
+        {&typeid(EventRow), sizeof(EventRow)},
 };
 // The document types whose rows keep their text in fixed-length records (a model's 3DI records, a
-// clip's bone table, a def catalog's records): a longer text grows no row of theirs. Every other
-// type's rows hold their text as strings, which a longer text makes longer.
-const char *const kFixedText[] = {"model", "animation", "catalog"};
+// clip's bone table, a def catalog's records, a mission's header and entity slots): a longer text
+// grows no row of theirs. Every other type's rows hold their text as strings, which a longer text
+// makes longer.
+const char *const kFixedText[] = {"model", "animation", "catalog", "mission"};
 bool fixed_text(const DocumentType &type) {
 	for (const char *name : kFixedText)
 		if (std::string(name) == type.name) return true;
@@ -190,7 +196,7 @@ struct PinnedPresence {
 	const char *type;
 	size_t optional, presences;
 };
-const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}};
+const PinnedPresence kPinnedPresence[] = {{"menu", 301, 301}, {"catalog", 27, 27}, {"mission", 4, 4}};
 
 // One clause of the contract, named with where it failed (the file, the record, the field).
 void check(bool ok, const std::string &where, const char *clause) {
@@ -292,6 +298,8 @@ std::vector<Fixture> fixtures(const std::string &repo) {
 	        {AssetKind::Model, "armory.3di", file("threedi/synth/armory.3di")},
 	        {AssetKind::Animation, "walk.bad", file("anim/walk.bad")},
 	        {AssetKind::AnimationMap, "soldier.adm", file("anim/soldier.adm")},
+	        // The minted mission (S14): every row kind, a path, two events naming one another.
+	        {AssetKind::Mission, "synth_logic.bms", file("bms/synth_logic.bms")},
 	        // The text types (S13 D9).
 	        {AssetKind::Script, "text_document.wac", file("wac/text_document.wac")},
 	        {AssetKind::MusicScript, "gamemus.bin", file("mus/synth_gamemus.bin")},
@@ -326,10 +334,27 @@ std::vector<uint8_t> table_with_a_key_twice() {
 	return out;
 }
 
+// The minted mission with its two events' trigger runs laid out in the other order (the second
+// event's trigger first in the table): what the game reads alike and Save lays out again
+// (mission.event_order). Empty when the mission does not read or write.
+std::vector<uint8_t> mission_with_runs_reordered(const std::vector<uint8_t> &minted) {
+	opennova::bms::File file;
+	std::vector<uint8_t> out;
+	std::string error;
+	if (minted.empty() || !opennova::bms::parse(minted.data(), minted.size(), file, error)) return out;
+	if (file.events.size() != 2 || file.triggers.size() != 2) return out;
+	std::swap(file.triggers[0], file.triggers[1]);
+	file.events[0].trigger_index = 1;
+	file.events[1].trigger_index = 0;
+	if (!opennova::bms::write(file, out, error)) out.clear();
+	return out;
+}
+
 // A file of each type whose fixture above makes no finding, holding a flaw the type's
 // validate_file reports (a key twice in a section, two screens of one NAME, a CTRL register the
-// engine does not know, a clip at 25 frames per second, a slot named twice): what the per-type
-// findings clause reads with the fixtures, through check_validate_file alone.
+// engine does not know, a clip at 25 frames per second, a slot named twice, a mission's runs out of
+// its events' order): what the per-type findings clause reads with the fixtures, through
+// check_validate_file alone.
 std::vector<Fixture> flawed_files(const std::string &repo) {
 	const auto file = [&](const char *relative) { return test_io::read_file(repo + "/fixtures/" + relative); };
 	const std::string pop = "<ACTION type=\"POP_SCREEN\"></ACTION>";
@@ -340,6 +365,7 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::Animation, "walk_25fps.bad", clip_at_25fps(file("anim/walk.bad"))},
 	        {AssetKind::AnimationMap, "slot_twice.adm",
 	         text_bytes("anim_reset\t\"idle.bad\"\r\nanim_idle\t\"idle.bad\"\r\nanim_idle\t\"walk.bad\"\r\n")},
+	        {AssetKind::Mission, "reordered.bms", mission_with_runs_reordered(file("bms/synth_logic.bms"))},
 	        // The text types (S13 D9): a compile error, a message handler, credits lines holding spaces
 	        // (the minted synth_nlist.kda), a plain shader.
 	        {AssetKind::Script, "flawed.wac", text_bytes("fxrain FX_Buildup )\r\n")},
@@ -1050,8 +1076,15 @@ void check_adds(const DocumentType &type, const Fixture &fixture, Document &docu
 		      "a row of a kind the outline adds is added (make_node)");
 		if (!added) continue;
 		++g_row_adds;
-		check(document.rows().back()->kind == row.kind, where,
-		      "the row added is the last, of its kind");
+		// Where the type's order puts it (Document::row_position: a mission's band): the last row of
+		// its kind, and the last of all for a type that keeps the position asked.
+		const NodeId made = document.last_added();
+		bool last_of_kind = false;
+		for (const auto &each : document.rows()) {
+			if (each->id == made) last_of_kind = each->kind == row.kind;
+			else if (each->kind == row.kind) last_of_kind = false;
+		}
+		check(last_of_kind, where, "the row added is the last of its kind");
 		reads_back(where);
 		document.undo();
 		check(document.serialize().text == serialized && !document.dirty(), where,
@@ -1422,13 +1455,25 @@ void check_record_references(const DocumentType &type, const Fixture &fixture, D
 		NodeAddress first;
 		const Named before = named(target.reference, &first);
 		if (before.empty() || !first.row) continue;
+		// The record is one a record holds (its placement there), or a row of the file (S14: a
+		// mission's markers and events), which is added, moved and removed among the rows; rows the
+		// outline adds none of (a mission's 128 paths) are a fixed table no edit renumbers.
 		Document::Placement at;
-		check(first.child && document.placement(first, at) && first.kind == target.kind, where,
+		const bool row_level = first.child == 0;
+		check((row_level || document.placement(first, at)) && first.kind == target.kind, where,
 		      "a record a Record reference names is of its collection's kind");
-		if (!first.child || !document.placement(first, at)) continue;
-		Edit add = edit_of(EditOperation::Add, {first.row, target.kind, 0}, "");
+		if (!row_level && !document.placement(first, at)) continue;
+		if (row_level && !*document.kind_row(target.kind)->add_label) continue;
+		Edit add = edit_of(EditOperation::Add, {row_level ? 0 : first.row, target.kind, 0}, "");
 		add.parent = at.owner.child;
 		add.position = at.index;
+		if (row_level) {
+			add.position = 0;
+			for (const auto &each : document.rows()) {
+				if (each->id == first.row) break;
+				++add.position;
+			}
+		}
 		Diagnostic error;
 		if (!document.apply(add, error)) {
 			check(error.code() == "document.collection" && error.message != "This collection cannot accept that edit.",

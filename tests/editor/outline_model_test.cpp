@@ -13,6 +13,10 @@
 // again only when what they read moves (lines_made): the document (another instance, or the same
 // one loaded again, and its revision), what is open, the filter, the order, Every, the master row;
 // the file-wide values come from the hook a type gives, their heading open as the model has it.
+// ADR 0046 S14: a list or a tree lists the kinds its mask keeps and leaves out the rows its type's
+// listed hook does until all rows are listed, a reveal winning over both; a click selects a record
+// alone, with Ctrl joining or leaving, with Shift the lines from the primary's; and the Inspector's
+// shared form spans records of kinds whose fields are alike (ui/inspector_layout).
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -20,12 +24,14 @@
 #include <editor/documents/def_catalog_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/ui/inspector_layout.h>
 #include <editor/ui/outline_model.h>
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/pool_document.h"
 
 using namespace opennova::editor;
 
@@ -428,10 +434,209 @@ int test_file_values() {
 	return 0;
 }
 
+// The pool document's five rows: two crates (one weighing nothing), two barrels and a note.
+bool load_pool(editor_test::PoolDocument &pool) {
+	return load(pool, bytes_of("C alpha 5\nB bravo 3\nC charlie 0\nN delta words\nB echo 7\n"), "pool.txt", AssetKind::Unknown);
+}
+
+// The kinds a list or a tree lists (a bit per kind, every one until one is cleared) and the rows a
+// type's listed hook leaves out until the "all rows" switch lists them: a row of a kind left out,
+// or one the hook leaves out, has no line; either moving makes the lines anew; an edit that makes a
+// row listed (a crate given a weight) makes its line through the change set; a reveal of a row
+// either hides lists its kind, or all rows, and nothing more than it needs. Master and detail
+// lists every row whatever they say.
+int test_kinds_and_listed_rows() {
+	using editor_test::kPoolBarrel;
+	using editor_test::kPoolCrate;
+	using editor_test::kPoolNote;
+	editor_test::PoolDocument pool;
+	TEST_EXPECT(load_pool(pool));
+	const uint64_t crate = OutlineModel::kind_bit(pool, kPoolCrate), barrel = OutlineModel::kind_bit(pool, kPoolBarrel),
+	               note = OutlineModel::kind_bit(pool, kPoolNote);
+	TEST_EXPECT(crate == 1 && barrel == 2 && note == 4 && OutlineModel::kind_bit(pool, 9) == 0);
+	for (const OutlineMode mode : {OutlineMode::List, OutlineMode::Tree}) {
+		OutlineModel list(mode);
+		TEST_EXPECT(list.kinds() == ~uint64_t(0) && !list.all_rows());
+		TEST_EXPECT(list.lines(pool).size() == 5 && list.lines_made() == 1);
+		// The barrels left out; the same mask again makes nothing.
+		list.set_kinds(~barrel);
+		const std::vector<OutlineLine> &kept = list.lines(pool);
+		TEST_EXPECT(kept.size() == 3 && list.lines_made() == 2);
+		for (const OutlineLine &line : kept) TEST_EXPECT(line.address.kind != kPoolBarrel);
+		TEST_EXPECT(kept[1].index == 2 && kept[2].index == 3); // each row's place in the file
+		list.set_kinds(~barrel);
+		list.lines(pool);
+		TEST_EXPECT(list.lines_made() == 2);
+		// The crates alone, then nothing.
+		list.set_kinds(crate);
+		TEST_EXPECT(list.lines(pool).size() == 2 && list.lines_made() == 3);
+		list.set_kinds(0);
+		TEST_EXPECT(list.lines(pool).empty());
+	}
+
+	// The listed hook: a crate or a barrel weighing nothing is left out until all rows are listed.
+	OutlineModel listed(OutlineMode::List, nullptr, editor_test::pool_row_listed);
+	const auto row_at = [&](size_t i) { return NodeAddress{pool.rows()[i]->id, pool.rows()[i]->kind, 0}; };
+	TEST_EXPECT(listed.lines(pool).size() == 4 && listed.line_of(row_at(2)) == SIZE_MAX);
+	listed.set_all_rows(true);
+	TEST_EXPECT(listed.lines(pool).size() == 5 && listed.line_of(row_at(2)) == 2 && listed.lines_made() == 2);
+	listed.set_all_rows(false);
+	TEST_EXPECT(listed.lines(pool).size() == 4 && listed.lines_made() == 3);
+	// The crate given a weight: its row's line made through the change set, nothing anew; undone, gone.
+	Edit weigh;
+	weigh.address = row_at(2);
+	weigh.field = "weight";
+	weigh.value = int64_t(4);
+	Diagnostic error;
+	TEST_EXPECT(pool.apply(weigh, error));
+	const size_t rows_made = listed.rows_made();
+	TEST_EXPECT(listed.lines(pool).size() == 5 && listed.lines_made() == 3 && listed.rows_made() == rows_made + 1);
+	pool.undo();
+	TEST_EXPECT(listed.lines(pool).size() == 4 && listed.lines_made() == 3);
+
+	// A reveal wins: a row whose kind is left out has its kind listed (the other kinds as they were),
+	// one the hook leaves out has all rows listed; one that shows changes neither.
+	OutlineModel revealed(OutlineMode::List, nullptr, editor_test::pool_row_listed);
+	revealed.set_kinds(note);
+	TEST_EXPECT(revealed.lines(pool).size() == 1);
+	TEST_EXPECT(revealed.reveal(pool, {row_at(3)}) == 0 && revealed.kinds() == note && !revealed.all_rows());
+	TEST_EXPECT(revealed.reveal(pool, {row_at(1)}) == 0 && revealed.kinds() == (note | barrel) && !revealed.all_rows());
+	TEST_EXPECT(revealed.lines(pool).size() == 3);
+	TEST_EXPECT(revealed.reveal(pool, {row_at(2)}) == 2 && revealed.kinds() == (note | barrel | crate) &&
+	            revealed.all_rows() && revealed.lines(pool).size() == 5);
+
+	// Master and detail lists every row as a master whatever the kinds and the hook say.
+	OutlineModel masters(OutlineMode::MasterDetail, nullptr, editor_test::pool_row_listed);
+	masters.set_kinds(0);
+	masters.lines(pool, 0);
+	TEST_EXPECT(masters.masters().size() == 5);
+	std::printf("test_kinds_and_listed_rows passed\n");
+	return 0;
+}
+
+// What a click on a record's line selects (OutlineModel::click): the record alone; with Ctrl the
+// record joining or leaving the selection; with Shift every record line from the primary's to it,
+// either way round, the clicked one the record and the rest named with it; a Shift click with no
+// primary on the lines, or on the primary's own, the record alone; a collection's heading nothing.
+// In a list the primary's row stands for a record it holds; under a sort the range is the lines'.
+int test_clicks() {
+	editor_test::PoolDocument pool;
+	TEST_EXPECT(load_pool(pool));
+	const auto row_at = [&](size_t i) { return NodeAddress{pool.rows()[i]->id, pool.rows()[i]->kind, 0}; };
+	OutlineModel list(OutlineMode::List);
+	list.lines(pool);
+	OutlineClick click = list.click(1, row_at(0), false, false);
+	TEST_EXPECT(click.record == row_at(1) && click.mode == SelectMode::Replace && click.records.empty());
+	click = list.click(1, row_at(0), true, false);
+	TEST_EXPECT(click.record == row_at(1) && click.mode == SelectMode::Toggle && click.records.empty());
+	// Ctrl wins over Shift.
+	click = list.click(3, row_at(0), true, true);
+	TEST_EXPECT(click.mode == SelectMode::Toggle && click.records.empty());
+	click = list.click(3, row_at(1), false, true);
+	TEST_EXPECT(click.record == row_at(3) && click.mode == SelectMode::Replace &&
+	            click.records == (std::vector<NodeAddress>{row_at(1), row_at(2)}));
+	click = list.click(0, row_at(2), false, true);
+	TEST_EXPECT(click.record == row_at(0) && click.records == (std::vector<NodeAddress>{row_at(1), row_at(2)}));
+	click = list.click(2, row_at(2), false, true);
+	TEST_EXPECT(click.record == row_at(2) && click.records.empty());
+	click = list.click(2, NodeAddress(), false, true);
+	TEST_EXPECT(click.record == row_at(2) && click.records.empty());
+	TEST_EXPECT(!list.click(99, row_at(0), false, false).record.row);
+	// The primary's line not listed (its kind left out): the record alone.
+	list.set_kinds(~OutlineModel::kind_bit(pool, editor_test::kPoolBarrel));
+	list.lines(pool);
+	click = list.click(2, row_at(1), false, true);
+	TEST_EXPECT(click.record == row_at(3) && click.records.empty());
+	// And the range is over the lines listed: alpha to delta leaves the barrel between them out.
+	click = list.click(2, row_at(0), false, true);
+	TEST_EXPECT(click.record == row_at(3) && click.records == (std::vector<NodeAddress>{row_at(0), row_at(2)}));
+	// By name: the lines' order (alpha, bravo, charlie, delta, echo is the file's too; another after
+	// a rename of alpha to zulu: bravo, charlie, delta, echo, zulu; a list names a row of another
+	// kind than the file's own after its kind's label).
+	OutlineModel sorted(OutlineMode::List);
+	sorted.set_sort(true);
+	Edit rename;
+	rename.address = row_at(0);
+	rename.field = "name";
+	rename.value = std::string("zulu");
+	Diagnostic error;
+	TEST_EXPECT(pool.apply(rename, error));
+	TEST_EXPECT(texts(sorted.lines(pool)) ==
+	            std::vector<std::string>({"Barrel: bravo", "charlie", "Note: delta", "Barrel: echo", "zulu"}));
+	click = sorted.click(4, row_at(3), false, true);
+	TEST_EXPECT(click.record == row_at(0) && click.records == (std::vector<NodeAddress>{row_at(3), row_at(4)}));
+
+	// A tree: a collection's heading selects nothing, and a range leaves the headings out; a list's
+	// primary that is a record a row holds stands by its row.
+	const std::string repo = test_paths_repo_root(__FILE__);
+	ModelDocument model;
+	TEST_EXPECT(load(model, test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di"), "armory.3di", AssetKind::Model));
+	OutlineModel tree(OutlineMode::Tree);
+	tree.set_open(tree.lines(model).front(), true);
+	const std::vector<OutlineLine> lines = tree.lines(model);
+	TEST_EXPECT(lines.size() > 3 && lines[1].collection && !lines.back().collection);
+	TEST_EXPECT(!tree.click(1, lines[0].address, false, false).record.row);
+	click = tree.click(lines.size() - 1, lines[0].address, false, true);
+	TEST_EXPECT(click.record == lines.back().address && click.records == (std::vector<NodeAddress>{lines[0].address}));
+	const ModelRow *row = model.model_row();
+	TEST_EXPECT(row && !row->ids.lists[kModelUserPoints].empty());
+	if (!row || row->ids.lists[kModelUserPoints].empty()) return 1;
+	const NodeAddress point{row->id, node_kind(ModelKind::UserPoint), row->ids.lists[kModelUserPoints][0].id};
+	OutlineModel rows(OutlineMode::List);
+	const std::vector<OutlineLine> flat = rows.lines(model);
+	TEST_EXPECT(flat.size() == 2 && flat[0].address.row == row->id);
+	click = rows.click(1, point, false, true);
+	TEST_EXPECT(click.record == flat[1].address && click.records == (std::vector<NodeAddress>{flat[0].address}));
+	std::printf("test_clicks passed\n");
+	return 0;
+}
+
+// The Inspector's form over several records (ui/inspector_layout): kinds are alike when their fields
+// are (the same ids and types in the same order: the pool's crates and barrels, two lists apart in
+// storage; never a note's), the shared plan spans records of kinds alike (each field every one has)
+// and is empty of a field a record of a kind not alike lacks, and the heading counts the records by
+// kind.
+int test_kinds_alike() {
+	using editor_test::kPoolBarrel;
+	using editor_test::kPoolCrate;
+	using editor_test::kPoolNote;
+	editor_test::PoolDocument pool;
+	TEST_EXPECT(load_pool(pool));
+	const auto row_at = [&](size_t i) { return NodeAddress{pool.rows()[i]->id, pool.rows()[i]->kind, 0}; };
+	TEST_EXPECT(&pool.fields(kPoolCrate) != &pool.fields(kPoolBarrel));
+	TEST_EXPECT(kinds_alike(pool, kPoolCrate, kPoolCrate) && kinds_alike(pool, kPoolCrate, kPoolBarrel) &&
+	            kinds_alike(pool, kPoolBarrel, kPoolCrate));
+	TEST_EXPECT(!kinds_alike(pool, kPoolCrate, kPoolNote) && !kinds_alike(pool, kPoolNote, kPoolBarrel));
+	const auto ids = [](const std::vector<InspectorSection> &plan) {
+		std::vector<std::string> out;
+		for (const InspectorSection &section : plan)
+			for (const FieldUse &field : section.fields) out.push_back(field.schema->id);
+		return out;
+	};
+	// A crate and two barrels: both fields, each as the primary's kind declares it.
+	const std::vector<NodeAddress> weighed = {row_at(0), row_at(1), row_at(4)};
+	const std::vector<InspectorSection> shared = plan_shared_inspector(pool, weighed, "");
+	TEST_EXPECT(ids(shared) == std::vector<std::string>({"name", "weight"}));
+	TEST_EXPECT(shared.front().fields[1].schema == &pool.fields(kPoolCrate)[1]);
+	TEST_EXPECT(field_mixed(pool, weighed, "weight") && field_mixed(pool, weighed, "name"));
+	TEST_EXPECT(ids(plan_shared_inspector(pool, weighed, "weigh")) == std::vector<std::string>({"weight"}));
+	// With a note among them nothing is shared (the window shows the primary's own form instead).
+	TEST_EXPECT(plan_shared_inspector(pool, {row_at(0), row_at(3)}, "").empty());
+	TEST_EXPECT(selected_words(pool, {row_at(0), row_at(2)}) == "2 Crate records selected");
+	TEST_EXPECT(selected_words(pool, weighed) == "3 records selected (1 Crate, 2 Barrel)");
+	TEST_EXPECT(selected_words(pool, {row_at(4), row_at(3), row_at(0), row_at(1)}) ==
+	            "4 records selected (2 Barrel, 1 Note, 1 Crate)");
+	std::printf("test_kinds_alike passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
 	int failures = 0;
+	failures += test_kinds_and_listed_rows();
+	failures += test_clicks();
+	failures += test_kinds_alike();
 	failures += test_list();
 	failures += test_tree();
 	failures += test_master_detail();

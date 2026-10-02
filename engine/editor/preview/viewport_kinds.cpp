@@ -7,6 +7,7 @@
 
 #include <editor/model/document.h>
 #include <editor/preview/menu_viewport.h>
+#include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/script_viewport.h>
 #include <editor/session/view/documents_view.h>
@@ -39,8 +40,16 @@ constexpr ViewportFeed kScriptFeeds[] = {
 	{ T::Text, true },
 };
 
+// The mission's (S14): a mission, the Document tab's main view; the rows as they stand (a mission
+// that cannot be written still shows).
+constexpr ViewportFeed kMissionFeeds[] = {
+	{ T::Mission, true },
+};
+
 // The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
-// over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8).
+// over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
+// mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
+// of its devices at most (each holds a terrain and the mission's models).
 constexpr ViewportKindRow kRows[] = {
 	{ ViewportKind::Menu, ViewportRole::Preview, true, true, false, kMenuFeeds, std::size(kMenuFeeds),
 			MenuViewport::make },
@@ -48,6 +57,8 @@ constexpr ViewportKindRow kRows[] = {
 			ModelViewport::make },
 	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
 			ScriptViewport::make, false },
+	{ ViewportKind::Mission, ViewportRole::Main, false, false, true, kMissionFeeds, std::size(kMissionFeeds),
+			MissionViewport::make, true, 2 },
 };
 
 static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");

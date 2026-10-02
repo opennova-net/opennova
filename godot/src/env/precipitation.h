@@ -38,8 +38,8 @@ class Precipitation : public Node3D {
 	GDCLASS(Precipitation, Node3D)
 
 public:
-	static constexpr const char *kRainTexture = "eraindrp.tga";
-	static constexpr const char *kSnowTexture = "jsnwflk.tga";
+	static constexpr const char *kRainTexture = opennova::renderer::kRainTexture;
+	static constexpr const char *kSnowTexture = opennova::renderer::kSnowTexture;
 
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	void set_weather_path(const NodePath &p_path);

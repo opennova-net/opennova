@@ -43,6 +43,32 @@ struct GraphEdge {
 	// name, then "ammo_" and its name [orig: WacScript_ResolveParameter @ 0x4F2E21..0x4F2E92]); ""
 	// for none. A symbol kind's edge only: it resolves to the first of the two a lookup finds.
 	std::string fallback;
+	// The scopes the lookup tries after `scope`, in order, where the name finds nothing there (a
+	// mission's text key: the mission's own table, then GAMETEXT.BIN [orig:
+	// MissionText_GetStringByKeyOrGameText @ 0x51ECD0]); none for a lookup of one scope. A symbol
+	// kind's edge only: it resolves to the first scope's definition a lookup finds (a fallback is a
+	// second name, this a second place).
+	std::vector<std::string> scopes_after;
+	// The table the lookup reads in the scope's table's place when the project has no file of that
+	// table's name, the scope's section kept: the game loads the one or the other, never both (a
+	// mission's text: <stem>.bin, else medmssn.bin [orig: TextResource_LoadMissionTextBin @0x51ed90]);
+	// "" for none. A symbol kind's edge only.
+	std::string scope_alternate;
+	// The file whose presence makes the scope the lookup's (a script of a mission's name reads that
+	// mission's text: <stem>.bms): without it the name resolves in any table, and no rename rewrites
+	// the use (its table is whichever mission's script compiles it in, AssetGraph::rewrites); "" for
+	// none. A symbol kind's edge only.
+	std::string scope_owner;
+	// The game runs without the file (a mission's script, which 40 of 115 shipped missions have,
+	// ADR 0046 S14): the graph makes no finding of it missing; the resolver, the pickers, References
+	// and the import read the edge as any other.
+	bool optional = false;
+	// The file whose presence the reader needs before it reads this one at all (a mission's dialog
+	// sounds, read only when its .dbf exists [orig: DialogManager_LoadFromFile @ 0x44e650, opened
+	// from DialogSystem_Init @ 0x5275e0 only when the .dbf exists @ 0x527648]); while the project
+	// lacks it the edge is no reference (NotAReference: no finding, no user, no rename companion,
+	// nothing the import follows). "" for none. A file kind's edge only.
+	std::string needs;
 };
 
 // A name a file defines that other files may reference: a document's field whose field_on

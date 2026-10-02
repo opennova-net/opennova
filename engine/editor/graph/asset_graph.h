@@ -208,11 +208,23 @@ public:
 	                        std::string *file_out = nullptr, int32_t loader_arg = -1) const;
 	// Where an edge resolves: its value as written (the name the loader is handed: a model
 	// texture's rule reads its case), in its scope, by its loader's argument; for a symbol kind's
-	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing.
+	// edge with a fallback (GraphEdge::fallback), the fallback where the value finds nothing; then
+	// each scope the edge tries after its own (GraphEdge::scopes_after), both names in each. Its own
+	// is where the project's files put it (lookup_scope).
 	ReferenceStatus resolve(const GraphEdge &edge, std::string *file_out = nullptr) const;
+	// The scope an edge's lookup starts in: its own; its alternate table's section where the project
+	// has no file of its own table (GraphEdge::scope_alternate); "" (any table, and no scope after it)
+	// where its owner is a file the project does not have (GraphEdge::scope_owner).
+	std::string lookup_scope(const GraphEdge &edge) const;
+	// Whether Rename everywhere rewrites the edge's use: its source writes it (GraphEdge::rewritable)
+	// and its scope is the lookup's (an owner the project has, where it names one).
+	bool rewrites(const GraphEdge &edge) const;
 	// The definition a symbol kind's edge reaches (resolve_symbol): its value's, else its
-	// fallback's; null for none.
+	// fallback's, in the first of its scopes a lookup finds either in; null for none.
 	const GraphSymbol *symbol_reached(const GraphEdge &edge) const;
+	// The name of the two a symbol kind's edge reaches (its value, or its fallback where only that
+	// one is defined in the first scope either is found in); the value where neither is.
+	const std::string &reached_name(const GraphEdge &edge) const;
 	// The edges of `kind` with a fallback (GraphEdge::fallback) that name `name` as their value or
 	// their fallback, in the files' order: what a rename to `name` checks (a use it would take over).
 	std::vector<const GraphEdge *> edges_naming(ReferenceKind kind, const std::string &name) const;
@@ -407,8 +419,8 @@ void extract_from_text(const TextDocument &document, Extracted &out);
 // loader decodes them): a record type's or a text type's through its document
 // (DocumentBase::load_bytes), a native kind's through the engine's parser. `name` is what the edges
 // and symbols name the file by (the project-relative path in the graph). True with nothing for a
-// file the graph does not read (graph_reads_file), a type's whose documents hold neither records
-// nor a text that names anything included.
+// file of a kind the graph does not read (graph_reads_kind), a type's whose documents hold neither
+// records nor a text that names anything included.
 bool extract_from_bytes(const std::string &name, AssetKind kind, const std::vector<uint8_t> &bytes,
                         const std::string &game, Extracted &out, Diagnostic &error);
 // A project file read, then extract_from_bytes.
@@ -416,11 +428,8 @@ bool extract_from_asset(const ProjectPaths &paths, const ProjectDocument &projec
                         Extracted &out, Diagnostic &error);
 // True when files of this kind carry references or symbols the graph reads: a record type's
 // (document_content), a text type's whose text names references (DocumentType::references), or
-// a native extractor's kind.
+// a native extractor's kind. A file of another kind (a texture, a mission text) holds nothing the
+// graph reads: its row counts (the file set), what it names goes unchecked.
 bool graph_reads_kind(AssetKind kind);
-// The same for one file, by its name: false for a mission's .mis, the mission editors' text
-// form, which the mission document will read (the graph reads the .bms the game loads), so
-// the graph skips the file and what it names goes unchecked.
-bool graph_reads_file(AssetKind kind, const std::string &name);
 
 } // namespace opennova::editor

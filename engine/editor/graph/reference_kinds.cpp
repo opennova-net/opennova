@@ -48,6 +48,13 @@ std::vector<std::string> font_files(const std::string &name, int32_t, const Exis
 	return one(menu::menu_font_file(name));
 }
 
+// The file's name of the path a sound bank's single holds: an archive holds names, no folders (the
+// shell's sound bank reads the same name, audio/sound_bank.cpp).
+std::vector<std::string> wave_files(const std::string &name, int32_t, const Exists &) {
+	const size_t slash = name.find_last_of("/\\");
+	return one(slash == std::string::npos ? name : name.substr(slash + 1));
+}
+
 // The extensions a loader appends to a name, tried after the name as written.
 constexpr const char *kModel[] = {".3di", nullptr};
 constexpr const char *kAnimationMap[] = {".adm", nullptr};
@@ -57,6 +64,10 @@ constexpr const char *kMenu[] = {".mnu", nullptr};
 constexpr const char *kTable[] = {".bin", nullptr};
 constexpr const char *kTerrain[] = {".trn", nullptr};
 constexpr const char *kEnvironment[] = {".env", nullptr};
+constexpr const char *kScriptFile[] = {".wac", nullptr};
+constexpr const char *kLoadingImage[] = {".pcx", nullptr};
+constexpr const char *kTilePlacement[] = {".til", nullptr};
+constexpr const char *kDialogBankFile[] = {".dbf", nullptr};
 
 // --- what a finding says of a name nothing resolves (ReferenceKindRow::missing_message) ---
 
@@ -80,10 +91,12 @@ std::string style_missing(const AssetGraph &graph, const GraphEdge &edge) {
 }
 
 std::string text_id_missing(const AssetGraph &graph, const GraphEdge &edge) {
-	const size_t slash = edge.scope.find('/');
-	const std::string table = edge.scope.substr(0, slash);
-	const std::string section = slash == std::string::npos ? std::string() : edge.scope.substr(slash + 1);
-	if (edge.scope.empty()) return ", which no string table defines; the game shows the id.";
+	// The table the lookup reads as the project's files are (a mission's own, else medmssn.bin).
+	const std::string scope = graph.lookup_scope(edge);
+	const size_t slash = scope.find('/');
+	const std::string table = scope.substr(0, slash);
+	const std::string section = slash == std::string::npos ? std::string() : scope.substr(slash + 1);
+	if (scope.empty()) return ", which no string table defines; the game shows the id.";
 	if (table.empty())
 		return ", but its window names no string table (TEXT_RSRC) and neither does the window it falls back to; the "
 		       "game shows the id.";
@@ -111,8 +124,16 @@ std::string window_missing(const AssetGraph &graph, const GraphEdge &edge) {
 	                 : ", which no window of screen " + screen + " is named: the ACTION does nothing.";
 }
 
+std::string terrain_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game refuses to start the mission.";
+}
+
 std::string bank_missing(const AssetGraph &, const GraphEdge &) {
 	return ", which the project does not have: the game plays no sound for it.";
+}
+
+std::string wave_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game plays nothing for it.";
 }
 
 std::string credits_missing(const AssetGraph &, const GraphEdge &) {
@@ -131,6 +152,44 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 	       " does not have among its first 16 user points: the effect attaches to none.";
 }
 
+// The lookups find no record of the SSN: a condition on it reads as its type does for no entity (a
+// SingleDestroyed TRUE), an action on it does nothing [orig: EventTrigger_EvaluateCondition
+// @0x453620; docs/mission/bms-event-runtime-re.md 7.4].
+std::string entity_missing(const AssetGraph &, const GraphEdge &) {
+	return ", an SSN no entity of the mission has: the game's lookups find no record for it.";
+}
+
+// The load neuters a trigger naming a zone the file lacks, which then reads false (a negated one
+// true), and zeroes an action naming one [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
+// EventTrigger_ResolveZoneActionRefs @0x453100].
+std::string zone_missing(const AssetGraph &, const GraphEdge &) {
+	return ", a zone id no area trigger of the mission has: the game makes a trigger naming it read false and an "
+	       "action naming it do nothing.";
+}
+
+// The mission's tile placement the game reads loose first [orig: Terrain_LoadTileInfoFile @0x60a740];
+// without it the terrain's own tiles stand.
+std::string tiles_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the terrain's own tiles stand.";
+}
+
+// A dialog plays from the mission's own bank [orig: DialogSystem_Init @0x5275e0 builds the name
+// from the mission's]; without it the game plays no dialog.
+std::string dialog_missing(const AssetGraph &, const GraphEdge &) {
+	return ", which the project does not have: the game plays no dialog of this mission.";
+}
+
+// The mission's text loads from its own table, else medmssn.bin [orig: TextResource_LoadMissionTextBin
+// @0x51ed90]; with neither every key the mission reads answers "" [orig:
+// MissionText_GetStringByKeyOrGameText @0x51ECD0, the "" @0x51ecea]: no title, no briefing, no
+// location name, no objective text.
+std::string mission_strings_missing(const AssetGraph &graph, const GraphEdge &) {
+	return graph.has_file("medmssn.bin")
+	               ? ", which the project does not have: the game reads medmssn.bin in its place."
+	               : ", which the project does not have, nor medmssn.bin to read in its place: the mission's title, "
+	                 "briefing, location names and objectives show empty.";
+}
+
 // --- the values a Record reference names none by (ReferenceKindRow::none) ----------------------
 
 // A part animation's frame byte (the field holds 0 to 255) names no MTRX row at 0 and at 128 to
@@ -139,6 +198,16 @@ std::string user_point_missing(const AssetGraph &, const GraphEdge &edge) {
 // (threedi_panm_frame_row, the pose's rule; whether a row turns through a frame at all is its
 // field's use, ModelDocument's). Any value past the byte names none too.
 bool frame_none(int64_t value) { return value <= 0 || value > 127; }
+
+// A mission's group 0 names none: every witnessed consumer exits or reads false for it [orig:
+// Entity_KillAllByNetId @0x43C8F2, Entity_IsTeamInTriggerBounds @0x43c730, Entity_HandleAlertCommand
+// @0x43CF10, Entity_TeleportAllByNetId @0x43D5D0].
+bool group_none(int64_t value) { return value == 0; }
+
+// A waypoint list's number names a path from 1 to 122; 0 is none and 123 to 127 are commands (go to an
+// SSN, a group, the player) [orig editor: dfx2med Med_ParamWaypointList @0x449c60;
+// docs/world/world-wac-ai-re.md section 11].
+bool path_none(int64_t value) { return value == 0 || (value >= 123 && value <= 127); }
 
 // --- the table -------------------------------------------------------------------------------
 
@@ -199,6 +268,14 @@ struct Row {
 		out.row.picker_scoped = picker;
 		return out;
 	}
+	// The game refuses what names a name of the kind that finds nothing, by the witness given: a
+	// missing reference of it refuses a build (blocks_build).
+	constexpr Row fatal(const char *orig, ReferenceMissingMessage message) const {
+		Row out = *this;
+		out.row.gates_when_missing = orig;
+		out.row.missing_message = message;
+		return out;
+	}
 	// The game tolerates the name missing: a warning, saying what the game does instead.
 	constexpr Row tolerated(ReferenceMissingMessage message) const {
 		Row out = *this;
@@ -254,7 +331,15 @@ constexpr ReferenceKindRow kRows[] = {
 	        .variable()
 	        .tolerated(style_missing)
 	        .row,
-	Row(ReferenceKind::Terrain, "terrain", "the terrain", "terrain").loads(AssetKind::Terrain, kTerrain).row,
+	// A mission's terrain that does not load leaves the terrain config cleared, which the loader's tail
+	// refuses; the mission does not start (ADR 0046 S14: witnessed, so a missing one refuses a build).
+	Row(ReferenceKind::Terrain, "terrain", "the terrain", "terrain")
+	        .loads(AssetKind::Terrain, kTerrain)
+	        .fatal("[orig: Game_StartMission @ 0x524b26 -> Game_LoadTerrainDuringConnect @ 0x520710 -> "
+	               "Terrain_LoadEnvironmentConfig @ 0x610940, the empty colour map refused @ 0x610a2a; the start "
+	               "failing @ 0x524b30]",
+	               terrain_missing)
+	        .row,
 	Row(ReferenceKind::Environment, "environment", "the environment", "environment")
 	        .loads(AssetKind::Environment, kEnvironment)
 	        .row,
@@ -314,6 +399,21 @@ constexpr ReferenceKindRow kRows[] = {
 	        .scoped(true)
 	        .tolerated(user_point_missing)
 	        .row,
+	// A terrain's height data, opened by the name its .trn gives. A .trn that names none is refused
+	// [orig: Terrain_LoadEnvironmentConfig @0x610940, the empty polydata name @0x610a3e] (a terrain the
+	// graph cannot read); a named file the files lack is opened later with its result unread [orig:
+	// Terrain_Init @0x60fbe0 -> PolyTrn_LoadTerrainConfig @0x60e3d0, @0x60fd2d], so what the game makes
+	// of it is not witnessed: listed, not gating (ADR 0046 S14).
+	Row(ReferenceKind::TerrainData, "terrain_data", "the terrain height data", "terrain height data")
+	        .loads(AssetKind::TerrainPolyData, nullptr)
+	        .row,
+	// A sound bank's single holds its wave's file name in a 256-byte slot the load patches in [orig:
+	// SoundBank_LoadTriggerSets @0x75c370, the string pool @0x75c688; docs/audio/lwf-dbf-sound-re.md],
+	// read from the archives by that name (wave_files); a wave the files lack plays nothing.
+	Row(ReferenceKind::Wave, "wave", "the wave", "wave")
+	        .loads(AssetKind::Wave, nullptr, wave_files)
+	        .tolerated(wave_missing)
+	        .row,
 	// A powerup row by name, the first row of the name [orig: PowerUpDef_FindByName @0x442660, stricmp
 	// over the rows in order]; an item whose powerupdef names none is destroyed as the mission starts
 	// [orig: PowerupEntity_InitFromDef @0x442D10, Entity_Destroy @0x442E26].
@@ -324,10 +424,52 @@ constexpr ReferenceKindRow kRows[] = {
 	// runtime reads unbounded: past them it reads the pool's zeroed entry [orig: Pool_GetEntryUnchecked
 	// @0x441FC0, Pool_Clear @0x442060].
 	Row(ReferenceKind::MissionMarker, "mission_marker", "the marker", "marker").record("marker").row,
-	// An event's run of triggers (of actions) starts at the record of its mission's table at that index,
-	// which the loader fixes up into a pointer [orig: EventTrigger_LoadAllData @0x453eb0].
-	Row(ReferenceKind::MissionTrigger, "mission_trigger", "the trigger", "trigger").record("trigger").row,
-	Row(ReferenceKind::MissionAction, "mission_action", "the action", "action").record("action").row,
+	// An Event trigger's and a ResetEvent action's first parameter names an event by its index in the
+	// event table, read with no bound [orig: EventTrigger_EvaluateCondition @0x453620 main type 3,
+	// EventAction_Dispatch @0x4542e0 case 34].
+	Row(ReferenceKind::MissionEvent, "mission_event", "the event", "event").record("event").row,
+	// A group by its index in the file's 64, a path by its number among its 128: fixed tables, which no
+	// edit renumbers.
+	Row(ReferenceKind::MissionGroup, "mission_group", "the group", "group").record("group", group_none).row,
+	Row(ReferenceKind::MissionPath, "mission_path", "the waypoint path", "waypoint path")
+	        .record("waypoint_path", path_none)
+	        .row,
+	// An entity by its SSN and an area trigger by its zone id, each found in its own mission by the id
+	// its record carries, never by an index [orig: EntityPool_FindByNetId @0x4f0a20;
+	// EventTrigger_ResolveZoneTriggerRefs @0x453000]. The game tolerates either missing.
+	Row(ReferenceKind::MissionEntity, "mission_entity", "the entity", "entity")
+	        .symbol(NameCase::Exact)
+	        .scoped(true)
+	        .tolerated(entity_missing)
+	        .row,
+	Row(ReferenceKind::MissionZone, "mission_zone", "the zone", "zone")
+	        .symbol(NameCase::Exact)
+	        .scoped(true)
+	        .tolerated(zone_missing)
+	        .row,
+	// The files the game finds by a mission's name (documents/mission_file_set.h), each by the name
+	// its reader builds [orig: Game_StartMission @0x524360]: the script compiled after game.wac and
+	// server.wac [orig: WacScript_InitAndLoad @0x4f91f0], the loading image [orig: Render_LoadingScreen
+	// @0x521d10], the tile placement, the dialog bank (its sounds a SoundBank).
+	Row(ReferenceKind::Script, "script", "the script", "script").loads(AssetKind::Script, kScriptFile).row,
+	Row(ReferenceKind::LoadingImage, "loading_image", "the loading image", "loading image")
+	        .loads(AssetKind::Texture, kLoadingImage)
+	        .row,
+	Row(ReferenceKind::TilePlacement, "tile_placement", "the tile placement", "tile placement")
+	        .loads(AssetKind::TileInfo, kTilePlacement)
+	        .tolerated(tiles_missing)
+	        .row,
+	Row(ReferenceKind::DialogBank, "dialog_bank", "the dialog bank", "dialog bank")
+	        .loads(AssetKind::DialogBank, kDialogBankFile)
+	        .tolerated(dialog_missing)
+	        .row,
+	// The mission's own string table, a Strings file as a menu's TextTable is, but one the game runs
+	// without (its keys read empty): a warning, worded by whether medmssn.bin stands in.
+	Row(ReferenceKind::MissionStrings, "mission_strings", "the mission's string table", "mission string table")
+	        .loads(AssetKind::Strings, kTable)
+	        .tolerated(mission_strings_missing)
+	        .message_reads_files()
+	        .row,
 };
 
 constexpr bool same_token(const char *a, const char *b) {
@@ -362,7 +504,17 @@ constexpr bool records_well_formed() {
 	return true;
 }
 
+// A kind whose missing name refuses a build is one the graph finds missing, at an error's severity.
+constexpr bool gates_well_formed() {
+	for (const ReferenceKindRow &row : kRows)
+		if (row.gates_when_missing &&
+		    (!*row.gates_when_missing || !row.missing_message || row.severity_when_missing != DiagnosticSeverity::Error))
+			return false;
+	return true;
+}
+
 static_assert(sizeof(kRows) / sizeof(kRows[0]) == kReferenceKindCount, "every ReferenceKind has exactly one row");
+static_assert(gates_well_formed(), "a kind that gates when missing is found missing as an error, with its witness");
 static_assert(rows_well_formed(), "the rows follow ReferenceKind's order and their tokens are unique");
 static_assert(records_well_formed(),
 		"a Record row names its collection, no file and no missing message and counts across its file, "
@@ -407,6 +559,20 @@ StyleVariableUse style_variable_use(ReferenceKind through) {
 	case ReferenceKind::MenuTexture: return StyleVariableUse::Image;
 	default: return StyleVariableUse::Other;
 	}
+}
+
+bool blocks_build(const Diagnostic &d) {
+	if (d.severity != DiagnosticSeverity::Error) return false;
+	if (!d.row() || d.row()->gates_build) return true;
+	// A code listed and not gating (a missing reference) gates where its kind's refusal is witnessed.
+	const ReferenceSubject *reference = reference_subject(d);
+	return reference && reference_row(reference->kind).gates_when_missing != nullptr;
+}
+
+bool diagnostics_block_build(const std::vector<Diagnostic> &items) {
+	for (const Diagnostic &d : items)
+		if (blocks_build(d)) return true;
+	return false;
 }
 
 } // namespace opennova::editor
