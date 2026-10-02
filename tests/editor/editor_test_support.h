@@ -20,6 +20,12 @@
 #include <variant>
 #include <vector>
 
+#ifdef _WIN32
+#include <process.h>
+#else
+#include <unistd.h>
+#endif
+
 #include <base/io/hash.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
@@ -127,11 +133,23 @@ struct HoldingOperation : opennova::editor::SessionOperation {
 	opennova::editor::OperationOutcome finish(opennova::editor::SessionCore &) override { return {}; }
 };
 
+// The process's own suffix to a temporary directory's name: two runs of a test at once (a parallel
+// ctest beside another worktree's, an agent's beside a person's) share the system temp directory,
+// and each wipes its directory on construction and destruction, so a name both used would have one
+// run delete the other's project mid-test.
+inline std::string process_suffix() {
+#ifdef _WIN32
+	return "_" + std::to_string(_getpid());
+#else
+	return "_" + std::to_string(getpid());
+#endif
+}
+
 struct TempProjectDir {
 	std::filesystem::path path;
 
 	explicit TempProjectDir(const char *name) {
-		path = std::filesystem::temp_directory_path() / name;
+		path = std::filesystem::temp_directory_path() / (std::string(name) + process_suffix());
 		std::error_code ec;
 		std::filesystem::remove_all(opennova::editor::system_path(path.generic_string()), ec);
 		std::filesystem::create_directories(path, ec);
