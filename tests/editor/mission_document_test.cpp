@@ -40,6 +40,8 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/import/importer.h>
+#include <editor/import/sidecar.h>
 #include <editor/model/text_document.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -54,6 +56,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/png_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -571,6 +574,31 @@ int test_clipboard() {
 	}
 	document->undo();
 	TEST_EXPECT(bytes_of(*document) == original);
+	// A rider (a waypoint list of 123..125 beside the SSN of the entity to board [orig:
+	// Entity_UpdateInfantryAI @0x4ba9ad]) names that entity: an edge of its own, and a paste of the
+	// two follows the boarded one's fresh SSN.
+	{
+		const NodeAddress item0 = row_at(*document, MissionKind::Item, 0);
+		const int32_t item_ssn = static_cast<const EntityRow *>(document->row(item0.row))->native.id;
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, walker, "waypoint_id", int64_t(123)), error) &&
+		            document->apply(edit_of(EditOperation::Set, walker, "wp_number", int64_t(item_ssn)), error));
+		Extracted rides;
+		extract_from_document(*document, rides);
+		bool rider = false;
+		for (const GraphEdge &e : rides.edges)
+			rider = rider || (e.kind == ReferenceKind::MissionEntity && e.address == walker && e.field == "wp_number" &&
+			                  e.value == std::to_string(item_ssn) && e.rewritable);
+		TEST_EXPECT(rider);
+		Edit both = edit_of(EditOperation::Paste, {0, 0, 0}, "", document->copy({item0, walker}));
+		both.position = SIZE_MAX;
+		TEST_EXPECT(document->apply(both, error));
+		const EntityRow &item_copy = static_cast<const EntityRow &>(*m.rows_of(MissionKind::Item).back());
+		const EntityRow &walker_copy = static_cast<const EntityRow &>(*m.rows_of(MissionKind::Organic).back());
+		TEST_EXPECT(item_copy.native.id != item_ssn && walker_copy.native.waypoint_id == 123 &&
+		            walker_copy.native.wp_number == item_copy.native.id);
+		while (document->can_undo()) document->undo();
+		TEST_EXPECT(bytes_of(*document) == original);
+	}
 	// A trigger pasted into the other event (its one owner), a stop pasted into an empty path; the
 	// trigger refused by a path, the stop by an event.
 	Edit into = edit_of(EditOperation::Paste, {event1.row, k(MissionKind::Trigger), 0}, "", trigger_payload);
@@ -971,7 +999,9 @@ int test_pool_check() {
 
 // A mission renamed takes the files the game finds by its name that the project has (ADR 0046 S14):
 // the plan lists them as companions (its own derived edges rewriting nothing), the commit moves
-// them with it, and the renamed mission's set resolves under the new names.
+// them with it (an open companion with unsaved edits joining the unsaved prompt, then reopened at
+// its new name), and the renamed mission's set resolves under the new names; a stale file of the new
+// name and an imported companion refuse it.
 int test_rename_companions() {
 	editor_test::TempProjectDir dir("opennova_mission_rename_companions");
 	editor_test::NoProcess platform;
@@ -1031,6 +1061,27 @@ int test_rename_companions() {
 	TEST_EXPECT(test_io::read_file_text(root + "/missions/run.wac") == "X; the walk\r\n");
 	const GraphEdge *renamed = edge_to_file(*view.findings.graph, "missions/run.bms", ReferenceKind::MissionStrings);
 	TEST_EXPECT(renamed && renamed->value == "run.bin" && view.findings.graph->resolve(*renamed) == ReferenceStatus::Present);
+	// A companion the import pass makes (the loading image, out of a PNG source) refuses the rename:
+	// the next import would make it again under the old name; its source is the file to rename.
+	{
+		TEST_EXPECT(editor_test::write_bytes(root + "/art/run.png", editor_test::gradient_png(8, 8)));
+		const Importer *importer = importer_for(root + "/art/run.png");
+		TEST_EXPECT(importer);
+		if (!importer) return 1;
+		ImportSidecar sidecar;
+		sidecar.importer = importer->id;
+		sidecar.version = importer->version;
+		sidecar.options = importer->default_options;
+		Diagnostic error;
+		TEST_EXPECT(save_import_sidecar(root + "/art/run.png.import", sidecar, error));
+		editor_test::handle_to_end(session, request::rescan());
+		const AssetEntry *image = view.project.scan->find("run.pcx");
+		TEST_EXPECT(image && image->imported_from == "art/run.png");
+		const RenamePlan imported =
+		        plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "run.bms", "ride.bms");
+		TEST_EXPECT(!imported.ok() && imported.refusals.size() == 1 && imported.refusals[0].code() == "rename.imported" &&
+		            imported.refusals[0].message.find("run.pcx") != std::string::npos);
+	}
 	return 0;
 }
 
