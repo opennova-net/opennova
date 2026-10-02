@@ -3,9 +3,11 @@
 #include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <optional>
 #include <system_error>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 
@@ -37,10 +39,11 @@ bool parse_lease_name(const fs::path &path, std::string &build_id, int64_t &pid)
 	if (dot == std::string::npos) return false;
 	build_id = stem.substr(0, dot);
 	const std::string digits = stem.substr(dot + 1);
-	if (!is_build_id(build_id) || digits.empty() || digits.size() > 18 ||
-	    !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; }))
-		return false;
-	pid = std::stoll(digits);
+	if (!is_build_id(build_id) || !strutil::all_digits(digits)) return false;
+	// A pid a 64-bit signed number holds (strutil's parse: no throw).
+	const std::optional<long long> number = strutil::parse_llong(digits);
+	if (!number) return false;
+	pid = static_cast<int64_t>(*number);
 	return true;
 }
 

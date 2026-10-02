@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
@@ -1238,6 +1239,46 @@ static_assert(viewport_ops_hold(),
 		"the viewport ops follow ViewportOp, each a token, an answer and what it needs among what it takes, "
 		"every param of the query taken by name");
 
+// Whether a param's default reads as its type: a whole number's its digits (a '-' before them), a
+// number's digits with one '.' among them, a flag's true or false; a text's anything.
+constexpr bool default_reads(const QueryParam &param) {
+	const char *text = param.default_value;
+	if (!text) return true;
+	switch (param.type) {
+		case J::Integer:
+		case J::Number: {
+			if (*text == '-') ++text;
+			bool digit = false, point = false;
+			for (; *text; ++text) {
+				if (*text >= '0' && *text <= '9') digit = true;
+				else if (*text == '.' && param.type == J::Number && !point) point = true;
+				else return false;
+			}
+			return digit;
+		}
+		case J::Boolean: return same_text(text, "true") || same_text(text, "false");
+		default: return true;
+	}
+}
+constexpr bool defaults_read() {
+	for (const EditorQueryRow &row : kRows)
+		for (size_t p = 0; p < row.param_count; ++p)
+			if (!default_reads(row.params[p])) return false;
+	return true;
+}
+static_assert(defaults_read(), "every param's default reads as its type");
+
+// A param's default as its type reads it (strutil's parse, ADR 0049 d5; every default reads,
+// static_asserted above); 0 for a param with none.
+int64_t integer_default(const QueryParam &param) {
+	if (!param.default_value) return 0;
+	return static_cast<int64_t>(strutil::parse_llong(param.default_value).value_or(0));
+}
+double number_default(const QueryParam &param) {
+	if (!param.default_value) return 0.0;
+	return strutil::parse_double(param.default_value).value_or(0.0);
+}
+
 // A param a query takes, by name, or null.
 const QueryParam *param_of(const EditorQueryRow &row, const char *name) {
 	for (size_t i = 0; i < row.param_count; ++i)
@@ -1345,9 +1386,9 @@ JsonValue default_to_json(const QueryParam &param) {
 	const std::string text = param.default_value;
 	switch (param.type) {
 		case J::Integer:
-			return json_number(double(std::strtoll(text.c_str(), nullptr, 10)));
+			return json_number(double(integer_default(param)));
 		case J::Number:
-			return json_number(std::strtod(text.c_str(), nullptr));
+			return json_number(number_default(param));
 		case J::Boolean:
 			return JsonValue::make_bool(text == "true");
 		default:
@@ -1564,14 +1605,14 @@ int64_t QueryArgs::integer(const char *name) const {
 	if (const JsonValue *member = value(name); member && member->is_number())
 		return int64_t(member->number);
 	const QueryParam *param = param_of(row_, name);
-	return param && param->default_value ? std::strtoll(param->default_value, nullptr, 10) : 0;
+	return param ? integer_default(*param) : 0;
 }
 
 double QueryArgs::number(const char *name) const {
 	if (const JsonValue *member = value(name); member && member->is_number())
 		return member->number;
 	const QueryParam *param = param_of(row_, name);
-	return param && param->default_value ? std::strtod(param->default_value, nullptr) : 0.0;
+	return param ? number_default(*param) : 0.0;
 }
 
 bool QueryArgs::boolean(const char *name) const {
