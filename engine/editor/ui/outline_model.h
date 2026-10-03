@@ -86,10 +86,12 @@ using OutlineAddMenuHook = void (*)(Workspace &workspace, const Document &docume
 using OutlineGroup = RowHeading;
 // The headings each row of the document stands under, outermost first, one list per row in the
 // document's order (an empty list: a row under no heading, listed before every heading): the hook of
-// a type whose rows read better grouped (a mission's entities by pool, team and group). The rows of a
-// heading are listed together under it, the headings in their keys' order and each heading's rows in
-// the file's order.
-using OutlineGroupsHook = void (*)(const Document &document, std::vector<std::vector<OutlineGroup>> &out);
+// a type whose rows read better grouped (a mission's entities by pool, a marker's type, team and
+// group), the headings worded with the project's names where `names` gives them (a marker's type by
+// its item's name). The rows of a heading are listed together under it, the headings in their keys'
+// order and each heading's rows in the file's order.
+using OutlineGroupsHook = void (*)(const Document &document, const NameSource *names,
+                                   std::vector<std::vector<OutlineGroup>> &out);
 
 // What an outline view of a type is (its DocumentViewRow's outline, ui/document_views): its mode,
 // the heading of the master column (master and detail: the rows' words, "Sections"), the hook

@@ -82,6 +82,19 @@ void disabled_wrapped(const std::string &text) {
 
 float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f; }
 
+// What a fix of a finding about the game's own data says first (S15): the file is one the game ships,
+// so the problem is the original's too and a fix makes the file the modder's. "" for any other finding.
+std::string shipped_note(const Diagnostic &d, const SessionView &view) {
+	return in_original_data(d, view) ? "Edits a file the game ships: the original has this problem too, and the file "
+	                                   "becomes yours."
+	                                 : std::string();
+}
+// A fix's tooltip: its label, that note, what it does, whether it waits.
+std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed) {
+	return fix.label + "\n\n" + (note.empty() ? std::string() : note + "\n\n") + fix.detail +
+	       (allowed ? "" : std::string("\n") + kWaits);
+}
+
 } // namespace
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -269,8 +282,11 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	const std::vector<ProblemFix> &fixes = list_.fixes(view, line.finding);
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
+	const std::string note = fixes.empty() ? std::string() : shipped_note(d, view);
 	if (expanded) {
 		ImGui::TextWrapped("%s", d.message.c_str());
+		// A fix of the game's own data is marked as editing a file the game ships (S15).
+		if (!note.empty()) disabled_wrapped(note);
 		for (const ProblemFix &fix : fixes) {
 			ImGui::PushID(fix.label.c_str());
 			const float room = ImGui::GetContentRegionAvail().x;
@@ -279,7 +295,7 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 			if (fix_pressed(view, line.finding, fix, ui_kit::fitted_button(fix.label, "fix", room)) && allowed)
 				apply(view, line.finding, fix);
 			ImGui::EndDisabled();
-			ui_kit::tooltip_lazy([&] { return fix.label + "\n\n" + fix.detail + (allowed ? "" : std::string("\n") + kWaits); });
+			ui_kit::tooltip_lazy([&] { return fix_tip(fix, note, allowed); });
 			// What it does beside it when there is room for a few words, else under it.
 			if (room - ImGui::GetItemRectSize().x - ImGui::GetStyle().ItemSpacing.x >= ImGui::GetFontSize() * 12.0f)
 				ImGui::SameLine();
@@ -308,13 +324,14 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	const std::string whole = ProblemsList::location_of(d, true) + (where == plain ? std::string() : "\n" + where);
 	ui_kit::clipped_text(where, whole != where ? whole : std::string());
 	ImGui::TableNextColumn();
-	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes);
+	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes, note);
 	ImGui::PopID();
 }
 
 // The Fix column: the first fix and More (every fix) when both fit with the fix's words
 // legible, else one Fix... that lists every fix; each no wider than the column.
-void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes) {
+void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const std::vector<ProblemFix> &fixes,
+                                const std::string &note) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float room = ImGui::GetContentRegionAvail().x;
 	const float more = fixes.size() > 1 ? ui_kit::button_width("More") + style.ItemSpacing.x : 0.0f;
@@ -326,14 +343,14 @@ void ProblemsWindow::draw_fixes(const SessionView &view, size_t finding, const s
 		const bool clicked = ui_kit::fitted_button(first.label, "fix", room - more);
 		if (fix_pressed(view, finding, first, clicked) && allowed) apply(view, finding, first);
 		ImGui::EndDisabled();
-		ui_kit::tooltip_lazy([&] { return first.label + "\n\n" + first.detail + (allowed ? "" : std::string("\n") + kWaits); });
+		ui_kit::tooltip_lazy([&] { return fix_tip(first, note, allowed); });
 		if (fixes.size() == 1) return;
 		ImGui::SameLine();
 		open = ImGui::Button("More");
 	} else {
 		open = ui_kit::fitted_button("Fix...", "fixes", room);
 	}
-	ui_kit::tooltip("Every fix for this problem");
+	ui_kit::tooltip(note.empty() ? std::string("Every fix for this problem") : "Every fix for this problem\n\n" + note);
 	if (!open) return;
 	more_ = list_.ref(view, finding);
 	open_more_ = true;
@@ -354,6 +371,9 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 		return;
 	}
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
+	// The game's own data's: said first (S15).
+	const std::string note = shipped_note(view.findings.diagnostics[finding], view);
+	if (!note.empty()) ImGui::TextDisabled("%s", note.c_str());
 	for (const ProblemFix &fix : list_.fixes(view, finding)) {
 		const bool allowed = view.allows(fix.request.kind);
 		const bool clicked = ImGui::Selectable(fix.label.c_str(), false, allowed ? 0 : ImGuiSelectableFlags_Disabled);

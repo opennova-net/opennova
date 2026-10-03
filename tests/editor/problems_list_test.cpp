@@ -13,6 +13,8 @@
 // for nothing) and another project closing it; and the fixes planned only for the findings
 // asked, never for every one a refresh lists.
 #include <cstdio>
+#include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -367,6 +369,15 @@ int test_proposals() {
 	            made.requests[0].kind == EditorRequestKind::CreateFile &&
 	            made.requests[0].path == "skin.tga" && made.requests[0].file_kind == "texture" &&
 	            made.requests[1].path == "puff.tga");
+	// The same two in files that are the game's own data (ADR 0046 S15): their group, folded at first,
+	// offers no Fix all (it would change the original's files in bulk); each finding keeps its own fix.
+	textures.findings.original_files =
+	        std::make_shared<const std::set<std::string>>(std::set<std::string>{"models/tank.3di", "fx.ptl"});
+	textures.revisions.touch(ViewConcern::Findings);
+	ProblemsList shipped;
+	const ProblemAnswer &apart = shipped.refresh(textures);
+	TEST_EXPECT(apart.groups.size() == 1 && apart.groups[0].original && shipped.folded(kOriginalGroupKey));
+	TEST_EXPECT(shipped.group_fixes(0).requests.empty() && shipped.fixes(textures, 0).size() == 1);
 
 	// No Rewrite of a file that does not serialize; Only fixable: the finding a fix is offered for.
 	SessionView rewrite;

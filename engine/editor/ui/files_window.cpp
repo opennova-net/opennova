@@ -14,6 +14,7 @@
 #include <editor/graph/rename_transaction.h>
 #include <editor/import/import_run.h>
 #include <editor/project/project_files.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -187,8 +188,10 @@ void FilesWindow::refresh(const SessionView &view) {
 	for (const Diagnostic &d : view.findings.diagnostics) {
 		if (d.asset.empty()) continue;
 		Counts &counts = counts_[d.asset];
-		if (d.severity == DiagnosticSeverity::Error) ++counts.errors;
-		else if (d.severity == DiagnosticSeverity::Warning) ++counts.warnings;
+		// The game's own data's apart, as Problems counts them (S15).
+		const bool original = in_original_data(d, view);
+		if (d.severity == DiagnosticSeverity::Error) ++(original ? counts.original_errors : counts.errors);
+		else if (d.severity == DiagnosticSeverity::Warning) ++(original ? counts.original_warnings : counts.warnings);
 	}
 	if (!entry_at(view, selected_)) selected_.clear();
 }
@@ -448,11 +451,14 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		                  size_text(entry.size_bytes);
 		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
 		if (dirty) tip += "\nUnsaved changes";
-		if (counts.errors || counts.warnings)
-			tip += "\n" + std::to_string(counts.errors) +
-			       (counts.errors == 1 ? " error, " : " errors, ") +
-			       std::to_string(counts.warnings) +
-			       (counts.warnings == 1 ? " warning" : " warnings") + ": see Problems";
+		const auto said = [](size_t errors, size_t warnings) {
+			return std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
+			       (warnings == 1 ? " warning" : " warnings");
+		};
+		if (counts.errors || counts.warnings) tip += "\n" + said(counts.errors, counts.warnings) + ": see Problems";
+		if (counts.original_errors || counts.original_warnings)
+			tip += "\n" + said(counts.original_errors, counts.original_warnings) +
+			       " in the game's own data (the file is the install's, the original has them too)";
 		return tip;
 	});
 	ImGui::SameLine(0.0f, 0.0f);

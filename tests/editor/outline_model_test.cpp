@@ -21,6 +21,7 @@
 // groups where they tell rows apart, each with its count; a heading closed hides its rows, a reveal
 // opens it, a filter by a record's words keeps its headings), its rows titled with the names given.
 #include <cstdio>
+#include <map>
 #include <memory>
 #include <string>
 #include <utility>
@@ -34,6 +35,7 @@
 #include <editor/documents/strings_document.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/outline_model.h>
+#include <formats/mission/bms_edit.h>
 #include <formats/rtxt/rtxt.h>
 
 #include "common/file_io.h"
@@ -638,12 +640,13 @@ int test_kinds_alike() {
 	return 0;
 }
 
-// A source of names standing in for the graph: the fixture's catalog's three items (ADR 0046 S15).
+// A source of names standing in for the graph: the fixture's catalog's four items (ADR 0046 S15).
 class ItemNames : public NameSource {
 public:
 	ItemNames() {
 		for (const auto &[id, name] : std::vector<std::pair<const char *, const char *>>{
-		             {"106100", "Wire Test Pump"}, {"106101", "Wire Test Armory"}, {"106102", "Wire Test Rifleman"}}) {
+		             {"106100", "Wire Test Pump"}, {"106101", "Wire Test Armory"}, {"106102", "Wire Test Rifleman"},
+		             {"100001", "Marker Alpha"}}) {
 			GraphSymbol symbol;
 			symbol.kind = ReferenceKind::Item;
 			symbol.name = symbol.display = id;
@@ -707,6 +710,17 @@ int test_mission_headings() {
 	TEST_EXPECT(events != SIZE_MAX && events + 1 < lines.size() &&
 	            lines[events + 1].brief == "#" + std::to_string(ssn) + " is in zone 20");
 	TEST_EXPECT(lines[organics + 1].brief == "#" + std::to_string(ssn) + " Wire Test Rifleman");
+	// The markers under their types (their items): a type of two or more under a heading of its words
+	// (its item's name, else its id), one deeper than the pool's; a type of one marker under the pool alone.
+	std::map<int64_t, size_t> marker_types;
+	for (const Node *row : dynamic_cast<const MissionDocument &>(*mission).rows_of(MissionKind::Marker))
+		++marker_types[opennova::mission::entity_item_id(static_cast<const EntityRow *>(row)->native)];
+	TEST_EXPECT(marker_types.size() > 1);
+	for (const auto &[item, count] : marker_types) {
+		const std::string words = item == 100001 ? "Marker Alpha" : "Item " + std::to_string(item);
+		const size_t heading = line_named(words + " (" + std::to_string(count) + ")");
+		TEST_EXPECT(count > 1 ? heading != SIZE_MAX && lines[heading].heading && lines[heading].depth == 1 : heading == SIZE_MAX);
+	}
 	// The names' generation moved: the lines made anew; none given: the document's own words.
 	const size_t made = tree.lines_made();
 	names.generation_ = 8;

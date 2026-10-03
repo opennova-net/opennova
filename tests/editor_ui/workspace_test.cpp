@@ -1120,6 +1120,20 @@ void test_files_window() {
 			"readme.txt"}),
 	      "the file count; the folders sorted, each over its files; an import beside its source; the counts after a name");
 	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
+	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
+	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
+	v.findings.original_files = std::make_shared<const std::set<std::string>>(std::set<std::string>{"defs/items.def"});
+	v.revisions.touch(ViewConcern::Findings);
+	ui.frames(2);
+	text = files_text();
+	const size_t items_at = text.find("items.def"), size_at = text.find("3.0 KB");
+	CHECK(items_at != std::string::npos && size_at != std::string::npos && size_at > items_at &&
+	              text.substr(items_at + 9, size_at - items_at - 9).find_first_of("0123456789") == std::string::npos,
+	      "the game's own data: no counts after its name");
+	v.findings.original_files.reset();
+	v.revisions.touch(ViewConcern::Findings);
+	ui.frames(2);
+	text = files_text();
 	ImGuiTable *files_table = ImGui::TableFindByID(table);
 	CHECK(files_table && files_table->ColumnsCount == 3 && !files_table->Columns[1].IsEnabled &&
 	              files_table->Columns[0].WidthGiven > 2.0f * files_table->Columns[2].WidthGiven &&

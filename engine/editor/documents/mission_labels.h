@@ -63,12 +63,14 @@ std::unique_ptr<MissionNames> mission_label_names(const MissionDocument &documen
 
 // The headings the mission's outline groups its rows under (ui/outline_model's OutlineSpec::groups),
 // one list per row in the document's order: the mission row under none; an entity under its pool
-// ("Organics"), then its team where the pool holds more than one ("Team 2"), then its group where its
-// team holds more than one in the pool and the group more than one row ("Group 3", "No group"; a row
-// alone in its group stands under its team, before the group headings); a path, an area and an
-// event under their kind ("Waypoint paths", "Area triggers", "Events"). The pools and the kinds in
-// the file's bands' order, the teams and the groups by number.
-void mission_row_headings(const Document &document, std::vector<std::vector<RowHeading>> &out);
+// ("Organics"), a marker then under its type, its item ("Waypoint", by its catalog's name with
+// `names`, else "Item 100001"), where the markers are of more than one; then its team where the pool
+// (the marker's type) holds more than one ("Team 2"), then its group where its team holds more than
+// one and the group more than one row ("Group 3", "No group"); a heading over a single row is left out
+// (the row stands under the heading before it, before that heading's own headings); a path, an area
+// and an event under their kind ("Waypoint paths", "Area triggers", "Events"). The pools and the kinds
+// in the file's bands' order, the types by their words, the teams and the groups by number.
+void mission_row_headings(const Document &document, const NameSource *names, std::vector<std::vector<RowHeading>> &out);
 
 // --- values ------------------------------------------------------------------------------------------
 

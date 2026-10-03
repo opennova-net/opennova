@@ -173,7 +173,9 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 				folded_.erase(group.key);
 			}
 			lines_.push_back({true, g, 0});
-			group_fixes_.push_back(propose(view, fix_all_of(view, group.rows)));
+			// No Fix all over the game's own data (S15): it would change the original's files in bulk; a
+			// finding there is fixed one at a time, marked as editing a file the game ships.
+			group_fixes_.push_back(group.original ? Proposal() : propose(view, fix_all_of(view, group.rows)));
 			if (folded_.count(group.key)) continue;
 			for (const size_t finding : group.rows) lines_.push_back({false, g, finding});
 		}

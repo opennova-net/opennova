@@ -161,7 +161,7 @@ const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, No
 void OutlineModel::make_groups(const Document &document) {
 	if (!groups_) return;
 	std::vector<std::vector<OutlineGroup>> groups;
-	groups_(document, groups);
+	groups_(document, names_, groups);
 	for (size_t i = 0; i < rows_.size(); ++i) rows_[i].groups = i < groups.size() ? std::move(groups[i]) : std::vector<OutlineGroup>();
 }
 

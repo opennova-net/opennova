@@ -1,6 +1,7 @@
 // The mission's display names (mission_labels.h, ADR 0046 S15 Names).
 #include <editor/documents/mission_labels.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -383,26 +384,52 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 
 // --- records ------------------------------------------------------------------------------------------
 
-void mission_row_headings(const Document &document, std::vector<std::vector<RowHeading>> &out) {
+void mission_row_headings(const Document &document, const NameSource *names, std::vector<std::vector<RowHeading>> &out) {
 	const auto &rows = document.rows();
 	out.assign(rows.size(), std::vector<RowHeading>());
-	// Each pool's teams, each pool's team's groups and how many rows each holds (a team shown only where
-	// it tells rows apart; a group only where it does and holds more than one row: a vehicle in a group of
-	// its own stands under its team, not under a heading over itself alone).
-	std::map<NodeKind, std::set<int>> teams;
-	std::map<std::pair<NodeKind, int>, std::set<int>> groups;
-	std::map<std::tuple<NodeKind, int, int>, size_t> members;
+	// A marker's type is its item (a waypoint, a spawn point, the map's centre): the markers stand under
+	// their types first. Each pool's types, each type's teams, each team's groups and how many rows each
+	// holds, a heading shown only where it tells rows apart and holds more than one row (a vehicle in a
+	// group of its own stands under its team, not under a heading over itself alone).
+	const auto type_of = [](const Node &row, const bms::Entity &entity) {
+		return row.kind == k(K::Marker) ? int64_t(entity_item_id(entity)) : int64_t(-1);
+	};
+	using Type = std::pair<NodeKind, int64_t>;
+	std::map<NodeKind, std::set<int64_t>> types;
+	std::map<Type, size_t> typed;
+	std::map<Type, std::set<int>> teams;
+	std::map<std::tuple<NodeKind, int64_t, int>, std::set<int>> groups;
+	std::map<std::tuple<NodeKind, int64_t, int, int>, size_t> members;
 	for (const auto &row : rows) {
 		if (!row || !is_entity_kind(row->kind)) continue;
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
-		teams[row->kind].insert(entity.team);
-		groups[{row->kind, entity.team}].insert(entity.group_id);
-		++members[{row->kind, entity.team, entity.group_id}];
+		const int64_t type = type_of(*row, entity);
+		types[row->kind].insert(type);
+		++typed[{row->kind, type}];
+		teams[{row->kind, type}].insert(entity.team);
+		groups[{row->kind, type, entity.team}].insert(entity.group_id);
+		++members[{row->kind, type, entity.team, entity.group_id}];
 	}
 	const auto number = [](char prefix, int value) {
 		char key[16];
 		std::snprintf(key, sizeof(key), "%c%03d", prefix, value);
 		return std::string(key);
+	};
+	// A type's words: its item's catalog name, else its id; keyed by them (without case, no "/",
+	// which joins the keys of the headings over a row), so the types read in order.
+	const auto key_words = [](std::string text) {
+		text = strutil::to_lower(text);
+		std::replace(text.begin(), text.end(), '/', '|');
+		return text;
+	};
+	std::map<int64_t, RowHeading> type_headings;
+	const auto type_heading = [&](int64_t item) -> const RowHeading & {
+		auto found = type_headings.find(item);
+		if (found != type_headings.end()) return found->second;
+		const DisplayName words = mission_item_display(item, names);
+		const std::string text = words.text.empty() || words.dangling ? "Item " + std::to_string(item) : words.text;
+		return type_headings.emplace(item, RowHeading{"i" + key_words(text) + "\x1f" + std::to_string(item), text})
+		        .first->second;
 	};
 	for (size_t i = 0; i < rows.size(); ++i) {
 		const auto &row = rows[i];
@@ -415,8 +442,10 @@ void mission_row_headings(const Document &document, std::vector<std::vector<RowH
 		out[i].push_back({key, std::string(kind ? kind->row().label : "Record") + "s"});
 		if (!is_entity_kind(row->kind)) continue;
 		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
-		if (teams[row->kind].size() > 1) out[i].push_back({number('t', entity.team), "Team " + std::to_string(entity.team)});
-		if (groups[{row->kind, entity.team}].size() > 1 && members[{row->kind, entity.team, entity.group_id}] > 1)
+		const int64_t type = type_of(*row, entity);
+		if (types[row->kind].size() > 1 && typed[{row->kind, type}] > 1) out[i].push_back(type_heading(type));
+		if (teams[{row->kind, type}].size() > 1) out[i].push_back({number('t', entity.team), "Team " + std::to_string(entity.team)});
+		if (groups[{row->kind, type, entity.team}].size() > 1 && members[{row->kind, type, entity.team, entity.group_id}] > 1)
 			out[i].push_back({number('g', entity.group_id),
 			                  entity.group_id ? "Group " + std::to_string(entity.group_id) : std::string("No group")});
 	}
