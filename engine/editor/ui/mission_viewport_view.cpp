@@ -15,6 +15,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_options.h>
@@ -498,13 +499,15 @@ void MissionViewportView::Tools::events_using(Workspace &workspace, const Missio
 		ImGui::TextDisabled("No event names it.");
 		return;
 	}
+	const GraphNameSource names(*graph);
 	for (size_t i = 0; i < users.size(); ++i) {
 		const GraphEdge &edge = *users[i];
 		std::string label = edge.record.empty() ? edge.source : edge.record;
 		if (edge.source == mission.path() && edge.address.row) {
+			// The event (its sentence) and the trigger or action, by the display names.
 			const NodeAddress row{ edge.address.row, edge.address.kind, 0 };
-			label = document->record_title(row);
-			if (edge.address.child) label += ", " + document->record_title(edge.address);
+			label = record_display(*document, row, &names);
+			if (edge.address.child) label += ": " + record_display(*document, edge.address, &names);
 		}
 		ImGui::PushID(int(i));
 		if (ImGui::MenuItem(ui_kit::fit(label, ImGui::GetFontSize() * 24.0f).c_str()))

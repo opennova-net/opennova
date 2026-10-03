@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <unordered_map>
 #include <variant>
 
@@ -11,6 +12,7 @@
 #include <editor/assets/project_asset_source.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_hint.h>
@@ -75,6 +77,14 @@ Edit set_of(const NodeAddress &record, const char *field, Value value) {
 	edit.field = field;
 	edit.value = std::move(value);
 	return edit;
+}
+
+// A record by the project's names (the display names, S15: an entity by its item's name and SSN).
+std::string title_of(const SessionView &view, const Document &document, const NodeAddress &record) {
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return record_display(document, record, nullptr);
+	const GraphNameSource names(*graph);
+	return record_display(document, record, &names);
 }
 
 } // namespace
@@ -399,7 +409,7 @@ ViewportHit MissionViewport::hit(const ViewportContext &context, float x, float 
 	if (out.index < 0) return out;
 	const MissionMark &mark = shown[size_t(out.index)];
 	out.id = out.current ? mark.record.row : 0;
-	out.name = document->record_title(mark.record);
+	out.name = title_of(context.input.view, *document, mark.record);
 	out.kind = mark.kind;
 	return out;
 }
@@ -417,7 +427,7 @@ std::vector<ViewportHit> MissionViewport::box(const ViewportContext &context, fl
 		hit.current = true;
 		hit.index = index;
 		hit.id = record.row;
-		hit.name = document->record_title(record);
+		hit.name = title_of(context.input.view, *document, record);
 		hit.kind = shown[size_t(index)].kind;
 		out.push_back(std::move(hit));
 	}
@@ -967,13 +977,17 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 	const ViewportContext context = viewport_context(input.view, *this);
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
 	const Selection *selection = selection_of(input, *document);
+	// Each mark by the project's names (the display names, S15).
+	DisplayNameCache titles;
+	std::optional<GraphNameSource> names;
+	if (const AssetGraph *graph = input.view.findings.graph.get()) names.emplace(*graph);
 	for (size_t index = 0; index < shown.size(); ++index) {
 		const MissionMark &mark = shown[index];
 		JsonValue item = JsonValue::make_object();
 		item.set("index", json_number(double(index)));
 		item.set("id", json_number(double(mark.record.row)));
 		item.set("kind", json_string(mark.kind));
-		item.set("name", json_string(document->record_title(mark.record)));
+		item.set("name", json_string(titles.record(*document, mark.record, names ? &*names : nullptr)));
 		item.set("at", mission_point(mark));
 		if (mark.entity >= 0) {
 			const MissionEntityMark &entity = scene_.entities()[size_t(mark.entity)];
@@ -1025,7 +1039,7 @@ io::JsonValue MissionViewport::notes_json(const ViewportInput &input) const {
 			JsonValue note = JsonValue::make_object();
 			note.set("code", json_string("path.stop"));
 			note.set("id", json_number(double(path.row)));
-			note.set("name", json_string(document->record_title(NodeAddress{ path.row, path.kind, 0 })));
+			note.set("name", json_string(title_of(input.view, *document, NodeAddress{ path.row, path.kind, 0 })));
 			note.set("stop", json_number(double(stop)));
 			note.set("message", json_string("Stop " + std::to_string(stop + 1) + " names no marker."));
 			notes.push(std::move(note));

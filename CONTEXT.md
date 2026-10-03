@@ -747,6 +747,15 @@ and shown where it stands when the removal is undone; a moved one is moved in pl
 places the mission again.
 _Avoid_: spawned (what the game does at run time), dynamic, unplaced
 
+**Palette**:
+The mission viewport's list of what its Place tool places: every item the project's catalogs define,
+by its name, in a group of what items.def says it is (People, Vehicles, Objects, Buildings,
+Decoration and foliage, Markers, Effects), each with the pool a placed one lands in and the model it
+draws, searchable, the recently placed first. One is picked, then each click on the picture places
+one of it; or one is dragged onto the picture. The viewport's tool (Select, Place, Path stops, Area),
+its picked item and its picked path are its options, set by its toolbar and by the wire alike.
+_Avoid_: item list, catalog (the items.def file), library, browser (NovaWorld's)
+
 **Script device**:
 A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
 a Godot code editor placed over its Document tab, which owns the pointer and the keys there and

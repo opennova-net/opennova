@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/graph/display_names.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
@@ -147,6 +148,9 @@ private:
 	std::vector<MissionPressed> nudge_;
 	std::vector<NodeAddress> nudged_;
 	double nudge_east_ = 0.0, nudge_north_ = 0.0, nudge_up_ = 0.0;
+	// The marks' titles by the project's names (the labels, the hint), kept while the document and the
+	// graph stand.
+	mutable DisplayNameCache titles_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;

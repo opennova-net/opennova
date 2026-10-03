@@ -5,7 +5,10 @@
 #include <cstdio>
 
 #include <base/io/bam.h>
+#include <optional>
+
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
@@ -539,8 +542,15 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	overlay.selected_rows = &rows;
 	overlay.handle_reach = frame_.editable && frame_.current ? viewport.handle_reach() : 0.0f;
 	overlay.device = frame_.device;
+	// The labels by the project's names (the display names, kept while the document and the graph
+	// stand: a label a mark a frame).
+	const AssetGraph *graph = context.input.view.findings.graph.get();
+	std::optional<GraphNameSource> names;
+	if (graph) names.emplace(*graph);
 	if (const Document *document = frame_.document)
-		overlay.title = [document](const NodeAddress &record) { return document->record_title(record); };
+		overlay.title = [this, document, &names](const NodeAddress &record) {
+			return titles_.record(*document, record, names ? &*names : nullptr);
+		};
 	overlay.marquee = grab_.what == MissionGrab::What::Marquee && gesture_.dragging();
 	overlay.marquee_from = grab_.from;
 	overlay.marquee_to = grab_.to;
@@ -589,7 +599,7 @@ std::string MissionCanvas::hover_tip(const ViewportContext &, const CanvasInput 
 	return std::string();
 }
 
-std::string MissionCanvas::hint(const ViewportContext &, const CanvasInput &in) const {
+std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInput &in) const {
 	MissionHintInput hint;
 	hint.tool = tool();
 	hint.item = item_name_.empty() && item_ ? "item " + std::to_string(item_) : item_name_;
@@ -613,7 +623,10 @@ std::string MissionCanvas::hint(const ViewportContext &, const CanvasInput &in) 
 			const int under = mission_canvas_under(frame_, in);
 			if (under >= 0 && frame_.document) {
 				const MissionMark &mark = frame_.marks[size_t(under)];
-				hint.hovered = frame_.document->record_title(mark.record);
+				const AssetGraph *graph = context.input.view.findings.graph.get();
+				std::optional<GraphNameSource> names;
+				if (graph) names.emplace(*graph);
+				hint.hovered = titles_.record(*frame_.document, mark.record, names ? &*names : nullptr);
 				hint.hovered_area = mark.area >= 0;
 				hint.hovered_selected = is_selected(frame_, under);
 			}
