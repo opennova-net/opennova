@@ -46,9 +46,9 @@ std::string need_words(const ImportNeed &need) {
 // for its cell: a folder or an archive by its own name (the whole path is the tooltip's).
 std::string origin_words(const ImportPlanRow &row, bool short_place) {
 	std::string place = row.found_in;
-	const std::filesystem::path path(row.source.path);
+	const std::filesystem::path path = path_of(row.source.path);
 	if (short_place && !row.source.install && row.source.entry.empty() && !path.parent_path().filename().empty())
-		place = "the folder " + path.parent_path().filename().string();
+		place = "the folder " + utf8_of(path.parent_path().filename());
 	else if (short_place && !row.source.install && !row.source.entry.empty())
 		place = "the archive " + basename_of(row.source.path);
 	return row.made_from.empty() ? place : "made from " + row.made_from + ", " + place;

@@ -1,10 +1,10 @@
 #include <editor/import/converter.h>
 
-#include <filesystem>
 #include <sstream>
 
 #include <base/io/strutil.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_o3a_read.h>
 #include <formats/threedi/threedi_o3d_read.h>
@@ -12,7 +12,6 @@
 #include <runtime/renderer/material_descriptor.h>
 #include <runtime/renderer/material_texture.h>
 
-namespace fs = std::filesystem;
 
 namespace opennova::editor {
 namespace {
@@ -41,7 +40,7 @@ bool run_o3d(const std::string &source_name, const std::vector<uint8_t> &bytes, 
 	std::istringstream text(std::string(bytes.begin(), bytes.end()));
 	std::vector<threedi::SceneFinding> findings;
 	ImportOutput model;
-	model.name = fs::path(source_name).stem().generic_string() + ".3di";
+	model.name = utf8_of(path_of(source_name).stem()) + ".3di";
 	const bool built = threedi::threedi_o3d_build(text, renderer::material_descriptor_tangent_lookup,
 	                                              renderer::material_texture_dds_only, model.bytes, findings);
 	add_findings(source_name, findings, out);
@@ -66,7 +65,7 @@ bool run_o3a(const std::string &source_name, const std::vector<uint8_t> &bytes, 
 	if (!read || failed(out)) return false;
 	const bool lone = set.rows.empty() && set.clips.size() == 1;
 	const std::string name = lone ? set.clips[0].name + ".bad"
-	                         : set.adm_name.empty() ? fs::path(source_name).stem().generic_string() + ".adm"
+	                         : set.adm_name.empty() ? utf8_of(path_of(source_name).stem()) + ".adm"
 	                                                : set.adm_name;
 	std::vector<bad::BadMintedFile> files;
 	std::string error;
@@ -94,7 +93,7 @@ const std::vector<Converter> &converters() {
 }
 
 const Converter *converter_for(const std::string &source_name) {
-	const std::string extension = strutil::to_lower(fs::path(source_name).extension().generic_string());
+	const std::string extension = strutil::to_lower(utf8_of(path_of(source_name).extension()));
 	if (extension.empty()) return nullptr;
 	for (const Converter &converter : converters())
 		for (const std::string &candidate : converter.extensions)

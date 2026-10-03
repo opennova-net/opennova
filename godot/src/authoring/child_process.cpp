@@ -66,6 +66,36 @@ std::wstring native_path(std::string path) {
 	return to_wide(path);
 }
 
+// A path CreateProcessW takes: one past `limit` characters (the system's current directory holds
+// MAX_PATH less its trailing backslash and terminator; an image MAX_PATH less its terminator) given
+// in its 8.3 form where the volume keeps one, asked through the extended form a long path needs;
+// empty where even that is past the limit (the spawn is refused, never handed a path it would cut).
+std::wstring within(const std::wstring &path, size_t limit) {
+	if (path.size() <= limit) {
+		return path;
+	}
+	std::wstring extended = path;
+	if (path.rfind(L"\\\\?\\", 0) != 0) {
+		extended = path.rfind(L"\\\\", 0) == 0 ? L"\\\\?\\UNC\\" + path.substr(2) : L"\\\\?\\" + path;
+	}
+	const DWORD needed = GetShortPathNameW(extended.c_str(), nullptr, 0);
+	if (needed == 0) {
+		return std::wstring();
+	}
+	std::wstring out(static_cast<size_t>(needed), L'\0');
+	const DWORD written = GetShortPathNameW(extended.c_str(), out.data(), needed);
+	if (written == 0 || written >= needed) {
+		return std::wstring();
+	}
+	out.resize(written);
+	if (out.rfind(L"\\\\?\\UNC\\", 0) == 0) {
+		out = L"\\\\" + out.substr(8);
+	} else if (out.rfind(L"\\\\?\\", 0) == 0) {
+		out.erase(0, 4);
+	}
+	return out.size() <= limit ? out : std::wstring();
+}
+
 bool has_exited(HANDLE handle) {
 	return WaitForSingleObject(handle, 0) == WAIT_OBJECT_0;
 }
@@ -128,9 +158,10 @@ bool ChildProcessPlatform::can_spawn() const {
 
 int64_t ChildProcessPlatform::spawn(const opennova::editor::LaunchPlan &plan) {
 #ifdef _WIN32
-	const std::wstring exe = native_path(plan.executable);
-	const std::wstring cwd = native_path(plan.working_dir);
-	if (exe.empty()) {
+	// A run directory or an image under a deep project, past what the call takes, in its short form.
+	const std::wstring exe = within(native_path(plan.executable), MAX_PATH - 1);
+	const std::wstring cwd = within(native_path(plan.working_dir), MAX_PATH - 2);
+	if (exe.empty() || (!plan.working_dir.empty() && cwd.empty())) {
 		return -1;
 	}
 	std::wstring command = quote_arg(exe);
