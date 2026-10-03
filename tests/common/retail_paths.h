@@ -82,10 +82,20 @@ inline bool dir_exists(const std::string &path) {
     return !path.empty() && std::filesystem::is_directory(path, ec);
 }
 
+// A root's directory, or "" when the variable is unset or names no existing
+// directory: a root naming a missing folder is missing data, so every gated
+// test skips on it as on an unset root (the rule godot/tests/support/
+// retail_data.gd _dir keeps) instead of walking a directory that is not there
+// (a directory_iterator on it throws; the lwf / cpt / particle sweeps died on it).
+inline std::string root_dir(const char *variable) {
+    const std::string root = strip_trailing_separators(env_or_empty(variable));
+    return dir_exists(root) ? root : std::string();
+}
+
 // The packed retail install, or "".
-inline std::string install() { return selected() ? strip_trailing_separators(env_or_empty("OPENNOVA_JO_DIR")) : std::string(); }
+inline std::string install() { return selected() ? root_dir("OPENNOVA_JO_DIR") : std::string(); }
 // The extracted retail asset tree, or "".
-inline std::string assets() { return selected() ? strip_trailing_separators(env_or_empty("OPENNOVA_JO_ASSETS")) : std::string(); }
+inline std::string assets() { return selected() ? root_dir("OPENNOVA_JO_ASSETS") : std::string(); }
 inline std::string lower_ascii(std::string s) {
     for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
     return s;
