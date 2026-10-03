@@ -16,6 +16,7 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/model_labels.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
@@ -28,6 +29,7 @@
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
 #include <runtime/anim/anim_event_bits.h>
+#include <runtime/renderer/object_lod.h>
 
 namespace opennova::editor {
 
@@ -161,6 +163,10 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		}
 	}
 	tools_->toolbar(workspace, model, context);
+	// A LOD with no part draws nothing (retail ships empty LODs): said, not left a blank picture.
+	const int lod = model.lod();
+	if (lod >= 0 && size_t(lod) < model.model()->lod_count && model.model()->lods[lod].render_object_count == 0)
+		ImGui::TextDisabled("LOD %d holds no part: there is nothing to draw at it.", lod);
 	snap = kModelHandleSnaps[std::clamp(tools_->snap, 0, 4)];
 	context.snap = snap;
 	const float timeline =
@@ -368,29 +374,42 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	const float unit = ImGui::GetFontSize();
 	int32_t projected = 0;
 	const int automatic = model.auto_lod(&projected);
-	char label[48];
-	if (options.lod < 0) std::snprintf(label, sizeof(label), "Auto (level %d)", automatic);
-	else std::snprintf(label, sizeof(label), "Level %d", std::min(options.lod, int(shown.lod_count) - 1));
+	// The LODs as the outline names them (documents/model_labels.h): by index, what each draws at and
+	// its parts; a LOD the game's walk never reaches says so.
+	std::vector<int32_t> thresholds;
+	for (size_t i = 0; i < shown.lod_count; ++i) thresholds.push_back(shown.lods[i].lod_threshold);
+	const int held = options.lod < 0 ? -1 : std::min(options.lod, int(shown.lod_count) - 1);
+	const std::string label = options.lod < 0 ? "Auto (LOD " + std::to_string(automatic) + ")" : "LOD " + std::to_string(held);
 	ui_kit::WrapRow row;
-	row.next(ui_kit::field_width(unit * 11.0f, "Level"));
+	row.next(ui_kit::field_width(unit * 11.0f, "LOD"));
 	ImGui::SetNextItemWidth(unit * 11.0f);
-	if (ImGui::BeginCombo("Level", label)) {
+	if (ImGui::BeginCombo("LOD", label.c_str())) {
 		if (ImGui::Selectable("Auto", options.lod < 0)) options.lod = -1;
+		ui_kit::tooltip("The LOD the game picks at this distance.");
 		for (size_t i = 0; i < shown.lod_count; ++i) {
-			char text[48];
-			std::snprintf(text, sizeof(text), "Level %d (%d px)", int(i), int(shown.lods[i].lod_threshold));
-			if (ImGui::Selectable(text, options.lod == int(i))) options.lod = int(i);
+			const size_t parts = shown.lods[i].render_object_count;
+			const std::string text = "LOD " + std::to_string(i) + ": " + model_lod_range(thresholds, i) + ", " +
+			                         (parts ? std::to_string(parts) + (parts == 1 ? " part" : " parts") : std::string("no parts"));
+			if (!model_lod_drawn(thresholds, i)) ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			if (ImGui::Selectable(text.c_str(), options.lod == int(i))) options.lod = int(i);
+			if (!model_lod_drawn(thresholds, i)) ImGui::PopStyleColor();
 		}
 		ImGui::EndCombo();
 	}
-	ui_kit::tooltip("Auto draws the level the game picks at this distance: the model's projected "
-	                "radius against each level's threshold. A level held stays at any distance.");
-	char radius[32];
-	std::snprintf(radius, sizeof(radius), "%.1f px", projected / 65536.0);
+	ui_kit::tooltip("Auto draws the LOD the game picks at this distance: the model's projected radius "
+	                "against each LOD's threshold, LOD 0 first, the walk stopping at the first 0. A LOD held "
+	                "stays at any distance.");
+	// The projected radius Auto measures; the game's own reading inside the model's sphere.
+	const bool inside = projected >= renderer::kObjectLodBehindEyeRadiusQ16;
+	char radius[48];
+	if (inside) std::snprintf(radius, sizeof(radius), "inside its sphere");
+	else std::snprintf(radius, sizeof(radius), "radius %.0f px", projected / 65536.0);
 	row.next(ui_kit::text_width(radius));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", radius);
-	ui_kit::tooltip("The model's projected radius, the size Auto measures.");
+	ui_kit::tooltip(inside ? "The eye is inside the model's projection sphere: the game reads a 4096 px radius "
+	                         "there and draws LOD 0."
+	                       : "The model's projected radius on the picture, the size Auto measures.");
 	// The preview clock: Run or Pause (Play is the game's); a clip's timeline runs and holds the same
 	// clock, so an animation has its button there alone.
 	const bool playing = context.input.clock.playing();
@@ -423,11 +442,18 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	                "Alt to place freely.");
 	row.next(ui_kit::button_width("Frame"));
 	if (ImGui::Button("Frame")) {
-		// The selected record's marker, else the whole model.
+		// The selected record's marker, else the whole model (a record with no marker, a texture or a
+		// material, frames the whole model, as F does).
 		const SessionView &view = workspace.view();
 		std::vector<NodeId> ids;
-		if (view.documents.active == model.path() && view.documents.selection.primary.child)
-			ids.push_back(view.documents.selection.primary.child);
+		const NodeAddress &selected = view.documents.selection.primary;
+		const auto *document = dynamic_cast<const ModelDocument *>(
+				context.input.document ? records_of(*context.input.document) : nullptr);
+		ModelOverlayKind kind;
+		int index = -1;
+		if (view.documents.active == model.path() && selected.child && document &&
+		    model_overlay_of(*document, selected, kind, index))
+			ids.push_back(selected.child);
 		CanvasWindowRequests requests(workspace);
 		std::string error;
 		model.command(context, "frame", ids, requests, error);

@@ -5,6 +5,7 @@
 
 #include <editor/documents/animation_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/documents/model_labels.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/session/request_factories.h>
@@ -303,8 +304,13 @@ OverlayList ModelCanvas::shapes(
 std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under, int bone_under) const {
 	if (gesture_.dragging())
 		return std::string();
-	if (under >= 0 && size_t(under) < frame.overlays.size())
-		return frame.overlays[size_t(under)].name;
+	if (under >= 0 && size_t(under) < frame.overlays.size()) {
+		// A user point by its name and what the game reads it as (documents/model_labels.h).
+		const ModelOverlay &overlay = frame.overlays[size_t(under)];
+		const std::string role =
+		    overlay.kind == ModelOverlayKind::UserPoint ? model_user_point_role(overlay.name) : std::string();
+		return role.empty() ? overlay.name : overlay.name + ": " + role;
+	}
 	if (bone_under < 0 || size_t(bone_under) >= frame.joints.size())
 		return std::string();
 	// A joint by its bone's name, and what a click does where the clip is open.
