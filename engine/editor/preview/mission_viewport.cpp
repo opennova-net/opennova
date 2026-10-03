@@ -142,7 +142,7 @@ std::unique_ptr<CanvasHalf> MissionViewport::make_canvas() const {
 
 std::vector<MissionMark> MissionViewport::marks(int width, int height, const ViewportDevice *device) const {
 	if (reason_ != MissionViewStatus::Ready) return {};
-	return mission_marks(scene_, options_, camera_, width, height, device);
+	return mission_marks(scene_, options_, camera_, width, height, device, &bounds_.radii());
 }
 
 bool MissionViewport::pressed(const NodeAddress &record, MissionPressed &out) const {
@@ -271,6 +271,18 @@ OrbitCamera MissionViewport::framed(const std::vector<MissionMark> &marks, const
 	return camera;
 }
 
+void MissionViewport::bound_items_(const SessionView &view) {
+	// Asked again only when the scene or the graph moved: a pump with neither walks nothing.
+	const uint64_t graph = view.findings.graph ? view.findings.graph->generation() : 0;
+	if (bounds_serial_ == scene_.serial() && bounds_graph_ == graph) return;
+	bounds_serial_ = scene_.serial();
+	bounds_graph_ = graph;
+	std::vector<int64_t> items;
+	items.reserve(scene_.entities().size());
+	for (const MissionEntityMark &entity : scene_.entities()) items.push_back(entity.item);
+	bounds_.refresh(view, items);
+}
+
 ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
 	reason_ = reason;
 	detail_.clear();
@@ -301,6 +313,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 	const bool anew = !picture_.shows() || (input.change != ChangeClass::None && !rows);
 	if (anew) {
 		scene_.read(*source);
+		bound_items_(view);
 		picture_.show(key, generation);
 		shown(*document);
 		if (!framed_) {
@@ -321,6 +334,7 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		delta = scene_.patch(*rows, *source);
 		shown(*document);
 	}
+	bound_items_(view);
 	// A file the device read moved: the picture made again from the files, over the scene as it is.
 	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
 		options_moved_ = false;
@@ -407,7 +421,7 @@ ViewportHit MissionViewport::hit(const ViewportContext &context, float x, float 
 	const Document *document = document_of(context.input);
 	if (reason_ != MissionViewStatus::Ready || !document) return out;
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
-	out.index = pick_mission_mark(shown, x, y);
+	out.index = pick_mission_mark(shown, camera_, context.width, context.height, x, y);
 	if (out.index < 0) return out;
 	const MissionMark &mark = shown[size_t(out.index)];
 	out.id = out.current ? mark.record.row : 0;

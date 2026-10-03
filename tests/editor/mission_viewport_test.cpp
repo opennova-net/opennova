@@ -45,6 +45,7 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
+#include <runtime/world/model_geometry.h>
 #include <runtime/world/presentation_frame.h>
 
 #include "common/file_io.h"
@@ -441,6 +442,65 @@ static int test_hit_and_box() {
 		TEST_EXPECT(now[size_t(boxed[i - 1].index)].depth <= now[size_t(boxed[i].index)].depth);
 	}
 	std::printf("test_hit_and_box passed\n");
+	return 0;
+}
+
+// The polish: an entity is picked by its item's bound sphere about its position (the model's GHDR
+// radius by the item's SCALE, padded, none without a collision block: mission_item_bound_radius, the
+// game's entity+0), read once per item while the graph stands; a pump clicked well above its anchor,
+// past the slop, is picked through the viewport's hit, and the facts a drop reads carry the bound (the
+// scaled pump's by its SCALE).
+static int test_sphere_picking() {
+	Rig rig("opennova_editor_mission_viewport_spheres");
+	TEST_EXPECT(rig.open(true, true));
+	const MissionViewport *viewport = rig.viewport();
+	const SessionView &view = rig.session.view();
+	const std::vector<uint8_t> bytes = test_io::read_file(fixture("threedi/synth/pump.3di"));
+	opennova::threedi::Threedi3di3 model{};
+	TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &model) == 0);
+	const bool collision = model.collision != nullptr;
+	const int32_t radius_q16 = opennova::world::model_bound_radius_q16_from_3di(model);
+	opennova::threedi::threedi_3di3_free(&model);
+	TEST_EXPECT(collision && radius_q16 > 0);
+	const double pump = mission_item_bound_radius(radius_q16, true, 0, false, 0);
+	TEST_EXPECT(near(pump, double(radius_q16 + 0x1000) / 65536.0, 1e-9));
+	TEST_EXPECT(mission_item_bound_radius(radius_q16, false, 0, false, 0) == 0.0);
+	const auto &radii = viewport->bounds().radii();
+	TEST_EXPECT(radii.count(106100) == 1 && near(radii.at(106100), pump, 1e-4));
+	MissionItemFacts facts;
+	std::string error;
+	TEST_EXPECT(mission_item_facts(view, 106100, facts, error) && near(facts.radius, pump, 1e-9));
+	TEST_EXPECT(mission_item_facts(view, 106103, facts, error) &&
+			near(facts.radius, mission_item_bound_radius(radius_q16, true, int32_t(1.5 * 65536.0), false, 0), 1e-9) &&
+			facts.radius > pump * 1.4);
+	TEST_EXPECT(mission_item_facts(view, 100001, facts, error) && facts.radius == 0.0); // a marker draws no model
+	// Asked once: a pump with nothing changed reads no file again.
+	const size_t read = viewport->bounds().files_read();
+	TEST_EXPECT(read > 0);
+	rig.pump();
+	TEST_EXPECT(viewport->bounds().files_read() == read);
+	// A pump framed close, clicked above its anchor by most of its radius: the pump's.
+	const MissionEntityMark *target = nullptr;
+	for (const MissionEntityMark &entity : viewport->scene().entities())
+		if (!target && entity.item == 106100) target = &entity;
+	TEST_EXPECT(target != nullptr);
+	OrbitCamera camera = viewport->camera();
+	camera.target = target->at;
+	camera.distance = float(pump) * 8.0f;
+	rig.session.handle(request::set_viewport(kMission, mission_camera_change(camera)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const ViewportContext context = rig.context();
+	const std::vector<MissionMark> marks = viewport->marks(context.width, context.height, context.device);
+	const int index = viewport->scene().mark_index(target->row);
+	TEST_EXPECT(index >= 0 && marks[size_t(index)].shown && near(marks[size_t(index)].radius, pump, 1e-4));
+	float x = 0.0f, y = 0.0f;
+	TEST_EXPECT(viewport->camera().project(mission_scene_point(target->x, target->y, target->z + pump * 0.7), context.width,
+			context.height, x, y));
+	TEST_EXPECT(std::fabs(y - marks[size_t(index)].y) > 2.0f * kMissionPickSlop);
+	const ViewportHit hit = viewport->hit(context, x, y);
+	TEST_EXPECT(hit.index == index && hit.id == target->row && hit.kind == "item");
+	std::printf("test_sphere_picking passed\n");
 	return 0;
 }
 
@@ -1297,6 +1357,7 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(test_files() == 0);
 	TEST_EXPECT(test_camera_frame() == 0);
 	TEST_EXPECT(test_hit_and_box() == 0);
+	TEST_EXPECT(test_sphere_picking() == 0);
 	TEST_EXPECT(test_envelope() == 0);
 	TEST_EXPECT(test_drop() == 0);
 	TEST_EXPECT(test_ground_command() == 0);

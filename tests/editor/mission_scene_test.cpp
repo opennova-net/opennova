@@ -266,7 +266,7 @@ int test_marks() {
 		float x = 0.0f, y = 0.0f;
 		TEST_EXPECT(mark.entity == int(i) && mark.record.row == scene.entities()[i].row && mark.shown);
 		TEST_EXPECT(camera.project(scene.entities()[i].at, width, height, x, y) && x == mark.x && y == mark.y);
-		TEST_EXPECT(pick_mission_mark(marks, mark.x + 3.0f, mark.y - 3.0f) == int(i));
+		TEST_EXPECT(pick_mission_mark(marks, camera, width, height, mark.x + 3.0f, mark.y - 3.0f) == int(i));
 	}
 	TEST_EXPECT(std::string(marks[0].kind) == "item" && std::string(marks[1].kind) == "building" &&
 			std::string(marks[2].kind) == "marker" && std::string(marks[3].kind) == "organic");
@@ -276,7 +276,7 @@ int test_marks() {
 	device.ground = [](double, double) { return 3.5; };
 	marks = mission_marks(scene, options, camera, width, height, &device);
 	TEST_EXPECT(marks[4].at.y == 3.5f);
-	TEST_EXPECT(pick_mission_mark(marks, -100.0f, -100.0f) == -1);
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, -100.0f, -100.0f) == -1);
 	// Two marks on one ray: the nearer wins.
 	source.entity_rows.push_back(entity_of(15, kItemKind, MissionPool::Item, 1, 1, 0.0, 0.0, 50.0, 0, 0));
 	scene.read(source);
@@ -284,11 +284,12 @@ int test_marks() {
 	above.pitch = kOrbitPitchLimit; // straight down: the origin and 50 above it on one ray
 	marks = mission_marks(scene, options, above, width, height, nullptr);
 	TEST_EXPECT(marks[0].shown && marks[4].shown && std::fabs(marks[0].x - marks[4].x) < 0.5f);
-	TEST_EXPECT(pick_mission_mark(marks, marks[0].x, marks[0].y) == 4 && marks[4].depth < marks[0].depth);
+	TEST_EXPECT(pick_mission_mark(marks, above, width, height, marks[0].x, marks[0].y) == 4 && marks[4].depth < marks[0].depth);
 	// A kind's marks off: not shown, not picked; past the range the same; the range 0 is none.
 	options.items = false;
 	marks = mission_marks(scene, options, above, width, height, nullptr);
-	TEST_EXPECT(!marks[0].shown && !marks[4].shown && marks[1].shown && pick_mission_mark(marks, marks[0].x, marks[0].y) == -1);
+	TEST_EXPECT(!marks[0].shown && !marks[4].shown && marks[1].shown &&
+			pick_mission_mark(marks, above, width, height, marks[0].x, marks[0].y) == -1);
 	options.items = true;
 	options.mark_range = 280.0f;
 	marks = mission_marks(scene, options, above, width, height, nullptr);
@@ -304,6 +305,60 @@ int test_marks() {
 			scene.entities().size() + 1);
 	TEST_EXPECT(mission_box_records(marks, CanvasPoint{ -5.0f, -5.0f }, CanvasPoint{ -1.0f, -1.0f }).empty());
 	std::printf("test_marks passed\n");
+	return 0;
+}
+
+// The polish: an entity whose item has a bound is picked by its sphere about its position (the camera's
+// ray against it, the nearest entry), a glyph within the slop still first; the box by the sphere's
+// centre, its anchor.
+int test_sphere_picks() {
+	Source source = make_source();
+	// A second item 30 m north of the first and 8 m east (the camera south of both, looking north).
+	source.entity_rows.push_back(entity_of(15, kItemKind, MissionPool::Item, 1, 100302, 8.0, 30.0, 0.0, 0, 1));
+	MissionScene scene;
+	scene.read(source);
+	MissionViewportOptions options;
+	OrbitCamera camera = camera_over(0.0, 0.0, 0.0, 60.0f);
+	camera.pitch = 0.2f; // looking north and a little down
+	const int width = 640, height = 480;
+	const MissionPickRadii radii = { { 100300, 8.0f }, { 100302, 12.0f } };
+	const std::vector<MissionMark> marks = mission_marks(scene, options, camera, width, height, nullptr, &radii);
+	TEST_EXPECT(marks.size() == 6 && marks[4].record.row == 15 && marks[5].area == 0);
+	TEST_EXPECT(marks[0].radius == 8.0f && marks[4].radius == 12.0f && marks[1].radius == 0.0f && marks[2].radius == 0.0f);
+	// Clicked 5 m above the first's anchor, past the slop: its sphere takes it, where with no spheres
+	// nothing is under the point.
+	float x = 0.0f, y = 0.0f;
+	TEST_EXPECT(camera.project(mission_scene_point(0.0, 0.0, 5.0), width, height, x, y));
+	TEST_EXPECT(std::fabs(y - marks[0].y) > 2.0f * kMissionPickSlop);
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, x, y) == 0);
+	const std::vector<MissionMark> bare = mission_marks(scene, options, camera, width, height, nullptr);
+	TEST_EXPECT(pick_mission_mark(bare, camera, width, height, x, y) == -1);
+	// Overlap: that ray goes on into the second's sphere (with the second's alone it is the second's),
+	// and the nearer, the first, took it.
+	const MissionPickRadii second = { { 100302, 12.0f } };
+	const std::vector<MissionMark> behind = mission_marks(scene, options, camera, width, height, nullptr, &second);
+	TEST_EXPECT(pick_mission_mark(behind, camera, width, height, x, y) == 4);
+	// 10 m above the second, only its sphere.
+	TEST_EXPECT(camera.project(mission_scene_point(8.0, 30.0, 10.0), width, height, x, y));
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, x, y) == 4);
+	// A glyph within the slop is its own mark first: the ray to the second's anchor passes through the
+	// first's sphere, nearer, yet the click on the glyph is the second's.
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, marks[4].x, marks[4].y) == 4);
+	// The marker (no bound) by its anchor alone.
+	TEST_EXPECT(pick_mission_mark(marks, camera, width, height, marks[2].x + 3.0f, marks[2].y) == 2);
+	// The box takes an entity by its sphere's centre, its anchor: a box over the first's sphere above
+	// its anchor takes nothing; one over its anchor takes it.
+	TEST_EXPECT(camera.project(mission_scene_point(0.0, 0.0, 5.0), width, height, x, y));
+	TEST_EXPECT(mission_box_records(marks, CanvasPoint{ x - 3.0f, y - 3.0f }, CanvasPoint{ x + 3.0f, y + 3.0f }).empty());
+	const std::vector<NodeAddress> boxed = mission_box_records(marks, CanvasPoint{ marks[0].x - 3.0f, marks[0].y - 3.0f },
+			CanvasPoint{ marks[0].x + 3.0f, marks[0].y + 3.0f });
+	TEST_EXPECT(boxed.size() == 1 && boxed[0].row == 10);
+	// The eye inside a sphere: that sphere takes no click (else every click there would be its).
+	OrbitCamera inside = camera_over(0.0, 0.0, 0.0, 3.0f);
+	inside.pitch = 0.2f;
+	const std::vector<MissionMark> near = mission_marks(scene, options, inside, width, height, nullptr, &radii);
+	TEST_EXPECT(pick_mission_mark(near, inside, width, height, 10.0f, 10.0f) != 0);
+	std::printf("test_sphere_picks passed\n");
 	return 0;
 }
 
@@ -496,6 +551,7 @@ int test_label_picks() {
 int main() {
 	TEST_EXPECT(test_scene() == 0);
 	TEST_EXPECT(test_marks() == 0);
+	TEST_EXPECT(test_sphere_picks() == 0);
 	TEST_EXPECT(test_options() == 0);
 	TEST_EXPECT(test_overlays() == 0);
 	TEST_EXPECT(test_label_picks() == 0);

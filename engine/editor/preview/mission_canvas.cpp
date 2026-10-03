@@ -93,7 +93,7 @@ std::string metres(double value) {
 
 int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in) {
 	if (!in.hovered || !frame.viewport) return -1;
-	return pick_mission_mark(frame.marks, in.mouse.x, in.mouse.y);
+	return pick_mission_mark(frame.marks, frame.viewport->camera(), in.width, in.height, in.mouse.x, in.mouse.y);
 }
 
 bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out) {

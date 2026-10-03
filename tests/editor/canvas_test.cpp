@@ -1386,7 +1386,7 @@ struct MissionRig {
 		const std::vector<MissionMark> shown = marks();
 		std::vector<int> out;
 		for (size_t i = 0; i < shown.size(); ++i)
-			if (shown[i].shown && shown[i].entity >= 0 && pick_mission_mark(shown, shown[i].x, shown[i].y) == int(i))
+			if (shown[i].shown && shown[i].entity >= 0 && pick_mission_mark(shown, follow()->camera(), width, height, shown[i].x, shown[i].y) == int(i))
 				out.push_back(int(i));
 		return out;
 	}
@@ -1875,7 +1875,7 @@ int test_mission_handle_tap_and_turn() {
 		const std::vector<MissionMark> marks = rig.marks();
 		if (!viewport->handle_at(marks[size_t(pick)], MissionHandle::Yaw, at) ||
 				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) ||
-				pick_mission_mark(marks, hx, hy) >= 0 || hx < 1.0f || hy < 1.0f || hx > MissionRig::width - 1.0f ||
+				pick_mission_mark(marks, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy) >= 0 || hx < 1.0f || hy < 1.0f || hx > MissionRig::width - 1.0f ||
 				hy > MissionRig::height - 1.0f)
 			continue;
 		held = mark;
@@ -1923,7 +1923,7 @@ int test_mission_group_turn() {
 		float hx = 0.0f, hy = 0.0f;
 		if (!viewport->pressed(primary.record, a) || !viewport->pressed(other.record, b) ||
 				!viewport->handle_at(marks[size_t(picks[i])], MissionHandle::Yaw, handle) ||
-				!viewport->camera().project(handle, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(marks, hx, hy) >= 0)
+				!viewport->camera().project(handle, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(marks, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy) >= 0)
 			continue;
 		double pivot[2];
 		TEST_EXPECT(mission_turn_centre({ a, b }, pivot));
@@ -2032,7 +2032,7 @@ int test_mission_ground_on_canvas() {
 		double anchor[3];
 		preview_to_mission(marks[i].at, anchor);
 		TEST_EXPECT(std::fabs(anchor[2] - ground.ground(mx, my)) < 1e-3);
-		if (pick_mission_mark(marks, marks[i].x, marks[i].y) != int(i)) continue;
+		if (pick_mission_mark(marks, rig.follow()->camera(), MissionRig::width, MissionRig::height, marks[i].x, marks[i].y) != int(i)) continue;
 		requests = rig.click(marks[i].x, marks[i].y);
 		TEST_EXPECT(requests.size() == 1 && requests[0].kind == Request::Kind::Select && requests[0].record == marks[i].record);
 		area = true;
@@ -2214,7 +2214,7 @@ int test_mission_tools() {
 		float hx = 0.0f, hy = 0.0f;
 		const std::vector<MissionMark> now = rig.marks();
 		if (!viewport->handle_at(now[size_t(pick)], MissionHandle::Yaw, at) ||
-				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(now, hx, hy) >= 0)
+				!viewport->camera().project(at, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(now, viewport->camera(), MissionRig::width, MissionRig::height, hx, hy) >= 0)
 			continue;
 		const CanvasInput over = MissionRig::at(hx, hy);
 		rig.step(over);

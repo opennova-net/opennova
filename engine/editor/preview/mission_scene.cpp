@@ -221,7 +221,7 @@ size_t MissionScene::count(MissionPool pool) const {
 // --- marks ---------------------------------------------------------------------------------------
 
 std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionViewportOptions &options,
-		const OrbitCamera &camera, int width, int height, const ViewportDevice *device) {
+		const OrbitCamera &camera, int width, int height, const ViewportDevice *device, const MissionPickRadii *radii) {
 	std::vector<MissionMark> marks;
 	marks.reserve(scene.entities().size() + scene.areas().size());
 	const auto place = [&](MissionMark &mark, bool wanted) {
@@ -236,6 +236,8 @@ std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionV
 		mark.kind = mission_pool_token(entity.pool);
 		mark.at = entity.at;
 		mark.entity = int(i);
+		if (radii)
+			if (const auto radius = radii->find(entity.item); radius != radii->end()) mark.radius = radius->second;
 		place(mark, pool_shown(options, entity.pool));
 		marks.push_back(mark);
 	}
@@ -256,12 +258,39 @@ std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionV
 	return marks;
 }
 
-int pick_mission_mark(const std::vector<MissionMark> &marks, float x, float y, float slop) {
+int pick_mission_mark(const std::vector<MissionMark> &marks, const OrbitCamera &camera, int width, int height, float x,
+		float y, float slop) {
+	// A glyph clicked: the front-most anchor within the slop.
 	int best = -1;
 	for (size_t i = 0; i < marks.size(); ++i) {
 		const MissionMark &mark = marks[i];
 		if (!mark.shown || std::fabs(mark.x - x) > slop || std::fabs(mark.y - y) > slop) continue;
 		if (best < 0 || mark.depth < marks[size_t(best)].depth) best = int(i);
+	}
+	if (best >= 0) return best;
+	// Else a model clicked: the sphere the ray enters nearest. The ray's direction is one unit of depth
+	// a unit, so the entry's parameter is its depth in front of the eye.
+	PreviewVec3 from, direction;
+	if (!camera.ray(x, y, width, height, from, direction)) return -1;
+	const double a = double(direction.x) * direction.x + double(direction.y) * direction.y + double(direction.z) * direction.z;
+	if (!(a > 0.0)) return -1;
+	double nearest = 0.0;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		const MissionMark &mark = marks[i];
+		if (!mark.shown || !(mark.radius > 0.0f)) continue;
+		const double ox = double(from.x) - mark.at.x, oy = double(from.y) - mark.at.y, oz = double(from.z) - mark.at.z;
+		const double b = ox * direction.x + oy * direction.y + oz * direction.z;
+		const double c = ox * ox + oy * oy + oz * oz - double(mark.radius) * mark.radius;
+		const double disc = b * b - a * c;
+		if (disc < 0.0) continue;
+		// Its entry in front of the eye; a sphere the eye stands in (a low camera in a base) takes no
+		// click, or every click there would be its.
+		const double t = (-b - std::sqrt(disc)) / a;
+		if (t < 0.0) continue;
+		if (best < 0 || t < nearest) {
+			best = int(i);
+			nearest = t;
+		}
 	}
 	return best;
 }
