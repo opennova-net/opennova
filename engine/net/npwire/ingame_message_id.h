@@ -237,7 +237,8 @@ inline constexpr uint8_t EMOTE_REQUEST = 0x14;              // i16 Emotes-menu d
 inline constexpr uint8_t WAYPOINT_SHARE = 0x17;
 // The weapon drop (44 B, NetPacket_WriteCompactEntityState @0x42AB40). No
 // stock client reaches its sender, and retail's authority handler terminates
-// on every body that sender writes; an opennova host leaves it unhandled
+// on every body that sender writes on a process's first mission; an opennova
+// host leaves it unhandled
 // (world/powerup-re.md "The weapon2 -pwrup family").
 // [orig: NapiNPServerMsg_HandleWeaponSpawn @0x51A020 (a misnomer); sender
 //  Entity_SpawnVehicleAtEntity @0x4DD920 (a misnomer)]
