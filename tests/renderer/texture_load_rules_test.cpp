@@ -205,9 +205,111 @@ void test_pcx_reader() {
 			"a PCX that is not 8 bits per channel fails");
 }
 
+void test_masks_follow_the_name() {
+	// Texture_LoadAndRegister and the HUD loader mask by the name, after either reader.
+	const TextureLoad plain = only(TextureLoader::Plain, "SKIN.PCX.TGA", mounted({}));
+	CHECK(plain.reader == TextureReader::Tga && plain.transform == TextureLoadTransform::WhiteAlphaFromBlue,
+			"an upper-case .PCX in a TGA's name masks it");
+	const TextureLoad hud = only(TextureLoader::HudColor, "logo.pcx.tga", mounted({}));
+	CHECK(hud.reader == TextureReader::Tga && hud.transform == TextureLoadTransform::WhiteAlphaFromBlue,
+			"the HUD masks a TGA whose name holds .PCX");
+	CHECK(only(TextureLoader::HudColor, "logo.tga", mounted({})).transform == TextureLoadTransform::None,
+			"a plain HUD TGA keeps its colour");
+}
+
+void test_particle_attempts() {
+	const std::vector<TextureLoad> attempts =
+			texture_load_attempts(TextureLoader::Particle, "fx\\spark.tga", mounted({}));
+	CHECK(attempts.size() == 2, "the loose folder, then the mounted name");
+	if (attempts.size() == 2) {
+		CHECK(attempts[0].source == TextureFileSource::ParticleTextureDir &&
+						attempts[0].reader == TextureReader::TgaParticleLoose && attempts[0].file == "fx\\spark.tga",
+				"the loose leg reads the whole name from the particle folder");
+		CHECK(attempts[1].source == TextureFileSource::Mounted && attempts[1].reader == TextureReader::Tga &&
+						attempts[1].file == "spark.tga",
+				"the archive leg reads the part after the last backslash");
+	}
+}
+
+void test_hud_alpha_material() {
+	CHECK(hud_alpha_material_argb(0xFFA0A0A0u) == 0xFFFFFFFFu, "0xA0 doubles and saturates to white");
+	CHECK(hud_alpha_material_argb(0x80102030u) == 0x80204060u, "twice each channel, alpha kept");
+}
+
+void test_side_caps() {
+	CHECK(material_texture_side_cap(4) == 512 && material_texture_side_cap(5) == 512, "normal maps");
+	CHECK(material_texture_side_cap(7) == 512, "the occlusion producer");
+	CHECK(material_texture_side_cap(6) == 0, "the horizon volume is never downsampled");
+	CHECK(material_texture_side_cap(0) == 0 && material_texture_side_cap(1) == 0, "diffuse rows");
+}
+
+void test_dds_codec_order() {
+	const std::vector<DdsCodec> &order = dds_reader_codec_order();
+	CHECK(order.size() == 9 && order[0] == DdsCodec::Bmp && order[2] == DdsCodec::Dds &&
+					order[3] == DdsCodec::Jpeg && order[4] == DdsCodec::Png && order[7] == DdsCodec::Tga,
+			"BMP, PPM, DDS, JPEG, PNG, PFM, HDR, TGA, DIB");
+}
+
+// A minimal 24-bit (NPlanes 3) PCX, raw scanlines of 3 * BytesPerLine bytes.
+std::vector<uint8_t> pcx24(int width, int height, int bpl, const std::vector<uint8_t> &rows) {
+	std::vector<uint8_t> bytes(128, 0);
+	bytes[0] = 0x0A;
+	bytes[1] = 5;
+	bytes[2] = 1;
+	bytes[3] = 8;
+	bytes[8] = static_cast<uint8_t>(width - 1);
+	bytes[10] = static_cast<uint8_t>(height - 1);
+	bytes[0x41] = 3;
+	bytes[0x42] = static_cast<uint8_t>(bpl);
+	for (uint8_t b : rows) bytes.push_back(b);
+	return bytes;
+}
+
+void test_pcx_more() {
+	// 24-bit: the red, green and blue planes `width` apart in each scanline.
+	const std::vector<uint8_t> rgb = pcx24(2, 1, 2, {10, 20, 30, 40, 50, 60});
+	opennova::RgbaImage image;
+	std::string error;
+	CHECK(opennova::decode_pcx_menu_rgba(rgb.data(), rgb.size(), image, error), "24-bit decodes");
+	CHECK(image.pixels.size() == 8 && image.pixels[0] == 10 && image.pixels[1] == 30 &&
+					image.pixels[2] == 50 && image.pixels[4] == 20,
+			"pixel 0 is (plane0[0], plane1[0], plane2[0])");
+	// A header naming 30000 x 30000 over a few bytes fails before the buffer.
+	std::vector<uint8_t> huge = pcx8(2, 1, 2, {1, 2});
+	huge[8] = 0x2F;
+	huge[9] = 0x75;
+	huge[10] = 0x2F;
+	huge[11] = 0x75;
+	CHECK(!opennova::decode_pcx_menu_rgba(huge.data(), huge.size(), image, error), "the colour reader refuses");
+	CHECK(!opennova::decode_pcx_luminance_alpha(huge.data(), huge.size(), image, error),
+			"the 8-bit reader refuses");
+	// The 8-bit alpha read takes the last 768 bytes without the 0x0C marker, and an
+	// odd width's pad index spills onto the next row and, from the last row, onto the
+	// palette [orig: Texture_LoadPCXFromPFF8Bit @ 0x56E0A0].
+	std::vector<uint8_t> unmarked = pcx8(3, 2, 4, {1, 2, 3, 9, 0, 5, 6, 7});
+	unmarked[128 + 8] = 0x00; // the marker byte, now a zero
+	CHECK(opennova::decode_pcx_luminance_alpha(unmarked.data(), unmarked.size(), image, error),
+			"no marker needed");
+	CHECK(image.width == 3 && image.height == 2 && image.pixels.size() == 24, "3 x 2 out");
+	// Palette entry 1 is (1, 2, 3): luminance (85 * 6) >> 8 = 1. Pixel 3 is row 1's own
+	// index 0 (row 0's pad 9 overwritten); row 1's pad 7 landed on entry 0's blue, so
+	// entry 0 reads (0, 0, 7), luminance (85 * 7) >> 8 = 2.
+	if (image.pixels.size() == 24) {
+		CHECK(image.pixels[3] == 1, "pixel 0's alpha is entry 1's luminance");
+		CHECK(image.pixels[3 * 4 + 3] == 2 && image.pixels[3 * 4 + 2] == 7,
+				"the last row's pad index clobbered the palette the luminance reads");
+	}
+}
+
 } // namespace
 
 int main() {
+	test_masks_follow_the_name();
+	test_particle_attempts();
+	test_hud_alpha_material();
+	test_side_caps();
+	test_dds_codec_order();
+	test_pcx_more();
 	test_no_alternate_names();
 	test_stage();
 	test_plain_upper_pcx_mask();

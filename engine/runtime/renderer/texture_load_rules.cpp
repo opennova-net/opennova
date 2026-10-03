@@ -59,6 +59,20 @@ std::vector<TextureLoad> cine_fade_attempts(std::string_view name, const Texture
 	return {one_reader(name, TextureReader::Pcx), one_reader(name, TextureReader::Tga)};
 }
 
+// [orig: CTextureData_LoadTGA @ 0x5F7B20 — the path is the particle manager's folder
+//  plus the name (CParticleManager_BuildTexturePath @ 0x5DF8C0; the folder is the
+//  executable's directory plus "tga\", CEffectSystem_Init @ 0x5F61D6..0x5F61E9); a
+//  file fopen opens there decodes through the loose leg, whatever the session's
+//  loose-first setting; else the part of the path after its last '\' through the TGA
+//  reader on the mounted set (CTerrainTileData_LoadTGAFromArchive)]
+std::vector<TextureLoad> particle_attempts(std::string_view name) {
+	TextureLoad loose = one_reader(name, TextureReader::TgaParticleLoose);
+	loose.source = TextureFileSource::ParticleTextureDir;
+	const size_t slash = name.rfind('\\');
+	const std::string_view archived = slash == std::string_view::npos ? name : name.substr(slash + 1);
+	return {loose, one_reader(archived, TextureReader::Tga)};
+}
+
 TextureReader menu_reader(menu::MenuTextureFormat format) {
 	switch (format) {
 		case menu::MenuTextureFormat::Tga: return TextureReader::Tga;
@@ -115,6 +129,9 @@ std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string
 		}
 		case TextureLoader::CineFade:
 			return cine_fade_attempts(name, files);
+		case TextureLoader::Particle:
+			if (name.empty()) return {};
+			return particle_attempts(name);
 	}
 	if (load.reader == TextureReader::None || load.file.empty()) return {};
 	return {load};
@@ -135,11 +152,12 @@ TextureLoad stage_texture_load(std::string_view query, bool loose_first_hit, boo
 }
 
 // [orig: Texture_LoadAndRegister @ 0x58B790 — the upper-cased dispatch
-//  @ 0x58B80E..0x58B881; the mask tests the name as written for ".PCX"
-//  @ 0x58B8A5 and shifts every word left 24, ORing 0xFFFFFF @ 0x58B8D7..0x58B8DA]
+//  @ 0x58B80E..0x58B881; after either reader the mask tests the name as written for
+//  ".PCX" @ 0x58B8A5..0x58B8AB and shifts every word left 24, ORing 0xFFFFFF
+//  @ 0x58B8D7..0x58B8DA]
 TextureLoad plain_texture_load(std::string_view name) {
 	TextureLoad load = plain_dispatch(name);
-	if (load.reader == TextureReader::Pcx && name.find(".PCX") != std::string_view::npos)
+	if (load.reader != TextureReader::None && name.find(".PCX") != std::string_view::npos)
 		load.transform = TextureLoadTransform::WhiteAlphaFromBlue;
 	return load;
 }
@@ -172,8 +190,9 @@ TextureLoad file_texture_load(std::string_view name, bool white_alpha) {
 // [orig: sub_591750 @ 0x591750 — the upper-cased name's ".FULL" @ 0x59179A and
 //  ".ALPHA" @ 0x5917B7..0x5917BD cut off and overriding the mode, the existence test
 //  @ 0x5917DF; HUD_LoadImageAsTexture @ 0x591550 — ".TGA" @ 0x5915AB, ".PCX"
-//  @ 0x5915CE, the PCX turned white with its blue as alpha @ 0x59160F..0x59163E, the
-//  alpha-only A8 copy @ 0x5916AE..0x5916BE, colour kept @ 0x5916FB..0x59170B]
+//  @ 0x5915CE, after either reader a name holding ".PCX" (@ 0x591615) turned white with
+//  its blue as alpha @ 0x59160F..0x59163E, the alpha-only A8 copy @ 0x5916AE..0x5916BE,
+//  colour kept @ 0x5916FB..0x59170B]
 TextureLoad hud_texture_load(std::string_view name, bool alpha_mode) {
 	std::string file(name);
 	const std::string upper = strutil::to_upper(name);
@@ -191,10 +210,10 @@ TextureLoad hud_texture_load(std::string_view name, bool alpha_mode) {
 		load.reader = TextureReader::Tga;
 	} else if (holds(file_upper, ".PCX")) {
 		load.reader = TextureReader::Pcx;
-		load.transform = TextureLoadTransform::WhiteAlphaFromBlue;
 	} else {
 		return load;
 	}
+	if (holds(file_upper, ".PCX")) load.transform = TextureLoadTransform::WhiteAlphaFromBlue;
 	load.file = std::move(file);
 	load.alpha_only = alpha;
 	return load;
@@ -211,6 +230,40 @@ void apply_texture_load_transform(TextureLoadTransform transform, bool alpha_onl
 		}
 		if (alpha_only) p[0] = p[1] = p[2] = 0xFF;
 	}
+}
+
+// [orig: sub_591750 @ 0x591750 — an alpha-mode texture's material mode 0xA51 (2641),
+//  a colour one's 0x651 (1617); RenderState_DecodeModeColorStage @ 0x681080 — mode
+//  family 0xA00's stage 0: colour op 7 (ADD) over arguments 0 and 0 (DIFFUSE,
+//  DIFFUSE) @ 0x6812D7..0x6812E2, where 0x600 is MODULATE(2X)(TEXTURE = 2, DIFFUSE = 0)
+//  @ 0x6814BE..0x6814CA; RenderState_ApplyToDevice @ 0x681920 sets them as the stage's
+//  COLOROP / COLORARG1 / COLORARG2]
+uint32_t hud_alpha_material_argb(uint32_t argb) {
+	const auto doubled = [&](int shift) -> uint32_t {
+		const uint32_t channel = (argb >> shift) & 0xFFu;
+		return (channel * 2u > 0xFFu ? 0xFFu : channel * 2u) << shift;
+	};
+	return (argb & 0xFF000000u) | doubled(16) | doubled(8) | doubled(0);
+}
+
+// [orig: Material_LoadStageTexture @ 0x5B16F0 — flag 0x1000 ORed in for types 4/5
+//  @ 0x5B1782, 6 @ 0x5B17A4 and 7 @ 0x5B17C1; type 7's sub_58CE10 @ 0x58CE10 hands it to
+//  GTexture_FindOrCreateFromData, whose GTexture_DownsampleToLimits @ 0x687170 caps the
+//  side at 512; type 6's sub_58A580 @ 0x58A580 makes a volume through
+//  GTexture_CreateFromPixelData @ 0x686950, which never downsamples]
+uint32_t material_texture_side_cap(uint8_t runtime_type) {
+	return runtime_type == 4 || runtime_type == 5 || runtime_type == 7 ? kNormalMapSideCap : 0u;
+}
+
+// [orig: D3DXTex::CImage::Load @ 0x6DF1DC — the codec order table
+//  @ 0x6DF212..0x6DF242 (0 BMP, 5 PPM, 4 DDS, 1 JPEG, 3 PNG, 8 PFM, 7 HDR, 2 TGA,
+//  6 DIB), tried in turn until one decodes @ 0x6DF289..0x6DF397; reached from
+//  Texture_LoadDDSFromPFF @ 0x56E3C0 -> GTexture_InitFromMemory @ 0x687DF0 ->
+//  D3DXCreateTextureFromFileInMemoryEx]
+const std::vector<DdsCodec> &dds_reader_codec_order() {
+	static const std::vector<DdsCodec> order = {DdsCodec::Bmp, DdsCodec::Ppm, DdsCodec::Dds,
+			DdsCodec::Jpeg, DdsCodec::Png, DdsCodec::Pfm, DdsCodec::Hdr, DdsCodec::Tga, DdsCodec::Dib};
+	return order;
 }
 
 // [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap (flag 0x1000 -> 512, 0x2000 ->

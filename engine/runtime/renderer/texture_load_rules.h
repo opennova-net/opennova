@@ -6,10 +6,10 @@
 // own rule is material_texture.h (material_image_source); the embedder reads each
 // attempt's file, decodes it through the named reader (the TGA reader
 // formats/tga/tga_read.h; the PCX reader formats/pcx decode_pcx_menu_rgba, which is
-// Texture_LoadPCXFromPFF32's decode as well as the menu's; a DDS through its DXT
-// decode; a PNG, menus only) and applies the transform. No loader reads an alternate
-// name: no `_O` twin, no png/jpg/bmp beside a .tga. Witness record:
-// docs/render/render-material-re.md ("Texture loaders").
+// Texture_LoadPCXFromPFF32's decode as well as the menu's; a DDS through D3DX's
+// content sniff; a PNG, menus only) and applies the transform. No loader reads an
+// alternate name: no `_O` twin, no png/jpg/bmp beside a .tga. Witness record:
+// docs/render/render-material-re.md ("The game's texture loaders").
 
 #include <runtime/renderer/material_texture.h>
 
@@ -23,7 +23,30 @@
 namespace opennova::renderer {
 
 // The reader a loader hands the file to.
-enum class TextureReader : uint8_t { None, Dds, Tga, Pcx, Png };
+enum class TextureReader : uint8_t {
+	None,
+	// D3DXCreateTextureFromFileInMemoryEx: the bytes decoded by their content, the
+	// codecs tried in D3DX's order (dds_reader_codec_order).
+	Dds,
+	// The TGA reader (CTerrainTileData_LoadTGAFromArchive).
+	Tga,
+	// The particle manager's loose TGA leg (CTextureData_LoadTGA): the TGA reader with
+	// unsigned sides and the height-stride flip (formats/tga TgaReaderForm::ParticleLoose).
+	TgaParticleLoose,
+	// The PCX reader (Texture_LoadPCXFromPFF32).
+	Pcx,
+	// The menus' PNG reader.
+	Png,
+};
+
+// Where an attempt's file is read from.
+enum class TextureFileSource : uint8_t {
+	// The mounted file set, under the caller's lookup policy.
+	Mounted,
+	// The particle manager's loose texture folder, "<game directory>\tga\", opened
+	// directly whatever the session's loose-first setting (CEffectSystem_Init sets it).
+	ParticleTextureDir,
+};
 
 // What a loader does to the decoded pixels.
 enum class TextureLoadTransform : uint8_t {
@@ -32,20 +55,22 @@ enum class TextureLoadTransform : uint8_t {
 	// left 24 and ORs 0xFFFFFF, so blue becomes alpha.
 	WhiteAlphaFromBlue,
 	// A PCX's alpha from its palette entry's luminance, (85 * (r + g + b)) >> 8
-	// (formats/pcx decode_pcx_luminance_alpha decodes it whole).
+	// (formats/pcx decode_pcx_luminance_alpha, the 8-bit reader's indices).
 	PaletteLuminanceAlpha,
 };
 
 struct TextureLoad {
 	std::string file; // the name the loader opens (empty with reader None)
 	TextureReader reader = TextureReader::None;
+	TextureFileSource source = TextureFileSource::Mounted;
 	TextureLoadTransform transform = TextureLoadTransform::None;
-	// Only the alpha survives: the loader makes an A8 texture (the HUD's alpha mode).
+	// Only the alpha survives: the loader makes an A8 texture, drawn with the HUD's
+	// alpha material (hud_alpha_material_argb).
 	bool alpha_only = false;
 };
 
 // The game's texture loaders, by the role that calls them (the role table:
-// docs/render/render-material-re.md "Texture loaders").
+// docs/render/render-material-re.md "The game's texture loaders").
 enum class TextureLoader : uint8_t {
 	// Texture_LoadByNameWithChannel: model diffuse, scorch, rain and snow, the
 	// binocular and NVG masks, sight cards, tip icons, terrain detail maps.
@@ -62,8 +87,7 @@ enum class TextureLoader : uint8_t {
 	// flag-point icons, the binocular digits, the NVG scale.
 	File,
 	// The TGA reader on the name alone: the terrain colour, blend, far detail and
-	// tile-set maps, the network icons, the board box, the start-mission cursor,
-	// particle graphics.
+	// tile-set maps, the network icons, the board box, the start-mission cursor.
 	Tga,
 	// The PCX reader on the name alone: the loading screen, the map overview.
 	Pcx,
@@ -76,18 +100,23 @@ enum class TextureLoader : uint8_t {
 	Menu,
 	// CinematicFadeEvent_LoadTexture: the end-of-round cine's full-screen images.
 	CineFade,
+	// CTextureData_LoadTGA: particle graphics, the loose "tga\" folder first, then the
+	// mounted name.
+	Particle,
 };
 
 // What the embedder answers about the mounted file set.
 struct TextureFileQuery {
 	// Whether `name` is in the mounted set (the loader's FileSystem_FileExists).
 	std::function<bool(const std::string &)> exists;
-	// Whether the `/d` loose-first search finds `name` as a loose file.
+	// Whether a loose-first search finds `name` as a loose file (the session's `/d`
+	// search, or the caller's forced lookup policy).
 	std::function<bool(const std::string &)> loose_first_hit;
 };
 
 // The files `loader` tries for `name`, in order; the first that reads and decodes
-// is the texture, none is a failed load. Every loader but CineFade tries one.
+// is the texture, none is a failed load. CineFade and Particle try two, every other
+// loader one.
 std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string_view name,
 		const TextureFileQuery &files);
 
@@ -98,8 +127,9 @@ std::vector<TextureLoad> texture_load_attempts(TextureLoader loader, std::string
 TextureLoad stage_texture_load(std::string_view query, bool loose_first_hit, bool dds_exists);
 
 // Texture_LoadAndRegister (a model row of runtime type 1): the whole name, no DDS
-// probe; a name that holds ".PCX" in upper case as written turns white with its blue
-// as alpha, "x.pcx" in lower case stays opaque colour.
+// probe, .TGA/.MDT through the TGA reader and .PCX through the PCX reader; a name
+// that holds ".PCX" in upper case as written turns white with its blue as alpha
+// whichever reader read it ("X.PCX.TGA" too), "x.pcx" in lower case stays colour.
 TextureLoad plain_texture_load(std::string_view name);
 
 // Texture_LoadFromArchive: the .dds sibling of the whole name first unless a loose
@@ -116,23 +146,41 @@ TextureLoad file_texture_load(std::string_view name, bool white_alpha);
 
 // The HUD loader (sub_591750 -> HUD_LoadImageAsTexture): a ".FULL" suffix cut off
 // makes it colour, an ".ALPHA" suffix cut off makes it alpha-only, else the caller's
-// `alpha_mode`; ".TGA" through the TGA reader, ".PCX" through the PCX reader turned
-// white with its blue as alpha, anything else nothing.
+// `alpha_mode`; ".TGA" through the TGA reader, else ".PCX" through the PCX reader,
+// anything else nothing; a name holding ".PCX" turns white with its blue as alpha
+// whichever reader read it.
 TextureLoad hud_texture_load(std::string_view name, bool alpha_mode);
 
 // The transform on RGBA8 pixels (`pixels` of them). WhiteAlphaFromBlue as the loaders
 // do it; `alpha_only` keeps the alpha and makes the colour white, the form an A8
-// texture takes under the modulating draw: the retail HUD draws its alpha-only art
-// with colour op ADD(TEXTURE, DIFFUSE) over an A8 read (colour 0), so the drawn
-// colour is the vertex colour alone, which a white texture modulated by it gives.
+// texture takes here: the colour the alpha material draws comes from the vertex
+// colour alone (hud_alpha_material_argb), which a white texture leaves untouched.
 // PaletteLuminanceAlpha is a decode, not a pixel transform: nothing happens here.
 void apply_texture_load_transform(TextureLoadTransform transform, bool alpha_only, uint8_t *rgba,
 		size_t pixels);
 
+// The vertex colour the HUD's alpha material 0xA51 draws an A8 texture with: colour
+// op ADD(DIFFUSE, DIFFUSE), saturated, so twice the vertex colour (the texture's colour
+// is never an argument); alpha MODULATE(TEXTURE, DIFFUSE), the vertex alpha the
+// modulating draw multiplies by the texture's. `argb` is the quad's vertex colour.
+uint32_t hud_alpha_material_argb(uint32_t argb);
+
 // GTexture_DownsampleToLimits's cap halving: while either side exceeds `cap`, both
-// sides halve with a 2x2 box. A model normal map (runtime type 4 or 5) loads with
-// the 512 cap. `rgba` holds width x height RGBA8 pixels; width and height are updated.
+// sides halve with a 2x2 box. `rgba` holds width x height RGBA8 pixels; width and
+// height are updated.
 inline constexpr uint32_t kNormalMapSideCap = 512;
 void halve_rgba_to_cap(std::vector<uint8_t> &rgba, uint32_t &width, uint32_t &height, uint32_t cap);
+
+// The side cap a model row's texture loads with: 512 (flag 0x1000) for the normal maps
+// (runtime types 4 and 5) and the occlusion producer (7); 0 (none) for every other
+// type, the horizon volume (6) included, whose volume texture is never downsampled.
+uint32_t material_texture_side_cap(uint8_t runtime_type);
+
+// The codecs D3DXCreateTextureFromFileInMemoryEx tries on a "DDS" file's bytes, in
+// order, the first that decodes wins. The port decodes BMP, DDS, JPEG, PNG and TGA
+// (D3DX's TGA honours the origin bit); PPM, PFM, HDR and a headerless DIB are not
+// decoded.
+enum class DdsCodec : uint8_t { Bmp, Ppm, Dds, Jpeg, Png, Pfm, Hdr, Tga, Dib };
+const std::vector<DdsCodec> &dds_reader_codec_order();
 
 } // namespace opennova::renderer
