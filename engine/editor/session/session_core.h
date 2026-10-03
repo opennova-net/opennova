@@ -91,7 +91,9 @@ public:
 	// part enters handle(); a request that reaches it while one is served (a device's or a
 	// source's callback) asserts in a debug build and is served inside the outer one, its findings
 	// the outer outcome's, which it neither empties nor ends. Leaving the scope, however it is
-	// left, ends only the request it began.
+	// left, ends only the request it began. The status line a refused request leaves is that
+	// request's (ADR 0046 S15): the next request served without a refusal replaces it with its own
+	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after.
 	class RequestScope {
 	public:
 		explicit RequestScope(SessionCore &core);
@@ -102,6 +104,7 @@ public:
 	private:
 		SessionCore &core_;
 		bool outermost_;
+		std::string status_before_; // the line when the request arrived
 	};
 	const ActionOutcome &outcome() const { return outcome_; }
 	ActionOutcome &outcome() { return outcome_; }
@@ -278,6 +281,7 @@ private:
 	std::map<std::string, WireDrag> wire_drags_;
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
+	std::string refusal_status_; // the status line the last refused request left, until a request is served
 };
 
 } // namespace opennova::editor

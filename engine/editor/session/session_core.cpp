@@ -92,10 +92,24 @@ SessionCore::RequestScope::RequestScope(SessionCore &core) : core_(core), outerm
 	if (!outermost_) return;
 	core_.outcome_ = ActionOutcome();
 	core_.in_request_ = true;
+	status_before_ = core_.view_.activity.status;
 }
 
 SessionCore::RequestScope::~RequestScope() {
-	if (outermost_) core_.in_request_ = false;
+	if (!outermost_) return;
+	// A refused request's line is its own: kept until a request is served, which said its own line
+	// or, having said nothing, leaves none (ADR 0046 S15). A refusal that said nothing on the line
+	// claims none.
+	if (core_.outcome_.refused) {
+		if (core_.view_.activity.status != status_before_) core_.refusal_status_ = core_.view_.activity.status;
+	} else if (!core_.refusal_status_.empty()) {
+		if (core_.view_.activity.status == core_.refusal_status_) {
+			core_.view_.activity.status.clear();
+			core_.touch(ViewConcern::Output);
+		}
+		core_.refusal_status_.clear();
+	}
+	core_.in_request_ = false;
 }
 
 void SessionCore::note(std::string line) {
