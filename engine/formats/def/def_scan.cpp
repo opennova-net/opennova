@@ -484,7 +484,9 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
     const DefProperty *property = nullptr;
     for (const auto &p : def_properties(property_kind))
         if (p.key == key || (property_kind == DefRecordKind::Attachment && p.key == "addeweap") ||
-            (kind == DefRecordKind::Action && key == "delay" && p.key == "delayend")) { property = &p; break; }
+            (kind == DefRecordKind::Action && key == "delay" && p.key == "delayend") ||
+            // `animcal` fills the one anim-map buffer `animadm` does [orig: @ 0x543D77 / 0x543D47]
+            (kind == DefRecordKind::Weapon && key == "animcal" && p.key == "animadm")) { property = &p; break; }
     const bool alias = kind == DefRecordKind::Item &&
         (key == "sqb_rate" || key == "sqb_distance" || key == "sqb_error" || key == "num_doors" ||
          key == "first_door" || key == "first_subobject" || key == "door_dir" || key == "rotor_parts" ||
@@ -540,6 +542,18 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
             if (!lookup_item_attrib(text.data(), text.size()) && !lookup_item_attrib2(text.data(), text.size()) && text != "parent")
                 authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty, text.c_str());
         }
+        return;
+    }
+    if (encoding == DefEncoding::ModelOption) {
+        // The model by its first token; the reader compares the second with `nocheckdepth`
+        // and reads nothing else, so any other token is ignored input [orig:
+        // WeaponDefs_ParseLineCallback @ 0x544F85..0x544FBB, tokens[2] @ 0x544F92].
+        const auto *field = def_field(property_kind, property->fields.front());
+        if (count >= 1 && field && tokens[0].len >= field->width) invalid();
+        for (int i = 1; i < count; ++i)
+            if (i > 1 || word(i) != "nocheckdepth")
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::UnknownProperty,
+                                std::string(tokens[i].s, tokens[i].len).c_str());
         return;
     }
     if (encoding == DefEncoding::AmmoFlags || encoding == DefEncoding::WeaponFlags || encoding == DefEncoding::AmmoKillZone) {
@@ -659,7 +673,13 @@ void validate_property(opennova::def::DefRecordKind kind, const char *line, size
         if (field->type == DefFieldType::Text) {
             const size_t size = columns == 1 ? value_length : tokens[i].len;
             if (size >= field->width) invalid();
-        } else if (!numeric(int(i)) && !(encoding == DefEncoding::Delay && word(int(i)) == "auto")) invalid();
+        } else if (!numeric(int(i)) && !(encoding == DefEncoding::Delay && word(int(i)) == "auto")) {
+            // An attachment's angle the reader atol's: a word reads as 0 [orig:
+            // ItemDef_ParseProperty @ 0x4A1BB4..0x4A1C49], reported as such, written as 0.
+            if (encoding == DefEncoding::Attachment && i >= 2)
+                authoring_issue(issues, report, number, record, line, key_length, DefIssueCode::Reinterpreted, "0");
+            else invalid();
+        }
     }
 }
 

@@ -322,6 +322,9 @@ const std::vector<DefField> kWeaponFields = {
 	FIELD(DefWeaponDef, farp_rounds, Integer),
 	FIELD(DefWeaponDef, farp_interval, Integer),
 	FIELD(DefWeaponDef, designation_ticks, Integer),
+	FIELD(DefWeaponDef, sameas, Text),
+	FIELD(DefWeaponDef, gfx1_nocheckdepth, Integer),
+	FIELD(DefWeaponDef, gfx3_nocheckdepth, Integer),
 };
 
 const std::vector<DefField> kAmmoFields = {

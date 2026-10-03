@@ -396,7 +396,13 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "loadout_menu_icon")) {
                 safe_copy(cw.loadout_menu_icon, sizeof(cw.loadout_menu_icon), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "animadm")) {
+            } else if (key_is(key, "animadm") || key_is(key, "animcal")) {
+                /* Both keys copy the first value token into the one buffer the weapon's
+                   `end` loads its anim map from and clears [orig: 'animadm' @ 0x543D47 and
+                   'animcal' @ 0x543D77, each strcpy into byte_252DB98 @ 0x543D5C /
+                   0x543D8C; Anim_InitActions @ 0x541FA0 loads it, WeaponDefs_ResetParseState
+                   @ 0x53FF90 clears it, both from the `end` arm @ 0x5437D0 / 0x5437DC]:
+                   `animcal` is `animadm` by another name, the later line winning. */
                 safe_copy(cw.animadm, sizeof(cw.animadm), v, vl);
                 parsed = 1;
             } else if (key_is(key, "launchuserpoint")) {
@@ -455,11 +461,18 @@ static int parse_weapons_buf(const char *buf, size_t file_len, DefWeaponsFile *o
             } else if (key_is(key, "gfx1b")) {
                 safe_copy(cw.gfx1b, sizeof(cw.gfx1b), v, vl);
                 parsed = 1;
-            } else if (key_is(key, "gfx1")) {
-                safe_copy(cw.gfx1, sizeof(cw.gfx1), v, vl);
+            } else if (key_is(key, "gfx1") || key_is(key, "gfx3")) {
+                /* The model by the first value token; `nocheckdepth` second loads it with
+                   the depth check off [orig: @ 0x544F85..0x544FBB, stricmp of tokens[2]
+                   @ 0x544F92]. */
+                const bool first = key_is(key, "gfx1");
+                safe_copy(first ? cw.gfx1 : cw.gfx3, sizeof(cw.gfx1), v, vl);
+                (first ? cw.gfx1_nocheckdepth : cw.gfx3_nocheckdepth) =
+                        strutil::iequals(tokens.token(2), "nocheckdepth") ? 1 : 0;
                 parsed = 1;
-            } else if (key_is(key, "gfx3")) {
-                safe_copy(cw.gfx3, sizeof(cw.gfx3), v, vl);
+            } else if (key_is(key, "sameas")) {
+                /* strncpy 32 of the first value token -> +0x34 [orig: @ 0x544062..0x544072] */
+                safe_copy(cw.sameas, sizeof(cw.sameas), v, vl);
                 parsed = 1;
             } else if (key_is(key, "flags")) {
                 char flag_lower[64];

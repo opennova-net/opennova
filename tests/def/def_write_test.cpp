@@ -247,6 +247,83 @@ int expansion_catalog_lines() {
 	return failures;
 }
 
+// The #752 review's def lines, each as the game reads it:
+// - a particle slot whose effect-only line follows a full one keeps the secondary with no
+//   userpoint, a state no single line holds: written as the full line then the effect-only
+//   one, which read back to it [orig: ItemDef_ParseProperty @ 0x4A140B.., the secondary only
+//   past three tokens @ 0x4A145E]; with no effect either, the bare key last;
+// - an attachment's angle that is a word reads as 0 (atol) [orig: @ 0x4A1BB4..0x4A1C49]:
+//   reported as such, never blocking, written 0;
+// - weapon.def's `sameas` (strncpy 32 -> +0x34 [orig: @ 0x544062..0x544072]) is kept and
+//   written; `animcal` fills the one anim-map buffer `animadm` does [orig: @ 0x543D77 /
+//   0x543D47] and is written as `animadm`; `gfx1`/`gfx3`'s `nocheckdepth` option (compared
+//   without case [orig: @ 0x544F92]) is kept, any other token there ignored.
+int review_def_lines() {
+	int failures = 0;
+	const char *slots = "begin \"Slot\"\nid 100001\nparticlefxs a b c\nparticlefxs d\nend\n"
+	                    "begin \"Bare\"\nid 100002\nparticlefxw1 a b c\nparticlefxw1\nend\n";
+	const Outcome slot = run("items.def", slots);
+	DefItemsFile parsed{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(slots), std::strlen(slots), &parsed, nullptr);
+	const bool read = parsed.count == 2 && std::strcmp(parsed.entries[0].particlefxs.effect, "d") == 0 &&
+	                  parsed.entries[0].particlefxs.userpoint[0] == 0 &&
+	                  std::strcmp(parsed.entries[0].particlefxs.secondary_effect, "c") == 0 &&
+	                  parsed.entries[1].particlefxw1.effect[0] == 0 &&
+	                  std::strcmp(parsed.entries[1].particlefxw1.secondary_effect, "c") == 0;
+	def_free_items(&parsed);
+	DefItemsFile again{};
+	def_parse_items_memory(reinterpret_cast<const uint8_t *>(slot.written.text.data()), slot.written.text.size(), &again,
+	                       nullptr);
+	const bool kept = again.count == 2 && std::strcmp(again.entries[0].particlefxs.effect, "d") == 0 &&
+	                  again.entries[0].particlefxs.userpoint[0] == 0 &&
+	                  std::strcmp(again.entries[0].particlefxs.secondary_effect, "c") == 0 &&
+	                  again.entries[1].particlefxw1.effect[0] == 0 && again.entries[1].particlefxw1.userpoint[0] == 0 &&
+	                  std::strcmp(again.entries[1].particlefxw1.secondary_effect, "c") == 0;
+	def_free_items(&again);
+	if (!read || !kept || !slot.diagnostics.empty() || !slot.written.ok() ||
+	    slot.written.text.find("\tparticlefxs d d c\r\n\tparticlefxs d\r\n") == std::string::npos ||
+	    slot.written.text.find("\tparticlefxw1 c c c\r\n\tparticlefxw1\r\n") == std::string::npos) {
+		std::printf("FAIL an effect-only particle line over a secondary (read %d, kept %d):\n%s\n", int(read), int(kept),
+		            slot.written.text.c_str());
+		for (const auto &d : slot.written.diagnostics) std::printf("  write %s.%s: %s\n", d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	const Outcome angles = run("items.def", "begin \"Gun\"\nid 100090\ntype vehicle\n"
+	                                        "addeweapG ewep01 100184 <down angle> <up angle>\nend\n");
+	size_t zeros = 0;
+	for (const auto &d : angles.diagnostics)
+		zeros += d.code == DefIssueCode::Reinterpreted && d.message.find("reads this as 0") != std::string::npos;
+	if (angles.blocking() || zeros != 4 || !angles.written.ok() ||
+	    angles.written.text.find("\taddeweapg ewep01 100184 0 0 0 0\r\n") == std::string::npos) {
+		std::printf("FAIL addeweap angles that are words: blocking=%d zeros=%zu\n%s\n", int(angles.blocking()), zeros,
+		            angles.written.text.c_str());
+		++failures;
+	}
+	const char *weapons = "weapon \"WPN_SAME\"\ncategory 1\nsameas WPN_OTHER\nanimcal anim_same\n"
+	                      "gfx1 m_gun NOCHECKDEPTH\ngfx3 m_far other\nend\n";
+	const Outcome weapon = run("weapon.def", weapons);
+	DefWeaponsFile wp{};
+	def_parse_weapons_memory(reinterpret_cast<const uint8_t *>(weapons), std::strlen(weapons), &wp, nullptr);
+	const bool stored = wp.count == 1 && std::strcmp(wp.entries[0].sameas, "WPN_OTHER") == 0 &&
+	                    std::strcmp(wp.entries[0].animadm, "anim_same") == 0 &&
+	                    std::strcmp(wp.entries[0].gfx1, "m_gun") == 0 && wp.entries[0].gfx1_nocheckdepth == 1 &&
+	                    std::strcmp(wp.entries[0].gfx3, "m_far") == 0 && wp.entries[0].gfx3_nocheckdepth == 0;
+	def_free_weapons(&wp);
+	if (!stored || weapon.blocking() || weapon.ignored() != 1 || !weapon.written.ok() ||
+	    weapon.written.text.find("\tsameas WPN_OTHER\r\n") == std::string::npos ||
+	    weapon.written.text.find("\tanimadm anim_same\r\n") == std::string::npos ||
+	    weapon.written.text.find("\tgfx1 m_gun nocheckdepth\r\n") == std::string::npos ||
+	    weapon.written.text.find("\tgfx3 m_far\r\n") == std::string::npos ||
+	    !run("weapon.def", weapon.written.text.c_str()).diagnostics.empty()) {
+		std::printf("FAIL sameas / animcal / nocheckdepth (stored %d, ignored %zu):\n%s\n", int(stored), weapon.ignored(),
+		            weapon.written.text.c_str());
+		for (const auto &d : weapon.diagnostics)
+			std::printf("  line %zu %s.%s: %s\n", d.line, d.record.c_str(), d.field.c_str(), d.message.c_str());
+		++failures;
+	}
+	return failures;
+}
+
 int ignored_input() {
 	int failures = 0;
 	// An unknown key, two attrib: tokens outside the chain and a husk token without a
@@ -801,6 +878,7 @@ int main(int argc, char **argv) {
 	}
 	failures += ignored_input();
 	failures += expansion_catalog_lines();
+	failures += review_def_lines();
 	failures += powerup_table();
 	failures += tokenizer_rules();
 	failures += authored_units();

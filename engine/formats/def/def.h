@@ -550,20 +550,41 @@ typedef struct DefWeaponDef {
     size_t end_line;
     /* 'farpinfo <rounds> <interval>': the FARP rearm of a vehicle's weapon. Two atol'd
        ints -> +0xE8 / +0xEC, 0 = key absent (the entry memset; a missing second token
-       reads as the tokenizer's "", so 0). The rearm pass, standing on a FARP, adds
-       <rounds> to the held weapon's clip and reserve (capped by the def) on every
-       <interval>-th step of its counter; 0 in either does nothing. jox01 authors it on
-       its vehicle guns (`farpinfo 100 1`, `farpinfo 3 1`). Appended (layout stability).
+       reads as the tokenizer's "", so 0). The rearm pass walks the vehicles (pool-1
+       entities whose item def is of type 1 [orig: @ 0x51187E]) at least
+       farp_reuse_time * 62 ticks after their last rearm (+0x454 [orig: @ 0x511889]);
+       one standing on a FARP counts a step (+0x450 [orig: @ 0x5118BE]), and when its
+       item def carries the EWeap attrib (+0x54 bit 0x20 [orig: @ 0x5118EF]) its weapon
+       (the def at +0x494 [orig: @ 0x51190B]) gains <rounds> in clip and reserve (capped
+       by the def) on every <interval>-th step (counter % interval [orig: @ 0x51192C]),
+       its attached guns' weapons the same [orig: @ 0x51193C..0x5119B5]; 0 in either
+       does nothing. jox01 authors it on its vehicle guns (`farpinfo 100 1`, `farpinfo
+       3 1`). Appended (layout stability).
        [orig: WeaponDefs_ParseLineCallback 'farpinfo' @ 0x544da3 -> +0xE8 @ 0x544dc4,
         +0xEC @ 0x544ddf; consumer Server_UpdateEntityTargetLockAndWeaponOverlays
         @ 0x511820, @ 0x51190b..0x511934 -> the ammo top-up sub_546230 @ 0x546230] */
     int farp_rounds;           /* +0xE8 */
     int farp_interval;         /* +0xEC */
     /* 'designation_time <seconds>': atol x 62 -> +0x458, the life of a designation in
-       62 Hz ticks (WPN_DESIGNATOR / WPN_COPILOT author 30). 0 = key absent.
+       62 Hz ticks (JO:CA's WPN_DESIGNATOR authors 30, in the base's weapon.def and
+       jox01's alike; no other weapon). 0 = key absent.
        [orig: WeaponDefs_ParseLineCallback 'designation_time' @ 0x544895 -> +0x458
         @ 0x5448c5 (n*31*2); consumer the DesignateTarget spawn leg @ 0x4ec264] */
     int designation_ticks;     /* +0x458 */
+    /* 'sameas <name>': strncpy 32 of the first value token -> +0x34 (a name of 32 bytes
+       or more keeps no NUL there; the model holds 31). JO:CA's weapon.def files author
+       none; a mod's line was dropped as ignored before. Appended (layout stability).
+       [orig: WeaponDefs_ParseLineCallback 'sameas' @ 0x544050, strncpy @ 0x544062..0x544072] */
+    char sameas[32];
+    /* 'gfx1 <model> [nocheckdepth]' / 'gfx3 ...': the reader loads the first value token
+       as the model, and when the second is `nocheckdepth` (compared without case) loads it
+       with the load-pass flags 0x300000 instead [orig: WeaponDefs_ParseLineCallback 'gfx1'
+       @ 0x5448fc / 'gfx3' @ 0x544912 -> @ 0x544F85: stricmp(tokens[2], "nocheckdepth")
+       @ 0x544F92, Model_SetNextLoadPassFlags(0x300000) @ 0x544FA4 around
+       ThreediGp_LoadModel(tokens[1]) @ 0x544FB2]; any other token on the line is read by
+       nothing. 1 = the option is on. Appended (layout stability). */
+    int gfx1_nocheckdepth;
+    int gfx3_nocheckdepth;
 } DefWeaponDef;
 
 /* One `ammoclass_max_carry <class> <n>` row: the class token and the carry cap,
