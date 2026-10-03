@@ -7,6 +7,14 @@
 
 namespace opennova::editor {
 
+struct ProjectDocument;
+
+// The game a project's recently placed items are kept under (Preferences::recent_items): its target
+// game, the game whose catalogs its item ids are looked up in ("jo"). S16 (expansions): key by the
+// project's game profile as it stands then, the expansion it builds for with its game, once a project
+// has one; until then the target game is the whole of it.
+std::string recent_items_game(const ProjectDocument &project);
+
 // The editor's preferences (preferences_store.h) over the store its embedder owns (ADR 0046 S13
 // A2): read once when the session starts; a change written from a copy and in effect once the
 // store kept it, so a preference that could not be written is still the one in effect and a retry
@@ -33,9 +41,12 @@ public:
 	// dropped from it. In effect at once, kept by the next save.
 	void remember_recent_project(const std::string &root);
 	void forget_recent_project(const std::string &root);
-	// `item` moved (or added) to the front of the recently placed items, capped at kRecentItemsMax.
-	// In effect at once, kept by the next save; false when it was first already (nothing changed).
-	bool remember_recent_item(int64_t item);
+	// `item` moved (or added) to the front of the items recently placed for `game` (recent_items_game),
+	// capped at kRecentItemsMax. In effect at once, kept by the next save; false when it was first
+	// already (nothing changed).
+	bool remember_recent_item(const std::string &game, int64_t item);
+	// The items recently placed for `game`, most recent first (none for a game none were placed for).
+	const std::vector<int64_t> &recent_items(const std::string &game) const;
 
 private:
 	PreferencesStore &store_;
