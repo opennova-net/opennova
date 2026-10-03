@@ -7,6 +7,7 @@
 
 #include <editor/project_build/build_run.h>
 #include <editor/session/play_controller.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/view/session_view.h>
@@ -445,9 +446,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	std::vector<const DocumentBase *> unsaved;
 	for (const auto &document : v.documents.open)
 		if (document->dirty()) unsaved.push_back(document.get());
-	size_t errors = 0, warnings = 0, infos = 0;
+	// The modder's findings: those about the game's own data (S15) are counted apart, in the tooltip.
+	size_t errors = 0, warnings = 0, infos = 0, original = 0;
 	for (const Diagnostic &d : v.findings.diagnostics) {
-		if (d.severity == DiagnosticSeverity::Error) ++errors;
+		if (in_original_data(d, v)) ++original;
+		else if (d.severity == DiagnosticSeverity::Error) ++errors;
 		else if (d.severity == DiagnosticSeverity::Warning) ++warnings;
 		else ++infos;
 	}
@@ -538,6 +541,7 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	if (first <= 1) {
 		std::string tip = std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
 		                  (warnings == 1 ? " warning, " : " warnings, ") + std::to_string(infos) + " info.";
+		if (original) tip += " " + std::to_string(original) + " more in the game's own data (also in the original).";
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";

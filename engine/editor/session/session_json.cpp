@@ -1140,6 +1140,12 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	counts.set("warnings", json_number(double(answer.warnings)));
 	counts.set("infos", json_number(double(answer.infos)));
 	out.set("counts", std::move(counts));
+	// The game's own data's findings, counted apart (S15).
+	JsonValue original = JsonValue::make_object();
+	original.set("errors", json_number(double(answer.original_errors)));
+	original.set("warnings", json_number(double(answer.original_warnings)));
+	original.set("infos", json_number(double(answer.original_infos)));
+	out.set("original_counts", std::move(original));
 	const size_t first = page.first(answer.rows.size());
 	const size_t last = page.last(answer.rows.size());
 	set_page(out, page, answer.rows.size());
@@ -1165,6 +1171,8 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 			entry.set("errors", json_number(double(group.errors)));
 			entry.set("warnings", json_number(double(group.warnings)));
 			entry.set("infos", json_number(double(group.infos)));
+			if (!group.header) entry.set("header", boolean(false));
+			if (group.original) entry.set("original", boolean(true));
 			groups.push(std::move(entry));
 		}
 		out.set("groups", std::move(groups));
@@ -1176,6 +1184,9 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		// The record in the words the windows show for it, where its document is open (S15).
 		const std::string title = finding_record_title(d, view);
 		if (!title.empty()) row.set("record_title", json_string(title));
+		const std::string field = finding_field_title(d, view);
+		if (!field.empty()) row.set("field_title", json_string(field));
+		if (in_original_data(d, view)) row.set("original", boolean(true));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));

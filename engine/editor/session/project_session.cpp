@@ -220,6 +220,7 @@ void ProjectSession::run_operations() {
 		poll();
 	}
 	impl_->problems.validate_pending();
+	impl_->problems.settle_originals();
 }
 
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {

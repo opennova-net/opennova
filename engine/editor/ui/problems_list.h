@@ -31,7 +31,9 @@ struct SessionView;
 // group before its findings. A group of notes alone starts folded the first time the project
 // shows it (the list opens on the errors and warnings) and opens again once it holds an error
 // or a warning, while one the user folded stays as the user left it; the groups folded and
-// seen are the project's. A group has a Fix all when several of its findings have a fix that
+// seen are the project's. The game's own data's findings (ADR 0046 S15: about a file the project
+// holds as the install serves it) come last under a group of their own that starts folded whatever
+// it holds, the modder's before it (ungrouped, with no header). A group has a Fix all when several of its findings have a fix that
 // runs with the others; while required files are missing the summary says the game cannot
 // start and offers the Fix alls that make them (one Create naming every file a factory makes,
 // one import list of those the game data has). A finding selected (drawn whole with every

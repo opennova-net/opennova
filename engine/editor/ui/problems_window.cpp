@@ -105,6 +105,7 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	const ProblemAnswer &counts = list_.answer(view); // every finding's, whatever it shows
 	ProblemQuery &query = list_.query();
 	ui_kit::WrapRow row;
+	// Your project's own counts (S15: the game's own data's are counted apart, under their group).
 	severity_toggle(row, "Errors", "###errors", counts.errors, "errors", query.errors);
 	severity_toggle(row, "Warnings", "###warnings", counts.warnings, "warnings", query.warnings);
 	severity_toggle(row, "Info", "###infos", counts.infos, "info", query.infos);
@@ -115,13 +116,26 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	query.text = text_;
 	choice_combo(row, "Scope", kScopes, query.scope,
 	             "Which files' problems: the project's, the active file's, the open files'.");
+	// The active file's alone, one click (S15): on, the button lit; again, the whole project's.
+	if (!view.documents.active.empty()) {
+		const bool only = query.scope == ProblemScope::ActiveFile;
+		const std::string label = "Only " + basename_of(view.documents.active) + "###only_active";
+		row.next(ui_kit::button_width(label.c_str()));
+		if (only) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+		if (ImGui::Button(label.c_str())) query.scope = only ? ProblemScope::Project : ProblemScope::ActiveFile;
+		if (only) ImGui::PopStyleColor();
+		ui_kit::tooltip(only ? "Showing the active file's problems alone: click for the whole project's."
+		                     : "Only the active file's problems (Scope: Active file).");
+	}
 	choice_combo(row, "Group", kGroupings, query.grouping,
 	             "Group the problems by file or by kind, or list them as one.");
 	row.next(ui_kit::checkbox_width("Only fixable"));
 	ImGui::Checkbox("Only fixable", &query.fixable);
 	ui_kit::tooltip("Only the problems the editor offers a fix for.");
 	const ProblemAnswer &answer = list_.refresh(view);
-	const std::string shown = std::to_string(answer.rows.size()) + " of " + std::to_string(answer.total());
+	// The severities count the modder's findings; the game's own data's are said after the shown count.
+	std::string shown = std::to_string(answer.rows.size()) + " of " + std::to_string(answer.total());
+	if (answer.original()) shown += " (" + std::to_string(answer.original()) + " in the game's own data)";
 	row.next(ui_kit::text_width(shown.c_str()));
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", shown.c_str());
@@ -214,6 +228,9 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	const std::string counts =
 	        ProblemsList::severity_counts(group.errors, group.warnings, group.infos);
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
+	if (group.original)
+		ui_kit::tooltip("Problems in files the project holds exactly as the game install has them: the original game "
+		                "has them too, so they are not yours to fix. A file you change leaves this group.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {

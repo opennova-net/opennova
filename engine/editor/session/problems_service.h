@@ -16,6 +16,7 @@
 
 namespace opennova::editor {
 
+class OriginalFiles;
 class ProjectChecks;
 class SessionCore;
 struct ProjectFindingsInput;
@@ -68,8 +69,12 @@ public:
 	}
 	// The poll's validation steps (S13 A3): the validation left due, or the one under way, stepped
 	// within `budget` (at least one step, none while a gesture's edits wait for it to end), its rows
-	// composed on the step that ends it.
+	// composed on the step that ends it; with none left, within what is left of the budget, the check
+	// of which files the rows are about are the game's own data (S15, OriginalFiles), the view's
+	// original_files and Findings moving when it finds otherwise.
 	void step_validation(const PollBudget &budget, const OperationClock &clock);
+	// That check run to its end (a test's, after its operations: ProjectSession::run_operations).
+	void settle_originals();
 	// One step of the validation due or under way within `bytes` (an operation that joins it: its
 	// first steps are the validation's remaining ones), its rows composed on the step that ends it;
 	// none while a gesture's edits are open. True when none is due or under way.
@@ -154,6 +159,12 @@ private:
 	// The rows, from the pass that ended (its files' findings moved or not, a pass it took the place
 	// of having moved them, and the project checks') and, with `keep_reported`, what was reported.
 	void compose_rows(bool keep_reported);
+	// The check of the game's own data asked again of the rows as they stand; one step of it within
+	// `bytes`, true when none is left.
+	void want_originals();
+	bool step_originals(uint64_t bytes);
+	// The view's original_files made the check's set where it moved (Findings then moves).
+	void show_originals();
 
 	SessionCore &core_;
 	SessionView &view_;
@@ -186,6 +197,8 @@ private:
 	GraphReadings readings_;
 	ProblemQueryCache query_cache_;         // the problems query's answer, kept while both stand
 	ProblemFixCache fix_cache_;             // and its problems' fixes while the view stands
+	// Which of the files the rows are about are the game's own data (S15), checked after a validation.
+	std::unique_ptr<OriginalFiles> originals_;
 };
 
 } // namespace opennova::editor

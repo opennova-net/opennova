@@ -74,15 +74,52 @@ bool ProblemQuery::operator==(const ProblemQuery &other) const {
 	       scope == other.scope && fixable == other.fixable && grouping == other.grouping;
 }
 
+bool in_original_data(const Diagnostic &diagnostic, const SessionView &view) {
+	const auto &files = view.findings.original_files;
+	return files && !diagnostic.asset.empty() && files->count(diagnostic.asset) != 0;
+}
+
+namespace {
+
+// The game's own data's findings after the modder's (S15): their group last, the modder's before it
+// as they are grouped or, ungrouped, as one group with no header.
+void place_original(ProblemAnswer &answer, std::vector<size_t> original, const SessionView &view) {
+	if (original.empty()) return;
+	if (!answer.grouped) {
+		answer.grouped = true;
+		if (!answer.rows.empty()) {
+			ProblemGroup mine;
+			mine.header = false;
+			mine.rows = answer.rows;
+			for (const size_t i : mine.rows) tally(view.findings.diagnostics[i].severity, mine.errors, mine.warnings, mine.infos);
+			answer.groups.push_back(std::move(mine));
+		}
+	}
+	ProblemGroup group;
+	group.key = kOriginalGroupKey;
+	group.title = kOriginalGroupTitle;
+	group.original = true;
+	for (const size_t i : original) tally(view.findings.diagnostics[i].severity, group.errors, group.warnings, group.infos);
+	answer.rows.insert(answer.rows.end(), original.begin(), original.end());
+	group.rows = std::move(original);
+	answer.groups.push_back(std::move(group));
+}
+
+} // namespace
+
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view) {
 	ProblemAnswer answer;
 	answer.grouped = query.grouping != ProblemGrouping::None;
 	const std::vector<Diagnostic> &findings = view.findings.diagnostics;
-	for (const Diagnostic &d : findings) tally(d.severity, answer.errors, answer.warnings, answer.infos);
+	for (const Diagnostic &d : findings) {
+		if (in_original_data(d, view)) tally(d.severity, answer.original_errors, answer.original_warnings, answer.original_infos);
+		else tally(d.severity, answer.errors, answer.warnings, answer.infos);
+	}
 	const std::string needle = strutil::to_lower(query.text);
 	// Only the fixable: the view's findings read once for all of them, not once per finding.
 	std::unique_ptr<ProblemFixIndex> index;
 	if (query.fixable) index = std::make_unique<ProblemFixIndex>(view);
+	std::vector<size_t> original;
 	for (const DiagnosticSeverity severity :
 	     {DiagnosticSeverity::Error, DiagnosticSeverity::Warning, DiagnosticSeverity::Info}) {
 		if (!query.shows(severity)) continue;
@@ -90,10 +127,13 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 			const Diagnostic &d = findings[i];
 			if (d.severity != severity || !in_scope(d, query.scope, view) || !matches_text(d, needle)) continue;
 			if (index && !has_fixes(d, view, index.get())) continue;
-			answer.rows.push_back(i);
+			(in_original_data(d, view) ? original : answer.rows).push_back(i);
 		}
 	}
-	if (!answer.grouped) return answer;
+	if (!answer.grouped) {
+		place_original(answer, std::move(original), view);
+		return answer;
+	}
 	std::map<std::string, size_t> placed; // a key -> its group
 	for (const size_t i : answer.rows) {
 		const Diagnostic &d = findings[i];
@@ -114,6 +154,7 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 	}
 	answer.rows.clear();
 	for (const ProblemGroup &group : answer.groups) answer.rows.insert(answer.rows.end(), group.rows.begin(), group.rows.end());
+	place_original(answer, std::move(original), view);
 	return answer;
 }
 

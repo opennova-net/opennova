@@ -44,13 +44,27 @@ struct ProblemGroup {
 	size_t errors = 0;
 	size_t warnings = 0;
 	size_t infos = 0;
+	// Shown under a header of its own (a group of the query's grouping, the game's own data's); false
+	// for the modder's findings listed as one before the game's own data's (ungrouped).
+	bool header = true;
+	// The game's own data's (ADR 0046 S15): the findings about a file byte-identical to the install's
+	// copy (FindingsView::original_files), kOriginalGroupKey, last.
+	bool original = false;
 };
+
+// The key and the title of the group of the game's own data's findings.
+inline constexpr const char *kOriginalGroupKey = "original";
+inline constexpr const char *kOriginalGroupTitle = "In the game's own data (also in the original)";
 
 // What the query shows of a view: `rows` indexes the view's diagnostics in display order
 // (errors, then warnings, then notes, each in the order they were reported; grouped, group
 // after group, the groups in the order their first finding shows); `groups` when grouped;
 // and how many findings of each severity the project has in all, shown or not ("37 of 412"
-// is rows.size() of total()).
+// is rows.size() of total()). The findings about the game's own data (S15: a file the project holds
+// as the install serves it) come after the modder's, under a group of their own
+// (ProblemGroup::original; the answer grouped then whatever the query's grouping, the modder's
+// findings ungrouped as one group with no header), and are counted apart: `errors`, `warnings` and
+// `infos` are the modder's, `original_*` the game's own data's.
 struct ProblemAnswer {
 	std::vector<size_t> rows;
 	bool grouped = false;
@@ -58,8 +72,14 @@ struct ProblemAnswer {
 	size_t errors = 0;
 	size_t warnings = 0;
 	size_t infos = 0;
-	size_t total() const { return errors + warnings + infos; }
+	size_t original_errors = 0;
+	size_t original_warnings = 0;
+	size_t original_infos = 0;
+	size_t original() const { return original_errors + original_warnings + original_infos; }
+	size_t total() const { return errors + warnings + infos + original(); }
 };
+// Whether a finding is about a file the project holds as the game install serves it (S15).
+bool in_original_data(const Diagnostic &diagnostic, const SessionView &view);
 
 ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view);
 

@@ -154,10 +154,19 @@ const ProblemAnswer &ProblemsList::refresh(const SessionView &view) {
 	if (answer.grouped) {
 		for (size_t g = 0; g < answer.groups.size(); ++g) {
 			const ProblemGroup &group = answer.groups[g];
-			// A group of notes alone folds the first time it shows; folded so, it opens again
-			// once it holds an error or a warning, while one the user folded stays folded.
+			// The modder's findings listed as one before the game's own data's: no header, never folded.
+			if (!group.header) {
+				group_fixes_.push_back(Proposal());
+				for (const size_t finding : group.rows) lines_.push_back({false, g, finding});
+				continue;
+			}
+			// The game's own data's (S15) folds the first time it shows, whatever it holds, and stays as
+			// the user leaves it. A group of notes alone folds the first time it shows; folded so, it opens
+			// again once it holds an error or a warning, while one the user folded stays folded.
 			const bool notes_alone = group.errors == 0 && group.warnings == 0;
-			if (seen_groups_.insert(group.key).second && notes_alone) {
+			if (group.original) {
+				if (seen_groups_.insert(group.key).second) folded_.insert(group.key);
+			} else if (seen_groups_.insert(group.key).second && notes_alone) {
 				folded_.insert(group.key);
 				auto_folded_.insert(group.key);
 			} else if (!notes_alone && auto_folded_.erase(group.key)) {

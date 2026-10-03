@@ -8,6 +8,7 @@
 #include <editor/graph/project_validation.h>
 #include <editor/project/project_findings.h>
 #include <editor/session/document_set.h>
+#include <editor/session/original_files.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
@@ -57,10 +58,12 @@ struct ProblemsService::Pass {
 };
 
 ProblemsService::ProblemsService(SessionCore &core) :
-		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()) {
+		core_(core), view_(core.view()), checks_(std::make_shared<ProjectChecks>()),
+		originals_(std::make_unique<OriginalFiles>()) {
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
 	view_.findings.project_checks = checks_;
+	view_.findings.original_files = originals_->files();
 }
 
 ProblemsService::~ProblemsService() = default;
@@ -151,9 +154,41 @@ bool ProblemsService::advance(uint64_t bytes) {
 }
 
 void ProblemsService::step_validation(const PollBudget &budget, const OperationClock &clock) {
-	if (!validating() || core_.documents().gesture_open()) return;
 	const int64_t start = budget.ms > 0 ? clock() : 0;
-	while (!advance(budget.step_bytes) && budget.ms > 0 && clock() - start < budget.ms) {
+	if (validating()) {
+		if (core_.documents().gesture_open()) return;
+		while (!advance(budget.step_bytes) && budget.ms > 0 && clock() - start < budget.ms) {
+		}
+		if (validating()) return;
+	}
+	// The rows stand: which files they are about are the game's own data, in what is left of the budget.
+	while (!step_originals(budget.step_bytes) && budget.ms > 0 && clock() - start < budget.ms) {
+	}
+}
+
+void ProblemsService::want_originals() {
+	if (!view_.project.open || !view_.project.scan) return;
+	// An install or a project that moved forgets what was found: the view says so at once.
+	originals_->want(core_.game_install(), view_.project.document, view_.project.root, *view_.project.scan,
+	                 view_.findings.diagnostics);
+	show_originals();
+}
+
+bool ProblemsService::step_originals(uint64_t bytes) {
+	if (originals_->settled()) return true;
+	const bool done = originals_->step(bytes);
+	show_originals();
+	return done;
+}
+
+void ProblemsService::show_originals() {
+	if (view_.findings.original_files == originals_->files()) return;
+	view_.findings.original_files = originals_->files();
+	core_.touch(ViewConcern::Findings);
+}
+
+void ProblemsService::settle_originals() {
+	while (!step_originals(UINT64_MAX)) {
 	}
 }
 
@@ -190,6 +225,7 @@ void ProblemsService::compose_rows(bool keep_reported) {
 	// then; the small inputs are compared with their copies (Composed::same), and the open documents'
 	// own findings are made again for it.
 	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.findings.diagnostics.size())) {
+		want_originals();
 		show_validation();
 		return;
 	}
@@ -213,6 +249,7 @@ void ProblemsService::compose_rows(bool keep_reported) {
 		core_.touch(ViewConcern::Findings);
 	}
 	composed_.keep(input, view_.findings.diagnostics.size());
+	want_originals();
 	show_validation();
 }
 
@@ -262,6 +299,8 @@ void ProblemsService::clear() {
 	pass_.reset();
 	moved_since_composed_ = false;
 	readings_.clear();
+	originals_->clear();
+	show_originals();
 	show_validation();
 }
 
