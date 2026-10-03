@@ -323,6 +323,11 @@ public:
 	// one-off harvest under `p_tree_parent`), so a placement that names it
 	// later finds them warm; true when the graphic resolves to batches.
 	bool warm_static_graphic(const String &p_graphic, Node *p_tree_parent);
+	// The triangles a warm graphic's static batches draw at its finest level (each batch's mesh faces
+	// through its offset, three vertices a triangle), in the entity's space, kept with the batches: what
+	// the editor's mission device casts a pick against (ADR 0046, the polish). Empty for a graphic not
+	// warmed (one the placement draws as a node of its own).
+	PackedVector3Array get_static_graphic_faces(const String &p_graphic);
 	// Whether a placement draws an entity of the item as a row of its
 	// graphic's static populations (else as an individual model: the item
 	// needs a node of its own, or its graphic a live PANM).
@@ -568,6 +573,7 @@ private:
 	HashMap<String, Ref<ObjectData>> object_data_cache_;
 	HashMap<String, Ref<SkeletalAnim>> skeletal_cache_;
 	HashMap<String, Vector<StaticBatch>> static_batch_cache_;
+	HashMap<String, PackedVector3Array> static_face_cache_; // get_static_graphic_faces
 	HashMap<String, StaticLodProfile> static_lod_profile_cache_;
 	HashMap<String, bool> graphic_panm_cache_;
 	HashMap<int64_t, bool> occlusion_cache_;
