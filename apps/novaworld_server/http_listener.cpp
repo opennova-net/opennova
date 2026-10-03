@@ -299,8 +299,13 @@ struct HttpListener::Impl {
 HttpListener::HttpListener(ConnectionManager &manager, db::Database &db,
                            SessionStore &sessions)
 	: impl_(std::make_unique<Impl>()), manager_(manager), db_(db),
-	  sessions_(sessions),
-	  epask_params_(opennova::generate_epask()) {
+	  sessions_(sessions) {
+	// A bundle that did not converge stays the zero one, which every client
+	// refuses (the modexp gate), so the login leg fails rather than the service.
+	if (!opennova::generate_epask(epask_params_)) {
+		std::fprintf(stderr, "[http] EPASK params: generate_epask did not converge; logins will fail\n");
+		return;
+	}
 	std::printf("[http] EPASK params: e=%u n=%u key=%s\n",
 	            epask_params_.exponent, epask_params_.modulus,
 	            epask_params_.key.c_str());
@@ -1859,16 +1864,23 @@ void HttpListener::register_legacy_host_join_routes(
 				std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner identity - PUB* cookies will be empty (joiner cookies=[%s])\n",
 				             cookie_summary(request_cookie_header(req)).c_str());
 			} else {
-				try {
-					const auto payloads =
-						opennova::build_pub_join_identity_plaintexts(joiner_pcid, joiner_nwhandle);
-					pub_pcid = opennova::encode_pub_value(payloads.pcid, host_pcid_key);
-					if (!payloads.name_info.empty()) {
-						pub_nameinfo = opennova::encode_pub_value(payloads.name_info, host_pcid_key);
-					}
-					if (!payloads.squad_info.empty()) {
-						pub_squadinfo = opennova::encode_pub_value(payloads.squad_info, host_pcid_key);
-					}
+				const auto payloads =
+					opennova::build_pub_join_identity_plaintexts(joiner_pcid, joiner_nwhandle);
+				// A refused encode (only an empty key is refused, ruled out above)
+				// leaves every PUB* cookie empty, as a missing host key does.
+				const bool encoded =
+					opennova::encode_pub_value(payloads.pcid, host_pcid_key, pub_pcid) &&
+					(payloads.name_info.empty() ||
+					 opennova::encode_pub_value(payloads.name_info, host_pcid_key, pub_nameinfo)) &&
+					(payloads.squad_info.empty() ||
+					 opennova::encode_pub_value(payloads.squad_info, host_pcid_key, pub_squadinfo));
+				if (!encoded) {
+					pub_pcid.clear();
+					pub_nameinfo.clear();
+					pub_squadinfo.clear();
+					std::fprintf(stderr, "[http] /NWJoin.dll PUB* encode refused (host_key=%zuB)\n",
+					             host_pcid_key.size());
+				} else {
 					if (payloads.name_info.empty() || payloads.squad_info.empty()) {
 						std::fprintf(stderr, "[http] /NWJoin.dll WARN no joiner display handle - PUBNAMEINFO/PUBSQUADINFO will be empty (joiner=%s cookies=[%s])\n",
 						             joiner_label.c_str(),
@@ -1878,8 +1890,6 @@ void HttpListener::register_legacy_host_join_routes(
 					            joiner_label.c_str(), joiner_pcid.c_str(),
 					            joiner_nwhandle.c_str(), host_pcid_key.size(),
 					            payloads.name_info.size(), payloads.squad_info.size());
-				} catch (const std::exception &e) {
-					std::fprintf(stderr, "[http] /NWJoin.dll PUB* encode failed: %s\n", e.what());
 				}
 			}
 			// Phase I.3: persist the join in host_players. Cascade-deletes
