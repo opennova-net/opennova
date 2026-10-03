@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 #include <base/io/strutil.h>
@@ -121,6 +122,33 @@ bool is_animation_kind(AssetKind kind) {
 	return asset_kind_row(kind).document == DocumentTypeId::Animation;
 }
 
+std::string animation_trigger_words(uint32_t trigger) {
+	std::string words;
+	const auto add = [&words](const std::string &part) { words += (words.empty() ? "" : ", ") + part; };
+	uint32_t unread = trigger;
+	for (const anim::AnimEventBit &bit : anim::kAnimEventBits) {
+		if (!(trigger & bit.mask)) continue;
+		add(bit.words);
+		unread &= ~bit.mask;
+	}
+	if (unread) {
+		char hex[16];
+		std::snprintf(hex, sizeof(hex), "0x%X", unread);
+		add(std::string("an unread bit (") + hex + ")");
+	}
+	return words;
+}
+
+std::string AnimationDocument::record_title(const NodeAddress &address) const {
+	const ClipRow *row = clip();
+	if (!row || address.row != row->id || address.kind != kEvent) return record_name(address);
+	const size_t i = index_of(*row, address);
+	if (i == SIZE_MAX) return record_name(address);
+	const std::string words =
+			row->version == 0 ? std::string() : animation_trigger_words(static_cast<uint32_t>(row->events[i].trigger));
+	return "Frame " + std::to_string(i) + (words.empty() ? std::string() : ": " + words);
+}
+
 const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
 	static const std::vector<RecordKindRow> table = {
 	        {kClip, "clip", "Clip", "", true},
@@ -132,8 +160,11 @@ const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
 
 std::vector<Document::Collection> AnimationDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kClip || owner.child != 0) return {};
+	// Numbered from 0, as the game indexes them: a frame event is its frame (its title's, the
+	// timeline's), a bone its channel (the model's part it pairs with).
 	CollectionSpec bones{kBone, "Bones", "name", true};
 	CollectionSpec events{kEvent, "Frame events", "", true};
+	bones.first_number = events.first_number = 0;
 	return {{bones, row.collections[0]}, {events, row.collections[1]}};
 }
 

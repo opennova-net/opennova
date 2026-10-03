@@ -68,6 +68,9 @@ private:
 	// black with the flag set, imgui-godot 6.3.2 / Godot 4.6.1 D3D12), so the
 	// pass's flag follows the root window's mode every frame.
 	bool window_allows_platform_windows() const;
+	// The mouse's place as the OS has it, for the pass each frame (ImGuiPass::set_mouse_place):
+	// one of the product's windows focused, the cursor over one of them.
+	void feed_mouse_place(opennova::devtools::ImGuiPass &p_pass) const;
 	void set_layer_visible(bool p_visible);
 
 	bool attached_ = false;

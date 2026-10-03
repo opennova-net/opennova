@@ -7,6 +7,7 @@
 #include <imgui_internal.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 
 // The engine's ImGui copy must be the commit the imgui-godot addon bundles
@@ -86,6 +87,16 @@ void create_default_layout(ImGuiID dockspace_id, const ImGuiViewport &viewport, 
 		}
 	}
 	ImGui::DockBuilderFinish(dockspace_id);
+}
+
+// The frame's mouse forgotten after NewFrame: no window hovered (so no item is, and no tooltip
+// starts), the position unknown (so no rectangle test hits, and the next frame's delta is 0).
+void forget_mouse() {
+	ImGuiContext &g = *ImGui::GetCurrentContext();
+	g.IO.MousePos = ImVec2(-FLT_MAX, -FLT_MAX);
+	g.HoveredWindow = nullptr;
+	g.HoveredWindowUnderMovingWindow = nullptr;
+	g.HoveredWindowBeforeClear = nullptr;
 }
 
 }  // namespace
@@ -284,6 +295,12 @@ void ImGuiPass::sync_visibility() {
 bool ImGuiPass::draw_frame(uint64_t frame_index) {
 	if (!attached_ || !open_) {
 		return false;
+	}
+
+	// The mouse not the pass's this frame (set_mouse_place): forgotten before anything draws,
+	// after the bridge's NewFrame placed it from the global cursor.
+	if (!((mouse_focused_ && mouse_over_) || ImGui::IsAnyMouseDown())) {
+		forget_mouse();
 	}
 
 	// A reset requested last frame (the menu item, a probe) rebuilds the

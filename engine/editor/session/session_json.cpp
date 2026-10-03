@@ -1566,6 +1566,7 @@ JsonValue graph_search_to_json(const std::vector<GraphSearchHit> &hits, const Js
 			entry.set("name", json_string(hit.name));
 			entry.set("file", json_string(hit.file));
 		}
+		if (!hit.words.empty()) entry.set("words", json_string(hit.words));
 		entry.set("usages", json_number(double(hit.usages)));
 		list.push(std::move(entry));
 	}

@@ -1306,7 +1306,7 @@ constexpr EditorQueryRow kRows[] = {
 	Query(K::ProjectSearch, "project_search", answer_project_search, kProjectSearchParams,
 			kGraphReads,
 			"A page of the files whose names and the symbols whose names hold the text, without "
-			"case, files first, each with its usages.")
+			"case, files first, each with its usages; an item also by its catalog's name (its words).")
 			.pages("hits")
 			.row,
 	Query(K::MenuTree, "menu_tree", answer_menu_tree, kMenuTreeParams, kMenuReads,

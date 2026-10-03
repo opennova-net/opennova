@@ -28,6 +28,9 @@ enum class ModelViewStatus : uint8_t {
 	Unserializable, // the model, clip or table cannot be written, so the game could not read it
 	Unreadable, // what it writes does not read back (or the rig's model does not read)
 	NoRig, // an animation no model plays: no item pairs its table with a graphic
+	// An animation no model plays yet while the project's references are still being read (its first
+	// validation runs): the pairing item may not be read yet (S17).
+	Reading,
 	Ready,
 };
 // "no_project", "ready", ...: its token on the wire.
@@ -46,9 +49,14 @@ struct ModelViewportOptions {
 	std::map<std::string, int64_t> ctrl;
 	ModelOverlayOptions overlays;
 	std::string rig_model;
+	// A clip's preview (ADR 0046 S17): a one-shot played again from its start after it ends and
+	// holds its last frame a moment (the game plays it once; a loop loops either way), and the rig's
+	// bones drawn over the picture, each named.
+	bool repeat = true;
+	bool bones = true;
 	bool operator==(const ModelViewportOptions &other) const {
 		return lod == other.lod && ctrl == other.ctrl && overlays == other.overlays &&
-				rig_model == other.rig_model;
+				rig_model == other.rig_model && repeat == other.repeat && bones == other.bones;
 	}
 	bool operator!=(const ModelViewportOptions &other) const { return !(*this == other); }
 };
@@ -57,8 +65,12 @@ struct ModelViewportOptions {
 // pitch and distance): what an orbit, a pan, a dolly or a framing on its canvas sends.
 std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
-// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model}.
+// ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, repeat, bones}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
+
+// How long a repeated one-shot holds its last frame before it plays again, in game ticks (half a
+// second): the editor's aid, not the game's (the game plays a one-shot once).
+inline constexpr int32_t kClipRepeatHoldTicks = 31;
 
 // A model's viewport (ADR 0046 S10p2, S10p6, S13 V5; ViewportKind::Model): the model document at its
 // path as it would save (its serialize(), read back), or a clip or an animation table played on its
@@ -135,14 +147,33 @@ public:
 	int clip_variant() const { return clip_variant_; }
 	const std::string &clip_file() const { return clip_file_; }
 	const std::vector<PreviewClipEvent> &clip_events() const { return clip_events_; }
+	// Why the clip playing is not the one selected, in words (a clip the project lacks, a row the
+	// game skips, the reset clip played in an unauthored slot's place: preview_clip_choice); "".
+	const std::string &clip_note() const { return clip_note_; }
 	// The playing clip's length in ticks (-1 unknown) and whether it loops.
 	int32_t clip_length_ticks() const;
 	bool clip_loops() const;
+	// Its frames (the header's count: the last frame is that count) and its rate (0: none plays).
+	uint32_t clip_frame_count() const;
+	uint32_t clip_fps() const;
+	// The tick of the clip's clock the clock's ticks play (S17): the clock's ticks, a repeated
+	// one-shot's taken again from 0 every length and hold (options' repeat, kClipRepeatHoldTicks); what
+	// the device poses the skeleton at and the timeline shows.
+	int32_t clip_ticks(const PreviewClock &clock) const;
 	// The clip's frame at the clock's ticks (loops wrap, a one-shot holds its end).
 	double clip_frame(const PreviewClock &clock) const;
 	// The first tick the clip's clock runs on `frame` (-1 when it never does), where its event fires
 	// in the game (anim::ClipTimeline::first_ticks).
 	int32_t tick_of_frame(int frame) const;
+	// The tick a step of `by` frames from the frame shown at `ticks` lands on: the next (or the
+	// previous) frame the clock runs on, kept within the clip (S17's frame step).
+	int32_t tick_of_step(int32_t ticks, int by) const;
+	// The tick that shows `frame`: the first the clip's clock runs on it, else on the next frame it
+	// runs on (a fast clip's steps pass over some), else the clip's end (-1: no clip plays). What a
+	// SetViewport's `frame` (S17: `{"frame": 14}`) holds the clock on.
+	int32_t tick_of_frame_shown(int frame) const;
+	// The rig's bones as the playing clip poses them at the clock (empty when none plays).
+	std::vector<PreviewJoint> joints(const PreviewClock &clock) const;
 
 	// What a canvas maps of it in a frame (model_canvas.h): its markers at the clock and, while the
 	// model is the active document, the selected records' markers.
@@ -237,6 +268,7 @@ private:
 	std::string clip_file_;
 	int clip_variant_ = 0;
 	std::vector<PreviewClipEvent> clip_events_;
+	std::string clip_note_;
 	NodeId sought_event_ = 0; // the event record the clock last sought
 };
 

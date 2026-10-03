@@ -108,6 +108,19 @@ bool ImGuiPassNode::window_allows_platform_windows() const {
 	return mode != Window::MODE_FULLSCREEN && mode != Window::MODE_EXCLUSIVE_FULLSCREEN;
 }
 
+void ImGuiPassNode::feed_mouse_place(opennova::devtools::ImGuiPass &p_pass) const {
+	// The addon feeds ImGui the global cursor (DisplayServer::mouse_get_position) and the
+	// window under it by rectangle alone, whatever covers the window: the pass hears from
+	// the OS whether the mouse is this product's at all.
+	DisplayServer *display = DisplayServer::get_singleton();
+	bool focused = false;
+	const PackedInt32Array windows = display->get_window_list();
+	for (int64_t i = 0; i < windows.size() && !focused; ++i) focused = display->window_is_focused(windows[i]);
+	const bool over = display->get_window_at_screen_position(display->mouse_get_position()) !=
+			DisplayServer::INVALID_WINDOW_ID;
+	p_pass.set_mouse_place(focused, over);
+}
+
 void ImGuiPassNode::set_layer_visible(bool p_visible) {
 	Engine *engine = Engine::get_singleton();
 	if (!engine->has_singleton(kImGuiSingleton)) {
@@ -167,6 +180,7 @@ void ImGuiPassNode::_process(double p_delta) {
 		return;
 	}
 	pass->set_platform_windows_enabled(platform_windows_allowed_ && window_allows_platform_windows());
+	feed_mouse_place(*pass);
 	const uint64_t frame = Engine::get_singleton()->get_process_frames();
 	before_layout(p_delta);
 	const int64_t t0 = Time::get_singleton()->get_ticks_usec();

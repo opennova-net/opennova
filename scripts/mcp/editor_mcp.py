@@ -4,7 +4,10 @@
 Launches the OpenNova Editor with `--mcp-port`, speaks JSON-RPC to its
 loopback Streamable-HTTP endpoint, and wraps its tools as subcommands that
 print JSON. Standard library only; the transport class is game_mcp.py's, so a
-`play start` here hands its `mcp_port` straight to `game_mcp.py --port`.
+`play start` here hands its `mcp_port` straight to `game_mcp.py --port`. A
+launch's window is shown without activation and kept behind every other window,
+never taking the foreground (game_mcp.BehindLaunch); `launch --front` starts it
+as usual.
 
     python scripts/mcp/editor_mcp.py launch --headless --open "C:/mods/My Game" --pid-file build/editor.pid
     python scripts/mcp/editor_mcp.py state --sections documents,problem_counts  # the view by section
@@ -61,8 +64,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import game_mcp  # noqa: E402  (the shared transport and process helpers)
 from game_mcp import (  # noqa: E402
-    EXIT_LAUNCH_FAILED, EXIT_OK, EXIT_STOP_SURVIVED, EXIT_TOOL_ERROR, EXIT_USAGE, GameMcp, GameMcpError,
-    emit_payload, find_godot, images_of, parse_json_arg, pid_alive, port_open, tail, text_of,
+    EXIT_LAUNCH_FAILED, EXIT_OK, EXIT_STOP_SURVIVED, EXIT_TOOL_ERROR, EXIT_USAGE, BehindLaunch, GameMcp,
+    GameMcpError, emit_payload, find_godot, images_of, parse_json_arg, pid_alive, port_open, tail, text_of,
 )
 
 # 8975 is the game, 8976 a LAN joiner (docs/mcp.md); the editor takes the next one.
@@ -123,34 +126,43 @@ def cmd_launch(args: argparse.Namespace) -> int:
             subprocess.CREATE_NEW_PROCESS_GROUP | getattr(subprocess, "DETACHED_PROCESS", 0x00000008))
     else:
         popen_kwargs["start_new_session"] = True
-    with open(stdout_log, "wb") as sink:
-        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
-                                 cwd=str(cwd), **popen_kwargs)
-    if args.pid_file:
-        Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
+    # Behind every other window and never the foreground, unless --front (game_mcp.BehindLaunch).
+    behind = BehindLaunch(args.front)
+    popen_kwargs.update(behind.popen_kwargs())
+    behind.lock()
+    try:
+        with open(stdout_log, "wb") as sink:
+            child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
+                                     cwd=str(cwd), **popen_kwargs)
+        if args.pid_file:
+            Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
 
-    deadline = time.monotonic() + args.timeout
-    client = GameMcp.for_port(port)
-    while time.monotonic() < deadline:
-        exit_code = child.poll()
-        if exit_code is not None:
+        deadline = time.monotonic() + args.timeout
+        client = GameMcp.for_port(port)
+        while time.monotonic() < deadline:
+            behind.tend(child.pid)
+            exit_code = child.poll()
+            if exit_code is not None:
+                raise GameMcpError(
+                    EXIT_LAUNCH_FAILED,
+                    f"the editor exited with code {exit_code} before its endpoint answered\n"
+                    f"--- {stdout_log} ---\n{tail(stdout_log)}"
+                    + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
+            if port_open(port):
+                try:
+                    client.initialize(timeout=5)
+                    break
+                except GameMcpError:
+                    pass
+            time.sleep(0.25 if not behind.active else 0.05)
+        else:
             raise GameMcpError(
                 EXIT_LAUNCH_FAILED,
-                f"the editor exited with code {exit_code} before its endpoint answered\n"
-                f"--- {stdout_log} ---\n{tail(stdout_log)}"
-                + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
-        if port_open(port):
-            try:
-                client.initialize(timeout=5)
-                break
-            except GameMcpError:
-                pass
-        time.sleep(0.25)
-    else:
-        raise GameMcpError(
-            EXIT_LAUNCH_FAILED,
-            f"the endpoint on port {port} did not answer within {args.timeout:.0f} s (pid {child.pid} "
-            f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
+                f"the endpoint on port {port} did not answer within {args.timeout:.0f} s (pid {child.pid} "
+                f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
+        behind.settle(child.pid)
+    finally:
+        behind.release()
     if args.open:
         # --open's project opens as an operation (S13 A3), then validates across frames: waited on,
         # so the first query after the launch reads the project; a launch whose Open did not end in
@@ -568,6 +580,9 @@ def build_parser() -> argparse.ArgumentParser:
     display.add_argument("--headless", action="store_true", help="no window (the screenshot refuses)")
     display.add_argument("--windowed", action="store_true", help="force a window")
     launch.add_argument("--resolution", default=None, help="WxH for the window")
+    launch.add_argument("--front", action="store_true",
+                        help="an ordinary start: the window may come to the front and take the focus (by default "
+                             "it is shown without activation and kept behind every other window)")
     launch.add_argument("--log-file", default=None, help="Godot --log-file for the editor process")
     launch.add_argument("--stdout-log", default=None, help="where the child's stdout/stderr go (default: the temp dir)")
     launch.add_argument("--pid-file", default=None, help="write the editor's PID here (stop --pid-file reads it)")

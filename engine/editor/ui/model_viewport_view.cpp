@@ -1,8 +1,10 @@
 #include <editor/ui/model_viewport_view.h>
 
 #include <algorithm>
+#include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -10,9 +12,12 @@
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
+#include <base/io/tick_rate.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/preview/animation_uses.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_viewport.h>
@@ -49,12 +54,46 @@ void seek_ticks(Workspace &workspace, const ModelViewport &model, int32_t ticks,
 	if (hold) clock.set("playing", io::JsonValue::make_bool(false));
 	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
 }
+void set_rate(Workspace &workspace, const ModelViewport &model, double rate) {
+	io::JsonValue clock = io::JsonValue::make_object();
+	clock.set("rate", io::json_number(rate));
+	workspace.request(request::set_viewport(model.path(), viewport_change(ViewportKind::Model, "clock", std::move(clock))));
+}
+
+// The playback speeds the timeline offers, and their words.
+constexpr double kRates[] = {0.1, 0.25, 0.5, 1.0, 2.0};
+constexpr const char *kRateWords[] = {"0.1x", "0.25x", "0.5x", "1x", "2x"};
+
+// An event's mark on the timeline: its colour and letter by what it does, a shot first, then a
+// footstep, then a sound (an event may carry several).
+struct EventMark {
+	ImU32 color;
+	const char *letter;
+};
+EventMark event_mark(uint32_t trigger) {
+	if (trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3))
+		return {IM_COL32(240, 90, 80, 255), "F"};
+	if (trigger & anim::kAnimEventFootLeft) return {IM_COL32(120, 220, 120, 255), "L"};
+	if (trigger & anim::kAnimEventFootRight) return {IM_COL32(120, 220, 120, 255), "R"};
+	return {kEventColor, "S"};
+}
+
+std::string seconds_text(double seconds) {
+	char text[32];
+	std::snprintf(text, sizeof(text), "%.2f s", seconds);
+	return text;
+}
 
 } // namespace
 
 // What the view keeps of its own: the snap.
 struct ModelViewportView::Tools {
 	int snap = 2; // kModelHandleSnaps: 1/16 m
+	// The Plays on choice's filter, and the models items animate, made again when the graph moves.
+	char rig_filter[64] = {};
+	const AssetGraph *animated_graph = nullptr;
+	uint64_t animated_generation = 0;
+	std::vector<std::string> animated;
 
 	void toolbar(Workspace &workspace, const ModelViewport &model, const ViewportContext &context);
 	void registers(Workspace &workspace, const ModelViewport &model);
@@ -70,7 +109,7 @@ void ModelViewportView::draw_empty(Workspace &workspace, const ViewportModel *mo
 	ViewportView::draw_empty(workspace, model, path);
 	// An animation no item pairs: the author picks the model it plays on.
 	const auto *shown = static_cast<const ModelViewport *>(model);
-	if (shown && shown->view_status() == ModelViewStatus::NoRig) {
+	if (shown && (shown->view_status() == ModelViewStatus::NoRig || shown->view_status() == ModelViewStatus::Reading)) {
 		ui_kit::WrapRow row;
 		tools_->rig_chooser(workspace, row, *shown);
 	}
@@ -82,135 +121,242 @@ void ModelViewportView::draw_ready(Workspace &workspace, const ViewportModel &vi
 		draw_empty(workspace, &viewport, viewport.path());
 		return;
 	}
-	// An animation: the model it plays on (the Preview window's line names it), the clip the
-	// selection plays (its slot in words, the table's key in the tooltip) and where the pairing
-	// comes from, cut to the room left (whole in its tooltip) or on a line of its own in a narrow
-	// window.
+	// An animation: the model it plays on (the Preview window's line names it) and where the pairing
+	// comes from, then the clip the selection plays (its slot in words, its file, which of the row's
+	// clips it is), and why it is not the one selected where it is not, each cut to the room left
+	// (whole in its tooltip).
 	if (model.animating()) {
 		const PreviewRig &rig = model.rig();
 		ui_kit::WrapRow row;
 		tools_->rig_chooser(workspace, row, model);
+		// The pairing's record by its name, its file after it ("ITEMS.DEF: Ranger" as "paired by Ranger
+		// (ITEMS.DEF)").
+		const size_t colon = rig.source.find(": ");
+		const std::string paired = rig.source.empty() ? std::string()
+		                           : rig.source == "chosen" ? std::string("(chosen)")
+		                           : colon == std::string::npos
+		                                   ? "paired by " + rig.source
+		                                   : "paired by " + rig.source.substr(colon + 2) + " (" + rig.source.substr(0, colon) + ")";
+		if (!paired.empty()) {
+			row.next(std::min(ui_kit::text_width(paired.c_str()), ImGui::GetFontSize() * 8.0f));
+			ImGui::AlignTextToFramePadding();
+			ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+			ui_kit::clipped_text(paired, "The item whose graphic and anim_def pair this model with the map.");
+			ImGui::PopStyleColor();
+		}
 		const std::string &key = model.clip_key();
-		const std::string slot = animation_key_title(key);
-		const std::string clip = key.empty() ? "(" + rig.source + ")"
-		                                     : "plays " + slot + " #" + std::to_string(model.clip_variant()) + " (" + rig.source + ")";
-		row.next(std::min(ui_kit::text_width(clip.c_str()), ImGui::GetFontSize() * 8.0f));
-		ImGui::AlignTextToFramePadding();
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
-		ui_kit::clipped_text(clip, slot != key ? clip + "\n" + key : std::string());
-		ImGui::PopStyleColor();
-		if (!model.detail().empty()) {
+		if (!key.empty()) {
+			const int count = model.skeleton() ? model.skeleton()->clip_variant_count(key) : 0;
+			std::string playing = "Playing " + animation_key_title(key) + ": " + model.clip_file();
+			if (count > 1)
+				playing += " (clip " + std::to_string(model.clip_variant() + 1) + " of " + std::to_string(count) +
+				           ", played in turn from the last)";
+			ui_kit::clipped_text(playing, playing + "\n" + key);
+		}
+		if (!model.clip_note().empty() || !model.detail().empty()) {
 			ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.3f, 1.0f));
-			ImGui::TextWrapped("%s", model.detail().c_str());
+			if (!model.clip_note().empty()) ImGui::TextWrapped("%s", model.clip_note().c_str());
+			if (!model.detail().empty()) ImGui::TextWrapped("%s", model.detail().c_str());
 			ImGui::PopStyleColor();
 		}
 	}
 	tools_->toolbar(workspace, model, context);
 	snap = kModelHandleSnaps[std::clamp(tools_->snap, 0, 4)];
 	context.snap = snap;
-	const float timeline = model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + 6.0f : 0.0f;
+	const float timeline =
+			model.animating() ? ImGui::GetFrameHeightWithSpacing() * 2.0f + ImGui::GetFontSize() * 2.0f + 16.0f : 0.0f;
 	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - timeline));
 	if (model.animating()) tools_->timeline(workspace, model, context.input.clock);
 }
 
-// The model an animation plays on: Auto (the one an item pairs with the table) or a model
-// of the project's.
+// The model an animation plays on: Auto (the one an item pairs with the table) or a model of the
+// project's, found by typing part of its name, the models items animate first (S17: a new clip's
+// likely rigs).
 void ModelViewportView::Tools::rig_chooser(Workspace &workspace, ui_kit::WrapRow &row, const ModelViewport &model) {
 	const SessionView &view = workspace.view();
 	ModelViewportOptions options = model.options();
 	const float width = ImGui::GetFontSize() * 10.0f;
 	row.next(ui_kit::field_width(width, "Plays on"));
 	ImGui::SetNextItemWidth(width);
-	if (ImGui::BeginCombo("Plays on", options.rig_model.empty() ? "Auto" : options.rig_model.c_str())) {
-		if (ImGui::Selectable("Auto", options.rig_model.empty())) options.rig_model.clear();
+	if (ImGui::BeginCombo("Plays on", options.rig_model.empty() ? "Auto" : options.rig_model.c_str(),
+	                      ImGuiComboFlags_HeightLarge)) {
+		if (ImGui::IsWindowAppearing()) {
+			rig_filter[0] = '\0';
+			ImGui::SetKeyboardFocusHere();
+		}
+		ImGui::SetNextItemWidth(-FLT_MIN);
+		ImGui::InputTextWithHint("##rig_filter", "Type part of a model's name", rig_filter, sizeof(rig_filter));
+		const std::string wanted = strutil::to_lower(rig_filter);
+		const auto shown = [&](const std::string &name) {
+			return wanted.empty() || strutil::to_lower(name).find(wanted) != std::string::npos;
+		};
+		if (wanted.empty() && ImGui::Selectable("Auto", options.rig_model.empty())) options.rig_model.clear();
+		if (view.findings.graph && (animated_graph != view.findings.graph.get() ||
+		                            animated_generation != view.findings.graph->generation())) {
+			animated_graph = view.findings.graph.get();
+			animated_generation = view.findings.graph->generation();
+			animated = view.project.scan ? animated_models(*view.findings.graph, *view.project.scan)
+			                             : std::vector<std::string>();
+		}
+		bool any = false;
+		for (const std::string &name : animated) {
+			if (!shown(name)) continue;
+			if (!any) ImGui::SeparatorText("Models items animate");
+			any = true;
+			if (ImGui::Selectable((name + "##animated").c_str(), name == options.rig_model)) options.rig_model = name;
+		}
+		ImGui::SeparatorText("Every model");
 		for (const AssetEntry &entry : view.project.scan->entries)
-			if (entry.kind == AssetKind::Model &&
+			if (entry.kind == AssetKind::Model && shown(entry.logical_name) &&
 			    ImGui::Selectable(entry.logical_name.c_str(), entry.logical_name == options.rig_model))
 				options.rig_model = entry.logical_name;
 		ImGui::EndCombo();
 	}
 	ui_kit::tooltip("The model the animation plays on. Auto takes the graphic of an item whose "
-	                "anim_def names the table.");
+	                "anim_def names the map. A clip's bones pair with the model's parts by their order.");
 	if (options != model.options()) set_options(workspace, model, options);
 }
 
-// The clip the selection plays: run or hold it, step a tick, scrub; its trigger events
-// under the track (a click on one seeks there and, in the clip's own document, selects it).
+// The clip the selection plays (ADR 0046 S17): its transport (Run or Pause, Space; the first
+// frame, Home; a frame back and on, the arrows; Repeat for a one-shot; the speed), the frame and the
+// time shown, then a track the mouse scrubs with its frames ruled and its events marked by what
+// they do (a footstep L or R, a shot F, a sound S; hovered, the event in words; clicked, the clock
+// held there and, in the clip's own document, the event selected), and the marks' legend.
 void ModelViewportView::Tools::timeline(Workspace &workspace, const ModelViewport &model, const PreviewClock &clock) {
 	const int32_t length = model.clip_length_ticks();
 	if (model.clip_key().empty() || length <= 0) {
-		ImGui::TextDisabled("%s", model.rig().table.empty() || model.clip_key().empty()
-		                                  ? "Select a row of the table to play its clip."
+		ImGui::TextDisabled("%s", !model.clip_note().empty() ? "Nothing plays here."
+		                          : model.rig().table.empty() || model.clip_key().empty()
+		                                  ? "Select a row of the map (or a clip of a row) to play it."
 		                                  : "The clip does not load in the rig.");
 		return;
 	}
-	const int32_t ticks = clock.ticks();
+	const int32_t ticks = model.clip_ticks(clock);
 	const int32_t shown = model.clip_loops() ? ticks % length : std::min(ticks, length);
-	if (ImGui::Button(clock.playing() ? "Pause##clip" : "Run##clip")) set_playing(workspace, model, !clock.playing());
-	ui_kit::tooltip(clock.playing() ? "Hold the clip where it is." : "Run the clip.");
+	const uint32_t frames = model.clip_frame_count();
+	const double frame = model.clip_frame(clock);
+	// The keys, while the Preview has the keyboard and no text field takes it.
+	const bool keys = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput;
+	ui_kit::WrapRow row;
+	const char *run = clock.playing() ? "Pause##clip" : "Run##clip";
+	row.next(ui_kit::button_width(run));
+	if (ImGui::Button(run) || (keys && ImGui::IsKeyPressed(ImGuiKey_Space, false))) set_playing(workspace, model, !clock.playing());
+	ui_kit::tooltip(clock.playing() ? "Hold the clip where it is (Space)." : "Run the clip (Space).");
+	row.next(ui_kit::button_width("|<"));
+	if (ImGui::Button("|<") || (keys && ImGui::IsKeyPressed(ImGuiKey_Home, false))) seek_ticks(workspace, model, 0, true);
+	ui_kit::tooltip("The first frame (Home).");
+	row.next(ImGui::GetFrameHeight() * 2.0f + ImGui::GetStyle().ItemSpacing.x);
+	if (ImGui::ArrowButton("##back", ImGuiDir_Left) || (keys && ImGui::IsKeyPressed(ImGuiKey_LeftArrow)))
+		seek_ticks(workspace, model, model.tick_of_step(shown, -1), true);
+	ui_kit::tooltip("A frame back (Left).");
 	ImGui::SameLine();
-	if (ImGui::ArrowButton("##back", ImGuiDir_Left)) seek_ticks(workspace, model, std::max(shown - 1, 0), false);
-	ui_kit::tooltip("A tick back.");
-	ImGui::SameLine();
-	if (ImGui::ArrowButton("##forward", ImGuiDir_Right)) seek_ticks(workspace, model, shown + 1, false);
-	ui_kit::tooltip("A tick on.");
-	ImGui::SameLine();
-	// The frame the clip shows after the track, its width kept for it; in a window too
-	// narrow for both, in the track's tooltip.
-	const anim::SkeletalClips::LoadedClip *clip = model.skeleton()->find_clip_variant(model.clip_key(), model.clip_variant());
-	char frame[48];
-	std::snprintf(frame, sizeof(frame), "frame %.1f / %u", model.clip_frame(clock), clip ? clip->clip.frame_count : 0u);
-	const float spacing = ImGui::GetStyle().ItemSpacing.x;
-	const float track_room = ImGui::GetContentRegionAvail().x - ui_kit::text_width(frame) - spacing;
-	const bool frame_beside = track_room >= ImGui::GetFontSize() * 5.0f;
-	int scrub = shown;
-	ImGui::SetNextItemWidth(frame_beside ? track_room : ImGui::GetContentRegionAvail().x);
-	if (ImGui::SliderInt("##clip_ticks", &scrub, 0, length, "tick %d")) seek_ticks(workspace, model, scrub, true);
-	if (!frame_beside) ui_kit::tooltip(frame);
-	const ImVec2 track_min = ImGui::GetItemRectMin(), track_max = ImGui::GetItemRectMax();
-	if (frame_beside) {
-		ImGui::SameLine();
-		ImGui::TextUnformatted(frame);
+	if (ImGui::ArrowButton("##forward", ImGuiDir_Right) || (keys && ImGui::IsKeyPressed(ImGuiKey_RightArrow)))
+		seek_ticks(workspace, model, model.tick_of_step(shown, 1), true);
+	ui_kit::tooltip("A frame on (Right).");
+	char where[96];
+	std::snprintf(where, sizeof(where), "Frame %d of %u, %s of %s", int(std::floor(frame + 1e-6)), frames,
+	              seconds_text(shown / io::kTickHz).c_str(), seconds_text(length / io::kTickHz).c_str());
+	row.next(ui_kit::text_width(where));
+	ImGui::AlignTextToFramePadding();
+	ImGui::TextUnformatted(where);
+	ui_kit::tooltip("The frame the clip shows (from 0) and the time, as the game's ticks pass (62.5 a "
+	                "second; tick " + std::to_string(shown) + " of " + std::to_string(length) + ").");
+	ModelViewportOptions options = model.options();
+	row.next(ui_kit::checkbox_width("Repeat"));
+	ImGui::BeginDisabled(model.clip_loops());
+	bool repeat = model.clip_loops() || options.repeat;
+	if (ImGui::Checkbox("Repeat", &repeat)) {
+		options.repeat = repeat;
+		set_options(workspace, model, options);
 	}
+	ImGui::EndDisabled();
+	ui_kit::tooltip(model.clip_loops()
+	                        ? "This clip loops (its Loops flag): it plays again from its start as the game plays it."
+	                        : "Play this one-shot again from its start after a moment. The game plays a one-shot "
+	                          "once and holds its last frame.");
+	int rate = 3;
+	for (int i = 0; i < int(std::size(kRates)); ++i)
+		if (std::fabs(clock.rate() - kRates[i]) < 1e-6) rate = i;
+	const float rate_width = ImGui::GetFontSize() * 3.5f;
+	row.next(ui_kit::field_width(rate_width, "Speed"));
+	ImGui::SetNextItemWidth(rate_width);
+	if (ImGui::Combo("Speed", &rate, kRateWords, int(std::size(kRateWords)))) set_rate(workspace, model, kRates[rate]);
+	ui_kit::tooltip("How fast the preview plays: 1x is the game's speed.");
 
-	// The events under the track.
-	const float strip = 8.0f;
-	const float grab = ImGui::GetStyle().GrabMinSize * 0.5f + ImGui::GetStyle().FramePadding.x;
-	const float left = track_min.x + grab, right = track_max.x - grab;
-	ImGui::SetCursorScreenPos(ImVec2(track_min.x, track_max.y + 2.0f));
-	ImGui::InvisibleButton("##events", ImVec2(std::max(1.0f, track_max.x - track_min.x), strip));
+	// The track: scrubbed by the mouse (the clock held where it is let go); the events' letters on its
+	// top line, the frames ruled and numbered on its bottom one.
+	const float height = ImGui::GetFontSize() * 2.0f + 8.0f;
+	const float width = std::max(1.0f, ImGui::GetContentRegionAvail().x);
+	const ImVec2 at = ImGui::GetCursorScreenPos();
+	ImGui::InvisibleButton("##track", ImVec2(width, height));
 	const bool hovered = ImGui::IsItemHovered();
-	const bool clicked = ImGui::IsItemClicked();
+	const float pad = 6.0f;
+	const float left = at.x + pad, right = at.x + width - pad;
+	const auto x_of = [&](int32_t tick) { return left + (right - left) * float(tick) / float(length); };
+	if (ImGui::IsItemActive()) {
+		const float t = std::clamp((ImGui::GetIO().MousePos.x - left) / std::max(1.0f, right - left), 0.0f, 1.0f);
+		const int32_t to = int32_t(std::lround(t * float(length)));
+		if (to != ticks || clock.playing()) seek_ticks(workspace, model, to, true);
+	}
 	ImDrawList *paint = ImGui::GetWindowDrawList();
+	const float top = at.y, bottom = at.y + height;
+	paint->AddRectFilled(ImVec2(at.x, top), ImVec2(at.x + width, bottom), ImGui::GetColorU32(ImGuiCol_FrameBg), 3.0f);
+	// The frames ruled: every frame where they are far enough apart, else every 5th or 10th; the 10ths
+	// longer and numbered where there is room.
+	const float per_frame = frames > 0 ? (right - left) / float(frames) : 0.0f;
+	const int step = per_frame >= 5.0f ? 1 : per_frame >= 1.5f ? 5 : 10;
+	const float label_room = ui_kit::text_width("000") + 4.0f;
+	for (uint32_t f = 0; frames > 0 && f <= frames; f += uint32_t(step)) {
+		const int32_t tick = model.tick_of_frame(int(f));
+		const float x = f == frames ? right : tick >= 0 ? x_of(tick) : left + per_frame * float(f);
+		const bool tenth = f % 10 == 0;
+		paint->AddLine(ImVec2(x, bottom - (tenth ? 8.0f : 4.0f)), ImVec2(x, bottom), ImGui::GetColorU32(ImGuiCol_TextDisabled));
+		if (tenth && f > 0 && f < frames && per_frame * 10.0f >= label_room) {
+			const std::string label = std::to_string(f);
+			paint->AddText(ImVec2(x - ui_kit::text_width(label.c_str()) * 0.5f, bottom - 8.0f - ImGui::GetFontSize()),
+			               ImGui::GetColorU32(ImGuiCol_TextDisabled), label.c_str());
+		}
+	}
+	// The events: a mark and its letter at the top of the track.
 	const float mouse = ImGui::GetIO().MousePos.x;
 	const PreviewClipEvent *under = nullptr;
 	for (const PreviewClipEvent &event : model.clip_events()) {
-		const float x = left + (right - left) * float(event.tick) / float(length);
-		ImU32 color = kEventColor;
-		if (event.trigger & (anim::kAnimEventFootLeft | anim::kAnimEventFootRight)) color = IM_COL32(120, 220, 120, 255);
-		else if (event.trigger & (anim::kAnimEventFirePrimary | anim::kAnimEventFireSecondary | anim::kAnimEventFireMarker3))
-			color = IM_COL32(240, 90, 80, 255);
-		paint->AddRectFilled(ImVec2(x - 1.5f, track_max.y + 2.0f), ImVec2(x + 1.5f, track_max.y + 2.0f + strip), color);
+		const float x = x_of(event.tick);
+		const EventMark mark = event_mark(event.trigger);
+		paint->AddRectFilled(ImVec2(x - 1.5f, top + 2.0f), ImVec2(x + 1.5f, top + 9.0f), mark.color);
+		paint->AddText(ImVec2(x + 2.5f, top), mark.color, mark.letter);
 		if (hovered && std::fabs(mouse - x) <= 4.0f) under = &event;
 	}
-	if (!under) return;
-	std::string bits;
-	for (const anim::AnimEventBit &bit : anim::kAnimEventBits)
-		if (under->trigger & bit.mask) bits += (bits.empty() ? "" : ", ") + std::string(bit.name);
-	ui_kit::tooltip("frame " + std::to_string(under->frame) + ", tick " +
-	                std::to_string(under->tick) + ": " +
-	                (bits.empty() ? std::string("no named bit") : bits));
-	if (!clicked) return;
-	seek_ticks(workspace, model, under->tick, true);
-	// In the clip's own document the event is a record: select it.
-	const SessionView &view = workspace.view();
-	for (const auto &open : view.documents.open) {
-		const auto *clip_document = dynamic_cast<const AnimationDocument *>(open.get());
-		if (!clip_document || clip_document->path() != model.path() || clip_document->rows().empty()) continue;
-		const Node &row = *clip_document->rows().front();
-		if (size_t(under->frame) < row.collections[1].size())
-			window_requests::select(workspace, *clip_document,
-			                        {row.id, node_kind(AnimationKind::Event), row.collections[1][size_t(under->frame)]});
+	// The playhead.
+	const float head = x_of(shown);
+	paint->AddLine(ImVec2(head, top), ImVec2(head, bottom), ImGui::GetColorU32(ImGuiCol_SliderGrabActive), 2.0f);
+	if (under) {
+		ui_kit::tooltip("Frame " + std::to_string(under->frame) + " (" + seconds_text(under->tick / io::kTickHz) +
+		                "): " + animation_trigger_words(under->trigger) + ". Click to go there.");
+		if (ImGui::IsItemClicked()) {
+			seek_ticks(workspace, model, under->tick, true);
+			// In the clip's own document the event is a record: select it.
+			const SessionView &view = workspace.view();
+			for (const auto &open : view.documents.open) {
+				const auto *clip_document = dynamic_cast<const AnimationDocument *>(open.get());
+				if (!clip_document || clip_document->path() != model.path() || clip_document->rows().empty()) continue;
+				const Node &clip_row = *clip_document->rows().front();
+				if (size_t(under->frame) < clip_row.collections[1].size())
+					window_requests::select(workspace, *clip_document,
+					                        {clip_row.id, node_kind(AnimationKind::Event),
+					                         clip_row.collections[1][size_t(under->frame)]});
+			}
+		}
+	} else if (hovered) {
+		ui_kit::tooltip("Drag to scrub; the clip holds where you let go.");
+	}
+	// The marks' legend.
+	if (!model.clip_events().empty()) {
+		ImGui::TextColored(ImVec4(120 / 255.0f, 220 / 255.0f, 120 / 255.0f, 1.0f), "L R footstep");
+		ImGui::SameLine();
+		ImGui::TextColored(ImVec4(240 / 255.0f, 90 / 255.0f, 80 / 255.0f, 1.0f), "F fires");
+		ImGui::SameLine();
+		ImGui::TextColored(ImVec4(1.0f, 220 / 255.0f, 90 / 255.0f, 1.0f), "S sound");
 	}
 }
 
@@ -245,13 +391,16 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	ImGui::AlignTextToFramePadding();
 	ImGui::TextDisabled("%s", radius);
 	ui_kit::tooltip("The model's projected radius, the size Auto measures.");
-	// The preview clock: Run or Pause (Play is the game's).
+	// The preview clock: Run or Pause (Play is the game's); a clip's timeline runs and holds the same
+	// clock, so an animation has its button there alone.
 	const bool playing = context.input.clock.playing();
 	const char *clock = playing ? "Pause" : "Run";
-	row.next(ui_kit::button_width(clock));
-	if (ImGui::Button(clock)) set_playing(workspace, model, !playing);
-	ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
-	                "generators.");
+	if (!model.animating()) {
+		row.next(ui_kit::button_width(clock));
+		if (ImGui::Button(clock)) set_playing(workspace, model, !playing);
+		ui_kit::tooltip("Run or hold the preview clock: the model's part animations, flipbooks and colour "
+		                "generators.");
+	}
 	row.next(ui_kit::button_width("Show"));
 	if (ImGui::Button("Show")) ImGui::OpenPopup("marks");
 	ui_kit::tooltip("What the viewport marks over the model.");
@@ -259,6 +408,11 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 		ImGui::Checkbox("User points", &options.overlays.user_points);
 		ImGui::Checkbox("Lights", &options.overlays.lights);
 		ImGui::Checkbox("Part pivots", &options.overlays.pivots);
+		if (model.animating()) {
+			ImGui::Checkbox("Bones", &options.bones);
+			ui_kit::tooltip("The rig's bones as the clip poses them, each named under the pointer; in the "
+			                "clip's own document a click on one selects it.");
+		}
 		ImGui::EndPopup();
 	}
 	static const char *const kSnapNames[] = {"Free", "1/64 m", "1/16 m", "1/4 m", "1 m"};
@@ -290,6 +444,39 @@ void ModelViewportView::Tools::toolbar(Workspace &workspace, const ModelViewport
 	if (ImGui::BeginPopup("registers")) {
 		registers(workspace, model);
 		ImGui::EndPopup();
+	}
+	// From the model to its animations (S17): the maps the items pairing it play, each opened to play
+	// on it.
+	const SessionView &view = workspace.view();
+	if (!model.animating() && view.findings.graph && view.project.scan) {
+		const std::vector<ModelAnimation> maps = model_animations(*view.findings.graph, *view.project.scan, model.path());
+		if (!maps.empty()) {
+			const std::string label = "Animations (" + std::to_string(maps.size()) + ")";
+			row.next(ui_kit::button_width(label.c_str()));
+			if (ImGui::Button(label.c_str())) ImGui::OpenPopup("animations");
+			ui_kit::tooltip("The animation maps the items using this model play on it. Open one to play its clips here.");
+			if (ImGui::BeginPopup("animations")) {
+				for (const ModelAnimation &played : maps) {
+					const std::string name = played.map.substr(played.map.find_last_of('/') + 1);
+					const std::string line = name + "  (" + played.record + ")";
+					if (ImGui::Selectable(line.c_str())) {
+						workspace.request(request::open_document(played.map));
+						// On this model: chosen where the map's own pairing takes another item's model.
+						const std::string here = model.path().substr(model.path().find_last_of('/') + 1);
+						const PreviewRig paired = resolve_preview_rig(*view.findings.graph, *view.project.scan, name,
+						                                              AssetKind::AnimationMap, std::string());
+						if (!strutil::iequals(paired.model, here)) {
+							ModelViewportOptions chosen;
+							chosen.rig_model = here;
+							workspace.request(request::set_viewport(
+									played.map, viewport_change(ViewportKind::Model, "options", model_options_to_json(chosen))));
+						}
+					}
+					ui_kit::tooltip(played.record + " in " + played.file + " plays " + played.map + " on this model.");
+				}
+				ImGui::EndPopup();
+			}
+		}
 	}
 }
 

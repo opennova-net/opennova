@@ -273,12 +273,89 @@ static int test_selection_concern() {
 	return 0;
 }
 
+// Names are the game's, case-insensitive in its archives and in the project (ADR 0046 S17): a file
+// named in another case, its folder's or its own, is the project's file (SessionCore::project_file,
+// the scan's lookup), opened as itself (its own path, no document.missing), shown again when it is
+// open already, and edited by a request that spells it so; a name the project has in no case is
+// still not found.
+static int test_names_in_another_case() {
+	Menus menus("opennova_editor_document_set_case");
+	const SessionView &v = menus.view();
+	menus.session.handle(request::create_file("Extra.mnu", asset_kind_token(AssetKind::Menu)));
+	const Document *made = menus.session.document_for("Extra.mnu");
+	TEST_EXPECT(made != nullptr);
+	if (!made) return 1;
+	const std::string path = made->path();
+	TEST_EXPECT(path.find('/') != std::string::npos && path.substr(path.size() - 9) == "Extra.mnu");
+	menus.session.handle(request::close_document(path));
+	TEST_EXPECT(!menus.session.document_for(path));
+
+	std::string shouted = path;
+	for (char &c : shouted) c = static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
+	menus.session.handle(request::open_document(shouted));
+	const Document *opened = menus.session.document_for(path);
+	TEST_EXPECT(menus.session.outcome().done() && opened && opened->path() == path && v.documents.active == path);
+	TEST_EXPECT(menus.session.outcome().findings.empty() && v.activity.status == "Opened " + path + ".");
+
+	std::string lowered = path;
+	for (char &c : lowered) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+	menus.session.handle(request::open_document("main.mnu"));
+	menus.session.handle(request::open_document(lowered));
+	TEST_EXPECT(menus.session.document_for(lowered) == opened && v.documents.active == path &&
+	            v.activity.status == "Showing " + path + ".");
+
+	Edit rename;
+	rename.address = opened->address_at(kMain);
+	rename.field = "name";
+	rename.value = std::string("SHOUTED");
+	menus.session.handle(request::edit_record(shouted, rename));
+	TEST_EXPECT(menus.session.last_edit_ok() && opened->dirty() && opened->record_name(opened->address_at(kMain)) == "SHOUTED");
+
+	menus.session.handle(request::open_document("MENUS/NOWHERE.MNU"));
+	bool missing = false;
+	for (const Diagnostic &finding : menus.session.outcome().findings)
+		missing = missing || finding.code() == std::string("document.missing");
+	TEST_EXPECT(!menus.session.outcome().done() && missing);
+	return 0;
+}
+
+// The status line of a batch setting one field (ADR 0046 S15, S17): one record's by its title, to
+// its value in words; several records' to the value they now share, or "to different values" when
+// they do not (never one record's value said of all).
+static int test_batch_status_says_each_value() {
+	Menus menus("opennova_editor_document_set_status");
+	const SessionView &v = menus.view();
+	const auto text = [&](const char *locator, const char *value) {
+		Edit edit;
+		edit.address = menus.at(locator);
+		edit.field = "string.value";
+		edit.value = std::string(value);
+		return edit;
+	};
+	menus.session.handle(request::edit_record("main.mnu", text(kTitle, "Same")));
+	const std::string one = v.activity.status;
+	const size_t of = one.find(" of "), to = one.rfind(" to ");
+	TEST_EXPECT(menus.session.last_edit_ok() && one.rfind("Set ", 0) == 0 && of != std::string::npos &&
+	            to != std::string::npos && one.back() == '.');
+	if (of == std::string::npos || to == std::string::npos) return 1;
+	const std::string title = one.substr(4, of - 4), shown = one.substr(to + 4, one.size() - to - 5);
+	TEST_EXPECT(!title.empty() && shown.find("Same") != std::string::npos);
+
+	menus.session.handle(request::edit_record("main.mnu", std::vector<Edit>{text(kTitle, "Same"), text(kExit, "Other")}));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.activity.status == "Set " + title + " of 2 records to different values.");
+	menus.session.handle(request::edit_record("main.mnu", std::vector<Edit>{text(kTitle, "Same"), text(kExit, "Same")}));
+	TEST_EXPECT(menus.session.last_edit_ok() && v.activity.status == "Set " + title + " of 2 records to " + shown + ".");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_batch_status_says_each_value();
 	failures += test_paste_and_duplicate_agree();
 	failures += test_remembered_selections();
 	failures += test_selection_over_rows();
 	failures += test_selection_concern();
+	failures += test_names_in_another_case();
 	if (failures == 0) std::printf("editor_document_set: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

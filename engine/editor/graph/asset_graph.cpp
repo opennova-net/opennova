@@ -1131,11 +1131,15 @@ std::vector<GraphSearchHit> AssetGraph::search(const std::string &text) const {
 	});
 	for_each_symbol([&](const GraphSymbol &symbol) {
 		// A record set's records go by their index, no name.
-		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record || !holds(symbol.display))
-			return;
+		if (reference_row(symbol.kind).resolution == ReferenceResolution::Record) return;
+		// An item by its catalog's name too (ADR 0046 S17: a soldier found by the name a modder knows
+		// it by, "Indonesian Soldier #1", not its id).
+		const std::string words = symbol.kind == ReferenceKind::Item ? symbol_words(symbol) : std::string();
+		if (!holds(symbol.display) && (words.empty() || !holds(words))) return;
 		GraphSearchHit hit;
 		hit.symbol = &symbol;
 		hit.name = symbol.display;
+		hit.words = words == symbol.display ? std::string() : words;
 		hit.file = symbol.file;
 		hit.usages = users_of(symbol).size();
 		hits.push_back(std::move(hit));

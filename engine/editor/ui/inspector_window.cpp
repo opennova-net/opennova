@@ -764,9 +764,9 @@ std::string record_tip(const Document &document, const NodeAddress &address) {
 	return title + (name != title ? "\n" + name : std::string()) + (*change ? std::string("\n") + change : std::string());
 }
 
-// The records as a table: a numbered row each (a click selects it; marked when it changed
-// since the last save), a column per field, every cell edited in place. The columns size
-// to the font, resize, and scroll sideways past the table's width.
+// The records as a table: a numbered row each, from the list's first number (a click selects it;
+// marked when it changed since the last save), a column per field, every cell edited in place. The
+// columns size to the font, resize, and scroll sideways past the table's width.
 void records_table(Workspace &workspace, Controls &controls, const Document &document, const NodeAddress &owner,
                    const Document::Collection &records, const std::vector<FieldSchema> &fields) {
 	const ImGuiStyle &style = ImGui::GetStyle();
@@ -804,7 +804,7 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 			const bool on = workspace.view().documents.selection.holds(address);
 			if (on) ImGui::TableSetBgColor(ImGuiTableBgTarget_RowBg1, ImGui::GetColorU32(ImGuiCol_Header));
 			const float x = ImGui::GetCursorScreenPos().x;
-			const std::string number = ui_kit::kChangeRoom + std::to_string(i + 1);
+			const std::string number = ui_kit::kChangeRoom + std::to_string(records.spec.first_number + size_t(i));
 			if (ImGui::Selectable(number.c_str(), on, ImGuiSelectableFlags_None, ImVec2(0.0f, ImGui::GetFrameHeight())))
 				select_row(workspace, document, address);
 			ui_kit::change_dot(document.record_change(address), x);
@@ -830,7 +830,8 @@ void records_list(Workspace &workspace, const Document &document, const NodeAddr
 		ImGui::PushID(static_cast<int>(address.child));
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name =
-		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + record_display(document, address, names.get()),
+		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(records.spec.first_number + i) + ". " +
+		                            record_display(document, address, names.get()),
 		                    ImGui::GetContentRegionAvail().x);
 		if (ImGui::Selectable((name + "###record").c_str(), workspace.view().documents.selection.holds(address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
