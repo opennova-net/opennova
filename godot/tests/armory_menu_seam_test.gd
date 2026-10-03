@@ -79,7 +79,7 @@ func _make_weapon_driver(with_frame := false) -> MenuDriver:
 	for n in ["PRIMARY", "SECONDARY", "ACCESSORY",
 			"PRIMARY_AMMO1", "SECONDARY_AMMO1", "ACCESSORY_AMMO1",
 			"GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]:
-		body += MenuDriverFixture.wnd("combo", n, y)
+		body += MenuDriverFixture.wnd("combobox", n, y)
 		y += 24
 	for n in ["PRIMARY_ICON", "SECONDARY_ICON", "ACCESSORY_ICON"]:
 		body += MenuDriverFixture.wnd("window", n, y)
@@ -135,7 +135,7 @@ func test_owns_menu_detects_weapon_screen() -> void:
 			"PLAYER_CLASS + PRIMARY_AMMO1 mark the WEAPON screen")
 	# player.mnu's screen (PLAYERCLASS combo, no ammo combos) is NOT claimed.
 	var player_info := MenuDriverFixture.driver_over(self, MenuDriverFixture.doc_from_xml(self, MenuDriverFixture.screen_xml("PLAYER_INFO",
-			MenuDriverFixture.wnd("combo", "PLAYERCLASS", 10))), "player.mnu")
+			MenuDriverFixture.wnd("combobox", "PLAYERCLASS", 10))), "player.mnu")
 	assert_false(companion.owns_menu(player_info),
 			"the PLAYER_INFO screen stays with its own companion")
 

@@ -2,9 +2,11 @@
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
 
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <base/io/strutil.h>
 
@@ -54,8 +56,21 @@ typedef struct AdmFile {
     size_t count;
 } AdmFile;
 
+// A line whose input the parser leaves out of the table (adm_parse_buffer's
+// `dropped`): what the game ignores there, or what the parsed model cannot
+// hold (`blocks`). Blank lines hold nothing and are not reported.
+struct AdmDroppedLine {
+    size_t line = 0;       // 1-based, as the retail walk numbers the lines
+    size_t row = SIZE_MAX; // the table row the line keeps (an index into entries), else SIZE_MAX
+    std::string key;       // the line's first token ("" for none)
+    std::string what;      // a sentence: what is left out and why
+    bool blocks = false;   // input the table would lose that the game reads (a ninth clip)
+};
+
 int adm_parse(const char *path, AdmFile *out);
-int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out);
+// `dropped`, when given, receives every line whose input the table leaves out.
+int adm_parse_buffer(const char *bytes, size_t size, AdmFile *out,
+                     std::vector<AdmDroppedLine> *dropped = nullptr);
 void adm_free(AdmFile *af);
 
 // The canonical-form writer (adm_write.cpp): one leading blank line, rows of
@@ -69,5 +84,8 @@ void adm_free(AdmFile *af);
 // (which the parser trims).
 int adm_write_buffer(const AdmFile *af, std::string &out);
 int adm_write(const char *path, const AdmFile *af);
+// Why the writer refuses a row (the reasons above, as a sentence), or null when
+// it writes it.
+const char *adm_row_problem(const AdmEntry &entry);
 
 } // namespace opennova::adm

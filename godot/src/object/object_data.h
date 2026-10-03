@@ -33,6 +33,7 @@ struct WeatherOscillator;
 #include <runtime/renderer/model_panm_cache.h>
 
 #include "resource_index/resource_root.h"
+#include "util/texture_files.h"
 
 namespace godot {
 
@@ -58,6 +59,8 @@ private:
 	String object_name = "untitled";
 	String last_error;
 	Ref<ResourceRoot> resource_root;
+	// The textures of a model opened from a handle (open_from_model), else null.
+	std::shared_ptr<const opennova::TextureFiles> texture_files_;
 
 	// Memoized build_lod_submeshes results, keyed (lod | skeletal | bone_count).
 	// Entries hold SHARED Ref<ArrayMesh> refs: every model instance built from
@@ -145,6 +148,11 @@ public:
 	// A renderer mesh-cache hit is still a logical model-definition load in the
 	// new mission generation. Recreate retail's sticky foliage mark without
 	// reparsing/rebuilding the cached .3DI.
+	// A parsed model an embedder holds (the editor's preview of a document as it would
+	// save), its textures read through `p_textures`. Not a mounted load: it registers no
+	// network-challenge model.
+	void open_from_model(const opennova::assets::Model &p_model, const String &p_name,
+			std::shared_ptr<const opennova::TextureFiles> p_textures);
 	static void mark_cached_network_challenge_foliage_model(const String &p_name);
 	static void reset_network_challenge_model_registry();
 	static int64_t network_challenge_model_count();

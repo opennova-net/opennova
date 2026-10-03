@@ -9,7 +9,7 @@
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_overlay_windows.h>
 
-#include "fixtures/minimal_fnt_builder.h"
+#include "common/test_font.h"
 
 #include <cstdio>
 #include <string>
@@ -183,7 +183,7 @@ void test_windows_ride_the_top_layer(const fnt_font_t *font) {
 } // namespace
 
 int main() {
-	fnt_font_t font = minimal_fnt::uniform_test_font();
+	fnt_font_t font = test_font::uniform_test_font();
 	test_wrapped_text_layout(&font);
 	test_briefing_pages();
 	test_windows_ride_the_top_layer(&font);

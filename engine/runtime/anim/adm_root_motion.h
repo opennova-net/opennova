@@ -146,8 +146,6 @@ private:
 	// Variant wraps modulo the ring size, so a stale cursor from a shorter row on
 	// another rig still resolves; missing states bind RESET's ring.
 	const Track *resolve_track(int adm_id, int state_id, int variant = 0) const;
-	static double position_of(const Track &track, int32_t phase_ticks,
-	                          int32_t armed_boundary = -1);
 	static float sample(const Track &track, const std::vector<float> &channel,
 	                    int32_t phase_ticks, int32_t armed_boundary = -1);
 	static uint32_t sample_trigger(const Track &track, int32_t phase_ticks,

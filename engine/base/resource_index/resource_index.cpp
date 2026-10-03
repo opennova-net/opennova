@@ -1,14 +1,16 @@
 #include <base/resource_index/resource_index.h>
 
+#include <base/resource_index/boot_policy.h>
+#include <base/resource_index/resource_kind.h>
 #include <base/vfs/vfs.h>
 
 #include <algorithm>
 #include <atomic>
-#include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
 
+#include <base/io/file_time.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
@@ -19,120 +21,8 @@ namespace opennova {
 namespace {
 std::atomic<uint64_t> g_cache_epoch{1};
 
-// Last-write time of `path` as Unix seconds (UTC), or 0 when it can't be read.
-// fs::file_time_type has no portable epoch before C++20, so map it onto
-// system_clock via the now()-offset trick (precise enough for display).
-int64_t file_modified_unix_seconds(const fs::path &path) {
-	std::error_code ec;
-	const fs::file_time_type ftime = fs::last_write_time(path, ec);
-	if (ec) {
-		return 0;
-	}
-	const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
-	        ftime - fs::file_time_type::clock::now() + std::chrono::system_clock::now());
-	return std::chrono::duration_cast<std::chrono::seconds>(system_time.time_since_epoch()).count();
-}
-
-bool has_magic(const std::vector<uint8_t> &bytes, const char (&want)[5]) {
-	return bytes.size() >= 4 &&
-	       bytes[0] == want[0] &&
-	       bytes[1] == want[1] &&
-	       bytes[2] == want[2] &&
-	       bytes[3] == want[3];
-}
-
-bool has_rtxt_magic(const std::vector<uint8_t> &bytes) {
-	return has_magic(bytes, "RTXT");
-}
-
-// MUS bytecode is stored in an .bin wrapper whose first four bytes are "SCR0"
-// (the music script loader's SCR container). This disambiguates a music .bin
-// from a localized-strings .bin (RTXT magic) and a raw .bin (neither).
-bool has_scr_magic(const std::vector<uint8_t> &bytes) {
-	return has_magic(bytes, "SCR0");
-}
-
-// The names are UTF-8 strings (the VFS's), taken apart as strings: a std::filesystem
-// round trip reads them in the ANSI code page on Windows (base/io/os_path.h).
-std::string extension_for_name(const std::string &name) {
-	const std::string file = io::utf8_file_name(name);
-	const size_t dot = file.rfind('.');
-	return (dot == std::string::npos || dot == 0) ? std::string() : strutil::to_lower(file.substr(dot));
-}
-
-std::string kind_for_name_and_magic(const std::string &name, bool is_rtxt_bin, bool is_scr_bin) {
-	const std::string extension = extension_for_name(name);
-	// Avatars.def is the singular player-character database. Matched by NAME, not
-	// extension: the .def extension is
-	// shared with weapon/items/ammo/hudpos.def, which the engine consumes by name at
-	// runtime and which stay unbrowsable (like .dbf). [orig: CAvatarDefs_Init @ 0x57b180
-	// opens "Avatars.def" by exact name]
-	if (strutil::to_lower(io::utf8_file_name(name)) == "avatars.def") {
-		return "avatar";
-	}
-	// The game's one mission file [orig: Mission_LoadBMSFile @ 0x40f4e0; the mission list scans
-	// *.bms, *.npj and *.npz, MissionList_ScanAndBuildFromFiles @ 0x563170]. A `.mis` is the
-	// original mission editor's text, which the game never reads (no literal of it in the
-	// image): no kind here.
-	if (extension == ".bms") {
-		return "mission";
-	}
-	if (extension == ".trn") {
-		return "terrain";
-	}
-	if (extension == ".env") {
-		return "environment";
-	}
-	if (extension == ".3di") {
-		return "object_model";
-	}
-	if (extension == ".kda") {
-		return "credits";
-	}
-	if (extension == ".fnt") {
-		return "font";
-	}
-	// The effect catalog is one grammar across three extensions. `.ptl` is the base
-	// set; `.ptu` and `.ptg` are the US and German gore sets, parsed by the SAME
-	// section callback and differing only in which one the runtime selects
-	// [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
-	// OR the selected extension @0x5f64f3 and parses both through
-	// CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
-	// CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
-	// File_ParseASCIIFile + callback]. The index carries all three so the browser
-	// and the loader can both see them; particle_extension() owns the SELECTION.
-	if (extension == ".ptl" || extension == ".ptu" || extension == ".ptg") {
-		return "particle";
-	}
-	if (extension == ".mnu") {
-		return "menu";
-	}
-	if (extension == ".mns") {
-		return "menu_style";
-	}
-	if (extension == ".sbf") {
-		return "sbf";
-	}
-	if (extension == ".lwf") {
-		return "sound";
-	}
-	// The .def family is name-keyed, not extension-keyed (items/weapon/ammo/avatars all share
-	// .def and are consumed at runtime by name). Only hudpos.def is a browsable kind, for the
-	// HUD layout catalog; the rest stay unclassified.
-	if (extension == ".def" && strutil::to_lower(io::utf8_file_name(name)) == "hudpos.def") {
-		return "hudpos";
-	}
-	// NOTE: .dbf (dialog bank) is intentionally NOT classified as a browsable kind.
-	// It is consumed at runtime by name (DbfData); classifying it as an LWF sound
-	// profile would conflate two unrelated formats.
-	if (extension == ".bin" && is_scr_bin) {
-		return "music_script";
-	}
-	if (extension == ".bin" && is_rtxt_bin) {
-		return "strings";
-	}
-	return "";
-}
+// The kind classifier (extension + the `.bin` magic peeks) lives in resource_kind.cpp so
+// the editor's asset registry shares it (ADR 0046 d9).
 
 std::string normalize_kind(const std::string &kind) {
 	const std::string key = strutil::to_lower(strutil::trim(kind));
@@ -207,6 +97,8 @@ struct ResourceIndex::Impl {
 	std::string root_dir;
 	std::string last_error;
 	std::vector<ResourceFileEntry> records; // recognized-kind entries
+	// An embedder's own file set mounted in place of an install (mount_source); null otherwise.
+	std::shared_ptr<const FileSource> source;
 };
 
 uint64_t cache_epoch() {
@@ -236,10 +128,37 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		impl_->last_error = impl_->vfs.last_error();
 		return false;
 	}
+	index_mounted();
+	return true;
+}
+
+ResourceIndex::InstallScan ResourceIndex::scan_install(const std::string &root_dir, const LaunchFlags &flags) {
+	clear();
+	if (!mount_install(impl_->vfs, root_dir, flags)) {
+		impl_->last_error = impl_->vfs.last_error();
+		// The Vfs keeps the root it mounted: none means the root itself did not mount.
+		return impl_->vfs.game_root().empty() ? InstallScan::Unmounted : InstallScan::NoArchive;
+	}
+	index_mounted();
+	return InstallScan::Mounted;
+}
+
+bool ResourceIndex::mount_source(std::shared_ptr<const FileSource> files) {
+	clear();
+	if (!files) {
+		impl_->last_error = "No file source to mount";
+		return false;
+	}
+	impl_->source = std::move(files);
+	impl_->root_dir = kSourceRootDir;
+	return true;
+}
+
+void ResourceIndex::index_mounted() {
 	impl_->root_dir = impl_->vfs.game_root();
 
 	for (const VfsFileLocation &loc : impl_->vfs.list_files()) {
-		const std::string ext = extension_for_name(loc.logical_name);
+		const std::string ext = resource_extension_for_name(loc.logical_name);
 		std::string kind;
 		if (ext == ".bin") {
 			// RTXT strings tables and SCR0 music scripts need a content peek; only
@@ -247,11 +166,11 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			// loose/PFF payloads classify the same way as plaintext files.
 			std::vector<uint8_t> bytes;
 			const bool ok = impl_->vfs.read_file(loc.logical_name, bytes);
-			const bool rtxt = ok && has_rtxt_magic(bytes);
-			const bool scr = ok && has_scr_magic(bytes);
-			kind = kind_for_name_and_magic(loc.logical_name, rtxt, scr);
+			const bool rtxt = ok && resource_bin_has_rtxt_magic(bytes);
+			const bool scr = ok && resource_bin_has_scr_magic(bytes);
+			kind = resource_kind_for_name_and_magic(loc.logical_name, rtxt, scr);
 		} else {
-			kind = kind_for_name_and_magic(loc.logical_name, false, false);
+			kind = resource_kind_for_name_and_magic(loc.logical_name, false, false);
 		}
 		if (kind.empty()) {
 			continue;
@@ -275,7 +194,7 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 			if (!size_ec) {
 				entry.size_bytes = static_cast<uint64_t>(size);
 			}
-			entry.modified_time = file_modified_unix_seconds(loose_path);
+			entry.modified_time = io::file_modified_unix_seconds(loose_path);
 		} else {
 			entry.source_type = "pff";
 			entry.archive_path = loc.source_path;
@@ -289,7 +208,6 @@ bool ResourceIndex::scan(const std::string &root_dir, const std::string &expansi
 		          const std::string b_key = b.kind + ":" + strutil::to_lower(b.relative_path);
 		          return a_key < b_key;
 	          });
-	return true;
 }
 
 void ResourceIndex::clear() {
@@ -298,6 +216,7 @@ void ResourceIndex::clear() {
 	impl_->root_dir.clear();
 	impl_->last_error.clear();
 	impl_->records.clear();
+	impl_->source.reset();
 }
 
 bool ResourceIndex::has_mounted_archive() const {
@@ -324,7 +243,7 @@ std::string ResourceIndex::particle_extension() const {
 	// [orig: Game_LoadConfig @ 0x551480 sets byte_24D4DF9 = FileSystem_FileExists(
 	// "fgn2.bin") != 0 @0x5514e8..0x5514fa; CEffectSystem_Init @ 0x5f6070 reads it to
 	// pick ".ptg" over the ".ptu" default @0x5f608b..0x5f6095].
-	return impl_->vfs.has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
+	return has_file("fgn2.bin") ? std::string(".ptg") : std::string(".ptu");
 }
 
 void ResourceIndex::set_scr_policy(int scr_policy) {
@@ -334,23 +253,29 @@ void ResourceIndex::set_scr_policy(int scr_policy) {
 }
 
 bool ResourceIndex::prefers_loose_file(const std::string &name) const {
-    return impl_->vfs.prefers_loose_file(name);
+	// A file source has no archive a loose file could be preferred over.
+	if (impl_->source) return false;
+	return impl_->vfs.prefers_loose_file(name);
 }
 
 bool ResourceIndex::has_file(const std::string &name) const {
+	if (impl_->source) return impl_->source->stamp(name) != 0;
 	return impl_->vfs.has_file(name);
 }
 
 bool ResourceIndex::has_file(const std::string &name, VfsLookupPolicy policy) const {
+	if (impl_->source) return impl_->source->stamp(name) != 0;
 	return impl_->vfs.has_file(name, policy);
 }
 
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out) const {
+	if (impl_->source) return impl_->source->read(name, out);
 	return impl_->vfs.read_file(name, out);
 }
 
 bool ResourceIndex::read_file(const std::string &name, std::vector<uint8_t> &out,
                               VfsLookupPolicy policy) const {
+	if (impl_->source) return impl_->source->read(name, out);
 	return impl_->vfs.read_file(name, out, policy);
 }
 

@@ -77,7 +77,7 @@ var _frame_stats := FrameStats.new()
 var _render_stats := RootRenderStatsSampler.new()
 var _frame_phase_sampler := RootFramePhaseSampler.new()
 var _mp_companion: MpMenuCompanion  # drives the multiplayer (mp.mnu) menu by control name
-var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER
+var _bundled_companion: BundledMenuCompanion  # the bundled menu's PLAY RETAIL / CHANGE FOLDER / EXIT
 var _retail_picker: FileDialog  # the PLAY RETAIL folder picker, while open
 var _web_retail_picking := false  # the web page's picker is open (ADR 0049)
 var _lan_session: LanSession  # retail-style 0x41/0x81 LAN enumeration browser
@@ -90,6 +90,9 @@ var _chosen_avatar: Dictionary = {}  # canonical active + per-side PLAYER_INFO s
 var _profile_root_key := ""  # reload weapon.sav only when the mounted game/expansion changes
 var _world_load := WorldLoadCoordinatorScript.new()
 var _world_load_pending := false
+# The mission a `--mission` launch starts in, until its load ends: one that fails is named on a
+# line of the log the editor's Play reads back (ResourceRoot.launch_mission_failed_marker()).
+var _launch_mission := ""
 var _end_flow := MissionEndFlow.new()  # the SP end-of-mission flow (round_end -> score screen)
 # The join screen (pre.mnu PRE_GAME_MENU) a join runs on until the host starts the game.
 var _join_screen := PreGameMenuPresenter.new()
@@ -363,6 +366,7 @@ func _ready() -> void:
 	# default; a post-spawn pose rides the game_debug teleport action over MCP.
 	var sp_mission := LaunchFlags.mission()
 	if not sp_mission.is_empty():
+		_launch_mission = sp_mission
 		_on_start_requested(sp_mission)
 		return
 	# Co-op LAN launches (`--lan-host` / `--lan-join`) ride the controller.
@@ -644,6 +648,14 @@ func _enter_menu(dir: String) -> bool:
 	# keyhelp.bin off the mounted root; null when the root carries none or it
 	# does not parse (every binding label then renders its literal fallback).
 	Strings.register_table(Strings.TABLE_KEYHELP, Strings.load_rtxt(_root, "keyhelp.bin"))
+	# The mounted expansion's own text bin (<exp>.bin, e.g. jox01.bin) is the
+	# override table every string lookup tries first, the menu strings
+	# included; with no expansion there is none. Retail's expansion load
+	# installs it the same way (docs/interface/rtxt-strings-re.md, the override
+	# row; docs/mnu/menu-re.md "Menu strings").
+	var expansion := String(_root.get_expansion())
+	Strings.set_override_table(
+			Strings.load_rtxt(_root, expansion + ".bin") if not expansion.is_empty() else null)
 	if not _menu_shell.setup(_root):
 		push_warning("MainGame: no menu found in resource dir (looked for %s)"
 				% _menu_shell.main_menu_file)
@@ -771,6 +783,7 @@ func _wire_shell() -> void:
 	_bundled_companion = BundledMenuCompanion.new()
 	_bundled_companion.play_retail_requested.connect(play_retail)
 	_bundled_companion.change_folder_requested.connect(request_retail_dir)
+	_bundled_companion.exit_requested.connect(_on_exit_to_desktop)
 	_menu_shell.add_companion(_bundled_companion)
 	# Delegate mp.mnu and player.mnu to their respective companions.
 	_mp_companion = MpMenuCompanion.new()
@@ -807,8 +820,8 @@ func _on_avatar_chosen(profile: Dictionary) -> void:
 func refresh_local_profile_for_mount() -> void:
 	if _root == null:
 		return
-	var profile_root_key := "%s|%s" % [String(_root.get_root_dir()),
-			String(_root.get_expansion()).to_lower()]
+	var profile_root_key := "%s|%s|%s" % [String(_root.get_root_dir()),
+			String(_root.get_expansion()).to_lower(), String(LaunchFlags.working_dir())]
 	if profile_root_key != _profile_root_key:
 		_chosen_avatar = PlayerProfile.load_character_profile(_root)
 		_profile_root_key = profile_root_key
@@ -1029,6 +1042,7 @@ func _on_world_loaded() -> void:
 	# under the loading presentation until the separate authoritative edge.
 	# A fresh mission gets a fresh pick set (stale handles never cross
 	# sessions); the pick session curates the shell-owned list from here on.
+	_launch_mission = ""  # the launch's mission loaded: a later load's failure is not its
 	_pick_session.begin_world(_world)
 	_on_dev_tools_open_changed(is_dev_tools_open())
 	var sim := _world.get_sim()
@@ -1182,6 +1196,12 @@ func _on_world_load_failed(reason: String) -> void:
 	# (Client_CheckDisconnectOrEscDuringLoad) and the network-wait failure legs;
 	# scene_entry = "Post Menu"] (docs/interface/loading-screen-re.md, the
 	# load-flow case matrix).
+	if not _launch_mission.is_empty():
+		# The launch's own mission (`--mission`, the editor's Play mission): said on a line of
+		# its own, which Play reads back by its marker.
+		push_warning("MainGame: %s%s %s"
+				% [ResourceRoot.launch_mission_failed_marker(), _launch_mission, reason])
+		_launch_mission = ""
 	_abort_to_menu("mission load failed", reason)
 
 

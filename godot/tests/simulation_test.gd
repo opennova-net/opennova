@@ -1230,10 +1230,14 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 	assert_lt(absf(_weapon_arm_pitch_deg(sim)), 0.001,
 		"a differently named weapon sharing the resolved AnimMap does not dip")
 
+	# The game compares the held and the previously held weapon's category, never
+	# their AnimMap (the category change itself is pinned in the C++
+	# local_player_view test; these defs all carry category 0).
+	# [orig: Entity_UpdateInfantryPlayerBody @0x4b46e7 / @0x4b46ed]
 	sim.set_local_player_weapon(_minimal_weapon("WPN_C", "different.adm"), {})
 	sim.step()
-	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
-		"a changed AnimMap stamps the dip")
+	assert_lt(absf(_weapon_arm_pitch_deg(sim)), 0.001,
+		"a changed AnimMap of the same category does not dip")
 
 	# Replacing the world/player keeps the equipped host state, but the new entity's
 	# observed serial starts empty and must receive its own initial stamp.
@@ -1242,7 +1246,7 @@ func test_weapon_channel_keeps_own_phase_and_switch_identity_per_entity() -> voi
 	sim.set_local_player_weapon(_minimal_weapon("WPN_C", "different.adm"), {})
 	sim.step()
 	assert_gt(absf(_weapon_arm_pitch_deg(sim)), 1.0,
-		"a replacement local entity observes the current AnimMap as new")
+		"a replacement local entity's first mount dips")
 
 func test_weapon_clip_variant_ring_rotates_bake_reads_and_plays() -> void:
 	# Multi-clip .adm variant rings, end to end through the public binding: clip

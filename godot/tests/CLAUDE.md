@@ -57,9 +57,16 @@
   keep only its ObjectID, so a sim built as a temporary (`_wire_pass(_sim(), ...)`) is gone
   before the first read; keep it on the test (`var _sims: Array[Simulation]`, cleared in
   `after_each`) like `wire_present_pass_test.gd`.
-- A new `class_name` (a fixture, a production class) is invisible to a headless GUT run
-  until `"$GODOT_BIN" --headless --path godot --import` refreshes the class cache; the
-  symptom is "Could not find base class" and a silently dropped script.
+- A new `class_name` (a fixture, a production class, or one a rebase onto a new base brings)
+  is invisible to a headless GUT run until `"$GODOT_BIN" --headless --path godot --import`
+  refreshes the class cache; the symptom is "Could not find base class" / "Could not find
+  type" and a silently dropped script. `scripts/test_godot.sh` checks the cache against the
+  scripts' `class_name` lines (`scripts/godot_class_cache.py`) and imports when it is stale;
+  before a direct `gut_cmdln.gd` run after a base change, run that check (exit 1 = import).
+- No GUT run reads or writes the developer's ImGui layout (`user://imgui.ini`): a run under a
+  script main loop (GUT's) keeps none (`ImGuiPass::set_user_layout`, the shell's rule in
+  `devtools/imgui_pass_node.cpp`, as an MCP-driven run does), and `scripts/test_godot.sh`
+  isolates `user://` besides.
 - A fixture whose world must run holds a human: a playable load, the listen host's own
   player, or `spawn_local_player` (`simulation_test.gd`'s `_spawn_fixture_human`). Once the
   WAC clock starts, retail's frame gate holds the entity update of a world with no human

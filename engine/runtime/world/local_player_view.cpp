@@ -539,7 +539,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // The mounted camera's carrier read, refreshed every tick: only a CONTROL
     // seat (the retail parentSlot 2/5 test) takes the mounted leg, and the
     // carrier's pose/radius/class feed the chase target, the back-off and the
-    // watercraft eye drop [orig: Camera_ComputeThirdPersonView @0x437D10 --
+    // aircraft eye drop [orig: Camera_ComputeThirdPersonView @0x437D10 --
     // the +0x168 seat test, parentEntity +0x16C, boundRadius +0, the unitType
     // +0x196 in {3,4} test @0x43861D..0x43864C; see player_view.h]. The same
     // seat test is the arbiter's [orig: Render_ProcessMainSceneFrame
@@ -564,7 +564,7 @@ void local_player_view_tick(World *world, PlayerViewState &v,
         collision_matrix_from_euler(mount.carrier_yaw_bam, pitch_bam, roll_bam, zero)
                 .rotate_point(ahead, mount.lookahead_target_q16);
         mount.bound_radius = carrier->bound_radius;
-        mount.watercraft = carrier->item_unit_type == 3 || carrier->item_unit_type == 4;
+        mount.aircraft = vehicle_unit_type_is_aircraft(carrier->item_unit_type);
     }
     v.mount = mount;
     // The remaining arbiter inputs [orig: Render_ProcessMainSceneFrame

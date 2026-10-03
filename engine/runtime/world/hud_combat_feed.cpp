@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <base/io/bam.h>
 #include <cmath>
+#include <runtime/hud/hud_texture_names.h>
 #include <runtime/world/ai.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
@@ -294,9 +295,9 @@ void fill_hud_combat_view(World &world, LocalPlayerWeapon &weapon, LocalPlayerVi
 		out.cargo_texture = cargo->hud_image;
 		// Texture defaults are filled from HUD_LoadAllTextures by the device.
 		if (cargo->item_id == 4091 || cargo->item_id == 4093 || cargo->item_id == 4095)
-			out.cargo_texture = "H_flag.tga";
+			out.cargo_texture = hud::kHudCargoFlagTexture;
 		else if (out.cargo_texture.empty())
-			out.cargo_texture = "H_docmnt.tga";
+			out.cargo_texture = hud::kHudCargoDocumentTexture;
 	}
 }
 } // namespace opennova::world

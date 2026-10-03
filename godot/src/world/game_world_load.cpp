@@ -10,6 +10,8 @@
 
 #include <cmath>
 
+#include <runtime/environment/environment_state.h>
+
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
@@ -555,12 +557,12 @@ void GameWorld::load_environment(const String &p_env_path) {
 	}
 	// MissionEnvironment's setter reloads + pushes shader globals on assignment.
 	env_->set_environment_data(env);
-	// The overcast table the overcast blend cross-fades against: overcast.def
-	// appended after the .trn pass (stock .trn files carry no TOD blocks)
-	// (retail Environment_LoadTimeOfDayConfig @ 0x57db30).
+	// The overcast table the overcast blend cross-fades against, appended after
+	// the .trn pass (stock .trn files carry no TOD blocks); the engine's
+	// env::kOvercastFile carries the name and the witness.
 	Ref<EnvFile> overcast;
 	overcast.instantiate();
-	if (overcast->load_from_resource_root(resource_root_, "overcast.def") == OK) {
+	if (overcast->load_from_resource_root(resource_root_, opennova::env::kOvercastFile) == OK) {
 		env_->set_overcast_data(overcast);
 	} else {
 		env_->set_overcast_data(Ref<EnvFile>());
@@ -1092,12 +1094,19 @@ void GameWorld::load_player_weapon_profile() {
 	if (sim.is_null()) {
 		return;
 	}
-	// The mount root joined with the engine's expansion-scoped relpath (the
-	// shell's PlayerProfile.weapon_profile_path computes the same path).
-	if (resource_root_.is_null() || resource_root_->get_root_dir().is_empty()) {
+	// The working directory joined with the engine's expansion-scoped relpath, as
+	// retail builds it [orig: PlayerProfile_LoadAllFromDisk @ 0x54f4d0, path build
+	// @0x54f68c-0x54f6b7]: never the mount root, a build the editor's Play runs from
+	// (ADR 0046 S13 A8). The shell's PlayerProfile.weapon_profile_path computes the
+	// same path.
+	if (resource_root_.is_null()) {
 		return;
 	}
-	const String path = resource_root_->get_root_dir().path_join(
+	const String dir = LaunchFlags::working_dir();
+	if (dir.is_empty()) {
+		return;
+	}
+	const String path = dir.path_join(
 			Simulation::weapon_profile_relpath(resource_root_->get_expansion()));
 	if (path.is_empty()) {
 		return;

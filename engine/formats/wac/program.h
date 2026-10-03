@@ -2,10 +2,13 @@
 // string pools and the diagnostics gathered during compilation.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
+
+#include <formats/wac/param_type.h>
 
 namespace opennova::mus { struct MusGlobals; }
 
@@ -26,6 +29,64 @@ struct Diagnostic {
     std::string message;
     bool error = false;
     uint32_t source = 0; // Program::source_names index
+    // Tooling metadata the VM and the listing never read: the byte offset in its source of the
+    // token the compiler was at when it reported (the editor places a finding by it; retail
+    // keeps the line alone, which counts CRs), and whether the report is a name a table the
+    // embedder hands the compiler does not hold (an effect, a sound set or an ammo of the
+    // catalogs, a group of the world's table): what it says depends on the files that fill the
+    // table, not on the script alone.
+    size_t offset = 0;
+    bool table = false;
+};
+
+// A catalog lookup a pool operand made (an effect, a sound set, an ammo, a text token), found
+// or not, at the name's place in its source: tooling metadata the VM and the listing never read
+// (the editor's references read it). `name` is the token past its prefix as the tokenizer holds
+// it (upper-cased); `offset` and `length` are the same bytes in the source, as written.
+// `declaration`: made while a declared name (a VAR's, a CHEAT's, an IF's) was checked as new,
+// which resolves the name through the same legs [orig: Script_Compile @ 0x4F3812..0x4F3964,
+// @ 0x4F36C0..0x4F380D]: a name the script gives, never one it looks up.
+struct CatalogLookup {
+    ParamType kind = ParamType::Null; // Fx, SoundSet, Ammo or TextToken
+    std::string name;
+    uint32_t source = 0; // Program::source_names index
+    size_t offset = 0, length = 0;
+    bool found = false;
+    bool declaration = false;
+};
+
+// A file a script names, by the name its reader loads it under (tooling metadata the VM and the
+// listing never read, as CatalogLookup is; the editor's references read it, ADR 0046 S14): a RUN's
+// script, noted where the run loads it (not inside a block nor from a run file, which report
+// instead) [orig: Script_LoadAndCompileFile @0x4EE660; the name is the token to its first '.' then
+// ".wac", Path_ReplaceOrAppendExtension @0x53C780]; or a Filename slot's wave (the wave, pwave,
+// SSNwave and SSNradio commands), its string as the pool holds it [orig: WacScript_ResolveParameter
+// @0x4F2DA3..0x4F2E1C], which the game reads from the archives under that name
+// [orig: Wac_PlayScriptedVoiceWave @0x4ED610 -> Audio_LoadWavFileFromArchive @0x766480 ->
+// FileSystem_ReadFileWithSearchPaths @0x75B700]. `offset` and `length` are the name's bytes in its
+// source, as written (a quoted string's past its opening quote).
+struct FileUse {
+    enum class Kind : uint8_t { Run, Wave };
+    Kind kind = Kind::Run;
+    std::string name;    // as the reader loads it (a RUN's ".wac" name; a wave's string)
+    uint32_t source = 0; // Program::source_names index
+    size_t offset = 0, length = 0;
+};
+
+// A word the compiler read as one of its language's, where it stood (tooling metadata the VM and
+// the listing never read, as CatalogLookup is; the editor's script device colours them, ADR 0046
+// S13 V10): a keyword of the block, declaration and expression syntax (IF, THEN, ELSE, ELSEIF, END
+// and its family, ENTER, LEAVE, DOSEQ, DORND, NEXT, GLOOP, PLOOP, VAR, CHEAT, RUN, NOT, AND, OR),
+// recognized as the compiler recognizes it (the hash of the token's first four bytes); the name of
+// a command of the table (an action or a condition) it emitted; an operand it looked a name up
+// in a catalog for (an effect, a sound set, an ammo, a text key: its whole token, the prefix with
+// the name; never a declared name checked as new); or a file it names (a RUN's script, a wave:
+// FileUse). `offset` and `length` are the token's bytes in its source, as written.
+struct WordUse {
+    enum class Kind : uint8_t { Keyword, Command, Operand };
+    Kind kind = Kind::Keyword;
+    uint32_t source = 0; // Program::source_names index
+    size_t offset = 0, length = 0;
 };
 
 struct InstructionSource {
@@ -60,6 +121,9 @@ struct Program {
     std::string string_pool;
     std::vector<TextToken> text_tokens;
     std::vector<OperandSymbol> operand_symbols;
+    std::vector<CatalogLookup> catalog_lookups; // in the order the compiler made them
+    std::vector<WordUse> word_uses;             // in the order the compiler read them
+    std::vector<FileUse> file_uses;             // in the order the compiler read them
     // Effect handles are stable 1-based integers, separate from text-pool offsets.
     // The presentation consumer resolves these names in its mounted effect scene.
     std::vector<std::string> effect_names;

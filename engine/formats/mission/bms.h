@@ -515,6 +515,24 @@ inline int32_t to_fixed_16_16(float v) {
     return static_cast<int32_t>(v * 65536.0f);
 }
 
+// The numbers a 16.16 word holds, in mission units: INT32_MIN / 65536 to INT32_MAX / 65536.
+inline constexpr double kFixed16Min = -32768.0;
+inline constexpr double kFixed16Max = 2147483647.0 / 65536.0;
+
+// The same conversion from a double, which holds every 16.16 value exactly (a float keeps 24 bits, so
+// a position past 256 mission units loses its low bits on the way through one): what an editor's
+// number in mission units is written by, so a value read as fixed / 65536 writes back the same word.
+inline int32_t to_fixed_16_16(double v) {
+    if (std::isnan(v)) {
+        v = 0.0;
+    } else if (v > kFixed16Max) {
+        v = kFixed16Max;
+    } else if (v < kFixed16Min) {
+        v = kFixed16Min;
+    }
+    return static_cast<int32_t>(v * 65536.0);
+}
+
 // [orig editor: dfx2med.exe. Every offset CONFIRMED byte-exact by the packer Med_PackEntityRecord @0x44c8e0
 //  (RAM 448B -> disk 172B); canonical field NAMES come from the .mis text writer Med_WriteMisFile @0x454630
 //  (literal keywords). Notes: yaw/pitch/roll stored % 360; w_accuracy1 clamped <= w_accuracy2; iai_name (name1)
@@ -715,11 +733,12 @@ struct Event {
 
 // [orig: EventTrigger_EvaluateCondition @0x453620 reads param1..4 as triggerParams[3..6]]
 // Per-type param meaning (group/entity/zone/var/event refs, thresholds, distances) in
-// docs/mission/bms-event-runtime-re.md section 7. *IsWithinArea (sub 10): param2 = the area trigger's ID
-// in the file, which the game remaps to its array index at mission start [orig:
-// EventTrigger_ResolveZoneTriggerRefs @0x453000]; param1 = the tested group/entity. PlayerSatchel (main 7
-// sub 37): param1 = an area trigger's ID likewise. Event (main 3): param1 = an event's index. Single
-// distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
+// docs/mission/bms-event-runtime-re.md section 7 (as rows: formats/mission/mission_params.h).
+// *IsWithinArea (sub 10): param2 = the area trigger's ID in the file, which the game remaps to its
+// array index at mission start [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000]; param1 = the
+// tested group/entity. PlayerSatchel (main 7 sub 37): param1 = an area trigger's ID likewise. Event
+// (main 3): param1 = an event's index. An entity parameter is the entity's SSN (its id), never an
+// index. Single distance subtypes (43-45): param3 = whole meters (engine uses param3<<16).
 struct Trigger {
     int32_t condition_flags;
     TriggerMainType main_type;
@@ -876,6 +895,13 @@ bool parse_file(const std::string& path, File& out, std::string& error);
 
 // Write a BMS file to a byte buffer.
 bool write(const File& file, std::vector<uint8_t>& out, std::string& error);
+
+// Whether the weapon loadout chunk the writer writes for `loadout` reads back as the same records:
+// the reader takes a fourth string as the record's damage class only when it is a nonzero number or
+// holds no letter, else as the next record's name, which every later record then shifts by
+// [orig: AIProfile_SanitizeConfigData @ 0x40cfe0]. False with the first record that does not (or
+// the one the writer refuses) in `first`.
+bool loadout_reads_back(const WeaponLoadout& loadout, size_t& first);
 
 // Write the canonical 616-byte BMS header used by authored-file output. Chunk
 // lengths are recomputed from the modeled loadout and item-availability data.

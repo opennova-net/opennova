@@ -22,7 +22,7 @@ bool track_uses_noise(const ThreediTransform &track) {
 }
 
 void resolve_track_register(const Threedi3di3 &model, ThreediTransform &track) {
-    if (track.control <= 0x70) {
+    if (!threedi_generator_names_register(track.control)) {
         return;
     }
     const char *name = nullptr;

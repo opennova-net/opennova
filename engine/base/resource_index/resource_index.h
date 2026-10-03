@@ -5,9 +5,12 @@
 #include <string>
 #include <vector>
 
+#include <base/vfs/file_source.h>
 #include <base/vfs/vfs.h>
 
 namespace opennova {
+
+struct LaunchFlags;
 
 // Process-wide refresh for derived resource caches. ResourceRoot advances this
 // on mount/clear and explicit refresh; native asset consumers observe it too.
@@ -56,6 +59,30 @@ public:
 	bool scan(const std::string &root_dir, const std::string &expansion = std::string(),
 	          VfsMountMode mode = VfsMountMode::PackedWithLooseOverride,
 	          VfsArchiveDiscovery discovery = VfsArchiveDiscovery::ScanAll);
+	// What scan_install came to: the install mounted and indexed; the root mounted but opened
+	// none of the game's archives, which retail's boot refuses (last_error() names an archive
+	// that failed to open, when one did: a corrupt sole archive is this, not Unmounted); or
+	// the root did not mount at all (last_error() says why).
+	enum class InstallScan { Mounted, NoArchive, Unmounted };
+	// Mount and index a game install as a launch with `flags` mounts it (mount_install,
+	// boot_policy.h: the witnessed boot table with the /exp expansion over it, the /game
+	// code's key, the archives alone unless /d puts the loose files first). Replaces the
+	// mount as scan() does.
+	InstallScan scan_install(const std::string &root_dir, const LaunchFlags &flags);
+	// Mount an embedder's own file set in place of an install (the editor's project files, the
+	// documents it has open standing in for theirs: base/vfs/file_source.h), replacing the mount as
+	// scan() does. One flat namespace, the source's own lookup: has_file is a name the source
+	// resolves (its stamp is not 0), read_file its read; a lookup policy changes nothing (there is
+	// no archive under a loose file), no file is preferred loose, nothing is indexed by kind
+	// (resource_files answers none: a consumer reads the names it knows), and root_dir() is
+	// kSourceRootDir, a label and no directory. The index reads the source as it stands at each
+	// call; a holder that caches what it read asks the source for the name's stamp. False, the
+	// index left cleared, for no source.
+	static constexpr const char *kSourceRootDir = "source:";
+	bool mount_source(std::shared_ptr<const FileSource> files);
+	// The mounted files changed where the index cannot see it (a file source one of whose stamps
+	// moved): the revision moves, so a holder of what it parsed from the index parses it again.
+	void mark_changed() { ++revision_; }
 	void clear();
 	// Mount/decode revision, including failed scans.
 	uint64_t revision() const { return revision_; }
@@ -89,6 +116,9 @@ public:
 	const std::string &last_error() const;
 
 private:
+	// Index the files the Vfs mounted (scan and scan_install, after their mount).
+	void index_mounted();
+
 	uint64_t revision_ = 0;
 	struct Impl;
 	std::unique_ptr<Impl> impl_;

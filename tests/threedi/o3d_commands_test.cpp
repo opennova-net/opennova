@@ -496,6 +496,32 @@ int main(int argc, char **argv) {
 		check(v != nullptr && v->tangent[2] > 0.999f && v->bitangent[0] > 0.999f, "tangents follow the UVs");
 		threedi_3di3_free(&m);
 	}
+	// scene's texfile records, one per texture name and row type: the one file
+	// that row's loader opens beside the model (renderer::material_texture_source).
+	// A diffuse row naming wall.tga takes its .dds sibling, a plain row (type 1)
+	// the .tga itself, and a normal map naming a .pcx nothing, the file there or not.
+	{
+		const auto folder = dir / "texture-rows";
+		std::filesystem::create_directories(folder);
+		for (const char *file : {"wall.tga", "wall.dds", "bump.pcx"}) std::ofstream(folder / file) << "x";
+		const auto model = build("texture-rows/rows",
+				"o3d 1\nmodel ROWS\nmaterial FF_MT_OP\ntexture wall.tga 1 0\ntexture wall.tga 2 1\ntexture bump.pcx 3 4\n"
+				"lod 0\npart 0 0 0 0\nstrip 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n");
+		const auto text = (folder / "rows.rt.o3d").string();
+		check(threedi_cli::cmd_scene(model.c_str(), text.c_str()) == 0, "scene beside a model's textures");
+		const std::string rt = test_io::read_file_text(text);
+		const auto file_of = [&rt](const std::string &record) -> std::string {
+			const std::string head = "texfile " + record + " ";
+			const size_t at = rt.find(head);
+			if (at == std::string::npos) return "(no record)";
+			const size_t end = rt.find_first_of("\r\n", at);
+			const std::string path = rt.substr(at + head.size(), end - at - head.size());
+			return path == "-" ? path : std::filesystem::u8path(path).filename().u8string();
+		};
+		check(file_of("wall.tga 0") == "wall.dds", "a diffuse row's texfile is its .dds sibling");
+		check(file_of("wall.tga 1") == "wall.tga", "a plain row's texfile is the name itself, one record per type");
+		check(file_of("bump.pcx 4") == "-", "a normal map naming a .pcx loads nothing");
+	}
 	std::printf("o3d_commands: %d failures\n", failures);
 	return failures ? 1 : 0;
 }

@@ -51,6 +51,7 @@
 #include <godot_cpp/variant/vector2i.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <base/io/hash.h>
 #include <base/io/strutil.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/renderer/particle_atlas.h>
@@ -348,16 +349,8 @@ ParticleCameraFrame particle_camera_frame(Camera3D *camera) {
 // when it matches. Computed only when a report is asked for.
 std::uint64_t vertex_checksum(
 		const std::vector<opennova::renderer::ParticleVertex> &vertices) {
-	std::uint64_t hash = 14695981039346656037ull;
-	const unsigned char *bytes =
-			reinterpret_cast<const unsigned char *>(vertices.data());
-	const std::size_t size =
-			vertices.size() * sizeof(opennova::renderer::ParticleVertex);
-	for (std::size_t index = 0; index < size; ++index) {
-		hash ^= bytes[index];
-		hash *= 1099511628211ull;
-	}
-	return hash;
+	return opennova::io::fnv1a64_bytes(opennova::io::kFnv1a64Offset, vertices.data(),
+			vertices.size() * sizeof(opennova::renderer::ParticleVertex));
 }
 
 // Diagnostics read each compiler's retained draw list in place: it stays

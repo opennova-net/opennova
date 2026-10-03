@@ -3,11 +3,14 @@
 #include "mnu/menu_draw_list_stats.h"
 #include "util/string_convert.h"
 
+#include <formats/pcx/pcx_io.h>
+#include <runtime/menu/menu_assets.h>
 #include <runtime/menu/options_policy.h>
 
 #include "mnu/mns_stylesheet.h"
 #include "mnu/mnu_document.h"
 #include "resource_index/resource_root.h"
+#include "rtxt/rtxt_string_file.h"
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/image_texture.hpp>
@@ -112,126 +115,86 @@ RID MenuFrame::get_custom_slot_canvas_item() {
 	return slot_canvas_item_;
 }
 
-void MenuFrame::free_fonts_() {
-	fonts_.clear();
-	owned_fonts_.clear();
-}
-
-void MenuFrame::collect_font_names_(const void *p_window,
-		std::vector<String> &r_names) const {
-	const opennova::mnu::Window &w = *static_cast<const opennova::mnu::Window *>(p_window);
-	if (!w.font.name.empty()) {
-		const String name = opennova::to_gd(w.font.name);
-		bool seen = false;
-		for (const String &existing : r_names) {
-			if (existing.nocasecmp_to(name) == 0) {
-				seen = true;
-				break;
-			}
-		}
-		if (!seen) {
-			r_names.push_back(name);
-		}
-	}
-	for (const opennova::mnu::Window &child : w.children) {
-		collect_font_names_(&child, r_names);
-	}
-}
-
-bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
-		const String &p_screen_name, const Ref<ResourceRoot> &p_root,
-		const Ref<MnsStyleSheet> &p_style, const Dictionary &p_text_lookup) {
-	document_ = p_document;
-	root_ = p_root;
-	configured_ = false;
-	textures_.clear();
-	texture_images_.clear();
-	frame_texture_cache_.clear();
-	compiler_.clear_registered_fonts();
-	free_fonts_();
-	state_ = opennova::menu::MenuFrameState{};
-	cursor_slot_ = -1;
-	press_claim_ = -1;
-	unresolved_assets_ = 0;
-	if (document_.is_null()) {
-		queue_redraw();
+// One menu texture file decoded by the format the engine's extension dispatch picked
+// (TGA / DDS / PNG through Godot's decoders, PCX through the engine's port of retail's
+// loader); the dispatch and its witness live at the engine home, menu_assets.h.
+bool MenuFrameTextures::decode(const std::string &p_key, opennova::menu::MenuTextureFormat p_format,
+		const std::vector<uint8_t> &p_bytes, int &r_width, int &r_height) {
+	if (p_bytes.empty()) {
 		return false;
 	}
-	const opennova::mnu::Document &doc = document_->get_native();
-	const opennova::mnu::Screen *screen = p_screen_name.is_empty()
-			? doc.first_screen()
-			: doc.find_screen(opennova::to_std(p_screen_name));
-	if (screen == nullptr) {
-		queue_redraw();
+	PackedByteArray bytes;
+	bytes.resize(static_cast<int64_t>(p_bytes.size()));
+	std::memcpy(bytes.ptrw(), p_bytes.data(), p_bytes.size());
+	Ref<Image> image;
+	image.instantiate();
+	Error err = FAILED;
+	switch (p_format) {
+		case opennova::menu::MenuTextureFormat::Tga:
+			err = image->load_tga_from_buffer(bytes);
+			break;
+		case opennova::menu::MenuTextureFormat::Dds:
+			err = image->load_dds_from_buffer(bytes);
+			break;
+		case opennova::menu::MenuTextureFormat::Png:
+			err = image->load_png_from_buffer(bytes);
+			break;
+		case opennova::menu::MenuTextureFormat::Pcx: {
+			opennova::RgbaImage decoded;
+			std::string error;
+			if (opennova::decode_pcx_menu_rgba(p_bytes.data(), p_bytes.size(), decoded, error)) {
+				PackedByteArray pixels;
+				pixels.resize(static_cast<int64_t>(decoded.pixels.size()));
+				std::memcpy(pixels.ptrw(), decoded.pixels.data(), decoded.pixels.size());
+				image = Image::create_from_data(decoded.width, decoded.height, false,
+						Image::FORMAT_RGBA8, pixels);
+				err = image.is_valid() ? OK : FAILED;
+			}
+			break;
+		}
+		case opennova::menu::MenuTextureFormat::None:
+			break;
+	}
+	if (err != OK || image.is_null() || image->is_empty()) {
 		return false;
 	}
+	if (image->is_compressed()) {
+		image->decompress();
+	}
+	if (image->get_format() != Image::FORMAT_RGBA8) {
+		image->convert(Image::FORMAT_RGBA8);
+	}
+	Entry entry;
+	entry.image = image;
+	entry.texture = ImageTexture::create_from_image(image);
+	if (entry.texture.is_null()) {
+		return false;
+	}
+	r_width = image->get_width();
+	r_height = image->get_height();
+	entries_[p_key] = entry;
+	return true;
+}
 
-	// Stylesheet vars + the id text table feed the compiler's resolution.
-	std::map<std::string, std::string> vars;
-	if (p_style.is_valid()) {
-		for (const auto &kv : p_style->variables()) {
-			vars[kv.first] = kv.second;
-		}
-	}
-	compiler_.set_style_vars(vars);
-	std::map<std::string, std::string> text_table;
-	{
-		const Array keys = p_text_lookup.keys();
-		for (int64_t i = 0; i < keys.size(); ++i) {
-			const String key = keys[i];
-			text_table[opennova::to_std(key)] = opennova::to_std(String(p_text_lookup[keys[i]]));
-		}
-	}
-	compiler_.set_text_lookup(text_table);
+void MenuFrameTextures::release(const std::string &p_key) {
+	entries_.erase(p_key);
+}
 
-	// Fonts referenced by the tree, loaded through the VFS and registered
-	// before configure() interns them. The first loadable font doubles as the
-	// default (an unauthored FONT falls back to it, the shell's existing
-	// fallback policy).
-	std::vector<String> raw_font_names;
-	collect_font_names_(&screen->root_window, raw_font_names);
-	// Authored FONT names are frequently stylesheet variables
-	// (%DEF_FONTNAME%); resolve them the way the compiler interns them so the
-	// VFS load and the slot mapping key on the SAME resolved name.
-	std::vector<String> font_names;
-	for (const String &raw : raw_font_names) {
-		const String resolved =
-				opennova::to_gd(compiler_.resolve_style_var(opennova::to_std(raw)));
-		bool seen = false;
-		for (const String &existing : font_names) {
-			if (existing.nocasecmp_to(resolved) == 0) {
-				seen = true;
-				break;
-			}
-		}
-		if (!seen) {
-			font_names.push_back(resolved);
-		}
+const MenuFrameTextures::Entry *MenuFrameTextures::find(const std::string &p_key) const {
+	const auto found = entries_.find(p_key);
+	return found != entries_.end() ? &found->second : nullptr;
+}
+
+// A font's pages uploaded on its first draw and kept while the loader keeps the font.
+const std::vector<Ref<Texture2D>> *MenuFrame::font_pages_(int32_t p_slot) {
+	const opennova::menu::MenuFont *font = assets_.font_for_slot(compiler_, p_slot);
+	if (font == nullptr || !font->valid) {
+		return nullptr;
 	}
-	std::map<std::string, LoadedFont *> loaded;
-	LoadedFont *default_font = nullptr;
-	for (const String &name : font_names) {
-		if (root_.is_null()) {
-			++unresolved_assets_;
-			continue;
-		}
-		const PackedByteArray bytes = root_->read_file(name.get_file());
-		if (bytes.is_empty()) {
-			++unresolved_assets_;
-			continue;
-		}
-		auto owned = std::make_unique<LoadedFont>();
-		if (fnt_parse(bytes.ptr(), static_cast<size_t>(bytes.size()),
-					&owned->font) != FNT_OK) {
-			++unresolved_assets_;
-			continue;
-		}
-		owned->valid = true;
-		LoadedFont *font = owned.get();
-		owned_fonts_.push_back(std::move(owned));
-		font->pages.resize(font->font.num_pages);
-		for (uint32_t page = 0;
-				page < font->font.num_pages && page < FNT_MAX_PAGES; ++page) {
+	auto found = font_pages_by_serial_.find(font->serial);
+	if (found == font_pages_by_serial_.end()) {
+		std::vector<Ref<Texture2D>> pages(font->font.num_pages);
+		for (uint32_t page = 0; page < font->font.num_pages && page < FNT_MAX_PAGES; ++page) {
 			const uint8_t *data = fnt_get_page_data_const(&font->font, page);
 			if (data == nullptr) {
 				continue;
@@ -242,73 +205,134 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 			const Ref<Image> image = Image::create_from_data(FNT_TEXTURE_WIDTH,
 					FNT_TEXTURE_HEIGHT, false, Image::FORMAT_RGBA8, page_bytes);
 			if (image.is_valid()) {
-				font->pages[page] = ImageTexture::create_from_image(image);
+				pages[page] = ImageTexture::create_from_image(image);
 			}
 		}
-		loaded[opennova::to_std(name.to_lower())] = font;
-		compiler_.register_font(opennova::to_std(name), &font->font);
-		if (default_font == nullptr) {
-			default_font = font;
+		found = font_pages_by_serial_.emplace(font->serial, std::move(pages)).first;
+	}
+	return &found->second;
+}
+
+bool MenuFrame::texture_loads(const String &p_name) {
+	return files_ != nullptr && !p_name.is_empty() &&
+			assets_.texture_loads(opennova::to_std(p_name), *files_, texture_store_);
+}
+
+bool MenuFrame::load_texture_ahead(const std::string &p_name, const opennova::FileSource &p_files) {
+	return assets_.texture_loads(p_name, p_files, texture_store_);
+}
+
+bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
+		const String &p_screen_name, const Ref<ResourceRoot> &p_root,
+		const Ref<MnsStyleSheet> &p_style, const Ref<RtxtStringFile> &p_override_text) {
+	document_ = p_document;
+	override_text_ = p_override_text;
+	root_files_.set_root(p_root);
+	if (document_.is_null()) {
+		clear_screen();
+		return false;
+	}
+	const opennova::mnu::Document &doc = document_->get_native();
+	const opennova::mnu::Screen *screen = p_screen_name.is_empty()
+			? doc.first_screen()
+			: doc.find_screen(opennova::to_std(p_screen_name));
+	// The stylesheet vars feed the compiler's resolution.
+	std::map<std::string, std::string> vars;
+	if (p_style.is_valid()) {
+		for (const auto &kv : p_style->variables()) {
+			vars[kv.first] = kv.second;
 		}
 	}
+	return configure_screen(&doc, screen, root_files_, vars,
+			override_text_.is_valid() ? &override_text_->get_native() : nullptr);
+}
 
-	compiler_.configure(screen,
-			default_font != nullptr ? &default_font->font : nullptr);
-
-	// Resolve every interned texture through the VFS and report its size for
-	// the engine-side rect fallbacks.
-	const std::vector<std::string> &tex_names = compiler_.texture_names();
-	textures_.resize(tex_names.size());
-	texture_images_.resize(tex_names.size());
-	for (size_t i = 0; i < tex_names.size(); ++i) {
-		if (root_.is_null()) {
-			++unresolved_assets_;
-			continue;
-		}
-		const String name = opennova::to_gd(tex_names[i]);
-		const PackedByteArray bytes = root_->read_file(name.get_file());
-		if (bytes.is_empty()) {
-			++unresolved_assets_;
-			continue;
-		}
-		Ref<Image> image;
-		image.instantiate();
-		if (image->load_tga_from_buffer(bytes) != OK) {
-			++unresolved_assets_;
-			continue;
-		}
-		const Ref<Texture2D> tex = ImageTexture::create_from_image(image);
-		textures_[i] = tex;
-		texture_images_[i] = image;
-		if (tex.is_valid()) {
-			compiler_.set_texture_size(static_cast<int32_t>(i),
-					tex->get_width(), tex->get_height());
-		}
+// What the screen reads, through the engine's loader (the witnesses live at the engine
+// homes, menu_screen_inputs.h and menu_frame_assets.h): the string tables its windows
+// name, every FONT (no default font: a widget whose FONT did not load draws with its
+// ancestors'), and every texture it interned, each kept by (file, stamp) so a configure
+// that names the same unchanged files reads nothing again.
+bool MenuFrame::configure_screen(const opennova::mnu::Document *p_document,
+		const opennova::mnu::Screen *p_screen, const opennova::FileSource &p_files,
+		const std::map<std::string, std::string> &p_vars,
+		const opennova::rtxt::File *p_override_text) {
+	files_ = &p_files;
+	configured_ = false;
+	state_ = opennova::menu::MenuFrameState{};
+	cursor_slot_ = -1;
+	press_claim_ = -1;
+	++configure_count_;
+	if (p_document == nullptr) {
+		clear_screen();
+		return false;
 	}
-
-	// Map the compiler's font slots to the loaded fonts (slot 0 = default).
-	const std::vector<std::string> &slot_names = compiler_.font_names();
-	fonts_.resize(slot_names.size(), nullptr);
-	for (size_t i = 0; i < slot_names.size(); ++i) {
-		if (slot_names[i].empty()) {
-			fonts_[i] = default_font;
-			continue;
-		}
-		std::string key = slot_names[i];
-		std::transform(key.begin(), key.end(), key.begin(), [](unsigned char c) {
-			return static_cast<char>(std::tolower(c));
-		});
-		const auto it = loaded.find(key);
-		fonts_[i] = it != loaded.end() ? it->second : default_font;
-	}
-
-	configured_ = true;
+	assets_.configure(compiler_, p_document, p_screen, p_files, texture_store_, p_vars,
+			p_override_text);
+	adopt_slots_();
+	configured_ = p_screen != nullptr;
 	queue_redraw();
-	return true;
+	return configured_;
+}
+
+void MenuFrame::clear_screen() {
+	configured_ = false;
+	state_ = opennova::menu::MenuFrameState{};
+	cursor_slot_ = -1;
+	press_claim_ = -1;
+	++configure_count_;
+	assets_.clear(compiler_, texture_store_);
+	files_ = nullptr;
+	adopt_slots_();
+	queue_redraw();
+}
+
+// The configured screen's texture slots from what the loader kept, and the composed
+// frames and font pages of what it no longer keeps let go.
+void MenuFrame::adopt_slots_() {
+	texture_keys_ = assets_.slot_keys();
+	textures_.assign(texture_keys_.size(), Ref<Texture2D>());
+	texture_images_.assign(texture_keys_.size(), Ref<Image>());
+	for (size_t i = 0; i < texture_keys_.size(); ++i) {
+		if (const MenuFrameTextures::Entry *entry = texture_store_.find(texture_keys_[i])) {
+			textures_[i] = entry->texture;
+			texture_images_[i] = entry->image;
+		}
+	}
+	for (auto it = frame_texture_cache_.begin(); it != frame_texture_cache_.end();) {
+		if (it->second.used + 1 < configure_count_) {
+			it = frame_texture_cache_.erase(it);
+		} else {
+			++it;
+		}
+	}
+	for (auto it = font_pages_by_serial_.begin(); it != font_pages_by_serial_.end();) {
+		if (assets_.font_alive(it->first)) {
+			++it;
+		} else {
+			it = font_pages_by_serial_.erase(it);
+		}
+	}
+}
+
+void MenuFrame::reset_loads() {
+	compiler_.reset_texture_loads();
 }
 
 bool MenuFrame::is_configured() const {
 	return configured_;
+}
+
+Ref<Texture2D> MenuFrame::cached_frame_texture_(const std::string &p_key) const {
+	const auto found = frame_texture_cache_.find(p_key);
+	if (found == frame_texture_cache_.end()) {
+		return Ref<Texture2D>();
+	}
+	found->second.used = configure_count_;
+	return found->second.texture;
+}
+
+void MenuFrame::keep_frame_texture_(const std::string &p_key, const Ref<Texture2D> &p_texture) {
+	frame_texture_cache_[p_key] = FrameTexture{ p_texture, configure_count_ };
 }
 
 Ref<Texture2D> MenuFrame::texture_for_quad_(
@@ -356,13 +380,15 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 				static_cast<int>(std::floor(p_quad.x0)), src_w);
 		const int phase_y = positive_mod(
 				static_cast<int>(std::floor(p_quad.y0)), src_h);
-		const std::string key = "tile:" + std::to_string(p_quad.texture) + ":" +
+		// Keyed by the texture's kept load (its file and stamp), so a tile survives a
+		// reconfigure that keeps the texture.
+		const std::string key = "tile:" + texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
 				std::to_string(src_x0) + ":" + std::to_string(src_y0) + ":" +
 				std::to_string(src_w) + ":" + std::to_string(src_h) + ":" +
 				std::to_string(phase_x) + ":" + std::to_string(phase_y);
-		const auto cached = frame_texture_cache_.find(key);
-		if (cached != frame_texture_cache_.end()) {
-			return cached->second;
+		const Ref<Texture2D> cached = cached_frame_texture_(key);
+		if (cached.is_valid()) {
+			return cached;
 		}
 		Ref<Image> tile = Image::create(src_w, src_h, false, Image::FORMAT_RGBA8);
 		for (int y = 0; y < src_h; ++y) {
@@ -373,7 +399,7 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 			}
 		}
 		const Ref<Texture2D> texture = ImageTexture::create_from_image(tile);
-		frame_texture_cache_[key] = texture;
+		keep_frame_texture_(key, texture);
 		return texture;
 	}
 
@@ -381,14 +407,14 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 			1, static_cast<int>(std::lround(p_quad.x1 - p_quad.x0)));
 	const int dst_h = std::max(
 			1, static_cast<int>(std::lround(p_quad.y1 - p_quad.y0)));
-	const std::string key = "frame:" + std::to_string(p_quad.texture) + ":" +
-			std::to_string(p_quad.texture2) + ":" + std::to_string(src_x0) + ":" +
+	const std::string key = "frame:" + texture_keys_[static_cast<size_t>(p_quad.texture)] + ":" +
+			texture_keys_[static_cast<size_t>(p_quad.texture2)] + ":" + std::to_string(src_x0) + ":" +
 			std::to_string(src_y0) + ":" + std::to_string(src_w) + ":" +
 			std::to_string(src_h) + ":" + std::to_string(dst_w) + ":" +
 			std::to_string(dst_h);
-	const auto cached = frame_texture_cache_.find(key);
-	if (cached != frame_texture_cache_.end()) {
-		return cached->second;
+	const Ref<Texture2D> cached = cached_frame_texture_(key);
+	if (cached.is_valid()) {
+		return cached;
 	}
 	const Ref<Image> second =
 			texture_images_[static_cast<size_t>(p_quad.texture2)];
@@ -413,7 +439,7 @@ Ref<Texture2D> MenuFrame::texture_for_quad_(
 		}
 	}
 	const Ref<Texture2D> texture = ImageTexture::create_from_image(composed);
-	frame_texture_cache_[key] = texture;
+	keep_frame_texture_(key, texture);
 	return texture;
 }
 
@@ -436,8 +462,15 @@ void MenuFrame::set_widget_shown_override(int p_index, bool p_shown) {
 	queue_redraw();
 }
 
+void MenuFrame::set_native_state(const opennova::menu::MenuFrameState &p_state) {
+	state_ = p_state;
+	queue_redraw();
+}
+
 void MenuFrame::set_widget_disabled(int p_index, bool p_disabled) {
-	widget_(p_index).disabled = p_disabled;
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.has_disabled = true;
+	ws.disabled = p_disabled;
 	queue_redraw();
 }
 
@@ -553,10 +586,19 @@ void MenuFrame::set_widget_table_rows(int p_index,
 	queue_redraw();
 }
 
-void MenuFrame::set_widget_table_columns(int p_index,
-		const std::vector<opennova::menu::MenuTableColumnDef> &p_columns) {
-	compiler_.set_table_columns(p_index, p_columns);
-	queue_redraw();
+void MenuFrame::set_widget_table_cells(int p_index, const Array &p_rows) {
+	std::vector<opennova::menu::MenuTableRow> rows;
+	rows.reserve(static_cast<size_t>(p_rows.size()));
+	for (int64_t i = 0; i < p_rows.size(); ++i) {
+		const PackedStringArray cells = p_rows[i];
+		opennova::menu::MenuTableRow row;
+		for (int64_t c = 0; c < cells.size(); ++c) {
+			row.cells.push_back(opennova::to_std(cells[c]));
+		}
+		row.values.push_back(0);
+		rows.push_back(std::move(row));
+	}
+	set_widget_table_rows(p_index, rows);
 }
 
 void MenuFrame::set_table_cell_painter(int p_index,
@@ -573,14 +615,25 @@ void MenuFrame::set_widget_clip_rect(int p_index, bool p_enabled, const Rect2i &
 	queue_redraw();
 }
 
-void MenuFrame::set_widget_marquee_lines(int p_index,
-		const PackedStringArray &p_lines) {
+void MenuFrame::set_widget_table_columns(int p_index, bool p_installed,
+		const std::vector<opennova::menu::MenuTableColumn> &p_columns, int p_sort_column) {
 	opennova::menu::MenuWidgetState &ws = widget_(p_index);
-	ws.marquee_lines.clear();
-	ws.marquee_lines.reserve(static_cast<size_t>(p_lines.size()));
-	for (int64_t i = 0; i < p_lines.size(); ++i) {
-		ws.marquee_lines.push_back(opennova::to_std(p_lines[i]));
+	ws.has_table_columns = p_installed;
+	ws.table_columns = p_columns;
+	ws.table_sort_column = p_sort_column;
+	queue_redraw();
+}
+
+void MenuFrame::set_widget_marquee(int p_index,
+		const opennova::menu::MarqueeCredits &p_credits) {
+	// The node fonts load the way a FONT does (menu_credits.h).
+	for (const opennova::menu::MarqueeCreditNode &node : p_credits.nodes) {
+		if (node.text && !node.font.empty() && files_ != nullptr) {
+			assets_.add_font(compiler_, node.font, *files_);
+		}
 	}
+	opennova::menu::MenuWidgetState &ws = widget_(p_index);
+	ws.marquee = p_credits;
 	ws.marquee_reset = true; // fresh content restarts the roll
 	queue_redraw();
 }
@@ -598,7 +651,7 @@ int MenuFrame::widget_kind(int p_index) const {
 }
 
 String MenuFrame::widget_authored_text(int p_index) const {
-	return opennova::to_gd(compiler_.widget_authored_text(p_index));
+	return opennova::cp1252_to_gd(compiler_.widget_authored_text(p_index));
 }
 
 bool MenuFrame::is_widget_disabled(int p_index) const {
@@ -639,10 +692,10 @@ int MenuFrame::item_count(int p_index) const {
 String MenuFrame::get_widget_text(int p_index) const {
 	for (const opennova::menu::MenuWidgetState &ws : state_.widgets) {
 		if (ws.index == p_index && ws.has_text) {
-			return opennova::to_gd(ws.text);
+			return opennova::cp1252_to_gd(ws.text);
 		}
 	}
-	return opennova::to_gd(compiler_.widget_authored_text(p_index));
+	return widget_authored_text(p_index);
 }
 
 int MenuFrame::get_widget_caret(int p_index) const {
@@ -729,11 +782,12 @@ bool MenuFrame::table_hit(int p_index, const Vector2 &p_position, int *r_row,
 			r_row, r_column);
 }
 
-int MenuFrame::hotkey_widget(const String &p_key, bool p_virtual) const {
-	if (!configured_) {
-		return -1;
-	}
-	return compiler_.hotkey_widget(opennova::to_std(p_key), p_virtual, state_);
+std::string MenuFrame::widget_mnemonic(int p_index) const {
+	return configured_ ? compiler_.widget_mnemonic(p_index) : std::string();
+}
+
+void MenuFrame::set_open_popup(int p_index) {
+	state_.popup_root = p_index;
 }
 
 bool MenuFrame::edit_char(int p_index, int p_unicode) {
@@ -790,7 +844,7 @@ Ref<Texture2D> MenuFrame::get_cursor_texture() const {
 }
 
 int MenuFrame::get_unresolved_asset_count() const {
-	return unresolved_assets_;
+	return static_cast<int>(assets_.unresolved().size());
 }
 
 void MenuFrame::set_time_ms(int64_t p_ms) {
@@ -829,6 +883,7 @@ int MenuFrame::process_mouse(const Vector2 &p_position, bool p_button_down) {
 		press_claim_ = -1;
 	}
 	mouse_button_down_ = p_button_down;
+	last_sample_scrolled_ = claim.scroll_index >= 0;
 	if (claim.scroll_value_changed) {
 		emit_signal("scroll_value_changed", claim.scroll_index,
 				claim.scroll_value);
@@ -1002,11 +1057,8 @@ void MenuFrame::_draw() {
 	};
 	const auto apply_font_run =
 			[&](const opennova::menu::MenuDrawList::FontRun &run) {
-				LoadedFont *font = nullptr;
-				if (run.font >= 0 && run.font < static_cast<int32_t>(fonts_.size())) {
-					font = fonts_[static_cast<size_t>(run.font)];
-				}
-				if (font == nullptr) {
+				const std::vector<Ref<Texture2D>> *pages = font_pages_(run.font);
+				if (pages == nullptr) {
 					return;
 				}
 				const int32_t end = run.first + run.count;
@@ -1014,10 +1066,10 @@ void MenuFrame::_draw() {
 						i < end && i < static_cast<int32_t>(list.glyphs.size()); ++i) {
 					const opennova::hud::GameFontQuad &glyph =
 							list.glyphs[static_cast<size_t>(i)];
-					if (glyph.page >= font->pages.size()) {
+					if (glyph.page >= pages->size()) {
 						continue;
 					}
-					const Ref<Texture2D> page = font->pages[glyph.page];
+					const Ref<Texture2D> page = (*pages)[glyph.page];
 					if (page.is_null()) {
 						continue;
 					}
@@ -1149,7 +1201,7 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::video_preset_buttons);
 	ClassDB::bind_method(
 			D_METHOD("configure", "document", "screen_name", "root", "style",
-					"text_lookup"),
+					"override_text"),
 			&MenuFrame::configure);
 	ClassDB::bind_method(D_METHOD("is_configured"), &MenuFrame::is_configured);
 	ClassDB::bind_method(D_METHOD("set_widget_disabled", "index", "disabled"),
@@ -1180,6 +1232,10 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::get_draw_list_stats);
 	ClassDB::bind_method(D_METHOD("set_widget_items", "index", "items"),
 			&MenuFrame::set_widget_items);
+	ClassDB::bind_method(D_METHOD("set_widget_table_cells", "index", "rows"),
+			&MenuFrame::set_widget_table_cells);
+	ClassDB::bind_method(D_METHOD("set_widget_clip_rect", "index", "enabled", "rect"),
+			&MenuFrame::set_widget_clip_rect);
 	ClassDB::bind_method(D_METHOD("widget_count"), &MenuFrame::widget_count);
 	ClassDB::bind_method(D_METHOD("widget_name", "index"),
 			&MenuFrame::widget_name);

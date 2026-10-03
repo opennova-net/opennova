@@ -496,4 +496,50 @@ bool bad_build_mint_table(const BadBuildSet &set, std::string &out, std::string 
     return true;
 }
 
+bool bad_build_mint_set(const BadBuildSet &set, const std::string &out_name, std::vector<BadMintedFile> &out,
+                        std::string *error, int *failed_clip) {
+    out.clear();
+    if (failed_clip != nullptr) *failed_clip = -1;
+    const bool lone = out_name.size() > 4 && strutil::ends_with_icase(out_name, ".bad");
+    if (set.clips.empty()) return fail(error, "the set holds no clip");
+    // The file the game packs keeps its name: 15 bytes at most, the
+    // extension included (bad_build_packable_name).
+    if (!bad_build_packable_name(out_name))
+        return fail(error, "'" + out_name + "' is " + std::to_string(out_name.size()) +
+                                   " bytes; the game packs a file name of at most " +
+                                   std::to_string(kBadPackedNameMax) + " ASCII bytes, its extension included");
+    if (lone && (set.clips.size() != 1 || !set.rows.empty()))
+        return fail(error, "a lone clip is one clip and no table row");
+    if (!lone && set.rows.empty())
+        return fail(error, "the set holds no table row (mint one clip on its own instead)");
+    // Every clip of a table composes against its reset clip; a lone clip
+    // against its own first key.
+    const BadBuildClip *reset = lone ? nullptr : bad_build_reset_clip(set);
+    std::vector<BadMintedFile> files;
+    for (size_t c = 0; c < set.clips.size(); ++c) {
+        const BadBuildClip &clip = set.clips[c];
+        BadMintedFile minted;
+        std::string why;
+        BadFile check{};
+        if (!bad_build_mint(clip, reset, minted.bytes, &why)) {
+            if (failed_clip != nullptr) *failed_clip = static_cast<int>(c);
+            return fail(error, "clip '" + clip.name + "': " + why);
+        }
+        if (bad_parse_buffer(minted.bytes.data(), minted.bytes.size(), &check) != 0) {
+            if (failed_clip != nullptr) *failed_clip = static_cast<int>(c);
+            return fail(error, "clip '" + clip.name + "' does not read back");
+        }
+        bad_free(&check);
+        minted.name = lone ? out_name : clip.name + ".bad";
+        files.push_back(std::move(minted));
+    }
+    if (!lone) {
+        std::string text;
+        if (!bad_build_mint_table(set, text, error)) return false;
+        files.push_back(BadMintedFile{out_name, std::vector<uint8_t>(text.begin(), text.end())});
+    }
+    out = std::move(files);
+    return true;
+}
+
 } // namespace opennova::bad

@@ -60,10 +60,10 @@ static int test_light_transfer(void) {
         fprintf(stderr, "FAIL: light_transfer clamp/scale semantics mismatch\n");
         ++fails;
     }
-    if (items.entries[1].raw_lines_count != 0 ||
-        items.entries[2].raw_lines_count != 0 ||
-        items.entries[3].raw_lines_count != 0) {
-        fprintf(stderr, "FAIL: light_transfer fell through to raw_lines\n");
+    if (items.entries[1].unmodeled_count != 0 ||
+        items.entries[2].unmodeled_count != 0 ||
+        items.entries[3].unmodeled_count != 0) {
+        fprintf(stderr, "FAIL: light_transfer fell through to unmodeled syntax\n");
         ++fails;
     }
     def_free_items(&items);
@@ -111,8 +111,8 @@ static int test_score_word(void) {
                 items.entries[1].score, items.entries[2].score, items.entries[3].score);
         ++fails;
     }
-    if (items.entries[1].raw_lines_count != 0 || items.entries[2].raw_lines_count != 0) {
-        fprintf(stderr, "FAIL: score fell through to raw_lines\n");
+    if (items.entries[1].unmodeled_count != 0 || items.entries[2].unmodeled_count != 0) {
+        fprintf(stderr, "FAIL: score fell through to unmodeled syntax\n");
         ++fails;
     }
     def_free_items(&items);
@@ -176,10 +176,10 @@ static int test_particle_keys(void) {
         fprintf(stderr, "FAIL: particle snippet buggy id mismatch: got %d\n", b->id);
         ++fails;
     }
-    /* Every line above is a recognized key — none may fall through to raw_lines. */
-    if (b->raw_lines_count != 0) {
-        fprintf(stderr, "FAIL: particle keys fell through to raw_lines (%zu)\n",
-                b->raw_lines_count);
+    /* Every line above is a recognized key — none may fall through to unmodeled syntax. */
+    if (b->unmodeled_count != 0) {
+        fprintf(stderr, "FAIL: particle keys fell through to unmodeled syntax (%zu)\n",
+                b->unmodeled_count);
         ++fails;
     }
 
@@ -364,8 +364,8 @@ static int test_weathervane_minai_default_aip(void) {
         fprintf(stderr, "FAIL: keys leaked into the next entry\n");
         ++fails;
     }
-    if (items.entries[0].raw_lines_count != 0) {
-        fprintf(stderr, "FAIL: a parsed key fell through to raw_lines\n");
+    if (items.entries[0].unmodeled_count != 0) {
+        fprintf(stderr, "FAIL: a parsed key fell through to unmodeled syntax\n");
         ++fails;
     }
     def_free_items(&items);
@@ -1233,9 +1233,9 @@ int main(int argc, char **argv) {
         a3->angle_count != 4 || a3->down_angle != 0 || a3->up_angle != 0 ||
         a3->right_angle != 0 || a3->left_angle != 0 ||
         carrier->emplacement_g_slot != 2 || carrier->emplacement_c_slot != 4 ||
-        carrier->raw_lines_count != 0 ||
+        carrier->unmodeled_count == 0 ||
         attachment_items.entries[1].emplacement_attachments_count != 0 ||
-        attachment_items.entries[1].raw_lines_count != 1) {
+        attachment_items.entries[1].unmodeled_count == 0) {
         fprintf(stderr, "FAIL: emplacement attachment parse semantics mismatch\n");
         def_free_items(&attachment_items);
         return 1;

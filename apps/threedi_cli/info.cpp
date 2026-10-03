@@ -24,9 +24,9 @@ void print_track(const Threedi3di3 &m, int t, const ThreediTransform &tr) {
 	if (tr.control == 0 && tr.rate == 0 && tr.start == 0 && tr.end == 0) return;
 	const char *style = threedi_panm_control_name(tr.control);
 	std::string reg;
-	if (threedi_panm_parameter_is_ctrl_reference(tr.control) && tr.control_param < m.ctrl.count)
+	if (threedi_generator_names_register(tr.control) && tr.control_param < m.ctrl.count)
 		reg = m.ctrl.registers[tr.control_param].name;
-	std::printf("        %-6s style %3u (%s) param %u%s%s rate %d start %d end %d\n", track_label(t),
+	std::printf("        %-6s style %3u (%s) param %u%s%s rate %d start %d end %d\n", threedi_panm_track_label(t),
 			tr.control, style != nullptr ? style : "?", tr.control_param, reg.empty() ? "" : " reg ",
 			reg.c_str(), tr.rate, tr.start, tr.end);
 }
@@ -184,8 +184,8 @@ int cmd_info(const char *path, int verbose) {
 			const ThreediPartAnimation &pa = lod.part_animations[a];
 			std::printf("    panm part %u parent %u flags 0x%08x  matrix %u offset %u bind %d\n", pa.subobject_index,
 					pa.parent_subobject, pa.flags, pa.matrix_index, pa.matrix_offset, pa.bind_matrix_index);
-			const auto tracks = panm_tracks(pa);
-			for (int t = 0; t < kTrackCount; ++t) print_track(m, t, *tracks[t]);
+			const auto tracks = threedi_panm_tracks(pa);
+			for (int t = 0; t < THREEDI_PANM_TRACK_COUNT; ++t) print_track(m, t, *tracks[t]);
 		}
 	}
 	for (uint32_t i = 0; i < m.material_count; ++i) {

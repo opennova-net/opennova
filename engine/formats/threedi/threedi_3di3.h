@@ -7,7 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 #include <math.h>
+#include <string_view>
 #include <vector>
+#include <base/io/strutil.h>
 #include <formats/threedi/threedi.h>
 
 #pragma pack(push, 1)
@@ -954,6 +956,23 @@ int threedi_3di3_ground_anchor(const Threedi3di3 *model, float out[3]);
 // points (seats, ground, cameras), 83 ('S') for effect/particle points.
 inline constexpr int32_t THREEDI_USER_POINT_GAMEPLAY = 71;
 inline constexpr int32_t THREEDI_USER_POINT_EFFECT = 83;
+
+// The seat scan binds a model's `sitex` user points, in order, to its 8
+// passenger seats. A ninth takes the control seat (the slot ctrlx and drvrx
+// fill), sets no seat bit and ends the scan: the model still loads, and no
+// user point after it is bound.
+// [orig: EntityDef_LoadModelsAndCallbacks @ 0x439F50 - the seat store
+//  @ 0x43A4F0, the seat bit 1 << n @ 0x43A4CC..0x43A4D0 (a byte, so none at
+//  n = 8), the scan end `cmp ebp, 8; jg` @ 0x43A5AF]
+inline constexpr int THREEDI_SITEX_SEAT_LIMIT = 8;
+
+// Whether a user point is a `sitex` seat: its name starts `sitex` in any
+// case, a five-character strnicmp from byte zero (a padded or embedded token
+// is none). [orig: Entity_GetBoneSlotType @ 0x434ED0, the strnicmp @ 0x434F16;
+// EntityDef_LoadModelsAndCallbacks, the strnicmp @ 0x43A4BC]
+inline bool threedi_user_point_is_sitex(std::string_view name) {
+    return opennova::strutil::starts_with_icase(name, "sitex");
+}
 
 // The attach scan reads only a model's FIRST 16 userpoints — the result is a
 // 16-bit mask. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]

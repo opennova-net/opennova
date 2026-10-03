@@ -45,6 +45,19 @@ bool plain_variant(const char *v) {
 
 } // namespace
 
+const char *adm_row_problem(const AdmEntry &e) {
+    if (std::memchr(e.key, '\0', sizeof(e.key)) == nullptr || adm_slot_name(e.key).empty())
+        return "A key names its slot past its first five characters (anim_...).";
+    if (!plain_key(e.key)) return "A key is one plain token: no space, tab, comma, quote, ';' or \"//\".";
+    if (e.variant_count == 0) return "A row names at least one clip.";
+    if (e.variant_count > static_cast<size_t>(ADM_MAX_VARIANTS)) return "A row names at most 8 clips.";
+    for (size_t v = 0; v < e.variant_count; ++v)
+        if (std::memchr(e.variants[v], '\0', sizeof(e.variants[v])) == nullptr || !plain_variant(e.variants[v]))
+            return "A clip name holds no quote or control character, does not start with '/' (it ends the row) "
+                   "and has no space at either end.";
+    return nullptr;
+}
+
 int adm_write_buffer(const AdmFile *af, std::string &out) {
     out.clear();
     if (af == nullptr) return -1;
@@ -55,16 +68,10 @@ int adm_write_buffer(const AdmFile *af, std::string &out) {
     out += "\r\n";
     for (size_t i = 0; i < af->count; ++i) {
         const AdmEntry &e = af->entries[i];
-        if (std::memchr(e.key, '\0', sizeof(e.key)) == nullptr || adm_slot_name(e.key).empty() ||
-            !plain_key(e.key))
-            return -1;
-        if (e.variant_count == 0 || e.variant_count > static_cast<size_t>(ADM_MAX_VARIANTS)) return -1;
+        if (adm_row_problem(e) != nullptr) return -1;
         out += e.key;
         out += "\t\t\t\t";
         for (size_t v = 0; v < e.variant_count; ++v) {
-            if (std::memchr(e.variants[v], '\0', sizeof(e.variants[v])) == nullptr ||
-                !plain_variant(e.variants[v]))
-                return -1;
             if (v > 0) out += ' ';
             out += '"';
             out += e.variants[v];

@@ -12,6 +12,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
+#include <formats/mission/mission_field.h>
 #include <formats/mission/mission_mis.h>
 
 #include "common/file_io.h"
@@ -55,6 +56,67 @@ bool write_document(opennova::bms::File &file, std::vector<uint8_t> &out) {
 	std::string error;
 	opennova::mission::sync_counts(file);
 	return opennova::bms::write(file, out, error);
+}
+
+// Each event's runs as the records they hold: what an edit of another event's chain keeps.
+std::vector<std::vector<int32_t>> chains_of(const opennova::bms::File &file) {
+	std::vector<std::vector<int32_t>> out;
+	for (const opennova::bms::Event &event : file.events) {
+		std::vector<int32_t> chain;
+		for (int i = 0; i < event.trigger_count; ++i) chain.push_back(file.triggers[size_t(event.trigger_index + i)].param1);
+		chain.push_back(-999);
+		for (int i = 0; i < event.action_count; ++i) chain.push_back(file.actions[size_t(event.action_index + i)].param2);
+		out.push_back(chain);
+	}
+	return out;
+}
+
+// An event's chain edited in the middle of the file's tables (S13 D10's review: the chain edits keep
+// every other event's runs on their records): a trigger put in mid-chain moves the later runs up one
+// and taken out gives them back; an event removed mid-list takes its chain, and the later events' runs
+// still hold their own records.
+int chain_ranges() {
+	using namespace opennova::mission;
+	opennova::bms::File file;
+	TEST_EXPECT(load_document(read_file(fixture_path()), file));
+	// The event whose chain is edited: the first holding two triggers or more.
+	size_t edited = 0;
+	while (edited < file.events.size() && file.events[edited].trigger_count < 2) ++edited;
+	TEST_EXPECT(file.events.size() >= 3 && edited < file.events.size());
+	// Mark every trigger and action by its place, so a run is known by the records it holds (an action's
+	// second parameter: a removal repairs a ResetEvent action's first).
+	for (size_t i = 0; i < file.triggers.size(); ++i) file.triggers[i].param1 = int32_t(1000 + i);
+	for (size_t i = 0; i < file.actions.size(); ++i) file.actions[i].param2 = int32_t(2000 + i);
+	const std::vector<std::vector<int32_t>> before = chains_of(file);
+	const std::vector<opennova::bms::Event> events = file.events;
+	std::string error;
+	MissionTriggerRecord added;
+	added.param1 = 7777;
+	TEST_EXPECT(insert_event_trigger(file, edited, 1, added, error));
+	std::vector<std::vector<int32_t>> after = chains_of(file);
+	TEST_EXPECT(after[edited].size() == before[edited].size() + 1 && after[edited][1] == 7777);
+	size_t moved = 0;
+	for (size_t e = 0; e < file.events.size(); ++e) {
+		if (e == edited) continue;
+		TEST_EXPECT(after[e] == before[e]);
+		if (events[e].trigger_count && events[e].trigger_index > events[edited].trigger_index) {
+			TEST_EXPECT(file.events[e].trigger_index == events[e].trigger_index + 1);
+			++moved;
+		}
+	}
+	TEST_EXPECT(remove_event_trigger(file, edited, 1, error) && chains_of(file) == before);
+	for (size_t e = 0; e < file.events.size(); ++e) TEST_EXPECT(file.events[e].trigger_index == events[e].trigger_index);
+	TEST_EXPECT(moved > 0); // a run after the edited one moved, and held its records
+	// An event out of the middle: its chain goes with it, the rest keep theirs.
+	TEST_EXPECT(remove_event(file, 1, error) && file.events.size() == events.size() - 1);
+	after = chains_of(file);
+	TEST_EXPECT(after[0] == before[0]);
+	for (size_t e = 1; e < file.events.size(); ++e) TEST_EXPECT(after[e] == before[e + 1]);
+	TEST_EXPECT(file.triggers.size() == size_t(file.trigger_count) && file.actions.size() == size_t(file.action_count));
+	std::vector<uint8_t> bytes;
+	opennova::bms::File back;
+	TEST_EXPECT(write_document(file, bytes) && load_document(bytes, back) && chains_of(back) == after);
+	return 0;
 }
 
 } // namespace
@@ -164,6 +226,54 @@ int main() {
 	TEST_EXPECT(entity_count(document, EntityKind::Item) == original_item_count + 1);
 	TEST_EXPECT(entity_item_id(document.items[added]) == 101291);
 	TEST_EXPECT(document.items[added].type_id == 1291);
+	// A new record holds what the shipped records most often hold (new_entity; mission_corpus's
+	// retail leg holds each to the corpus), its SSN one past the file's largest.
+	{
+		const opennova::bms::Entity &made = document.items[added];
+		int largest = 0;
+		for (EntityKind kind : {EntityKind::Item, EntityKind::Building, EntityKind::Marker, EntityKind::Organic})
+			for (const opennova::bms::Entity &other : *entities(document, kind))
+				if (&other != &made) largest = std::max(largest, other.id);
+		TEST_EXPECT(made.id == largest + 1 && next_entity_ssn(document) == made.id + 1);
+		TEST_EXPECT(made.wp_distance == 10 && made.perception2 == 100 && made.perfectionist2 == 100);
+		TEST_EXPECT(made.min_engagement_distance == 16 && made.max_engagement_distance == 320 &&
+		            made.max_attack_distance == 16);
+		TEST_EXPECT(made.w_accuracy1 == 100 && made.w_accuracy2 == 100 && made.spawns == 0 && made.no_more_than == 0);
+		TEST_EXPECT(made.crouch_timer == 3 && made.unk15a == 0 && made.shoot_timer == 5 && made.wp_adv_trigger == -1);
+		TEST_EXPECT(made.attention == 30 && made.obliqueness == 15 && made.advancetimer == 10 && made.map_symbol == 255);
+		TEST_EXPECT(std::string(made.gen_string) == "null" && made.name1[0] == 0 && made.name2[0] == 0);
+		TEST_EXPECT(made.mis_height_lock == 1 && made.get_x() == 1.0f && made.yaw == 90);
+		const opennova::bms::Entity marker = new_entity(EntityKind::Marker, 100001, 77);
+		TEST_EXPECT(marker.type == opennova::bms::ItemType::Marker && marker.id == 77 && marker.type_id == 1 &&
+		            marker.x == 0 && marker.attention == 30);
+	}
+	// A blank mission: named, on its terrain and under its environment, the header values the shipped
+	// missions hold in common, no record of any pool; a name past its slot is refused, the file as it was.
+	{
+		opennova::bms::File blank;
+		std::string blank_error;
+		TEST_EXPECT(make_blank(blank, {"New mission", "A designer", "Tmap", "synth_full"}, blank_error));
+		const MissionInfo info = mission_info(blank);
+		TEST_EXPECT(info.mission_name == "New mission" && info.designer == "A designer" && info.terrain == "Tmap" &&
+		            info.environment == "synth_full" && info.tile_set.empty());
+		TEST_EXPECT(std::string(blank.header.default_str) == "Default" &&
+		            blank.header.mission_type == opennova::bms::MissionType::NormalMission);
+		TEST_EXPECT(blank.header.bonus_expiration == 10 && blank.header.max_saves == 3 && blank.header.map_zoom == 0.5f &&
+		            blank.header.minutes_per_day == 1440 && blank.header.start_time == 3840);
+		for (int i = 0; i < 8; ++i)
+			TEST_EXPECT(blank.header.win_conditions[i] == 255 && blank.header.lose_conditions[i] == 255);
+		TEST_EXPECT(blank.items.empty() && blank.buildings.empty() && blank.markers.empty() && blank.organics.empty() &&
+		            blank.area_triggers.empty() && blank.events.empty() && blank.loadout.entries.empty());
+		std::vector<uint8_t> blank_bytes;
+		opennova::bms::File blank_back;
+		TEST_EXPECT(write_document(blank, blank_bytes) && load_document(blank_bytes, blank_back) &&
+		            opennova::bms::equal(blank, blank_back));
+		const opennova::bms::File kept = blank;
+		TEST_EXPECT(!make_blank(blank, {"New mission", "", std::string(17, 't'), "synth_full"}, blank_error) &&
+		            !blank_error.empty() && opennova::bms::equal(blank, kept));
+		TEST_EXPECT(!make_blank(blank, {std::string(33, 'n'), "", "Tmap", "synth_full"}, blank_error) &&
+		            opennova::bms::equal(blank, kept));
+	}
 
 	std::vector<uint8_t> edited_bytes;
 	TEST_EXPECT(write_document(document, edited_bytes));
@@ -1029,15 +1139,14 @@ int main() {
 
 		// A record that wrote three strings writes three (has_flags, bms.h): the chunk comes back as
 		// its own bytes, where the writer once gave every record a fourth. flags still reads the "-1"
-		// the sanitizer inserts.
+		// the sanitizer inserts; a Set of it through its field row writes the fourth string.
 		const std::vector<std::string> mixed = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0",
 		                                        "WPN_ALSO", "2", "3"};
 		TEST_EXPECT(parse_loadout(mixed, parsed));
 		TEST_EXPECT(parsed.loadout.entries.size() == 3);
-		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[0].has_flags &&
-		            !parsed.loadout.entries[1].has_flags && !parsed.loadout.entries[2].has_flags);
-		TEST_EXPECT(parsed.loadout.entries.size() == 3 && parsed.loadout.entries[1].flags == "-1" &&
-		            parsed.loadout.entries[2].flags == "-1");
+		TEST_EXPECT(parsed.loadout.entries[0].has_flags && !parsed.loadout.entries[1].has_flags &&
+		            !parsed.loadout.entries[2].has_flags);
+		TEST_EXPECT(parsed.loadout.entries[1].flags == "-1" && parsed.loadout.entries[2].flags == "-1");
 		std::vector<uint8_t> chunk;
 		for (const std::string &field : mixed) {
 			chunk.insert(chunk.end(), field.begin(), field.end());
@@ -1064,10 +1173,19 @@ int main() {
 		opennova::bms::File changed = parsed;
 		changed.loadout.entries[1].has_flags = true;
 		TEST_EXPECT(!opennova::bms::equal(parsed, changed));
-		// A fourth string given to a record that had none is written.
-		entries[1].flags = "2";
-		entries[1].has_flags = true;
-		TEST_EXPECT(set_weapon_loadout(parsed, entries, err));
+		// A fourth string given to a record that had none is written: through the typed view...
+		opennova::bms::File through_view = parsed;
+		auto given = entries;
+		given[1].flags = "2";
+		given[1].has_flags = true;
+		TEST_EXPECT(set_weapon_loadout(through_view, given, err));
+		std::vector<uint8_t> through_view_bytes;
+		TEST_EXPECT(opennova::bms::write(through_view, through_view_bytes, err));
+		// ...and through its field row (a Set of flags).
+		const opennova::mission::MissionField *flags =
+		        opennova::mission::find_mission_field(opennova::mission::MissionRecord::Loadout, "flags");
+		TEST_EXPECT(flags != nullptr && flags->set(&parsed.loadout.entries[1], std::string("2"), err));
+		TEST_EXPECT(parsed.loadout.entries[1].has_flags && parsed.loadout.entries[1].flags == "2");
 		TEST_EXPECT(opennova::bms::write(parsed, canonical, err));
 		const std::vector<std::string> set = {"WPN_FOUR", "6", "-1", "1", "WPN_THREE", "-1", "0", "2",
 		                                      "WPN_ALSO", "2", "3"};
@@ -1078,6 +1196,7 @@ int main() {
 		}
 		chunk.push_back(0);
 		TEST_EXPECT(chunk_of(canonical) == chunk);
+		TEST_EXPECT(chunk_of(through_view_bytes) == chunk);
 	}
 
 	// --- Modeling policy: the loader sanitizes the loadout chunk into the records it reads.
@@ -1337,5 +1456,6 @@ int main() {
 		TEST_EXPECT(actual_bytes == expected_bytes);
 	}
 
+	if (chain_ranges() != 0) return 1;
 	return 0;
 }

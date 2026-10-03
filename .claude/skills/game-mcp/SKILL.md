@@ -29,7 +29,7 @@ python scripts/mcp/game_mcp.py launch --windowed --resolution 1280x720 \
   every mission probe begins with `wait_for_local_player`.
 - The console wrapper stalls from a shell without a console: launch from a
   terminal, or point `GODOT_BIN` at the plain runtime executable.
-- Ports: 8975 single game (the tracked `.mcp.json`), 8975/8976 for a LAN pair
+- Ports: 8975 single game (the tracked `.mcp.json`), 8975/8976 for a LAN pair, 8977 the editor (`scripts/mcp/editor_mcp.py`; docs/mcp.md "The editor MCP")
   (`scripts/net/run_lan_pair.ps1`). Claude Code sees a game started after the
   session began through `/mcp` reconnect, or through this script.
 

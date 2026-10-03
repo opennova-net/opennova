@@ -11,6 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include <array>
+#include <string>
+
 #include <formats/threedi/threedi_3di3.h>
 
 namespace opennova::threedi {
@@ -100,6 +103,19 @@ static inline uint32_t threedi_panm_pack_flags(uint8_t scale_type,
            ((uint32_t)translate_type << 24);
 }
 
+// The MTRX row a part animation turns through, or 0 when it reads none. The
+// loader sign-extends the file's frame byte, the pose reads the table only for
+// a selector above zero, and only the spinner and the Euler tracks (rotation
+// types 1 and 2) turn through the row: 0 and 0x80..0xFF name no frame.
+// [orig: GPM_LoadRenderModel @ 0x5B5698 (movsx) / @ 0x5B569C (store); the
+//  frame gate `<= 0` Model_TransformBoneMatrices @ 0x58E3FE; the row's uses
+//  @ 0x58E648 / @ 0x58E764 (spinner), @ 0x58E8AA / @ 0x58EAA7 (Euler)]
+static inline int threedi_panm_frame_row(const ThreediPartAnimation &pa) {
+    const uint8_t rotation = threedi_panm_rotation_type(pa.flags);
+    const int selector = static_cast<int8_t>(pa.matrix_index);
+    return (rotation == 1 || rotation == 2) && selector > 0 ? selector : 0;
+}
+
 static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget target) {
     switch (target) {
         case THREEDI_PANM_ROT_X:
@@ -124,6 +140,45 @@ static inline int threedi_panm_track_present(uint32_t flags, ThreediPanmTarget t
     }
 }
 
+// A PANM row's seven tracks in on-disk order, and the names the `.o3d` scene
+// text and the editor give them.
+inline constexpr int THREEDI_PANM_TRACK_COUNT = 7;
+inline const char *threedi_panm_track_label(int track) {
+    static const char *const kNames[THREEDI_PANM_TRACK_COUNT] = {
+            "rotx", "roty", "rotz", "scalex", "scaley", "scalez", "trans"};
+    return track >= 0 && track < THREEDI_PANM_TRACK_COUNT ? kNames[track] : "?";
+}
+inline int threedi_panm_track_index(const std::string &label) {
+    for (int i = 0; i < THREEDI_PANM_TRACK_COUNT; ++i)
+        if (label == threedi_panm_track_label(i)) return i;
+    return -1;
+}
+inline std::array<ThreediTransform *, THREEDI_PANM_TRACK_COUNT> threedi_panm_tracks(ThreediPartAnimation &pa) {
+    return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z,
+            &pa.translation};
+}
+inline std::array<const ThreediTransform *, THREEDI_PANM_TRACK_COUNT> threedi_panm_tracks(
+        const ThreediPartAnimation &pa) {
+    return {&pa.rotation_x, &pa.rotation_y, &pa.rotation_z, &pa.scale_x, &pa.scale_y, &pa.scale_z,
+            &pa.translation};
+}
+
+// Whether the load copies a row's track (by its index in threedi_panm_tracks) into the
+// record the pose samples: the rotations for rotation type 2, the first scale for scale
+// type 1 or 2 and the other two for type 2, the translation for translate types 1 to 3.
+// Only a copied track has the register it names swapped for its global one.
+// [orig: GPM_LoadRenderModel @ 0x5B54C7..0x5B5687 (the copies);
+//  ThreediGp_LoadFromFile @ 0x5B5E08..0x5B5EF6 (the swaps)]
+inline bool threedi_panm_track_loaded(const ThreediPartAnimation &pa, int track) {
+    if (track == THREEDI_PANM_TRACK_COUNT - 1)
+        return threedi_panm_track_present(pa.flags, THREEDI_PANM_TRANS_X) ||
+               threedi_panm_track_present(pa.flags, THREEDI_PANM_TRANS_Y) ||
+               threedi_panm_track_present(pa.flags, THREEDI_PANM_TRANS_Z);
+    // The first six tracks are the targets ROT_X..SCALE_Z, in order.
+    return track >= 0 && track < THREEDI_PANM_TRACK_COUNT - 1 &&
+           threedi_panm_track_present(pa.flags, static_cast<ThreediPanmTarget>(track)) != 0;
+}
+
 typedef struct ThreediControlFuncInfo {
     const char *name;     // Static string for the control function (or NULL).
 } ThreediControlFuncInfo;
@@ -134,15 +189,18 @@ const ThreediControlFuncInfo *threedi_control_func_info(uint8_t code);
 // PANM-specific dispatch metadata. Codes 114..117 are raw waveform lookups
 // selected by their low nibble, not additional register operations.
 const char *threedi_panm_control_name(uint8_t code);
-int threedi_panm_control_uses_register(uint8_t code);
 
-// Structural loader metadata, distinct from runtime dispatch. Retail treats
-// every PANM style above THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD (0x70) as
-// carrying a model-local CTRL reference and rewrites that parameter to a
-// global ordinal during model load [orig: loader fixup ThreediGp_LoadCtrlRegisters @ 0x5B4640].
-// Only style 113 subsequently reads the referenced register value.
+// Structural loader metadata, distinct from runtime dispatch. Every generator
+// style above THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD (0x70), in a material,
+// a PANM track or a light alike, carries a model-local CTRL index in its
+// parameter byte, and the load rewrites that index to the global register its
+// table entry names [orig: loader fixup ThreediGp_LoadCtrlRegisters @ 0x5B4640;
+// ThreediGp_LoadFromFile @ 0x5B5C7A..0x5B5DA2 (materials), @ 0x5B5E0B..0x5B5EF6
+// (PANM fixups), @ 0x5B5F4D..0x5B5F62 (lights)]. Which of those styles
+// then read the register's value is the consumer's rule
+// (threedi_generator_reads_register).
 inline constexpr int THREEDI_GENERATOR_CTRL_REFERENCE_THRESHOLD = 0x70;
-int threedi_panm_parameter_is_ctrl_reference(uint8_t code);
+bool threedi_generator_names_register(int style);
 
 // --- Generator-style catalog (all consumers) --------------------------------
 //
@@ -171,6 +229,25 @@ typedef enum ThreediGeneratorConsumer {
     THREEDI_GENERATOR_CONSUMER_LIGHT = 3,
     THREEDI_GENERATOR_CONSUMER_PANM = 4
 } ThreediGeneratorConsumer;
+
+// Whether the consumer reads the value of the register a style names; every
+// other style above 0x70 takes the parameter byte as its waveform's phase. UV
+// reads it for every style above 0x70, RGB and a light (a light's colour is
+// an RgbGen) for 0x71 and 0x72, alpha and PANM for 0x71 alone.
+// [orig: Material_ComputeUVTransformMatrix @ 0x5B1AB9 / @ 0x5B1AED (U),
+//  @ 0x5B1D0C / @ 0x5B1D48 (V); RgbGen_EvaluateColor @ 0x5B244B, @ 0x5B245C;
+//  Light_GetPointLightParams, its RgbGen_EvaluateColor call @ 0x5A9225;
+//  AlphaGen_EvaluateValue @ 0x5B2343; PANM_SampleTrack @ 0x5B22A1]
+bool threedi_generator_reads_register(ThreediGeneratorConsumer consumer, int style);
+
+// Whether a material's flipbook reads a register: one with frames, on the
+// register clock (type 1). The load swaps its time word for the global
+// register under that gate alone [orig: ThreediGp_LoadFromFile
+// @ 0x5B5D6E..0x5B5D99, the frames and clock gate and the word's swap], and
+// the draw reads the register under the same one [orig:
+// Material_ApplyShaderParameters @ 0x58DBB2..0x58DBC2 (the frames),
+// @ 0x58DBF0..0x58DC13 (the clock and the read)].
+bool threedi_flipbook_reads_register(const ThreediTexAnim &animation);
 
 // Resolve a control register name by index. Returns NULL if out of range or missing.
 const char *threedi_ctrl_reg_name(const ThreediCtrl *ctrl, uint8_t idx);

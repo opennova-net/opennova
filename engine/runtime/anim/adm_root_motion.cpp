@@ -50,7 +50,8 @@ int AdmRootMotion::parse_adm(const opennova::assets::AssetStore *assets,
 			return cached->second.frame_count > 0 ? &cached->second : nullptr;
 		}
 		Track t;
-		if (const auto file = assets->bone_animation(bad_name)) {
+		// A token whose .bad does not load plays failsafe.bad, when the mount has one.
+		if (const auto file = adm_token_clip(*assets, bad_name)) {
 			const BadFile &bf = *file;
 			// Fence-post: frame_count+1 root records [orig: 0x40b230 lerps rec[i]..rec[i+1]].
 			// No fps gate: the channel delta is fps/62/frames with no fps test, so an
@@ -191,16 +192,9 @@ int AdmRootMotion::variant_count(int adm_id, int state_id) const {
 	return it->second.empty() ? 1 : static_cast<int>(it->second.size());
 }
 
-double AdmRootMotion::position_of(const Track &track, int32_t phase_ticks,
-								  int32_t armed_boundary) {
-	const double frame = double(track.clock.normalized_at(phase_ticks, armed_boundary)) *
-	                     track.frame_count;
-	return std::clamp(frame, 0.0, double(track.frame_count));
-}
-
 float AdmRootMotion::sample(const Track &track, const std::vector<float> &channel,
 							int32_t phase_ticks, int32_t armed_boundary) {
-	const double position = position_of(track, phase_ticks, armed_boundary);
+	const double position = track.clock.frame_at(phase_ticks, armed_boundary);
 	const size_t frame = std::min(static_cast<size_t>(position),
 	                             static_cast<size_t>(track.frame_count - 1));
 	const double fraction = position - frame;
@@ -212,7 +206,7 @@ float AdmRootMotion::sample(const Track &track, const std::vector<float> &channe
 uint32_t AdmRootMotion::sample_trigger(const Track &track, int32_t phase_ticks,
 									   int32_t armed_boundary) {
 	if (track.clock.stopped_at(phase_ticks)) return 0;
-	return track.trigger[static_cast<size_t>(position_of(track, phase_ticks, armed_boundary))];
+	return track.trigger[static_cast<size_t>(track.clock.frame_index_at(phase_ticks, armed_boundary))];
 }
 
 int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
@@ -226,12 +220,10 @@ int AdmRootMotion::scan_triggers(int adm_id, int state_id, int32_t from_phase,
 	// word each time the FRAME index changes (or on the first step, which is
 	// the frame the playhead just entered). A non-looping clip clamps just
 	// below its end, so the walk terminates there.
-	int32_t prev_frame = from_phase < 0
-			? -1
-			: static_cast<int32_t>(position_of(*track, from_phase));
+	int32_t prev_frame = from_phase < 0 ? -1 : track->clock.frame_index_at(from_phase);
 	for (int32_t phase = from_phase + 1; phase <= to_phase; ++phase) {
 		if (track->clock.stopped_at(phase)) break;
-		const int32_t frame = static_cast<int32_t>(position_of(*track, phase));
+		const int32_t frame = track->clock.frame_index_at(phase);
 		if (frame == prev_frame) continue;
 		prev_frame = frame;
 		out[written++] = track->trigger[static_cast<size_t>(frame)];

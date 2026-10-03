@@ -76,6 +76,22 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the bundled font draws the menu text")
 
 
+# EXIT is a named control, as retail's is (retail's ACTION has no quit verb): the
+# companion that owns the bundled menu relays it for the shell to quit.
+func test_exit_is_relayed_by_name() -> void:
+	var text := FileAccess.get_file_as_string(
+			BootRootMount.bundled_assets_dir().path_join("main.mnu"))
+	var driver := MenuDriverFixture.driver_over(self,
+			MenuDriverFixture.doc_from_xml(self, text), "main.mnu")
+	var companion := BundledMenuCompanion.new()
+	assert_true(companion.owns_menu(driver), "the companion claims the bundled menu")
+	companion.on_menu_built(driver, "main.mnu", "", null)
+	watch_signals(companion)
+	driver.widget_activated.emit(driver.widget_id("EXIT"), "EXIT")
+	assert_signal_emitted(companion, "exit_requested")
+	assert_signal_not_emitted(companion, "play_retail_requested")
+
+
 func test_play_retail_mounts_the_saved_install_and_opens_its_menu() -> void:
 	_retail_dir = _stage_retail()
 	ResourceDirSettings.set_retail_dir(_retail_dir)

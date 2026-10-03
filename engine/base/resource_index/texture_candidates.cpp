@@ -76,4 +76,17 @@ std::vector<std::string> texture_candidate_filenames(const std::string &filename
 	return candidates;
 }
 
+TextureFolder list_texture_folder(const std::filesystem::path &dir) {
+	TextureFolder listing;
+	std::error_code ec;
+	for (std::filesystem::directory_iterator it(dir, ec), end; !ec && it != end; it.increment(ec)) {
+		try {
+			if (!it->is_regular_file(ec)) continue;
+			listing.emplace(lower(it->path().filename().u8string()), it->path().u8string());
+		} catch (const std::exception &) {
+		}
+	}
+	return listing;
+}
+
 } // namespace opennova

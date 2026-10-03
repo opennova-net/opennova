@@ -18,6 +18,7 @@
 #include <deque>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace opennova::devtools {
@@ -31,6 +32,42 @@ enum class InitialDockPlacement {
 	Center,
 	Right,
 	RightBottom, // the lower split of the right column
+	Left,        // a column split off the centre only when a window asks for it
+	Bottom,      // a strip under the centre (or the whole width: DockLayout), likewise
+	CenterRight, // the right part of the centre, likewise
+};
+
+// How the pass builds its default docked layout, the first time its dockspace has none
+// and on a Reset layout: the host's say (the editor's), the game's F3 workspace keeping
+// the defaults. ImGui's ini keeps a layout by the dockspace's id string, so a new string
+// starts a layout of its own. Each ratio is of the node it splits, in this order: the
+// right column off the whole (its lower part, 0.45 of it, when a window asks for
+// RightBottom), then the bottom strip and the left column off the centre, in the order
+// the windows asking for them registered; with `bottom_full_width` the bottom strip comes
+// off the whole first, then the left and the right column off what is above it. Last, the
+// centre's right part when a window asks for CenterRight. A strip or column no window
+// asks for is not split off (the right column always is). Once built, the windows `focus`
+// names come forward as they dock, each selected in its dock node, the first focused.
+struct DockLayout {
+	std::string dockspace = "OpenNovaWorkspaceDockspace";
+	bool bottom_full_width = false;
+	float right = 0.30f;
+	float left = 0.25f;
+	float bottom = 0.30f;
+	float center_right = 0.50f;
+	std::vector<std::string> focus;
+};
+
+// A product's own menus on the pass's main menu bar, drawn before the pass's
+// "Windows" menu (the editor's File / Edit / Build; the game has none), and
+// what it shows at the bar's right end, drawn after the pass's own menus (the
+// editor's unsaved files, problem counts and build state; none by default).
+class ImGuiPass;
+class MenuBarContributor {
+public:
+	virtual ~MenuBarContributor() = default;
+	virtual void draw_menu_bar(ImGuiPass &pass) = 0;
+	virtual void draw_menu_bar_trailing(ImGuiPass &pass) { (void)pass; }
 };
 
 // The section of the "Windows" menu a window lists under, in menu order.
@@ -88,6 +125,15 @@ public:
 	virtual bool owns_frame() const { return false; }
 	// The "Windows" menu section the window lists under.
 	virtual MenuGroup menu_group() const { return MenuGroup::Tools; }
+	// An open window its product steps aside for now (the editor's Preview while the active
+	// document's own picture fills the Document tab): not drawn and not visible, as a closed one,
+	// `open` still the user's. ImGui keeps the dock node it leaves (the window's dock id kept),
+	// which hides while empty so its neighbour takes the room, and the window docks back into it
+	// the frame it draws again; the user's docking stands. Its "Windows" menu item reads unticked
+	// meanwhile, and ticking it calls show_anyway(): the author's ask to see it, which the window
+	// honours as its own rule says (the Preview's: for the document active then).
+	virtual bool stands_aside() const { return false; }
+	virtual void show_anyway() {}
 	// The debug-control rows this window reads through the control board
 	// (control_board.h) while it shows: the embedder pushes their live
 	// states on the board's cadence. The ids are debug_control_ids.h
@@ -146,12 +192,28 @@ public:
 	void set_platform_windows_enabled(bool enabled);
 	bool platform_windows_enabled() const { return platform_windows_enabled_; }
 
+	// Whether the context keeps the user's window layout: the file the embedder's ImGui reads at
+	// its first frame and writes as the docking changes (imgui-godot's user://imgui.ini, one per
+	// product name, so every run of it shares the one file). A run that keeps none (the shell's
+	// say: a test runner's, an agent's over MCP) has the default layout every time, the file
+	// neither read nor written, so it never depends on whoever docked last and never changes the
+	// user's. Applied at attach_imgui: a layout the context already read is dropped, and the file
+	// is let go for the rest of the run. Default true (the shipped editor's and game's).
+	void set_user_layout(bool keep) { user_layout_ = keep; }
+	bool user_layout() const { return user_layout_; }
+
 	// The whole surface: closed = nothing drawn, no capture, no input.
 	void set_open(bool open);
 	bool is_open() const { return open_; }
 	void toggle() { set_open(!open_); }
 
 	Window &register_window(std::unique_ptr<Window> window);
+	// The product's menus (not owned; nullptr = none).
+	void set_menu_bar_contributor(MenuBarContributor *contributor) { menu_bar_ = contributor; }
+	// The default docked layout (DockLayout); set before the first layout pass, it
+	// applies to the next build of the dockspace.
+	void set_dock_layout(DockLayout layout) { layout_ = std::move(layout); }
+	const DockLayout &dock_layout() const { return layout_; }
 	int window_count() const { return static_cast<int>(windows_.size()); }
 	Window &window(int index) { return *windows_[static_cast<size_t>(index)]; }
 	const Window &window(int index) const { return *windows_[static_cast<size_t>(index)]; }
@@ -177,6 +239,9 @@ public:
 	// "Close dev tools" menu item; the embedder reads is_open() afterwards,
 	// exactly as for Escape). Safe to call from inside a window's draw.
 	void request_close() { close_requested_ = true; }
+	// Whether the menu offers "Close dev tools" (the editor's workspace has no
+	// closed state, so it turns the item off).
+	void set_closeable(bool closeable) { closeable_ = closeable; }
 
 	// World-space overlay layers (overlay_canvas.h): owned by their windows,
 	// registered here, toggled from the "Overlays" menu independently of
@@ -217,11 +282,21 @@ private:
 	std::vector<std::unique_ptr<Window>> windows_;
 	std::vector<OverlayLayer *> overlays_; // registration order (the menu's)
 	std::deque<StatusLine> status_; // newest first
+	MenuBarContributor *menu_bar_ = nullptr;
+	DockLayout layout_;
+	// The layout's `focus` windows still to bring forward, from the frame after the build
+	// (armed): a window docks into the new layout at its Begin, and a tab bar selects its
+	// newest tab on the frame the tab appears.
+	std::vector<std::string> layout_focus_;
+	std::string layout_focus_first_;
+	bool layout_focus_armed_ = false;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
+	bool user_layout_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;
 	bool close_requested_ = false;
+	bool closeable_ = true;
 };
 
 }  // namespace opennova::devtools

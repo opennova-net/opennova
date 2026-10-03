@@ -770,8 +770,9 @@ func test_options_controls_inert_without_control_table() -> void:
 func test_runtime_loads_pff_archived_stylesheet_by_canonical_name() -> void:
 	var dir := OS.get_temp_dir().path_join("menu_shell_style_%d" % Time.get_ticks_usec())
 	DirAccess.make_dir_recursive_absolute(dir)
-	var mns := "// test stylesheet\nDEF_FONTNAME_LG Gunpl27b.fnt\nDEF_TEXT_FG FFFFFFFF\n" \
-		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\nDEF_TEXT_SELECTED_FG FFFF0000\nDEF_TEXT_DISABLED_FG FF545252\n"
+	# CRLF: the game's reader stops responding on a value line ended by a lone LF.
+	var mns := "// test stylesheet\r\nDEF_FONTNAME_LG Gunpl27b.fnt\r\nDEF_TEXT_FG FFFFFFFF\r\n" \
+		+ "DEF_TEXT_MOUSEOVER_FG FFFF0000\r\nDEF_TEXT_SELECTED_FG FFFF0000\r\nDEF_TEXT_DISABLED_FG FF545252\r\n"
 	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
 		{"name": "main.mnu", "bytes": _fixture_bytes(MAIN_FIXTURE)},
 		{"name": "menu_style.mns", "bytes": mns},
