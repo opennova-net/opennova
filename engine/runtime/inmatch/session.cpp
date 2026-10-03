@@ -58,6 +58,23 @@ void Role::apply_input(const TickInput &input) {
 	// cooldown live in request_medic).
 	if ((input.player.pressed_action_bits & PRESSED_MEDIC_REQUEST) != 0)
 		request_medic();
+	// The ToSpecial dispatches, with the deferred ones, once per outer frame
+	// on its first tick, as retail's input frame precedes the logic tick
+	// [orig: Input_ProcessFrame @0x49D520 -> Input_FlushDeferredEvents @0x49D591].
+	// The row's flag 1 keeps a dead player's PRESS out of the queue; its
+	// release is dispatched regardless [orig: Input_ProcessKeyboardEvents
+	// @0x49D330..0x49D339 (the press pass), the release pass @0x49D249 has no
+	// such gate; ToSpecial's row flags 0x8C000801].
+	if (!spectating && input.consume_one_shots) {
+		const bool held = (input.player.held_action_bits & HELD_TO_SPECIAL) != 0;
+		if ((input.player.pressed_action_bits & PRESSED_TO_SPECIAL) != 0) {
+			const bool local_dead = kind() == RoleKind::Joiner && client_runtime() != nullptr
+					? client_runtime()->local_player_dead()
+					: kernel.local.local_player_dead();
+			if (!held || !local_dead) kernel.local.queue_to_special();
+		}
+		kernel.local.dispatch_to_special(held);
+	}
 }
 
 void Role::observe_frame_rate(int32_t fps) {

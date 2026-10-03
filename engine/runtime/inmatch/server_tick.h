@@ -107,16 +107,6 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 void Server_RecalculateAllPlayerKitWeights(
 		std::vector<NapiNPConnection> &roster, world::World &world);
 
-// Drain the world's powerup grants (world/powerup.h) onto the owning
-// connections' pool tables and slot clips: the per-class adds and the
-// `allammo` re-seed the way retail's authority arms write the validated
-// entity's per-connection tables; the listen host's own player never
-// produces one (its live inventory is written in place). Runs in the entity
-// pass routes; exposed for its tests.
-// [orig: WeaponSlot_AddAmmo @0x540A20 (@0x540AC2..0x540AF1);
-//  Entity_UpdateWeaponOverlayFrameState @0x4DC340 (@0x4DC348..0x4DC38F)]
-void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::World &world);
-
 // The join-phase validation watchdog (NetPlayer states 3/4): the NovaWorld
 // ClientPlayerEnterRequest announcement on an armed host, the 120 s
 // NONWTOVALU / NWJTICKTMOUT reaps. Runs from the periodic block; exposed for

@@ -161,6 +161,17 @@ public:
     void teleport_local_player(const Vec3 &mission_pos, double yaw_deg,
             double pitch_deg);
     void set_weapon_input(bool fire_held, bool fire_pressed, bool reload_pressed);
+    // The ToSpecial action (input case 220): each press or release edge of its
+    // keys queues one dispatch, and dispatch_to_special runs the queue with the
+    // keys' live state, keeping a deferred dispatch (and those behind it) for
+    // the next frame, as retail's 32-entry deferred input queue does.
+    // [orig: the release pass Input_ProcessKeyboardEvents @0x49D249..0x49D2B9
+    //  (row flags & 0x80800000; ToSpecial's row flags 0x8C000801), the press
+    //  @0x49D42F; Input_QueueDeferredEvent @0x4993E0 (the 32 cap @0x4993E8);
+    //  Input_FlushDeferredEvents @0x497AC0 from Input_ProcessFrame @0x49D591]
+    void queue_to_special();
+    void dispatch_to_special(bool keys_held);
+    int32_t to_special_queued = 0;
     // The USE-ITEM mount toggle [orig: Input_ProcessFrame release edge
     // @0x49d6dc -> Entity_ToggleVehicleMount @0x436950], including the
     // out-of-session UseGun rejection (rules.mp_session, the retail

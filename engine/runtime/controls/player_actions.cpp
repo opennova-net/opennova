@@ -188,6 +188,15 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
 	frame.medic_edge = world::latched_key_edge(
 			admitted("MedicReq") && source.pressed("MedicReq"), true, medic_was_down_);
+	// ToSpecial's keys are read raw (the handler reads g_InputState.keyState);
+	// an edge dispatches only with captured gameplay input and under the
+	// death screen's binding scan, like the other weapon rows, and the latch
+	// follows the keys regardless.
+	// [orig: Input_HandleActionBinding_0 case 0xDC @0x4E1161..0x4E1181]
+	frame.to_special_held = source.pressed("ToSpecial");
+	frame.to_special_edge = frame.to_special_held != to_special_was_down_ && captured &&
+			admitted("ToSpecial") && gate.simulation_available;
+	to_special_was_down_ = frame.to_special_held;
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
 		const auto &row = kRows[i];
 		if ((row.flags & NeedsSimulation) && !gate.simulation_available) continue;

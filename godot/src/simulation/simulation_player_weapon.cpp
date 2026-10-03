@@ -35,6 +35,9 @@ static_assert(opennova::world::weapon_flag::kPowerThrow ==
 static_assert(opennova::world::weapon_flag::kForceCrouch ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG_FORCECROUCH),
 		"kForceCrouch drifted from def.h");
+static_assert(opennova::world::weapon_flag::kQuickSwitch ==
+				static_cast<int32_t>(DEF_WEAPON_FLAG_QUICKSWITCH),
+		"kQuickSwitch drifted from def.h");
 static_assert(opennova::world::weapon_flag::kForceScoped ==
 				static_cast<int32_t>(DEF_WEAPON_FLAG_FORCESCOPED),
 		"kForceScoped drifted from def.h");

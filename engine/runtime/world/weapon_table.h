@@ -44,6 +44,12 @@ struct WeaponTableEntry {
     uint8_t loadout_selectable = 0; // +0x3A8
     uint8_t loadout_subclasses = 0; // +0x3AC — data ONLY; sub-variant blocks allocate their own slots
                                     // [orig: @0x544E43 is a plain scalar store]
+    // `sameas <weapon>`: the weapon whose held slot a pickup of this one
+    // refills instead (empty = absent; no shipped weapon.def authors it).
+    // Resolved by name at each use, as retail does. [orig: AdmDef+0x34,
+    // parse @0x544072; WeaponSlot_InitFromAvatarDef @0x542779..0x5427C8,
+    // WeaponSlot_RecalculateScore @0x5424CA..0x5424F9]
+    std::string sameas;
     std::string ammo_class;         // `ammoclass <name> <n>` [orig: @0x5441CB]
     int16_t ammo_class_count = 0;
     int32_t ammo_bucket = 0;        // [orig: @0x544045]
@@ -62,7 +68,8 @@ struct WeaponTableEntry {
 	int32_t hud_splash_radius = 0; // engine units [orig: AdmDef+0x454 @0x4DEBBD]
     std::string voice_macro_token; // [orig: WeaponDefs_ParseLineCallback @0x543C29]
     // The two FLAGS dwords [orig: AdmDef+8 / AdmDef+12; token table @0x830bf0].
-    // The switch/select paths read: flags bit 0x8000000 = the binoculars slot marker
+    // The switch/select paths read: flags bit 0x8000000 = QuickSwitch, the ToSpecial
+    // hold-swap target (an IDB misnomer once called it the binoculars slot)
     // [orig: WeaponSlotTable_LoadAllFromDefs tail @0x54165a]; flags2 bit 1 = NoSelect
     // (excluded from manual switching, but the ONLY defs the exact-slot select leg
     // takes — the parachute-style forced equips) [orig: Player_SwitchToWeaponByHandle

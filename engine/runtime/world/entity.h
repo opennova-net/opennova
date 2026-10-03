@@ -851,6 +851,12 @@ struct Entity {
     // 0 makes the next pickup destroy the row [orig: @0x442D51 / @0x442D59;
     //  the pickup test @0x442AC7; the decrement @0x442895]
     int32_t powerup_respawns_left = 0;
+    // The weapon byte at entity+0x2B0 of a powerup row: the `weapon` arm stores
+    // the def's weapon index here, and the slot grant (and a joiner's S2C 0x35)
+    // reads the row's copy back. 0 on a fresh row (the "null" def, which names
+    // no slot). [orig: PowerupAction_Pickup @0x4428FB; WeaponSlot_InitFromAvatarDef
+    //  @0x54274A]
+    uint8_t powerup_weapon = 0;
     // Hidden/dismembered skeletal sections (entity+0x134): a set bit removes
     // the matching ordinal bone from person collision and presentation.
     // Distinct from spawned_piece_mask at +0x138.

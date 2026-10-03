@@ -301,6 +301,23 @@ void LocalPlayer::set_weapon_input(bool fire_held, bool fire_pressed, bool reloa
 	w::local_weapon_set_input(weapon, view, fire_held, fire_pressed, reload_pressed);
 }
 
+void LocalPlayer::queue_to_special() {
+	if (to_special_queued < 32) ++to_special_queued; // [orig: @0x4993E8]
+}
+
+void LocalPlayer::dispatch_to_special(bool keys_held) {
+	if (!inventory_valid) {
+		to_special_queued = 0;
+		return;
+	}
+	while (to_special_queued > 0) {
+		if (w::local_player_to_special(world_, weapon, inventory, view, keys_held) ==
+				w::ToSpecialResult::kDeferred)
+			return; // re-dispatched next frame [orig: Input_FlushDeferredEvents @0x497AC0]
+		--to_special_queued;
+	}
+}
+
 bool LocalPlayer::toggle_mount() {
 	World &world = world_;
 	const w::Entity *toggle_player = player();

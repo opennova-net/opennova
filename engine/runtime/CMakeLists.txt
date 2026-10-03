@@ -416,6 +416,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_net_quality.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_overlay_state.cpp        # the 14-tick minimap overlay visits (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_medic.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_powerup.cpp              # the remote powerup grants and the S2C 0x35 fan (split off server_tick.cpp)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_spawn.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_tick.cpp

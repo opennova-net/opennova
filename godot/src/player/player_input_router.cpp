@@ -168,6 +168,7 @@ Ref<MissionFrameInput> PlayerInputRouter::before_world_tick(double p_delta, bool
 	const auto actions = actions_.poll(GodotActionSource(controls_), gate);
 	frame_input->set_weapon_input(actions.fire_held, actions.fire_edge,
 			actions.reload_edge, actions.medic_edge);
+	frame_input->set_to_special_input(actions.to_special_held, actions.to_special_edge);
 	for (const auto &request : actions.requests) {
 		// A menu pick closes its menu whether or not a session carries it
 		// (engine hud_toggles_close_voice_menu carries the witness).

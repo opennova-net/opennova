@@ -2282,6 +2282,7 @@ void JoinerRole::apply_gameplay_events() {
 		if (player != nullptr && player->inf.active)
 			player->inf.reload_anim_ticks = 80;
 	}
+	apply_weapon_pickups(*this, rt, world, lp);
 
 	// The frame decays remote recoil after the emplacement channels consume it.
 }

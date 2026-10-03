@@ -33,8 +33,11 @@ void LocalRole::run_tick(const TickInput &) {
 	//  @0x5080D0 — the NapiNPServer_SendFiltered call @0x508199]
 	kernel.world.out.hud_relays.clear();
 	// A local role resolves only its own body, so no remote-player powerup
-	// grant is produced here; the outbox stays clear regardless.
+	// grant is produced here; the outbox stays clear regardless. Its own
+	// `weapon` grants already landed in place, and their S2C 0x35 has no
+	// connection to reach.
 	kernel.world.out.powerup_grants.clear();
+	kernel.world.out.powerup_weapon_grants.clear();
 	// The frame tail laps onto the stats board's player-tail row; the weapon
 	// walk keeps its own row.
 	devtools::ProfileLap tail(kernel.world.profile);

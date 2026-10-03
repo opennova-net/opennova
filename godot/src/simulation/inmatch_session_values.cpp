@@ -24,6 +24,8 @@ void MissionFrameInput::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_weapon_input", "fire_held", "fire_pressed",
 			"reload_pressed", "medic_pressed"), &MissionFrameInput::set_weapon_input,
 			DEFVAL(false));
+	ClassDB::bind_method(D_METHOD("set_to_special_input", "held", "dispatched"),
+			&MissionFrameInput::set_to_special_input);
 	ClassDB::bind_method(D_METHOD("set_sequence", "sequence"),
 			&MissionFrameInput::set_sequence);
 	ClassDB::bind_method(D_METHOD("get_sequence"),
@@ -107,6 +109,14 @@ void MissionFrameInput::set_weapon_input(bool p_fire_held,
 			(p_fire_pressed ? PRESSED_FIRE : 0u) |
 			(p_reload_pressed ? PRESSED_RELOAD : 0u) |
 			(p_medic_pressed ? PRESSED_MEDIC_REQUEST : 0u);
+}
+
+void MissionFrameInput::set_to_special_input(bool p_held, bool p_dispatched) {
+	value_.player.held_action_bits = (value_.player.held_action_bits & ~HELD_TO_SPECIAL) |
+			(p_held ? HELD_TO_SPECIAL : 0u);
+	value_.player.pressed_action_bits =
+			(value_.player.pressed_action_bits & ~PRESSED_TO_SPECIAL) |
+			(p_dispatched ? PRESSED_TO_SPECIAL : 0u);
 }
 
 void MissionFrameInput::set_sequence(int64_t p_sequence) {

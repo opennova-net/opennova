@@ -387,6 +387,42 @@ void handle_weapon_switch_outcome(World &world, LocalPlayerWeapon &w,
                                   WeaponInventory *inventory,
                                   const WeaponSwitchOutcome &out, PlayerViewState &view);
 
+// Player_MountWeaponSlot on a personal slot: with an equipped weapon the slot
+// becomes the pending one and the held weapon queues its switch-out (rank
+// within a category, else from); with none, nothing. The direct mounts reach
+// it (the S2C 0x35 grant, the ToSpecial swap), as the category walk's admitted
+// outcome does. [orig: Player_MountWeaponSlot @0x4DFA40 -- the EquippedSlot
+// def gate @0x4DFA6B..0x4DFA71, g_PendingWeaponSlot @0x4DFB16, the category
+// compare @0x4DFB8B]
+void local_player_mount_weapon_slot(World &world, LocalPlayerWeapon &w,
+                                    WeaponInventory &inventory, PlayerViewState &view,
+                                    int32_t combo);
+
+// Player_EquipWeaponByEntity: a slot with a weapon is mounted and true is
+// returned; an empty one plays the deny sound and returns false.
+// [orig: Player_EquipWeaponByEntity @0x4E0370 -- the def gate @0x4E0389, the
+// mount @0x4E03B8, the deny Sound_PlayInterfaceTriggerSet(dword_24E08C4)
+// @0x4E037E]
+bool local_player_equip_weapon_slot(World &world, LocalPlayerWeapon &w,
+                                    WeaponInventory &inventory, PlayerViewState &view,
+                                    int32_t combo);
+
+// The ToSpecial action (input case 220, the QuickSwitch hold-swap), run once
+// per dispatch with the ToSpecial keys' live state. Held (the press): unless
+// the held weapon is reloading (deferred), and given a QuickSwitch target, no
+// stash, an on-foot or passenger seat and a target other than the equipped
+// slot, the equipped slot is stashed and the target equipped. Released: unless
+// the held weapon is reloading or drawing (deferred), a stash outside a gunner
+// seat is equipped again and cleared. A successful swap drops the binoculars
+// request. kDeferred asks the caller to dispatch again next frame, as retail's
+// deferred input queue does. [orig: Input_HandleActionBinding_0 case 0xDC
+// @0x4E115B..0x4E1273; the deferral Input_QueueDeferredEvent @0x4E1211 and
+// its per-frame flush Input_FlushDeferredEvents @0x497AC0]
+enum class ToSpecialResult : uint8_t { kHandled, kDeferred };
+ToSpecialResult local_player_to_special(World &world, LocalPlayerWeapon &w,
+                                        WeaponInventory &inventory, PlayerViewState &view,
+                                        bool keys_held);
+
 
 // The FP channel's two legs, run by the pump on the FSM's events against the
 // weapon table's shared rings: a play of `key` (false for slot 0, whose play

@@ -919,6 +919,7 @@ void World::restore(const Snapshot &s) {
     out.entity_events.clear();
     out.hud_relays.clear();
     out.powerup_grants.clear();
+    out.powerup_weapon_grants.clear();
     // The baseline copy above restores the configured rules, roster, clock,
     // stats, and outcome together. This matters for SP-as-listen-server: its
     // host player and game type already exist when the play-start snapshot is

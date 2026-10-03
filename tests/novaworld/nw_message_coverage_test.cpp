@@ -969,6 +969,24 @@ int check_S_49_weapon_reload() {
 	return 0;
 }
 
+// S2C 0x35 — the powerup weapon grant: [u16 picker][u16 powerup] (4 B), minted
+// through the host's encoder; a short body does not decode.
+// [orig: Server_BroadcastWeaponOverlayUpdate @0x509FC0; NapiNPClientMsg_0x035 @0x4261A0]
+int check_S_35_weapon_pickup() {
+	WeaponPickupNotice notice;
+	notice.picker_handle = 0x0003;  // pool 0 slot 3 (a player)
+	notice.powerup_handle = 0x1005; // pool 1 slot 5 (the PU_* row)
+	const std::vector<uint8_t> wire = encode_weapon_pickup(notice);
+	EXPECT(wire == std::vector<uint8_t>({0x03, 0x00, 0x05, 0x10}));
+	WeaponPickupNotice out;
+	size_t consumed = 0;
+	EXPECT(decode_weapon_pickup(wire.data(), wire.size(), out, consumed));
+	EXPECT(consumed == 4 && out.picker_handle == 0x0003 && out.powerup_handle == 0x1005);
+	EXPECT(!decode_weapon_pickup(wire.data(), 3, out, consumed));
+	cover('S', 0x35);
+	return 0;
+}
+
 // C2S 0x25 — weapon-reload request: same 4-B [u16 handle][u16 weaponSlotCombo] body the host
 // relays back as S2C 0x49 (§5.58). Round-trip via the real encoder.
 int check_C_25_reload_request() {
@@ -2191,6 +2209,7 @@ int main() {
 	if (check_u32_scalar_trio()) return 1;
 	if (check_S_6B_minimap()) return 1;
 	if (check_S_49_weapon_reload()) return 1;
+	if (check_S_35_weapon_pickup()) return 1;
 	if (check_C_25_reload_request()) return 1;
 	if (check_C_03_auto_medic_preference()) return 1;
 	if (check_C_2E_medic_request()) return 1;
