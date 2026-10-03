@@ -62,6 +62,10 @@ Gotchas:
   unregistered class fails to parse (GUT then silently drops those test scripts).
 - The editor loads only `godot/bin/libopennova.*`. A stale editor means a stale
   `godot/bin` DLL — rebuild via `scripts/build_godot.sh` and fully restart.
+- godot-cpp compiles only the engine classes in `godot_cpp_profile.json`, derived from
+  this tree. A binding that starts using a class the list lacks fails with a missing
+  `godot_cpp/classes/*.hpp` (or a missing method): run
+  `python scripts/lint/godot_cpp_profile.py --write` and commit the regenerated list.
 - The web build (ADR 0049) compiles this tree as a wasm32 threads side module
   (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only; `ci.yml`'s
   `build-gdextension-web` builds it on every PR) with `OPENNOVA_DEVTOOLS` off, as in
