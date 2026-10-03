@@ -83,6 +83,9 @@ struct MissionOverlayInput {
 	// and north; null none).
 	const std::vector<MissionPressed> *copies = nullptr;
 	double copy_by[2] = { 0.0, 0.0 };
+	// A group turn's pivot (a mission point), drawn while the turn goes.
+	bool pivot = false;
+	double pivot_at[3] = { 0.0, 0.0, 0.0 };
 	// The Area tool's box on the ground (mission points), snapped to `box_snap` metres as its drop is.
 	bool box = false;
 	double box_from[3] = { 0.0, 0.0, 0.0 }, box_to[3] = { 0.0, 0.0, 0.0 };

@@ -53,7 +53,8 @@ std::string mission_canvas_hint(const MissionHintInput &in) {
 				"stops).";
 	case MissionTool::Area:
 		if (in.dragging) return "Let go to make an area trigger over the box.";
-		return "Area: drag a box on the ground to make an area trigger (snaps to " + mission_snap_words(in.snap) +
+		// The box takes the toolbar's grid whatever is held.
+		return "Area: drag a box on the ground to make an area trigger (snaps to " + mission_snap_words(in.grid) +
 				"; Esc stops).";
 	case MissionTool::Select: break;
 	}
@@ -78,7 +79,8 @@ std::string mission_canvas_hint(const MissionHintInput &in) {
 	if (in.selected > 0) {
 		std::string line = std::to_string(in.selected) + (in.selected == 1 ? " selected" : " selected records");
 		if (in.editable)
-			line += ": arrows nudge (" + mission_snap_words(in.snap) + ", Shift finer), PgUp/PgDn raise, Ctrl+D "
+			// The arrows go a metre when the snap is free.
+			line += ": arrows nudge (" + mission_snap_words(in.grid > 0.0f ? in.grid : 1.0f) + ", Shift finer), PgUp/PgDn raise, Ctrl+D "
 					"duplicates, Delete removes, F frames; click empty ground to select nothing.";
 		else
 			line += ": F frames; " + in.not_editable;

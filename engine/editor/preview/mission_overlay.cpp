@@ -292,6 +292,14 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 			}
 		}
 	}
+	// A group turn's pivot: a cross over a dark ring where the records turn about.
+	if (in.pivot) {
+		float px = 0.0f, py = 0.0f;
+		if (camera.project(mission_scene_point(in.pivot_at[0], in.pivot_at[1], in.pivot_at[2]), in.width, in.height, px, py)) {
+			list.ring(CanvasPoint{ px, py }, 7.0f, OverlayRole::Normal, 3.5f, kMissionShadowRgb, kMissionShadowAlpha);
+			list.marker(CanvasPoint{ px, py }, OverlayGlyph::Cross, 6.0f, OverlayRole::Selected, kMissionItemRgb, 2.0f);
+		}
+	}
 	// The Area tool's box on the ground, as its drop snaps it.
 	if (in.box) {
 		const double x0 = snapped(std::min(in.box_from[0], in.box_to[0]), in.box_snap);

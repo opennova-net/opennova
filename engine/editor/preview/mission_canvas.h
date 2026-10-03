@@ -23,15 +23,17 @@ class ViewportDevice;
 // change is a request: a record selected (a click, Shift adding, Ctrl toggling; a marquee's records
 // in one SelectRecord), a batch a sample of a drag (the mark under the press moved on the ground with
 // every selected record, one not selected selected alone first; the primary's height and yaw
-// handles, several selected turning about their group's centre; an area's edges; Ctrl held, free of
-// the snap), one undo step a gesture; an Alt-drag of a mark copies what it would move, the copies
+// handles, several selected (areas with them) turning about their group's centre, the turn the
+// pointer's bearing about it; an area's edges; Ctrl held, from the press or as it goes, free of the
+// snap), one undo step a gesture; an Alt-drag of a mark copies what it would move, the copies
 // placed where it is let go (one `duplicate` command, one undo step); the camera's state (a look with
 // the right button, flown with W A S D Q E while it is held; a pan with the middle button; an orbit
 // with Alt on nothing; the wheel's dolly toward the ground under the pointer; F and a double click
 // framing), a look, a fly and a wheel in one frame one SetViewport. The arrows nudge the selection a
 // snap step along the file's axis nearest the camera's right and forward (Shift a tenth of it), PgUp
 // and PgDn its height; Ctrl+D duplicates it a step to the right of the camera; Delete removes the
-// selected records; Esc selects nothing. Its tools (the viewport's options' MissionTool, which the
+// selected records; Esc selects nothing, and while a press is down cancels it (nothing its release
+// would raise, what its drag wrote put back). Its tools (the viewport's options' MissionTool, which the
 // toolbar and the wire set): Place (each click places the picked item), Path (each click adds the
 // picked path's next stop), Area (a box dragged on the ground makes an area trigger), each an
 // EditInViewport drop the viewport plans.
@@ -134,10 +136,13 @@ private:
 	// One sample of a handle's drag: its batch planned from the records as pressed.
 	void drag_(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out);
 	void release_(CanvasRequests &out);
+	// Esc while a press is down: nothing its release would raise, what its drag wrote put back.
+	void cancel_(CanvasRequests &out);
 	// The selection moved a step east, north and up (the arrows, PgUp and PgDn): a nudge's batch,
 	// planned from the records as the nudge began.
 	void nudge_by_(double east, double north, double up, CanvasRequests &out);
-	// The step a nudge and a duplicate go: the snap's (a metre when free), a tenth of it with Shift.
+	// The step a nudge goes: the snap's (a metre when free), a tenth of it with Shift; Ctrl+D's copy goes
+	// the whole step (Ctrl+Shift+D is no duplicate).
 	float step_(const CanvasInput &in) const;
 
 	CanvasGesture gesture_;

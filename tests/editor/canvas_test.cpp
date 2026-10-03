@@ -52,6 +52,8 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_viewport.h>
@@ -1527,13 +1529,14 @@ int test_mission_canvas() {
 		TEST_EXPECT(rings(OverlayRole::Hover) == 1 && rings(OverlayRole::Selected) == 3);
 		TEST_EXPECT(rig.out.take().empty());
 	}
-	// The primary dragged 40 pixels across, freely (Ctrl held as it goes, S15), in two samples.
+	// The primary dragged 40 pixels across, freely (Ctrl held from the press, S15 review: a press with
+	// Ctrl still takes the mark; only a click with it toggles), in two samples.
 	const double ax = rig.entity(a)->x, bx = rig.entity(b)->x, cx = rig.entity(c)->x;
 	marks = rig.marks();
 	const CanvasPoint from{ marks[size_t(picks[2])].x, marks[size_t(picks[2])].y };
 	CanvasKeys free;
 	free.ctrl = true;
-	requests = rig.drag_holding(from, CanvasPoint{ from.x + 40.0f, from.y }, 2, free);
+	requests = rig.drag(from, CanvasPoint{ from.x + 40.0f, from.y }, 2, free);
 	uint64_t gesture = 0;
 	size_t count = 0;
 	std::vector<Edit> last = batches(requests, gesture, count);
@@ -1549,7 +1552,7 @@ int test_mission_canvas() {
 	// A mark not selected dragged: selected alone first, then moved alone.
 	marks = rig.marks();
 	TEST_EXPECT(!selection.holds(d) && marks[size_t(picks[3])].shown);
-	requests = rig.drag_holding(CanvasPoint{ marks[size_t(picks[3])].x, marks[size_t(picks[3])].y },
+	requests = rig.drag(CanvasPoint{ marks[size_t(picks[3])].x, marks[size_t(picks[3])].y },
 			CanvasPoint{ marks[size_t(picks[3])].x, marks[size_t(picks[3])].y + 30.0f }, 2, free);
 	TEST_EXPECT(requests.size() >= 3 && requests[0].kind == Request::Kind::Select && requests[0].record == d &&
 			requests[0].join == CanvasJoin::Replace);
@@ -1897,6 +1900,99 @@ int test_mission_handle_tap_and_turn() {
 	return 0;
 }
 
+// A group turn keeps its handle under the pointer (S15 review): two entities selected, the primary's
+// yaw handle dragged a quarter turn clockwise about the group's centre (the pointer from the handle to
+// the handle's point carried round the centre): the primary's heading turned a quarter, both carried
+// round the centre a quarter, the pivot drawn while it goes. (Measured about the primary's own anchor,
+// the turn was another angle, and the handle ran from the pointer.)
+int test_mission_group_turn() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open());
+	const MissionViewport *viewport = rig.follow();
+	const std::vector<int> picks = rig.pickable();
+	TEST_EXPECT(picks.size() >= 2);
+	if (picks.size() < 2) return 1;
+	rig.canvas.set_turn(0.0f); // whole degrees
+	bool turned = false;
+	for (size_t i = 0; i + 1 < picks.size() && !turned; ++i) {
+		const MissionMark primary = rig.marks()[size_t(picks[i])], other = rig.marks()[size_t(picks[i + 1])];
+		rig.session.handle(request::select_record(rig.path, primary.record, SelectMode::Replace, { other.record, primary.record }));
+		const std::vector<MissionMark> marks = rig.marks();
+		MissionPressed a, b;
+		PreviewVec3 handle;
+		float hx = 0.0f, hy = 0.0f;
+		if (!viewport->pressed(primary.record, a) || !viewport->pressed(other.record, b) ||
+				!viewport->handle_at(marks[size_t(picks[i])], MissionHandle::Yaw, handle) ||
+				!viewport->camera().project(handle, MissionRig::width, MissionRig::height, hx, hy) || pick_mission_mark(marks, hx, hy) >= 0)
+			continue;
+		double pivot[2];
+		TEST_EXPECT(mission_turn_centre({ a, b }, pivot));
+		// The handle's point carried a quarter turn clockwise round the centre: (e, n) to (n, -e).
+		double h[3];
+		preview_to_mission(handle, h);
+		const double e = h[0] - pivot[0], n = h[1] - pivot[1];
+		float px = 0.0f, py = 0.0f;
+		if (!viewport->camera().project(mission_scene_point(pivot[0] + n, pivot[1] - e, a.z), MissionRig::width, MissionRig::height, px,
+					py) ||
+				px < 1.0f || py < 1.0f || px > MissionRig::width - 1.0f || py > MissionRig::height - 1.0f)
+			continue;
+		// Drawn round the centre in steps, so every sample's bearing is the pointer's own.
+		CanvasInput in = MissionRig::at(hx, hy);
+		in.pressed = in.down = true;
+		rig.step(in);
+		bool pivot_drawn = false;
+		for (int step = 1; step <= 6; ++step) {
+			const double turn = 90.0 * step / 6.0 * 3.14159265358979323846 / 180.0, c = std::cos(turn), s = std::sin(turn);
+			float sx = 0.0f, sy = 0.0f;
+			if (!viewport->camera().project(mission_scene_point(pivot[0] + e * c + n * s, pivot[1] + n * c - e * s, a.z),
+						MissionRig::width, MissionRig::height, sx, sy))
+				continue;
+			CanvasInput moved = MissionRig::at(sx, sy);
+			moved.down = true;
+			rig.step(moved);
+			if (step == 3) {
+				const OverlayList shapes = rig.canvas.shapes(rig.context(), moved);
+				pivot_drawn = std::any_of(shapes.shapes.begin(), shapes.shapes.end(), [](const OverlayShape &shape) {
+					return shape.kind == OverlayKind::Marker && shape.glyph == OverlayGlyph::Cross && shape.role == OverlayRole::Selected;
+				});
+			}
+		}
+		rig.step(MissionRig::at(px, py));
+		TEST_EXPECT(rig.serve(rig.out.take()) > 0);
+		const MissionEntityMark *now_a = rig.entity(primary.record), *now_b = rig.entity(other.record);
+		TEST_EXPECT(now_a && now_b && pivot_drawn);
+		if (!now_a || !now_b) return 1;
+		const int expect = (a.yaw + 90) % 360;
+		TEST_EXPECT(std::abs(now_a->yaw - expect) <= 1 || std::abs(now_a->yaw - expect) >= 359);
+		const double ae = a.x - pivot[0], an = a.y - pivot[1], be = b.x - pivot[0], bn = b.y - pivot[1];
+		TEST_EXPECT(std::fabs(now_a->x - (pivot[0] + an)) < 0.05 * std::max(1.0, std::hypot(ae, an)) &&
+				std::fabs(now_a->y - (pivot[1] - ae)) < 0.05 * std::max(1.0, std::hypot(ae, an)));
+		TEST_EXPECT(std::fabs(now_b->x - (pivot[0] + bn)) < 0.05 * std::max(1.0, std::hypot(be, bn)) &&
+				std::fabs(now_b->y - (pivot[1] - be)) < 0.05 * std::max(1.0, std::hypot(be, bn)));
+		turned = true;
+	}
+	TEST_EXPECT(turned);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_group_turn passed\n");
+	return 0;
+}
+
+// The line under the picture's words (S15 review): the arrows nudge a metre when the snap is free; the
+// Area box says the toolbar's grid, which it takes whatever is held.
+int test_mission_hint_words() {
+	MissionHintInput in;
+	in.selected = 1;
+	in.grid = 0.0f;
+	TEST_EXPECT(mission_canvas_hint(in).find("arrows nudge (1 m") != std::string::npos);
+	in.grid = 5.0f;
+	TEST_EXPECT(mission_canvas_hint(in).find("arrows nudge (5 m") != std::string::npos);
+	in.tool = MissionTool::Area;
+	in.snap = 0.0f; // Ctrl held
+	TEST_EXPECT(mission_canvas_hint(in).find("snaps to 5 m") != std::string::npos);
+	std::printf("test_mission_hint_words passed\n");
+	return 0;
+}
+
 // Over a device that answers a ground (z = 3 + x / 10; S14 review M2): a move of an entity with
 // Stick keeps its height over that ground where it goes, the arrows' nudge too, and an area's mark
 // stands on the ground at its middle (not at its z_min), where a click selects it.
@@ -1912,6 +2008,7 @@ int test_mission_ground_on_canvas() {
 	if (picks.empty()) return 1;
 	MissionMark mark = rig.marks()[size_t(picks[0])];
 	const double clearance = over(*rig.entity(mark.record)), x0 = rig.entity(mark.record)->x;
+	// Ctrl taken as the drag goes (pressed after the press): free all the same.
 	CanvasKeys free;
 	free.ctrl = true;
 	std::vector<Request> requests =
@@ -2044,6 +2141,37 @@ int test_mission_tools() {
 			requests[0].drop.box && requests[0].drop.x == 200.0f && requests[0].drop.x2 == 300.0f && requests[0].drop.y2 == 260.0f);
 	TEST_EXPECT(rig.serve(requests) == 1 && rig.follow()->scene().areas().size() == areas + 1);
 	TEST_EXPECT(rig.click(250.0f, 250.0f).empty());
+	// Esc while a press is down cancels it (S15 review): a press, a drag, Esc, let go, what each frame
+	// raised served before the next (as the Shell serves it): no box drop, the tool kept (the view leaves
+	// a tool only on an Esc with no press down). The requests raised and how many were done.
+	size_t done = 0;
+	const auto escape_mid_drag = [&](CanvasPoint from, CanvasPoint to, CanvasKeys keys) {
+		std::vector<Request> all;
+		done = 0;
+		const auto frame = [&](const CanvasInput &in) {
+			rig.step(in);
+			std::vector<Request> raised = rig.out.take();
+			done += rig.serve(raised);
+			all.insert(all.end(), raised.begin(), raised.end());
+		};
+		CanvasInput in = MissionRig::at(from.x, from.y, keys);
+		in.pressed = in.down = true;
+		frame(in);
+		CanvasInput moved = MissionRig::at(to.x, to.y, keys);
+		moved.down = true;
+		moved.delta = CanvasPoint{ to.x - from.x, to.y - from.y };
+		frame(moved);
+		CanvasInput escape = MissionRig::at(to.x, to.y, keys);
+		escape.down = true;
+		escape.keyboard.focused = true;
+		escape.keyboard.escape = true;
+		frame(escape);
+		frame(MissionRig::at(to.x, to.y, keys));
+		return all;
+	};
+	requests = escape_mid_drag(CanvasPoint{ 200.0f, 200.0f }, CanvasPoint{ 300.0f, 260.0f }, CanvasKeys());
+	TEST_EXPECT(count_of(requests, Request::Kind::Drop) == 0 && rig.canvas.tool() == MissionTool::Area &&
+			rig.follow()->scene().areas().size() == areas + 1);
 	// Path: a click is the path's next stop.
 	TEST_EXPECT(rig.tool(R"({"tool": "path", "path": 1})"));
 	TEST_EXPECT(rig.canvas.tool() == MissionTool::Path);
@@ -2060,6 +2188,22 @@ int test_mission_tools() {
 	TEST_EXPECT(rig.out.take().empty());
 	TEST_EXPECT(rig.tool(R"({"tool": "select"})"));
 	TEST_EXPECT(rig.canvas.tool() == MissionTool::Select);
+	// Esc mid-move: what the drag wrote put back where the press found it (served, the mark stands where
+	// it stood); Esc mid-Alt-drag: no copies.
+	if (!picks.empty()) {
+		const MissionMark mark = rig.marks()[size_t(picks[0])];
+		const double x0 = rig.entity(mark.record)->x, y0 = rig.entity(mark.record)->y;
+		requests = escape_mid_drag(CanvasPoint{ mark.x, mark.y }, CanvasPoint{ mark.x + 50.0f, mark.y + 10.0f }, CanvasKeys());
+		TEST_EXPECT(count_of(requests, Request::Kind::Edits) >= 2 && done == requests.size());
+		TEST_EXPECT(rig.entity(mark.record)->x == x0 && rig.entity(mark.record)->y == y0);
+		CanvasKeys alt;
+		alt.alt = true;
+		const size_t entities = rig.follow()->scene().entities().size();
+		const MissionMark again = rig.marks()[size_t(picks[0])];
+		requests = escape_mid_drag(CanvasPoint{ again.x, again.y }, CanvasPoint{ again.x + 50.0f, again.y }, alt);
+		TEST_EXPECT(count_of(requests, Request::Kind::Command) == 0 && count_of(requests, Request::Kind::Edits) == 0);
+		TEST_EXPECT(rig.follow()->scene().entities().size() == entities);
+	}
 	// The primary's yaw handle under the pointer.
 	bool found = false;
 	const MissionViewport *viewport = rig.follow();
@@ -2134,6 +2278,10 @@ int main() {
 	if (test_mission_canvas() != 0)
 		return 1;
 	if (test_mission_handle_tap_and_turn() != 0)
+		return 1;
+	if (test_mission_group_turn() != 0)
+		return 1;
+	if (test_mission_hint_words() != 0)
 		return 1;
 	if (test_mission_ground_on_canvas() != 0)
 		return 1;

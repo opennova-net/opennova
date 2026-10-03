@@ -26,7 +26,8 @@ struct MissionHintInput {
 	bool dragging = false; // a drag is under way, of `which` (a marquee when !handle)
 	bool copying = false; // the drag copies (Alt)
 	size_t selected = 0; // how many records are selected
-	float snap = 0.0f; // metres (0 free)
+	float snap = 0.0f; // metres a drag snaps to now (0 free: the snap off, or Ctrl held)
+	float grid = 0.0f; // the toolbar's snap, metres (0 free), whatever is held: the Area box's and the arrows'
 	float turn = 0.0f; // degrees (0 whole degrees)
 	bool empty_mission = false; // the mission has no entity and no area
 };
