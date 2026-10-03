@@ -383,12 +383,14 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 	build_hash_ = io::kFnv1a64Offset;
 }
 
-// Where each archive's hash starts: the format it is written in and the writer's version, so a
-// writer that would pack the same entries otherwise never finds the archive the old one packed
-// unchanged (and a link to it): a writer change rebuilds every archive once.
+// Where each archive's hash starts: the format it is written in, the writer's version and the time
+// its entries are stamped with, so a writer that would pack the same entries otherwise never finds
+// the archive the old one packed unchanged (and a link to it): a writer change rebuilds every
+// archive once (the stamp's: every archive packed with 0, which hid its effects, D-VFS-12).
 uint64_t BuildRun::archive_hash_seed() {
 	uint64_t seed = io::fnv1a64_value(io::kFnv1a64Offset, static_cast<int>(kBuildArchiveFormat));
-	return io::fnv1a64_value(seed, pff::PFF_WRITER_VERSION);
+	seed = io::fnv1a64_value(seed, pff::PFF_WRITER_VERSION);
+	return io::fnv1a64_value(seed, pff::PFF_NEW_ENTRY_TIMESTAMP);
 }
 
 BuildRun::~BuildRun() {
@@ -746,8 +748,9 @@ void BuildRun::pack(uint64_t budget) {
 					e.name = archive.entries[i].logical_name.c_str();
 					e.size = static_cast<uint32_t>(stamps_[stamp_index(archive_index_, i)].size);
 					e.flags = 0;
-					e.timestamp = 0; // ADR 0008: zero for new entries; the engine reads neither field
-					e.checksum = 0;
+					// Never 0: the effect loaders skip such an entry (pff::PFF_NEW_ENTRY_TIMESTAMP, D-VFS-12).
+					e.timestamp = pff::PFF_NEW_ENTRY_TIMESTAMP;
+					e.checksum = 0; // no reader (ADR 0008)
 					entries.push_back(e);
 				}
 				s.archive = archive_index_;

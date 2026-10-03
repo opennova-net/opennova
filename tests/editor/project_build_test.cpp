@@ -553,7 +553,7 @@ static int test_archives_match_the_single_call_writer() {
 				TEST_EXPECT(read_file_bytes(archive.entries[i].source_path, payloads[i], error));
 			for (size_t i = 0; i < archive.entries.size(); ++i)
 				entries.push_back({archive.entries[i].logical_name.c_str(), payloads[i].empty() ? nullptr : payloads[i].data(),
-				                   uint32_t(payloads[i].size()), 0, 0, 0});
+				                   uint32_t(payloads[i].size()), 0, opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0});
 			const std::string single = p.dir.file(archive.file_name.c_str());
 			TEST_EXPECT(opennova::pff::pff_write_archive(single.c_str(), opennova::pff::PFF_FORMAT_PFF3,
 			                                             entries.empty() ? nullptr : entries.data(),
@@ -562,6 +562,13 @@ static int test_archives_match_the_single_call_writer() {
 			TEST_EXPECT(read_file_bytes((fs::path(run.report().build_dir) / archive.file_name).generic_string(), built, error));
 			TEST_EXPECT(read_file_bytes(single, expected, error));
 			TEST_EXPECT(!built.empty() && built == expected);
+			// D-VFS-12: no entry stamped 0, which the game's effect loaders skip.
+			opennova::pff::PffArchive opened{};
+			const std::string at = (fs::path(run.report().build_dir) / archive.file_name).generic_string();
+			TEST_EXPECT(opennova::pff::pff_open(&opened, at.c_str()) == 0);
+			for (uint32_t i = 0; i < opened.entry_count; ++i)
+				TEST_EXPECT(opened.entries[i].timestamp == opennova::pff::PFF_NEW_ENTRY_TIMESTAMP);
+			opennova::pff::pff_close(&opened);
 		}
 	}
 	return 0;
