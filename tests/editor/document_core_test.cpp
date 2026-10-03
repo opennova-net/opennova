@@ -957,6 +957,10 @@ static int test_structure() {
 	TEST_EXPECT(records == 8 && round_trips == records);
 	TEST_EXPECT(document.address_at("0/item:5") == NodeAddress() && document.address_at("0/leaf:0") == NodeAddress());
 	TEST_EXPECT(document.address_at("2") == NodeAddress() && document.address_at("x/item:0") == NodeAddress());
+	// An index is decimal digits alone (strutil's parse): no sign, no blank, nothing after, none past
+	// what a size holds.
+	for (const char *odd : {"+1", " 1", "1 ", "-1", "1x", "99999999999999999999999", "0/item:+0", "0/item:0x"})
+		TEST_EXPECT(document.address_at(odd) == NodeAddress());
 	// The walk stops when the visitor says so.
 	size_t visited = 0;
 	document.walk_records(*document.rows()[0], [&](const NodeAddress &, const Document::Placement &) { return ++visited < 3; });
