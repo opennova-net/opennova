@@ -2,6 +2,7 @@
 
 #include <cstddef>
 
+#include <editor/session/view/findings_index.h>
 #include <editor/ui/document_views.h>
 #include <editor/ui/outline_model.h>
 #include <editor/ui/record_reveal.h>
@@ -23,10 +24,15 @@ namespace opennova::editor {
 //   RecordKindRow::add_label) and the selected row's Duplicate / Remove / Up / Down, then the file-
 //   wide values (an item table's vehicle spawn registry, marked while it differs from the saved
 //   file). A row's nested records are the Inspector's.
-// - Tree (a model, a clip, an animation table): every row, each collection a record holds (+ adds
-//   one at its end where it is not fixed) and each record in it, a level at a time and scrolling
-//   sideways when deep; the rows the file adds (one tool per kind with an add label) and the
-//   selected record's Duplicate / Remove / Up / Down where its list allows them.
+// - Tree (a model, a clip, an animation table, a mission): every row, each collection a record holds
+//   (+ adds one at its end where it is not fixed) and each record in it, a level at a time and
+//   scrolling sideways when deep, under the headings its type groups the rows under where it has them
+//   (OutlineSpec::groups, ADR 0046 S15: a mission's pools, teams and groups, each with its count,
+//   opened and closed as a record is); the rows the file adds (one tool per kind with an add label)
+//   and the selected record's Duplicate / Remove / Up / Down where its list allows them.
+// A record's line reads as the display names word it (ADR 0046 S15: record_display with the graph's
+// names, a mission's entity by its item's name and its SSN), and one a finding is on is marked with
+// the worst one's severity, every finding on it in the mark's tooltip (the view's findings index).
 // - MasterDetail (a string table): the rows with their tools in a column that resizes, the
 //   selected row's records (or, with Every ticked and a filter set, every row's that match) as a
 //   table of their text fields edited in place (ui/text_edit), a text over as many lines as it
@@ -55,9 +61,13 @@ private:
 	void draw_details(Workspace &workspace, const Document &document, const Node *master, size_t revealed);
 	void draw_file_values(Workspace &workspace, const Document &document);
 
+	// The mark after a record's line where a finding is on it (none drawn for none).
+	void finding_mark(const SessionView &view, const Document &document, const NodeAddress &address);
+
 	OutlineSpec spec_;
 	OutlineModel model_;
 	RecordReveal reveal_;
+	FindingsIndex findings_;
 	char filter_[128]{};  // the filter box's text: the model's filter
 	NodeAddress editing_; // master and detail: the record whose cell had the keyboard last frame
 };

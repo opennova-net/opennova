@@ -63,6 +63,19 @@ std::string ScriptMark::tip() const {
 	return out;
 }
 
+std::string ScriptMark::note() const {
+	const ScriptMarkFinding *worst = nullptr;
+	for (const ScriptMarkFinding &finding : findings)
+		if (!worst || rank(finding.severity) > rank(worst->severity)) worst = &finding;
+	if (!worst) return std::string();
+	return worst->note + (findings.size() > 1 ? " (+" + std::to_string(findings.size() - 1) + " more)" : std::string());
+}
+
+std::string first_sentence(const std::string &message) {
+	const size_t stop = message.find(". ");
+	return stop == std::string::npos ? message : message.substr(0, stop + 1);
+}
+
 ScriptViewport::ScriptViewport(std::string path) :
 		ViewportModel(ViewportKind::Script, std::move(path), kHeadlessSize) {}
 
@@ -128,7 +141,7 @@ void ScriptViewport::make_marks_(const SessionView &view, const TextDocument &do
 		} else if (rank(d.severity) > rank(mark->severity)) {
 			mark->severity = d.severity;
 		}
-		mark->findings.push_back({d.code(), d.severity, d.column, d.message});
+		mark->findings.push_back({d.code(), d.severity, d.column, d.message, first_sentence(d.message)});
 	}
 	std::stable_sort(marks_.begin(), marks_.end(), [](const ScriptMark &a, const ScriptMark &b) { return a.line < b.line; });
 	++marks_serial_;
@@ -331,9 +344,11 @@ io::JsonValue ScriptViewport::items_json(const ViewportInput &) const {
 			entry.set("severity", json_string(diagnostic_severity_label(finding.severity)));
 			entry.set("column", json_number(double(finding.column)));
 			entry.set("message", json_string(finding.message));
+			entry.set("note", json_string(finding.note));
 			findings.push(std::move(entry));
 		}
 		item.set("findings", std::move(findings));
+		item.set("note", json_string(mark.note()));
 		out.push(std::move(item));
 	}
 	return out;

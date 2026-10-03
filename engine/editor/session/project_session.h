@@ -96,7 +96,8 @@ public:
 	// of the running operation per poll).
 	void set_poll_budget(const PollBudget &budget);
 	// The running operation, and those its finish starts, run to their end and finished, then the
-	// validation they left due run to its end (a test, a command line).
+	// validation they left due run to its end, and the check of which files its rows are about are the
+	// game's own data (S15) (a test, a command line).
 	void run_operations();
 	// `operation` started in the slot as a request starts one: its id, 0 while another runs (a
 	// test's, for an operation no request starts yet: one that cannot be cancelled, one that
