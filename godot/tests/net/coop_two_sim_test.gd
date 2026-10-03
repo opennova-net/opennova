@@ -2204,6 +2204,10 @@ func test_joiner_round_hits_host_authoritatively_and_predicts_peer_impact() -> v
 	var host := Simulation.new()
 	var host_options := HostSessionOptions.new()
 	host_options.game_type = 0x30020
+	# Friendly fire ON (the stock mpattrib 0x3A02 carries NoFriendlyFire 0x200):
+	# both co-op players are blue, and a same-team round lands only with the
+	# bit clear [orig: Projectile_DamagePairEligible @0x4E74F0, D-WPN-42].
+	host_options.mp_attributes = 0x3802
 	host.configure_host_session(host_options)
 	assert_true(host.enable_host_listen(0))
 	assert_true(host.load_from_mission_data(mission))
