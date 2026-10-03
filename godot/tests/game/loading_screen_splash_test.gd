@@ -64,8 +64,8 @@ func test_begin_raises_over_the_held_background() -> void:
 	assert_true(screen.begin_start_mission_splash(_root_for(screen)))
 	assert_true(screen.is_splash_active())
 	assert_true(screen.has_splash_arrow(),
-		"the fixture newarow1.tga DECODES — TGA rides read_file + the TGA "
-		+ "decoder, not the PCX load_texture path")
+		"the fixture newarow1.tga DECODES through the TGA reader "
+		+ "(ResourceRoot.TEXTURE_LOADER_TGA), not the background's PCX reader")
 	assert_false(screen.begin_start_mission_splash(_root_for(screen)),
 		"a raised splash never re-raises")
 

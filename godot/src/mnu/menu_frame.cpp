@@ -265,15 +265,12 @@ bool MenuFrame::configure(const Ref<MnuDocument> &p_document,
 			++unresolved_assets_;
 			continue;
 		}
+		// The menu texture loader's file and reader (menu::menu_texture_source:
+		// a .tga, else its .dds; a .dds; a .pcx; a .png), decoded the retail way.
 		const String name = opennova::to_gd(tex_names[i]);
-		const PackedByteArray bytes = root_->read_file(name.get_file());
-		if (bytes.is_empty()) {
-			++unresolved_assets_;
-			continue;
-		}
-		Ref<Image> image;
-		image.instantiate();
-		if (image->load_tga_from_buffer(bytes) != OK) {
+		const Ref<Image> image = root_->load_texture_image(name.get_file(),
+				ResourceRoot::TEXTURE_LOADER_MENU);
+		if (image.is_null()) {
 			++unresolved_assets_;
 			continue;
 		}

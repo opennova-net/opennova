@@ -35,11 +35,14 @@ void VehicleTrailPresenter::sync_water_wakes() {
 		return;
 	}
 	if (!node) {
-		const Callable provider = effects->get_texture_provider();
-		if (!provider.is_valid())
+		// The ring textures load through Texture_LoadFromArchive with an
+		// empty alpha name (renderer::TextureLoader::Archive).
+		const Ref<ResourceRoot> &root = effects->resource_root();
+		if (root.is_null())
 			return;
-		const Ref<Texture2D> wake = provider.call(String("wake5.tga"));
-		const Ref<Texture2D> gradient = provider.call(String("wakegrad.tga"));
+		const Ref<Texture2D> wake = root->load_texture("wake5.tga", ResourceRoot::TEXTURE_LOADER_ARCHIVE);
+		const Ref<Texture2D> gradient =
+				root->load_texture("wakegrad.tga", ResourceRoot::TEXTURE_LOADER_ARCHIVE);
 		if (wake.is_null() || gradient.is_null())
 			return;
 		Ref<Shader> shader =

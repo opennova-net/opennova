@@ -84,6 +84,10 @@ public:
 	void set_particles_hidden(bool p_hidden);
 	bool are_particles_hidden() const;
 	Callable get_texture_provider() const;
+	// C++ siblings only (not bound): the root load_from_resource_root mounted,
+	// for an effect device whose texture loads through another retail loader
+	// than the particle graphics' TGA reader (the water wake).
+	const Ref<ResourceRoot> &resource_root() const { return root_; }
 	// The per-frame owner-pose resolver: called with the owner key, it
 	// answers a Transform3D (the full pose), a Vector3 (a translation over
 	// the cached basis) or null (the owner is gone: its groups detach).

@@ -115,7 +115,9 @@ func set_weapon_sights(sights: Array[WeaponSightRow], root: ResourceRoot) -> voi
 			row.queue_free()
 	_rows.clear()
 	for e: WeaponSightRow in sights:
-		var tex := TgaTexture.load_from_root(root, String(e.get_texture()).get_file())
+		# A sight card's texture loads through the stage loader (its .dds first).
+		var tex: Texture2D = root.load_texture(String(e.get_texture()).get_file(),
+				ResourceRoot.TEXTURE_LOADER_STAGE) if root != null else null
 		if tex == null:
 			continue
 		var row := SightRowControl.new()

@@ -11,7 +11,6 @@
 
 #include "util/axes.h"
 #include "util/data_format.h"
-#include "util/pcx_texture_bridge.h"
 #include "util/string_convert.h"
 #include "util/texture_path_resolver.h"
 
@@ -324,31 +323,14 @@ void EnvFile::_load_sky_textures() {
 // decode makes the cloud pass cover the whole dome
 // [orig: Terrain_InitRenderingResources @ 0x578a97/0x578aa5 ->
 // Texture_LoadFromArchive @ 0x58b980, PCX alpha loop @ 0x58bc35..0x58bcee, see docs/env/env-tod-re.md].
-// Non-PCX names (DDS/TGA) keep the generic decode like retail's DDS-first path.
+// The name rides as its own alpha name, so the loader's .dds sibling still
+// wins first (renderer::TextureLoader::ArchiveSelfAlpha).
 Ref<Texture2D> EnvFile::_load_sky_map_texture(const String &name) {
-	if (name.get_extension().to_lower() == "pcx") {
-		const PackedByteArray bytes = resource_root->read_file(name);
-		if (!bytes.is_empty()) {
-			Ref<Texture2D> tex = opennova::build_pcx_luminance_alpha_texture(bytes);
-			if (tex.is_valid()) {
-				return tex;
-			}
-		}
-	}
-	return resource_root->load_texture(name);
+	return resource_root->load_texture(name, ResourceRoot::TEXTURE_LOADER_ARCHIVE_SELF_ALPHA);
 }
 
 Ref<Texture2D> EnvFile::_load_sky_map_texture_from_dir(const String &dir, const String &name) {
-	if (name.get_extension().to_lower() == "pcx") {
-		PackedByteArray bytes;
-		if (read_nova_payload_file(dir.path_join(name), bytes) && !bytes.is_empty()) {
-			Ref<Texture2D> tex = opennova::build_pcx_luminance_alpha_texture(bytes);
-			if (tex.is_valid()) {
-				return tex;
-			}
-		}
-	}
-	return opennova::load_texture_from_dir(dir, name);
+	return opennova::load_texture_from_dir(dir, name, opennova::renderer::TextureLoader::ArchiveSelfAlpha);
 }
 
 Error EnvFile::load() {

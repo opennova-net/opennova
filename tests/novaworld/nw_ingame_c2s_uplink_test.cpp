@@ -284,10 +284,13 @@ int test_client_checksum_reply() {
 	const bool ok = decode_client_checksum_reply(
 		kChecksumReply_f2101, sizeof(kChecksumReply_f2101), r, consumed);
 	EXPECT(ok);
-	EXPECT(consumed == 5);
+	EXPECT(consumed == 9);
 	EXPECT(r.player_index == 0x12);
 	EXPECT(r.expected_crc == 0x42a13f29u);
-	// 4 trailing zero bytes are not read by the handler.
+	// The trailing dword is the echoed challenge key (zero: the challenge
+	// carried a zero key); the host handler never reads it.
+	EXPECT(r.has_echoed_key);
+	EXPECT(r.echoed_key == 0u);
 	std::printf("PASS client_checksum_reply\n");
 	return 0;
 }

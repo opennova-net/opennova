@@ -986,7 +986,7 @@ add_test(NAME mission_seat_spec_extract COMMAND mission_seat_spec_extract_test)
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
         particle_atlas_contract particle_frame_compiler_contract render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
-        scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt)
+        scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules)
     add_executable(renderer_${test}_test renderer/${test}_test.cpp)
     target_link_libraries(renderer_${test}_test PRIVATE opennova_runtime opennova_formats)
     target_include_directories(renderer_${test}_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -1014,6 +1014,13 @@ add_executable(pcx_roundtrip_test pcx/pcx_roundtrip_test.cpp)
 target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
+
+# The game's TGA reader (formats/tga/tga_read.h): the unconditional flip, the
+# pixel start, the forms it reads and the ones it zero-fills.
+add_executable(tga_read_test tga/tga_read_test.cpp)
+target_link_libraries(tga_read_test PRIVATE opennova_formats)
+target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_read COMMAND tga_read_test)
 
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
@@ -3133,6 +3140,15 @@ target_link_libraries(nwmsg_replay_test PRIVATE opennova_net)
 target_include_directories(nwmsg_replay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(nwmsg_replay_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME nwmsg_replay COMMAND nwmsg_replay_test)
+# R1 of the net parity proof ladder: every body in the retail captures decoded
+# to the byte and, where a struct encoder exists, re-encoded byte-identical
+# (net/npwire/ingame_body_codec.h). The _retail leg proves the authored
+# record-class table against the real items.def.
+add_executable(nwmsg_codec_parity_test novaworld/nwmsg_codec_parity_test.cpp)
+target_link_libraries(nwmsg_codec_parity_test PRIVATE opennova_runtime opennova_formats opennova_net)
+target_include_directories(nwmsg_codec_parity_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(nwmsg_codec_parity_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+opennova_add_mixed_test(nwmsg_codec_parity COMMAND nwmsg_codec_parity_test)
 
 # Host-row staleness backstop sweep (prune_stale_hosts).
 add_executable(host_prune_test novaworld/host_prune_test.cpp)

@@ -64,10 +64,29 @@ param(
     [ValidateRange(1, 65535)]
     [int] $JoinerMcpPort = 8976,
 
+    # The retail expansion both roles load. The pinned reference install
+    # (ADR 0050 d2) is JO:CA's jox01.
+    [ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_-]{0,30}$')]
+    [string] $Expansion = "jox01",
+
+    # The OpenNova integrity-challenge profile (--integrity-profile): the
+    # retail CRC table image our host validates replies against and our
+    # joiner answers from (D-NET-181). Profiles exist per witnessed corpus
+    # (retail-revx02-024f56f2-2d087374 for revx02); empty passes none, so our
+    # host stays silent on CRC replies and our joiner does not answer.
+    [string] $IntegrityProfile = "",
+
     # Diagnostic only: accept OpenNova launches through the plain runtime
     # executable (no console-wrapper job). A verdict-bearing run needs the
     # wrapper's ownership proof; the summary records the relaxation.
-    [switch] $AllowDirectRuntime
+    [switch] $AllowDirectRuntime,
+
+    # Diagnostic only: launch retail with onHook's behavior-changing hooks as
+    # its onhook.cfg defaults them. A verdict-bearing run loads every retail
+    # role with StockObserver (retail stock, the hook only observing) and
+    # requires the loaded hook to confirm it; the summary records the
+    # relaxation.
+    [switch] $AllowModifiedRetail
 )
 
 $ErrorActionPreference = "Stop"
@@ -79,10 +98,6 @@ if ($HostSessionName.Length -gt 31 -or $HostSessionName -notmatch '^[\x20-\x7e]+
     throw "HostSessionName must be at most 31 printable ASCII characters."
 }
 $ServerName = $HostSessionName
-if (-not [string]::Equals(
-        $ServerName, "Untitled ", [System.StringComparison]::Ordinal)) {
-    throw "Verdict-bearing retail parity runs require exact server_name 'Untitled ' (including trailing space)."
-}
 if ($ReadinessMode -eq "deploy_hold" -and ($AutoDeploy -or $ExerciseInput)) {
     throw "deploy_hold readiness cannot auto-deploy or exercise input."
 }
@@ -147,7 +162,27 @@ if ([string]::Equals(
     throw "RetailServerRoot and RetailClientRoot must be distinct installations."
 }
 $env:GODOT_BIN = $GodotLauncher
-$Expansion = "revx02"
+# Both role copies must be the same retail executable; the hash rides the
+# summary as the run's retail identity.
+$RetailServerExeSha256 = (Get-FileHash -LiteralPath (Join-Path $ServerDir "Jointops.exe") `
+    -Algorithm SHA256).Hash.ToLowerInvariant()
+$RetailClientExeSha256 = (Get-FileHash -LiteralPath (Join-Path $ClientDir "Jointops.exe") `
+    -Algorithm SHA256).Hash.ToLowerInvariant()
+if ($RetailServerExeSha256 -ne $RetailClientExeSha256) {
+    throw "RetailServerRoot and RetailClientRoot hold different Jointops.exe images."
+}
+# A retail host advertises its game.cfg game_name verbatim (S2C 0x2C/0x7B), so
+# the session name every cell expects is the SERVER copy's own, exactly.
+$serverGameName = Select-String -LiteralPath (Join-Path $ServerDir "game.cfg") `
+    -Pattern '^\s*game_name\s*=\s*"([^"]*)"' | Select-Object -First 1
+if (-not $serverGameName) {
+    throw "RetailServerRoot game.cfg has no game_name."
+}
+$retailGameName = $serverGameName.Matches[0].Groups[1].Value
+if (-not [string]::Equals($ServerName, $retailGameName, [System.StringComparison]::Ordinal)) {
+    throw "HostSessionName '$ServerName' must equal the SERVER copy's game.cfg game_name '$retailGameName' exactly."
+}
+$StockObserver = -not $AllowModifiedRetail
 $RunRoot = Join-Path $Repo ".scratch\runs\$RunId"
 $CaptureScript = Join-Path $Repo "scripts\net\capture.ps1"
 $HostScript = Join-Path $Repo "scripts\net\host_opennova.ps1"
@@ -779,24 +814,39 @@ function Stop-RetailProcessCapture {
     $null = $script:RetailInstanceIds.Remove($InstanceId)
 }
 
-# Retail is launched only through onhook-mcp. Its role tools must return the
-# exact process (pid + instance_id) like onhook_run_lan_pair does and render
-# the role's onhook.cfg from their arguments; until the upstream tools do,
-# these cells stop with a named error instead of guessing at a process.
+# Retail is launched only through onhook-mcp (bridge protocol 1.8 or later):
+# its role tools return the exact process (pid + instance_id), render the
+# role's onhook.cfg from their arguments, and report whether the loaded hook
+# runs retail stock. A launch missing any of that stops the cell instead of
+# guessing at a process or a configuration.
+function Assert-RetailStock {
+    param(
+        [Parameter(Mandatory = $true)] [string] $Tool,
+        [Parameter(Mandatory = $true)] $Reported
+    )
+    if ($StockObserver -and -not ($Reported -eq $true)) {
+        throw "$Tool did not confirm stock_observer; deploy onhook (bridge protocol 1.8+) to both retail copies, or pass -AllowModifiedRetail for a diagnostic run."
+    }
+}
+
 function Assert-OnHookRoleLaunch {
     param(
         [Parameter(Mandatory = $true)] [string] $Tool,
         [Parameter(Mandatory = $true)] $Result
     )
-    foreach ($name in @("pid", "instance_id", "run_id", "capture_path")) {
+    foreach ($name in @("pid", "instance_id", "run_id", "capture_path", "hook_config_path")) {
         if (-not ($Result.PSObject.Properties.Name -contains $name) -or
                 [string]::IsNullOrWhiteSpace([string] $Result.$name)) {
-            throw "UPSTREAM BLOCKER (onhook-mcp): $Tool returned no '$name'; the role tools must return pid/instance_id/run_id/capture_path like onhook_run_lan_pair and render onhook.cfg from their arguments (TODO.md)."
+            throw "onhook-mcp $Tool returned no '$name'; deploy onhook-mcp from bridge protocol 1.8 or later."
         }
     }
     if ([int] $Result.pid -le 0) {
-        throw "UPSTREAM BLOCKER (onhook-mcp): $Tool returned pid $($Result.pid)."
+        throw "onhook-mcp $Tool returned pid $($Result.pid)."
     }
+    $reported = if ($Result.PSObject.Properties.Name -contains "stock_observer") {
+        $Result.stock_observer
+    } else { $null }
+    Assert-RetailStock -Tool $Tool -Reported $reported
 }
 
 function Start-RetailHostExact {
@@ -815,6 +865,7 @@ function Start-RetailHostExact {
         capture = $true
         windowed = $true
         allow_many = $true
+        stock_observer = $StockObserver
         wait_timeout_ms = 240000
     })
     Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $result
@@ -849,6 +900,11 @@ function Start-RetailJoinerExact {
         capture = $true
         windowed = $true
         allow_many = $true
+        stock_observer = $StockObserver
+        # deploy_hold returns once the session is connected: an A&S joiner
+        # holds on the deploy screen with no local Person, which the
+        # in_match readiness waits for.
+        readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
         wait_timeout_ms = 240000
     })
     Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $result
@@ -1134,7 +1190,7 @@ function Start-OpenNovaHostExact {
         -Mission $Mission -Name $HostCallsign -Port $Port -LanMode 1 `
         -MaxPlayers 4 -GameType ([string] $GameType) -ResourceDir $ServerDir `
         -Expansion $Expansion `
-        -IntegrityProfile "retail-revx02-024f56f2-2d087374" `
+        -IntegrityProfile $IntegrityProfile `
         -LogFile (Join-Path $hostDir "godot.log") `
         -Resolution $Resolution -Windowed -McpPort $HostMcpPort `
         -SkipReadyCheck -PassThru
@@ -1190,12 +1246,12 @@ function Start-OpenNovaJoinerExact {
             "--windowed", "--resolution", $Resolution,
             "--log-file", (Join-Path $joinerDir "godot.log")
         ) `
-        -GameArguments @(
+        -GameArguments (@(
             "--lan-join", "127.0.0.1:$Port",
-            "--callsign", $JoinerCallsign,
-            "--integrity-profile", "retail-revx02-024f56f2-2d087374",
+            "--callsign", $JoinerCallsign
+        ) + $(if ($IntegrityProfile) { @("--integrity-profile", $IntegrityProfile) } else { @() }) + @(
             "--resource-dir", $ClientDir, "/exp", $Expansion
-        ) `
+        )) `
         -McpPort $JoinerMcpPort
     if (-not $script:OpenNovaJoiner) { throw "OpenNova joiner launcher returned no process" }
     Register-OpenNovaLaunchProof -Role joiner -Process $script:OpenNovaJoiner
@@ -1362,11 +1418,16 @@ try {
                 capture = $true
                 windowed = $true
                 allow_many = $true
+                stock_observer = $StockObserver
                 wait_timeout_ms = 240000
             }
             $pair = Get-StructuredResult $pairResult
             $script:OwnedRetailRuns.Add([string] $pair.host.run_id)
             $script:OwnedRetailRuns.Add([string] $pair.joiner.run_id)
+            Assert-RetailStock -Tool "onhook_run_lan_pair host" `
+                -Reported $pair.host.instance.stock_observer
+            Assert-RetailStock -Tool "onhook_run_lan_pair joiner" `
+                -Reported $pair.joiner.instance.stock_observer
             Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
             Bind-EffectiveRetailConfig -Role client -Source (Join-Path $ClientDir "onhook.cfg")
             $hostStatus = Wait-RetailRunForPeer -OwnedRunId ([string] $pair.host.run_id)
@@ -1479,10 +1540,12 @@ try {
                 capture = $true
                 windowed = $true
                 allow_many = $true
+                stock_observer = $StockObserver
                 wait_timeout_ms = 240000
             }
             $retailHost = Get-StructuredResult $hostResult
             $script:OwnedRetailRuns.Add([string] $retailHost.run_id)
+            Assert-OnHookRoleLaunch -Tool "onhook_host_lan" -Result $retailHost
             Bind-EffectiveRetailConfig -Role server -Source (Join-Path $ServerDir "onhook.cfg")
             $script:EvidenceCapture = [string] $retailHost.capture_path
             $script:EvidencePerspective = "retail-host"
@@ -1546,6 +1609,8 @@ try {
                 capture = $true
                 windowed = $true
                 allow_many = $true
+                stock_observer = $StockObserver
+                readiness = $(if ($ReadinessMode -eq "in_match") { "in_match" } else { "peer" })
                 wait_timeout_ms = 240000
             })
             Assert-OnHookRoleLaunch -Tool "onhook_join_lan" -Result $retailJoinLaunch
@@ -1554,11 +1619,13 @@ try {
             $script:RetailJoinerProcess = $script:RetailProcess
             $clientCfg = Join-Path $ClientDir "onhook.cfg"
             $cfgText = Get-Content -LiteralPath $clientCfg -Raw
+            # The managed keys onhook_join_lan renders for this case (the
+            # expansion travels as its launch argument, not in the cfg).
             foreach ($expected in @(
                 "LanJoinAddress 127.0.0.1",
                 "LanJoinPort $Port",
                 "LanJoinCallsign $JoinerCallsign",
-                "OpenNovaExpansion $Expansion"
+                "StockObserver $(if ($StockObserver) { 1 } else { 0 })"
             )) {
                 if ($cfgText -notmatch [regex]::Escape($expected)) {
                     throw "CLIENT cfg is not pinned to the current matrix case: missing '$expected'"
@@ -1915,7 +1982,10 @@ $summary = [pscustomobject]@{
     steady_seconds = $SteadySeconds
     steady_started_utc = $script:SteadyStartedUtc
     steady_completed_utc = $script:SteadyCompletedUtc
-    integrity_profile = "retail-revx02-024f56f2-2d087374"
+    integrity_profile = $IntegrityProfile
+    retail_exe_sha256 = $RetailServerExeSha256
+    retail_stock_observer = [bool] $StockObserver
+    onhook_mcp_sha256 = (Get-FileHash -LiteralPath $McpExe -Algorithm SHA256).Hash.ToLowerInvariant()
     run_id = $RunId
     suite_id = $SuiteId
     corpus_fingerprint = $CorpusFingerprint

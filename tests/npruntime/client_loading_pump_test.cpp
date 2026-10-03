@@ -410,7 +410,7 @@ bool drive_to_an_early_in_match_release(Harness &h, uint8_t period) {
 	batch.entity_count = 1;
 	OrganicSpawnRecord self;
 	self.slot_id = 0x00C6;
-	self.has_body = true;
+	self.def_type = 3; // ItemDefType person
 	self.item_type_id = 0x14B9;
 	self.owner_connection_id = 4; // the 0x82's MI
 	self.minimap_flags = 0x100;

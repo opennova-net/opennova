@@ -127,7 +127,7 @@ void ClientReplicaPipeline::apply_organic_spawn(const std::vector<uint8_t> &body
 		const bool type_changed = existing != nullptr &&
 				existing->type_id != rec.item_type_id;
 		const uint32_t next_spawn_revision = begin_entity_lifetime(rec.slot_id);
-		if (!rec.has_body) {
+		if (!rec.has_body()) {
 			const std::size_t before = state_.entities.size();
 			state_.entities.erase(
 					std::remove_if(state_.entities.begin(), state_.entities.end(),

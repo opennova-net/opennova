@@ -99,6 +99,11 @@ public:
     bool has_mounted_archive() const;
     // Whether the current session allows this exact loose query to win.
     bool prefers_loose_file(const std::string &name) const;
+    // Whether a loose-first search under `policy` finds this exact query as a loose
+    // file: the session's answer (prefers_loose_file) by default, the loose file's
+    // existence under ForceLooseFirst, never under ForceArchiveOnly. The loaders that
+    // let a loose file beat a .dds sibling ask it with the caller's policy.
+    bool loose_first_hit(const std::string &name, VfsLookupPolicy policy) const;
 
     // Choose how read_file keys SCR payloads. Pass a VfsScrPolicy / gameprofile ScrPolicy value
     // (they share ordinals). Defaults to version-detect; persists across mounts. The game-aware

@@ -172,8 +172,10 @@ bool TerrainTileCacheDevice::rebuild(
 			{uint8_t{0}, uint8_t{1}, uint8_t{2}, uint8_t{4}}) {
 		const std::string_view name =
 				opennova::terrain::terrain_scorch_texture_name(texture_index);
+		// The scorch set loads through the stage loader (Terrain_LoadScorchTextures).
 		const Ref<Texture2D> texture = p_data->load_source_texture(
-				String::utf8(name.data(), static_cast<int>(name.size())));
+				String::utf8(name.data(), static_cast<int>(name.size())),
+				opennova::renderer::TextureLoader::Stage);
 		opennova::terrain::Rgba8Image base;
 		if (!texture_to_rgba8(texture, base)) {
 			scorch_ready = false;

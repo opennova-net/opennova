@@ -1273,7 +1273,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 				spawn.item_type_id = rec.item_type_id;
 				spawn.anim_slot = rec.anim_slot;
 				spawn.net_id = rec.net_id;
-				apply_self_spawn(rec.slot_id, rec.has_body, rec.owner_connection_id,
+				apply_self_spawn(rec.slot_id, rec.has_body(), rec.owner_connection_id,
 						rec.minimap_flags, spawn, out);
 			}
 			out.inbound_world.emplace_back(m.tag, m.payload);
