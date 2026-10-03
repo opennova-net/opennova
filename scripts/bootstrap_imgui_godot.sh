@@ -37,6 +37,18 @@ sha256_of() {
   fi
 }
 
+version_line() {
+  echo "imgui-godot addon $1 at godot/addons/imgui-godot (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2), imgui: $(tr -d '[:space:]' < "$dst/include/imgui-version.txt"))"
+}
+
+# The pinned zip installed here last time: skip the re-extract and re-copy,
+# whose fresh file times send the Godot editor rescanning the addon.
+stamp="$cache_dir/imgui-godot.installed"
+if [[ -f "$dst/plugin.cfg" && "$(cat "$stamp" 2>/dev/null)" == "$IMGUI_GODOT_SHA256" ]]; then
+  version_line "up to date"
+  exit 0
+fi
+
 mkdir -p "$cache_dir"
 if [[ ! -f "$zip_path" || "$(sha256_of "$zip_path")" != "$IMGUI_GODOT_SHA256" ]]; then
   echo "Downloading $IMGUI_GODOT_URL"
@@ -66,5 +78,6 @@ rm -rf "$dst"
 mkdir -p "$dst"
 cp -r "$src/." "$dst/"
 rm -rf "$extract_dir"
+echo "$IMGUI_GODOT_SHA256" > "$stamp"
 
-echo "imgui-godot addon installed at godot/addons/imgui-godot (version: $(grep '^version=' "$dst/plugin.cfg" | cut -d'"' -f2), imgui: $(tr -d '[:space:]' < "$dst/include/imgui-version.txt"))"
+version_line installed
