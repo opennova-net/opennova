@@ -31,14 +31,23 @@ recorded with it.
   code-identical to the IDB image; ADR 0050 decision 2). Keep it pristine: the
   SERVER and CLIENT copies below are hash-verified copies of it, and onHook is
   deployed only into the copies.
-- Use two distinct retail copies for SERVER and CLIENT.
-- Use the complete patched-Bink deployment, including the original Bink DLL
-  under the forwarding filename expected by that proxy. For revx02, retain
-  `PatchesEnabled 1`: the observed expansion has 2,455 item definitions, above
-  retail's unpatched 2,048-item limit. Verify the hook log reports the expanded
-  item table and allocation. Disabling this group reproduced a host startup
-  access violation before any client connected. Record the effective hook
-  configuration with the run; optional transport patches are separate switches.
+- Use two distinct retail copies for SERVER and CLIENT; the runner refuses
+  copies whose `Jointops.exe` hashes differ and records the hash
+  (`retail_exe_sha256`).
+- Deploy the onHook debug proxy (bridge protocol 1.8 or later) into both
+  copies: its `binkw32.dll` with the original Bink DLL renamed to
+  `binkw32_.dll`, the forwarding filename the proxy expects, and pass the
+  matching `onhook-mcp.exe` as `-OnHookMcpPath`.
+- Retail runs stock. Every retail role loads with onHook's `StockObserver`:
+  every behavior-changing hook and patch off, only the instruments (bridge,
+  LAN automation, passive capture, read-only witnesses) installed. The loaded
+  hook must confirm it (`stock_observer`), and the runner snapshots each role's
+  rendered `onhook.cfg` with its SHA-256 (`effective_retail_configs`).
+  `-AllowModifiedRetail` drops StockObserver for a diagnostic run only. OpenNova
+  never ports onHook patches; the hook only observes and drives retail. A
+  modded expansion such as revx02 (2,455 item definitions, above retail's
+  unpatched 2,048) needs onHook's capacity patches and is therefore never a
+  stock reference.
 - Keep retail files, captures, hook logs, screenshots, account data, machine
   paths, adapter addresses, and DLLs machine-local and gitignored.
 - Record the repository commit, onHook commit, deployed proxy SHA-256, Godot
@@ -65,13 +74,14 @@ pwsh -File scripts/net/run_parity_topology.ps1 `
     -Mission 01TR.bms `
     -Port 32786 `
     -GameType 65568 `
-    -HostSessionName 'Untitled ' `
+    -HostSessionName 'Untitled' `
     -ReadinessMode in_match `
     -RunId 01tr-rr-001 `
     -MissionArtifactPath C:\retail\corpus\missions\01TR.bms `
     -MissionSha256 ((Get-FileHash C:\retail\corpus\missions\01TR.bms -Algorithm SHA256).Hash.ToLowerInvariant()) `
-    -RetailServerRoot C:\retail\SERVER `
-    -RetailClientRoot C:\retail\CLIENT `
+    -RetailServerRoot C:\retail\jox01\SERVER `
+    -RetailClientRoot C:\retail\jox01\CLIENT `
+    -Expansion jox01 `
     -OnHookMcpPath C:\opennova-int\onhook\onhook-mcp.exe `
     -GodotLauncher C:\Godot\Godot_v4.6.1-stable_win64_console.exe `
     -HostMcpPort 8975 -JoinerMcpPort 8976
@@ -80,7 +90,12 @@ pwsh -File scripts/net/run_parity_topology.ps1 `
 The mission artifact must be the exact BMS used by the installed expansion.
 Place matching extracted `items.def` one directory above its `missions/`
 directory; the packet readiness gate uses both files to validate mission
-identity and decode entity types.
+identity and decode entity types. Extract both with the expansion layered,
+e.g. `opennova-extract --game <install> /exp jox01 --out <corpus>\missions 01TR.bms`
+and `... --out <corpus> items.def` (from git-bash, set `MSYS_NO_PATHCONV=1` or
+`/exp` is rewritten as a path and the base `items.def` comes out).
+`HostSessionName` must equal the SERVER copy's `game.cfg` `game_name` exactly,
+the name a retail host advertises (JO:CA ships `Untitled`).
 
 Run the command once for each of `RR`, `RO`, `OR`, and `OO`, changing `RunId`
 for every cell while holding all other case inputs fixed. Ports supported by
@@ -103,11 +118,20 @@ in the acceptance record.
 
 Retail roles are launched only through onhook-mcp. `RR`/`RO` in `deploy_hold`
 readiness and the `OR` retail joiner call the single-role `onhook_host_lan` /
-`onhook_join_lan` tools and stop with a named `UPSTREAM BLOCKER` error until
-those tools return `pid`/`instance_id`/`run_id`/`capture_path` like
-`onhook_run_lan_pair` and render `onhook.cfg` from their arguments (the
-opennova-int items in `TODO.md`); the `RR` in-match cell rides
-`onhook_run_lan_pair` today.
+`onhook_join_lan` tools; the `RR` in-match cell rides `onhook_run_lan_pair`.
+Each returns `pid`/`instance_id`/`run_id`/`capture_path`/`hook_config_path`
+and `stock_observer`, and a launch missing any of them stops the cell. A
+`deploy_hold` retail joiner is launched with `readiness: "peer"`: an A&S
+joiner holds on the deploy screen with no local Person, which the in-match
+readiness waits for.
+
+The OpenNova roles answer and validate retail's anti-cheat CRC challenges
+only from an explicit `-IntegrityProfile` reproduced from the same retail
+corpus (D-NET-181). The revx02 corpus has `retail-revx02-024f56f2-2d087374`;
+the jox01 reference has none yet, so its default is empty: our host stays
+silent on CRC replies and our joiner does not answer a retail host's
+challenges. Passing the revx02 profile against jox01 makes our host punt a
+retail joiner on the first mismatched reply.
 
 For a cold retail-to-retail session, the lower-level call is
 `onhook_run_lan_pair`, a method of the external onHook executable and invoked

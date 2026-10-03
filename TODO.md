@@ -32,15 +32,12 @@ health. Divergences from the original engine belong in
       RunId prefix (`.agents/retail-lan-parity.md`), gate each on the wire-ready witness,
       and re-express the retired verifier's RO/OR/OO-vs-RR
       comparison (both directions, packet grouping, 0x0A/0x0C state) as a ctest or
-      PowerShell verifier. Upstream blockers still open in opennova-int (the runner stops the
-      `deploy_hold` RR/RO cells and the OR retail joiner with a named UPSTREAM BLOCKER
-      error until they land): the single-role `onhook_host_lan`/`onhook_join_lan` MCP
-      tools pass role config via child env and never render `onhook.cfg` (make
-      `LaunchLanRole` render it like the `onhook_run_lan_pair` half), and they must
-      return `pid`/`instance_id`/`run_id`/`capture_path` like `onhook_run_lan_pair`;
-      onhook-mcp advertises protocol version `2026-07-28`, which Claude Code rejects
-      (negotiate `2025-06-18`/`2025-03-26`); optionally an `onhook_exercise_input`
-      tool would retire `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
+      PowerShell verifier (ADR 0050 R4). Every cell runs on the pinned JO:CA reference
+      (`jox01`) with retail stock under onHook's StockObserver (opennova-int, bridge
+      protocol 1.8+). Open: a jox01 integrity-challenge profile (D-NET-181; with none,
+      our host stays silent on CRC replies and our joiner does not answer a retail
+      host's challenges), and optionally an `onhook_exercise_input` tool to retire
+      `exercise_retail_input.ps1`. Baseline: the 2026-08-05 suites captured 24/24 cells
       cleanly, wire-ready + the since-retired `diff_vs_golden.ps1` (ca1cef465) GREEN.
 - [ ] Terrain native `[orig]` citation pass: sweep the remaining uncited chains —
       every port under `engine/runtime/terrain` now carries an anchor (the row-stripe and
