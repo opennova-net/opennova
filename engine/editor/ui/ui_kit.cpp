@@ -239,6 +239,17 @@ void severity_marker(DiagnosticSeverity severity) {
 	draw_mark(severity, ImVec2(at.x + size * 0.5f, at.y + size * 0.5f));
 }
 
+bool severity_mark_on_item(DiagnosticSeverity severity) {
+	if (!ImGui::IsItemVisible()) return false;
+	const ImVec2 min = ImGui::GetItemRectMin(), max = ImGui::GetItemRectMax();
+	const float size = max.y - min.y;
+	// The item's right end, or the window's where the item runs past what it shows.
+	const float right = std::min(max.x, ImGui::GetCurrentWindow()->InnerClipRect.Max.x);
+	const ImVec2 centre(right - size * 0.5f, (min.y + max.y) * 0.5f);
+	draw_mark(severity, centre);
+	return ImGui::IsMouseHoveringRect(ImVec2(centre.x - size * 0.5f, min.y), ImVec2(centre.x + size * 0.5f, max.y));
+}
+
 void severity_count(DiagnosticSeverity severity, size_t count, float height) {
 	ImGui::BeginGroup();
 	const ImVec2 centre = mark_box(height);

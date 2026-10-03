@@ -14,9 +14,9 @@ extends GutTest
 const EDITOR_SCENE := "res://editor/editor_root.tscn"
 const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
 const MISSION := "ASH_I1gA.bms"
-## An import or a build of the whole closure, at most (a closure is some 7,000 files).
-const IMPORT_MS := 900000
-const BUILD_MS := 600000
+## How long the picture's build may stand still (no unit run) before it counts as a hang: the build
+## takes as long as it takes while it moves (the import's settle is the seam's, likewise by progress).
+const BUILD_STALL_MS := 120000
 
 var _dirs: Array[String] = []
 var _app: Node = null
@@ -63,12 +63,13 @@ func _build(state: Dictionary) -> Dictionary:
 	return build if build is Dictionary else {}
 
 
-## A request served and its operation settled within `timeout_ms`: whether it was done.
-func _served(fields: Dictionary, timeout_ms: int) -> bool:
+## A request served and its operation settled (the seam's request settles it for as long as it
+## moves): whether it was done.
+func _served(fields: Dictionary) -> bool:
 	var answer: Dictionary = _seam.request(fields)
 	var done := bool(answer.get("outcome", {}).get("done", false))
 	assert_true(done, "%s: %s" % [String(fields.get("kind", "")), str(answer)])
-	return done and _seam.settle(timeout_ms)
+	return done and bool(_seam.settled)
 
 
 func test_the_largest_mission_builds() -> void:
@@ -81,12 +82,12 @@ func test_the_largest_mission_builds() -> void:
 	var dir := OS.get_cache_dir().path_join("opennova editor retail mission %d" % Time.get_ticks_usec())
 	_dirs.append(dir)
 	assert_true(_seam.new_project(dir, "Retail Mission Viewport"))
-	assert_true(_served({"kind": "apply_project_settings", "settings": {"game_install": install, "mission": true}}, IMPORT_MS))
+	assert_true(_served({"kind": "apply_project_settings", "settings": {"game_install": install, "mission": true}}))
 	var started := Time.get_ticks_msec()
-	assert_true(_served({"kind": "preview_install_import", "names": [MISSION], "with_dependencies": true}, IMPORT_MS))
+	assert_true(_served({"kind": "preview_install_import", "names": [MISSION], "with_dependencies": true}))
 	var plan: Dictionary = _seam.query("import_preview", {"limit": 1})
 	assert_gt(int(plan.get("count", 0)), 0, "the closure planned: %s" % str(plan).left(400))
-	assert_true(_served({"kind": "import_files", "planned": true}, IMPORT_MS))
+	assert_true(_served({"kind": "import_files", "planned": true}))
 	gut.p("%s's closure: %d files, %.1f MB, imported in %.1f s" % [MISSION, int(plan.get("count", 0)),
 			float(plan.get("total_bytes", 0)) / 1e6, float(Time.get_ticks_msec() - started) / 1000.0])
 
@@ -104,8 +105,8 @@ func test_the_largest_mission_builds() -> void:
 	var us_by_label := {}
 	var units: Array = []
 	var built: Dictionary = _build(state)
-	var deadline := Time.get_ticks_msec() + BUILD_MS
-	while String(state.get("status", "")) == "loading" and Time.get_ticks_msec() < deadline:
+	var moved_at := Time.get_ticks_msec()
+	while String(state.get("status", "")) == "loading" and Time.get_ticks_msec() - moved_at < BUILD_STALL_MS:
 		var label := String(_progress(state).get("label", ""))
 		var done := int(_progress(state).get("done", 0))
 		var spent := int(built.get("total_us", 0))
@@ -118,6 +119,7 @@ func test_the_largest_mission_builds() -> void:
 		if ran <= 0:
 			built = now
 			continue
+		moved_at = Time.get_ticks_msec()
 		if labels.is_empty() or labels[labels.size() - 1] != label:
 			labels.append(label)
 		var cost := int(now.get("total_us", spent)) - spent

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>
@@ -44,12 +45,14 @@ struct ProjectView {
 	// The editor's settings (Preferences, editor_preferences.h): the recent projects, the game
 	// install the editor imports from and plays in (the open project's, else the last chosen),
 	// Play in the game install, the runtime the settings name ("" = the one packaged beside the
-	// editor), and whether a preview the windows raise plans the files the chosen ones need.
+	// editor), whether a preview the windows raise plans the files the chosen ones need, and the items
+	// most recently placed in a mission (ADR 0046 S15), most recent first.
 	std::vector<std::string> recent_projects;
 	std::string retail_directory;
 	bool play_retail = false;
 	std::string runtime_setting;
 	bool import_dependencies = true;
+	std::vector<int64_t> recent_items;
 };
 
 } // namespace opennova::editor

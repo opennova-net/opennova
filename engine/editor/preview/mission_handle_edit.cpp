@@ -5,6 +5,7 @@
 #include <cstring>
 #include <variant>
 
+#include <base/io/bam.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/viewport_device.h>
@@ -149,16 +150,90 @@ bool mission_height_edits(const Document &document, const std::vector<MissionPre
 	return true;
 }
 
+bool mission_turn_centre(const std::vector<MissionPressed> &pressed, double out[2]) {
+	size_t members = 0;
+	double low[2] = { 0.0, 0.0 }, high[2] = { 0.0, 0.0 };
+	for (const MissionPressed &each : pressed) {
+		// An entity by its position, an area by its middle.
+		const double x = each.area ? (each.min[0] + each.max[0]) * 0.5 : each.x;
+		const double y = each.area ? (each.min[1] + each.max[1]) * 0.5 : each.y;
+		if (!members++) {
+			low[0] = high[0] = x;
+			low[1] = high[1] = y;
+		}
+		low[0] = std::min(low[0], x);
+		low[1] = std::min(low[1], y);
+		high[0] = std::max(high[0], x);
+		high[1] = std::max(high[1], y);
+	}
+	if (members < 2) return false;
+	out[0] = (low[0] + high[0]) * 0.5;
+	out[1] = (low[1] + high[1]) * 0.5;
+	return true;
+}
+
 bool mission_yaw_edits(const Document &document, const std::vector<MissionPressed> &pressed, size_t grabbed,
-		double delta, float snap, uint64_t gesture, std::vector<Edit> &out) {
+		double delta, float snap, uint64_t gesture, std::vector<Edit> &out, bool stick, const ViewportDevice *device) {
 	out.clear();
 	if (grabbed >= pressed.size() || pressed[grabbed].area) return false;
 	// The grabbed one's heading snapped (whole degrees when free); the others turn as far.
 	const double turned = snapped(double(pressed[grabbed].yaw) + delta, snap >= 1.0f ? snap : 1.0f);
 	const double by = turned - double(pressed[grabbed].yaw);
-	for (const MissionPressed &each : pressed)
-		if (!each.area) set_yaw(document, each.record, wrapped(double(each.yaw) + by), gesture, out);
+	// Several (entities and areas) turn about their group's centre: the middle of their box.
+	double centre[2] = { 0.0, 0.0 };
+	const bool group = mission_turn_centre(pressed, centre);
+	const double cx = centre[0], cy = centre[1];
+	// A compass heading turns clockwise: (east, north) by `by` degrees is (e cos + n sin, n cos - e sin).
+	const double radians = by * io::kRadiansPerDegree, c = std::cos(radians), s = std::sin(radians);
+	// An area's box keeps the file's axes: an odd number of quarter turns swaps its extents.
+	const long quarters = std::lround(by / 90.0);
+	const bool swaps = std::fabs(by - double(quarters) * 90.0) < 1e-9 && quarters % 2 != 0;
+	for (const MissionPressed &each : pressed) {
+		if (each.area) {
+			if (!group) continue;
+			// Its middle carried round the centre, its extents as they stand (swapped by a quarter turn).
+			const double mx = (each.min[0] + each.max[0]) * 0.5, my = (each.min[1] + each.max[1]) * 0.5;
+			const double half_e = (each.max[0] - each.min[0]) * 0.5, half_n = (each.max[1] - each.min[1]) * 0.5;
+			const double e = mx - cx, n = my - cy;
+			const double x = cx + e * c + n * s, y = cy + n * c - e * s;
+			const double he = swaps ? half_n : half_e, hn = swaps ? half_e : half_n;
+			set_position(document, each.record, "x_min", x - he, gesture, out);
+			set_position(document, each.record, "x_max", x + he, gesture, out);
+			set_position(document, each.record, "y_min", y - hn, gesture, out);
+			set_position(document, each.record, "y_max", y + hn, gesture, out);
+			continue;
+		}
+		set_yaw(document, each.record, wrapped(double(each.yaw) + by), gesture, out);
+		if (!group) continue;
+		const double e = each.x - cx, n = each.y - cy;
+		const double x = cx + e * c + n * s, y = cy + n * c - e * s;
+		set_position(document, each.record, "x", x, gesture, out);
+		set_position(document, each.record, "y", y, gesture, out);
+		double was = 0.0, now = 0.0;
+		if (stick && device && device->ground_at(each.x, each.y, was) && device->ground_at(x, y, now))
+			set_position(document, each.record, "z", now + (each.z - was), gesture, out);
+		else
+			set_position(document, each.record, "z", each.z, gesture, out);
+	}
 	return true;
+}
+
+void mission_restore_edits(const Document &document, const std::vector<MissionPressed> &pressed, uint64_t gesture,
+		std::vector<Edit> &out) {
+	out.clear();
+	for (const MissionPressed &each : pressed) {
+		if (each.area) {
+			set_position(document, each.record, "x_min", each.min[0], gesture, out);
+			set_position(document, each.record, "x_max", each.max[0], gesture, out);
+			set_position(document, each.record, "y_min", each.min[1], gesture, out);
+			set_position(document, each.record, "y_max", each.max[1], gesture, out);
+			continue;
+		}
+		set_position(document, each.record, "x", each.x, gesture, out);
+		set_position(document, each.record, "y", each.y, gesture, out);
+		set_position(document, each.record, "z", each.z, gesture, out);
+		set_yaw(document, each.record, wrapped(double(each.yaw)), gesture, out);
+	}
 }
 
 bool mission_area_edge_edits(const Document &document, const MissionPressed &area, MissionHandle edge, double to,

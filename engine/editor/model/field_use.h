@@ -20,6 +20,10 @@ struct FieldUse {
 	// The reference it makes given the record's other fields, and the symbol it defines.
 	ReferenceKind reference = ReferenceKind::None;
 	ReferenceKind defines = ReferenceKind::None;
+	// What the field is picked by name as where its value names no record because the game resolves
+	// it itself (a mission's SSN that is the player's: no reference, so no badge, yet the picker lists
+	// the entities by name, ADR 0046 S15), in `scope`; None: `reference`.
+	ReferenceKind picks = ReferenceKind::None;
 	// What a value that is one %NAME% stands for where the field makes no reference of its own: a
 	// menu's text as the game reads it (ReferenceKind::MenuText: any text of a menu, the game
 	// expanding its whole text first), which the stylesheet variable's value replaces as it is;

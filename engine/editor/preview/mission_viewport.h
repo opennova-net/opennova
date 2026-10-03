@@ -35,6 +35,11 @@ inline constexpr float kMissionFrameDistance = 400.0f;
 inline constexpr float kMissionFramePitch = 0.610865f;
 inline constexpr float kMissionFrameRadius = 10.0f;
 inline constexpr float kMissionTurnSnap = 15.0f;
+// A framing of everything on a mission whose marks spread past kMissionFrameSpread metres from their
+// middle looks at its densest place instead: the marks within a cell of the kMissionFrameCell-metre
+// cell that holds the most (S15).
+inline constexpr float kMissionFrameSpread = 1500.0f;
+inline constexpr float kMissionFrameCell = 400.0f;
 
 // The change a SetViewport makes to set a mission viewport's camera to `camera` (its target, heading,
 // pitch and distance, in the mission's terms: mission_camera.h): what a look, a fly, a pan, an orbit,
@@ -116,15 +121,32 @@ public:
 	// over the target, north up): each a SetViewport of the camera. `ground`: each named entity (else
 	// each selected one) set down on the device's ground under it, its z the ground's less its model's
 	// anchor height (preview/mission_items), one batch; refused with no ground under one.
+	// `select_same` (S15): one SelectRecord of every entity whose item is a named (else a selected)
+	// entity's, the primary kept where it is among them.
 	bool command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
 			CanvasRequests &out, std::string &error) const override;
+	// The commands that take more than their records (S15): `duplicate {ids?, by?: [east, north]}`
+	// (each named, else each selected, entity and area copied and moved by `by` metres, with stick its
+	// height over the ground kept: one batch, preview/mission_place), `paste {at: [x, y]}` (the
+	// clipboard's copied entities and areas pasted with their middle where the point meets the
+	// ground: one batch of one Paste whose payload is moved there); the rest as command() plans them.
+	bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const override;
 	// A drop (a model file, or an item by its id: the Place tool's): the item's entity added to the
 	// pool its TYPE puts it in where the point meets the ground (the device's terrain, its model's
-	// ground anchor baked in; else the plane through the camera's target), one batch (an Add, then
-	// its x, y and z through batch_made). Refused: a file that is no model, a model no item draws or
-	// several do (naming them), an item no catalog of the project defines, a point over no ground.
+	// ground anchor baked in; else the plane through the camera's target), facing the way the camera
+	// looks (S15: its yaw the camera's heading), one batch (an Add, then its x, y, z and yaw through
+	// batch_made). Refused: a file that is no model, a model no item draws or several do (naming
+	// them), an item no catalog of the project defines, a point over no ground. S15: a path's next
+	// stop (`reference` "path", `name` its number: a marker of the item its stops use added at the
+	// point and a stop naming it, preview/mission_place) and an area (`reference` "area", a box: an
+	// area trigger over the ground the box's corners meet).
 	bool drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
 			std::string &error) const override;
+	// The Place tool's palette (preview/mission_palette) over the project's graph, the recently placed
+	// (the preferences') first.
+	io::JsonValue palette_json(
+			const SessionView &view, const std::string &text, const JsonPage &page, std::string &error) const override;
 	io::JsonValue options_json() const override;
 	io::JsonValue camera_json() const override;
 	io::JsonValue body_json(const ViewportInput &input) const override;
@@ -145,6 +167,11 @@ private:
 	const Document *planned_(const ViewportContext &context, std::string &error) const;
 	// The mark of the record whose row is `id` among `marks` (made from the scene now; -1: none).
 	int mark_of_(const std::vector<MissionMark> &marks, NodeId id) const;
+	// Where the picture point (x, y) meets the ground for a placing gesture (the device's terrain, else
+	// the plane through the camera's target, that only as far as a pick reaches from the target: near
+	// the horizon the plane is tens of kilometres out); false past it, or past what the file's
+	// positions hold.
+	bool ground_of_(const ViewportContext &context, float x, float y, double out[3], bool *on_terrain = nullptr) const;
 	// The records a drag of `record` by `handle` takes with it, as pressed: the selected entities (and
 	// areas, for a move) when it is selected, itself alone when not; `grabbed` its place among them.
 	std::vector<MissionPressed> taken_(const ViewportContext &context, const Document &document,

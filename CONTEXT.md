@@ -562,6 +562,36 @@ A `.mis`: the original mission editor's interchange text (`dfx2med.exe`), which 
 Its own kind, packed nowhere; never a mission.
 _Avoid_: mission (the `.bms` the game loads), mission file
 
+**Display name**:
+What a value a document holds reads as to a modder where it stands for something with a name (ADR
+0046 S15): an item id by its catalog's name, an SSN by its entity's item and SSN ("Ranger #12"), a
+zone, a path with its stops, an event by its sentence, a text key by its string; one naming nothing
+says so in words (it is **dangling**). The raw value stays beside it, secondary (muted, in a tooltip,
+on the wire). One service makes it for every window and the wire
+(`engine/editor/graph/display_names.h`; a type's own words in its `record_label` and `value_label`
+hooks, the mission's `documents/mission_labels.h`), reading the project's names through a **name
+source** (the asset graph's). A record's display name is its **title**; its **name** stays what the
+graph keys it by (an entity's SSN). Where a column cannot hold the title, its **brief** words show
+what tells the record apart first (an event's first trigger's subject and verb, an entity's SSN).
+_Avoid_: label (a field's own name), caption, alias
+
+**Game's own data**:
+A project file that is byte for byte the game install's copy as the game is served it, what an import
+of the install copies (ADR 0046 S15, `engine/editor/session/original_files.h`): its findings are the
+original's too, so Problems shows them apart, under "In the game's own data (also in the original)",
+and counts the modder's findings first. A file the modder changes leaves it.
+_Avoid_: stock files, vanilla, unmodified (as Problems words)
+
+**Event sentence**:
+A mission's event in words, as the game runs it (ADR 0046 S15): "When <trigger>, and/or <trigger>
+..., then <action>; <action>.", the triggers folded left to right with the joins their flags make
+(bracketed where the join changes), a negated one in its type's negative words, the start, end and
+repeat flags and the two times in seconds, each parameter by its display name
+(`engine/editor/documents/mission_sentence.h`). An event's title; a trigger's and an action's are
+their part of it. Its type's name in the Add trigger and Add action pickers is its **title**, under
+its **group**.
+_Avoid_: description, summary, event label
+
 **Base layer**:
 What a read-only dependency mount (a game install a project builds on) gives the project's
 asset graph: its files and the names they define, read once and never edited. A lookup by name
@@ -688,7 +718,8 @@ One document's picture as the game would draw it, of one kind (a menu's screen, 
 its script device, a mission's 3D view), kept by the session while the document is
 open: one per document and kind. Its role is Preview (shown by the Preview window while its document
 is the last of its kind made active) or Main (the Document tab's view: a text's script device, or a
-picture with the outline and the Inspector beside it: a mission's);
+picture with the outline and the Inspector beside it: a mission's, for which the Preview window steps
+aside while that document is active and it has nothing to show, so the picture has the centre);
 a document type is shown by one Main kind at most and fed by one Preview kind at most (a mission has
 its 3D view alone; its top-down look is a camera command of that view, `top`, not a map). Its state (the size its device draws at where no
 canvas sizes the picture, the kind's options and camera) changes by a SetViewport request, every
@@ -735,14 +766,26 @@ and shown where it stands when the removal is undone; a moved one is moved in pl
 places the mission again.
 _Avoid_: spawned (what the game does at run time), dynamic, unplaced
 
+**Palette**:
+The mission viewport's list of what its Place tool places: every item the project's catalogs define,
+by its name, in a group of what items.def says it is (People, Vehicles, Objects, Buildings,
+Decoration and foliage, Markers, Effects), each with the pool a placed one lands in and the model it
+draws, searchable, the recently placed first. One is picked, then each click on the picture places
+one of it; or one is dragged onto the picture. The viewport's tool (Select, Place, Path stops, Area),
+its picked item and its picked path are its options, set by its toolbar and by the wire alike.
+_Avoid_: item list, catalog (the items.def file), library, browser (NovaWorld's)
+
 **Script device**:
 A text document's Main view (a script, a music script, a credits file, a shader, a configuration):
 a Godot code editor placed over its Document tab, which owns the pointer and the keys there and
 shows the document's text as it stands (the text is the document's: an undo, a reload or another
 client's edit comes back into the control). What is typed goes to the document as spans replaced,
 each run of typing one gesture and one undo step, Undo and Redo the editor's and never the
-control's; the findings are marks in its gutter, their messages on hover; a script's words the WAC
-compiler knows (its keywords, commands and operands) are coloured, nothing else; a Go to or a
+control's; the findings are marks in its gutter, their messages on hover and the worst one's first
+sentence after its line's text; a script's words the WAC compiler knows (its keywords, commands and
+operands) are coloured, nothing else; as a script is typed it offers what may complete the word (the
+commands and keywords, or the names the command's parameter takes), says what a word is on hover, and
+a Ctrl+click goes where the word is defined (ADR 0046 S15, `session/script_assist`); a Go to or a
 Problems row selects its place. A file its text form cannot carry shows read only, and so does every
 text while an operation holds the documents. Where no window draws it (headless) or something is
 drawn over the tab (a menu, a dialog), the document's lines show instead, read only.
