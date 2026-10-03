@@ -371,8 +371,9 @@ void MissionViewportView::Tools::numbers(Workspace &workspace, const MissionView
 	const float unit = ImGui::GetFontSize();
 	ui_kit::WrapRow row;
 	std::vector<Edit> batch;
+	// Wide enough for the widest a mission's span reads (a map is some kilometres across) with its unit.
+	const float width = std::max(unit * 4.5f, ImGui::CalcTextSize("-00000.00 m").x + ImGui::GetStyle().FramePadding.x * 2.0f);
 	const auto number = [&](const char *label, const char *id, double value, const char *format, const char *tip) {
-		const float width = unit * 4.5f;
 		row.next(ui_kit::field_width(width, label));
 		ImGui::SetNextItemWidth(width);
 		ImGui::BeginDisabled(!edits);

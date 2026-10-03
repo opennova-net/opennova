@@ -232,7 +232,8 @@ OverlayList mission_overlay_shapes(const MissionOverlayInput &in) {
 			label.x = at.x;
 			label.y = at.y;
 			label.depth = mark.depth;
-			label.always = index == in.hover || is_selected(index);
+			label.always = index == in.hover || index == in.primary;
+			label.first = !label.always && is_selected(index);
 			labels.push_back(label);
 			label_marks.push_back(index);
 		}

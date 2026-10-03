@@ -25,9 +25,10 @@ bool overlaps(const Box &a, const Box &b) {
 std::vector<size_t> mission_label_picks(const std::vector<MissionLabelCandidate> &candidates) {
 	std::vector<size_t> order(candidates.size());
 	std::iota(order.begin(), order.end(), size_t(0));
-	// The ones that always show first, then nearest first.
+	// The ones that always show first, then the other selected, each nearest first.
 	std::stable_sort(order.begin(), order.end(), [&](size_t a, size_t b) {
 		if (candidates[a].always != candidates[b].always) return candidates[a].always;
+		if (candidates[a].first != candidates[b].first) return candidates[a].first;
 		return candidates[a].depth < candidates[b].depth;
 	});
 	std::vector<size_t> out;
