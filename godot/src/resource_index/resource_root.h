@@ -77,8 +77,14 @@ private:
 	// `discovery` selects the witnessed retail boot table or an explicit archive scan.
 	Error mount_with_mode(const String &path, const String &expansion, opennova::VfsMountMode mode,
 	                      const String &game_code, opennova::VfsArchiveDiscovery discovery);
+	// mount_runtime's mount itself (the archives, the expansion that took).
+	Error mount_runtime_archives_(const String &path, const String &expansion,
+	                              bool allow_loose_override, const String &game_code);
 
 	String expansion_;
+	// The expansion's text-override table the last mount_runtime left (see
+	// get_expansion_override_table).
+	PackedByteArray expansion_override_table_;
 
 protected:
 	static void _bind_methods();
@@ -121,6 +127,14 @@ public:
 	// to pick the right entry point: re-mounting a runtime root through set_root_dir would
 	// silently drop its archives and leave the session on loose files.
 	bool is_runtime_mount() const;
+	// The expansion's text-override table the last mount_runtime() left: the loose
+	// expansion/<n>/<n>.bin's bytes, or empty (no expansion, no loose file, a loose
+	// mount, a failed mount). The rule is the engine's vfs_expansion_override_table: a
+	// mount over a root that is not runtime-mounted is the boot's load (no archive
+	// open), a mount over a runtime-mounted one the in-place switch's (the old archives
+	// open: the loose file only under `/d`). Every mount_runtime() and set_root_dir()
+	// emits `mounted` once it is done, so a holder re-reads this.
+	PackedByteArray get_expansion_override_table() const;
 
 	// Expansion names discoverable under `<path>/expansion/` (each subdir with a matching
 	// <name>.pff). Independent of the currently mounted root, so the UI can list before mounting.
