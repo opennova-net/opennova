@@ -21,6 +21,9 @@ struct MissionHintInput {
 	std::string hovered; // the mark under the pointer, by its title ("" none)
 	bool hovered_area = false; // it is an area
 	bool hovered_selected = false;
+	// A press there takes it too (its glyph, or its surface as the device draws it): a drag moves it. A
+	// mark a click takes by its sphere alone (no device to say) is selected, never dragged.
+	bool hovered_drags = true;
 	bool handle = false; // the pointer is on the primary's handle `which`
 	MissionHandle which = MissionHandle::Move;
 	bool dragging = false; // a drag is under way, of `which` (a marquee when !handle)
