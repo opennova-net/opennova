@@ -9,6 +9,7 @@
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_hint.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 
@@ -66,7 +67,8 @@ struct MissionGrab {
 	};
 	What what = What::None;
 	MissionHandle handle = MissionHandle::Move;
-	int pick = -1; // the mark under the press (-1 none)
+	int pick = -1; // the mark the press took (MissionPick::Press; -1 none)
+	int click = -1; // the mark a click there takes (MissionPick::Click; -1 none): what a release with no travel selects
 	CanvasJoin join = CanvasJoin::Replace;
 	// The records the drag takes, as pressed, and the grabbed one's place among them; whether the
 	// grabbed one was not selected (selected alone as the drag begins).
@@ -83,8 +85,10 @@ struct MissionGrab {
 	double ground[3] = { 0.0, 0.0, 0.0 }; // where the press met the ground (a move's, an edge's)
 	bool grounded = false;
 };
-// The front-most mark within the pick slop of the pointer (-1: none, or not hovered).
-int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in);
+// The mark under the pointer for `by` (pick_mission_mark over the frame's marks and device: a glyph within
+// the pick slop, else what the device's ray meets; with no device to say, nothing for a press and the
+// sphere for a click); -1: none, or not hovered.
+int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionPick by);
 // The primary's handle within the pick slop of the pointer (its height, its yaw, an area's edges),
 // while the mission takes edits: false for none.
 bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out);
@@ -109,6 +113,10 @@ public:
 	// What the line under the picture says now (mission_hint.h): what the tool does, what a click or a
 	// drag would do where the pointer is.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
+	// The marks' titles and the labels' last layout as the overlay keeps them (a test's measure: each
+	// title worded once and the labels laid out once while nothing they read moves).
+	const DisplayNameCache &titles() const { return titles_; }
+	const MissionLabelLayout &label_layout() const { return labels_; }
 
 	// The camera on the selected marks, else on everything (F, a double click, the toolbar's Frame).
 	void frame_selected(int width, int height, CanvasRequests &out) const;
@@ -154,8 +162,10 @@ private:
 	std::vector<NodeAddress> nudged_;
 	double nudge_east_ = 0.0, nudge_north_ = 0.0, nudge_up_ = 0.0;
 	// The marks' titles by the project's names (the labels, the hint), kept while the document and the
-	// graph stand.
+	// graph stand, and while a drag of a handle writes (the polish: it moves marks, which no title reads);
+	// the labels' last layout, laid out again only when what it read moved.
 	mutable DisplayNameCache titles_;
+	mutable MissionLabelLayout labels_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;
