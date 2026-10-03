@@ -221,8 +221,8 @@ bool members_known(const JsonValue &object, std::initializer_list<const char *> 
 // type checked.
 bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::string &error) {
 	if (!json.is_object()) { error = "\"settings\" must be an object."; return false; }
-	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "game_install", "runtime_executable",
-	                          "play_in_install"},
+	if (!members_known(json, {"serial", "title", "mission", "multiplayer", "expansion", "builds_on", "game_install",
+	                          "runtime_executable", "play_in_install"},
 	                   "settings", error)) return false;
 	ProjectSettingsChange change;
 	if (const JsonValue *serial = json.get("serial"); serial && !read_id(*serial, change.serial)) {
@@ -244,6 +244,7 @@ bool settings_from_json(const JsonValue &json, ProjectSettingsChange &out, std::
 		return true;
 	};
 	if (!text("title", change.title) || !flag("mission", change.mission) || !flag("multiplayer", change.multiplayer) ||
+	    !text("expansion", change.expansion) || !text("builds_on", change.builds_on) ||
 	    !text("game_install", change.game_install) || !text("runtime_executable", change.runtime_executable) ||
 	    !flag("play_in_install", change.play_in_install))
 		return false;
@@ -257,6 +258,8 @@ JsonValue settings_to_json(const ProjectSettingsChange &change) {
 	if (change.title) out.set("title", json_string(*change.title));
 	if (change.mission) out.set("mission", boolean(*change.mission));
 	if (change.multiplayer) out.set("multiplayer", boolean(*change.multiplayer));
+	if (change.expansion) out.set("expansion", json_string(*change.expansion));
+	if (change.builds_on) out.set("builds_on", json_string(*change.builds_on));
 	if (change.game_install) out.set("game_install", json_string(*change.game_install));
 	if (change.runtime_executable)
 		out.set("runtime_executable", json_string(*change.runtime_executable));
@@ -735,6 +738,8 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Dir: return text_of(json, token, request.dir, error);
 	case F::Title: return text_of(json, token, request.title, error);
 	case F::Game: return text_of(json, token, request.game, error);
+	case F::Expansion: return text_of(json, token, request.expansion, error);
+	case F::BuildsOn: return text_of(json, token, request.builds_on, error);
 	case F::GameInstall: return text_of(json, token, request.game_install, error);
 	case F::Path: return text_of(json, token, request.path, error);
 	case F::Locator: return text_of(json, token, request.locator, error);
@@ -855,6 +860,8 @@ bool field_to_json(
 	case F::Dir: out = json_string(request.dir); return !request.dir.empty();
 	case F::Title: out = json_string(request.title); return !request.title.empty();
 	case F::Game: out = json_string(request.game); return !request.game.empty();
+	case F::Expansion: out = json_string(request.expansion); return !request.expansion.empty();
+	case F::BuildsOn: out = json_string(request.builds_on); return !request.builds_on.empty();
 	case F::GameInstall: out = json_string(request.game_install); return !request.game_install.empty();
 	case F::Path: out = json_string(request.path); return !request.path.empty();
 	case F::Locator: out = json_string(request.locator); return !request.locator.empty();

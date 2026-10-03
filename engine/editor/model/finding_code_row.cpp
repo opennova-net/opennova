@@ -123,6 +123,10 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::EditorSettingsSchemaVersionUnsupported, code("editor_settings.schema_version.unsupported", G::EditorSettings) },
 	{ C::EditorSettingsUnreadable, code("editor_settings.unreadable", G::EditorSettings) },
 	{ C::EditorSettingsWrite, code("editor_settings.write", G::EditorSettings) },
+	// A project file the game never reads for the project's expansion setting (ADR 0046 S16): a music
+	// bank but the streamed pair, an expansion's base music scripts. Listed, its fix a Rename: the
+	// game runs without it.
+	{ C::ExpansionFileUnread, listed(about_the_file("expansion.file.unread", G::Expansion, F::Rename)) },
 	// Export (ADR 0046 S16, project_build/export_build.h): a folder that is the person's, never written
 	// over; the runtime to ship that is not there; a copy or a rename refused.
 	{ C::ExportFolder, code("export.folder", G::Export) },

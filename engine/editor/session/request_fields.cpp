@@ -17,6 +17,13 @@ constexpr RequestField kFields[] = {
 	{ F::Game, "game", J::String,
 			"A new project's game, a gameprofile code (jo, jodemo, dfx, dfx2, bhd; jo when left "
 			"out)." },
+	{ F::Expansion, "expansion", J::String,
+			"The expansion a new project builds as, played with /exp <name> from expansion\\<name>\\ "
+			"(left out, a standalone project): the game's rule for its name, 31 characters, one word, "
+			"11 for M<name>.bin to fit the archives (ADR 0046 S16)." },
+	{ F::BuildsOn, "builds_on", J::String,
+			"The installed expansion a new project builds on, by its folder's name (left out, the base "
+			"game); it needs an expansion." },
 	{ F::GameInstall, "game_install", J::String,
 			"A game install the project opens with for the session alone, in place of the one its "
 			".opennova/local.json names, which stays as it is (a dry run's install); left out, its "
@@ -84,8 +91,9 @@ constexpr RequestField kFields[] = {
 	{ F::Choice, "choice", J::String,
 			"The unsaved-changes prompt's answer: save, discard or cancel." },
 	{ F::Settings, "settings", J::Object,
-			"The settings to set, {serial?, title?, mission?, multiplayer?, game_install?, "
-			"runtime_executable?, play_in_install?}, each left out as it is." },
+			"The settings to set, {serial?, title?, mission?, multiplayer?, expansion?, builds_on?, "
+			"game_install?, runtime_executable?, play_in_install?}, each left out as it is (expansion "
+			"\"\" a standalone project, builds_on \"\" the base game)." },
 	{ F::Viewport, "viewport", J::Object,
 			"A viewport's change, {kind?, device?, clock?, options?, camera?}: kind its kind's token "
 			"(menu, model, script; left out, the kind the document shows in: the Preview's kind that shows "

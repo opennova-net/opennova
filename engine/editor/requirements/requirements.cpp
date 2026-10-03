@@ -4,6 +4,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_files.h>
+#include <editor/project/expansion_name.h>
 
 namespace opennova::editor {
 
@@ -27,7 +28,40 @@ const char *requirement_phase_label(int phase) {
 	}
 }
 
-RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan) {
+namespace {
+
+// The project's files the game never reads for its expansion setting (ADR 0046 S16): a music bank but
+// the pair the game streams, and under an expansion the base game's music scripts.
+void unread_expansion_files(const ProjectDocument &doc, const AssetScan &scan, std::vector<Diagnostic> &out) {
+	const bool expansion = !doc.expansion.standalone();
+	const std::string menu = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::MenuMusicBank), doc.expansion.name)
+	                                   : expansion_file_row(ExpansionFileRole::MenuMusicBank).replaces;
+	const std::string game = expansion ? expansion_file_name(expansion_file_row(ExpansionFileRole::GameMusicBank), doc.expansion.name)
+	                                   : expansion_file_row(ExpansionFileRole::GameMusicBank).replaces;
+	for (const AssetEntry &entry : scan.entries) {
+		std::string read_instead;
+		if (entry.kind == AssetKind::MusicBank && !strutil::iequals(entry.logical_name, menu) &&
+		    !strutil::iequals(entry.logical_name, game))
+			read_instead = "the game streams music from " + menu + " and " + game + " alone";
+		else if (expansion && entry.kind == AssetKind::MusicScript)
+			for (const ExpansionFileRole role : { ExpansionFileRole::MenuMusicScript, ExpansionFileRole::GameMusicScript }) {
+				const ExpansionFileRow &row = expansion_file_row(role);
+				if (strutil::iequals(entry.logical_name, row.replaces))
+					read_instead = "under /exp " + doc.expansion.name + " the game reads " +
+					               expansion_file_name(row, doc.expansion.name) + " in its place";
+			}
+		if (read_instead.empty()) continue;
+		out.push_back(make_finding(CoreFinding::ExpansionFileUnread, DiagnosticSeverity::Warning,
+		                           "The game never reads " + entry.logical_name + ": " + read_instead +
+		                                   ". Rename it to be read, or remove it.",
+		                           entry.relative_path));
+	}
+}
+
+} // namespace
+
+RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetScan &scan,
+                                        const std::vector<std::string> *install_expansions) {
 	RequirementReport report;
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
@@ -112,6 +146,11 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 			break;
 		}
 	}
+	// The project's expansion (ADR 0046 S16): against the game install's, listed; and the files its
+	// setting leaves the game never reading.
+	if (install_expansions)
+		expansion_install_findings(doc.expansion, *install_expansions, DiagnosticSeverity::Warning, report.diagnostics);
+	unread_expansion_files(doc, scan, report.diagnostics);
 	return report;
 }
 

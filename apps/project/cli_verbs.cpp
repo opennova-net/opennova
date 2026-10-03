@@ -344,11 +344,13 @@ bool set_up(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	const std::string &dir = args.positional.front();
 	const bool dry_run = args.has("--dry-run");
 	const std::string install = args.value("--install");
-	const JsonValue opened = handled(
-	        cli, row.requests[0] == K::NewProject
-	                     ? editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass)
-	                     : editor::request::open_project(dir, row.import_pass && !dry_run,
-	                                                     dry_run ? install : std::string()));
+	EditorRequest first = editor::request::open_project(dir, row.import_pass && !dry_run, dry_run ? install : std::string());
+	if (row.requests[0] == K::NewProject) {
+		first = editor::request::new_project(dir, args.value("--title"), args.value("--game"), row.import_pass);
+		first.expansion = args.value("--expansion");
+		first.builds_on = args.value("--builds-on");
+	}
+	const JsonValue opened = handled(cli, first);
 	if (!done(opened) || !project_open(cli)) {
 		print_setup_failure(cli, opened);
 		if (!has_error(items(opened, "findings")))
@@ -381,6 +383,12 @@ int run_new(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	const JsonValue &project = at(answer, "project");
 	std::fprintf(cli.out, "created %s (%s) at %s\n", project.get_string("title", "").c_str(),
 	             project.get_string("target_game", "").c_str(), project.get_string("root", "").c_str());
+	const JsonValue &expansion = at(project, "expansion");
+	if (const std::string name = expansion.get_string("name", ""); !name.empty()) {
+		const std::string builds_on = expansion.get_string("builds_on", "");
+		std::fprintf(cli.out, "  as the expansion %s, on %s\n", name.c_str(),
+		             builds_on.empty() ? "the base game" : ("the expansion " + builds_on).c_str());
+	}
 	return 0;
 }
 
@@ -394,6 +402,14 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	const JsonValue &project = at(answer, "project"), &run = at(answer, "run");
 	std::fprintf(cli.out, "project: %s (%s) at %s\n", project.get_string("title", "").c_str(),
 	             project.get_string("target_game", "").c_str(), project.get_string("root", "").c_str());
+	// Its expansion (ADR 0046 S16): what it builds as, on what.
+	const JsonValue &expansion = at(project, "expansion");
+	const std::string name = expansion.get_string("name", ""), builds_on = expansion.get_string("builds_on", "");
+	if (name.empty())
+		std::fprintf(cli.out, "expansion: none (a standalone project)\n");
+	else
+		std::fprintf(cli.out, "expansion: %s, on %s\n", name.c_str(),
+		             builds_on.empty() ? "the base game" : ("the expansion " + builds_on).c_str());
 	const std::string runtime = run.get_string("runtime_executable", "");
 	std::fprintf(cli.out, "runtime: %s\n", runtime.empty() ? "(beside the editor)" : runtime.c_str());
 	const std::string install = run.get_string("game_install", "");
@@ -1100,7 +1116,10 @@ constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source
 constexpr CliPositional kRequestArgs[] = { { "a project directory" }, { "a request as JSON" } };
 constexpr CliPositional kQueryArgs[] = { { "a project directory" }, { "a query's name" }, { "its args as JSON", false } };
 
-constexpr CliOption kNewOptions[] = { { "--title", "a text" }, { "--game", "a code" } };
+constexpr CliOption kNewOptions[] = { { "--title", "a text" },
+	                                  { "--game", "a code" },
+	                                  { "--expansion", "a name" },
+	                                  { "--builds-on", "an expansion" } };
 constexpr CliOption kCreateMissingOptions[] = { { "--role", "a token" } };
 constexpr CliOption kImportOptions[] = { { "--entry", "a file name", true },
 	                                     { "--replace" },
@@ -1114,10 +1133,12 @@ constexpr CliOption kBuildOptions[] = { { "--out", "a directory" }, { "--rehash"
 using V = CliVerb;
 
 constexpr VerbRow kRows[] = {
-	Verb(V::New, "new", "<dir> [--title <text>] [--game <code>]", kNewRequests, kDir, run_new,
+	Verb(V::New, "new", "<dir> [--title <text>] [--game <code>] [--expansion <name>] [--builds-on <expansion>]",
+	     kNewRequests, kDir, run_new,
 	     "create an empty project (project.opennova + .opennova/) in <dir> and open it, no\n"
 	     "source the folder holds imported; --title names it (else the folder's name), --game\n"
-	     "is its game's code (else jo)")
+	     "is its game's code (else jo); --expansion builds it as that expansion (played with\n"
+	     "/exp <name>), --builds-on on the game install's expansion of that name (else the base game)")
 	        .takes(kNewOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"project\"]}")

@@ -1,9 +1,11 @@
 #pragma once
 
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/import/import_run.h>
@@ -11,6 +13,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
+#include <editor/requirements/requirements.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
@@ -151,10 +154,11 @@ public:
 	// --- the project ------------------------------------------------------------------------
 
 	// A project of `game` (a gameprofile code; "" the default, jo) made in `dir` (titled `title`,
-	// else the folder's name), then opened as open_project opens it, with its import pass unless
-	// `import_pass` is false.
+	// else the folder's name) as `expansion` (ADR 0046 S16: its rule and the game install's
+	// expansions weighed first; its version text made and, on the base game, its text table), then
+	// opened as open_project opens it, with its import pass unless `import_pass` is false.
 	bool new_project(const std::string &dir, const std::string &title, const std::string &game = std::string(),
-	                 bool import_pass = true);
+	                 bool import_pass = true, const ProjectExpansion &expansion = ProjectExpansion());
 	// The project in `dir` read (its document, its local settings; `game_install` in place of the
 	// install they name, for the session alone, when given), then, the open one closed, opened as an
 	// operation (OpenOperation, S13 A3: the game install's names, the import pass unless `import_pass`
@@ -230,6 +234,12 @@ public:
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;
+	// The game install's expansions read again into the view (ADR 0046 S16: the ones it mounts, with
+	// the Mods list's name and description of each), when the install may have moved.
+	void read_install_expansions();
+	// The requirements of `doc` over `scan`, with the game install's expansions weighed
+	// (evaluate_requirements: the project's expansion against them, listed).
+	RequirementReport requirements_of(const ProjectDocument &doc, const AssetScan &scan) const;
 	// The requirement row of `role`, or null.
 	const RequirementRow *requirement_row(const std::string &role) const;
 	// The project file `file` names: the one at that project-relative path, else the first of that
@@ -283,6 +293,9 @@ private:
 	// The gesture of the wire's open in the document at `path` ends (its EndEdit, as a client's last
 	// sample would raise it).
 	void end_wire_gesture(const std::string &path);
+	// The renames a change of the project's expansion's name leaves to do (ADR 0046 S16: the project's
+	// own expansion files to the new name's), one an operation, each started when the slot is free.
+	void next_expansion_rename();
 
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;
@@ -295,6 +308,8 @@ private:
 	std::shared_ptr<Viewports> viewports_;
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
+	std::deque<std::pair<std::string, std::string>> expansion_renames_; // (project-relative file, new name)
+	std::vector<std::string> install_expansion_names_; // the game install's expansions, by folder name
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
 	std::string refusal_status_; // the status line the last refused request left, until a request is served
