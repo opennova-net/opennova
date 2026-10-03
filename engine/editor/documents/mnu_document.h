@@ -91,9 +91,10 @@ public:
 	// A screen or window no by-name lookup returns (lookup_names) is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
 	// Windows (with everything they hold) as the menu text of one SCREEN whose roots they
-	// are, in document order, UTF-8 after a byte order mark (a window selected with a window
-	// that holds it comes with that one); "" when a record is not a window or the windows
-	// hold a value the format cannot carry back.
+	// are, in document order (of one screen or of several: the screens in the file's order),
+	// UTF-8 after a byte order mark (a window selected with a window that holds it comes with
+	// that one); "" when a record is not a window or the windows hold a value the format cannot
+	// carry back.
 	std::string copy(const std::vector<NodeAddress> &records) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {

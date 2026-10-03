@@ -1079,3 +1079,134 @@ func test_attributes_lift_and_undo_shows_the_placed_one() -> void:
 	assert_eq(int(device.get("lifted", -1)), 0, "given back what was placed: nothing lifted")
 	assert_false(placer.is_static_instance_hidden(key), "the placed static shows again")
 	assert_eq(int(device.get("placements", 0)), 1, "nothing placed again")
+
+
+## The picture point of the nearest of `faces` (three vertices a triangle, through `xform`) to the camera
+## whose middle is on the picture `size` and past the pick slop from mark `mark`'s glyph (twice it):
+## where a press on the entity's surface goes. Vector2(-1, -1): none.
+func _face_point(camera: Camera3D, faces: PackedVector3Array, xform: Transform3D, mark: Dictionary, size: Vector2) -> Vector2:
+	var glyph := Vector2(float(mark["screen"][0]), float(mark["screen"][1]))
+	var best := Vector2(-1, -1)
+	var nearest := INF
+	var i := 0
+	while i + 2 < faces.size():
+		var middle := (xform * faces[i] + xform * faces[i + 1] + xform * faces[i + 2]) / 3.0
+		i += 3
+		if camera.is_position_behind(middle):
+			continue
+		var at := camera.unproject_position(middle)
+		if at.x < 2.0 or at.y < 2.0 or at.x > size.x - 2.0 or at.y > size.y - 2.0 or at.distance_to(glyph) < 16.0:
+			continue
+		var away := camera.global_position.distance_to(middle)
+		if away < nearest:
+			nearest = away
+			best = at
+	return best
+
+
+## Every face an individual model's meshes draw, in the picture's space (three vertices a triangle).
+func _model_faces(model: ObjectModel) -> PackedVector3Array:
+	var out := PackedVector3Array()
+	for node: Node in model.find_children("*", "MeshInstance3D", true, false):
+		var mesh := node as MeshInstance3D
+		if mesh.mesh == null:
+			continue
+		for vertex in mesh.mesh.get_faces():
+			out.append(mesh.global_transform * vertex)
+	return out
+
+
+## The polish after its review (H1, M2): a press takes what the pointer is over, as the game's own choice
+## among the entities a ray's broad phase passes is the face it hits. The device answers what the
+## camera's ray meets first (the placed entities' faces, the nearer first, before the terrain): framed
+## close, a retained static hit through its nearest face away from its glyph is its record, and so is an
+## individual model; the ground just beside the static, past its faces yet within the sphere about its
+## anchor that holds them (what a sphere alone would take), is no record, nor is the sky.
+func test_a_hit_takes_the_face_the_ray_meets() -> void:
+	if _app == null:
+		return
+	assert_true(_open_mission())
+	var state := await _await_ready()
+	assert_eq(String(state.get("status", "")), "ready", str(state))
+	var device := _mission_device()
+	var placer: MissionObjectPlacer = device.get("placer")
+	assert_not_null(placer)
+	if placer == null:
+		return
+	var keys: Dictionary = device.get("keys", {})
+	var wire: Dictionary = state.get("device", {})
+	var size := Vector2(float(wire.get("width", 1024)), float(wire.get("height", 768)))
+	var still := _placed_mark(state, device, "static")
+	var person := _placed_mark(state, device, "model")
+	assert_false(still.is_empty(), "a retained static")
+	assert_false(person.is_empty(), "an individual model")
+	if still.is_empty() or person.is_empty():
+		return
+	# Both set down on the terrain (the minted mission's entities stand under it), so nothing of the
+	# ground stands between the camera and their faces.
+	var grounded: Dictionary = _ask({"kind": "edit_in_viewport", "command": {"name": "ground",
+			"ids": [int(still["id"]), int(person["id"])], "kind": "mission"}})
+	assert_true(bool(grounded.get("outcome", {}).get("done", false)), str(grounded))
+	state = _state()
+	still = _mark_of(state, int(still["id"]))
+	person = _mark_of(state, int(person["id"]))
+	# The static framed close: its graphic's faces where its rows draw it.
+	var at: Variant = placer.get_static_instance_transform(int(keys.get(int(still["id"]), 0)))
+	assert_true(at is Transform3D, "the static's rows")
+	var faces := placer.get_static_graphic_faces(placer.graphic_for(int(still.get("item", 0))))
+	assert_false(faces.is_empty(), "the static's graphic warm, its faces kept")
+	if not at is Transform3D or faces.is_empty():
+		return
+	var xform: Transform3D = at
+	assert_true(_change({"kind": "mission", "camera": {"target": still["at"], "yaw": 30, "pitch": 35, "distance": 6}}))
+	state = _state()
+	var camera := _camera(state)
+	assert_not_null(camera)
+	if camera == null:
+		return
+	still = _mark_of(state, int(still["id"]))
+	var point := _face_point(camera, faces, xform, still, size)
+	assert_true(point.x >= 0.0, "a face of the static on the picture, off its glyph")
+	var hit := _viewport("hit", {"x": point.x, "y": point.y})
+	assert_eq(int(hit.get("id", 0)), int(still["id"]), "the static's face: its record: %s" % str(hit))
+	# The ground beside it, toward the camera, past its faces' reach about its anchor yet within the sphere
+	# there that holds them: no record.
+	var terrain: Terrain = _device_node(state, "Terrain")
+	var data: TerrainData = terrain.get_terrain_data() if terrain != null else null
+	assert_not_null(data)
+	if data != null:
+		var origin := xform.origin
+		var across := 0.0
+		var reach := 0.0
+		for vertex in faces:
+			var world := xform * vertex
+			across = maxf(across, Vector2(world.x - origin.x, world.z - origin.z).length())
+			reach = maxf(reach, world.distance_to(origin))
+		var toward := Vector3(camera.global_position.x - origin.x, 0.0, camera.global_position.z - origin.z).normalized()
+		var beside := origin + toward * lerpf(across, reach, 0.25)
+		beside.y = data.get_height_world_bilinear(beside)
+		assert_gt(reach, across, "the sphere about the anchor holding the faces reaches past them on the ground")
+		assert_lt(beside.distance_to(origin), reach, "the point within that sphere")
+		var ground := camera.unproject_position(beside)
+		var glyph := Vector2(float(still["screen"][0]), float(still["screen"][1]))
+		assert_gt(ground.distance_to(glyph), 8.0, "off the glyph")
+		hit = _viewport("hit", {"x": ground.x, "y": ground.y})
+		assert_eq(int(hit.get("id", 0)), 0, "the ground beside the static: no record: %s" % str(hit))
+	# The sky, the camera level three metres over the static: no record.
+	var over := _vector(still["at"]) + Vector3(0.0, 0.0, 3.0)
+	assert_true(_change({"kind": "mission", "camera": {"target": [over.x, over.y, over.z], "pitch": 0, "distance": 6}}))
+	hit = _viewport("hit", {"x": size.x * 0.5, "y": 4.0})
+	assert_eq(int(hit.get("id", 0)), 0, "the sky: no record: %s" % str(hit))
+	# The individual model framed close: its meshes' faces where its node stands.
+	var model: ObjectModel = _models_by_key(placer).get(int(keys.get(int(person["id"]), 0)))
+	assert_not_null(model)
+	if model == null:
+		return
+	assert_true(_change({"kind": "mission", "camera": {"target": person["at"], "yaw": 200, "pitch": 20, "distance": 5}}))
+	state = _state()
+	camera = _camera(state)
+	person = _mark_of(state, int(person["id"]))
+	point = _face_point(camera, _model_faces(model), Transform3D(), person, size)
+	assert_true(point.x >= 0.0, "a face of the model on the picture, off its glyph")
+	hit = _viewport("hit", {"x": point.x, "y": point.y})
+	assert_eq(int(hit.get("id", 0)), int(person["id"]), "the model's face: its record: %s" % str(hit))
