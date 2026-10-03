@@ -5,8 +5,10 @@ classes the GDExtension can reach, so godot-cpp generates and compiles those
 
 The set is derived, never hand-edited:
   1. every extension_api.json class or native structure whose name appears as
-     a token anywhere under godot/src (includes, GDCLASS parents, casts,
-     signatures, comments: a superset is harmless);
+     a token anywhere under godot/src (GDCLASS parents, casts, signatures,
+     comments: a superset is harmless), and every class whose generated
+     header godot/src includes (a header can be included without the class
+     ever being named);
   2. closed over parents and over every type a method of an included class
      names in its signature (return value, arguments, the class of an enum
      or bitfield), so a chained call such as get_viewport()->get_camera_3d()
@@ -46,6 +48,14 @@ PINNED = ("Mutex", "OS")
 
 TOKEN = re.compile(r"\b[A-Z][A-Za-z0-9_]*\b")
 TYPE_PART = re.compile(r"[A-Za-z0-9_]+")
+CLASS_INCLUDE = re.compile(r"godot_cpp/classes/([a-z0-9_]+)\.hpp")
+
+
+def header_stem(name: str) -> str:
+    """A class's generated header name (binding_generator.py camel_to_snake)."""
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    name = re.sub("([a-z0-9])([A-Z])", r"\1_\2", name)
+    return name.replace("2_D", "2D").replace("3_D", "3D").lower()
 
 
 def derive(api: dict, source: str) -> list[str]:
@@ -62,7 +72,9 @@ def derive(api: dict, source: str) -> list[str]:
                 found.update(part for part in TYPE_PART.findall(t) if part in known)
         return found
 
+    by_header = {header_stem(name): name for name in classes}
     pending = {token for token in TOKEN.findall(source) if token in known} | set(PINNED)
+    pending |= {by_header[stem] for stem in CLASS_INCLUDE.findall(source) if stem in by_header}
     included: set[str] = set()
     while pending:
         name = pending.pop()
