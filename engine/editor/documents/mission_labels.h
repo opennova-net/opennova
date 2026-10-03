@@ -43,8 +43,9 @@ std::string mission_record_label(const Document &document, const NodeAddress &ad
 // waypoint 8 of path 9"), or with no trigger by what it does first ("show win objective 1"); a trigger and
 // an action alike. "" for a record whose title is short already (a path, an area, a stop).
 std::string mission_record_brief(const Document &document, const NodeAddress &address, const NameSource *names);
-// The values an entity field's picker offers that no record defines (DocumentType::game_choices): the
-// player, SSN 10000, which the game resolves itself [bms-event-runtime-re.md 7.3].
+// The values a field's picker offers that no record defines (DocumentType::game_choices): the player,
+// SSN 10000, which the game resolves itself [bms-event-runtime-re.md 7.3]; and a text key's 0, which
+// forms no key (a name index's no name, the end of the objectives panel's rows).
 void mission_game_choices(const Document &document, const NodeAddress &address, const FieldUse &field,
                           std::vector<GameChoice> &out);
 

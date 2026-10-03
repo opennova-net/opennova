@@ -37,8 +37,12 @@ std::string where_of(const ReferenceChoice &choice) {
 std::string choice_tip(const ReferenceChoice &choice, const AssetGraph *graph, const std::string &scope) {
 	std::string tip = words_of(choice) + (choice.label.empty() ? std::string() : "\n" + choice.name) + "\n" +
 	                  (choice.record.empty() ? "The file " : "Defined in ") + where_of(choice);
+	// A choice named otherwise (a text key's number) previews the symbol it stands for.
+	const bool other = !choice.symbol.empty();
 	if (graph)
-		if (const std::string preview = symbol_preview(*graph, choice.kind, choice.name, scope); !preview.empty())
+		if (const std::string preview = symbol_preview(*graph, choice.kind, other ? choice.symbol : choice.name,
+		                                               other ? choice.symbol_scope : scope);
+		    !preview.empty())
 			tip += "\n" + preview;
 	if (choice.status == ReferenceStatus::Missing) tip += "\nSet here, the game would not find it: Missing.";
 	if (choice.inert) tip += "\nNo lookup of the game finds this definition: " + choice.reason + ".";

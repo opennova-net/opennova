@@ -6,7 +6,8 @@
 // to take it), nor with BACK beside it, nor a list row or the screen; a Paste goes after the
 // primary's window among its siblings (INPART's: CHOICES, the listed window holding it; a list
 // row's: its window), at the end of the screen's root windows for the screen, nothing, or a
-// selection of another screen; and only while the clipboard holds records. The listed window a
+// selection of another screen (whose windows copy, with this screen's too: the polish); and only
+// while the clipboard holds records. The listed window a
 // record is or that holds it (listed_window: what a Paste goes after, and where the menu view's
 // Add window puts a new one) is one walk for both.
 #include <cstdio>
@@ -127,9 +128,16 @@ int test_rule() {
 	TEST_EXPECT(!board.copy);
 	board = menu_clipboard(document, id, NodeAddress(), {}, true);
 	TEST_EXPECT(!board.copy && pastes_at(board, id, 0, SIZE_MAX));
+	// A window of another screen is a window its own screen's tree lists: copied (the polish: windows
+	// of several screens copy together), alone or beside one of this screen; a Paste on this screen
+	// goes at the end of its root windows.
 	const NodeAddress elsewhere = named(document, "ELSEWHERE");
 	board = menu_clipboard(document, id, elsewhere, {elsewhere}, true);
-	TEST_EXPECT(!board.copy && pastes_at(board, id, 0, SIZE_MAX));
+	TEST_EXPECT(board.copy && pastes_at(board, id, 0, SIZE_MAX));
+	board = menu_clipboard(document, id, back, {elsewhere, back}, true);
+	TEST_EXPECT(board.copy && pastes_at(board, id, main.child, 1));
+	board = menu_clipboard(document, id, back, {elsewhere, back, in_part}, true);
+	TEST_EXPECT(!board.copy);
 
 	// The listed window a record is or that holds it: a listed window itself; INPART's, CHOICES;
 	// the ACTION's, BACK; none for the screen, nothing, or another screen's window.
