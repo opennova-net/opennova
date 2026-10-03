@@ -76,7 +76,9 @@ private:
 };
 
 // The engine's identity for a logical name: the PFF normalization (uppercase, trailing
-// spaces trimmed) that the reader's lookup and the writer's directory share.
+// spaces trimmed) that the reader's lookup and the writer's directory share, of the whole name
+// to its first NUL however long (a filter compares a record's text by it, which may run past any
+// name's length).
 std::string normalized_logical_name(std::string_view name);
 
 // The output-name rules a build must satisfy: at most PFF_NAME_SIZE bytes and not empty
