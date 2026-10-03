@@ -51,18 +51,24 @@ func _request(request: Dictionary) -> Dictionary:
 
 
 # `request` raised, then the session pumped until the operation it started or joined ends (a
-# build steps across pumps, S13 A1): false when the request was refused or waits on the
+# build steps across pumps, S13 A1), for as long as its progress moves (120 s standing still is a
+# hang, as the seam's settle has it): false when the request was refused or waits on the
 # unsaved-changes prompt, nothing run.
 func _run_operation(request: Dictionary) -> bool:
 	var outcome: Dictionary = _request(request).get("outcome", {})
 	if not bool(outcome.get("done", false)):
 		return false
 	var id := int(outcome.get("operation", 0))
-	var deadline := Time.get_ticks_msec() + 120000
-	while Time.get_ticks_msec() < deadline:
-		var state: Variant = JSON.parse_string(_seam.get_operation_json())
+	var progress := ""
+	var moved_at := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - moved_at < 120000:
+		var text: String = _seam.get_operation_json()
+		var state: Variant = JSON.parse_string(text)
 		if not (state is Dictionary) or int((state as Dictionary).get("operation", {}).get("id", 0)) != id:
 			break
+		if text != progress:
+			progress = text
+			moved_at = Time.get_ticks_msec()
 		_app.pump()
 	return true
 
