@@ -32,6 +32,7 @@ add_library(opennova_net STATIC
     # npwire — the NovaLogic game wire protocol (ADR 0019): in-game codec, NWU
     # session framing, capture decode, the LAN discovery codec
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/entity_class.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_body_codec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_decode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/ingame_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/npwire/wire/visible_players.cpp

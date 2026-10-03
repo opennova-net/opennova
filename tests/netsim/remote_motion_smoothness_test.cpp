@@ -544,7 +544,7 @@ bool run_infantry_first_record_does_not_swing_to_zero() {
 	{
 		nw::OrganicSpawnRecord spawn;
 		spawn.slot_id = handle;
-		spawn.has_body = true;
+		spawn.def_type = 3; // ItemDefType person
 		spawn.item_type_id = 0x0777;
 		spawn.pos_x = ax;
 		spawn.pos_y = ay;

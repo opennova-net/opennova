@@ -394,7 +394,11 @@ OrganicSpawnBatch build_pool0_organic_batch(const world::World &w) {
 		// whole-body corpse, exactly like retail (world-wac-ai-re §19.2).
 		OrganicSpawnRecord rec;
 		rec.slot_id = e.handle.packed;                 // the wire handle (pool<<12|slot)
-		rec.has_body = true;
+		// The item def's type byte gates the body: the writer reads
+		// itemDef+0x5C (3 for a person) and writes its low byte; retail has no
+		// pool-0 entity without a def, so ours without one sends the empty form.
+		// [orig: NetPacket_SerializeEntityStatesToBuffer @0x503195 / @0x5031d8]
+		rec.def_type = e.has_item_def ? e.item_type : 0;
 		rec.item_type_id = static_cast<uint16_t>(e.item_id);
 		rec.owner_connection_id = e.owner_connection_id; // entity+0x78: the owning connection's dcb,
 		                                               // stamped at spawn (host loopback / joiner ack).

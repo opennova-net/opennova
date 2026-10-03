@@ -280,16 +280,16 @@ std::vector<uint8_t> encode_terrain_load_batch(const TerrainLoadBatch &batch) {
 }
 
 // [orig: NapiNPClientMsg_0x00C @ 0x42E730] — the inverse of decode_organic_spawn_batch
-// (§5.23). Header u16 entity_count, then per record: u16 slot_id, u8 has_body, and (when
-// has_body) the unconditional field block. A field-identical round-trip with the decoder.
+// (§5.23). Header u16 entity_count, then per record: u16 slot_id, u8 def_type, and (when
+// def_type is nonzero) the unconditional field block. A field-identical round-trip with the decoder.
 std::vector<uint8_t> encode_organic_spawn_batch(const OrganicSpawnBatch &batch) {
 	std::vector<uint8_t> out;
 	Writer w{out};
 	w.u16(batch.entity_count);
 	for (const OrganicSpawnRecord &rec : batch.records) {
 		w.u16(rec.slot_id);
-		w.u8(rec.has_body ? 1 : 0);
-		if (!rec.has_body) continue; // empty spawn ends after the has_body byte (@ 0x42e813)
+		w.u8(rec.def_type); // itemDef+0x5C low byte [orig: @0x5031d8; 0 @0x5031a6]
+		if (!rec.has_body()) continue; // empty spawn ends after the def-type byte (@ 0x42e813)
 		w.u16(rec.item_type_id);
 		w.u32(rec.owner_connection_id);
 		w.cstr(rec.entity_name);

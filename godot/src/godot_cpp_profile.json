@@ -33,7 +33,6 @@
 		"ColorRect",
 		"Compositor",
 		"CompositorEffect",
-		"CompressedTexture2D",
 		"ConcavePolygonShape3D",
 		"Control",
 		"ConvexPolygonShape3D",

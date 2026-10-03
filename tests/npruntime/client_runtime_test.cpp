@@ -1918,7 +1918,7 @@ std::vector<uint8_t> make_organic_spawn(uint16_t slot_id, const std::string &nam
 	batch.entity_count = 1;
 	OrganicSpawnRecord rec;
 	rec.slot_id = slot_id;
-	rec.has_body = true;
+	rec.def_type = 3; // ItemDefType person
 	rec.item_type_id = 0x14B9;
 	rec.owner_connection_id = owner;
 	rec.minimap_flags = owner ? 0x100 : 0;
@@ -3487,6 +3487,8 @@ bool run_host_startup_seeds_mounted_no_callback_carrier() {
 	w::Entity infantry;
 	infantry.kind = w::EntityKind::Organic;
 	infantry.item_id = 5311; // US02 organic in the production Godot witness
+	infantry.has_item_def = true; // its person def, as the item-traits sweep stamps it
+	infantry.item_type = 3;
 	infantry.net_class_code = static_cast<uint8_t>(EntityClass::Infantry);
 	const w::EntityHandle infantry_h = world.registry.spawn(0, infantry);
 	if (!expect(infantry_h.valid() && ai.attach(infantry_h) >= 0,

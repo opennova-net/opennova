@@ -26,9 +26,10 @@ jobs:
           submodules: recursive
           lfs: false   # net stack consumes no LFS game assets (net fixtures pulled below)
 
-      # nwmsg_replay_test reads the captured .nwmsg parity fixtures and
-      # nw_self_capture_test the committed opennova-produced self-capture pcap,
-      # both LFS-tracked (fixtures/** in .gitattributes). The rest of the net
+      # nwmsg_replay_test and nwmsg_codec_parity_test read the captured .nwmsg
+      # parity fixtures and nw_self_capture_test the committed
+      # opennova-produced self-capture pcap (fixtures/** in .gitattributes:
+      # the binaries LFS-tracked, the text fixtures plain blobs). The rest of the net
       # stack consumes no LFS assets, so pull only this subtree to keep checkout
       # fast.
       - name: Materialize net parity fixtures (LFS)
@@ -57,7 +58,7 @@ jobs:
             connection_registry_test connection_manager_test \
             db_sqlite_test session_hello_roundtrip_test lobby_session_test \
             backend_schema_test nw_codec_identity_test nw_self_capture_test \
-            unknown_tracker_test nwmsg_replay_test \
+            unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
             opennova_extract nw_pp \
             mission_kernel_test mission_kernel_lifecycle_test host_role_test \
             inspect_test terrain_field_store_test
@@ -65,7 +66,7 @@ jobs:
       - name: Run net ctests + the kernel smoke
         run: |
           ctest --test-dir build --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db_sqlite|session_hello_roundtrip|lobby_session|backend_schema|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store)$"
 
       - name: sccache stats
         if: always()
