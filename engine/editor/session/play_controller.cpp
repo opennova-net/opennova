@@ -132,6 +132,15 @@ bool PlayController::refused(const std::string &mission) {
 		core_.touch(ViewConcern::Output);
 		return true;
 	}
+	// An expansion plays over the game install, with /exp (ADR 0046 S16): none set, nothing is built.
+	if (view_.project.open && !view_.project.document->expansion.standalone() && core_.game_install().empty()) {
+		core_.report(make_finding(CoreFinding::PlayInstallMissing, DiagnosticSeverity::Error,
+		                          "The project builds as an expansion, which plays over the game install: choose its "
+		                          "folder in File > Project settings... first."));
+		view_.activity.status = "Play needs the game install; see Problems.";
+		core_.touch(ViewConcern::Output);
+		return true;
+	}
 	return false;
 }
 

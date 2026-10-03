@@ -883,7 +883,7 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	// end first (S13 A3: the polls step it, and no request runs it).
 	core.problems().validate_pending();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
-			core.problems().gate_findings());
+			core.problems().gate_findings(), core.build_target());
 	std::vector<const Diagnostic *> blocking;
 	for (const Diagnostic &d : plan.diagnostics)
 		if (blocks_build(d))

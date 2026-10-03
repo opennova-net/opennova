@@ -46,14 +46,13 @@ std::string expansion_archive_path(const std::string &expansion, bool language);
 
 // Where a build puts a file of the expansion `<b>`: its kind's place, a file the front door reads
 // (ExpansionLoose::FrontDoor) packed in <b>.pff and loose in the folder alike (`also_loose`); and the
-// files the game reads by their path in the expansion's folder, whatever their kind would say (ADR
-// 0046 S16, the expansion files' rows), loose there alone: `<b>.bin`, the override table, whose
-// path-qualified query no archive entry matches, so only the loose file serves it [orig:
-// TextResource_LoadOverrideTable @ 0x4a49de through File_LoadResource @ 0x75b540], and which serves the
-// Mods list's name and description too, loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the
-// search path @ 0x4a4492] (JO:CA keeps jox01.bin in jox01L.pff alone, so the stock game never loads
-// its table); `version.txt`, whose checksum the boot reads by its path [orig: Expansion_LoadAssets @
-// 0x4a4858..0x4a488a]; and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig
+// files the game reads by their path in the expansion's folder, whatever their kind would say, loose
+// there alone: the expansion's own files whose row says so (project/expansion_files.h,
+// ExpansionPlacement::Folder: `<b>.bin`, the override table, whose path-qualified query no archive
+// entry matches, so only the loose file serves it [orig: TextResource_LoadOverrideTable @ 0x4a49de
+// through File_LoadResource @ 0x75b540], and which serves the Mods list's name and description too,
+// loose first [orig: Expansion_ScanAndRegister @ 0x4a43d0, the search path @ 0x4a4492]; `version.txt`;
+// the music banks), and `gt.ssc`, read loose first from the folder [orig: Mission_LoadEncryptedConfig
 // @ 0x4cdcf4].
 ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &expansion, bool &also_loose);
 
