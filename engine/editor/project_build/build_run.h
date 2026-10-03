@@ -62,6 +62,8 @@ struct BuildProgress {
 
 struct BuildReport {
 	bool ok = false;
+	// Refused by the gate before anything was read (its plan blocked: build_blockers), not failed on the way.
+	bool refused = false;
 	std::string build_id;
 	std::string build_dir;               // the published directory (empty on failure)
 	bool reused_existing = false;        // the same content was already built

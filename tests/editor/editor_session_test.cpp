@@ -149,7 +149,11 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.revisions.any() > before);
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok);
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && platform.spawns == 0);
-	TEST_EXPECT(output_has(v, "Build failed"));
+	// Refused by the gate, naming what refuses it (the UX round's problems lane): the string tables and the
+	// main menu the boot stops without, by name, in the status line and the refusal's own row.
+	TEST_EXPECT(output_has(v, "Build refused") && v.activity.last_build->refused);
+	TEST_EXPECT(v.activity.status.rfind("Build refused: gametext.bin is missing: the game shows \"Unable to load game strings\" and exits (and ", 0) == 0);
+	TEST_EXPECT(output_has(v, "The build was refused: 4 problems stop it: gametext.bin is missing"));
 
 	// Create all missing: the checklist clears.
 	editor_test::create_missing_files(session);
@@ -268,7 +272,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 1);
 	const Diagnostic *boot = finding_about(v.findings.diagnostics, "play.boot_missing", "main.mnu");
 	TEST_EXPECT(boot && boot->asset.empty() && editor_test::requirement_of(*boot).role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
-	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos && boot->message.find("Without it") != std::string::npos);
+	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos &&
+	            boot->message.find("The main menu never appears") != std::string::npos);
 	TEST_EXPECT(v.activity.missing_at_boot("main.mnu"));
 	{
 		bool marked = false;

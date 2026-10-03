@@ -1106,6 +1106,16 @@ static int test_over_a_session() {
 	const JsonValue &missing = problems.get("problems")->array.front();
 	TEST_EXPECT(missing.get_string("code", "") == "requirement.missing" && missing.get("asset") == nullptr &&
 	            missing.get_string("role", "") == "gameerr" && missing.get_string("target", "") == "gameerr.bin");
+	// In plain words, the manifest's own record the cited detail; the boot goes on without gameerr.bin, so
+	// it blocks no build, while gametext.bin's absence does (the boot exits), said with why.
+	TEST_EXPECT(missing.get_string("message", "").find("an error dialog") != std::string::npos &&
+	            missing.get_string("witness", "").find("[orig:") != std::string::npos && missing.get("blocks_build") == nullptr);
+	bool gametext_blocks = false;
+	for (const JsonValue &row : problems.get("problems")->array)
+		if (row.get_string("role", "") == "gametext")
+			gametext_blocks = row.get_bool("blocks_build", false) &&
+			                  row.get_string("blocks_because", "").find("Unable to load game strings") != std::string::npos;
+	TEST_EXPECT(gametext_blocks && counts->get_int("blocking", 0) >= 4);
 	const JsonValue *fixes = missing.get("fixes");
 	TEST_EXPECT(fixes && !fixes->array.empty());
 	if (!fixes || fixes->array.empty()) return 1;

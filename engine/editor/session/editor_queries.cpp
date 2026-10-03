@@ -129,6 +129,8 @@ constexpr QueryParam kProblemsParams[] = {
 			"Matched without case against the message, file, record, field and code." },
 	{ "scope", J::String, false, "project", "Whose findings: project, active_file or open_files." },
 	{ "fixable", J::Boolean, false, "false", "Only the findings with a fix." },
+	{ "blocking", J::Boolean, false, "false",
+			"Only the findings a build is refused for (each row's blocks_build: the gate's refusals)." },
 	{ "group", J::String, false, "none",
 			"How the rows are grouped: none, file or kind (the code's family)." },
 	{ "offset", J::Integer, false, "0", kOffsetDoc },
@@ -504,6 +506,7 @@ JsonValue answer_problems(const QueryContext &context, const QueryArgs &args, st
 	}
 	query.text = args.text("text");
 	query.fixable = args.boolean("fixable");
+	query.blocking = args.boolean("blocking");
 	const std::string scope = args.text("scope"), group = args.text("group");
 	if (!problem_scope_from_token(scope, query.scope)) {
 		error = "no scope \"" + scope + "\" (project, active_file, open_files).";
@@ -884,17 +887,19 @@ JsonValue answer_build_gate(const QueryContext &context, const QueryArgs &args, 
 	core.problems().validate_pending();
 	const BuildPlan plan = plan_build(core.paths(), *view.project.scan, *view.project.requirements,
 			core.problems().gate_findings());
-	std::vector<const Diagnostic *> blocking;
-	for (const Diagnostic &d : plan.diagnostics)
-		if (blocks_build(d))
-			blocking.push_back(&d);
+	const std::vector<Diagnostic> blocking = build_blockers(plan);
 	const JsonPage page = page_of(args);
 	JsonValue out = JsonValue::make_object();
 	out.set("blocked", JsonValue::make_bool(!plan.ok));
+	// The line a build would be refused with (the UX round's problems lane), each refusal with its why.
+	if (!plan.ok) out.set("refusal", JsonValue::make_string(refusal_words(blocking)));
 	set_page(out, page, blocking.size());
 	JsonValue list = JsonValue::make_array();
-	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i)
-		list.push(diagnostic_to_json(*blocking[i]));
+	for (size_t i = page.first(blocking.size()); i < page.last(blocking.size()); ++i) {
+		JsonValue row = diagnostic_to_json(blocking[i]);
+		row.set("because", JsonValue::make_string(blocker_reason(blocking[i])));
+		list.push(std::move(row));
+	}
 	out.set("blocking", std::move(list));
 	return out;
 }
@@ -1273,9 +1278,10 @@ constexpr EditorQueryRow kRows[] = {
 			.row,
 	Query(K::Problems, "problems", answer_problems, kProblemsParams, kProblemsReads,
 			"The Problems rows as the Problems window shows them: errors, then warnings, then "
-			"notes; total, shown (the rows matching), counts by severity, a page of the rows, "
-			"each with what it is about and its fixes ({label, detail, bulk, request}: the "
-			"request an editor_request passes back as it is), and grouped, the page's groups.")
+			"notes; total, shown (the rows matching), counts by severity (and blocking, the rows a "
+			"build is refused for), a page of the rows, each with what it is about, blocks_build "
+			"and why where a build is refused for it, and its fixes ({label, detail, bulk, request}: "
+			"the request an editor_request passes back as it is), and grouped, the page's groups.")
 			.pages("problems")
 			.row,
 	Query(K::References, "references", answer_references, kReferencesParams, kGraphReads,

@@ -395,6 +395,15 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 	}
 }
 
+void MenuRenderCheck::findings_of(const DocumentBase &document, const ProjectCheckInput &input,
+                                  std::vector<Diagnostic> &out) const {
+	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
+	if (!menu || document.blocked()) return;
+	Menu scratch;
+	render_menu_(scratch, *menu, input.files, vars_);
+	out.insert(out.end(), scratch.findings.begin(), scratch.findings.end());
+}
+
 std::unique_ptr<ProjectCheck> make_menu_render_check() { return std::make_unique<MenuRenderCheck>(); }
 
 const MenuRenderCheck *menu_render_check(const ProjectChecks *checks) {

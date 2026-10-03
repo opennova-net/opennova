@@ -187,11 +187,14 @@ void FilesWindow::refresh(const SessionView &view) {
 			return normalized_logical_name(folders_[a].name) < normalized_logical_name(folders_[b].name);
 		});
 	counts_.clear();
-	for (const Diagnostic &d : view.findings.diagnostics) {
+	FindingMarks scratch;
+	const FindingMarks &marks = finding_marks(view, scratch);
+	for (size_t i = 0; i < view.findings.diagnostics.size(); ++i) {
+		const Diagnostic &d = view.findings.diagnostics[i];
 		if (d.asset.empty()) continue;
 		Counts &counts = counts_[d.asset];
-		// The game's own data's apart, as Problems counts them (S15).
-		const bool original = in_original_data(d, view);
+		// The game's own data's apart, as Problems counts them (S15, per finding).
+		const bool original = marks.original[i] != 0;
 		if (d.severity == DiagnosticSeverity::Error) ++(original ? counts.original_errors : counts.errors);
 		else if (d.severity == DiagnosticSeverity::Warning) ++(original ? counts.original_warnings : counts.warnings);
 	}

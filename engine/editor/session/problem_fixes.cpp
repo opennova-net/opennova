@@ -47,12 +47,15 @@ std::string retail_name(const SessionView &view, const std::string &name) {
 }
 
 // The import dialog on a file of the game install, planned with the files it needs when the
-// editor's setting says so (SessionView::import_dependencies).
-ProblemFix import_fix(const SessionView &view, const std::string &retail) {
+// editor's setting says so (SessionView::import_dependencies). Named as the finding names it (`named`,
+// a required file's name as the manifest spells it; the install's spelling when none), the install's
+// own spelling what the import asks for.
+ProblemFix import_fix(const SessionView &view, const std::string &retail, const std::string &named = std::string()) {
 	const EditorRequest request =
 	        request::preview_install_import({retail}, view.project.import_dependencies);
-	return {"Import " + retail + " from the game data...",
-	        "Opens the import dialog on " + retail + " from the game install" +
+	const std::string name = named.empty() ? retail : named;
+	return {"Import " + name + " from the game data...",
+	        "Opens the import dialog on the game's own " + name + " from the game install" +
 	                (request.with_dependencies ? ", with the files it needs," : "") +
 	                " to copy into the project. The copy cannot be undone with Undo.",
 	        request, true};
@@ -83,12 +86,17 @@ void requirement_fixes(const RequirementSubject &subject, const SessionView &vie
 	for (const RequirementRow &candidate : view.project.requirements->rows)
 		if (candidate.role == subject.role) row = &candidate;
 	if (!row || row->state != RequirementState::Missing) return;
-	if (const BlankFactory *factory = find_blank_factory_for_role(row->role)) {
-		out.push_back(
-		        {"Create " + row->name, placeholder(*factory), request::create_missing({row->role}), true});
-	}
+	// The game's own file first where the install has it (Fix all and the banner take a finding's first
+	// fix): a placeholder makes a game that starts empty; it is the fix only where the install lacks the
+	// file.
 	const std::string retail = retail_name(view, row->name);
-	if (!retail.empty()) out.push_back(import_fix(view, retail));
+	if (!retail.empty()) out.push_back(import_fix(view, retail, row->name));
+	if (const BlankFactory *factory = find_blank_factory_for_role(row->role)) {
+		std::string detail = placeholder(*factory);
+		if (!retail.empty()) detail = "Instead of the game's own: " + detail;
+		out.push_back({retail.empty() ? "Create " + row->name : "Create a placeholder " + row->name, detail,
+		               request::create_missing({row->role}), true});
+	}
 	// Renaming a file of the project into place is for a file the game cannot start without;
 	// an optional one is made or imported, never taken from another file.
 	if (!row->required) return;
@@ -133,7 +141,7 @@ void wrong_kind_fixes(const RequirementSubject &subject, const SessionView &view
 		if (candidate.role == subject.role) row = &candidate;
 	if (!row || row->state != RequirementState::WrongKind) return;
 	const std::string retail = retail_name(view, row->name);
-	if (!retail.empty()) out.push_back(import_fix(view, retail));
+	if (!retail.empty()) out.push_back(import_fix(view, retail, row->name));
 	if (!row->asset_path.empty()) out.push_back(rename_fix(row->asset_path));
 }
 

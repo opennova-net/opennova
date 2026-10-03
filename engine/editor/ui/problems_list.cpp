@@ -322,19 +322,38 @@ std::string ProblemsList::severity_counts(size_t errors, size_t warnings, size_t
 	return out;
 }
 
-std::string ProblemsList::summary(const RequirementReport &report) {
-	if (report.required_missing + report.required_wrong_kind == 0) return std::string();
-	const auto are = [](int n) { return n == 1 ? " is " : " are "; };
-	std::string text = "The game cannot start: ";
-	if (report.required_missing)
-		text += counted(size_t(report.required_missing), "required file") +
-		        are(report.required_missing) + "missing";
-	if (report.required_wrong_kind) {
-		if (report.required_missing) text += ", and ";
-		text += counted(size_t(report.required_wrong_kind), "required file") +
-		        are(report.required_wrong_kind) + "not the kind of file the game reads";
+ProblemsList::Summary ProblemsList::summary(const RequirementReport &report) {
+	// The gate's rows (the boot's refusals, RES_FATAL: the build refuses them) apart from the rest.
+	size_t stop_missing = 0, stop_wrong = 0, more_missing = 0, more_wrong = 0;
+	for (const RequirementRow &row : report.rows) {
+		if (!row.required || row.state == RequirementState::Present) continue;
+		const bool stops = row.severity == gameprofile::RES_FATAL;
+		const bool missing = row.state == RequirementState::Missing;
+		++(stops ? (missing ? stop_missing : stop_wrong) : (missing ? more_missing : more_wrong));
 	}
-	return text + ".";
+	const auto are = [](size_t n) { return n == 1 ? " is " : " are "; };
+	// "2 required files are missing, and 1 required file is not the kind of file the game reads".
+	const auto files = [&are](size_t missing, size_t wrong, const char *one, const char *many) {
+		const auto noun = [&](size_t n) { return std::to_string(n) + " " + (n == 1 ? one : many); };
+		std::string text;
+		if (missing) text += noun(missing) + are(missing) + "missing";
+		if (wrong) text += (missing ? std::string(", and ") : std::string()) + noun(wrong) + are(wrong) +
+		                   "not the kind of file the game reads";
+		return text;
+	};
+	Summary out;
+	if (stop_missing + stop_wrong)
+		out.stops = "The game will not start: " + files(stop_missing, stop_wrong, "required file", "required files") + ".";
+	const size_t more = more_missing + more_wrong;
+	if (more) {
+		const char *part = more == 1 ? "part of it" : "parts of it";
+		out.more = out.stops.empty()
+		                   ? "The game starts, but " + files(more_missing, more_wrong, "file it reads", "files it reads") + ": " +
+		                             part + " will not work."
+		                   : files(more_missing, more_wrong, "more file the game reads", "more files the game reads") + ": " +
+		                             part + " will not work.";
+	}
+	return out;
 }
 
 std::string ProblemsList::describe(const SessionView &view, const EditorRequest &request) {
@@ -366,7 +385,7 @@ std::string ProblemsList::describe(const SessionView &view, const EditorRequest 
 
 std::string ProblemsList::fix_all_label(const EditorRequest &request) {
 	switch (request.kind) {
-	case EditorRequestKind::CreateMissing: return "Create " + std::to_string(request.roles.size());
+	case EditorRequestKind::CreateMissing: return "Create " + counted(request.roles.size(), "placeholder");
 	case EditorRequestKind::PreviewInstallImport:
 		return "Import " + std::to_string(request.names.size()) + " from the game data...";
 	case EditorRequestKind::Reimport: return "Import " + basename_of(request.path) + " again";

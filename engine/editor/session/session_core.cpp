@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/edit.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/viewport_model.h>
@@ -347,6 +348,7 @@ bool SessionCore::close_project() {
 	view_.project.scan = std::make_shared<const AssetScan>();
 	view_.project.requirements = std::make_shared<const RequirementReport>();
 	view_.findings.diagnostics.clear();
+	view_.findings.marks.reset();
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
 	// The last build's findings are this project's and go with it.
@@ -918,6 +920,18 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 			     " file(s) hashed)");
 			view_.activity.status = "Build finished.";
 		}
+	} else if (result.refused) {
+		// What refused it, by name (the UX round's problems lane): its first refusal on the status line,
+		// the whole line (the build.blocked row's) in Output and Problems.
+		std::vector<Diagnostic> blockers;
+		for (const Diagnostic &d : result.diagnostics)
+			if (blocks_build(d) && d.row() != &finding_code(CoreFinding::BuildBlocked)) blockers.push_back(d);
+		note("Build refused.");
+		view_.activity.status = blockers.empty()
+		                                ? std::string("Build refused: see Problems.")
+		                                : "Build refused: " + blocker_words(blockers.front()) +
+		                                          (blockers.size() > 1 ? " (and " + std::to_string(blockers.size() - 1) + " more)" : "") +
+		                                          ". See Problems.";
 	} else {
 		note("Build failed.");
 		view_.activity.status = "Build failed; see Problems.";

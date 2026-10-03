@@ -154,7 +154,11 @@ EditorWindows::EditorWindows() {
 		inspector_window_ = inspector.get();
 		pass_.register_window(std::move(inspector));
 	}
-	problems_window_ = &pass_.register_window(std::make_unique<ProblemsWindow>(*this));
+	{
+		auto problems = std::make_unique<ProblemsWindow>(*this);
+		problems_window_ = problems.get();
+		pass_.register_window(std::move(problems));
+	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
@@ -469,10 +473,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	} else if (v.activity.play_state != PlayState::Stopped) {
 		state = "Stopping the game";
 	} else if (v.activity.has_build) {
-		state = v.activity.last_build->ok ? "Built" : "Build failed";
-		state_tip = v.activity.last_build->ok
-				? "The last build: " + v.activity.last_build->build_dir
-				: "See Problems.";
+		const BuildReport &last = *v.activity.last_build;
+		state = last.ok ? "Built" : last.refused ? "Build refused" : "Build failed";
+		state_tip = last.ok ? "The last build: " + last.build_dir
+		            : last.refused ? v.activity.status + "\nA click shows what refuses it in Problems."
+		                           : "See Problems.";
 	}
 
 	// Each part's width, left to right: the unsaved files, the problem counts, the state and
@@ -539,6 +544,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		std::string tip = std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
 		                  (warnings == 1 ? " warning, " : " warnings, ") + std::to_string(infos) + " info.";
 		if (original) tip += " " + std::to_string(original) + " more in the game's own data (also in the original).";
+		if (counted.blocking)
+			tip += " " + std::to_string(counted.blocking) + (counted.blocking == 1 ? " blocks" : " block") + " the build.";
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
@@ -548,8 +555,18 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ui_kit::severity_count(DiagnosticSeverity::Warning, warnings, height);
 	}
 	if (first <= 2 && !state.empty()) {
+		// A refused build: a click shows Problems with only what refuses it.
+		const bool refused = !v.activity.operation.running() && !v.activity.validation.running &&
+		                     v.activity.play_state == PlayState::Stopped && v.activity.has_build &&
+		                     v.activity.last_build->refused;
+		if (refused) {
+			if (clickable("##refused", ui_kit::text_width(state.c_str()), state_tip) && problems_window_)
+				problems_window_->show_blocking();
+			ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Error));
+		}
 		ImGui::TextUnformatted(state.c_str());
-		ui_kit::tooltip(state_tip);
+		if (refused) ImGui::PopStyleColor();
+		else ui_kit::tooltip(state_tip);
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
 				request(request::cancel_operation());

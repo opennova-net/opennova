@@ -170,6 +170,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
     # requirements — the manifest rows evaluated against the project
+    ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirement_words.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan, the run directory the game runs in, and the one managed child
     # over the platform seam

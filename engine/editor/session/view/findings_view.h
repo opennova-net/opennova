@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <set>
 #include <string>
@@ -12,6 +14,22 @@ namespace opennova::editor {
 class AssetGraph;
 class ProjectAssetSource;
 class ProjectChecks;
+struct OriginalData;
+
+// What the session marks each Problems row with (the UX round's problems lane), index for index with the
+// rows: whether it is about the game's own data (S15, decided per finding: session/original_files.h) and
+// whether a build is refused for it (one of the rows the build's plan is refused over:
+// project_build/build_plan.h's build_blockers). Made again whenever the rows, what the check of the game's
+// own data found or the open documents' unsaved state move; `rows` is how many rows they were made for
+// (marks made for other rows are read as none: problem_query.h's in_original_data, blocks_the_build).
+struct FindingMarks {
+	size_t rows = 0;
+	std::vector<uint8_t> original, blocking;
+	size_t blocking_count = 0;
+	bool operator==(const FindingMarks &o) const {
+		return rows == o.rows && original == o.original && blocking == o.blocking;
+	}
+};
 
 // What the project's validation found, as the view shows it (ADR 0046 S13 V4; the Findings and
 // Graph concerns): the Problems rows, and what the rows were made from and the windows read too,
@@ -34,10 +52,14 @@ struct FindingsView {
 	// compiled headless as the game draws it (S9j2; preview/menu_render_check.h's
 	// menu_render_check), whose render of a screen answers the menu_render query.
 	std::shared_ptr<const ProjectChecks> project_checks;
-	// The project's files a finding is about that are the game's own data, byte for byte as the game
-	// install serves them (session/original_files.h, ADR 0046 S15): Problems shows their findings apart,
-	// as the original's too. Project-relative paths; never null while a session holds the view.
-	std::shared_ptr<const std::set<std::string>> original_files;
+	// What the check of the game's own data found (session/original_files.h, ADR 0046 S15): the files a
+	// finding is about that the project holds byte for byte as the game install serves them, and, for those
+	// it holds otherwise, the findings their install copies make. Problems shows the findings it holds to be
+	// the original's apart. Never null while a session holds the view.
+	std::shared_ptr<const OriginalData> originals;
+	// The rows' marks (above); null in a view no session made, whose readers then work them out from what
+	// the view holds.
+	std::shared_ptr<const FindingMarks> marks;
 };
 
 } // namespace opennova::editor
