@@ -38,6 +38,11 @@ std::unique_ptr<DocumentBase> make_script_document();
 // otherwise than the editor's lines (an LF alone, a CR alone) is script.line_ending, which a
 // Rewrite fixes.
 std::vector<Diagnostic> validate_script_file(const DocumentBase &document);
+// A WAC compiler report in plain words, one sentence (ADR 0046 S15): what the report says is wrong
+// where it stands, from the compiler's own legs (runtime/wac/compiler.cpp): "Missing END" is "A
+// block opened on this line (an IF, a DO or a loop) has no END."; a report the table does not word
+// comes back as the compiler says it. A finding's message leads with it, the compiler's words after.
+std::string script_report_words(const std::string &report);
 // The names its operands look up, each at its span, as the compiler's lookups record them
 // (wac::Program::catalog_lookups), but a declared name's (a VAR's, a CHEAT's, an IF's: checked as
 // new through the same legs, a name the script gives): an effect (FX:NAME, a particle effect), a

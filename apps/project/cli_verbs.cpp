@@ -412,9 +412,15 @@ int run_status(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 	std::fprintf(cli.out, "requirements: %zu required, %zu missing, %zu wrong kind (missions %s)\n",
 	             count_at(requirements, "total"), count_at(requirements, "missing"), count_at(requirements, "wrong_kind"),
 	             at(project, "features").get_bool("mission", false) ? "on" : "off");
+	// The modder's findings, as the editor's Problems and menu bar count them; the game's own data's
+	// (files the project holds as the install serves them, ADR 0046 S15) said after them.
 	const JsonValue &problems = at(answer, "problem_counts");
 	std::fprintf(cli.out, "problems: %zu error(s), %zu warning(s), %zu info\n", count_at(problems, "errors"),
 	             count_at(problems, "warnings"), count_at(problems, "infos"));
+	const JsonValue &original = at(problems, "original");
+	if (const size_t more = count_at(original, "errors") + count_at(original, "warnings") + count_at(original, "infos"))
+		std::fprintf(cli.out, "  and in the game's own data: %zu error(s), %zu warning(s), %zu info\n",
+		             count_at(original, "errors"), count_at(original, "warnings"), count_at(original, "infos"));
 	return 0;
 }
 
@@ -453,7 +459,9 @@ int run_validate(Cli &cli, const CliVerbRow &row, const CliArgs &) {
 			print_finding(cli.out, finding);
 		}
 	}
-	const size_t errors = count_at(at(pages.front(), "counts"), "errors");
+	// Every error row: the modder's and the game's own data's (S15), none of which the gate refuses.
+	const size_t errors = count_at(at(pages.front(), "counts"), "errors") +
+	                      count_at(at(pages.front(), "original_counts"), "errors");
 	if (blocked)
 		std::fprintf(cli.out, "not ok: %zu finding(s) block a build\n", count_at(gate.front(), "count"));
 	else if (errors > 0)

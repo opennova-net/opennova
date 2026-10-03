@@ -6,11 +6,14 @@
 
 #if OPENNOVA_IMGUI_NODE
 #include <godot_cpp/classes/display_server.hpp>
+#include <godot_cpp/classes/main_loop.hpp>
 #include <godot_cpp/variant/packed_int64_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <runtime/devtools/imgui_abi.h>
 #include <runtime/devtools/imgui_pass.h>
+
+#include "resource_index/launch_flags.h"
 #endif
 
 #include <climits>
@@ -32,6 +35,20 @@ void ImGuiPassNode::_bind_methods() {
 }
 
 #if OPENNOVA_IMGUI_NODE
+
+namespace {
+
+// The window layout is the user's in a run a person drives. A run under a test runner (a script
+// main loop: GUT's) or driven over MCP (--mcp-port: an agent's) keeps none
+// (ImGuiPass::set_user_layout): the default layout every time, the user's file neither read nor
+// written, so it never depends on whoever docked last and never changes the user's.
+bool keeps_user_layout() {
+	const MainLoop *loop = Engine::get_singleton()->get_main_loop();
+	if (loop != nullptr && loop->get_script().get_type() != Variant::NIL) return false;
+	return LaunchFlags::mcp_port() <= 0;
+}
+
+} // namespace
 
 bool ImGuiPassNode::attach(opennova::devtools::ImGuiPass &p_pass) {
 	Engine *engine = Engine::get_singleton();
@@ -63,6 +80,12 @@ bool ImGuiPassNode::attach(opennova::devtools::ImGuiPass &p_pass) {
 				abi.version));
 		return false;
 	}
+	// A run that keeps no layout lets the addon's file go too: the addon holds the file's name and
+	// hands it to ImGui again (a context whose name the pass alone cleared still wrote the user's
+	// file at exit), so its own SetIniFilename with no name is what keeps the file unwritten.
+	const bool keeps = keeps_user_layout();
+	if (!keeps) imgui->call("SetIniFilename", String());
+	p_pass.set_user_layout(keeps);
 	return p_pass.attach_imgui(reinterpret_cast<void *>(static_cast<intptr_t>(table[0])),
 			reinterpret_cast<opennova::devtools::ImGuiAllocFn>(static_cast<intptr_t>(table[1])),
 			reinterpret_cast<opennova::devtools::ImGuiFreeFn>(static_cast<intptr_t>(table[2])), nullptr);

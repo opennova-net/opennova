@@ -7,6 +7,7 @@
 #include <utility>
 
 #include <base/io/json.h>
+#include <base/io/strutil.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/model/edit.h>
@@ -79,6 +80,7 @@ void SessionCore::start() {
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.recent_items = settings.recent_items;
 	view_.activity.status = "No project open.";
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
@@ -90,10 +92,24 @@ SessionCore::RequestScope::RequestScope(SessionCore &core) : core_(core), outerm
 	if (!outermost_) return;
 	core_.outcome_ = ActionOutcome();
 	core_.in_request_ = true;
+	status_before_ = core_.view_.activity.status;
 }
 
 SessionCore::RequestScope::~RequestScope() {
-	if (outermost_) core_.in_request_ = false;
+	if (!outermost_) return;
+	// A refused request's line is its own: kept until a request is served, which said its own line
+	// or, having said nothing, leaves none (ADR 0046 S15). A refusal that said nothing on the line
+	// claims none.
+	if (core_.outcome_.refused) {
+		if (core_.view_.activity.status != status_before_) core_.refusal_status_ = core_.view_.activity.status;
+	} else if (!core_.refusal_status_.empty()) {
+		if (core_.view_.activity.status == core_.refusal_status_) {
+			core_.view_.activity.status.clear();
+			core_.touch(ViewConcern::Output);
+		}
+		core_.refusal_status_.clear();
+	}
+	core_.in_request_ = false;
 }
 
 void SessionCore::note(std::string line) {
@@ -104,6 +120,8 @@ void SessionCore::note(std::string line) {
 void SessionCore::report(const Diagnostic &d) {
 	problems().add_reported(d);
 	record_outcome(d);
+	// A request refused says why on the status line too (ADR 0046 S15), as well as in Output.
+	if (in_request_ && d.severity == DiagnosticSeverity::Error) view_.activity.status = d.message;
 	note(std::string(diagnostic_severity_label(d.severity)) + ": " + d.message);
 }
 
@@ -120,7 +138,9 @@ void SessionCore::record_outcome(const Diagnostic &d) {
 // request did nothing and its outcome says so.
 void SessionCore::refuse_now(CoreFinding code, const std::string &message, const std::string &asset) {
 	report(make_finding(code, DiagnosticSeverity::Warning, message, asset));
-	if (in_request_) outcome_.refused = true;
+	if (!in_request_) return;
+	outcome_.refused = true;
+	view_.activity.status = message;
 }
 
 // --- the operation slot ------------------------------------------------------------------
@@ -371,6 +391,9 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			evaluate_requirements(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
+	// A whole refresh (an open, a Rescan, a Reimport) reads the install as it stands now too: which files
+	// are the game's own data is found again after the validation (S15).
+	problems().forget_originals();
 	problems().validate_later();
 	return imports;
 }
@@ -647,7 +670,7 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 			if (drop) {
 				viewport->drop(context, request.drop, planned, error);
 			} else if (!drag) {
-				viewport->command(context, request.command.name, request.command.ids, planned, error);
+				viewport->command_of(context, request.command, planned, error);
 			} else {
 				if (going && asked.by) {
 					x = going->x + asked.x;
@@ -687,6 +710,10 @@ void SessionCore::edit_in_viewport(const EditorRequest &request) {
 	// Served in order, as the parts serve what they compose (never through handle()): each meets its
 	// own row's gate, and its findings are this request's outcome.
 	for (const EditorRequest &each : planned.requests) serve_request(*this, each);
+	// An item placed is among the recently placed (ADR 0046 S15: the Place tool's palette lists them
+	// first), kept with the editor's preferences.
+	if (drop && !outcome_.refused && request.drop.reference == "item" && !request.drop.box)
+		if (const std::optional<int> item = strutil::parse_int(request.drop.name)) remember_recent_item(*item);
 	if (!drag) return;
 	// The gesture ends with this sample (its EndEdit served), or stays open for the next: the
 	// document's open one, its last sample's time kept, and the point this sample took the handle to
@@ -740,19 +767,41 @@ void SessionCore::quit() {
 		refuse_busy(std::string());
 		return;
 	}
+	save_recent_items();
 	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }
 
 void SessionCore::save_preferences() {
 	Diagnostic error;
+	recent_items_unsaved_ = false; // this save keeps them
 	if (!preferences_.save(error)) report(error);
 	const Preferences &settings = preferences_.values();
 	view_.project.recent_projects = settings.recent_projects;
 	view_.project.retail_directory = game_install();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.import_dependencies = settings.import_dependencies;
+	view_.project.recent_items = settings.recent_items;
 	touch(ViewConcern::Preferences);
+}
+
+void SessionCore::remember_recent_item(int64_t item) {
+	// In effect at once (the palette lists it first); written at the next poll, outside the request that
+	// placed it, and not at all when it was first already.
+	if (!preferences_.remember_recent_item(item)) return;
+	view_.project.recent_items = preferences_.values().recent_items;
+	touch(ViewConcern::Preferences);
+	recent_items_unsaved_ = true;
+}
+
+void SessionCore::save_recent_items() {
+	if (!recent_items_unsaved_) return;
+	recent_items_unsaved_ = false;
+	// A placement already went through: a settings file that cannot be written is a note, never the
+	// placement's refusal.
+	Diagnostic error;
+	if (!preferences_.save(error))
+		note("note: the recently placed items could not be kept with the editor's settings: " + error.message);
 }
 
 std::string SessionCore::game_install() const {
