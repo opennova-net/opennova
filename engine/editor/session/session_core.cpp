@@ -815,15 +815,16 @@ const RequirementRow *SessionCore::requirement_row(const std::string &role) cons
 	return row;
 }
 
-// Two files of one name are the scan's asset.name.duplicate: the path named, else the first of
-// the name.
+// Names are the game's, case-insensitive in its archives and in the project: the path named,
+// else that path in another case, else the file of its name (the scan's lookup, the engine's).
+// Two files of one name are the scan's asset.name.duplicate: the first of the name by path.
 const AssetEntry *SessionCore::project_file(const std::string &file) const {
-	for (const AssetEntry &candidate : view_.project.scan->entries)
-		if (candidate.relative_path == file) return &candidate;
-	const std::string wanted = normalized_logical_name(basename_of(file));
-	for (const AssetEntry &candidate : view_.project.scan->entries)
-		if (normalized_logical_name(candidate.logical_name) == wanted) return &candidate;
-	return nullptr;
+	if (!view_.project.scan) return nullptr;
+	const AssetScan &scan = *view_.project.scan;
+	if (const AssetEntry *exact = scan.at_path(file)) return exact;
+	for (const AssetEntry &candidate : scan.entries)
+		if (strutil::iequals(candidate.relative_path, file)) return &candidate;
+	return scan.find(basename_of(file));
 }
 
 // --- the build -------------------------------------------------------------------------------

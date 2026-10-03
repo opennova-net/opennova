@@ -35,6 +35,10 @@ DocumentBase *DocumentSet::document_for(const std::string &path) {
 	for (auto &document : documents_)
 		if (document->path() == wanted || normalized_logical_name(basename_of(document->path())) == normalized_logical_name(wanted))
 			return document.get();
+	// Named in another case (names are the game's, case-insensitive): the project's file of it.
+	if (const AssetEntry *file = core_.project_file(wanted))
+		for (auto &document : documents_)
+			if (document->path() == file->relative_path) return document.get();
 	return nullptr;
 }
 
@@ -329,7 +333,11 @@ void DocumentSet::create_file(const EditorRequest &request) {
 
 void DocumentSet::open_document(const EditorRequest &request) {
 	if (!view_.project.open) return;
-	const std::string path = request.path.empty() ? view_.documents.active : request.path;
+	// The file the request names, however it spells it (another case, the name alone): the
+	// project's file (SessionCore::project_file, the scan's case-insensitive lookup).
+	const std::string named = request.path.empty() ? view_.documents.active : request.path;
+	const AssetEntry *file = core_.project_file(named);
+	const std::string path = file ? file->relative_path : named;
 	// The record a request names (by its address, or by its locator: a Go to) is selected,
 	// and its field (a Problems row's, the defining field a Go to shows) shown: a RevealRecord
 	// event for the document's view and the Inspector, one per ask (the same row clicked again
@@ -379,8 +387,8 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		say("Showing " + document.path() + ".");
 		return;
 	}
-	for (const auto &asset : view_.project.scan->entries) {
-		if (asset.relative_path != path && normalized_logical_name(asset.logical_name) != normalized_logical_name(path)) continue;
+	if (file) {
+		const AssetEntry &asset = *file;
 		const DocumentType *type = document_type_for(asset.kind);
 		if (!type) {
 			refuse(make_finding(CoreFinding::DocumentKind, DiagnosticSeverity::Error, "This kind of file has no editor yet.", path));
