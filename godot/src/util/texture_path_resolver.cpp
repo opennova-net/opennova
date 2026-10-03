@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <initializer_list>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -81,7 +82,93 @@ godot::Ref<godot::Image> rgba_image(int width, int height, const uint8_t *pixels
 	return godot::Image::create_from_data(width, height, false, godot::Image::FORMAT_RGBA8, data);
 }
 
-// The reader alone: RGBA8, no mips, null when the bytes do not decode.
+// The game's TGA reader straight into the image's own bytes (one buffer, no copy).
+godot::Ref<godot::Image> read_tga(const godot::PackedByteArray &bytes, tga::TgaReaderForm form) {
+	int width = 0, height = 0;
+	std::string error;
+	const uint8_t *data = bytes.ptr();
+	const size_t size = static_cast<size_t>(bytes.size());
+	if (!tga::tga_retail_size(data, size, width, height, error, form)) {
+		return godot::Ref<godot::Image>();
+	}
+	godot::PackedByteArray pixels;
+	pixels.resize(static_cast<int64_t>(width) * height * 4);
+	if (!tga::tga_decode_retail_into(data, size, pixels.ptrw(), error, form)) {
+		return godot::Ref<godot::Image>();
+	}
+	return godot::Image::create_from_data(width, height, false, godot::Image::FORMAT_RGBA8, pixels);
+}
+
+bool starts_with(const godot::PackedByteArray &bytes, std::initializer_list<uint8_t> magic) {
+	if (static_cast<size_t>(bytes.size()) < magic.size()) {
+		return false;
+	}
+	size_t i = 0;
+	for (const uint8_t byte : magic) {
+		if (bytes[static_cast<int64_t>(i++)] != byte) {
+			return false;
+		}
+	}
+	return true;
+}
+
+// Whether the bytes carry a TGA header D3DX's TGA codec would take: a colour-map type
+// of 0 or 1, one of the image types it reads and a pixel depth it knows. A check before
+// Godot's decoder so a file that is no TGA fails quietly, as the codec does.
+bool looks_like_tga(const godot::PackedByteArray &bytes) {
+	if (bytes.size() < 18) {
+		return false;
+	}
+	const uint8_t map_type = bytes[1];
+	const uint8_t image_type = bytes[2];
+	const uint8_t depth = bytes[16];
+	const bool type_ok = image_type == 1 || image_type == 2 || image_type == 3 ||
+			image_type == 9 || image_type == 10 || image_type == 11;
+	const bool depth_ok = depth == 8 || depth == 15 || depth == 16 || depth == 24 || depth == 32;
+	return map_type <= 1 && type_ok && depth_ok;
+}
+
+// The "DDS" reader: D3DX decodes the bytes by their content, its codecs tried in turn
+// (renderer::dds_reader_codec_order). Godot decodes BMP, DDS, JPEG, PNG and TGA; its
+// TGA decoder honours the origin bit as D3DX's codec does.
+godot::Ref<godot::Image> read_dds_by_content(const godot::PackedByteArray &bytes) {
+	for (const renderer::DdsCodec codec : renderer::dds_reader_codec_order()) {
+		godot::Ref<godot::Image> image;
+		image.instantiate();
+		godot::Error err = godot::ERR_FILE_UNRECOGNIZED;
+		switch (codec) {
+			case renderer::DdsCodec::Bmp:
+				if (starts_with(bytes, { 'B', 'M' })) err = image->load_bmp_from_buffer(bytes);
+				break;
+			case renderer::DdsCodec::Dds:
+				if (godot::bytes_look_like_dds(bytes)) err = image->load_dds_from_buffer(bytes);
+				break;
+			case renderer::DdsCodec::Jpeg:
+				if (starts_with(bytes, { 0xFF, 0xD8, 0xFF })) err = image->load_jpg_from_buffer(bytes);
+				break;
+			case renderer::DdsCodec::Png:
+				if (starts_with(bytes, { 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A })) {
+					err = image->load_png_from_buffer(bytes);
+				}
+				break;
+			case renderer::DdsCodec::Tga:
+				if (looks_like_tga(bytes)) err = image->load_tga_from_buffer(bytes);
+				break;
+			case renderer::DdsCodec::Ppm:
+			case renderer::DdsCodec::Pfm:
+			case renderer::DdsCodec::Hdr:
+			case renderer::DdsCodec::Dib:
+				break;
+		}
+		if (err == godot::OK && !image->is_empty()) {
+			return image;
+		}
+	}
+	return godot::Ref<godot::Image>();
+}
+
+// The reader alone: RGBA8 and null when the bytes do not decode. Only a DDS-reader
+// image keeps a mip chain, the one its file carries.
 godot::Ref<godot::Image> read_image(renderer::TextureReader reader, const godot::PackedByteArray &bytes) {
 	if (bytes.is_empty()) {
 		return godot::Ref<godot::Image>();
@@ -91,13 +178,10 @@ godot::Ref<godot::Image> read_image(renderer::TextureReader reader, const godot:
 	std::string error;
 	godot::Ref<godot::Image> image;
 	switch (reader) {
-		case renderer::TextureReader::Tga: {
-			tga::TgaImage decoded;
-			if (!tga::tga_decode_retail(data, size, decoded, error)) {
-				return godot::Ref<godot::Image>();
-			}
-			return rgba_image(decoded.width, decoded.height, decoded.rgba.data(), decoded.rgba.size());
-		}
+		case renderer::TextureReader::Tga:
+			return read_tga(bytes, tga::TgaReaderForm::Archive);
+		case renderer::TextureReader::TgaParticleLoose:
+			return read_tga(bytes, tga::TgaReaderForm::ParticleLoose);
 		case renderer::TextureReader::Pcx: {
 			RgbaImage decoded;
 			if (!decode_pcx_menu_rgba(data, size, decoded, error)) {
@@ -106,13 +190,7 @@ godot::Ref<godot::Image> read_image(renderer::TextureReader reader, const godot:
 			return rgba_image(decoded.width, decoded.height, decoded.pixels.data(), decoded.pixels.size());
 		}
 		case renderer::TextureReader::Dds:
-			if (!godot::bytes_look_like_dds(bytes)) {
-				return godot::Ref<godot::Image>();
-			}
-			image.instantiate();
-			if (image->load_dds_from_buffer(bytes) != godot::OK) {
-				return godot::Ref<godot::Image>();
-			}
+			image = read_dds_by_content(bytes);
 			break;
 		case renderer::TextureReader::Png:
 			image.instantiate();
@@ -129,7 +207,7 @@ godot::Ref<godot::Image> read_image(renderer::TextureReader reader, const godot:
 	if (image->is_compressed() && image->decompress() != godot::OK) {
 		return godot::Ref<godot::Image>();
 	}
-	if (image->has_mipmaps()) {
+	if (reader != renderer::TextureReader::Dds && image->has_mipmaps()) {
 		image->clear_mipmaps();
 	}
 	if (image->get_format() != godot::Image::FORMAT_RGBA8) {
@@ -162,6 +240,9 @@ godot::Ref<godot::Image> decode_texture_load(const renderer::TextureLoad &load,
 		}
 	}
 	if (load.transform == renderer::TextureLoadTransform::WhiteAlphaFromBlue || load.alpha_only) {
+		if (image->has_mipmaps()) {
+			image->clear_mipmaps();
+		}
 		godot::PackedByteArray data = image->get_data();
 		renderer::apply_texture_load_transform(load.transform, load.alpha_only, data.ptrw(),
 				static_cast<size_t>(data.size()) / 4u);
@@ -170,19 +251,35 @@ godot::Ref<godot::Image> decode_texture_load(const renderer::TextureLoad &load,
 	return image;
 }
 
-godot::Ref<godot::Image> load_texture_image(renderer::TextureLoader loader, const godot::String &name,
-		const renderer::TextureFileQuery &files,
-		const std::function<godot::PackedByteArray(const std::string &)> &read) {
-	if (name.is_empty() || !read) {
+godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read, bool *r_alpha_only) {
+	if (r_alpha_only != nullptr) {
+		*r_alpha_only = false;
+	}
+	if (!read) {
 		return godot::Ref<godot::Image>();
 	}
-	for (const renderer::TextureLoad &load : renderer::texture_load_attempts(loader, to_std(name), files)) {
-		const godot::Ref<godot::Image> image = decode_texture_load(load, read(load.file));
+	for (const renderer::TextureLoad &load : attempts) {
+		const godot::Ref<godot::Image> image = decode_texture_load(load, read(load));
 		if (image.is_valid()) {
+			if (r_alpha_only != nullptr) {
+				*r_alpha_only = load.alpha_only;
+			}
 			return image;
 		}
 	}
 	return godot::Ref<godot::Image>();
+}
+
+std::string texture_load_key(const std::vector<renderer::TextureLoad> &attempts) {
+	std::string key;
+	for (const renderer::TextureLoad &load : attempts) {
+		key += std::to_string(static_cast<int>(load.source)) + "/" +
+				std::to_string(static_cast<int>(load.reader)) + "/" +
+				std::to_string(static_cast<int>(load.transform)) + "/" + (load.alpha_only ? "a" : "c") +
+				"/" + to_std(to_gd(load.file).to_lower()) + "|";
+	}
+	return key;
 }
 
 godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image) {
@@ -192,7 +289,10 @@ godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image>
 	if (image->is_compressed()) {
 		image->decompress();
 	}
-	image->generate_mipmaps();
+	// A DDS keeps the chain its file carries (D3DX's MipLevels 0).
+	if (!image->has_mipmaps()) {
+		image->generate_mipmaps();
+	}
 	return godot::ImageTexture::create_from_image(image);
 }
 
@@ -210,30 +310,35 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 		return resource_loader->exists(path) ? godot::Ref<godot::Texture2D>(resource_loader->load(path))
 											  : godot::Ref<godot::Texture2D>();
 	}
-	// Absolute/external original-asset path: decode the raw bytes the retail way.
-	// Cached directory listing + decoded-texture cache so a shared texture is
-	// enumerated/decoded/uploaded once, not per material.
-	const std::string key = "loader:" + std::to_string(static_cast<int>(loader)) + ":" +
-			to_std(dir) + "/" + to_std(filename.to_lower());
-	const auto cached = g_texture_cache.find(key);
-	if (cached != g_texture_cache.end()) {
-		return cached->second;
-	}
+	// Absolute/external original-asset path: decode the raw bytes the retail way. A
+	// loose directory is the only source, so no loose-first search competes; the
+	// particle folder is the directory's "tga" folder.
 	renderer::TextureFileQuery files;
 	files.exists = [&dir](const std::string &name) {
 		return !resolve_file_in_dir(dir, to_gd(name)).is_empty();
 	};
-	// A loose directory is the only source, so no loose-first search competes.
-	const auto read = [&dir](const std::string &name) {
+	const std::vector<renderer::TextureLoad> attempts =
+			renderer::texture_load_attempts(loader, to_std(filename), files);
+	// Cached directory listing + decoded-texture cache, keyed by the files and readers
+	// the loader resolved, so a shared texture is decoded and uploaded once.
+	const std::string key = "dir:" + to_std(dir) + ":" + texture_load_key(attempts);
+	const auto cached = g_texture_cache.find(key);
+	if (cached != g_texture_cache.end()) {
+		return cached->second;
+	}
+	const auto read = [&dir](const renderer::TextureLoad &load) {
 		godot::PackedByteArray bytes;
-		const godot::String path = resolve_file_in_dir(dir, to_gd(name));
+		if (load.source == renderer::TextureFileSource::ParticleTextureDir) {
+			const godot::String path = resolve_file_in_dir(dir.path_join("tga"), to_gd(load.file));
+			return path.is_empty() ? godot::PackedByteArray() : godot::FileAccess::get_file_as_bytes(path);
+		}
+		const godot::String path = resolve_file_in_dir(dir, to_gd(load.file));
 		if (path.is_empty() || !godot::read_nova_payload_file(path, bytes)) {
 			return godot::PackedByteArray();
 		}
 		return bytes;
 	};
-	const godot::Ref<godot::Texture2D> texture =
-			texture_with_mipmaps(load_texture_image(loader, filename, files, read));
+	const godot::Ref<godot::Texture2D> texture = texture_with_mipmaps(load_texture_image(attempts, read));
 	// Cache the null too: a missing or undecodable file is not re-read per probe.
 	g_texture_cache.emplace(key, texture);
 	return texture;
@@ -268,9 +373,10 @@ godot::Ref<godot::Texture2D> load_material_image_from_bytes(
 		return texture_with_mipmaps(decode_texture_load(load, bytes));
 	}
 	// D3DXCreateTextureFromFileInMemoryEx keeps the file's mip levels; only a
-	// chain-less DDS gets generated ones.
+	// chain-less DDS gets generated ones. Bytes that are no DDS go through the
+	// reader's other codecs (renderer::dds_reader_codec_order).
 	if (!godot::bytes_look_like_dds(bytes)) {
-		return godot::Ref<godot::Texture2D>();
+		return texture_with_mipmaps(decode_texture_load(load, bytes));
 	}
 	godot::Ref<godot::Image> image;
 	image.instantiate();
@@ -333,11 +439,12 @@ godot::Ref<godot::Texture> prepare_material_texture(
         const godot::String &name, uint8_t type) {
     using namespace opennova::renderer;
     const auto mode = material_texture_transform(type, name.utf8().get_data(), source.is_valid());
-    // A normal map past the cap is halved (renderer::halve_rgba_to_cap).
-    const bool normal = type == 4 || type == 5;
-    const bool over_cap = normal && source.is_valid() &&
-            (static_cast<uint32_t>(source->get_width()) > kNormalMapSideCap ||
-             static_cast<uint32_t>(source->get_height()) > kNormalMapSideCap);
+    // A row whose texture loads with a side cap (the normal maps and the occlusion
+    // producer: renderer::material_texture_side_cap) is halved to it.
+    const uint32_t cap = material_texture_side_cap(type);
+    const bool over_cap = cap != 0 && source.is_valid() &&
+            (static_cast<uint32_t>(source->get_width()) > cap ||
+             static_cast<uint32_t>(source->get_height()) > cap);
     if (mode == MaterialTextureTransform::Unchanged && !over_cap) return source;
     const std::string key = mode == MaterialTextureTransform::Checkerboard ? "material:checkerboard"
             : "material:" + std::to_string(type) + ":" + std::to_string(source->get_instance_id());
@@ -368,7 +475,8 @@ godot::Ref<godot::Texture> prepare_material_texture(
                 pixels = ambient_occlusion_from_height(rgba.ptr(), width, height); break;
             default: break;
         }
-        if (normal && pixels) halve_rgba_to_cap(pixels.rgba, pixels.width, pixels.height, kNormalMapSideCap);
+        if (cap != 0 && pixels && pixels.depth == 1)
+            halve_rgba_to_cap(pixels.rgba, pixels.width, pixels.height, cap);
     }
     if (!pixels) return prepare_material_texture({}, name, type);
     const auto texture = upload_material_pixels(pixels, mode == MaterialTextureTransform::HorizonVolume);

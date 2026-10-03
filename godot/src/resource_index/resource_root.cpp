@@ -12,6 +12,7 @@
 #include <base/vfs/vfs.h>
 
 #include <godot_cpp/classes/dir_access.hpp>
+#include <godot_cpp/classes/file_access.hpp>
 #include <godot_cpp/classes/os.hpp>
 #include <godot_cpp/classes/project_settings.hpp>
 
@@ -45,6 +46,8 @@ static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_MENU) ==
 		static_cast<int>(opennova::renderer::TextureLoader::Menu));
 static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_CINE_FADE) ==
 		static_cast<int>(opennova::renderer::TextureLoader::CineFade));
+static_assert(static_cast<int>(ResourceRoot::TEXTURE_LOADER_PARTICLE) ==
+		static_cast<int>(opennova::renderer::TextureLoader::Particle));
 
 namespace {
 
@@ -102,6 +105,7 @@ void ResourceRoot::_bind_methods() {
 	BIND_ENUM_CONSTANT(TEXTURE_LOADER_HUD_ALPHA);
 	BIND_ENUM_CONSTANT(TEXTURE_LOADER_MENU);
 	BIND_ENUM_CONSTANT(TEXTURE_LOADER_CINE_FADE);
+	BIND_ENUM_CONSTANT(TEXTURE_LOADER_PARTICLE);
 
 	// Every mount_runtime() / set_root_dir() is done: the mount, the expansion and
 	// the expansion's override table may have changed.
@@ -531,24 +535,59 @@ PackedByteArray ResourceRoot::read_file(const String &name, LookupPolicy policy)
 	return to_packed_bytes(bytes);
 }
 
-Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader loader,
-		LookupPolicy policy) const {
-	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
-		return Ref<Image>();
+std::vector<opennova::renderer::TextureLoad> ResourceRoot::texture_attempts_(const String &name,
+		TextureLoader loader, LookupPolicy policy) const {
+	// A runtime mount hands the loader the caller's whole query (its qualified lookup
+	// is retail's); a loose mount resolves flat names, so a qualified query keeps its
+	// file name.
+	const String query = mount_kind_ == MountKind::Runtime ? name.strip_edges() : lookup_name(name);
+	if (query.is_empty()) {
+		return {};
 	}
-	// The loader receives the caller's whole query; read_file/has_file keep the
-	// mount's own rules for it (a runtime mount's qualified lookup, a loose
-	// mount's flat names).
 	opennova::renderer::TextureFileQuery files;
 	files.exists = [this, policy](const std::string &file) {
 		return has_file(opennova::to_gd(file), policy);
 	};
-	files.loose_first_hit = [this](const std::string &file) {
-		return index_.prefers_loose_file(file);
+	files.loose_first_hit = [this, policy](const std::string &file) {
+		return index_.loose_first_hit(file, to_vfs_lookup_policy(policy));
 	};
-	return opennova::load_texture_image(static_cast<opennova::renderer::TextureLoader>(loader),
-			name.strip_edges(), files,
-			[this, policy](const std::string &file) { return read_file(opennova::to_gd(file), policy); });
+	return opennova::renderer::texture_load_attempts(
+			static_cast<opennova::renderer::TextureLoader>(loader), opennova::to_std(query), files);
+}
+
+PackedByteArray ResourceRoot::read_texture_attempt_(const opennova::renderer::TextureLoad &load,
+		LookupPolicy policy) const {
+	if (load.source == opennova::renderer::TextureFileSource::ParticleTextureDir) {
+		// The particle manager's own folder, "<game directory>\tga\", opened directly
+		// (renderer::TextureFileSource::ParticleTextureDir); raw bytes, as fopen reads.
+		const String tga_dir = root_dir_.path_join("tga");
+		const String file = opennova::to_gd(load.file).replace("\\", "/");
+		const String path = file.contains("/")
+				? (FileAccess::file_exists(tga_dir.path_join(file)) ? tga_dir.path_join(file) : String())
+				: opennova::resolve_file_in_dir(tga_dir, file);
+		return path.is_empty() ? PackedByteArray() : FileAccess::get_file_as_bytes(path);
+	}
+	return read_file(opennova::to_gd(load.file), policy);
+}
+
+Ref<Image> ResourceRoot::load_texture_image(const String &name, TextureLoader loader,
+		LookupPolicy policy, bool *r_alpha_only) const {
+	if (r_alpha_only != nullptr) {
+		*r_alpha_only = false;
+	}
+	if (root_dir_.is_empty() || name.strip_edges().is_empty()) {
+		return Ref<Image>();
+	}
+	const Ref<Image> image = opennova::load_texture_image(texture_attempts_(name, loader, policy),
+			[this, policy](const opennova::renderer::TextureLoad &load) {
+				return read_texture_attempt_(load, policy);
+			},
+			r_alpha_only);
+	// An image consumer takes the top level alone.
+	if (image.is_valid() && image->has_mipmaps()) {
+		image->clear_mipmaps();
+	}
+	return image;
 }
 
 Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader loader,
@@ -561,17 +600,21 @@ Ref<Texture2D> ResourceRoot::load_texture(const String &name, TextureLoader load
 		texture_cache_.clear();
 		texture_cache_epoch_ = epoch;
 	}
-	// The loader, the source policy and the normalized query are the texture's
-	// identity: one loader's decode never serves another's, and a prior
-	// archive/default decode never poisons a later forced-loose lookup.
-	const std::string cache_key = std::to_string(static_cast<int>(loader)) + ":" +
-			std::to_string(static_cast<int>(policy)) + ":" +
-			opennova::to_std(name.strip_edges().to_lower());
+	// The files and readers the loader resolved, under the source policy, are the
+	// texture's identity: one loader's decode never serves another's, a prior
+	// archive/default decode never poisons a later forced-loose lookup, and two names
+	// whose case the rules read differently (".MDT", ".PCX") stay apart.
+	const std::vector<opennova::renderer::TextureLoad> attempts = texture_attempts_(name, loader, policy);
+	const std::string cache_key = std::to_string(static_cast<int>(policy)) + ":" +
+			opennova::texture_load_key(attempts);
 	const auto cached = texture_cache_.find(cache_key);
 	if (cached != texture_cache_.end()) {
 		return cached->second;
 	}
-	const Ref<Texture2D> result = opennova::texture_with_mipmaps(load_texture_image(name, loader, policy));
+	const Ref<Texture2D> result = opennova::texture_with_mipmaps(opennova::load_texture_image(attempts,
+			[this, policy](const opennova::renderer::TextureLoad &load) {
+				return read_texture_attempt_(load, policy);
+			}));
 	texture_cache_.emplace(cache_key, result);
 	return result;
 }

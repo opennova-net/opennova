@@ -84,11 +84,13 @@ func test_hud_loader_suffixes_override_the_mode() -> void:
 	var mode_colour := root.load_texture("art.tga", ResourceRoot.TEXTURE_LOADER_HUD_COLOR)
 	assert_not_null(alpha, ".ALPHA is cut off before the file is opened")
 	assert_not_null(full, ".FULL is cut off before the file is opened")
+	assert_not_null(mode_alpha, "alpha mode loads the TGA")
+	assert_not_null(mode_colour, "colour mode loads the TGA")
 	if alpha != null and full != null and mode_alpha != null and mode_colour != null:
 		assert_eq(_pixel(alpha), Color8(255, 255, 255, 99), ".ALPHA makes it alpha-only")
 		assert_eq(_pixel(full), Color8(10, 20, 30, 99), ".FULL makes it colour")
 		assert_eq(_pixel(mode_alpha), Color8(255, 255, 255, 99),
-				"alpha mode keeps only the alpha, drawn in the vertex colour")
+				"alpha mode keeps only the alpha; the material draws the vertex colour")
 		assert_eq(_pixel(mode_colour), Color8(10, 20, 30, 99), "colour mode keeps ARGB")
 	assert_null(root.load_texture("art.dds", ResourceRoot.TEXTURE_LOADER_HUD_COLOR),
 			"the HUD loader reads TGA and PCX only")
@@ -96,8 +98,9 @@ func test_hud_loader_suffixes_override_the_mode() -> void:
 
 # Six HUDSTANCE frames all naming `stance_name` (the stance widget sizes its
 # quads off frame 0).
-func _stance_layout(dir: String, stance_name: String) -> HudPos:
+func _stance_layout(dir: String, stance_name: String, extra := PackedStringArray()) -> HudPos:
 	var lines := PackedStringArray(["HUDSTANCEPOS 21 630", "ALPHAFADE 30 50 3"])
+	lines.append_array(extra)
 	for i in range(6):
 		lines.append("HUDSTANCE %d 10 11 %s S%d" % [i, stance_name, i])
 	TestFs.write_text(self, dir.path_join("hudpos.def"), "\n".join(lines))
@@ -120,6 +123,38 @@ func test_hud_overlay_draws_pcx_and_suffixed_stance_art() -> void:
 		hud.set_player_state(100, 1.0, 2, 80.0)
 		assert_eq(hud.get_draw_list_stats().quads, 1,
 				"the HUD loader loads stance art named %s" % stance_name)
+
+
+func _doubled(c: Color) -> Color:
+	return Color(minf(c.r8 * 2, 255) / 255.0, minf(c.g8 * 2, 255) / 255.0,
+			minf(c.b8 * 2, 255) / 255.0, c.a8 / 255.0)
+
+
+func test_alpha_mode_art_draws_twice_the_vertex_colour() -> void:
+	# The stance art loads in alpha mode, whose material 0xA51 draws ADD(DIFFUSE,
+	# DIFFUSE): twice the vertex colour, saturated, the texture's colour unread. A
+	# ".FULL" name loads it in colour mode, drawn at the vertex colour.
+	for stance_name in ["stance.tga", "stance.tga.full"]:
+		var dir := _root_dir("hud_alpha_draw")
+		TestFs.write_bytes(self, dir.path_join("stance.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color8(10, 20, 30, 255)))
+		var hud := HudOverlay.new()
+		hud.size = Vector2(1024, 768)
+		add_child_autofree(hud)
+		hud.configure(_stance_layout(dir, stance_name,
+				PackedStringArray(["stanceicon_color 255 80 40 20"])), _loose(dir))
+		hud.set_player_state(100, 1.0, 2, 80.0)
+		var compiled := hud.get_textured_quad_colors(false)
+		var drawn := hud.get_textured_quad_colors(true)
+		assert_eq(drawn.size(), 1, "one stance quad")
+		if drawn.size() != 1:
+			continue
+		assert_eq(compiled[0].r8, 80, "the stance tint is the vertex colour")
+		if stance_name == "stance.tga":
+			assert_true(drawn[0].is_equal_approx(_doubled(compiled[0])),
+					"alpha mode draws twice the vertex colour (%s from %s)" % [drawn[0], compiled[0]])
+			assert_eq(drawn[0].r8, 160, "0x50 doubles to 0xA0")
+		else:
+			assert_true(drawn[0].is_equal_approx(compiled[0]), "colour mode draws the vertex colour")
 
 
 # --- 2. Model texture type 1 -----------------------------------------------
@@ -224,3 +259,119 @@ func test_normal_maps_halve_to_512() -> void:
 			"a normal map loads with the 512 cap: both sides halve while either exceeds it")
 	var small: Texture2D = root.load_material_texture("small.mdt", 4)
 	assert_eq(Vector2i(small.get_width(), small.get_height()), Vector2i(512, 4), "at the cap nothing halves")
+
+
+func test_occlusion_rows_halve_to_512() -> void:
+	# Type 7 (the occlusion producer) loads with the same 512 cap as the normal maps
+	# (renderer::material_texture_side_cap).
+	var dir := _root_dir("ao_cap")
+	TestFs.write_bytes(self, dir.path_join("height.tga"), TestFs.tga_bytes(Vector2i(1024, 4), Color8(128, 128, 128, 200)))
+	var ao: Texture2D = _loose(dir).load_material_texture("height.tga", 7)
+	assert_eq(Vector2i(ao.get_width(), ao.get_height()), Vector2i(512, 2), "the AO texture halves to 512")
+
+
+# --- The review's further cases ---------------------------------------------
+
+func _mip_coloured_dds() -> PackedByteArray:
+	# 4x4 red level 0 with an authored green 2x2 and blue 1x1 below it.
+	var data := PackedByteArray()
+	for side_colour in [[4, Color.RED], [2, Color.GREEN], [1, Color.BLUE]]:
+		var colour: Color = side_colour[1]
+		for _texel in side_colour[0] * side_colour[0]:
+			data.append_array(PackedByteArray([colour.r8, colour.g8, colour.b8, 255]))
+	return Image.create_from_data(4, 4, true, Image.FORMAT_RGBA8, data).save_dds_to_buffer()
+
+
+func test_archive_self_alpha_takes_the_dds_sibling_first() -> void:
+	var dir := _root_dir("archive_dds_first")
+	var root := _packed(dir, [
+		{"name": "sky.pcx", "bytes": TestPcx.ramp_2x2()},
+		{"name": "sky.dds", "bytes": _dds(Color.BLUE)},
+	])
+	assert_eq(_pixel(root.load_texture("sky.pcx", ResourceRoot.TEXTURE_LOADER_ARCHIVE_SELF_ALPHA)),
+			Color.BLUE, "the sky map's .dds wins before the PCX and its luminance")
+
+
+func test_dds_sibling_against_a_loose_file_follows_the_policy() -> void:
+	var dir := _root_dir("policy")
+	TestFs.write_bytes(self, dir.path_join("wall.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color.YELLOW))
+	WorldFixture.write_pff(self, dir.path_join("resource.pff"), [
+		{"name": "wall.dds", "bytes": _dds(Color.BLUE)},
+		{"name": "wall.tga", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.CYAN)},
+	])
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(dir), OK)
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	assert_eq(_pixel(root.load_texture("wall.tga", stage)), Color.BLUE,
+			"a packed session: the .dds sibling wins")
+	assert_eq(_pixel(root.load_texture("wall.tga", stage, ResourceRoot.LOOKUP_FORCE_LOOSE_FIRST)),
+			Color.YELLOW, "a forced loose-first lookup lets the loose TGA win")
+	assert_eq(root.mount_runtime(dir, "", true), OK)
+	assert_eq(_pixel(root.load_texture("wall.tga", stage)), Color.YELLOW, "/d: the loose TGA wins")
+	assert_eq(_pixel(root.load_texture("wall.tga", stage, ResourceRoot.LOOKUP_FORCE_ARCHIVE_ONLY)),
+			Color.BLUE, "an archive-only lookup ignores the loose file and takes the .dds")
+
+
+func test_dds_reader_decodes_by_content() -> void:
+	var dir := _root_dir("dds_content")
+	var png := Image.create(2, 2, false, Image.FORMAT_RGBA8)
+	png.fill(Color.GREEN)
+	var root := _packed(dir, [
+		{"name": "pic.dds", "bytes": png.save_png_to_buffer()},
+		{"name": "flip.dds", "bytes": _two_row_tga(Color.RED, Color.GREEN, 0x20)},
+		{"name": "mips.dds", "bytes": _mip_coloured_dds()},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	var pic := root.load_texture("pic.tga", stage)
+	assert_not_null(pic, "a PNG under the .dds sibling's name decodes, as D3DX sniffs it")
+	if pic != null:
+		assert_eq(_pixel(pic), Color.GREEN)
+	var flip := root.load_texture("flip.dds", stage)
+	assert_not_null(flip, "a TGA under a .dds name decodes")
+	if flip != null:
+		assert_eq(_pixel(flip, 0, 0), Color.RED, "D3DX's TGA codec honours the origin bit")
+	var mips := root.load_texture("mips.dds", stage)
+	assert_not_null(mips)
+	if mips != null:
+		var image := mips.get_image()
+		assert_true(image.has_mipmaps(), "a DDS keeps its mip chain")
+		var level1 := image.get_mipmap_offset(1)
+		var data := image.get_data()
+		assert_eq(Color8(data[level1], data[level1 + 1], data[level1 + 2]), Color8(0, 255, 0),
+				"the authored level 1 survives")
+
+
+func test_names_differing_in_case_stay_apart() -> void:
+	# ".MDT" is tested as written, so "x.mdt" takes the .dds sibling and "x.MDT" the
+	# TGA reader: two textures, whichever loads first.
+	var dir := _root_dir("case_keys")
+	var root := _packed(dir, [
+		{"name": "x.dds", "bytes": _dds(Color.BLUE)},
+		{"name": "x.mdt", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.RED)},
+	])
+	var stage := ResourceRoot.TEXTURE_LOADER_STAGE
+	assert_eq(_pixel(root.load_texture("x.MDT", stage)), Color.RED, "x.MDT reads the MDT")
+	assert_eq(_pixel(root.load_texture("x.mdt", stage)), Color.BLUE, "x.mdt reads the .dds")
+	assert_eq(_pixel(root.load_texture("x.MDT", stage)), Color.RED, "and x.MDT stays the MDT")
+
+
+func test_loose_mount_resolves_a_qualified_name_by_its_file() -> void:
+	var dir := _root_dir("qualified")
+	TestFs.write_bytes(self, dir.path_join("flat.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color.RED))
+	var texture := _loose(dir).load_texture("sub/flat.tga", ResourceRoot.TEXTURE_LOADER_TGA)
+	assert_not_null(texture, "a loose mount keeps a qualified query's file name")
+
+
+func test_particle_graphics_read_the_loose_tga_folder_first() -> void:
+	var dir := _root_dir("particle")
+	DirAccess.make_dir_recursive_absolute(dir.path_join("tga"))
+	TestFs.write_bytes(self, dir.path_join("tga").path_join("spark.tga"), TestFs.tga_bytes(Vector2i(2, 2), Color.RED))
+	var root := _packed(dir, [
+		{"name": "spark.tga", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.BLUE)},
+		{"name": "ember.tga", "bytes": TestFs.tga_bytes(Vector2i(2, 2), Color.BLUE)},
+	])
+	var particle := ResourceRoot.TEXTURE_LOADER_PARTICLE
+	assert_eq(_pixel(root.load_texture("spark.tga", particle)), Color.RED,
+			"the loose tga folder wins without /d")
+	assert_eq(_pixel(root.load_texture("ember.tga", particle)), Color.BLUE,
+			"a graphic not in the folder reads the mounted file")

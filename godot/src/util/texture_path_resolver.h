@@ -10,24 +10,36 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace opennova {
 
 // The image a loader makes of one attempt's bytes: the retail reader the attempt
-// names (renderer::TextureReader: the TGA reader formats/tga, the PCX reader
-// formats/pcx decode_pcx_menu_rgba, Godot's DDS and PNG decoders for the DXT decode
-// and the menus' PNG), then the loader's transform. RGBA8, no mips; null when the
-// bytes do not decode.
+// names (renderer::TextureReader: the TGA reader formats/tga in its archive or
+// particle-loose form, the PCX reader formats/pcx decode_pcx_menu_rgba, the DDS
+// reader's content sniff over Godot's BMP/DDS/JPEG/PNG/TGA decoders, the menus' PNG),
+// then the loader's transform. RGBA8; only a DDS keeps a mip chain, its file's; null
+// when the bytes do not decode.
 godot::Ref<godot::Image> decode_texture_load(const renderer::TextureLoad &load,
 		const godot::PackedByteArray &bytes);
 
-// A loader's image for `name` (renderer::texture_load_attempts over `files`), each
-// attempt's bytes from `read`; the first attempt that decodes, else null.
-godot::Ref<godot::Image> load_texture_image(renderer::TextureLoader loader, const godot::String &name,
-		const renderer::TextureFileQuery &files,
-		const std::function<godot::PackedByteArray(const std::string &)> &read);
+// Reads one attempt's bytes from its source (a mounted file, or a loose file in the
+// particle folder); empty when there is none.
+using TextureReadFn = std::function<godot::PackedByteArray(const renderer::TextureLoad &)>;
 
-// The texture the game draws an image with: its mip chain generated.
+// The image of the first of a loader's attempts (renderer::texture_load_attempts)
+// that reads and decodes, else null; `r_alpha_only` reports whether the winning
+// attempt is alpha-only (the HUD's alpha material).
+godot::Ref<godot::Image> load_texture_image(const std::vector<renderer::TextureLoad> &attempts,
+		const TextureReadFn &read, bool *r_alpha_only = nullptr);
+
+// A loader's resolved attempts as a cache identity: each attempt's source, reader,
+// transform, mode and file (lower-cased: the file sets are case-insensitive, and the
+// rules that read the name's case have already decided).
+std::string texture_load_key(const std::vector<renderer::TextureLoad> &attempts);
+
+// The texture the game draws an image with: the mip chain a DDS carries, else
+// generated.
 godot::Ref<godot::Texture2D> texture_with_mipmaps(const godot::Ref<godot::Image> &image);
 
 // A loader's texture for `filename` within `dir`, the one source (no loose-first

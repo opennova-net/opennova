@@ -109,7 +109,7 @@ Ref<Image> load_particle_image(const Callable &provider,
 		texture = provider.call(candidate);
 	if (texture.is_null() && !texture_dir.is_empty())
 		texture = opennova::load_texture_from_dir(texture_dir, candidate,
-				opennova::renderer::TextureLoader::Tga);
+				opennova::renderer::TextureLoader::Particle);
 	if (texture.is_null())
 		return Ref<Image>();
 	Ref<Image> image = texture->get_image();

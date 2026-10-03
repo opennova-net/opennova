@@ -14,8 +14,11 @@
 namespace godot {
 void HudOverlay::combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
 		opennova::hud::HudSprite &sprite) {
-	if (combat_texture_names_[slot] != name) {
+	// A slot reloads when its name or its loader changes (the cargo slot's mode
+	// follows its art).
+	if (combat_texture_names_[slot] != name || combat_texture_loaders_[slot] != static_cast<int>(loader)) {
 		combat_texture_names_[slot] = name;
+		combat_texture_loaders_[slot] = static_cast<int>(loader);
 		textures_[slot] = load_hud_texture_(name, loader);
 	}
 	const auto &texture = textures_[slot];

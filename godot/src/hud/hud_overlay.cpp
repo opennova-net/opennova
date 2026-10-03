@@ -342,6 +342,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_radar_frame_gates"),
 			&HudOverlay::get_radar_frame_gates);
 	ClassDB::bind_method(D_METHOD("get_draw_list_stats"), &HudOverlay::get_draw_list_stats);
+	ClassDB::bind_method(D_METHOD("get_textured_quad_colors", "drawn"), &HudOverlay::get_textured_quad_colors);
 	ClassDB::bind_method(D_METHOD("set_draw_timing_enabled", "enabled"),
 			&HudOverlay::set_draw_timing_enabled);
 	ClassDB::bind_method(D_METHOD("consume_draw_timing_us"),
@@ -546,14 +547,46 @@ Ref<Texture2D> HudOverlay::load_hud_texture_(const String &p_name, ResourceRoot:
 	if (root_.is_null() || p_name.is_empty()) {
 		return Ref<Texture2D>();
 	}
-	const Ref<Image> image = root_->load_texture_image(p_name.get_file(), p_loader);
+	bool alpha_mode = false;
+	const Ref<Image> image = root_->load_texture_image(p_name.get_file(), p_loader,
+			ResourceRoot::LOOKUP_SESSION_DEFAULT, &alpha_mode);
 	if (image.is_null()) {
 		return Ref<Texture2D>();
 	}
 	if (p_generate_mipmaps && image->generate_mipmaps() != OK) {
 		return Ref<Texture2D>();
 	}
-	return ImageTexture::create_from_image(image);
+	const Ref<Texture2D> texture = ImageTexture::create_from_image(image);
+	// The HUD loader's resolved mode picks the material the quads draw with.
+	if (texture.is_valid() && alpha_mode) {
+		alpha_mode_textures_.insert(texture->get_instance_id());
+	}
+	return texture;
+}
+
+Color HudOverlay::texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const {
+	if (p_texture.is_valid() && alpha_mode_textures_.count(p_texture->get_instance_id()) != 0) {
+		return opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(p_argb));
+	}
+	return opennova::color_from_argb(p_argb);
+}
+
+PackedColorArray HudOverlay::get_textured_quad_colors(bool p_drawn) {
+	PackedColorArray out;
+	if (!configured_) {
+		return out;
+	}
+	const Vector2 surface = draw_surface_();
+	ensure_label_fonts_(surface.x);
+	const HudDrawList &list = compiler_.compile(state_, surface.x, surface.y);
+	for (const opennova::hud::HudQuad &quad : list.quads) {
+		if (quad.texture < 0 || quad.texture >= kTextureSlots) {
+			continue;
+		}
+		const Ref<Texture2D> tex = textures_[static_cast<size_t>(quad.texture)];
+		out.push_back(p_drawn ? texture_draw_color_(tex, quad.color) : opennova::color_from_argb(quad.color));
+	}
+	return out;
 }
 
 void HudOverlay::load_crosshair_texture_() {
@@ -573,6 +606,8 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 	layout_ = HudLayout{};
 	textures_ = {};
 	combat_texture_names_ = {};
+	combat_texture_loaders_ = {};
+	alpha_mode_textures_.clear();
 	clear_font_();
 	// The freed label pair must leave the compiler too; the first draw's
 	// ensure_label_fonts_ reloads it for the fresh root.
@@ -2141,7 +2176,6 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 	for (size_t i = p_range.quads_begin; i < p_range.quads_end; ++i) {
 		const opennova::hud::HudQuad &quad = p_list.quads[i];
 		const Rect2 rect(quad.x0, quad.y0, quad.x1 - quad.x0, quad.y1 - quad.y0);
-		const Color color = opennova::color_from_argb(quad.color);
 		if (!quad.filled) {
 			PackedVector2Array outline;
 			outline.push_back(Vector2(quad.x0, quad.y0));
@@ -2150,7 +2184,7 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 			outline.push_back(Vector2(quad.x0, quad.y1));
 			outline.push_back(Vector2(quad.x0, quad.y0));
 			PackedColorArray outline_color;
-			outline_color.push_back(color);
+			outline_color.push_back(opennova::color_from_argb(quad.color));
 			rs->canvas_item_add_polyline(p_item, outline, outline_color, -1.0f);
 			continue;
 		}
@@ -2158,6 +2192,8 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 		if (quad.texture >= 0 && quad.texture < kTextureSlots) {
 			tex = textures_[static_cast<size_t>(quad.texture)];
 		}
+		// An alpha-mode texture draws with its material's colour.
+		const Color color = texture_draw_color_(tex, quad.color);
 		// A second texture stage: the flagged triangle pair kHudFlatShader
 		// combines, the stage-1 texture and its divisors bound on the item's
 		// material (every such quad names the same stage, the boxtile camo).
@@ -2223,6 +2259,7 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 		while (end < p_range.tris_end && p_list.tris[end].texture == texture) ++end;
 		Ref<Texture2D> tex;
 		if (texture >= 0 && texture < kTextureSlots) tex = textures_[static_cast<size_t>(texture)];
+		const bool alpha_mode = tex.is_valid() && alpha_mode_textures_.count(tex->get_instance_id()) != 0;
 		const int count = static_cast<int>((end - first) * 3);
 		PackedVector2Array points, uvs;
 		PackedColorArray colors;
@@ -2241,7 +2278,11 @@ void HudOverlay::render_flat_(const RID &p_item, const HudDrawList &p_list, cons
 			for (const auto *vertex : { &tri.a, &tri.b, &tri.c }) {
 				point[vertex_index] = Vector2(vertex->x, vertex->y);
 				uv[vertex_index] = Vector2(vertex->u, vertex->v);
-				color[vertex_index] = modulation * opennova::color_from_argb(vertex->color);
+				const Color diffuse = modulation * opennova::color_from_argb(vertex->color);
+				color[vertex_index] = alpha_mode
+						? opennova::color_from_argb(opennova::renderer::hud_alpha_material_argb(
+								  static_cast<uint32_t>(diffuse.to_argb32())))
+						: diffuse;
 				index[vertex_index] = vertex_index;
 				++vertex_index;
 			}

@@ -10,6 +10,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/packed_string_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
+#include <godot_cpp/variant/packed_color_array.hpp>
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -29,6 +30,8 @@
 #include "resource_index/resource_root.h"
 
 #include <array>
+#include <cstdint>
+#include <unordered_set>
 
 namespace godot {
 
@@ -369,6 +372,10 @@ public:
 	// Debug/test accessor: compile at the current surface size and report the
 	// draw list's element counts.
 	Ref<HudDrawListStats> get_draw_list_stats();
+	// Debug/test accessor: each textured quad's colour in draw order, the compiled
+	// vertex colour or (`p_drawn`) the colour the device draws it with, which an
+	// alpha-mode texture's material doubles (renderer::hud_alpha_material_argb).
+	PackedColorArray get_textured_quad_colors(bool p_drawn);
 
 	// F3 Stats seam: _draw() runs inside Godot's deferred flush (outside every
 	// Node callback), so its compile + canvas-emit cost is timed here and
@@ -528,6 +535,13 @@ private:
 	void combat_texture_(int slot, const String &name, ResourceRoot::TextureLoader loader,
 			opennova::hud::HudSprite &sprite);
 	std::array<String, kTextureSlots> combat_texture_names_;
+	std::array<int, kTextureSlots> combat_texture_loaders_{};
+	// The textures the HUD loader made in alpha mode (by instance id): their quads
+	// draw with the alpha material's colour (renderer::hud_alpha_material_argb).
+	mutable std::unordered_set<uint64_t> alpha_mode_textures_;
+	// The colour a textured command draws with: the alpha material's for an
+	// alpha-mode texture, else the vertex colour.
+	Color texture_draw_color_(const Ref<Texture2D> &p_texture, uint32_t p_argb) const;
 	// Stamp the cached colour/spread options into layout_.
 	void apply_crosshair_options_();
 	void clear_font_();
