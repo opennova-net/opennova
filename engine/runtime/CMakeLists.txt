@@ -55,6 +55,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
+    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
