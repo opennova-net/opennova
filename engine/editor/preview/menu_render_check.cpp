@@ -6,6 +6,7 @@
 
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/project_checks.h>
+#include <editor/documents/validation_cache.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/make_menu_render_check.h>
 #include <editor/project/project_files.h>
@@ -33,10 +34,7 @@ std::shared_ptr<const MnuDocument> read_menu(
 		const ValidationInput &input, const AssetEntry &asset) {
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
-	if (!document->load(
-				join_path(input.paths.root, asset.relative_path),
-				asset.relative_path, asset.kind, input.project.target_game, error) ||
-			document->blocked())
+	if (!load_listed(*document, input.paths, asset, input.project.target_game, error) || document->blocked())
 		return nullptr;
 	return document;
 }
@@ -216,6 +214,7 @@ Diagnostic menu_note_diagnostic(const menu::MenuFrameNote &note, const MnuDocume
 	d.child_id = address.child;
 	d.record_kind = address.kind;
 	d.record = address.child ? document.record_path(address) : screen_row.name();
+	if (address.row) d.record_key = document.record_identity(address);
 	return d;
 }
 
@@ -382,6 +381,7 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 				d.row_id = row->id;
 				d.record_kind = node_kind(MenuKind::Screen);
 				d.record = row->name();
+				d.record_key = document.record_identity({row->id, d.record_kind, 0});
 				menu.findings.push_back(std::move(d));
 			} else {
 				for (const menu::MenuFrameNote &note : screen.render->notes()) {
@@ -395,14 +395,6 @@ void MenuRenderCheck::render_menu_(Menu &menu, const MnuDocument &document, cons
 	}
 }
 
-void MenuRenderCheck::findings_of(const DocumentBase &document, const ProjectCheckInput &input,
-                                  std::vector<Diagnostic> &out) const {
-	const auto *menu = dynamic_cast<const MnuDocument *>(&document);
-	if (!menu || document.blocked()) return;
-	Menu scratch;
-	render_menu_(scratch, *menu, input.files, vars_);
-	out.insert(out.end(), scratch.findings.begin(), scratch.findings.end());
-}
 
 std::unique_ptr<ProjectCheck> make_menu_render_check() { return std::make_unique<MenuRenderCheck>(); }
 

@@ -115,7 +115,8 @@ void test_frame_bracket_follows_the_table() {
 	using K = EditorRequestKind;
 	const std::vector<K> saved = {K::NewProject, K::OpenProject, K::CloseProject, K::Rescan, K::ImportFiles,
 	                              K::Build, K::Play, K::ReloadDocument, K::CloseDocument, K::Save, K::SaveAll,
-	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::Quit};
+	                              K::ResolveUnsaved, K::RenameAsset, K::AssignRequirement, K::RenameSymbol, K::RenameBack,
+	                              K::Quit};
 	// S13 V7: a viewport's change and an edit in a viewport name the active document's, as every
 	// pathless request does.
 	const std::vector<K> active = {K::OpenDocument, K::ReloadDocument, K::CloseDocument, K::SelectRecord, K::EditRecord,
@@ -1456,6 +1457,17 @@ void test_preview_several_windows_ui() {
 void test_ui_kit() {
 	NullBackend backend;
 	ImGui::NewFrame();
+	// A path cut in its middle, its start and its end kept (the review's L9: the end tells two folders apart).
+	{
+		const std::string path = "C:/Users/someone/Documents/My Mods/Builds/For Players";
+		const float narrow = ImGui::CalcTextSize("C:/Users/some...For Players").x;
+		const std::string cut = ui_kit::fit_middle(path, narrow);
+		CHECK(cut.size() < path.size() && cut.find("...") != std::string::npos && cut.rfind("C:/", 0) == 0 &&
+		              cut.size() >= 7 && cut.compare(cut.size() - 7, 7, "Players") == 0 &&
+		              ImGui::CalcTextSize(cut.c_str()).x <= narrow + 0.5f,
+		      "a path cut in its middle");
+		CHECK(ui_kit::fit_middle(path, 10000.0f) == path, "a path that fits is whole");
+	}
 	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
 	ImGui::SetNextWindowSize(ImVec2(220.0f, 400.0f));
 	ImGui::Begin("kit");
@@ -1640,6 +1652,23 @@ void test_problems_window_ui() {
 	ui.activate(item_id(window, {"Whole project###scope_project"}));
 	CHECK(listed(ui).size() == 5, "the project's");
 
+	// What a build is refused for, shown whatever hid it (the review's M7): the active file's scope (a required
+	// file's finding names no file) and the errors hidden; "Show them" (the build result's, the menu bar's) lists
+	// every refusal, and turning "Blocks the build" off puts the filters back.
+	ui.activate(item_id(window, {"a.mnu###scope_active"}));
+	ui.activate(item_id(window, {"###errors"}));
+	CHECK(listed(ui) == List({"Bravo:"}), "the active file's, errors hidden");
+	auto *problems = const_cast<ProblemsWindow *>(dynamic_cast<const ProblemsWindow *>(find_window(ui.windows.pass(), "Problems")));
+	CHECK(problems != nullptr, "the Problems window");
+	if (problems) problems->show_blocking();
+	ui.frames(2);
+	CHECK(listed(ui) == List({kGametext, kMainMenu}), "every refusal shown");
+	ui.activate(item_id(window, {"###blocking"}));
+	CHECK(listed(ui) == List({"Bravo:"}), "turned off: the filters as they were");
+	ui.activate(item_id(window, {"###errors"}));
+	ui.activate(item_id(window, {"Whole project###scope_project"}));
+	CHECK(listed(ui).size() == 5, "the project's again");
+
 	// The grouping: a header per file (the project's own findings first), then per kind; a
 	// group of notes alone (b.mnu's, the stylesheets') starts folded. A click on a group's
 	// header folds it away, keeping the header; another opens it again.
@@ -1673,7 +1702,8 @@ void test_problems_window_ui() {
 	ui.frames(2);
 	CHECK(confirmation() && ui.drain().empty(), "Fix all asks first");
 	text = logged_frame(ui);
-	CHECK(in_order(text, {"Import gametext.bin from the game data", "Create main.mnu. It starts as placeholder content"}) &&
+	CHECK(text.find("Import gametext.bin from the game data") != std::string::npos &&
+	              text.find("Create main.mnu. It starts as placeholder content") != std::string::npos &&
 	              text.find("cannot be undone with Undo") != std::string::npos,
 	      "saying what it will do");
 	CHECK(count_of(text, "Fix all") == 1, "the other groups have no Fix all");
@@ -1684,10 +1714,10 @@ void test_problems_window_ui() {
 	ui.frames(2);
 	ui.click(confirmation_button(false));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::PreviewInstallImport &&
-	              requests[0].names == List({"gametext.bin"}) && requests[1].kind == EditorRequestKind::CreateMissing &&
-	              requests[1].roles == List({"main_menu"}),
-	      "Apply: the game's own gametext.bin, and main.mnu created");
+	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::CreateMissing &&
+	              requests[0].roles == List({"main_menu"}) && requests[1].kind == EditorRequestKind::PreviewInstallImport &&
+	              requests[1].names == List({"gametext.bin"}),
+	      "Apply: main.mnu created, then the game's own gametext.bin (its preview last: an operation)");
 	ui.frames(2);
 	CHECK(!confirmation(), "and the confirmation closes");
 	pick("Group", "None");
@@ -2064,8 +2094,7 @@ void test_problems_original() {
 	add(DiagnosticSeverity::Error, "Charlie: the game's.", "defs/shipped.def");
 	add(DiagnosticSeverity::Error, "Delta: the game's.", "defs/shipped.def");
 	add(DiagnosticSeverity::Warning, "Echo: the game's.", "defs/shipped.def");
-	OriginalData shipped;
-	shipped.files = {"defs/shipped.def"};
+	const OriginalData shipped = editor_test::originals_of(v.findings.diagnostics, {"defs/shipped.def"});
 	v.findings.originals = std::make_shared<const OriginalData>(shipped);
 	v.documents.active = "defs/mine.def";
 	Ui ui;
@@ -2639,6 +2668,16 @@ void test_output_folded() {
 	CHECK(text.find("Imported 2 files (1.0 KB): Menu 2.  (2 lines)") != std::string::npos && text.find("Imported a.mnu") == std::string::npos,
 	      "the import's one line, its files folded");
 	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
+	// Its rows made again only when the log or the lines opened move, not every frame (the review's L10).
+	const auto *output = dynamic_cast<const OutputWindow *>(find_window(ui.windows.pass(), "Output"));
+	CHECK(output != nullptr, "the Output window");
+	if (!output) return;
+	const size_t made = output->rows_made();
+	ui.frames(5);
+	CHECK(output->rows_made() == made, "five frames of the same log: the rows kept");
+	v.activity.output.append("Saved a.mnu.");
+	ui.frames(2);
+	CHECK(output->rows_made() == made + 1, "a line more: made again, once");
 }
 
 void run_problems_tests() {

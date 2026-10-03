@@ -1124,8 +1124,7 @@ void test_files_window() {
 	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
 	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
 	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
-	OriginalData shipped;
-	shipped.files = {"defs/items.def"};
+	const OriginalData shipped = editor_test::originals_of(v.findings.diagnostics, {"defs/items.def"});
 	v.findings.originals = std::make_shared<const OriginalData>(shipped);
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);

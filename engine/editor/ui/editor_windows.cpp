@@ -7,6 +7,7 @@
 
 #include <editor/project_build/build_run.h>
 #include <editor/session/build_result.h>
+#include <editor/session/rename_controller.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
@@ -272,7 +273,14 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
-	case PickPurpose::BuildFolder: request(request::build(path)); break;
+	case PickPurpose::BuildFolder: {
+		// The modder's pick, kept with the project's local settings (Build > Build to <it>), then built into.
+		ProjectSettingsChange keep;
+		keep.build_folder = path;
+		request(request::apply_project_settings(keep));
+		request(request::build(path));
+		break;
+	}
 	case PickPurpose::None: break;
 	}
 }
@@ -372,16 +380,15 @@ void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *doc
 	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
 		request(request::redo());
 	if (document) step_words(document->redo_words());
-	// A rename is no step of a document's history: it rewrites files. The way back is a rename again.
-	if (v.activity.last_rename.made) {
+	// A rename is no step of a document's history: it rewrites files. Its way back is its true inverse (only
+	// the sites it rewrote), shown before it commits, offered while its name is still where it put it.
+	if (v.activity.last_rename.made && rename_back_offered(v)) {
 		const ActivityView::LastRename &last = v.activity.last_rename;
-		const std::string label = "Rename " + last.to + " back to " + last.from;
-		const EditorRequestKind kind = last.symbol ? EditorRequestKind::RenameSymbol : EditorRequestKind::RenameAsset;
-		if (menu_item(label.c_str(), nullptr, v.allows(kind)))
-			request(last.symbol ? request::rename_symbol(last.path, last.locator, last.field, last.from)
-			                    : request::rename_asset(last.path, last.from));
-		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This renames it back, every use rewritten "
-		                "again.");
+		const std::string label = "Rename " + last.to + " back to " + last.from + "...";
+		if (menu_item(label.c_str(), nullptr, v.allows(EditorRequestKind::PreviewRenameBack)))
+			request(request::preview_rename_back(true));
+		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This shows what renaming it back rewrites "
+		                "(only what the rename wrote), then does it.");
 	}
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
@@ -397,15 +404,17 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	// A build for players, in a folder of the modder's choosing (the UX round's problems lane): the last
 	// one again, or another.
 	if (!v.project.build_folder.empty()) {
-		const std::string again = "Build to " + ui_kit::fit(v.project.build_folder, ImGui::GetFontSize() * 20.0f);
+		// Its end tells two folders apart: the middle gives way.
+		const std::string again = "Build to " + ui_kit::fit_middle(v.project.build_folder, ImGui::GetFontSize() * 20.0f);
 		if (menu_item(again.c_str(), nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
 			request(request::build(v.project.build_folder));
-		ui_kit::tooltip("Builds the game's files into " + v.project.build_folder + " again, for players to copy into their game.");
+		ui_kit::tooltip("Builds the game's files again into a new folder inside " + v.project.build_folder +
+		                ", for players to copy into their game.");
 	}
 	if (menu_item("Build to folder...", nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
 		request(request::pick_directory(PickPurpose::BuildFolder));
-	ui_kit::tooltip("Builds the game's files into a folder you choose, outside the project: what players copy into their "
-	                "game to play the mod.");
+	ui_kit::tooltip("Builds the game's files into a new folder inside a folder you choose, outside the project: what "
+	                "players copy into their game to play the mod.");
 	const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 	if (menu_item("Play", "F5", plays)) request(request::play());
 	// S14: the game started in the active document's mission (its own file, or the mission the game
@@ -483,6 +492,11 @@ void EditorWindows::draw_build_panel(const SessionView &v) {
 	if (!result.players.empty()) {
 		ImGui::Spacing();
 		ImGui::TextWrapped("%s", result.players.c_str());
+	}
+	if (!result.others.empty()) {
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+		ImGui::TextWrapped("%s", result.others.c_str());
+		ImGui::PopStyleColor();
 	}
 	ImGui::PopTextWrapPos();
 	ImGui::Spacing();
@@ -599,8 +613,9 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	} else if (v.activity.has_build) {
 		const BuildReport &last = *v.activity.last_build;
 		state = last.ok ? "Built" : last.refused ? "Build refused" : "Build failed";
+		// What refused it, from its own report (the status line has moved on since).
 		state_tip = last.ok ? "The last build: " + last.build_dir
-		            : last.refused ? v.activity.status + "\nA click shows what refuses it in Problems."
+		            : last.refused ? refused_words(last) + "\nA click shows what refuses it in Problems."
 		                           : "See Problems.";
 	}
 

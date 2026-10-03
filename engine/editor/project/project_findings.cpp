@@ -9,6 +9,7 @@
 #include <editor/graph/project_validation.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
 #include <runtime/mission/mission_sidecars.h>
 
@@ -97,6 +98,10 @@ ProjectFindings collect_project_findings(const ProjectFindingsInput &input, cons
 	rows.insert(rows.end(), std::make_move_iterator(documents.begin()),
 			std::make_move_iterator(documents.end()));
 	rows.insert(rows.end(), input.open_findings.begin(), input.open_findings.end());
+	// The build's own word on the files (an archive in the project, a name no archive stores, a player's
+	// file left out): rows of the gate, so a build is refused only for what Problems shows and marks.
+	const std::vector<Diagnostic> plan = plan_scan_findings(input.scan);
+	rows.insert(rows.end(), plan.begin(), plan.end());
 	out.gate_end = rows.size();
 	checks.append_findings(rows);
 	rows.insert(rows.end(), input.build.begin(), input.build.end());

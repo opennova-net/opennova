@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/model/value.h>
 #include <editor/run/play_state.h>
 #include <editor/session/output_log.h>
 #include <editor/session/session_operation.h>
@@ -78,12 +79,15 @@ struct ActivityView {
 
 	// The last rename that finished in this project (the UX round's problems lane): Undo does not take
 	// a rename back (it rewrote files, not a step of a document's history), so the Edit menu offers the
-	// rename back, every use rewritten again. A name's (`symbol`: its defining file, the record's locator
-	// and the field) or a file's (`path` its new path); `from` the old name, `to` the new.
+	// rename back (RenameController's rename_back: only the sites it rewrote). A name's (`symbol`: its
+	// defining file, the record's locator and the field, its kind and scope) or a file's (`path` its new
+	// path); `from` the old name, `to` the new.
 	struct LastRename {
 		bool made = false;
 		bool symbol = false;
 		std::string path, locator, field, from, to;
+		ReferenceKind kind = ReferenceKind::None;
+		std::string scope;
 	};
 	LastRename last_rename;
 };

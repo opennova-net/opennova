@@ -69,11 +69,6 @@ public:
 	bool step(const ProjectCheckInput &input, uint64_t budget, bool &moved) override;
 	void clear() override;
 	const std::vector<Diagnostic> &findings() const override { return diagnostics_; }
-	// A menu document's screens compiled alone with the project's files and the shell's variables as the
-	// last update read them, its notes as they would be Problems rows; nothing kept (an install copy's,
-	// for the game's own data's fold).
-	void findings_of(const DocumentBase &document, const ProjectCheckInput &input,
-	                 std::vector<Diagnostic> &out) const override;
 	// The render of a screen row of the menu at `path`, null when there is none.
 	const MenuScreenRender *render(const std::string &path, NodeId screen_row) const;
 	// The menu document the last update rendered for `path` (the open one, or the closed
@@ -105,8 +100,8 @@ private:
 		std::vector<Diagnostic> findings;
 		bool seen = false;
 	};
-	static void render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,
-	                         const std::map<std::string, std::string> &vars);
+	void render_menu_(Menu &menu, const MnuDocument &document, const FileSource &files,
+	                  const std::map<std::string, std::string> &vars);
 
 	std::map<std::string, Menu> menus_; // by project-relative path
 	menu::MenuStyleSource style_;

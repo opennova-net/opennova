@@ -442,6 +442,12 @@ std::vector<EditorRequest> merge_fixes(const std::vector<ProblemFix> &fixes) {
 			if (std::find(joined.begin(), joined.end(), name) == joined.end())
 				joined.push_back(name);
 	}
+	// What writes the project at once (the placeholders made) before what starts an operation over its files
+	// (the import dialog's plan, which holds them while it runs): raised in one frame, neither is refused as
+	// busy (a Create after the plan started would be).
+	std::stable_partition(requests.begin(), requests.end(), [](const EditorRequest &request) {
+		return request.kind != EditorRequestKind::PreviewInstallImport && request.kind != EditorRequestKind::PreviewImport;
+	});
 	return requests;
 }
 

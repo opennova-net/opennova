@@ -313,14 +313,15 @@ int test_proposals() {
 	ProblemsList list;
 	list.refresh(v);
 	const ProblemsList::Proposal &required = list.group_fixes(0);
+	// The placeholder made first, the import's preview last (an operation a request after it would find busy).
 	TEST_EXPECT(required.findings == 2 && required.requests.size() == 2 &&
-	            required.requests[0].kind == EditorRequestKind::PreviewInstallImport &&
-	            required.requests[0].names == Words({"gametext.bin"}) &&
-	            required.requests[1].kind == EditorRequestKind::CreateMissing &&
-	            required.requests[1].roles == Words({"main_menu"}));
+	            required.requests[0].kind == EditorRequestKind::CreateMissing &&
+	            required.requests[0].roles == Words({"main_menu"}) &&
+	            required.requests[1].kind == EditorRequestKind::PreviewInstallImport &&
+	            required.requests[1].names == Words({"gametext.bin"}));
 	TEST_EXPECT(required.lines.size() == 3 &&
-	            required.lines[0].rfind("Import gametext.bin from the game data", 0) == 0 &&
-	            required.lines[1] == "Create main.mnu. It starts as placeholder content, to replace with your own." &&
+	            required.lines[0] == "Create main.mnu. It starts as placeholder content, to replace with your own." &&
+	            required.lines[1].rfind("Import gametext.bin from the game data", 0) == 0 &&
 	            required.lines[2] == "What this does to the files cannot be undone with Undo.");
 	// The catalog's and the menus' findings have no fix: no Fix all.
 	TEST_EXPECT(list.group_fixes(1).requests.empty() && list.group_fixes(2).requests.empty());
@@ -336,8 +337,9 @@ int test_proposals() {
 	v.revisions.touch(ViewConcern::Findings);
 	list.refresh(v);
 	const std::vector<EditorRequest> &summary = list.required_fixes().requests;
-	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Import 2 from the game data..." &&
-	            ProblemsList::fix_all_label(summary[1]) == "Create 1 placeholder");
+	// The placeholders first, the import's preview last (the window draws the import's button first).
+	TEST_EXPECT(summary.size() == 2 && ProblemsList::fix_all_label(summary[0]) == "Create 1 placeholder" &&
+	            ProblemsList::fix_all_label(summary[1]) == "Import 2 from the game data...");
 	const ProblemsList::Summary said = ProblemsList::summary(*v.project.requirements);
 	TEST_EXPECT(said.stops == "The game will not start: 2 required files are missing." &&
 	            said.more == "1 more file the game reads is missing: part of it will not work.");
@@ -388,8 +390,7 @@ int test_proposals() {
 	            made.requests[1].path == "puff.tga");
 	// The same two in files that are the game's own data (ADR 0046 S15): their group, folded at first,
 	// offers no Fix all (it would change the original's files in bulk); each finding keeps its own fix.
-	OriginalData held;
-	held.files = {"models/tank.3di", "fx.ptl"};
+	const OriginalData held = editor_test::originals_of(textures.findings.diagnostics, {"models/tank.3di", "fx.ptl"});
 	textures.findings.originals = std::make_shared<const OriginalData>(held);
 	textures.revisions.touch(ViewConcern::Findings);
 	ProblemsList shipped;

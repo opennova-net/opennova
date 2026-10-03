@@ -1,21 +1,74 @@
 #include <editor/session/original_files.h>
 
-#include <iterator>
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <filesystem>
+#include <set>
+#include <system_error>
 #include <utility>
 
+#include <base/vfs/file_source.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
-#include <editor/documents/document_types.h>
+#include <editor/assets/asset_registry.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/documents/project_check.h>
 #include <editor/documents/project_checks.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
-#include <editor/model/document_base.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
+namespace fs = std::filesystem;
+
 namespace opennova::editor {
+
+namespace {
+
+// Every run of digits as one '#': a count or a place in words, which an edit elsewhere moves.
+std::string without_numbers(const std::string &text) {
+	std::string out;
+	bool digits = false;
+	for (const char c : text) {
+		const bool digit = std::isdigit(static_cast<unsigned char>(c)) != 0;
+		if (digit && !digits) out += '#';
+		if (!digit) out += c;
+		digits = digit;
+	}
+	return out;
+}
+
+// The game install's files as the game is served them, by logical name: its archives' through the
+// mount (as an import copies them), the loose files it ships beside them from its folder.
+class InstallFiles final : public FileSource {
+public:
+	InstallFiles(std::unique_ptr<Vfs> game, std::string root) : game_(std::move(game)), root_(std::move(root)) {
+		for (const std::string &name : list_install_loose_files(root_)) loose_.insert(normalized_logical_name(name));
+	}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
+		return read_install_file(*game_, root_, name, out);
+	}
+	uint64_t stamp(const std::string &name) const override {
+		return game_->has_file(name) || loose_.count(normalized_logical_name(name)) ? 1 : 0;
+	}
+	// A file's size as stored, without reading it; 0 when it cannot be told.
+	uint64_t size_of(const std::string &name) const {
+		uint64_t size = 0;
+		if (game_->file_size(name, size)) return size;
+		std::error_code ec;
+		const uintmax_t loose = fs::file_size(system_path(join_path(root_, name)), ec);
+		return ec ? 0 : uint64_t(loose);
+	}
+
+private:
+	std::unique_ptr<Vfs> game_;
+	std::string root_;
+	std::set<std::string> loose_;
+};
+
+} // namespace
 
 std::string original_finding_key(const Diagnostic &d) {
 	std::string key = d.code();
@@ -23,7 +76,7 @@ std::string original_finding_key(const Diagnostic &d) {
 		key += '\x1f';
 		key += text;
 	};
-	part(d.record);
+	part(d.record_key.empty() ? without_numbers(d.record) : d.record_key);
 	part(d.field);
 	if (const RequirementSubject *requirement = requirement_subject(d)) {
 		part(requirement->role);
@@ -34,191 +87,192 @@ std::string original_finding_key(const Diagnostic &d) {
 		part(reference->scope);
 		part(std::to_string(reference->loader_arg));
 	}
-	// A text document's finding names no record: its words tell two of one code apart, never its line.
-	if (d.record.empty() && d.line) part(d.message);
+	// A finding of no record (a text document's) by its words, never its line or its numbers.
+	if (d.record.empty() && d.record_key.empty()) part(without_numbers(d.message));
 	return key;
 }
+
+// The install validated: its files listed and read through its mount, its own graph, files' findings
+// and project checks (nothing of the session's), its steps' time.
+struct OriginalFiles::Run {
+	std::shared_ptr<const ProjectDocument> document;
+	std::shared_ptr<InstallFiles> files;
+	ProjectPaths paths;
+	std::vector<std::string> names; // the install's files as the game serves them
+	size_t scanned = 0;              // of those, typed into the scan
+	std::shared_ptr<AssetScan> scan = std::make_shared<AssetScan>();
+	std::vector<std::shared_ptr<const DocumentBase>> open; // none: the install's files as they ship
+	AssetGraph graph;
+	ValidationCache cache;
+	GraphReadings readings;
+	std::unique_ptr<ProjectValidation> validation;
+	ProjectChecks checks;
+	size_t slot = 0;
+	bool begun = false;
+	std::chrono::steady_clock::duration spent{};
+
+	ValidationInput input() const { return {paths, *document, *scan, open}; }
+};
 
 OriginalFiles::OriginalFiles() : data_(std::make_shared<const OriginalData>()) {}
 
 OriginalFiles::~OriginalFiles() = default;
 
 void OriginalFiles::want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
-                         const std::string &root, const std::shared_ptr<const AssetScan> &scan,
-                         const std::vector<Diagnostic> &findings, const std::vector<std::shared_ptr<const DocumentBase>> &open) {
+                         const void *scan) {
 	const std::string game = document ? document->target_game : std::string();
-	if (install != install_ || root != root_ || !document_ || !document || document_->target_game != game) {
+	if (install != install_ || game != game_ || !document_ || !document) {
 		clear();
 		install_ = install;
-		root_ = root;
+		game_ = game;
+		document_ = document;
+		scan_ = scan;
+		if (!install_.empty() && document_) start();
+		return;
 	}
 	document_ = document;
+	if (scan == scan_) return;
 	scan_ = scan;
-	open_ = open;
-	queue_.clear();
-	asked_.clear();
-	if (install_.empty() || !document_ || !scan_) return;
-	// The files the findings are about, each as the scan lists it now: one known as it stands is kept,
-	// any other checked (again).
-	for (const Diagnostic &d : findings) {
-		if (d.asset.empty() || asked_.count(d.asset)) continue;
-		const AssetEntry *entry = scan_->at_path(d.asset);
-		if (!entry) continue;
-		asked_.insert(entry->relative_path);
-		const auto found = known_.find(entry->relative_path);
-		if (found != known_.end() && found->second.size == entry->size_bytes && found->second.modified == entry->modified_ticks &&
-		    found->second.kind == entry->kind)
-			continue;
-		File file;
-		file.path = entry->relative_path;
-		file.name = entry->logical_name;
-		file.kind = entry->kind;
-		file.size = entry->size_bytes;
-		file.modified = entry->modified_ticks;
-		queue_.push_back(std::move(file));
+	// A new scan (a Refresh, a save, an import): the install's folder looked at again, and validated again
+	// once it moved (a patch over it). One under way goes on.
+	if (phase_ == Phase::Done && folder_state() != folder_) start();
+}
+
+void OriginalFiles::start() {
+	run_.reset();
+	folder_ = folder_state();
+	longest_ms_ = 0.0;
+	phase_ = Phase::Mount;
+}
+
+// The install folder's files (their names, sizes and last writes), what a patch over it moves.
+std::string OriginalFiles::folder_state() const {
+	std::vector<std::string> entries;
+	std::error_code ec;
+	fs::directory_iterator it(system_path(install_), ec);
+	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
+		std::error_code status;
+		if (!it->is_regular_file(status)) continue;
+		const uintmax_t size = it->file_size(status);
+		const auto written = it->last_write_time(status).time_since_epoch().count();
+		entries.push_back(utf8_of(it->path().filename()) + "\x1f" + std::to_string(size) + "\x1f" + std::to_string(written));
 	}
-	// What the files and the documents hold may have moved since the last baseline: brought up again
-	// once the files are checked (an update over a shadow that holds them reads only what changed).
-	baseline_due_ = true;
+	std::sort(entries.begin(), entries.end());
+	std::string out;
+	for (const std::string &entry : entries) out += entry + "\x1e";
+	return out;
 }
 
-bool OriginalFiles::mount() {
-	if (!mount_tried_) {
-		mount_tried_ = true;
-		game_ = std::make_unique<Vfs>();
-		if (!mount_retail(*game_, install_, *document_)) game_.reset();
-	}
-	return game_ != nullptr;
-}
-
-void OriginalFiles::compare(uint64_t bytes) {
-	const bool mounted = mount();
-	uint64_t read = 0;
-	do {
-		File file = std::move(queue_.back());
-		queue_.pop_back();
-		// Its bytes as the project holds them against the install's copy as the game is served it.
-		std::vector<uint8_t> held, served;
-		std::string error;
-		file.served = mounted && read_served(*game_, file.name, served);
-		file.original = file.served && read_file_bytes(join_path(root_, file.path), held, error) && held == served;
-		read += held.size() + served.size();
-		++checked_;
-		known_[file.path] = std::move(file);
-	} while (!queue_.empty() && read < bytes);
-}
-
-bool OriginalFiles::step(uint64_t bytes, const OriginalProject &project) {
-	if (!queue_.empty()) {
-		compare(bytes);
-		if (!queue_.empty()) return false;
-		// The baseline, a step of its own.
+bool OriginalFiles::step(uint64_t bytes) {
+	if (settled()) return true;
+	const auto began = std::chrono::steady_clock::now();
+	const auto spent = [&] {
+		const auto took = std::chrono::steady_clock::now() - began;
+		longest_ms_ = std::max(longest_ms_, std::chrono::duration<double, std::milli>(took).count());
+		if (run_) run_->spent += took;
+	};
+	switch (phase_) {
+	case Phase::Mount: {
+		// The install mounted as a stock launch mounts it and listed as the game serves it: each file by its
+		// logical name, read through the mount, its kind as the scan types it (a `.bin` or a name no rule
+		// types by what it holds).
+		run_ = std::make_unique<Run>();
+		run_->document = document_;
+		auto game = std::make_unique<Vfs>();
+		if (!mount_retail(*game, install_, *document_)) {
+			// An install that does not mount: none of the project's findings is the original's.
+			run_.reset();
+			phase_ = Phase::Done;
+			OriginalData none;
+			none.ready = true;
+			publish(std::move(none));
+			return true;
+		}
+		run_->files = std::make_shared<InstallFiles>(std::move(game), install_);
+		run_->paths = ProjectPaths::for_root(install_);
+		run_->paths.files = run_->files;
+		run_->names = list_retail_file_names(install_, *document_);
+		phase_ = Phase::Scan;
+		spent();
 		return false;
 	}
-	if (baseline_due_) {
-		baseline_due_ = false;
-		baseline(project);
-		// Nothing left to do: the install let go, its archives closed (the game, or a patch, may write
-		// them); the next check mounts it again.
-		game_.reset();
-		mount_tried_ = false;
+	case Phase::Scan: {
+		// Each file typed within the budget: by its name, or by what it holds where its name cannot say.
+		uint64_t read = 0;
+		while (run_->scanned < run_->names.size() && read < bytes) {
+			const std::string &name = run_->names[run_->scanned++];
+			AssetEntry entry;
+			entry.logical_name = name;
+			entry.relative_path = name;
+			entry.size_bytes = run_->files->size_of(name);
+			entry.kind = classify_asset(name, nullptr);
+			read += kValidationFileCost;
+			if (asset_classification_needs_bytes(name) || entry.kind == AssetKind::Unknown) {
+				std::vector<uint8_t> content;
+				if (run_->files->read(name, content)) entry.kind = classify_asset(name, &content);
+				read += content.size();
+			}
+			run_->scan->entries.push_back(std::move(entry));
+		}
+		if (run_->scanned == run_->names.size()) {
+			run_->scan->index();
+			run_->validation = std::make_unique<ProjectValidation>(run_->graph, run_->cache, run_->readings);
+			phase_ = Phase::Validate;
+		}
+		spent();
+		return false;
+	}
+	case Phase::Validate:
+		if (run_->validation->step(run_->input(), bytes)) phase_ = Phase::Checks;
+		spent();
+		return false;
+	case Phase::Checks: {
+		// The document types' project checks over the install's files, each stepped (a menu a step).
+		const ValidationInput input = run_->input();
+		while (run_->slot < run_->checks.slot_count()) {
+			if (!run_->begun) {
+				run_->checks.begin_slot(run_->slot);
+				run_->begun = true;
+			}
+			bool moved = false;
+			if (!run_->checks.step_slot(run_->slot, {input, run_->cache, *run_->files}, bytes, moved)) {
+				spent();
+				return false;
+			}
+			run_->begun = false;
+			const bool checked = run_->checks.has_check(run_->slot);
+			++run_->slot;
+			if (checked) {
+				spent();
+				return false;
+			}
+		}
+		phase_ = Phase::Rows;
+		spent();
+		return false;
+	}
+	case Phase::Rows: {
+		// Every finding about a file of the install, keyed, by the file's logical name; then everything the
+		// run held let go (its graph, its files' findings, its checks, the mount).
+		std::vector<Diagnostic> rows = project_rows(run_->input(), run_->graph, run_->cache);
+		run_->checks.append_findings(rows);
+		OriginalData data;
+		data.ready = true;
+		for (const Diagnostic &d : rows)
+			if (!d.asset.empty()) ++data.findings[normalized_logical_name(basename_of(d.asset))][original_finding_key(d)];
+		spent();
+		files_ = run_->scan->entries.size();
+		last_ms_ = std::chrono::duration<double, std::milli>(run_->spent).count();
+		++validations_;
+		run_.reset();
+		phase_ = Phase::Done;
+		publish(std::move(data));
+		return true;
+	}
+	case Phase::Idle:
+	case Phase::Done: break;
 	}
 	return true;
-}
-
-// The install's copy of a file as a document standing in for it, kept while the project's file stands as
-// it was checked: the install's bytes for a file that differs, the project's own (the same bytes) for one
-// open with unsaved edits. Null when its kind has no document or its copy does not load: no finding of
-// the file is then the original's.
-std::shared_ptr<DocumentBase> OriginalFiles::copy_of(const File &file) {
-	const auto found = copies_.find(file.path);
-	if (found != copies_.end() && found->second.size == file.size && found->second.modified == file.modified &&
-	    found->second.from_install == !file.original)
-		return found->second.document;
-	Copy copy;
-	copy.size = file.size;
-	copy.modified = file.modified;
-	copy.from_install = !file.original;
-	const DocumentType *type = document_type_for(file.kind);
-	std::vector<uint8_t> bytes;
-	std::string error;
-	bool read = false;
-	if (type && type->make)
-		read = file.original ? read_file_bytes(join_path(root_, file.path), bytes, error)
-		                     : mount() && read_served(*game_, file.name, bytes);
-	if (read) {
-		std::shared_ptr<DocumentBase> made = type->make();
-		Diagnostic failed;
-		if (made->load_bytes(bytes, file.path, file.kind, document_->target_game, failed)) copy.document = std::move(made);
-	}
-	copies_[file.path] = copy;
-	return copy.document;
-}
-
-void OriginalFiles::baseline(const OriginalProject &project) {
-	OriginalData data;
-	if (!document_ || !scan_ || install_.empty()) return publish(std::move(data));
-	std::set<std::string> dirty;
-	for (const auto &open : open_)
-		if (open && open->dirty()) dirty.insert(open->path());
-	// The files the install serves: as the install's, and not open with unsaved edits, every finding of
-	// theirs is the original's; held otherwise, each is judged against its install copy.
-	std::vector<const File *> otherwise;
-	for (const std::string &path : asked_) {
-		const auto found = known_.find(path);
-		if (found == known_.end() || !found->second.served) continue;
-		if (found->second.original && !dirty.count(path)) data.files.insert(path);
-		else otherwise.push_back(&found->second);
-	}
-	if (otherwise.empty()) {
-		shadow_graph_.reset();
-		shadow_cache_.reset();
-		copies_.clear();
-		return publish(std::move(data));
-	}
-	// The project as it would be with the game's own copies: the install copies standing in, as open
-	// documents, for the files held otherwise; every other open document as it is.
-	std::set<std::string> replaced;
-	std::vector<std::pair<std::string, std::shared_ptr<DocumentBase>>> standing;
-	for (const File *file : otherwise) {
-		replaced.insert(file->path);
-		data.findings[file->path]; // judged, with none the original's where its copy does not load
-		if (std::shared_ptr<DocumentBase> copy = copy_of(*file)) standing.emplace_back(file->path, std::move(copy));
-	}
-	for (auto it = copies_.begin(); it != copies_.end();)
-		it = replaced.count(it->first) ? std::next(it) : copies_.erase(it);
-	std::vector<std::shared_ptr<const DocumentBase>> open;
-	for (const auto &document : open_)
-		if (document && !replaced.count(document->path())) open.push_back(document);
-	for (const auto &[path, document] : standing) open.push_back(document);
-	// The shadow: the session's graph and files' findings copied the first time, then brought up as the
-	// session's are (only what changed is read again).
-	if (!shadow_graph_) {
-		shadow_graph_ = std::make_unique<AssetGraph>(project.graph);
-		shadow_cache_ = std::make_unique<ValidationCache>(project.cache);
-	}
-	const ValidationInput input{project.paths, *document_, *scan_, open};
-	refresh_project(input, *shadow_graph_, *shadow_cache_);
-	++baselines_;
-	for (const Diagnostic &d : project_rows(input, *shadow_graph_, *shadow_cache_)) {
-		const auto found = data.findings.find(d.asset);
-		if (found != data.findings.end()) ++found->second[original_finding_key(d)];
-	}
-	// What the project checks make of each copy alone (a menu's screens compiled as the game draws them),
-	// made again only for a new copy or a new scan (the files its renders read).
-	const ProjectCheckInput checks{input, *shadow_cache_, project.files};
-	for (const auto &[path, document] : standing) {
-		Copy &copy = copies_[path];
-		if (copy.checked_over != scan_.get()) {
-			copy.checked.clear();
-			project.checks.findings_of(*document, checks, copy.checked);
-			copy.checked_over = scan_.get();
-		}
-		std::map<std::string, size_t> &keys = data.findings[path];
-		for (const Diagnostic &d : copy.checked)
-			if (d.asset == path) ++keys[original_finding_key(d)];
-	}
-	publish(std::move(data));
 }
 
 void OriginalFiles::publish(OriginalData data) {
@@ -229,19 +283,12 @@ void OriginalFiles::publish(OriginalData data) {
 
 void OriginalFiles::clear() {
 	install_.clear();
-	root_.clear();
+	game_.clear();
 	document_.reset();
-	scan_.reset();
-	open_.clear();
-	asked_.clear();
-	game_.reset();
-	mount_tried_ = false;
-	known_.clear();
-	queue_.clear();
-	baseline_due_ = false;
-	copies_.clear();
-	shadow_graph_.reset();
-	shadow_cache_.reset();
+	folder_.clear();
+	scan_ = nullptr;
+	run_.reset();
+	phase_ = Phase::Idle;
 	publish(OriginalData());
 }
 

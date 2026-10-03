@@ -59,6 +59,8 @@ enum class EditorRequestKind {
 	AssignRequirement,
 	PreviewRename,
 	RenameSymbol,
+	PreviewRenameBack,
+	RenameBack,
 	Reimport,
 	PreviewInstallImport,
 	ClearOutput,
@@ -110,12 +112,16 @@ struct ProjectSettingsChange {
 	std::optional<std::string> game_install;
 	std::optional<std::string> runtime_executable; // "" = the runtime packaged beside the editor
 	std::optional<bool> play_in_install;
+	// The folder Build to folder builds into, kept with the project's local settings ("" for none): the
+	// modder's pick (a build's out_dir keeps nothing).
+	std::optional<std::string> build_folder;
 };
 
 inline bool operator==(const ProjectSettingsChange &a, const ProjectSettingsChange &b) {
 	return a.serial == b.serial && a.title == b.title && a.mission == b.mission &&
 			a.multiplayer == b.multiplayer && a.game_install == b.game_install &&
-			a.runtime_executable == b.runtime_executable && a.play_in_install == b.play_in_install;
+			a.runtime_executable == b.runtime_executable && a.play_in_install == b.play_in_install &&
+			a.build_folder == b.build_folder;
 }
 
 // Where Paste puts the clipboard: into the owner `parent` (0 = the row `row` itself) at

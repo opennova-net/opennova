@@ -229,6 +229,8 @@ JsonValue dialogs_section(const SessionView &view) {
 	if (rename.serial) {
 		JsonValue preview = JsonValue::make_object();
 		preview.set("serial", json_number(double(rename.serial)));
+	// The last rename's way back (preview_rename_back): its sites only those the rename wrote.
+	preview.set("back", boolean(rename.back));
 		preview.set("symbol", boolean(rename.symbol));
 		if (rename.symbol)
 			preview.set("kind", json_string(reference_row(rename.kind).token));
@@ -614,6 +616,10 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 			built.push(std::move(entry));
 		}
 		build.set("built", std::move(built));
+		// The folder's builds of other projects, left as they are (several projects building into one folder).
+		JsonValue others = JsonValue::make_array();
+		for (const std::string &name : report.others) others.push(json_string(name));
+		build.set("others", std::move(others));
 	}
 	out.set("build", std::move(build));
 	return out;

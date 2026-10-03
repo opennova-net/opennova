@@ -4,75 +4,54 @@
 #include <cstdint>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <vector>
 
-#include <editor/assets/asset_registry.h>
 #include <editor/model/diagnostic.h>
-
-namespace opennova {
-class FileSource;
-class Vfs;
-}
 
 namespace opennova::editor {
 
-class AssetGraph;
-class DocumentBase;
-class ProjectChecks;
-class ValidationCache;
 struct ProjectDocument;
-struct ProjectPaths;
 
-// A finding as the game's own data's fold compares it: its code, the record it is on (by its path,
-// the names from the row down: a record keeps it when its fields change or it moves among its
-// siblings), the field and what it names; a text document's finding with no record by its message.
-// The line is left out: an edit above a finding moves its line, not the finding.
+// A finding as the game's own data's fold compares it (the UX round's problems lane): its code, the
+// record it is on as itself (Diagnostic::record_key, Document::record_identity: its kind and own name,
+// else a digest of what it holds, so a record inserted, removed, moved or renamed beside it, or an owner
+// renamed, leaves it as it was), the field and what it names. A finding that names a record but no key
+// by its record's path, its numbers left out; a text document's finding of no record by its words, its
+// numbers left out too (a count or a place in a message moves with an edit elsewhere). Never its line.
 std::string original_finding_key(const Diagnostic &d);
 
-// What the check of the game's own data found (ADR 0046 S15, decided per finding since the UX round's
-// problems lane): the files the findings are about that the project holds exactly as the game install
-// serves them, every finding of which is the original's too; and the files the install serves that the
-// project holds otherwise (an edit saved, or one unsaved), each with the findings its install copy
-// makes standing in for it in the project, by key and how many of each. A finding of such a file is
-// the game's own while its key is among them, as many times as they hold it: one edit no longer makes
-// every finding the file had the modder's, only those the edit brought.
+// What the game install makes of its own files (ADR 0046 S15, decided per finding against the install
+// as a whole since the UX round's problems lane): each file the install serves, by its logical name
+// (normalized_logical_name), with the findings a validation of the whole install makes about it, by key
+// and how many of each. A finding of the project is the game's own while its file's logical name holds
+// its key, as many times as the install's holds it; nothing is before the install was validated
+// (`ready`).
 struct OriginalData {
-	std::set<std::string> files;
+	bool ready = false;
 	std::map<std::string, std::map<std::string, size_t>> findings;
-	bool operator==(const OriginalData &o) const { return files == o.files && findings == o.findings; }
+	bool operator==(const OriginalData &o) const { return ready == o.ready && findings == o.findings; }
 	bool operator!=(const OriginalData &o) const { return !(*this == o); }
 };
 
-// What a baseline reads of the project as the session's last validation left it: its paths, its graph,
-// its files' own findings and its project checks (each copied or asked, never changed), and the files as
-// the game looks them up (a project check's renders read them).
-struct OriginalProject {
-	const ProjectPaths &paths;
-	const AssetGraph &graph;
-	const ValidationCache &cache;
-	const ProjectChecks &checks;
-	const FileSource &files;
-};
-
-// The project's files that are the game's own data (ADR 0046 S15, Names): a file the project holds
-// exactly as the game install serves it (asset_import's read_served over mount_retail, what an import of
-// the install copies), so a Problems row about it is the original's too, not the modder's, and Problems
-// shows it apart. Only the files a finding is about are checked, each once while its size and last
-// write stand; the install is mounted while files wait to be checked and let go when none does (its
-// archives closed: a patch may write them). A file the install does not serve, an install that cannot be
-// mounted, and a file that cannot be read are not the original's.
+// The game's own data's baseline (ADR 0046 S15; the UX round's problems lane): the game install
+// validated as a project of its own, once, for every finding of the project to be judged against what
+// the install as a whole makes: a finding is the game's own only when the install, as it ships, makes
+// it too, in the file of the same name. A file's own findings the install's copy of it makes; a
+// reference the install's files do not resolve either (a missing texture the install lacks too) but
+// not one whose target the install has (the modder's project lacks it: the modder's); what other files
+// make of a name the install's files make too. So an edit never makes the original's findings of a
+// file the modder's, and the modder's own effects on files they never touched are theirs.
 //
-// Per finding (the UX round's problems lane): a file the install serves that the project holds
-// otherwise, or holds open with unsaved edits, is judged finding by finding against its install copy.
-// The baseline is the project validated as it would be with the game's own copies of those files: the
-// session's graph and its files' own findings copied once into a shadow of their own, the install copies
-// standing in as open documents for the files that differ, each file's own findings and the use checks
-// and the graph's findings made over it as the project's are, and the project checks asked of each
-// install copy alone (ProjectChecks::findings_of: a menu's screens compiled as the game draws them). The
-// shadow is kept while such files stand and brought to the project after each validation (an update
-// over the same files reads only what changed); it goes when no file is held otherwise.
+// The install is listed as the game serves it (mount_retail: its archives' files, the loose files the
+// game ships beside them), each file by its logical name and read through the mount (ProjectPaths::
+// files), then validated as the session validates the project (ProjectValidation, then the document
+// types' project checks over the install's files: a menu's screens compiled as the game draws them),
+// every step within a budget of bytes, its own graph, cache and checks let go once the findings are
+// keyed (nothing of the session's is copied or read). It never depends on the project: an edit, a
+// save, an import or a build validates nothing again. A Refresh (a new scan) looks at the install's
+// folder again, and an install that moved there (a patch) is validated again; another install or game
+// forgets it.
 class OriginalFiles {
 public:
 	OriginalFiles();
@@ -80,76 +59,47 @@ public:
 	OriginalFiles(const OriginalFiles &) = delete;
 	OriginalFiles &operator=(const OriginalFiles &) = delete;
 
-	// What to check: the install's folder (`install`, "" for none) and the project (`document` for its
-	// game, `root` its folder), the scan (each file's logical name, size and last write), the findings
-	// (the files they are about, their `asset`: project-relative paths) and the open documents (one with
-	// unsaved edits is judged per finding). What it found of a file that still stands is kept; an
-	// install or a project that moved forgets everything. The baseline is brought up again after the
-	// files are checked.
-	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document,
-	          const std::string &root, const std::shared_ptr<const AssetScan> &scan,
-	          const std::vector<Diagnostic> &findings, const std::vector<std::shared_ptr<const DocumentBase>> &open);
-	// Checks files within `bytes` (what it reads of the project and of the install; at least one file),
-	// then brings the baseline up over `project` in a step of its own. True when nothing is left to do.
-	bool step(uint64_t bytes, const OriginalProject &project);
-	bool settled() const { return queue_.empty() && !baseline_due_; }
+	// The install to judge against (`install`, "" for none) for the project's game (`document`);
+	// `scan` the session's scan, a new one of which (a Refresh, a save) looks at the install's folder
+	// again. Another install, game or folder state forgets what was found and starts over.
+	void want(const std::string &install, const std::shared_ptr<const ProjectDocument> &document, const void *scan);
+	// Goes on within `bytes` (what it reads, each file at least kValidationFileCost: at least one
+	// step); true when nothing is left to do.
+	bool step(uint64_t bytes);
+	bool settled() const { return phase_ == Phase::Idle || phase_ == Phase::Done; }
 	// What it found: a new instance whenever it moves (then generation() moves too), never null.
 	const std::shared_ptr<const OriginalData> &data() const { return data_; }
 	uint64_t generation() const { return generation_; }
-	// How many files it has read to check (for the tests: a file that stands is checked once), and how
-	// many times it brought a baseline up over a shadow.
-	size_t checked() const { return checked_; }
-	size_t baselines() const { return baselines_; }
-	// Whether it holds a shadow of the project (for the tests: none while every file is as the install's).
-	bool shadowed() const { return shadow_graph_ != nullptr; }
+	// For the tests and the measure: how many times it validated an install, of how many files, the last
+	// one's time in its steps and the longest step it took (milliseconds of the steady clock).
+	size_t validations() const { return validations_; }
+	size_t files() const { return files_; }
+	double last_ms() const { return last_ms_; }
+	double longest_step_ms() const { return longest_ms_; }
 	// The project closed: everything forgotten, the install let go.
 	void clear();
 
 private:
-	// A file to check, or one checked: as the scan listed it, and what the check found.
-	struct File {
-		std::string path; // project-relative
-		std::string name; // its logical name, what the install serves it by
-		AssetKind kind = AssetKind::Unknown;
-		uint64_t size = 0;
-		int64_t modified = 0;
-		bool served = false;   // the install serves a file of its name
-		bool original = false; // byte for byte the install's
-	};
-	// An install copy as a document, kept while the project's file stands as it was checked, and what the
-	// project checks made of it while the scan it was made over stands.
-	struct Copy {
-		bool from_install = false; // read from the install (else from the project's file, the same bytes)
-		uint64_t size = 0;
-		int64_t modified = 0;
-		std::shared_ptr<DocumentBase> document; // null: it did not load
-		const AssetScan *checked_over = nullptr;
-		std::vector<Diagnostic> checked;
-	};
-	bool mount();
-	void compare(uint64_t bytes);
-	void baseline(const OriginalProject &project);
-	std::shared_ptr<DocumentBase> copy_of(const File &file);
+	enum class Phase : uint8_t { Idle, Mount, Scan, Validate, Checks, Rows, Done };
+	struct Run;
+
+	void start();
 	void publish(OriginalData data);
+	std::string folder_state() const;
 
 	std::string install_;
 	std::shared_ptr<const ProjectDocument> document_;
-	std::string root_;
-	std::shared_ptr<const AssetScan> scan_;
-	std::vector<std::shared_ptr<const DocumentBase>> open_;
-	std::set<std::string> asked_; // the files the findings are about
-	std::unique_ptr<Vfs> game_;
-	bool mount_tried_ = false;
-	std::map<std::string, File> known_;
-	std::vector<File> queue_;
-	bool baseline_due_ = false;
-	std::map<std::string, Copy> copies_;
-	std::unique_ptr<AssetGraph> shadow_graph_;
-	std::unique_ptr<ValidationCache> shadow_cache_;
+	std::string game_;
+	std::string folder_; // the install folder's state when it was validated (folder_state)
+	const void *scan_ = nullptr;
+	Phase phase_ = Phase::Idle;
+	std::unique_ptr<Run> run_;
 	std::shared_ptr<const OriginalData> data_;
 	uint64_t generation_ = 0;
-	size_t checked_ = 0;
-	size_t baselines_ = 0;
+	size_t validations_ = 0;
+	size_t files_ = 0;
+	double last_ms_ = 0.0;
+	double longest_ms_ = 0.0;
 };
 
 } // namespace opennova::editor

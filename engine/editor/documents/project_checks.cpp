@@ -64,12 +64,6 @@ void ProjectChecks::append_findings(std::vector<Diagnostic> &out) const {
 			out.insert(out.end(), slot.check->findings().begin(), slot.check->findings().end());
 }
 
-void ProjectChecks::findings_of(const DocumentBase &document, const ProjectCheckInput &input,
-                                std::vector<Diagnostic> &out) const {
-	for (const Slot &slot : slots_)
-		if (slot.check) slot.check->findings_of(document, input, out);
-}
-
 size_t ProjectChecks::findings_size() const {
 	size_t size = 0;
 	for (const Slot &slot : slots_)

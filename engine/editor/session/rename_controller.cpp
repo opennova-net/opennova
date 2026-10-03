@@ -1,10 +1,12 @@
 #include <editor/session/rename_controller.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <utility>
 
+#include <base/io/hash.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
@@ -13,6 +15,7 @@
 #include <editor/session/rename_operation.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_core.h>
+#include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
 
@@ -134,26 +137,63 @@ OperationOutcome RenameController::absorb_rename(RenameOperation &operation) {
 	const auto way_back = [](const std::string &from, const std::string &to) {
 		return " Undo does not take it back: Edit > Rename " + to + " back to " + from + " does.";
 	};
+	const bool back = backing_;
+	backing_ = false;
+	const std::string renamed = back ? " back to " : " to ";
 	if (ok && operation.symbol()) {
 		const SymbolRenamePlan &plan = operation.symbol_plan();
-		const size_t uses = plan.sites.size() - 1;
-		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + " to " + plan.new_name +
+		const size_t uses = plan.sites.empty() ? 0 : plan.sites.size() - 1;
+		core_.note("Renamed " + std::string(reference_row(plan.kind).phrase) + " " + plan.old_name + renamed + plan.new_name +
 		           " (" + std::to_string(uses) + " use" + (uses == 1 ? "" : "s") + " rewritten)." +
 		           way_back(plan.old_name, plan.new_name));
-		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + " everywhere.";
-		view_.activity.last_rename = {true, true, plan.file, plan.locator, plan.field, plan.old_name, plan.new_name};
+		view_.activity.status = "Renamed " + plan.old_name + renamed + plan.new_name + (back ? "." : " everywhere.");
+		view_.activity.last_rename = {true, true, plan.file, plan.locator, plan.field, plan.old_name, plan.new_name, plan.kind,
+		                              plan.scope};
 	} else if (ok) {
 		const RenamePlan &plan = operation.file_plan();
 		std::string companions;
 		for (const RenameOutput &companion : plan.companions)
 			companions += (companions.empty() ? ", with " : ", ") + companion.old_name + " to " + companion.new_name;
-		core_.note("Renamed " + plan.old_name + " to " + plan.new_name + " (" + std::to_string(plan.sites.size()) +
+		core_.note("Renamed " + plan.old_name + renamed + plan.new_name + " (" + std::to_string(plan.sites.size()) +
 		           " reference" + (plan.sites.size() == 1 ? "" : "s") + " rewritten" + companions + ")." +
 		           way_back(plan.old_name, plan.new_name));
-		view_.activity.status = "Renamed " + plan.old_name + " to " + plan.new_name + ".";
-		view_.activity.last_rename = {true, false, plan.new_path, std::string(), std::string(), plan.old_name, plan.new_name};
+		view_.activity.status = "Renamed " + plan.old_name + renamed + plan.new_name + ".";
+		view_.activity.last_rename = {true, false, plan.new_path, std::string(), std::string(), plan.old_name, plan.new_name,
+		                              ReferenceKind::None, std::string()};
 	} else {
 		view_.activity.status = "The rename did not finish.";
+	}
+	// What it did, for its way back: the sites as it left them (a text's later sites on a line moved by the
+	// names before them), each file it wrote by its bytes' hash now.
+	if (ok) {
+		Done done;
+		done.symbol = operation.symbol();
+		if (done.symbol) {
+			const SymbolRenamePlan &plan = operation.symbol_plan();
+			done.kind = plan.kind;
+			done.file = plan.file;
+			done.field = plan.field;
+			done.scope = plan.scope;
+			done.from = plan.old_name;
+			done.to = plan.new_name;
+		} else {
+			const RenamePlan &plan = operation.file_plan();
+			done.file = plan.new_path;
+			done.from = plan.old_name;
+			done.to = plan.new_name;
+		}
+		done.sites = sites;
+		for (RenameSite &site : done.sites) {
+			if (!site.span.line) continue;
+			ptrdiff_t moved = 0;
+			for (const RenameSite &earlier : sites)
+				if (earlier.file == site.file && earlier.span.line == site.span.line && earlier.span.column < site.span.column)
+					moved += ptrdiff_t(earlier.after.size()) - ptrdiff_t(earlier.span.length);
+			site.span.column = size_t(ptrdiff_t(site.span.column) + moved);
+			site.span.length = site.after.size();
+		}
+		for (const RenameSite &site : done.sites) done.written[site.file] = hash_of(site.file);
+		done_ = std::move(done);
 	}
 	core_.touch(ViewConcern::Selection); // the active document and its selection, kept or started over
 	core_.touch(ViewConcern::Output);
@@ -305,6 +345,24 @@ void RenameController::assign_requirement(const std::string &role, const std::st
 void RenameController::unsaved_files(const EditorRequest &request, std::vector<std::string> &files) {
 	DocumentSet &documents = core_.documents();
 	switch (request.kind) {
+	case EditorRequestKind::RenameBack: {
+		// The documents with unsaved edits among the files the way back rewrites (saved, a file it wrote is
+		// no longer as it left it: the plan then says so); none when there is no way back.
+		if (!view_.project.open || !done_ || !documents.documents_dirty()) return;
+		if (unsaved_while_due(files)) return;
+		std::vector<std::string> rewrites;
+		if (done_->symbol)
+			for (const RenameSite &site : plan_back_symbol().sites) rewrites.push_back(site.file);
+		else {
+			const RenamePlan plan = plan_back_file();
+			rewrites.push_back(plan.path);
+			for (const RenameSite &site : plan.sites) rewrites.push_back(site.file);
+		}
+		for (const auto &document : documents.documents())
+			if (document->dirty() && std::find(rewrites.begin(), rewrites.end(), document->path()) != rewrites.end())
+				files.push_back(document->path());
+		return;
+	}
 	case EditorRequestKind::RenameAsset: rename_unsaved(request.path, request.new_name, files); return;
 	case EditorRequestKind::RenameSymbol:
 		// The documents with unsaved edits among the files the plan rewrites, and those whose
@@ -366,6 +424,170 @@ void RenameController::rename_unsaved(const std::string &file, const std::string
 		                [&path](const RenameOutput &companion) { return companion.path == path; }))
 			files.push_back(path);
 	}
+}
+
+uint64_t RenameController::hash_of(const std::string &file) const {
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!read_file_bytes(join_path(paths_.root, file), bytes, error)) return 0;
+	return io::fnv1a64_bytes(io::kFnv1a64Offset, bytes.data(), bytes.size());
+}
+
+void RenameController::keep_written(std::vector<RenameSite> &sites, std::vector<Diagnostic> &refusals) const {
+	const Done &done = *done_;
+	// A file the rename wrote, changed since: which of its uses it wrote can no longer be told from the others.
+	for (const auto &[file, hash] : done.written)
+		if (hash_of(file) != hash)
+			refusals.push_back(make_finding(CoreFinding::RenameSite, DiagnosticSeverity::Error,
+			                                file + " changed since the rename: which of its uses of " + done.to +
+			                                        " the rename wrote can no longer be told. Rename it everywhere instead, "
+			                                        "or put the file back as the rename left it.",
+			                                file));
+	const auto same = [](const RenameSite &a, const RenameSite &b) {
+		return a.file == b.file && a.locator == b.locator && a.field == b.field && a.span.line == b.span.line &&
+		       (!a.span.line || a.span.column == b.span.column);
+	};
+	std::vector<RenameSite> kept;
+	for (const RenameSite &site : sites)
+		if (std::any_of(done.sites.begin(), done.sites.end(), [&](const RenameSite &wrote) { return same(wrote, site); }))
+			kept.push_back(site);
+	// Every site it wrote is one to take back: one the plan no longer has no longer names it.
+	for (const RenameSite &wrote : done.sites)
+		if (done.written.count(wrote.file) && hash_of(wrote.file) == done.written.at(wrote.file) &&
+		    std::none_of(kept.begin(), kept.end(), [&](const RenameSite &site) { return same(wrote, site); }))
+			refusals.push_back(make_finding(CoreFinding::RenameSite, DiagnosticSeverity::Error,
+			                                wrote.file + (wrote.record.empty() ? std::string() : ": " + wrote.record) +
+			                                        " no longer names " + done.to + " where the rename wrote it.",
+			                                wrote.file, wrote.field));
+	sites = std::move(kept);
+}
+
+SymbolRenamePlan RenameController::plan_back_symbol() {
+	const Done &done = *done_;
+	const AssetGraph &graph = core_.problems().graph();
+	// The definition the rename gave the new name, by itself: its kind, its name, the file and field defining it.
+	const GraphSymbol *defined = nullptr;
+	for (const GraphSymbol *symbol : graph.symbols_named(done.kind, done.to, done.scope))
+		if (symbol->file == done.file && symbol->field == done.field) {
+			defined = symbol;
+			break;
+		}
+	if (!defined) {
+		SymbolRenamePlan none;
+		none.kind = done.kind;
+		none.file = done.file;
+		none.field = done.field;
+		none.old_name = done.to;
+		none.new_name = done.from;
+		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
+		                                     done.file + " no longer defines " + done.to + ": there is nothing to rename back.",
+		                                     done.file, done.field));
+		return none;
+	}
+	SymbolRenamePlan plan = plan_symbol_rename_project(*view_.project.scan, graph, *defined, done.from);
+	keep_written(plan.sites, plan.refusals);
+	return plan;
+}
+
+RenamePlan RenameController::plan_back_file() {
+	const Done &done = *done_;
+	if (!view_.project.scan->at_path(done.file)) {
+		RenamePlan none;
+		none.path = done.file;
+		none.old_name = done.to;
+		none.new_name = done.from;
+		none.refusals.push_back(make_finding(CoreFinding::RenameUnknownFile, DiagnosticSeverity::Error,
+		                                     "The project no longer has " + done.file + ": there is nothing to rename back.",
+		                                     done.file));
+		return none;
+	}
+	RenamePlan plan = plan_rename(paths_, *view_.project.scan, core_.problems().graph(), done.file, done.from);
+	keep_written(plan.sites, plan.refusals);
+	return plan;
+}
+
+void RenameController::preview_back(const EditorRequest &request) {
+	if (!view_.project.open) return;
+	DialogsView::RenamePreview preview;
+	preview.serial = view_.dialogs.rename_preview.serial + 1;
+	preview.back = true;
+	if (!done_) {
+		preview.refusals.push_back(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
+		                                        "No rename has finished in this project to take back."));
+		preview.sites = std::make_shared<const std::vector<RenameSite>>();
+	} else if (done_->symbol) {
+		const SymbolRenamePlan plan = plan_back_symbol();
+		preview.symbol = true;
+		preview.kind = plan.kind;
+		preview.path = plan.file;
+		preview.locator = plan.locator;
+		preview.field = plan.field;
+		preview.old_name = plan.old_name;
+		preview.new_name = plan.new_name;
+		preview.requested = plan.new_name;
+		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
+		preview.refusals = plan.refusals;
+	} else {
+		const RenamePlan plan = plan_back_file();
+		preview.path = plan.path;
+		preview.old_name = plan.old_name;
+		preview.new_name = plan.new_name;
+		preview.requested = plan.new_name;
+		preview.sites = std::make_shared<const std::vector<RenameSite>>(plan.sites);
+		for (const RenameOutput &companion : plan.companions) preview.companions.push_back(companion.old_name + " to " + companion.new_name);
+		preview.refusals = plan.refusals;
+	}
+	view_.dialogs.rename_preview = std::move(preview);
+	if (request.ask_name) {
+		ViewEvent ask;
+		ask.kind = ViewEventKind::AskRename;
+		ask.path = view_.dialogs.rename_preview.path;
+		ask.field = view_.dialogs.rename_preview.field;
+		ask.tag = view_.dialogs.rename_preview.serial;
+		view_.events.post(std::move(ask));
+	}
+	core_.touch(ViewConcern::Dialogs);
+}
+
+void RenameController::rename_back() {
+	if (!view_.project.open) return;
+	if (!done_) {
+		core_.report(make_finding(CoreFinding::RenameUnknownSymbol, DiagnosticSeverity::Error,
+		                          "No rename has finished in this project to take back."));
+		return;
+	}
+	const RenameOperation::Kept kept{view_.documents.active, view_.documents.selection};
+	uint64_t id = 0;
+	if (done_->symbol) {
+		RenameOperation::SymbolPlanner planner = [this](std::shared_ptr<const AssetScan> &scan) {
+			scan = view_.project.scan;
+			return plan_back_symbol();
+		};
+		id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_, *view_.project.document,
+		                                                             core_.problems().graph(), std::move(planner), kept));
+	} else {
+		RenameOperation::FilePlanner planner = [this](std::shared_ptr<const AssetScan> &scan) {
+			scan = view_.project.scan;
+			return plan_back_file();
+		};
+		id = core_.start_operation(std::make_unique<RenameOperation>(core_.problems(), paths_, *view_.project.document,
+		                                                             core_.problems().graph(), std::move(planner), kept));
+	}
+	if (id == 0) return core_.refuse_busy(done_->file); // the gate let no operation run beside it
+	backing_ = true;
+	core_.outcome().operation = id;
+	view_.activity.status = "Renaming " + done_->to + " back to " + done_->from + "...";
+	core_.touch(ViewConcern::Output);
+}
+
+bool rename_back_offered(const SessionView &view) {
+	const ActivityView::LastRename &last = view.activity.last_rename;
+	if (!last.made || !view.project.open) return false;
+	if (!last.symbol) return view.project.scan && view.project.scan->at_path(last.path);
+	if (!view.findings.graph) return false;
+	for (const GraphSymbol *symbol : view.findings.graph->symbols_named(last.kind, last.to, last.scope))
+		if (symbol->file == last.path && symbol->field == last.field) return true;
+	return false;
 }
 
 } // namespace opennova::editor

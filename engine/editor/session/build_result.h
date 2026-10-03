@@ -25,6 +25,7 @@ struct BuildResult {
 	};
 	std::vector<File> files;
 	std::string players;               // a folder build's: how a player installs it
+	std::string others;                // the folder's builds of other projects, left as they are ("" for none)
 	std::vector<std::string> refusals; // a refused build's, each in words, the first few
 	std::string failure;               // a failed build's: why
 };
@@ -35,6 +36,10 @@ BuildResult build_result(const BuildReport &report, bool in_project);
 // A build that landed in one line for Output: "Built in 37 s: resource.pff 220.4 MB, localres.pff 3.1 MB,
 // language.pff 12.0 KB and 1 loose file, in <where>."
 std::string build_result_line(const BuildResult &result);
+
+// What refused a build, from its own report (the menu bar's "Build refused" says it whatever the status line
+// has moved on to): "Refused: <its first refusal> (and N more)."; "" for a build not refused.
+std::string refused_words(const BuildReport &report);
 
 // A size in a modder's units: "812 B", "4.5 KB", "220.4 MB", "1.2 GB".
 std::string size_words(uint64_t bytes);

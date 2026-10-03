@@ -79,38 +79,36 @@ bool ProblemQuery::operator==(const ProblemQuery &other) const {
 
 namespace {
 
-bool open_dirty(const std::vector<std::shared_ptr<const DocumentBase>> &open, const std::string &path) {
-	for (const auto &document : open)
-		if (document && document->path() == path && document->dirty()) return true;
-	return false;
+// The logical name a row's file is served by (its project-relative path's file name), normalized: what
+// the install's findings are kept by.
+std::string served_name(const Diagnostic &d) {
+	const size_t slash = d.asset.find_last_of('/');
+	return normalized_logical_name(slash == std::string::npos ? d.asset : d.asset.substr(slash + 1));
 }
 
-// Whether a row's file and finding are the game's own (mark_findings' rule), `left` the install copies'
-// findings not taken by an earlier row (null: none taken, a single row's answer).
+// Whether a row is the game's own (mark_findings' rule): the install, as a whole, makes the same finding in
+// the file of the same name; `left` the install's findings not taken by an earlier row (null: none taken,
+// a single row's answer).
 bool original_row(const Diagnostic &d, const OriginalData &originals,
-                  const std::vector<std::shared_ptr<const DocumentBase>> &open,
                   std::map<std::string, std::map<std::string, size_t>> *left) {
 	// A finding the build gates on stays the modder's to see, whatever file it is in.
-	if (d.asset.empty() || blocks_build(d)) return false;
-	const auto judged = originals.findings.find(d.asset);
-	if (judged != originals.findings.end()) {
-		const std::string key = original_finding_key(d);
-		if (!left) return judged->second.count(key) != 0;
-		auto file = left->find(d.asset);
-		if (file == left->end()) file = left->emplace(d.asset, judged->second).first;
-		const auto found = file->second.find(key);
-		if (found == file->second.end() || found->second == 0) return false;
-		--found->second;
-		return true;
-	}
-	// A document with unsaved edits the check has not judged yet is judged by what it holds: the modder's.
-	return originals.files.count(d.asset) != 0 && !open_dirty(open, d.asset);
+	if (!originals.ready || d.asset.empty() || blocks_build(d)) return false;
+	const std::string name = served_name(d);
+	const auto served = originals.findings.find(name);
+	if (served == originals.findings.end()) return false;
+	const std::string key = original_finding_key(d);
+	if (!left) return served->second.count(key) != 0;
+	auto file = left->find(name);
+	if (file == left->end()) file = left->emplace(name, served->second).first;
+	const auto found = file->second.find(key);
+	if (found == file->second.end() || found->second == 0) return false;
+	--found->second;
+	return true;
 }
 
 } // namespace
 
 FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalData *originals,
-                           const std::vector<std::shared_ptr<const DocumentBase>> &open,
                            const std::vector<Diagnostic> *blockers) {
 	FindingMarks marks;
 	marks.rows = rows.size();
@@ -119,7 +117,7 @@ FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalDa
 	std::map<std::string, std::map<std::string, size_t>> left;
 	for (size_t i = 0; i < rows.size(); ++i) {
 		const Diagnostic &d = rows[i];
-		if (originals && original_row(d, *originals, open, &left)) marks.original[i] = 1;
+		if (originals && original_row(d, *originals, &left)) marks.original[i] = 1;
 		const bool blocks = blocks_build(d) &&
 		                    (!blockers || std::find(blockers->begin(), blockers->end(), d) != blockers->end());
 		if (blocks) {
@@ -133,16 +131,15 @@ FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalDa
 const FindingMarks &finding_marks(const SessionView &view, FindingMarks &scratch) {
 	const auto &marks = view.findings.marks;
 	if (marks && marks->rows == view.findings.diagnostics.size()) return *marks;
-	scratch = mark_findings(view.findings.diagnostics, view.findings.originals.get(), view.documents.open, nullptr);
+	scratch = mark_findings(view.findings.diagnostics, view.findings.originals.get(), nullptr);
 	return scratch;
 }
-
 bool in_original_data(size_t row, const SessionView &view) {
 	const std::vector<Diagnostic> &rows = view.findings.diagnostics;
 	if (row >= rows.size()) return false;
 	const auto &marks = view.findings.marks;
 	if (marks && marks->rows == rows.size()) return marks->original[row] != 0;
-	return view.findings.originals && original_row(rows[row], *view.findings.originals, view.documents.open, nullptr);
+	return view.findings.originals && original_row(rows[row], *view.findings.originals, nullptr);
 }
 
 bool blocks_the_build(size_t row, const SessionView &view) {
@@ -251,7 +248,6 @@ ProblemAnswer answer_problems(const ProblemQuery &query, const SessionView &view
 }
 
 RevisionKey problem_query_key(const SessionView &view, const ProblemQuery &query) {
-	// The game's own data's fold reads which documents have unsaved edits (in_original_data).
 	RevisionKey key = revision_key(view.revisions, {ViewConcern::Findings, ViewConcern::DocumentSet});
 	if (query.scope == ProblemScope::ActiveFile)
 		key = key | revision_key(view.revisions, {ViewConcern::ActiveDocument});

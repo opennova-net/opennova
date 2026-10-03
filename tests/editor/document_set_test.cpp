@@ -343,8 +343,13 @@ static int test_undo_says_what() {
 	for (const std::string &line : v.activity.output)
 		said = said || line.find("Undo does not take it back: Edit > Rename HEADER back to TITLE does.") != std::string::npos;
 	TEST_EXPECT(said);
-	editor_test::handle_to_end(menus.session, request::rename_symbol(last.path, last.locator, last.field, last.from));
+	// The way back: planned first (the definition, found by its name), then committed.
+	editor_test::handle_to_end(menus.session, request::preview_rename_back(true));
+	TEST_EXPECT(v.dialogs.rename_preview.back && v.dialogs.rename_preview.refusals.empty() &&
+	            v.dialogs.rename_preview.old_name == "HEADER" && v.dialogs.rename_preview.new_name == "TITLE");
+	editor_test::handle_to_end(menus.session, request::rename_back());
 	TEST_EXPECT(menus.menu().record_name(menus.at(kTitle)) == "TITLE" && last.from == "HEADER" && last.to == "TITLE");
+	TEST_EXPECT(v.activity.status == "Renamed HEADER back to TITLE.");
 	std::printf("undo words: what Undo and Redo did, a rename's way back\n");
 	return 0;
 }

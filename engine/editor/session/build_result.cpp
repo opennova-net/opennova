@@ -1,5 +1,6 @@
 #include <editor/session/build_result.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 
@@ -48,8 +49,13 @@ BuildResult build_result(const BuildReport &report, bool in_project) {
 		std::vector<Diagnostic> blockers;
 		for (const Diagnostic &d : report.diagnostics)
 			if (blocks_build(d) && d.row() != &finding_code(CoreFinding::BuildBlocked)) blockers.push_back(d);
-		out.headline = "Build refused: " + counted(blockers.size(), "problem") + (blockers.size() == 1 ? " stops" : " stop") +
-		               " it, as the game would stop.";
+		// Why, by the refusals' class: the game's own (a required file, a reference the game cannot go on
+		// without), the editor's (what it cannot read, write or store), or both.
+		const size_t games = size_t(std::count_if(blockers.begin(), blockers.end(), blocker_is_the_games));
+		const std::string why = games == blockers.size() ? " it, as the game would stop."
+		                        : games == 0 ? " it: the editor does not pack what it cannot vouch for."
+		                                     : " it: the game would stop for some, and the editor does not pack the others.";
+		out.headline = "Build refused: " + counted(blockers.size(), "problem") + (blockers.size() == 1 ? " stops" : " stop") + why;
 		for (const Diagnostic &d : blockers) out.refusals.push_back(blocker_words(d));
 		return out;
 	}
@@ -82,7 +88,19 @@ BuildResult build_result(const BuildReport &report, bool in_project) {
 		out.players = "To play it, copy these files into a copy of the game's folder, over the files of these names. "
 		              "The game then reads only what this build packs, so the project must hold everything the "
 		              "game needs (File > Import the whole game install).";
+	// A folder several projects build into: theirs are never pruned, replaced or taken.
+	if (!report.others.empty())
+		out.others = "The folder holds " + counted(report.others.size(), "build") + " of other projects, left as " +
+		             (report.others.size() == 1 ? "it is." : "they are.");
 	return out;
+}
+
+std::string refused_words(const BuildReport &report) {
+	if (!report.refused) return std::string();
+	const std::vector<std::string> refusals = build_result(report, true).refusals;
+	if (refusals.empty()) return "The build was refused.";
+	return "Refused: " + refusals.front() +
+	       (refusals.size() > 1 ? " (and " + std::to_string(refusals.size() - 1) + " more)" : std::string()) + ".";
 }
 
 std::string build_result_line(const BuildResult &result) {

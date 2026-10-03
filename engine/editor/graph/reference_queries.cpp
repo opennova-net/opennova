@@ -154,6 +154,7 @@ bool missing_finding(const AssetGraph &graph, const Document &document, const No
 	GraphEdge edge;
 	edge.source = document.path();
 	edge.record = document.record_path(address);
+	edge.record_key = document.record_identity(address);
 	edge.locator = document.locator(address);
 	edge.address = address;
 	edge.field = field.schema->id;

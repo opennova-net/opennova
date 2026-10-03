@@ -50,8 +50,8 @@ struct ProblemGroup {
 	// Shown under a header of its own (a group of the query's grouping, the game's own data's); false
 	// for the modder's findings listed as one before the game's own data's (ungrouped).
 	bool header = true;
-	// The game's own data's (ADR 0046 S15): the findings the install's copy of their file makes too
-	// (FindingsView::originals, FindingMarks::original), kOriginalGroupKey, last.
+	// The game's own data's (ADR 0046 S15): the findings the game install, as a whole, makes too in the file
+	// of the same name (FindingsView::originals, FindingMarks::original), kOriginalGroupKey, last.
 	bool original = false;
 };
 
@@ -63,8 +63,8 @@ inline constexpr const char *kOriginalGroupTitle = "In the game's own data (also
 // (errors, then warnings, then notes, each in the order they were reported; grouped, group
 // after group, the groups in the order their first finding shows); `groups` when grouped;
 // and how many findings of each severity the project has in all, shown or not ("37 of 412"
-// is rows.size() of total()). The findings about the game's own data (S15: a file the project holds
-// as the install serves it) come after the modder's, under a group of their own
+// is rows.size() of total()). The findings about the game's own data (S15: those the game install makes
+// too) come after the modder's, under a group of their own
 // (ProblemGroup::original; the answer grouped then whatever the query's grouping, the modder's
 // findings ungrouped as one group with no header), and are counted apart: `errors`, `warnings` and
 // `infos` are the modder's, `original_*` the game's own data's.
@@ -86,14 +86,12 @@ struct ProblemAnswer {
 
 // The marks of `rows` (FindingMarks; the UX round's problems lane). A row is about the game's own data
 // when the build does not gate on its code (blocks_build: the gate follows the game's refusals, so no
-// count of 0 errors stands beside a refused build) and its file is one the project holds as the install
-// serves it (OriginalData::files) and not open with unsaved edits, or one held otherwise whose install
-// copy makes a finding of its key (original_finding_key), each of the copy's findings taken by one row,
-// the rows' first; an open document with unsaved edits the check has not judged yet is the modder's. A
-// row blocks the build when it is one of `blockers` (the plan's refusals, build_blockers; null: when the
-// build gates on its code).
+// count of 0 errors stands beside a refused build) and the game install, as a whole, makes the same
+// finding (original_finding_key) in the file of the same logical name (OriginalData::findings, once
+// `ready`), each of the install's findings taken by one row, the rows' first: what the modder's edits
+// or the project's other files brought is the modder's, wherever it is. A row blocks the build when it is
+// one of `blockers` (the plan's refusals, build_blockers; null: when the build gates on its code).
 FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalData *originals,
-                           const std::vector<std::shared_ptr<const DocumentBase>> &open,
                            const std::vector<Diagnostic> *blockers);
 // The view's marks: the session's while they are the rows' (FindingsView::marks), else made into
 // `scratch` from what the view holds (a view no session made).

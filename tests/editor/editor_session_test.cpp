@@ -203,7 +203,9 @@ static int test_lifecycle() {
 	{
 		const BuildReport &report = *v.activity.last_build;
 		TEST_EXPECT(report.built.size() >= 3 && report.built[0].archive && report.built[0].name == "language.pff" &&
-		            report.built[2].name == "resource.pff" && report.built[2].bytes > 0 && report.seconds >= 0.0);
+		            report.built[2].name == "resource.pff" && report.built[2].bytes > 0);
+		// Timed by the operation, start to finish: a build that read files took some time, and not minutes.
+		TEST_EXPECT(report.seconds > 0.0 && report.seconds < 600.0);
 		size_t packed = 0;
 		for (const BuiltFile &file : report.built) packed += file.files;
 		TEST_EXPECT(packed > 0);
@@ -217,6 +219,14 @@ static int test_lifecycle() {
 		            result.where == report.build_dir && result.files.size() == report.built.size() && result.players.empty() &&
 		            result.files[2].words.find(", written") != std::string::npos);
 		TEST_EXPECT(!build_result(report, false).players.empty());
+		// Its time in words, as the panel says it.
+		BuildReport timed = report;
+		timed.seconds = 37.4;
+		TEST_EXPECT(build_result(timed, true).headline == "Built in 37 s.");
+		timed.seconds = 125.0;
+		TEST_EXPECT(build_result(timed, true).headline == "Built in 2 min 5 s.");
+		timed.seconds = 0.4;
+		TEST_EXPECT(build_result(timed, true).headline == "Built in under a second.");
 		const std::vector<ViewEvent> ended = editor_test::events_after(v, events_before, ViewEventKind::BuildEnded);
 		TEST_EXPECT(ended.size() == 1 && ended[0].flag && ended[0].tag == 0);
 		TEST_EXPECT(v.activity.status.rfind("Built in ", 0) == 0);
@@ -3627,9 +3637,12 @@ static int test_play_leases() {
 	return 0;
 }
 
-// Build to folder (the UX round's problems lane): a build into a folder outside the project lands there,
-// the folder kept with the project's local settings (Build > Build to <it> again: the view's build_folder,
-// the preferences section's), and its result says how players install it; reopened, the project keeps it.
+// Build to folder (the UX round's problems lane): a build into a folder outside the project lands there, and
+// its result says how players install it; a build's out_dir keeps nothing (a script's build into a folder of
+// its own is not the modder's Build to <it>, the review's L4): the folder is kept with the project's local
+// settings only when the modder picks it (apply_project_settings' build_folder, which the picker raises:
+// Build > Build to <it> again, the view's build_folder, the preferences section's), never one inside the
+// project; reopened, the project keeps it.
 static int test_build_to_folder() {
 	editor_test::TempProjectDir dir("opennova_editor_session_build_folder");
 	FakePlatform platform;
@@ -3642,11 +3655,20 @@ static int test_build_to_folder() {
 	const std::string players = dir.file("for players");
 	editor_test::handle_to_end(session, request::build(players));
 	std::error_code ec;
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.project.build_folder.empty() &&
-	            fs::equivalent(fs::path(v.project.build_folder), fs::path(players), ec));
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && v.project.build_folder.empty());
 	TEST_EXPECT(fs::equivalent(fs::path(v.activity.last_build->build_dir).parent_path(), fs::path(players), ec));
-	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_string("build_folder", "") == v.project.build_folder);
 	TEST_EXPECT(!build_result(*v.activity.last_build, false).players.empty());
+	// The modder's pick: kept.
+	ProjectSettingsChange keep;
+	keep.build_folder = players;
+	editor_test::handle_to_end(session, request::apply_project_settings(keep));
+	TEST_EXPECT(v.project.build_folder == players);
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_string("build_folder", "") == v.project.build_folder);
+	// One inside the project: refused, the kept one as it was.
+	ProjectSettingsChange inside;
+	inside.build_folder = v.project.root + "/builds";
+	editor_test::handle_to_end(session, request::apply_project_settings(inside));
+	TEST_EXPECT(v.project.build_folder == players);
 	const std::string root = v.project.root;
 	editor_test::handle_to_end(session, request::close_project());
 	TEST_EXPECT(v.project.build_folder.empty());
@@ -4129,6 +4151,7 @@ static int test_prompt_words_from_the_table() {
 		{EditorRequestKind::RenameAsset, "Rename main.mnu", "Save all and rename"},
 		{EditorRequestKind::AssignRequirement, "Rename main.mnu", "Save all and rename"},
 		{EditorRequestKind::RenameSymbol, "Rename everywhere (defined in main.mnu)", "Save all and rename"},
+		{EditorRequestKind::RenameBack, "Rename back", "Save all and rename back"},
 		{EditorRequestKind::Quit, "Quit", "Save all"},
 	};
 	size_t guarded = 0;

@@ -82,11 +82,12 @@ void disabled_wrapped(const std::string &text) {
 
 float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPadding.y * 2.0f; }
 
-// What a fix of a finding about the game's own data says first (S15): the file is one the game ships,
-// so the problem is the original's too and a fix makes the file the modder's. "" for any other finding.
+// What a fix of a finding about the game's own data says first (S15): the game as it ships has the
+// problem too (its install, validated as a whole, makes the same finding in the file of that name), and a
+// fix makes the file the modder's. "" for any other finding.
 std::string shipped_note(size_t row, const SessionView &view) {
-	return in_original_data(row, view) ? "Edits a file the game ships: the original has this problem too, and the file "
-	                                     "becomes yours."
+	return in_original_data(row, view) ? "Edits a file the game ships: the game as it ships has this problem too, and "
+	                                     "the file becomes yours."
 	                                   : std::string();
 }
 // A fix's tooltip: its label, that note, what it does, whether it waits.
@@ -98,8 +99,34 @@ std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed
 } // namespace
 
 void ProblemsWindow::show_blocking() {
-	list_.query().blocking = true;
+	set_blocking(true);
 	request_focus();
+}
+
+void ProblemsWindow::set_blocking(bool on) {
+	ProblemQuery &query = list_.query();
+	if (on == query.blocking) return;
+	if (on) {
+		// Every refusal shown: a required file's finding names no file (no scope but the project's shows it),
+		// and a hidden severity, a text or Only fixable could hide the rest.
+		before_blocking_ = query;
+		text_before_ = text_;
+		query.scope = ProblemScope::Project;
+		query.errors = query.warnings = query.infos = true;
+		query.fixable = false;
+		query.text.clear();
+		text_[0] = '\0';
+		query.blocking = true;
+		return;
+	}
+	if (before_blocking_) {
+		query = *before_blocking_;
+		const size_t n = std::min(text_before_.size(), sizeof(text_) - 1);
+		text_before_.copy(text_, n);
+		text_[n] = '\0';
+		before_blocking_.reset();
+	}
+	query.blocking = false;
 }
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
@@ -134,9 +161,10 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 		const bool on = query.blocking;
 		if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
 		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Error));
-		if (ImGui::Button(label.c_str())) query.blocking = !on;
+		if (ImGui::Button(label.c_str())) set_blocking(!on);
 		ImGui::PopStyleColor(on ? 2 : 1);
-		ui_kit::tooltip(on ? std::string("Showing only what a build is refused for: click for every problem.")
+		ui_kit::tooltip(on ? std::string("Showing only what a build is refused for, every one: click for the problems as "
+		                                 "they were filtered before.")
 		                   : std::string("Only what a build is refused for: what would stop the game as it stops the "
 		                                 "original, and what the editor cannot pack as it is."));
 	}
@@ -205,7 +233,11 @@ void ProblemsWindow::draw_summary(const SessionView &view) {
 	}
 	ImGui::PushID(view.project.root.c_str());
 	ImGui::PushID("required");
-	for (const EditorRequest &request : list_.required_fixes().requests) {
+	// The game's own copies offered before the placeholders (each button raises its own request).
+	std::vector<EditorRequest> offered = list_.required_fixes().requests;
+	std::stable_partition(offered.begin(), offered.end(),
+	                      [](const EditorRequest &request) { return request.kind == EditorRequestKind::PreviewInstallImport; });
+	for (const EditorRequest &request : offered) {
 		const std::string label = ProblemsList::fix_all_label(request);
 		row.next(ui_kit::button_width(label.c_str()));
 		ImGui::PushID(static_cast<int>(request.kind));
@@ -279,9 +311,10 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	        ProblemsList::severity_counts(group.errors, group.warnings, group.infos);
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
 	if (group.original)
-		ui_kit::tooltip("Problems the game install's own copy of the file has too: the original game has them, so they "
-		                "are not yours to fix. A file you change keeps here only the problems its original has; a "
-		                "problem your edit brings, and one that would stop a build, is never in it.");
+		ui_kit::tooltip("Problems the game has as it ships: its install, checked as a whole, has each of them too, in "
+		                "the file of the same name, so they are not yours to fix. A problem your edits bring, or your "
+		                "project's other files bring (a texture the install has that your project lacks), is never in "
+		                "it, nor one that would stop a build.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {

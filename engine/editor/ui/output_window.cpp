@@ -67,10 +67,24 @@ void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		return;
 	}
 	// The lines opened that the log no longer holds go.
-	for (auto it = open_.begin(); it != open_.end();) it = *it < output.first_index() ? open_.erase(it) : std::next(it);
+	for (auto it = open_.begin(); it != open_.end();) {
+		if (*it >= output.first_index()) {
+			++it;
+			continue;
+		}
+		it = open_.erase(it);
+		open_moved_ = true;
+	}
+	if (open_moved_ || rows_generation_ != output.generation() || rows_next_ != output.next_index()) {
+		rows_ = rows(output, open_);
+		++rows_made_;
+		rows_generation_ = output.generation();
+		rows_next_ = output.next_index();
+		open_moved_ = false;
+	}
 	if (ImGui::BeginChild("lines", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,
 	                      ImGuiWindowFlags_HorizontalScrollbar)) {
-		const std::vector<std::pair<uint64_t, int64_t>> shown = rows(output, open_);
+		const std::vector<std::pair<uint64_t, int64_t>> &shown = rows_;
 		ImGuiListClipper clipper;
 		clipper.Begin(static_cast<int>(shown.size()));
 		while (clipper.Step()) {
@@ -95,9 +109,11 @@ void OutputWindow::draw(devtools::ImGuiPass &, uint64_t) {
 				const bool open = open_.count(at) != 0;
 				ImGui::SetNextItemOpen(open, ImGuiCond_Always);
 				const std::string label = output[held] + "  (" + counted(count, "line") + ")###folded" + std::to_string(at);
-				if (ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth) != open) {
+				if (ImGui::TreeNodeEx(label.c_str(), ImGuiTreeNodeFlags_NoTreePushOnOpen | ImGuiTreeNodeFlags_SpanAvailWidth |
+					                                     ImGuiTreeNodeFlags_NoAutoOpenOnLog) != open) {
 					if (open) open_.erase(at);
 					else open_.insert(at);
+					open_moved_ = true;
 				}
 				ui_kit::tooltip(open ? "Folds its lines away." : "Shows the lines folded under it.");
 			}

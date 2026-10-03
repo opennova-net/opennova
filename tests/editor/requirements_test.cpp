@@ -185,6 +185,8 @@ static int test_words_cover_the_manifest() {
 	}
 	TEST_EXPECT(next == requirement_words_count());
 	TEST_EXPECT(requirement_without("keyhelp") == "The game shows \"Unable to load keyboard map strings\" and exits.");
+	// fgn2.bin's presence picks the effects set (the review's L2): the German .ptg with it, the .ptu without.
+	TEST_EXPECT(requirement_without("fgn2_bin").find(".ptu") != std::string::npos && requirement_without("fgn2_bin").find(".ptg") != std::string::npos);
 	TEST_EXPECT(requirement_without("no_such_role").empty() && requirement_witness("no_such_role").empty());
 	return 0;
 }

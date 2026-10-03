@@ -577,12 +577,12 @@ _Avoid_: label (a field's own name), caption, alias
 
 **Game's own data**:
 What the game install ships, as the game is served it, what an import of the install copies (ADR 0046
-S15, `engine/editor/session/original_files.h`). A finding is the game's own when the install's copy of
-its file makes the same finding (its code, its record and field, what it names) standing in for the
-file in the project: every finding of a file held byte for byte as the install's, and of a file the
-modder changed only those its original has too. Problems shows them apart, under "In the game's own
-data (also in the original)", and counts the modder's findings first; a finding that blocks the build
-is never the game's own there.
+S15, `engine/editor/session/original_files.h`). A finding is the game's own when the game install, as
+it ships and validated as a whole, makes the same finding (its code, its record as itself, its field,
+what it names) in the file of the same name: whatever the modder's edits or the project's other files
+brought is the modder's (a texture the install has that the project lacks among it), however shipped the
+file it is in. Problems shows them apart, under "In the game's own data (also in the original)", and
+counts the modder's findings first; a finding that blocks the build is never the game's own there.
 _Avoid_: stock files, vanilla, unmodified (as Problems words)
 
 **Event sentence**:

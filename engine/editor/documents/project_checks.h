@@ -43,8 +43,6 @@ public:
 	bool step_slot(size_t slot, const ProjectCheckInput &input, uint64_t budget, bool &moved);
 	// Every check's findings as the last update left them, in the registry's order.
 	void append_findings(std::vector<Diagnostic> &out) const;
-	// What every check finds of one document alone (ProjectCheck::findings_of), in the registry's order.
-	void findings_of(const DocumentBase &document, const ProjectCheckInput &input, std::vector<Diagnostic> &out) const;
 	size_t findings_size() const;
 	// The check of a type, null for a type with none. The type's own code reads what its check
 	// keeps (the menu preview a screen's render: preview/menu_render_check.h's menu_render_check).

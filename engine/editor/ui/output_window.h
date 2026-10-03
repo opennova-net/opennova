@@ -35,11 +35,19 @@ public:
 	// folded index), each opened line followed by its folded lines (their index under it). The portable
 	// half the tests read.
 	static std::vector<std::pair<uint64_t, int64_t>> rows(const OutputLog &output, const std::set<uint64_t> &open);
+	// How many times the window made its rows again (for the tests: only when the log or the lines opened move).
+	size_t rows_made() const { return rows_made_; }
 
 private:
 	Workspace &workspace_;
 	uint64_t lines_seen_ = 0; // the absolute index after the newest line drawn (OutputLog)
 	std::set<uint64_t> open_; // the lines whose folded lines show, by absolute index
+	// The rows drawn, made again only when the log or the lines opened move (an opened game log holds
+	// thousands): the log's generation and next index they were made at, and whether open_ moved since.
+	std::vector<std::pair<uint64_t, int64_t>> rows_;
+	uint64_t rows_generation_ = UINT64_MAX, rows_next_ = 0;
+	bool open_moved_ = true;
+	size_t rows_made_ = 0;
 };
 
 } // namespace opennova::editor

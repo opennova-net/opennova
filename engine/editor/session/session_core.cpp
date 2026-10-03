@@ -28,6 +28,7 @@
 #include <editor/session/play_controller.h>
 #include <editor/session/problems_service.h>
 #include <editor/session/refresh_operation.h>
+#include <editor/session/rename_controller.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/unsaved_guard.h>
 
@@ -365,6 +366,7 @@ bool SessionCore::close_project() {
 	view_.findings.diagnostics.clear();
 	view_.findings.marks.reset();
 	view_.activity.last_rename = ActivityView::LastRename(); // its way back is this project's
+	renames().forget();
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
 	// The last build's findings are this project's and go with it.
@@ -412,9 +414,8 @@ ImportRunResult SessionCore::absorb_refresh(ProjectRefresh &refresh) {
 	view_.project.requirements = std::make_shared<const RequirementReport>(
 			evaluate_requirements(*view_.project.document, *view_.project.scan));
 	touch(ViewConcern::Files);
-	// A whole refresh (an open, a Rescan, a Reimport) reads the install as it stands now too: which files
-	// are the game's own data is found again after the validation (S15).
-	problems().forget_originals();
+	// A whole refresh (an open, a Rescan, a Reimport) makes a new scan, on which the game's own data's
+	// baseline looks at the install's folder again (S15: a patch over it is validated again).
 	problems().validate_later();
 	return imports;
 }
@@ -519,6 +520,28 @@ void SessionCore::apply_project_settings(const ProjectSettingsChange &change) {
 		if (save_local_settings(paths_, local, error)) {
 			local_ = std::move(local);
 			install_changed = true;
+		} else {
+			failures.push_back(error);
+		}
+	}
+	// The folder Build to folder builds into, kept with the project's local settings (Build > Build to <it>): the
+	// modder's pick, never what a build request's out_dir names (a script's build keeps nothing, L4).
+	if (change.build_folder && !view_.project.open) {
+		failures.push_back(make_finding(CoreFinding::ProjectNone, DiagnosticSeverity::Error,
+		                                "Open a project to keep a folder to build it into."));
+	} else if (change.build_folder && !change.build_folder->empty() &&
+	           inside(path_of(*change.build_folder).lexically_normal(), path_of(paths_.root))) {
+		failures.push_back(make_finding(CoreFinding::BuildOutDirInProject, DiagnosticSeverity::Error,
+		                                "A folder to build into for players lies outside the project: " +
+		                                        *change.build_folder + " is inside it."));
+	} else if (change.build_folder && *change.build_folder != local_.build_folder) {
+		LocalSettings local = local_;
+		local.build_folder = *change.build_folder;
+		Diagnostic error;
+		if (save_local_settings(paths_, local, error)) {
+			local_ = std::move(local);
+			view_.project.build_folder = local_.build_folder;
+			touch(ViewConcern::Preferences);
 		} else {
 			failures.push_back(error);
 		}
@@ -881,20 +904,6 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 			return;
 		}
 		output_root = utf8_of(out);
-		// A folder outside the project is a build for players (Build to folder): kept with the project's
-		// local settings, so Build > Build to <it> builds there again.
-		if (!inside(out, path_of(paths_.root)) && output_root != local_.build_folder) {
-			LocalSettings local = local_;
-			local.build_folder = output_root;
-			Diagnostic error;
-			if (save_local_settings(paths_, local, error)) {
-				local_ = std::move(local);
-				view_.project.build_folder = local_.build_folder;
-				touch(ViewConcern::Preferences);
-			} else {
-				note("note: the build folder could not be kept with the project's local settings: " + error.message);
-			}
-		}
 	}
 	problems().clear_build_findings(); // the last build's rows go: this one reports anew
 	documents().reload_changed();
@@ -905,6 +914,11 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	BuildPlan plan =
 			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
 	plan.rehash = rehash;
+	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
+	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
+	// build there is its own.
+	plan.project = view_.project.document->project_id;
+	plan.own_folder = inside(path_of(output_root), path_of(paths_.root));
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process
 	// that may still run (a game left running across an editor restart; one the platform cannot

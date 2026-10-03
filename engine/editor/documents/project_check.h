@@ -72,15 +72,6 @@ public:
 	}
 	// Its findings as its last update left them, on the records and fields that cause them.
 	virtual const std::vector<Diagnostic> &findings() const = 0;
-	// What it finds of one document alone, standing in for its file, the rest of the project as `input`
-	// has it, keeping nothing: what the game's own data's fold asks of a file's install copy
-	// (session/original_files.h). Nothing for a document the check does not read.
-	virtual void findings_of(const DocumentBase &document, const ProjectCheckInput &input,
-	                         std::vector<Diagnostic> &out) const {
-		(void)document;
-		(void)input;
-		(void)out;
-	}
 	// The project closed: what it held of it goes, and the next update starts over.
 	virtual void clear() = 0;
 };

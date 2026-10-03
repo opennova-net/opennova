@@ -19,8 +19,8 @@ struct OriginalData;
 // What the session marks each Problems row with (the UX round's problems lane), index for index with the
 // rows: whether it is about the game's own data (S15, decided per finding: session/original_files.h) and
 // whether a build is refused for it (one of the rows the build's plan is refused over:
-// project_build/build_plan.h's build_blockers). Made again whenever the rows, what the check of the game's
-// own data found or the open documents' unsaved state move; `rows` is how many rows they were made for
+// project_build/build_plan.h's build_blockers). Made again whenever the rows or what the game's own data's
+// baseline found move; `rows` is how many rows they were made for
 // (marks made for other rows are read as none: problem_query.h's in_original_data, blocks_the_build).
 struct FindingMarks {
 	size_t rows = 0;
@@ -52,10 +52,9 @@ struct FindingsView {
 	// compiled headless as the game draws it (S9j2; preview/menu_render_check.h's
 	// menu_render_check), whose render of a screen answers the menu_render query.
 	std::shared_ptr<const ProjectChecks> project_checks;
-	// What the check of the game's own data found (session/original_files.h, ADR 0046 S15): the files a
-	// finding is about that the project holds byte for byte as the game install serves them, and, for those
-	// it holds otherwise, the findings their install copies make. Problems shows the findings it holds to be
-	// the original's apart. Never null while a session holds the view.
+	// What the game install makes of its own files (session/original_files.h, ADR 0046 S15): validated as a
+	// whole, the findings it makes in each file it serves, by key. Problems shows a finding the install makes
+	// too in the file of the same name apart, as the original's. Never null while a session holds the view.
 	std::shared_ptr<const OriginalData> originals;
 	// The rows' marks (above); null in a view no session made, whose readers then work them out from what
 	// the view holds.

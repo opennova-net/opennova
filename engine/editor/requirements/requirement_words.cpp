@@ -12,7 +12,7 @@ namespace {
 // whose failure and citation are the witness: requirement_witness). In the manifest's order.
 constexpr RequirementWords kWords[] = {
 	// --- the boot [orig: Game_Run @ 0x4a7fb0 -> Game_InitSubsystems @ 0x4a6cd0] ---
-	{ "fgn2_bin", "Nothing changes: the game only checks whether it is there." },
+	{ "fgn2_bin", "The game loads the standard effects (its .ptu particle files) beside the .ptl ones: with this file there, the German set (.ptg) instead. It checks only whether the file is there." },
 	{ "cc_bin", "The game runs with no country code." },
 	{ "gameerr", "The game shows an error dialog as it starts, then starts anyway." },
 	{ "gametext", "The game shows \"Unable to load game strings\" and exits." },
