@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <editor/project/expansion_files.h>
 
 namespace opennova::editor {
 
@@ -58,9 +59,11 @@ ExpansionPlace route_for_expansion(const AssetEntry &asset, const std::string &e
 	also_loose = false;
 	const ExpansionPlace by_kind = route_for_expansion(asset.kind);
 	if (by_kind == ExpansionPlace::None) return by_kind;
-	for (const char *name : {"version.txt", "gt.ssc"})
-		if (strutil::iequals(asset.logical_name, name)) return ExpansionPlace::Folder;
-	if (strutil::iequals(asset.logical_name, expansion + ".bin")) return ExpansionPlace::Folder;
+	// The expansion's own files where their row puts them (project/expansion_files: <b>.bin, version.txt
+	// and the music banks loose in the folder, the rest by kind).
+	if (const ExpansionFileRow *row = expansion_file_for(expansion, asset.logical_name))
+		if (row->placement == ExpansionPlacement::Folder) return ExpansionPlace::Folder;
+	if (strutil::iequals(asset.logical_name, "gt.ssc")) return ExpansionPlace::Folder;
 	also_loose = asset_kind_row(asset.kind).expansion_loose == ExpansionLoose::FrontDoor;
 	return by_kind;
 }

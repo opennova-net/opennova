@@ -263,6 +263,9 @@ public:
 	// project's export folder; "" with a finding reported when it lies inside the project but the
 	// export folder (the next scan would list what it holds as the project's files).
 	std::string export_folder(const std::string &to);
+	// What the open project's build makes (ADR 0046 S16): its project.opennova's expansion (none: the
+	// standalone game), over the project's game install, keyed by its game.
+	BuildTarget build_target() const;
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active

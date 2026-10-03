@@ -84,6 +84,46 @@ static bool archive_has(const std::string &archive_path, const char *name) {
 	return found;
 }
 
+// An archive of `files` (name, text), as the PFF writer packs one.
+static bool write_archive(const std::string &path, const std::vector<std::pair<std::string, std::string>> &files) {
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, text] : files)
+		entries.push_back({name.c_str(), reinterpret_cast<const uint8_t *>(text.data()), uint32_t(text.size()), 0,
+		                   opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0});
+	fs::create_directories(fs::path(path).parent_path());
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                        entries.empty() ? nullptr : entries.data(),
+	                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
+}
+
+// ADR 0046 S16: a project that builds as an expansion (project.opennova's expansion) builds its folder,
+// expansion/jxm/ with its pair and its own files loose, nothing at the build's root, and exports it laid
+// out as in an install.
+static int test_expansion_project() {
+	editor_test::TempProjectDir dir("opennova_project_cli_expansion");
+	const std::string install = dir.file("install"), root = dir.file("Mod");
+	TEST_EXPECT(write_archive(install + "/language.pff", { { "base.bin", "base" } }) &&
+	            write_archive(install + "/localres.pff", {}) && write_archive(install + "/resource.pff", {}));
+	opennova::editor::ProjectDocument doc;
+	opennova::editor::Diagnostic error;
+	TEST_EXPECT(opennova::editor::create_project(root, "Mod", "jo", doc, error, opennova::editor::ProjectExpansion{ "jxm", "" }));
+	TEST_EXPECT(run({ "create-missing", root, "--install", install }) == 0);
+	for (const char *role : { "expansion_table", "expansion_version" })
+		TEST_EXPECT(run({ "create-missing", root, "--role", role }) == 0);
+	TEST_EXPECT(run({ "build", root }) == 0);
+	const std::string built = opennova::editor::last_good_build_dir(root + "/.opennova/build/play");
+	TEST_EXPECT(!built.empty() && fs::is_regular_file(built + "/expansion/jxm/jxm.pff") &&
+	            fs::is_regular_file(built + "/expansion/jxm/jxmL.pff") && fs::is_regular_file(built + "/expansion/jxm/jxm.bin") &&
+	            fs::is_regular_file(built + "/expansion/jxm/version.txt") && !fs::exists(built + "/language.pff"));
+	TEST_EXPECT(archive_has(built + "/expansion/jxm/jxmL.pff", "gametext.bin") &&
+	            archive_has(built + "/expansion/jxm/jxm.pff", "main.mnu") && !archive_has(built + "/expansion/jxm/jxmL.pff", "jxm.bin"));
+	TEST_EXPECT(run({ "export", root }) == 0);
+	TEST_EXPECT(fs::is_regular_file(root + "/build/export/expansion/jxm/jxm.pff") &&
+	            fs::is_regular_file(root + "/build/export/expansion/jxm/version.txt") &&
+	            fs::is_regular_file(root + "/build/export/export.json") && !fs::exists(root + "/build/export/language.pff"));
+	return 0;
+}
+
 static int test_usage_errors() {
 	TEST_EXPECT(run({}) == 2);
 	TEST_EXPECT(run({"frobnicate"}) == 2);
@@ -696,6 +736,7 @@ static int test_older_local_settings() {
 int main() {
 	int failures = 0;
 	failures += test_usage_errors();
+	failures += test_expansion_project();
 	failures += test_new_status_validate();
 	failures += test_validate_pins_the_rows();
 	failures += test_one_game_install();

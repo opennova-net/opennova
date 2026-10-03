@@ -905,6 +905,15 @@ std::string SessionCore::export_folder(const std::string &to) {
 	return utf8_of(out);
 }
 
+BuildTarget SessionCore::build_target() const {
+	BuildTarget target;
+	if (!view_.project.open) return target;
+	target.expansion = view_.project.document->expansion.name;
+	target.install = game_install();
+	target.game = view_.project.document->target_game;
+	return target;
+}
+
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported) {
 	if (intent.wanted && play().refused(intent.mission)) return;
@@ -935,8 +944,8 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
-	BuildPlan plan =
-			plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings());
+	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings(),
+	                            build_target());
 	plan.rehash = rehash;
 	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
 	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every
