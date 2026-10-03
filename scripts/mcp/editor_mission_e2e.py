@@ -11,6 +11,14 @@ ended (the editor with its tree) when it does not: only the pids this run record
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations"
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --mission ASH_I1gA.bms --windowed
     python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations" --whole-install
+    python scripts/mcp/editor_mission_e2e.py --install "C:/Games/Joint Operations Combined Arms" \
+        --builds-on jox01 --expansion jxm --mission 07TR.bms
+
+With --expansion (ADR 0046 S16) the project builds as that expansion, on the installed one
+--builds-on names when given: its mission imported from what /exp <builds-on> serves, its build
+the expansion's folder (the base game's own files left out: same_as_base), Play running the game
+over the install's base game with /exp <expansion>, and the game read until the mission is loaded
+and listed by its mission list.
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
@@ -197,6 +205,16 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     say(f"2. a new project in {project}, on the game install {install}")
     request(client, "new_project", wait_s=120, dir=str(project), title="Mission e2e")
     request(client, "apply_project_settings", wait_s=120, settings={"game_install": install, "mission": True})
+    if args.expansion:
+        # The project as the expansion (project.opennova's expansion, ADR 0046 S16), then opened again,
+        # so the install's listing and the import read through /exp <builds-on>.
+        say(f"   building as the expansion {args.expansion}" +
+            (f" on {args.builds_on}" if args.builds_on else " on the base game"))
+        project_file = project / "project.opennova"
+        document = json.loads(project_file.read_text(encoding="utf-8"))
+        document["expansion"] = {"name": args.expansion, "builds_on": args.builds_on or ""}
+        project_file.write_text(json.dumps(document, indent=2), encoding="utf-8")
+        request(client, "open_project", wait_s=600, dir=str(project))
     state = client.structured("editor_state", {"sections": ["project", "import"]})
     expect(state.get("project", {}).get("open", False), "the project did not open")
     say(f"   the install lists {state.get('import', {}).get('install_files', 0)} files")
@@ -247,11 +265,21 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     say("7. saving and building")
     request(client, "save_all")
     expect(not document_state(client, path).get("dirty", True), "the mission is still unsaved")
+    started = time.monotonic()
     outcome, ended = raise_and_wait(client, {"kind": "build"}, args.timeout)
     expect(bool(ended) and ended.get("end") == "done", f"the build did not land: {json.dumps(outcome)} {json.dumps(ended)}")
     build = query(client, "operation").get("build", {})
     expect(build.get("ok", False), f"the build failed: {json.dumps(build)[:600]}")
-    say(f"   built {build.get('dir')}")
+    say(f"   built {build.get('dir')} in {time.monotonic() - started:.1f} s")
+    if args.expansion:
+        built = Path(build.get("dir", "")) / "expansion" / args.expansion
+        expect(build.get("expansion") == args.expansion and (built / f"{args.expansion}.pff").is_file() and
+               (built / f"{args.expansion}L.pff").is_file(), f"no expansion {args.expansion} was built: {built}")
+        same = build.get("same_as_base", {})
+        size = sum(f.stat().st_size for f in built.rglob("*") if f.is_file())
+        say(f"   expansion/{args.expansion}: {size / 1e6:.1f} MB; {same.get('files', 0)} files "
+            f"({same.get('bytes', 0) / 1e6:.1f} MB) left out as the base game's own, "
+            f"{same.get('base_bytes_read', 0) / 1e6:.1f} MB of the base read")
 
     say(f"8. Play in {args.mission}")
     outcome, ended = raise_and_wait(client, {"kind": "play", "mission": args.mission}, args.timeout)
@@ -264,6 +292,10 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     game_port = int(run_section.get("mcp_port", 0))
     expect(game_port > 0, "the game has no MCP endpoint")
     say(f"   the game runs (pid {run_section.get('pid')}), its endpoint on port {game_port}")
+    if args.expansion:
+        command = run_section.get("command_line", "")
+        expect(f"/exp {args.expansion}" in command, f"the game was not started with /exp {args.expansion}: {command}")
+        say(f"   on its run directory {run_section.get('run_dir')} with /exp {args.expansion}")
 
     say("9. reading the game")
     game = GameMcp.for_port(game_port)
@@ -286,6 +318,11 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     expect(bool(shell.get("world_loaded")) and str(shell.get("mission_file", "")).lower() == args.mission.lower(),
            f"the mission did not load within {args.game_timeout:.0f} s: {json.dumps(shell)}")
     say(f"   loaded {shell.get('mission_file')}")
+    if args.expansion:
+        expect(shell.get("expansion") == args.expansion,
+               f"the game did not mount the expansion {args.expansion}: {json.dumps(shell)}")
+        expect(bool(shell.get("mission_listed")), f"the game's mission list does not list {args.mission}")
+        say(f"   mounted /exp {shell.get('expansion')}; {args.mission} listed by its mission list")
     entities = game_entities(game)
     expect(len(entities) > 0, "the game lists no entity")
     to_new, to_old = nearest(entities, new), nearest(entities, old)
@@ -308,6 +345,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="where the project is made (must not exist; default: a temp folder, removed after)")
     parser.add_argument("--whole-install", dest="whole_install", action="store_true",
                         help="import every file of the install instead of the mission's closure")
+    parser.add_argument("--expansion", default=None,
+                        help="the project builds as this expansion (ADR 0046 S16), played with /exp")
+    parser.add_argument("--builds-on", dest="builds_on", default=None,
+                        help="with --expansion: the installed expansion the project's files come from")
     parser.add_argument("--move", type=float, default=64.0, help="how far the record moves along x")
     parser.add_argument("--tolerance", type=float, default=1.0,
                         help="how near, on the ground plane, the game's entity must stand to where the record was put")
