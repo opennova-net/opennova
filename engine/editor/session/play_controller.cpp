@@ -161,7 +161,10 @@ void PlayController::start(const std::string &mission) {
 					}),
 			view_.findings.diagnostics.end());
 	core_.touch(ViewConcern::Run);
-	if (view_.findings.diagnostics.size() != rows) core_.touch(ViewConcern::Findings);
+	if (view_.findings.diagnostics.size() != rows) {
+		core_.problems().mark_rows();
+		core_.touch(ViewConcern::Findings);
+	}
 	boot_project_ = view_.project.root;
 	// The mission as the project spells its file now (the build read the project again): one gone
 	// since Play was asked for starts nothing.

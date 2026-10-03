@@ -288,6 +288,8 @@ JsonValue problem_counts_section(const SessionView &view) {
 	original.set("warnings", json_number(double(counts.original_warnings)));
 	original.set("infos", json_number(double(counts.original_infos)));
 	out.set("original", std::move(original));
+	// The rows a build is refused for (the gate's refusals; Problems marks them "Blocks the build").
+	out.set("blocking", json_number(double(counts.blocking)));
 	return out;
 }
 

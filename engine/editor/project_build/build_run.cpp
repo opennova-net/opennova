@@ -455,10 +455,11 @@ bool BuildRun::step(uint64_t budget_bytes) {
 // The gate: a plan with a blocking finding never packs. Then the hash cache, read once.
 void BuildRun::prepare() {
 	if (!plan_.ok) {
+		// Refused by the gate: the line names what refuses it (the UX round's problems lane).
 		report_.diagnostics = plan_.diagnostics;
-		report_.diagnostics.push_back(make_finding(
-		        CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
-		        "The project has problems that would stop the game; fix them first."));
+		report_.refused = true;
+		report_.diagnostics.push_back(make_finding(CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
+		                                           refusal_words(build_blockers(plan_))));
 		phase_ = Phase::Done;
 		return;
 	}

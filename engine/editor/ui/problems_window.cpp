@@ -7,6 +7,8 @@
 #include <vector>
 
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
+#include <editor/requirements/requirement_words.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/view/session_view.h>
@@ -84,10 +86,10 @@ float line_height() { return ImGui::GetFrameHeight() + ImGui::GetStyle().CellPad
 
 // What a fix of a finding about the game's own data says first (S15): the file is one the game ships,
 // so the problem is the original's too and a fix makes the file the modder's. "" for any other finding.
-std::string shipped_note(const Diagnostic &d, const SessionView &view) {
-	return in_original_data(d, view) ? "Edits a file the game ships: the original has this problem too, and the file "
-	                                   "becomes yours."
-	                                 : std::string();
+std::string shipped_note(size_t row, const SessionView &view) {
+	return in_original_data(row, view) ? "Edits a file the game ships: the original has this problem too, and the file "
+	                                     "becomes yours."
+	                                   : std::string();
 }
 // A fix's tooltip: its label, that note, what it does, whether it waits.
 std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed) {
@@ -96,6 +98,11 @@ std::string fix_tip(const ProblemFix &fix, const std::string &note, bool allowed
 }
 
 } // namespace
+
+void ProblemsWindow::show_blocking() {
+	list_.query().blocking = true;
+	request_focus();
+}
 
 void ProblemsWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	const SessionView &view = workspace_.view();
@@ -122,6 +129,19 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	severity_toggle(row, "Errors", "###errors", counts.errors, "errors", query.errors);
 	severity_toggle(row, "Warnings", "###warnings", counts.warnings, "warnings", query.warnings);
 	severity_toggle(row, "Info", "###infos", counts.infos, "info", query.infos);
+	// What a build is refused for (the gate's rows), one click: shown while any is, or while it is on.
+	if (counts.blocking || query.blocking) {
+		const std::string label = "Blocks the build " + std::to_string(counts.blocking) + "###blocking";
+		row.next(ui_kit::button_width(label.c_str()));
+		const bool on = query.blocking;
+		if (on) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+		ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Error));
+		if (ImGui::Button(label.c_str())) query.blocking = !on;
+		ImGui::PopStyleColor(on ? 2 : 1);
+		ui_kit::tooltip(on ? std::string("Showing only what a build is refused for: click for every problem.")
+		                   : std::string("Only what a build is refused for: what would stop the game as it stops the "
+		                                 "original, and what the editor cannot pack as it is."));
+	}
 	const float filter = ImGui::GetFontSize() * 13.0f;
 	row.next(filter);
 	ui_kit::filter_box("##filter", text_, sizeof(text_), "Filter", filter,
@@ -155,17 +175,22 @@ const ProblemAnswer &ProblemsWindow::draw_filters(const SessionView &view) {
 	return answer;
 }
 
-// While required files are missing: the game cannot start, and the Fix alls that make them,
-// each asking first.
+// While required files are missing: what stops the game (the gate's rows: a build is refused for them)
+// and what it starts without, then the Fix alls that bring them, each asking first (the game's own copies
+// where the install has them, placeholders for the rest).
 void ProblemsWindow::draw_summary(const SessionView &view) {
-	const std::string sentence = ProblemsList::summary(*view.project.requirements);
-	if (sentence.empty()) return;
+	const ProblemsList::Summary summary = ProblemsList::summary(*view.project.requirements);
+	if (summary.empty()) return;
 	ui_kit::WrapRow row;
-	row.next(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x + ui_kit::text_width(sentence.c_str()));
-	ui_kit::severity_marker(DiagnosticSeverity::Error);
-	ImGui::SameLine();
-	ImGui::AlignTextToFramePadding();
-	ImGui::TextWrapped("%s", sentence.c_str());
+	for (const auto &[sentence, severity] : {std::make_pair(summary.stops, DiagnosticSeverity::Error),
+	                                         std::make_pair(summary.more, DiagnosticSeverity::Warning)}) {
+		if (sentence.empty()) continue;
+		row.next(ImGui::GetFrameHeight() + ImGui::GetStyle().ItemSpacing.x + ui_kit::text_width(sentence.c_str()));
+		ui_kit::severity_marker(severity);
+		ImGui::SameLine();
+		ImGui::AlignTextToFramePadding();
+		ImGui::TextWrapped("%s", sentence.c_str());
+	}
 	ImGui::PushID(view.project.root.c_str());
 	ImGui::PushID("required");
 	for (const EditorRequest &request : list_.required_fixes().requests) {
@@ -242,9 +267,9 @@ void ProblemsWindow::draw_header(const SessionView &view, const ProblemAnswer &a
 	        ProblemsList::severity_counts(group.errors, group.warnings, group.infos);
 	ui_kit::clipped_text(group.title + " (" + counts + ")");
 	if (group.original)
-		ui_kit::tooltip("Problems in files the project holds exactly as the game install has them: the original game "
-		                "has them too, so they are not yours to fix. A file you change leaves this group (an unsaved "
-		                "edit too), and a problem that would stop a build is never in it.");
+		ui_kit::tooltip("Problems the game install's own copy of the file has too: the original game has them, so they "
+		                "are not yours to fix. A file you change keeps here only the problems its original has; a "
+		                "problem your edit brings, and one that would stop a build, is never in it.");
 	ImGui::TableSetColumnIndex(3);
 	const ProblemsList::Proposal &all = list_.group_fixes(line.group);
 	if (all.findings >= 2 && !all.requests.empty()) {
@@ -283,9 +308,21 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	const std::vector<ProblemFix> &fixes = list_.fixes(view, line.finding);
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
-	const std::string note = fixes.empty() ? std::string() : shipped_note(d, view);
+	const std::string note = fixes.empty() ? std::string() : shipped_note(line.finding, view);
+	// A row a build is refused for says so first, why in its tooltip (the refusal it follows, cited).
+	const bool blocks = blocks_the_build(line.finding, view);
+	if (blocks) {
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Error), "Blocks the build");
+		ui_kit::tooltip_lazy([&] { return blocker_reason(d); });
+		ImGui::SameLine();
+	}
 	if (expanded) {
 		ImGui::TextWrapped("%s", d.message.c_str());
+		if (blocks) disabled_wrapped(blocker_reason(d));
+		// A file the game reads by name: the manifest's own record of it, the plain words' cited detail.
+		if (const RequirementSubject *requirement = requirement_subject(d))
+			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
+				disabled_wrapped("As the original was seen to do: " + witness);
 		// A fix of the game's own data is marked as editing a file the game ships (S15).
 		if (!note.empty()) disabled_wrapped(note);
 		for (const ProblemFix &fix : fixes) {
@@ -373,7 +410,7 @@ void ProblemsWindow::draw_more(const SessionView &view) {
 	}
 	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 32.0f);
 	// The game's own data's: said first (S15).
-	const std::string note = shipped_note(view.findings.diagnostics[finding], view);
+	const std::string note = shipped_note(finding, view);
 	if (!note.empty()) ImGui::TextDisabled("%s", note.c_str());
 	for (const ProblemFix &fix : list_.fixes(view, finding)) {
 		const bool allowed = view.allows(fix.request.kind);

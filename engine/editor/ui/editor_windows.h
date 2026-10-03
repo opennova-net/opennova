@@ -21,6 +21,7 @@ namespace opennova::editor {
 class DocumentWindow;
 class InspectorWindow;
 class PreviewWindow;
+class ProblemsWindow;
 class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
@@ -121,7 +122,7 @@ private:
 	DocumentWindow *document_window_ = nullptr; // owned by the pass
 	InspectorWindow *inspector_window_ = nullptr; // owned by the pass
 	PreviewWindow *preview_window_ = nullptr; // owned by the pass
-	devtools::Window *problems_window_ = nullptr; // owned by the pass
+	ProblemsWindow *problems_window_ = nullptr; // owned by the pass
 };
 
 } // namespace opennova::editor
