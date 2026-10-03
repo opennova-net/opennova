@@ -91,8 +91,14 @@ python "$root/scripts/ci/test_suites.py" --suite "$suite" --godot-config "$confi
 # Do not let a previous successful run stand in for a failed collector.
 rm -f "$report"
 
+# A windowed run starts behind every other window and never takes the foreground
+# (game_mcp.py run; docs/mcp.md "Launching").
+behind=()
+if [[ "$windowed" == "1" ]]; then
+  behind=(python "$root/scripts/mcp/game_mcp.py" run --)
+fi
 set +e
-"$GODOT_BIN" "${display[@]}" --path "$root/godot" \
+${behind[@]+"${behind[@]}"} "$GODOT_BIN" "${display[@]}" --path "$root/godot" \
   -s addons/gut/gut_cmdln.gd -gconfig="$config" -gexit 2>&1 | tee "$log"
 status=${PIPESTATUS[0]}
 set -e
