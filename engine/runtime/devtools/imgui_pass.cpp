@@ -219,6 +219,18 @@ bool ImGuiPass::attach_imgui(void *context, ImGuiAllocFn alloc, ImGuiFreeFn free
 	ImGui::SetCurrentContext(static_cast<ImGuiContext *>(context));
 	ImGuiIO &io = ImGui::GetIO();
 	io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+	if (!user_layout_) {
+		// No layout file for this run: none read from now on, none written, and what the context
+		// already read from the user's (its docking, its windows' places) dropped once, at the first
+		// such attach of the process, so the default layout is built. (The embedder's ImGui may hold
+		// the file's name itself and hand it back: the shell lets it go there too.)
+		static bool user_layout_dropped = false;
+		io.IniFilename = nullptr;
+		if (!user_layout_dropped) {
+			user_layout_dropped = true;
+			ImGui::ClearIniSettings();
+		}
+	}
 	attached_ = true;
 	set_platform_windows_enabled(platform_windows_enabled_);
 	return true;
@@ -261,7 +273,7 @@ Window &ImGuiPass::register_window(std::unique_ptr<Window> window) {
 
 void ImGuiPass::sync_visibility() {
 	for (auto &window : windows_) {
-		const bool visible = open_ && window->open;
+		const bool visible = open_ && window->open && !window->stands_aside();
 		if (visible != window->visible_) {
 			window->visible_ = visible;
 			window->on_visibility(visible);
@@ -309,6 +321,10 @@ bool ImGuiPass::draw_frame(uint64_t frame_index) {
 			// A closed window never carries a focus request forward: the pick
 			// that raised it was declined when the window was closed again.
 			window.take_focus_request();
+			continue;
+		}
+		if (window.stands_aside()) {
+			// Not drawn this frame; a focus request waits for its return.
 			continue;
 		}
 		if (window.owns_frame()) {
@@ -402,7 +418,17 @@ void ImGuiPass::draw_menu_bar() {
 	}
 	const auto menu_item = [](Window &window) {
 		if (window.is_closeable()) {
-			ImGui::MenuItem(window.title(), nullptr, &window.open);
+			// Ticked while it shows: one standing aside reads unticked, and ticking it is the author's
+			// ask to see it anyway.
+			const bool aside = window.open && window.stands_aside();
+			bool shown = window.open && !aside;
+			if (ImGui::MenuItem(window.title(), nullptr, &shown)) {
+				if (shown && aside) {
+					window.show_anyway();
+				} else {
+					window.open = shown;
+				}
+			}
 		} else {
 			bool selected = true;
 			ImGui::BeginDisabled();
