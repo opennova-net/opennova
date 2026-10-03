@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include <editor/assets/asset_kinds.h>
@@ -86,17 +87,40 @@ private:
 	ViewEventMailbox<> events_;
 };
 
+// What a type's own part of the Inspector drew of a record (ADR 0046 S15): the fields it shows
+// itself and the collections it lists itself, which the generic form then leaves out, and whether it
+// listed the record's uses inside its own document (the generic Referenced by then lists the other
+// files' alone).
+struct InspectorTaken {
+	std::vector<std::string> fields;
+	std::vector<NodeKind> collections;
+	bool own_uses = false;
+};
+// A type's part of the Inspector over the selected record: its top (true where it drew, saying what
+// it took of the generic form), and its bottom, after the generic form.
+using InspectorTop = bool (*)(Workspace &workspace, const Document &document, const NodeAddress &record,
+                              InspectorTaken &taken);
+using InspectorBottom = void (*)(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                 InspectorTaken &taken);
+// Whether the Inspector's breadcrumb names a record by its name rather than its title: a record whose
+// title the type's top part shows whole (a mission's event, its sentence).
+using InspectorNamesInBreadcrumb = bool (*)(const Document &document, const NodeAddress &record);
+
 // A document type's view (ADR 0046 S13 V3): one row per DocumentTypeId past None, in its order,
 // in ui/document_views.cpp, which does not build without it (static_asserts): its role, and the
 // view it makes: an outline in the mode its OutlineSpec gives (ui/outline_view; for a MainViewport
 // row, the outline beside the viewport, ui/main_viewport_view), or a view of its own, which its
 // make makes (one of the two; a MainViewport row's draws the viewport itself, the text types'
-// script view, S13 V10).
+// script view, S13 V10); and its part of the Inspector (S15: a mission's logic in words), null for
+// none.
 struct DocumentViewRow {
 	DocumentTypeId type = DocumentTypeId::None;
 	DocumentViewRole role = DocumentViewRole::Records;
 	const OutlineSpec *outline = nullptr;
 	std::unique_ptr<DocumentView> (*make)() = nullptr;
+	InspectorTop inspector_top = nullptr;
+	InspectorBottom inspector_bottom = nullptr;
+	InspectorNamesInBreadcrumb breadcrumb_names = nullptr;
 };
 
 // A type's row; null for None and past the last.

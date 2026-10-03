@@ -27,6 +27,11 @@ struct MissionItemFacts {
 	double anchor[3] = { 0.0, 0.0, 0.0 }; // mission x east, y north, z up
 };
 
+// The pool a record of TYPE `type` is placed in, as the game's editor places it
+// (entity_kind_for_item_type): a person among the organics, a building, a decoration or foliage among
+// the buildings, a marker among the markers, anything else among the items.
+MissionKind mission_item_pool_of_type(int type);
+
 // The item `item` as the project defines it: false, with why, when no catalog of the project does.
 // A graphic that loads no model of the project leaves `model` empty and the anchor at the origin.
 bool mission_item_facts(const SessionView &view, int64_t item, MissionItemFacts &out, std::string &error);

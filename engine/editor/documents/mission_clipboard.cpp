@@ -13,6 +13,7 @@
 #include <type_traits>
 #include <vector>
 
+#include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -230,6 +231,68 @@ std::string MissionDocument::copy(const std::vector<NodeAddress> &records) const
 		fragment.waypoint_records[0].marker_count = uint32_t(fragment.waypoint_records[0].waypoint_numbers.size());
 	if (kind == k(K::Trigger) || kind == k(K::Action)) join_event_chains({chain}, fragment);
 	return write_clip(holds, {}, fragment);
+}
+
+bool mission_clip_middle(const std::string &payload, double out[2]) {
+	Clip clip;
+	if (!read_clip(payload, clip) || clip.holds != "rows") return false;
+	const bms::File &fragment = clip.fragment;
+	bool any = false;
+	double low[2] = { 0.0, 0.0 }, high[2] = { 0.0, 0.0 };
+	const auto take = [&](double x, double y) {
+		if (!any) {
+			low[0] = high[0] = x;
+			low[1] = high[1] = y;
+		}
+		any = true;
+		low[0] = std::min(low[0], x);
+		low[1] = std::min(low[1], y);
+		high[0] = std::max(high[0], x);
+		high[1] = std::max(high[1], y);
+	};
+	for (const std::vector<bms::Entity> *pool : { &fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics })
+		for (const bms::Entity &entity : *pool) take(entity.x / 65536.0, entity.y / 65536.0);
+	for (const bms::AreaTrigger &area : fragment.area_triggers)
+		take((area.x_min + double(area.x_max)) / 131072.0, (area.y_min + double(area.y_max)) / 131072.0);
+	if (!any) return false;
+	out[0] = (low[0] + high[0]) * 0.5;
+	out[1] = (low[1] + high[1]) * 0.5;
+	return true;
+}
+
+std::string mission_clip_moved(const std::string &payload, double east, double north, const MissionClipRise &rise) {
+	Clip clip;
+	if (!read_clip(payload, clip) || clip.holds != "rows") return std::string();
+	bms::File &fragment = clip.fragment;
+	// A 16.16 position moved `by` metres, in metres (no word arithmetic: a sum past the word's range
+	// is refused, never wrapped).
+	const auto moved = [](int32_t word, double by, int32_t &out) {
+		const double metres = double(word) / io::kFp16OneD + by;
+		if (!(metres >= bms::kFixed16Min && metres <= bms::kFixed16Max)) return false;
+		out = bms::to_fixed_16_16(metres);
+		return true;
+	};
+	for (std::vector<bms::Entity> *pool : { &fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics })
+		for (bms::Entity &entity : *pool) {
+			const double from_x = double(entity.x) / io::kFp16OneD, from_y = double(entity.y) / io::kFp16OneD;
+			const double up = rise ? rise(from_x, from_y, from_x + east, from_y + north) : 0.0;
+			int32_t x = 0, y = 0, z = 0;
+			if (!moved(entity.x, east, x) || !moved(entity.y, north, y) || !moved(entity.z, up, z)) return std::string();
+			entity.x = x;
+			entity.y = y;
+			entity.z = z;
+		}
+	for (bms::AreaTrigger &area : fragment.area_triggers) {
+		int32_t x_min = 0, x_max = 0, y_min = 0, y_max = 0;
+		if (!moved(area.x_min, east, x_min) || !moved(area.x_max, east, x_max) || !moved(area.y_min, north, y_min) ||
+				!moved(area.y_max, north, y_max))
+			return std::string();
+		area.x_min = x_min;
+		area.x_max = x_max;
+		area.y_min = y_min;
+		area.y_max = y_max;
+	}
+	return write_clip(clip.holds, clip.events, fragment);
 }
 
 bool MissionDocument::pastes_rows(const std::string &payload) const {

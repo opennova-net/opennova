@@ -26,9 +26,12 @@ namespace godot {
 // each an LF), which cannot reach the state that lets Godot's paste a line copied with nothing
 // selected above the current one, so a copy or a cut with nothing selected takes nothing. The
 // findings show as an icon a line in a gutter of their own (the worst one's severity, the shapes
-// and colours of the windows' marks), their messages its tooltip over the gutter; each marked line
-// keeps its mark's index as its gutter's metadata, so the icon, the tip and what the GUT tests read
-// stay with the line as text is inserted or removed above it. It tells its device what the user did
+// and colours of the windows' marks), their messages its tooltip over the gutter and the worst one's
+// first sentence written after the line's text (S15); each marked line keeps its mark's index as its
+// gutter's metadata, so the icon, the tip, the note and what the GUT tests read stay with the line as
+// text is inserted or removed above it. Its device answers what a script may use as it is typed
+// (the completion list), what a word is (the tooltip over the text) and where it is defined (a
+// Ctrl+click), from session/script_assist (S15). It tells its device what the user did
 // (its text changed, the focus left it), each outside any pump (a deferred call), lets go of its
 // focus on any press of the window outside its rect (the window's own input, a press and its
 // release in one frame included), and does nothing else with it: the device turns the text into
@@ -65,6 +68,24 @@ public:
 	// a CR as it takes text, which would join the lines a CR alone ends), in place of the selection.
 	void _paste(int32_t p_caret_index) override;
 
+	// What its device answers of the script (ADR 0046 S15; the data is session/script_assist's): the
+	// completions at the caret (the device adds the options and updates the list), a word's words at a
+	// place (its tooltip over the text), and the place a Ctrl+click looks up (the device goes there).
+	// Lines and columns from 0, the control's. Null members: nothing.
+	struct Assist {
+		std::function<void(bool force)> complete;
+		std::function<std::string(int line, int column)> hover;
+		std::function<void(int line, int column)> lookup;
+	};
+	void set_assist(Assist assist);
+	// The list asked for (Ctrl+Space, or a word's character typed): the device's completions.
+	void _request_code_completion(bool p_force) override;
+	// The note each marked line shows after its text (the worst finding's first sentence), and what the
+	// word at a place is (the tooltip over the text), for the GUT tests: a line's and a column's (from
+	// 0), "" for none.
+	String get_mark_note(int p_line) const;
+	String get_word_tip(int p_line, int p_column) const;
+
 protected:
 	static void _bind_methods();
 	void _notification(int p_what);
@@ -75,7 +96,12 @@ private:
 	void run_deferred_();
 	void on_gui_input_(const Ref<InputEvent> &p_event);
 	void on_window_input_(const Ref<InputEvent> &p_event);
+	void on_symbol_validate_(const String &p_symbol);
+	void on_symbol_lookup_(const String &p_symbol, int64_t p_line, int64_t p_column);
+	// Each marked line's note after its text, in its severity's colour, where the line shows.
+	void draw_notes_();
 	const opennova::editor::ScriptMark *mark_at_(int p_line) const;
+	Assist assist_;
 
 	std::function<void()> text_changed_;
 	std::function<void()> focus_exited_;
