@@ -59,7 +59,7 @@ Diagnostic settings_set_aside(const std::string &path, const io::JsonValue &json
 bool load_local_settings(const ProjectPaths &paths, LocalSettings &out, Diagnostic &finding) {
 	const std::string &path = paths.local_settings_file;
 	std::error_code ec;
-	if (!fs::exists(path, ec)) {
+	if (!fs::exists(system_path(path), ec)) {
 		out = LocalSettings();
 		return true;
 	}
@@ -110,8 +110,8 @@ bool save_local_settings(const ProjectPaths &paths, const LocalSettings &setting
 std::string absolute_install_path(const std::string &path) {
 	if (path.empty()) return path;
 	std::error_code ec;
-	const fs::path absolute = fs::absolute(fs::path(path), ec);
-	return (ec ? fs::path(path) : absolute).lexically_normal().generic_string();
+	const fs::path absolute = fs::absolute(path_of(path), ec);
+	return utf8_of((ec ? path_of(path) : absolute).lexically_normal());
 }
 
 bool open_local_settings(const ProjectPaths &paths, const std::string &seed_install,

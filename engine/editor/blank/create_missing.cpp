@@ -44,11 +44,11 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 		}
 		const std::string dir = asset_kind_row(row.expected_kind).folder;
 		const std::string relative = dir.empty() ? row.name : dir + "/" + row.name;
-		const fs::path target = fs::path(paths.root) / relative;
+		const fs::path target = path_of(paths.root) / path_of(relative);
 		// The report may be older than the tree: a file that has appeared where this one
 		// would go since is left as it is.
 		std::error_code ec;
-		if (fs::exists(target, ec) || ec) {
+		if (fs::exists(system_path(utf8_of(target)), ec) || ec) { // a project past MAX_PATH too
 			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingExists, DiagnosticSeverity::Error,
 			                                          relative + " is on disk already: nothing was created. Refresh to "
 			                                                     "see it.",
@@ -66,8 +66,8 @@ CreateMissingResult create_missing_requirements(const ProjectPaths &paths, const
 			continue;
 		}
 		std::string io_error;
-		if (!ensure_directory(target.parent_path().generic_string(), io_error) ||
-		    !write_file_atomic(target.generic_string(), bytes.data(), bytes.size(), io_error)) {
+		if (!ensure_directory(utf8_of(target.parent_path()), io_error) ||
+		    !write_file_atomic(utf8_of(target), bytes.data(), bytes.size(), io_error)) {
 			result.diagnostics.push_back(make_finding(CoreFinding::CreateMissingWrite, DiagnosticSeverity::Error,
 			                                          io_error, row.name));
 			continue;
