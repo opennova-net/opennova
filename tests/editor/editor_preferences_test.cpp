@@ -1,11 +1,15 @@
 // Pins the editor's preferences over their store (ADR 0046 S13 A2): the memory store gives back
 // every preference it was given; the file store writes the settings file, byte for byte, with the
-// game install's keys S13 A4 renamed under schema 2, and sets aside a file of another schema, an
-// older editor's among them (no reader for it: pre-1.0), read as the defaults with a warning
-// naming everything it held and written again by the next save; EditorPreferences reads a store
+// game install's keys S13 A4 renamed and the recently placed items kept per game (the polish:
+// `recent_items_by_game`, schema 2 still), reads S15's file whole but for its one list of items
+// (ignored, not set aside: an additive change keeps a user's settings), skips an item that is no
+// whole number a double holds, and sets aside a file of another schema, an older editor's among them
+// (no reader for it: pre-1.0), read as the defaults with a warning naming everything it held and
+// written again by the next save; EditorPreferences reads a store
 // once, writes a change from a copy (a change the store refuses leaves the values in effect), and
-// keeps the recent-projects list capped, most recent first; and a session over each store shows
-// them.
+// keeps the recent-projects list and each game's recently placed items capped, most recent first;
+// and a session over each store shows them, a project's game's items alone.
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -38,7 +42,7 @@ Preferences every_preference() {
 	preferences.game_install = "D:/Joint Operations";
 	preferences.play_in_install = true;
 	preferences.import_dependencies = false;
-	preferences.recent_items = {106100, 2044};
+	preferences.recent_items = {{"jo", {106100, 2044}}, {"dfx", {7}}};
 	return preferences;
 }
 
@@ -49,15 +53,21 @@ bool same(const Preferences &a, const Preferences &b) {
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
-// the game install's keys as S13 A4 named them, schema 2; the recently placed items (S15).
+// the game install's keys as S13 A4 named them; the recently placed items (S15) per game (the polish),
+// schema 2.
 const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
                                   "  \"play_in_install\": true,\n"
-                                  "  \"recent_items\": [\n"
-                                  "    106100,\n"
-                                  "    2044\n"
-                                  "  ],\n"
+                                  "  \"recent_items_by_game\": {\n"
+                                  "    \"dfx\": [\n"
+                                  "      7\n"
+                                  "    ],\n"
+                                  "    \"jo\": [\n"
+                                  "      106100,\n"
+                                  "      2044\n"
+                                  "    ]\n"
+                                  "  },\n"
                                   "  \"recent_projects\": [\n"
                                   "    \"C:/games/Armory\",\n"
                                   "    \"D:/mods/Harbor\"\n"
@@ -65,6 +75,24 @@ const char *const kSettingsFile = "{\n"
                                   "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
                                   "  \"schema_version\": 2\n"
                                   "}\n";
+
+// S15's file (schema 2 as well): every preference, the recently placed items one list whatever the
+// game.
+const char *const kS15File = "{\n"
+                             "  \"game_install\": \"D:/Joint Operations\",\n"
+                             "  \"import_dependencies\": false,\n"
+                             "  \"play_in_install\": true,\n"
+                             "  \"recent_items\": [\n"
+                             "    106100,\n"
+                             "    2044\n"
+                             "  ],\n"
+                             "  \"recent_projects\": [\n"
+                             "    \"C:/games/Armory\",\n"
+                             "    \"D:/mods/Harbor\"\n"
+                             "  ],\n"
+                             "  \"runtime_executable\": \"C:/tools/opennova.exe\",\n"
+                             "  \"schema_version\": 2\n"
+                             "}\n";
 
 // The same preferences as an editor before S13 A4 wrote them: schema 1, the game install under
 // retail_directory and Play in it under play_retail.
@@ -122,15 +150,16 @@ static int test_memory_store_round_trips() {
 	one.import_dependencies = false;
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
-	one.recent_items = {7};
+	one.recent_items = {{"jo", {7}}};
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	return 0;
 }
 
-// The file store writes the settings file byte for byte and reads it back; a file an older editor
-// wrote (schema 1, the game install under its old keys) is set aside (S13 A4: no compat reader):
-// read as the defaults, the warning naming the file and everything it held, now gone, and written
-// again as a new file by the next save.
+// The file store writes the settings file byte for byte and reads it back; S15's file reads whole but
+// for its one list of items, no warning, and the next save writes the items per game in its place; a
+// file an older editor wrote (schema 1, the game install under its old keys) is set aside (S13 A4: no
+// compat reader): read as the defaults, the warning naming the file and everything it held, now gone,
+// and written again as a new file by the next save.
 static int test_file_store_writes_the_settings_file() {
 	editor_test::TempProjectDir dir("opennova_editor_preferences_file");
 	const std::string path = dir.file("a/b/editor_settings.json");
@@ -165,6 +194,28 @@ static int test_file_store_writes_the_settings_file() {
 	// Written over by the next save: the file the store writes.
 	TEST_EXPECT(FilePreferencesStore(older_editor).save(every_preference(), error));
 	TEST_EXPECT(test_io::read_file_text(older_editor, written) && written == kSettingsFile);
+	// S15's file, its items one list (the polish keeps them per game, under a key of their own): the
+	// game install, the recent projects, the runtime and the rest read as they are, no warning, the
+	// list ignored (its items of whichever game); the next save writes the items per game in its
+	// place, S15's key gone.
+	const std::string s15 = dir.file("user/s15_editor_settings.json");
+	TEST_EXPECT(editor_test::write_text(s15, kS15File));
+	Preferences kept = every_preference();
+	kept.recent_items.clear();
+	loaded = Preferences();
+	Diagnostic two;
+	TEST_EXPECT(FilePreferencesStore(s15).load(loaded, two) && same(loaded, kept) && two.code().empty());
+	loaded.recent_items = every_preference().recent_items;
+	TEST_EXPECT(FilePreferencesStore(s15).save(loaded, error));
+	TEST_EXPECT(test_io::read_file_text(s15, written) && written == kSettingsFile);
+	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
+	// past 2^53 either way (-2^63 among them: its cast would give it back), a string; a game left
+	// with none is no game.
+	TEST_EXPECT(editor_test::write_text(dir.file("odd.json"),
+			"{\"schema_version\": 2, \"recent_items_by_game\": {\"jo\": [1.5, 1e300, -9223372036854775808, "
+			"9007199254740992, \"7\", 12, -3], \"dfx\": [0.25], \"\": [4], \"tc\": 5}}"));
+	TEST_EXPECT(FilePreferencesStore(dir.file("odd.json")).load(loaded, error) && loaded.recent_items.size() == 1 &&
+	            loaded.recent_items.at("jo") == std::vector<int64_t>({12, -3}));
 
 	// A file that is not there reads as the defaults; one that does not say whether an import
 	// brings the files it needs reads as on; a newer schema is set aside too (it held nothing);
@@ -210,14 +261,16 @@ static int test_editor_preferences() {
 	            preferences.values().recent_projects.size() == kRecentProjectsMax - 1);
 	TEST_EXPECT(store.saves() == 0 && preferences.save(error) && store.saves() == 1 &&
 	            store.preferences().recent_projects == preferences.values().recent_projects);
-	// The recently placed items (S15): capped at kRecentItemsMax, most recent first, an item placed
-	// again moved to the front.
-	for (int64_t item = 1; item <= 14; ++item) preferences.remember_recent_item(item);
-	TEST_EXPECT(preferences.values().recent_items.size() == kRecentItemsMax &&
-	            preferences.values().recent_items.front() == 14 && preferences.values().recent_items.back() == 3);
-	preferences.remember_recent_item(5);
-	TEST_EXPECT(preferences.values().recent_items.front() == 5 && preferences.values().recent_items.size() == kRecentItemsMax &&
-	            std::count(preferences.values().recent_items.begin(), preferences.values().recent_items.end(), int64_t(5)) == 1);
+	// The recently placed items (S15), per game (the polish): capped at kRecentItemsMax, most recent
+	// first, an item placed again moved to the front; another game's its own, none before any.
+	for (int64_t item = 1; item <= 14; ++item) preferences.remember_recent_item("jo", item);
+	const std::vector<int64_t> &jo = preferences.recent_items("jo");
+	TEST_EXPECT(jo.size() == kRecentItemsMax && jo.front() == 14 && jo.back() == 3);
+	TEST_EXPECT(preferences.remember_recent_item("jo", 5) && !preferences.remember_recent_item("jo", 5));
+	TEST_EXPECT(preferences.recent_items("jo").front() == 5 && preferences.recent_items("jo").size() == kRecentItemsMax &&
+	            std::count(preferences.recent_items("jo").begin(), preferences.recent_items("jo").end(), int64_t(5)) == 1);
+	TEST_EXPECT(preferences.recent_items("dfx").empty() && preferences.remember_recent_item("dfx", 106100));
+	TEST_EXPECT(preferences.recent_items("dfx") == std::vector<int64_t>({106100}) && preferences.recent_items("jo").front() == 5);
 	TEST_EXPECT(preferences.write(every_preference(), error) && same(preferences.values(), every_preference()) &&
 	            same(store.preferences(), every_preference()));
 
@@ -266,6 +319,16 @@ static int test_session_over_a_store() {
 		session.handle(request::forget_recent("C:/games/Armory"));
 		TEST_EXPECT(v.project.recent_projects == std::vector<std::string>({"D:/mods/Harbor"}) &&
 		            store.preferences().recent_projects == v.project.recent_projects);
+		// The recently placed items shown are the open project's game's (the polish): none with no
+		// project open, a JO project's its own, none again once it closes; the other game's kept.
+		TEST_EXPECT(v.project.recent_items.empty());
+		session.handle(request::new_project(dir.file("jo_project"), "Placed"));
+		session.run_operations();
+		TEST_EXPECT(session.project_open() && v.project.recent_items == std::vector<int64_t>({106100, 2044}));
+		session.handle(request::close_project());
+		session.run_operations();
+		TEST_EXPECT(!session.project_open() && v.project.recent_items.empty() &&
+		            store.preferences().recent_items.at("dfx") == std::vector<int64_t>({7}));
 	}
 	{
 		const std::string path = dir.file("settings/editor_settings.json");
