@@ -2,9 +2,12 @@
 
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
+#include <editor/assets/asset_kinds.h>
+#include <editor/ui/document_views.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
 #include <editor/model/field_text.h>
@@ -265,10 +268,42 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 bool is_reference(const FieldUse &field, const Value &value) {
 	return value_reference(field, value) != ReferenceKind::None;
 }
+// A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
+// group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
+// draw_field, ADR 0046 S15), never typed as a number; one whose value the game resolves itself (the
+// player's SSN) picked as what it would name otherwise (FieldUse::picks; graph/display_names' picked_as).
+bool picks_by_name(const FieldUse &field) {
+	const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
+	if (kind == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
+	const ReferenceResolution resolution = reference_row(kind).resolution;
+	return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record;
+}
+// A text reference: typed in its box, or picked (its Pick).
 bool picks_reference(const FieldUse &field) {
-	if (field.reference == ReferenceKind::None) return false;
-	return field.schema->type == FieldType::Text ||
-	       reference_row(field.reference).resolution == ReferenceResolution::Record;
+	return field.reference != ReferenceKind::None && field.schema->type == FieldType::Text;
+}
+
+// The project's names the Inspector's words read (the graph's), while it stands.
+struct ViewNames {
+	std::optional<GraphNameSource> graph;
+	explicit ViewNames(const SessionView &view) {
+		if (view.findings.graph) graph.emplace(*view.findings.graph);
+	}
+	const NameSource *get() const { return graph ? &*graph : nullptr; }
+};
+
+// What a value names, in words, under its control (ADR 0046 S15): a field with no choices and not
+// picked by name whose value names something (a name index's string, the stop an entity starts at),
+// muted, or in the missing colour where it names nothing; cut to the column, whole in its tooltip.
+void value_words(const DisplayName &words) {
+	if (words.text.empty()) return;
+	const std::string shown = ui_kit::fit(words.text, ImGui::GetContentRegionAvail().x);
+	if (words.dangling) ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s", shown.c_str());
+	else ImGui::TextDisabled("%s", shown.c_str());
+	std::string tip = words.text;
+	if (!words.raw.empty()) tip += "\nThe file holds " + words.raw;
+	if (!words.source.empty()) tip += "\nFrom " + words.source;
+	ui_kit::tooltip(tip);
 }
 // What a name picked sets the field to: the text, or the index a Record reference's name is (a
 // name that is no index stays the text, which the field refuses).
@@ -531,12 +566,26 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
-	value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
+	// What the value names, in words (ADR 0046 S15): the picker's frame shows them, any other control
+	// has them under it.
+	const ViewNames names(workspace.view());
+	const DisplayName words = value_display(document, address, field, value, names.get());
+	const bool by_name = picks_by_name(field);
+	if (by_name) {
+		std::string picked;
+		const FieldUse picking = picked_as(field);
+		if (controls.picker.draw_field(workspace, document, address, picking, value, words, mixed, picked))
+			set(workspace, document, targets, schema.id, picked_value(picking, picked), false);
+	} else {
+		value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
+	}
 	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(workspace, document, targets, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
+	std::vector<FieldChoice> own;
+	if (!by_name && !mixed && present && !schema.flags && document.choices_on(address, field, own).empty()) value_words(words);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -648,7 +697,17 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);
-	value_control(workspace, controls.typed, document, {address}, field, value, true);
+	if (picks_by_name(field)) {
+		// Picked by name, its words in the cell (ADR 0046 S15).
+		const ViewNames names(workspace.view());
+		std::string picked;
+		const FieldUse picking = picked_as(field);
+		if (controls.picker.draw_field(workspace, document, address, picking, value,
+		                               value_display(document, address, field, value, names.get()), false, picked))
+			set(workspace, document, {address}, schema.id, picked_value(picking, picked), false);
+	} else {
+		value_control(workspace, controls.typed, document, {address}, field, value, true);
+	}
 	if (present) drop_target(workspace, document, {address}, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
@@ -672,6 +731,11 @@ float column_width(const FieldSchema &field) {
 	if (field.optional) width += frame;
 	if (field.color == FieldColor::HexArgb || field.color == FieldColor::PackedRgb) width += field_widgets::swatch_width();
 	if (field.reference != ReferenceKind::None) width += em * 3.0f;
+	// A number picked by name shows its words (ADR 0046 S15).
+	const ReferenceResolution resolution = reference_row(field.reference).resolution;
+	if (field.type != FieldType::Text &&
+	    (resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record))
+		width = std::max(width, em * 16.0f);
 	return width;
 }
 
@@ -760,12 +824,13 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 // last save: a click selects one, whose own fields and lists the inspector then shows.
 void records_list(Workspace &workspace, const Document &document, const NodeAddress &owner,
                   const Document::Collection &records) {
+	const ViewNames names(workspace.view());
 	for (size_t i = 0; i < records.ids.size(); ++i) {
 		const NodeAddress address{owner.row, records.spec.kind, records.ids[i]};
 		ImGui::PushID(static_cast<int>(address.child));
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name =
-		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
+		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + record_display(document, address, names.get()),
 		                    ImGui::GetContentRegionAvail().x);
 		if (ImGui::Selectable((name + "###record").c_str(), workspace.view().documents.selection.holds(address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
@@ -884,11 +949,15 @@ void draw_section(Workspace &workspace, Controls &controls, const Document &docu
 }
 
 // The row and every record that holds the selection, each one click away, on a row that
-// wraps; a long name cut to the window (whole in its tooltip, with the token its type words).
-void breadcrumb(Workspace &workspace, const Document &document, const NodeAddress &selection) {
+// wraps; a long name cut to the window (whole in its tooltip, with the token its type words). A
+// record its type's part of the Inspector shows in words by its name (`by_name`, S15: a mission's
+// event, trigger or action).
+void breadcrumb(Workspace &workspace, const Document &document, const NodeAddress &selection,
+                InspectorNamesInBreadcrumb by_name) {
 	std::vector<NodeAddress> chain = document.ancestors(selection);
 	chain.push_back(selection);
 	const float room = ImGui::GetContentRegionAvail().x;
+	const ViewNames names(workspace.view());
 	ui_kit::WrapRow row;
 	for (size_t i = 0; i < chain.size(); ++i) {
 		ImGui::PushID(int(i));
@@ -896,7 +965,9 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 			row.next(ui_kit::text_width("/"));
 			ImGui::TextDisabled("/");
 		}
-		const std::string title = document.record_title(chain[i]), name = document.record_name(chain[i]);
+		const std::string name = document.record_name(chain[i]);
+		const std::string title =
+		    by_name && by_name(document, chain[i]) ? name : record_display(document, chain[i], names.get());
 		const bool last = i + 1 == chain.size();
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
@@ -936,7 +1007,7 @@ void findings(const SessionView &view, const FindingsIndex &index, const Documen
 // edges stay where they are while it stands) and the files. Clipped: a variable a thousand
 // windows use draws only the lines that show, each cut to the window (the whole of it, and the
 // field's id, in its tooltip); a click goes to the use (graph/reference_queries' usage_target).
-void InspectorWindow::referenced_by(const Document &document, const NodeAddress &record) {
+void InspectorWindow::referenced_by(const Document &document, const NodeAddress &record, bool others_only) {
 	const SessionView &view = workspace_.view();
 	if (!view.findings.graph) return;
 	const AssetGraph &graph = *view.findings.graph;
@@ -948,6 +1019,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 	key.graph = &graph;
 	key.generation = graph.generation();
 	key.files = revision_key(view.revisions, {ViewConcern::Files});
+	key.others_only = others_only;
 	if (!(key == users_key_)) {
 		users_key_ = key;
 		++users_made_;
@@ -956,6 +1028,8 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 			if (symbol->inert) continue; // not what the game reads: nothing names this one
 			if (symbol->address.row && symbol->address != record) continue; // another record of the same path
 			for (const GraphEdge *edge : graph.referrers_of(symbol->kind, symbol->name, symbol->scope)) {
+				// Its own document's uses listed in its type's words already (S15: a mission's events).
+				if (others_only && edge->source == document.path()) continue;
 				const std::string field = edge_field_title(view, *edge);
 				users_.push_back({edge, edge->source + ": " + (edge->record.empty() ? field : edge->record + " - " + field)});
 			}
@@ -963,7 +1037,7 @@ void InspectorWindow::referenced_by(const Document &document, const NodeAddress 
 	}
 	if (users_.empty()) return;
 	ImGui::Separator();
-	ImGui::Text("Referenced by %zu field(s)", users_.size());
+	ImGui::Text(others_only ? "Referenced by %zu field(s) in other files" : "Referenced by %zu field(s)", users_.size());
 	ImGuiListClipper clipper;
 	clipper.Begin(static_cast<int>(users_.size()));
 	while (clipper.Step())
@@ -1033,7 +1107,8 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 	reveal.scroll = reveal_scroll_;
 	const double since = ImGui::GetTime() - reveal_time_;
 	reveal.light = reveal_field_.empty() || since >= kFlashSeconds ? 0.0f : float(1.0 - since / kFlashSeconds) * 0.8f;
-	breadcrumb(workspace_, *document, selection);
+	const DocumentViewRow *own = document_view_row(asset_kind_row(document->kind()).document);
+	breadcrumb(workspace_, *document, selection, own ? own->breadcrumb_names : nullptr);
 	// Several records of one kind, or of kinds whose fields are alike (a mission's entities of
 	// several pools): the fields they share, each change set on every one.
 	Targets together{selection};
@@ -1061,13 +1136,18 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 		                         " records of different kinds selected; the fields below are the primary one's.";
 		ui_kit::empty_state(note.c_str());
 	}
+	// The type's own part first (S15: a mission's event, trigger or action in words), and what it
+	// draws itself the generic form leaves out.
+	InspectorTaken taken;
+	if (own && own->inspector_top) own->inspector_top(workspace_, *document, selection, taken);
 	ui_kit::filter_box("##filter", filter_, sizeof(filter_), "Filter fields and lists");
 	// The selection's own collections, or its owner's when it holds none, so the records
 	// beside it (a window's other actions) stay one click away.
 	NodeAddress owner = selection;
 	Document::Placement at;
 	if (document->collections_of(selection).empty() && document->placement(selection, at)) owner = at.owner;
-	const std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
+	std::vector<InspectorSection> plan = plan_inspector(*document, selection, owner, filter_);
+	leave_out(plan, taken.fields, taken.collections);
 	if (plan.empty() && filter_[0]) ui_kit::empty_state("No field or list matches the filter.");
 	Controls controls{picker_, typed_};
 	ImGui::BeginDisabled(!editable);
@@ -1083,7 +1163,10 @@ void InspectorWindow::draw(devtools::ImGuiPass &, uint64_t) {
 			rename_everywhere(workspace_, *document, selection, field, value);
 			break;
 		}
-	referenced_by(*document, selection);
+	// The type's own part last (S15: what in its document names the record, in its words), then who
+	// names it in the other files.
+	if (own && own->inspector_bottom) own->inspector_bottom(workspace_, *document, selection, taken);
+	referenced_by(*document, selection, taken.own_uses);
 	findings_.follow(view);
 	findings(view, findings_, *document, *row, selection);
 }

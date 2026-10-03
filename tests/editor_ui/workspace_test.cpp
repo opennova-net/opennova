@@ -35,9 +35,11 @@
 
 #include <editor/blank/blank_factory.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/mission_palette.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
 #include <editor/preview/model_overlay.h>
@@ -1119,6 +1121,20 @@ void test_files_window() {
 			"readme.txt"}),
 	      "the file count; the folders sorted, each over its files; an import beside its source; the counts after a name");
 	CHECK(text.find("Kind") == std::string::npos && text.find("Item defin") == std::string::npos, "the kind hidden");
+	// ADR 0046 S15: a file that is the game's own data has its findings counted apart, as Problems
+	// counts them: none after its name (its tooltip says them); the modder's again once it is not.
+	v.findings.original_files = std::make_shared<const std::set<std::string>>(std::set<std::string>{"defs/items.def"});
+	v.revisions.touch(ViewConcern::Findings);
+	ui.frames(2);
+	text = files_text();
+	const size_t items_at = text.find("items.def"), size_at = text.find("3.0 KB");
+	CHECK(items_at != std::string::npos && size_at != std::string::npos && size_at > items_at &&
+	              text.substr(items_at + 9, size_at - items_at - 9).find_first_of("0123456789") == std::string::npos,
+	      "the game's own data: no counts after its name");
+	v.findings.original_files.reset();
+	v.revisions.touch(ViewConcern::Findings);
+	ui.frames(2);
+	text = files_text();
 	ImGuiTable *files_table = ImGui::TableFindByID(table);
 	CHECK(files_table && files_table->ColumnsCount == 3 && !files_table->Columns[1].IsEnabled &&
 	              files_table->Columns[0].WidthGiven > 2.0f * files_table->Columns[2].WidthGiven &&
@@ -2121,6 +2137,258 @@ void test_mission_view_ground() {
 	CHECK(grounded && std::fabs(grounded->z - ground(grounded->x, grounded->y)) < 1e-3, "the entity set down on the ground");
 }
 
+// Placing and tweaking in the mission's view (ADR 0046 S15), over a real session: Place opens the
+// palette beside the picture (the project's item by name in its group), a row picked there and a
+// click on the picture place one of it (one EditInViewport, the new entity selected), the tool kept
+// for the next; Esc goes back to Select; the line under the picture says what a click does; the
+// primary's place typed in the East field moves it there (one batch); the right button's click on a
+// mark opens the menu of what applies, whose Select same item selects every entity of its item.
+void test_mission_view_placing() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_mission_view_placing");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	// A wide display, so the lines this test reads are read whole (the Preview steps aside for the
+	// mission: the Document tab has the centre).
+	ImGui::GetIO().DisplaySize = ImVec2(4096.0f, 1600.0f);
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	run.open("missions/synth_logic.bms");
+	const Document *mission = session.document_for("missions/synth_logic.bms");
+	CHECK(mission != nullptr, "the mission open");
+	if (!mission) return;
+	const std::string path = mission->path();
+	ui.focus("Document");
+	run.settle();
+	run.take();
+	const auto *viewport = static_cast<const MissionViewport *>(session.viewports().find(path, ViewportKind::Mission));
+	const auto column_window = [] {
+		const ImGuiWindow *column = nullptr;
+		for (const ImGuiWindow *window : GImGui->Windows)
+			if (window->Active && !window->Hidden && std::strstr(window->Name, "/viewport_column_")) column = window;
+		return column;
+	};
+	const ImGuiWindow *column = column_window();
+	CHECK(viewport && column, "the mission's view drawn");
+	if (!viewport || !column) return;
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Click a mark to select it") != std::string::npos, "the line under the picture: what a click does");
+	// Place: the palette beside the picture, the project's item by name in its group.
+	ui.activate(item_id(column->ID, { "Place" }));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Buildings (1)") != std::string::npos && text.find("Skinned Thing") != std::string::npos,
+	      "the palette: Buildings, Skinned Thing");
+	CHECK(text.find("Place: pick an item") != std::string::npos, "the line: pick an item first");
+	const ImGuiWindow *items = nullptr;
+	for (const ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && !window->Hidden && std::strstr(window->Name, "/palette_items")) items = window;
+	CHECK(items != nullptr, "the palette's rows drawn");
+	if (!items) return;
+	ui.activate(item_id(pushed(pushed(items->ID, int(MissionPaletteGroup::Buildings)), 0), { "###item" }));
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Place Skinned Thing: click the ground") != std::string::npos, "the line: placing the picked item");
+	// A click on the picture places one there, the new building selected; the tool stays.
+	DrawnDevice *device = devices.held(path, ViewportKind::Mission);
+	CHECK(device != nullptr && device->width > 0, "the picture drawn");
+	if (!device) return;
+	const size_t buildings = viewport->scene().count(MissionPool::Building);
+	run.take();
+	ui.click(ImVec2(device->origin.x + float(device->width) * 0.5f, device->origin.y + float(device->height) * 0.5f));
+	run.settle();
+	std::vector<EditorRequest> raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::EditInViewport) == 1 && viewport->scene().count(MissionPool::Building) == buildings + 1,
+	      "a click places one");
+	const MissionEntityMark *placed = viewport->scene().entity(v.documents.selection.primary.row);
+	CHECK(placed && placed->item == 100200, "the placed building selected");
+	CHECK(v.project.recent_items == std::vector<int64_t>({ 100200 }), "the item among the recently placed");
+	// Esc: back to Select.
+	ui.key(ImGuiKey_Escape, true);
+	ui.key(ImGuiKey_Escape, false);
+	run.settle();
+	text = logged_frame(ui);
+	CHECK(text.find("Buildings (1)") == std::string::npos && text.find("Place Skinned Thing") == std::string::npos,
+	      "Esc: the palette gone, Select again");
+	// The East field: the placed building moved to 123.5 m east, one batch.
+	column = column_window();
+	CHECK(column != nullptr && placed, "the column again");
+	if (!column || !placed) return;
+	const ImGuiID east = item_id(column->ID, { "###east" });
+	run.take();
+	ImGui::ActivateItemByID(east);
+	GImGui->NavNextActivateFlags = ImGuiActivateFlags_PreferInput;
+	ui.frames(2);
+	CHECK(GImGui->ActiveId == east, "the East field has the keyboard");
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, true);
+	ui.frames(1);
+	ImGui::GetIO().AddKeyEvent(ImGuiKey_A, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+	ui.frames(1);
+	ImGui::GetIO().AddInputCharactersUTF8("123.5");
+	ui.frames(2);
+	ui.key(ImGuiKey_Enter, true);
+	ui.key(ImGuiKey_Enter, false);
+	run.settle();
+	raised = run.take();
+	const MissionEntityMark *moved = viewport->scene().entity(v.documents.selection.primary.row);
+	CHECK(count_of_kind(raised, EditorRequestKind::EditRecord) == 1 && moved && std::fabs(moved->x - 123.5) < 1e-3,
+	      "East typed: the building at 123.5 m east, one batch");
+	// The right button's click on a pump's mark: its menu; Select same item selects every pump.
+	std::vector<MissionMark> marks = viewport->marks(device->width, device->height, device);
+	int pump = -1;
+	for (size_t i = 0; i < marks.size() && pump < 0; ++i)
+		if (marks[i].shown && marks[i].entity >= 0 && viewport->scene().entities()[size_t(marks[i].entity)].item == 106100 &&
+				pick_mission_mark(marks, marks[i].x, marks[i].y) == int(i))
+			pump = int(i);
+	CHECK(pump >= 0, "a pump's mark on the picture");
+	if (pump < 0) return;
+	ui.mouse(device->origin.x + marks[size_t(pump)].x, device->origin.y + marks[size_t(pump)].y);
+	ui.button(true, 1);
+	ui.button(false, 1);
+	run.settle();
+	CHECK(v.documents.selection.primary == marks[size_t(pump)].record, "the right button selects the mark under it");
+	text = logged_frame(ui);
+	CHECK(in_order(text, { "Paste here", "Frame", "Drop to ground", "Duplicate", "Delete", "Select same item", "Go to in outline",
+	                         "Show events using this" }),
+	      "the menu of what applies");
+	column = column_window();
+	if (!column) return;
+	ui.activate(popup_item(item_id(column->ID, { "mission_canvas_menu" }), "Select same item"));
+	run.settle();
+	CHECK(v.documents.selection.records.size() == 3, "Select same item: the three pumps");
+	// Ctrl+V over the picture with an event on the clipboard (nothing with a place to paste at): the
+	// session's own paste, never Paste here's refusal (S15 review).
+	const auto *placed_in = static_cast<const MissionDocument *>(session.document_for(path));
+	const std::vector<const Node *> events = placed_in ? placed_in->rows_of(MissionKind::Event) : std::vector<const Node *>();
+	CHECK(!events.empty(), "the mission has events");
+	if (events.empty()) return;
+	session.handle(request::select_record(path, { events.front()->id, events.front()->kind, 0 }));
+	EditorRequest copy = request::of(EditorRequestKind::Copy);
+	copy.path = path;
+	session.handle(copy);
+	double middle[2];
+	CHECK(!v.documents.clipboard.empty() && !mission_clip_middle(v.documents.clipboard, middle), "an event copied");
+	run.settle();
+	// The picture clicked (its corner, the sky: the view has the keyboard), the pointer over its middle.
+	ui.click(ImVec2(device->origin.x + 3.0f, device->origin.y + 3.0f));
+	run.settle();
+	run.take();
+	ui.mouse(device->origin.x + float(device->width) * 0.5f, device->origin.y + float(device->height) * 0.5f);
+	ui.frames(1);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, true);
+	ui.key(ImGuiKey_V, true);
+	ui.key(ImGuiKey_V, false);
+	ImGui::GetIO().AddKeyEvent(ImGuiMod_Ctrl, false);
+	run.settle();
+	raised = run.take();
+	CHECK(count_of_kind(raised, EditorRequestKind::Paste) == 1 && count_of_kind(raised, EditorRequestKind::EditInViewport) == 0,
+	      "Ctrl+V with an event: the session's paste");
+}
+
+// The Preview steps aside for a mission (ADR 0046 S15), over a real session at the first layout:
+// nothing open, Preview draws beside Document (what to open); the mission made active with nothing
+// to preview, Preview is not drawn (its Windows item still open), its node hides and Document takes
+// the whole centre, the mission's picture the main view; a menu opened, Preview is back in the node
+// it left and Document has its share again; the mission active again, Preview stays beside it,
+// showing the menu it has to show.
+void test_preview_steps_aside() {
+	editor_test::TempProjectDir dir("opennova_editor_ui_preview_steps_aside");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	CHECK(preview_project(session, dir), "the preview project");
+	const SessionView &v = session.view();
+	const std::string repo = test_paths_repo_root(__FILE__);
+	CHECK(editor_test::write_bytes(v.project.root + "/missions/synth_logic.bms",
+	                               test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")),
+	      "the mission written");
+	session.handle(request::rescan());
+	session.run_operations();
+	DrawnDevices devices;
+	session.viewports().set_devices(&devices.cache);
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.windows.set_devices(&devices.cache);
+	PreviewRun run{ session, devices, ui, {} };
+	const devtools::Window *preview_window = find_window(ui.windows.pass(), "Preview");
+	CHECK(preview_window != nullptr, "the Preview window");
+	if (!preview_window) return;
+	const auto centre = [] {
+		const ImGuiWindow *files = ImGui::FindWindowByName("Files");
+		const ImGuiWindow *inspector = ImGui::FindWindowByName("Inspector");
+		return files && inspector ? inspector->Pos.x - (files->Pos.x + files->Size.x) : 0.0f;
+	};
+	run.settle();
+	ImGuiWindow *preview = ImGui::FindWindowByName("Preview");
+	ImGuiWindow *document = ImGui::FindWindowByName("Document");
+	CHECK(preview && preview->Active && document && centre() > 0.0f, "nothing open: Preview drawn beside Document");
+	if (!preview || !document) return;
+	const ImGuiID node = preview->DockId;
+	CHECK(node != 0 && document->Size.x < centre() * 0.5f, "Document its share of the centre, Preview the rest");
+	CHECK(!preview_stands_aside(v), "with no mission active the Preview stands");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(preview_stands_aside(v) && !preview->Active && preview_window->open,
+	      "a mission, nothing to preview: Preview steps aside, still open in the Windows menu");
+	const ImGuiDockNode *left = ImGui::DockBuilderGetNode(node);
+	CHECK(left && !left->IsVisible && left->Windows.Size == 0, "the node it left kept, empty and hidden");
+	// The whole centre but the separators between the docks.
+	CHECK(std::fabs(document->Size.x - centre()) < 2.0f * ImGui::GetStyle().DockingSeparatorSize + 1.0f,
+	      "Document the whole centre");
+	run.open("main.mnu");
+	ui.frames(3);
+	CHECK(preview->Active && preview->DockId == node && document->Size.x < centre() * 0.5f,
+	      "a menu opened: Preview back in its node, Document its share");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(!preview_stands_aside(v) && preview->Active && v.documents.preview_shown == ViewportKind::Menu,
+	      "the mission again: Preview stays beside it, the menu its to show");
+	// The author's ask (S15 review): the menu closed, the Preview steps aside for the mission again;
+	// ticked in the Windows menu (show_anyway), it shows beside that mission until another document is
+	// made active.
+	devtools::Window *preview_item = nullptr;
+	for (int i = 0; i < ui.windows.pass().window_count(); ++i)
+		if (std::strcmp(ui.windows.pass().window(i).title(), "Preview") == 0) preview_item = &ui.windows.pass().window(i);
+	CHECK(preview_item != nullptr, "the Preview's window");
+	if (!preview_item) return;
+	const DocumentBase *menu = session.document_base_for("main.mnu");
+	if (menu) session.handle(request::close_document(menu->path()));
+	run.settle();
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "the menu closed: aside again");
+	preview_item->show_anyway();
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "asked for: shown beside the mission");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "another document made active between: aside again");
+	// Floated off the dockspace (another monitor), it never steps aside: it frees no room.
+	preview_item->show_anyway();
+	ui.frames(3);
+	ImGui::DockContextQueueUndockWindow(ImGui::GetCurrentContext(), preview);
+	ui.frames(3);
+	CHECK(preview->DockId == 0, "the Preview floated");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "floated: it stays beside the mission");
+}
+
 // A canvas whose picture fills it (the model's, the mission's), read through ImGui: the right
 // button is apart from a press (right_pressed, right_down; never pressed or down), a click of it
 // only when it comes up having travelled less than a drag; the left button is a press; the keys a
@@ -2537,6 +2805,8 @@ void run_workspace_tests() {
 	test_preview_model_pane_input();
 	test_mission_view_input();
 	test_mission_view_ground();
+	test_mission_view_placing();
+	test_preview_steps_aside();
 	test_canvas_fill_input();
 	test_window_title();
 	test_view_event_mailboxes();
