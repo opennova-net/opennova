@@ -54,6 +54,13 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
 		}
 	}
+	// The recently placed items (S15): whole numbers, the first kRecentItemsMax.
+	if (const io::JsonValue *recent = json.get("recent_items"); recent && recent->is_array()) {
+		for (const io::JsonValue &item : recent->array) {
+			if (settings.recent_items.size() >= kRecentItemsMax) break;
+			if (item.is_number() && item.number == double(int64_t(item.number))) settings.recent_items.push_back(int64_t(item.number));
+		}
+	}
 	out = std::move(settings);
 	return true;
 }
@@ -69,6 +76,9 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
 	json.set("recent_projects", std::move(recent));
+	io::JsonValue items = io::JsonValue::make_array();
+	for (const int64_t item : settings.recent_items) items.push(io::JsonValue::make_number(double(item)));
+	json.set("recent_items", std::move(items));
 	std::string io_error;
 	if (!ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
 	    !write_file_atomic(path, io::json_write(json), io_error)) {

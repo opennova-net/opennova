@@ -36,8 +36,8 @@ SelectMode select_mode(CanvasJoin join);
 // text field takes it (the rest reads nothing otherwise). The arrows pressed this frame, their key
 // repeat included, -1, 0 or 1 on each axis, and whether one is held down; Esc and F pressed. The
 // keys a camera flies by, held, -1, 0 or 1 on each of its axes (A and D: left and right; Q and E:
-// down and up; S and W: back and forward), Shift held with them (fast); Delete pressed; PgUp and
-// PgDn pressed, their key repeat included (1 up, -1 down).
+// down and up; S and W: back and forward), Shift held with them (fast; with the arrows, fine);
+// Delete pressed; PgUp and PgDn pressed, their key repeat included (1 up, -1 down); Ctrl+D pressed.
 struct CanvasKeyboard {
 	bool focused = false;
 	int arrow_x = 0;
@@ -51,6 +51,7 @@ struct CanvasKeyboard {
 	bool fast = false;
 	bool remove = false; // Delete
 	int page = 0;
+	bool duplicate = false; // Ctrl+D
 };
 
 // One frame of the pointer and the keyboard over a canvas's picture: the editor's canvas reads it

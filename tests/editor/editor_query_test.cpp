@@ -1522,7 +1522,7 @@ static int test_viewport_query() {
 		kinds_named += (i ? ", " : "") + kind_tokens.back();
 	}
 	TEST_EXPECT(kind_tokens.size() >= 2 && kind_tokens[0] == "menu" && kind_tokens[1] == "model");
-	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, box, notes, render, not \"zoom\"."));
+	TEST_EXPECT(says(R"({"op": "zoom"})", "\"op\" is one of state, items, hit, box, notes, render, palette, not \"zoom\"."));
 	TEST_EXPECT(says(R"({"op": "state", "kind": "map"})",
 			("\"kind\" is one of " + kinds_named + ", not \"map\".").c_str()));
 	TEST_EXPECT(says(R"({"op": "state", "x": 1})", "op state takes no \"x\" (it takes path, kind, op, offset, limit)."));
@@ -1541,7 +1541,8 @@ static int test_viewport_query() {
 	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "kind": "menu"})").get_string("kind", "") == "menu");
 
 	// The catalog's op and kind are the query's choices: every op it lists answers (none refused by
-	// its op), and the kinds are the viewport kinds' tokens.
+	// its op; a menu has no palette, S15: the kind refuses it), and the kinds are the viewport kinds'
+	// tokens.
 	const JsonValue catalog = ask(session, "catalog", "{}");
 	std::vector<std::string> ops, kinds;
 	for (const JsonValue &query : catalog.get("queries")->array) {
@@ -1552,9 +1553,11 @@ static int test_viewport_query() {
 				(param.get_string("name", "") == "op" ? ops : kinds).push_back(tokens->array[i].string);
 		}
 	}
-	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "box", "notes", "render" }));
+	TEST_EXPECT(ops == (std::vector<std::string>{ "state", "items", "hit", "box", "notes", "render", "palette" }));
 	TEST_EXPECT(kinds == kind_tokens);
+	TEST_EXPECT(says(R"({"op": "palette", "text": "pump"})", "a menu viewport places nothing"));
 	for (const std::string &op : ops) {
+		if (op == "palette") continue;
 		std::string args = R"({"op": ")" + op + "\"";
 		if (op == "hit") args += R"(, "x": 1, "y": 1)";
 		if (op == "box") args += R"(, "x": 1, "y": 1, "x2": 9, "y2": 9)";
