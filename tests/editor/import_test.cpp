@@ -260,7 +260,7 @@ static int test_import_pass() {
 	TEST_EXPECT(produced && produced->imported_from == "art/logo.png" && produced->kind == AssetKind::Texture);
 	const AssetEntry *source = view.project.scan->find("logo.png");
 	TEST_EXPECT(source && source->kind == AssetKind::ImportSource);
-	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo") ==
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "logo.pcx") ==
 			ReferenceStatus::Present);
 	// A menu names the output by its own file; the source is not packed, so a menu
 	// naming the PNG finds nothing the game can load.
@@ -347,17 +347,16 @@ static int test_import_pass() {
 			count_code(view.findings.diagnostics, "import.decode") == 1);
 	TEST_EXPECT(imported_source(view, "art/logo.png") && imported_source(view, "art/logo.png")->reimported);
 	// A menu's .tga the project lacks loads its .dds (from the first dot), as retail's
-	// loader does (a texture of no model finds it too, the runtime's lookup trying the
-	// name's stem with .dds, S11h); with the .tga there the .tga is the file.
+	// loader does (a texture whose use's loader is not witnessed reads the name alone, ADR 0046
+	// S18); with the .tga there the .tga is the file.
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.dds", std::vector<uint8_t>{'D', 'D', 'S', ' '}));
 	editor_test::handle_to_end(session, request::rescan());
 	std::string sky;
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(),
 						&sky) == ReferenceStatus::Present &&
 			sky == "art/sky.dds");
-	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(),
-						&sky) == ReferenceStatus::Present &&
-			sky == "art/sky.dds");
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "sky.tga", std::string(), &sky) ==
+			ReferenceStatus::Missing);
 	TEST_EXPECT(editor_test::write_bytes(root + "/art/sky.tga", std::vector<uint8_t>(18, 0)));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "sky.tga", std::string(),

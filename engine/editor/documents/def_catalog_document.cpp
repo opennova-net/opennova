@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 
@@ -171,6 +172,15 @@ void DefCatalogDocument::refine_field(const NodeAddress &address, FieldUse &use)
 	// What the table's labelled field decides on its record (none of a catalog's decides: the rows say
 	// it all), then the catalog's own rules.
 	TableDocument::refine_field(address, use);
+	// A texture through its use's loader (ADR 0046 S18): an item's HUD image the HUD's, alpha only
+	// [orig: HUD_LoadAllTextures @ 0x59E248..0x59E26A, the ItemDef's +0xA74 in mode 1], a loadout
+	// icon the menus' (CTextureManager_LoadOrFindTexture @ 0x654980); a crosshair's and a HUD icon's
+	// loaders NEEDS-RE, so those name their file as written.
+	if (use.reference == ReferenceKind::Texture) {
+		if (use.schema->id == "hud_image") use.loader_arg = texture_role_arg(TextureRoleId::HudAlphaOnly);
+		else if (use.schema->id == "loadout_menu_icon") use.loader_arg = texture_role_arg(TextureRoleId::MenuImage);
+		return;
+	}
 	// A bit per id of the file-wide registry (record_choices).
 	if (use.schema->id == "vehicle_spawn_mask" && def_kind(address.kind) == DefRecordKind::Item) {
 		use.own_choices = true;

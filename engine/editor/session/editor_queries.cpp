@@ -21,6 +21,7 @@
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
@@ -1152,6 +1153,18 @@ JsonValue answer_script_assist(const QueryContext &context, const QueryArgs &arg
 	return out;
 }
 
+// Every way the game uses a texture (ADR 0046 S18, documents/texture_roles), in the catalog's order.
+JsonValue answer_texture_roles(const QueryContext &, const QueryArgs &args, std::string &) {
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	set_page(out, page, kTextureRoleCount);
+	JsonValue roles = JsonValue::make_array();
+	for (size_t i = page.first(kTextureRoleCount); i < page.last(kTextureRoleCount); ++i)
+		roles.push(texture_role_json(texture_role_row(static_cast<TextureRoleId>(i))));
+	out.set("roles", std::move(roles));
+	return out;
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1410,7 +1423,8 @@ constexpr EditorQueryRow kRows[] = {
 			"as does a Problems row the build does not gate on (a project check's: the render "
 			"check's). A listed code blocks where its subject names the refusal: a reference, missing "
 			"or naming a file of another kind, of a kind whose row cites it (gates_when_missing: a "
-			"mission's terrain), and a required file missing or of another kind whose manifest row "
+			"mission's terrain; by its role, a terrain's colour map and its blend map once splat details "
+			"are authored), and a required file missing or of another kind whose manifest row "
 			"is the boot's refusal (its fatal rows). The query runs the validation left due to its end first, so "
 			"the rows it reads are the files' as they stand. A build request reads changed files "
 			"again first, joins a build that runs and waits on unsaved edits, which the gate does "
@@ -1464,6 +1478,16 @@ constexpr EditorQueryRow kRows[] = {
 			"mission's name finds (name, path where the project holds it, held, create_at beside the mission).")
 			.pages("items")
 			.chooses(kScriptChoices)
+			.row,
+	// The roles are compiled in: no concern moves what it answers, Project the one it is stamped by.
+	Query(K::TextureRoles, "texture_roles", answer_texture_roles, kPageParams, concern_set({ C::Project }),
+			"Every way the game uses a texture (ADR 0046 S18), a page of the roles in the catalog's order: each "
+			"its role token, words, group, loader (the name rule that picks the file and its reader: stage, "
+			"plain, normal, producer, chunk, archive, hud, file, menu, ptl, tga, pcx, pcx8, cube), the "
+			"extensions it takes (formats), its size rule {rule, words, width, height}, what its alpha means, "
+			"whether its loader reads the alpha at all, how it is sampled, what the game does when the file is "
+			"missing or wrong, and the witness.")
+			.pages("roles")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "

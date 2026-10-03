@@ -37,7 +37,6 @@
 
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
-#include <base/resource_index/texture_candidates.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/documents/document_types.h>
@@ -45,6 +44,7 @@
 #include <editor/documents/mns_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/strings_document.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
@@ -418,7 +418,22 @@ static int test_native_extractors() {
 	TEST_EXPECT(editor_test::write_text(root + "/sky_a.pcx", "x"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a.pcx") == ReferenceStatus::Present);
-	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a") == ReferenceStatus::Present); // without the extension
+	// No loader of the game adds an extension (ADR 0046 S18): a name without one finds nothing.
+	TEST_EXPECT(graph.resolve(ReferenceKind::Texture, "sky_a") == ReferenceStatus::Missing);
+	// The sky map's own loader (ARCHIVE, the .dds beside the name first) finds the PCX, then its .dds.
+	{
+		std::string served;
+		const GraphEdge *map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
+		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.pcx");
+		TEST_EXPECT(editor_test::write_text(root + "/sky_a.dds", "x"));
+		editor_test::handle_to_end(session, request::rescan());
+		map = edge_to(graph, "day.env", ReferenceKind::Texture, "sky_a.pcx");
+		TEST_EXPECT(map && graph.resolve(*map, &served) == ReferenceStatus::Present && served == "sky_a.dds");
+		TEST_EXPECT(!graph.referrers_of_file("sky_a.dds").empty());
+		std::error_code removed;
+		fs::remove(fs::path(root) / "sky_a.dds", removed);
+		editor_test::handle_to_end(session, request::rescan());
+	}
 	TEST_EXPECT(!graph.referrers_of_file("sky_a.pcx").empty());
 	TEST_EXPECT(has_symbol(graph, ReferenceKind::Particle, "BOOM"));
 	TEST_EXPECT(graph.resolve(ReferenceKind::Particle, "boom") == ReferenceStatus::Present);
@@ -1608,9 +1623,9 @@ static int test_reference_kind_rows() {
 
 // The names a file reference loads, in the order the game probes them (the graph takes the
 // first the project has, a fix the first the game install has): the name, then with each
-// extension the kind's loader appends; a texture of no model row what the runtime's texture
-// lookup probes (S11h: the name, then its stem with each texture extension, never an
-// extension appended to the whole name); a font the .fnt from the name's first dot; where the
+// extension the kind's loader appends; a texture of no model row the one file its role's loader
+// opens, or the name as written where none is witnessed (ADR 0046 S18); a font the .fnt from the
+// name's first dot; where the
 // loader decides by what is there, the one file it opens: a menu texture's .tga, else its
 // .dds; a model's texture row by the row's type (S11f: a diffuse row's .dds sibling of the
 // name cut three characters after its first dot, the '.MDT' test with its case; a plain
@@ -1625,13 +1640,15 @@ static int test_reference_file_candidates() {
 		return [files](const std::string &name) { return std::find(files.begin(), files.end(), name) != files.end(); };
 	};
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Model, "soldier", -1, none) == Names({"soldier", "soldier.3di"}));
-	const Names bare = reference_file_candidates(ReferenceKind::Texture, "wall", -1, none);
-	TEST_EXPECT(bare == opennova::texture_candidate_filenames("wall"));
-	TEST_EXPECT(bare.size() > 3 && bare[0] == "wall" && bare[1] == "wall.tga" && bare[2] == "wall.dds");
-	const Names named = reference_file_candidates(ReferenceKind::Texture, "wall.png", -1, has({"wall.dds"}));
-	TEST_EXPECT(named == opennova::texture_candidate_filenames("wall.png"));
-	TEST_EXPECT(named.size() > 2 && named[0] == "wall.png" && named[1] == "wall.tga" && named[2] == "wall.dds");
-	TEST_EXPECT(std::find(named.begin(), named.end(), "wall.png.tga") == named.end());
+	// A texture whose use's loader is not witnessed yet: the name as written alone, no other
+	// extension's twin (ADR 0046 S18: no loader of the game reads one); one of a role by its loader (a
+	// sky map's ARCHIVE: the .dds beside it first; a colour map's TGA reader: the name alone).
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall", -1, none) == Names({"wall"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "wall.png", -1, has({"wall.dds"})) == Names({"wall.png"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "sky.pcx", texture_role_arg(TextureRoleId::SkyCloud),
+	                                      has({"sky.dds"})) == Names({"sky.dds"}));
+	TEST_EXPECT(reference_file_candidates(ReferenceKind::Texture, "map.tga", texture_role_arg(TextureRoleId::TerrainColourMap),
+	                                      has({"map.dds"})) == Names({"map.tga"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "Arial99.fnt", -1, none) == Names({"Arial99.fnt"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "arial12b", -1, none) == Names({"arial12b.fnt"}));
 	TEST_EXPECT(reference_file_candidates(ReferenceKind::Font, "a.b.fnt", -1, none) == Names({"a.fnt"}));
@@ -1737,9 +1754,9 @@ static int test_terrain_and_bank_extractors() {
 // A model's texture row resolves to the file its type's loader opens (S11f): a diffuse row
 // naming wall.tga to the .dds the project has beside no .tga, else to the .tga; a plain row
 // (type 1) never to the .dds; a normal map by renderer::material_texture_source; an authored type the
-// loader zeroes as a diffuse row. A particle's texture reads as the runtime's texture lookup
-// does (S11h: texture_candidate_filenames). The badge, the finding and the edge's JSON read
-// the same rule, the row's type carried on the edge.
+// loader zeroes as a diffuse row. A particle's texture reads as its atlas loads it, the name alone
+// (ADR 0046 S18: its role on the edge). The badge, the finding and the edge's JSON read the same
+// rule, the row's type carried on the edge.
 static int test_model_texture_references() {
 	editor_test::TempProjectDir dir("opennova_asset_graph_model_textures");
 	NoProcess platform;
@@ -1791,10 +1808,9 @@ static int test_model_texture_references() {
 	TEST_EXPECT(resolved("bump.tga", &file) == ReferenceStatus::Present && file == "textures/bump.dds");
 	TEST_EXPECT(resolved("trim.tga", &file) == ReferenceStatus::Present && file == "textures/trim.dds");
 	TEST_EXPECT(!view.findings.graph->referrers_of_file("wall.dds").empty());
-	// A texture of anything else (no row type) reads as the runtime's texture lookup, which
-	// takes the stem's .dds too.
-	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "wall.tga", "", &file) == ReferenceStatus::Present &&
-	            file == "textures/wall.dds");
+	// A texture whose use's loader is not witnessed (no row type, no role) reads the name as written
+	// alone (ADR 0046 S18): no .dds twin.
+	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::Texture, "wall.tga", "", &file) == ReferenceStatus::Missing);
 	// Only the missing row is a finding, and it carries the row's type as its loader's argument
 	// (in its JSON too).
 	const auto finding_for = [&](const char *target) -> const Diagnostic * {
@@ -1865,21 +1881,21 @@ static int test_model_texture_references() {
 	const opennova::io::JsonValue json = graph_edge_to_json(*view.findings.graph, *wall);
 	TEST_EXPECT(json.get("loader_arg") && json.get("loader_arg")->number == 0.0 && !json.get("material_type") &&
 	            json.get_string("status", "") == "present" && json.get_string("file", "") == "textures/wall.dds");
-	// A particle's texture, as the runtime's lookup reads it: its stem's .dds or its overlay
-	// twin serves it; an extension appended to the whole name does not.
+	// A particle's graphic, as its atlas loads it (ADR 0046 S18): the TGA reader on the name alone
+	// [orig: CParticleTextureEntry_ProbeSizeFromDisk @ 0x5DFAA0]. Neither its stem's .dds, nor an _O
+	// twin, nor an extension appended serves it; the edge carries its role.
 	textures({"puff.dds"});
 	const GraphEdge *puff =
 			edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && puff->loader_arg == -1 &&
-			view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present &&
-			file == "textures/puff.dds" &&
-			!graph_edge_to_json(*view.findings.graph, *puff).get("loader_arg"));
+	TEST_EXPECT(puff && puff->loader_arg == texture_role_arg(TextureRoleId::ParticleGraphic) &&
+			view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Missing &&
+			graph_edge_to_json(*view.findings.graph, *puff).get_string("texture_role", "") == "particle_graphic");
 	textures({"puff_O.tga"});
 	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
-	TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Present);
-	textures({"puff.tga.dds"});
-	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
 	TEST_EXPECT(puff && view.findings.graph->resolve(*puff) == ReferenceStatus::Missing);
+	textures({"puff.tga"});
+	puff = edge_to(*view.findings.graph, "fx.ptl", ReferenceKind::Texture, "puff.tga");
+	TEST_EXPECT(puff && view.findings.graph->resolve(*puff, &file) == ReferenceStatus::Present && file == "textures/puff.tga");
 	return 0;
 }
 

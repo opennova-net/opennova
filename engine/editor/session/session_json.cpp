@@ -11,6 +11,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
 #include <base/io/cp1252.h>
 #include <editor/graph/display_names.h>
@@ -152,6 +153,15 @@ const char *reference_status_token(ReferenceStatus status) {
 }
 
 JsonValue boolean(bool value) { return JsonValue::make_bool(value); }
+
+// A texture reference's use, by the role its loader argument names (ADR 0046 S18, texture_roles.h):
+// texture_role its token, texture_gates whether the game refuses the mission without it.
+void set_texture_role(JsonValue &out, ReferenceKind kind, int32_t loader_arg) {
+	TextureRoleId role = TextureRoleId::kCount;
+	if (kind != ReferenceKind::Texture || !texture_arg_role(loader_arg, role)) return;
+	out.set("texture_role", json_string(texture_role_row(role).token));
+	if (texture_arg_gates(loader_arg)) out.set("texture_gates", boolean(true));
+}
 
 } // namespace
 
@@ -1111,6 +1121,7 @@ JsonValue diagnostic_to_json(const Diagnostic &d) {
 			out.set("reference", json_string(reference_row(reference->kind).token));
 		if (!reference->scope.empty()) out.set("scope", json_string(reference->scope));
 		if (reference->loader_arg >= 0) out.set("loader_arg", json_number(double(reference->loader_arg)));
+		set_texture_role(out, reference->kind, reference->loader_arg);
 	}
 	return out;
 }
@@ -1442,6 +1453,7 @@ JsonValue graph_edge_to_json(const AssetGraph &graph, const GraphEdge &edge) {
 	out.set("rewritable", boolean(graph.rewrites(edge)));
 	if (edge.through != ReferenceKind::None) out.set("through", json_string(reference_row(edge.through).token));
 	if (edge.loader_arg >= 0) out.set("loader_arg", json_number(double(edge.loader_arg)));
+	set_texture_role(out, edge.kind, edge.loader_arg);
 	std::string file;
 	const ReferenceStatus status = edge.target.empty() ? ReferenceStatus::NotAReference : graph.resolve(edge, &file);
 	out.set("status", json_string(reference_status_token(status)));

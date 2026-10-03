@@ -12,6 +12,7 @@
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_labels.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
@@ -540,6 +541,10 @@ bool MissionDocument::accept_step(const EditStep &step, const StagedRows &rows, 
 void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) const {
 	TableDocument::refine_field(address, use);
 	const std::string &id = use.schema->id;
+	// The header's tile set: the terrain's tile atlas, its extension made TGA (ADR 0046 S18 [orig:
+	// Terrain_LoadEnvironmentConfig @ 0x6109C8..0x6109EE; Terrain_LoadTileSetAtlas @ 0x604A90]).
+	if (use.reference == ReferenceKind::Texture && id == "terrain_tile")
+		use.loader_arg = texture_role_arg(TextureRoleId::TerrainTileAtlas, kTextureArgTileSet);
 	if (address.kind == k(K::Trigger) && id == "sub_type") use.own_choices = true;
 	if (address.kind == k(K::Action) && id == "action_sub_type") use.own_choices = true;
 	const int slot = param_slot(id);
