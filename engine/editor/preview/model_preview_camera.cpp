@@ -124,9 +124,9 @@ void OrbitCamera::dolly(float factor) {
 void model_preview_sphere(const threedi::Threedi3di3 &model, PreviewVec3 &center, float &radius) {
 	const renderer::ObjectProjectionSphere sphere = world::collision_projection_sphere_from_3di(model);
 	if (sphere.valid && sphere.radius_q16 > 0) {
-		const float at[3] = {sphere.center_q16[0] * io::kInvFp16One, sphere.center_q16[1] * io::kInvFp16One,
-		                     sphere.center_q16[2] * io::kInvFp16One};
-		center = preview_from_model(at);
+		// The collision block's box middle, in its mission axes.
+		center = preview_from_mission(sphere.center_q16[0] * io::kInvFp16One, sphere.center_q16[1] * io::kInvFp16One,
+		                              sphere.center_q16[2] * io::kInvFp16One);
 		radius = sphere.radius_q16 * io::kInvFp16One;
 		return;
 	}
@@ -140,11 +140,11 @@ int model_preview_auto_lod(const threedi::Threedi3di3 &model, const OrbitCamera 
 	if (projected_q16) *projected_q16 = 0;
 	if (!model.lods || model.lod_count == 0 || width <= 0) return -1;
 	const renderer::ObjectProjectionSphere sphere = world::collision_projection_sphere_from_3di(model);
-	const float at[3] = {sphere.center_q16[0] * io::kInvFp16One, sphere.center_q16[1] * io::kInvFp16One,
-	                     sphere.center_q16[2] * io::kInvFp16One};
+	const PreviewVec3 at = preview_from_mission(sphere.center_q16[0] * io::kInvFp16One, sphere.center_q16[1] * io::kInvFp16One,
+	                                            sphere.center_q16[2] * io::kInvFp16One);
 	PreviewVec3 right, up, back;
 	camera.axes(right, up, back);
-	const float depth = -dot(sub(preview_from_model(at), camera.eye()), back);
+	const float depth = -dot(sub(at, camera.eye()), back);
 	const double depth_q16 = std::clamp(static_cast<double>(depth) * io::kFp16OneD, -2147483647.0, 2147483647.0);
 	const int32_t focal = renderer::object_lod_focal_pixels(static_cast<float>(width), tan_half_fov());
 	const int32_t radius = renderer::project_bound_sphere_radius_q16(sphere.radius_q16, static_cast<int32_t>(depth_q16), focal);
