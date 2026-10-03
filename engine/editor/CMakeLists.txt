@@ -95,6 +95,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_checks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the game's PCX or TGA) and what they read (the import

@@ -46,6 +46,13 @@ std::string text(const Value &value) {
 // 0x5B1737; the type the loader copies, Material_ConvertDefinition @ 0x5B045B..0x5B04A0].
 TextureRoleId model_role(const GraphEdge &edge, const Document *model, TextureUseContext &context) {
 	context.type = texture_arg_is_row_type(edge.loader_arg) ? uint8_t(edge.loader_arg) : 0;
+	// What the edge carries of the row (TextureRowContext); the document, where it reads, adds the
+	// material's place and shader.
+	const TextureRowContext row = unpack_texture_row_context(edge.use_context);
+	context.slot = row.slot;
+	context.row_flags = row.row_flags;
+	context.material_flags = row.material_flags;
+	context.alpha_ref = row.alpha_ref;
 	if (model) {
 		const NodeAddress row = model->address_at(edge.locator);
 		Value value;

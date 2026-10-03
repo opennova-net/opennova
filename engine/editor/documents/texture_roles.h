@@ -178,4 +178,18 @@ inline bool texture_arg_gates(int32_t loader_arg) { return loader_arg > 0 && (lo
 // name (a foliage or char map), a cube map.
 bool texture_role_renderer_loader(TextureRoleId role, renderer::TextureLoader &out);
 
+// What a model texture row says of its use beyond its type (FieldUse::use_context, GraphEdge::use_context):
+// its slot, its flags (the flipbook bit), its material's flags (alpha test, inverted) and alpha-test
+// reference, packed a byte each; a slot of 0 (none is) for no row.
+struct TextureRowContext {
+	uint8_t slot = 0, row_flags = 0, material_flags = 0, alpha_ref = 0;
+};
+inline uint32_t pack_texture_row_context(const TextureRowContext &row) {
+	return uint32_t(row.slot) | uint32_t(row.row_flags) << 8 | uint32_t(row.material_flags) << 16 |
+	       uint32_t(row.alpha_ref) << 24;
+}
+inline TextureRowContext unpack_texture_row_context(uint32_t packed) {
+	return {uint8_t(packed), uint8_t(packed >> 8), uint8_t(packed >> 16), uint8_t(packed >> 24)};
+}
+
 } // namespace opennova::editor

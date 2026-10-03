@@ -37,6 +37,9 @@ struct GraphEdge {
 	// texture's role, documents/texture_roles.h texture_role_arg, or the game's loader of it alone,
 	// texture_loader_arg); -1 for none.
 	int32_t loader_arg = -1;
+	// What the record says of the use beyond that (FieldUse::use_context: a model texture row's slot,
+	// flags and its material's alpha test, texture_roles.h); 0 for none.
+	uint32_t use_context = 0;
 	// In a text document (ADR 0046 S13 D9), where the name is written: its line and column
 	// (1-based) and its length, which a rename rewrites and a Go to opens the document at; a line
 	// of 0 for a reference of a record (TextDocument, TextReference).

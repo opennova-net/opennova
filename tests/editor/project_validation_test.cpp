@@ -179,13 +179,15 @@ struct PinnedRows {
 // projects less their cross-table rows, which the review dropped). S13 D10 numbers a model's
 // records in the table shape's one order (RecordIds: a LOD's part animations right after the LOD,
 // where the model numbered every list first), which moved the fixtures' model rows' child ids and
-// nothing else (the same rows with the model's former order give the former digest, 57832e00).
+// nothing else (the same rows with the model's former order give the former digest, 57832e00). S18
+// adds the stylesheet projects' one texture finding: their art/logo.tga holds no TGA header, which the
+// game cannot load (texture.unloadable; the former rows gave 8a3d7521 and 626d6c86).
 static int test_rows_as_before() {
 	const PinnedRows pinned[] = {
 		{ "fixtures", fixture_files, false, 238, 0xc276a18f5cad4241ull },
-		{ "styles", style_files, false, 14, 0x8a3d7521d4f40d63ull },
+		{ "styles", style_files, false, 15, 0xe39ad4219139a453ull },
 		{ "items", item_files, false, 4, 0xc8ca7a0734b9eac6ull },
-		{ "open", style_and_item_files, true, 18, 0x626d6c867164ff5aull },
+		{ "open", style_and_item_files, true, 19, 0x80eb2caf43356608ull },
 	};
 	for (const PinnedRows &pin : pinned) {
 		Project project;
@@ -223,9 +225,10 @@ static int test_what_a_validation_reads() {
 				{ project.paths, project.document, project.scan, open }, graph, cache);
 	};
 	const ValidationStats &stats = cache.stats();
-	// Three stylesheets, a menu, two item tables, a weapon table and an ammo table.
+	// Three stylesheets, a menu, two item tables, a weapon table, an ammo table and a texture (S18: a
+	// texture's own findings are its file's).
 	const size_t files = validation_files(project.scan).size();
-	TEST_EXPECT(files == 8);
+	TEST_EXPECT(files == 9);
 	validate();
 	TEST_EXPECT(stats.passes == 1 && stats.files_validated == files &&
 			stats.files_loaded == files && stats.files_reused == 0 && stats.files_failed == 0);
@@ -361,8 +364,9 @@ static int test_use_check_table() {
 		TEST_EXPECT(row->kind == static_cast<AssetKind>(k) && row->check &&
 				document_type_for(row->kind));
 	}
-	// The stylesheet's unused-variable check and the mission's pool check (S14).
-	TEST_EXPECT(rows == 2 && use_check(AssetKind::MenuStyle) && use_check(AssetKind::Mission) && !use_check(AssetKind::ItemDefs));
+	// The textures' check (S18), the stylesheet's unused-variable check and the mission's pool check (S14).
+	TEST_EXPECT(rows == 3 && use_check(AssetKind::Texture) && use_check(AssetKind::MenuStyle) && use_check(AssetKind::Mission) &&
+	            !use_check(AssetKind::ItemDefs));
 	return 0;
 }
 
@@ -518,8 +522,8 @@ static int test_item_ids_within_a_table() {
 }
 
 // The retail leg (OPENNOVA_JO_DIR): the install's files of every kind a document type opens and
-// validates (its catalogs, string tables, menus, stylesheet, models, clips and animation tables; a
-// texture's type makes no findings of a file of its own) exported into a
+// validates (its catalogs, string tables, menus, stylesheet, models, clips and animation tables; its
+// textures are the texture checks' retail leg's) exported into a
 // project and validated: every file's own findings made once, and no closed file's document
 // alive after (the models' geometry included); nothing made again while nothing changed; an edit
 // of the open item table validates that table alone and the graph extracts it alone.
@@ -541,10 +545,10 @@ static int test_retail_validation() {
 		const std::string &name = location.logical_name;
 		if (opennova::strutil::ends_with_icase(name, ".pff"))
 			continue;
-		// A type whose files take no findings of their own (a texture's) is no file the validation reads.
+		// The install's textures are the texture checks' retail leg's (editor_texture_roles): left out here.
 		const AssetKind kind = origin.file_kind(name);
 		const DocumentType *type = document_type_for(kind);
-		if (!type || !validates_files(*type))
+		if (!type || type->id == DocumentTypeId::Texture)
 			continue;
 		std::vector<uint8_t> bytes;
 		if (!origin.read(name, bytes))
@@ -594,7 +598,7 @@ static int test_retail_validation() {
 		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 		std::vector<Diagnostic> uses;
 		const auto checks_start = std::chrono::steady_clock::now();
-		run_use_checks(graph, cache, uses);
+		run_use_checks(graph, cache, { project.paths, project.document, project.scan, open }, uses);
 		std::printf("retail: the rows composed again over %zu missions, nothing moved: %zu in %.2f ms, the use checks' "
 				"%zu in %.2f ms\n",
 				missions, composed, ms, uses.size(),

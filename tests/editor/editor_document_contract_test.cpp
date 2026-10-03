@@ -393,11 +393,23 @@ std::vector<uint8_t> mission_with_runs_reordered(const std::vector<uint8_t> &min
 	return out;
 }
 
+// A 2 x 2 true-colour TGA whose header says its first row is the top one.
+std::vector<uint8_t> top_first_tga() {
+	std::vector<uint8_t> out(18, 0);
+	out[2] = 2; // true colour
+	out[12] = 2;
+	out[14] = 2;
+	out[16] = 32;
+	out[17] = 0x28; // 8 alpha bits, the first row the top one
+	out.resize(out.size() + 2 * 2 * 4, 0xFF);
+	return out;
+}
+
 // A file of each type whose fixture above makes no finding, holding a flaw the type's
 // validate_file reports (a key twice in a section, two screens of one NAME, a CTRL register the
 // engine does not know, a clip at 25 frames per second, a slot named twice, a mission's runs out of
-// its events' order): what the per-type findings clause reads with the fixtures, through
-// check_validate_file alone.
+// its events' order, a TGA whose header says its rows run top first): what the per-type findings clause
+// reads with the fixtures, through check_validate_file alone.
 std::vector<Fixture> flawed_files(const std::string &repo) {
 	const auto file = [&](const char *relative) { return test_io::read_file(repo + "/fixtures/" + relative); };
 	const std::string pop = "<ACTION type=\"POP_SCREEN\"></ACTION>";
@@ -415,6 +427,8 @@ std::vector<Fixture> flawed_files(const std::string &repo) {
 	        {AssetKind::MusicScript, "handled.bin", music_with_a_handler(file("mus/synth_gamemus.bin"))},
 	        {AssetKind::Credits, "spaced.kda", file("cbin/synth_nlist.kda")},
 	        {AssetKind::Shader, "plain.fx", text_bytes("float4 main() : COLOR { return 0; }\r\n")},
+	        // A 2 x 2 true-colour TGA, its origin bit set (S18: texture.tga_upside_down).
+	        {AssetKind::Texture, "top_first.tga", top_first_tga()},
 	};
 }
 
@@ -1709,9 +1723,8 @@ int main() {
 		}
 		// Per type: a validate_file that never took its own documents (its cast to another type)
 		// would make nothing over its files. The text type makes none (S13 D9: its files are read
-		// through readers the editor does not model), its table empty; nor does the texture type yet
-		// (S18: what the game makes of a texture is its role's), its table empty.
-		const bool silent_type = type->id == DocumentTypeId::Text || type->id == DocumentTypeId::Texture;
+		// through readers the editor does not model), its table empty.
+		const bool silent_type = type->id == DocumentTypeId::Text;
 		check(counts.findings > 0 || (silent_type && type->findings().count == 0), type->name,
 		      "validate_file makes a finding over the type's files");
 		// Likewise a project check that never read its type's files would keep the clause above

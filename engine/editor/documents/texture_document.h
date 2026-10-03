@@ -28,8 +28,9 @@ public:
 	// The copy a snapshot is (DocumentBase::snapshot).
 	TextureDocument(const TextureDocument &other) = default;
 
-	// The texture as the game reads it (null before a load).
-	const std::shared_ptr<const TextureImage> &image() const { return image_; }
+	// The texture as the game reads it (null before a load): decoded as it is first asked for, so a
+	// validation that reads only its header (validate_texture_file) never decodes its texels.
+	const std::shared_ptr<const TextureImage> &image() const;
 	// The file's bytes as the document read them (decoded as a document's are: the base's).
 	const std::vector<uint8_t> &bytes() const { return bytes_; }
 
@@ -55,12 +56,32 @@ protected:
 
 private:
 	std::vector<uint8_t> bytes_;
-	std::shared_ptr<const TextureImage> image_;
+	bool loaded_ = false;
+	mutable std::shared_ptr<const TextureImage> image_;
 };
 
-// The texture type's row (documents/document_types.cpp): its documents; its file's own findings (none
-// yet: what the game makes of a texture depends on what reads it, its role, S18's design); its fields
-// (none: a texture holds no records); its finding codes (none yet); and its content on the wire, the
+// The texture type's findings (ADR 0046 S18), each on a texture file: its own, what the reader its name
+// picks makes of it whatever uses it (validate_texture_file, from its header: texture_header), and a file
+// of a name its loader passes over (graph/texture_checks). What a use's role asks of the file its loader
+// opens is a finding on the use, the referring file's, whatever its type: the core's texture codes
+// (CoreFinding::Texture*). An error gates (the game draws texels the editor cannot vouch for, or writes
+// past the image); the others are warnings. Each finding says what the game does, its witness cited where
+// it is made.
+enum class TextureFinding {
+	Unloadable,          // texture.unloadable: the reader its name picks refuses it
+	TgaUnfilled,         // texture.tga_unfilled (an error): a TGA form the reader leaves unset
+	TgaZeroed,           // texture.tga_zeroed: a TGA form the reader zeroes
+	TgaUpsideDown,       // texture.tga_upside_down: rows top first, the reader takes them bottom up
+	TgaColourMapSkipped, // texture.tga_colour_map_skipped: a true-colour TGA's colour map read as texels
+	PcxOverrun,          // texture.pcx_overrun (an error): an odd-width 8-bit PCX's rows overrun
+	NotRead,             // texture.not_read: a file its loader passes over for another of the name
+	kCount,
+};
+const FindingCodeRow &finding_code(TextureFinding code);
+
+// The texture type's row (documents/document_types.cpp): its documents; its file's own findings (the
+// reader faults its header shows, whatever reads it: TextureFinding's first rows); its fields (none: a
+// texture holds no records); its finding codes (TextureFinding's); and its content on the wire, the
 // document query's `texture`: the reader, whether the game loads it and why not, whether its texels
 // are decoded, its sides, levels, palette size, alpha and facts.
 std::unique_ptr<DocumentBase> make_texture_document();

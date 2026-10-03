@@ -214,7 +214,7 @@ int test_document() {
 	TEST_EXPECT(snapshot->is_snapshot() && snapshot->identity() == made->identity() &&
 	            snapshot->serialize().text == made->serialize().text &&
 	            dynamic_cast<const TextureDocument *>(snapshot.get())->image() == texture->image());
-	TEST_EXPECT(type->validate_file(*made).empty() && type->findings().count == 0);
+	TEST_EXPECT(type->validate_file(*made).empty() && type->findings().count == size_t(TextureFinding::kCount));
 	const JsonValue content = type->content_json(*made);
 	TEST_EXPECT(content.get_string("reader", "") == "tga" && content.get_number("width", 0) == 4 && content.get_bool("loads", false));
 	// A file that does not decode still opens: the image says why the game cannot load it.

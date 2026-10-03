@@ -88,4 +88,31 @@ std::shared_ptr<const TextureImage> decode_texture(const std::string &name, cons
 // The texel at (x, y) of `level`, R, G, B, A; false off the level.
 bool texture_texel(const TextureImage &image, size_t level, uint32_t x, uint32_t y, uint8_t rgba[4]);
 
+// What a texture file's header says, read without decoding its texels (ADR 0046 S18: the reader faults
+// a file's own validation reports, the sizes its uses' checks read): the reader its name picks, whether
+// that reader takes the header (`read`, else `refusal`), the sides, and each reader's own fields (a
+// TGA's image type, depth, descriptor and colour map, unpacked from BFC1 first as the models' reader
+// does; an 8-bit PCX's bits, planes and bytes a line; a DDS's format and levels), and whether the stored
+// form holds an alpha channel.
+struct TextureHeader {
+	TextureReader reader = TextureReader::None;
+	bool read = false;
+	std::string refusal;
+	uint32_t width = 0, height = 0;
+	bool bfc1 = false;
+	// TGA (reader Tga)
+	uint8_t tga_type = 0, tga_bits = 0, tga_descriptor = 0, tga_map_type = 0, tga_map_entry_bits = 0;
+	uint16_t tga_map_length = 0;
+	// PCX (reader Pcx)
+	uint8_t pcx_bits = 0, pcx_planes = 0;
+	uint16_t pcx_bytes_per_line = 0;
+	// DDS (reader Dds)
+	std::string dds_format;
+	uint32_t dds_levels = 0;
+	bool alpha = false;
+};
+TextureHeader texture_header(const std::string &name, const std::vector<uint8_t> &bytes);
+// The same read by a given reader whatever the name (a terrain's colour map through the TGA reader).
+TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t> &bytes);
+
 } // namespace opennova::editor

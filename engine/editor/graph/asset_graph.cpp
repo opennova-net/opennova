@@ -42,7 +42,7 @@ bool same_reading(const GraphEdge &a, const GraphEdge &b) {
 	return a.source == b.source && a.record == b.record && a.record_key == b.record_key && a.locator == b.locator &&
 			a.address == b.address && a.field == b.field && a.kind == b.kind &&
 			a.value == b.value && a.scope == b.scope && a.rewritable == b.rewritable &&
-			a.through == b.through && a.loader_arg == b.loader_arg &&
+			a.through == b.through && a.loader_arg == b.loader_arg && a.use_context == b.use_context &&
 			a.span.line == b.span.line && a.span.column == b.span.column &&
 			a.span.length == b.span.length && a.fallback == b.fallback &&
 			a.scopes_after == b.scopes_after && a.optional == b.optional && a.scope_alternate == b.scope_alternate &&

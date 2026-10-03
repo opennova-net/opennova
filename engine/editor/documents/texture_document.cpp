@@ -1,5 +1,6 @@
 #include <editor/documents/texture_document.h>
 
+#include <iterator>
 #include <utility>
 
 namespace opennova::editor {
@@ -9,8 +10,38 @@ namespace {
 using io::JsonValue;
 using io::json_number;
 using io::json_string;
+using F = TextureFinding;
+
+constexpr FindingCodeRow code(const char *token) {
+	FindingCodeRow row;
+	row.token = token;
+	return row;
+}
+
+constexpr FindingCodeEntry<F> kFindingEntries[] = {
+	{F::Unloadable, code("texture.unloadable")},
+	{F::TgaUnfilled, code("texture.tga_unfilled")},
+	{F::TgaZeroed, code("texture.tga_zeroed")},
+	{F::TgaUpsideDown, code("texture.tga_upside_down")},
+	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
+	{F::PcxOverrun, code("texture.pcx_overrun")},
+	{F::NotRead, code("texture.not_read")},
+};
+static_assert(std::size(kFindingEntries) == size_t(F::kCount), "a row per texture finding");
+static_assert(finding_entries_well_formed(kFindingEntries), "the texture findings in their enum's order, a token each");
+constexpr auto kFindingRows = finding_rows(kFindingEntries, FindingGroup::Textures);
+static_assert(finding_rows_well_formed(kFindingRows), "every row of the table takes its group");
 
 } // namespace
+
+const FindingCodeRow &finding_code(TextureFinding code) {
+	return kFindingRows[static_cast<size_t>(code)];
+}
+
+const std::shared_ptr<const TextureImage> &TextureDocument::image() const {
+	if (loaded_ && !image_) image_ = decode_texture(path(), bytes_);
+	return image_;
+}
 
 bool TextureDocument::changes_since(uint64_t load_generation, uint64_t revision, ChangeSet &out) const {
 	// One state per load: the one a caller read is this one exactly when it read this load.
@@ -45,7 +76,8 @@ bool TextureDocument::read_source(const std::vector<uint8_t> &decoded, bool adop
 	// document that does not open.
 	if (!adopt) return true;
 	bytes_ = decoded;
-	image_ = decode_texture(path(), bytes_);
+	loaded_ = true;
+	image_.reset();
 	return true;
 }
 
@@ -54,8 +86,72 @@ std::unique_ptr<DocumentBase> make_texture_document() {
 }
 
 std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
-	(void)document;
-	return {};
+	std::vector<Diagnostic> out;
+	const auto *texture = dynamic_cast<const TextureDocument *>(&document);
+	if (!texture) return out;
+	const auto add = [&](TextureFinding code, DiagnosticSeverity severity, const std::string &message) {
+		out.push_back(make_finding(finding_code(code), severity, message, document.path()));
+	};
+	const TextureHeader header = texture_header(document.path(), texture->bytes());
+	if (!header.read) {
+		add(F::Unloadable, DiagnosticSeverity::Warning, "The game cannot load it: " + header.refusal);
+		return out;
+	}
+	switch (header.reader) {
+	case TextureReader::Tga: {
+		// What the game's TGA reader makes of each image type [orig: CTerrainTileData_LoadTGAFromArchive @
+		// 0x56E570, the switch @ 0x56E6C2], whose decode the menus' reader repeats [orig: CUIImage_LoadTGA @
+		// 0x6647D0].
+		const uint8_t type = header.tga_type, bits = header.tga_bits;
+		const std::string form = "image type " + std::to_string(type) + " at " + std::to_string(bits) + " bits";
+		const bool known = type == 1 || type == 2 || type == 3 || type == 9 || type == 10 || type == 11;
+		if (!known || (type == 3 && bits != 8)) {
+			add(F::TgaUnfilled, DiagnosticSeverity::Error,
+			    "The game's TGA reader has no case for " + form +
+			            ": it leaves the texels as the buffer held them, so the game draws whatever memory held. Save "
+			            "it as a 24- or 32-bit true-colour TGA.");
+		} else if (type == 9 || type == 11 || ((type == 2 || type == 10) && bits != 24 && bits != 32) ||
+		           (type == 1 && header.tga_map_entry_bits != 24)) {
+			add(F::TgaZeroed, DiagnosticSeverity::Warning,
+			    "The game's TGA reader zeroes " +
+			            (type == 1 ? "a colour-mapped TGA whose map is not of 24-bit entries" : form) +
+			            ": the game draws it transparent black. Save it as a 24- or 32-bit true-colour TGA.");
+		}
+		// Rows always taken bottom up, the descriptor's origin bit unread [orig: @ 0x56E995..0x56E9EA; the
+		// menus' @ 0x66499D; the particles' @ 0x5F7FE8].
+		if (header.tga_descriptor & 0x20)
+			add(F::TgaUpsideDown, DiagnosticSeverity::Warning,
+			    "Its rows are stored top first (its header's origin bit), but the game's TGA reader takes every file "
+			    "bottom up: the game draws it upside down. Save it with the bottom row first.");
+		// The texels read from byte 18 plus the ID's length whatever the colour map holds [orig: @ 0x56E6BA].
+		if ((type == 2 || type == 3 || type == 10) && header.tga_map_type != 0 && header.tga_map_length > 0)
+			add(F::TgaColourMapSkipped, DiagnosticSeverity::Warning,
+			    "It carries a colour map of " + std::to_string(header.tga_map_length) +
+			            " entries, which the game's TGA reader does not skip: it reads the texels from the map's start, "
+			            "shifted. Save it without a colour map.");
+		break;
+	}
+	case TextureReader::Pcx:
+		// The game's PCX reader takes 8 bits a plane alone (any other depth fails the load), reads three
+		// planes as 24-bit colour and any other count as 8-bit indices, and writes each decoded row of an
+		// indexed image's bytes-a-line into a buffer of the image's width [orig: Texture_LoadPCXFromPFF32 @
+		// 0x56EA30, the depth test @ 0x56EABC, the 24-bit path @ 0x56EB31, the rows @ 0x56ED70..0x56EDFC].
+		if (header.pcx_bits != 8) {
+			add(F::Unloadable, DiagnosticSeverity::Warning,
+			    "The game cannot load it: its PCX reader takes 8 bits a plane alone (this one is " +
+			            std::to_string(header.pcx_bits) + " bits a plane).");
+		} else if (header.pcx_planes != 3 && header.pcx_bytes_per_line != header.width) {
+			add(F::PcxOverrun, DiagnosticSeverity::Error,
+			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
+			            " texels (an odd width): the game's PCX reader writes each row's extra byte into the next row and "
+			            "the last past its buffer. Make its width even.");
+		}
+		break;
+	case TextureReader::Dds:
+	case TextureReader::Png:
+	case TextureReader::None: break;
+	}
+	return out;
 }
 
 const std::vector<FieldSchema> &texture_fields(NodeKind kind) {
@@ -65,7 +161,7 @@ const std::vector<FieldSchema> &texture_fields(NodeKind kind) {
 }
 
 FindingTable texture_finding_codes() {
-	return {};
+	return {kFindingRows.data(), kFindingRows.size()};
 }
 
 JsonValue texture_image_json(const TextureImage &image) {

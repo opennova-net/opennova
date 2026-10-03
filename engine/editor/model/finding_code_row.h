@@ -75,6 +75,7 @@ enum class FindingGroup {
 	Credits,
 	Shaders,
 	Missions,
+	Textures,
 	kCount
 };
 inline constexpr size_t kFindingGroupCount = static_cast<size_t>(FindingGroup::kCount);
@@ -215,7 +216,9 @@ inline constexpr const char *kRewriteDropsIgnoredInput = "without the input the 
 
 // The editor's own codes, which no document type declares: the project, its files and their names,
 // the requirements, the documents' lifecycle and edits, the graph, imports, the build, Play,
-// renames, the settings, the session's operations and the unsaved-changes prompt.
+// renames, the settings, the session's operations and the unsaved-changes prompt; and what a texture
+// use asks of the file its loader opens (ADR 0046 S18, graph/texture_checks), a finding on the use
+// (the referring file's field, of any type) or on a file the game opens by name.
 enum class CoreFinding {
 	AssetKindUnknown,
 	AssetNameDuplicate,
@@ -364,6 +367,17 @@ enum class CoreFinding {
 	RequirementUnknown,
 	RequirementUnknownFile,
 	RequirementWrongKind,
+	TextureAlphaNotLoaded,
+	TextureColourMapSize,
+	TextureFoliageMapOverrun,
+	TextureFoliageMapShape,
+	TextureHeightWrap,
+	TextureLoadingScreenSize,
+	TextureMfdNotPowerOfTwo,
+	TextureNormalMapHalved,
+	TextureParticleTooBig,
+	TextureTileAtlasCells,
+	TextureWrongReader,
 	UnsavedDiscard,
 	UnsavedNone,
 	ViewportRefused,

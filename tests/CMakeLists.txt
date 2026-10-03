@@ -4198,6 +4198,14 @@ target_link_libraries(editor_texture_uses_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_uses_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_uses COMMAND editor_texture_uses_test)
 
+# ADR 0046 S18, the texture checks: a texture file's own findings from its header and its uses' (the
+# texture use check, graph/texture_checks) over a minted project, which refuse a build; the retail leg
+# (OPENNOVA_JO_DIR) every shipped texture's own findings and every terrain's colour map, none refusing one.
+add_executable(editor_texture_checks_test editor/texture_checks_test.cpp)
+target_link_libraries(editor_texture_checks_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(editor_texture_checks COMMAND editor_texture_checks_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

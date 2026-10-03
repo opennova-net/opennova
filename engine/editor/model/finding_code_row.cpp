@@ -216,6 +216,21 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	// [orig: TextResource_FixupPointers @ 0x75d050]): listed, gating where the row is the boot's
 	// refusal (RES_FATAL), whose table the boot then runs on wild pointers.
 	{ C::RequirementWrongKind, listed(code("requirement.wrong_kind", G::RequiredFiles, F::WrongKind)) },
+	// What a texture's use asks of the file its loader opens (ADR 0046 S18, graph/texture_checks: each
+	// finding cites its witness). An error of one gates: a terrain's colour map read past its texels, a
+	// foliage map read past its rows, a terrain map the mission needs that its loader cannot read (the
+	// mission aborts); the others are warnings and notes.
+	{ C::TextureAlphaNotLoaded, code("texture.alpha_not_loaded", G::Textures) },
+	{ C::TextureColourMapSize, code("texture.colormap_size", G::Textures) },
+	{ C::TextureFoliageMapOverrun, code("texture.foliage_map_overrun", G::Textures) },
+	{ C::TextureFoliageMapShape, code("texture.foliage_map_shape", G::Textures) },
+	{ C::TextureHeightWrap, code("texture.height_wrap", G::Textures) },
+	{ C::TextureLoadingScreenSize, code("texture.loading_screen_size", G::Textures) },
+	{ C::TextureMfdNotPowerOfTwo, code("texture.mfd_not_pow2", G::Textures) },
+	{ C::TextureNormalMapHalved, code("texture.normal_map_halved", G::Textures) },
+	{ C::TextureParticleTooBig, code("texture.particle_too_big", G::Textures) },
+	{ C::TextureTileAtlasCells, code("texture.tile_atlas_cells", G::Textures) },
+	{ C::TextureWrongReader, code("texture.wrong_reader", G::Textures) },
 	{ C::UnsavedDiscard, code("unsaved.discard", G::UnsavedChanges) },
 	{ C::UnsavedNone, code("unsaved.none", G::UnsavedChanges) },
 	{ C::ViewportRefused, code("viewport.refused", G::Viewports) },

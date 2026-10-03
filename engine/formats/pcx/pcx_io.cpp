@@ -462,7 +462,11 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 		return false;
 	}
 
-	const int bytes_per_line = image.width + (image.width & 1);
+	// A row of exactly the image's width, odd or even: the game's readers decode BytesPerLine bytes a row at
+	// a stride of the width, so a padded odd row spills into the next and the last past the buffer [orig:
+	// Texture_LoadPCXFromPFF32 @ 0x56ED70..0x56EDFC; load_pcx_to_argb @ 0x664cc0], and every PCX the game
+	// ships holds rows of its width.
+	const int bytes_per_line = image.width;
 	out.reserve(static_cast<size_t>(128 + image.height * bytes_per_line + 769));
 
 	uint8_t header[128] = {};
@@ -487,9 +491,6 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	for (int y = 0; y < image.height; ++y) {
 		for (int x = 0; x < image.width; ++x) {
 			row[static_cast<size_t>(x)] = image.indices[static_cast<size_t>(y * image.width + x)];
-		}
-		if (bytes_per_line > image.width) {
-			row[static_cast<size_t>(image.width)] = 0;
 		}
 
 		int pos = 0;

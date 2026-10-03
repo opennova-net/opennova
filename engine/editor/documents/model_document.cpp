@@ -6,6 +6,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/texture_roles.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <runtime/renderer/material_descriptor.h>
@@ -147,9 +148,22 @@ void ModelDocument::refine_field(const NodeAddress &address, FieldUse &use) cons
 		else if (named == IndexReference::Frame || (named == IndexReference::Register && swapped))
 			use.reference = record_reference(named);
 	}
-	// A texture row's name loads the file its type's loader picks (reference_file_candidates).
-	if (use.reference == ReferenceKind::Texture && at.record.kind == node_kind(ModelKind::Texture))
-		use.loader_arg = at.record.as<ThreediMaterialTexture>().type;
+	// A texture row's name loads the file its type's loader picks (reference_file_candidates); its slot,
+	// its flags and its material's alpha test say what the use makes of it (ADR 0046 S18, the texture
+	// checks: TextureRowContext).
+	if (use.reference == ReferenceKind::Texture && at.record.kind == node_kind(ModelKind::Texture)) {
+		const ThreediMaterialTexture &texture = at.record.as<ThreediMaterialTexture>();
+		use.loader_arg = texture.type;
+		TextureRowContext context;
+		context.slot = texture.slot;
+		context.row_flags = texture.flags;
+		if (!at.is_row() && at.step().owner.kind == node_kind(ModelKind::Material)) {
+			const ThreediMaterial &material = at.step().owner.as<ThreediMaterial>();
+			context.material_flags = material.material_flags;
+			context.alpha_ref = material.alpha_test_value_byte;
+		}
+		use.use_context = pack_texture_row_context(context);
+	}
 	// A user point is looked up on the model an item names by its file (the item's graphic).
 	if (use.defines == ReferenceKind::UserPoint)
 		use.scope = strutil::to_upper(basename_of(path()));

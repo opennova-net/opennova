@@ -374,4 +374,96 @@ bool texture_texel(const TextureImage &image, size_t level, uint32_t x, uint32_t
 	return true;
 }
 
+TextureHeader texture_header(const std::string &name, const std::vector<uint8_t> &bytes) {
+	return texture_header_as(texture_reader_for(name), bytes);
+}
+
+TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t> &bytes) {
+	TextureHeader out;
+	out.reader = reader;
+	switch (out.reader) {
+	case TextureReader::Tga: {
+		// Unpacked from BFC1 first, as the models' reader does (read_tga).
+		std::vector<uint8_t> unpacked;
+		const std::vector<uint8_t> *data = &bytes;
+		if (bfc1::bfc1_is_bfc1(bytes.data(), bytes.size())) {
+			uint32_t size = 0;
+			if (bfc1::bfc1_uncompressed_size(bytes.data(), bytes.size(), &size) == 0) {
+				unpacked.resize(size);
+				size_t made = unpacked.size();
+				if (bfc1::bfc1_decompress(bytes.data(), bytes.size(), unpacked.data(), &made) == 0) {
+					unpacked.resize(made);
+					data = &unpacked;
+					out.bfc1 = true;
+				}
+			}
+			if (!out.bfc1) {
+				out.refusal = "Its BFC1 packing does not unpack.";
+				return out;
+			}
+		}
+		tga::TgaHeader header;
+		if (!tga::tga_read_header(data->data(), data->size(), header)) {
+			out.refusal = "The TGA header is cut short.";
+			return out;
+		}
+		out.read = true;
+		out.width = uint32_t(std::max<int>(0, header.width));
+		out.height = uint32_t(std::max<int>(0, header.height));
+		out.tga_type = header.image_type;
+		out.tga_bits = header.bits;
+		out.tga_descriptor = header.descriptor;
+		out.tga_map_type = header.colour_map_type;
+		out.tga_map_length = header.map_length;
+		out.tga_map_entry_bits = header.map_entry_bits;
+		out.alpha = (header.image_type == 2 || header.image_type == 10) && header.bits == 32;
+		return out;
+	}
+	case TextureReader::Pcx:
+		// The header's fields (the 128 bytes before the texels): bits a plane @ 3, the window @ 4..11,
+		// the planes @ 65, the bytes a line @ 66.
+		if (bytes.size() < 128 || bytes[0] != 0x0A) {
+			out.refusal = "The PCX header is cut short or is not one.";
+			return out;
+		}
+		out.read = true;
+		out.pcx_bits = bytes[3];
+		out.pcx_planes = bytes[65];
+		out.pcx_bytes_per_line = uint16_t(bytes[66] | bytes[67] << 8);
+		out.width = uint32_t((bytes[8] | bytes[9] << 8) - (bytes[4] | bytes[5] << 8) + 1);
+		out.height = uint32_t((bytes[10] | bytes[11] << 8) - (bytes[6] | bytes[7] << 8) + 1);
+		return out;
+	case TextureReader::Dds: {
+		dds::DdsImage image;
+		std::string error;
+		if (is_png(bytes)) {
+			// D3DX reads a PNG under a .dds name as the PNG (read_dds).
+			out.read = png_header_size(bytes, out.width, out.height);
+			out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
+			return out;
+		}
+		if (!dds::dds_read(bytes.data(), bytes.size(), image, error) || !image.loads) {
+			out.refusal = error.empty() ? image.refusal : error;
+			return out;
+		}
+		out.read = true;
+		out.width = image.header.width;
+		out.height = image.header.height;
+		out.dds_format = image.format.name;
+		out.dds_levels = uint32_t(image.levels.size());
+		const std::string format = image.format.name;
+		// A DXT1 block may hold a transparent texel (its three-colour mode), so it counts as holding one.
+		out.alpha = format.rfind("DXT", 0) == 0 || format.find('A') != std::string::npos;
+		return out;
+	}
+	case TextureReader::Png:
+		out.read = png_header_size(bytes, out.width, out.height);
+		if (!out.read) out.refusal = "The PNG header is cut short or is not one.";
+		out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
+		return out;
+	case TextureReader::None: out.refusal = "No texture reader of the game takes a file of this name."; break;
+	}
+	return out;
+}
+
 } // namespace opennova::editor

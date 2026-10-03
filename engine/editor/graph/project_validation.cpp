@@ -128,7 +128,7 @@ std::vector<Diagnostic> project_rows(
 	for (const AssetEntry *asset : validation_files(input.scan))
 		if (const std::vector<Diagnostic> *own = cache.kept_findings(asset->relative_path))
 			out.insert(out.end(), own->begin(), own->end());
-	run_use_checks(graph, cache, out);
+	run_use_checks(graph, cache, input, out);
 	const std::vector<Diagnostic> &references = graph.diagnostics();
 	out.insert(out.end(), references.begin(), references.end());
 	return out;

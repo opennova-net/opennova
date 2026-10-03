@@ -52,6 +52,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::Credits, "credits", "Credits" },
 	{ G::Shaders, "shader", "Shaders" },
 	{ G::Missions, "mission", "Missions" },
+	{ G::Textures, "texture", "Textures" },
 };
 
 constexpr bool groups_well_formed() {

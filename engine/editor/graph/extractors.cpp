@@ -145,6 +145,7 @@ void extract_record(const Document &document, const NodeAddress &address, Extrac
 		edge.record_key = identity;
 		edge.address = address;
 		edge.loader_arg = field.loader_arg;
+		edge.use_context = field.use_context;
 		// A text that is one %NAME% stands for the variable's value: a use of the variable alone
 		// (FieldUse::variable_through), which Rename rewrites with it.
 		if (field.reference == ReferenceKind::None) edge.through = field.variable_through;
