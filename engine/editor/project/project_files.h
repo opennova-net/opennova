@@ -18,11 +18,25 @@ namespace opennova::editor {
 // either the old file or the new one). `error` carries the OS reason on failure. Every
 // one of them calls the system through system_path, so none is bound by MAX_PATH.
 
-// The path the system's own file calls take for `path` (ADR 0046 S13 A8): on Windows an absolute
-// path in its extended-length form (`\\?\C:\...`, a share's `\\?\UNC\server\share\...`), which
-// MAX_PATH does not bound, so a build under a deep folder writes as one under a short one does;
-// elsewhere the path as it is. For the call alone: a path the editor keeps, compares or shows
-// stays as it was given.
+// Every path the editor keeps is a UTF-8 string: what the Shell hands it (String.utf8()), what it
+// shows, stores and compares, and what the process seam widens for a child (CP_UTF8). On Windows
+// std::filesystem's narrow conversions read and write the ANSI code page instead (a path made from
+// a std::string, a std::string joined with operator/, string(), generic_string()), so a project
+// under a folder named outside ASCII (C:/Users/José/...) was made and read in another folder, and
+// a name the code page cannot hold threw. Every conversion between the two goes through these,
+// base/io/os_path.h's UTF-8 ones: path_of is the UTF-8 string as a path, lexically, as spelled
+// (system_path is the one a system call takes); utf8_of a path as UTF-8, '/'-separated, without
+// a \\?\ prefix; join_path the two joined as std::filesystem joins them. Elsewhere a path's
+// bytes are its name and they are plain conversions.
+std::filesystem::path path_of(const std::string &utf8);
+std::string utf8_of(const std::filesystem::path &path);
+std::string join_path(const std::string &dir, const std::string &name);
+
+// The path the system's own file calls take for the UTF-8 `path` (ADR 0046 S13 A8): on Windows an
+// absolute path in its extended-length form (`\\?\C:\...`, a share's `\\?\UNC\server\share\...`),
+// which MAX_PATH does not bound, so a build under a deep folder writes as one under a short one
+// does; elsewhere the path as it is. For the call alone: a path the editor keeps, compares or
+// shows stays as it was given.
 std::filesystem::path system_path(const std::string &path);
 
 bool read_file_bytes(const std::string &path, std::vector<uint8_t> &out, std::string &error);

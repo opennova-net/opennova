@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
-#include <exception>
 #include <filesystem>
 #include <map>
 #include <set>
@@ -35,7 +34,7 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 	std::vector<ImportChoice> sources;
 	for (const std::string &path : paths) {
 		std::error_code ec;
-		if (!fs::is_regular_file(path, ec)) {
+		if (!fs::is_regular_file(system_path(path), ec)) {
 			diagnostics.push_back(make_finding(CoreFinding::ImportNotFound, DiagnosticSeverity::Error,
 			                                  "File not found: " + path));
 		} else if (strutil::ends_with_icase(path, ".pff")) {
@@ -78,17 +77,14 @@ bool install_loose_kind(AssetKind kind) {
 std::vector<std::string> list_install_loose_files(const std::string &retail_root) {
 	std::vector<std::string> names;
 	std::error_code ec;
-	fs::directory_iterator it(retail_root, ec);
+	fs::directory_iterator it(system_path(retail_root), ec);
 	for (; !ec && it != fs::directory_iterator(); it.increment(ec)) {
 		std::error_code status;
-		try {
-			if (!it->is_regular_file(status)) continue;
-			const std::string name = it->path().filename().string();
-			// The kinds the game ships loose, never a player's own file beside them.
-			if (install_loose_kind(classify_asset(name, nullptr)) && !is_player_file(name)) names.push_back(name);
-		} catch (const std::exception &) {
-			// A name the narrow encoding cannot carry is no file the game ships.
-		}
+		if (!it->is_regular_file(status)) continue;
+		// Its name as UTF-8, whatever the code page (project_files.h, utf8_of).
+		const std::string name = utf8_of(it->path().filename());
+		// The kinds the game ships loose, never a player's own file beside them.
+		if (install_loose_kind(classify_asset(name, nullptr)) && !is_player_file(name)) names.push_back(name);
 	}
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
 		return normalized_logical_name(a) < normalized_logical_name(b);
@@ -104,7 +100,7 @@ bool read_install_file(const Vfs &game, const std::string &retail_root, const st
 	for (const std::string &loose : list_install_loose_files(retail_root)) {
 		if (normalized_logical_name(loose) != wanted) continue;
 		std::string error;
-		return read_file_bytes((fs::path(retail_root) / loose).generic_string(), out, error);
+		return read_file_bytes(join_path(retail_root, loose), out, error);
 	}
 	return false;
 }
@@ -166,7 +162,7 @@ std::vector<std::string> list_retail_file_names(const std::string &retail_root, 
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {
 	if (const AssetEntry *prior = existing.find(name)) return prior->relative_path;
-	return (fs::path(asset_kind_row(kind).folder) / name).generic_string();
+	return join_path(asset_kind_row(kind).folder, name);
 }
 
 namespace {
@@ -271,7 +267,7 @@ public:
 				// goes before this import stages its own.
 				if (!cleaned_) {
 					std::error_code cleaned;
-					fs::remove_all(paths_.staging_dir, cleaned);
+					fs::remove_all(system_path(paths_.staging_dir), cleaned);
 					cleaned_ = true;
 				}
 				// The project's files as they are now, the step's bytes its own.
@@ -448,7 +444,7 @@ private:
 			const AssetEntry *prior = existing_.find(output.name);
 			if (prior && !replace_existing_) {
 				std::vector<uint8_t> held;
-				if (read_file_bytes((fs::path(paths_.root) / prior->relative_path).generic_string(), held, io_error) &&
+				if (read_file_bytes(join_path(paths_.root, prior->relative_path), held, io_error) &&
 				    held == output.bytes)
 					continue;
 				refuse(CoreFinding::ImportExists, output.name + " already exists; select Replace existing files to replace it.",
@@ -456,7 +452,7 @@ private:
 				continue;
 			}
 			const std::string relative = import_destination(existing_, output.name, kind);
-			if (!check_project_file_name(paths_.root, fs::path(relative).parent_path().generic_string(), output.name, kind,
+			if (!check_project_file_name(paths_.root, utf8_of(path_of(relative).parent_path()), output.name, kind,
 			                             problem, message)) {
 				refuse(name_refused(problem), message, output.name);
 				continue;
@@ -470,7 +466,7 @@ private:
 			// there stays). Where the record goes must take a file.
 			const Importer *record = nullptr;
 			if (importer) {
-				const fs::path at = fs::path(paths_.root) / (relative + kImportSidecarSuffix);
+				const fs::path at = system_path(join_path(paths_.root, relative + kImportSidecarSuffix));
 				std::error_code ec;
 				if (fs::exists(at, ec) && !fs::is_regular_file(at, ec)) {
 					refuse(CoreFinding::ImportRecord,
@@ -516,14 +512,14 @@ private:
 				failed_ = true;
 				return false;
 			}
-			stage_ = fs::path(paths_.staging_dir) / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
-			if (!ensure_directory(stage_.generic_string(), io_error))
-				return stage_failed(stage_.generic_string(), io_error, std::string());
+			stage_ = path_of(paths_.staging_dir) / std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+			if (!ensure_directory(utf8_of(stage_), io_error))
+				return stage_failed(utf8_of(stage_), io_error, std::string());
 		}
-		const fs::path destination = fs::path(paths_.root) / output.relative;
+		const fs::path destination = path_of(paths_.root) / path_of(output.relative);
 		for (fs::path &folder : missing_folders(destination.parent_path())) folders_.push_back(std::move(folder));
-		const std::string file = (stage_ / std::to_string(outputs_.size())).generic_string();
-		if (!ensure_directory(destination.parent_path().generic_string(), io_error) ||
+		const std::string file = utf8_of(stage_ / std::to_string(outputs_.size()));
+		if (!ensure_directory(utf8_of(destination.parent_path()), io_error) ||
 		    !write_file_atomic(file, bytes.data(), bytes.size(), io_error))
 			return stage_failed(output.relative, io_error, output.name);
 		cost_ += bytes.size();
@@ -549,12 +545,12 @@ private:
 	// it), the rest is not published, each said.
 	void publish(size_t i) {
 		const Output &output = outputs_[i];
-		const fs::path destination = fs::path(paths_.root) / output.relative;
-		const fs::path record = fs::path(destination.generic_string() + kImportSidecarSuffix);
+		const fs::path destination = path_of(paths_.root) / path_of(output.relative);
+		const fs::path record = path_of(utf8_of(destination) + kImportSidecarSuffix);
 		std::string failed, why;
-		if (!output.staged_record.empty() && !replace_file(output.staged_record, record.generic_string(), why))
+		if (!output.staged_record.empty() && !replace_file(output.staged_record, utf8_of(record), why))
 			failed = output.relative + kImportSidecarSuffix;
-		if (failed.empty() && !replace_file(output.staged, destination.generic_string(), why)) {
+		if (failed.empty() && !replace_file(output.staged, utf8_of(destination), why)) {
 			failed = output.relative;
 			std::error_code ignored;
 			if (!output.staged_record.empty()) fs::remove(record, ignored);

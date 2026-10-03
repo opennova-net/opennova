@@ -78,7 +78,7 @@ void hold_read_only(std::vector<SourceIssue> &issues, const std::string &why) {
 			"This music script " + why + ": the editor shows its MUS text and does not save it."});
 }
 
-bool decode_music_script(const std::vector<uint8_t> &stored, std::string &text,
+bool decode_music_script(const std::string &, const std::vector<uint8_t> &stored, std::string &text,
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error) {
 	mus::MusFile file{};
