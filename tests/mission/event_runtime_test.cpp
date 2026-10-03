@@ -352,6 +352,20 @@ static void test_repeat_cooldown() {
 // signed char. Skipped actions do not skip the input consume, linked-spawn
 // hook, active latch, or repeat cooldown. Exercise the public World tick path.
 // [orig: EventTrigger_UpdateEntry @0x454C92/@0x454CAB and @0x454D01/@0x454D13]
+// Every retail list entry is a live pool-3 marker entity: the walks skip one
+// that is gone (Spectator_CycleTarget @0x4dc267), so the fixture spawns one per
+// entry at the entry's slot.
+static void back_with_markers(World &w) {
+    w.registry.configure_pool(3, static_cast<int>(w.script.waypoints.entries.size()));
+    for (size_t i = 0; i < w.script.waypoints.entries.size(); ++i) {
+        w.script.waypoints.entries[i].node = static_cast<int32_t>(i);
+        world::Entity marker;
+        marker.item_id = 6005;
+        CHECK(w.registry.spawn_at(world::EntityHandle::make(3, static_cast<int>(i)), marker)
+                      .valid());
+    }
+}
+
 static void test_signed_action_count_immediate_and_delayed() {
     struct Case { uint8_t count; int available; int executed; };
     const Case cases[] = {
@@ -367,6 +381,7 @@ static void test_signed_action_count_immediate_and_delayed() {
             world::WaypointEntry marker;
             marker.linked_event = 1; // retail reserves event index zero as no link
             w.script.waypoints.entries = {{}, marker};
+            back_with_markers(w);
             w.script.waypoints.current = 1;
             w.script.input_action_bits = 0x40;
 
@@ -703,6 +718,7 @@ static void test_waypoint_track_integration() {
     b.x = 100 << 16; b.y = 0;
     b.linked_event = 1;
     w.script.waypoints.entries = {a, b};
+    back_with_markers(w);
     w.script.waypoints.current = 1;
 
     // Event 0: inert filler (its OutputText is irrelevant); event 1: the linked

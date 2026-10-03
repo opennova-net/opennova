@@ -177,16 +177,15 @@ public:
 // One role's tick over the kernel it binds: the SP/no-net frame, the listen
 // or dedicated host frame, or the joiner frame -- each the leg order it was
 // witnessed with, line for line (ADR 0043 d3). Session::run_one_tick applies
-// the frame's input through the role first (the spectator gate and the
-// medic-call send are the role's facts), then runs the role's tick.
+// the frame's input through the role first (the death screen's input filter
+// over the role's replica and the medic-call send are the role's facts), then
+// runs the role's tick.
 class Role {
 public:
 	virtual ~Role() = default;
 	virtual RoleKind kind() const = 0;
 	virtual void bind(mission::MissionKernel &kernel) { kernel_ = &kernel; }
 	mission::MissionKernel *kernel() const { return kernel_; }
-	// A spectating joiner drives no body: movement, look and fire are dropped.
-	virtual bool spectator() const { return false; }
 	// The dead player's medic call (C2S 0x2E) for this role; the entity, dead
 	// and cooldown gates are the shared prologue's. False = nothing sent.
 	virtual bool send_medic_request() { return false; }

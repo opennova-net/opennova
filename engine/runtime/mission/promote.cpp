@@ -870,6 +870,12 @@ PromoteResult promote_mission(const bms::File &m, World &world,
             e.linked_event = mk.wp_adv_trigger;
             // [orig: entity+535 = attributes bit 22 @0x40f123-0x40f129]
             e.chain_back = (mk.bmsi_attributes & (1u << 22)) != 0;
+            // [orig: entity+0x20C = the record's wpgoal0..3 dword (+0x64) on a
+            //  type-6005 marker @0x40f090; read bytewise @0x4dbeb4]
+            if (mk.type_id == 6005)
+                for (int g = 0; g < 4; ++g)
+                    e.goals[g] = static_cast<uint8_t>(
+                            static_cast<uint32_t>(mk.wp_goals) >> (8 * g));
             world.script.waypoints.entries.push_back(e);
         }
         break; // first flagged channel only [orig: the @0x502e53 scan stops on the first hit]

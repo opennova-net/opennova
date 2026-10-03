@@ -597,9 +597,15 @@ void World::run_entity_pass(const TickContext &ctx) {
     // the original's 16.16 fixed compare space. [orig: Player_UpdatePerFrame
     // @0x4de5f7]
     if (ctx.is_authority && gameplay && !script.waypoints.empty()) {
-        if (const Entity *lp = registry.get(cached.local_player))
-            script.waypoints.tick_advance(static_cast<int32_t>(lp->position.x * 65536.0f),
-                                   static_cast<int32_t>(lp->position.y * 65536.0f));
+        if (const Entity *lp = registry.get(cached.local_player)) {
+            WaypointFrameInputs in;
+            static_cast<WaypointCycleContext &>(in) = waypoint_context();
+            in.player_x = static_cast<int32_t>(lp->position.x * 65536.0f);
+            in.player_y = static_cast<int32_t>(lp->position.y * 65536.0f);
+            in.subgoals_won = script.subgoals.won; // [orig: dword_AC86F4 @0x452e14]
+            in.local = lp;
+            script.waypoints.tick_advance(in);
+        }
     }
     // The one-shot initial group recount, ordered right after the pre pass
     // [orig: Game_StartMission @ 0x525b86 -> @ 0x525b8b]. The live rescan is

@@ -145,6 +145,16 @@ public:
     void clear_stance_latches();
     // Mouse pixels onto the look angles (the center-lock accumulator).
     void look(float dx_px, float dy_px);
+    // The same pixels onto the chase orbit instead, as the death screen's
+    // chase sub-mode takes them [orig: sub_52AD50 @0x52ae4f..0x52ae99].
+    void look_chase_orbit(float dx_px, float dy_px);
+    // The sub-mode cycle's wrap back to the free sub-mode: one camera compose,
+    // then the local entity takes its view pose — the position less the
+    // CameraOffset, the yaw (the look yaw too), the pitch and the roll — so
+    // free flight starts where the camera was.
+    // [orig: sub_52AFF0 — Camera_ComputeThirdPersonView @0x52b082, the
+    //  stores @0x52b087..0x52b0ee]
+    void place_on_composed_view();
     // Point the look straight at a mission-space target from a mission-space
     // eye (absolute heading + pitch, engine BAM frame).
     void aim_at(const Vec3 &eye, const Vec3 &target);

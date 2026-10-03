@@ -24,6 +24,23 @@ static WaypointEntry wp(int32_t x_units, int32_t y_units, int32_t radius_units) 
     return e;
 }
 
+// One per-frame selection pass in a waypoint gametype (Co-op 0x30020).
+static void advance(WaypointTrack &t, int32_t x, int32_t y, uint32_t won = 0,
+                    uint32_t game_type = 0x30020) {
+    WaypointFrameInputs in;
+    in.game_type = game_type;
+    in.player_x = x;
+    in.player_y = y;
+    in.subgoals_won = won;
+    t.tick_advance(in);
+}
+
+static WaypointCycleContext in_session(bool session) {
+    WaypointCycleContext ctx;
+    ctx.in_session = session;
+    return ctx;
+}
+
 int main() {
     {
         EntityRegistry registry;
@@ -65,28 +82,28 @@ int main() {
         t.entries = {wp(0, 0, 4), wp(100, 0, 4), wp(200, 0, 4)};
 
         // Null current latches entry 0 regardless of distance. [orig: @0x4de6de]
-        t.tick_advance(500 << 16, 500 << 16);
+        advance(t, 500 << 16, 500 << 16);
         CHECK(t.current == 0);
 
         // Far away: no advance.
-        t.tick_advance(50 << 16, 0);
+        advance(t, 50 << 16, 0);
         CHECK(t.current == 0);
 
         // Inside the radius (dx=3 < 4): advance to entry 1. [orig: @0x4de695]
-        t.tick_advance(3 << 16, 0);
+        advance(t, 3 << 16, 0);
         CHECK(t.current == 1);
 
         // The approx metric: dx=3, dy=3 -> 3 + 3/2 = 4.5 >= radius 4 -> HOLD
         // (the per-axis early accept passes but the combined metric fails).
-        t.tick_advance((100 + 3) << 16, 3 << 16);
+        advance(t, (100 + 3) << 16, 3 << 16);
         CHECK(t.current == 1);
 
         // dx=2, dy=2 -> 2 + 1 = 3 < 4 -> advance.
-        t.tick_advance((100 + 2) << 16, 2 << 16);
+        advance(t, (100 + 2) << 16, 2 << 16);
         CHECK(t.current == 2);
 
         // The LAST entry never proximity-advances. [orig: @0x4de6ca]
-        t.tick_advance(200 << 16, 0);
+        advance(t, 200 << 16, 0);
         CHECK(t.current == 2);
     }
 
@@ -96,7 +113,7 @@ int main() {
         t.entries = {wp(0, 0, 50), wp(100, 0, 50)};
         t.entries[0].linked_event = 7;
         t.current = 0;
-        t.tick_advance(0, 0); // standing on it
+        advance(t, 0, 0); // standing on it
         CHECK(t.current == 0); // event-gated: held [orig: @0x4de649]
 
         // The linked event fires: entry 0 completes and current skips forward.
@@ -152,9 +169,9 @@ int main() {
     {
         WaypointTrack t;
         t.entries = {wp(10, 10, 4)};
-        t.tick_advance(0, 0);
+        advance(t, 0, 0);
         CHECK(t.current == 0);
-        t.tick_advance(10 << 16, 10 << 16); // standing on it: stays (nothing to advance to)
+        advance(t, 10 << 16, 10 << 16); // standing on it: stays (nothing to advance to)
         CHECK(t.current == 0);
     }
 
@@ -165,39 +182,39 @@ int main() {
         t.entries = {wp(0, 0, 4), wp(10, 0, 4), wp(20, 0, 4)};
         // No selection: SP refuses; in a session the scan starts at 0 and
         // steps to 1 (@0x4dc246).
-        t.manual_cycle(false, false);
+        t.manual_cycle(false, in_session(false));
         CHECK(t.current == -1);
-        t.manual_cycle(false, true);
+        t.manual_cycle(false, in_session(true));
         CHECK(t.current == 1);
         // In a session: plain wrap both ways.
-        t.manual_cycle(true, true);
+        t.manual_cycle(true, in_session(true));
         CHECK(t.current == 0);
-        t.manual_cycle(true, true);
+        t.manual_cycle(true, in_session(true));
         CHECK(t.current == 2);
-        t.manual_cycle(false, true);
+        t.manual_cycle(false, in_session(true));
         CHECK(t.current == 0);
         // SP forward leaves only a chain-back (+535) or done (+536) entry.
-        t.manual_cycle(false, false);
+        t.manual_cycle(false, in_session(false));
         CHECK(t.current == 0);
         t.entries[0].done = true;
-        t.manual_cycle(false, false);
+        t.manual_cycle(false, in_session(false));
         CHECK(t.current == 1);
         t.entries[1].chain_back = true;
-        t.manual_cycle(false, false);
+        t.manual_cycle(false, in_session(false));
         CHECK(t.current == 2);
         // SP backward: never below list[0]; reverts unless it lands on +535.
-        t.manual_cycle(true, false);
+        t.manual_cycle(true, in_session(false));
         CHECK(t.current == 1); // entry 1 carries chain_back
-        t.manual_cycle(true, false);
+        t.manual_cycle(true, in_session(false));
         CHECK(t.current == 1); // entry 0 does not: reverted
         t.current = 0;
         t.entries[0].chain_back = true;
-        t.manual_cycle(true, false);
+        t.manual_cycle(true, in_session(false));
         CHECK(t.current == 0); // the first entry never steps back
         // The show gate refuses the SP action.
         t.current = 1;
         t.show = false;
-        t.manual_cycle(false, false);
+        t.manual_cycle(false, in_session(false));
         CHECK(t.current == 1);
     }
 
@@ -235,6 +252,129 @@ int main() {
         t.current = 5; // out of range reads as no selection
         v = waypoint_hud_view(t, nullptr);
         CHECK(v.current == -1);
+    }
+
+    // --- the goal gate [orig: SpawnPoint_CheckWeaponRestrictions @0x4dbe80;
+    //     Player_UpdatePerFrame @0x4de656..0x4de695] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(100, 0, 4), wp(200, 0, 4)};
+        t.entries[0].goals[0] = 1; // SubGoalWon slot 1 (bit 2)
+        t.current = 0;
+        advance(t, 0, 0, /*won=*/0); // standing on it, the goal unmet: held
+        CHECK(t.current == 0);
+        advance(t, 900 << 16, 0, /*won=*/0x2); // met: advance from anywhere
+        CHECK(t.current == 1);
+        t.entries[1].goals[1] = 7; // slot 2 (bit 4) and nothing else
+        advance(t, 900 << 16, 0, /*won=*/0x2);
+        CHECK(t.current == 1);
+        advance(t, 900 << 16, 0, /*won=*/0x4);
+        CHECK(t.current == 2);
+    }
+
+    // --- outside the waypoint gametypes: the first live entry, or the CTF
+    //     pair's nearest enemy base [orig: @0x4de701..0x4de72c] ---
+    {
+        WaypointTrack t;
+        t.entries = {wp(0, 0, 4), wp(100, 0, 4), wp(200, 0, 4)};
+        advance(t, 100 << 16, 0, 0, /*game_type=*/0x10000);
+        CHECK(t.current == 0);
+        advance(t, 100 << 16, 0, 0, 0x10000); // a selection holds; no proximity leg
+        CHECK(t.current == 0);
+    }
+
+    // --- the map POI list [orig: Entity_BuildMapPoiLists @0x42de40] ---
+    {
+        EntityRegistry registry;
+        registry.configure_pool(1, 4);
+        registry.configure_pool(2, 4);
+        registry.configure_pool(3, 4);
+        const auto put = [&](int pool, int slot, int32_t type, uint32_t attrib, float x) {
+            Entity e;
+            e.has_item_def = true;
+            e.item_id = type;
+            e.item_attrib = attrib;
+            e.position = {x, 0, 0};
+            CHECK(registry.spawn_at(EntityHandle::make(pool, slot), e).valid());
+        };
+        put(2, 0, 9000, 0x8000u, 1);  // a target
+        put(2, 1, 9001, 0x80000u, 2); // an armory
+        put(2, 2, 9002, 0u, 3);       // neither
+        put(1, 0, 4091, 0u, 4);       // a flag
+        put(1, 1, 4093, 0x8000u, 5);  // a flag that is a target: listed twice
+        put(1, 2, 4098, 0u, 6);       // a flag bay
+        put(3, 0, 6027, 0u, 7);       // a zone
+        put(3, 1, 6005, 0u, 8);       // a route marker: not a POI
+        WaypointTrack t;
+        t.build_map_poi_list(registry);
+        const EntityHandle want[] = {
+            EntityHandle::make(2, 0), EntityHandle::make(1, 0), EntityHandle::make(1, 1),
+            EntityHandle::make(1, 1), EntityHandle::make(1, 2), EntityHandle::make(3, 0),
+            EntityHandle::make(2, 1),
+        };
+        CHECK(t.entries.size() == 7);
+        for (size_t i = 0; i < 7 && i < t.entries.size(); ++i)
+            CHECK(t.entries[i].handle() == want[i]);
+        CHECK(t.current == -1);
+        // A rebuild keeps the selected entity.
+        t.current = 4;
+        registry.get(EntityHandle::make(2, 2))->item_attrib = 0x8000u; // a new target, first
+        t.build_map_poi_list(registry);
+        CHECK(t.entries.size() == 8 && t.current == 5 &&
+              t.entries[5].handle() == EntityHandle::make(1, 2));
+        // The HUD reads the live entity: a carried flag's label follows it.
+        registry.get(EntityHandle::make(1, 2))->position = {40, 50, 0};
+        const WaypointHudView v = waypoint_hud_view(t, &registry);
+        CHECK(v.def_type == 4098 && v.entry.x == (40 << 16) && v.entry.y == (50 << 16));
+
+        // The walk skips an entry whose entity is gone [orig: @0x4dc267].
+        WaypointCycleContext ctx;
+        ctx.registry = &registry;
+        t.current = 0;
+        registry.despawn(EntityHandle::make(2, 2)); // index 1
+        t.cycle_forward(ctx);
+        CHECK(t.current == 2);
+        // A list of nothing but dead entries empties itself [orig: @0x4dc204].
+        WaypointTrack dead;
+        dead.entries = t.entries;
+        for (const WaypointEntry &entry : t.entries)
+            if (registry.get(entry.handle()) != nullptr) registry.despawn(entry.handle());
+        dead.cycle_forward(ctx);
+        CHECK(dead.entries.empty() && dead.current == -1);
+    }
+
+    // --- KOTH steps over a dead target [orig: @0x4dc2e0..0x4dc324] ---
+    {
+        EntityRegistry registry;
+        registry.configure_pool(2, 4);
+        for (int i = 0; i < 3; ++i) {
+            Entity e;
+            e.has_item_def = true;
+            e.item_id = 9000 + i;
+            e.item_attrib = 0x8000u;
+            e.health = i == 0 ? 0 : 100;
+            CHECK(registry.spawn_at(EntityHandle::make(2, i), e).valid());
+        }
+        WaypointTrack t;
+        t.build_map_poi_list(registry);
+        CHECK(t.entries.size() == 3);
+        WaypointCycleContext ctx;
+        ctx.registry = &registry;
+        ctx.game_type = 0x10002;
+        t.current = 2;
+        t.cycle_forward(ctx); // out of session: the dead target is taken
+        CHECK(t.current == 0);
+        ctx.in_session = true;
+        WaypointTrack fresh;
+        fresh.entries = t.entries;
+        fresh.current = 2;
+        fresh.cycle_forward(ctx); // in session: one step more
+        CHECK(fresh.current == 1);
+        // The guard is the last landing: from the dead target's own landing
+        // the step holds (the first track just landed on it).
+        t.current = 2;
+        t.cycle_forward(ctx);
+        CHECK(t.current == 0);
     }
 
     if (failures == 0) std::printf("waypoint_track_test: all checks passed\n");

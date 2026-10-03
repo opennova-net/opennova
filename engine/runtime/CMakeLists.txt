@@ -210,6 +210,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/weather_state.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/tick_accumulator.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/waypoint_track.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/spectator_motor.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/user_waypoints.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_combat.cpp     # acquisition, engagement, commands
     ${CMAKE_CURRENT_SOURCE_DIR}/world/ai_aircraft.cpp
@@ -424,6 +425,8 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_radio_call.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_designations.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/spectator_session.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/replica_track.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/session_status.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/stat_screen_feed.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_status_feed.cpp # the status page's roster and host facts

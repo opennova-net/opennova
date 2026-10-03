@@ -276,7 +276,6 @@ private:
 	void set_avatar_transform(ObjectModel *p_avatar, const Transform3D &p_next);
 	void reset_state();
 	void set_world_nvg_view(bool p_active, int p_gain);
-	void set_spectator_camera_active(bool p_active);
 	Vector2 aim_angles_deg() const;
 	Vector3 eye_position(const Vector3 &p_pos) const;
 	void update_held_weapon(const Ref<PlayerAimOverlay> &p_overlay);
@@ -330,7 +329,6 @@ private:
 	bool debug_body_in_first_person_ = false;
 	bool debug_third_person_ = false;
 	int64_t camera_saved_cull_mask_ = -1;
-	bool spectator_active_ = false;
 	int fixed_weapon_batches_consumed_ = 0;
 };
 

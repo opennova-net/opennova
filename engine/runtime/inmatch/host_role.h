@@ -9,6 +9,7 @@
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/loopback_channel.h>
+#include <runtime/inmatch/replica_track.h>
 #include <runtime/inmatch/session.h>
 #include <runtime/mission/mission_text.h>
 
@@ -132,6 +133,8 @@ private:
 	std::shared_ptr<const replication::ItemReplicationCatalog> item_catalog_;
 	int64_t last_net_us_ = 0;
     uint64_t local_round_reset_seen_ = 0;
+    // The own client's 0x0F / local 0x50 track legs consumed (replica_track.h).
+    ReplicaTrackSeen track_seen_;
 };
 
 } // namespace opennova::inmatch

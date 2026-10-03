@@ -356,23 +356,19 @@ void LocalPlayerPresenter::after_world_tick() {
 			weapon_effects_->reset();
 		}
 		view_.unref();
-		set_spectator_camera_active(false);
 		return;
 	}
 	// The display frame's one camera compose; every other read of the view
 	// (weapon-event placement, the mode refresh, the HUD) observes it.
 	view_ = visuals_->present_local_player_view();
 	if (is_local_spectator()) {
-		// The first spectator frame starts at the last authoritative player
-		// camera pose (or the spectator entity's initial pose on a fresh join).
-		// Subsequent frames belong wholly to FlyCamera: never stamp them back
-		// onto the hidden team-0 entity.
-		if (!spectator_active_) {
-			stamp_camera_pose();
-		}
-		set_spectator_camera_active(true);
-		set_fly_camera_locked(false);
-		input_router_.release_mouse_capture();
+		// The death screen's view is the composed local view like any other:
+		// the engine's free-fly motor owns the hidden entity's pose (the
+		// target's in a chase or first-person sub-mode), the camera compose
+		// frames it, and this leg only stamps it. The hidden body presents
+		// no avatar and no viewmodel.
+		set_fly_camera_locked(true);
+		stamp_camera_pose();
 		clear_models();
 		set_world_nvg_view(false, 0);
 		feed_world_thermal_view(world(), false, false);
@@ -383,7 +379,6 @@ void LocalPlayerPresenter::after_world_tick() {
 		third_person_ = true;
 		return;
 	}
-	set_spectator_camera_active(false);
 	// The camera mode is the sim's resolved word (the arbiter ran this tick).
 	third_person_ = view_.is_valid() &&
 			opennova::world::presents_third_person(view_->get_third_person(), view_->get_camera_mode());
@@ -476,9 +471,11 @@ bool LocalPlayerPresenter::has_player() const {
 	return player_sim.is_valid() && player_sim->has_local_player();
 }
 
+// The death screen (retail g_DeathScreenActive), the latch every engine leg
+// of the spectator keys on.
 bool LocalPlayerPresenter::is_local_spectator() const {
 	const Ref<Simulation> spectator_sim = sim();
-	return spectator_sim.is_valid() && spectator_sim->is_local_spectator();
+	return spectator_sim.is_valid() && spectator_sim->local_death_screen_active();
 }
 
 void LocalPlayerPresenter::ensure_models() {
@@ -520,16 +517,6 @@ void LocalPlayerPresenter::clear_models() {
 void LocalPlayerPresenter::set_fly_camera_locked(bool p_locked) {
 	if (GameplayCamera *fly = fly_camera()) {
 		fly->set_gameplay_locked(p_locked);
-	}
-}
-
-void LocalPlayerPresenter::set_spectator_camera_active(bool p_active) {
-	if (p_active == spectator_active_) {
-		return;
-	}
-	spectator_active_ = p_active;
-	if (GameplayCamera *fly = fly_camera()) {
-		fly->set_spectator_mode(p_active);
 	}
 }
 

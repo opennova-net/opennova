@@ -585,6 +585,17 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     t.camera_local_dead_seen = v.local_dead;
     const int mode_before = v.camera_mode;
     player_view_resolve_mode(v);
+    // The arbiter's tracked entity: the spectate target while the death
+    // screen's first-person sub-mode has one, else the local player
+    // [orig: Camera_SetTrackedEntity @0x4391e0..0x4391f9, called
+    //  @0x5ca262 when it or the mode changed @0x5ca250..0x5ca25e]. The
+    // compose itself stays on the local entity, whose pose copies the
+    // target's (docs/net/novaworld-net-re.md, D-NET-330).
+    const bool tracks_target = s.death_screen_active && s.death_screen_submode == 2 &&
+            s.spectate_target_key != 0;
+    const uint32_t tracked = tracks_target ? s.spectate_target_key : 0u;
+    const bool tracked_dead = tracks_target ? s.spectate_target_dead : v.local_dead;
+    player_view_track_entity(v, tracked, v.camera_mode != mode_before, tracked_dead);
     if (v.camera_mode == 4 && mode_before != 4) enter_death_camera(*world, *e, v, s);
     local_player_view_refresh(world, v);
     // The binocular tip on the raw toggle's edges: a toggle that went up with
@@ -617,6 +628,9 @@ void local_player_view_tick(World *world, PlayerViewState &v,
     // [orig: ThirdPersonCamera_Update @0x437B70..0x437B76]
     const Vec3 current_eye = player_eye_position(*e);
     const float eye[3] = {current_eye.x, current_eye.y, current_eye.z};
+    // The same update's orbit legs, whatever the mode [orig:
+    // ThirdPersonCamera_Update @0x437c1b..0x437d02].
+    player_view_chase_tick(v, world->script.input_action_bits, tracked_dead);
     player_view_tick(v, eye);
 }
 

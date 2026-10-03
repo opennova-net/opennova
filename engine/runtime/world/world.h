@@ -48,6 +48,7 @@
 #include <runtime/world/weather_state.h>
 #include <runtime/world/reverb.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/spectator_motor.h>
 #include <runtime/world/item_sections.h>
 #include <runtime/world/terrain_scorch_events.h>
 #include <runtime/devtools/tick_profile.h>
@@ -826,6 +827,10 @@ public:
     // decoder writes its targets back.
     WeatherState weather;
     CachedFrameState cached;
+    // The client-local death-screen spectate state the local player's motor
+    // reads (spectator_motor.h); the role stamps it from its replica runtime
+    // ahead of every entity update.
+    SpectatorMotorState spectator;
     // Non-owning local state, bound by the mission kernel for synchronous
     // deployment resets; bare authoritative worlds need no local view.
     LocalPlayer *local_player_state = nullptr;
@@ -842,6 +847,15 @@ public:
     // The lifetime groups (declared above): what the script owns, what the
     // embedder feeds once, what the host stamps, what the drains consume.
     ScriptState script;
+    // The waypoint/POI walks' view of this world (waypoint_track.h): the live
+    // entries' entities and the session facts the KOTH leg reads.
+    WaypointCycleContext waypoint_context() const {
+        WaypointCycleContext ctx;
+        ctx.registry = &registry;
+        ctx.game_type = match.rules().game_type;
+        ctx.in_session = rules.mp_session;
+        return ctx;
+    }
     MissionDiagnostics diagnostics; // retained across ticks; restored with the mission baseline
     MissionTables tables;
     SessionRules rules;

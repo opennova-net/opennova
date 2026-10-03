@@ -6,6 +6,7 @@
 #include <formats/mission/bms.h>
 #include <base/io/fixed.h>
 #include <base/gameprofile/game_type.h>
+#include <runtime/inmatch/spectator_session.h>
 #include <runtime/world/music_vars.h>
 #include <runtime/world/player_view.h>
 
@@ -178,12 +179,14 @@ void Simulation::request_hud_map_close() {
 }
 
 void Simulation::request_waypoint_cycle(int p_direction) {
-	kernel_->world.script.waypoints.manual_cycle(p_direction < 0, is_mp_session());
+	kernel_->world.script.waypoints.manual_cycle(p_direction < 0,
+			kernel_->world.waypoint_context());
 }
 
 void Simulation::request_spectate_action(int p_code) {
-	// The role's own client replica holds the death screen's spectate state.
-	if (runtime_ != nullptr) runtime_->view().spectate_action(p_code);
+	// The role's own client replica holds the death screen's spectate state;
+	// the cycle's wrap places the local entity (inmatch::spectate_action).
+	if (runtime_ != nullptr) opennova::inmatch::spectate_action(*kernel_, *runtime_, p_code);
 }
 
 int Simulation::get_hud_map_mode() const {

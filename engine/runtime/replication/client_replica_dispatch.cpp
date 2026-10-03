@@ -171,6 +171,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				refresh.slot = static_cast<uint8_t>(assign.entity_handle & 0xFFu);
 				refresh.fields = kTeamAssignSyncFields;
 				state_.pending_visible_refreshes.push_back(refresh);
+				// [orig: `cmp ebp, g_LocalPlayerEntity` @0x431b10]
+				if (assign.entity_handle == spectate_local_handle_) ++state_.local_team_assigns;
 			}
 		} else {
 			++malformed_bodies_;

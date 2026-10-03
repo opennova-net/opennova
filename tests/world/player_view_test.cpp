@@ -1098,7 +1098,7 @@ void test_compose_camera_third_person() {
                 pose);
         CHECK(pose.third_person);
         CHECK(pose.roll_deg == 0.0f);
-        const float back = candidates ? 0.75f : kTpDistance;
+        const float back = candidates ? 0.75f : 1.0f; // the play reset's 1.0
         CHECK(near_eq(pose.eye[0], 1.0f));
         CHECK(near_eq(pose.eye[1], 2.0f - back));
         CHECK(near_eq(pose.eye[2], 3.0f));
@@ -1106,7 +1106,7 @@ void test_compose_camera_third_person() {
         chase_look_at(pose.eye, pivot, yaw, pitch);
         CHECK(near_eq(pose.yaw_deg, yaw, 1e-4f));
         CHECK(near_eq(pose.pitch_deg, pitch, 1e-4f));
-        CHECK(pose.yaw_deg > 270.0f && pose.pitch_deg > kTpOrbitPitchDeg + 1.0f);
+        CHECK(pose.yaw_deg > 270.0f && pose.pitch_deg > 1.0f);
     }
 }
 

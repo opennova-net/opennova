@@ -97,6 +97,17 @@ const ActionRow kRows[] = {
 	{"NextWaypoint", {Action::WaypointCycle, 1}, Gate::Active},
 };
 
+// A catalog row's mode word by its config token (alive bit 1, death-screen
+// bit 2); a token no row carries reads 0 [orig: the row's +8 word,
+// Input_IsBindingActiveForMode @0x497ea0].
+uint32_t row_modes(const char *token) {
+	std::size_t count = 0;
+	const ActionDef *rows = catalog(&count);
+	for (std::size_t i = 0; i < count; ++i)
+		if (std::string_view(rows[i].token) == token) return rows[i].modes;
+	return 0;
+}
+
 } // namespace
 
 PlayerActions::PlayerActions() : rows_(std::size(kRows)) {}
@@ -165,20 +176,25 @@ PlayerActionFrame PlayerActions::poll(const PlayerActionSource &source, const Pl
 	// [orig: the binding dispatch cases 0x95 fire / 0xD3 reload / 6 scope,
 	//  Input_HandleActionBinding_0 @0x4e0420 -- ported in engine/runtime/world
 	//  weapon_fsm + Simulation]
-	frame.fire_held = captured && source.pressed("attack_1");
+	const auto admitted = [&gate](const char *token) {
+		return !gate.death_screen || (row_modes(token) & 2u) != 0;
+	};
+	frame.fire_held = captured && admitted("attack_1") && source.pressed("attack_1");
 	frame.fire_edge = world::latched_key_edge(frame.fire_held, true, fire_was_held_);
-	frame.reload_edge = world::latched_key_edge(captured && source.pressed("magazine"),
-			true, reload_was_down_);
+	frame.reload_edge = world::latched_key_edge(
+			captured && admitted("magazine") && source.pressed("magazine"), true, reload_was_down_);
 	// The death screen releases capture. Medic still samples even with
 	// inactive gameplay or no simulation; the sim owns death/cooldown gates.
 	// [orig: Input_HandleActionBinding case 217 @0x49b4b4 (row 64 MedicReq)]
-	frame.medic_edge = world::latched_key_edge(source.pressed("MedicReq"), true, medic_was_down_);
+	frame.medic_edge = world::latched_key_edge(
+			admitted("MedicReq") && source.pressed("MedicReq"), true, medic_was_down_);
 	for (std::size_t i = 0; i < std::size(kRows); ++i) {
 		const auto &row = kRows[i];
 		if ((row.flags & NeedsSimulation) && !gate.simulation_available) continue;
 		const bool active = row.gate == Gate::Captured ? captured : gate.active;
 		const bool capture_latch = (row.flags & CaptureLatch) != 0;
-		const bool down = (!capture_latch || active) && source.pressed(row.token);
+		const bool down = (!capture_latch || active) && admitted(row.token) &&
+				source.pressed(row.token);
 		bool swallowed = false;
 		if (!capture_latch && down && (use_held_prev_ || menu_digits_)) {
 			// VK digits only: a rebound digit is swallowed, a mouse/joystick
