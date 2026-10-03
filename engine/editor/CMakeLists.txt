@@ -159,6 +159,7 @@ add_library(opennova_editor STATIC
     # project — project.opennova, the cache directory, machine-local settings, file plumbing,
     # and the one refresh (import, scan, requirements) and the one findings composer the
     # editor and the CLI share
+    ${CMAKE_CURRENT_SOURCE_DIR}/project/expansion_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/expansion_name.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/local_settings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_document.cpp

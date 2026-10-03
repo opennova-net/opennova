@@ -36,7 +36,10 @@ enum class ExpansionNameUse { Own, BuildsOn };
 // - a folder Windows can make: none of `\ / : * ? " < > |`, no trailing dot or space, not a device
 //   name (CON, PRN, AUX, NUL, COM1..9, LPT1..9, alone or before a dot);
 // - for the project's own (ExpansionNameUse::Own): M<n>.bin and <n>L.lwf fit the archives' names
-//   (logical_name_fits_archive), so 11 characters [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989].
+//   (logical_name_fits_archive), so 11 characters [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989];
+//   and none of the files it forms (expansion_files.h) is a file the game reads by that name for its
+//   own (a manifest row's literal: "game" would make game.bin, the menu's table), the project holding
+//   one file of a name.
 std::string expansion_name_problem(std::string_view name, ExpansionNameUse use);
 
 // expansion_name_problem as a finding: false with `error` (project.field.invalid) saying which rule

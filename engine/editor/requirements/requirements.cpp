@@ -4,6 +4,7 @@
 #include <editor/assets/asset_type_registry.h>
 #include <editor/model/diagnostic.h>
 #include <editor/requirements/requirement_words.h>
+#include <editor/project/expansion_files.h>
 
 namespace opennova::editor {
 
@@ -34,19 +35,28 @@ RequirementReport evaluate_requirements(const ProjectDocument &doc, const AssetS
 	const int count = gameprofile_required_resource_count();
 	for (int i = 0; i < count; ++i) {
 		const RequiredResource *resource = gameprofile_required_resource_at(i);
-		// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
-		// project's, ADR 0046 S14) is no row of the checklist.
-		if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) continue;
+		// An expansion's own file is a row of a project that builds as one, by the name its expansion
+		// forms (ADR 0046 S16, expansion_files.h); a project of the base game has none.
+		const ExpansionFileRow *expansion_file = nullptr;
+		if (resource->flags & RES_F_EXPANSION) {
+			if (doc.expansion.standalone()) continue;
+			expansion_file = expansion_file_row_for_manifest_role(resource->role);
+			if (!expansion_file) continue;
+		} else if (resource->flags & (RES_F_PATTERN | RES_F_PFF_TABLE_ANY | RES_F_PLAYER_FILE)) {
+			// A pattern, a boot archive, or the player's own file (a save, a configuration: never a
+			// project's, ADR 0046 S14) is no row of the checklist.
+			continue;
+		}
 		if (!requirement_phase_enabled(doc, resource->phase)) continue;
 
 		RequirementRow row;
 		row.resource = resource;
 		row.role = resource->role;
-		row.name = resource->name;
+		row.name = expansion_file ? expansion_file_name(*expansion_file, doc.expansion.name) : resource->name;
 		row.phase = resource->phase;
 		row.severity = resource->severity;
 		row.required = resource->severity != RES_OPTIONAL;
-		row.expected_kind = expected_asset_kind_for_required_name(row.name);
+		row.expected_kind = expansion_file ? expansion_file->kind : expected_asset_kind_for_required_name(row.name);
 		if (const AssetEntry *asset = scan.find(row.name)) {
 			row.asset_path = asset->relative_path;
 			row.found_kind = asset->kind;

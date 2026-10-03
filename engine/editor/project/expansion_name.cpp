@@ -1,7 +1,9 @@
 #include <editor/project/expansion_name.h>
 
+#include <base/gameprofile/required_resources.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/project/expansion_files.h>
 
 namespace opennova::editor {
 
@@ -51,6 +53,18 @@ std::string expansion_name_problem(std::string_view name, ExpansionNameUse use) 
 		return quoted(name) + " is " + std::to_string(name.size()) +
 		       " characters: the expansion's music script M" + std::string(name) + ".bin and its sound bank " +
 		       std::string(name) + "L.lwf must fit the archives' 16-character names, so its name holds 11.";
+	// The project's own files the name forms (expansion_files.h) must not be files the game reads by those
+	// names for its own (the manifest's): the project holds one file of a name, and the game would read
+	// it as both (a name "game" makes game.bin, which the game reads as its menu's table).
+	if (use == ExpansionNameUse::Own) {
+		for (const ExpansionFile &file : expansion_files(std::string(name))) {
+			if (file.row->fixed) continue;
+			const gameprofile::RequiredResource *own = gameprofile::gameprofile_required_resource_find(file.name.c_str());
+			if (own && !(own->flags & gameprofile::RES_F_PATTERN))
+				return quoted(name) + " would name " + file.row->what + " " + file.name + ", a file the game reads as " +
+				       own->name + " for its own: give the expansion another name.";
+		}
+	}
 	return std::string();
 }
 
