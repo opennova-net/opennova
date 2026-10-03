@@ -413,6 +413,74 @@ static int test_expansion_routing() {
 	return 0;
 }
 
+// Files as an archive or a folder holds them: (name, bytes).
+using Files = std::vector<std::pair<std::string, std::vector<uint8_t>>>;
+
+static std::vector<uint8_t> bytes_of(const std::string &text) {
+	return std::vector<uint8_t>(text.begin(), text.end());
+}
+
+static std::vector<uint8_t> file_bytes(const std::string &path) {
+	std::vector<uint8_t> bytes;
+	std::string error;
+	read_file_bytes(path, bytes, error);
+	return bytes;
+}
+
+// The project file of the name, wherever the project keeps it ("" for none).
+static std::string find_file(const std::string &root, const std::string &name) {
+	std::error_code ec;
+	for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+		if (it->is_regular_file() && it->path().filename().string() == name) return it->path().generic_string();
+	return std::string();
+}
+
+static bool archive_has(const std::string &archive_path, const char *name) {
+	opennova::pff::PffArchive archive{};
+	if (opennova::pff::pff_open(&archive, archive_path.c_str()) != 0) return false;
+	const bool found = opennova::pff::pff_find(&archive, name) != nullptr;
+	opennova::pff::pff_close(&archive);
+	return found;
+}
+
+static bool write_archive(const std::string &path, const Files &files) {
+	std::vector<opennova::pff::PffWriteEntry> entries;
+	for (const auto &[name, bytes] : files)
+		entries.push_back({name.c_str(), bytes.empty() ? nullptr : bytes.data(), uint32_t(bytes.size()), 0,
+		                   opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0});
+	fs::create_directories(fs::path(path).parent_path());
+	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3,
+	                                        entries.empty() ? nullptr : entries.data(),
+	                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
+}
+
+// A base game's install (ADR 0046 S16): its three boot archives and the loose files beside them, and
+// the names it serves, sorted as the session's listing sorts them (BaseNames).
+struct BaseInstall {
+	std::string root;
+	std::vector<std::string> names;
+	bool written = false;
+	BaseNames base() const { return BaseNames{&names}; }
+};
+
+static BaseInstall make_base(const std::string &root, const Files &language, const Files &localres, const Files &resource,
+                             const Files &loose = {}) {
+	BaseInstall out;
+	out.root = root;
+	out.written = write_archive(root + "/language.pff", language) && write_archive(root + "/localres.pff", localres) &&
+	              write_archive(root + "/resource.pff", resource);
+	for (const Files *files : {&language, &localres, &resource, &loose})
+		for (const auto &[name, bytes] : *files) out.names.push_back(name);
+	for (const auto &[name, bytes] : loose) {
+		std::string error;
+		out.written = out.written && write_file_atomic(root + "/" + name, bytes.data(), bytes.size(), error);
+	}
+	std::sort(out.names.begin(), out.names.end(), [](const std::string &a, const std::string &b) {
+		return normalized_logical_name(a) < normalized_logical_name(b);
+	});
+	return out;
+}
+
 // ADR 0046 S16: the project built as the expansion jxm. Its folder holds its two archives (the
 // language slot's kinds in jxmL.pff, the rest in jxm.pff), its loose files where the game reads them
 // under /exp jxm (a video, its music bank, its version.txt, its jxm.bin, a NovaWorld screen packed and
@@ -430,8 +498,12 @@ static int test_expansion_layout() {
 	TEST_EXPECT(editor_test::write_text(p.root + "/version.txt", "1.0"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/nw_error.mnx", "<HTML/>"));
+	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
+	TEST_EXPECT(install.written);
+	const BaseNames base = install.base();
 	BuildTarget target;
 	target.expansion = "jxm";
+	target.install = install.root;
 	target.game = "jo";
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	AssetGraph graph;
@@ -439,7 +511,7 @@ static int test_expansion_layout() {
 	const std::vector<std::shared_ptr<const DocumentBase>> open;
 	const auto plan_as = [&](const BuildTarget &as) {
 		return plan_build(p.paths, scan, evaluate_requirements(p.doc, scan),
-				validate_project({ p.paths, p.doc, scan, open }, graph, cache), as);
+				validate_project({ p.paths, p.doc, scan, open }, graph, cache), as, &base);
 	};
 	const BuildPlan plan = plan_as(target);
 	for (const Diagnostic &d : plan.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
@@ -462,17 +534,18 @@ static int test_expansion_layout() {
 	TEST_EXPECT(loose_at("expansion/jxm/nw_error.mnx"));
 	TEST_EXPECT(loose_at("expansion/jxm/jxm.bin") && loose_at("expansion/jxm/header.bik"));
 	TEST_EXPECT(loose_at("expansion/jxm/Mjxm.sbf") && loose_at("expansion/jxm/version.txt"));
-	TEST_EXPECT(!in(plan.loose, "cc.bin") && !in(plan.archives[0].entries, "cc.bin"));
-	bool root_only = false;
-	for (const Diagnostic &d : plan.diagnostics)
-		root_only = root_only || (d.code() == "build.expansion.root_only" && d.asset == "cc.bin" &&
-		                          d.severity == DiagnosticSeverity::Warning && !blocks_build(d));
-	TEST_EXPECT(root_only);
+	TEST_EXPECT(!in(plan.loose, "cc.bin") && !in(plan.archives[0].entries, "cc.bin") && in(plan.root_only, "cc.bin"));
 	for (const BuildEntry &entry : plan.loose) TEST_EXPECT(entry.build_path.rfind("expansion/jxm/", 0) == 0);
 
 	const BuildReport report = run_build(plan, p.output_root());
 	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
-	TEST_EXPECT(report.ok && report.archives_written.size() == 2);
+	TEST_EXPECT(report.ok && report.archives_written.size() == 2 && report.same_as_base_files == 0);
+	// The base has no cc.bin of its own: the expansion's cannot be shipped, and is said.
+	bool root_only = false;
+	for (const Diagnostic &d : report.diagnostics)
+		root_only = root_only || (d.code() == "build.expansion.root_only" && d.asset == "cc.bin" &&
+		                          d.severity == DiagnosticSeverity::Warning && !blocks_build(d));
+	TEST_EXPECT(root_only);
 	const fs::path dir = fs::path(report.build_dir);
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/jxmL.pff") && fs::is_regular_file(dir / "expansion/jxm/jxm.pff"));
 	TEST_EXPECT(fs::is_regular_file(dir / "expansion/jxm/version.txt") && fs::is_regular_file(dir / "expansion/jxm/jxm.bin"));
@@ -504,9 +577,12 @@ static int test_expansion_layout() {
 static int test_expansion_empty_pair() {
 	editor_test::TempProjectDir dir("opennova_editor_build_expansion_empty_test");
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("Game"));
+	const BaseInstall install = make_base(dir.file("install"), { { "gametext.bin", bytes_of("text") } }, {}, {});
+	const BaseNames base = install.base();
 	BuildTarget target;
 	target.expansion = "x1";
-	const BuildPlan plan = plan_build(paths, AssetScan(), RequirementReport(), {}, target);
+	target.install = install.root;
+	const BuildPlan plan = plan_build(paths, AssetScan(), RequirementReport(), {}, target, &base);
 	TEST_EXPECT(plan.ok && plan.archives.size() == 2 && plan.archives[0].entries.empty() && plan.archives[1].entries.empty());
 	const BuildReport report = run_build(plan, dir.file("out"));
 	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
@@ -517,6 +593,121 @@ static int test_expansion_empty_pair() {
 	opennova::LaunchFlags flags;
 	flags.expansion = "x1";
 	TEST_EXPECT(opennova::mount_install(vfs, report.build_dir, flags) && vfs.mounted_expansion() == "x1");
+	return 0;
+}
+
+// ADR 0046 S16, lean packing: an expansion's build leaves out what its base game serves the same under
+// the name (a string table and a menu packed alike, a video the install's folder holds alike), so the
+// game reads the base's; a file of the name that differs, or one the base lacks, stays. A mission the
+// expansion ships keeps its text table in <b>L.pff however like the base's (the mission list titles it
+// from the pair's own text archive). A root-only file like the base's is said nothing, one unlike it
+// build.expansion.root_only. The report counts what the base serves (same_as_base); the next build of
+// the same content reads none of the base's bytes (its hashes cached) and is the same build; an
+// install whose base does not mount fails the build, build.expansion.base_missing.
+static int test_lean_packing() {
+	Project p("opennova_editor_build_lean_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(editor_test::write_text(p.root + "/video/intro.bik", "the base's intro"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/video/header.bik", "a header of our own"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m2.bms", "our mission"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m2.bin", "its table"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "ours"));
+	const std::string gametext = find_file(p.root, "gametext.bin"), menu = find_file(p.root, "main.mnu"),
+	                  coo = find_file(p.root, "nw_cdata.coo");
+	TEST_EXPECT(!gametext.empty() && !menu.empty() && !coo.empty());
+	const BaseInstall install = make_base(
+	        p.dir.file("install"), { { "gametext.bin", file_bytes(gametext) }, { "m2.bin", bytes_of("its table") } },
+	        { { "main.mnu", file_bytes(menu) }, { "m2.bms", bytes_of("the base's mission") } }, {},
+	        { { "intro.bik", bytes_of("the base's intro") }, { "header.bik", bytes_of("the base's header") },
+	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") }, { "nw_cdata.coo", file_bytes(coo) } });
+	TEST_EXPECT(install.written);
+	const BaseNames base = install.base();
+	BuildTarget target;
+	target.expansion = "jxm";
+	target.install = install.root;
+	target.game = "jo";
+	const auto plan_of = [&] {
+		const AssetScan scan = scan_project_assets(p.paths, p.doc);
+		return plan_build(p.paths, scan, evaluate_requirements(p.doc, scan), {}, target, &base);
+	};
+	const BuildPlan plan = plan_of();
+	for (const Diagnostic &d : plan.diagnostics)
+		if (blocks_build(d, &base)) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.ok);
+	const BuildReport report = run_build(plan, p.output_root());
+	for (const Diagnostic &d : report.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(report.ok);
+	const std::string folder = report.build_dir + "/expansion/jxm";
+	TEST_EXPECT(!archive_has(folder + "/jxmL.pff", "gametext.bin") && !archive_has(folder + "/jxm.pff", "main.mnu"));
+	TEST_EXPECT(!fs::exists(folder + "/intro.bik") && fs::is_regular_file(folder + "/header.bik"));
+	TEST_EXPECT(archive_has(folder + "/jxm.pff", "m2.bms") && archive_has(folder + "/jxmL.pff", "m2.bin"));
+	TEST_EXPECT(report.same_as_base_files == 3 && report.same_as_base_bytes == file_bytes(gametext).size() +
+	                                                                               file_bytes(menu).size() + 16);
+	TEST_EXPECT(report.base_bytes_read > 0);
+	size_t root_only = 0;
+	for (const Diagnostic &d : report.diagnostics)
+		if (d.code() == "build.expansion.root_only") {
+			++root_only;
+			TEST_EXPECT(d.asset == "score.ini");
+		}
+	TEST_EXPECT(root_only == 1);
+	std::printf("editor_project_build: lean packing left out %zu file(s), %llu byte(s), reading %llu of the base's\n",
+	            report.same_as_base_files, static_cast<unsigned long long>(report.same_as_base_bytes),
+	            static_cast<unsigned long long>(report.base_bytes_read));
+	// The same content: the same build, none of the base's bytes read (the build cache's `base`).
+	const BuildReport again = run_build(plan_of(), p.output_root());
+	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id && again.base_bytes_read == 0);
+	// A base that does not mount fails the build.
+	BuildTarget gone = target;
+	gone.install = p.dir.file("no_install");
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	const BuildReport failed = run_build(plan_build(p.paths, scan, evaluate_requirements(p.doc, scan), {}, gone, &base),
+	                                     p.paths.build_dir + "/gone");
+	bool missing = false;
+	for (const Diagnostic &d : failed.diagnostics) missing = missing || d.code() == "build.expansion.base_missing";
+	TEST_EXPECT(!failed.ok && missing);
+	return 0;
+}
+
+// ADR 0046 S16, the gate over the base: an expansion's required file the project lacks blocks nothing
+// where the base serves it (requirement.missing), nor a gating reference's file (a mission's terrain);
+// a required file of another kind still blocks (requirement.wrong_kind); with no base listing the
+// expansion does not build (build.expansion.base_missing); the standalone game's gate is as it was.
+static int test_base_gate() {
+	Project p("opennova_editor_build_base_gate_test");
+	TEST_EXPECT(p.create());
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	const RequirementReport requirements = evaluate_requirements(p.doc, scan);
+	std::vector<std::string> required;
+	for (const RequirementRow &row : requirements.rows)
+		if (row.required) required.push_back(row.name);
+	std::sort(required.begin(), required.end(), [](const std::string &a, const std::string &b) {
+		return normalized_logical_name(a) < normalized_logical_name(b);
+	});
+	const BaseNames base{&required};
+	BuildTarget target;
+	target.expansion = "jxm";
+	TEST_EXPECT(!plan_build(p.paths, scan, requirements, {}).ok);          // the standalone game: blocked
+	TEST_EXPECT(plan_build(p.paths, scan, requirements, {}, target, &base).ok); // the base serves them
+	const std::vector<std::string> nothing{ "other.bin" };
+	const BaseNames thin{&nothing};
+	TEST_EXPECT(!plan_build(p.paths, scan, requirements, {}, target, &thin).ok); // the base lacks them
+	const BuildPlan unmounted = plan_build(p.paths, scan, requirements, {}, target, nullptr);
+	bool missing = false;
+	for (const Diagnostic &d : unmounted.diagnostics) missing = missing || d.code() == "build.expansion.base_missing";
+	TEST_EXPECT(!unmounted.ok && missing);
+	// A gating reference (a mission's terrain) the base serves; one it does not.
+	Diagnostic terrain = make_finding(CoreFinding::ReferenceMissing, DiagnosticSeverity::Error, "no terrain");
+	terrain.subject = ReferenceSubject{ ReferenceKind::Terrain, "hills", std::string(), -1 };
+	const std::vector<std::string> hills{ "hills.trn" };
+	const BaseNames with_hills{&hills};
+	TEST_EXPECT(blocks_build(terrain) && blocks_build(terrain, &thin) && !blocks_build(terrain, &with_hills));
+	// A required file of another kind blocks over any base.
+	Diagnostic wrong = make_finding(CoreFinding::RequirementWrongKind, DiagnosticSeverity::Error, "wrong kind");
+	wrong.subject = RequirementSubject{ "gametext", "gametext.bin" };
+	TEST_EXPECT(blocks_build(wrong) && blocks_build(wrong, &base));
 	return 0;
 }
 
@@ -618,15 +809,19 @@ static int test_export() {
 	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.runtime" && !fs::exists(runtime.export_dir));
 
 	// An expansion's, laid out as in an install.
+	const BaseInstall install = make_base(p.dir.file("install"), { { "basetable.bin", bytes_of("base") } }, {}, {});
+	const BaseNames base = install.base();
 	BuildTarget target;
 	target.expansion = "jxm";
+	target.install = install.root;
 	const AssetScan scan = scan_project_assets(p.paths, p.doc);
 	AssetGraph graph;
 	ValidationCache cache;
 	const std::vector<std::shared_ptr<const DocumentBase>> open;
-	const BuildReport expansion = run_build(plan_build(p.paths, scan, evaluate_requirements(p.doc, scan),
-	                                                   validate_project({ p.paths, p.doc, scan, open }, graph, cache), target),
-	                                        p.paths.build_dir + "/expansion");
+	const BuildReport expansion =
+	        run_build(plan_build(p.paths, scan, evaluate_requirements(p.doc, scan),
+	                             validate_project({ p.paths, p.doc, scan, open }, graph, cache), target, &base),
+	                  p.paths.build_dir + "/expansion");
 	TEST_EXPECT(expansion.ok);
 	ExportRequest mod = request;
 	mod.build_dir = expansion.build_dir;
@@ -1229,6 +1424,8 @@ int main() {
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
 	failures += test_export();
+	failures += test_lean_packing();
+	failures += test_base_gate();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

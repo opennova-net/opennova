@@ -170,6 +170,7 @@ add_library(opennova_editor STATIC
     # project_build — routing into the boot-table archives (or an expansion's pair), the plan, the
     # immutable build, the Export's copy of it (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/base_match.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/export_build.cpp

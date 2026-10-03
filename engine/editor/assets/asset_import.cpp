@@ -105,17 +105,32 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 	return sources;
 }
 
-std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document) {
+namespace {
+
+// The names `spec`'s view of the install gives, sorted by their normalized form; none when it does
+// not open.
+std::vector<std::string> view_names(const InstallSpec &spec) {
 	std::vector<std::string> names;
 	InstallView view;
 	std::string error;
-	if (retail_root.empty() || !view.open(install_spec(retail_root, document), error)) return names;
+	if (spec.root.empty() || !view.open(spec, error)) return names;
 	names.reserve(view.files().size());
 	for (const InstallFile &file : view.files()) names.push_back(file.name);
 	std::sort(names.begin(), names.end(), [](const std::string &a, const std::string &b) {
 		return normalized_logical_name(a) < normalized_logical_name(b);
 	});
 	return names;
+}
+
+} // namespace
+
+std::vector<std::string> list_retail_file_names(const std::string &retail_root, const ProjectDocument &document) {
+	return view_names(install_spec(retail_root, document));
+}
+
+std::vector<std::string> list_base_file_names(const std::string &retail_root, const ProjectDocument &document) {
+	if (document.expansion.standalone()) return std::vector<std::string>();
+	return view_names(base_install_spec(retail_root, document));
 }
 
 std::string import_destination(const AssetScan &existing, const std::string &name, AssetKind kind) {

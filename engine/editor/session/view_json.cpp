@@ -597,6 +597,12 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("loose_written", json_number(double(report.loose_written.size())));
 		build.set("files_hashed", json_number(double(report.files_hashed)));
 		build.set("bytes_hashed", json_number(double(report.bytes_hashed)));
+		// An expansion's files left out as the base game's own (ADR 0046 S16, lean packing).
+		JsonValue same = JsonValue::make_object();
+		same.set("files", json_number(double(report.same_as_base_files)));
+		same.set("bytes", json_number(double(report.same_as_base_bytes)));
+		same.set("base_bytes_read", json_number(double(report.base_bytes_read)));
+		build.set("same_as_base", std::move(same));
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
 	}
 	out.set("build", std::move(build));

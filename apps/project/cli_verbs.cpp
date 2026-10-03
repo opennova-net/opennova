@@ -801,7 +801,17 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 		             dir.c_str(), count_at(build, "archives_written"), count_at(build, "archives_reused"),
 		             count_at(build, "archives_linked"), count_at(build, "loose_written"),
 		             count_at(build, "files_hashed"));
-	std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
+	const std::string expansion = build.get_string("expansion", "");
+	if (expansion.empty()) {
+		std::fprintf(cli.out, "run: opennova.exe -- --resource-dir \"%s\"\n", dir.c_str());
+		return 0;
+	}
+	// ADR 0046 S16: an expansion, its files the base game serves the same left out.
+	const JsonValue &same = at(build, "same_as_base");
+	std::fprintf(cli.out, "expansion %s: %.0f file(s) (%.0f byte(s)) left out as the base game's own\n",
+	             expansion.c_str(), same.get_number("files", 0.0), same.get_number("bytes", 0.0));
+	std::fprintf(cli.out, "run: put %s/expansion/%s in the game's folder, then run the game with /exp %s\n", dir.c_str(),
+	             expansion.c_str(), expansion.c_str());
 	return 0;
 }
 

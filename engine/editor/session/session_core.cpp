@@ -311,7 +311,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
-	imports().set_install_files(std::move(open.install_files()));
+	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
 	absorb_refresh(open.refresh());
 	const std::string &title = view_.project.document->title;
 	note("Opened " + title + ".");
@@ -893,8 +893,9 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// The plan gates on the findings the refresh above just produced (the Problems rows),
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
+	const BaseNames base{&view_.project.base_files};
 	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings(),
-	                            build_target());
+	                            build_target(), &base);
 	plan.rehash = rehash;
 	// No directory a game runs from is pruned, asked when the build publishes (a game started
 	// while it packed counts): this editor's game's, and every one whose lease names a process

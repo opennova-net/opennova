@@ -65,6 +65,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildBlocked, code("build.blocked", G::Build) },
 	{ C::BuildChanged, code("build.changed", G::Build) },
 	{ C::BuildCopy, code("build.copy", G::Build) },
+	// An expansion whose base game does not mount (no install, none of its archives): its build cannot
+	// be compared with the base nor gated over it (ADR 0046 S16), so it gates, the editor's integrity.
+	{ C::BuildExpansionBaseMissing, code("build.expansion.base_missing", G::Build) },
 	// A file an expansion's build leaves out because the game reads its kind only from the install's
 	// folder (ADR 0046 S16, AssetKindRow::expansion_loose): said, refusing nothing.
 	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },

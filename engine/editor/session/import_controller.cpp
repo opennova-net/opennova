@@ -327,11 +327,14 @@ OperationOutcome ImportController::absorb_import(ImportOperation &operation) {
 void ImportController::refresh_install_files() {
 	view_.project.retail_files = view_.project.open ? list_retail_file_names(core_.game_install(), *view_.project.document)
 	                                        : std::vector<std::string>();
+	view_.project.base_files = view_.project.open ? list_base_file_names(core_.game_install(), *view_.project.document)
+	                                      : std::vector<std::string>();
 	core_.touch(ViewConcern::Files);
 }
 
-void ImportController::set_install_files(std::vector<std::string> names) {
+void ImportController::set_install_files(std::vector<std::string> names, std::vector<std::string> base) {
 	view_.project.retail_files = std::move(names);
+	view_.project.base_files = std::move(base);
 	core_.touch(ViewConcern::Files);
 }
 
@@ -372,6 +375,7 @@ void ImportController::clear() {
 	view_.dialogs.import_preview = DialogsView::ImportPreview();
 	view_.project.imports = std::make_shared<const std::vector<ImportedSource>>();
 	view_.project.retail_files.clear();
+	view_.project.base_files.clear();
 }
 
 } // namespace opennova::editor

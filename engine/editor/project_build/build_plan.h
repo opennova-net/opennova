@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/archive_routing.h>
@@ -28,6 +29,7 @@ struct BuildEntry {
 	// the archives, or under `expansion/<b>/` in an expansion's build (ADR 0046 S16). Unused for an
 	// archive's entry.
 	std::string build_path;
+	AssetKind kind = AssetKind::Unknown; // what the scan made of it
 };
 
 struct BuildArchive {
@@ -56,6 +58,10 @@ struct BuildPlan {
 	// <b>L.pff then <b>.pff, even empty (the game opens the pair by name).
 	std::vector<BuildArchive> archives;
 	std::vector<BuildEntry> loose;      // copied beside the archives (an expansion's into its folder)
+	// An expansion's files the game reads from the install's folder alone (ExpansionPlace::RootOnly):
+	// never built; the build compares each with the base's and says so where it differs
+	// (build.expansion.root_only). `build_path` is its project path.
+	std::vector<BuildEntry> root_only;
 	std::vector<Diagnostic> diagnostics;
 	bool ok = false;                    // false when a diagnostic blocks the build (blocks_build)
 	// The file the build keeps each file's content hash in, by the size and last write it was
@@ -70,8 +76,11 @@ struct BuildPlan {
 // `document_findings` is the document validation over this scan
 // (graph/project_validation.h validate_project) the caller already has: the session's
 // last validation's gate, or the command line's one pass. The plan does not validate
-// again. `target` says what the build makes (the standalone game when it names no expansion).
+// again. `target` says what the build makes (the standalone game when it names no expansion); `base`,
+// an expansion's base game's names (the session's base listing), without which an expansion does not
+// build (build.expansion.base_missing), and over which its gate reads (blocks_build).
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
-                     const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget());
+                     const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget(),
+                     const BaseNames *base = nullptr);
 
 } // namespace opennova::editor
