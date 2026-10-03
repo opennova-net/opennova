@@ -888,8 +888,9 @@ std::string DocumentSet::records_words(const Document &document, const std::vect
 
 // What a batch did, in words, for the status line (ADR 0046 S15): a field set by its name, on its
 // record by its title as it read before (`named`), to what its new value names ("Set Group of Ranger
-// #12 to Group 3 (5 entities)."); a row added by its title; "" for any other batch (the line then
-// names the file).
+// #12 to Group 3 (5 entities)."), and on several records to the one value they now share, or "to
+// different values" when they do not (S17: never one record's value said of all); a row added by
+// its title; "" for any other batch (the line then names the file).
 std::string DocumentSet::edit_words(const Document &document, const std::vector<Edit> &edits,
                                     const std::string &named) const {
 	std::optional<GraphNameSource> names;
@@ -898,17 +899,30 @@ std::string DocumentSet::edit_words(const Document &document, const std::vector<
 	if (edits.empty()) return std::string();
 	const Edit &first = edits.front();
 	if (!named.empty() && sets_one_field(edits) && document.row(first.address.row)) {
-		const FieldSchema *schema = nullptr;
-		for (const FieldSchema &field : document.fields(first.address.kind))
-			if (field.id == first.field) schema = &field;
-		if (!schema) return std::string();
-		const FieldUse use = document.field_on(first.address, *schema);
-		Value value;
-		if (!document.get(first.address, first.field, value)) return std::string();
-		const DisplayName words = value_display(document, first.address, use, value, source);
-		std::vector<FieldChoice> own;
-		const std::string shown = words.text.empty() ? shown_value(*schema, document.choices_on(first.address, use, own), value) : words.text;
-		return "Set " + field_title(use) + " of " + named + " to " + shown + ".";
+		// A record's field as it reads now: its title, and its value in words.
+		const auto read = [&](const NodeAddress &address, std::string &title, std::string &shown) {
+			const FieldSchema *schema = nullptr;
+			for (const FieldSchema &field : document.fields(address.kind))
+				if (field.id == first.field) schema = &field;
+			if (!schema) return false;
+			const FieldUse use = document.field_on(address, *schema);
+			Value value;
+			if (!document.get(address, first.field, value)) return false;
+			const DisplayName words = value_display(document, address, use, value, source);
+			std::vector<FieldChoice> own;
+			title = field_title(use);
+			shown = words.text.empty() ? shown_value(*schema, document.choices_on(address, use, own), value) : words.text;
+			return true;
+		};
+		std::string title, shown;
+		if (!read(first.address, title, shown)) return std::string();
+		for (const Edit &edit : edits) {
+			std::string other_title, other;
+			if (edit.address == first.address) continue;
+			if (!read(edit.address, other_title, other)) return std::string();
+			if (other != shown) return "Set " + title + " of " + named + " to different values.";
+		}
+		return "Set " + title + " of " + named + " to " + shown + ".";
 	}
 	// Several fields of one record (a drag's left, top, right and bottom; the UX round's problems lane):
 	// the fields by name, on the record by its title as it read before.
