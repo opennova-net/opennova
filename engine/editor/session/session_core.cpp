@@ -15,6 +15,7 @@
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
@@ -62,6 +63,13 @@ SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferenc
 		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
 	view_.documents.viewports = viewports_;
 	view_.documents.thumbnails = std::make_shared<TextureThumbnails>();
+	// A closed model a texture's uses read is read as a document opens it (DocumentSet::load).
+	texture_uses_ = std::make_shared<TextureUseIndex>([this](const std::string &path) -> std::shared_ptr<DocumentBase> {
+		const AssetEntry *entry = view_.project.scan ? view_.project.scan->at_path(path) : nullptr;
+		Diagnostic error;
+		return entry ? documents().load(path, entry->kind, error) : nullptr;
+	});
+	view_.documents.texture_uses = texture_uses_;
 	// What a viewport's follow derives (a menu's held window, a model framed, a clip's clock sought)
 	// moves the Viewports concern as a SetViewport does; the follow runs at the Shell's pump, outside
 	// any request, so the counter alone moves (nothing is tracked again).
@@ -362,6 +370,7 @@ bool SessionCore::close_project() {
 	view_.project.open = false;
 	imports().clear();
 	view_.documents.thumbnails->clear();
+	texture_uses_->clear();
 	view_.project.root.clear();
 	view_.project.document = std::make_shared<const ProjectDocument>();
 	view_.project.scan = std::make_shared<const AssetScan>();

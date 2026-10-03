@@ -23,6 +23,7 @@
 #include <editor/documents/mission_uses.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <editor/session/texture_use_index.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
@@ -1224,6 +1225,36 @@ JsonValue answer_texture_thumbnail(const QueryContext &context, const QueryArgs 
 	return texture_thumbnail_json(*thumbnail, true);
 }
 
+constexpr QueryParam kTextureUsesParams[] = {
+	{ "path", J::String, true, nullptr,
+			"A texture file of the project, by its project-relative path or its logical name." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+// What uses a texture (ADR 0046 S18, graph/texture_uses over the session's index).
+JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path");
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	if (!entry && view.project.scan) entry = view.project.scan->find(path);
+	if (!entry || entry->kind != AssetKind::Texture) {
+		error = "no texture file " + path + " in the project.";
+		return JsonValue::make_null();
+	}
+	static const std::vector<TextureUse> kNone;
+	const std::vector<TextureUse> &uses =
+			view.documents.texture_uses ? view.documents.texture_uses->uses_of(view, entry->relative_path) : kNone;
+	const JsonPage page = page_of(args);
+	JsonValue out = JsonValue::make_object();
+	out.set("file", json_string(entry->relative_path));
+	set_page(out, page, uses.size());
+	JsonValue list = JsonValue::make_array();
+	for (size_t i = page.first(uses.size()); i < page.last(uses.size()); ++i) list.push(texture_use_json(uses[i]));
+	out.set("uses", std::move(list));
+	return out;
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1560,6 +1591,18 @@ constexpr EditorQueryRow kRows[] = {
 			"height (the picture's), source_width, source_height, levels, format, texels and alpha in words, "
 			"and png, the picture as a base64 PNG.")
 			.chooses(kThumbnailChoices)
+			.row,
+	Query(K::TextureUses, "texture_uses", answer_texture_uses, kTextureUsesParams,
+			concern_set({ C::Graph, C::Files, C::Documents, C::DocumentSet }),
+			"What uses a texture file (ADR 0046 S18): a page of its uses, the graph's references whose loader "
+			"names it (those that load it and those whose name is the file's though the loader opens another, "
+			"a .tga beside the .dds the game takes: reads_file false) and the names the game opens itself; each "
+			"its role token, words (the role and where: a model's material and its shader and cut-out, a "
+			"terrain's key, a HUD keyword), referrer, record, locator and field (none for a fixed name: fixed, "
+			"fixed_for, witness), name_written, load {file, reader, transform}, served (the project file the "
+			"loader opens) and context (a model row's material, slot, type, row_flags, shader, alpha_test, "
+			"alpha_ref; key; hud_mode).")
+			.pages("uses")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "

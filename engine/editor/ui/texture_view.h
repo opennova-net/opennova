@@ -16,8 +16,10 @@ struct GraphEdge;
 // role): a column of what the texture is (its facts in a modder's words: the format, the size, the
 // texels, the compression, the alpha, the mip levels, the palette, and whether the game loads it), its
 // palette as swatches where it has one (an entry's index and colour as the pointer rests on it), and
-// what uses it (the graph's references to the file, each by the referring record's words and field,
-// a Go to on each); beside it the texture viewport filling the rest (ui/texture_viewport_view).
+// what it is used as (the session's texture uses, S18: each use by its role and where, a model's
+// material with its shader and cut-out, a name the game opens itself with what for; a use whose loader
+// opens another file said so; a Go to on each referrer); beside it the texture viewport filling the rest
+// (ui/texture_viewport_view).
 class TextureView final : public DocumentView {
 public:
 	TextureView();
@@ -31,17 +33,9 @@ public:
 private:
 	void draw_info(Workspace &workspace, const DocumentBase &document);
 	void draw_palette(const std::vector<uint8_t> &palette);
-	void draw_users(Workspace &workspace, const DocumentBase &document);
+	void draw_uses(Workspace &workspace, const DocumentBase &document);
 
 	std::unique_ptr<TextureViewportView> viewport_;
-	// The uses listed, asked of the graph once while it and the file set stand.
-	struct Users {
-		RevisionKey key;
-		std::string file;
-		std::vector<const GraphEdge *> edges;
-		std::vector<std::string> lines;
-	};
-	Users users_;
 };
 
 std::unique_ptr<DocumentView> make_texture_view();

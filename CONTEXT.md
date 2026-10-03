@@ -819,6 +819,15 @@ each with its witness. A file has as many roles as uses; the role, not the file,
 right.
 _Avoid_: texture type (a model texture row's type field), usage, slot (a model row's slot field)
 
+**Texture use**:
+One way a texture file is used (ADR 0046 S18): a reference to it from another file (a model's material
+row, a terrain's key, a sky's cloud layer, a particle's graphic, an item's HUD image, a menu's image) with
+the role that reference gives it and what the referrer says of it (the material's shader and cut-out),
+or a name the game opens itself (the HUD's art, the weather, the scars). A use whose loader opens another
+file of the name (a `.tga` beside the `.dds` a model row loads) does not read this one. A texture's tab
+lists its uses as Used as.
+_Avoid_: usage (the graph's references to any file), referrer (the file that makes the use)
+
 **Texture thumbnail**:
 A texture file as a small picture (ADR 0046 S18): read by the reader its name picks, what a use's
 loader makes of its texels applied (the HUD's alpha alone, a sky map's PCX alpha from its palette),

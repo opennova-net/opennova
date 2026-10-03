@@ -29,6 +29,7 @@ class ProjectRefresh;
 struct PlayIntent;
 class RenameController;
 class UnsavedGuard;
+class TextureUseIndex;
 class Viewports;
 
 // How long a gesture of the wire's stays open with no sample (S13 V7): a client that began a drag
@@ -288,6 +289,7 @@ private:
 	PollBudget poll_budget_ = kDefaultPollBudget;
 	SessionView view_;
 	std::shared_ptr<Viewports> viewports_;
+	std::shared_ptr<TextureUseIndex> texture_uses_; // the view's texture_uses, cleared with the project
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
 	size_t files_scanned_ = 0;

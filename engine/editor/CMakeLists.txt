@@ -95,6 +95,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/reference_queries.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/rename_transaction.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/style_value_use.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graph/texture_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/graph/use_checks.cpp
     # import — the importers (a PNG to the game's PCX or TGA) and what they read (the import
     # context), the sidecars, the import pass, and the plan of an import with the files it needs
@@ -224,6 +225,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_core.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_json.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/session_operation.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/texture_use_index.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/unsaved_guard.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/view_json.cpp
     # session/view — the view the windows draw, an aggregate of sub-views (S13 V4: the project,

@@ -47,6 +47,7 @@ enum class EditorQueryKind : uint8_t {
 	ScriptAssist,
 	TextureRoles,
 	TextureThumbnail,
+	TextureUses,
 	Catalog,
 	kCount,
 };

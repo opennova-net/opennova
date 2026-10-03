@@ -4190,6 +4190,14 @@ target_link_libraries(editor_texture_thumbnails_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_thumbnails_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME editor_texture_thumbnails COMMAND editor_texture_thumbnails_test)
 
+# ADR 0046 S18, the texture uses (graph/texture_uses, session/texture_use_index): each texture's uses by
+# role over a minted project, a model row by its material, a .tga beside the .dds its loader opens, a
+# terrain's, a sky's, a HUD image's, a name the game opens itself; the texture_uses query.
+add_executable(editor_texture_uses_test editor/texture_uses_test.cpp)
+target_link_libraries(editor_texture_uses_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_uses_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_uses COMMAND editor_texture_uses_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -17,6 +17,7 @@ namespace opennova::editor {
 
 class DocumentBase;
 class TextureThumbnails;
+class TextureUseIndex;
 class Viewports;
 
 // What the Preview window shows of a viewport kind (ADR 0046 S13 V5; the kinds are
@@ -123,6 +124,9 @@ struct DocumentsView {
 	// ask as they draw (a picture not made is queued, and the session's poll makes it within its budget)
 	// and the wire makes a picture in at once. Made with the session (null only in a view no session made).
 	std::shared_ptr<TextureThumbnails> thumbnails;
+	// What uses each texture (session/texture_use_index.h, ADR 0046 S18), kept while the graph, the files
+	// and the open documents stand: the texture view's Used as and the texture_uses query read it.
+	std::shared_ptr<const TextureUseIndex> texture_uses;
 };
 
 } // namespace opennova::editor
