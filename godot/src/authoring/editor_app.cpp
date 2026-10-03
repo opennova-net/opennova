@@ -17,6 +17,8 @@
 
 #include <runtime/devtools/imgui_pass.h>
 
+#include <editor/assets/asset_registry.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_device_cache.h>
 #include <editor/preview/viewports.h>
 #include <editor/run/launch_plan.h>
@@ -66,6 +68,7 @@ void EditorApp::_bind_methods() {
 	ADD_PROPERTY(PropertyInfo(Variant::INT, "first_picture_budget_ms"), "set_first_picture_budget_ms",
 			"get_first_picture_budget_ms");
 	ClassDB::bind_method(D_METHOD("get_viewport_device", "path", "kind"), &EditorApp::get_viewport_device);
+	ClassDB::bind_method(D_METHOD("get_thumbnail_texture", "path", "transform"), &EditorApp::get_thumbnail_texture);
 	ClassDB::bind_method(D_METHOD("get_mission_placer", "path"), &EditorApp::get_mission_placer);
 	ClassDB::bind_method(D_METHOD("get_mission_device_count", "path", "what"), &EditorApp::get_mission_device_count);
 	ClassDB::bind_method(D_METHOD("get_mission_entity_key", "path", "row"), &EditorApp::get_mission_entity_key);
@@ -164,9 +167,12 @@ void EditorApp::_ready() {
 	devices_->set_pin_all_targets(!is_available());
 	// A planner with no canvas (the wire's drag and drop) reads the device of its viewport there.
 	session_->viewports().set_devices(devices_.get());
+	// The texture thumbnails' GPU copies, uploaded a few a frame as the windows draw them (S18).
+	thumbnails_ = std::make_unique<ThumbnailImages>();
 	if (is_available()) {
 #if OPENNOVA_EDITOR_UI
 		windows_->set_devices(devices_.get());
+		windows_->set_thumbnail_images(thumbnails_.get());
 #endif
 		UtilityFunctions::print_verbose("OpenNova Editor: editor variant loaded, workspace attached");
 	} else {
@@ -227,9 +233,11 @@ void EditorApp::_exit_tree() {
 	mcp_port_ = 0;
 #if OPENNOVA_EDITOR_UI
 	windows_->set_devices(nullptr);
+	windows_->set_thumbnail_images(nullptr);
 #endif
 	if (session_) session_->viewports().set_devices(nullptr);
 	devices_.reset();
+	thumbnails_.reset();
 	free_retired_();
 	if (picker_ != nullptr) {
 		picker_->queue_free();
@@ -276,6 +284,7 @@ void EditorApp::_process(double p_delta) {
 }
 
 void EditorApp::before_layout(double) {
+	if (thumbnails_) thumbnails_->begin_frame();
 #if OPENNOVA_EDITOR_UI
 	windows_->begin_frame();
 #endif
@@ -514,6 +523,23 @@ SubViewport *EditorApp::get_viewport_device(const String &p_path, const String &
 	// The Shell's cache makes its devices by the kinds' table alone (authoring/viewport_devices).
 	auto *device = static_cast<ViewportDevice *>(devices_->held(opennova::to_std(p_path), kind));
 	return device ? device->sub_viewport() : nullptr;
+}
+
+Ref<ImageTexture> EditorApp::get_thumbnail_texture(const String &p_path, const String &p_transform) {
+	ensure_session();
+	const opennova::editor::SessionView &view = session_->view();
+	if (!thumbnails_ || !view.documents.thumbnails || !view.project.scan) return Ref<ImageTexture>();
+	const opennova::editor::AssetEntry *entry = view.project.scan->at_path(opennova::to_std(p_path));
+	if (!entry) entry = view.project.scan->find(opennova::to_std(p_path));
+	if (!entry || entry->kind != opennova::editor::AssetKind::Texture) return Ref<ImageTexture>();
+	opennova::editor::TextureLoadTransform transform = opennova::editor::TextureLoadTransform::None;
+	for (size_t i = 0; i < size_t(opennova::editor::TextureLoadTransform::kCount); ++i) {
+		const auto each = static_cast<opennova::editor::TextureLoadTransform>(i);
+		if (opennova::to_std(p_transform) == opennova::editor::texture_load_transform_token(each)) transform = each;
+	}
+	const std::shared_ptr<const opennova::editor::TextureThumbnail> thumbnail =
+			view.documents.thumbnails->make_now(view, entry->relative_path, transform);
+	return thumbnail ? thumbnails_->texture_of(*thumbnail) : Ref<ImageTexture>();
 }
 
 namespace {

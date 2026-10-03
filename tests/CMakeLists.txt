@@ -4182,6 +4182,14 @@ target_link_libraries(editor_texture_roles_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_roles_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_texture_roles COMMAND editor_texture_roles_test)
 
+# ADR 0046 S18, the texture thumbnails (preview/texture_thumbnails): a texture as a small picture, the
+# PNG writer, the session's cache made by its poll, the texture_thumbnail query and a texture field's
+# record and choices naming the file its loader opens.
+add_executable(editor_texture_thumbnails_test editor/texture_thumbnails_test.cpp)
+target_link_libraries(editor_texture_thumbnails_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_thumbnails_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_thumbnails COMMAND editor_texture_thumbnails_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

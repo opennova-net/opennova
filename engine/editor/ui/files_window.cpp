@@ -21,6 +21,7 @@
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -467,8 +468,8 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 		open_to_.clear();
 	}
 	draw_file_menu(view, entry);
-	// Its path, kind and size, made only while its tooltip shows.
-	ui_kit::tooltip_lazy([&] {
+	// Its path, kind and size, made only while its tooltip shows; a texture's picture above them (S18).
+	const auto tip = [&] {
 		std::string tip = entry.relative_path + "\n" + asset_kind_label(entry.kind) + ", " +
 		                  size_text(entry.size_bytes);
 		if (!entry.imported_from.empty()) tip += "\nImported from " + entry.imported_from;
@@ -482,7 +483,10 @@ void FilesWindow::draw_file(const SessionView &view, const AssetEntry &entry, bo
 			tip += "\n" + said(counts.original_errors, counts.original_warnings) +
 			       " in the game's own data (the game as it ships has them too)";
 		return tip;
-	});
+	};
+	if (entry.kind != AssetKind::Texture) ui_kit::tooltip_lazy(tip);
+	else if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip))
+		texture_preview::tooltip(workspace_, entry.relative_path, TextureLoadTransform::None, tip());
 	ImGui::SameLine(0.0f, 0.0f);
 	if (in_tree) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + ImGui::GetTreeNodeToLabelSpacing());
 	const float spacing = ImGui::GetStyle().ItemInnerSpacing.x;

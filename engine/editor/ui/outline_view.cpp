@@ -18,6 +18,7 @@
 #include <editor/ui/field_widgets.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/text_edit.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -413,7 +414,10 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		reveal_.scroll_to(line.address);
 		const Document::RecordChange change = document.record_change(line.address);
 		ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
-		ui_kit::tooltip_lazy([&] { return record_tip(line, change); });
+		// A record naming a texture (a model's texture row) shows it as its tooltip (S18).
+		if (!(ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip) &&
+		      texture_preview::record_tooltip(workspace, document, line.address, record_tip(line, change))))
+			ui_kit::tooltip_lazy([&] { return record_tip(line, change); });
 		if (ImGui::IsItemClicked() && !toggled) select_line(workspace, document, model_, index);
 		// A double click on a mission's entity or area frames it in the mission's picture (ADR 0046
 		// S15: the outline and the picture are one selection; its viewport plans the camera).

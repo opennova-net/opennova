@@ -119,6 +119,18 @@ const char *texture_load_transform_token(TextureLoadTransform transform) {
 	return "none";
 }
 
+const char *texture_load_transform_words(TextureLoadTransform transform) {
+	switch (transform) {
+	case TextureLoadTransform::LuminanceAlpha: return "its alpha the brightness of its palette's colours";
+	case TextureLoadTransform::WhiteAlphaFromBlue: return "white, its alpha its blue";
+	case TextureLoadTransform::AlphaOnly: return "its alpha alone, tinted by the HUD colour";
+	case TextureLoadTransform::NormalFromHeight: return "a normal map made from the height in its alpha";
+	case TextureLoadTransform::None:
+	case TextureLoadTransform::kCount: break;
+	}
+	return "";
+}
+
 TextureLoad texture_load(TextureLoader loader, std::string_view written, const TextureNameTest &exists, uint8_t row_type,
                          int alpha_mode) {
 	const std::string name(written);

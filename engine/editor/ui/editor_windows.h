@@ -22,6 +22,7 @@ class DocumentWindow;
 class InspectorWindow;
 class PreviewWindow;
 class ProblemsWindow;
+class TextureThumbnailImages;
 class ViewportDeviceSource;
 
 // The OpenNova Editor's workspace (ADR 0046 d10, S11d): the ImGui pass with the editor's
@@ -81,6 +82,8 @@ public:
 	// The Shell's devices, by document and viewport kind, the viewports' canvases draw through
 	// (null: no picture).
 	void set_devices(ViewportDeviceSource *devices) { devices_ = devices; }
+	// The Shell's thumbnail device the texture previews draw through (null: framed boxes, S18).
+	void set_thumbnail_images(TextureThumbnailImages *images) { thumbnail_images_ = images; }
 
 	// The new-project form (the welcome view's and File > New project...'s), for a test.
 	const NewProjectForm &new_project_form() const { return new_project_; }
@@ -89,6 +92,7 @@ public:
 	const SessionView &view() const override;
 	void request(EditorRequest request) override;
 	ViewportDeviceSource *devices() const override { return devices_; }
+	TextureThumbnailImages *thumbnail_images() const override { return thumbnail_images_; }
 
 	// MenuBarContributor
 	void draw_menu_bar(devtools::ImGuiPass &pass) override;
@@ -109,6 +113,7 @@ private:
 	SessionView empty_;
 	uint64_t dispatched_ = 0; // the seq of the last view event sent to a window
 	ViewportDeviceSource *devices_ = nullptr; // the Shell's (set_devices)
+	TextureThumbnailImages *thumbnail_images_ = nullptr; // the Shell's (set_thumbnail_images)
 	std::deque<EditorRequest> requests_;
 	std::vector<EditorRequest> deferred_; // this frame's requests that act on the files as saved
 	bool in_frame_ = false;

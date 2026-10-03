@@ -961,7 +961,8 @@ std::vector<ReferenceChoice> AssetGraph::choices(ReferenceKind kind, const std::
 				choice.name = slot.logical_name;
 				choice.kind = kind;
 				choice.file = slot.path;
-				choice.status = resolve(kind, choice.name, scope, nullptr, loader_arg);
+				choice.status = resolve(kind, choice.name, scope, &choice.served, loader_arg);
+				if (choice.status != ReferenceStatus::Present) choice.served.clear();
 				out.push_back(std::move(choice));
 			});
 		};

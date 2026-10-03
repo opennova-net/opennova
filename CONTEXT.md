@@ -819,6 +819,15 @@ each with its witness. A file has as many roles as uses; the role, not the file,
 right.
 _Avoid_: texture type (a model texture row's type field), usage, slot (a model row's slot field)
 
+**Texture thumbnail**:
+A texture file as a small picture (ADR 0046 S18): read by the reader its name picks, what a use's
+loader makes of its texels applied (the HUD's alpha alone, a sky map's PCX alpha from its palette),
+shrunk to 128 pixels a side, with its size and format in words. The session keeps them by the file's
+stamp and makes them off the frame; the editor shows one wherever a field names a texture (the file the
+reference's loader opens, a `.tga`'s `.dds` where that is what the game loads), in a texture field's
+picker, and as the tooltip of a texture in Files, Problems and the outline.
+_Avoid_: icon, preview (the Preview window), image
+
 **Texture viewport**:
 A texture's picture (the Main view of a texture document, and the Preview window's for a texture
 Files selects, read from its file while it is not open): its texels at a zoom (fitted, or a scale about

@@ -17,6 +17,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/requirements/requirement_words.h>
@@ -167,6 +168,28 @@ void set_texture_role(JsonValue &out, ReferenceKind kind, int32_t loader_arg) {
 }
 
 } // namespace
+
+JsonValue texture_reference_json(const SessionView &view, const TextureReferenceLoad &load) {
+	JsonValue out = JsonValue::make_object();
+	out.set("name", json_string(load.name));
+	out.set("status", json_string(reference_status_token(load.status)));
+	if (load.file.empty()) return out;
+	out.set("file", json_string(load.file));
+	out.set("transform", json_string(texture_load_transform_token(load.transform)));
+	const std::shared_ptr<const TextureThumbnail> thumbnail =
+			view.documents.thumbnails ? view.documents.thumbnails->make_now(view, load.file, load.transform) : nullptr;
+	if (!thumbnail) return out;
+	const bool loads = thumbnail->state == TextureThumbnail::State::Ready;
+	out.set("loads", boolean(loads));
+	if (!loads) out.set("refusal", json_string(thumbnail->refusal));
+	out.set("width", json_number(double(thumbnail->source_width)));
+	out.set("height", json_number(double(thumbnail->source_height)));
+	out.set("levels", json_number(double(thumbnail->levels)));
+	out.set("format", json_string(thumbnail->format));
+	out.set("texels", json_string(thumbnail->texels));
+	out.set("alpha", json_string(thumbnail->alpha));
+	return out;
+}
 
 JsonValue address_to_json(const NodeAddress &address) {
 	JsonValue out = JsonValue::make_object();
@@ -1428,6 +1451,9 @@ JsonValue record_to_json(const Document &document, const NodeAddress &address, c
 					? reference_target_file(*view.findings.graph, field, value)
 					: std::string();
 			if (!target.empty()) entry.set("reference_file", json_string(target));
+			// A texture's: the file its loader opens and what that file is (ADR 0046 S18).
+			if (view.findings.graph && is_texture_reference(field.reference))
+				entry.set("texture", texture_reference_json(view, texture_reference(*view.findings.graph, field, value)));
 		}
 		if (field.defines != ReferenceKind::None) entry.set("defines", json_string(reference_row(field.defines).token));
 		fields.push(std::move(entry));
@@ -1530,6 +1556,11 @@ JsonValue reference_choices_to_json(const Document &document, const NodeAddress 
 			entry.set("inert", boolean(true));
 			entry.set("reason", json_string(choice.reason));
 		}
+		// A texture's: the file the reference set to it loads, and what it is (ADR 0046 S18).
+		if (!choice.served.empty()) entry.set("served", json_string(choice.served));
+		if (view.findings.graph && is_texture_reference(field.reference) && is_texture_reference(choice.kind))
+			entry.set("texture", texture_reference_json(view, texture_reference(*view.findings.graph, field.reference, choice.name,
+			                                                                     field.scope, field.loader_arg)));
 		list.push(std::move(entry));
 	}
 	JsonValue out = JsonValue::make_object();

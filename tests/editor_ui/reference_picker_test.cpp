@@ -12,6 +12,8 @@
 
 #include <editor/documents/mission_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/texture_thumbnails.h>
+#include <formats/tga/tga.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
@@ -461,6 +463,53 @@ void test_pick_by_name() {
 	CHECK(pick("123456") == 123456, "an id no name is, typed: set as typed");
 }
 
+// S18: a texture field shows the texture its loader opens under it (the session's thumbnails, made by
+// its poll): a name the project has no file for says so; one it has shows the file, its size and
+// what the use's loader makes of it (an item's HUD image: its alpha alone); its picker previews the
+// highlighted texture beside the list. No thumbnail device here: a framed box stands in for each.
+void test_texture_previews() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const std::string root = project.session.view().project.root;
+	const std::vector<uint8_t> rgba(16, 200);
+	std::vector<uint8_t> tga;
+	std::string error;
+	CHECK(opennova::tga::tga_write_rgba32(rgba.data(), 2, 2, tga, error) &&
+	              editor_test::write_bytes(root + "/textures/present.tga", tga),
+	      "a texture of the project");
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Inspector");
+	ui.away();
+	ui.drain();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Not found") != std::string::npos &&
+	              text.find("The project has no file the game loads for gone.tga.") != std::string::npos,
+	      "a texture the project lacks says so under its field");
+	Edit set;
+	set.address = project.item;
+	set.field = "hud_image";
+	set.value = std::string("present.tga");
+	project.session.handle(request::edit_record(project.items->path(), set));
+	ui.frames(4);
+	text = logged_frame(ui);
+	CHECK(text.find("present.tga") != std::string::npos && text.find("2 x 2, TGA image") != std::string::npos &&
+	              text.find("As this use loads it: its alpha alone, tinted by the HUD colour") != std::string::npos,
+	      "a texture the project has shows its file, its size and what the HUD makes of it");
+	const TextureThumbnails *thumbnails = project.session.view().documents.thumbnails.get();
+	CHECK(thumbnails && thumbnails->made() == 1 && !thumbnails->pending(), "its thumbnail made once, by a poll");
+	open_picker(ui, project, "hud_image");
+	text = logged_frame(ui);
+	CHECK(text.find("2 x 2, TGA image") != std::string::npos, "the picker previews the highlighted texture");
+	ImGui::ClosePopupsExceptModals();
+	ui.frames(2);
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -470,6 +519,7 @@ void run_reference_picker_tests() {
 	test_list_kept();
 	test_lists_let_go();
 	test_pick_by_name();
+	test_texture_previews();
 }
 
 } // namespace editor_ui_test

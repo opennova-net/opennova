@@ -14,6 +14,7 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/rename_dialog.h>
+#include <editor/ui/texture_preview.h>
 #include <editor/ui/ui_kit.h>
 
 #include <algorithm>
@@ -336,6 +337,9 @@ void reference_tools(Workspace &workspace, ReferencePicker &picker, const Docume
 			set(workspace, document, targets, field.schema->id, picked_value(field, picked), false);
 	}
 	reference_status(workspace, field, value, compact, row);
+	// A texture's preview (ADR 0046 S18): the file its loader opens, as that loader loads it; under the
+	// field, or a line high beside its dot in a table's cell.
+	texture_preview::reference_field(workspace, field, value, compact);
 }
 
 // A Files row dropped on a text reference's value: the file set on every target, when it is one
@@ -694,6 +698,9 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	if (is_reference(field, value))
 		reserve += (picks_reference(field) ? ui_kit::button_width("...") + style.ItemSpacing.x : 0.0f) +
 		           ImGui::GetFrameHeight() * 0.5f + style.ItemSpacing.x;
+	// A texture's thumbnail a line high after its dot (S18).
+	if (is_reference(field, value) && is_texture_reference(field.reference))
+		reserve += ImGui::GetFrameHeight() + style.ItemSpacing.x;
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);

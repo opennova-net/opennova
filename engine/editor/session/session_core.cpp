@@ -14,6 +14,7 @@
 #include <editor/model/edit.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
@@ -60,6 +61,7 @@ bool inside(const fs::path &path, const fs::path &dir) {
 SessionCore::SessionCore(ProcessPlatform &platform, EditorPreferences &preferences) :
 		platform_(platform), preferences_(preferences), viewports_(std::make_shared<Viewports>()) {
 	view_.documents.viewports = viewports_;
+	view_.documents.thumbnails = std::make_shared<TextureThumbnails>();
 	// What a viewport's follow derives (a menu's held window, a model framed, a clip's clock sought)
 	// moves the Viewports concern as a SetViewport does; the follow runs at the Shell's pump, outside
 	// any request, so the counter alone moves (nothing is tracked again).
@@ -359,6 +361,7 @@ bool SessionCore::close_project() {
 	documents().update_view();
 	view_.project.open = false;
 	imports().clear();
+	view_.documents.thumbnails->clear();
 	view_.project.root.clear();
 	view_.project.document = std::make_shared<const ProjectDocument>();
 	view_.project.scan = std::make_shared<const AssetScan>();

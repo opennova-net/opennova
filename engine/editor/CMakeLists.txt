@@ -106,6 +106,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/import/import_run.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/mission_fixed_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/png_decode.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/import/png_encode.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/quantize.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/import/sidecar.cpp
     # preview — the viewports (S13 V5): their kinds' table, the session's viewports and the preview
@@ -155,6 +156,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/text_burst.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_canvas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_header.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_thumbnails.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/texture_viewport.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_device_cache.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/viewport_follow.cpp
@@ -275,6 +277,7 @@ if(OPENNOVA_IMGUI)
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/styles_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/text_edit.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_preview.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/texture_viewport_view.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/ui_kit.cpp
@@ -297,8 +300,9 @@ target_include_directories(opennova_editor
 
 # The chain: editor -> runtime -> net -> base -> formats -> io (all PUBLIC).
 target_link_libraries(opennova_editor PUBLIC opennova_runtime)
-# The image importer inflates PNG data through the vendored miniz (private: no
-# consumer of the editor sees miniz.h).
+# The image importer inflates PNG data, and the PNG writer (the thumbnails' wire
+# form) deflates it, through the vendored miniz (private: no consumer of the
+# editor sees miniz.h).
 target_link_libraries(opennova_editor PRIVATE opennova_miniz)
 
 target_compile_features(opennova_editor PUBLIC cxx_std_17)

@@ -13,6 +13,7 @@
 #include <editor/session/project_session.h>
 
 #include "authoring/child_process.h"
+#include "authoring/thumbnail_images.h"
 #include "devtools/imgui_pass_node.h"
 #include "mission/mission_object_placer.h"
 
@@ -98,6 +99,11 @@ public:
 	// viewport is read through query_json's `viewport` and changed through request_json's
 	// set_viewport and edit_in_viewport (S13 V7).
 	SubViewport *get_viewport_device(const String &p_path, const String &p_kind) const;
+	// The GPU texture of a texture file's thumbnail (ADR 0046 S18) as `p_transform` makes it (a
+	// texture_thumbnail query's transform token), made and uploaded now: for the thumbnail device's
+	// test alone (the windows draw it through the ImGui pass). Null for a file that is no texture of the
+	// project or a picture with no texels.
+	Ref<ImageTexture> get_thumbnail_texture(const String &p_path, const String &p_transform);
 	// The mission device over the mission at `p_path` (ADR 0046 S14), for its parity tests alone: its
 	// MissionObjectPlacer (null before its item table is read, or no device); a count by name
 	// ("placements": the whole placements run; "placed", "lifted", "hidden": its entities;
@@ -175,6 +181,8 @@ private:
 	std::vector<opennova::editor::EditorRequest> queued_device_requests_;
 	// The viewports' devices (S13 V5): at most four, by document and kind, made under this node.
 	std::unique_ptr<opennova::editor::ViewportDeviceCache> devices_;
+	// The texture thumbnails' GPU copies (S18), which the windows draw through.
+	std::unique_ptr<ThumbnailImages> thumbnails_;
 	// The milliseconds each frame gives the devices' builds (S13 V6).
 	int build_budget_ms_ = kBuildBudgetMs;
 	int first_picture_budget_ms_ = kFirstPictureBudgetMs;

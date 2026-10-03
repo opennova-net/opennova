@@ -16,6 +16,7 @@
 namespace opennova::editor {
 
 class DocumentBase;
+class TextureThumbnails;
 class Viewports;
 
 // What the Preview window shows of a viewport kind (ADR 0046 S13 V5; the kinds are
@@ -118,6 +119,10 @@ struct DocumentsView {
 	// at every change of the view (preview/viewport_kinds' update_preview_targets, the session's
 	// touch).
 	std::shared_ptr<const Viewports> viewports;
+	// The project's texture thumbnails (preview/texture_thumbnails.h, ADR 0046 S18): a cache the windows
+	// ask as they draw (a picture not made is queued, and the session's poll makes it within its budget)
+	// and the wire makes a picture in at once. Made with the session (null only in a view no session made).
+	std::shared_ptr<TextureThumbnails> thumbnails;
 };
 
 } // namespace opennova::editor

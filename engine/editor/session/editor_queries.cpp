@@ -22,6 +22,7 @@
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_kinds.h>
@@ -1186,6 +1187,43 @@ JsonValue answer_texture_roles(const QueryContext &, const QueryArgs &args, std:
 	return out;
 }
 
+const char *transform_choice(size_t index) {
+	return index < size_t(TextureLoadTransform::kCount) ? texture_load_transform_token(static_cast<TextureLoadTransform>(index))
+	                                                    : nullptr;
+}
+
+constexpr QueryParam kThumbnailParams[] = {
+	{ "path", J::String, true, nullptr,
+			"A texture file of the project, by its project-relative path or its logical name." },
+	{ "transform", J::String, false, "\"none\"",
+			"What the use's loader makes of the texels first (a texture reference's texture.transform): none, "
+			"luminance_alpha, white_alpha_from_blue, alpha_only or normal_from_height." },
+};
+constexpr QueryChoices kThumbnailChoices[] = { { "transform", transform_choice } };
+
+// A texture file as a small picture (ADR 0046 S18, preview/texture_thumbnails), made now when the cache
+// lacks it: its facts and the picture as a PNG.
+JsonValue answer_texture_thumbnail(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const SessionView &view = context.core.view();
+	const std::string path = args.text("path");
+	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path) : nullptr;
+	if (!entry && view.project.scan) entry = view.project.scan->find(path);
+	if (!entry || entry->kind != AssetKind::Texture) {
+		error = "no texture file " + path + " in the project.";
+		return JsonValue::make_null();
+	}
+	TextureLoadTransform transform = TextureLoadTransform::None;
+	for (size_t i = 0; i < size_t(TextureLoadTransform::kCount); ++i)
+		if (args.text("transform") == transform_choice(i)) transform = static_cast<TextureLoadTransform>(i);
+	const std::shared_ptr<const TextureThumbnail> thumbnail =
+			view.documents.thumbnails ? view.documents.thumbnails->make_now(view, entry->relative_path, transform) : nullptr;
+	if (!thumbnail) {
+		error = entry->relative_path + " did not read.";
+		return JsonValue::make_null();
+	}
+	return texture_thumbnail_json(*thumbnail, true);
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1512,6 +1550,16 @@ constexpr EditorQueryRow kRows[] = {
 			"whether its loader reads the alpha at all, how it is sampled, what the game does when the file is "
 			"missing or wrong, and the witness.")
 			.pages("roles")
+			.row,
+	Query(K::TextureThumbnail, "texture_thumbnail", answer_texture_thumbnail, kThumbnailParams,
+			concern_set({ C::Files, C::Project }),
+			"A texture file as the windows' thumbnails show it (ADR 0046 S18): read by the reader its name "
+			"picks, what the use's loader makes of its texels applied (transform), shrunk to fit 128 pixels a "
+			"side by averaging; made now when the cache lacks it for the file as the scan last read it. file, "
+			"state (ready, or unloadable: refusal says why the game cannot load it), transform, width and "
+			"height (the picture's), source_width, source_height, levels, format, texels and alpha in words, "
+			"and png, the picture as a base64 PNG.")
+			.chooses(kThumbnailChoices)
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "

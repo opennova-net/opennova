@@ -9,6 +9,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/model/text_document.h>
+#include <editor/preview/texture_thumbnails.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
@@ -28,6 +29,13 @@
 #include <editor/session/unsaved_guard.h>
 
 namespace opennova::editor {
+
+namespace {
+
+// How many bytes of texture files a poll reads to make thumbnails (one thumbnail at least).
+constexpr size_t kThumbnailPollBytes = size_t(4) << 20;
+
+} // namespace
 
 // The session's parts, each holding the core and reaching the others through it (SessionCore::
 // Parts). Made in this order and destroyed in the reverse: the core outlives every part.
@@ -212,6 +220,11 @@ void ProjectSession::poll() {
 	session.play.poll();
 	if (session.core.operations().done()) session.core.finish_operation();
 	session.core.save_recent_items();
+	// The texture thumbnails the windows asked for and the cache lacks (ADR 0046 S18), at least one a
+	// poll, until kThumbnailPollBytes of files are read: a list of hundreds of textures fills a few at a
+	// frame.
+	const SessionView &view = session.core.view();
+	if (view.project.open && view.documents.thumbnails) view.documents.thumbnails->step(view, kThumbnailPollBytes);
 }
 
 void ProjectSession::set_poll_budget(const PollBudget &budget) {

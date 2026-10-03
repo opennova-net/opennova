@@ -30,6 +30,8 @@ enum class TextureLoadTransform : uint8_t {
 	kCount,
 };
 const char *texture_load_transform_token(TextureLoadTransform transform);
+// What a transform makes of a texture, in a modder's words ("" for none).
+const char *texture_load_transform_words(TextureLoadTransform transform);
 
 struct TextureLoad {
 	std::string file; // the name the loader opens ("" none)

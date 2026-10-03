@@ -61,6 +61,9 @@ struct ReferenceChoice {
 	// symbol's; empty: `name`, in the field's scope.
 	std::string symbol;
 	std::string symbol_scope;
+	// A file name's: the project file the reference set to it loads ("" for none: the picker's
+	// thumbnail of a texture is that file's, a .tga's .dds where its loader opens that, ADR 0046 S18).
+	std::string served;
 };
 
 // A file or a symbol whose name holds a searched text (AssetGraph::search), with how many uses
