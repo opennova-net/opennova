@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -188,6 +189,23 @@ struct BaseNames {
 // reference.wrong_kind: the project's file is the one the game reads). Null `base`: blocks_build.
 bool blocks_build(const Diagnostic &d, const BaseNames *base);
 bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base);
+
+// The files a build packs as the game ships them (ADR 0046 S16): the project's files that are the
+// game's own data byte for byte (session/original_bytes.h), less those whose open documents hold
+// unsaved edits. The build packs and copies every file's bytes as stored and never runs the editor's
+// writer over them (project_build/build_run.h), so a finding that a file does not serialize (a
+// blocks_save row's: the writer cannot write back what the editor holds, or holds a value the reader
+// refuses) is about a file the build must write: one changed, or one whose edits the Save a build asks
+// first must write. Over the game's own bytes, which the game ships and loads, it refuses nothing.
+struct ShippedFiles {
+	std::set<std::string> original; // project-relative paths (session/original_bytes.h)
+	std::set<std::string> unsaved;                    // the open documents with unsaved edits
+	bool has(const std::string &asset) const;
+};
+// blocks_build over the base (above) and the shipped files: a blocks_save row's error about a file
+// `shipped` has blocks nothing. Null `shipped`: every such error gates.
+bool blocks_build(const Diagnostic &d, const BaseNames *base, const ShippedFiles *shipped);
+bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base, const ShippedFiles *shipped);
 // The kind a token names; false for none.
 bool reference_kind_from_token(const std::string &token, ReferenceKind &out);
 // The reference a stylesheet value naming a file of `file`'s kind makes where the game reads it

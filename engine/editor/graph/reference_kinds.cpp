@@ -651,4 +651,19 @@ bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNam
 	return false;
 }
 
+bool ShippedFiles::has(const std::string &asset) const {
+	return !asset.empty() && original.count(asset) != 0 && unsaved.count(asset) == 0;
+}
+
+bool blocks_build(const Diagnostic &d, const BaseNames *base, const ShippedFiles *shipped) {
+	if (!blocks_build(d, base)) return false;
+	return !(shipped && d.row() && d.row()->blocks_save && shipped->has(d.asset));
+}
+
+bool diagnostics_block_build(const std::vector<Diagnostic> &items, const BaseNames *base, const ShippedFiles *shipped) {
+	for (const Diagnostic &d : items)
+		if (blocks_build(d, base, shipped)) return true;
+	return false;
+}
+
 } // namespace opennova::editor

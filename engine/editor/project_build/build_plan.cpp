@@ -135,7 +135,7 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
-                     const BaseNames *base) {
+                     const BaseNames *base, const ShippedFiles *shipped) {
 	BuildPlan plan;
 	plan.target = target;
 	plan.hash_cache = paths.build_cache_file;
@@ -232,9 +232,10 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 	}
 	// An error whose code gates refuses the build (blocks_build): a missing reference is listed
 	// among the plan's findings and refuses nothing (ADR 0046 S14); an expansion's required file or
-	// gating reference the base serves refuses nothing either (S16, BaseNames).
+	// gating reference the base serves refuses nothing either (S16, BaseNames), nor does a finding that
+	// the game's own bytes, packed as stored, do not serialize (ShippedFiles).
 	for (const Diagnostic &d : plan.diagnostics)
-		if (blocks_build(d, target.is_expansion() ? base : nullptr)) plan.blockers.push_back(d);
+		if (blocks_build(d, target.is_expansion() ? base : nullptr, shipped)) plan.blockers.push_back(d);
 	plan.ok = plan.blockers.empty();
 	return plan;
 }

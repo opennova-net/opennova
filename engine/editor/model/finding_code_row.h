@@ -106,7 +106,9 @@ enum class FindingProblem { None, Info, Warning };
 // graph/reference_kinds.h). The build follows retail, one set of rules (ADR 0046 S14, "the gate"):
 // it is refused exactly where the built game would fail to load or run as retail does, each such row
 // citing the original's refusal, and where the editor cannot vouch for what it packs (a file it
-// cannot read or write, a name the archives cannot store). Every other code is listed (false): its
+// cannot read or write, a name the archives cannot store; a file it cannot write gates only where the
+// build must write it, not over the game's own bytes packed as stored: graph/reference_kinds.h
+// ShippedFiles, S16). Every other code is listed (false): its
 // findings are shown, counted and fixable and refuse nothing. A listed code whose subject names the
 // witness gates where it does: a missing reference of a kind whose row cites the game's refusal
 // (ReferenceKindRow::gates_when_missing), a missing required file whose manifest row is the game's
@@ -189,7 +191,8 @@ constexpr bool finding_entries_well_formed(const FindingCodeEntry<Code> (&entrie
 		if (static_cast<size_t>(entries[i].code) != i || !row.token || !*row.token) return false;
 		if ((row.fixes == FindingFix::Rewrite) != (row.rewrite_does != nullptr)) return false;
 		if (row.blocks_save && row.fixes == FindingFix::Rewrite) return false;
-		// A file that does not serialize cannot be packed as the editor holds it: it gates.
+		// A file that does not serialize cannot be packed as the editor holds it: it gates, but over
+		// the game's own bytes held unedited, which the build packs as stored (ShippedFiles, S16).
 		if (row.blocks_save && !row.gates_build) return false;
 		for (size_t j = 0; j < i; ++j)
 			if (same_finding_token(row.token, entries[j].row.token)) return false;

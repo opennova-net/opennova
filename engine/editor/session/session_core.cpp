@@ -1024,6 +1024,24 @@ BuildTarget SessionCore::build_target() const {
 	return target;
 }
 
+ShippedFiles SessionCore::shipped_files() {
+	ShippedFiles shipped;
+	for (const auto &open : view_.documents.open)
+		if (open && open->dirty()) shipped.unsaved.insert(open->path());
+	if (!view_.project.open) return shipped;
+	// Only the files a gate row says do not serialize are asked of the install (a few, each read once while
+	// it stands).
+	std::vector<std::string> asked;
+	for (const Diagnostic &d : problems().gate_findings())
+		if (d.severity == DiagnosticSeverity::Error && d.row() && d.row()->blocks_save && !d.asset.empty() &&
+		    !shipped.unsaved.count(d.asset))
+			asked.push_back(d.asset);
+	std::sort(asked.begin(), asked.end());
+	asked.erase(std::unique(asked.begin(), asked.end()), asked.end());
+	shipped.original = original_bytes_.identical(game_install(), *view_.project.document, paths_.root, asked);
+	return shipped;
+}
+
 void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
                               const ExportIntent &exported) {
 	if (intent.wanted && play().refused(intent.mission)) return;
@@ -1055,8 +1073,10 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	// not on a validation of its own; the build's own findings are those its report adds to
 	// these rows (absorb_build), whatever the rows are when it ends.
 	const BaseNames base{&view_.project.base_files};
-	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, problems().gate_findings(),
-	                            build_target(), &base);
+	std::vector<Diagnostic> gate = problems().gate_findings();
+	const ShippedFiles shipped = shipped_files();
+	BuildPlan plan = plan_build(paths_, *view_.project.scan, *view_.project.requirements, gate, build_target(), &base,
+	                            &shipped);
 	plan.rehash = rehash;
 	// The build is this project's: in a folder several projects build into (Build to folder), it reuses, prunes
 	// and replaces only its own. Inside the project (its default folder, its cache, its export folder) every

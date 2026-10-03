@@ -87,10 +87,12 @@ struct BuildPlan {
 // last validation's gate, or the command line's one pass. The plan does not validate
 // again. `target` says what the build makes (the standalone game when it names no expansion); `base`,
 // an expansion's base game's names (the session's base listing), without which an expansion does not
-// build (build.expansion.base_missing), and over which its gate reads (blocks_build).
+// build (build.expansion.base_missing), and over which its gate reads (blocks_build); `shipped`, the
+// files packed as the game ships them, whose findings that they do not serialize gate nothing (null:
+// every such finding gates).
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget(),
-                     const BaseNames *base = nullptr);
+                     const BaseNames *base = nullptr, const ShippedFiles *shipped = nullptr);
 
 // The plan's own findings over the scan alone, which plan_build adds to the gate it reads (each one the gate
 // holds already it leaves): an archive the project holds (refused), a player's own file (left out), a name no

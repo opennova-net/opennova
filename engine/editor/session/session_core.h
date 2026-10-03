@@ -16,6 +16,7 @@
 #include <editor/requirements/requirements.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
+#include <editor/session/original_bytes.h>
 #include <editor/session/session_operation.h>
 #include <editor/session/view/view_revisions.h>
 #include <editor/session/view/session_view.h>
@@ -276,6 +277,10 @@ public:
 	// What the open project's build makes (ADR 0046 S16): its project.opennova's expansion (none: the
 	// standalone game), over the project's game install, keyed by its game.
 	BuildTarget build_target() const;
+	// The files the build packs as the game ships them (ADR 0046 S16, ShippedFiles), its gate reading
+	// them: of the files a gate row says do not serialize, those that are the game install's bytes
+	// (OriginalBytes, asked here), less the open documents with unsaved edits.
+	ShippedFiles shipped_files();
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active
@@ -315,6 +320,7 @@ private:
 	std::shared_ptr<Viewports> viewports_;
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
+	OriginalBytes original_bytes_; // which files are the install's bytes (shipped_files)
 	std::deque<std::pair<std::string, std::string>> expansion_renames_; // (project-relative file, new name)
 	std::vector<std::string> install_expansion_names_; // the game install's expansions, by folder name
 	size_t files_scanned_ = 0;
