@@ -1015,6 +1015,13 @@ target_link_libraries(pcx_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(pcx_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pcx_roundtrip COMMAND pcx_roundtrip_test)
 
+# The game's TGA reader (formats/tga/tga_read.h): the unconditional flip, the
+# pixel start, the forms it reads and the ones it zero-fills.
+add_executable(tga_read_test tga/tga_read_test.cpp)
+target_link_libraries(tga_read_test PRIVATE opennova_formats)
+target_include_directories(tga_read_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME tga_read COMMAND tga_read_test)
+
 add_executable(til_roundtrip_test til/til_roundtrip_test.cpp)
 target_link_libraries(til_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(til_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
