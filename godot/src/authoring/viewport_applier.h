@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <string>
 
+#include <editor/preview/viewport_device.h>
 #include <editor/session/operation_progress.h>
 
 namespace opennova::editor {
@@ -89,6 +90,14 @@ public:
 		(void)y;
 		(void)height;
 		return false;
+	}
+	// What the segment from `from` to `to` meets first of what the picture draws
+	// (opennova::editor::ViewportDevice::ray_between: a placed record's faces, the surface, nothing);
+	// Unknown for a kind that draws no records, or before they are placed.
+	virtual opennova::editor::ViewportRayHit ray_between(const double from[3], const double to[3]) const {
+		(void)from;
+		(void)to;
+		return opennova::editor::ViewportRayHit();
 	}
 	// The process-wide scene state its picture renders with (ADR 0046 S14, E13; the portable
 	// ViewportDevice::scene_state): 0 for the shipped defaults (the menu's, the model's), else a

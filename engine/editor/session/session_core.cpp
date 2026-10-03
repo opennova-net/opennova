@@ -80,7 +80,7 @@ void SessionCore::start() {
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.runtime_setting = settings.runtime_executable;
 	view_.project.import_dependencies = settings.import_dependencies;
-	view_.project.recent_items = settings.recent_items;
+	show_recent_items();
 	view_.activity.status = "No project open.";
 	touch(ViewConcern::Preferences);
 	touch(ViewConcern::Graph);
@@ -355,6 +355,8 @@ bool SessionCore::close_project() {
 	local_ = LocalSettings();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	view_.project.retail_directory = game_install();
+	show_recent_items(); // the project's game's go with it
+	touch(ViewConcern::Preferences);
 	note("Closed " + title + ".");
 	view_.activity.status = "No project open.";
 	// What the project was goes with it: every concern of the view moves.
@@ -781,17 +783,24 @@ void SessionCore::save_preferences() {
 	view_.project.retail_directory = game_install();
 	view_.project.play_retail = settings.play_in_install;
 	view_.project.import_dependencies = settings.import_dependencies;
-	view_.project.recent_items = settings.recent_items;
+	show_recent_items();
 	touch(ViewConcern::Preferences);
 }
 
 void SessionCore::remember_recent_item(int64_t item) {
 	// In effect at once (the palette lists it first); written at the next poll, outside the request that
-	// placed it, and not at all when it was first already.
-	if (!preferences_.remember_recent_item(item)) return;
-	view_.project.recent_items = preferences_.values().recent_items;
+	// placed it, and not at all when it was first already. Kept under the open project's game: an id
+	// names another item in another game's catalogs.
+	if (!view_.project.open || !preferences_.remember_recent_item(recent_items_game(*view_.project.document), item))
+		return;
+	show_recent_items();
 	touch(ViewConcern::Preferences);
 	recent_items_unsaved_ = true;
+}
+
+void SessionCore::show_recent_items() {
+	view_.project.recent_items = view_.project.open ? preferences_.recent_items(recent_items_game(*view_.project.document))
+	                                                : std::vector<int64_t>();
 }
 
 void SessionCore::save_recent_items() {
