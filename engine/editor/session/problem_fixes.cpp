@@ -96,7 +96,7 @@ void requirement_fixes(const RequirementSubject &subject, const SessionView &vie
 	// (it is renamed through its source) and no other requirement names (the rename would
 	// only move the problem).
 	const auto extension = [](const std::string &name) {
-		return normalized_logical_name(fs::path(name).extension().generic_string());
+		return normalized_logical_name(utf8_of(path_of(name).extension()));
 	};
 	size_t offered = 0;
 	for (const AssetEntry &file : view.project.scan->entries) {

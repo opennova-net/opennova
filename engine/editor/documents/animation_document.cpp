@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
-#include <filesystem>
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/project/project_files.h>
 #include <formats/bad/bad.h>
 #include <formats/bad/bad_build.h>
 #include <formats/bad/bad_write.h>
@@ -240,7 +240,7 @@ bool AnimationDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 	}
 	auto row = std::make_shared<ClipRow>();
 	row->base = base;
-	row->clip_name = std::filesystem::path(path()).stem().generic_string();
+	row->clip_name = utf8_of(path_of(path()).stem());
 	row->version = base->version;
 	row->fps = base->fps;
 	row->flags = base->flags;
