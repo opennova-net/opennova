@@ -1,5 +1,6 @@
 #pragma once
 
+#include <godot_cpp/classes/ref.hpp>
 #include <godot_cpp/classes/ref_counted.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/typed_array.hpp>
@@ -8,6 +9,8 @@
 
 #include <runtime/controls/binding_set.h>
 #include <runtime/controls/help_screen.h>
+
+#include "devtools/scripted_input.h"
 
 #include <array>
 
@@ -67,8 +70,15 @@ public:
 	// modifier-less row yields its key to a held-modifier row that claims it)
 	// plus the held-sampleable mouse-mask buttons (wheel masks are
 	// impulse-only and never sample). The one gameplay-sampler entry point —
-	// samples Godot Input here at the device seam.
+	// samples Godot Input here at the device seam, plus the attached scripted
+	// device's held tokens.
 	bool is_token_pressed(const String &p_token) const;
+	// The scenario driver's scripted input device (devtools/scripted_input.h)
+	// at this seam: a token it holds reads held like a keyboard slot, so an
+	// open chat line silences it the same way; it has no VK, so
+	// pressed_key_for_token never reports it. Null detaches.
+	void set_scripted_input(const Ref<ScriptedInput> &p_input) { scripted_input_ = p_input; }
+	Ref<ScriptedInput> get_scripted_input() const { return scripted_input_; }
 	String mouse_event_token(int p_button) const;
 	// The VK (0 = none) of the keyboard slot firing the token RIGHT NOW under
 	// those same two passes — the sampler's seam for rules that look at WHICH
@@ -132,6 +142,7 @@ private:
 	opennova::controls::BindingSet bindings_;
 	opennova::controls::HelpScreen help_screen_;
 	mutable std::array<bool, 256> consumed_vks_{};
+	Ref<ScriptedInput> scripted_input_;
 };
 
 } // namespace godot

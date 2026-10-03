@@ -195,6 +195,7 @@ add_library(${TARGET_NAME} SHARED
     devtools/debug_control_records.cpp
     devtools/debug_shell_host.cpp
     devtools/debug_control_table.cpp
+    devtools/scripted_input.cpp
     hud/hud_pos.cpp
     hud/vehicle_hud_block.cpp
     mission/mission_data.cpp

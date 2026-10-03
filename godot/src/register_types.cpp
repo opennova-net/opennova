@@ -118,6 +118,7 @@
 #include "devtools/debug_control_table.h"
 #include "devtools/debug_shell_host.h"
 #include "devtools/frame_stats.h"
+#include "devtools/scripted_input.h"
 #include "hud/hud_pos.h"
 #include "hud/vehicle_hud_block.h"
 #include "mission/mission_catalog.h"
@@ -435,6 +436,9 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
+	// The scenario driver's scripted input device (inert until a probe arms
+	// it), ahead of the binding model it attaches to.
+	GDREGISTER_CLASS(ScriptedInput);
 	GDREGISTER_CLASS(ControlsModel);
 	// The local player's presentation (ADR 0043 slice G8): the presenter node,
 	// its registered viewmodel rig, the world's local-player visuals, the

@@ -188,10 +188,16 @@ void ControlsModel::consume_key_press(int p_vk) {
 }
 
 bool ControlsModel::is_token_pressed(const String &p_token) const {
-	const int index = bindings_.index_of_token(p_token.utf8().get_data());
+	const CharString token = p_token.utf8();
+	const int index = bindings_.index_of_token(token.get_data());
 	const opennova::controls::BindingRecord *r = bindings_.record(index);
 	if (r == nullptr) {
 		return false;
+	}
+	// The scripted device holds the row itself, as a keyboard would.
+	if (scripted_input_.is_valid() && !bindings_.keyboard_captured() &&
+			scripted_input_->native().token_held(token.get_data())) {
+		return true;
 	}
 	Input *input = Input::get_singleton();
 	if (input == nullptr) {
@@ -356,6 +362,9 @@ void ControlsModel::_bind_methods() {
     ClassDB::bind_method(D_METHOD("mouse_event_token", "button"), &ControlsModel::mouse_event_token);
 	ClassDB::bind_method(D_METHOD("is_token_pressed", "token"),
 			&ControlsModel::is_token_pressed);
+	ClassDB::bind_method(D_METHOD("set_scripted_input", "input"),
+			&ControlsModel::set_scripted_input);
+	ClassDB::bind_method(D_METHOD("get_scripted_input"), &ControlsModel::get_scripted_input);
 	ClassDB::bind_method(D_METHOD("pressed_key_for_token", "token"),
 			&ControlsModel::pressed_key_for_token);
 	ClassDB::bind_method(D_METHOD("set_keyboard_captured", "captured"),

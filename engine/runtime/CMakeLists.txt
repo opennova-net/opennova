@@ -29,6 +29,9 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/audio/sound_profile.cpp
     # Frame statistics remain available without the debug-only ImGui tools.
     ${CMAKE_CURRENT_SOURCE_DIR}/devtools/frame_stats_board.cpp
+    # The scenario driver's scripted input device (a probe instrument, inert
+    # until armed), beside the debug-control rows every flavour carries.
+    ${CMAKE_CURRENT_SOURCE_DIR}/devtools/scripted_input.cpp
     # controls — the JO input-binding catalog + CONTROL_MAPPING model
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/controls.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/controls/binding_set.cpp
