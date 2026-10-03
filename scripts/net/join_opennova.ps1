@@ -8,7 +8,7 @@
 # address or hostname without a port; use -Port separately.
 #
 # Usage:
-#   pwsh -File scripts\net\join_opennova.ps1 [-Host 127.0.0.1] [-Name Joiner] [-Port 32768] [-McpPort 8976] [-Resolution 1920x1080] [-Wait]
+#   pwsh -File scripts\net\join_opennova.ps1 [-Host 127.0.0.1] [-Name Joiner] [-Port 32768] [-McpPort 8976] [-Resolution 1920x1080] [-Front] [-Wait]
 
 [CmdletBinding()]
 param(
@@ -23,6 +23,7 @@ param(
     [string] $LogFile = "",
     [string] $Resolution = "",
     [switch] $Windowed,
+    [switch] $Front,
     [switch] $Wait,
     [switch] $PassThru
 )
@@ -73,7 +74,8 @@ $process = Start-OpenNovaProcess `
     -GodotArguments $godotArguments `
     -GameArguments $gameArguments `
     -McpPort $McpPort `
-    -McpReadyTimeoutSeconds $McpReadyTimeoutSeconds
+    -McpReadyTimeoutSeconds $McpReadyTimeoutSeconds `
+    -Front:$Front
 
 Write-Host "OPENNOVA_JOIN_PID=$($process.Id)"
 Write-Host "OPENNOVA_JOIN_LAUNCHER_PID=$($process.OpenNovaLauncherProcess.Id)"

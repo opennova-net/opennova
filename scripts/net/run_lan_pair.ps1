@@ -7,7 +7,7 @@
 # remains a quick bring-up aid.
 #
 # Usage:
-#   pwsh -File scripts\net\run_lan_pair.ps1 -Mission 01TR.bms -GameType 65568 -Resolution 1920x1080
+#   pwsh -File scripts\net\run_lan_pair.ps1 -Mission 01TR.bms -GameType 65568 -Resolution 1920x1080 [-Front]
 
 [CmdletBinding()]
 param(
@@ -26,6 +26,7 @@ param(
     [string] $GameType = "auto",
     [string] $Resolution = "",
     [switch] $Windowed,
+    [switch] $Front,
     [switch] $Wait
 )
 
@@ -66,6 +67,7 @@ if ($normalizedResolution) {
     $hostArgs["Resolution"] = $normalizedResolution
 }
 if ($Windowed) { $hostArgs["Windowed"] = $true }
+if ($Front) { $hostArgs["Front"] = $true }
 $hostProcess = & $hostScript @hostArgs
 
 if ($JoinDelayMs -gt 0) {
@@ -98,6 +100,7 @@ if ($normalizedResolution) {
     $joinArgs["Resolution"] = $normalizedResolution
 }
 if ($Windowed) { $joinArgs["Windowed"] = $true }
+if ($Front) { $joinArgs["Front"] = $true }
 $joinProcess = & $joinScript @joinArgs
 
 Write-Host "OPENNOVA_PAIR_HOST_PID=$($hostProcess.Id)"
