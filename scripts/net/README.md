@@ -57,6 +57,9 @@ The launchers find Godot through `GODOT_BIN` or the repo's `.godot-bin`
 convention. Pass the retail resource directory with `-ResourceDir`
 (`-HostResourceDir`/`-JoinResourceDir` for the pair): without a `--resource-dir`
 the game boots its bundled menu and ignores the LAN launch flags (ADR 0048).
+Each game starts behind every other window and never takes the foreground, and
+the console wrapper's console gets no window (`Start-OpenNovaProcess`;
+`docs/mcp.md` "Launching"); `-Front` is an ordinary start.
 
 ```powershell
 pwsh -File scripts\net\host_opennova.ps1 `

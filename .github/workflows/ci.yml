@@ -142,6 +142,9 @@ jobs:
           # Suite isolation, migration coverage and report-completeness checks.
           python scripts/ci/test_suites.py --suite core --check-layout
           python -B -m unittest discover -s scripts/ci -p test_test_suites.py
+          # The scripted game launch starts behind every window and never takes
+          # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
+          python -B -m unittest discover -s scripts/mcp -p "test_*.py"
 
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search

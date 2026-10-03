@@ -742,12 +742,16 @@ function Find-NwLanProbe {
 # remains the lifecycle owner; the returned Process is its proven runtime
 # child and owns the window, the LAN socket and, with -McpPort, the
 # opennova-game endpoint (`--mcp-port`, awaited before returning).
+# The window starts behind every other window and never takes the foreground
+# ([OpenNova.Scripts.BehindLaunch], scripts/mcp/game_mcp.ps1; the wrapper's
+# console gets no window); -Front is an ordinary start (Start-Process).
 function Start-OpenNovaProcess {
     param(
         [string[]] $GodotArguments = @(),
         [string[]] $GameArguments = @(),
         [ValidateRange(0, 65535)] [int] $McpPort = 0,
-        [ValidateRange(1, 600)] [int] $McpReadyTimeoutSeconds = 240
+        [ValidateRange(1, 600)] [int] $McpReadyTimeoutSeconds = 240,
+        [switch] $Front
     )
 
     $godotCandidate = Find-GodotBinary
@@ -774,11 +778,12 @@ function Start-OpenNovaProcess {
         $GameArguments = @($GameArguments) + @('--mcp-port', [string] $McpPort)
     }
 
+    $behind = [OpenNova.Scripts.BehindLaunch]::new(-not $Front)
     try {
         # No --headless/hidden flags: each child is an ordinary, visible game instance.
-        # Start-Process flattens ArgumentList on Windows, so quote every token that
-        # contains whitespace. Reject embedded quotes instead of producing an
-        # ambiguous command line.
+        # The command line is one string (Start-Process flattens ArgumentList on
+        # Windows), so quote every token that contains whitespace. Reject embedded
+        # quotes instead of producing an ambiguous command line.
         $tokens = @('--path', $projectDir) + @($GodotArguments)
         if ($GameArguments.Count -gt 0) {
             $tokens += '--'
@@ -805,10 +810,17 @@ function Start-OpenNovaProcess {
         $launchNotBeforeUtc = [DateTime]::UtcNow
         $launcher = $null
         try {
-            $launcher = Start-Process -FilePath $godotCandidate `
-                -WorkingDirectory $projectDir `
-                -ArgumentList ($arguments -join ' ') `
-                -PassThru
+            if ($behind.Active) {
+                $behind.Prepare()
+                $launcher = $behind.Start($godotCandidate, ($arguments -join ' '), $projectDir, $wrapperUsed)
+                $behind.Watch($launcher)
+            }
+            else {
+                $launcher = Start-Process -FilePath $godotCandidate `
+                    -WorkingDirectory $projectDir `
+                    -ArgumentList ($arguments -join ' ') `
+                    -PassThru
+            }
             $launcherStartUtc = $launcher.StartTime.ToUniversalTime()
             if ($launcherStartUtc -lt $launchNotBeforeUtc.AddSeconds(-1)) {
                 throw "Godot launcher Process predates the current launch."
@@ -894,6 +906,7 @@ function Start-OpenNovaProcess {
                 $runtime | Add-Member -NotePropertyName OpenNovaMcpPort `
                     -NotePropertyValue $McpPort -Force
             }
+            $behind.Settle()
             return $runtime
         }
         catch {
@@ -917,7 +930,8 @@ function Start-OpenNovaProcess {
         }
     }
     finally {
-        # Nothing to restore: the launch mutated no process state.
+        # The foreground lock is never held past the start, however it ends.
+        $behind.Dispose()
     }
 }
 

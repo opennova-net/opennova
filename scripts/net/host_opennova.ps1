@@ -9,7 +9,7 @@
 # reporting the host role on the requested port.
 #
 # Usage:
-#   pwsh -File scripts\net\host_opennova.ps1 -Mission 01TR.bms -GameType 65568 -Resolution 1920x1080 [-Name Host] [-Port 32768] [-McpPort 8975] [-LanMode 1] [-MaxPlayers 4] [-Wait]
+#   pwsh -File scripts\net\host_opennova.ps1 -Mission 01TR.bms -GameType 65568 -Resolution 1920x1080 [-Name Host] [-Port 32768] [-McpPort 8975] [-LanMode 1] [-MaxPlayers 4] [-Front] [-Wait]
 
 [CmdletBinding()]
 param(
@@ -29,6 +29,7 @@ param(
     [string] $LogFile = "",
     [string] $Resolution = "",
     [switch] $Windowed,
+    [switch] $Front,
     [switch] $SkipReadyCheck,
     [switch] $Wait,
     [switch] $PassThru
@@ -91,7 +92,8 @@ $process = Start-OpenNovaProcess `
     -GodotArguments $godotArguments `
     -GameArguments $gameArguments `
     -McpPort $McpPort `
-    -McpReadyTimeoutSeconds $McpReadyTimeoutSeconds
+    -McpReadyTimeoutSeconds $McpReadyTimeoutSeconds `
+    -Front:$Front
 
 Write-Host "OPENNOVA_HOST_PID=$($process.Id)"
 Write-Host "OPENNOVA_HOST_LAUNCHER_PID=$($process.OpenNovaLauncherProcess.Id)"

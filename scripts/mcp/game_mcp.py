@@ -6,11 +6,12 @@ loopback Streamable-HTTP endpoint, and wraps the everyday tools as
 subcommands. Standard library only. PowerShell callers use
 scripts/mcp/game_mcp.ps1 instead; both talk to the same endpoint.
 
-    python scripts/mcp/game_mcp.py launch --windowed --mission 00TRa.bms
+    python scripts/mcp/game_mcp.py launch --windowed --mission 00TRa.bms   # behind every window (--front: not)
     python scripts/mcp/game_mcp.py tools
     python scripts/mcp/game_mcp.py call game_state
     python scripts/mcp/game_mcp.py probe run perf_sample '{"sample_ms": 5000}' --wait
     python scripts/mcp/game_mcp.py stop --pid-file build/game.pid
+    python scripts/mcp/game_mcp.py run -- "$GODOT_BIN" --path godot ...       # a windowed run with no endpoint, behind
 
 Exit codes: 0 ok; 1 usage or transport failure; 2 the tool reported
 isError; 3 a JSON-RPC error; 4 the probe was cancelled; 5 the probe
@@ -218,6 +219,205 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
+class FlashInfo(ctypes.Structure):
+    """FLASHWINFO."""
+
+    _fields_ = [("cbSize", ctypes.c_uint), ("hwnd", ctypes.c_void_p), ("dwFlags", ctypes.c_ulong),
+                ("uCount", ctypes.c_uint), ("dwTimeout", ctypes.c_ulong)]
+
+
+class BehindLaunch:
+    """A launch whose windows start behind every other window and never take the foreground (the
+    maintainer works at the machine the agents launch games on). PowerShell's twin is
+    OpenNova.Scripts.BehindLaunch in scripts/mcp/game_mcp.ps1.
+
+    Windows puts the windows a process shows or raises on top, and lets it take the foreground, when
+    the process holds foreground rights, which it inherits from the process that started it; an
+    agent's launcher holds them whenever the maintainer's terminal tab it runs under has the focus.
+    Without them a new window goes behind the foreground window. Nothing reaches Godot's window from
+    outside until its main loop first pumps messages, a second or more after the window shows (the
+    window's own thread makes every change to it). So on Windows:
+
+    - before the start, the launcher's foreground rights are read (AllowSetForegroundWindow on itself
+      succeeds only with them) and SetForegroundWindow is locked (LockSetForegroundWindow) for the
+      start alone, so Godot's request as it shows its window is refused. With rights the lock is
+      waited for while another launch holds it, at most 30 s (a game started with rights takes the
+      foreground the moment no lock refuses it); the system lets the lock go as the user switches
+      windows, so it is taken again on every pass;
+    - the first window is shown without activation (STARTUPINFO SW_SHOWNOACTIVATE): without rights
+      it shows behind the foreground window; with them it shows on top until Godot first pumps;
+    - every window of the process is sent to the bottom of the z-order without activation on every
+      pass (Godot raises a window it restyles), posted to the window's thread, so the launcher never
+      waits on the game;
+    - Godot's refused request flashes the taskbar button, which draws the user's eye (and click), so
+      each window's flashing is stopped through its first second shown and once more at the end;
+    - the start ends when the endpoint answers and the windows have settled (Godot may show its
+      window after the endpoint answers), at most 10 s after; the lock is let go then, or as soon
+      as the start fails.
+
+    The window is never minimized to hide it: restoring a minimized Godot window activates it, and
+    takes the foreground whenever the lock has been let go. A window the user brings to the
+    foreground during the start is theirs: it is left alone. `front` (the launch's --front) opts
+    back in to an ordinary start. Elsewhere it does nothing. `user32`, `windows`, `clock`, `sleep`
+    and `pid` stand in for the system's in a test (scripts/mcp/test_mcp_launch.py)."""
+
+    GRACE_SECONDS = 2.0  # tended at least this long after the endpoint answers
+    QUIET_SECONDS = 1.0  # a shown window's flashing stopped this long
+    SETTLE_LIMIT_SECONDS = 10.0  # never tended (nor the lock held) longer than this after the answer
+    LOCK_WAIT_SECONDS = 30.0  # another launch's lock waited for, with foreground rights
+    SW_SHOWNOACTIVATE = 4
+    LSFW_LOCK, LSFW_UNLOCK = 1, 2
+    HWND_BOTTOM = 1
+    SWP_NOSIZE, SWP_NOMOVE, SWP_NOACTIVATE, SWP_ASYNCWINDOWPOS = 0x1, 0x2, 0x10, 0x4000
+    FLASHW_STOP = 0
+    GODOT_WINDOW_CLASS = "Engine"  # DisplayServerWindows' window class
+
+    def __init__(self, front: bool, user32=None, windows: bool | None = None, clock=time.monotonic,
+                 sleep=time.sleep, pid: int | None = None):
+        self.active = (os.name == "nt" if windows is None else windows) and not front
+        self.rights = False  # the launcher may set the foreground window, and so may what it starts
+        self.locked = False
+        self.shown_at: dict[int, float] = {}
+        self.waiting = False  # a Godot window not shown yet
+        self.clock = clock
+        self.sleep = sleep
+        self.pid = os.getpid() if pid is None else pid
+        self.user32 = user32
+        if self.active and self.user32 is None:
+            self.user32 = ctypes.WinDLL("user32", use_last_error=True)
+            pointer = ctypes.c_void_p
+            self.user32.SetWindowPos.argtypes = [pointer, pointer, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                                                 ctypes.c_int, ctypes.c_uint]
+            self.user32.IsWindowVisible.argtypes = [pointer]
+            self.user32.GetForegroundWindow.restype = pointer
+            self.user32.GetWindowThreadProcessId.argtypes = [pointer, ctypes.POINTER(ctypes.c_ulong)]
+            self.user32.AllowSetForegroundWindow.argtypes = [ctypes.c_ulong]
+            self.user32.FlashWindowEx.argtypes = [ctypes.POINTER(FlashInfo)]
+            self.user32.GetClassNameW.argtypes = [pointer, ctypes.c_wchar_p, ctypes.c_int]
+
+    def prepare(self) -> None:
+        """Before the process starts: the launcher's foreground rights read and the lock taken (with
+        rights, waited for while another launch holds it)."""
+        if not self.active:
+            return
+        self.rights = bool(self.user32.AllowSetForegroundWindow(self.pid))
+        deadline = self.clock() + (self.LOCK_WAIT_SECONDS if self.rights else 0.0)
+        self.lock()
+        while not self.locked and self.clock() < deadline:
+            self.sleep(0.1)
+            self.lock()
+
+    def popen_kwargs(self) -> dict:
+        """What subprocess.Popen takes besides: the first window shown without activation."""
+        if not self.active or not hasattr(subprocess, "STARTUPINFO"):
+            return {}
+        info = subprocess.STARTUPINFO()
+        info.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        info.wShowWindow = self.SW_SHOWNOACTIVATE
+        return {"startupinfo": info}
+
+    def lock(self) -> None:
+        """SetForegroundWindow refused while the process starts."""
+        if self.active and not self.locked:
+            self.locked = bool(self.user32.LockSetForegroundWindow(self.LSFW_LOCK))
+
+    def relock(self) -> None:
+        """The lock taken again when the system let it go (it does as the user switches windows);
+        refused, harmlessly, while it is still held."""
+        if self.active and self.locked:
+            self.user32.LockSetForegroundWindow(self.LSFW_LOCK)
+
+    def release(self) -> None:
+        """The lock let go: never held past the start."""
+        if self.active and self.locked:
+            self.user32.LockSetForegroundWindow(self.LSFW_UNLOCK)
+            self.locked = False
+
+    def windows_of(self, pid: int) -> list[tuple[int, bool]]:
+        """The top-level windows of `pid` that are shown, and Godot's not shown yet: (hwnd, shown)."""
+        found: list[tuple[int, bool]] = []
+        visit_type = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        name = ctypes.create_unicode_buffer(32)
+
+        def visit(hwnd, _):
+            owner = ctypes.c_ulong()
+            self.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+            if owner.value != pid:
+                return True
+            if self.user32.IsWindowVisible(hwnd):
+                found.append((int(hwnd), True))
+            elif self.user32.GetClassNameW(hwnd, name, len(name)) and name.value == self.GODOT_WINDOW_CLASS:
+                found.append((int(hwnd), False))
+            return True
+
+        self.user32.EnumWindows(visit_type(visit), 0)
+        return found
+
+    def chosen(self, pid: int) -> bool:
+        """The foreground window is `pid`'s: the user brought it up (the lock refuses the game)."""
+        foreground = self.user32.GetForegroundWindow()
+        if not foreground:
+            return False
+        owner = ctypes.c_ulong()
+        self.user32.GetWindowThreadProcessId(foreground, ctypes.byref(owner))
+        return owner.value == pid
+
+    def send_back(self, hwnd: int) -> None:
+        """To the bottom of the z-order without activation: posted to the window's thread, which does
+        it as it next pumps."""
+        self.user32.SetWindowPos(hwnd, self.HWND_BOTTOM, 0, 0, 0, 0,
+                                 self.SWP_NOSIZE | self.SWP_NOMOVE | self.SWP_NOACTIVATE | self.SWP_ASYNCWINDOWPOS)
+
+    def tend(self, pid: int, again: bool = False) -> None:
+        """The lock taken again if it was let go; each window of `pid` sent to the bottom of the
+        z-order without activation (Godot raises a window it restyles, so every call, not once), and
+        a window's flashing stopped through its first second shown (every window's, `again`).
+        Nothing for a window the user has chosen."""
+        if not self.active:
+            return
+        self.relock()
+        if self.chosen(pid):
+            return
+        now = self.clock()
+        self.waiting = False
+        for hwnd, shown in self.windows_of(pid):
+            if shown:
+                first = self.shown_at.setdefault(hwnd, now)
+                if again or now - first <= self.QUIET_SECONDS:
+                    self.stop_flashing(hwnd)
+            else:
+                self.waiting = True
+            self.send_back(hwnd)
+
+    def settled(self) -> bool:
+        """Every Godot window shown, and each shown past its quiet second."""
+        now = self.clock()
+        return not self.waiting and all(now - first > self.QUIET_SECONDS for first in self.shown_at.values())
+
+    def stop_flashing(self, hwnd: int) -> None:
+        """The window's taskbar button back to plain (FlashWindowEx FLASHW_STOP)."""
+        info = FlashInfo(ctypes.sizeof(FlashInfo), hwnd, self.FLASHW_STOP, 0, 0)
+        self.user32.FlashWindowEx(ctypes.byref(info))
+
+    def settle(self, pid: int) -> None:
+        """The endpoint answered: the windows tended through the grace and until they have settled
+        (Godot may show its window after the endpoint answers), within the limit; then every window
+        once more, and the lock let go."""
+        if not self.active:
+            return
+        try:
+            start = self.clock()
+            while True:
+                self.tend(pid)
+                spent = self.clock() - start
+                if spent >= self.SETTLE_LIMIT_SECONDS or (spent >= self.GRACE_SECONDS and self.settled()):
+                    break
+                self.sleep(0.05)
+            self.tend(pid, again=True)
+        finally:
+            self.release()
+
+
 def find_godot(explicit: str | None) -> Path:
     candidate = explicit or os.environ.get("GODOT_BIN", "")
     if candidate:
@@ -313,37 +513,80 @@ def cmd_launch(args: argparse.Namespace) -> int:
         popen_kwargs["creationflags"] = creation
     else:
         popen_kwargs["start_new_session"] = True
-    with open(stdout_log, "wb") as sink:
-        child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
-                                 cwd=str(project), **popen_kwargs)
-    if args.pid_file:
-        Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
+    # Behind every other window and never the foreground, unless --front (a headless game has none).
+    behind = BehindLaunch(args.front or args.headless)
+    try:
+        behind.prepare()
+        popen_kwargs.update(behind.popen_kwargs())
+        with open(stdout_log, "wb") as sink:
+            child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=sink, stderr=subprocess.STDOUT,
+                                     cwd=str(project), **popen_kwargs)
+        if args.pid_file:
+            Path(args.pid_file).write_text(str(child.pid), encoding="utf-8")
 
-    deadline = time.monotonic() + args.timeout
-    client = GameMcp.for_port(port)
-    while time.monotonic() < deadline:
-        exit_code = child.poll()
-        if exit_code is not None:
+        deadline = time.monotonic() + args.timeout
+        client = GameMcp.for_port(port)
+        while time.monotonic() < deadline:
+            behind.tend(child.pid)
+            exit_code = child.poll()
+            if exit_code is not None:
+                raise GameMcpError(
+                    EXIT_LAUNCH_FAILED,
+                    f"the game exited with code {exit_code} before its endpoint answered\n"
+                    f"--- {stdout_log} ---\n{tail(stdout_log)}"
+                    + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
+            if port_open(port):
+                try:
+                    client.initialize(timeout=5)
+                    break
+                except GameMcpError:
+                    pass
+            time.sleep(0.25 if not behind.active else 0.05)
+        else:
             raise GameMcpError(
                 EXIT_LAUNCH_FAILED,
-                f"the game exited with code {exit_code} before its endpoint answered\n"
-                f"--- {stdout_log} ---\n{tail(stdout_log)}"
-                + (f"\n--- {log_file} ---\n{tail(log_file)}" if log_file else ""))
-        if port_open(port):
-            try:
-                client.initialize(timeout=5)
-                break
-            except GameMcpError:
-                pass
-        time.sleep(0.25)
-    else:
-        raise GameMcpError(
-            EXIT_LAUNCH_FAILED,
-            f"the endpoint on port {port} did not answer within {args.timeout:.0f} s (pid {child.pid} "
-            f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
+                f"the endpoint on port {port} did not answer within {args.timeout:.0f} s (pid {child.pid} "
+                f"still running; stop it with `stop --pid {child.pid}`)\n--- {stdout_log} ---\n{tail(stdout_log)}")
+        behind.settle(child.pid)
+    finally:
+        behind.release()
     print(f"url={client.url} pid={child.pid} log={stdout_log}"
           + (f" godot_log={log_file}" if log_file else ""))
     return EXIT_OK
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    """A windowed Godot command with no endpoint (scripts/test_godot.sh --windowed's GUT run) run
+    behind every other window, and its exit code returned. It starts as a launch does, the
+    foreground locked until its window has shown and settled (at most 30 s), and its windows are
+    kept at the bottom until it exits. The console wrapper is swapped for the plain runtime, so the
+    start state reaches the window; it is handed this process's output handles (a GUI process
+    writes to none it merely inherits)."""
+    command = list(args.command)
+    if command[:1] == ["--"]:
+        command = command[1:]
+    if not command:
+        raise GameMcpError(EXIT_USAGE, "run: no command given")
+    command[0] = str(runtime_sibling(Path(command[0])))
+    behind = BehindLaunch(args.front)
+    try:
+        behind.prepare()
+        sys.stdout.flush()
+        child = subprocess.Popen(command, stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=sys.stderr,
+                                 **behind.popen_kwargs())
+        started = time.monotonic()
+        while child.poll() is None:
+            behind.tend(child.pid)
+            now = time.monotonic()
+            first = min(behind.shown_at.values(), default=None)
+            if behind.locked and (now - started >= behind.LOCK_WAIT_SECONDS or (
+                    first is not None and now - first >= behind.GRACE_SECONDS and behind.settled())):
+                behind.tend(child.pid, again=True)
+                behind.release()
+            time.sleep(0.05)
+        return child.returncode
+    finally:
+        behind.release()
 
 
 def cmd_wait(args: argparse.Namespace) -> int:
@@ -645,6 +888,9 @@ def build_parser() -> argparse.ArgumentParser:
     display.add_argument("--headless", action="store_true", help="no window (tools that need one refuse)")
     display.add_argument("--windowed", action="store_true", help="force a window over the project's fullscreen setting")
     launch.add_argument("--resolution", default=None, help="WxH for the window")
+    launch.add_argument("--front", action="store_true",
+                        help="an ordinary start: the window may come to the front and take the focus (by default "
+                             "it is shown without activation and kept behind every other window)")
     launch.add_argument("--rendering-method", default=None, help="Godot rendering method (gl_compatibility, forward_plus)")
     launch.add_argument("--log-file", default=None, help="Godot --log-file; game_logs follows it")
     launch.add_argument("--stdout-log", default=None, help="where the child's stdout/stderr go (default: the temp dir)")
@@ -668,6 +914,12 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--capture-pcap", default=None, help="record the session's datagrams to this pcap")
     launch.add_argument("game_args", nargs="*", help="further game flags, after --")
     launch.set_defaults(func=cmd_launch)
+
+    run = commands.add_parser(
+        "run", help="run a windowed Godot command behind every other window and wait for it (its exit code)")
+    run.add_argument("--front", action="store_true", help="an ordinary start: the window may come to the front")
+    run.add_argument("command", nargs=argparse.REMAINDER, help="-- <godot> <arguments...>")
+    run.set_defaults(func=cmd_run)
 
     wait = commands.add_parser("wait", help="wait until an endpoint answers")
     add_endpoint_options(wait)
