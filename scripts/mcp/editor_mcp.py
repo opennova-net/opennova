@@ -290,8 +290,8 @@ def cmd_request(args: argparse.Namespace) -> int:
     return EXIT_OK if done and ended.get("end", "done") == "done" else EXIT_NOT_DONE
 
 
-VIEWPORT_OPS = ("state", "items", "hit", "box", "notes", "render", "options", "camera", "seek", "drag", "command",
-                "drop")
+VIEWPORT_OPS = ("state", "items", "hit", "box", "notes", "render", "palette", "options", "camera", "seek", "drag",
+                "command", "drop")
 
 
 def parse_pair(text: str, flag: str) -> list:
@@ -309,34 +309,43 @@ def viewport_of(args: argparse.Namespace) -> dict:
     """editor_viewport's arguments: op and path, then the op's fields (the editor refuses those its op
     does not take, naming what it takes)."""
     request: dict = {"op": args.op}
-    for name in ("path", "kind", "x", "y", "x2", "y2", "row", "offset", "limit"):
+    for name in ("path", "kind", "x", "y", "x2", "y2", "row", "text", "offset", "limit"):
         if getattr(args, name) is not None:
             request[name] = getattr(args, name)
     for name in ("options", "camera", "clock", "device"):
         if getattr(args, name):
             request[name] = parse_json_arg(getattr(args, name), None)
+    # --by, --to and --snap are a drag's; --to and --snap a drop's too (S15: a box, the grid), --by and
+    # --at a command's (a mission's duplicate goes by [east, north], its paste lands at a point).
     drag: dict = {}
-    for name in ("id", "handle", "snap", "gesture"):
+    for name in ("id", "handle", "gesture"):
         if getattr(args, name) is not None:
             drag[name] = getattr(args, name)
-    if args.by is not None:
-        drag["by"] = parse_pair(args.by, "--by")
-    if args.to is not None:
-        drag["to"] = parse_pair(args.to, "--to")
+    if args.op == "drag":
+        if args.snap is not None:
+            drag["snap"] = args.snap
+        if args.by is not None:
+            drag["by"] = parse_pair(args.by, "--by")
+        if args.to is not None:
+            drag["to"] = parse_pair(args.to, "--to")
     if args.end is not None:
         drag["end"] = args.end == "true"
     drop: dict = {}
     for name in ("file", "reference"):
         if getattr(args, name) is not None:
             drop[name] = getattr(args, name)
-    if args.at is not None:
-        drop["at"] = parse_pair(args.at, "--at")
     if args.op == "drop":
+        if args.at is not None:
+            drop["at"] = parse_pair(args.at, "--at")
+        if args.to is not None:
+            drop["to"] = parse_pair(args.to, "--to")
+        if args.snap is not None:
+            drop["snap"] = args.snap
         if args.name is not None:
             drop["name"] = args.name
         request["drop"] = drop
     elif drop:
-        raise GameMcpError(EXIT_NOT_READ, "--file, --reference and --at are op drop's")
+        raise GameMcpError(EXIT_NOT_READ, "--file and --reference are op drop's")
     command: dict = {}
     if args.name is not None and args.op != "drop":
         command["name"] = args.name
@@ -346,13 +355,25 @@ def viewport_of(args: argparse.Namespace) -> dict:
         except ValueError as error:
             raise GameMcpError(EXIT_NOT_READ, f"--ids takes record ids, comma-separated, not {args.ids!r}") from error
     if args.op == "command":
+        if args.by is not None:
+            command["by"] = parse_pair(args.by, "--by")
+        if args.at is not None:
+            command["at"] = parse_pair(args.at, "--at")
         request["command"] = command
     elif command:
         raise GameMcpError(EXIT_NOT_READ, "--name and --ids are op command's (--name also op drop's)")
     if args.op == "drag":
         request["drag"] = drag
     elif drag:
-        raise GameMcpError(EXIT_NOT_READ, "--id, --handle, --by, --to, --snap, --gesture and --end are op drag's")
+        raise GameMcpError(EXIT_NOT_READ, "--id, --handle, --gesture and --end are op drag's")
+    # Each of --by, --to, --at and --snap only where its op sends it: never read and dropped.
+    takes = {"drag": ("by", "to", "snap"), "drop": ("at", "to", "snap"), "command": ("by", "at")}
+    given = [name for name in ("by", "to", "at", "snap") if getattr(args, name) is not None]
+    stray = [name for name in given if name not in takes.get(args.op, ())]
+    if stray:
+        ops = "; ".join(f"--{name} is op " + " or ".join(f"{op}'s" for op, names in takes.items() if name in names)
+                        for name in stray)
+        raise GameMcpError(EXIT_NOT_READ, f"op {args.op} takes no {', '.join('--' + name for name in stray)} ({ops})")
     return request
 
 
@@ -677,8 +698,8 @@ def build_parser() -> argparse.ArgumentParser:
                                                     "its answer as JSON")
     add_endpoint_options(viewport)
     viewport.add_argument("--op", required=True, choices=VIEWPORT_OPS,
-                          help="state, items, notes, hit, box or render read it (the viewport query); options and "
-                               "camera change its state, seek the preview clock (set_viewport); drag, command and "
+                          help="state, items, notes, hit, box, render or palette read it (the viewport query); options "
+                               "and camera change its state, seek the preview clock (set_viewport); drag, command and "
                                "drop edit through it (edit_in_viewport)")
     viewport.add_argument("--path", default=None,
                           help="the document (a project-relative path or a logical name; the active one when left "
@@ -692,8 +713,11 @@ def build_parser() -> argparse.ArgumentParser:
     viewport.add_argument("--x2", type=float, default=None, help="box: the other corner across")
     viewport.add_argument("--y2", type=float, default=None, help="box: the other corner down")
     viewport.add_argument("--row", type=int, default=None, help="render: the row, by its identity (a menu's screen)")
-    viewport.add_argument("--offset", type=int, default=None, help="state, items, notes, render: a page's first entry")
-    viewport.add_argument("--limit", type=int, default=None, help="state, items, notes, render: a page's size, 1 to 200")
+    viewport.add_argument("--text", default=None, help="palette: the items whose name, id or model's file holds it")
+    viewport.add_argument("--offset", type=int, default=None,
+                          help="state, items, notes, render, palette: a page's first entry")
+    viewport.add_argument("--limit", type=int, default=None,
+                          help="state, items, notes, render, palette: a page's size, 1 to 200")
     viewport.add_argument("--options", default=None, help="options: the kind's options, a JSON object")
     viewport.add_argument("--camera", default=None, help="camera: the camera, a JSON object (yaw, pitch, distance, "
                                                          "target, frame)")
@@ -708,25 +732,29 @@ def build_parser() -> argparse.ArgumentParser:
                                "or bottom_right; a model marker's place or axis; a mission entity's move, height or "
                                "yaw, an area's move, x_min, x_max, y_min or y_max")
     viewport.add_argument("--by", default=None, help="drag: DX,DY from where the picture shows the handle "
-                                                     "(--by=-8,4 for a negative one)")
-    viewport.add_argument("--to", default=None, help="drag: X,Y, the point of the picture the handle goes to")
+                                                     "(--by=-8,4 for a negative one); command: a mission's "
+                                                     "duplicate's way, EAST,NORTH in metres")
+    viewport.add_argument("--to", default=None, help="drag: X,Y, the point of the picture the handle goes to; drop: "
+                                                     "a box's other corner (a mission's area, --reference area)")
     viewport.add_argument("--snap", type=float, default=None,
                           help="drag: a menu's grid of 8 when not 0, a model's or a mission's grid in metres, a "
-                               "mission's yaw in degrees (0, free, by default)")
+                               "mission's yaw in degrees (0, free, by default); drop: a mission's grid in metres")
     viewport.add_argument("--gesture", type=int, default=None,
                           help="drag: the gesture the first sample's answer named, to go on with it (one undo step; "
                                "the samples of one gesture are consecutive drags of one handle on its document)")
     viewport.add_argument("--end", choices=("true", "false"), default=None,
                           help="drag: false keeps the gesture open for the next sample (10 s with none ends it)")
     viewport.add_argument("--name", default=None, help="command: an arrange op (align_left, ..., send_to_back) or frame; "
-                                                       "a mission's frame, top or ground (the entities set down on the "
-                                                       "ground under them); drop: the name --reference names (an "
-                                                       "item's id)")
+                                                       "a mission's frame, top, ground (the entities set down on the "
+                                                       "ground under them), select_same, duplicate or paste; drop: the "
+                                                       "name --reference names (an item's id, a path's number)")
     viewport.add_argument("--file", default=None,
                           help="drop: a project file by its logical name (a model: the item that draws it)")
     viewport.add_argument("--reference", default=None,
-                          help="drop: a reference kind's token whose name --name gives (item: an item by its id)")
-    viewport.add_argument("--at", default=None, help="drop: X,Y, the point of the picture it is let go at")
+                          help="drop: a reference kind's token whose name --name gives (item: an item by its id; "
+                               "path: a path's next stop; area, with --to and no --name: an area over the box)")
+    viewport.add_argument("--at", default=None, help="drop: X,Y, the point of the picture it is let go at; command: "
+                                                     "a mission's paste's point")
     viewport.add_argument("--ids", default=None, help="command: the records, comma-separated (the first the one the "
                                                       "others follow)")
     viewport.add_argument("--timeout", type=float, default=120.0)
