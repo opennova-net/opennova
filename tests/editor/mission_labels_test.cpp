@@ -10,7 +10,6 @@
 // line). Its retail leg words every record and every reference of the install's 115 missions with the
 // install's catalog and tables, and times it.
 #include <algorithm>
-#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -44,6 +43,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "common/thread_cpu_clock.h"
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
 
@@ -447,7 +447,9 @@ int test_retail() {
 			TEST_EXPECT(document && !document->blocked());
 			if (!document) continue;
 			++missions;
-			const auto started = std::chrono::steady_clock::now();
+			// The thread's CPU (common/thread_cpu_clock.h): what the words cost, which another process's
+			// load (ctest -j8, a build beside it) does not stretch as it stretches the wall clock.
+			const double started = test_clock::thread_cpu_ms();
 			size_t rows = 0;
 			for (const auto &row : document->rows()) {
 				++rows;
@@ -487,7 +489,7 @@ int test_retail() {
 					}
 				}
 			}
-			const double took = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+			const double took = test_clock::thread_cpu_ms() - started;
 			words_ms += took;
 			all_rows += rows;
 			if (took > slowest_ms) {
@@ -502,7 +504,7 @@ int test_retail() {
 	            "(%zu items by their catalog's name)\n",
 	            missions, titles, shown_names, values, items_named);
 	for (const auto &[what, count] : dangling) std::printf("  naming nothing, %s: %zu\n", what.c_str(), count);
-	std::printf("retail: the words took %.1f ms over the %zu missions, the slowest %.1f ms (%zu rows), at most %.1f us a row\n",
+	std::printf("retail: the words took %.1f ms of CPU over the %zu missions, the slowest %.1f ms (%zu rows), at most %.1f us a row\n",
 	            words_ms, missions, slowest_ms, slowest_rows, slowest_per_row_us);
 	TEST_EXPECT(missions == 115);
 	// The SSNs and zones naming nothing are the ones mission_document's retail leg counts (162 entity
@@ -510,8 +512,9 @@ int test_retail() {
 	// table, no stop past the markers.
 	TEST_EXPECT(dangling["ssn"] == 162 && dangling["zone"] == 53 && !dangling.count("event") && !dangling.count("marker"));
 	// Fast enough to word every row of a mission each time it is drawn whole: a few microseconds a row
-	// over the 115 (the bound is the whole pass's mean, which a loaded machine's one slow mission does
-	// not move; the slowest mission's is printed).
+	// over the 115 (the bound is the whole pass's mean of the thread's CPU, which neither a loaded
+	// machine nor one slow mission moves, and Windows' tick a mission averages out; the slowest
+	// mission's is printed).
 	const double mean_per_row_us = words_ms * 1000.0 / double(std::max<size_t>(all_rows, 1));
 	std::printf("retail: %.1f us a row over the %zu rows\n", mean_per_row_us, all_rows);
 	TEST_EXPECT(mean_per_row_us < 200.0);
