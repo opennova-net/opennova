@@ -142,7 +142,9 @@ public:
 	bool cancelled() const { return cancelled_; }
 
 	// The bytes hashed and then written or copied so far, out of how many (every entry's
-	// bytes twice, once per pass), never going back; and what the last step worked on.
+	// bytes twice, once per pass; an expansion's three times, its comparison with the base game a
+	// pass of its own, and a file left out as the base's leaving the write pass's total), never going
+	// back; and what the last step worked on.
 	uint64_t bytes_done() const { return bytes_done_; }
 	uint64_t bytes_total() const { return bytes_total_; }
 	const std::string &label() const { return label_; }

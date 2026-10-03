@@ -20,6 +20,11 @@ namespace opennova::editor {
 // in 32 bytes too [orig: UI_JoinSelectedSession @ 0x569afa, @ 0x569dc4]. Nothing shorter fails
 // (D-VFS-8's search-path spill is read as one string, vfs-pff-mount-re.md § Expansions item 2).
 inline constexpr size_t kExpansionNameMax = 31;
+// An 11-character own name makes M<n>.bin and <n>L.lwf names of 16 characters, which fill an archive
+// entry's 16-byte name with no NUL inside it. Retail compares a query with `strcmp(query, entry + 16)`
+// [orig: PFF_CompareSearchNameToEntry @ 0x768240], so such a name ends only at the entry's next field, its
+// checksum at +32, which the build writes 0 (build_run.cpp's entries; JO:CA's archives hold no
+// 16-character name). A writer that put a nonzero checksum there would break these names' lookups.
 
 // What a name is for: the project's own expansion, whose files the build names after it (its music
 // script M<n>.bin and its sound bank <n>L.lwf go into the archives, so they bind the archives'
@@ -27,7 +32,12 @@ inline constexpr size_t kExpansionNameMax = 31;
 enum class ExpansionNameUse { Own, BuildsOn };
 
 // The first rule `name` breaks, in words ("" when it keeps them all):
-// - 1..31 characters (kExpansionNameMax);
+// - 1..31 characters (kExpansionNameMax), and for an installed expansion's name (ExpansionNameUse::
+//   BuildsOn) a folder's name of `expansion\` alone (none of `\ / : * ? " < > |` or a control
+//   character, not `.` or `..`): every folder the game mounts by its name, a quoted one with a space
+//   among them, which the editor mounts through the file system and never puts on a command line;
+// the rest bind the project's own (ExpansionNameUse::Own) alone:
+// - no leading dot, which the Mods list skips [orig: Expansion_ScanAndRegister @ 0x4a444b];
 // - one `/exp` token: no space, tab or comma, which split the command line outside quotes, no `"`,
 //   which a token never keeps, no `;`, which ends the line [orig: Terrain_TokenizeConfigLine
 //   @ 0x53cb60 over GetCommandLineA, @ 0x4a73b2];
@@ -35,12 +45,19 @@ enum class ExpansionNameUse { Own, BuildsOn };
 //   @ 0x768280], and the game builds its paths in the ANSI code page);
 // - a folder Windows can make: none of `\ / : * ? " < > |`, no trailing dot or space, not a device
 //   name (CON, PRN, AUX, NUL, COM1..9, LPT1..9, alone or before a dot);
-// - for the project's own (ExpansionNameUse::Own): M<n>.bin and <n>L.lwf fit the archives' names
-//   (logical_name_fits_archive), so 11 characters [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989];
-//   and none of the files it forms (expansion_files.h) is a file the game reads by that name for its
-//   own (a manifest row's literal: "game" would make game.bin, the menu's table), the project holding
-//   one file of a name.
+// - M<n>.bin and <n>L.lwf fit the archives' names (logical_name_fits_archive), so 11 characters
+//   [orig: Expansion_LoadAssets @ 0x4a491d, @ 0x4a4989]; and none of the files it forms
+//   (expansion_files.h) is a file the game reads by that name for its own (a manifest row's literal:
+//   "game" would make game.bin, the menu's table), the project holding one file of a name.
 std::string expansion_name_problem(std::string_view name, ExpansionNameUse use);
+
+// The project's own expansion name against the files the game finds: none of the files it forms
+// (expansion_files.h: `<n>.bin`, `M<n>.bin`, `<n>L.lwf`, ...) may be a file the game reads by a
+// mission's name (mission::sidecars: its text `<base>.bin`, its dialog bank's sounds `<base>.lwf`) for
+// a mission among `files` (the install's view and the project's names: `.bms`, `.npj`, `.npz`), or
+// the mission would list untitled and its text become the override table (a name `01TR` on JO's base
+// game). The problem in words; "" when there is none.
+std::string expansion_name_mission_problem(std::string_view name, const std::vector<std::string> &files);
 
 // expansion_name_problem as a finding: false with `error` (project.field.invalid) saying which rule
 // `name` breaks.

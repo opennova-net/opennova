@@ -67,15 +67,20 @@ JsonValue project_section(const SessionView &view) {
 	JsonValue out = JsonValue::make_object();
 	out.set("open", boolean(view.project.open));
 	out.set("quit_requested", boolean(view.dialogs.quit_requested));
-	JsonValue expansions = JsonValue::make_array();
-	for (const ProjectView::InstallExpansion &installed : view.project.install_expansions) {
-		JsonValue entry = JsonValue::make_object();
-		entry.set("name", json_string(installed.name));
-		entry.set("title", json_string(installed.title));
-		entry.set("description", json_string(installed.description));
-		expansions.push(std::move(entry));
-	}
-	out.set("install_expansions", std::move(expansions));
+	const auto listed = [](const std::vector<ProjectView::InstallExpansion> &installs) {
+		JsonValue expansions = JsonValue::make_array();
+		for (const ProjectView::InstallExpansion &installed : installs) {
+			JsonValue entry = JsonValue::make_object();
+			entry.set("name", json_string(installed.name));
+			entry.set("title", json_string(installed.title));
+			entry.set("description", json_string(installed.description));
+			expansions.push(std::move(entry));
+		}
+		return expansions;
+	};
+	out.set("install_expansions", listed(view.project.install_expansions));
+	// The install a new project opens with (the editor's last chosen): what New project offers.
+	out.set("new_project_expansions", listed(view.project.new_project_expansions));
 	if (!view.project.open)
 		return out;
 	const ProjectDocument &document = *view.project.document;
@@ -371,7 +376,8 @@ constexpr ViewSectionRow kSections[] = {
 			"builds_on} (S16: \"\" a standalone project, \"\" the base game), file_count (the files query "
 			"pages the files), and quit_requested; open or not, install_expansions, the game install's "
 			"expansions [{name, title, description}] (its folder's name, the Mods list's name and "
-			"description)." },
+			"description), and new_project_expansions, the same of the install a new project opens with "
+			"(the one last chosen)." },
 	{ S::Requirements, "requirements", concern_set({ C::Files, C::Run }), requirements_section,
 			"The required files: total, missing, wrong_kind, and every row with its role, name, "
 			"state and expected kind (boot_missing where the last game reported it missing)." },

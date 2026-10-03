@@ -4,6 +4,7 @@
 // an optional file the project lacks is, and the roles "create every missing file" names.
 #include <algorithm>
 #include <cstdio>
+#include <filesystem>
 #include <string>
 #include <vector>
 
@@ -251,6 +252,22 @@ static int test_expansion_rows() {
 		description = description || (entry.key == "EXP_DESC" && entry.text.empty());
 	}
 	TEST_EXPECT(name && description);
+	// A title past the 63 bytes the Mods list holds EXP_NAME in [orig: Expansion_ScanAndRegister
+	// @ 0x4a4598]: cut there, at a character's start, a table the build takes.
+	std::error_code removed;
+	std::filesystem::remove(paths.root + "/" + row_named(after, "jxm.bin")->asset_path, removed);
+	doc.title = std::string(62, 'A') + "\xc3\xa9" + "xyz";
+	const CreateMissingResult long_made = create_missing_requirements(
+			paths, doc, evaluate_requirements(doc, scan_project_assets(paths, doc)), {"expansion_table"});
+	TEST_EXPECT(long_made.diagnostics.empty() && long_made.created.size() == 1);
+	const RequirementReport cut = evaluate_requirements(doc, scan_project_assets(paths, doc));
+	opennova::rtxt::File reparsed;
+	TEST_EXPECT(read_file_bytes(paths.root + "/" + row_named(cut, "jxm.bin")->asset_path, table, io_error) &&
+	            opennova::rtxt::parse(table.data(), table.size(), reparsed, parse_error));
+	bool clamped = false;
+	for (const opennova::rtxt::Entry &entry : reparsed.entries)
+		clamped = clamped || (entry.key == "EXP_NAME" && entry.text == std::string(62, 'A'));
+	TEST_EXPECT(clamped);
 	return 0;
 }
 

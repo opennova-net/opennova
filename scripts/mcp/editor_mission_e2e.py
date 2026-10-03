@@ -321,8 +321,16 @@ def run(args: argparse.Namespace, project: Path, pid_file: Path, started_pids: d
     if args.expansion:
         expect(shell.get("expansion") == args.expansion,
                f"the game did not mount the expansion {args.expansion}: {json.dumps(shell)}")
-        expect(bool(shell.get("mission_listed")), f"the game's mission list does not list {args.mission}")
-        say(f"   mounted /exp {shell.get('expansion')}; {args.mission} listed by its mission list")
+        expect(bool(shell.get("mission_in_catalog")), f"OpenNova's mission catalog does not hold {args.mission}")
+        # The catalog reads a mission's text through the mount stack, not retail's archive pairs: the
+        # build is what says the stock game's list would show it untitled (no text table in its pair).
+        untitled = [p for p in query(client, "problems", text="build.expansion.mission_untitled", limit=50).get("problems", [])
+                    if str(p.get("code", "")) == "build.expansion.mission_untitled"
+                    and args.mission.lower() in str(p.get("message", "")).lower()]
+        expect(not untitled, f"the build says the game's mission list shows {args.mission} untitled: "
+               + "; ".join(str(p.get("message")) for p in untitled))
+        say(f"   mounted /exp {shell.get('expansion')}; {args.mission} in OpenNova's mission catalog, its text table in "
+            f"the expansion's pair")
     entities = game_entities(game)
     expect(len(entities) > 0, "the game lists no entity")
     to_new, to_old = nearest(entities, new), nearest(entities, old)

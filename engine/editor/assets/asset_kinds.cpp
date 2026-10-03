@@ -501,6 +501,9 @@ bool asset_kind_packed(AssetKind kind) {
 }
 
 bool archive_name_limit_binds(AssetKind kind) {
+	// A NovaWorld screen of a name no archive holds is one the game never reads: the build leaves it out
+	// and says so (build.unread, plan_build), never refusing the build for it.
+	if (kind == AssetKind::NovaWorldScreen) return false;
 	const ArchiveSlot slot = asset_kind_row(kind).archive_slot;
 	return kind == AssetKind::ImportSource || (slot != ArchiveSlot::Loose && slot != ArchiveSlot::None);
 }

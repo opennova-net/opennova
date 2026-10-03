@@ -45,10 +45,16 @@ ProjectPaths ProjectPaths::for_root(const std::string &root) {
 	return p;
 }
 
+std::string without_trailing_separator(const std::string &dir) {
+	std::string out = dir;
+	while (out.size() > 1 && (out.back() == '/' || out.back() == '\\') && out[out.size() - 2] != ':') out.pop_back();
+	return out;
+}
+
 std::string ProjectPaths::export_dir(const ProjectDocument &doc) const {
 	const fs::path output = path_of(doc.export_settings.output);
-	if (output.is_absolute()) return utf8_of(output);
-	return utf8_of((path_of(root) / output).lexically_normal());
+	if (output.is_absolute()) return without_trailing_separator(utf8_of(output.lexically_normal()));
+	return without_trailing_separator(utf8_of((path_of(root) / output).lexically_normal()));
 }
 
 bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error) {

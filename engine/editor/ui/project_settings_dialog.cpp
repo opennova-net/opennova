@@ -136,7 +136,7 @@ void ProjectSettingsDialog::draw(Workspace &workspace) {
 	                "of the game, so File > Import the whole game install... is the way to bring them in.");
 	ImGui::Checkbox("Multiplayer", &fields_.multiplayer);
 	ImGui::SeparatorText("Expansion");
-	const bool expansion_ok = expansion_.draw(v);
+	const bool expansion_ok = expansion_.draw(v.project.install_expansions);
 	if (expansion_.value().name != v.project.document->expansion.name && !v.project.document->expansion.name.empty() &&
 	    !expansion_.value().name.empty())
 		ImGui::TextDisabled("Apply renames the project's own expansion files to the new name.");

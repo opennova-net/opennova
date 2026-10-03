@@ -26,6 +26,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/install_view.h>
 #include <editor/assets/player_files.h>
@@ -44,6 +45,7 @@
 #include <editor/session/view/session_view.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
+#include <formats/pff/pff.h>
 
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
@@ -1159,6 +1161,53 @@ static int test_apply_retail_expansion() {
 		own += row.source.as.empty() ? 0 : 1;
 		expansion_layer += file->layer == InstallFile::Layer::Expansion ? 1 : 0;
 	}
+	// The same, independently of the view's mount (the mount above is the code path the view reads
+	// through): jox01's own archives opened directly. A row of the expansion's layer is a member of
+	// jox01L.pff or jox01.pff, served as stored there; a row of the base's is a member of neither (the
+	// expansion would serve it); a loose row is the file on the disk, the expansion's in its folder.
+	opennova::pff::PffArchive language{}, resources{};
+	const bool language_open = opennova::pff::pff_open(&language, (install + "/expansion/jox01/jox01L.pff").c_str()) == 0;
+	const bool resources_open = opennova::pff::pff_open(&resources, (install + "/expansion/jox01/jox01.pff").c_str()) == 0;
+	TEST_EXPECT(language_open && resources_open);
+	const auto stored = [](const opennova::pff::PffArchive &archive, const opennova::pff::PffEntry *entry) {
+		std::vector<uint8_t> bytes(entry ? entry->size : 0);
+		if (entry && opennova::pff::pff_extract_raw(&archive, entry, bytes.data(), bytes.size()) != 0) bytes.clear();
+		return bytes;
+	};
+	size_t independent = 0, loose_rows = 0;
+	for (const ImportPlanRow &row : plan.rows) {
+		if (row.state == State::NotFound || !row.source.install) continue;
+		const InstallFile *file = origin.find(row.name);
+		if (!file) continue;
+		if (!file->loose_path.empty()) {
+			std::vector<uint8_t> planned, on_disk;
+			std::string io_error;
+			TEST_EXPECT(origin.read(*file, planned) && read_file_bytes(file->loose_path, on_disk, io_error));
+			std::vector<uint8_t> decoded = on_disk; // as the game's loaders take it (a scrambled text decoded)
+			opennova::vfs_decode_payload(decoded, origin.vfs().scr_policy());
+			TEST_EXPECT(planned == on_disk || planned == decoded);
+			if (file->layer == InstallFile::Layer::Expansion)
+				TEST_EXPECT(opennova::strutil::to_lower(file->loose_path).find("jox01") != std::string::npos);
+			++loose_rows;
+			continue;
+		}
+		const opennova::pff::PffEntry *in_language = language_open ? opennova::pff::pff_find(&language, file->member.c_str()) : nullptr;
+		const opennova::pff::PffEntry *in_resources =
+				resources_open ? opennova::pff::pff_find(&resources, file->member.c_str()) : nullptr;
+		if (file->layer == InstallFile::Layer::Base) {
+			TEST_EXPECT(!in_language && !in_resources);
+			continue;
+		}
+		TEST_EXPECT(in_language || in_resources);
+		std::vector<uint8_t> served;
+		TEST_EXPECT(origin.vfs().read_file_raw(file->member, served) &&
+		            ((in_language && served == stored(language, in_language)) ||
+		             (in_resources && served == stored(resources, in_resources))));
+		++independent;
+	}
+	if (language_open) opennova::pff::pff_close(&language);
+	if (resources_open) opennova::pff::pff_close(&resources);
+	TEST_EXPECT(independent > 0);
 	const auto row_called = [&plan](const char *wanted) -> const ImportPlanRow * {
 		for (const ImportPlanRow &row : plan.rows)
 			if (normalized_logical_name(row.name) == normalized_logical_name(wanted)) return &row;
@@ -1170,9 +1219,10 @@ static int test_apply_retail_expansion() {
 	            table->needed_by.field.find("the game, ") == 0);
 	TEST_EXPECT(!row_called("jox01.bin") && !row_called("menumus.bin"));
 	std::printf("editor_import retail expansion: %s's closure %zu files (%.1f MB), %zu of the install's archives' checked "
-	            "byte for byte against /exp jox01 (%zu from the expansion's, %zu under the project's names), planned in "
-	            "%.1f s\n",
-	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, seconds);
+	            "byte for byte against /exp jox01 (%zu from the expansion's, %zu under the project's names; %zu against "
+	            "jox01's archives opened directly, %zu loose against the disk), planned in %.1f s\n",
+	            smallest->name.c_str(), plan.file_count(), plan.total_bytes() / 1e6, checked, expansion_layer, own, independent,
+	            loose_rows, seconds);
 	TEST_EXPECT(checked > 100 && expansion_layer > 0 && own > 0);
 	return 0;
 }

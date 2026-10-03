@@ -94,7 +94,15 @@ bool make_blank_mission_text(const BlankRequest &request, std::vector<uint8_t> &
 // modder adds those sections here.
 bool make_blank_expansion_table(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	File table;
-	const std::string title = request.project_title.empty() ? request.logical_name : request.project_title;
+	std::string title = request.project_title.empty() ? request.logical_name : request.project_title;
+	// The Mods list copies EXP_NAME into a 64-byte name with no bound, a longer one running over the
+	// record's directory [orig: Expansion_ScanAndRegister @ 0x4a4598]: the title is cut to 63 bytes, at a
+	// character's start, so the table made is one the build takes (build.expansion.exp_name).
+	if (title.size() > 63) {
+		size_t cut = 63;
+		while (cut > 0 && (static_cast<unsigned char>(title[cut]) & 0xC0) == 0x80) --cut;
+		title.resize(cut);
+	}
 	add_section(table, "exp_info", {{"EXP_NAME", title}, {"EXP_DESC", std::string()}});
 	return write_table(table, request, out, error);
 }

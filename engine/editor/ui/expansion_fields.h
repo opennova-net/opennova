@@ -1,12 +1,12 @@
 #pragma once
 
 #include <string>
+#include <vector>
 
 #include <editor/project/project_document.h>
+#include <editor/session/view/project_view.h>
 
 namespace opennova::editor {
-
-struct SessionView;
 
 // The fields a project's expansion is set with (ADR 0046 S16), drawn by the new-project form and the
 // project settings dialog alike: "Builds on" (the base game, or one of the game install's expansions by
@@ -17,8 +17,10 @@ public:
 	// The fields set from a project's expansion (a standalone one: unchecked, the base game), which
 	// they are then weighed against: as it stands, nothing is checked again.
 	void set(const ProjectExpansion &expansion);
-	// Draws them; true while they hold an expansion the game takes (or none).
-	bool draw(const SessionView &view);
+	// Draws them over the install's expansions `installed` (the open project's install for its settings, the
+	// install a new project opens with for the New project form); true while they hold an expansion the
+	// game takes (or none).
+	bool draw(const std::vector<ProjectView::InstallExpansion> &installed);
 	// The expansion they hold: none when "Build as an expansion" is unchecked.
 	ProjectExpansion value() const;
 

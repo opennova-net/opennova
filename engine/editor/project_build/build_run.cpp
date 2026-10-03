@@ -431,14 +431,20 @@ BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protec
 	for (const BuildEntry &entry : plan_.loose) bytes += entry.size_bytes;
 	stamps_.resize(base);
 	contents_.resize(base);
-	// Every byte hashed once (or vouched for by the hash cache), then written or copied once.
-	bytes_total_ = plan_.ok ? bytes * 2 : 0;
+	// Every byte hashed once (or vouched for by the hash cache), an expansion's compared with the base's
+	// once (its copy's bytes read, or vouched for by the base cache), then written or copied once; a file
+	// left out as the base's leaves the write pass (drop_same_as_base).
+	bytes_total_ = plan_.ok ? bytes * (plan_.target.is_expansion() ? 3 : 2) : 0;
 	group_hash_ = archive_hash_seed();
 	build_hash_ = io::kFnv1a64Offset;
 	// An expansion's build is another build than the standalone game's of the same files, and than
-	// another expansion name's: its id starts from the name (ADR 0046 S16).
+	// another expansion name's: its id starts from the name as spelled (ADR 0046 S16), the folder's
+	// spelling being what the Mods list copies into the name the game joins with, which the host compares
+	// with case [orig: Expansion_ScanAndRegister @ 0x4a4530..0x4a453a, the folder's name copied whole;
+	// Server_ValidatePlayerJoinRequest @ 0x5122f0, String_ExactMatch, reason 0x2F], so a name changed
+	// in its case alone is another build, published under the new spelling.
 	if (plan_.target.is_expansion()) {
-		const std::string seed = "expansion/" + strutil::to_lower(plan_.target.expansion);
+		const std::string seed = "expansion/" + plan_.target.expansion;
 		build_hash_ = io::fnv1a64_bytes(build_hash_, seed.data(), seed.size());
 	}
 }
@@ -713,6 +719,7 @@ void BuildRun::compare_base(uint64_t budget) {
 		same_[index] = found && ((copy.size == stamp.size && copy.raw == contents_[index]) ||
 		                         (copy.served_size == stamp.size && copy.served == contents_[index]));
 		report_.base_bytes_read += read;
+		advance(stamp.size);
 		label_ = "Comparing " + entry.logical_name + " with the base game";
 		left -= std::min(left, std::max(read, kOpenCost));
 	}
@@ -724,20 +731,44 @@ void BuildRun::compare_base(uint64_t budget) {
 void BuildRun::drop_same_as_base() {
 	// A mission the expansion ships keeps its text table in <b>L.pff, however like the base's: the
 	// mission list titles a mission only from the archive paired with its own [orig:
-	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)].
+	// Mission_BuildMapListFromPFF @ 0x562c2d, PFF_FileExists(bin, textArchive)]; it lists the map projects
+	// (.npj, .npz) by the same rule as the .bms [orig: Mission_BuildMapListFromPFF @ 0x562910].
 	std::map<std::string, bool> kept_tables;
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
 		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
 			const BuildEntry &entry = plan_.archives[a].entries[e];
-			if (entry.kind == AssetKind::Mission && !same_[stamp_index(a, e)] &&
-			    strutil::ends_with_icase(entry.logical_name, ".bms"))
+			if (!same_[stamp_index(a, e)] && lists_as_mission(entry.logical_name))
 				kept_tables[normalized_logical_name(mission::mission_base_name(entry.logical_name) + ".bin")] = true;
 		}
+	std::map<std::string, bool> tables; // the text tables the expansion's pair holds
 	for (size_t a = 0; a < plan_.archives.size(); ++a)
 		if (plan_.archives[a].slot == ArchiveSlot::Language)
-			for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e)
-				if (kept_tables.count(normalized_logical_name(plan_.archives[a].entries[e].logical_name)))
-					same_[stamp_index(a, e)] = false;
+			for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+				const std::string name = normalized_logical_name(plan_.archives[a].entries[e].logical_name);
+				tables[name] = true;
+				if (kept_tables.count(name)) same_[stamp_index(a, e)] = false;
+			}
+	// What the game's lists make of a mission the expansion ships, said, refusing nothing: one with no text
+	// table in its pair lists untitled; one of a name the base game lists too lists twice, both rows loading
+	// the expansion's (the lists keep no dedupe).
+	for (size_t a = 0; a < plan_.archives.size(); ++a)
+		for (size_t e = 0; e < plan_.archives[a].entries.size(); ++e) {
+			const BuildEntry &entry = plan_.archives[a].entries[e];
+			if (same_[stamp_index(a, e)] || !lists_as_mission(entry.logical_name)) continue;
+			const std::string table = mission::mission_base_name(entry.logical_name) + ".bin";
+			if (!tables.count(normalized_logical_name(table)))
+				report_.diagnostics.push_back(make_finding(
+				        CoreFinding::BuildExpansionMissionUntitled, DiagnosticSeverity::Warning,
+				        entry.logical_name + " has no text table " + table + " of its own in the expansion: the game's "
+				                             "mission list shows it untitled, with no briefing.",
+				        entry.relative_path));
+			if (base_->serves(entry.logical_name))
+				report_.diagnostics.push_back(make_finding(
+				        CoreFinding::BuildExpansionMissionTwice, DiagnosticSeverity::Warning,
+				        "The base game has a mission named " + entry.logical_name + " too: the game's mission list "
+				                "shows it twice, both rows loading the expansion's.",
+				        entry.relative_path));
+		}
 	// What stays, its stamps and hashes with it.
 	std::vector<Stamp> stamps;
 	std::vector<uint64_t> contents;
@@ -754,6 +785,7 @@ void BuildRun::drop_same_as_base() {
 			}
 			++report_.same_as_base_files;
 			report_.same_as_base_bytes += stamps_[index].size;
+			bytes_total_ -= std::min(bytes_total_ - bytes_done_, stamps_[index].size); // no write pass for it
 		}
 		entries = std::move(kept);
 	};

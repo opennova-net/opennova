@@ -23,7 +23,11 @@ namespace opennova::editor {
 // Every hash read is kept (the build cache's `base` section, the project's build_cache.json), by the
 // install, the game and the stamps (size and last write) of what it came from (the boot archives
 // together for a member, the file for a loose one), so the next build reads none of the base's bytes
-// while the install is unchanged.
+// while the install is unchanged. A hash is kept only when what it came from had settled before the
+// build read it (io::file_stamp_settled, git's racy rule: a rewrite of the same size in the same clock
+// tick keeps the stamp); one that had not is read again next time. What a build no longer asks for
+// leaves the cache. A member is read once: the bytes as served are decoded from the stored ones in
+// memory (vfs_decode_payload, as the loaders are served them), never read a second time.
 struct BaseCopy {
 	uint64_t size = 0;   // as stored
 	uint64_t raw = 0;    // FNV-1a 64 of the bytes as stored
@@ -43,6 +47,8 @@ public:
 	// The install folder's loose file `name` (compared without case, as the game's file system does):
 	// false when there is none.
 	bool root_copy(const std::string &name, BaseCopy &out, uint64_t &read_bytes);
+	// Whether the base's archives serve a file of `name` (compared as the game compares names).
+	bool serves(const std::string &name) const { return view_.find(name) != nullptr; }
 
 	// The cache as the build cache's `base` section keeps it: read before the comparison (one of
 	// another install or game reads as empty), and what it holds after: every copy asked for this
@@ -56,12 +62,15 @@ private:
 		BaseCopy copy;
 	};
 	std::string stamp_of(const std::string &path);
+	bool settled(const std::string &path) const;
 	bool cached(const std::string &key, const std::string &stamp, BaseCopy &out);
 
 	std::string install_;
 	std::string game_;
 	InstallView view_;
 	std::string archives_stamp_;               // the boot archives' stamps together
+	bool archives_settled_ = false;            // each boot archive's last write settled when opened
+	int64_t opened_at_ = 0;                    // the file system's clock when opened (file_clock_now_ticks)
 	std::map<std::string, std::string> loose_; // normalized name -> the install folder's file
 	std::map<std::string, Cached> cache_;      // read from the cache
 	std::map<std::string, Cached> kept_;       // asked for this time

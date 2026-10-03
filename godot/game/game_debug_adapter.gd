@@ -164,11 +164,13 @@ func get_mcp_game_state() -> Variant:
 			"world_loaded": world != null and world.is_loaded(),
 			"mission_file": mission_file,
 			"dev_tools_open": _shell != null and _shell.is_dev_tools_open(),
-			# The expansion the game data mounted with (/exp; "" for the base game), and whether the
-			# mission catalog over it lists the loaded mission (ADR 0046 S16: an editor's
-			# expansion build, played).
+			# The expansion the game data mounted with (/exp; "" for the base game), and whether
+			# OpenNova's mission catalog over it holds the loaded mission (ADR 0046 S16: an
+			# editor's expansion build, played). The catalog reads a mission's text through the
+			# mount stack, not retail's archive pairs (runtime/mission/mission_catalog.h), so this
+			# says nothing of the pair rule; the build says that (build.expansion.mission_*).
 			"expansion": String(root.get_expansion()) if root != null else "",
-			"mission_listed": _mission_listed(root, mission_file),
+			"mission_in_catalog": _mission_in_catalog(root, mission_file),
 		},
 		"session": _session_facts(sim),
 		"runtime": runtime_state,
@@ -386,8 +388,9 @@ func _resource_root() -> ResourceRoot:
 	return menu.get_resource_root() if menu != null else null
 
 
-## Whether the mission catalog over `root` lists `mission` (compared as the game compares names).
-static func _mission_listed(root: ResourceRoot, mission: String) -> bool:
+## Whether OpenNova's mission catalog over `root` holds `mission` (compared as the game compares
+## names).
+static func _mission_in_catalog(root: ResourceRoot, mission: String) -> bool:
 	if root == null or mission.is_empty():
 		return false
 	for name in MissionCatalog.mission_names(root):

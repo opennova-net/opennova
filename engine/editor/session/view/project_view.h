@@ -50,6 +50,9 @@ struct ProjectView {
 		std::string description;
 	};
 	std::vector<InstallExpansion> install_expansions;
+	// The same of the install a new project opens with (the editor's last chosen, whatever install an
+	// open project names), which the New project form offers and New project weighs against.
+	std::vector<InstallExpansion> new_project_expansions;
 	// What the last ApplyProjectSettings could not write (each also a finding); its
 	// SettingsApplied event (view_events.h) says it came.
 	struct SettingsResult {

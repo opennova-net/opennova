@@ -13,6 +13,7 @@
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
+#include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 #include <editor/run/process_platform.h>
 #include <editor/session/editor_request.h>
@@ -266,10 +267,14 @@ public:
 	// before anything is built when it lies inside the project but its export folder).
 	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported);
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
-	// the game started on it, in the Play's mission, when a Play waits and it is good; copied into
-	// the export folder when an Export waits and it is good (export_build).
+	// the game started on it, in the Play's mission, when a Play waits and it is good; what the export
+	// that waited on it came to (`shipped`: its ExportRun's report, or what refused it; null when none ran).
 	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent,
-	                              const ExportIntent &exported);
+	                              const ExportIntent &exported, const ExportReport *shipped);
+	// What an Export that waited on the build `built` copies (BuildOperation's ExportResolver): its folder
+	// (export_folder), the runtime beside a standalone game when the project asks for it; false with
+	// `refused` holding what refuses it.
+	bool export_request(const ExportIntent &intent, const BuildReport &built, ExportRequest &request, ExportReport &refused);
 	// The folder an Export lands in: `to` from the project's folder when relative, else the
 	// project's export folder; "" with a finding reported when it lies inside the project but the
 	// export folder (the next scan would list what it holds as the project's files).
@@ -305,9 +310,14 @@ private:
 	// The gesture of the wire's open in the document at `path` ends (its EndEdit, as a client's last
 	// sample would raise it).
 	void end_wire_gesture(const std::string &path);
-	// The renames a change of the project's expansion's name leaves to do (ADR 0046 S16: the project's
-	// own expansion files to the new name's), one an operation, each started when the slot is free.
-	void next_expansion_rename();
+	// The project's own expansion files under the name `from`, renamed to the name `to`'s, and the project
+	// document `project` (which names `to`) saved, all or nothing (ADR 0046 S16): every rename planned and
+	// checked first (a target taken, a file another file names, a file open with unsaved edits refuses the
+	// whole change, nothing written), then each file moved, then the document saved; a move or the save
+	// that fails puts back every move made before it. True when the change is in, its open documents
+	// read again at their new paths and the scan updated; false with `failures`, nothing changed.
+	bool rename_expansion_files(const std::string &from, const std::string &to, const ProjectDocument &project,
+	                            std::vector<Diagnostic> &failures);
 
 	ProcessPlatform &platform_;
 	EditorPreferences &preferences_;
@@ -321,7 +331,6 @@ private:
 	ActionOutcome outcome_;
 	std::map<std::string, WireDrag> wire_drags_;
 	OriginalBytes original_bytes_; // which files are the install's bytes (shipped_files)
-	std::deque<std::pair<std::string, std::string>> expansion_renames_; // (project-relative file, new name)
 	std::vector<std::string> install_expansion_names_; // the game install's expansions, by folder name
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's

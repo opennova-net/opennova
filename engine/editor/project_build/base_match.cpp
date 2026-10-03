@@ -7,7 +7,10 @@
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/vfs/vfs.h>
+#include <base/vfs/vfs_decode.h>
+#include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/assets/asset_type_registry.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;
@@ -42,9 +45,12 @@ bool BaseMatch::open(const std::string &install, const std::string &game, std::s
 		std::error_code kind;
 		if (entry.is_regular_file(kind)) loose_[normalized_logical_name(utf8_of(entry.path().filename()))] = utf8_of(entry.path());
 	}
+	opened_at_ = io::file_clock_now_ticks();
+	archives_settled_ = true;
 	for (const char *archive : kBootArchiveTable) {
 		const auto found = loose_.find(normalized_logical_name(archive));
 		archives_stamp_ += (found == loose_.end() ? std::string("-") : stamp_of(found->second)) + ";";
+		if (found != loose_.end()) archives_settled_ = archives_settled_ && settled(found->second);
 	}
 	return true;
 }
@@ -54,6 +60,10 @@ std::string BaseMatch::stamp_of(const std::string &path) {
 	const uint64_t size = fs::file_size(system_path(path), ec);
 	const int64_t written = ec ? 0 : io::file_modified_ticks(system_path(path));
 	return std::to_string(size) + ":" + std::to_string(written);
+}
+
+bool BaseMatch::settled(const std::string &path) const {
+	return io::file_stamp_settled(io::file_modified_ticks(system_path(path)), opened_at_);
 }
 
 bool BaseMatch::cached(const std::string &key, const std::string &stamp, BaseCopy &out) {
@@ -74,14 +84,16 @@ bool BaseMatch::archive_copy(const std::string &name, BaseCopy &out, uint64_t &r
 	read_bytes += bytes.size();
 	out.size = bytes.size();
 	out.raw = hash_of(bytes);
-	if (view_.read(*file, bytes)) {
+	// As served: the loaders' decode of the stored bytes (InstallView::read's, read_served), in memory.
+	if (asset_kind_row(classify_asset(file->member, nullptr)).scr != ScrForm::Shader &&
+	    vfs_decode_payload(bytes, view_.vfs().scr_policy())) {
 		out.served = hash_of(bytes);
 		out.served_size = bytes.size();
 	} else {
 		out.served = out.raw;
 		out.served_size = out.size;
 	}
-	kept_[key] = Cached{archives_stamp_, out};
+	if (archives_settled_) kept_[key] = Cached{archives_stamp_, out};
 	return true;
 }
 
@@ -97,7 +109,7 @@ bool BaseMatch::root_copy(const std::string &name, BaseCopy &out, uint64_t &read
 	read_bytes += bytes.size();
 	out.size = out.served_size = bytes.size();
 	out.raw = out.served = hash_of(bytes);
-	kept_[key] = Cached{stamp, out};
+	if (settled(found->second)) kept_[key] = Cached{stamp, out};
 	return true;
 }
 

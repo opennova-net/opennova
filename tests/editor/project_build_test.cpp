@@ -16,6 +16,7 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -385,6 +386,16 @@ static int test_new_kinds_land_where_their_rows_say() {
 	TEST_EXPECT(screens.ok && in(screens.archives[1].entries, "nw_error.mnx") && in(screens.archives[1].entries, "nw_startup.mnx"));
 	TEST_EXPECT(!in(screens.loose, "nw_error.mnx") && !in(screens.loose, "nw_startup.mnx") &&
 	            !in(screens.archives[0].entries, "nw_error.mnx") && !in(screens.archives[2].entries, "nw_error.mnx"));
+	// One of a name no archive holds, which the game never reads (a backup): left out and said, the build
+	// going ahead.
+	const std::string backup = "nw_startup_backup.mnx";
+	TEST_EXPECT(editor_test::write_text(p.root + "/" + backup, "<HTML/>"));
+	const BuildPlan unread = p.plan();
+	size_t said = 0;
+	for (const Diagnostic &d : unread.diagnostics)
+		if (d.code() == "build.unread" && d.asset == backup && d.severity == DiagnosticSeverity::Warning && !blocks_build(d)) ++said;
+	TEST_EXPECT(unread.ok && said == 1 && !in(unread.loose, backup.c_str()));
+	for (const BuildArchive &archive : unread.archives) TEST_EXPECT(!in(archive.entries, backup.c_str()));
 	return 0;
 }
 
@@ -606,14 +617,28 @@ static int test_expansion_empty_pair() {
 	return 0;
 }
 
+// Every file under `root` given a last write an hour back: settled (io::file_stamp_settled), so a
+// cache keeps what it read of them.
+static void settle_files(const std::string &root) {
+	std::error_code ec;
+	const fs::file_time_type past = fs::file_time_type::clock::now() - std::chrono::hours(1);
+	for (auto it = fs::recursive_directory_iterator(root, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec)) {
+		std::error_code set;
+		if (it->is_regular_file()) fs::last_write_time(it->path(), past, set);
+	}
+}
+
 // ADR 0046 S16, lean packing: an expansion's build leaves out what its base game serves the same under
 // the name (a string table and a menu packed alike, a video the install's folder holds alike), so the
-// game reads the base's; a file of the name that differs, or one the base lacks, stays. A mission the
-// expansion ships keeps its text table in <b>L.pff however like the base's (the mission list titles it
-// from the pair's own text archive). A root-only file like the base's is said nothing, one unlike it
+// game reads the base's; a file of the name that differs, or one the base lacks, stays. A mission (or a
+// map project) the expansion ships keeps its text table in <b>L.pff however like the base's (the
+// mission list titles it from the pair's own text archive); one with no table in the pair is said
+// (build.expansion.mission_untitled), as one of a name the base lists too
+// (build.expansion.mission_twice). A root-only file like the base's is said nothing, one unlike it
 // build.expansion.root_only. The report counts what the base serves (same_as_base); the next build of
-// the same content reads none of the base's bytes (its hashes cached) and is the same build; an
-// install whose base does not mount fails the build, build.expansion.base_missing.
+// the same content reads none of the base's bytes (its hashes cached) and is the same build; stepped,
+// the comparison moves the progress; the name in another case is another build; an install whose base
+// does not mount fails the build, build.expansion.base_missing.
 static int test_lean_packing() {
 	Project p("opennova_editor_build_lean_test");
 	TEST_EXPECT(p.create());
@@ -624,15 +649,20 @@ static int test_lean_packing() {
 	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m2.bin", "its table"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/cc.bin", "us"));
 	TEST_EXPECT(editor_test::write_text(p.root + "/score.ini", "ours"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.npz", "a map project of ours"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/ASP_G7.bin", "its own table"));
+	TEST_EXPECT(editor_test::write_text(p.root + "/missions/m3.bms", "a mission with the base's text"));
 	const std::string gametext = find_file(p.root, "gametext.bin"), menu = find_file(p.root, "main.mnu"),
 	                  coo = find_file(p.root, "nw_cdata.coo");
 	TEST_EXPECT(!gametext.empty() && !menu.empty() && !coo.empty());
 	const BaseInstall install = make_base(
-	        p.dir.file("install"), { { "gametext.bin", file_bytes(gametext) }, { "m2.bin", bytes_of("its table") } },
+	        p.dir.file("install"), { { "gametext.bin", file_bytes(gametext) }, { "m2.bin", bytes_of("its table") },
+	                                 { "ASP_G7.bin", bytes_of("its own table") }, { "m3.bin", bytes_of("the base's") } },
 	        { { "main.mnu", file_bytes(menu) }, { "m2.bms", bytes_of("the base's mission") } }, {},
 	        { { "intro.bik", bytes_of("the base's intro") }, { "header.bik", bytes_of("the base's header") },
 	          { "cc.bin", bytes_of("us") }, { "score.ini", bytes_of("theirs") }, { "nw_cdata.coo", file_bytes(coo) } });
 	TEST_EXPECT(install.written);
+	settle_files(install.root); // the base cache keeps what it reads of settled files alone
 	const BaseNames base = install.base();
 	BuildTarget target;
 	target.expansion = "jxm";
@@ -653,6 +683,18 @@ static int test_lean_packing() {
 	TEST_EXPECT(!archive_has(folder + "/jxmL.pff", "gametext.bin") && !archive_has(folder + "/jxm.pff", "main.mnu"));
 	TEST_EXPECT(!fs::exists(folder + "/intro.bik") && fs::is_regular_file(folder + "/header.bik"));
 	TEST_EXPECT(archive_has(folder + "/jxm.pff", "m2.bms") && archive_has(folder + "/jxmL.pff", "m2.bin"));
+	// A map project lists as a mission does [orig: Mission_BuildMapListFromPFF @ 0x562910]: its table stays.
+	TEST_EXPECT(archive_has(folder + "/jxm.pff", "ASP_G7.npz") && archive_has(folder + "/jxmL.pff", "ASP_G7.bin"));
+	// What the lists make of the missions it ships, said and refusing nothing: m3.bms has no table in its
+	// pair (untitled); m2.bms is a name the base lists too (twice).
+	std::vector<std::string> untitled, twice;
+	for (const Diagnostic &d : report.diagnostics) {
+		if (d.code() == "build.expansion.mission_untitled") untitled.push_back(d.asset);
+		if (d.code() == "build.expansion.mission_twice") twice.push_back(d.asset);
+		if (d.code().rfind("build.expansion.mission_", 0) == 0)
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Warning && !blocks_build(d, &base));
+	}
+	TEST_EXPECT(untitled == std::vector<std::string>{ "missions/m3.bms" } && twice == std::vector<std::string>{ "missions/m2.bms" });
 	TEST_EXPECT(report.same_as_base_files == 3 && report.same_as_base_bytes == file_bytes(gametext).size() +
 	                                                                               file_bytes(menu).size() + 16);
 	TEST_EXPECT(report.base_bytes_read > 0);
@@ -669,6 +711,46 @@ static int test_lean_packing() {
 	// The same content: the same build, none of the base's bytes read (the build cache's `base`).
 	const BuildReport again = run_build(plan_of(), p.output_root());
 	TEST_EXPECT(again.ok && again.reused_existing && again.build_id == report.build_id && again.base_bytes_read == 0);
+	// An archive written within the settle window (a rewrite of the same size may keep its stamp, git's
+	// racy rule): read again by every build until it settles, the build the same.
+	{
+		std::error_code touched;
+		fs::last_write_time(install.root + "/localres.pff", fs::file_time_type::clock::now(), touched);
+		const BuildReport racy = run_build(plan_of(), p.output_root());
+		const BuildReport racy_again = run_build(plan_of(), p.output_root());
+		TEST_EXPECT(racy.ok && racy.base_bytes_read > 0 && racy_again.ok && racy_again.base_bytes_read > 0 &&
+		            racy_again.build_id == report.build_id);
+		settle_files(install.root);
+		const BuildReport settled = run_build(plan_of(), p.output_root());
+		const BuildReport settled_again = run_build(plan_of(), p.output_root());
+		TEST_EXPECT(settled.ok && settled.base_bytes_read > 0 && settled_again.base_bytes_read == 0);
+	}
+	// Stepped, the comparison with the base moves the progress, which only goes up, to a total the dropped
+	// files left.
+	{
+		BuildRun stepped(plan_of(), p.paths.build_dir + "/stepped");
+		uint64_t last = 0;
+		bool compared = false;
+		while (!stepped.step(4096)) {
+			TEST_EXPECT(stepped.bytes_done() >= last && stepped.bytes_done() <= stepped.bytes_total());
+			if (stepped.label().rfind("Comparing", 0) == 0 && stepped.bytes_done() > last) compared = true;
+			last = stepped.bytes_done();
+		}
+		TEST_EXPECT(stepped.report().ok && compared && stepped.bytes_done() == stepped.bytes_total());
+	}
+	// The name in another case is another build, published under the new spelling (a host compares the
+	// name as spelled [orig: String_ExactMatch @ 0x5122f0]).
+	BuildTarget upper = target;
+	upper.expansion = "JXM";
+	const BuildReport recased = run_build(plan_build(p.paths, scan_project_assets(p.paths, p.doc),
+	                                                 evaluate_requirements(p.doc, scan_project_assets(p.paths, p.doc)), {},
+	                                                 upper, &base),
+	                                      p.paths.build_dir + "/recased");
+	std::string spelled;
+	std::error_code listed;
+	for (const fs::directory_entry &each : fs::directory_iterator(recased.build_dir + "/expansion", listed))
+		spelled = each.path().filename().string();
+	TEST_EXPECT(recased.ok && recased.build_id != report.build_id && spelled == "JXM");
 	// A base that does not mount fails the build.
 	BuildTarget gone = target;
 	gone.install = p.dir.file("no_install");
@@ -767,6 +849,19 @@ static int test_base_gate() {
 	return 0;
 }
 
+// The findings of `code` among `findings`.
+static size_t count_code(const std::vector<Diagnostic> &findings, const char *code) {
+	size_t count = 0;
+	for (const Diagnostic &d : findings) count += d.code() == code ? 1 : 0;
+	return count;
+}
+
+// An export's listed files: every file it wrote but its record.
+static std::vector<std::string> expected_files(std::vector<std::string> files) {
+	files.erase(std::remove(files.begin(), files.end(), std::string(kExportRecordFileName)), files.end());
+	return files;
+}
+
 // The files under `dir`, '/'-separated and relative, sorted.
 static std::vector<std::string> files_under(const std::string &dir) {
 	std::vector<std::string> out;
@@ -778,10 +873,14 @@ static std::vector<std::string> files_under(const std::string &dir) {
 }
 
 // ADR 0046 S16: Export copies the build whole (its record left behind) into a folder of its own with
-// export.json naming the project; again over its own export (a file the folder gained since gone);
-// into an empty folder; never over a folder of the person's files nor another project's export
-// (export.folder, nothing written), nor into the build; a staging folder its own cut-short export
-// left removed first, one of anything else refused; an expansion's laid out as in an install; the
+// export.json naming the project; again over its own export (what the person added there kept, a file
+// of the export they changed replaced, an earlier export's file the build no longer holds removed, each
+// said: export.replaced); into an empty folder; never over a folder of the person's files nor another
+// project's export (export.folder, nothing written), nor into the build; a staging folder its own
+// cut-short export left, and a set-aside folder an export could not remove (export.cleanup), removed
+// first, one of anything else refused and left as it is; a folder named with a trailing separator;
+// stepped by bytes and cancelled leaving the folder as it was (export.cancelled); the scan passing over
+// the export folder's staging and set-aside siblings; an expansion's laid out as in an install; the
 // runtime's folder under runtime/ when asked. The build is only read.
 static int test_export() {
 	Project p("opennova_editor_export_test");
@@ -814,13 +913,81 @@ static int test_export() {
 	TEST_EXPECT(!fs::equivalent(request.export_dir + "/language.pff", build.build_dir + "/language.pff", ec)); // copied
 	TEST_EXPECT(!fs::exists(request.export_dir + kExportStagingSuffix) && !fs::exists(request.export_dir + kExportPreviousSuffix));
 
-	// Again over its own export: replaced whole.
-	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine?"));
+	// Again over its own export: what the person added there kept (and said), a file of the export they
+	// changed replaced by the build's (and said), the record naming the export's own files alone.
+	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine"));
+	std::this_thread::sleep_for(std::chrono::milliseconds(20)); // a last write after the record's
+	TEST_EXPECT(editor_test::write_text(request.export_dir + "/intro.bik", "changed"));
 	shipped = export_build(request);
-	TEST_EXPECT(shipped.ok && !fs::exists(request.export_dir + "/notes.txt") && files_under(request.export_dir) == expected);
-	// A cut-short export's staging folder is removed first.
-	TEST_EXPECT(editor_test::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text));
-	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportStagingSuffix));
+	std::vector<std::string> with_notes = expected;
+	with_notes.push_back("notes.txt");
+	std::sort(with_notes.begin(), with_notes.end());
+	TEST_EXPECT(shipped.ok && files_under(request.export_dir) == with_notes && shipped.files == expected_files(expected));
+	TEST_EXPECT(read_file_text(request.export_dir + "/notes.txt", text, error) && text == "mine" &&
+	            read_file_text(request.export_dir + "/intro.bik", text, error) && text == "BIKi");
+	TEST_EXPECT(shipped.kept == std::vector<std::string>{"notes.txt"} &&
+	            shipped.replaced == std::vector<std::string>{"intro.bik"} && shipped.removed.empty());
+	TEST_EXPECT(count_code(shipped.diagnostics, "export.replaced") == 1 && shipped.diagnostics.back().severity == DiagnosticSeverity::Info &&
+	            shipped.diagnostics.back().message.find("notes.txt") != std::string::npos);
+	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
+	            text.find("notes.txt") == std::string::npos);
+	// A cut-short export's staging folder, and a set-aside one an export could not remove, go first.
+	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error));
+	TEST_EXPECT(editor_test::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text) &&
+	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName, text) &&
+	            editor_test::write_text(request.export_dir + kExportPreviousSuffix + "/language.pff", "old"));
+	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportStagingSuffix) &&
+	            !fs::exists(request.export_dir + kExportPreviousSuffix));
+	// A set-aside folder that cannot be removed (a file of it open elsewhere): the new export is in, and said.
+	const RemoveTree held = [](const std::string &, std::string &reason) {
+		reason = "a file of it is in use";
+		return false;
+	};
+	shipped = export_build(request, held);
+	TEST_EXPECT(shipped.ok && count_code(shipped.diagnostics, "export.cleanup") == 1 &&
+	            fs::is_regular_file(request.export_dir + kExportPreviousSuffix + "/" + kExportRecordFileName) &&
+	            files_under(request.export_dir) == with_notes);
+	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportPreviousSuffix));
+	// A folder named with a trailing separator is the folder.
+	ExportRequest trailing = request;
+	trailing.export_dir = request.export_dir + "/";
+	shipped = export_build(trailing);
+	TEST_EXPECT(shipped.ok && shipped.export_dir == request.export_dir && files_under(request.export_dir) == with_notes &&
+	            !fs::exists(request.export_dir + "/" + kExportStagingSuffix) && !fs::exists(request.export_dir + "/.old"));
+	// Stepped by a budget of bytes, progress only going up; cancelled before its folder is replaced, the
+	// folder as it was and the staging folder gone.
+	{
+		const std::string before = editor_test::tree_digest(request.export_dir);
+		ExportRun run(request);
+		uint64_t last = 0;
+		int steps = 0;
+		while (!run.done() && steps < 3) {
+			run.step(1024);
+			TEST_EXPECT(run.bytes_done() >= last && run.bytes_done() <= run.bytes_total());
+			last = run.bytes_done();
+			++steps;
+		}
+		TEST_EXPECT(!run.done() && run.bytes_total() > 0 && fs::exists(request.export_dir + kExportStagingSuffix));
+		run.cancel();
+		TEST_EXPECT(run.done() && !run.report().ok && count_code(run.report().diagnostics, "export.cancelled") == 1 &&
+		            !fs::exists(request.export_dir + kExportStagingSuffix) &&
+		            editor_test::tree_digest(request.export_dir) == before);
+		ExportRun whole(request);
+		int whole_steps = 0;
+		while (!whole.step(64 * 1024)) ++whole_steps;
+		TEST_EXPECT(whole.report().ok && whole_steps > 2 && whole.bytes_done() == whole.bytes_total());
+	}
+	// The scan passes over a staging or set-aside folder beside the project's own export folder, which a
+	// build would otherwise refuse as archives in the project.
+	const std::string own = p.paths.export_dir(p.doc);
+	TEST_EXPECT(editor_test::write_text(own + kExportStagingSuffix + "/language.pff", "PFF3") &&
+	            editor_test::write_text(own + kExportPreviousSuffix + "/expansion/jxm/jxm.pff", "PFF3"));
+	{
+		const BuildPlan beside = p.plan();
+		TEST_EXPECT(beside.ok && count_code(beside.diagnostics, "build.archive_in_project") == 0);
+		fs::remove_all(own + kExportStagingSuffix, ec);
+		fs::remove_all(own + kExportPreviousSuffix, ec);
+	}
 	// An empty folder takes it.
 	ExportRequest empty = request;
 	empty.export_dir = p.dir.file("empty");
@@ -838,7 +1005,7 @@ static int test_export() {
 	ExportRequest other = request;
 	other.project_id = "another-project";
 	refused = export_build(other);
-	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" && files_under(request.export_dir) == expected);
+	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" && files_under(request.export_dir) == with_notes);
 	ExportRequest staged = request;
 	staged.export_dir = p.dir.file("staged");
 	TEST_EXPECT(editor_test::write_text(staged.export_dir + kExportStagingSuffix + "/keep.txt", "mine"));
@@ -890,6 +1057,15 @@ static int test_export() {
 	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/intro.bik") && !fs::exists(mod.export_dir + "/language.pff"));
 	TEST_EXPECT(read_file_text(mod.export_dir + "/" + kExportRecordFileName, text, error) &&
 	            opennova::io::json_parse(text, record, error) && record.get_string("expansion", "") == "jxm");
+	// The expansion over the standalone game's export: the earlier export's files the build no longer
+	// holds removed (and said), the person's kept.
+	ExportRequest over = mod;
+	over.export_dir = request.export_dir;
+	shipped = export_build(over);
+	TEST_EXPECT(shipped.ok && fs::is_regular_file(over.export_dir + "/expansion/jxm/jxm.pff") &&
+	            !fs::exists(over.export_dir + "/language.pff") && fs::is_regular_file(over.export_dir + "/notes.txt"));
+	TEST_EXPECT(std::find(shipped.removed.begin(), shipped.removed.end(), "language.pff") != shipped.removed.end() &&
+	            shipped.kept == std::vector<std::string>{"notes.txt"});
 	return 0;
 }
 

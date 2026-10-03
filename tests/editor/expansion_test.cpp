@@ -15,11 +15,15 @@
 #include <base/gameprofile/required_resources.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/install_view.h>
+#include <editor/import/import_plan.h>
+#include <editor/model/document.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_document.h>
+#include <editor/requirements/requirements.h>
 #include <editor/session/original_files.h>
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
@@ -54,18 +58,27 @@ bool write_archive(const std::string &path, const std::vector<std::pair<std::str
 	                                        uint32_t(entries.size())) == opennova::pff::PFF_WRITE_OK;
 }
 
+// Where a synthetic install's expansion keeps its text table x1.bin: in x1L.pff alone (as JO:CA's
+// jox01 does), loose in its folder alone (as every expansion the editor builds), or both.
+enum class TablePlace { Archive, Loose, Both };
+
 // A synthetic install: the base's archive and loose files, an expansion x1 with its two archives, its
-// music bank, a video, its version text and a player's weapon.sav.
-bool make_install(const std::string &root) {
+// music bank, a video, its version text and a player's weapon.sav, its text table where `table` says.
+bool make_install(const std::string &root, TablePlace table = TablePlace::Archive) {
 	const std::string x1 = root + "/expansion/x1";
 	std::error_code ec;
 	std::filesystem::create_directories(x1, ec);
+	std::vector<std::pair<std::string, std::string>> language{ { "Mx1.bin", "x1 menu script" }, { "x1L.lwf", "x1 bank" } };
+	if (table != TablePlace::Loose) language.push_back({ "x1.bin", "x1 table" });
+	if (table != TablePlace::Archive && !editor_test::write_text(x1 + "/x1.bin", "x1 loose table")) return false;
 	return write_archive(root + "/resource.pff", { { "shared.txt", "base" }, { "baseonly.txt", "base only" },
-	                                               { "menumus.bin", "base menu script" },
+	                                               { "01TR.bms", "a mission" }, { "menumus.bin", "base menu script" },
 	                                               { "gamemus.bin", "base game script" } }) &&
-	       write_archive(x1 + "/x1.pff", { { "shared.txt", "expansion" }, { "x1only.txt", "x1 only" } }) &&
-	       write_archive(x1 + "/x1L.pff", { { "x1.bin", "x1 table" }, { "Mx1.bin", "x1 menu script" },
-	                                        { "x1L.lwf", "x1 bank" } }) &&
+	       write_archive(x1 + "/x1.pff", { { "shared.txt", "expansion" }, { "x1only.txt", "x1 only" },
+	                                       { "version.txt", "an archived version" }, { "gt.ssc", "archived config" } }) &&
+	       write_archive(x1 + "/x1L.pff", language) &&
+	       editor_test::write_text(x1 + "/trailer.bik", "a video the game never reads") &&
+	       editor_test::write_text(x1 + "/gt.ssc", "loose config") &&
 	       editor_test::write_text(root + "/MENUMUS.SBF", "base music") &&
 	       editor_test::write_text(root + "/header.bik", "base header") &&
 	       editor_test::write_text(root + "/main.bik", "base main") && editor_test::write_text(x1 + "/Mx1.sbf", "x1 music") &&
@@ -93,17 +106,28 @@ static int test_name_rule() {
 	TEST_EXPECT(takes(twelve, ExpansionNameUse::BuildsOn) && takes(thirty_one, ExpansionNameUse::BuildsOn));
 	TEST_EXPECT(refuses(thirty_two, "holds an expansion's name in 31", ExpansionNameUse::BuildsOn));
 	TEST_EXPECT(refuses(thirty_two, "holds an expansion's name in 31"));
-	// One /exp token [orig: Terrain_TokenizeConfigLine @ 0x53cb60].
-	for (const char *name : { "my mod", "my\tmod", "my,mod", "my\"mod", "my;mod", "trailing " })
-		TEST_EXPECT(refuses(name, "one word") && refuses(name, "one word", ExpansionNameUse::BuildsOn));
+	// One /exp token [orig: Terrain_TokenizeConfigLine @ 0x53cb60] for the project's own; an installed
+	// one the game mounts by its folder, a quoted name with a space among them, takes any.
+	for (const char *name : { "my mod", "my,mod", "my;mod", "trailing " })
+		TEST_EXPECT(refuses(name, "one word") && takes(name, ExpansionNameUse::BuildsOn));
+	for (const char *name : { "my\tmod", "my\"mod" }) // no folder's name holds these
+		TEST_EXPECT(refuses(name, "one word") && !takes(name, ExpansionNameUse::BuildsOn));
 	// Printable ASCII, a folder Windows can make.
 	TEST_EXPECT(refuses("caf\xc3\xa9", "printable ASCII") && refuses("a\x01", "printable ASCII"));
+	TEST_EXPECT(takes("caf\xc3\xa9", ExpansionNameUse::BuildsOn));
 	for (const char *name : { "a\\b", "a/b", "a:b", "a*b", "a?b", "a<b", "a>b", "a|b" })
 		TEST_EXPECT(refuses(name, "no folder's name can hold"));
 	TEST_EXPECT(refuses("mod.", "ends with a dot"));
 	for (const char *name : { "con", "NUL", "Prn", "aux", "com1", "LPT9", "con.x" })
-		TEST_EXPECT(refuses(name, "keeps for a device", ExpansionNameUse::BuildsOn));
-	TEST_EXPECT(takes("com0") && takes("console") && takes("lpt10", ExpansionNameUse::BuildsOn));
+		TEST_EXPECT(refuses(name, "keeps for a device"));
+	TEST_EXPECT(takes("com0") && takes("console") && takes("lpt10"));
+	// A leading dot: the Mods list never lists the folder [orig: Expansion_ScanAndRegister @ 0x4a444b].
+	TEST_EXPECT(refuses(".mod", "starts with a dot") && refuses(".", "starts with a dot"));
+	TEST_EXPECT(takes(".mod", ExpansionNameUse::BuildsOn));
+	// An installed one's name is a folder's: none of the characters no folder's name holds, not a folder's
+	// own links.
+	for (const char *name : { "a/b", "a\\b", "a:b", "a\x01", ".", ".." })
+		TEST_EXPECT(!takes(name, ExpansionNameUse::BuildsOn));
 	Diagnostic error;
 	TEST_EXPECT(check_expansion_name("jxm", ExpansionNameUse::Own, error));
 	TEST_EXPECT(!check_expansion_name("my mod", ExpansionNameUse::Own, error) && error.code() == "project.field.invalid" &&
@@ -121,7 +145,9 @@ static int test_project_expansion() {
 	            error.code() == "project.expansion.unsupported");
 	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "", "jox01" }, error) &&
 	            error.code() == "project.field.invalid" && error.message.find("/exp") != std::string::npos);
-	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "jxm", "a b" }, error) &&
+	// An installed expansion by any name its folder can have (a quoted /exp mounts one with a space).
+	TEST_EXPECT(check_project_expansion("jo", ProjectExpansion{ "jxm", "a b" }, error));
+	TEST_EXPECT(!check_project_expansion("jo", ProjectExpansion{ "jxm", "a/b" }, error) &&
 	            error.code() == "project.field.invalid");
 	return 0;
 }
@@ -187,6 +213,15 @@ static int test_name_forms_no_game_file() {
 	TEST_EXPECT(refuses("game", "game.bin") && refuses("GAME", "GAME.bin") && refuses("ENUMUS", "MENUMUS.sbf"));
 	TEST_EXPECT(refuses("gametext", "gametext.bin"));
 	TEST_EXPECT(takes("game", ExpansionNameUse::BuildsOn)); // an installed one forms no file of the project's
+	// Nor a file the game reads by a mission's name [orig: Game_StartMission @ 0x524360]: 01TR.bin is
+	// JO's 01TR.bms's text, which would become the expansion's override table (compared without case).
+	const std::vector<std::string> missions{ "01TR.bms", "C1.npz", "readme.txt", "02TR.til" };
+	TEST_EXPECT(expansion_name_mission_problem("01TR", missions).find("01TR.bin") != std::string::npos &&
+	            expansion_name_mission_problem("01tr", missions).find("01TR.bms") != std::string::npos);
+	TEST_EXPECT(!expansion_name_mission_problem("C1", missions).empty()); // a .npz lists as a mission too
+	TEST_EXPECT(expansion_name_mission_problem("jxm", missions).empty() &&
+	            expansion_name_mission_problem("readme", missions).empty() &&
+	            expansion_name_mission_problem("02TR", missions).empty()); // a .til is no mission
 	return 0;
 }
 
@@ -229,6 +264,17 @@ static int test_install_view() {
 	TEST_EXPECT(choice.install && choice.entry == "Mx1.sbf" && choice.as == "Mjxm.sbf" && choice.name() == "Mjxm.sbf");
 	const ImportChoice plain = install_choice(root, *origin.find("shared.txt"));
 	TEST_EXPECT(plain.as.empty() && plain.name() == "shared.txt");
+	// An import's rows say the layer a file is served from.
+	{
+		ImportOrigin from;
+		std::string why;
+		TEST_EXPECT(from.open(ImportOrigin::Kind::GameInstall, root, document, why));
+		TEST_EXPECT(from.words("shared.txt") == "the game install's expansion x1" &&
+		            from.words("baseonly.txt") == "the game install's base game" && from.words() == "the game install");
+		ImportOrigin plain_game;
+		TEST_EXPECT(plain_game.open(ImportOrigin::Kind::GameInstall, root, ProjectDocument(), why) &&
+		            plain_game.words("shared.txt") == "the game install");
+	}
 	// On the base game, building as jxm: its music pairs under the project's names.
 	document.expansion = { "jxm", "" };
 	InstallView own;
@@ -241,6 +287,23 @@ static int test_install_view() {
 	InstallView missing;
 	TEST_EXPECT(!missing.open(install_spec(root, document), error) && error.find("'x2'") != std::string::npos &&
 	            !missing.is_open() && missing.files().empty());
+	// A video in the folder the game never reads there is not offered; an archived version text never is;
+	// the configuration read loose first [orig: Mission_LoadEncryptedConfig @ 0x4cdcf4] is the folder's.
+	TEST_EXPECT(!origin.find("trailer.bik") && text_of(origin, "gt.ssc") == "loose config");
+	// The text table the game reads from the folder alone [orig: TextResource_LoadOverrideTable @ 0x4a49de]:
+	// a loose x1.bin is listed as the project's jxm.bin, from the folder, and stands over an archived copy.
+	for (const TablePlace place : { TablePlace::Loose, TablePlace::Both }) {
+		const std::string other = dir.file(place == TablePlace::Loose ? "loose" : "both");
+		TEST_EXPECT(make_install(other, place));
+		document.expansion = { "jxm", "x1" };
+		InstallView view;
+		TEST_EXPECT(view.open(install_spec(other, document), error));
+		const InstallFile *table = view.find("jxm.bin");
+		TEST_EXPECT(table && table->member == "x1.bin" && table->layer == InstallFile::Layer::Expansion &&
+		            table->loose_path.find("expansion") != std::string::npos);
+		TEST_EXPECT(text_of(view, "jxm.bin") == "x1 loose table" && !view.find("x1.bin"));
+		TEST_EXPECT(text_of(view, "header.bik") == "x1 header" && !view.find("version.txt"));
+	}
 	return 0;
 }
 
@@ -313,6 +376,9 @@ static int test_session() {
 		const opennova::io::JsonValue *listed = project.get("install_expansions");
 		TEST_EXPECT(listed && listed->array.size() == 1 && listed->array[0].get_string("name", "") == "x1" &&
 		            !project.get("expansion"));
+		// The install a new project opens with (the one last chosen), whatever an open project names.
+		const opennova::io::JsonValue *for_new = project.get("new_project_expansions");
+		TEST_EXPECT(for_new && for_new->array.size() == 1 && for_new->array[0].get_string("name", "") == "x1");
 	}
 	// Refused before anything is made: a name the install has (without case, as the file system
 	// compares), an expansion to build on that it lacks.
@@ -324,6 +390,11 @@ static int test_session() {
 	outcome = editor_test::handle_to_end(session, request::new_expansion_project(lacks, "Lacks", "jxm", "x2"));
 	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.expansion.not_installed", "'x2'") == 1 &&
 	            !std::filesystem::exists(opennova::io::os_path(lacks)) && !view.project.open);
+	// A name whose table is a mission's text (the install's 01TR.bms reads 01TR.bin).
+	const std::string clash = dir.file("clash");
+	outcome = editor_test::handle_to_end(session, request::new_expansion_project(clash, "Clash", "01tr"));
+	TEST_EXPECT(outcome.refused && count_code(outcome.findings, "project.field.invalid", "01TR.bms") == 1 &&
+	            !std::filesystem::exists(opennova::io::os_path(clash)) && !view.project.open);
 	// On the base game: its version text, its table.
 	const std::string root = dir.file("own");
 	outcome = editor_test::handle_to_end(session, request::new_expansion_project(root, "Own", "jxm"));
@@ -333,6 +404,11 @@ static int test_session() {
 	const AssetEntry *table = view.project.scan->find("jxm.bin");
 	TEST_EXPECT(version && table && file_text(root + "/" + version->relative_path) == "Own\r\n");
 	const std::string table_path = table ? root + "/" + table->relative_path : std::string(); // the scan moves on
+	// The base game's music files are no rows of an expansion's checklist: M<n>.* and G<n>.* take their
+	// place [orig: Expansion_LoadAssets @ 0x4a4906..0x4a494a].
+	for (const RequirementRow &row : view.project.requirements->rows)
+		for (const char *unread : { "MENUMUS.SBF", "MENUMUS.BIN", "GAMEMUS.SBF", "GAMEMUS.BIN" })
+			TEST_EXPECT(!opennova::strutil::iequals(row.name, unread));
 	{
 		const opennova::io::JsonValue project = view_section_to_json(view, ViewSection::Project);
 		const opennova::io::JsonValue *expansion = project.get("expansion");
@@ -357,6 +433,70 @@ static int test_session() {
 	            view.project.scan->find("version.txt") &&
 	            !table_path.empty() && !std::filesystem::exists(opennova::io::os_path(table_path)));
 	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "expansion.file.unread", "Mjxk.sbf") == 1);
+	// Renamed onto a mission's name: refused, the name as it was.
+	ProjectSettingsChange onto_mission;
+	onto_mission.expansion = "01TR";
+	editor_test::apply_settings(session, onto_mission);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.field.invalid", "01TR.bin") == 1 &&
+	            view.project.document->expansion.name == "jxk" && view.project.scan->find("jxk.bin"));
+	// All or nothing: a target the project holds already refuses the whole change, nothing renamed and
+	// nothing saved; so does a file of the old name open with unsaved edits.
+	const AssetEntry *renamed_table = view.project.scan->find("jxk.bin");
+	TEST_EXPECT(renamed_table != nullptr);
+	if (!renamed_table) return 1;
+	const std::string table_file = renamed_table->relative_path;
+	const std::string jxk = root + "/" + table_file;
+	const std::string jxq = std::filesystem::path(jxk).parent_path().generic_string() + "/jxq.bin";
+	TEST_EXPECT(editor_test::write_text(jxq, "a stale table"));
+	editor_test::handle_to_end(session, request::rescan());
+	ProjectSettingsChange onto_stale;
+	onto_stale.expansion = "jxq";
+	editor_test::apply_settings(session, onto_stale);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "rename.exists") == 1 &&
+	            view.project.document->expansion.name == "jxk" && std::filesystem::exists(opennova::io::os_path(jxk)) &&
+	            file_text(jxq) == "a stale table");
+	ProjectDocument on_disk;
+	Diagnostic unread;
+	TEST_EXPECT(open_project(root, on_disk, unread) && on_disk.expansion.name == "jxk");
+	std::error_code gone;
+	std::filesystem::remove(opennova::io::os_path(jxq), gone);
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document(table_file));
+	{
+		const Document *held = records_of(*session.document_for(table_file));
+		Edit retitled;
+		if (held)
+			for (const auto &row : held->rows()) {
+				if (!row || !retitled.field.empty()) continue;
+				for (const FieldSchema &field : held->fields(row->kind))
+					if (field.type == FieldType::Text && !field.read_only && retitled.field.empty()) {
+						retitled.address = { row->id, row->kind, 0 };
+						retitled.field = field.id;
+					}
+			}
+		retitled.value = std::string("EDITED");
+		TEST_EXPECT(held && !retitled.field.empty());
+		editor_test::handle_to_end(session, request::edit_record(table_file, retitled));
+		TEST_EXPECT(held && held->dirty());
+	}
+	ProjectSettingsChange while_unsaved;
+	while_unsaved.expansion = "jxq";
+	editor_test::apply_settings(session, while_unsaved);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "rename.conflict") == 1 &&
+	            view.project.document->expansion.name == "jxk" && std::filesystem::exists(opennova::io::os_path(jxk)));
+	editor_test::handle_to_end(session, request::undo(table_file));
+	TEST_EXPECT(!session.document_for(table_file)->dirty());
+	// Clean and open, the change goes through and the document follows its file.
+	ProjectSettingsChange back;
+	back.expansion = "jxq";
+	editor_test::apply_settings(session, back);
+	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.document->expansion.name == "jxq" &&
+	            view.project.scan->find("jxq.bin") && !view.project.scan->find("jxk.bin") &&
+	            session.document_for(view.project.scan->find("jxq.bin")->relative_path) != nullptr);
+	ProjectSettingsChange restore;
+	restore.expansion = "jxk";
+	editor_test::apply_settings(session, restore);
+	TEST_EXPECT(view.project.settings_result.failures.empty() && view.project.scan->find("jxk.bin"));
 	// To build on an expansion the install lacks: refused, the expansion as it was; on one it has.
 	ProjectSettingsChange elsewhere;
 	elsewhere.builds_on = "x2";
@@ -371,6 +511,31 @@ static int test_session() {
 	ProjectDocument saved;
 	Diagnostic error;
 	TEST_EXPECT(open_project(root, saved, error) && saved.expansion == (ProjectExpansion{ "jxk", "x1" }));
+	// The project's own export copied into an install: its name listed as taken, and a change of what it
+	// builds on alone not refused for it; a change of the name weighed again.
+	const std::string mine = dir.file("mine");
+	std::error_code made_mine;
+	std::filesystem::create_directories(opennova::io::os_path(mine + "/expansion/jxk"), made_mine);
+	TEST_EXPECT(make_install(mine) && write_archive(mine + "/expansion/jxk/jxk.pff", { { "exported.txt", "x" } }));
+	editor_test::set_game_install(session, mine);
+	TEST_EXPECT(count_code(view.project.requirements->diagnostics, "project.expansion.name_taken", "'jxk'") == 1);
+	ProjectSettingsChange onto_base;
+	onto_base.builds_on = "";
+	editor_test::apply_settings(session, onto_base);
+	TEST_EXPECT(view.project.settings_result.failures.empty() &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxk", "" }));
+	// A change of the name's case alone is a change of name (a host compares EXP as spelled [orig:
+	// String_ExactMatch @ 0x5122f0]): weighed again, and the install's folder is the same to its file system.
+	ProjectSettingsChange case_only;
+	case_only.expansion = "JXK";
+	editor_test::apply_settings(session, case_only);
+	TEST_EXPECT(count_code(view.project.settings_result.failures, "project.expansion.name_taken") == 1 &&
+	            view.project.document->expansion.name == "jxk");
+	ProjectSettingsChange back_on_x1;
+	back_on_x1.builds_on = "x1";
+	editor_test::apply_settings(session, back_on_x1);
+	TEST_EXPECT(view.project.settings_result.failures.empty() &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxk", "x1" }));
 	// An install without x1: listed, never refused.
 	const std::string bare = dir.file("bare");
 	std::error_code made;
@@ -386,6 +551,17 @@ static int test_session() {
 	TEST_EXPECT(view.project.document->expansion.standalone() &&
 	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0 &&
 	            count_code(view.project.requirements->diagnostics, "expansion.file.unread") == 0);
+	// A new project is weighed against the install it opens with (the one last chosen), not the open
+	// project's: open on the bare install for this session alone, one building on x1 is still made.
+	editor_test::set_game_install(session, install);
+	editor_test::handle_to_end(session, request::open_project(root, true, bare));
+	TEST_EXPECT(view.project.open && view.project.install_expansions.empty() &&
+	            view.project.new_project_expansions.size() == 1 && view.project.new_project_expansions[0].name == "x1");
+	const std::string second = dir.file("second");
+	outcome = editor_test::handle_to_end(session, request::new_expansion_project(second, "Second", "jxz", "x1"));
+	TEST_EXPECT(!outcome.refused && view.project.open &&
+	            view.project.document->expansion == (ProjectExpansion{ "jxz", "x1" }) &&
+	            count_code(view.project.requirements->diagnostics, "project.expansion.not_installed") == 0);
 	return 0;
 }
 

@@ -97,9 +97,10 @@ public:
 	// The source import_assets takes for the origin's file `name`: a folder's file copied as
 	// the game's own (native).
 	ImportChoice source(const std::string &name) const;
-	// Where it is, in words: "the folder C:/art", "the archive C:/mod/menus.pff", "the game
-	// install".
-	std::string words() const;
+	// Where its file `name` is, in words: "the folder C:/art", "the archive C:/mod/menus.pff", "the game
+	// install" (for an install with an expansion, "the game install's expansion jox01" or "the game
+	// install's base game", the layer the file is served from; ADR 0046 S16).
+	std::string words(const std::string &name = std::string()) const;
 
 private:
 	Kind kind_ = Kind::Folder;

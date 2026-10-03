@@ -3,6 +3,8 @@
 #include <algorithm>
 
 #include <base/gameprofile/required_resources.h>
+#include <base/io/strutil.h>
+
 #include <editor/assets/player_files.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/model/diagnostic.h>
@@ -130,6 +132,11 @@ std::vector<Diagnostic> plan_scan_findings(const AssetScan &scan, const std::str
 	return out;
 }
 
+bool lists_as_mission(const std::string &name) {
+	return strutil::ends_with_icase(name, ".bms") || strutil::ends_with_icase(name, ".npj") ||
+	       strutil::ends_with_icase(name, ".npz");
+}
+
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target,
                      const BaseNames *base, const ShippedFiles *shipped) {
@@ -198,10 +205,24 @@ BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const Req
 		// An import source (its outputs, named after it, are in the scan) and a file of no kind the
 		// game knows, which the game never asks for (S13 A8), are left out.
 		if (!asset_kind_packed(asset.kind)) continue;
+		// A NovaWorld screen is read through the archives alone (unless /d) by its name: nw_startup.mnx and
+		// nw_error.mnx [orig: UI_EnterNovaWorldMenu @ 0x558937; UI_ShowNovaWorldErrorMessage @ 0x558449], and
+		// the page an ACTION of type MNX names [orig: CUIWidget_HandleScriptedAction @ 0x649bb2]. A name no
+		// archive can store is one the game never reads: such a page (a template, a backup) is left out and
+		// said, never gating the build as an archived kind's name would (ADR 0046 S16).
+		if (asset.kind == AssetKind::NovaWorldScreen && !logical_name_fits_archive(asset.logical_name)) {
+			plan.diagnostics.push_back(make_finding(
+			        CoreFinding::BuildUnread, DiagnosticSeverity::Warning,
+			        "The game reads a NovaWorld screen through its archives alone, and no archive can hold the name " +
+			                asset.logical_name + " (it is too long): the build leaves it out.",
+			        asset.relative_path));
+			continue;
+		}
 		const Placement placement = place(asset, target);
 		BuildEntry entry;
 		entry.logical_name = asset.logical_name;
 		entry.source_path = join_path(paths.root, asset.relative_path);
+		entry.relative_path = asset.relative_path;
 		entry.size_bytes = asset.size_bytes;
 		entry.kind = asset.kind;
 		if (placement.root_only) {

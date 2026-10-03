@@ -26,7 +26,7 @@ bool NewProjectForm::draw(Workspace &workspace) {
 		workspace.request(request::pick_directory(PickPurpose::NewProjectLocation));
 	ImGui::EndDisabled();
 	ImGui::TextDisabled("The folder is created if it does not exist; it must not already hold a project.");
-	const bool expansion_ok = expansion_.draw(workspace.view());
+	const bool expansion_ok = expansion_.draw(workspace.view().project.new_project_expansions);
 	const bool ready = title_[0] != '\0' && folder_[0] != '\0' && allowed && expansion_ok;
 	ImGui::BeginDisabled(!ready);
 	const bool create = ImGui::Button("Create project") && ready;

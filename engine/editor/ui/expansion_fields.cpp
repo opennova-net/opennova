@@ -5,7 +5,6 @@
 
 #include <base/io/strutil.h>
 #include <editor/project/expansion_name.h>
-#include <editor/session/view/session_view.h>
 #include <editor/ui/ui_kit.h>
 
 #include <imgui.h>
@@ -31,17 +30,20 @@ void ExpansionFields::set(const ProjectExpansion &expansion) {
 	builds_on_ = expansion.builds_on;
 }
 
-bool ExpansionFields::draw(const SessionView &view) {
-	// Builds on: the base game, or an expansion of the game install (a name it no longer has stays
-	// offered, as the project holds it).
+bool ExpansionFields::draw(const std::vector<ProjectView::InstallExpansion> &expansions) {
+	// Builds on: the base game, or an expansion of the game install the game can mount (a name it no
+	// longer has stays offered, as the project holds it). Names compared as the file system does.
 	std::string shown = "The base game";
-	for (const ProjectView::InstallExpansion &installed : view.project.install_expansions)
-		if (installed.name == builds_on_) shown = installed_words(installed);
+	for (const ProjectView::InstallExpansion &installed : expansions)
+		if (strutil::iequals(installed.name, builds_on_)) shown = installed_words(installed);
 	if (!builds_on_.empty() && shown == "The base game") shown = builds_on_ + " (not in the game install)";
 	if (ImGui::BeginCombo("Builds on", shown.c_str())) {
 		if (ImGui::Selectable("The base game", builds_on_.empty())) builds_on_.clear();
-		for (const ProjectView::InstallExpansion &installed : view.project.install_expansions) {
-			if (ImGui::Selectable(installed_words(installed).c_str(), installed.name == builds_on_)) builds_on_ = installed.name;
+		for (const ProjectView::InstallExpansion &installed : expansions) {
+			// Only what Apply takes is offered (expansion_name_problem's rule for an installed one).
+			if (!expansion_name_problem(installed.name, ExpansionNameUse::BuildsOn).empty()) continue;
+			if (ImGui::Selectable(installed_words(installed).c_str(), strutil::iequals(installed.name, builds_on_)))
+				builds_on_ = installed.name;
 			if (!installed.description.empty()) ui_kit::tooltip(installed.description);
 		}
 		ImGui::EndCombo();
@@ -66,7 +68,7 @@ bool ExpansionFields::draw(const SessionView &view) {
 		ImGui::PopTextWrapPos();
 		return false;
 	}
-	for (const ProjectView::InstallExpansion &installed : view.project.install_expansions)
+	for (const ProjectView::InstallExpansion &installed : expansions)
 		if (strutil::iequals(installed.name, name_)) {
 			ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "The game install has an expansion named %s already.",
 			                   installed.name.c_str());

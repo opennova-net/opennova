@@ -87,9 +87,19 @@ struct ProjectPaths {
 	std::string install_copy_dir;
 
 	static ProjectPaths for_root(const std::string &root);
-	// The project-relative export output resolved against the root.
+	// The project-relative export output resolved against the root, with no trailing separator (an
+	// export's staging and set-aside folders are its siblings, named after it).
 	std::string export_dir(const ProjectDocument &doc) const;
 };
+
+// The folders beside an export folder that an export stages in and sets the last one aside in
+// (project_build/export_build.h): `<folder>.tmp`, `<folder>.old`. A project's scan passes over them as it
+// passes over the export folder, so one an export left behind is no file of the project's.
+inline constexpr const char *kExportStagingSuffix = ".tmp";
+inline constexpr const char *kExportPreviousSuffix = ".old";
+
+// A folder path with no trailing separator (`C:/x/mod/` is `C:/x/mod`), a root kept whole.
+std::string without_trailing_separator(const std::string &dir);
 
 // The cache directory with its self-ignore file (`.opennova/.gitignore` = `*`). The
 // file ignores itself too, so a clone never has it: whatever writes under the cache

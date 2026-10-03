@@ -149,11 +149,17 @@ ImportChoice ImportOrigin::source(const std::string &name) const {
 	return out;
 }
 
-std::string ImportOrigin::words() const {
+std::string ImportOrigin::words(const std::string &name) const {
 	switch (kind_) {
 	case Kind::Folder: return "the folder " + path_;
 	case Kind::Archive: return "the archive " + path_;
-	case Kind::GameInstall: return "the game install";
+	case Kind::GameInstall: {
+		// The layer the file comes from (ADR 0046 S16): the expansion `/exp` serves it from, or the base.
+		const InstallFile *file = name.empty() ? nullptr : install_.find(name);
+		if (file && file->layer == InstallFile::Layer::Expansion)
+			return "the game install's expansion " + install_.spec().expansion;
+		return install_.spec().expansion.empty() || !file ? "the game install" : "the game install's base game";
+	}
 	}
 	return path_;
 }
@@ -368,7 +374,7 @@ private:
 			}
 			loaded = converter != nullptr;
 			cost_ += bytes.size();
-			found_in = from->words();
+			found_in = from->words(name);
 		} else {
 			std::string io_error;
 			if (!read_file_bytes(source.path, bytes, io_error)) {
@@ -492,7 +498,7 @@ private:
 		row.name = spelling;
 		row.kind = from->file_kind(spelling);
 		row.size = from->size(spelling);
-		row.found_in = from->words();
+		row.found_in = from->words(spelling);
 		row.needed_by = need;
 		place(row);
 		row.selected = row.problem.empty();
@@ -880,7 +886,7 @@ private:
 			if (same_file(rival.source, source)) return;
 		ImportRival rival;
 		rival.name = spelling;
-		rival.found_in = origin->words();
+		rival.found_in = origin->words(spelling);
 		rival.source = source;
 		std::vector<uint8_t> planned, other;
 		rival.differs = !read_row(row, planned) || !origin->read(spelling, other) || other != planned;
@@ -981,7 +987,7 @@ private:
 		row.name = spelling;
 		row.kind = from->file_kind(spelling);
 		row.size = from->size(spelling);
-		row.found_in = from->words();
+		row.found_in = from->words(spelling);
 		row.needed_by = need;
 		place(row);
 		row.selected = row.problem.empty(); // one the project cannot take is listed, not taken

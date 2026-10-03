@@ -24,6 +24,7 @@ namespace opennova::editor {
 struct BuildEntry {
 	std::string logical_name;  // the engine-facing name (the archive entry name)
 	std::string source_path;   // absolute path of the project file
+	std::string relative_path; // the project file's path, project-relative (what a finding about it names)
 	uint64_t size_bytes = 0;
 	// Where a loose file lands in the build directory, '/'-separated and relative: its name beside
 	// the archives, or under `expansion/<b>/` in an expansion's build (ADR 0046 S16). Unused for an
@@ -90,6 +91,10 @@ struct BuildPlan {
 // build (build.expansion.base_missing), and over which its gate reads (blocks_build); `shipped`, the
 // files packed as the game ships them, whose findings that they do not serialize gate nothing (null:
 // every such finding gates).
+// Whether the game's mission list lists a file of this name: a mission (.bms) or a map project (.npj,
+// .npz) [orig: Mission_BuildMapListFromPFF @ 0x562910].
+bool lists_as_mission(const std::string &name);
+
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings, const BuildTarget &target = BuildTarget(),
                      const BaseNames *base = nullptr, const ShippedFiles *shipped = nullptr);

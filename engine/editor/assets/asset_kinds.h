@@ -114,7 +114,8 @@ bool asset_kind_packed(AssetKind kind);
 // Whether the archives' name limit binds a file of the kind: a kind the build packs into an
 // archive, and an import source (its importer names its outputs after it). Not a loose one (a
 // video, a music bank, a config), which the build copies beside the archives under any name, nor
-// one the build leaves out (an archive, a file of no kind the game knows).
+// one the build leaves out (an archive, a file of no kind the game knows), nor a NovaWorld screen,
+// which the game reads by the few names its menus give (a longer one the build leaves out, said).
 bool archive_name_limit_binds(AssetKind kind);
 
 } // namespace opennova::editor
