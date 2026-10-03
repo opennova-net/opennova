@@ -340,10 +340,11 @@ static int test_paging() {
 }
 
 // build_gate (S13 A7): what a build started now would be refused for, nothing built. With no
-// project open it is refused; a new project lacking its required files is blocked, each unmet
-// requirement blocking it; with them made nothing blocks it, a missing reference included (S14: an
-// error that is listed and gates no build) but for a file of the name of the wrong kind and a kind
-// whose row cites the game's refusal (review F3: a mission's terrain); an archive in the project blocks it by
+// project open it is refused; a new project lacking its required files is blocked by those the game
+// refuses to boot without (the manifest's fatal rows); with them made nothing blocks it, a missing
+// reference and a file of the name of the wrong kind included (S14, the build follows retail: errors
+// that are listed and gate no build) but for a kind whose row cites the game's refusal (review F3: a
+// mission's terrain); an archive in the project blocks it by
 // the build's own check of the files, which no Problems row shows; and the build then refused, as
 // the gate said.
 static int test_build_gate() {
@@ -364,6 +365,34 @@ static int test_build_gate() {
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0 &&
 			gate.get("blocking")->array.empty());
+	// A required file the game boots on without (weapon.def: its table left with a single None entry)
+	// is listed and blocks nothing; one the boot exits without (gametext.bin: "Unable to load game
+	// strings") blocks.
+	for (const char *name : { "weapon.def", "gametext.bin" }) {
+		const AssetEntry *entry = session.view().project.scan->find(name);
+		TEST_EXPECT(entry != nullptr);
+		if (!entry) return 1;
+		const std::string file = dir.file("project") + "/" + entry->relative_path;
+		std::vector<uint8_t> kept;
+		std::string error;
+		TEST_EXPECT(read_file_bytes(file, kept, error));
+		std::error_code removed;
+		std::filesystem::remove(file, removed);
+		session.handle(request::rescan());
+		session.run_operations();
+		size_t listed = 0;
+		for (const Diagnostic &d : session.view().findings.diagnostics)
+			listed += d.code() == "requirement.missing" && d.severity == DiagnosticSeverity::Error ? 1 : 0;
+		gate = ask(session, "build_gate");
+		const bool fatal = std::string(name) == "gametext.bin";
+		TEST_EXPECT(listed == 1 && gate.get_bool("blocked", !fatal) == fatal &&
+				gate.get_number("count", -1.0) == (fatal ? 1.0 : 0.0));
+		TEST_EXPECT(write_file_atomic(file, kept.data(), kept.size(), error));
+		session.handle(request::rescan());
+		session.run_operations();
+	}
+	gate = ask(session, "build_gate");
+	TEST_EXPECT(!gate.get_bool("blocked", true));
 	// S14: a missing reference (a particle's texture the project lacks: an error among the Problems
 	// rows) is listed and blocks nothing; the build then lands with the row still there.
 	TEST_EXPECT(editor_test::write_text(dir.file("project/fx.ptl"),
@@ -383,15 +412,20 @@ static int test_build_gate() {
 	TEST_EXPECT(session.view().activity.last_operation.end == OperationEnd::Done && session.view().activity.last_build->ok &&
 			missing_references() == 1);
 	// Review F3: a file of the name the game opens that it does not load as the kind (the particle's
-	// graphic naming the project's text file) is its own finding, which blocks.
+	// graphic naming the project's text file) is its own finding; the loader finds nothing it loads
+	// there, as for a missing name, so it gates only where its kind's missing name does (the gate
+	// follows retail): a texture's does not, and it is listed.
 	TEST_EXPECT(editor_test::write_text(dir.file("project/notes.txt"), "a note\n") &&
 			editor_test::write_text(dir.file("project/fx.ptl"),
 					"[particledef]\n{\n\tid = puff;\n\tgraphic1 = notes.txt, additive;\n}\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	gate = ask(session, "build_gate");
-	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
-			gate.get("blocking")->array[0].get_string("code", "") == "reference.wrong_kind" && missing_references() == 0);
+	size_t wrong_kind = 0;
+	for (const Diagnostic &d : session.view().findings.diagnostics)
+		wrong_kind += d.code() == "reference.wrong_kind" ? 1 : 0;
+	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0 && wrong_kind == 1 &&
+			missing_references() == 0);
 	std::error_code ec;
 	std::filesystem::remove(dir.file("project/notes.txt"), ec);
 	session.handle(request::rescan());

@@ -18,7 +18,7 @@ namespace opennova::editor {
 namespace {
 
 std::string lower_basename(const std::string &logical_name) {
-	return strutil::to_lower(fs::path(logical_name).filename().string());
+	return strutil::to_lower(basename_of(logical_name));
 }
 
 } // namespace

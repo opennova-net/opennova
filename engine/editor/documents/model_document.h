@@ -218,7 +218,8 @@ std::vector<Diagnostic> validate_model_file(const DocumentBase &document);
 // than the game keeps, a user point name repeated, more user points than the game reads, a
 // register or a frame the model lacks, a shader or register name the engine does not know, a
 // material no strip draws with, a light on a part LOD 0 lacks, LOD thresholds that do not
-// descend.
+// descend; a light naming a register in a model with no CTRL table, whose load crashes (the one
+// of them that refuses a build: the gate follows retail, ADR 0046 S14).
 enum class ModelFinding {
 	Seats,
 	UserPointDuplicate,
@@ -230,6 +231,7 @@ enum class ModelFinding {
 	RegisterUnknown,
 	LodOrder,
 	FrameMissing,
+	LightNoRegisters,
 	kCount
 };
 const FindingCodeRow &finding_code(ModelFinding code);
