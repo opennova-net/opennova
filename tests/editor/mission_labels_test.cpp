@@ -6,9 +6,9 @@
 // name and the name the game shows for it, an item id by its catalog's name, an SSN, a zone, an event,
 // a group, a path, a stop, a text key by its string; every value naming nothing said in words); through
 // a session over a project holding the catalog and the mission's table (the graph's names: the
-// outline's titles, the picker's choices worded, the wire's `display`). Its retail leg words every
-// record and every reference of the install's 115 missions with the install's catalog and tables, and
-// times it.
+// outline's titles, the picker's choices worded, the wire's `display`, Problems' places, the status
+// line). Its retail leg words every record and every reference of the install's 115 missions with the
+// install's catalog and tables, and times it.
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -31,7 +31,9 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/field_text.h>
 #include <editor/session/preferences_store.h>
+#include <editor/session/problem_query.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/session_json.h>
@@ -78,6 +80,12 @@ NodeAddress first_child(const Document &document, const NodeAddress &row, Missio
 	for (const Document::Collection &collection : document.collections_of(row))
 		if (collection.spec.kind == k(kind) && !collection.ids.empty()) return {row.row, k(kind), collection.ids[0]};
 	return NodeAddress();
+}
+
+// The words against those wanted, the two printed where they differ.
+bool same(const std::string &got, const std::string &want) {
+	if (got != want) std::printf("  got:  %s\n  want: %s\n", got.c_str(), want.c_str());
+	return got == want;
 }
 
 int32_t ssn_of(const Document &document, const NodeAddress &row) {
@@ -300,7 +308,37 @@ int test_session_words() {
 			if (field.get_string("id", "") == "item")
 				worded = field.get_string("display", "") == "Wire Test Rifleman" && field.get_number("value", 0) == 106102.0;
 	TEST_EXPECT(worded && record.get_string("title", "") == "Wire Test Rifleman #" + walker_ssn + " (Sgt. Walker)");
-	std::printf("session words: the graph's names, the picker, the wire\n");
+	// Problems: a finding's place in words while its file is open, the record by its title, the field
+	// by what the record calls it (a trigger's parameter by what it reads); none for the raw ids.
+	const NodeAddress trigger = first_child(*document, row_at(*document, MissionKind::Event, 0), MissionKind::Trigger);
+	Diagnostic finding;
+	finding.asset = document->path();
+	finding.row_id = trigger.row;
+	finding.record_kind = trigger.kind;
+	finding.child_id = trigger.child;
+	finding.field = "param2";
+	std::string param2;
+	for (const FieldSchema &schema : document->fields(trigger.kind))
+		if (schema.id == "param2") param2 = field_title(document->field_on(trigger, schema));
+	TEST_EXPECT(finding_record_title(finding, view) == record_display(*document, trigger, &names));
+	TEST_EXPECT(!param2.empty() && param2 != "param2" && finding_field_title(finding, view) == param2);
+	finding.field = "no_such_field";
+	TEST_EXPECT(finding_field_title(finding, view).empty());
+	// The status line: an edit in words, the field by its name, the record by its title as it read
+	// before the edit (its item set renames it), the value by what it names.
+	Edit item;
+	item.address = walker;
+	item.field = "item";
+	item.value = int64_t(106100);
+	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", item));
+	TEST_EXPECT(same(view.activity.status, "Set Item of Wire Test Rifleman #" + walker_ssn + " (Sgt. Walker) to Wire Test Pump."));
+	Edit group;
+	group.address = walker;
+	group.field = "group";
+	group.value = int64_t(5);
+	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", group));
+	TEST_EXPECT(same(view.activity.status, "Set Group of Wire Test Pump #" + walker_ssn + " (Sgt. Walker) to Group 5 (1 entity)."));
+	std::printf("session words: the graph's names, the picker, the wire, Problems' places, the status line\n");
 	return 0;
 }
 

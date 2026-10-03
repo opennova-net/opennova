@@ -1,6 +1,7 @@
 #include <editor/ui/problems_window.h>
 
 #include <algorithm>
+#include <initializer_list>
 #include <string>
 #include <utility>
 #include <vector>
@@ -277,10 +278,17 @@ void ProblemsWindow::draw_finding(const SessionView &view, const Line &line, boo
 	ImGui::TableNextColumn();
 	ImGui::AlignTextToFramePadding();
 	// The record in the words its document shows it by where it is open (a mission's trigger as what it
-	// tests, S15), its path in the tooltip.
-	const std::string title = finding_record_title(d, view);
-	const std::string where = title.empty() ? ProblemsList::location_of(d, false) : basename_of(d.asset) + " - " + title;
-	const std::string whole = ProblemsList::location_of(d, true) + (title.empty() ? std::string() : "\n" + title);
+	// tests, an entity by its item's name, S15), and the field by what the record calls it; its path in
+	// the tooltip.
+	const std::string title = finding_record_title(d, view), field = finding_field_title(d, view);
+	const std::string plain = ProblemsList::location_of(d, false);
+	std::string where = plain;
+	if (!title.empty() || !field.empty()) {
+		where = basename_of(d.asset);
+		for (const std::string *part : {title.empty() ? &d.record : &title, field.empty() ? &d.field : &field})
+			if (!part->empty()) where += " - " + *part;
+	}
+	const std::string whole = ProblemsList::location_of(d, true) + (where == plain ? std::string() : "\n" + where);
 	ui_kit::clipped_text(where, whole != where ? whole : std::string());
 	ImGui::TableNextColumn();
 	if (!expanded && !fixes.empty()) draw_fixes(view, line.finding, fixes);

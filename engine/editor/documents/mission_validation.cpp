@@ -117,9 +117,8 @@ struct Checker {
 			scanned += pool == K::Organic ? "organics" : pool == K::Item ? "items" : pool == K::Building ? "buildings" : "markers";
 		}
 		on(address, MissionFinding::SsnUnscanned, DiagnosticSeverity::Warning,
-		   "SSN " + std::to_string(ssn) + " is " + document.kind_label(first->kind) + " " +
-		           document.record_name({first->id, first->kind, 0}) + "'s, and " + what + " looks it up among the " +
-		           scanned + " alone: " + outcome,
+		   "SSN " + std::to_string(ssn) + " is " + document.record_title({first->id, first->kind, 0}) + "'s, and " + what +
+		           " looks it up among the " + scanned + " alone: " + outcome,
 		   "param1");
 	}
 
@@ -181,8 +180,7 @@ struct Checker {
 			for (const Node *row : rows)
 				if (row != found)
 					on({row->id, row->kind, 0}, MissionFinding::SsnDuplicate, DiagnosticSeverity::Warning,
-					   "SSN " + std::to_string(ssn) + " is also " + document.kind_label(found->kind) + " " +
-					           document.record_name({found->id, found->kind, 0}) +
+					   "SSN " + std::to_string(ssn) + " is also " + document.record_title({found->id, found->kind, 0}) +
 					           "'s: the game's lookups by SSN find that one (organics, items, buildings, markers first) and "
 					           "never this" +
 					           (row->kind == k(K::Organic) || row->kind == k(K::Item)
@@ -232,10 +230,10 @@ struct Checker {
 		for (const Node *row : document.rows_of(K::Area)) {
 			const bms::AreaTrigger &area = static_cast<const AreaRow &>(*row).native;
 			const NodeAddress address{row->id, row->kind, 0};
-			if (const auto found = first.find(area.id); found != first.end())
+			if (first.count(area.id))
 				on(address, MissionFinding::ZoneDuplicate, DiagnosticSeverity::Warning,
-				   "Zone " + std::to_string(area.id) + " is also " + document.record_name({found->second->id, found->second->kind, 0}) +
-				           "'s: which of the two the game's triggers and actions take is not known.",
+				   "Another area trigger has zone " + std::to_string(area.id) +
+				           ": which of the two the game's triggers and actions take is not known.",
 				   "id");
 			else
 				first.emplace(area.id, row);

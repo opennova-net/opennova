@@ -7,6 +7,7 @@
 #include <tuple>
 #include <vector>
 
+#include <editor/documents/name_source.h>
 #include <editor/model/document.h>
 #include <editor/session/editor_request.h>
 
@@ -21,10 +22,13 @@ namespace opennova::editor {
 enum class OutlineMode { Tree, List, MasterDetail };
 
 // One line of an outline: a record, or in a tree a collection a record holds (its heading, over
-// its records).
+// its records), or a heading the type groups its rows under (OutlineSpec::groups: a mission's
+// "Organics", "Team 1", "Group 3", over the rows standing under it).
 struct OutlineLine {
 	NodeAddress address;     // the record; a collection's owner
 	bool collection = false; // a collection's heading, of records of `kind`
+	bool heading = false;    // a group's heading (`key` its key, `count` the rows under it)
+	std::string key;         // a heading's key: its outer headings' keys and its own, '/'-joined
 	NodeKind kind = 0;
 	int depth = 0;       // how deep in the tree it sits: 0 for a row
 	bool branch = false; // it opens: a record that holds collections, a collection holding records
@@ -37,10 +41,11 @@ struct OutlineLine {
 	bool addable = false; // a collection that takes another record at its end (its + tool)
 	size_t full = 0;      // a collection holding the most it holds: that most (its + off, saying so)
 	int lines = 1;        // master and detail: the lines of text its tallest cell shows (1 to 8)
-	// What the line shows: a record's title (Document::record_title; in a list, a row of another
-	// kind than the file's own after its kind's label), a collection's label and count; a record's
-	// name where the title words it otherwise (for its tooltip), and in master and detail the name
-	// of the row holding it.
+	// What the line shows: a record's title (record_display, graph/display_names.h: the type's words
+	// with the project's names; in a list, a row of another kind than the file's own after its kind's
+	// label), a collection's label and count, a heading's words and count; a record's name where the
+	// title words it otherwise (for its tooltip), and in master and detail the name of the row holding
+	// it.
 	std::string text;
 	std::string name;
 	std::string row_name;
@@ -73,6 +78,17 @@ class Workspace;
 using OutlineAddsByMenuHook = bool (*)(NodeKind kind);
 using OutlineAddMenuHook = void (*)(Workspace &workspace, const Document &document, const NodeAddress &owner, NodeKind kind);
 
+// A heading a tree groups rows under (OutlineSpec::groups): its key among its siblings, which orders
+// them (a mission's pools by their band, its teams and groups by number: "03", "t001"), and its words
+// ("Organics", "Team 1", "Group 3"): documents/name_source.h's RowHeading, which a type's hook makes.
+using OutlineGroup = RowHeading;
+// The headings each row of the document stands under, outermost first, one list per row in the
+// document's order (an empty list: a row under no heading, listed before every heading): the hook of
+// a type whose rows read better grouped (a mission's entities by pool, team and group). The rows of a
+// heading are listed together under it, the headings in their keys' order and each heading's rows in
+// the file's order.
+using OutlineGroupsHook = void (*)(const Document &document, std::vector<std::vector<OutlineGroup>> &out);
+
 // What an outline view of a type is (its DocumentViewRow's outline, ui/document_views): its mode,
 // the heading of the master column (master and detail: the rows' words, "Sections"), the hook
 // of a type whose files hold file-wide values a list shows after its rows (null: none), whether a
@@ -90,6 +106,8 @@ struct OutlineSpec {
 	const char *unlisted = "";
 	OutlineAddsByMenuHook adds_by_menu = nullptr;
 	OutlineAddMenuHook add_menu = nullptr;
+	// A tree's headings over its rows (null: none; ADR 0046 S15).
+	OutlineGroupsHook groups = nullptr;
 };
 
 // What a click on a record's line selects (OutlineModel::click): the record, how it joins the
@@ -114,7 +132,8 @@ struct OutlineClick {
 class OutlineModel {
 public:
 	explicit OutlineModel(OutlineMode mode = OutlineMode::Tree,
-			OutlineFileValuesHook file_values = nullptr, OutlineRowListedHook row_listed = nullptr);
+			OutlineFileValuesHook file_values = nullptr, OutlineRowListedHook row_listed = nullptr,
+			OutlineGroupsHook groups = nullptr);
 
 	OutlineMode mode() const { return mode_; }
 
@@ -145,7 +164,8 @@ public:
 	bool all_rows() const { return all_rows_; }
 
 	// A tree's line opened or closed: a record's (its collections under it), a collection's (its
-	// records under it); one the filter holds open (OutlineLine::forced) is left as it is.
+	// records under it), a heading's (the rows under it; every heading open until closed); one the
+	// filter holds open (OutlineLine::forced) is left as it is.
 	void set_open(const OutlineLine &line, bool open);
 	bool is_open(const OutlineLine &line) const;
 	// The file-wide values' heading (a list's, after its rows) opened or closed.
@@ -154,17 +174,20 @@ public:
 	// The selection a Go to, a find or a Problems row moves to, shown (`path`: the records holding
 	// it, the row first, then the record: RecordReveal's): in a tree every record and collection
 	// holding it opened; a filter that would hide its line cleared, its kind listed and the rows left
-	// out listed where either hid it, the reveal winning over them. Its
-	// line among lines(document, master) as they are then (a list's: the row holding it; a tree's and
-	// master and detail's: the record), SIZE_MAX for none (master and detail's rows are its master
-	// column's, which lists every one).
-	size_t reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master = 0);
+	// out listed where either hid it, the reveal winning over them, and the headings over its row
+	// opened. Its line among lines(document, master, names) as they are then (a list's: the row holding
+	// it; a tree's and master and detail's: the record), SIZE_MAX for none (master and detail's rows are
+	// its master column's, which lists every one).
+	size_t reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master = 0,
+	              const NameSource *names = nullptr);
 
 	// The lines of `document` as they stand (a tree's, a list's, master and detail's detail
 	// records), and in master and detail the rows (every one, in the file's order): made again only
 	// when what they read moved, after an edit the rows its change set names alone. `master`: master
-	// and detail's master row (0: none).
-	const std::vector<OutlineLine> &lines(const Document &document, NodeId master = 0);
+	// and detail's master row (0: none). `names`: what the records' titles read of the project (ADR 0046
+	// S15, graph/display_names.h's record_display: a mission's entity by its item's name), the lines made
+	// anew when its generation moves; null: the document's own titles.
+	const std::vector<OutlineLine> &lines(const Document &document, NodeId master = 0, const NameSource *names = nullptr);
 	const std::vector<OutlineLine> &masters() const { return masters_; }
 	// Master and detail: the detail records' kind, their collection's label, and the columns, the
 	// kind's text fields the file writes, in its schema's order (made with the lines).
@@ -208,25 +231,34 @@ private:
 		bool sort = false, every = false, all_rows = false;
 		uint64_t kinds = 0;
 		NodeId master = 0;
+		bool has_names = false;
+		uint64_t names = 0;
 		// Everything but the revision the same: the lines may follow the document's change set.
 		bool same_but_revision(const Key &other) const {
 			return made == other.made && document == other.document && load == other.load &&
 			       open == other.open && filter == other.filter && sort == other.sort &&
 			       every == other.every && all_rows == other.all_rows && kinds == other.kinds &&
-			       master == other.master;
+			       master == other.master && has_names == other.has_names && names == other.names;
 		}
 		bool operator==(const Key &other) const { return same_but_revision(other) && revision == other.revision; }
 	};
 	// One row's lines, a slot per row in the document's row order: a tree's (the row and what is
 	// listed under it), a list's (its line, none where the filter drops it; in name order its name as
 	// names compare), master and detail's (the row as a master, and its detail records where they are
-	// listed).
+	// listed); and in a tree with headings the ones it stands under (OutlineSpec::groups).
 	struct RowLines {
 		NodeId row = 0;
 		OutlineLine master;
 		std::vector<OutlineLine> lines;
 		std::string order;
+		std::vector<OutlineGroup> groups;
 	};
+	// A tree's headings: each row's (the hook's) put on its lines' slot.
+	void make_groups(const Document &document);
+	// The tree's lines with its headings: the rows in their headings' order, a heading line where a
+	// row's headings first differ from the row before it, a closed heading's rows (and those of the
+	// headings under it) left out.
+	void join_grouped();
 	// Master and detail: the detail records' kind, their label and the columns, from the first
 	// collection a row holds.
 	void make_detail_columns(const Document &document);
@@ -257,6 +289,11 @@ private:
 	OutlineMode mode_ = OutlineMode::Tree;
 	OutlineFileValuesHook file_values_ = nullptr;
 	OutlineRowListedHook row_listed_ = nullptr;
+	OutlineGroupsHook groups_ = nullptr;
+	// The names the titles read while the lines are made (lines()' argument; null after).
+	const NameSource *names_ = nullptr;
+	// The headings closed (by key): every other one is open.
+	std::set<std::string> closed_;
 	uint64_t kinds_ = ~uint64_t(0);
 	bool all_rows_ = false;
 	std::string filter_;

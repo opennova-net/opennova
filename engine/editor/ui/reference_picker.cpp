@@ -1,5 +1,6 @@
 #include "reference_picker.h"
 
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/problem_fixes.h>
 #include <editor/session/view/session_view.h>
@@ -10,30 +11,47 @@
 #include <cstddef>
 #include <cstring>
 #include <iterator>
+#include <optional>
 #include <set>
 
+#include <base/io/strutil.h>
+
 #include <imgui.h>
+#include <imgui_internal.h>
 
 namespace opennova::editor {
 namespace {
 
-// A choice's line: its name and label (a record set's record by its own name, S13 D8), then where
-// it is defined, dimmed.
-std::string name_of(const ReferenceChoice &choice) {
-	return choice.label.empty() ? choice.name : choice.name + "  " + choice.label;
-}
+// A choice's line (ADR 0046 S15): what it names, its words (an item's name, an entity's title, a
+// register's NAME; S13 D8's label), then its name muted where the words are not it, then where it is
+// defined, dimmed.
+const std::string &words_of(const ReferenceChoice &choice) { return choice.label.empty() ? choice.name : choice.label; }
 std::string where_of(const ReferenceChoice &choice) {
 	if (choice.record.empty()) return choice.file;
 	return choice.file + ": " + choice.record;
 }
 
-// What a choice's tooltip says: the name, where, what the field would reference, why a lookup
-// never finds it.
-std::string choice_tip(const ReferenceChoice &choice) {
-	std::string tip = name_of(choice) + "\n" + (choice.record.empty() ? "The file " : "Defined in ") + where_of(choice);
+// What a choice's tooltip says: its words and its name, where, what it points at (an item's model, a
+// string id's text: symbol_preview, made only while it shows), what the field would reference, why a
+// lookup never finds it.
+std::string choice_tip(const ReferenceChoice &choice, const AssetGraph *graph, const std::string &scope) {
+	std::string tip = words_of(choice) + (choice.label.empty() ? std::string() : "\n" + choice.name) + "\n" +
+	                  (choice.record.empty() ? "The file " : "Defined in ") + where_of(choice);
+	if (graph)
+		if (const std::string preview = symbol_preview(*graph, choice.kind, choice.name, scope); !preview.empty())
+			tip += "\n" + preview;
 	if (choice.status == ReferenceStatus::Missing) tip += "\nSet here, the game would not find it: Missing.";
 	if (choice.inert) tip += "\nNo lookup of the game finds this definition: " + choice.reason + ".";
 	return tip;
+}
+
+// Whether a typed text is a value the field takes as it is (the picker's "Use"): a whole number for a
+// number field, any text for a text one.
+bool typed_takes(const FieldUse &field, const std::string &typed) {
+	if (typed.empty()) return false;
+	if (field.schema->type == FieldType::Text) return true;
+	const std::optional<int> number = strutil::parse_int(typed);
+	return number && (!field.schema->ranged || (double(*number) >= field.schema->min && double(*number) <= field.schema->max));
 }
 
 } // namespace
@@ -55,6 +73,7 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 	if (popup.view == &view && popup.key == key) return;
 	popup.view = &view;
 	popup.key = key;
+	popup.field = field;
 	++lists_made_;
 	popup.choices = view.findings.graph ? reference_choices(*view.findings.graph, field)
 										: std::vector<ReferenceChoice>();
@@ -62,6 +81,12 @@ void ReferencePicker::refresh(Popup &popup, const SessionView &view, const Docum
 		popup.choices.erase(std::remove_if(popup.choices.begin(), popup.choices.end(),
 		                                   [&](const ReferenceChoice &choice) { return choice.kind != field.reference; }),
 		                    popup.choices.end());
+	// Each name by what it names (ADR 0046 S15: an item id by its catalog's name, an SSN by its entity),
+	// the name muted beside the words.
+	if (view.findings.graph) {
+		const GraphNameSource names(*view.findings.graph);
+		word_choices(document, record, field, &names, popup.choices);
+	}
 	popup.fixes.clear();
 	// The finding the graph makes of this value, as Problems shows it, for its fixes (a %NAME% the
 	// stylesheets do not define: the variable's).
@@ -133,12 +158,61 @@ bool ReferencePicker::draw(Workspace &workspace, const Document &document, const
 	popup.drawn = frame;
 	if (!popup.view) held_.push_back(key);
 	refresh(popup, workspace.view(), document, record, field, value, others);
-	const bool done = draw_popup(workspace, popup, picked);
+	const bool done = draw_popup(workspace, popup, picked, false);
 	ImGui::EndPopup();
 	return done;
 }
 
-bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string &picked) {
+bool ReferencePicker::draw_field(Workspace &workspace, const Document &document, const NodeAddress &record,
+                                 const FieldUse &field, const Value &value, const DisplayName &words, bool mixed,
+                                 std::string &picked) {
+	// What the frame shows: the words (or the value where it has none), the value muted after them.
+	const std::string raw = std::holds_alternative<std::string>(value)   ? std::get<std::string>(value)
+	                        : std::holds_alternative<int64_t>(value) ? std::to_string(std::get<int64_t>(value))
+	                                                                     : std::string();
+	const std::string shown = mixed ? std::string("(mixed)") : words.text.empty() ? raw : words.text;
+	const std::string muted = mixed || words.text.empty() || words.raw.empty() ? std::string() : words.raw;
+	const Key key{document.identity(), record.row, record.kind, record.child, ImGui::GetID("##value")};
+	const int frame = ImGui::GetFrameCount();
+	let_go(frame);
+	bool done = false;
+	if (ImGui::BeginCombo("##value", "", int(ImGuiComboFlags_CustomPreview) | int(ImGuiComboFlags_HeightLarge))) {
+		prune(workspace.view());
+		Popup &popup = popups_[key];
+		popup.drawn = frame;
+		if (!popup.view) held_.push_back(key);
+		// Opened afresh, nothing typed yet: a pick by name starts from every name (the last pick's
+		// words are not kept as a filter).
+		if (ImGui::IsWindowAppearing()) popup.filter[0] = '\0';
+		refresh(popup, workspace.view(), document, record, field, value, true);
+		done = draw_popup(workspace, popup, picked, true);
+		ImGui::EndCombo();
+	} else {
+		const auto kept = popups_.find(key);
+		if (kept != popups_.end() && kept->second.view) drop_list(kept->second);
+	}
+	if (ImGui::BeginComboPreview()) {
+		const float room = ImGui::GetContentRegionAvail().x;
+		const float tail = muted.empty() ? 0.0f : ui_kit::text_width(muted.c_str()) + ImGui::GetStyle().ItemSpacing.x;
+		const std::string fitted = ui_kit::fit(shown, std::max(room - tail, room * 0.5f));
+		if (words.dangling) ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s", fitted.c_str());
+		else ImGui::TextUnformatted(fitted.c_str());
+		if (!muted.empty()) {
+			ImGui::SameLine();
+			ImGui::TextDisabled("%s", ui_kit::fit(muted, ImGui::GetContentRegionAvail().x).c_str());
+		}
+		ImGui::EndComboPreview();
+	}
+	ui_kit::tooltip_lazy([&] {
+		std::string tip = shown;
+		if (!raw.empty() && raw != shown) tip += "\nThe file holds " + raw;
+		if (!words.source.empty()) tip += "\nFrom " + words.source;
+		return tip + "\nPick by name: type to find one.";
+	});
+	return done;
+}
+
+bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string &picked, bool typed_value) {
 	const float width = ImGui::GetFontSize() * 26.0f;
 	if (ImGui::IsWindowAppearing()) {
 		popup.cursor = 0;
@@ -180,9 +254,23 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 		popup.moved = true;
 	}
 	popup.cursor = std::min(popup.cursor, shown.empty() ? size_t(0) : shown.size() - 1);
-	bool chosen = !escape && !shown.empty() &&
-	              (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+	const bool enter = !escape && (ImGui::IsKeyPressed(ImGuiKey_Enter, false) || ImGui::IsKeyPressed(ImGuiKey_KeypadEnter, false));
+	bool chosen = enter && !shown.empty();
 	if (chosen) picked = shown[popup.cursor]->name;
+	// A value typed that no name is, taken as typed where the field takes it (a field picked by name:
+	// an SSN the mission has no entity of yet, an item id no catalog defines).
+	if (typed_value && popup.field.schema && popup.filter[0]) {
+		const std::string token = popup.filter;
+		const bool known = std::any_of(popup.choices.begin(), popup.choices.end(),
+		                               [&](const ReferenceChoice &choice) { return strutil::iequals(choice.name, token); });
+		if (!known && typed_takes(popup.field, token)) {
+			if (ImGui::Selectable(("Use \"" + token + "\"").c_str()) || (enter && shown.empty())) {
+				picked = token;
+				chosen = true;
+			}
+			ui_kit::tooltip("Written as typed: no name the project has is this value.");
+		}
+	}
 	const float line = ImGui::GetTextLineHeightWithSpacing();
 	ImGui::BeginChild("names", ImVec2(width, line * float(std::clamp<size_t>(shown.size(), 3, 14)) + line * 0.5f),
 	                  ImGuiChildFlags_Borders);
@@ -202,19 +290,27 @@ bool ReferencePicker::draw_popup(Workspace &workspace, Popup &popup, std::string
 				chosen = true;
 			}
 			if (i == popup.cursor && popup.moved) ImGui::SetScrollHereY(0.5f);
-			ui_kit::tooltip_lazy([&] { return choice_tip(choice); });
+			ui_kit::tooltip_lazy([&] {
+				return choice_tip(choice, popup.view ? popup.view->findings.graph.get() : nullptr, popup.field.scope);
+			});
 			ImGui::SameLine(0.0f, 0.0f);
 			ImGui::SetCursorPosX(x);
-			// The name, then where it is defined in what is left, then what it would be when not found.
+			// The words, the name muted where it is not them, then where it is defined in what is left,
+			// then what it would be when not found.
 			const bool found = choice.status == ReferenceStatus::Present || choice.status == ReferenceStatus::Unverified;
 			const char *word = found ? "" : ui_kit::reference_word(choice.status);
 			const float room = ImGui::GetContentRegionAvail().x - (found ? 0.0f : ui_kit::text_width(word));
-			const std::string name = ui_kit::fit(name_of(choice), room * 0.6f);
+			const std::string name = ui_kit::fit(words_of(choice), room * 0.6f);
 			if (choice.inert) ImGui::TextDisabled("%s", name.c_str());
 			else ImGui::TextUnformatted(name.c_str());
+			float used = ui_kit::text_width(name.c_str());
+			if (!choice.label.empty()) {
+				ImGui::SameLine();
+				ImGui::TextDisabled("%s", choice.name.c_str());
+				used += ui_kit::text_width(choice.name.c_str()) + ImGui::GetStyle().ItemSpacing.x;
+			}
 			ImGui::SameLine();
-			const std::string where = ui_kit::fit(where_of(choice), room - ui_kit::text_width(name.c_str()) -
-			                                                                ImGui::GetStyle().ItemSpacing.x * 2.0f);
+			const std::string where = ui_kit::fit(where_of(choice), room - used - ImGui::GetStyle().ItemSpacing.x * 2.0f);
 			ImGui::TextDisabled("%s", where.c_str());
 			if (!found) {
 				ImGui::SameLine();

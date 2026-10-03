@@ -2,6 +2,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/def_catalog_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_table.h>
 #include <editor/model/document_base.h>
 #include <editor/ui/main_viewport_view.h>
@@ -40,9 +41,11 @@ bool mission_row_listed(const Document &, const Node &row) {
 constexpr OutlineSpec kCatalogOutline{OutlineMode::List, "", catalog_file_values};
 // A mission's rows as a tree (an event holding its triggers and its actions), a chip per kind of
 // row (the four pools, the paths, the areas, the events), the empty paths left out; an event's
-// triggers and actions added by type (S15: the "+" offers the types by name).
+// triggers and actions added by type (S15: the "+" offers the types by name); under headings that
+// read like the mission (S15: each pool, then its teams and groups where they tell rows apart; the
+// paths, the areas, the events).
 constexpr OutlineSpec kMissionOutline{OutlineMode::Tree, "", nullptr, true, mission_row_listed, "Empty paths",
-                                      mission_adds_by_menu, draw_mission_add_menu};
+                                      mission_adds_by_menu, draw_mission_add_menu, mission_row_headings};
 constexpr OutlineSpec kStringsOutline{OutlineMode::MasterDetail, "Sections", nullptr};
 constexpr OutlineSpec kTreeOutline{OutlineMode::Tree, "", nullptr};
 std::unique_ptr<DocumentView> make_menu_view() { return std::make_unique<MenuView>(); }

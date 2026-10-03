@@ -4,13 +4,17 @@
 #include <cctype>
 #include <cstdint>
 #include <cstring>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include <editor/documents/document_types.h>
+#include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/document_toolbar.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/field_widgets.h>
+#include <editor/ui/inspector_layout.h>
 #include <editor/ui/text_edit.h>
 #include <editor/ui/ui_kit.h>
 
@@ -103,9 +107,42 @@ bool adds_rows_of(const Document &document, NodeKind kind) {
 	return row && *row->add_label;
 }
 
+// The project's names a document's lines read (the graph's), for a type that words its records with
+// them (DocumentType::record_label); none with no project open, and for any other type (its lines
+// then never made again for a graph's change).
+struct ViewNames {
+	std::optional<GraphNameSource> graph;
+	ViewNames(const SessionView &view, const Document &document) {
+		const DocumentType *type = document_type_for(document.kind());
+		if (view.findings.graph && type && type->record_label) graph.emplace(*view.findings.graph);
+	}
+	const NameSource *get() const { return graph ? &*graph : nullptr; }
+};
+
 } // namespace
 
-OutlineView::OutlineView(const OutlineSpec &spec) : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed) {}
+OutlineView::OutlineView(const OutlineSpec &spec)
+    : spec_(spec), model_(spec.mode, spec.file_values, spec.row_listed, spec.groups) {}
+
+void OutlineView::finding_mark(const SessionView &view, const Document &document, const NodeAddress &address) {
+	const std::vector<size_t> found = findings_.of_record(document.path(), address.row, address.child);
+	if (found.empty()) return;
+	// The worst severity among them, and every message (the field's name before it) in the tooltip.
+	DiagnosticSeverity worst = DiagnosticSeverity::Info;
+	for (const size_t i : found) {
+		const DiagnosticSeverity severity = view.findings.diagnostics[i].severity;
+		if (severity == DiagnosticSeverity::Error || (severity == DiagnosticSeverity::Warning && worst == DiagnosticSeverity::Info))
+			worst = severity;
+	}
+	if (!ui_kit::severity_mark_on_item(worst)) return;
+	std::string tip;
+	for (const size_t i : found) {
+		const Diagnostic &d = view.findings.diagnostics[i];
+		const NodeKind kind = d.record_kind ? d.record_kind : address.kind;
+		tip += (tip.empty() ? "" : "\n") + (d.field.empty() ? d.message : field_title(document, kind, d.field) + ": " + d.message);
+	}
+	ImGui::SetTooltip("%s", tip.c_str());
+}
 
 void OutlineView::rebind(const DocumentBase &) {
 	// The reveal and the cell being edited name the records of the document it last drew: the next
@@ -277,14 +314,16 @@ void OutlineView::draw_file_values(Workspace &workspace, const Document &documen
 void OutlineView::draw_tree(Workspace &workspace, const Document &document) {
 	filter_box("Filter records", 0.0f, "Lists the records whose name holds the text, and what holds them.");
 	draw_kinds(document);
-	// The selection moved there: the records and collections holding it open (a filter hiding it
-	// cleared), its line scrolled to, however far down.
-	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path()) : SIZE_MAX;
+	const ViewNames names(workspace.view(), document);
+	findings_.follow(workspace.view());
+	// The selection moved there: the records, collections and headings holding it open (a filter
+	// hiding it cleared), its line scrolled to, however far down.
+	const size_t revealed = reveal_.moved() ? model_.reveal(document, reveal_.path(), 0, names.get()) : SIZE_MAX;
 	ImGui::BeginDisabled(document.blocked());
 	draw_tree_tools(workspace, document);
 	ImGui::Separator();
 	if (ImGui::BeginChild("outline", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None, ImGuiWindowFlags_HorizontalScrollbar)) {
-		const std::vector<OutlineLine> &lines = model_.lines(document);
+		const std::vector<OutlineLine> &lines = model_.lines(document, 0, names.get());
 		if (document.rows().empty()) ui_kit::empty_state("The file holds no records.");
 		else if (lines.empty()) ui_kit::empty_state("No record matches the filter.");
 		ImGuiListClipper clipper;
@@ -312,7 +351,14 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 	ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_SpanAvailWidth | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 	if (line.branch) ImGui::SetNextItemOpen(line.open);
 	else flags |= ImGuiTreeNodeFlags_Leaf;
-	if (line.collection) {
+	if (line.heading) {
+		// A heading: its words and how many rows stand under it, opened and closed as a record is.
+		ImGui::PushID(line.key.c_str());
+		ImGui::TreeNodeEx("##heading", flags | ImGuiTreeNodeFlags_Framed, "%s", line.text.c_str());
+		if (ImGui::IsItemToggledOpen()) model_.set_open(line, !line.open);
+		ui_kit::tooltip(line.forced ? "Opened while the filter keeps a record under it." : line.open ? "Click to close." : "Click to open.");
+		ImGui::PopID();
+	} else if (line.collection) {
 		ImGui::PushID(document.kind_token(line.kind));
 		ImGui::PushID(static_cast<int>(line.address.child ? line.address.child : line.address.row));
 		ImGui::TreeNodeEx("##collection", flags | ImGuiTreeNodeFlags_AllowOverlap, "%s", line.text.c_str());
@@ -343,9 +389,10 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		flags |= ImGuiTreeNodeFlags_OpenOnArrow;
 		if (view.documents.selection.holds(line.address)) flags |= ImGuiTreeNodeFlags_Selected;
 		const float x = ImGui::GetCursorScreenPos().x;
-		// Cut to the column (a mission's event is its whole sentence, S15): the whole in its tooltip.
+		// Cut to the column (a mission's event is its whole sentence, S15), room left at its end for its
+		// findings' mark: the whole in its tooltip.
 		const float room = ImGui::GetContentRegionAvail().x - ImGui::GetTreeNodeToLabelSpacing() -
-		                   ui_kit::text_width(ui_kit::kChangeRoom);
+		                   ui_kit::text_width(ui_kit::kChangeRoom) - ImGui::GetTextLineHeight();
 		const std::string label = ui_kit::kChangeRoom + ui_kit::fit(line.text, std::max(room, ImGui::GetFontSize() * 6.0f));
 		const NodeId id = line.address.child ? line.address.child : line.address.row;
 		ImGui::TreeNodeEx(reinterpret_cast<void *>(static_cast<uintptr_t>(id)), flags, "%s", label.c_str());
@@ -356,6 +403,7 @@ void OutlineView::draw_tree_line(Workspace &workspace, const Document &document,
 		ui_kit::change_dot(change, x + ImGui::GetTreeNodeToLabelSpacing());
 		ui_kit::tooltip_lazy([&] { return record_tip(line, change); });
 		if (ImGui::IsItemClicked() && !toggled) select_line(workspace, document, model_, index);
+		finding_mark(view, document, line.address);
 	}
 	if (indent > 0.0f) ImGui::Unindent(indent);
 }
@@ -396,7 +444,8 @@ void OutlineView::draw_tree_tools(Workspace &workspace, const Document &document
 		if (*kind.add_label && ui_kit::tool(row, kind.add_label, true, "Adds one at the end of the file.", true))
 			edit(workspace, document, EditOperation::Add, {0, kind.kind, 0});
 	if (placed) {
-		const std::string title = document.record_title(selection), name = document.record_name(selection);
+		const ViewNames names(workspace.view(), document);
+		const std::string title = record_display(document, selection, names.get()), name = document.record_name(selection);
 		const std::string shown = ui_kit::fit(title, std::min(ImGui::GetFontSize() * 12.0f, line));
 		row.next(ui_kit::text_width(shown.c_str()));
 		ImGui::TextUnformatted(shown.c_str());

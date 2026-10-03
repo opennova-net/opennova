@@ -110,5 +110,9 @@ ProblemLocation problem_location(const Diagnostic &diagnostic, const SessionView
 // trigger or action in words, ADR 0046 S15) where its document is open and its type words it
 // otherwise than its name; "" where it does not (the finding's record path stands alone).
 std::string finding_record_title(const Diagnostic &diagnostic, const SessionView &view);
+// What the record a finding is about calls the field it names (FieldUse::label: a trigger's
+// parameter by what it reads, "Zone"), where its document is open and the field has a name of its
+// own; "" where it does not (the finding's field id stands alone).
+std::string finding_field_title(const Diagnostic &diagnostic, const SessionView &view);
 
 } // namespace opennova::editor

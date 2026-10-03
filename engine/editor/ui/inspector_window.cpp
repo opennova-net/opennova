@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/session/view/findings_index.h>
 #include <editor/session/view/session_view.h>
@@ -267,10 +268,40 @@ void reference_status(Workspace &workspace, const FieldUse &field, const Value &
 bool is_reference(const FieldUse &field, const Value &value) {
 	return value_reference(field, value) != ReferenceKind::None;
 }
+// A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
+// group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
+// draw_field, ADR 0046 S15), never typed as a number.
+bool picks_by_name(const FieldUse &field) {
+	if (field.reference == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
+	const ReferenceResolution resolution = reference_row(field.reference).resolution;
+	return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record;
+}
+// A text reference: typed in its box, or picked (its Pick).
 bool picks_reference(const FieldUse &field) {
-	if (field.reference == ReferenceKind::None) return false;
-	return field.schema->type == FieldType::Text ||
-	       reference_row(field.reference).resolution == ReferenceResolution::Record;
+	return field.reference != ReferenceKind::None && field.schema->type == FieldType::Text;
+}
+
+// The project's names the Inspector's words read (the graph's), while it stands.
+struct ViewNames {
+	std::optional<GraphNameSource> graph;
+	explicit ViewNames(const SessionView &view) {
+		if (view.findings.graph) graph.emplace(*view.findings.graph);
+	}
+	const NameSource *get() const { return graph ? &*graph : nullptr; }
+};
+
+// What a value names, in words, under its control (ADR 0046 S15): a field with no choices and not
+// picked by name whose value names something (a name index's string, the stop an entity starts at),
+// muted, or in the missing colour where it names nothing; cut to the column, whole in its tooltip.
+void value_words(const DisplayName &words) {
+	if (words.text.empty()) return;
+	const std::string shown = ui_kit::fit(words.text, ImGui::GetContentRegionAvail().x);
+	if (words.dangling) ImGui::TextColored(ui_kit::reference_color(ReferenceStatus::Missing), "%s", shown.c_str());
+	else ImGui::TextDisabled("%s", shown.c_str());
+	std::string tip = words.text;
+	if (!words.raw.empty()) tip += "\nThe file holds " + words.raw;
+	if (!words.source.empty()) tip += "\nFrom " + words.source;
+	ui_kit::tooltip(tip);
 }
 // What a name picked sets the field to: the text, or the index a Record reference's name is (a
 // name that is no index stays the text, which the field refuses).
@@ -533,12 +564,25 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	                    ImGui::GetContentRegionAvail().x - tools >= ImGui::GetFontSize() * 6.0f;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(beside ? -tools : -FLT_MIN);
-	value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
+	// What the value names, in words (ADR 0046 S15): the picker's frame shows them, any other control
+	// has them under it.
+	const ViewNames names(workspace.view());
+	const DisplayName words = value_display(document, address, field, value, names.get());
+	const bool by_name = picks_by_name(field);
+	if (by_name) {
+		std::string picked;
+		if (controls.picker.draw_field(workspace, document, address, field, value, words, mixed, picked))
+			set(workspace, document, targets, schema.id, picked_value(field, picked), false);
+	} else {
+		value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
+	}
 	if (about) ui_kit::tooltip(about);
 	if (present) drop_target(workspace, document, targets, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
+	std::vector<FieldChoice> own;
+	if (!by_name && !mixed && present && !schema.flags && document.choices_on(address, field, own).empty()) value_words(words);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
@@ -650,7 +694,16 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 	if (ignored) reserve += ui_kit::text_width("!") + style.ItemSpacing.x;
 	ImGui::BeginDisabled(!present);
 	ImGui::SetNextItemWidth(reserve > 0.0f ? -reserve : -FLT_MIN);
-	value_control(workspace, controls.typed, document, {address}, field, value, true);
+	if (picks_by_name(field)) {
+		// Picked by name, its words in the cell (ADR 0046 S15).
+		const ViewNames names(workspace.view());
+		std::string picked;
+		if (controls.picker.draw_field(workspace, document, address, field, value,
+		                               value_display(document, address, field, value, names.get()), false, picked))
+			set(workspace, document, {address}, schema.id, picked_value(field, picked), false);
+	} else {
+		value_control(workspace, controls.typed, document, {address}, field, value, true);
+	}
 	if (present) drop_target(workspace, document, {address}, field);
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
@@ -674,6 +727,11 @@ float column_width(const FieldSchema &field) {
 	if (field.optional) width += frame;
 	if (field.color == FieldColor::HexArgb || field.color == FieldColor::PackedRgb) width += field_widgets::swatch_width();
 	if (field.reference != ReferenceKind::None) width += em * 3.0f;
+	// A number picked by name shows its words (ADR 0046 S15).
+	const ReferenceResolution resolution = reference_row(field.reference).resolution;
+	if (field.type != FieldType::Text &&
+	    (resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record))
+		width = std::max(width, em * 16.0f);
 	return width;
 }
 
@@ -762,12 +820,13 @@ void records_table(Workspace &workspace, Controls &controls, const Document &doc
 // last save: a click selects one, whose own fields and lists the inspector then shows.
 void records_list(Workspace &workspace, const Document &document, const NodeAddress &owner,
                   const Document::Collection &records) {
+	const ViewNames names(workspace.view());
 	for (size_t i = 0; i < records.ids.size(); ++i) {
 		const NodeAddress address{owner.row, records.spec.kind, records.ids[i]};
 		ImGui::PushID(static_cast<int>(address.child));
 		const float x = ImGui::GetCursorScreenPos().x;
 		const std::string name =
-		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + document.record_title(address),
+		        ui_kit::fit(ui_kit::kChangeRoom + std::to_string(i + 1) + ". " + record_display(document, address, names.get()),
 		                    ImGui::GetContentRegionAvail().x);
 		if (ImGui::Selectable((name + "###record").c_str(), workspace.view().documents.selection.holds(address))) select_row(workspace, document, address);
 		ui_kit::change_dot(document.record_change(address), x);
@@ -894,6 +953,7 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 	std::vector<NodeAddress> chain = document.ancestors(selection);
 	chain.push_back(selection);
 	const float room = ImGui::GetContentRegionAvail().x;
+	const ViewNames names(workspace.view());
 	ui_kit::WrapRow row;
 	for (size_t i = 0; i < chain.size(); ++i) {
 		ImGui::PushID(int(i));
@@ -902,7 +962,8 @@ void breadcrumb(Workspace &workspace, const Document &document, const NodeAddres
 			ImGui::TextDisabled("/");
 		}
 		const std::string name = document.record_name(chain[i]);
-		const std::string title = by_name && by_name(document, chain[i]) ? name : document.record_title(chain[i]);
+		const std::string title =
+		    by_name && by_name(document, chain[i]) ? name : record_display(document, chain[i], names.get());
 		const bool last = i + 1 == chain.size();
 		const std::string shown = ui_kit::fit(title, room - (last ? 0.0f : ImGui::GetStyle().FramePadding.x * 2.0f));
 		row.next(last ? ui_kit::text_width(shown.c_str()) : ui_kit::button_width(shown.c_str()));
