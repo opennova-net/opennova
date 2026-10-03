@@ -91,7 +91,9 @@ public:
 	// part enters handle(); a request that reaches it while one is served (a device's or a
 	// source's callback) asserts in a debug build and is served inside the outer one, its findings
 	// the outer outcome's, which it neither empties nor ends. Leaving the scope, however it is
-	// left, ends only the request it began.
+	// left, ends only the request it began. The status line a refused request leaves is that
+	// request's (ADR 0046 S15): the next request served without a refusal replaces it with its own
+	// line, or, saying nothing, clears it, so a refusal never reads as the outcome of what came after.
 	class RequestScope {
 	public:
 		explicit RequestScope(SessionCore &core);
@@ -102,6 +104,7 @@ public:
 	private:
 		SessionCore &core_;
 		bool outermost_;
+		std::string status_before_; // the line when the request arrived
 	};
 	const ActionOutcome &outcome() const { return outcome_; }
 	ActionOutcome &outcome() { return outcome_; }
@@ -217,6 +220,12 @@ public:
 	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
+	// `item` first among the recently placed items (ADR 0046 S15), shown at once; kept by the next
+	// poll's save_recent_items (nothing to keep when it was first already).
+	void remember_recent_item(int64_t item);
+	// The poll's (and a quit's, and the session's end): the recently placed items kept by the store when
+	// they changed since; a store that cannot keep them says so in Output, failing no request.
+	void save_recent_items();
 	// The game install the editor imports from and plays in: the open project's (its local.json),
 	// else the one the editor last chose.
 	std::string game_install() const;
@@ -276,6 +285,8 @@ private:
 	std::map<std::string, WireDrag> wire_drags_;
 	size_t files_scanned_ = 0;
 	bool in_request_ = false; // a request from outside is being served: what is reported is its outcome's
+	std::string refusal_status_; // the status line the last refused request left, until a request is served
+	bool recent_items_unsaved_ = false; // the recently placed items changed since the store kept them
 };
 
 } // namespace opennova::editor

@@ -210,6 +210,12 @@ public:
 	// one it cannot plan.
 	virtual bool command(const ViewportContext &context, const std::string &name,
 			const std::vector<NodeId> &ids, CanvasRequests &out, std::string &error) const = 0;
+	// A command whole (session/editor_request.h's ViewportCommand: its name and records, and what it
+	// takes beside them, ADR 0046 S15: `by` a way, `at` a point of the picture), planned into requests:
+	// by default the command of its name over its records, refusing a `by` or an `at` the kind does not
+	// read (a mission's duplicate reads `by`, its paste `at`).
+	virtual bool command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+			std::string &error) const;
 	// A drop on the picture (S14, EditInViewport: session/editor_request.h's ViewportDrop: a project
 	// file or a reference kind's name let go at a point of it) planned into requests: what it makes
 	// there, one batch. False, with why: by default a kind takes no drop (a menu's, a model's), and
@@ -241,6 +247,11 @@ public:
 	// not render (by default: a kind whose picture is its whole document, a model's).
 	virtual io::JsonValue render_json(
 			const ViewportInput &input, NodeId row, const JsonPage &page, std::string &error) const;
+	// What the kind's place tool places (the viewport query's palette, ADR 0046 S15): a mission's
+	// items by name in their groups, those whose name, id or model holds `text`, a page of them. Null,
+	// with why, for a kind that places nothing (by default).
+	virtual io::JsonValue palette_json(
+			const SessionView &view, const std::string &text, const JsonPage &page, std::string &error) const;
 
 	// --- the device's -------------------------------------------------------------------------------
 
