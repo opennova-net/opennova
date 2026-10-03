@@ -315,6 +315,7 @@ JsonValue import_choice_to_json(const ImportChoice &source) {
 	if (!source.entry.empty()) out.set("entry", json_string(source.entry));
 	if (source.install) out.set("install", boolean(true));
 	if (source.native) out.set("native", boolean(true));
+	if (!source.as.empty()) out.set("as", json_string(source.as));
 	return out;
 }
 
@@ -701,23 +702,26 @@ bool drop_from_json(const JsonValue &json, ViewportDrop &out, std::string &error
 	return true;
 }
 
-// An import source: {path, entry?, install?, native?}.
+// An import source: {path, entry?, install?, native?, as?}.
 constexpr const char *kImportsShape =
-        "\"imports\" must be an array of {path, entry, install, native}.";
+        "\"imports\" must be an array of {path, entry, install, native, as}.";
 
 bool import_choice_from_json(const JsonValue &json, ImportChoice &out, std::string &error) {
 	if (!json.is_object()) {
 		error = kImportsShape;
 		return false;
 	}
-	if (!members_known(json, {"path", "entry", "install", "native"}, "import", error)) return false;
+	if (!members_known(json, {"path", "entry", "install", "native", "as"}, "import", error)) return false;
 	ImportChoice import;
 	if (!read_string(json, "path", import.path, error) ||
 	    !read_string(json, "entry", import.entry, error) ||
 	    !read_bool(json, "install", import.install, error) ||
-	    !read_bool(json, "native", import.native, error))
+	    !read_bool(json, "native", import.native, error) ||
+	    !read_string(json, "as", import.as, error))
 		return false;
 	if (import.path.empty()) { error = "An import names its path."; return false; }
+	// A name of its own is an install's file's (ImportChoice::as).
+	if (!import.as.empty() && !import.install) { error = "An import's \"as\" names an install's file."; return false; }
 	out = std::move(import);
 	return true;
 }

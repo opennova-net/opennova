@@ -96,7 +96,7 @@ void ImportController::preview_install(const EditorRequest &request) {
 	std::vector<ImportChoice> named;
 	std::map<std::string, size_t> by_name; // the install's files by name, the first of each, once (review F7)
 	if (!request.names.empty())
-		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].entry), i);
+		for (size_t i = 0; i < sources.size(); ++i) by_name.emplace(normalized_logical_name(sources[i].name()), i);
 	for (const std::string &name : request.names) {
 		const auto found = by_name.find(normalized_logical_name(name));
 		if (found == by_name.end()) {
@@ -296,7 +296,7 @@ bool ImportController::sources_of(const EditorRequest &request, std::vector<Impo
 		    !row.problem.empty())
 			continue;
 		const std::string key = row.source.path + '\n' + row.source.entry + '\n' + (row.source.install ? '1' : '0') +
-		                        (row.source.native ? '1' : '0');
+		                        (row.source.native ? '1' : '0') + '\n' + row.source.as;
 		if (taken.insert(key).second) imports.push_back(row.source);
 	}
 	return true;

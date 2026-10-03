@@ -22,6 +22,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <formats/mns/mns.h>
@@ -359,7 +360,8 @@ private:
 				fail(source.install ? CoreFinding::ImportInstall : CoreFinding::ImportArchive, error);
 				return;
 			}
-			if (from->find(source.entry).empty() || (converter && !from->read(source.entry, bytes))) {
+			// By the name the project gets (an install's file under the project's expansion's name: `as`).
+			if (from->find(name).empty() || (converter && !from->read(name, bytes))) {
 				fail(CoreFinding::ImportRead, source.install ? "The game data has no file named " + name + "."
 				                                  : "Could not read " + name + " from " + source.path);
 				return;
@@ -427,8 +429,8 @@ private:
 			const bool authored = !source.install && source.entry.empty() && !source.native;
 			row.kind = authored && importer_for(output.name) ? AssetKind::ImportSource
 			           : loaded                              ? classify_asset(output.name, &output.bytes)
-			                                                 : from->file_kind(source.entry);
-			row.size = loaded ? output.bytes.size() : from->size(source.entry);
+			                                                 : from->file_kind(name);
+			row.size = loaded ? output.bytes.size() : from->size(name);
 			row.made_from = converter ? name : std::string();
 			row.found_in = found_in;
 			const bool first = !provided_.count(key(output.name));
@@ -519,6 +521,20 @@ private:
 			const int count = gameprofile_required_resource_count();
 			for (int i = 0; i < count; ++i) {
 				const RequiredResource *resource = gameprofile_required_resource_at(i);
+				// An expansion's own file, for a project that builds as one (ADR 0046 S16): by the name
+				// its expansion forms, the install's copy of it listed under that name (install_view.h);
+				// every row optional, the version text the build's own.
+				if (resource->flags & RES_F_EXPANSION) {
+					const ExpansionFileRow *expansion_file = document_.expansion.standalone()
+					        ? nullptr : expansion_file_row_for_manifest_role(resource->role);
+					if (!expansion_file || expansion_file->fixed) continue;
+					const std::string name = expansion_file_name(*expansion_file, document_.expansion.name);
+					bring(own, name, ImportNeed{file, std::string(),
+					                            std::string("the game, ") + requirement_phase_label(resource->phase),
+					                            ReferenceKind::None, name, -1});
+					if (plan_.truncated) return;
+					continue;
+				}
 				// A pattern, a boot archive, or the player's own file (a save, a configuration, the
 				// stored credentials: never a resource the game is made of, and in a game's folder
 				// beside the missions found loose there) is never brought.
@@ -784,7 +800,7 @@ private:
 		} else {
 			const ImportOrigin *from = origin(source.install ? ImportOrigin::Kind::GameInstall : ImportOrigin::Kind::Archive,
 			                                  source.path, error);
-			read = from && from->read(source.entry, out);
+			read = from && from->read(source.name(), out);
 		}
 		if (read) cost_ += out.size();
 		return read;
