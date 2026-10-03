@@ -32,7 +32,7 @@ bool run_number(const std::string &name, unsigned long &out) {
 // started its game, or one whose game stopped) and for a game the platform says is gone.
 bool held(const fs::path &dir, const LeaseLiveness &liveness) {
 	std::string text, error;
-	if (!read_file_text((dir / kRunRecordFileName).string(), text, error)) return false;
+	if (!read_file_text(utf8_of(dir / kRunRecordFileName), text, error)) return false;
 	io::JsonValue json;
 	if (!io::json_parse(text, json, error) || !json.is_object() ||
 	    json.get_int("schema_version", -1) != kRunRecordSchemaVersion)
@@ -56,7 +56,7 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 	     fs::directory_iterator(system_path(runs_root), fs::directory_options::skip_permission_denied, ec)) {
 		unsigned long number = 0;
 		std::error_code kind;
-		if (!entry.is_directory(kind) || !run_number(entry.path().filename().string(), number)) continue;
+		if (!entry.is_directory(kind) || !run_number(utf8_of(entry.path().filename()), number)) continue;
 		runs[number] = held(entry.path(), liveness);
 	}
 	// The first one free, emptied (one whose files will not go, a process holding them, is passed
@@ -65,7 +65,7 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 	for (unsigned long number = 1; taken == 0; ++number) {
 		const auto found = runs.find(number);
 		if (found != runs.end() && found->second) continue;
-		const fs::path dir = system_path((fs::path(runs_root) / std::to_string(number)).generic_string());
+		const fs::path dir = system_path(join_path(runs_root, std::to_string(number)));
 		std::error_code removed;
 		fs::remove_all(dir, removed);
 		if (fs::exists(dir, removed)) continue;
@@ -74,9 +74,9 @@ bool take_run_directory(const std::string &runs_root, const LeaseLiveness &liven
 	for (const auto &[number, busy] : runs) {
 		if (busy || number == taken) continue;
 		std::error_code removed;
-		fs::remove_all(system_path((fs::path(runs_root) / std::to_string(number)).generic_string()), removed);
+		fs::remove_all(system_path(join_path(runs_root, std::to_string(number))), removed);
 	}
-	out = (fs::path(runs_root) / std::to_string(taken)).generic_string();
+	out = join_path(runs_root, std::to_string(taken));
 	return ensure_directory(out, error);
 }
 
@@ -87,13 +87,13 @@ bool claim_run_directory(const std::string &dir, int64_t pid, const ProcessIdent
 	json.set("image", io::JsonValue::make_string(identity.image));
 	// A string, as a lease writes it: a creation time passes a JSON number's exact range.
 	json.set("created", io::JsonValue::make_string(identity.created));
-	return write_file_atomic((fs::path(dir) / kRunRecordFileName).generic_string(), io::json_write(json), error);
+	return write_file_atomic(join_path(dir, kRunRecordFileName), io::json_write(json), error);
 }
 
 void release_run_directory(const std::string &dir) {
 	if (dir.empty()) return;
 	std::error_code ec;
-	fs::remove(system_path((fs::path(dir) / kRunRecordFileName).generic_string()), ec);
+	fs::remove(system_path(join_path(dir, kRunRecordFileName)), ec);
 }
 
 } // namespace opennova::editor

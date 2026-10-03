@@ -355,10 +355,16 @@ int frames_and_registers() {
 	TEST_EXPECT(set_all(light, {{"style", 0x71}, {"param", 0}}));
 	// The register findings of a model, by record and field.
 	using Found = std::map<std::string, std::pair<DiagnosticSeverity, std::string>>;
+	bool codes_hold = true;
 	const auto registers_found = [&](const std::shared_ptr<const ModelDocument> &of) {
 		Found out;
 		for (const Diagnostic &d : validated(of)) {
-			if (d.code() != "model.register_missing") continue;
+			if (d.code() != "model.register_missing" && d.code() != "model.light_no_registers") continue;
+			// The light's crash is its own code, the one of them that refuses a build (the gate follows
+			// retail): every other register past its table is listed.
+			const bool crash = d.code() == "model.light_no_registers";
+			codes_hold = codes_hold && crash == (d.child_id == light.child && of->model_row()->registers.empty()) &&
+			             d.row() && d.row()->gates_build == crash;
 			const char *record = d.child_id == material.child ? "material"
 			                     : d.child_id == panm.child   ? "panm"
 			                     : d.child_id == light.child  ? "light"
@@ -384,6 +390,7 @@ int frames_and_registers() {
 	TEST_EXPECT(is(found, "panm rotx.param", warning, no_table + "register 0 as the global register LOD_FRAC."));
 	TEST_EXPECT(is(found, "light param", error_,
 	               "The model has no CTRL registers, and the game crashes loading a light that names one."));
+	TEST_EXPECT(codes_hold);
 	TEST_EXPECT(set_all(material, {{"texanim.frames", 0}}));
 	TEST_EXPECT(registers_found(document).count("material texanim.time") == 0);
 	TEST_EXPECT(set_all(material, {{"texanim.frames", 4}}));
