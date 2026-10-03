@@ -7,7 +7,7 @@
 
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_hint.h>
-#include <editor/preview/mission_labels.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
 #include <formats/mission/bms.h>

@@ -23,7 +23,7 @@
 #include <vector>
 
 #include <base/io/json.h>
-#include <editor/preview/mission_labels.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_scene.h>

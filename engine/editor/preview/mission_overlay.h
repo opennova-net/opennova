@@ -25,7 +25,7 @@ struct OrbitCamera;
 // bottom too where its flags bound z) with its edge handles when primary, a path's line through its
 // stops (closed unless it does not loop; thick while it or one of its markers is selected), a label
 // beside the hovered and the selected marks (beside the other shown ones with the labels option,
-// decluttered: preview/mission_labels), and the marquee. A line with an end behind the near plane is
+// decluttered: preview/mission_label_picks), and the marquee. A line with an end behind the near plane is
 // clipped to it. At most kMissionMarksDrawn marks are drawn, the nearest. S15: the selected marks
 // ringed twice over a dark ring (they read on any ground, among thousands of glyphs) and the hovered
 // one ringed wide; the handle the pointer is on (or a drag holds) named beside it with its step ("Turn,

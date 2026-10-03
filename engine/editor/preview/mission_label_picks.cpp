@@ -1,4 +1,4 @@
-#include <editor/preview/mission_labels.h>
+#include <editor/preview/mission_label_picks.h>
 
 #include <algorithm>
 #include <numeric>

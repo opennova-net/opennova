@@ -52,7 +52,7 @@
 #include <editor/preview/menu_screen_render.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_canvas.h>
-#include <editor/preview/mission_labels.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/model_canvas.h>
