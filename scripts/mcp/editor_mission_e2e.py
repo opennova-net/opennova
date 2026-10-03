@@ -18,7 +18,8 @@ With --expansion (ADR 0046 S16) the project builds as that expansion, on the ins
 --builds-on names when given: its mission imported from what /exp <builds-on> serves, its build
 the expansion's folder (the base game's own files left out: same_as_base), Play running the game
 over the install's base game with /exp <expansion>, and the game read until the mission is loaded
-and listed by its mission list.
+and in OpenNova's mission catalog, the build saying nothing of the stock game's list showing it
+untitled (build.expansion.mission_untitled).
 
 Local only: it needs a game install and starts the game, so no CI job runs it and it reads
 no environment variable. Standard library only; the clients are editor_mcp.py's and
