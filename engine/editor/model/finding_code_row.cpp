@@ -65,6 +65,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::BuildBlocked, code("build.blocked", G::Build) },
 	{ C::BuildChanged, code("build.changed", G::Build) },
 	{ C::BuildCopy, code("build.copy", G::Build) },
+	// A file an expansion's build leaves out because the game reads its kind only from the install's
+	// folder (ADR 0046 S16, AssetKindRow::expansion_loose): said, refusing nothing.
+	{ C::BuildExpansionRootOnly, listed(about_the_file("build.expansion.root_only", G::Build, F::None)) },
 	{ C::BuildNameUnstorable, about_the_file("build.name_unstorable", G::Build, F::Rename) },
 	{ C::BuildOutDirInProject, code("build.out_dir_in_project", G::Build) },
 	// A player's or this machine's file the project holds, which a build leaves out (ADR 0046 S14,

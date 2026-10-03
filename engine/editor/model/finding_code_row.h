@@ -235,6 +235,7 @@ enum class CoreFinding {
 	BuildBlocked,
 	BuildChanged,
 	BuildCopy,
+	BuildExpansionRootOnly,
 	BuildNameUnstorable,
 	BuildOutDirInProject,
 	BuildPlayerFile,
