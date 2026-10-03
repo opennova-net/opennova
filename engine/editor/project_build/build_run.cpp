@@ -111,7 +111,7 @@ struct LastGood {
 bool read_last_good(const std::string &output_root, LastGood &out) {
 	std::string text;
 	std::string io_error;
-	if (!read_file_text((fs::path(output_root) / kLastGoodBuildFileName).generic_string(), text, io_error))
+	if (!read_file_text(join_path(output_root, kLastGoodBuildFileName), text, io_error))
 		return false;
 	io::JsonValue json;
 	std::string parse_error;
@@ -155,10 +155,11 @@ io::JsonValue build_record(const std::string &build_id, const std::map<std::stri
 
 // Every planned name must resolve through the engine's own mount of the staged
 // directory: the one a stock launch boots with (mount_install: the fixed boot table,
-// archive-only), handed the directory's system path, so a deep one mounts as well.
+// archive-only), handed the directory's UTF-8 path as the game is handed its own, which it
+// opens past MAX_PATH itself (base/io/os_path.h).
 bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &error) {
 	Vfs vfs;
-	if (!mount_install(vfs, system_path(dir).string(), LaunchFlags())) {
+	if (!mount_install(vfs, dir, LaunchFlags())) {
 		error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 		                     "The built archives do not mount: " + vfs.last_error());
 		return false;
@@ -175,7 +176,7 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 	}
 	std::error_code ec;
 	for (const BuildEntry &entry : plan.loose) {
-		if (!fs::is_regular_file(system_path((fs::path(dir) / entry.logical_name).generic_string()), ec)) {
+		if (!fs::is_regular_file(system_path(join_path(dir, entry.logical_name)), ec)) {
 			error = make_finding(CoreFinding::BuildVerify, DiagnosticSeverity::Error,
 			                     entry.logical_name + " is missing from the build directory", entry.logical_name);
 			return false;
@@ -190,7 +191,7 @@ bool verify_staged(const BuildPlan &plan, const std::string &dir, Diagnostic &er
 // so anything else under the output root (a user's own folders) is never touched. `dir` is the
 // directory's system path.
 bool is_prunable_build_dir(const fs::path &dir) {
-	const std::string name = dir.filename().string();
+	const std::string name = utf8_of(dir.filename());
 	std::error_code ec;
 	const std::string tmp_suffix = kBuildStagingSuffix;
 	if (name.size() > tmp_suffix.size() && name.compare(name.size() - tmp_suffix.size(), tmp_suffix.size(), tmp_suffix) == 0)
@@ -198,7 +199,7 @@ bool is_prunable_build_dir(const fs::path &dir) {
 	if (!is_build_id(name)) return false;
 	std::string text;
 	std::string io_error;
-	if (!read_file_text((dir / kBuildRecordFileName).string(), text, io_error)) return false;
+	if (!read_file_text(utf8_of(dir / kBuildRecordFileName), text, io_error)) return false;
 	io::JsonValue json;
 	std::string parse_error;
 	if (!io::json_parse(text, json, parse_error) || !json.is_object()) return false;
@@ -211,7 +212,7 @@ bool is_prunable_build_dir(const fs::path &dir) {
 // into its staging) still proves itself, so a later build prunes it instead of refusing its name as
 // "not a build directory". False when anything stayed.
 bool remove_build_dir(const fs::path &dir) {
-	const fs::path proof = dir / (staged_build_id(dir.filename().string()).empty() ? kBuildRecordFileName
+	const fs::path proof = dir / (staged_build_id(utf8_of(dir.filename())).empty() ? kBuildRecordFileName
 	                                                                             : kBuildStagingMarkerFileName);
 	std::error_code ec;
 	bool kept = false;
@@ -239,7 +240,7 @@ void prune_old_builds(const std::string &output_root, const std::string &keep_id
 			fs::directory_iterator(system_path(output_root), fs::directory_options::skip_permission_denied, ec)) {
 		if (ec) break;
 		if (!entry.is_directory(ec)) continue;
-		const std::string name = entry.path().filename().string();
+		const std::string name = utf8_of(entry.path().filename());
 		if (name == keep_id || !is_prunable_build_dir(entry.path())) continue;
 		bool keep = false;
 		for (const std::string &p : protected_dirs) {
@@ -356,9 +357,9 @@ bool is_build_id(const std::string &name) {
 std::string last_good_build_dir(const std::string &output_root) {
 	LastGood last;
 	if (!read_last_good(output_root, last)) return std::string();
-	const fs::path dir = fs::path(output_root) / last.build_id;
+	const std::string dir = join_path(output_root, last.build_id);
 	std::error_code ec;
-	return fs::is_directory(system_path(dir.generic_string()), ec) ? dir.generic_string() : std::string();
+	return fs::is_directory(system_path(dir), ec) ? dir : std::string();
 }
 
 BuildRun::BuildRun(BuildPlan plan, std::string output_root, ProtectedDirs protected_dirs) :
@@ -619,8 +620,7 @@ void BuildRun::settle() {
 	if (!ensure_directory(output_root_, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
-	const fs::path final_dir = fs::path(output_root_) / report_.build_id;
-	final_dir_ = final_dir.generic_string();
+	final_dir_ = join_path(output_root_, report_.build_id);
 	std::error_code ec;
 	if (fs::is_directory(system_path(final_dir_), ec)) {
 		// Same content, same build: prove it still mounts and hand it back.
@@ -648,7 +648,7 @@ void BuildRun::settle() {
 
 	LastGood last;
 	if (read_last_good(output_root_, last)) {
-		last_dir_ = (fs::path(output_root_) / last.build_id).generic_string();
+		last_dir_ = join_path(output_root_, last.build_id);
 		last_hashes_ = last.archive_hashes;
 		last_sizes_ = last.archive_sizes;
 	}
@@ -659,7 +659,7 @@ void BuildRun::settle() {
 	// over a name already there.
 	std::string tmp_dir;
 	for (int attempt = 0; attempt < kStagingAttempts && tmp_dir.empty(); ++attempt) {
-		const std::string candidate = (fs::path(output_root_) / staging_name(report_.build_id, attempt)).generic_string();
+		const std::string candidate = join_path(output_root_, staging_name(report_.build_id, attempt));
 		const fs::path staging = system_path(candidate);
 		if (fs::exists(staging, ec)) {
 			if (!is_prunable_build_dir(staging)) {
@@ -679,7 +679,7 @@ void BuildRun::settle() {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	tmp_dir_ = tmp_dir; // from here a failure or a cancel removes it
-	if (!write_file_atomic((fs::path(tmp_dir) / kBuildStagingMarkerFileName).generic_string(), report_.build_id, io_error)) {
+	if (!write_file_atomic(join_path(tmp_dir, kBuildStagingMarkerFileName), report_.build_id, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	phase_ = Phase::Archives;
@@ -697,13 +697,13 @@ void BuildRun::pack(uint64_t budget) {
 			return;
 		}
 		const BuildArchive &archive = plan_.archives[archive_index_];
-		const std::string target = (fs::path(tmp_dir_) / archive.file_name).generic_string();
+		const std::string target = join_path(tmp_dir_, archive.file_name);
 		if (!item_started_) {
 			item_started_ = true;
 			item_share_ = 0;
 			item_share_done_ = 0;
 			for (size_t i = 0; i < archive.entries.size(); ++i) item_share_ += stamps_[stamp_index(archive_index_, i)].size;
-			const std::string previous = (fs::path(last_dir_) / archive.file_name).generic_string();
+			const std::string previous = join_path(last_dir_, archive.file_name);
 			const auto found = last_hashes_.find(archive.file_name);
 			const auto recorded = last_sizes_.find(archive.file_name);
 			std::error_code ec;
@@ -752,7 +752,7 @@ void BuildRun::pack(uint64_t budget) {
 				}
 				s.archive = archive_index_;
 				s.failed_entry.clear();
-				const int rc = s.writer.open(system_path(target).string().c_str(), kBuildArchiveFormat, entries.data(),
+				const int rc = s.writer.open(target.c_str(), kBuildArchiveFormat, entries.data(),
 				                             static_cast<uint32_t>(entries.size()), &Streams::read_chunk, &s);
 				if (rc != pff::PFF_WRITE_OK) {
 					return fail(make_finding(CoreFinding::BuildArchive, DiagnosticSeverity::Error,
@@ -830,7 +830,7 @@ void BuildRun::copy_loose(uint64_t budget) {
 		if (!item_started_) {
 			item_started_ = true;
 			if (!s.open_unchanged(entry.source_path, stamp)) return fail(changed_while_packing(entry.logical_name));
-			if (!s.open_out((fs::path(tmp_dir_) / entry.logical_name).generic_string())) {
+			if (!s.open_out(join_path(tmp_dir_, entry.logical_name))) {
 				return fail(make_finding(CoreFinding::BuildCopy, DiagnosticSeverity::Error,
 				                         "cannot copy " + entry.logical_name, entry.logical_name));
 			}
@@ -873,9 +873,9 @@ void BuildRun::publish() {
 		if (!verify_staged(plan_, tmp_dir_, verify_error)) return fail(std::move(verify_error));
 		std::map<std::string, uint64_t> sizes;
 		for (const BuildArchive &archive : plan_.archives)
-			sizes[archive.file_name] = size_of((fs::path(tmp_dir_) / archive.file_name).generic_string());
+			sizes[archive.file_name] = size_of(join_path(tmp_dir_, archive.file_name));
 		record_ = io::json_write(build_record(report_.build_id, hashes_, sizes, report_.loose_written));
-		if (!write_file_atomic((fs::path(tmp_dir_) / kBuildRecordFileName).generic_string(), record_, io_error)) {
+		if (!write_file_atomic(join_path(tmp_dir_, kBuildRecordFileName), record_, io_error)) {
 			return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 		}
 		publish_ready_ = true;
@@ -891,8 +891,8 @@ void BuildRun::publish() {
 		                         "cannot publish the build: " + ec.message()));
 	}
 	tmp_dir_.clear(); // published: nothing left to clean up
-	fs::remove(system_path((fs::path(final_dir_) / kBuildStagingMarkerFileName).generic_string()), ec); // the record is its proof now
-	if (!write_file_atomic((fs::path(output_root_) / kLastGoodBuildFileName).generic_string(), record_, io_error)) {
+	fs::remove(system_path(join_path(final_dir_, kBuildStagingMarkerFileName)), ec); // the record is its proof now
+	if (!write_file_atomic(join_path(output_root_, kLastGoodBuildFileName), record_, io_error)) {
 		return fail(make_finding(CoreFinding::BuildWrite, DiagnosticSeverity::Error, io_error));
 	}
 	// The directories games run from, asked now: a game started (or found alive) since the build

@@ -19,6 +19,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <string>
@@ -260,6 +261,29 @@ static int test_rewrite_moves_the_stamp() {
 		TEST_EXPECT(now > last && fs::file_size(path) == text.size());
 		last = now;
 	}
+	return 0;
+}
+
+// A rename the system refuses while another holds the file (on Windows a reader that does not share
+// delete: an indexer, a scanner) is tried again a bounded few times and then refused with the refusal
+// that may pass, never waited on; with the file let go it renames (rename_with_retry, which the save's
+// replace, the build's publish and a case-only Rename take).
+static int test_rename_retry_is_bounded() {
+	editor_test::TempProjectDir dir("opennova_long_ops_rename_retry");
+	const std::string from = dir.file("held.txt"), to = dir.file("HELD2.txt");
+	std::string error;
+	TEST_EXPECT(write_file_atomic(from, std::string("held"), error));
+	std::error_code ec;
+#ifdef _WIN32
+	{
+		std::ifstream holder(system_path(from), std::ios::binary);
+		TEST_EXPECT(holder.is_open());
+		const auto began = std::chrono::steady_clock::now();
+		TEST_EXPECT(!rename_with_retry(system_path(from), system_path(to), ec) && rename_refusal_passes(ec));
+		TEST_EXPECT(std::chrono::steady_clock::now() - began < std::chrono::seconds(2));
+	}
+#endif
+	TEST_EXPECT(rename_with_retry(system_path(from), system_path(to), ec) && fs::is_regular_file(to) && !fs::exists(from));
 	return 0;
 }
 
@@ -1152,6 +1176,7 @@ int main(int argc, char **argv) {
 	failures += test_validation_started_again();
 	failures += test_rename_keeps_the_selection();
 	failures += test_rewrite_moves_the_stamp();
+	failures += test_rename_retry_is_bounded();
 	failures += test_retail_open();
 	return failures == 0 ? 0 : 1;
 }

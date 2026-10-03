@@ -9,6 +9,7 @@
 #include <editor/import/png_decode.h>
 #include <editor/import/quantize.h>
 #include <editor/model/diagnostic.h>
+#include <editor/project/project_files.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/tga/tga.h>
 
@@ -34,7 +35,7 @@ bool run_image(ImportContext &context, ImportProduct &out) {
 		return false;
 	}
 	ImportOutput output;
-	output.name = std::filesystem::path(source_name).stem().generic_string() + "." + wanted;
+	output.name = utf8_of(path_of(source_name).stem()) + "." + wanted;
 	if (wanted == "tga") {
 		if (!tga::tga_write_rgba32(image.pixels.data(), static_cast<uint32_t>(image.width),
 		                           static_cast<uint32_t>(image.height), output.bytes, error)) {
@@ -83,7 +84,7 @@ const Importer *importer_for(const std::string &source_name) {
 }
 
 const Importer *importer_for(const std::string &source_name, const std::vector<Importer> &table) {
-	const std::string extension = strutil::to_lower(std::filesystem::path(source_name).extension().generic_string());
+	const std::string extension = strutil::to_lower(utf8_of(path_of(source_name).extension()));
 	if (extension.empty()) return nullptr;
 	for (const Importer &importer : table)
 		for (const std::string &candidate : importer.extensions)
@@ -93,16 +94,16 @@ const Importer *importer_for(const std::string &source_name, const std::vector<I
 
 std::string renamed_import_output(const std::string &output, const std::string &old_source,
                                   const std::string &new_source) {
-	const std::filesystem::path path(output);
-	const std::string stem = path.stem().generic_string();
-	const std::string old_stem = std::filesystem::path(old_source).stem().generic_string();
-	const std::string new_stem = std::filesystem::path(new_source).stem().generic_string();
+	const std::filesystem::path path = path_of(output);
+	const std::string stem = utf8_of(path.stem());
+	const std::string old_stem = utf8_of(path_of(old_source).stem());
+	const std::string new_stem = utf8_of(path_of(new_source).stem());
 	// The source's stem itself, or followed by an underscore and the rest (`<stem>_01`).
 	const bool named = strutil::to_lower(stem) == strutil::to_lower(old_stem) ||
 	                   (stem.size() > old_stem.size() + 1 && stem[old_stem.size()] == '_' &&
 	                    strutil::to_lower(stem.substr(0, old_stem.size())) == strutil::to_lower(old_stem));
 	if (!named) return output;
-	return new_stem + stem.substr(old_stem.size()) + path.extension().generic_string();
+	return new_stem + stem.substr(old_stem.size()) + utf8_of(path.extension());
 }
 
 } // namespace opennova::editor
