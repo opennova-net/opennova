@@ -25,9 +25,11 @@ const std::vector<FieldSchema> &text_fields(NodeKind kind);
 Diagnostic text_finding(const FindingCodeRow &row, DiagnosticSeverity severity, std::string message,
 		const TextDocument &document, size_t offset);
 
-// The text type: the file is its text. The game reads its files through readers the editor does not
-// model yet (each configuration its own), so its validate_file makes no finding and its table has
-// no row.
+// The text type: the file is its text, but gt.ssc, which the game reads by its name decoded under a
+// key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]: the document shows the tag decoded and
+// Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
+// encode_key_chain). The game reads its files through readers the editor does not model yet (each
+// configuration its own), so its validate_file makes no finding and its table has no row.
 std::unique_ptr<DocumentBase> make_text_document();
 std::vector<Diagnostic> validate_text_file(const DocumentBase &document);
 FindingTable text_finding_codes();
