@@ -823,7 +823,8 @@ static int test_palette() {
 			rig.preferences.saves() == saves);
 	rig.session.poll();
 	TEST_EXPECT(rig.preferences.saves() == saves + 1 &&
-			rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101 }));
+			rig.preferences.preferences().recent_items.at("jo") == std::vector<int64_t>({ 106101 }) &&
+			rig.preferences.preferences().recent_items.size() == 1); // kept under the project's game
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
 	rig.session.poll();
 	TEST_EXPECT(rig.session.outcome().done() && rig.preferences.saves() == saves + 1);
@@ -845,7 +846,7 @@ static int test_palette() {
 	drop.name = "106101";
 	rig.session.handle(request::edit_in_viewport(kMission, drop));
 	rig.session.poll();
-	TEST_EXPECT(rig.preferences.preferences().recent_items == std::vector<int64_t>({ 106101, 106102 }));
+	TEST_EXPECT(rig.preferences.preferences().recent_items.at("jo") == std::vector<int64_t>({ 106101, 106102 }));
 	answer = ask(rig, R"({"op": "palette", "limit": 1})", error);
 	rows = answer.get("items");
 	TEST_EXPECT(rows && rows->array.size() == 1 && rows->array[0].get_string("group", "") == "recent" &&

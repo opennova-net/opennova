@@ -54,11 +54,16 @@ bool FilePreferencesStore::load(Preferences &out, Diagnostic &finding) {
 			if (item.is_string() && !item.string.empty()) settings.recent_projects.push_back(item.string);
 		}
 	}
-	// The recently placed items (S15): whole numbers, the first kRecentItemsMax.
-	if (const io::JsonValue *recent = json.get("recent_items"); recent && recent->is_array()) {
-		for (const io::JsonValue &item : recent->array) {
-			if (settings.recent_items.size() >= kRecentItemsMax) break;
-			if (item.is_number() && item.number == double(int64_t(item.number))) settings.recent_items.push_back(int64_t(item.number));
+	// The recently placed items (S15), per game (schema 3): an object of each game's list of whole
+	// numbers, the first kRecentItemsMax of each.
+	if (const io::JsonValue *recent = json.get("recent_items"); recent && recent->is_object()) {
+		for (const io::JsonMember &game : recent->object) {
+			if (game.key.empty() || !game.value.is_array()) continue;
+			std::vector<int64_t> &items = settings.recent_items[game.key];
+			for (const io::JsonValue &item : game.value.array) {
+				if (items.size() >= kRecentItemsMax) break;
+				if (item.is_number() && item.number == double(int64_t(item.number))) items.push_back(int64_t(item.number));
+			}
 		}
 	}
 	out = std::move(settings);
@@ -76,9 +81,14 @@ bool FilePreferencesStore::save(const Preferences &settings, Diagnostic &error) 
 	io::JsonValue recent = io::JsonValue::make_array();
 	for (const std::string &root : settings.recent_projects) recent.push(io::JsonValue::make_string(root));
 	json.set("recent_projects", std::move(recent));
-	io::JsonValue items = io::JsonValue::make_array();
-	for (const int64_t item : settings.recent_items) items.push(io::JsonValue::make_number(double(item)));
-	json.set("recent_items", std::move(items));
+	io::JsonValue by_game = io::JsonValue::make_object();
+	for (const auto &game : settings.recent_items) {
+		if (game.second.empty()) continue;
+		io::JsonValue items = io::JsonValue::make_array();
+		for (const int64_t item : game.second) items.push(io::JsonValue::make_number(double(item)));
+		by_game.set(game.first, std::move(items));
+	}
+	json.set("recent_items", std::move(by_game));
 	std::string io_error;
 	if (!ensure_directory(utf8_of(path_of(path).parent_path()), io_error) ||
 	    !write_file_atomic(path, io::json_write(json), io_error)) {
