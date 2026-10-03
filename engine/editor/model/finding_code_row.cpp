@@ -162,6 +162,15 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::PlaySpawn, code("play.spawn", G::Play) },
 	{ C::PlayUnsupported, code("play.unsupported", G::Play) },
 	{ C::ProjectExists, code("project.exists", G::Project) },
+	// The project's expansion against its game install (ADR 0046 S16, expansion_name.h): a name the
+	// install has already, an expansion to build on it lacks. Refused where a project is made or its
+	// settings applied; listed where an open project's install is read again (the install is this
+	// machine's, the project the modder's), refusing no build: the game mounts the build's own
+	// expansion whatever else the install holds.
+	{ C::ProjectExpansionNameTaken, listed(code("project.expansion.name_taken", G::Project)) },
+	{ C::ProjectExpansionNotInstalled, listed(code("project.expansion.not_installed", G::Project)) },
+	// An expansion for a game other than Joint Operations, whose expansions alone are witnessed.
+	{ C::ProjectExpansionUnsupported, code("project.expansion.unsupported", G::Project) },
 	{ C::ProjectFieldInvalid, code("project.field.invalid", G::Project) },
 	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
 	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },

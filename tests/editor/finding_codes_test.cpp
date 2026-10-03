@@ -306,7 +306,7 @@ static int test_columns() {
 	TEST_EXPECT(tokens_where([](const FindingCodeRow &row) { return !row.gates_build; }) ==
 	            Tokens({ "animation_map.no_reset", "catalog.item_type", "catalog.name_empty", "mission.event_missing",
 	                     "mission.group_range", "model.frame_missing", "model.light_part", "model.register_missing",
-	                     "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
+	                     "project.expansion.name_taken", "project.expansion.not_installed", "reference.missing", "reference.wrong_kind", "requirement.missing", "requirement.wrong_kind",
 	                     "shader.form", "strings.key_empty", "strings.section_empty", "style.continued_duplicate",
 	                     "style.directive_form", "style.directive_tail", "style.if_without_argument",
 	                     "style.invalid_name_char", "style.missing_value_delimiter", "style.nul_byte", "style.stops",

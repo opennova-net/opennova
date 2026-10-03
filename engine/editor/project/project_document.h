@@ -10,8 +10,9 @@ namespace opennova::editor {
 // The project file (ADR 0046 d6): `project.opennova` at the project root, versioned
 // UTF-8 JSON. Unknown schema versions are rejected outright; pre-1.0 there are no
 // migration readers. Everything machine-local (paths, window state) lives in
-// `.opennova/local.json` instead, so this file is what a modder commits.
-inline constexpr int kProjectSchemaVersion = 1;
+// `.opennova/local.json` instead, so this file is what a modder commits. Schema 2 (S16) added
+// the expansion object; a schema 1 file is refused with what changed.
+inline constexpr int kProjectSchemaVersion = 2;
 inline constexpr const char *kProjectFileName = "project.opennova";
 inline constexpr const char *kProjectCacheDirName = ".opennova";
 inline constexpr const char *kLocalSettingsFileName = "local.json";
@@ -34,6 +35,23 @@ struct ProjectExportSettings {
 	bool include_runtime = false;              // copy the runtime beside the data on export
 };
 
+// What the project is to the game's expansions (ADR 0046 S16): built as one of its own, played with
+// `/exp <name>` from `expansion\<name>\`, and built on an installed one (the import mounts the base
+// game and that expansion as the game does). Both empty: a standalone project of the base game. The
+// game reads an expansion's own files (its table, banks and music) only under `/exp`, so a project
+// builds on an installed expansion only as an expansion of its own [orig: Expansion_LoadAssets
+// @ 0x4a4906..0x4a49de]. Each name keeps expansion_name.h's rule.
+struct ProjectExpansion {
+	std::string name;      // builds as expansion\<name>\ ("" = standalone)
+	std::string builds_on; // an installed expansion ("" = the base game); requires `name`
+
+	bool standalone() const { return name.empty(); }
+	bool operator==(const ProjectExpansion &other) const {
+		return name == other.name && builds_on == other.builds_on;
+	}
+	bool operator!=(const ProjectExpansion &other) const { return !(*this == other); }
+};
+
 struct ProjectDocument {
 	int schema_version = kProjectSchemaVersion;
 	std::string project_id;   // a UUID minted at creation, stable for the project's life
@@ -41,6 +59,7 @@ struct ProjectDocument {
 	std::string target_game = kDefaultTargetGame; // a gameprofile code: jo, jodemo, dfx, dfx2, bhd
 	ProjectFeatures features;
 	ProjectExportSettings export_settings;
+	ProjectExpansion expansion; // `"expansion": {"name", "builds_on"}`, absent when standalone
 };
 
 // Where a project keeps things, derived from its root. `cache_dir` and everything
@@ -70,8 +89,9 @@ struct ProjectPaths {
 bool ensure_project_cache_dir(const ProjectPaths &paths, std::string &error);
 
 io::JsonValue project_document_to_json(const ProjectDocument &doc);
-// False with `error` set for a wrong schema version, a missing/invalid field or an
-// unknown target game; `out` is left untouched on failure.
+// False with `error` set for a wrong schema version, a missing/invalid field, an
+// unknown target game or an expansion the rule refuses (check_project_expansion: one the
+// target game has none of, a name the game cannot take); `out` is left untouched on failure.
 bool project_document_from_json(const io::JsonValue &json, ProjectDocument &out, Diagnostic &error);
 
 bool load_project_document(const std::string &project_file, ProjectDocument &out, Diagnostic &error);
@@ -82,16 +102,19 @@ bool save_project_document(const std::string &project_file, const ProjectDocumen
 // A fresh random UUID (version 4 text form).
 std::string make_project_id();
 
-// Whether a project could be made at `root` for `target_game` (a gameprofile code): the
-// directory must not already hold a project file. Nothing is written; create_project asks the
-// same first.
-bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error);
+// Whether a project could be made at `root` for `target_game` (a gameprofile code) as `expansion`
+// (the expansion's rule, check_project_expansion: what an install has is the caller's to weigh,
+// expansion_install_findings): the directory must not already hold a project file. Nothing is
+// written; create_project asks the same first.
+bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
+                        const ProjectExpansion &expansion = ProjectExpansion());
 
 // Create a project at `root`: the directory (created if missing) must not already hold a
 // project file. Writes `project.opennova` and the self-ignoring cache directory, returns
 // the new document. `target_game` must be a gameprofile code.
 bool create_project(const std::string &root, const std::string &title, const std::string &target_game,
-                    ProjectDocument &out, Diagnostic &error);
+                    ProjectDocument &out, Diagnostic &error,
+                    const ProjectExpansion &expansion = ProjectExpansion());
 
 // The project rooted at `root` (its project file must exist).
 bool open_project(const std::string &root, ProjectDocument &out, Diagnostic &error);
