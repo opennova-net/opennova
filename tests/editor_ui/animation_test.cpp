@@ -4,7 +4,8 @@
 // with its events' legend; Space runs and holds the clock, Right steps a frame and Home goes back to
 // the first, the speed is a choice, and the track scrubbed with the mouse holds the clip where it
 // is let go; the Inspector says what the game does with the row and who plays the map; the clip's
-// own Inspector its length and the rows that play it.
+// own Inspector its length and the rows that play it, its bones and frame events numbered from 0 as
+// the game counts them; the clip's outline shows no tool that cannot apply, a map's row its tools.
 #include <cctype>
 #include <string>
 
@@ -133,6 +134,31 @@ void test_timeline() {
 	      "the clip's length in frames and seconds");
 	CHECK(text.find("played by these map rows (1):") != std::string::npos && text.find("anims/skin.adm: walk forward") != std::string::npos,
 	      "the rows that play it");
+	// One numbering, the game's: the Inspector's bones and frame events from 0, as the events' titles
+	// and the timeline count frames (the fixture's clip: 3 bones, 5 frame events).
+	CHECK(in_order(text, {"### bones (3) ###", "|   0 | { bn01 pelvis }", "|   2 | { bn03 leg }", "### frame events (5) ###",
+	                      "|   0 | { 0 }", "|   4 | { 0 }"}) &&
+	              text.find("|   5 |") == std::string::npos,
+	      "the bones and the frame events numbered from 0");
+	// The clip's one row and its fixed lists: no outline tool can apply, so none shows.
+	CHECK(text.find("[ duplicate ]") == std::string::npos && text.find("[ remove ]") == std::string::npos &&
+	              text.find("[ up ]") == std::string::npos && text.find("[ down ]") == std::string::npos,
+	      "no locked Duplicate, Remove, Up or Down");
+	session.handle(request::select_record(clip->path(), {}));
+	run.settle();
+	ui.away();
+	text = lowered(logged_frame(ui));
+	CHECK(text.find("[ duplicate ]") == std::string::npos && text.find("[ remove ]") == std::string::npos,
+	      "none with nothing selected either: nothing in a clip moves");
+
+	// A map's rows can be duplicated and removed: its outline keeps them.
+	session.handle(request::open_document(path));
+	session.handle(request::select_record(path, walk));
+	run.settle();
+	ui.away();
+	text = lowered(logged_frame(ui));
+	CHECK(text.find("[ duplicate ]") != std::string::npos && text.find("[ remove ]") != std::string::npos,
+	      "a map's row: its tools");
 	ui.drain();
 }
 
