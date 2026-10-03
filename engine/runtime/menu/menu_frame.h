@@ -424,7 +424,8 @@ public:
 	// Bind (or clear, with an empty function) the custom-draw handler of the
 	// table at `index`; kept across configure() while the index stays a table.
 	void set_table_cell_painter(int index, MenuTableCellPainter painter);
-	// The table's runtime column layout (MenuTableColumnDef), kept across
+	// The table's runtime column records (MenuTableColumnDef: a kept authored
+	// column or a record started over, an init over either), kept across
 	// configure() and applied over the authored COLUMN layout.
 	void set_table_columns(int index, const std::vector<MenuTableColumnDef> &columns);
 	// Non-mutating front-most hit (the pump's claim walk without the state

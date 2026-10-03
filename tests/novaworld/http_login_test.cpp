@@ -41,6 +41,13 @@ opennova::EpaskParams epask_from_string(const std::string &text) {
 	return opennova::epask_from_string(text, out) ? out : opennova::EpaskParams{};
 }
 
+// A bundle as the server mints it at boot.
+opennova::EpaskParams fresh_epask() {
+	opennova::EpaskParams params;
+	check(opennova::generate_epask(params), "generate_epask converges");
+	return params;
+}
+
 // Mirror of apps/novaworld_server/http_listener.cpp url_decode (the body is
 // emitted raw by the helpers, so this only collapses '+' and '%XX' if present).
 std::string url_decode(const std::string &s) {
@@ -89,7 +96,7 @@ int main() {
 	using namespace opennova;
 
 	// The server generates this once at boot and ships it as the EPASK cookie.
-	const EpaskParams pub = generate_epask();
+	const EpaskParams pub = fresh_epask();
 
 	// ---- 1. Credential body round-trips through the server's decode path ----
 	{
@@ -103,7 +110,9 @@ int main() {
 		    {"pfid", "28"},
 		    {"rememberlogin", "1"},
 		};
-		const std::string body = build_credentials_post_body(pub, name, password, hidden);
+		std::string body;
+		check(build_credentials_post_body(pub, name, password, body, hidden),
+		      "the credential body builds under the issued bundle");
 
 		const auto form = parse_form_body(body);
 
@@ -258,7 +267,8 @@ int main() {
 		    {"failure", "jop_2_login.htm", true},
 		    {"success", "jop_2_main.htm", true},
 		};
-		const std::string body = build_login_post_body(pub, fields);
+		std::string body;
+		check(build_login_post_body(pub, fields, body), "the login body builds under the issued bundle");
 		const auto form = parse_form_body(body);
 
 		check(form.at("EPASK") == epask_to_string(pub), "EPASK echoed plaintext");
@@ -275,6 +285,19 @@ int main() {
 		      "failure decrypts");
 		// rememberlogindata is the lone empty plaintext passthrough (matches retail).
 		check(form.at("rememberlogindata").empty(), "rememberlogindata empty plaintext");
+	}
+
+	// ---- 4. Params the modexp gate rejects build no body ----
+	// The field's encryption fails as a result, not a throw (ADR 0049 d5); the
+	// flow refuses such a bundle before it gets here (LobbyHttpFlow's Prepare leg).
+	{
+		const EpaskParams rejected{0, 0, "k"};
+		std::string body = "stale";
+		check(!build_login_post_body(rejected, {{"NAME", "ljim", true}}, body) && body.empty(),
+		      "an encrypted field under rejected params builds no body");
+		check(build_login_post_body(rejected, {{"EPASK", "0:0:k", false}}, body) &&
+		          body == "EPASK=0:0:k",
+		      "a body with no encrypted field needs no usable params");
 	}
 
 	if (g_failures == 0) {

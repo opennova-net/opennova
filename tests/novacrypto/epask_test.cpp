@@ -1,7 +1,6 @@
 #include <net/novacrypto/epask.h>
 
 #include <cstdio>
-#include <stdexcept>
 #include <string>
 
 namespace {
@@ -17,6 +16,12 @@ bool expect_eq(const std::string &got, const std::string &want, const char *what
 std::string decrypt(const std::string &ciphertext, const opennova::EpaskParams &params) {
 	std::string out;
 	return opennova::epask_decrypt(ciphertext, params, out) ? out : std::string("<rejected>");
+}
+
+// The encrypted field, or "<rejected>" where epask_encrypt returns false.
+std::string encrypt(const std::string &plaintext, const opennova::EpaskParams &params) {
+	std::string out;
+	return opennova::epask_encrypt(plaintext, params, out) ? out : std::string("<rejected>");
 }
 
 // The parsed bundle; `ok` whether epask_from_string accepted it.
@@ -59,7 +64,7 @@ bool fixtures_match_python() {
 		// ciphertext exactly. Confirmed in grill wave 3 (NW-C2) against retail
 		// (EPASK_Encrypt@0x6669a0) and by compiling this source against the
 		// production-proven onnw Python — the two agree byte-for-byte.
-		const std::string ct = opennova::epask_encrypt(c.plaintext, params);
+		const std::string ct = encrypt(c.plaintext, params);
 		if (!expect_eq(ct, c.ciphertext, "encrypt fixture")) return false;
 		const std::string back = decrypt(ct, params);
 		if (!expect_eq(back, c.plaintext, "round-trip")) return false;
@@ -133,16 +138,16 @@ bool rejected_params_never_reach_modexp() {
 	             opennova::EpaskParams{10001, 258, "k"},
 	             opennova::EpaskParams{0, 207887, "k"},
 	     }) {
-		bool threw = false;
-		try { (void)opennova::epask_encrypt("x", p); }
-		catch (const std::exception &) { threw = true; }
-		if (!threw) {
+		// Rejected params are a result, never a throw (ADR 0049 d5): false, the
+		// output emptied, the reason named [orig: EPASK_Encrypt -1 @0x666a9b].
+		std::string out = "stale";
+		std::string why;
+		if (opennova::epask_encrypt("x", p, out, &why) || !out.empty() || why.empty()) {
 			std::fprintf(stderr, "FAIL: encrypt with exp=%u mod=%u must be rejected\n",
 			             p.exponent, p.modulus);
 			return false;
 		}
-		std::string out;
-		std::string why;
+		why.clear();
 		if (opennova::epask_decrypt("ABCDEFGH", p, out, &why) || why.empty()) {
 			std::fprintf(stderr, "FAIL: decrypt with exp=%u mod=%u must be rejected\n",
 			             p.exponent, p.modulus);
@@ -153,7 +158,7 @@ bool rejected_params_never_reach_modexp() {
 	// power a permutation (259 = 7 * 37 is not an RSA modulus, so x^3 mod 259
 	// collides); the gate only checks the bounds, not the pair's validity.
 	const opennova::EpaskParams edge{1, 259, "k"};
-	const std::string back = decrypt(opennova::epask_encrypt("hi", edge), edge);
+	const std::string back = decrypt(encrypt("hi", edge), edge);
 	if (!expect_eq(back, "hi", "modulus 259 passes the gate and round-trips")) return false;
 	return true;
 }
@@ -165,8 +170,8 @@ bool encrypt_truncates_at_first_nul() {
 	params.key      = "1700000000000000001";
 
 	const std::string with_tail("abc\0def", 7);
-	const std::string ct = opennova::epask_encrypt(with_tail, params);
-	if (!expect_eq(ct, opennova::epask_encrypt("abc", params),
+	const std::string ct = encrypt(with_tail, params);
+	if (!expect_eq(ct, encrypt("abc", params),
 	               "encrypt truncates at first NUL")) return false;
 	if (!expect_eq(decrypt(ct, params), "abc",
 	               "NUL-truncated ciphertext decrypts to prefix")) return false;
@@ -174,7 +179,11 @@ bool encrypt_truncates_at_first_nul() {
 }
 
 bool generate_yields_valid_params() {
-	auto params = opennova::generate_epask();
+	opennova::EpaskParams params;
+	if (!opennova::generate_epask(params)) {
+		std::fprintf(stderr, "FAIL: generate_epask converges\n");
+		return false;
+	}
 	if (params.modulus <= 200000u || params.modulus >= 300000u) {
 		std::fprintf(stderr, "FAIL: generate_epask modulus %u out of range\n",
 		             params.modulus);
@@ -191,8 +200,7 @@ bool generate_yields_valid_params() {
 		return false;
 	}
 	// Sanity: encrypt + decrypt round-trips with the generated params.
-	const std::string back = decrypt(
-		opennova::epask_encrypt("test", params), params);
+	const std::string back = decrypt(encrypt("test", params), params);
 	if (!expect_eq(back, "test", "generated params round-trip")) return false;
 	return true;
 }

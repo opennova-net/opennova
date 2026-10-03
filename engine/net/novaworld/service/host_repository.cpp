@@ -1,5 +1,7 @@
 #include <net/novaworld/host_repository.h>
 
+#include <base/io/strutil.h>
+
 namespace opennova::hostdb {
 
 namespace {
@@ -222,12 +224,9 @@ bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) 
 	take(h.game_type,    "GameType");
 	take(h.mission_name, "MissionName");
 	take(h.region,       "Region");
-	if (auto v = lobby_status_value(blob, "Players"); !v.empty()) {
-		try { h.player_count = std::stoi(v); } catch (...) {}
-	}
-	if (auto v = lobby_status_value(blob, "MaxPlayers"); !v.empty()) {
-		try { h.max_players = std::stoi(v); } catch (...) {}
-	}
+	// A count that is no number (or out of int's range) keeps the stored one.
+	if (const auto n = strutil::parse_int(lobby_status_value(blob, "Players"))) h.player_count = *n;
+	if (const auto n = strutil::parse_int(lobby_status_value(blob, "MaxPlayers"))) h.max_players = *n;
 	take(h.dedicated,   "Dedicated");
 	take(h.locked,      "Locked");
 	take(h.skins,       "Skins");

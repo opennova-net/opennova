@@ -3,8 +3,6 @@
 #include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/crc32.h>
 
-#include <stdexcept>
-
 namespace opennova {
 
 namespace {
@@ -116,11 +114,13 @@ void ticket_transform(std::vector<uint8_t> &data, const std::string &key, bool d
 
 // [orig: NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0 (retail), single-key path: CRC32-append
 //        -> NWU-encrypt -> A-P. grill wave 3 NW-C3, MATCHING. (Multi-key form = Python remember-cookie.)]
-std::string encode_pub_value(const std::vector<uint8_t> &plaintext,
-                             const std::string &pcid_key) {
-	if (pcid_key.empty()) {
-		throw std::runtime_error("pcid_key is required");
-	}
+// The original refuses only a missing buffer or a short output buffer
+// [orig: @0x619012, @0x619057]; the empty key is this port's precondition (the
+// service never encodes without the host's PCIDKey), refused as a result.
+bool encode_pub_value(const std::vector<uint8_t> &plaintext, const std::string &pcid_key,
+                      std::string &out) {
+	out.clear();
+	if (pcid_key.empty()) return false;
 	const uint32_t crc = crc32_be(plaintext);
 	std::vector<uint8_t> buffer = plaintext;
 	buffer.reserve(plaintext.size() + 4);
@@ -130,12 +130,14 @@ std::string encode_pub_value(const std::vector<uint8_t> &plaintext,
 	buffer.push_back(static_cast<uint8_t>((crc >> 16) & 0xFFu));
 	buffer.push_back(static_cast<uint8_t>((crc >> 24) & 0xFFu));
 	ticket_transform(buffer, pcid_key, /*decrypt=*/false);
-	return encode_ap(buffer);
+	out = encode_ap(buffer);
+	return true;
 }
 
-std::string encode_pub_value(const std::string &plaintext, const std::string &pcid_key) {
+bool encode_pub_value(const std::string &plaintext, const std::string &pcid_key,
+                      std::string &out) {
 	return encode_pub_value(
-		std::vector<uint8_t>(plaintext.begin(), plaintext.end()), pcid_key);
+		std::vector<uint8_t>(plaintext.begin(), plaintext.end()), pcid_key, out);
 }
 
 // One key's probe: decipher a copy, then compare the trailing LE CRC with the

@@ -159,6 +159,43 @@ inline constexpr const char *kExpansionUnnamed = "Unnamed Expansion";
 inline constexpr const char *kExpansionNoDescription = "This expansion lacks a description.";
 ExpansionInfo vfs_expansion_info(const std::string &game_root, const std::string &expansion);
 
+// Where Expansion_LoadAssets runs, which decides what its override-table load
+// reaches (vfs_expansion_override_table).
+enum class ExpansionLoadPoint {
+    // Boot and the full reload: no archive is open [orig: Game_InitSubsystems —
+    // the scan closed its archives @ 0x4a46c4..0x4a46db, Expansion_LoadAssets
+    // @ 0x4a6f37, then PFF_OpenAllArchives @ 0x4a6f44; Game_ReloadExpansionAndMods
+    // — PFF_CloseAllOpenArchives @ 0x552770, then @ 0x552775].
+    ArchivesClosed,
+    // The menu's and the join's switch: the previous set is still open
+    // [orig: Expansion_ReloadAllAssets @ 0x5683a9, closed after @ 0x5683ae;
+    // Expansion_SwitchTo @ 0x568963, closed after @ 0x568968].
+    ArchivesOpen,
+};
+
+// The expansion's text-override table [orig: g_TextOverrideTable @ 0x33429b0]
+// into `out`: the bytes of the loose expansion/<name>/<name>.bin, the only file
+// that serves it. Expansion_LoadAssets asks File_LoadResource for
+// "expansion\<n>\<n>.bin" [orig: @ 0x4a49d4 -> TextResource_LoadOverrideTable
+// @ 0x75d5c0 -> File_LoadResource @ 0x75b540], which asks an archive for the
+// whole query (the basename strip's setter @ 0x75a590 has no caller, and
+// PFF_FindEntry @ 0x7685d0 matches the archive's flat entry names), so an
+// archived <n>.bin never serves it. With an archive open and loose-first off it
+// walks only the archives (@ 0x75b56c..0x75b57c), so at ArchivesOpen the loose
+// file is reached only under /d (`loose_first`: the session flag /d raises
+// @ 0x4a6fac). The loose walk tries the search path's join first,
+// expansion/<n>/expansion/<n>/<n>.bin (the path @ 0x4a49bb, the join
+// @ 0x75b5b9), then the query itself (@ 0x75b5a4), both under `game_root`. False
+// (no table: the old one freed, the global left NULL @ 0x75d5c7..0x75d5f6) for
+// an empty expansion or one whose <n>.pff is absent (the name cleared
+// @ 0x4a4775, the table cleared @ 0x4a482a), or when no loose file is reached;
+// an empty file is no table either (the loader would fix pointers up over a
+// zero-length allocation, a degenerate original path with no value to keep).
+// docs/interface/rtxt-strings-re.md "The override table's source" (D-RTXT-10).
+bool vfs_expansion_override_table(const std::string &game_root, const std::string &expansion,
+                                  ExpansionLoadPoint point, bool loose_first,
+                                  std::vector<uint8_t> &out);
+
 // The expansion version-file CRC [orig: CRC_ComputeCustomTable @ 0x53c820]:
 // MSB-first CRC-32, polynomial 0x04C11DB7, init -1, no reflection, no final
 // xor ("CRC-32/MPEG-2"; the 256-entry table @ 0x830780 — entries [1]

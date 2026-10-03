@@ -646,6 +646,11 @@ func _enter_menu(dir: String) -> bool:
 	# The menu, loading screen, and world are one runtime resource session.
 	# GameWorld must not remount from mutable persisted settings after boot.
 	_world.set_resource_root(_root)
+	# The mounted expansion's text-override table (a loose expansion/<n>/<n>.bin
+	# only, never the archived copy), installed as the table every string lookup
+	# tries first and re-installed on each remount of this root, the menu's and the
+	# join's expansion switches included (Strings.track_expansion_override).
+	Strings.track_expansion_override(_root)
 	_state = State.MENU
 	_shell_presentation.enter_menu(_world, _hud)
 	_wire_shell()

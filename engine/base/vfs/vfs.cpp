@@ -761,6 +761,39 @@ int32_t vfs_expansion_version_checksum(const std::string &game_root,
     return vfs_version_crc(bytes.data(), bytes.size());
 }
 
+bool vfs_expansion_override_table(const std::string &game_root, const std::string &expansion,
+                                  ExpansionLoadPoint point, bool loose_first,
+                                  std::vector<uint8_t> &out) {
+    out.clear();
+    // [orig: Expansion_LoadAssets — File_CheckExists("expansion\<n>\<n>.pff") @ 0x4a4767,
+    //  the name cleared @ 0x4a4775, TextResource_LoadOverrideTable(NULL) @ 0x4a482a]
+    fs::path archive;
+    if (game_root.empty() || expansion.empty() ||
+        !resolve_retail_loose_file(game_root, {"expansion", expansion, expansion + ".pff"}, archive))
+        return false;
+    // [orig: File_LoadResource @ 0x75b540 — with an archive open and loose-first off only
+    //  the archives are walked (@ 0x75b56c..0x75b57c), and none matches the whole query]
+    if (point == ExpansionLoadPoint::ArchivesOpen && !loose_first) return false;
+    // The search path `expansion\<n>` (@ 0x4a49bb) joined to the query (@ 0x75b5b9), then
+    // the query itself (@ 0x75b5a4).
+    const std::string bin = expansion + ".bin";
+    const std::vector<std::vector<std::string>> walk = {
+            {"expansion", expansion, "expansion", expansion, bin},
+            {"expansion", expansion, bin},
+    };
+    for (const std::vector<std::string> &components : walk) {
+        fs::path file;
+        if (!resolve_retail_loose_file(game_root, components, file)) continue;
+        std::error_code ec;
+        if (!fs::is_regular_file(file, ec)) continue;
+        std::ifstream in(file, std::ios::binary);
+        if (!in) continue;
+        out.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+        return !out.empty();
+    }
+    return false;
+}
+
 std::string vfs_country_code(const std::string &game_root) {
     // [orig: Game_ReadCCBinFile @ 0x4a5860 — fopen("CC.BIN", "rb") @ 0x4a58d0,
     //  one byte @ 0x4a58e6 then a second @ 0x4a58fe, the NUL @ 0x4a591e,

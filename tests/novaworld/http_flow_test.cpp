@@ -35,7 +35,9 @@ static bool contains(const std::string &h, const std::string &needle) {
 
 // A valid EPASK bundle the server "issues" in the prepare Set-Cookie.
 static std::string make_epask_cookie() {
-	return nw::epask_to_string(nw::generate_epask());
+	nw::EpaskParams params;
+	expect(nw::generate_epask(params), "generate_epask converges");
+	return nw::epask_to_string(params);
 }
 
 // Concrete (OpenNova) context: a non-templated startup_url -> login skips NWSTART, base derived from it.

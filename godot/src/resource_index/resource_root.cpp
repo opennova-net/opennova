@@ -47,6 +47,8 @@ void ResourceRoot::_bind_methods() {
 			&ResourceRoot::expansion_description);
 	ClassDB::bind_method(D_METHOD("get_expansion"), &ResourceRoot::get_expansion);
 	ClassDB::bind_method(D_METHOD("is_runtime_mount"), &ResourceRoot::is_runtime_mount);
+	ClassDB::bind_method(D_METHOD("get_expansion_override_table"),
+			&ResourceRoot::get_expansion_override_table);
 	ClassDB::bind_method(D_METHOD("get_root_dir"), &ResourceRoot::get_root_dir);
 	ClassDB::bind_method(D_METHOD("get_last_error"), &ResourceRoot::get_last_error);
 	ClassDB::bind_method(D_METHOD("clear"), &ResourceRoot::clear);
@@ -64,6 +66,10 @@ void ResourceRoot::_bind_methods() {
 
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_LOOSE_FIRST);
 	BIND_ENUM_CONSTANT(LOOKUP_FORCE_ARCHIVE_ONLY);
+
+	// Every mount_runtime() / set_root_dir() is done: the mount, the expansion and
+	// the expansion's override table may have changed.
+	ADD_SIGNAL(MethodInfo("mounted"));
 }
 
 PackedStringArray ResourceRoot::list_missing_boot_resources() const {
@@ -126,6 +132,10 @@ bool ResourceRoot::is_runtime_mount() const {
 	return mount_kind_ == MountKind::Runtime;
 }
 
+PackedByteArray ResourceRoot::get_expansion_override_table() const {
+	return expansion_override_table_;
+}
+
 namespace {
 
 // One list_file_entries row (the resource-index enumeration edge the effect
@@ -175,17 +185,39 @@ Error ResourceRoot::set_root_dir(const String &path) {
 	// Loose-source mount: never open PFF archives. Loose files aren't SCR-wrapped,
 	// so the JO default (version-detect) is correct here.
 	expansion_ = String();
+	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
 	const Error err = mount_with_mode(path, String(), opennova::VfsMountMode::LooseOnly, "jo",
 			opennova::VfsArchiveDiscovery::ScanAll);
 	if (err == OK) {
 		mount_kind_ = MountKind::Loose;
 	}
+	emit_signal("mounted");
 	return err;
 }
 
 Error ResourceRoot::mount_runtime(const String &path, const String &expansion, bool allow_loose_override,
 		const String &game_code) {
+	// A root already runtime-mounted switches in place with its old archives still open
+	// (the menu's and the join's expansion switch); any other mount is the boot's, with
+	// none open. The engine's vfs_expansion_override_table says what each one reaches.
+	const opennova::ExpansionLoadPoint load_point = mount_kind_ == MountKind::Runtime
+			? opennova::ExpansionLoadPoint::ArchivesOpen
+			: opennova::ExpansionLoadPoint::ArchivesClosed;
+	const Error err = mount_runtime_archives_(path, expansion, allow_loose_override, game_code);
+	expansion_override_table_ = PackedByteArray();
+	std::vector<uint8_t> table;
+	if (err == OK &&
+			opennova::vfs_expansion_override_table(opennova::to_std(root_dir_),
+					opennova::to_std(expansion_), load_point, allow_loose_override, table)) {
+		expansion_override_table_ = to_packed_bytes(table);
+	}
+	emit_signal("mounted");
+	return err;
+}
+
+Error ResourceRoot::mount_runtime_archives_(const String &path, const String &expansion,
+		bool allow_loose_override, const String &game_code) {
 	// Runtime: the packed PFFs are the game data; loose files only shadow them under `/d`.
 	mount_kind_ = MountKind::None;
 	const opennova::VfsMountMode mode = allow_loose_override
@@ -292,6 +324,7 @@ void ResourceRoot::clear() {
 	root_dir_ = String();
 	last_error_ = String();
 	expansion_ = String();
+	expansion_override_table_ = PackedByteArray();
 	mount_kind_ = MountKind::None;
 	// Release Godot resources while RenderingServer is still alive. Waiting for
 	// the next epoch-checked lookup (or this RefCounted's destructor) retains
