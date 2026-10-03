@@ -797,15 +797,25 @@ int Compiler::parse_stmt(const char **err) {
             *err = "unknown play target (expected 'sound_N' or a bound name)";
             return -1;
         }
-        /* The play opcode operand is a single byte; a larger index would silently
-           wrap to a different sound. Reject it so the editor can never emit a
-           valid-but-wrong play (the original engine reads only a u8 here too). */
-        if (idx > 255) {
-            *err = "play target index out of range (max 255)";
+        /* The engine has two play opcodes that differ only in the index's width:
+           0x3E reads a byte, 0x3D a 16-bit word, and both start the sound
+           [orig: AudioVM_Op_Play @ 0x672CB0 `movzx eax, byte ptr [esi]`,
+           AudioVM_Op_PlayWait @ 0x672C90 `movzx eax, word ptr [esi]`]. Retail's
+           compiler writes the byte form up to 255 and the word form past it
+           (jox01's MJox01.bin: 823 plays of 0..255, 61 wide plays of 256..316, no
+           wide play below 256), so this does too; past a word is no index. */
+        if (idx > 0xFFFF) {
+            *err = "play target index out of range (max 65535)";
             return -1;
         }
-        emit.byte((uint8_t)MUS_OP_PLAY);
-        emit.byte((uint8_t)idx);
+        if (idx > 255) {
+            emit.byte((uint8_t)MUS_OP_PLAYW);
+            emit.byte((uint8_t)(idx & 0xFF));
+            emit.byte((uint8_t)(idx >> 8));
+        } else {
+            emit.byte((uint8_t)MUS_OP_PLAY);
+            emit.byte((uint8_t)idx);
+        }
         lex.advance();
         return 0;
     }
@@ -985,6 +995,26 @@ int Compiler::parse_stmt(const char **err) {
             *err = "too many targets in on(...) table (max 64)";
             return -1;
         }
+        /* A play table holding an index past a byte takes the word-wide play in every
+           entry: the table executes its entry through the opcode table, so the entry
+           [0x3D lo hi] reads its index as the plain statement does [orig:
+           AudioVM_Op_TableExec @ 0x672BFB..0x672C03 dispatching the entry's opcode;
+           AudioVM_Op_PlayWait @ 0x672C90]. */
+        int play_index[64];
+        if (inner_op == MUS_OP_PLAY) {
+            for (int t = 0; t < ntargets; ++t) {
+                play_index[t] = resolve_play_target(targets[t]);
+                if (play_index[t] < 0) {
+                    *err = "unknown play target in on(...) play table";
+                    return -1;
+                }
+                if (play_index[t] > 0xFFFF) {
+                    *err = "play target index out of range in on(...) table (max 65535)";
+                    return -1;
+                }
+                if (play_index[t] > 255) { inner_op = (uint8_t)MUS_OP_PLAYW; entry_size = 3; }
+            }
+        }
         /* Emit tablexec opcode + 4 header bytes: count, inner_op, entry_size,
            skip_size. skip_size is the TOTAL encoded instruction length
            (1 opcode + 4 header + count*entry_size body); Jointops.exe's
@@ -1007,7 +1037,11 @@ int Compiler::parse_stmt(const char **err) {
         emit.byte((uint8_t)total_size);
         for (int t = 0; t < ntargets; ++t) {
             emit.byte(inner_op);
-            if (entry_size == 2) {
+            if (inner_op == MUS_OP_PLAYW) {
+                /* wide play: entry[1..2] = sound idx (16-bit LE) */
+                emit.byte((uint8_t)(play_index[t] & 0xFF));
+                emit.byte((uint8_t)(play_index[t] >> 8));
+            } else if (entry_size == 2) {
                 /* enter or play: entry[1] = section/sound idx (1 byte) */
                 if (inner_op == MUS_OP_SETSTATE) {
                     int sidx = section_find_or_create(targets[t]);
@@ -1018,16 +1052,7 @@ int Compiler::parse_stmt(const char **err) {
                     emit.byte((uint8_t)sidx);
                 } else {
                     /* play: target is sound_N or a bound name */
-                    int sidx = resolve_play_target(targets[t]);
-                    if (sidx < 0) {
-                        *err = "unknown play target in on(...) play table";
-                        return -1;
-                    }
-                    if (sidx > 255) {
-                        *err = "play target index out of range in on(...) table (max 255)";
-                        return -1;
-                    }
-                    emit.byte((uint8_t)sidx);
+                    emit.byte((uint8_t)play_index[t]);
                 }
             } else {
                 /* goto: entry[1..4] = absolute target offset (4 LE bytes) */

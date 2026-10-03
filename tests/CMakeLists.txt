@@ -797,7 +797,7 @@ opennova_add_mixed_test(mus_names_roundtrip COMMAND mus_names_roundtrip_test
 # (true for both stock bins). Pins that the recompiled entry names the same
 # section -- a drift the text round-trip and encode-idempotence cannot see.
 add_executable(mus_entry_roundtrip_test mus/mus_entry_roundtrip_test.cpp)
-target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_formats)
+target_link_libraries(mus_entry_roundtrip_test PRIVATE opennova_base opennova_formats)
 target_include_directories(mus_entry_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(mus_entry_roundtrip_test PRIVATE
     MUS_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/mus")

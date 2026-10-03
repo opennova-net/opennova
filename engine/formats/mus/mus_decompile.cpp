@@ -658,17 +658,18 @@ static void decompile_block(Buf *out,
             }
         }
 
-        /* Control flow block detection. Only consult the cf map at the
-           top-level (the Python decompiler also reanalyzes per inner call,
-           but for our fixture only the top-level if_else block is detected,
-           and inner bodies pass empty entry points anyway). */
+        /* Control flow block detection, in a body as at the top level: the
+           map holds every branch by its offset, so an if nested in an if's
+           body is structured there too (the Python decompiler reanalyzes per
+           inner call). Consulted at the top level alone, jox01's MJox01.bin
+           lost fourteen nested ifs (`if (Var02 != 11) { play; enter }` inside
+           an if) to `// if !(...) goto @...` comments, which compile to
+           nothing. */
         const CFBlock *block = NULL;
-        if (!suppress_entries) {
-            for (int k = 0; k < cf->count; ++k) {
-                if (cf->blocks[k].start_offset == inst->offset) {
-                    block = &cf->blocks[k];
-                    break;
-                }
+        for (int k = 0; k < cf->count; ++k) {
+            if (cf->blocks[k].start_offset == inst->offset) {
+                block = &cf->blocks[k];
+                break;
             }
         }
         if (block && block->type == CF_TYPE_IF) {

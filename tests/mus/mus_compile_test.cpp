@@ -3,6 +3,8 @@
 #include <string.h>
 #include <formats/mus/mus.h>
 
+#include <string>
+
 using namespace opennova::mus;
 
 static int passed = 0, failed = 0;
@@ -104,18 +106,63 @@ static int compiles(const char *src) {
     return rc == 0;
 }
 
-static int test_reject_play_track_over_255(void) {
-    CHECK(!compiles(
-        "script t\nsection Begin\n{\n  play sound_256\n  done\n}\n"),
-        "play sound_256 must be rejected, not wrapped to sound_0");
-    return 1;
+/* The compiled bytecode of `src`, empty when it does not compile. */
+static std::string bytecode(const char *src) {
+    MusScript out = {};
+    int el = 0, ec = 0;
+    const char *em = NULL;
+    std::string code;
+    if (mus_compile(src, &out, &el, &ec, &em) == 0 && out.code)
+        code.assign(reinterpret_cast<const char *>(out.code), out.code_size);
+    mus_script_free(&out);
+    return code;
 }
 
-static int test_accept_play_track_255(void) {
-    /* 255 is the boundary: still a valid single-byte operand. */
-    CHECK(compiles(
-        "script t\nsection Begin\n{\n  play sound_255\n  done\n}\n"),
-        "play sound_255 is in range and must compile");
+/* The engine's two play opcodes differ only in the index's width: 0x3E reads a byte, 0x3D a word
+   [orig: AudioVM_Op_Play @ 0x672CB0, AudioVM_Op_PlayWait @ 0x672C90]. Retail's compiler writes the
+   byte form up to 255 and the word form past it (jox01's MJox01.bin: 823 byte plays, 61 word plays,
+   all of 256..316), so a sound past 255 compiles to the word form, never wraps; past a word is no
+   index. A play table holding one past a byte takes the word form in every entry (the table runs its
+   entry through the opcode table [orig: AudioVM_Op_TableExec @ 0x672BFB]). And the decompiled text of
+   a wide play compiles back to the same bytes. */
+static int test_play_track_widths(void) {
+    const std::string narrow = bytecode("script t\nsection Begin\n{\n  play sound_255\n  done\n}\n");
+    CHECK(narrow.find(std::string("\x3E\xFF", 2)) != std::string::npos, "sound_255: the byte form");
+    const std::string wide = bytecode("script t\nsection Begin\n{\n  play sound_256\n  done\n}\n");
+    CHECK(wide.find(std::string("\x3D\x00\x01", 3)) != std::string::npos, "sound_256: the word form, little-endian");
+    CHECK(wide.find('\x3E') == std::string::npos, "sound_256 never wraps to a byte play");
+    const std::string jox = bytecode("script t\nsection Begin\n{\n  play sound_316\n  done\n}\n");
+    CHECK(jox.find(std::string("\x3D\x3C\x01", 3)) != std::string::npos, "sound_316: the word form");
+    CHECK(!compiles("script t\nsection Begin\n{\n  play sound_65536\n  done\n}\n"),
+          "play sound_65536 must be rejected, not wrapped");
+    /* tablexec 0x35: count 2, inner 0x3D, entry size 3, total 5 + 2*3 = 11, then the entries. */
+    const std::string table = bytecode("script t\nsection Begin\n{\n  on (Var00) play sound_1 sound_300\n  done\n}\n");
+    CHECK(table.find(std::string("\x35\x02\x3D\x03\x0B\x3D\x01\x00\x3D\x2C\x01", 11)) != std::string::npos,
+          "a play table with a sound past 255: word-form entries");
+    const std::string small = bytecode("script t\nsection Begin\n{\n  on (Var00) play sound_1 sound_2\n  done\n}\n");
+    CHECK(small.find(std::string("\x35\x02\x3E\x02\x09\x3E\x01\x3E\x02", 9)) != std::string::npos,
+          "a play table within a byte keeps the byte form");
+    /* Compiled, decompiled and compiled again: the same bytecode. */
+    MusScript script = {};
+    int el = 0, ec = 0;
+    const char *em = NULL;
+    CHECK(mus_compile("script t\nsection Begin\n{\n  play sound_255\n  play sound_316\n  on (Var00) play sound_2 sound_400\n}\n",
+                      &script, &el, &ec, &em) == 0, em ? em : "compile");
+    const int needed = mus_decompile(&script, NULL, 0);
+    std::string text(size_t(needed > 0 ? needed : 0) + 1, '\0');
+    CHECK(needed > 0 && mus_decompile(&script, &text[0], text.size()) == needed, "decompile");
+    text.resize(size_t(needed));
+    const std::string first(reinterpret_cast<const char *>(script.code), script.code_size);
+    mus_script_free(&script);
+    const std::string again = bytecode(text.c_str());
+    if (again != first) {
+        fprintf(stderr, "%s\n", text.c_str());
+        for (const std::string *code : {&first, &again}) {
+            for (unsigned char c : *code) fprintf(stderr, "%02X ", c);
+            fprintf(stderr, "\n");
+        }
+    }
+    CHECK(again == first, "the decompiled text compiles to the same bytecode");
     return 1;
 }
 
@@ -185,8 +232,7 @@ int main(void) {
     RUN_TEST(test_compile_minimal_script);
     RUN_TEST(test_compile_minimal_single_section);
     RUN_TEST(test_encode_file_minimal);
-    RUN_TEST(test_reject_play_track_over_255);
-    RUN_TEST(test_accept_play_track_255);
+    RUN_TEST(test_play_track_widths);
     RUN_TEST(test_reject_switch_over_64_targets);
     RUN_TEST(test_reject_goto_table_too_large);
     printf("\n%d passed, %d failed\n", passed, failed);
