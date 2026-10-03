@@ -38,21 +38,26 @@ Preferences every_preference() {
 	preferences.game_install = "D:/Joint Operations";
 	preferences.play_in_install = true;
 	preferences.import_dependencies = false;
+	preferences.recent_items = {106100, 2044};
 	return preferences;
 }
 
 bool same(const Preferences &a, const Preferences &b) {
 	return a.recent_projects == b.recent_projects && a.runtime_executable == b.runtime_executable &&
 	       a.game_install == b.game_install && a.play_in_install == b.play_in_install &&
-	       a.import_dependencies == b.import_dependencies;
+	       a.import_dependencies == b.import_dependencies && a.recent_items == b.recent_items;
 }
 
 // The settings file every_preference() is: the keys sorted, two spaces an indent, a newline last;
-// the game install's keys as S13 A4 named them, schema 2.
+// the game install's keys as S13 A4 named them, schema 2; the recently placed items (S15).
 const char *const kSettingsFile = "{\n"
                                   "  \"game_install\": \"D:/Joint Operations\",\n"
                                   "  \"import_dependencies\": false,\n"
                                   "  \"play_in_install\": true,\n"
+                                  "  \"recent_items\": [\n"
+                                  "    106100,\n"
+                                  "    2044\n"
+                                  "  ],\n"
                                   "  \"recent_projects\": [\n"
                                   "    \"C:/games/Armory\",\n"
                                   "    \"D:/mods/Harbor\"\n"
@@ -115,6 +120,9 @@ static int test_memory_store_round_trips() {
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	one = Preferences();
 	one.import_dependencies = false;
+	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
+	one = Preferences();
+	one.recent_items = {7};
 	TEST_EXPECT(store.save(one, error) && store.load(loaded, error) && same(loaded, one));
 	return 0;
 }
@@ -202,6 +210,14 @@ static int test_editor_preferences() {
 	            preferences.values().recent_projects.size() == kRecentProjectsMax - 1);
 	TEST_EXPECT(store.saves() == 0 && preferences.save(error) && store.saves() == 1 &&
 	            store.preferences().recent_projects == preferences.values().recent_projects);
+	// The recently placed items (S15): capped at kRecentItemsMax, most recent first, an item placed
+	// again moved to the front.
+	for (int64_t item = 1; item <= 14; ++item) preferences.remember_recent_item(item);
+	TEST_EXPECT(preferences.values().recent_items.size() == kRecentItemsMax &&
+	            preferences.values().recent_items.front() == 14 && preferences.values().recent_items.back() == 3);
+	preferences.remember_recent_item(5);
+	TEST_EXPECT(preferences.values().recent_items.front() == 5 && preferences.values().recent_items.size() == kRecentItemsMax &&
+	            std::count(preferences.values().recent_items.begin(), preferences.values().recent_items.end(), int64_t(5)) == 1);
 	TEST_EXPECT(preferences.write(every_preference(), error) && same(preferences.values(), every_preference()) &&
 	            same(store.preferences(), every_preference()));
 

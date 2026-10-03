@@ -30,6 +30,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <variant>
 #include <vector>
@@ -2028,6 +2029,63 @@ void test_problems_many() {
 	CHECK(ui.windows.pending_requests() == 0, "drawing them raises nothing");
 }
 
+// ADR 0046 S15: the findings about the game's own data apart. Two findings in a file of the
+// modder's and three in one the project holds as the game install serves it: the modder's listed
+// first with no header, the game's own data's under their group last, folded at first (its findings
+// not drawn); the severities count the modder's alone and the shown count says the rest. A click on
+// the group's header opens it. The active file's alone, one click away ("Only <file>"), and back.
+void test_problems_original() {
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Original";
+	for (const char *name : {"mine.def", "shipped.def"})
+		editor_test::own(v.project.scan).entries.push_back(file_entry(name, std::string("defs/") + name, AssetKind::ItemDefs));
+	editor_test::own(v.project.scan).index();
+	// Missing textures: findings no build gates on (a gating one is never folded).
+	const auto add = [&v](DiagnosticSeverity severity, const char *message, const char *path) {
+		Diagnostic d = editor_test::finding_of(severity, "reference.missing", message, path, "name");
+		d.subject = ReferenceSubject{ReferenceKind::Texture, "skin.tga", std::string(), 0};
+		v.findings.diagnostics.push_back(d);
+	};
+	add(DiagnosticSeverity::Error, "Alpha: yours.", "defs/mine.def");
+	add(DiagnosticSeverity::Warning, "Bravo: yours too.", "defs/mine.def");
+	add(DiagnosticSeverity::Error, "Charlie: the game's.", "defs/shipped.def");
+	add(DiagnosticSeverity::Error, "Delta: the game's.", "defs/shipped.def");
+	add(DiagnosticSeverity::Warning, "Echo: the game's.", "defs/shipped.def");
+	v.findings.original_files = std::make_shared<const std::set<std::string>>(std::set<std::string>{"defs/shipped.def"});
+	v.documents.active = "defs/mine.def";
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Problems");
+	problems_grouping(ui, "None");
+	ui.away();
+	ui.drain();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Alpha:") != std::string::npos && text.find("Bravo:") != std::string::npos, "the modder's findings listed");
+	CHECK(text.find(kOriginalGroupTitle) != std::string::npos && text.find("Charlie:") == std::string::npos,
+	      "the game's own data's under their group, folded at first");
+	CHECK(text.find("Errors 1") != std::string::npos && text.find("Warnings 1") != std::string::npos,
+	      "the severities count the modder's alone");
+	CHECK(text.find("5 of 5 (3 in the game's own data)") != std::string::npos, "the shown count says the rest");
+	ui.click(problems_lines().at(2, 1)); // the group's header, after the modder's two
+	ui.away();
+	ui.frames(2);
+	text = logged_frame(ui);
+	CHECK(text.find("Charlie:") != std::string::npos && text.find("Echo:") != std::string::npos, "opened: its findings");
+	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Alpha:") != std::string::npos && text.find("Charlie:") == std::string::npos &&
+	              text.find(kOriginalGroupTitle) == std::string::npos,
+	      "Only mine.def: the active file's alone, one click");
+	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	ui.away();
+	text = logged_frame(ui);
+	CHECK(text.find("Charlie:") != std::string::npos, "again: the whole project's");
+	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
+}
+
 } // namespace
 
 // --- S9i: the stylesheet view ---------------------------------------------------------
@@ -2536,6 +2594,7 @@ void run_problems_tests() {
 	test_problems_narrow();
 	test_problems_rewrite_hidden();
 	test_problems_many();
+	test_problems_original();
 }
 constexpr Group kGroups[] = {
 	{"workspace", run_workspace_tests},   {"markers", run_marker_tests},
@@ -2544,7 +2603,7 @@ constexpr Group kGroups[] = {
 	{"rename", run_rename_tests},         {"menu", run_menu_tests},
 	{"inspector", run_inspector_tests},   {"preview", run_preview_tests},
 	{"styles", run_styles_tests},         {"problems", run_problems_tests},
-	{"gate", run_gate_tests},
+	{"gate", run_gate_tests},             {"logic", run_logic_tests},
 };
 
 } // namespace
