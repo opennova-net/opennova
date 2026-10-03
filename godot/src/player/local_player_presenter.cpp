@@ -444,7 +444,6 @@ void LocalPlayerPresenter::reset_state() {
 	}
 	input_router_.reset();
 	view_.unref();
-	set_spectator_camera_active(false);
 	set_world_nvg_view(false, 0);
 	feed_world_thermal_view(world(), false, false);
 	const Ref<Simulation> reset_sim = sim();
