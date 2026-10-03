@@ -28,6 +28,8 @@
 #include <formats/threedi/threedi_panm.h>
 #include <runtime/renderer/material_descriptor.h>
 
+#include <editor/documents/model_surfaces.h>
+
 #include "model_document_internal.h"
 
 namespace opennova::editor {
@@ -249,6 +251,11 @@ Field on_row(Field f, const char *group, bool channel = false) {
 	f.channel = channel;
 	return f;
 }
+// A field with words of what its value is, where the label cannot say it.
+Field noted(Field f, const char *note) {
+	f.note = note;
+	return f;
+}
 // Shown as the file holds it, never set: what the game does with it is not witnessed.
 Field unwitnessed(Field f) {
 	f.read_only = true;
@@ -284,7 +291,9 @@ std::vector<Entry> model_entries() {
 
 std::vector<Entry> lod_entries() {
 	return {
-		{in(integer("threshold", INT32_MIN, INT32_MAX, "Takes over below"), "px"),
+		{noted(in(integer("threshold", INT32_MIN, INT32_MAX, "Drawn above"), "px"),
+				  "The projected radius above which this LOD draws, down to the next one's; the game's walk stops at "
+				  "the first 0, so no LOD after it is drawn by distance [orig: Model_SelectRlodLevel @ 0x5c3b20]."),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediLod>(d).lod_threshold); },
 				[](void *d, const Value &v, int, std::string &) {
 					as<ThreediLod>(d).lod_threshold = static_cast<int32_t>(whole(v));
@@ -892,7 +901,7 @@ std::vector<Entry> volume_entries() {
 
 std::vector<Entry> face_entries() {
 	return {
-		{integer("poly_type", 0, 255, "Impact material"),
+		{integer("poly_type", 0, 255, "Surface"),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediCollisionFace>(d).poly_type); },
 				[](void *d, const Value &v, int, std::string &) {
 					as<ThreediCollisionFace>(d).poly_type = static_cast<uint8_t>(whole(v));
@@ -1322,6 +1331,11 @@ RecordTable make_table() {
 				LabelledField field;
 				field.schema = field_of(e->field);
 				if (row.kind == ModelKind::Material && field.schema.id == "shader") field.schema.choices = shader_choices();
+				// A bullet face's surface by the game's names (model_surfaces.h); any other byte typed.
+				if (row.kind == ModelKind::Face && field.schema.id == "poly_type") {
+					field.schema.choices = model_surface_choices();
+					field.schema.open_choices = true;
+				}
 				// A user point's name is what an item's particle slot looks it up by.
 				if (row.kind == ModelKind::UserPoint && field.schema.id == "name") field.schema.defines = ReferenceKind::UserPoint;
 				field.value.get = [e, shape](const RecordHandle &record, Value &out) {

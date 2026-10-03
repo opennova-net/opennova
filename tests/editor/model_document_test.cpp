@@ -865,7 +865,7 @@ int field_metadata() {
 	// The light's part: LOD 0's parts, any other index typed.
 	const FieldSchema part = schema(light, "part");
 	const size_t parts = row->base->lods[0].render_object_count;
-	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "Part 0");
+	TEST_EXPECT(part.open_choices && part.choices.size() == parts && parts > 0 && part.choices[0].label == "PN01");
 	// A part animation's parent: none (255) and the parts, its record's own choices.
 	const NodeAddress panm{model, kPanm, row->ids.lists[0][0].lists[0][0].id};
 	const FieldSchema parent = schema(panm, "parent");

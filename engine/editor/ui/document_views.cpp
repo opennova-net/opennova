@@ -10,6 +10,7 @@
 #include <editor/ui/main_viewport_view.h>
 #include <editor/ui/menu_view.h>
 #include <editor/ui/mission_logic_view.h>
+#include <editor/ui/model_inspector_view.h>
 #include <editor/ui/outline_view.h>
 #include <editor/ui/script_view.h>
 #include <editor/ui/styles_view.h>
@@ -69,7 +70,9 @@ constexpr DocumentViewRow kViews[] = {
 	{DocumentTypeId::Strings, DocumentViewRole::Records, &kStringsOutline, nullptr},
 	{DocumentTypeId::Menu, DocumentViewRole::Records, nullptr, make_menu_view},
 	{DocumentTypeId::Styles, DocumentViewRole::Records, nullptr, make_styles_view},
-	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr},
+	// A model's material heads the Inspector with its bullet faces' surface and flags, set on every face
+	// made from it (S17, ui/model_inspector_view).
+	{DocumentTypeId::Model, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_model_inspector},
 	// A clip's and a map's words head the Inspector (S17: what a row is for, who plays a map, a clip's
 	// length and the rows that play it).
 	{DocumentTypeId::Animation, DocumentViewRole::Records, &kTreeOutline, nullptr, draw_clip_inspector},

@@ -2698,7 +2698,7 @@ constexpr Group kGroups[] = {
 	{"inspector", run_inspector_tests},   {"preview", run_preview_tests},
 	{"styles", run_styles_tests},         {"problems", run_problems_tests},
 	{"gate", run_gate_tests},             {"logic", run_logic_tests},
-	{"animation", run_animation_tests},
+	{"animation", run_animation_tests},   {"model", run_model_tests},
 };
 
 } // namespace

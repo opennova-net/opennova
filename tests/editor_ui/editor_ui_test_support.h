@@ -649,5 +649,7 @@ void run_logic_tests();
 // A clip's timeline, its keys and its words, and the animation types' Inspector (animation_test.cpp):
 // S17.
 void run_animation_tests();
+// A model's material surface and its records' words in the Inspector (model_test.cpp): S17.
+void run_model_tests();
 
 } // namespace editor_ui_test

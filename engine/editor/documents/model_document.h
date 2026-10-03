@@ -144,6 +144,9 @@ public:
 			std::vector<FieldChoice> &out) const override;
 	// A user point past the first 16 is inert.
 	void refine_symbol(const NodeAddress &address, SymbolFacts &facts) const override;
+	// A record in the model's words (documents/model_labels.h, S17): every window that shows a record's
+	// title reads them, with no graph at hand.
+	std::string record_title(const NodeAddress &address) const override;
 	SerializeResult serialize() const override;
 	std::unique_ptr<DocumentBase> snapshot() const override {
 		return std::make_unique<ModelDocument>(*this);

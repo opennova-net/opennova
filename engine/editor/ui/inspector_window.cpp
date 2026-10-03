@@ -584,8 +584,15 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	ImGui::EndDisabled();
 	if (is_reference(field, value) && present)
 		reference_tools(workspace, controls.picker, document, targets, field, value, false, beside);
+	// The words under a control that shows the value as it is: one with no choices, or a value none of its
+	// choices is (an open choice typed: a model's part past LOD 0's, S17).
 	std::vector<FieldChoice> own;
-	if (!by_name && !mixed && present && !schema.flags && document.choices_on(address, field, own).empty()) value_words(words);
+	const std::vector<FieldChoice> &choices = document.choices_on(address, field, own);
+	const int64_t *number = std::get_if<int64_t>(&value);
+	const bool chosen = std::any_of(choices.begin(), choices.end(), [&](const FieldChoice &c) {
+		return number ? c.value == *number : std::holds_alternative<std::string>(value) && c.name == std::get<std::string>(value);
+	});
+	if (!by_name && !mixed && present && !schema.flags && !chosen) value_words(words);
 	if (renames) {
 		if (beside) ImGui::SameLine();
 		if (ImGui::SmallButton("Rename...")) rename_everywhere(workspace, document, address, field, value);
