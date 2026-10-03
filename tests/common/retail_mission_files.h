@@ -33,6 +33,9 @@ struct BootOptions {
 	// WAC 'humans' gate and the SP kill tallies. Off = the bare no-net world
 	// tick (what the AI-path and convoy tests drive).
 	bool listen_server = true;
+	// The SP restart's boot (Game_RestartRoundSP -> Game_StartMission(1)):
+	// mission::KernelBootOptions::restart.
+	bool restart = false;
 	std::string infantry_adm = mission::kDefaultInfantryAdm;
 };
 

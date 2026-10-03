@@ -3463,6 +3463,10 @@ opennova_add_gated_test(lose_flow_05tr_self_kill COMMAND lose_flow_test --bms 05
 # their authored actions; the round ends won and the engine's win epilog builds
 # its score screen over the mission's own tallies.
 opennova_add_gated_test(win_flow_01tr COMMAND lose_flow_test --bms 01TR.bms --win-event 38)
+# `--restart-boot`: 00TRa booted fresh and then as the SP restart's boot; the
+# restarted world equals the fresh launch at the same world ages (the spawn,
+# the fired-event set including event 11's authored activation delay).
+opennova_add_gated_test(restart_boot_00tra COMMAND lose_flow_test --bms 00TRa.bms --restart-boot)
 
 # The anim/def/particle/npruntime probes that became gated ctests (ADR 0041):
 # each mounts the retail data through ResourceIndex itself and is Skipped

@@ -76,6 +76,7 @@ var _mouse_held := false
 var _blue_candidates_logged := false
 var _start_gate := 1
 var _boot_fired: Array[int] = []
+var _boot_tick := 0  # the first launch's world tick at the boot capture
 
 
 func run(ctx: ProbeContext) -> ProbeVerdict:
@@ -187,6 +188,7 @@ func _gate_1_load() -> String:
 		_truck_rest = truck.get_position()
 	var outcome: RoundOutcome = sim.get_round_outcome_debug()
 	_boot_fired = _fired_indices()
+	_boot_tick = sim.get_logic_tick()
 	var briefing := _mission_string("info", "title")
 	var detail := "role=%s events=%d entities=%d spawn=%s truck=%s title=%s" % [
 			sim.session_role(), sim.get_event_count(), sim.get_entity_count(), str(_spawn_pos),
@@ -517,22 +519,28 @@ func _gate_11_ingame_restart() -> String:
 
 ## The fresh-launch checks over the loaded world: the spawn and the truck's rest
 ## at the first launch's, the boot fired set (the trigger-less events the
-## PreMission pass fires at every boot; none of the ride or failure events),
-## and the round live. Returns [ok, detail].
+## quarter passes fire at every boot; none of the ride or failure events),
+## and the round live. Returns [ok, detail]. The set is read at the first
+## launch's world age: the boot set grows with it (00TRa's event 11 carries
+## an authored 2-unit activation delay, 128 ticks past its first pass).
 func _fresh_launch_check(sample_label: String, capture_label: String) -> Array:
 	var sim := _ctx.sim()
+	await _wait_until(func() -> bool: return sim.get_logic_tick() >= _boot_tick,
+			LOAD_TIMEOUT_MS, "the first launch's world age")
 	var spawn := sim.get_local_player_position()
 	var truck := sim.entity_card_by_net_id(_truck_ssn)
 	var truck_pos := truck.get_position() if truck != null else Vector3.INF
 	var outcome: RoundOutcome = sim.get_round_outcome_debug()
 	var boot_fired := _fired_indices()
+	var boot_tick := sim.get_logic_tick()
 	await _sample(sample_label)
 	await _capture(capture_label)
 	var spawn_gap := _planar(spawn, _spawn_pos)
 	var truck_gap := _planar(truck_pos, _truck_rest) if truck != null else INF
 	var same_boot_set := boot_fired == _boot_fired
-	var detail := "spawn gap %.2f u; truck gap %.2f u; fired at boot %s (first launch %s); ended=%s" % [
-			spawn_gap, truck_gap, str(boot_fired), str(_boot_fired), str(outcome != null and outcome.get_ended())]
+	var detail := "spawn gap %.2f u; truck gap %.2f u; fired at tick %d %s (first launch at tick %d %s); ended=%s" % [
+			spawn_gap, truck_gap, boot_tick, str(boot_fired), _boot_tick, str(_boot_fired),
+			str(outcome != null and outcome.get_ended())]
 	var ok := spawn_gap <= 1.0 and truck_gap <= 1.0 and same_boot_set \
 			and outcome != null and not outcome.get_ended()
 	return [ok, detail]
