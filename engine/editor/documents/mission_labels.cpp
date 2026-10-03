@@ -59,10 +59,13 @@ bool text_of(const GraphEdge &edge, const NameSource *names, DisplayName &out) {
 	return true;
 }
 
-// The text key a record's field forms (mission_text_edges), "" field the record's own.
-bool text_edge(const MissionDocument &document, const NodeAddress &address, const std::string &field, GraphEdge &out) {
+// The text key a record's field forms (mission_text_edges), "" field the record's own; were it `value`
+// where one is given (a picker's choice worded as the field would read set to it).
+bool text_edge(const MissionDocument &document, const NodeAddress &address, const std::string &field, GraphEdge &out,
+               const int64_t *value = nullptr) {
 	std::vector<GraphEdge> edges;
-	mission_text_edges(document, address, edges);
+	if (value && !field.empty()) mission_text_edges(document, address, edges, false, field.c_str(), *value);
+	else mission_text_edges(document, address, edges);
 	for (GraphEdge &edge : edges)
 		if (edge.field == field) {
 			out = std::move(edge);
@@ -326,7 +329,7 @@ bool mission_value_label(const Document &base, const NodeAddress &address, const
 	// shows): the string its table holds.
 	const auto text = [&](const std::string &prefix) {
 		GraphEdge edge;
-		if (!text_edge(*document, address, id, edge)) return false;
+		if (!text_edge(*document, address, id, edge, number)) return false;
 		out = DisplayName();
 		out.raw = std::to_string(*number);
 		DisplayName found;
@@ -605,6 +608,11 @@ public:
 
 void mission_game_choices(const Document &, const NodeAddress &, const FieldUse &field, std::vector<GameChoice> &out) {
 	if (field.reference == ReferenceKind::MissionEntity) out.push_back({std::to_string(kPlayerSsn), "The player"});
+	// A number forming a text key, 0 forming none: an entity with no name (the spawn looks no STRNAME
+	// up for it [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a]), the end of the objectives panel's
+	// rows [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
+	if (field.reference == ReferenceKind::TextId && field.key_prefix && field.schema)
+		out.push_back({"0", field.schema->id == "name_index" ? "No name" : "No objective (the panel's rows end here)"});
 }
 
 std::string mission_record_brief(const Document &base, const NodeAddress &address, const NameSource *names) {

@@ -575,6 +575,20 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		return kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
 	};
 	if (by_id(use.defines) || by_id(use.reference) || by_id(use.picks)) use.scope = mission_scope(*this);
+	// A number that forms a text key (mission_text_edges' forms): picked by the strings of the section
+	// the game looks its key up in, the number written (FieldUse::key_prefix): an entity's name index,
+	// STRNAME%03i in PeopleNames [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a], and a win slot,
+	// the objectives panel's STRWINCOND%03i in WinConditions [orig: HUD_DrawWinConditions @0x5ba940];
+	// in the mission's own table, else medmssn.bin [orig: TextResource_LoadMissionTextBin @0x51ed90].
+	const auto keyed = [&](const char *section, const char *prefix) {
+		use.picks = ReferenceKind::TextId;
+		use.scope = strutil::to_upper(mission_base_name(basename_of(path()))) + ".BIN/" + section;
+		use.scope_alternate = "MEDMSSN.BIN";
+		use.key_prefix = prefix;
+	};
+	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed("PeopleNames", "STRNAME");
+	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
+		keyed("WinConditions", "STRWINCOND");
 }
 
 bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse &use,
@@ -828,17 +842,21 @@ bool MissionDocument::removal_edits(const std::vector<NodeAddress> &records, std
 // --- the references no field's value is ---------------------------------------------------------------
 
 void mission_text_edges(const MissionDocument &document, const NodeAddress &address, std::vector<GraphEdge> &out,
-                        bool placed) {
+                        bool placed, const char *as_field, int64_t as_value) {
 	const Node *row = document.row(address.row);
 	const MissionRow *header = document.mission_row();
 	if (!row || !header) return;
+	// A field's number as the record holds it, or as asked (as_field).
+	const auto number_of = [&](const std::string &field, int64_t held) {
+		return as_field && field == as_field ? as_value : held;
+	};
 	// The mission's own table, else the one the game loads in its place where the mission has none,
 	// never both [orig: TextResource_LoadMissionTextBin @0x51ed90]: the edge's alternate, which the
 	// graph reads only where the project has no table of the mission's name.
 	const std::string table = strutil::to_upper(mission_base_name(basename_of(document.path()))) + ".BIN";
-	const auto text = [&](const std::string &field, const char *section, const char *key, int number) {
+	const auto text = [&](const std::string &field, const char *section, const char *key, int64_t number) {
 		char name[32];
-		std::snprintf(name, sizeof(name), "%s%03i", key, number);
+		std::snprintf(name, sizeof(name), "%s%03i", key, int(number));
 		GraphEdge edge;
 		edge.source = document.path();
 		if (placed) {
@@ -861,16 +879,17 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 		if (const int location = document.location_of(*row)) text(std::string(), "Locations", "LOCATION", location);
 		// [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a: sprintf("STRNAME%03i", rec+4), gated
 		// on the index being nonzero]
-		if (entity.name_index != 0) text("name_index", "PeopleNames", "STRNAME", entity.name_index);
+		if (const int64_t name = number_of("name_index", entity.name_index)) text("name_index", "PeopleNames", "STRNAME", name);
 		return;
 	}
 	if (!address.child && row->kind == k(K::Mission)) {
 		// The objectives panel's rows: the win slots 1..8 until a 0 or 255 id, each its STRWINCOND
 		// [orig: HUD_DrawWinConditions @0x5ba940, the break @0x5ba9e0].
 		for (int slot = 0; slot < 8; ++slot) {
-			const uint8_t win = head.win_conditions[slot];
+			const std::string field = "win_conditions[" + std::to_string(slot) + "]";
+			const int64_t win = number_of(field, head.win_conditions[slot]);
 			if (win == 0 || win == 255) break;
-			text("win_conditions[" + std::to_string(slot) + "]", "WinConditions", "STRWINCOND", win);
+			text(field, "WinConditions", "STRWINCOND", win);
 		}
 		return;
 	}
@@ -888,19 +907,20 @@ void mission_text_edges(const MissionDocument &document, const NodeAddress &addr
 	// Text's ID%03i [orig: HUD_DisplayTriggeredText @0x51F190]. A slot past the eight reads a byte
 	// outside the header's tables, which the port does not model (runtime/world World::
 	// show_objective_notification): no edge.
-	const auto slot_text = [&](const uint8_t *ids, int32_t slot, const char *section, const char *key) {
+	const auto slot_text = [&](const uint8_t *ids, int64_t slot, const char *section, const char *key) {
 		if (slot >= 1 && slot <= 8) text("param1", section, key, ids[slot - 1]);
 	};
+	const int64_t param1 = number_of("param1", action.param1), param2 = number_of("param2", action.param2);
 	switch (action.action_type) {
-	case bms::ActionType::SubGoalWon: slot_text(head.win_conditions, action.param1, "WinConditions", "STRWINMSG"); break;
-	case bms::ActionType::SubGoalLost: slot_text(head.lose_conditions, action.param1, "LoseConditions", "STRLOSEMSG"); break;
+	case bms::ActionType::SubGoalWon: slot_text(head.win_conditions, param1, "WinConditions", "STRWINMSG"); break;
+	case bms::ActionType::SubGoalLost: slot_text(head.lose_conditions, param1, "LoseConditions", "STRLOSEMSG"); break;
 	case bms::ActionType::ShowWinSubgoal:
-		if (action.param2 != 0) slot_text(head.win_conditions, action.param1, "WinConditions", "STRWINDIRECTIVE");
+		if (param2 != 0) slot_text(head.win_conditions, param1, "WinConditions", "STRWINDIRECTIVE");
 		break;
 	case bms::ActionType::ShowLoseSubgoal:
-		if (action.param2 != 0) slot_text(head.lose_conditions, action.param1, "LoseConditions", "STRLOSEDIRECTIVE");
+		if (param2 != 0) slot_text(head.lose_conditions, param1, "LoseConditions", "STRLOSEDIRECTIVE");
 		break;
-	case bms::ActionType::OutputText: text("param1", "Triggered Text", "ID", action.param1); break;
+	case bms::ActionType::OutputText: text("param1", "Triggered Text", "ID", param1); break;
 	default: break;
 	}
 }
