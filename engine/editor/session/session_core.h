@@ -220,9 +220,12 @@ public:
 	void quit();
 	// The preferences kept by their store, and shown.
 	void save_preferences();
-	// `item` first among the recently placed items (ADR 0046 S15), shown at once; kept by the next
-	// poll's save_recent_items (nothing to keep when it was first already).
+	// `item` first among the items recently placed for the open project's game (ADR 0046 S15; per game
+	// since the polish, recent_items_game), shown at once; kept by the next poll's save_recent_items
+	// (nothing to keep when it was first already, or with no project open).
 	void remember_recent_item(int64_t item);
+	// The view's recently placed items: the open project's game's (none with no project open).
+	void show_recent_items();
 	// The poll's (and a quit's, and the session's end): the recently placed items kept by the store when
 	// they changed since; a store that cannot keep them says so in Output, failing no request.
 	void save_recent_items();
