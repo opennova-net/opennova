@@ -81,6 +81,21 @@ if [[ "$keep_user_dir" == "0" ]]; then
   trap 'rm -f "$log"; rm -rf "$user_dir" "$root/.godot-test-fixtures"' EXIT
 fi
 
+# --- the class cache ------------------------------------------------------------
+# A headless run resolves a class_name only through the class cache an import
+# writes. After a base change brings a new class_name (or moves one), the
+# scripts naming it fail to parse and GUT drops them until the project is
+# imported again; the cache is checked against the scripts and the project
+# imported when it is stale (inside the isolated user://, like the run).
+if ! python "$root/scripts/godot_class_cache.py" "$root/godot"; then
+  echo "test_godot: the class cache is stale; importing the project" >&2
+  "$GODOT_BIN" --headless --path "$root/godot" --import >/dev/null 2>&1 || true
+  if ! python "$root/scripts/godot_class_cache.py" "$root/godot"; then
+    echo "error: the class cache is still stale after an import" >&2
+    exit 1
+  fi
+fi
+
 reports="$root/build/Testing"
 mkdir -p "$reports"
 config="$reports/gut-$label.json"
