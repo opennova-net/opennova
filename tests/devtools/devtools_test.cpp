@@ -30,6 +30,7 @@
 #include <imgui_internal.h>
 
 #include <cstdio>
+#include <functional>
 #include <cstring>
 #include <utility>
 
@@ -790,27 +791,39 @@ struct PlacedWindow : opennova::devtools::Window {
 
 bool near(float a, float b) { return a - b <= 4.0f && b - a <= 4.0f; }
 
-// A window with one button, reporting whether the mouse hovers it.
+// A window with a button and a list that scrolls, reporting what the mouse did to them.
 struct HoverWindow : opennova::devtools::Window {
 	HoverWindow() { open = true; }
 	const char *title() const override { return "Hover"; }
 	void draw(opennova::devtools::ImGuiPass &, uint64_t) override {
-		ImGui::Button("target", ImVec2(200.0f, 100.0f));
+		if (ImGui::Button("target", ImVec2(200.0f, 100.0f))) ++clicks;
 		hovered = ImGui::IsItemHovered();
+		active = ImGui::IsItemActive();
 		at = ImGui::GetItemRectMin();
+		ImGui::BeginChild("list", ImVec2(200.0f, 120.0f));
+		for (int line = 0; line < 100; ++line) ImGui::Text("line %d", line);
+		scroll = ImGui::GetScrollY();
+		ImGui::EndChild();
+		list_at = ImGui::GetItemRectMin();
 	}
 	InitialDockPlacement initial_dock_placement() const override { return InitialDockPlacement::Center; }
 	bool hovered = false;
-	ImVec2 at{};
+	bool active = false;
+	int clicks = 0;
+	float scroll = 0.0f;
+	ImVec2 at{}, list_at{};
 };
 
 }  // namespace
 
-// The mouse is the pass's only while the shell's window has the focus and the cursor is over it
-// (ImGuiPass::set_mouse_place): the bridge feeds the global cursor every frame, so a window behind
-// another would otherwise take hovers (highlights, tooltips) through the window in front. Not the
-// pass's, the frame's mouse is forgotten (nothing hovered, the position unknown); a press the pass
-// took keeps its mouse while held, whatever the place says (a drag carried out of the window).
+// The mouse is the pass's by the OS's place (ImGuiPass::set_mouse_place) and the frame's events, fed
+// in the bridge's order: the events Godot dispatched (a button, the wheel) first, then the global
+// cursor just before NewFrame (imgui-godot's Input.Update), which ImGui's trickle queue takes a frame
+// after a button. The position is never taken back, so the first click into a window not yet focused
+// lands where the cursor is; hover is the pass's only with the focus and the cursor over its window
+// (a window behind another takes no highlight or tooltip); a press is the pass's with the cursor
+// over its window and is then held as taken (a drag carried out keeps its mouse), one elsewhere is
+// dropped; the wheel is the pass's with the cursor over its window, lists and canvases alike.
 void test_the_mouse_is_the_pass_only_in_its_window_in_use() {
 	NullBackend backend;
 	opennova::devtools::ImGuiPass pass;
@@ -818,41 +831,73 @@ void test_the_mouse_is_the_pass_only_in_its_window_in_use() {
 	pass.attach_imgui(backend.context, &test_alloc, &test_free, nullptr);
 	pass.set_open(true);
 	CHECK(pass.mouse_focused() && pass.mouse_over(), "until the shell says, the mouse is the pass's");
+	ImGuiIO &io = ImGui::GetIO();
 	uint64_t frame = 0;
-	const auto draw = [&](int frames) {
+	ImVec2 cursor;
+	const auto on_button = [&] { cursor = ImVec2(window->at.x + 20.0f, window->at.y + 20.0f); };
+	const auto on_list = [&] { cursor = ImVec2(window->list_at.x + 20.0f, window->list_at.y + 20.0f); };
+	// A frame as the bridge feeds it: `events` (Godot's dispatch) queued, then the cursor.
+	const auto draw = [&](int frames, const std::function<void()> &events = {}) {
 		for (int i = 0; i < frames; ++i) {
-			// The bridge's feed: the global cursor, every frame.
-			ImGui::GetIO().AddMousePosEvent(window->at.x + 20.0f, window->at.y + 20.0f);
+			if (events && i == 0) events();
+			io.AddMousePosEvent(cursor.x, cursor.y);
 			ImGui::NewFrame();
 			pass.draw_frame(++frame);
 			ImGui::Render();
 		}
 	};
+	const auto press = [&] { io.AddMouseButtonEvent(ImGuiMouseButton_Left, true); };
+	const auto release = [&] { io.AddMouseButtonEvent(ImGuiMouseButton_Left, false); };
+	const auto wheel = [&] { io.AddMouseWheelEvent(0.0f, -1.0f); };
+	draw(2);
+	on_button();
 	draw(3);
 	CHECK(window->hovered, "focused and over its window: the button under the cursor is hovered");
 
+	// Another application in use, the cursor over the editor (nothing covering it): no hover, however
+	// long it rests, so no tooltip; the position stays the bridge's.
 	pass.set_mouse_place(false, true);
-	draw(1);
-	CHECK(!window->hovered && !ImGui::IsMousePosValid(), "behind another window: nothing hovered, no position");
 	draw(30);
-	CHECK(!window->hovered, "however long the cursor rests there: no hover, so no tooltip");
-
-	pass.set_mouse_place(true, false);
-	draw(1);
-	CHECK(!window->hovered, "focused, the cursor over another window: nothing hovered");
-
+	CHECK(!window->hovered && ImGui::IsMousePosValid() && io.MousePos.x == cursor.x,
+	      "not focused: nothing hovered, the position kept");
+	// The click that focuses the window lands: the press (queued before the frame's cursor) is taken
+	// with the place still unfocused, the release with the window focused.
+	draw(1, press);
+	CHECK(window->active, "the first click into the window presses the button");
 	pass.set_mouse_place(true, true);
-	draw(1);
-	CHECK(window->hovered && ImGui::IsMousePosValid(), "back over its window in use: hovered again");
+	draw(1, release);
+	CHECK(window->clicks == 1, "and clicks it");
 
-	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, true);
-	draw(1);
+	// Covered by another window: a press is not the pass's; the wheel neither.
 	pass.set_mouse_place(false, false);
-	draw(1);
-	CHECK(window->hovered && ImGui::IsMousePosValid(), "a press held keeps its mouse");
-	ImGui::GetIO().AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+	draw(1, press);
+	CHECK(!window->active && !window->hovered, "a press with the cursor elsewhere is dropped");
+	draw(1, release);
+	CHECK(window->clicks == 1, "and clicks nothing");
+	on_list();
 	draw(2);
-	CHECK(!window->hovered, "let go, the place rules again");
+	const float scrolled = window->scroll;
+	draw(2, wheel);
+	CHECK(window->scroll == scrolled, "the wheel with the cursor elsewhere scrolls nothing");
+	// Not focused, the cursor over it: the wheel scrolls the list under it, as the OS sends it there.
+	pass.set_mouse_place(false, true);
+	draw(2, wheel);
+	CHECK(window->scroll > scrolled, "the wheel over the window scrolls its list, focused or not");
+	const float again = window->scroll;
+	pass.set_mouse_place(true, true);
+	draw(2, wheel);
+	CHECK(window->scroll > again, "and over the window in use");
+
+	// A press taken keeps its mouse while held, wherever the cursor goes; let go, the place rules.
+	on_button();
+	draw(1);
+	draw(1, press);
+	pass.set_mouse_place(false, false);
+	draw(2);
+	CHECK(window->active && window->hovered, "a press held keeps its mouse");
+	draw(1, release);
+	draw(1);
+	CHECK(!window->hovered && window->clicks == 2, "let go: the click, then the place rules again");
 	pass.detach_imgui();
 }
 
