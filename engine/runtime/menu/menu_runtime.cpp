@@ -647,36 +647,72 @@ int MenuRuntime::table_column_count_(int id) const {
 	return column.has_count && column.count >= 1 ? column.count : 1;
 }
 
-bool MenuRuntime::table_set_column_count(int id, int count) {
-	if (widget_kind_of(id) != kKindTable || count < 1) return false;
+namespace {
+
+// A record the table had, which a count that does not grow the table leaves in
+// place (menu_table_row.h MenuTableColumnDef::kept): the authored column.
+MenuTableColumnDef kept_record() {
+	MenuTableColumnDef record;
+	record.kept = true;
+	return record;
+}
+
+// A record a growing count starts over: every member zero
+// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the memset @0x63f710].
+MenuTableColumnDef zeroed_record() {
+	MenuTableColumnDef record;
+	record.justify = 0;
+	record.vjustify = 0;
+	return record;
+}
+
+} // namespace
+
+// The count over the records the table holds: the authored ones until code set a
+// count, kept by a count that does not grow the table, every one started over by
+// one that does. [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the shrink path
+// @0x63f870, the grow path @0x63f710..0x63f737]
+void MenuRuntime::table_resize_records_(int id, int count) {
+	const int current = table_column_count_(id);
 	MenuWidgetRuntimeState &state = state_of_(id);
 	if (!state.has_table_columns)
-		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
-				MenuTableColumnDef{});
-	state.table_columns.resize(static_cast<size_t>(count));
+		state.table_columns.assign(static_cast<size_t>(current), kept_record());
+	if (count > current)
+		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
+	else
+		state.table_columns.resize(static_cast<size_t>(count));
 	state.has_table_columns = true;
+}
+
+void MenuRuntime::push_table_columns_(int id) {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
 	const int index = frame_index(id);
-	if (index >= 0) frame_->set_widget_table_columns(index, state.table_columns);
+	if (state != nullptr && index >= 0) frame_->set_widget_table_columns(index, state->table_columns);
+}
+
+bool MenuRuntime::table_set_column_count(int id, int count) {
+	if (widget_kind_of(id) != kKindTable || count < 1) return false;
+	table_resize_records_(id, count);
+	push_table_columns_(id);
 	return true;
 }
 
+// An init over one record of the current count, as CTableWnd_InitRow writes it
+// (menu_table_row.h MenuTableColumnDef::defined); the record keeps the rest.
 bool MenuRuntime::table_init_column(int id, int column, int width, const std::string &label,
 		int justify, int vjustify) {
 	if (widget_kind_of(id) != kKindTable) return false;
-	if (column < 0 || column >= table_column_count_(id)) return false;
+	const int count = table_column_count_(id);
+	if (column < 0 || column >= count) return false;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	if (!state.has_table_columns)
-		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
-				MenuTableColumnDef{});
-	state.has_table_columns = true;
-	MenuTableColumnDef &def = state.table_columns[static_cast<size_t>(column)];
-	def.defined = true;
-	def.width = width;
-	def.label = label;
-	def.justify = justify;
-	def.vjustify = vjustify;
-	const int index = frame_index(id);
-	if (index >= 0) frame_->set_widget_table_columns(index, state.table_columns);
+	if (!state.has_table_columns) table_resize_records_(id, count); // the records as they stand
+	MenuTableColumnDef &record = state.table_columns[static_cast<size_t>(column)];
+	record.defined = true;
+	record.width = width;
+	record.label = label;
+	record.justify = justify;
+	record.vjustify = vjustify;
+	push_table_columns_(id);
 	return true;
 }
 
