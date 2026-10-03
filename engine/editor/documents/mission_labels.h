@@ -13,10 +13,12 @@
 // marker an index; the text keys the ones the game forms (mission_text_edges).
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_sentence.h>
 #include <editor/documents/name_source.h>
 #include <formats/mission/bms.h>
 
@@ -49,6 +51,9 @@ std::string mission_path_title(const MissionPath &path);
 std::string mission_event_title(const MissionDocument &document, const Node &event, const NameSource *names);
 std::string mission_trigger_words(const MissionDocument &document, const bms::Trigger &trigger, const NameSource *names);
 std::string mission_action_words(const MissionDocument &document, const bms::Action &action, const NameSource *names);
+// The names those words take, for what else says a parameter's value in the same words (the Inspector's
+// logic forms, what uses a record, a script's completions): the document's own with no `names`.
+std::unique_ptr<MissionNames> mission_label_names(const MissionDocument &document, const NameSource *names);
 
 // The headings the mission's outline groups its rows under (ui/outline_model's OutlineSpec::groups),
 // one list per row in the document's order: the mission row under none; an entity under its pool

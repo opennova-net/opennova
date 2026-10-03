@@ -360,9 +360,9 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 	// The mission's view (S14) in this narrow layout (the Document window beside the Preview takes
 	// about 250 pixels, its viewport column about 100 beside the outline, narrower than the 320 the
 	// design named): its toolbar wraps within the viewport's column, nothing of it past the column,
-	// and the mouse reaches its last button, Play mission (cut to the column where its label does
-	// not fit, found by ###; S15's tools before the rest, so within fourteen lines), under the first line;
-	// pressed, it raises Play in the mission.
+	// and the mouse reaches its Play mission (cut to the column where its label does not fit, found
+	// by ###; S15's tools before the rest, so within fourteen lines), under the first line; pressed, it
+	// raises Play in the mission.
 	sweep.open("missions/synth_logic.bms", nullptr);
 	const ImGuiWindow *documents = ImGui::FindWindowByName("Document");
 	const ImGuiWindow *column = nullptr;
@@ -383,6 +383,14 @@ void reach_wrapped_toolbars(Sweep &sweep) {
 		const EditorRequest *play = one(requests, EditorRequestKind::Play);
 		CHECK(play && play->mission == "synth_logic.bms", "Play mission raised in the mission");
 		ui.away();
+		// Its last, Script (S15): the project holds no synth_logic.wac, so it offers to make one beside
+		// the mission, and Make it raises that file's creation.
+		ui.activate(item_id(column->ID, {"Script"}));
+		ui.activate(item_id(column->ID, {"###Script"}));
+		ui.activate(popup_item(item_id(column->ID, {"make_script"}), "Make it"));
+		requests = ui.drain();
+		const EditorRequest *make = one(requests, EditorRequestKind::CreateFile);
+		CHECK(make && make->path == "missions/synth_logic.wac", "Script made the mission's script beside it");
 	}
 }
 

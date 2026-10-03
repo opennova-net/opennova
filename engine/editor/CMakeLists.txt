@@ -203,6 +203,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/session/problems_service.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/project_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/record_batch.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/session/script_assist.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/refresh_operation.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_controller.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/session/rename_operation.cpp

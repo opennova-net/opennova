@@ -3,6 +3,7 @@
 
 #include <cstdio>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <tuple>
@@ -451,6 +452,10 @@ std::string mission_action_words(const MissionDocument &document, const bms::Act
 
 std::string mission_event_title(const MissionDocument &document, const Node &row, const NameSource *names) {
 	return event_sentence(static_cast<const EventRow &>(row).native, LabelNames(document, names), header_of(document));
+}
+
+std::unique_ptr<MissionNames> mission_label_names(const MissionDocument &document, const NameSource *names) {
+	return std::make_unique<LabelNames>(document, names);
 }
 
 std::string mission_record_label(const Document &base, const NodeAddress &address, const NameSource *names) {

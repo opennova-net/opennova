@@ -23,6 +23,7 @@
 #include <editor/preview/mission_viewport.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/mission_palette_view.h>
@@ -322,6 +323,29 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 				played.empty() ? std::string("Make the mission the active document to start the game in it.")
 							   : "Build, then start the game in " + played + " (Ctrl+F5)."))
 		workspace.request(request::play(played));
+	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
+	// 0x4F91F0], opened, or made beside the mission where the project has none.
+	const MissionScript script = mission_script(view, mission.path());
+	if (!script.name.empty()) {
+		const bool held = !script.path.empty();
+		if (ui_kit::tool(row, "Script", view.project.open,
+					held ? "Open " + script.path + ", the script the game runs with this mission."
+						 : "The mission has no script (" + script.name + "): make one beside it.")) {
+			if (held) workspace.request(request::open_document(script.path));
+			else ImGui::OpenPopup("make_script");
+		}
+		if (ImGui::BeginPopup("make_script")) {
+			ImGui::TextUnformatted(("Make " + script.create_at + "?").c_str());
+			ImGui::TextDisabled("The game compiles it with the mission; an empty script does nothing.");
+			if (ImGui::Button("Make it")) {
+				workspace.request(request::create_file(script.create_at));
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
+	}
 	if (options != mission.options()) set_options(workspace, mission, options);
 }
 

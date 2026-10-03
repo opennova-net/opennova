@@ -2,16 +2,20 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <memory>
+#include <optional>
 #include <string>
 #include <variant>
 
 #include <imgui.h>
 
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_sentence.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
+#include <editor/graph/display_names.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
 #include <editor/ui/ui_kit.h>
@@ -23,6 +27,23 @@ namespace {
 constexpr NodeKind k(MissionKind kind) { return node_kind(kind); }
 
 const MissionDocument *mission_of(const Document &document) { return dynamic_cast<const MissionDocument *>(&document); }
+
+// The words a parameter's value reads in: the project's names where the asset graph stands (the
+// wire's and the outline's words, documents/mission_labels.h), the document's own otherwise.
+class ViewNames {
+public:
+	ViewNames(const SessionView &view, const MissionDocument &mission) {
+		if (view.findings.graph) source_.emplace(*view.findings.graph);
+		names_ = mission_label_names(mission, source_ ? &*source_ : nullptr);
+	}
+	ViewNames(const ViewNames &) = delete;
+	ViewNames &operator=(const ViewNames &) = delete;
+	const MissionNames &operator*() const { return *names_; }
+
+private:
+	std::optional<GraphNameSource> source_;
+	std::unique_ptr<MissionNames> names_;
+};
 
 // What the type picker's filter box holds: one picker is open at a time.
 char g_filter[64] = {};
@@ -211,9 +232,9 @@ void logic_list(Workspace &workspace, const MissionDocument &mission, const Logi
 }
 
 void event_form(Workspace &workspace, const MissionDocument &mission, NodeId event, InspectorTaken &taken, bool editable) {
-	const DocumentMissionNames names(mission);
+	const ViewNames names(workspace.view(), mission);
 	LogicEventForm form;
-	if (!logic_event_form(mission, event, names, form)) return;
+	if (!logic_event_form(mission, event, *names, form)) return;
 	taken.fields = {"flags", "reset_after", "delay"};
 	taken.collections = {k(MissionKind::Trigger), k(MissionKind::Action)};
 	ImGui::TextWrapped("%s", form.words.sentence.c_str());
@@ -237,9 +258,9 @@ void event_form(Workspace &workspace, const MissionDocument &mission, NodeId eve
 
 void record_form(Workspace &workspace, const MissionDocument &mission, const NodeAddress &record, InspectorTaken &taken,
                  bool editable) {
-	const DocumentMissionNames names(mission);
+	const ViewNames names(workspace.view(), mission);
 	LogicForm form;
-	if (!logic_form(mission, record, names, form)) return;
+	if (!logic_form(mission, record, *names, form)) return;
 	taken.fields = form.action ? std::vector<std::string>{"action_type", "action_sub_type"}
 	                           : std::vector<std::string>{"condition_flags", "main_type", "sub_type"};
 	// A parameter the type does not read that holds nothing is no field to fill.
@@ -345,7 +366,7 @@ bool draw_mission_inspector(Workspace &workspace, const Document &document, cons
 void draw_mission_uses(Workspace &workspace, const Document &document, const NodeAddress &record, InspectorTaken &taken) {
 	const MissionDocument *mission = mission_of(document);
 	if (!mission) return;
-	const MissionUses uses = mission_uses(*mission, record, DocumentMissionNames(*mission));
+	const MissionUses uses = mission_uses(*mission, record, *ViewNames(workspace.view(), *mission));
 	if (uses.what.empty()) return;
 	taken.own_uses = true;
 	ImGui::PushID("mission_uses");

@@ -4380,6 +4380,14 @@ target_link_libraries(editor_mission_labels_test PRIVATE opennova_editor)
 target_include_directories(editor_mission_labels_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_mission_labels COMMAND editor_mission_labels_test)
 
+# Help in a script's text (editor/session/script_assist.h, ADR 0046 S15): the completions from the WAC
+# compiler's tables and the mission of the script's name, what a word is, where it is defined, the
+# mission's script, a compiler report in plain words, and the script_assist query.
+add_executable(editor_script_assist_test editor/script_assist_test.cpp)
+target_link_libraries(editor_script_assist_test PRIVATE opennova_editor)
+target_include_directories(editor_script_assist_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_script_assist COMMAND editor_script_assist_test)
+
 # The one table shape (editor/model/table_shape.h, ADR 0046 S13 D10) as the menu's, the def
 # catalog's (items, weapons, powerups), the model's and the mission's tables fill it: the value, the
 # choice, the labelled field, the record handle and the list ops over a file of each; the cost of a

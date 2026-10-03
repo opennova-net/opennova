@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <iterator>
 #include <map>
+#include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -15,6 +17,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
+#include <editor/documents/mission_labels.h>
 #include <editor/documents/mission_logic.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_uses.h>
@@ -35,6 +38,7 @@
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/session_core.h>
 #include <editor/session/session_json.h>
 #include <editor/session/view_json.h>
@@ -953,6 +957,22 @@ const MissionDocument *mission_of(const QueryContext &context, const QueryArgs &
 	return mission;
 }
 
+// A mission's words with the graph's names where it stands (documents/mission_labels.h, S15 Names).
+class MissionWords {
+public:
+	MissionWords(const QueryContext &context, const MissionDocument &mission) {
+		if (const AssetGraph *graph = context.core.view().findings.graph.get()) source_.emplace(*graph);
+		names_ = mission_label_names(mission, source_ ? &*source_ : nullptr);
+	}
+	MissionWords(const MissionWords &) = delete;
+	MissionWords &operator=(const MissionWords &) = delete;
+	const MissionNames &operator*() const { return *names_; }
+
+private:
+	std::optional<GraphNameSource> source_;
+	std::unique_ptr<MissionNames> names_;
+};
+
 // The planned edits in the batch form an edit_record takes back, or the refusal that says why none.
 JsonValue planned(const Document &document, bool ok, const std::vector<Edit> &edits, const std::string &refusal) {
 	JsonValue out = JsonValue::make_object();
@@ -979,16 +999,16 @@ JsonValue answer_mission_logic(const QueryContext &context, const QueryArgs &arg
 	}
 	NodeAddress address;
 	if (!record_of(*mission, args, address, error)) return JsonValue::make_null();
-	const DocumentMissionNames names(*mission);
+	const MissionWords names(context, *mission);
 	const bool event = !address.child && address.kind == node_kind(MissionKind::Event);
 	if (op == "form") {
 		if (event) {
 			LogicEventForm form;
-			logic_event_form(*mission, address.row, names, form);
+			logic_event_form(*mission, address.row, *names, form);
 			return logic_event_form_to_json(form);
 		}
 		LogicForm form;
-		if (!logic_form(*mission, address, names, form)) {
+		if (!logic_form(*mission, address, *names, form)) {
 			error = "record " + std::to_string(identity_of(address)) + " is no event, trigger or action.";
 			return JsonValue::make_null();
 		}
@@ -1038,7 +1058,86 @@ JsonValue answer_mission_uses(const QueryContext &context, const QueryArgs &args
 	const MissionDocument *mission = mission_of(context, args, error);
 	NodeAddress address;
 	if (!mission || !record_of(*mission, args, address, error)) return JsonValue::make_null();
-	return mission_uses_to_json(mission_uses(*mission, address, DocumentMissionNames(*mission)), page_of(args));
+	return mission_uses_to_json(mission_uses(*mission, address, *MissionWords(context, *mission)), page_of(args));
+}
+
+// --- a script's help (S15) -----------------------------------------------------------------------
+
+constexpr const char *kScriptOps[] = { "complete", "hover", "definition", "mission_script" };
+const char *script_op_choice(size_t index) { return index < std::size(kScriptOps) ? kScriptOps[index] : nullptr; }
+constexpr QueryChoices kScriptChoices[] = { { "op", script_op_choice } };
+
+constexpr QueryParam kScriptAssistParams[] = {
+	{ "path", J::String, false, nullptr,
+			"An open script (complete, hover, definition) or mission (mission_script) by its project-relative path "
+			"or its logical name; left out, the active document." },
+	{ "op", J::String, true, nullptr,
+			"complete (what may complete the word at line, column), hover (what the word there is), definition "
+			"(the request that goes where it is defined), mission_script (the script a mission's name finds)." },
+	{ "line", J::Integer, false, "1", "The place's line, from 1." },
+	{ "column", J::Integer, false, "1", "The place's column, from 1 (complete: the caret, the word ending there)." },
+	{ "offset", J::Integer, false, "0", kOffsetDoc },
+	{ "limit", J::Integer, false, "100", kLimitDoc },
+};
+
+JsonValue answer_script_assist(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	const std::string op = args.text("op");
+	const DocumentBase *open = open_document_of(context, args, error);
+	if (!open) return JsonValue::make_null();
+	const SessionView &view = context.core.view();
+	JsonValue out = JsonValue::make_object();
+	if (op == "mission_script") {
+		if (!dynamic_cast<const MissionDocument *>(records_of(*open))) {
+			error = open->path() + " is no mission.";
+			return JsonValue::make_null();
+		}
+		const MissionScript script = mission_script(view, open->path());
+		out.set("name", json_string(script.name));
+		out.set("path", json_string(script.path));
+		out.set("create_at", json_string(script.create_at));
+		out.set("held", JsonValue::make_bool(!script.path.empty()));
+		return out;
+	}
+	const TextDocument *script = text_of(*open);
+	if (!script) {
+		error = open->path() + " is no text document.";
+		return JsonValue::make_null();
+	}
+	const size_t line = size_t(std::max<int64_t>(1, args.integer("line")));
+	const size_t column = size_t(std::max<int64_t>(1, args.integer("column")));
+	if (op == "complete") {
+		const ScriptCompletions completions = script_completions(view, *script, line, column);
+		out.set("column", json_number(double(completions.column)));
+		out.set("typed", json_string(completions.typed));
+		out.set("expected", json_string(completions.expected));
+		const JsonPage page = page_of(args);
+		set_page(out, page, completions.items.size());
+		JsonValue items = JsonValue::make_array();
+		for (size_t i = page.first(completions.items.size()); i < page.last(completions.items.size()); ++i) {
+			const ScriptCompletion &item = completions.items[i];
+			JsonValue entry = JsonValue::make_object();
+			entry.set("label", json_string(item.label));
+			entry.set("insert", json_string(item.insert));
+			entry.set("kind", json_string(item.kind));
+			entry.set("detail", json_string(item.detail));
+			items.push(std::move(entry));
+		}
+		out.set("items", std::move(items));
+		return out;
+	}
+	if (op == "hover") {
+		ScriptHover hover;
+		const bool known = script_hover(view, *script, line, column, hover);
+		out.set("word", json_string(known ? hover.word : std::string()));
+		out.set("column", json_number(double(known ? hover.column : column)));
+		out.set("length", json_number(double(known ? hover.length : 0)));
+		out.set("text", json_string(known ? hover.text : std::string()));
+		return out;
+	}
+	EditorRequest request;
+	out.set("request", script_definition(view, *script, line, column, request) ? editor_request_to_json(request)
+	                                                                            : JsonValue::make_null());
+	return out;
 }
 
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
@@ -1315,7 +1414,7 @@ constexpr EditorQueryRow kRows[] = {
 			"asked.")
 			.pages("items")
 			.row,
-	Query(K::MissionLogic, "mission_logic", answer_mission_logic, kMissionLogicParams, kDocumentReads,
+	Query(K::MissionLogic, "mission_logic", answer_mission_logic, kMissionLogicParams, kRecordReads,
 			"A mission's logic without its format (ADR 0046 S15), by op. form: an event's (its sentence and its "
 			"parts, when, then, delay, repeat; repeats, at_start, at_end; delay_steps and repeat_steps with their "
 			"seconds and most_steps; its triggers' and actions' counts, the most an event holds and why it takes "
@@ -1331,13 +1430,26 @@ constexpr EditorQueryRow kRows[] = {
 			.pages("types")
 			.chooses(kLogicChoices)
 			.row,
-	Query(K::MissionUses, "mission_uses", answer_mission_uses, kMissionUsesParams, kDocumentReads,
+	Query(K::MissionUses, "mission_uses", answer_mission_uses, kMissionUsesParams, kRecordReads,
 			"What happens when (ADR 0046 S15): the events whose triggers or actions name a record of a mission "
 			"(an entity by its SSN, an area by its zone id, a waypoint path, an event, a group), each its event "
 			"(address and index), the record and the field naming it, the record's words and its event's "
 			"sentence; what the record is to them, and why a second holder of an SSN or a zone id is named by "
 			"none (inert).")
 			.pages("uses")
+			.row,
+	Query(K::ScriptAssist, "script_assist", answer_script_assist, kScriptAssistParams, kRecordReads,
+			"A script's help from the WAC compiler's tables and the project (ADR 0046 S15), by op. complete: what "
+			"may complete the word at line, column (the caret): the word's column and what is typed, what is "
+			"expected there in words, and a page of the items (label, insert, kind: command, keyword, entity, "
+			"area, path, group, text key, effect, ammo; detail), the commands and keywords where a statement goes, "
+			"else the names the command's parameter takes (the mission of the script's name's entities by SSN, "
+			"areas by zone id, paths; the script groups; the graph's text keys, effects and ammo). hover: what the "
+			"word at line, column is, in words (word, column, length, text; text \"\" for none). definition: the "
+			"request that goes where it is defined (request, null for none). mission_script: the script a "
+			"mission's name finds (name, path where the project holds it, held, create_at beside the mission).")
+			.pages("items")
+			.chooses(kScriptChoices)
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "
