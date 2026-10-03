@@ -184,4 +184,72 @@ bool decode_pub_value(const std::string &encoded, const std::string &pcid_key,
 	return true;
 }
 
+namespace {
+
+// The keys of a chain in their order: the text between the ':'s (a chain with no ':' one key).
+std::vector<std::string> chain_keys(const std::string &key_chain) {
+	std::vector<std::string> keys(1);
+	for (const char c : key_chain) {
+		if (c == ':') keys.emplace_back();
+		else keys.back().push_back(c);
+	}
+	return keys;
+}
+
+// The C library's isprint in the "C" locale the game runs in: 0x20..0x7E.
+bool printable(unsigned char c) {
+	return c >= 0x20 && c <= 0x7E;
+}
+
+} // namespace
+
+// [orig: NapiNP_EncryptAndEncodeToHexAlpha @ 0x618fd0: each key in order @ 0x619074, the CRC of what
+// the buffer holds appended @ 0x6190ae, NapiNP_EncryptBuffer @ 0x6190b7; the A-P pack @ 0x6190de]
+std::string encode_key_chain(const std::vector<uint8_t> &plaintext, const std::string &key_chain) {
+	std::vector<uint8_t> buffer = plaintext;
+	for (const std::string &key : chain_keys(key_chain)) {
+		const uint32_t crc = crc32_be(buffer);
+		for (int shift = 0; shift < 32; shift += 8) buffer.push_back(static_cast<uint8_t>((crc >> shift) & 0xFFu));
+		ticket_transform(buffer, key, /*decrypt=*/false);
+	}
+	return encode_ap(buffer);
+}
+
+// [orig: NapiNP_DecodeEncryptedString @ 0x619130: the printable count @ 0x6191c1 and the room for the
+// keys' CRCs @ 0x61920f; each printable character a nibble, low first, one outside A-P refused
+// @ 0x61923a, an odd count refused @ 0x619261; the keys right to left @ 0x619294, each
+// NapiNP_DecryptBuffer @ 0x6192e1 then its CRC compared @ 0x6192f6]
+bool decode_key_chain(const std::string &encoded, const std::string &key_chain,
+                      std::vector<uint8_t> &plaintext) {
+	plaintext.clear();
+	const std::vector<std::string> keys = chain_keys(key_chain);
+	size_t printables = 0;
+	for (const char c : encoded) printables += printable(static_cast<unsigned char>(c)) ? 1 : 0;
+	if (printables / 2 < 4 * keys.size()) return false;
+	std::vector<uint8_t> data;
+	data.reserve(printables / 2);
+	bool high = false;
+	for (const char c : encoded) {
+		if (!printable(static_cast<unsigned char>(c))) continue;
+		const int nibble = c - 'A';
+		if (nibble < 0 || nibble > 15) return false;
+		if (high) data.back() = static_cast<uint8_t>(data.back() | (nibble << 4));
+		else data.push_back(static_cast<uint8_t>(nibble));
+		high = !high;
+	}
+	if (high) return false;
+	for (auto key = keys.rbegin(); key != keys.rend(); ++key) {
+		if (data.size() < 4) return false;
+		ticket_transform(data, *key, /*decrypt=*/true);
+		const size_t length = data.size() - 4;
+		const uint32_t stored = static_cast<uint32_t>(data[length]) | (static_cast<uint32_t>(data[length + 1]) << 8) |
+		                        (static_cast<uint32_t>(data[length + 2]) << 16) |
+		                        (static_cast<uint32_t>(data[length + 3]) << 24);
+		data.resize(length);
+		if (crc32_be(data) != stored) return false;
+	}
+	plaintext = std::move(data);
+	return true;
+}
+
 } // namespace opennova
