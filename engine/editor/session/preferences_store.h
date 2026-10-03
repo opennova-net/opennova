@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,6 +19,7 @@ namespace opennova::editor {
 // absent (the defaults) with a warning naming what it held, and the next save writes a new file.
 inline constexpr int kPreferencesSchemaVersion = 2;
 inline constexpr size_t kRecentProjectsMax = 10;
+inline constexpr size_t kRecentItemsMax = 12;
 
 struct Preferences {
 	std::vector<std::string> recent_projects; // project roots, most recent first
@@ -27,6 +29,10 @@ struct Preferences {
 	// The import dialog's "Include the files these need" (ADR 0046 S11g): what a preview the
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;
+	// The items most recently placed in a mission's viewport (ADR 0046 S15: its Place tool's palette
+	// lists them first), by their items.def id, most recent first; a store that does not say reads as
+	// none.
+	std::vector<int64_t> recent_items;
 };
 
 // Where the preferences are kept (S13 A2). The embedder owns the store and hands the session a

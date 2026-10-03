@@ -15,6 +15,7 @@
 
 namespace opennova::editor {
 class DocumentBase;
+class TextDocument;
 struct EditorRequest;
 } // namespace opennova::editor
 
@@ -81,9 +82,16 @@ private:
 	// which ended the burst's step itself, rather than another client's edit.
 	bool history_moved_(const opennova::editor::DocumentBase &document) const;
 	const opennova::editor::DocumentBase *document_() const;
+	const opennova::editor::TextDocument *text_() const;
 	void on_text_changed_();
 	void on_focus_exited_();
 	void end_burst_();
+	// What the control asks of the script (S15, session/script_assist): the completions at its caret
+	// added to its list, a word's words at a place, the place a Ctrl+click looks up gone to (a request),
+	// else a notice that nothing defines it.
+	void complete_(bool force);
+	std::string hover_(int line, int column) const;
+	void lookup_(int line, int column);
 	// The control takes `shown` where it holds another text (the fewest characters replaced, its caret
 	// and selection kept): true when it changed.
 	bool take_text_(const std::u32string &shown);

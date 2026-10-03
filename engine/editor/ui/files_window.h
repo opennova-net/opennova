@@ -86,10 +86,13 @@ private:
 		std::vector<size_t> folders;
 		std::vector<size_t> files;
 	};
-	// A file's findings, for the counts after its name.
+	// A file's findings, for the counts after its name: the modder's, as Problems counts them; a file
+	// that is the game's own data (S15) has its errors and warnings counted apart, said in its tooltip.
 	struct Counts {
 		size_t errors = 0;
 		size_t warnings = 0;
+		size_t original_errors = 0;
+		size_t original_warnings = 0;
 	};
 
 	void refresh(const SessionView &view);
