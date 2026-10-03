@@ -824,52 +824,88 @@ int MenuRuntime::table_column_count_(int id) const {
 
 namespace {
 
-// A column the resize left in place and no init has set up yet (menu_table.h).
-MenuTableColumn undefined_column() {
+// A record the table had, which a count that does not grow the table leaves in
+// place (menu_table.h): the frame draws the authored column there.
+MenuTableColumn kept_record() {
 	MenuTableColumn column;
+	column.kept = true;
 	column.defined = false;
 	return column;
 }
 
+// A record a growing count starts over: every member zero (menu_table.h)
+// [orig: CTableWnd_ResizeColumnCount @0x63f6c0 — the memset @0x63f710].
+MenuTableColumn zeroed_record() {
+	MenuTableColumn column;
+	column.justify = column.vjustify = 0;
+	column.body_justify = column.body_vjustify = 0;
+	column.ascending = false;
+	column.defined = false;
+	return column;
+}
+
+// CTableWnd_InitRow(column, numeric_sort, width, label, justify, vjustify) on one
+// record: the label, the sort compare (+112), ascending (+120 = 1), the width
+// (+124), the header justification with -1 taking 1 / 16 (+128 / +132), the
+// cells' copied from it (+144 / +148). The record's cell type, cell offsets,
+// SUBST rows and bitmap scale stay (`kept`, `cell_type`).
+// [orig: CTableWnd_InitRow @0x63f9c0 — +112 @0x63fb5c, +120 @0x63fb75, +124
+//  @0x63fb7f, +128 / +132 @0x63fb98..0x63fbd8, +0x90 / +0x94 copied
+//  @0x63fbdf..0x63fc03]
+void init_record(MenuTableColumn &record, bool numeric_sort, int width, const std::string &label,
+		int justify, int vjustify) {
+	record.defined = true;
+	record.label = label;
+	record.numeric_sort = numeric_sort;
+	record.ascending = true;
+	record.width = width;
+	record.justify = justify == -1 ? 1 : justify;
+	record.vjustify = vjustify == -1 ? 16 : vjustify;
+	record.body_justify = record.justify;
+	record.body_vjustify = record.vjustify;
+}
+
 } // namespace
+
+// The count over the records the table holds (menu_table.h): the authored ones
+// until code set a count, kept by a count that does not grow the table, every one
+// started over by one that does. [orig: CTableWnd_ResizeColumnCount @0x63f6c0]
+void MenuRuntime::table_resize_records_(int id, int count) {
+	const int current = table_column_count_(id);
+	MenuWidgetRuntimeState &state = state_of_(id);
+	if (!state.has_table_columns)
+		state.table_columns.assign(static_cast<size_t>(current), kept_record());
+	if (count > current)
+		state.table_columns.assign(static_cast<size_t>(count), zeroed_record());
+	else
+		state.table_columns.resize(static_cast<size_t>(count));
+	state.has_table_columns = true;
+}
+
+void MenuRuntime::push_table_columns_(int id) {
+	const MenuWidgetRuntimeState *state = saved_state_(id);
+	const int index = frame_index(id);
+	if (state != nullptr && index >= 0)
+		frame_->set_widget_table_columns(index, true, state->table_columns, state->table_sort_column);
+}
 
 bool MenuRuntime::table_set_column_count(int id, int count) {
 	if (widget_kind_of(id) != kKindTable || count < 1) return false;
-	MenuWidgetRuntimeState &state = state_of_(id);
-	if (!state.has_table_columns)
-		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
-				undefined_column());
-	state.table_columns.resize(static_cast<size_t>(count), undefined_column());
-	state.has_table_columns = true;
-	const int index = frame_index(id);
-	if (index >= 0)
-		frame_->set_widget_table_columns(index, true, state.table_columns, state.table_sort_column);
+	table_resize_records_(id, count);
+	push_table_columns_(id);
 	return true;
 }
 
 bool MenuRuntime::table_init_column(int id, int column, int width, const std::string &label,
 		int justify, int vjustify) {
 	if (widget_kind_of(id) != kKindTable) return false;
-	if (column < 0 || column >= table_column_count_(id)) return false;
+	const int count = table_column_count_(id);
+	if (column < 0 || column >= count) return false;
 	MenuWidgetRuntimeState &state = state_of_(id);
-	if (!state.has_table_columns)
-		state.table_columns.assign(static_cast<size_t>(table_column_count_(id)),
-				undefined_column());
-	state.has_table_columns = true;
-	MenuTableColumn &def = state.table_columns[static_cast<size_t>(column)];
-	def.defined = true;
-	def.width = width;
-	def.label = label;
-	// -1 takes the init's defaults, and the cells copy the header's
-	// [orig: CTableWnd_InitRow @0x63f9c0 — +0x80 / +0x84 (-1 -> 1 / 0x10) copied
-	// to +0x90 / +0x94 @0x63fbdf..0x63fc03].
-	def.justify = justify == -1 ? 1 : justify;
-	def.vjustify = vjustify == -1 ? 16 : vjustify;
-	def.body_justify = def.justify;
-	def.body_vjustify = def.vjustify;
-	const int index = frame_index(id);
-	if (index >= 0)
-		frame_->set_widget_table_columns(index, true, state.table_columns, state.table_sort_column);
+	if (!state.has_table_columns) table_resize_records_(id, count); // the records as they stand
+	init_record(state.table_columns[static_cast<size_t>(column)], false, width, label, justify,
+			vjustify);
+	push_table_columns_(id);
 	return true;
 }
 
@@ -972,14 +1008,21 @@ void MenuRuntime::table_select_row(int id, int row, bool additive) {
 	push_table_rows_(id);
 }
 
+// The stat fill's set-up: the count, then one init per column, each column's label,
+// width, justification and sort compare [orig: StatScreen_PopulateStatResultsList
+// @ 0x562240 — the count through the vtable +0x6C @0x562302, the inits
+// @0x562346..0x56242b]. A count below 1 fails, which sets nothing up.
 void MenuRuntime::table_set_columns(int id, const std::vector<MenuTableColumn> &columns) {
+	if (widget_kind_of(id) != kKindTable || columns.empty()) return;
+	table_resize_records_(id, static_cast<int>(columns.size()));
 	MenuWidgetRuntimeState &state = state_of_(id);
-	state.has_table_columns = true;
-	state.table_columns = columns;
+	for (size_t i = 0; i < columns.size(); ++i) {
+		const MenuTableColumn &c = columns[i];
+		init_record(state.table_columns[i], c.numeric_sort, c.width, c.label, c.justify, c.vjustify);
+	}
 	state.table_sort_keys.assign(std::min<size_t>(std::max<size_t>(columns.size(), 1), 20), -1);
 	state.table_sort_column = -1;
-	const int index = frame_index(id);
-	if (index >= 0) frame_->set_widget_table_columns(index, true, columns, -1);
+	push_table_columns_(id);
 }
 
 void MenuRuntime::table_set_column_ascending(int id, int column, bool ascending) {

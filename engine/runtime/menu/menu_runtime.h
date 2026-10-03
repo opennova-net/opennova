@@ -115,9 +115,9 @@ public:
 			int value) = 0;
 	virtual void set_widget_selected_set(int index, const std::vector<int> &rows) = 0;
 	virtual void set_widget_table_rows(int index, const std::vector<MenuTableRow> &rows) = 0;
-	// The columns code installed (none: the XML ones; an entry no init defined
-	// keeps the column the resize left there, MenuTableColumn::defined) and the
-	// sorted column (-1 none).
+	// The column records code set up (none: the XML ones; menu_table.h
+	// MenuTableColumn: a record a count kept, one it started over, an init over
+	// either) and the sorted column (-1 none).
 	virtual void set_widget_table_columns(int index, bool installed,
 			const std::vector<MenuTableColumn> &columns, int sort_column) = 0;
 	// CWnd_SetClipRect: the widget's own passes clipped to an absolute design
@@ -418,10 +418,14 @@ public:
 
 	// ---- tables (the CTableWnd operations, menu_table_row.h) ----
 	// The column count a populate sets before it defines its columns: false
-	// below 1 (the resize fails); existing columns are kept, new ones zeroed.
-	// [orig: CTableWnd vtable +0x6C -> resize_column_count @0x63f6c0]
+	// below 1 (the resize fails). A count that does not grow the table keeps
+	// its records (the authored columns); one that grows it starts every record
+	// over, zeroed (menu_table.h MenuTableColumn::kept).
+	// [orig: CTableWnd vtable +0x6C -> CTableWnd_ResizeColumnCount @0x63f6c0]
 	bool table_set_column_count(int id, int count);
-	// CTableWnd_InitRow on one column of the current count: false out of range.
+	// CTableWnd_InitRow(column, 0, width, label, justify, vjustify) on one record
+	// of the current count: false out of range. The record keeps its cell type,
+	// cell offsets, SUBST rows and bitmap scale (menu_table.h).
 	// [orig: CTableWnd_InitRow @0x63f9c0 — the bounds @0x63f9c8..0x63f9d9]
 	bool table_init_column(int id, int column, int width, const std::string &label,
 			int justify, int vjustify);
@@ -455,9 +459,13 @@ public:
 	// Select `row` alone (every other non-locked row cleared), or toggle it
 	// with `additive`.
 	void table_select_row(int id, int row, bool additive);
-	// Code-installed columns: they replace the XML ones (the table is resized
-	// and every column set up [orig: StatScreen_PopulateStatResultsList @ 0x562240 ->
-	// resize_column_count, init_table_row]); the sort-key stack starts over.
+	// Code-installed columns, as the stat fill sets them up: the count
+	// (table_set_column_count), then one init per column with its label, width,
+	// justification and sort compare (table_init_column; the rest of each entry
+	// is not read) [orig: StatScreen_PopulateStatResultsList @ 0x562240 ->
+	// CTableWnd_ResizeColumnCount, CTableWnd_InitRow]; the sort-key stack starts
+	// over. A count that grows the table (the stat RESULTLIST's, which authors no
+	// COLUMN) leaves no authored column behind; an empty set changes nothing.
 	void table_set_columns(int id, const std::vector<MenuTableColumn> &columns);
 	// A column's sort direction [orig: sub_63EC30 writes the column's +120].
 	void table_set_column_ascending(int id, int column, bool ascending);
@@ -546,6 +554,10 @@ private:
 	void push_table_rows_(int id);
 	bool table_multiselect_(int id) const;
 	int table_column_count_(int id) const;
+	// The records at `count` (menu_table.h): kept when it does not grow the
+	// table, every one zeroed when it does.
+	void table_resize_records_(int id, int count);
+	void push_table_columns_(int id);
 	void emit_value_changed_for_(int id, int row);
 	void on_claim_changed_(int previous, int current);
 	// The parent window's id, -1 for a root (or an unknown id).
