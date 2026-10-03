@@ -202,6 +202,21 @@ public:
 	void set_user_layout(bool keep) { user_layout_ = keep; }
 	bool user_layout() const { return user_layout_; }
 
+	// Where the mouse is, as the OS has it: whether one of the shell's windows has the focus,
+	// and whether the cursor is over one of them. The shell's say each frame, before
+	// draw_frame (until it says, both true). ImGui's bridge feeds it the global cursor
+	// whatever covers the window, so a window behind another, or not the one in use, would
+	// otherwise take hovers through the window in front: highlights, tooltips. The mouse is
+	// the pass's only with the focus and the cursor over its window, or while a press it
+	// took is held (a drag carried out of the window keeps its mouse); otherwise draw_frame
+	// forgets it for the frame before anything draws: nothing hovered, the position unknown.
+	void set_mouse_place(bool focused, bool over) {
+		mouse_focused_ = focused;
+		mouse_over_ = over;
+	}
+	bool mouse_focused() const { return mouse_focused_; }
+	bool mouse_over() const { return mouse_over_; }
+
 	// The whole surface: closed = nothing drawn, no capture, no input.
 	void set_open(bool open);
 	bool is_open() const { return open_; }
@@ -292,6 +307,8 @@ private:
 	bool layout_focus_armed_ = false;
 	bool attached_ = false;
 	bool platform_windows_enabled_ = true;
+	bool mouse_focused_ = true;
+	bool mouse_over_ = true;
 	bool user_layout_ = true;
 	bool open_ = false;
 	bool layout_reset_pending_ = false;
