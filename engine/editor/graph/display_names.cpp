@@ -203,8 +203,11 @@ const std::string &DisplayNameCache::record(const Document &document, const Node
 	key.has_names = names != nullptr;
 	key.names = names ? names->generation() : 0;
 	if (!(key == key_)) {
+		// Held: only the revision moved, which a held gesture's edits leave every title as it was.
+		const bool kept = held_ && key.document == key_.document && key.load == key_.load && key.names == key_.names &&
+		                  key.has_names == key_.has_names;
 		key_ = key;
-		titles_.clear();
+		if (!kept) titles_.clear();
 	}
 	const auto found = titles_.find(address);
 	if (found != titles_.end()) return found->second;

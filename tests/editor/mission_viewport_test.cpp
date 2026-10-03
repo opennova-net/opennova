@@ -28,6 +28,7 @@
 #include <base/io/json.h>
 #include <editor/documents/mission_document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_canvas.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_palette.h>
@@ -1216,6 +1217,115 @@ static int test_tweaking_commands() {
 // every mark shown on the first framing hit at its pixel answers the front-most record there; the
 // first item framed and moved by a drag of 64 pixels is one edit, and its undo gives the document's
 // bytes back. Prints the largest mission's counts.
+// The polish's measure of the labels: the canvas's overlay (MissionCanvas::shapes, the labels' layout in
+// it) with the labels option on over `path`, on a 1600 x 900 picture framed on everything (the densest
+// place), the 24 nearest entities selected: 120 idle frames (the pointer still over nothing, nothing
+// moving), then 120 drag frames (the primary's mark dragged a pixel a frame, each sample's batch served
+// and followed). Prints the mean and the slowest frame of each, milliseconds; everything undone.
+static int measure_labels(Rig &rig, const std::string &path) {
+	rig.session.handle(request::open_document(path));
+	const DocumentBase *open = rig.session.document_for(path);
+	TEST_EXPECT(open != nullptr);
+	if (!open) return 1;
+	const std::string full = open->path();
+	const std::string before = records_of(*open)->serialize().text;
+	rig.session.handle(request::set_viewport(path,
+			R"({"kind": "mission", "device": {"width": 1600, "height": 900}, "options": {"marks": {"labels": true}}})"));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	ViewportCommand frame;
+	frame.name = "frame";
+	frame.kind = ViewportKind::Mission;
+	rig.session.handle(request::edit_in_viewport(path, frame));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const MissionViewport *viewport =
+			static_cast<const MissionViewport *>(rig.session.viewports().find(full, ViewportKind::Mission));
+	TEST_EXPECT(viewport != nullptr);
+	if (!viewport) return 1;
+	const ViewportContext first = viewport_context(rig.session.view(), *viewport);
+	const int width = first.width, height = first.height;
+	const std::vector<MissionMark> marks = viewport->marks(width, height, first.device);
+	std::vector<size_t> nearest;
+	size_t shown = 0;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		shown += marks[i].shown ? 1 : 0;
+		if (marks[i].shown && marks[i].entity >= 0) nearest.push_back(i);
+	}
+	std::sort(nearest.begin(), nearest.end(), [&](size_t a, size_t b) { return marks[a].depth < marks[b].depth; });
+	if (nearest.size() > 24) nearest.resize(24);
+	TEST_EXPECT(!nearest.empty());
+	if (nearest.empty()) return 1;
+	std::vector<NodeAddress> records;
+	for (const size_t i : nearest) records.push_back(marks[i].record);
+	rig.session.handle(request::select_record(path, records.front(), SelectMode::Replace, records));
+	MissionCanvas canvas;
+	editor_test::Gathered out;
+	const auto input_at = [&](float x, float y) {
+		CanvasInput in;
+		in.width = width;
+		in.height = height;
+		in.mouse = CanvasPoint{ x, y };
+		in.screen = CanvasPoint{ x, y };
+		in.hovered = true;
+		return in;
+	};
+	size_t labels = 0;
+	// One frame as the view draws it: the frame's start, the pointer, the requests served and followed,
+	// then the overlay, timed.
+	int frame_index = 0;
+	const auto frame_of = [&](const CanvasInput &in, double &total, double &slowest, int &slowest_at) {
+		{
+			const ViewportContext context = viewport_context(rig.session.view(), *viewport);
+			canvas.follow(*viewport, context, out);
+			canvas.input(context, in, out);
+		}
+		editor_test::serve(rig.session, out.requests);
+		out.requests.clear();
+		rig.pump();
+		const ViewportContext context = viewport_context(rig.session.view(), *viewport);
+		const auto started = std::chrono::steady_clock::now();
+		const OverlayList list = canvas.shapes(context, in);
+		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		total += ms;
+		if (ms > slowest) slowest_at = frame_index;
+		slowest = std::max(slowest, ms);
+		++frame_index;
+		labels = 0;
+		for (const OverlayShape &shape : list.shapes) labels += shape.kind == OverlayKind::Text ? 1 : 0;
+	};
+	constexpr int kFrames = 120;
+	double idle = 0.0, idle_slowest = 0.0, drag = 0.0, drag_slowest = 0.0;
+	int idle_slowest_at = -1, drag_slowest_at = -1, ignored_at = -1;
+	for (int i = 0; i < kFrames; ++i) frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	const size_t idle_labels = labels;
+	const MissionMark &primary = marks[nearest.front()];
+	CanvasInput press = input_at(primary.x, primary.y);
+	press.pressed = press.down = true;
+	double ignored = 0.0, ignored_slowest = 0.0;
+	frame_of(press, ignored, ignored_slowest, ignored_at);
+	frame_index = 1;
+	for (int i = 1; i <= kFrames; ++i) {
+		CanvasInput moved = input_at(primary.x + float(i), primary.y);
+		moved.down = true;
+		moved.delta = CanvasPoint{ 1.0f, 0.0f };
+		frame_of(moved, drag, drag_slowest, drag_slowest_at);
+	}
+	frame_of(input_at(primary.x + float(kFrames), primary.y), ignored, ignored_slowest, ignored_at);
+	std::printf("labels: %s with the labels on, %zu marks shown, %zu labels drawn idle and %zu dragging 24 selected: idle "
+	            "%.3f ms a frame (slowest %.3f, frame %d), drag %.3f ms a frame (slowest %.3f, drag frame %d), %d frames each\n",
+	            path.c_str(), shown, idle_labels, labels, idle / kFrames, idle_slowest, idle_slowest_at, drag / kFrames,
+	            drag_slowest, drag_slowest_at, kFrames);
+	while (records_of(*rig.session.document_for(path))->dirty()) {
+		rig.session.handle(request::undo(path));
+		if (!rig.session.outcome().done()) break;
+	}
+	TEST_EXPECT(records_of(*rig.session.document_for(path))->serialize().text == before);
+	rig.session.handle(request::close_document(path));
+	rig.pump();
+	return 0;
+}
+
 static int test_retail() {
 	const std::string root = retail::install();
 	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission in its viewport)");
@@ -1345,6 +1455,7 @@ static int test_retail() {
 	            "largest, %s: %zu entities (%s)\n",
 	            opened, hits, moved, seconds, largest.c_str(), largest_entities, largest_counts.c_str());
 	TEST_EXPECT(opened == paths.size() && opened > 0 && hits > 0 && moved > 0);
+	TEST_EXPECT(measure_labels(rig, largest) == 0);
 	std::printf("test_retail passed\n");
 	return 0;
 }

@@ -280,6 +280,25 @@ int test_named_words() {
 	moved.generation_ = 2;
 	cache.record(*document, walker, &moved);
 	TEST_EXPECT(cache.made() == 2);
+	// Held (the polish: a drag of marks), an edit's revision keeps the titles; let go, the next one drops
+	// them; held, other names still do.
+	Edit nudge;
+	nudge.address = walker;
+	nudge.field = "x";
+	nudge.value = 12.5;
+	Diagnostic error;
+	cache.hold(true);
+	TEST_EXPECT(document->apply(nudge, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved) == record_display(*document, walker, &moved) && cache.made() == 2);
+	cache.hold(false);
+	nudge.value = 13.5;
+	TEST_EXPECT(document->apply(nudge, error));
+	cache.record(*document, walker, &moved);
+	TEST_EXPECT(cache.made() == 3);
+	cache.hold(true);
+	cache.record(*document, walker, &names);
+	TEST_EXPECT(cache.made() == 4);
+	cache.hold(false);
 	std::printf("named words: items, shown names, text keys, choices, the cache\n");
 	return 0;
 }

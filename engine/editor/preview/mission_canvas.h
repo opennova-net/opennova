@@ -9,6 +9,7 @@
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_hint.h>
+#include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_scene.h>
 #include <editor/preview/viewport_overlay.h>
 
@@ -154,8 +155,10 @@ private:
 	std::vector<NodeAddress> nudged_;
 	double nudge_east_ = 0.0, nudge_north_ = 0.0, nudge_up_ = 0.0;
 	// The marks' titles by the project's names (the labels, the hint), kept while the document and the
-	// graph stand.
+	// graph stand, and while a drag of a handle writes (the polish: it moves marks, which no title reads);
+	// the labels' last layout, laid out again only when what it read moved.
 	mutable DisplayNameCache titles_;
+	mutable MissionLabelLayout labels_;
 	MissionTool tool_ = MissionTool::Select;
 	int64_t item_ = 0;
 	std::string item_name_;

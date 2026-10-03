@@ -94,6 +94,10 @@ public:
 	const std::string &record(const Document &document, const NodeAddress &address, const NameSource *names);
 	// How many titles were worded (made, not read from the cache): a test's measure.
 	size_t made() const { return made_; }
+	// While held, the document's revision moving keeps the titles (its identity, its load or the names
+	// moving still drops them): a gesture whose edits change nothing a title reads (a drag of a mission's
+	// marks writes their positions and headings alone) words each title once, not once a sample.
+	void hold(bool held) { held_ = held; }
 
 private:
 	struct Key {
@@ -112,6 +116,7 @@ private:
 	Key key_;
 	std::unordered_map<NodeAddress, std::string, AddressHash> titles_;
 	size_t made_ = 0;
+	bool held_ = false;
 };
 
 } // namespace opennova::editor

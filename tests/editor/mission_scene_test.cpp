@@ -542,6 +542,19 @@ int test_label_picks() {
 	const std::vector<size_t> capped = mission_label_picks(many);
 	TEST_EXPECT(capped.size() == kMissionLabelsMax && capped.front() == 400 && capped[1] == 0 &&
 			capped.back() == kMissionLabelsMax - 2);
+	// The last layout (the polish): taken again while the candidates and their words are the same, made
+	// again when a candidate moves (a drag's selection, the camera) or a word does, once each.
+	MissionLabelLayout layout;
+	const std::vector<std::string> words(candidates.size(), "Wire Test");
+	TEST_EXPECT(layout.picks(candidates, words) == picks && layout.made() == 1);
+	TEST_EXPECT(layout.picks(candidates, words) == picks && layout.picks(candidates, words) == picks && layout.made() == 1);
+	std::vector<MissionLabelCandidate> moved = candidates;
+	moved[2].y = 0.0f; // the clear selected one dragged over the primary's: no longer drawn
+	TEST_EXPECT((layout.picks(moved, words) == std::vector<size_t>{ 0, 5, 3, 4 }) && layout.made() == 2);
+	TEST_EXPECT(layout.picks(moved, words) == std::vector<size_t>({ 0, 5, 3, 4 }) && layout.made() == 2);
+	std::vector<std::string> renamed = words;
+	renamed[4] = "Ranger";
+	TEST_EXPECT(layout.picks(moved, renamed).size() == 4 && layout.made() == 3);
 	std::printf("test_label_picks passed\n");
 	return 0;
 }

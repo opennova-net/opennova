@@ -27,8 +27,28 @@ struct MissionLabelCandidate {
 	bool always = false; // the hovered mark's or the primary's
 	bool first = false; // another selected mark's: placed before the rest, but only where it fits
 };
+bool operator==(const MissionLabelCandidate &a, const MissionLabelCandidate &b);
 
 // The candidates whose labels draw, by their index, in the order placed.
 std::vector<size_t> mission_label_picks(const std::vector<MissionLabelCandidate> &candidates);
+
+// The labels' last layout (the polish): the candidates and their words it was made over and its picks,
+// which a frame whose candidates and words are the same takes as they were. A canvas keeps one, so its
+// labels are laid out again only when something they read moved (the selection a drag moves, the
+// camera, the hover, a title), and then once a frame.
+class MissionLabelLayout {
+public:
+	// The picks of `candidates` worded `words` (one each): the last ones where both are the last
+	// layout's, else made anew (mission_label_picks) and kept.
+	const std::vector<size_t> &picks(std::vector<MissionLabelCandidate> candidates, std::vector<std::string> words);
+	// How many layouts it has made: a test's measure.
+	size_t made() const { return made_; }
+
+private:
+	std::vector<MissionLabelCandidate> candidates_;
+	std::vector<std::string> words_;
+	std::vector<size_t> picks_;
+	size_t made_ = 0;
+};
 
 } // namespace opennova::editor

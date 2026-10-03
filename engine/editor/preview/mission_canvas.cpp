@@ -206,6 +206,9 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 	// A nudge is of the selection it began on.
 	if (gesture_.nudging() && nudged_ != frame_.records) gesture_.end(out);
 	if (!gesture_.pressed()) grab_ = MissionGrab();
+	// A drag of a handle or a nudge writes positions, heights, headings and an area's bounds alone, which
+	// no title reads: the titles stand through its samples (each one a revision).
+	titles_.hold((gesture_.dragging() && grab_.what == MissionGrab::What::Handle) || gesture_.nudging());
 }
 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
@@ -584,6 +587,7 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 		overlay.title = [this, document, &names](const NodeAddress &record) {
 			return titles_.record(*document, record, names ? &*names : nullptr);
 		};
+	overlay.layout = &labels_;
 	overlay.marquee = grab_.what == MissionGrab::What::Marquee && gesture_.dragging();
 	overlay.marquee_from = grab_.from;
 	overlay.marquee_to = grab_.to;
