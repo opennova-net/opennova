@@ -6,6 +6,7 @@
 #include <variant>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/display_names.h>
 
 namespace opennova::editor {
 
@@ -24,8 +25,10 @@ const RecordKindRow *own_kind(const Document &document) {
 
 } // namespace
 
-OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, OutlineRowListedHook row_listed)
-    : mode_(mode), file_values_(file_values), row_listed_(row_listed) {}
+OutlineModel::OutlineModel(OutlineMode mode, OutlineFileValuesHook file_values, OutlineRowListedHook row_listed,
+                           OutlineGroupsHook groups, OutlineRowReadsOthersHook reads_others)
+    : mode_(mode), file_values_(file_values), row_listed_(row_listed), groups_(mode == OutlineMode::Tree ? groups : nullptr),
+      reads_others_(reads_others) {}
 
 void OutlineModel::set_filter(const std::string &filter) {
 	if (filter == filter_) return;
@@ -58,13 +61,18 @@ bool OutlineModel::row_listed(const Document &document, const Node &row) const {
 
 void OutlineModel::set_open(const OutlineLine &line, bool open) {
 	if (line.forced) return;
-	const bool changed = open ? open_.insert(key_of(line)).second : open_.erase(key_of(line)) > 0;
+	bool changed = false;
+	if (line.heading) changed = open ? closed_.erase(line.key) > 0 : closed_.insert(line.key).second;
+	else changed = open ? open_.insert(key_of(line)).second : open_.erase(key_of(line)) > 0;
 	if (changed) ++open_version_;
 }
 
-bool OutlineModel::is_open(const OutlineLine &line) const { return open_.count(key_of(line)) > 0; }
+bool OutlineModel::is_open(const OutlineLine &line) const {
+	return line.heading ? closed_.count(line.key) == 0 : open_.count(key_of(line)) > 0;
+}
 
-size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master) {
+size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddress> &path, NodeId master,
+                            const NameSource *names) {
 	if (path.empty()) return SIZE_MAX;
 	const NodeAddress &shown = mode_ == OutlineMode::List ? path.front() : path.back();
 	if (mode_ == OutlineMode::MasterDetail && !shown.child) return SIZE_MAX;
@@ -74,13 +82,23 @@ size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddr
 			changed = open_.insert({path[i], false, 0}).second || changed;
 			changed = open_.insert({path[i], true, path[i + 1].kind}).second || changed;
 		}
+		// The headings its row stands under, opened.
+		lines(document, master, names);
+		for (const RowLines &row : rows_) {
+			if (row.row != path.front().row) continue;
+			std::string key;
+			for (const OutlineGroup &group : row.groups) {
+				key += (key.empty() ? "" : "/") + group.key;
+				changed = closed_.erase(key) > 0 || changed;
+			}
+		}
 		if (changed) ++open_version_;
 	}
-	lines(document, master);
+	lines(document, master, names);
 	size_t at = line_of(shown);
 	if (at == SIZE_MAX && filtered()) {
 		set_filter(std::string());
-		lines(document, master);
+		lines(document, master, names);
 		at = line_of(shown);
 	}
 	// Its row's kind not listed, or its row one the listed hook leaves out: listed.
@@ -88,7 +106,7 @@ size_t OutlineModel::reveal(const Document &document, const std::vector<NodeAddr
 	if (row && !row_listed(document, *row)) {
 		kinds_ |= kind_bit(document, row->kind);
 		if (!row_listed(document, *row)) all_rows_ = true;
-		lines(document, master);
+		lines(document, master, names);
 		at = line_of(shown);
 	}
 	return at;
@@ -98,7 +116,7 @@ bool OutlineModel::matches(const std::string &text) const {
 	return needle_.empty() || normalized_logical_name(text).find(needle_) != std::string::npos;
 }
 
-const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, NodeId master) {
+const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, NodeId master, const NameSource *names) {
 	Key key;
 	key.made = true;
 	key.document = document.identity();
@@ -111,7 +129,15 @@ const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, No
 	key.all_rows = all_rows_;
 	key.kinds = kinds_;
 	key.master = mode_ == OutlineMode::MasterDetail ? master : 0;
+	key.has_names = names != nullptr;
+	key.names = names ? names->generation() : 0;
 	if (key == key_) return lines_;
+	// The names the titles read, while the lines are made.
+	struct Naming {
+		const NameSource *&held;
+		~Naming() { held = nullptr; }
+	} naming{names_};
+	names_ = names;
 	// The revision alone moved (an edit, an undo, a redo): the rows the document's change set names.
 	if (key.same_but_revision(key_)) {
 		ChangeSet changes;
@@ -128,8 +154,73 @@ const std::vector<OutlineLine> &OutlineModel::lines(const Document &document, No
 	const auto &rows = document.rows();
 	rows_.assign(rows.size(), RowLines());
 	for (size_t i = 0; i < rows.size(); ++i) make_row(document, i, key.master, rows_[i]);
+	make_groups(document);
 	join_rows();
 	return lines_;
+}
+
+void OutlineModel::make_groups(const Document &document) {
+	if (!groups_) return;
+	std::vector<std::vector<OutlineGroup>> groups;
+	groups_(document, names_, groups);
+	for (size_t i = 0; i < rows_.size(); ++i) rows_[i].groups = i < groups.size() ? std::move(groups[i]) : std::vector<OutlineGroup>();
+}
+
+void OutlineModel::join_grouped() {
+	// The rows that show, in their headings' order (each heading's in the file's order), and how many
+	// stand under each heading.
+	std::vector<const RowLines *> shown;
+	std::unordered_map<std::string, size_t> counts;
+	for (const RowLines &row : rows_) {
+		if (row.lines.empty()) continue;
+		shown.push_back(&row);
+		std::string key;
+		for (const OutlineGroup &group : row.groups) {
+			key += (key.empty() ? "" : "/") + group.key;
+			++counts[key];
+		}
+	}
+	const auto before = [](const RowLines *a, const RowLines *b) {
+		const size_t n = std::min(a->groups.size(), b->groups.size());
+		for (size_t i = 0; i < n; ++i)
+			if (a->groups[i].key != b->groups[i].key) return a->groups[i].key < b->groups[i].key;
+		return a->groups.size() < b->groups.size();
+	};
+	std::stable_sort(shown.begin(), shown.end(), before);
+	const std::vector<OutlineGroup> none;
+	const std::vector<OutlineGroup> *last = &none;
+	for (const RowLines *row : shown) {
+		// Where its headings first differ from the row before it: a heading line for each from there, as
+		// long as the headings over it are open (a filter keeping a row under one holds it open).
+		size_t same = 0;
+		while (same < last->size() && same < row->groups.size() && (*last)[same].key == row->groups[same].key) ++same;
+		std::string key;
+		bool open = true;
+		for (size_t level = 0; level < row->groups.size(); ++level) {
+			key += (key.empty() ? "" : "/") + row->groups[level].key;
+			const bool closed = !filtered() && closed_.count(key) > 0;
+			if (level >= same && open) {
+				OutlineLine line;
+				line.heading = true;
+				line.key = key;
+				line.depth = int(level);
+				line.count = counts[key];
+				line.branch = true;
+				line.open = !closed;
+				line.forced = filtered();
+				line.text = row->groups[level].text + " (" + std::to_string(line.count) + ")";
+				lines_.push_back(std::move(line));
+			}
+			open = open && !closed;
+		}
+		last = &row->groups;
+		if (!open) continue;
+		const int depth = int(row->groups.size());
+		for (OutlineLine line : row->lines) {
+			line.depth += depth;
+			lines_.push_back(std::move(line));
+		}
+	}
 }
 
 void OutlineModel::make_detail_columns(const Document &document) {
@@ -192,6 +283,14 @@ bool OutlineModel::follow_changes(const Document &document, const RowChanges &ch
 		}
 		rows_ = std::move(placed);
 	}
+	// A row whose title reads other rows (a mission's event its entities and areas, a path its stops'
+	// markers) made again with any change, its words the others' as they are now (S15).
+	if (reads_others_)
+		for (size_t i = 0; i < rows.size() && i < rows_.size(); ++i)
+			if (rows[i] && !changes.was_changed(rows[i]->id) && reads_others_(document, *rows[i]))
+				make_row(document, i, master, rows_[i]);
+	// A row's headings read the others' (a pool's teams): made again with any row's change.
+	make_groups(document);
 	join_rows();
 	return true;
 }
@@ -266,7 +365,8 @@ void OutlineModel::place_row(RowLines &row, size_t index) {
 		row.master.index = index;
 		return;
 	}
-	// A tree's and a list's row line is the first of its lines.
+	// A tree's and a list's row line is the first of its lines (its depth its own, the headings' added
+	// as the lines are joined).
 	if (!row.lines.empty() && row.lines.front().depth == 0 && !row.lines.front().collection) row.lines.front().index = index;
 }
 
@@ -286,18 +386,19 @@ void OutlineModel::join_rows() {
 		for (const RowLines *row : kept) lines_.push_back(row->lines.front());
 		return;
 	}
+	if (groups_) return join_grouped();
 	for (const RowLines &row : rows_) lines_.insert(lines_.end(), row.lines.begin(), row.lines.end());
 }
 
 size_t OutlineModel::line_of(const NodeAddress &address) const {
 	for (size_t i = 0; i < lines_.size(); ++i)
-		if (!lines_[i].collection && lines_[i].address == address) return i;
+		if (!lines_[i].collection && !lines_[i].heading && lines_[i].address == address) return i;
 	return SIZE_MAX;
 }
 
 OutlineClick OutlineModel::click(size_t clicked, const NodeAddress &primary, bool ctrl, bool shift) const {
 	OutlineClick out;
-	if (clicked >= lines_.size() || lines_[clicked].collection) return out;
+	if (clicked >= lines_.size() || lines_[clicked].collection || lines_[clicked].heading) return out;
 	out.record = lines_[clicked].address;
 	if (ctrl) {
 		out.mode = SelectMode::Toggle;
@@ -310,7 +411,7 @@ OutlineClick OutlineModel::click(size_t clicked, const NodeAddress &primary, boo
 			if (lines_[i].address.row == primary.row) from = i;
 	if (from == SIZE_MAX || from == clicked) return out;
 	for (size_t i = std::min(from, clicked); i <= std::max(from, clicked); ++i)
-		if (i != clicked && !lines_[i].collection) out.records.push_back(lines_[i].address);
+		if (i != clicked && !lines_[i].collection && !lines_[i].heading) out.records.push_back(lines_[i].address);
 	return out;
 }
 
@@ -325,9 +426,11 @@ OutlineLine OutlineModel::record_line(const Document &document, const NodeAddres
 	line.depth = depth;
 	line.index = index;
 	line.branch = branch;
-	line.text = document.record_title(record);
+	line.text = record_display(document, record, names_);
 	std::string name = document.record_name(record);
 	if (name != line.text) line.name = std::move(name);
+	std::string brief = record_brief(document, record, names_);
+	if (brief != line.text) line.brief = std::move(brief);
 	return line;
 }
 
@@ -355,6 +458,7 @@ OutlineLine collection_line(const NodeAddress &owner, const Document::Collection
 	line.count = collection.ids.size();
 	line.branch = !collection.ids.empty();
 	line.addable = !spec.fixed && (spec.max == 0 || collection.ids.size() < spec.max);
+	if (!spec.fixed && spec.max != 0 && collection.ids.size() >= spec.max) line.full = spec.max;
 	line.text = std::string(spec.label) + " (" + std::to_string(collection.ids.size()) + ")";
 	return line;
 }
