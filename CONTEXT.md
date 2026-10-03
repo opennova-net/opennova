@@ -538,6 +538,16 @@ leaves nothing out.
 _Avoid_: dependency mount, base, parent project (a project builds on nothing but what it holds),
 bundle
 
+**Import option**:
+One setting of how an import makes its outputs, held in its import record by a key (ADR 0046 S18):
+each a row of its importer's, with the values it takes, what it means where the record leaves it out
+and the option it applies under (the image importer's format, file name, alpha, size, palette, DDS
+compression, mip levels and green). What a texture's uses ask of its import (a model row's `.tga` the
+DXT5 `.dds` its loader reads first, a colour map a 24-bit 1024 x 1024 TGA, a loading screen an 800 x 600
+PCX) is said beside them, with why; a texture's tab sets them and its uses' in one click.
+_Avoid_: import setting, sidecar field, conversion (an option is how the outputs are made, never a
+change to the source)
+
 **Mission sidecar**:
 A file the game finds by a mission's name rather than by a reference in it, each skipped when
 absent: `<mission>.bin` (its text, else `medmssn.bin`), `.wac` (its script), `.pcx` (its loading

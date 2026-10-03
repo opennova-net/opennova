@@ -203,7 +203,9 @@ static bool mark_for_import(const std::string &source) {
 	opennova::editor::ImportSidecar sidecar;
 	sidecar.importer = importer->id;
 	sidecar.version = importer->version;
-	sidecar.options = importer->default_options;
+	// A PCX, the 8-bit indexed file these sources make (the image importer's format option; its default
+	// is a 32-bit TGA).
+	sidecar.options = {{"format", "pcx"}};
 	opennova::editor::Diagnostic error;
 	return opennova::editor::save_import_sidecar(source + ".import", sidecar, error);
 }
@@ -262,7 +264,9 @@ static int test_imports() {
 	TEST_EXPECT(text.find("imported art/logo.png") != std::string::npos);
 	const std::string build = opennova::editor::last_good_build_dir(dir.file("out"));
 	TEST_EXPECT(!build.empty());
-	TEST_EXPECT(archive_has(build + "/resource.pff", "LOGO.PCX") && archive_has(build + "/resource.pff", "SPLASH.PCX"));
+	// logo.png's record asks for a PCX; splash.png, imported by the import verb, takes the image importer's
+	// default, a 32-bit TGA.
+	TEST_EXPECT(archive_has(build + "/resource.pff", "LOGO.PCX") && archive_has(build + "/resource.pff", "SPLASH.TGA"));
 	TEST_EXPECT(!archive_has(build + "/resource.pff", "LOGO.PNG"));
 	TEST_EXPECT(archive_has(build + "/resource.pff", "PLAIN.PNG"));
 	TEST_EXPECT(run({"validate", root}) == 0);

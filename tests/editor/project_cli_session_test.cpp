@@ -197,7 +197,9 @@ bool mark_for_import(const std::string &source) {
 	editor::ImportSidecar sidecar;
 	sidecar.importer = importer->id;
 	sidecar.version = importer->version;
-	sidecar.options = importer->default_options;
+	// A PCX, the 8-bit indexed file these sources make (the image importer's format option; its default
+	// is a 32-bit TGA).
+	sidecar.options = {{"format", "pcx"}};
 	editor::Diagnostic error;
 	return editor::save_import_sidecar(source + ".import", sidecar, error);
 }

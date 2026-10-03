@@ -215,6 +215,59 @@ TextureRoleId texture_role_of_edge(const GraphEdge &edge, const Document *model,
 	return R::kCount;
 }
 
+namespace {
+
+bool texture_edge(const GraphEdge &edge) {
+	return edge.kind == ReferenceKind::Texture || edge.kind == ReferenceKind::MenuTexture ||
+	       edge.kind == ReferenceKind::LoadingImage;
+}
+
+// The use a texture edge is, its referring model read through `models` once a file (`read`); `served`
+// the file its loader finds.
+TextureUse edge_use(const AssetGraph &graph, const AssetScan &scan, const GraphEdge &edge, const TextureModelSource &models,
+                    const TextureNameTest &exists, std::map<std::string, std::shared_ptr<const Document>> &read) {
+	const AssetEntry *source = scan.at_path(edge.source);
+	std::shared_ptr<const Document> model;
+	if (source && source->kind == AssetKind::Model && texture_arg_is_row_type(edge.loader_arg) && models) {
+		auto found = read.find(edge.source);
+		if (found == read.end()) found = read.emplace(edge.source, models(edge.source)).first;
+		model = found->second;
+	}
+	TextureUse use;
+	use.referrer = edge.source;
+	use.record = edge.record;
+	use.locator = edge.locator;
+	use.field = edge.field;
+	use.name_written = edge.value;
+	use.role = texture_role_of_edge(edge, model.get(), use.context);
+	if (edge.kind == ReferenceKind::Texture) use.load = texture_reference_load(edge.value, edge.loader_arg, exists);
+	std::string served;
+	if (graph.resolve(edge, &served) == ReferenceStatus::Present) use.served = served;
+	return use;
+}
+
+// The use a name the game opens itself is.
+TextureUse fixed_use(const AssetScan &scan, const FixedTextureName &fixed, const TextureNameTest &exists) {
+	TextureUse use;
+	use.role = fixed.role;
+	use.fixed = true;
+	use.fixed_for = fixed.what;
+	use.fixed_witness = fixed.witness;
+	use.name_written = fixed.name;
+	use.context.hud_mode = fixed.hud_mode;
+	const TextureLoader loader = fixed.loader != TextureLoader::kCount ? fixed.loader : texture_role_row(fixed.role).loader;
+	use.load = texture_load(loader, fixed.name, exists, 0, std::max(fixed.hud_mode, 0));
+	if (const AssetEntry *opened = use.load.file.empty() ? nullptr : scan.find(basename_of(use.load.file)))
+		use.served = opened->relative_path;
+	return use;
+}
+
+std::string stem_key(const std::string &name) {
+	return normalized_logical_name(utf8_of(path_of(basename_of(name)).stem()));
+}
+
+} // namespace
+
 std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &scan, const std::string &file,
                                      const TextureModelSource &models, const TextureNameTest &exists) {
 	std::vector<TextureUse> out;
@@ -225,54 +278,45 @@ std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &s
 	// opens another (a .tga beside the .dds the loader takes).
 	std::vector<const GraphEdge *> edges;
 	for (const GraphEdge *edge : graph.referrers_of_file(file))
-		if (edge->kind == ReferenceKind::Texture || edge->kind == ReferenceKind::MenuTexture ||
-		    edge->kind == ReferenceKind::LoadingImage)
-			edges.push_back(edge);
+		if (texture_edge(*edge)) edges.push_back(edge);
 	graph.for_each_edge([&](const GraphEdge &edge) {
-		if (edge.kind != ReferenceKind::Texture && edge.kind != ReferenceKind::MenuTexture &&
-		    edge.kind != ReferenceKind::LoadingImage)
-			return;
-		if (normalized_logical_name(basename_of(edge.value)) != key) return;
+		if (!texture_edge(edge) || normalized_logical_name(basename_of(edge.value)) != key) return;
 		if (std::find(edges.begin(), edges.end(), &edge) == edges.end()) edges.push_back(&edge);
 	});
 	std::map<std::string, std::shared_ptr<const Document>> read;
 	for (const GraphEdge *edge : edges) {
-		const AssetEntry *source = scan.at_path(edge->source);
-		std::shared_ptr<const Document> model;
-		if (source && source->kind == AssetKind::Model && texture_arg_is_row_type(edge->loader_arg) && models) {
-			auto found = read.find(edge->source);
-			if (found == read.end()) found = read.emplace(edge->source, models(edge->source)).first;
-			model = found->second;
-		}
-		TextureUse use;
-		use.referrer = edge->source;
-		use.record = edge->record;
-		use.locator = edge->locator;
-		use.field = edge->field;
-		use.name_written = edge->value;
-		use.role = texture_role_of_edge(*edge, model.get(), use.context);
-		if (edge->kind == ReferenceKind::Texture)
-			use.load = texture_reference_load(edge->value, edge->loader_arg, exists);
-		std::string served;
-		if (graph.resolve(*edge, &served) == ReferenceStatus::Present) use.served = served;
+		TextureUse use = edge_use(graph, scan, *edge, models, exists, read);
 		use.reads_file = use.served == file;
 		use.words = use_words(use);
 		out.push_back(std::move(use));
 	}
 	for (const FixedTextureName &fixed : fixed_texture_names()) {
 		if (normalized_logical_name(fixed.name) != key) continue;
-		TextureUse use;
-		use.role = fixed.role;
-		use.fixed = true;
-		use.fixed_for = fixed.what;
-		use.fixed_witness = fixed.witness;
-		use.name_written = fixed.name;
-		use.context.hud_mode = fixed.hud_mode;
-		const TextureLoader loader = fixed.loader != TextureLoader::kCount ? fixed.loader : texture_role_row(fixed.role).loader;
-		use.load = texture_load(loader, fixed.name, exists, 0, std::max(fixed.hud_mode, 0));
-		if (const AssetEntry *opened = use.load.file.empty() ? nullptr : scan.find(basename_of(use.load.file)))
-			use.served = opened->relative_path;
+		TextureUse use = fixed_use(scan, fixed, exists);
 		use.reads_file = use.served == file;
+		use.words = use_words(use);
+		out.push_back(std::move(use));
+	}
+	return out;
+}
+
+std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,
+                                           const TextureModelSource &models, const TextureNameTest &exists) {
+	std::vector<TextureUse> out;
+	const std::string key = normalized_logical_name(stem);
+	if (key.empty()) return out;
+	std::map<std::string, std::shared_ptr<const Document>> read;
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (!texture_edge(edge) || stem_key(edge.value) != key) return;
+		TextureUse use = edge_use(graph, scan, edge, models, exists, read);
+		use.reads_file = !use.served.empty();
+		use.words = use_words(use);
+		out.push_back(std::move(use));
+	});
+	for (const FixedTextureName &fixed : fixed_texture_names()) {
+		if (stem_key(fixed.name) != key) continue;
+		TextureUse use = fixed_use(scan, fixed, exists);
+		use.reads_file = !use.served.empty();
 		use.words = use_words(use);
 		out.push_back(std::move(use));
 	}

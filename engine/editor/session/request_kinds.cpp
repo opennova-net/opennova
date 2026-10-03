@@ -162,6 +162,9 @@ void serve_rename_back(SessionCore &core, const EditorRequest &) {
 void serve_reimport(SessionCore &core, const EditorRequest &request) {
 	core.imports().reimport(request.path, request.force);
 }
+void serve_set_import_options(SessionCore &core, const EditorRequest &request) {
+	core.imports().set_options(request.path, request.values);
+}
 void serve_preview_install_import(SessionCore &core, const EditorRequest &request) {
 	core.imports().preview_install(request);
 }
@@ -608,6 +611,19 @@ constexpr RequestKindRow kRows[] = {
 			"is unchanged when force says so, an operation (the outcome names it); the findings on "
 			"the source are what the operation came to (last_operation).")
 			.takes(request_params({}, { F::Path, F::Force }))
+			.holds(kFiles, kFiles | kSlot)
+			.ends_edit_groups()
+			.row,
+	// An import's options are its record's (S18): the record written, then the refresh that imports it
+	// again, which holds the slot as a reimport does.
+	Request(K::SetImportOptions, "set_import_options", serve_set_import_options,
+			"The import record of the source path names, or of the import a file of that path or "
+			"logical name comes from, given values, each an option's key as the import_options query "
+			"lists them and a value its row takes (\"\" its default, left out of the record); then "
+			"imported again, a refresh (the outcome names the operation): an output whose format moves "
+			"takes the name its extension gives and the old file goes. Refused, nothing written, for a "
+			"file no import makes, or a key or a value no row takes (import.option).")
+			.takes(request_params({ F::Path, F::Values }))
 			.holds(kFiles, kFiles | kSlot)
 			.ends_edit_groups()
 			.row,

@@ -81,7 +81,9 @@ bool mark_for_import(const std::string &source) {
 	ImportSidecar sidecar;
 	sidecar.importer = importer->id;
 	sidecar.version = importer->version;
-	sidecar.options = importer->default_options;
+	// A PCX, the 8-bit indexed file these sources make (the image importer's format option; its default
+	// is a 32-bit TGA).
+	sidecar.options = {{"format", "pcx"}};
 	Diagnostic error;
 	return save_import_sidecar(source + ".import", sidecar, error);
 }
@@ -248,7 +250,7 @@ static int test_import_pass() {
 	ImportSidecar sidecar;
 	Diagnostic error;
 	TEST_EXPECT(load_import_sidecar(root + "/art/logo.png.import", sidecar, error));
-	TEST_EXPECT(sidecar.importer == "image" && sidecar.version == 1 && sidecar.options.at("format") == "pcx");
+	TEST_EXPECT(sidecar.importer == "image" && sidecar.version == importer_for("logo.png")->version && sidecar.options.at("format") == "pcx");
 	TEST_EXPECT(sidecar.outputs == std::vector<std::string>{"logo.pcx"} && sidecar.source_hash != 0);
 	// The output decodes to the source's size.
 	std::vector<uint8_t> pcx;

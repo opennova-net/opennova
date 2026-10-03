@@ -2,17 +2,19 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdio>
 #include <map>
 #include <set>
 #include <string>
 #include <utility>
 
-#include <cstdio>
-
+#include <base/io/strutil.h>
 #include <editor/import/import_plan.h>
 #include <editor/import/import_run.h>
+#include <editor/import/sidecar.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
+#include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/editor_preferences.h>
 #include <editor/session/import_operation.h>
@@ -21,6 +23,7 @@
 #include <editor/session/request_factories.h>
 #include <editor/session/request_kinds.h>
 #include <editor/session/session_core.h>
+#include <editor/session/texture_import_state.h>
 
 namespace opennova::editor {
 
@@ -125,6 +128,47 @@ void ImportController::reimport(const std::string &source, bool force) {
 	if (!view_.project.open) return;
 	if (core_.start_refresh(true, force, source)) view_.activity.status = "Importing again...";
 	core_.touch(ViewConcern::Output);
+}
+
+// The record of the import `path` names, each value set as its option's row takes it ("" back to its
+// row's fallback: left out of the record), written only when it changed, then the refresh that imports
+// it again (the pass takes a record that changed as stale, and drops an output the import no longer
+// makes).
+void ImportController::set_options(const std::string &path,
+                                   const std::vector<std::pair<std::string, std::string>> &values) {
+	if (!view_.project.open) return;
+	TextureImportState state;
+	std::string error;
+	if (!texture_import_state(view_, path, state, error))
+		return core_.refuse_now(CoreFinding::ImportOption, "No import options to set: " + error, path);
+	ImportSidecar sidecar = state.sidecar;
+	for (const auto &[key, value] : values) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, key);
+		if (!row) {
+			std::string keys;
+			for (const ImportOptionRow &each : state.importer->options) keys += (keys.empty() ? "" : ", ") + each.key;
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer has no option '" + key +
+			                                "' (its options: " + keys + ").",
+			                        state.source);
+		}
+		const std::string taken = row->keeps_case ? value : strutil::to_lower(value);
+		if (taken.empty()) {
+			sidecar.options.erase(key);
+			continue;
+		}
+		if (!import_option_accepts(*row, taken))
+			return core_.refuse_now(CoreFinding::ImportOption,
+			                        "The " + state.sidecar.importer + " importer's " + key + " takes " +
+			                                import_option_takes(*row) + "; '" + value + "' is none of them.",
+			                        state.source);
+		sidecar.options[key] = taken;
+	}
+	if (sidecar.options == state.sidecar.options) return;
+	Diagnostic write_error;
+	if (!save_import_sidecar(join_path(view_.project.root, state.record), sidecar, write_error))
+		return core_.refuse_now(CoreFinding::ImportSidecar, write_error.message, state.record);
+	reimport(state.source, false);
 }
 
 // The import dialog on `roots` chosen among `choices` (each file once), planned with the

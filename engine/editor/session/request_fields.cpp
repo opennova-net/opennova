@@ -44,9 +44,11 @@ constexpr RequestField kFields[] = {
 			"A mission of the project by its logical name (04TR.bms): the one Play starts the game "
 			"in; left out, the game starts at its menu." },
 	{ F::Values, "values", J::Object,
-			"A new file's starting values, each a string by its blank's parameter: a mission's "
-			"{title?, terrain, environment} (the terrain and the environment files of the project, "
-			"by name, with or without their extension; the title its file's name when left out)." },
+			"Named values, each a string: a new file's starting values by its blank's parameter, a "
+			"mission's {title?, terrain, environment} (the terrain and the environment files of the "
+			"project, by name, with or without their extension; the title its file's name when left "
+			"out); an import's options by their keys, as the import_options query lists them (\"\" an "
+			"option's default)." },
 	{ F::Roles, "roles", J::Strings, "Requirements' roles." },
 	{ F::Names, "names", J::Strings, "Files of the game install, by logical name." },
 	{ F::Paths, "paths", J::Strings,

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <editor/assets/asset_import.h>
@@ -44,6 +45,11 @@ public:
 	void cancel();
 	void import_files(const EditorRequest &request);
 	void reimport(const std::string &source, bool force);
+	// SetImportOptions (S18): the record of the import path names (a source, or a file an import makes)
+	// given alues, each an option's key and a value its row takes ("" its default), written when it
+	// changed, then the refresh that imports it again. Refused, nothing written: a file no import makes, a
+	// key no row has, a value its row does not take (import.option).
+	void set_options(const std::string &path, const std::vector<std::pair<std::string, std::string>> &values);
 	// The game install's file names, for the Import fixes (problem_fixes.h).
 	void refresh_install_files();
 	// Those an Open read (OpenOperation).

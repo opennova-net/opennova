@@ -4,15 +4,19 @@
 // and the first keeps what was typed when it opens again, Escape keeping it too; the arrows move
 // through the list, Enter picks, a pick is the field's Set. A Files row
 // dropped on a reference's value sets the file there when the field's kind loads it, and
-// nothing when it does not. A missing value's picker offers the fixes Problems offers for it.
+// nothing when it does not. A missing value's picker offers the fixes Problems offers for it. S18: a texture
+// field's picture and its picker's; a texture an import makes shows how it is made in its tab.
 #include <cstring>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include <editor/assets/asset_import.h>
 #include <editor/documents/mission_document.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/import/png_encode.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <formats/pcx/pcx.h>
 #include <formats/tga/tga.h>
 #include <editor/session/request_factories.h>
 #include <editor/ui/inspector_layout.h>
@@ -510,6 +514,60 @@ void test_texture_previews() {
 	ui.frames(2);
 }
 
+// S18: a texture an import makes shows, in its tab, how it is made: its source, the options that apply,
+// what its uses ask (the item's HUD image names gone.tga, so the PCX the record asks for is not what it
+// reads) and the one click that raises the set_import_options of what they ask.
+void test_texture_import_section() {
+	PickerProject project;
+	CHECK(project.open(), "the item table's project");
+	if (!project.items) return;
+	const SessionView &view = project.session.view();
+	opennova::RgbaImage image;
+	image.width = image.height = 4;
+	image.pixels.assign(64, 180);
+	const std::vector<uint8_t> png = encode_png_rgba(image.pixels.data(), 4, 4);
+	const std::string art = project.dir.file("art");
+	CHECK(editor_test::write_bytes(art + "/gone.png", png), "a PNG outside the project");
+	const ImportResult imported =
+	        import_assets({{art + "/gone.png", {}}}, ProjectPaths::for_root(view.project.root), *view.project.document, false);
+	CHECK(imported.imported.size() == 1, "imported as a modder imports it");
+	if (imported.imported.size() != 1) return;
+	const std::string source = imported.imported[0];
+	project.session.handle(request::rescan());
+	project.session.run_operations();
+	project.session.handle(request::set_import_options(source, {{"format", "pcx"}}));
+	project.session.run_operations();
+	const AssetEntry *output = view.project.scan ? view.project.scan->find("gone.pcx") : nullptr;
+	CHECK(output && output->imported_from == source, "made a PCX, as its record asks");
+	if (!output) return;
+	project.session.handle(request::open_document(output->relative_path));
+	Ui ui;
+	ui.pump = [&project] { project.session.poll(); };
+	ui.windows.set_view(&project.session.view());
+	ui.frames(6);
+	ui.focus("Document");
+	ui.away();
+	ui.drain();
+	const std::string text = logged_frame(ui);
+	CHECK(text.find("Made from gone.png") != std::string::npos && text.find("change how it is made here") != std::string::npos,
+	      "its tab says what it is made from");
+	CHECK(text.find("Its uses ask for:") != std::string::npos && text.find("format tga") != std::string::npos,
+	      "what its uses ask, with why");
+	CHECK(text.find("DXT5: the retail model textures' form") == std::string::npos &&
+	              text.find("the source's colours when 256 or fewer") != std::string::npos,
+	      "the options that apply to a PCX, the DDS's left out");
+	ImGuiWindow *info = nullptr;
+	for (ImGuiWindow *window : GImGui->Windows)
+		if (window->Active && std::strstr(window->Name, "texture_info")) info = window;
+	CHECK(info != nullptr, "the tab's info column");
+	if (!info) return;
+	ui.activate(ImHashStr("Make it as its uses ask", 0, info->ID));
+	const std::vector<EditorRequest> requests = ui.drain();
+	const EditorRequest *set = only(requests, EditorRequestKind::SetImportOptions);
+	const std::vector<std::pair<std::string, std::string>> asked = {{"format", "tga"}};
+	CHECK(set && set->path == source && set->values == asked, "the one click raises the set_import_options of what its uses ask");
+}
+
 } // namespace
 
 void run_reference_picker_tests() {
@@ -520,6 +578,7 @@ void run_reference_picker_tests() {
 	test_lists_let_go();
 	test_pick_by_name();
 	test_texture_previews();
+	test_texture_import_section();
 }
 
 } // namespace editor_ui_test

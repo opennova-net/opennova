@@ -23,6 +23,11 @@ inline constexpr uint8_t TGA_DESCRIPTOR_ALPHA_8 = 8; // 8 alpha bits, the origin
 // `error`, for an empty image or a side past the header's 16 bits.
 bool tga_write_rgba32(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
                       std::string &error);
+// The same image as 24-bit true colour, its alpha left out (image type 2, 24 bits a pixel, no alpha
+// bits, the origin at the bottom left): B, G, R a pixel from the bottom row up, which the game's readers
+// take opaque (ADR 0046 S18: a terrain colour map's form). `rgba` as above; refused alike.
+bool tga_write_rgb24(const uint8_t *rgba, uint32_t width, uint32_t height, std::vector<uint8_t> &out,
+                     std::string &error);
 
 // The size a TGA's 18-byte header states: the width and height at bytes 12 and 14 (tga.cpp
 // holds the witnesses). False when `size` is shorter than the header or the image type at

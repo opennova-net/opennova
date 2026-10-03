@@ -2,7 +2,8 @@
 // of the header (image type 2, 32 bits a pixel, 8 alpha bits, the origin at the bottom left),
 // the pixels B, G, R, A from the bottom row up, the image read back the way the game's TGA
 // readers read one (the block copied as it is, then the rows turned upright: tga.cpp's
-// witnesses), and what the writer refuses (no pixels, a side past the header's 16 bits).
+// witnesses), and what the writer refuses (no pixels, a side past the header's 16 bits); the same image
+// at 24 bits (S18), read back by the game's decode opaque.
 // The header's size read back (tga_header_size): the written file's, each image type that
 // holds an image, and what it refuses (a short header, an image type that holds none).
 #include <cstdint>
@@ -48,6 +49,20 @@ int main() {
 	TEST_EXPECT(!tga_write_rgba32(nullptr, 3, 2, out, error));
 	const std::vector<uint8_t> wide(size_t(65536) * 4, 0);
 	TEST_EXPECT(!tga_write_rgba32(wide.data(), 65536, 1, out, error));
+
+	// At 24 bits: the header's depth and descriptor (no alpha bits), B, G, R from the bottom row up, read
+	// back by the game's decode opaque.
+	TEST_EXPECT(tga_write_rgb24(rgba.data(), 3, 2, out, error));
+	TEST_EXPECT(out.size() == TGA_HEADER_SIZE + 6 * 3 && out[16] == 24 && out[17] == 0 && out[2] == 2);
+	const std::vector<uint8_t> rgb = {32, 31, 30, 42, 41, 40, 52, 51, 50, 2, 1, 0, 12, 11, 10, 22, 21, 20};
+	TEST_EXPECT(std::vector<uint8_t>(out.begin() + TGA_HEADER_SIZE, out.end()) == rgb);
+	TgaImage game;
+	TEST_EXPECT(tga_decode_game(out.data(), out.size(), game, error) && game.pixels == TgaPixels::Decoded &&
+	            game.width == 3 && game.height == 2);
+	for (size_t i = 0; i < 6 && game.rgba.size() == 24; ++i)
+		TEST_EXPECT(game.rgba[i * 4] == rgba[i * 4] && game.rgba[i * 4 + 1] == rgba[i * 4 + 1] &&
+		            game.rgba[i * 4 + 2] == rgba[i * 4 + 2] && game.rgba[i * 4 + 3] == 255);
+	TEST_EXPECT(!tga_write_rgb24(rgba.data(), 3, 0, out, error) && out.empty());
 
 	// The header's size.
 	TEST_EXPECT(tga_write_rgba32(rgba.data(), 3, 2, out, error));

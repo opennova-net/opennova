@@ -6,6 +6,7 @@
 
 #include <imgui.h>
 
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
@@ -14,7 +15,9 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/import/texture_import.h>
 #include <editor/project/project_files.h>
+#include <editor/session/request_factories.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
@@ -79,7 +82,101 @@ void TextureView::draw_info(Workspace &workspace, const DocumentBase &document) 
 		ImGui::EndTable();
 	}
 	if (!image->palette.empty() && ImGui::CollapsingHeader("Palette", ImGuiTreeNodeFlags_DefaultOpen)) draw_palette(image->palette);
+	draw_import(workspace, document);
 	draw_uses(workspace, document);
+}
+
+// How the texture is made, where an import makes it (ADR 0046 S18): its source; each option of its
+// importer that applies, a control whose change sets it (set_import_options); what its uses ask of it,
+// with why, and the one click that makes it so; what no one file serves.
+void TextureView::draw_import(Workspace &workspace, const DocumentBase &document) {
+	const SessionView &view = workspace.view();
+	const RevisionKey key = revision_key(view.revisions, {ViewConcern::Files, ViewConcern::Graph, ViewConcern::Documents,
+	                                                      ViewConcern::DocumentSet});
+	if (!import_.made || import_.key != key || import_.path != document.path()) {
+		import_ = ImportShown();
+		import_.made = true;
+		import_.key = key;
+		import_.path = document.path();
+		std::string error;
+		import_.imported = texture_import_state(view, document.path(), import_.state, error);
+		if (import_.imported)
+			for (const ImportOptionRow &row : import_.state.importer->options)
+				if (row.values.empty()) import_.drafts[row.key] = import_option_value(import_.state, row);
+	}
+	if (!import_.imported) return;
+	const TextureImportState &state = import_.state;
+	const std::string heading = "Made from " + basename_of(state.source) + "###made_from";
+	if (!ImGui::CollapsingHeader(heading.c_str(), ImGuiTreeNodeFlags_DefaultOpen)) return;
+	ImGui::PushTextWrapPos(0.0f);
+	ImGui::TextDisabled("Its import makes this file from %s: change how it is made here.", state.source.c_str());
+	ImGui::PopTextWrapPos();
+	// Set while the busy gate takes a set_import_options (an operation holding the files waits).
+	const bool allowed = view.allows(EditorRequestKind::SetImportOptions);
+	const auto set = [&](const std::string &option, const std::string &value) {
+		if (allowed) workspace.request(request::set_import_options(state.source, {{option, value}}));
+	};
+	ImGui::BeginDisabled(!allowed);
+	if (ImGui::BeginTable("import_options", 2, ImGuiTableFlags_SizingStretchProp)) {
+		ImGui::TableSetupColumn("label", ImGuiTableColumnFlags_WidthFixed);
+		ImGui::TableSetupColumn("value", ImGuiTableColumnFlags_WidthStretch);
+		for (const ImportOptionRow &row : state.importer->options) {
+			if (!import_option_applies_now(state, row)) continue;
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::TextDisabled("%s", row.label.c_str());
+			ui_kit::tooltip(row.words);
+			ImGui::TableNextColumn();
+			ImGui::PushID(row.key.c_str());
+			ImGui::SetNextItemWidth(-FLT_MIN);
+			const std::string value = import_option_value(state, row);
+			if (row.values.empty()) {
+				// A free value (the file name): typed, set when the field is left.
+				std::string &draft = import_.drafts[row.key];
+				char buffer[64];
+				std::snprintf(buffer, sizeof(buffer), "%s", draft.c_str());
+				const std::string hint = image_import_output_name(state.source, image_import_settings(state.sidecar.options));
+				if (ImGui::InputTextWithHint("##free", hint.c_str(), buffer, sizeof(buffer))) draft = buffer;
+				if (ImGui::IsItemDeactivatedAfterEdit() && draft != value) set(row.key, draft);
+				ui_kit::tooltip(row.words + "\nTakes " + import_option_takes(row) + ".");
+			} else {
+				const ImportOptionValue *current = nullptr;
+				for (const ImportOptionValue &each : row.values)
+					if (each.token == strutil::to_lower(value)) current = &each;
+				// A value of a free form (threshold:128, fit:512x512) shows as it is, among the tokens.
+				if (ImGui::BeginCombo("##choice", current ? current->words.c_str() : value.c_str())) {
+					for (const ImportOptionValue &each : row.values) {
+						if (ImGui::Selectable(each.words.c_str(), current == &each) && current != &each) set(row.key, each.token);
+						ui_kit::tooltip(each.token);
+					}
+					ImGui::EndCombo();
+				}
+				ui_kit::tooltip(row.words + "\nTakes " + import_option_takes(row) + ".");
+			}
+			ImGui::PopID();
+		}
+		ImGui::EndTable();
+	}
+	// What its uses ask, and the one click that makes it so.
+	const TextureImportNeeds &needs = state.needs;
+	std::vector<std::pair<std::string, std::string>> asked;
+	for (const auto &[option, value] : needs.options) {
+		const ImportOptionRow *row = import_option_row(state.importer->options, option);
+		if (row && strutil::to_lower(import_option_value(state, *row)) != strutil::to_lower(value)) asked.emplace_back(option, value);
+	}
+	ImGui::PushTextWrapPos(0.0f);
+	if (!asked.empty()) {
+		ImGui::TextUnformatted("Its uses ask for:");
+		for (const std::string &reason : needs.reasons) ImGui::BulletText("%s", reason.c_str());
+		if (ImGui::Button("Make it as its uses ask") && allowed)
+			workspace.request(request::set_import_options(state.source, {needs.options.begin(), needs.options.end()}));
+	} else if (needs.uses > 0 && needs.conflicts.empty()) {
+		ImGui::TextDisabled("It is made as its uses ask.");
+	}
+	for (const std::string &conflict : needs.conflicts)
+		ImGui::TextColored(ui_kit::severity_color(DiagnosticSeverity::Warning), "%s", conflict.c_str());
+	ImGui::PopTextWrapPos();
+	ImGui::EndDisabled();
 }
 
 // The palette as swatches, sixteen a row, as wide as the column lets them be.

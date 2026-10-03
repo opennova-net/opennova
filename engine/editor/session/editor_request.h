@@ -63,6 +63,7 @@ enum class EditorRequestKind {
 	PreviewRenameBack,
 	RenameBack,
 	Reimport,
+	SetImportOptions,
 	PreviewInstallImport,
 	ClearOutput,
 	SetViewport,
@@ -253,8 +254,9 @@ struct EditorRequest {
 	std::string out_dir;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
-	// A new file's starting values, by its blank's parameter tokens (blank_factory.h: a mission's
-	// title, terrain and environment), in the tokens' order.
+	// Named values, in their names' order: a new file's starting values, by its blank's parameter tokens
+	// (blank_factory.h: a mission's title, terrain and environment); an import's options, by their keys
+	// (SetImportOptions, S18).
 	std::vector<std::pair<std::string, std::string>> values;
 	// Requirements' roles; the game install's files by logical name; files on disk to import.
 	std::vector<std::string> roles;

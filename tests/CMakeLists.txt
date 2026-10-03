@@ -4206,6 +4206,15 @@ target_link_libraries(editor_texture_checks_test PRIVATE opennova_editor)
 target_include_directories(editor_texture_checks_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(editor_texture_checks COMMAND editor_texture_checks_test)
 
+# ADR 0046 S18, a texture's import (import/texture_import, graph/texture_import_needs,
+# session/texture_import_state): the image importer's option rows, its pieces, every format written and
+# read back by the reader the game picks, what a minted project's uses ask of an import, set_import_options
+# and the import_options query.
+add_executable(editor_texture_import_test editor/texture_import_test.cpp)
+target_link_libraries(editor_texture_import_test PRIVATE opennova_editor)
+target_include_directories(editor_texture_import_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME editor_texture_import COMMAND editor_texture_import_test)
+
 add_executable(editor_document_contract_test editor/editor_document_contract_test.cpp)
 target_link_libraries(editor_document_contract_test PRIVATE opennova_editor)
 target_include_directories(editor_document_contract_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

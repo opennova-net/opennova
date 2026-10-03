@@ -83,6 +83,13 @@ using TextureModelSource = std::function<std::shared_ptr<const Document>(const s
 std::vector<TextureUse> texture_uses(const AssetGraph &graph, const AssetScan &scan, const std::string &file,
                                      const TextureModelSource &models, const TextureNameTest &exists);
 
+// Every use of a name whose stem is `stem` (case aside), whatever file its loader finds: the graph's
+// texture references writing one (a missing one too), then the names the game opens itself; `served` the
+// project file the loader opens ("" none), `reads_file` whether it opens one. What an import of that stem
+// is asked for (graph/texture_import_needs).
+std::vector<TextureUse> texture_uses_named(const AssetGraph &graph, const AssetScan &scan, const std::string &stem,
+                                           const TextureModelSource &models, const TextureNameTest &exists);
+
 io::JsonValue texture_use_json(const TextureUse &use);
 
 } // namespace opennova::editor

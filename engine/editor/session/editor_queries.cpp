@@ -23,6 +23,7 @@
 #include <editor/documents/mission_uses.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/preview/texture_thumbnails.h>
+#include <editor/session/texture_import_state.h>
 #include <editor/session/texture_use_index.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/display_names.h>
@@ -1255,6 +1256,19 @@ JsonValue answer_texture_uses(const QueryContext &context, const QueryArgs &args
 	return out;
 }
 
+constexpr QueryParam kImportOptionsParams[] = {
+	{ "path", J::String, true, nullptr,
+			"An import source of the project (a file holding its .import record), or a file an import "
+			"makes, by its project-relative path or its logical name." },
+};
+
+// An import's options and what its uses ask of it (ADR 0046 S18, session/texture_import_state).
+JsonValue answer_import_options(const QueryContext &context, const QueryArgs &args, std::string &error) {
+	TextureImportState state;
+	if (!texture_import_state(context.core.view(), args.text("path"), state, error)) return JsonValue::make_null();
+	return texture_import_state_json(state);
+}
+
 JsonValue answer_catalog(const QueryContext &context, const QueryArgs &, std::string &);
 
 // --- the table -----------------------------------------------------------------------------------
@@ -1603,6 +1617,14 @@ constexpr EditorQueryRow kRows[] = {
 			"loader opens) and context (a model row's material, slot, type, row_flags, shader, alpha_test, "
 			"alpha_ref; key; hud_mode).")
 			.pages("uses")
+			.row,
+	Query(K::ImportOptions, "import_options", answer_import_options, kImportOptionsParams,
+			concern_set({ C::Files, C::Graph, C::Documents, C::DocumentSet }),
+			"An import's options and what its uses ask of it (ADR 0046 S18): its source, record, "
+			"importer and version; the record's options and every option's value in effect; its option "
+			"rows (key, label, words, values {token, words}, forms, fallback, applies {option, values}, "
+			"applies_now); the files it makes; and needs, what the uses of those files and of every "
+			"name of the source's stem ask of it (options, reasons, conflicts, uses).")
 			.row,
 	Query(K::Catalog, "catalog", answer_catalog, concern_set({ C::Findings }),
 			"What the session answers and takes: every request kind with the fields it takes and "

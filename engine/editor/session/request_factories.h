@@ -113,6 +113,15 @@ inline EditorRequest reimport(std::string path = std::string(), bool force = fal
 	request.force = force;
 	return request;
 }
+// The import record of the source `path` names (or of the import a file of that path or name comes
+// from) given `values`, each an option's key and value ("" its default), then imported again (S18).
+inline EditorRequest set_import_options(std::string path, std::vector<std::pair<std::string, std::string>> values) {
+	EditorRequest request = of(EditorRequestKind::SetImportOptions);
+	request.path = std::move(path);
+	std::sort(values.begin(), values.end());
+	request.values = std::move(values);
+	return request;
+}
 // The import dialog on the game install's files: `names` alone, chosen; none, every file listed.
 inline EditorRequest preview_install_import(
 		std::vector<std::string> names = {}, bool with_dependencies = false) {

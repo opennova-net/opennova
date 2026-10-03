@@ -27,6 +27,9 @@ public:
 
 	// The uses of the project file `file` as the view stands (none without a graph).
 	const std::vector<TextureUse> &uses_of(const SessionView &view, const std::string &file) const;
+	// The uses of every name whose stem is `stem`, whatever file they find (texture_uses_named: what an
+	// import of that stem is asked for), kept alike.
+	const std::vector<TextureUse> &uses_named(const SessionView &view, const std::string &stem) const;
 	// How many times a texture's uses were made (a test counts what the key saves).
 	uint64_t made() const { return made_; }
 	void clear();
@@ -42,8 +45,14 @@ private:
 		int64_t modified = 0;
 		std::shared_ptr<const Document> document;
 	};
+	// The model source over the view: an open model's document, else one read from its file.
+	TextureModelSource models(const SessionView &view) const;
+	// The uses kept under `key`, made by `make` when what they read moved.
+	const std::vector<TextureUse> &kept(const SessionView &view, const std::string &key,
+	                                    const std::function<std::vector<TextureUse>()> &make) const;
+
 	ModelReader reader_;
-	mutable std::map<std::string, Made> made_by_file_;
+	mutable std::map<std::string, Made> made_by_file_; // by a file's path, or "\x01" and a stem
 	mutable std::map<std::string, Model> models_;
 	mutable uint64_t made_ = 0;
 };
