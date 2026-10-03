@@ -68,6 +68,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/model_table.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_document.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_map_document.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/animation_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/text_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
@@ -120,6 +121,7 @@ add_library(opennova_editor STATIC
     # writes and what is drawn over the picture; the script device's viewport (S13 V10: a text
     # document's text as its Godot control shows it, the span edit a control's text plans, the
     # keystroke burst its edits fold in, the gutter marks and the highlights it colours)
+    ${CMAKE_CURRENT_SOURCE_DIR}/preview/animation_uses.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/canvas_gesture.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_arrange.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/preview/menu_canvas.cpp
@@ -241,6 +243,7 @@ add_library(opennova_editor STATIC
 # consumer whether the windows exist in this build.
 if(OPENNOVA_IMGUI)
     target_sources(opennova_editor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/ui/animation_inspector.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_toolbar.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_views.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/ui/document_window.cpp

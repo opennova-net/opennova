@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include <editor/documents/animation_document.h>
 #include <editor/documents/model_document.h>
 #include <editor/preview/model_preview_camera.h>
 #include <editor/preview/model_viewport.h>
@@ -41,6 +42,33 @@ int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
 		return -1;
 	return pick_model_overlay(frame.overlays, frame.model->camera(), in.width, in.height,
 			in.mouse.x, in.mouse.y, kModelPickSlop);
+}
+
+int model_canvas_bone_under(const ModelCanvasFrame &frame, const CanvasInput &in) {
+	if (!in.hovered || !frame.model || frame.joints.empty())
+		return -1;
+	const OrbitCamera &camera = frame.model->camera();
+	int best = -1;
+	float best_depth = 0.0f;
+	for (size_t i = 0; i < frame.joints.size(); ++i) {
+		float x = 0.0f, y = 0.0f, depth = 0.0f;
+		if (!camera.project(frame.joints[i].at, in.width, in.height, x, y, &depth)) continue;
+		if (std::fabs(x - in.mouse.x) > kModelPickSlop || std::fabs(y - in.mouse.y) > kModelPickSlop) continue;
+		if (best < 0 || depth < best_depth) {
+			best = int(i);
+			best_depth = depth;
+		}
+	}
+	return best;
+}
+
+NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint) {
+	const auto *clip = dynamic_cast<const AnimationDocument *>(frame.clip_document);
+	const ClipRow *row = clip ? clip->clip() : nullptr;
+	if (!row || joint < 0 || size_t(joint) >= frame.joints.size()) return NodeAddress();
+	const size_t bone = size_t(frame.joints[size_t(joint)].bone);
+	if (bone >= row->collections[0].size()) return NodeAddress();
+	return NodeAddress{row->id, node_kind(AnimationKind::Bone), row->collections[0][bone]};
 }
 
 ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in, int under) {
@@ -89,11 +117,13 @@ void ModelCanvas::input(const ViewportContext &, const CanvasInput &in, CanvasRe
 }
 
 OverlayList ModelCanvas::shapes(const ViewportContext &, const CanvasInput &in) const {
-	return shapes(frame_, in, model_canvas_under(frame_, in));
+	const int under = model_canvas_under(frame_, in);
+	return shapes(frame_, in, under, under < 0 ? model_canvas_bone_under(frame_, in) : -1);
 }
 
 std::string ModelCanvas::hover_tip(const ViewportContext &, const CanvasInput &in) const {
-	return hover_tip(frame_, model_canvas_under(frame_, in));
+	const int under = model_canvas_under(frame_, in);
+	return hover_tip(frame_, under, under < 0 ? model_canvas_bone_under(frame_, in) : -1);
 }
 
 void ModelCanvas::follow(const ModelCanvasFrame &frame, CanvasRequests &out) {
@@ -114,6 +144,7 @@ void ModelCanvas::input(
 	if (in.pressed) {
 		gesture_.press(subject_of(frame), in.screen, out);
 		grab_ = model_canvas_grab(frame, in, under);
+		if (under < 0) grab_.bone = model_canvas_bone_under(frame, in);
 	}
 	if (gesture_.pressed() && !in.down) {
 		// A click on a marker selects its record (while the picture is the document's).
@@ -123,6 +154,12 @@ void ModelCanvas::input(
 					*frame.document, frame.overlays[size_t(grab_.pick)], model.lod());
 			if (record.row)
 				out.request(request::select_record(frame.document->path(), record));
+		}
+		// A click on a joint selects its bone in the clip (S17).
+		if (!gesture_.dragging() && grab_.pick < 0 && grab_.bone >= 0 && frame.clip_document) {
+			const NodeAddress record = model_canvas_bone_record(frame, grab_.bone);
+			if (record.row)
+				out.request(request::select_record(frame.clip_document->path(), record));
 		}
 		gesture_.release(out);
 		grab_ = ModelGrab();
@@ -185,13 +222,30 @@ void ModelCanvas::frame_selected(
 }
 
 OverlayList ModelCanvas::shapes(
-		const ModelCanvasFrame &frame, const CanvasInput &in, int under) const {
+		const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under) const {
 	OverlayList list;
 	if (!frame.model)
 		return list;
 	const ModelViewport &model = *frame.model;
 	const OrbitCamera &camera = model.camera();
 	const int width = in.width, height = in.height;
+	// A clip's bones under the markers: a line from each joint to its parent's, a dot at each, the
+	// one under the pointer and the selected one ringed.
+	std::vector<CanvasPoint> joints(frame.joints.size());
+	std::vector<bool> shown(frame.joints.size(), false);
+	for (size_t i = 0; i < frame.joints.size(); ++i)
+		shown[i] = camera.project(frame.joints[i].at, width, height, joints[i].x, joints[i].y);
+	for (size_t i = 0; i < frame.joints.size(); ++i) {
+		const int parent = frame.joints[i].parent;
+		if (shown[i] && parent >= 0 && size_t(parent) < joints.size() && shown[size_t(parent)])
+			list.line(joints[size_t(parent)], joints[i], kBoneRgb, 1.5f);
+	}
+	for (size_t i = 0; i < frame.joints.size(); ++i) {
+		if (!shown[i]) continue;
+		list.marker(joints[i], OverlayGlyph::Dot, 3.0f, OverlayRole::Normal, kBoneRgb);
+		if (int(i) == bone_under) list.ring(joints[i], 7.0f, OverlayRole::Hover, 1.5f);
+		if (frame.joints[i].bone == frame.selected_bone) list.ring(joints[i], 8.0f, OverlayRole::Selected, 2.0f);
+	}
 	for (size_t i = 0; i < frame.overlays.size(); ++i) {
 		const ModelOverlay &overlay = frame.overlays[i];
 		float x = 0.0f, y = 0.0f, depth = 0.0f;
@@ -246,10 +300,16 @@ OverlayList ModelCanvas::shapes(
 	return list;
 }
 
-std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under) const {
-	if (gesture_.dragging() || under < 0 || size_t(under) >= frame.overlays.size())
+std::string ModelCanvas::hover_tip(const ModelCanvasFrame &frame, int under, int bone_under) const {
+	if (gesture_.dragging())
 		return std::string();
-	return frame.overlays[size_t(under)].name;
+	if (under >= 0 && size_t(under) < frame.overlays.size())
+		return frame.overlays[size_t(under)].name;
+	if (bone_under < 0 || size_t(bone_under) >= frame.joints.size())
+		return std::string();
+	// A joint by its bone's name, and what a click does where the clip is open.
+	const PreviewJoint &joint = frame.joints[size_t(bone_under)];
+	return joint.name + (model_canvas_bone_record(frame, bone_under).row ? " (click to select it)" : std::string());
 }
 
 } // namespace opennova::editor

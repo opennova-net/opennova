@@ -23,7 +23,10 @@
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/preview/animation_uses.h>
+#include <editor/preview/model_canvas.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
 #include <editor/preview/model_preview_camera.h>
@@ -851,10 +854,15 @@ static int test_runtime_clips() {
 	const auto *served = model->skeleton() ? model->skeleton()->find_clip_variant(model->clip_key(), model->clip_variant())
 	                                       : nullptr;
 	TEST_EXPECT(served && served->source.file == "walk" && served->source.token == 2 && served->clip.frame_count == 4);
+	// The missing token, selected: the game leaves it out, so the slot plays its other clips; the
+	// viewport plays the row's first that registered and says why (S17).
 	select.address = {walk.row, clip_kind, tokens[1]};
 	session.handle(select);
 	rig.pump();
-	TEST_EXPECT(model->clip_key().empty() && model->clip_file().empty() && model->clip_events().empty());
+	TEST_EXPECT(model->clip_key() == "anim_walk_forward" && model->clip_variant() == 0 &&
+	            strutil_iequals(model->clip_file(), "reset"));
+	TEST_EXPECT(model->clip_note() ==
+	            "missing is not in the project: the game leaves it out of walk forward's clips. walk forward plays reset here.");
 
 	// The one-shot's events against the game's root motion over the same files (its viewport's
 	// rig model chosen as well).
@@ -884,6 +892,228 @@ static int test_runtime_clips() {
 	for (size_t i = 0; i < fired.size() && i < events.size(); ++i)
 		TEST_EXPECT(fired[i].tick == events[i].tick && fired[i].trigger == events[i].trigger);
 	TEST_EXPECT(step->clip_length_ticks() == 2 && step->tick_of_frame(1) == 1 && step->tick_of_frame(2) == -1);
+	return 0;
+}
+
+// A clip set over the skinned fixture's bones whose `bend` turns the pelvis a quarter about x from
+// its frame 1, so the spine and the leg swing off the axis.
+constexpr const char *kBendClips = R"(o3a 1
+adm BEND.adm
+row anim_reset "rest"
+row anim_idle "bend"
+clip rest
+fps 30
+flags 0x1
+frames 1
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+clip bend
+fps 30
+flags 0x1
+frames 2
+bone -1 0 0 0 0.5 "BN01 Pelvis"
+ k 0 0 0 1
+ k 0.7071068 0 0 0.7071068
+ k 0.7071068 0 0 0.7071068
+bone 0 0 0 1 0.5 "BN02 Spine"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+bone 0 0 0 -1 0.5 "BN03 Leg"
+ k 0 0 0 1
+ k 0 0 0 1
+ k 0 0 0 1
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+event 0 0 0 0x0 0.9 1.7
+)";
+
+struct RecordedRequests final : CanvasRequests {
+	std::vector<EditorRequest> raised;
+	void request(EditorRequest request) override { raised.push_back(std::move(request)); }
+};
+
+// The clip's preview made a modder's (ADR 0046 S17): a row whose one clip the project lacks plays
+// what the game plays in its place, the reset clip, and says so; a map names who plays it and what
+// the game does with the selected row, a clip the rows that play it, a model the maps it plays; the
+// timeline steps frame by frame and tells frames and seconds; a one-shot repeats after its hold when
+// asked; the rig's bones pose with the clip, each named, a point on a bone riding it, and a click on
+// a joint in the clip's own document selects its bone; an item is found by its catalog's name.
+static int test_clip_preview() {
+	editor_test::TempProjectDir dir("opennova_editor_model_viewport_clip_preview");
+	NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	Rig rig{session};
+	const SessionView &view = session.view();
+	session.handle(request::new_project(dir.file("project"), "Clip Preview"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string source = dir.file("source");
+	TEST_EXPECT(editor_test::write_bytes(source + "/skinned.o3d",
+	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) +
+	                                                        "/fixtures/threedi/o3d/skinned.o3d")));
+	TEST_EXPECT(editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips));
+	TEST_EXPECT(editor_test::write_text(source + "/step.o3a", kStepClips));
+	TEST_EXPECT(editor_test::write_text(source + "/bend.o3a", kBendClips));
+	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
+	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}, {source + "/step.o3a", {}},
+	                  {source + "/bend.o3a", {}}};
+	session.handle(import);
+	session.run_operations();
+	TEST_EXPECT(editor_test::write_text(view.project.root + "/defs/items.def",
+	                                    "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\n"
+	                                    "anim_def skin\nend\n"));
+	session.handle(request::rescan());
+	session.run_operations();
+
+	// The walk row's one clip renamed to one the project lacks: the game leaves it out, the slot is
+	// unauthored, and an unauthored slot plays the reset row's first clip. The viewport plays that
+	// and says why; the map names its player and what the game does with the row.
+	session.handle(request::open_document("anims/SKIN.adm"));
+	Document *table = session.document_for("anims/SKIN.adm");
+	NodeAddress walk;
+	TEST_EXPECT(table && find_definition(AssetGraph(), *table, "anim_walk_forward", walk));
+	if (!table) return 1;
+	const NodeKind clip_kind = node_kind(AnimationMapKind::Clip);
+	const NodeId walk_token = table->row(walk.row)->collections[0][0];
+	set(session, table->path(), {walk.row, clip_kind, walk_token}, "clip", std::string("nothere.bad"));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	const ModelViewport *model = rig.viewport();
+	TEST_EXPECT(model && model->view_status() == ModelViewStatus::Ready && model->clip_key() == "anim_reset" &&
+	            strutil_iequals(model->clip_file(), "reset"));
+	TEST_EXPECT(model->clip_note() == "walk forward has no clip the game loads (none of its files is in the project): "
+	                                  "the game plays the reset clip, reset, in its place.");
+	JsonValue shown = rig.json();
+	const JsonValue *animation = shown.get("body")->get("animation");
+	TEST_EXPECT(animation && animation->get_string("note", "") == model->clip_note());
+	const JsonValue *players = animation->get("players");
+	TEST_EXPECT(players && players->array.size() == 1 && players->array[0].get_string("record", "") == "Skinned Thing" &&
+	            strutil_iequals(players->array[0].get_string("model", ""), "skinned.3di") &&
+	            !players->array[0].get_bool("first_person", true));
+	const JsonValue *notes = animation->get("notes");
+	TEST_EXPECT(notes && !notes->array.empty() && notes->array[0].string == "walk forward (slot 1): Walking forward.");
+	session.handle(request::undo(table->path()));
+	session.handle(request::select_record(table->path(), walk));
+	rig.pump();
+	TEST_EXPECT(model->clip_key() == "anim_walk_forward" && model->clip_note().empty());
+
+	// The timeline's frames and seconds: the walk's four frames at 30, stepped frame by frame from
+	// tick to tick the clip's clock first runs on each; its events in words.
+	TEST_EXPECT(model->clip_frame_count() == 4 && model->clip_fps() == 30);
+	TEST_EXPECT(model->tick_of_step(0, 1) == model->tick_of_frame(1) &&
+	            model->tick_of_step(model->tick_of_frame(3), -1) == model->tick_of_frame(2) &&
+	            model->tick_of_step(0, -1) == 0);
+	shown = rig.json();
+	animation = shown.get("body")->get("animation");
+	TEST_EXPECT(int(animation->get("frame_count")->number) == 4 && int(animation->get("fps")->number) == 30);
+	TEST_EXPECT(near(animation->get("length_seconds")->number, model->clip_length_ticks() / 62.5, 1e-6));
+	const JsonValue *events = animation->get("events");
+	TEST_EXPECT(events && events->array.size() >= 2 && events->array[0].get_string("words", "") == "left footstep" &&
+	            events->array[1].get_string("words", "") == "right footstep");
+	// The wire's form of a scrub or a step: a frame, the clock held on the tick that first shows it.
+	TEST_EXPECT(rig.set(R"({"frame": 2})") && rig.clock().ticks() == model->tick_of_frame(2) && !rig.clock().playing());
+	TEST_EXPECT(!rig.set(R"({"frame": -1})") && rig.clock().ticks() == model->tick_of_frame(2));
+	TEST_EXPECT(model->tick_of_frame_shown(99) >= 0);
+
+	// The clip's own document: the rows that play it.
+	session.handle(request::open_document("anims/walk.bad"));
+	rig.pump();
+	shown = rig.json();
+	const JsonValue *uses = shown.get("body")->get("animation")->get("uses");
+	TEST_EXPECT(uses && uses->array.size() == 1 && uses->array[0].get_string("map", "") == "anims/SKIN.adm" &&
+	            uses->array[0].get_string("words", "") == "walk forward");
+
+	// A one-shot repeats from its start after its length and the hold; with Repeat off it holds its end.
+	session.handle(request::open_document("anims/step.bad"));
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+	rig.pump();
+	const ModelViewport *step = rig.viewport();
+	TEST_EXPECT(step && !step->clip_loops() && step->clip_length_ticks() == 2 && step->options().repeat);
+	PreviewClock clock;
+	clock.seek_ticks(1);
+	TEST_EXPECT(step->clip_ticks(clock) == 1);
+	clock.seek_ticks(2 + kClipRepeatHoldTicks + 1);
+	TEST_EXPECT(step->clip_ticks(clock) == 1);
+	TEST_EXPECT(rig.set(R"({"options": {"repeat": false}})"));
+	rig.pump();
+	TEST_EXPECT(!step->options().repeat && step->clip_ticks(clock) == 2 + kClipRepeatHoldTicks + 1);
+
+	// The bones: the rest pose's on the axis, the bend's frame 1 swinging the spine a quarter turn off
+	// it; a point on the spine at rest carried to the spine's joint; the bones on the wire by name.
+	session.handle(request::open_document("anims/bend.bad"));
+	TEST_EXPECT(rig.set(R"({"options": {"rig_model": "skinned.3di"}})"));
+	rig.pump();
+	const ModelViewport *bend = rig.viewport();
+	TEST_EXPECT(bend && bend->view_status() == ModelViewStatus::Ready && bend->clip_key() == "anim_idle");
+	clock.seek_ticks(0);
+	std::vector<PreviewJoint> joints = bend->joints(clock);
+	TEST_EXPECT(joints.size() == 3 && joints[0].name == "BN01 Pelvis" && joints[1].name == "BN02 Spine" &&
+	            joints[1].parent == 0 && joints[0].parent == -1);
+	if (joints.size() != 3) return 1;
+	TEST_EXPECT(near(joints[1].at.x, 0.0) && near(std::fabs(joints[1].at.y), 1.0) && near(joints[1].at.z, 0.0));
+	const PreviewVec3 spine_rest = joints[1].at;
+	clock.seek_ticks(bend->tick_of_frame(1));
+	TEST_EXPECT(bend->tick_of_frame(1) > 0);
+	joints = bend->joints(clock);
+	TEST_EXPECT(joints.size() == 3 && near(std::fabs(joints[1].at.x), 1.0) && near(joints[1].at.y, 0.0) && near(joints[1].at.z, 0.0));
+	const PreviewVec3 carried = preview_joint_carry(joints[1], spine_rest);
+	TEST_EXPECT(near(carried.x, joints[1].at.x, 1e-4) && near(carried.y, joints[1].at.y, 1e-4) &&
+	            near(carried.z, joints[1].at.z, 1e-4));
+	TEST_EXPECT(rig.set(R"({"clock": {"playing": false, "ticks": 0}})"));
+	shown = rig.json();
+	const JsonValue *bones = shown.get("body")->get("animation")->get("bones");
+	TEST_EXPECT(bones && bones->array.size() == 3 && bones->array[1].get_string("name", "") == "BN02 Spine");
+
+	// A click on the spine's joint, the clip's own document active, selects its bone; its name on hover.
+	Document *bend_clip = session.document_for("anims/bend.bad");
+	const ViewportContext context = rig.context();
+	ModelCanvasFrame frame = bend->canvas_frame(context);
+	TEST_EXPECT(bend_clip && frame.clip_document == bend_clip && frame.joints.size() == 3);
+	float jx = 0.0f, jy = 0.0f;
+	TEST_EXPECT(bend->camera().project(frame.joints[1].at, context.width, context.height, jx, jy));
+	ModelCanvas canvas;
+	RecordedRequests out;
+	canvas.follow(frame, out);
+	CanvasInput in;
+	in.width = context.width;
+	in.height = context.height;
+	in.hovered = true;
+	in.mouse = in.screen = CanvasPoint{ jx, jy };
+	TEST_EXPECT(model_canvas_under(frame, in) < 0 && model_canvas_bone_under(frame, in) == 1);
+	TEST_EXPECT(canvas.hover_tip(frame, -1, 1) == "BN02 Spine (click to select it)");
+	in.pressed = in.down = true;
+	canvas.input(frame, in, -1, out);
+	in.pressed = in.down = false;
+	canvas.input(frame, in, -1, out);
+	const auto *clip_row = bend_clip ? static_cast<const AnimationDocument *>(bend_clip)->clip() : nullptr;
+	TEST_EXPECT(clip_row && out.raised.size() == 1 && out.raised[0].kind == EditorRequestKind::SelectRecord &&
+	            out.raised[0].path == "anims/bend.bad" &&
+	            out.raised[0].address == NodeAddress({clip_row->id, node_kind(AnimationKind::Bone), clip_row->collections[0][1]}));
+
+	// From the model to its animations: the maps the items pairing it play; an item by its name.
+	session.handle(request::open_document("models/skinned.3di"));
+	rig.pump();
+	shown = rig.json();
+	const JsonValue *maps = shown.get("body")->get("animations");
+	TEST_EXPECT(maps && maps->array.size() == 1 && maps->array[0].get_string("map", "") == "anims/SKIN.adm" &&
+	            maps->array[0].get_string("record", "") == "Skinned Thing");
+	const std::vector<std::string> animated = animated_models(*view.findings.graph, *view.project.scan);
+	TEST_EXPECT(animated.size() == 1 && strutil_iequals(animated[0], "skinned.3di"));
+	bool found = false;
+	for (const GraphSearchHit &hit : view.findings.graph->search("skinned th"))
+		found = found || (hit.symbol && hit.words == "Skinned Thing" && hit.name == "100200");
+	TEST_EXPECT(found);
 	return 0;
 }
 
@@ -927,6 +1157,7 @@ int main() {
 	TEST_EXPECT(test_handles() == 0);
 	TEST_EXPECT(test_animation() == 0);
 	TEST_EXPECT(test_runtime_clips() == 0);
+	TEST_EXPECT(test_clip_preview() == 0);
 	TEST_EXPECT(test_camera() == 0);
 	TEST_EXPECT(test_options_from_json() == 0);
 	TEST_EXPECT(test_auto_lod() == 0);

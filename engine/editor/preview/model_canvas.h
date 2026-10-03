@@ -8,10 +8,12 @@
 #include <editor/preview/canvas_half.h>
 #include <editor/preview/model_handle_edit.h>
 #include <editor/preview/model_overlay.h>
+#include <editor/preview/model_preview_rig.h>
 #include <editor/preview/viewport_overlay.h>
 
 namespace opennova::editor {
 
+class Document;
 class ModelDocument;
 class ModelViewport;
 class PreviewClock;
@@ -30,6 +32,7 @@ inline constexpr float kModelWheelDolly = 0.85f;
 // The markers' own colours (a light draws in its own start colour), 0xRRGGBB.
 inline constexpr uint32_t kUserPointRgb = 0xFFDC5A;
 inline constexpr uint32_t kPivotRgb = 0x6EDCFF;
+inline constexpr uint32_t kBoneRgb = 0xB4F0B4; // a clip's bones (S17)
 
 // What the canvas maps, one frame's worth.
 struct ModelCanvasFrame {
@@ -50,6 +53,12 @@ struct ModelCanvasFrame {
 	// press selects or orbits.
 	bool editable = true;
 	const PreviewClock *clock = nullptr; // the clock the markers are posed at
+	// A clip playing (ADR 0046 S17): the rig's bones as it poses them now, drawn while the options
+	// show them, each named on hover; the clip document whose bone records they are by index, while
+	// it is the active document (a click on a joint selects its bone there), and its selected bone.
+	std::vector<PreviewJoint> joints;
+	const Document *clip_document = nullptr;
+	int selected_bone = -1;
 };
 
 // What a press on the canvas took: on the selected marker (or its axis tip) its handle, whose
@@ -58,6 +67,7 @@ struct ModelCanvasFrame {
 struct ModelGrab {
 	bool pan = false; // the middle button, or Shift with the left
 	int pick = -1; // the marker under the press (-1 none)
+	int bone = -1; // the joint under the press where no marker is (-1 none; S17)
 	bool handle = false; // on the selected marker or its axis tip
 	ModelHandle which = ModelHandle::Place;
 	ModelOverlay marker; // the marker as pressed
@@ -67,6 +77,12 @@ struct ModelGrab {
 // The front-most marker within kModelPickSlop of the pointer (-1: none, or not hovered): found
 // once a frame, and what the hover ring, the tip and a press read (`under` below).
 int model_canvas_under(const ModelCanvasFrame &frame, const CanvasInput &in);
+// The front-most joint within kModelPickSlop of the pointer (S17), -1 none (or not hovered, or no
+// bones drawn).
+int model_canvas_bone_under(const ModelCanvasFrame &frame, const CanvasInput &in);
+// The bone record a joint is in the frame's clip document (by index: a clip's channels pair with
+// the model's parts by index); none past its bones or with no clip document.
+NodeAddress model_canvas_bone_record(const ModelCanvasFrame &frame, int joint);
 ModelGrab model_canvas_grab(const ModelCanvasFrame &frame, const CanvasInput &in, int under);
 
 // The canvas's gestures on a model viewport (its CanvasHalf), and what it draws and shows. Over a
@@ -107,11 +123,12 @@ public:
 	// x `height`: a SetViewport of the camera.
 	void frame_selected(const ModelCanvasFrame &frame, int width, int height, CanvasRequests &out) const;
 
-	// Over the picture: each marker where the camera puts it, the one under the pointer (`under`)
-	// ringed, the selected one ringed with its axis tip's handle.
-	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in, int under) const;
-	// The name of the marker under the pointer ("" none, or while dragging).
-	std::string hover_tip(const ModelCanvasFrame &frame, int under) const;
+	// Over the picture: a clip's bones (each joint, a line to its parent; the one under the pointer,
+	// `bone_under`, and the selected one ringed), then each marker where the camera puts it, the one
+	// under the pointer (`under`) ringed, the selected one ringed with its axis tip's handle.
+	OverlayList shapes(const ModelCanvasFrame &frame, const CanvasInput &in, int under, int bone_under = -1) const;
+	// The name of the marker under the pointer, else of the joint ("" none, or while dragging).
+	std::string hover_tip(const ModelCanvasFrame &frame, int under, int bone_under = -1) const;
 
 private:
 	CanvasGesture gesture_;

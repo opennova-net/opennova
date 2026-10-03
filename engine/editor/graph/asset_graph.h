@@ -68,6 +68,7 @@ struct ReferenceChoice {
 struct GraphSearchHit {
 	const GraphSymbol *symbol = nullptr; // the symbol; null for a file
 	std::string name;   // the file's logical name, or the symbol as defined
+	std::string words;  // what the symbol reads as where it is not its name (an item's catalog name); ""
 	std::string file;   // the file, or the file defining the symbol (project-relative)
 	size_t usages = 0;  // the file's usages (usages_of), or the symbol's users (users_of)
 };

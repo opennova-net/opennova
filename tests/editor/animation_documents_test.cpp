@@ -13,9 +13,11 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/animation_document.h>
 #include <editor/documents/animation_map_document.h>
+#include <editor/documents/animation_slots.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
+#include <editor/preview/animation_uses.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 
@@ -152,7 +154,18 @@ int clips() {
 	TEST_EXPECT(document.apply(set(event, "velocity.x", 0.25), error));
 	TEST_EXPECT(document.get(event, "velocity.x", value) && std::get<double>(value) == 0.25);
 	TEST_EXPECT(document.apply(set(event, "bottom", 1.0), error));
-	if (clip->version == 1) TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+	if (clip->version == 1) {
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+		// S17: a frame event by its frame from 0, as the timeline counts it, and what it fires in words.
+		TEST_EXPECT(document.record_title(event) == "Frame 0: left footstep");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0x2 | 0x40 | 0x10000)), error));
+		TEST_EXPECT(document.record_title(event) == "Frame 0: right footstep, sound 2, an unread bit (0x10000)");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(0)), error) && document.record_title(event) == "Frame 0");
+		TEST_EXPECT(document.apply(set(event, "trigger", int64_t(1)), error));
+	}
+	const NodeAddress second{clip->id, kEvent, clip->collections[1][1]};
+	TEST_EXPECT(document.record_title(second).rfind("Frame 1", 0) == 0 && document.record_name(second) == "Frame event 2");
+	TEST_EXPECT(document.record_title(bone) == document.record_name(bone));
 	// The motion's: the translation flag, the keys, the structure.
 	const int64_t flags = int64_t(document.clip()->flags);
 	TEST_EXPECT(!document.apply(set(row, "flags", flags ^ int64_t(bad::BAD_FLAG_TRANSLATION)), error));
@@ -197,15 +210,37 @@ int tables() {
 	for (const FieldChoice &choice : document.fields(kRow).front().choices)
 		walk_forward = walk_forward || (choice.name == "anim_walk_forward" && choice.label == "walk forward");
 	TEST_EXPECT(walk_forward);
-	// The windows name a row by those words (the key, as the game compares it, kept for the
-	// graph, Problems and the MCP); a key naming no slot as it is; a clip by its file.
+	// The windows name a row by those words and the clips it plays (S17; the key, as the game compares
+	// it, kept for the graph, Problems and the MCP); a key naming no slot as it is; a clip by its file.
 	const NodeAddress first{document.rows()[0]->id, kRow, 0};
-	TEST_EXPECT(document.record_title(first) == "reset" && document.record_name(first) == "anim_reset");
+	TEST_EXPECT(document.record_title(first) == "reset: idle.bad" && document.record_name(first) == "anim_reset");
 	TEST_EXPECT(animation_key_title("ANIM_WALK_FORWARD") == "walk forward");
 	TEST_EXPECT(animation_key_title("anim_no_such_slot") == "anim_no_such_slot" && animation_key_title("") == "");
 	const Document::Collection clips = document.collections_of(first).front();
 	TEST_EXPECT(!clips.ids.empty() && document.record_title({first.row, kMapClip, clips.ids.front()}) ==
 	                                          document.record_name({first.row, kMapClip, clips.ids.front()}));
+	// The rows under their slots' families, in the families' order (S17).
+	std::vector<std::vector<RowHeading>> headings;
+	animation_map_row_headings(document, nullptr, headings);
+	TEST_EXPECT(headings.size() == document.rows().size());
+	TEST_EXPECT(headings[0].size() == 1 && headings[0][0].text == "Reset (the rest pose)");
+	TEST_EXPECT(headings[1][0].text == "Standing still" && headings[3][0].text == "Walking and running");
+	TEST_EXPECT(headings[0][0].key < headings[3][0].key && headings[3][0].key < headings[1][0].key);
+	// What the game does with a row, in words: the walk's meaning, the reset row's rules and the body
+	// slots the map leaves out (233 of 239: it names six besides the reset).
+	const NodeAddress walk_row{document.rows()[3]->id, kRow, 0};
+	const std::vector<std::string> walk_notes = map_row_notes(document, walk_row);
+	TEST_EXPECT(walk_notes.size() == 1 && walk_notes[0] == "walk forward (slot 1): Walking forward.");
+	TEST_EXPECT(map_unauthored_slots(document).size() == 233);
+	const std::vector<std::string> reset_notes = map_row_notes(document, first);
+	TEST_EXPECT(reset_notes.size() == 3 && reset_notes[0].find("The rest pose") != std::string::npos &&
+	            reset_notes[1] == "This map leaves out 233 slots; each plays this row's first clip.");
+	// Every slot has a meaning and a family; a slot past the table has neither.
+	for (int slot = 0; slot < 252; ++slot)
+		TEST_EXPECT(!animation_slot_meaning(slot).empty() && animation_slot_family(slot) >= 0);
+	TEST_EXPECT(animation_slot_meaning(252).empty() && animation_slot_family(-1) < 0);
+	TEST_EXPECT(animation_slot_meaning(232) == "Shot dead in the right foot, from the front: the bone the round hit "
+	                                           "picks the part, its heading the side.");
 	// The canonical form reads back the rows it was read from.
 	{
 		const std::vector<uint8_t> bytes = serialized(document);
