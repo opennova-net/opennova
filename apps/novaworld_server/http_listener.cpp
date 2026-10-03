@@ -15,6 +15,8 @@
 #include <net/novaworld/relay_request.h>
 #include <net/novaworld/unknown_tracker.h>
 
+#include <base/io/strutil.h>
+
 #include <crow.h>
 
 #include <algorithm>
@@ -1710,13 +1712,13 @@ void HttpListener::register_legacy_host_join_routes(
 			res.body = "missing RID";
 			return res;
 		}
-		uint32_t rid_value = 0;
-		try { rid_value = static_cast<uint32_t>(std::stoul(rid_str)); }
-		catch (...) {
+		const auto rid_parsed = opennova::strutil::parse_ulong(rid_str);
+		if (!rid_parsed) {
 			crow::response res(400);
 			res.body = "bad RID";
 			return res;
 		}
+		const uint32_t rid_value = static_cast<uint32_t>(*rid_parsed);
 
 		// Look up the hosted entry from active_hosts (Phase I.2 — DB-backed).
 		auto host_row = hostdb::find_host_by_rid(db_, rid_value);

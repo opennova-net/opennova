@@ -147,11 +147,12 @@ inline bool hex_to_bytes(std::string_view hex, std::vector<uint8_t> &out)
     return true;
 }
 
-// Non-throwing std::stoi / std::stoul / std::stof: the same strtol / strtoul /
-// strtof parse (leading whitespace, optional sign, longest numeric prefix, so
-// "12abc" is 12), with nullopt exactly where the std:: form throws (no digits,
-// or out of range). Parsers use these instead of try/catch around the std::
-// form, which a build without exception catching (the web target) cannot run.
+// Non-throwing std::stoi / std::stoul / std::stoull / std::stof: the same
+// strtol / strtoul / strtoull / strtof parse (leading whitespace, optional
+// sign, longest numeric prefix, so "12abc" is 12), with nullopt exactly where
+// the std:: form throws (no digits, or out of range). Parsers use these
+// instead of try/catch around the std:: form, which a build without exception
+// catching (the web target) cannot run.
 inline std::optional<int> parse_int(const std::string &s, int base = 10)
 {
     const char *begin = s.c_str();
@@ -169,6 +170,17 @@ inline std::optional<unsigned long> parse_ulong(const std::string &s, int base =
     char *end = nullptr;
     errno = 0;
     const unsigned long v = std::strtoul(begin, &end, base);
+    if (end == begin || errno == ERANGE)
+        return std::nullopt;
+    return v;
+}
+
+inline std::optional<unsigned long long> parse_ullong(const std::string &s, int base = 10)
+{
+    const char *begin = s.c_str();
+    char *end = nullptr;
+    errno = 0;
+    const unsigned long long v = std::strtoull(begin, &end, base);
     if (end == begin || errno == ERANGE)
         return std::nullopt;
     return v;

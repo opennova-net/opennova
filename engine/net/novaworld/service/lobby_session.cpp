@@ -90,10 +90,8 @@ std::string default_gsid(const std::string &app_id) {
 	const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
 		now.time_since_epoch()).count() % 1000000;
 
-	uint32_t app_int = 0;
-	try {
-		if (!app_id.empty()) app_int = static_cast<uint32_t>(std::stoul(app_id));
-	} catch (...) {}
+	// A non-numeric AppId keeps the GSID's app field 0.
+	const uint32_t app_int = static_cast<uint32_t>(strutil::parse_ulong(app_id).value_or(0));
 
 	static thread_local std::mt19937_64 gen{std::random_device{}()};
 	const uint64_t r = std::uniform_int_distribution<uint64_t>{}(gen);
@@ -109,13 +107,11 @@ std::string default_gsid(const std::string &app_id) {
 	return std::string(buf);
 }
 
+// The decimal before any '/' ("3/16" is 3); 0 when it is no number or out of
+// int's range.
 int parse_int_safe(const std::string &s) {
-	try {
-		auto slash = s.find('/');
-		return std::stoi(slash == std::string::npos ? s : s.substr(0, slash), nullptr, 10);
-	} catch (...) {
-		return 0;
-	}
+	const auto slash = s.find('/');
+	return strutil::parse_int(slash == std::string::npos ? s : s.substr(0, slash)).value_or(0);
 }
 
 std::string first_value(const VarList &a, const VarList &b,

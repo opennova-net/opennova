@@ -1,5 +1,7 @@
 #include "server_config.h"
 
+#include <base/io/strutil.h>
+
 #include <cstdlib>
 #include <string>
 
@@ -12,34 +14,25 @@ const char *getenv_safe(const char *name) {
 	return (v && *v) ? v : nullptr;
 }
 
+// A value that is no number (or out of range) keeps the fallback; the parse is
+// std::stoi / stoull's without the throw (strutil, ADR 0049 d5).
 uint16_t getenv_u16(const char *name, uint16_t fallback) {
 	const char *v = getenv_safe(name);
 	if (!v) return fallback;
-	try {
-		return static_cast<uint16_t>(std::stoi(v));
-	} catch (...) {
-		return fallback;
-	}
+	const auto n = strutil::parse_int(v);
+	return n ? static_cast<uint16_t>(*n) : fallback;
 }
 
 uint64_t getenv_u64(const char *name, uint64_t fallback) {
 	const char *v = getenv_safe(name);
 	if (!v) return fallback;
-	try {
-		return std::stoull(v);
-	} catch (...) {
-		return fallback;
-	}
+	return strutil::parse_ullong(v).value_or(fallback);
 }
 
 int getenv_int(const char *name, int fallback) {
 	const char *v = getenv_safe(name);
 	if (!v) return fallback;
-	try {
-		return std::stoi(v);
-	} catch (...) {
-		return fallback;
-	}
+	return strutil::parse_int(v).value_or(fallback);
 }
 
 bool getenv_bool(const char *name, bool fallback) {

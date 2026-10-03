@@ -203,8 +203,8 @@ static int test_strutil()
     return 0;
 }
 
-// parse_int / parse_ulong / parse_float accept exactly what std::stoi /
-// stoul / stof accept and fail exactly where those throw.
+// parse_int / parse_ulong / parse_ullong / parse_float accept exactly what
+// std::stoi / stoul / stoull / stof accept and fail exactly where those throw.
 static int test_strutil_parse_numbers()
 {
     TEST_EXPECT(strutil::parse_int("42") == 42);
@@ -227,6 +227,12 @@ static int test_strutil_parse_numbers()
     TEST_EXPECT(!strutil::parse_ulong("zz", 16));
     TEST_EXPECT(!strutil::parse_ulong("", 16));
     TEST_EXPECT(!strutil::parse_ulong("fffffffffffffffffffff", 16));
+
+    TEST_EXPECT(strutil::parse_ullong("18446744073709551615") == 18446744073709551615ull);
+    TEST_EXPECT(strutil::parse_ullong(" 60000ms") == 60000ull);
+    TEST_EXPECT(!strutil::parse_ullong("18446744073709551616"));
+    TEST_EXPECT(!strutil::parse_ullong("ms"));
+    TEST_EXPECT(!strutil::parse_ullong(""));
 
     TEST_EXPECT(strutil::parse_float("1.5") == 1.5f);
     TEST_EXPECT(strutil::parse_float(" -0.25x") == -0.25f);
