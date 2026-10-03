@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -16,7 +17,10 @@ namespace opennova::editor {
 // project's `.opennova/local.json` overrides the runtime for that project alone, and holds its own
 // game install. Schema 2 (S13 A4) renamed the game install's keys ("game_install",
 // "play_in_install"); pre-1.0 there is no reader for schema 1: such a file is set aside, read as
-// absent (the defaults) with a warning naming what it held, and the next save writes a new file.
+// absent (the defaults) with a warning naming what it held, and the next save writes a new file. A key
+// added within a schema reads as its default where a file lacks it, and a key a file holds that the
+// schema no longer reads is ignored (S15's `recent_items` list, since the polish), so an additive
+// change keeps the rest of a user's settings.
 inline constexpr int kPreferencesSchemaVersion = 2;
 inline constexpr size_t kRecentProjectsMax = 10;
 inline constexpr size_t kRecentItemsMax = 12;
@@ -30,9 +34,11 @@ struct Preferences {
 	// windows raise plans with; a store that does not say reads as on.
 	bool import_dependencies = true;
 	// The items most recently placed in a mission's viewport (ADR 0046 S15: its Place tool's palette
-	// lists them first), by their items.def id, most recent first; a store that does not say reads as
-	// none.
-	std::vector<int64_t> recent_items;
+	// lists them first), by their items.def id, most recent first, kept per game (the polish: an id
+	// names another item in another game's catalogs) by the game the project was for
+	// (recent_items_game; the settings file's `recent_items_by_game`); a store that does not say reads
+	// as none.
+	std::map<std::string, std::vector<int64_t>> recent_items;
 };
 
 // Where the preferences are kept (S13 A2). The embedder owns the store and hands the session a

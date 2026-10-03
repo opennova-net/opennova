@@ -26,9 +26,10 @@ NodeAddress listed_window(const MnuDocument &document, NodeId screen, const Node
 MenuClipboard menu_clipboard(const MnuDocument &document, NodeId screen, const NodeAddress &primary,
                              const std::vector<NodeAddress> &selected, bool clipboard_full) {
 	MenuClipboard out;
+	// Each a window its own screen's tree lists: the windows of several screens copy together.
 	out.copy = !selected.empty();
 	for (const NodeAddress &record : selected)
-		out.copy = out.copy && listed_window(document, screen, record) == record;
+		out.copy = out.copy && listed_window(document, record.row, record) == record;
 	out.paste = clipboard_full;
 	out.paste_row = {screen, kWindow, 0};
 	Document::Placement at;
