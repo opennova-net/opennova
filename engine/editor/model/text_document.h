@@ -89,9 +89,10 @@ public:
 // A type's reading of its stored file (decoded as the game's loader decodes a stored file) into the
 // text the document holds: the text, the encoding that writes it back (left null for a file that is
 // its text) and the source's issues (a blocking one: the text cannot carry what the file holds, so
-// the document shows it and takes no edit and no save). False with `error` when the bytes do not
-// read at all.
-using TextDecode = bool (*)(const std::vector<uint8_t> &stored, std::string &text,
+// the document shows it and takes no edit and no save). `path` is the file's project-relative path,
+// for a type whose game reader decodes one file by its name (a configuration's gt.ssc). False with
+// `error` when the bytes do not read at all.
+using TextDecode = bool (*)(const std::string &path, const std::vector<uint8_t> &stored, std::string &text,
 		std::shared_ptr<const TextEncoding> &encoding, std::vector<SourceIssue> &issues,
 		std::string &error);
 
