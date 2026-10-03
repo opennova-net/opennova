@@ -213,7 +213,7 @@ void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &
 				if (canvas_ui().right_clicked() && canvas && !canvas->gesture().pressed()) {
 					tools.menu_at = in.mouse;
 					tools.menu_record = NodeAddress();
-					const int mark = mission_canvas_under(canvas->frame(), in);
+					const int mark = mission_canvas_under(canvas->frame(), in, MissionPick::Click);
 					if (mark >= 0) {
 						tools.menu_record = canvas->frame().marks[size_t(mark)].record;
 						if (!view.documents.selection.holds(tools.menu_record))
