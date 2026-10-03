@@ -62,9 +62,10 @@ io::JsonValue operation_status_to_json(const OperationStatus &status);
 // What an operation came to: {id, kind, end (done, failed, cancelled), findings}; null before the
 // first ends.
 io::JsonValue operation_outcome_to_json(const OperationOutcome &outcome);
-// The operation, what the last one came to and the last build: {operation, last_operation,
-// build: {has_build, and with one ok, id, dir, reused_existing, archives_written,
-// archives_reused, loose_written, diagnostics}} (the Operation section, the operation query).
+// The operation, what the last one came to, the last build and the last export: {operation,
+// last_operation, build: {has_build, and with one ok, id, dir, expansion, reused_existing,
+// archives_written, archives_reused, loose_written, diagnostics}, export: {has_export, and with
+// one ok, dir, files, bytes, diagnostics}} (the Operation section, the operation query).
 io::JsonValue activity_operation_to_json(const SessionView &view);
 // A view event (view_events.h): {seq, kind (its token: reveal_record, reveal_file, ask_rename,
 // settings_applied, import_planned)} and, as the kind sets them, `path`, `address` (the record's

@@ -14,6 +14,7 @@
 #include <editor/import/import_run.h>
 #include <editor/project/project_document.h>
 #include <editor/project_build/build_run.h>
+#include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 #include <editor/session/problem_query.h>
 
@@ -588,6 +589,7 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("ok", boolean(report.ok));
 		build.set("id", json_string(report.build_id));
 		build.set("dir", json_string(report.build_dir));
+		build.set("expansion", json_string(report.expansion));
 		build.set("reused_existing", boolean(report.reused_existing));
 		build.set("archives_written", json_number(double(report.archives_written.size())));
 		build.set("archives_reused", json_number(double(report.archives_reused.size())));
@@ -598,6 +600,17 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
 	}
 	out.set("build", std::move(build));
+	JsonValue exported = JsonValue::make_object();
+	exported.set("has_export", boolean(activity.has_export));
+	if (activity.has_export) {
+		const ExportReport &report = *activity.last_export;
+		exported.set("ok", boolean(report.ok));
+		exported.set("dir", json_string(report.export_dir));
+		exported.set("files", json_number(double(report.files.size())));
+		exported.set("bytes", json_number(double(report.bytes)));
+		exported.set("diagnostics", diagnostics_to_json(report.diagnostics));
+	}
+	out.set("export", std::move(exported));
 	return out;
 }
 

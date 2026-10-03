@@ -40,6 +40,11 @@ constexpr RequestField kFields[] = {
 			"Where a build lands: a directory on disk, each build a directory under it named by "
 			"its id (left out, the project's .opennova/build/play; a relative one from the "
 			"project's folder; one inside the project refused but its cache or export folder)." },
+	{ F::ExportDir, "export_dir", J::String,
+			"Where an export lands: a folder on disk the export replaces, when it is missing, empty or an "
+			"export of this project (left out, the project's export folder, project.opennova's "
+			"export.output; a relative one from the project's folder; one inside the project refused but "
+			"its export folder)." },
 	{ F::Mission, "mission", J::String,
 			"A mission of the project by its logical name (04TR.bms): the one Play starts the game "
 			"in; left out, the game starts at its menu." },

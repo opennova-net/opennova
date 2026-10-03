@@ -16,6 +16,7 @@
 #include <editor/preview/viewports.h>
 #include <editor/project/project_refresh.h>
 #include <editor/project_build/build_plan.h>
+#include <editor/project_build/export_build.h>
 #include <editor/run/play_lease.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/document_set.h>
@@ -305,6 +306,8 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	view_.project.document = std::make_shared<const ProjectDocument>(open.document());
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
+	view_.activity.has_export = false;
+	view_.activity.last_export = std::make_shared<const ExportReport>();
 	preferences_.remember_recent_project(paths_.root);
 	save_preferences();
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
@@ -349,6 +352,8 @@ bool SessionCore::close_project() {
 	view_.findings.diagnostics.clear();
 	view_.activity.has_build = false;
 	view_.activity.last_build = std::make_shared<const BuildReport>();
+	view_.activity.has_export = false;
+	view_.activity.last_export = std::make_shared<const ExportReport>();
 	// The last build's findings are this project's and go with it.
 	problems().clear_build_findings();
 	paths_ = ProjectPaths();
@@ -832,8 +837,27 @@ const AssetEntry *SessionCore::project_file(const std::string &file) const {
 // then stepped by the polls and landed by the one that sees it done (absorb_build). Unsaved
 // edits never reach here: Build and Play wait on the unsaved prompt first (UnsavedGuard), whose
 // Save writes them. A build running already served the request at the busy gate (it joined).
-void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash) {
+std::string SessionCore::export_folder(const std::string &to) {
+	const std::string own = paths_.export_dir(*view_.project.document);
+	if (to.empty()) return own;
+	fs::path out = path_of(to);
+	if (out.is_relative()) out = path_of(paths_.root) / out;
+	out = out.lexically_normal();
+	if (inside(out, path_of(paths_.root)) && !inside(out, path_of(own))) {
+		view_.activity.status = "The export was refused: its folder is inside the project.";
+		report(make_finding(CoreFinding::ExportFolder, DiagnosticSeverity::Error,
+		                    "An export cannot land in " + utf8_of(out) +
+		                            ": it is inside the project, whose files the next build would pack. Choose a folder "
+		                            "outside it, or the project's export folder."));
+		return std::string();
+	}
+	return utf8_of(out);
+}
+
+void SessionCore::start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash,
+                              const ExportIntent &exported) {
 	if (intent.wanted && play().refused(intent.mission)) return;
+	if (exported.wanted && export_folder(exported.to).empty()) return;
 	// Where it lands: out_dir taken from the project's folder when relative. One inside the project
 	// but in its cache or its export folder (which the scan passes over) would be files of the
 	// project the next scan lists, an archive every later build refuses: refused before anything
@@ -876,16 +900,18 @@ void SessionCore::start_build(const PlayIntent &intent, const std::string &out_d
 	std::string cache_error;
 	ensure_project_cache_dir(paths_, cache_error);
 	const uint64_t id = operations_.start(std::make_unique<BuildOperation>(
-	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent));
+	        plan, output_root, std::move(protected_dirs), view_.findings.diagnostics, intent, exported));
 	if (id == 0) return refuse_busy(std::string()); // another operation runs, holding nothing it needs
 	outcome_.operation = id;
-	view_.activity.status = intent.wanted ? "Building, then playing..." : "Building...";
+	view_.activity.status = intent.wanted     ? "Building, then playing..."
+	                        : exported.wanted ? "Building, then exporting..."
+	                                          : "Building...";
 	note("Build started.");
 	show_operation();
 }
 
 OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate,
-                                           const PlayIntent &intent) {
+                                           const PlayIntent &intent, const ExportIntent &exported) {
 	view_.activity.has_build = true;
 	view_.activity.last_build = std::make_shared<const BuildReport>(result);
 	// A blocked build's report repeats the findings that blocked it, which were Problems rows
@@ -914,9 +940,54 @@ OperationOutcome SessionCore::absorb_build(const BuildReport &result, const std:
 		view_.activity.status = "Build failed; see Problems.";
 	}
 	if (result.ok && intent.wanted) play().start(intent.mission);
+	bool exported_ok = true;
+	if (result.ok && exported.wanted) {
+		// What ships (ADR 0046 S16): the build copied whole into the export folder, the runtime's folder
+		// beside a standalone game when the project asks for it and a packaged runtime is set.
+		const ProjectDocument &document = *view_.project.document;
+		ExportRequest request;
+		request.build_dir = result.build_dir;
+		request.build_id = result.build_id;
+		request.expansion = result.expansion;
+		request.export_dir = export_folder(exported.to);
+		request.project_id = document.project_id;
+		// The runtime ships beside a standalone game alone (an expansion plays in the install's game),
+		// and only a packaged one: a source run's is the checkout.
+		const bool runtime = document.export_settings.include_runtime && result.expansion.empty();
+		const bool packaged = !view_.activity.source_run && !view_.activity.runtime_executable.empty();
+		if (runtime && packaged) request.runtime_dir = utf8_of(path_of(view_.activity.runtime_executable).parent_path());
+		ExportReport shipped;
+		if (request.export_dir.empty()) {
+			shipped.diagnostics.push_back(make_finding(CoreFinding::ExportFolder, DiagnosticSeverity::Error,
+			                                           "The export's folder is inside the project: nothing was copied."));
+		} else if (runtime && !packaged) {
+			shipped.diagnostics.push_back(make_finding(
+			        CoreFinding::ExportRuntime, DiagnosticSeverity::Error,
+			        "The project ships the runtime beside the game, and Play runs no packaged runtime here: set one in "
+			        "File > Project settings..., or export without it."));
+		} else {
+			shipped = export_build(request);
+		}
+		for (const Diagnostic &d : shipped.diagnostics) {
+			report(d);
+			own.push_back(d);
+		}
+		exported_ok = shipped.ok;
+		if (shipped.ok) {
+			note("Exported " + std::to_string(shipped.files.size()) + " file(s) to " +
+			     shown_path(shipped.export_dir, paths_.root));
+			view_.activity.status = "Exported.";
+		} else {
+			note("Export failed.");
+			view_.activity.status = "Export failed; see Problems.";
+		}
+		problems().set_build_findings(own);
+		view_.activity.has_export = true;
+		view_.activity.last_export = std::make_shared<const ExportReport>(std::move(shipped));
+	}
 	touch(ViewConcern::Operation);
 	OperationOutcome outcome;
-	outcome.end = result.ok ? OperationEnd::Done : OperationEnd::Failed;
+	outcome.end = result.ok && exported_ok ? OperationEnd::Done : OperationEnd::Failed;
 	outcome.findings = std::move(own);
 	return outcome;
 }

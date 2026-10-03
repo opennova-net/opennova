@@ -171,6 +171,24 @@ static int test_new_status_validate() {
 		TEST_EXPECT(built.find("built ") != std::string::npos && built.find(" of them linked, ") != std::string::npos &&
 		            built.find(" file(s) hashed)") != std::string::npos);
 	}
+	// ADR 0046 S16: Export, the build copied as what ships into the project's export folder (or --out),
+	// replaced while it is this project's export; never into a folder of the person's files, nor into
+	// the project but its export folder.
+	{
+		TEST_EXPECT(run({"export", root, "--out"}) == 2);
+		std::string exported;
+		TEST_EXPECT(run_capture(dir.file("exported.txt"), {"export", root}, exported) == 0);
+		TEST_EXPECT(exported.find("exported ") != std::string::npos);
+		TEST_EXPECT(fs::is_regular_file(root + "/build/export/language.pff") &&
+		            fs::is_regular_file(root + "/build/export/export.json") && !fs::exists(root + "/build/export/build.json"));
+		TEST_EXPECT(run({"export", root}) == 0);
+		TEST_EXPECT(run({"export", root, "--out", dir.file("shipped")}) == 0 &&
+		            fs::is_regular_file(dir.file("shipped") + "/localres.pff"));
+		TEST_EXPECT(editor_test::write_text(dir.file("taken") + "/mine.txt", "mine"));
+		TEST_EXPECT(run({"export", root, "--out", dir.file("taken")}) == 1 && !fs::exists(dir.file("taken") + "/localres.pff"));
+		TEST_EXPECT(run({"export", root, "--out", root + "/inside"}) == 1 && !fs::exists(root + "/inside"));
+		TEST_EXPECT(run({"validate", root}) == 0); // the export folder is no file of the project
+	}
 
 	// Generic native file import uses the same core; a file the project holds already is kept as it
 	// is, whatever its bytes, unless --replace writes it over (review F2).

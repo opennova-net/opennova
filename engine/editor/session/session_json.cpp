@@ -743,6 +743,7 @@ bool field_from_json(RequestFieldId id, const JsonValue &json, EditorRequest &re
 	case F::Role: return text_of(json, token, request.role, error);
 	case F::FileKind: return text_of(json, token, request.file_kind, error);
 	case F::OutDir: return text_of(json, token, request.out_dir, error);
+	case F::ExportDir: return text_of(json, token, request.export_dir, error);
 	case F::Mission: return text_of(json, token, request.mission, error);
 	case F::Values: {
 		// An object of strings, sorted by key: the writer emits an object's keys sorted, so the order
@@ -862,6 +863,7 @@ bool field_to_json(
 	case F::Role: out = json_string(request.role); return !request.role.empty();
 	case F::FileKind: out = json_string(request.file_kind); return !request.file_kind.empty();
 	case F::OutDir: out = json_string(request.out_dir); return !request.out_dir.empty();
+	case F::ExportDir: out = json_string(request.export_dir); return !request.export_dir.empty();
 	case F::Mission: out = json_string(request.mission); return !request.mission.empty();
 	case F::Values:
 		out = JsonValue::make_object();

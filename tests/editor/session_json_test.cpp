@@ -678,6 +678,7 @@ static EditorRequest table_sample(EditorRequestKind kind, const OpenMenu &open) 
 		case F::Role: out.role = "main_menu"; break;
 		case F::FileKind: out.file_kind = "menu"; break;
 		case F::OutDir: out.out_dir = "C:/builds/sample"; break;
+		case F::ExportDir: out.export_dir = "C:/shipped/sample"; break;
 		case F::Mission: out.mission = "04TR.bms"; break;
 		// In its keys' order, as the wire keeps an object's members.
 		// Given in the New file prompt's order, through the factory, which sorts them as the wire reads

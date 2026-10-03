@@ -167,11 +167,12 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_files.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_findings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project/project_refresh.cpp
-    # project_build — routing into the boot-table archives, the plan, the immutable build
-    # (the directory is not "build*": the lints skip those)
+    # project_build — routing into the boot-table archives (or an expansion's pair), the plan, the
+    # immutable build, the Export's copy of it (the directory is not "build*": the lints skip those)
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/archive_routing.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_plan.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/project_build/build_run.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/project_build/export_build.cpp
     # requirements — the manifest rows evaluated against the project
     ${CMAKE_CURRENT_SOURCE_DIR}/requirements/requirements.cpp
     # run — the Play launch plan, the run directory the game runs in, and the one managed child

@@ -27,6 +27,7 @@ class PlayController;
 class ProblemsService;
 class ProjectRefresh;
 struct PlayIntent;
+struct ExportIntent;
 class RenameController;
 class UnsavedGuard;
 class Viewports;
@@ -243,10 +244,18 @@ public:
 	// ("" the project's .opennova/build/play; a relative one taken from the project's folder; one
 	// inside the project but in its cache or its export folder refused); `rehash`, every file read
 	// again, the build cache set aside (BuildPlan::rehash).
-	void start_build(const PlayIntent &intent, const std::string &out_dir = std::string(), bool rehash = false);
+	// With the Export that waits on it (`exported`, ADR 0046 S16: the folder it lands in, refused
+	// before anything is built when it lies inside the project but its export folder).
+	void start_build(const PlayIntent &intent, const std::string &out_dir, bool rehash, const ExportIntent &exported);
 	// A build's finish (BuildOperation): its report into the view, the findings its gate lacked,
-	// the game started on it, in the Play's mission, when a Play waits and it is good.
-	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent);
+	// the game started on it, in the Play's mission, when a Play waits and it is good; copied into
+	// the export folder when an Export waits and it is good (export_build).
+	OperationOutcome absorb_build(const BuildReport &result, const std::vector<Diagnostic> &gate, const PlayIntent &intent,
+	                              const ExportIntent &exported);
+	// The folder an Export lands in: `to` from the project's folder when relative, else the
+	// project's export folder; "" with a finding reported when it lies inside the project but the
+	// export folder (the next scan would list what it holds as the project's files).
+	std::string export_folder(const std::string &to);
 
 private:
 	// The path of the document a viewport request names (its path or logical name; "" the active

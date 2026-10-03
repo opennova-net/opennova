@@ -41,8 +41,10 @@
 #include <editor/project_build/archive_routing.h>
 #include <formats/pff/pff.h>
 #include <formats/rtxt/rtxt.h>
+#include <base/io/json.h>
 #include <editor/project_build/build_plan.h>
 #include <editor/project_build/build_run.h>
+#include <editor/project_build/export_build.h>
 #include <editor/requirements/requirements.h>
 
 #include "common/test_expect.h"
@@ -515,6 +517,128 @@ static int test_expansion_empty_pair() {
 	opennova::LaunchFlags flags;
 	flags.expansion = "x1";
 	TEST_EXPECT(opennova::mount_install(vfs, report.build_dir, flags) && vfs.mounted_expansion() == "x1");
+	return 0;
+}
+
+// The files under `dir`, '/'-separated and relative, sorted.
+static std::vector<std::string> files_under(const std::string &dir) {
+	std::vector<std::string> out;
+	std::error_code ec;
+	for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator(); it.increment(ec))
+		if (it->is_regular_file()) out.push_back(it->path().lexically_relative(dir).generic_string());
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+// ADR 0046 S16: Export copies the build whole (its record left behind) into a folder of its own with
+// export.json naming the project; again over its own export (a file the folder gained since gone);
+// into an empty folder; never over a folder of the person's files nor another project's export
+// (export.folder, nothing written), nor into the build; a staging folder its own cut-short export
+// left removed first, one of anything else refused; an expansion's laid out as in an install; the
+// runtime's folder under runtime/ when asked. The build is only read.
+static int test_export() {
+	Project p("opennova_editor_export_test");
+	TEST_EXPECT(p.create());
+	TEST_EXPECT(p.fill());
+	TEST_EXPECT(editor_test::write_text(p.root + "/video/intro.bik", "BIKi"));
+	const BuildReport build = run_build(p.plan(), p.output_root());
+	TEST_EXPECT(build.ok);
+	const std::string tree = editor_test::tree_digest(build.build_dir);
+	ExportRequest request;
+	request.build_dir = build.build_dir;
+	request.build_id = build.build_id;
+	request.export_dir = p.dir.file("shipped/Game");
+	request.project_id = p.doc.project_id;
+	ExportReport shipped = export_build(request);
+	for (const Diagnostic &d : shipped.diagnostics) std::fprintf(stderr, "%s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(shipped.ok && shipped.export_dir == request.export_dir);
+	std::vector<std::string> expected = files_under(build.build_dir);
+	expected.erase(std::remove(expected.begin(), expected.end(), std::string(kBuildRecordFileName)), expected.end());
+	TEST_EXPECT(shipped.files == expected);
+	expected.push_back(kExportRecordFileName);
+	std::sort(expected.begin(), expected.end());
+	TEST_EXPECT(files_under(request.export_dir) == expected);
+	std::string text, error;
+	opennova::io::JsonValue record;
+	TEST_EXPECT(read_file_text(request.export_dir + "/" + kExportRecordFileName, text, error) &&
+	            opennova::io::json_parse(text, record, error) && record.get_string("project_id", "") == p.doc.project_id &&
+	            record.get_string("build_id", "") == build.build_id);
+	std::error_code ec;
+	TEST_EXPECT(!fs::equivalent(request.export_dir + "/language.pff", build.build_dir + "/language.pff", ec)); // copied
+	TEST_EXPECT(!fs::exists(request.export_dir + kExportStagingSuffix) && !fs::exists(request.export_dir + kExportPreviousSuffix));
+
+	// Again over its own export: replaced whole.
+	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine?"));
+	shipped = export_build(request);
+	TEST_EXPECT(shipped.ok && !fs::exists(request.export_dir + "/notes.txt") && files_under(request.export_dir) == expected);
+	// A cut-short export's staging folder is removed first.
+	TEST_EXPECT(editor_test::write_text(request.export_dir + kExportStagingSuffix + "/" + kExportRecordFileName, text));
+	TEST_EXPECT(export_build(request).ok && !fs::exists(request.export_dir + kExportStagingSuffix));
+	// An empty folder takes it.
+	ExportRequest empty = request;
+	empty.export_dir = p.dir.file("empty");
+	fs::create_directories(empty.export_dir);
+	TEST_EXPECT(export_build(empty).ok && fs::is_regular_file(empty.export_dir + "/localres.pff"));
+
+	// Never over the person's files, another project's export, a foreign staging folder, the build.
+	ExportRequest theirs = request;
+	theirs.export_dir = p.dir.file("theirs");
+	TEST_EXPECT(editor_test::write_text(theirs.export_dir + "/keep.txt", "mine"));
+	ExportReport refused = export_build(theirs);
+	TEST_EXPECT(!refused.ok && refused.diagnostics.size() == 1 && refused.diagnostics[0].code() == "export.folder");
+	TEST_EXPECT(files_under(theirs.export_dir) == std::vector<std::string>{"keep.txt"});
+	TEST_EXPECT(!fs::exists(theirs.export_dir + kExportStagingSuffix));
+	ExportRequest other = request;
+	other.project_id = "another-project";
+	refused = export_build(other);
+	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" && files_under(request.export_dir) == expected);
+	ExportRequest staged = request;
+	staged.export_dir = p.dir.file("staged");
+	TEST_EXPECT(editor_test::write_text(staged.export_dir + kExportStagingSuffix + "/keep.txt", "mine"));
+	refused = export_build(staged);
+	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.folder" &&
+	            fs::is_regular_file(staged.export_dir + kExportStagingSuffix + "/keep.txt") && !fs::exists(staged.export_dir));
+	ExportRequest into = request;
+	into.export_dir = build.build_dir + "/shipped";
+	TEST_EXPECT(!export_build(into).ok && !fs::exists(into.export_dir));
+	TEST_EXPECT(editor_test::tree_digest(build.build_dir) == tree);
+
+	// The runtime's folder under runtime/ when asked; one not there refused.
+	ExportRequest runtime = request;
+	runtime.export_dir = p.dir.file("with_runtime");
+	runtime.runtime_dir = p.dir.file("runtime_package");
+	TEST_EXPECT(editor_test::write_text(runtime.runtime_dir + "/opennova.exe", "exe") &&
+	            editor_test::write_text(runtime.runtime_dir + "/data/opennova.pck", "pck"));
+	TEST_EXPECT(export_build(runtime).ok && fs::is_regular_file(runtime.export_dir + "/runtime/opennova.exe") &&
+	            fs::is_regular_file(runtime.export_dir + "/runtime/data/opennova.pck") &&
+	            fs::is_regular_file(runtime.export_dir + "/language.pff"));
+	runtime.runtime_dir = p.dir.file("no_runtime");
+	runtime.export_dir = p.dir.file("without_runtime");
+	refused = export_build(runtime);
+	TEST_EXPECT(!refused.ok && refused.diagnostics[0].code() == "export.runtime" && !fs::exists(runtime.export_dir));
+
+	// An expansion's, laid out as in an install.
+	BuildTarget target;
+	target.expansion = "jxm";
+	const AssetScan scan = scan_project_assets(p.paths, p.doc);
+	AssetGraph graph;
+	ValidationCache cache;
+	const std::vector<std::shared_ptr<const DocumentBase>> open;
+	const BuildReport expansion = run_build(plan_build(p.paths, scan, evaluate_requirements(p.doc, scan),
+	                                                   validate_project({ p.paths, p.doc, scan, open }, graph, cache), target),
+	                                        p.paths.build_dir + "/expansion");
+	TEST_EXPECT(expansion.ok);
+	ExportRequest mod = request;
+	mod.build_dir = expansion.build_dir;
+	mod.build_id = expansion.build_id;
+	mod.expansion = "jxm";
+	mod.export_dir = p.dir.file("mod");
+	TEST_EXPECT(export_build(mod).ok);
+	TEST_EXPECT(fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxm.pff") &&
+	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/jxmL.pff") &&
+	            fs::is_regular_file(mod.export_dir + "/expansion/jxm/intro.bik") && !fs::exists(mod.export_dir + "/language.pff"));
+	TEST_EXPECT(read_file_text(mod.export_dir + "/" + kExportRecordFileName, text, error) &&
+	            opennova::io::json_parse(text, record, error) && record.get_string("expansion", "") == "jxm");
 	return 0;
 }
 
@@ -1104,6 +1228,7 @@ int main() {
 	failures += test_expansion_routing();
 	failures += test_expansion_layout();
 	failures += test_expansion_empty_pair();
+	failures += test_export();
 	if (failures == 0) std::printf("editor_project_build: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

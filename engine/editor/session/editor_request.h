@@ -35,6 +35,7 @@ enum class EditorRequestKind {
 	CreateMissing,
 	Build,
 	Play,
+	Export,
 	StopPlay,
 	CancelOperation,
 	CreateFile,
@@ -241,8 +242,10 @@ struct EditorRequest {
 	std::string new_name;
 	std::string role;
 	std::string file_kind;
-	// Where a build lands ("" the project's own place under its cache).
+	// Where a build lands ("" the project's own place under its cache); where an export lands ("" the
+	// project's export folder, ADR 0046 S16).
 	std::string out_dir;
+	std::string export_dir;
 	// The mission Play starts the game in, by its logical name ("" the game's menu; S14).
 	std::string mission;
 	// A new file's starting values, by its blank's parameter tokens (blank_factory.h: a mission's
@@ -297,7 +300,8 @@ inline bool operator==(const EditorRequest &a, const EditorRequest &b) {
 			a.game_install == b.game_install && a.path == b.path && a.locator == b.locator &&
 			a.field == b.field &&
 			a.new_name == b.new_name && a.role == b.role && a.file_kind == b.file_kind &&
-			a.out_dir == b.out_dir && a.mission == b.mission && a.values == b.values && a.roles == b.roles &&
+			a.out_dir == b.out_dir && a.export_dir == b.export_dir && a.mission == b.mission && a.values == b.values &&
+			a.roles == b.roles &&
 			a.names == b.names && a.paths == b.paths && a.imports == b.imports &&
 			a.edits == b.edits && a.address == b.address && a.records == b.records &&
 			a.paste_at == b.paste_at &&

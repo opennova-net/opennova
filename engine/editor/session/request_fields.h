@@ -22,6 +22,7 @@ enum class RequestFieldId : uint8_t {
 	Role,
 	FileKind,
 	OutDir,
+	ExportDir,
 	Mission,
 	Values,
 	Roles,

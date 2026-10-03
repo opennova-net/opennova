@@ -148,7 +148,7 @@ static int test_guard_column_is_the_prompt() {
 		const std::string named = !request.dir.empty() ? request.dir : request.path;
 		TEST_EXPECT(prompt.target == (row.guard == GuardScope::Document ? dirty.extra : named));
 	}
-	TEST_EXPECT(prompted == 12 && went_ahead == kEditorRequestKindCount - 12);
+	TEST_EXPECT(prompted == 13 && went_ahead == kEditorRequestKindCount - 13); // Export (S16) guards as Build does
 	return 0;
 }
 

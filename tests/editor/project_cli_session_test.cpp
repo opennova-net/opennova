@@ -299,7 +299,7 @@ static int test_verb_table() {
 		TEST_EXPECT(error.empty() && (args.is_null() || args.is_object()));
 		++queries;
 	}
-	TEST_EXPECT(kCliVerbCount == 9 && queries == 7 && requests >= 2 * kCliVerbCount);
+	TEST_EXPECT(kCliVerbCount == 10 && queries == 8 && requests >= 2 * kCliVerbCount); // export (S16)
 	TEST_EXPECT(cli_verb_row(CliVerb::Request).answer == CliAnswer::Request &&
 	            cli_verb_row(CliVerb::Query).answer == CliAnswer::NamedQuery);
 	const Ran usage = run(dir.root(), { "--help" });

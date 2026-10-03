@@ -232,7 +232,7 @@ def parse_list(text: str, flag: str, shape: str) -> list:
 # the lists (comma-separated), the objects (JSON) and the switches. The kind's row says which it
 # takes; the editor refuses the rest, naming what the kind takes (`query catalog` lists them).
 REQUEST_TEXTS = ("dir", "title", "game", "game_install", "path", "locator", "field", "new_name", "role", "file_kind",
-                 "out_dir", "mission", "mode", "choice", "purpose")
+                 "out_dir", "export_dir", "mission", "mode", "choice", "purpose")
 REQUEST_LISTS = ("roles", "names")
 REQUEST_SWITCHES = ("with_dependencies", "replace", "force", "ask_name", "open_first", "import_pass", "rehash", "all",
                     "planned")
@@ -445,6 +445,26 @@ def cmd_build(args: argparse.Namespace) -> int:
     return EXIT_OK if ended.get("end") == "done" and build.get("ok") else EXIT_NOT_DONE
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    """Export (ADR 0046 S16): a build, then its copy as what ships, waited on as `build` waits."""
+    client = client_of(args)
+    request = {"kind": "export"}
+    if args.export_dir is not None:
+        request["export_dir"] = args.export_dir
+    outcome, ended = raise_and_wait(client, request, args.timeout)
+    if ended is None:
+        return EXIT_NOT_DONE
+    if not outcome.get("done", False):
+        print_json({"outcome": outcome})
+        return EXIT_NOT_DONE
+    answer = client.structured("editor_query", {"query": "operation"})
+    exported = answer.get("export", {})
+    exported["build"] = answer.get("build", {})
+    exported["operation"] = ended
+    print_json(exported)
+    return EXIT_OK if ended.get("end") == "done" and exported.get("ok") else EXIT_NOT_DONE
+
+
 def run_section(client: GameMcp) -> dict:
     return client.structured("editor_state", {"sections": ["run"]}).get("run", {})
 
@@ -632,6 +652,9 @@ def build_parser() -> argparse.ArgumentParser:
                          help="build: where it lands, each build a directory under it (left out: the project's "
                               ".opennova/build/play; relative: from the project's folder; refused inside the "
                               "project but in its cache or export folder)")
+    request.add_argument("--export-dir", dest="export_dir", default=None,
+                         help="export: the folder the build is copied into as what ships (left out: the project's "
+                              "export folder; replaced only when missing, empty or an export of this project)")
     request.add_argument("--mission", default=None,
                          help="play: a mission of the project by its logical name, the one the game starts in")
     request.add_argument("--roles", default=None, help="comma-separated: create_missing's requirement roles")
@@ -766,6 +789,14 @@ def build_parser() -> argparse.ArgumentParser:
                        help="where it lands, each build a directory under it (as request build's --out-dir)")
     build.add_argument("--timeout", type=float, default=300.0)
     build.set_defaults(func=cmd_build)
+
+    export = commands.add_parser("export", help="build the project, then copy the build into its export folder as what "
+                                                "ships, waiting on the operation")
+    add_endpoint_options(export)
+    export.add_argument("--export-dir", dest="export_dir", default=None,
+                        help="the folder it lands in (as request export's --export-dir)")
+    export.add_argument("--timeout", type=float, default=300.0)
+    export.set_defaults(func=cmd_export)
 
     play = commands.add_parser("play", help="start (build, waiting on its operation, then run), stop or read the game")
     add_endpoint_options(play)

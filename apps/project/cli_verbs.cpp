@@ -805,6 +805,40 @@ int run_build(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	return 0;
 }
 
+// The project built and copied as what ships into the export folder, as the editor's Export does
+// (ADR 0046 S16): the import pass first, then the build run to its end, then the copy.
+int run_export(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
+	// --out is a path on the command line, taken from where the command runs.
+	const std::string out = from_here(args.value("--out"));
+	const JsonValue outcome = send(cli, editor::request::export_project(out, args.has("--rehash")));
+	JsonValue answer;
+	if (!answer_of(cli, row, answer)) return 2;
+	const JsonValue &operation = at(answer, "operation");
+	const JsonValue &build = at(operation, "build"), &exported = at(operation, "export"),
+	                &last = at(operation, "last_operation");
+	const bool landed = done(outcome) && last.get_number("id", 0.0) == outcome.get_number("operation", -1.0) &&
+	                    last.get_string("end", "") == "done" && exported.get_bool("ok", false);
+	if (cli.json) {
+		print_json(cli.out, answer);
+		return landed ? 0 : 1;
+	}
+	if (!done(outcome)) return 1; // refused: its findings said why
+	for (const JsonValue &finding : items(build, "diagnostics")) print_finding(cli.out, finding);
+	for (const JsonValue &finding : items(exported, "diagnostics")) print_finding(cli.out, finding);
+	if (!landed) {
+		std::fprintf(cli.out, "%s\n", build.get_bool("ok", false) ? "not ok: export failed" : "not ok: build failed");
+		return 1;
+	}
+	std::fprintf(cli.out, "exported %s (%zu file(s), %.0f byte(s)) from build %s\n", exported.get_string("dir", "").c_str(),
+	             size_t(exported.get_number("files", 0.0)), exported.get_number("bytes", 0.0),
+	             build.get_string("id", "").c_str());
+	const std::string expansion = build.get_string("expansion", "");
+	if (!expansion.empty())
+		std::fprintf(cli.out, "install: copy its expansion folder into the game's folder, then run the game with /exp %s\n",
+		             expansion.c_str());
+	return 0;
+}
+
 // What a request's answer (handle_json's) comes to for the exit code: 2 when it did not read, 1
 // when the shell serves its kind (a command line has none: nothing was done), when it was not done
 // or the operation it started did not end done (its findings said), else 0.
@@ -1049,6 +1083,7 @@ constexpr K kImportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Pl
 	                              K::ImportFiles };
 constexpr K kReimportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Reimport };
 constexpr K kBuildRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Build };
+constexpr K kExportRequests[] = { K::OpenProject, K::ApplyProjectSettings, K::Export };
 
 constexpr CliPositional kDir[] = { { "a project directory" } };
 constexpr CliPositional kImportArgs[] = { { "a project directory" }, { "a source file", false } };
@@ -1128,6 +1163,16 @@ constexpr VerbRow kRows[] = {
 	     "<dir>/.opennova/build/play/<build-id>; --out from where the command runs, refused\n"
 	     "inside the project but in its cache or export folder); --rehash reads every file\n"
 	     "again, the build cache set aside (--json: the state query's import and operation)")
+	        .takes(kBuildOptions)
+	        .opens_without_import_pass()
+	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")
+	        .row,
+	Verb(V::Export, "export", "<dir> [--out <dir>] [--rehash]", kExportRequests, kDir, run_export,
+	     "build the project, then copy the build into its export folder as what ships (default:\n"
+	     "project.opennova's export.output; --out from where the command runs, replaced only when\n"
+	     "missing, empty or an export of this project): a standalone game's archives and loose\n"
+	     "files, an expansion's expansion/<name>/ as in an install, export.json naming the project\n"
+	     "(--json: the state query's import and operation)")
 	        .takes(kBuildOptions)
 	        .opens_without_import_pass()
 	        .answers(Q::State, "{\"sections\": [\"import\", \"operation\"]}")

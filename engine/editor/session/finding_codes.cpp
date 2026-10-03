@@ -31,6 +31,7 @@ constexpr GroupRow kGroups[] = {
 	{ G::Documents, "document", "Documents" },
 	{ G::Imports, "import", "Imports" },
 	{ G::Build, "build", "Build" },
+	{ G::Export, "export", "Export" },
 	{ G::Play, "play", "Play" },
 	{ G::Renames, "rename", "Renames" },
 	{ G::NewFiles, "blank", "New files" },
