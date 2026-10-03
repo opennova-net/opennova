@@ -270,10 +270,17 @@ bool is_reference(const FieldUse &field, const Value &value) {
 }
 // A number naming a definition or a record of its own file (an item id, an SSN, a zone, an event, a
 // group, a path, a register by its index): picked by name in the value's place (ReferencePicker::
-// draw_field, ADR 0046 S15), never typed as a number.
+// draw_field, ADR 0046 S15), never typed as a number; one whose value the game resolves itself (the
+// player's SSN) picked as what it would name otherwise (FieldUse::picks).
+FieldUse picked_as(const FieldUse &field) {
+	FieldUse picking = field;
+	if (picking.reference == ReferenceKind::None) picking.reference = field.picks;
+	return picking;
+}
 bool picks_by_name(const FieldUse &field) {
-	if (field.reference == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
-	const ReferenceResolution resolution = reference_row(field.reference).resolution;
+	const ReferenceKind kind = field.reference != ReferenceKind::None ? field.reference : field.picks;
+	if (kind == ReferenceKind::None || field.schema->type == FieldType::Text) return false;
+	const ReferenceResolution resolution = reference_row(kind).resolution;
 	return resolution == ReferenceResolution::Symbol || resolution == ReferenceResolution::Record;
 }
 // A text reference: typed in its box, or picked (its Pick).
@@ -571,8 +578,9 @@ void field_row(Workspace &workspace, Controls &controls, const Document &documen
 	const bool by_name = picks_by_name(field);
 	if (by_name) {
 		std::string picked;
-		if (controls.picker.draw_field(workspace, document, address, field, value, words, mixed, picked))
-			set(workspace, document, targets, schema.id, picked_value(field, picked), false);
+		const FieldUse picking = picked_as(field);
+		if (controls.picker.draw_field(workspace, document, address, picking, value, words, mixed, picked))
+			set(workspace, document, targets, schema.id, picked_value(picking, picked), false);
 	} else {
 		value_control(workspace, controls.typed, document, targets, field, value, false, mixed);
 	}
@@ -698,9 +706,10 @@ void field_cell(Workspace &workspace, Controls &controls, const Document &docume
 		// Picked by name, its words in the cell (ADR 0046 S15).
 		const ViewNames names(workspace.view());
 		std::string picked;
-		if (controls.picker.draw_field(workspace, document, address, field, value,
+		const FieldUse picking = picked_as(field);
+		if (controls.picker.draw_field(workspace, document, address, picking, value,
 		                               value_display(document, address, field, value, names.get()), false, picked))
-			set(workspace, document, {address}, schema.id, picked_value(field, picked), false);
+			set(workspace, document, {address}, schema.id, picked_value(picking, picked), false);
 	} else {
 		value_control(workspace, controls.typed, document, {address}, field, value, true);
 	}

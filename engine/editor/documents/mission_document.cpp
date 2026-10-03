@@ -563,15 +563,18 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 		}
 	}
 	// What the file defines and names by id is looked up in the mission's own scope; the player's
-	// SSN names no record of it.
+	// SSN names no record of it, yet another entity is picked by name there (S15).
 	if (use.reference == ReferenceKind::MissionEntity) {
 		Value value;
-		if (get(address, id, value) && value == Value(kPlayerSsn)) use.reference = ReferenceKind::None;
+		if (get(address, id, value) && value == Value(kPlayerSsn)) {
+			use.reference = ReferenceKind::None;
+			use.picks = ReferenceKind::MissionEntity;
+		}
 	}
 	const auto by_id = [](ReferenceKind kind) {
 		return kind == ReferenceKind::MissionEntity || kind == ReferenceKind::MissionZone;
 	};
-	if (by_id(use.defines) || by_id(use.reference)) use.scope = mission_scope(*this);
+	if (by_id(use.defines) || by_id(use.reference) || by_id(use.picks)) use.scope = mission_scope(*this);
 }
 
 bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse &use,

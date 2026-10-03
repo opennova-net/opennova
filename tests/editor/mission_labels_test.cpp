@@ -338,6 +338,19 @@ int test_session_words() {
 	group.value = int64_t(5);
 	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", group));
 	TEST_EXPECT(same(view.activity.status, "Set Group of Wire Test Pump #" + walker_ssn + " (Sgt. Walker) to Group 5 (1 entity)."));
+	// A trigger's entity set to the player: no record named (no reference, no badge), yet still picked by
+	// name as an entity (FieldUse::picks), the player in words.
+	Edit player;
+	player.address = trigger;
+	player.field = "param1";
+	player.value = int64_t(10000);
+	editor_test::handle_to_end(session, request::edit_record("missions/synth_logic.bms", player));
+	FieldUse entity;
+	for (const FieldSchema &schema : document->fields(trigger.kind))
+		if (schema.id == "param1") entity = document->field_on(trigger, schema);
+	TEST_EXPECT(entity.schema && entity.reference == ReferenceKind::None && entity.picks == ReferenceKind::MissionEntity &&
+	            !entity.scope.empty());
+	TEST_EXPECT(same(shown(*document, trigger, "param1", &names).text, "The player"));
 	std::printf("session words: the graph's names, the picker, the wire, Problems' places, the status line\n");
 	return 0;
 }
