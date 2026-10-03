@@ -189,7 +189,8 @@ static int test_remembered_selections() {
 // A selection over several rows (S13 D7): the TITLE of two screens, a marquee's (SelectRecord with
 // records) or one joined to the other (Add, another row); Duplicate copies each after itself in one
 // step, the copies selected; a batch removing both is one step, the selection repaired to the
-// primary's owner; Cut asks the type, and a menu copies the windows of several screens.
+// primary's owner; Cut asks the type, and a menu copies the windows of several screens, a cut it
+// refuses leaving the clipboard as it was.
 static int test_selection_over_rows() {
 	Menus menus("opennova_editor_document_set_rows");
 	const SessionView &v = menus.view();
@@ -235,6 +236,15 @@ static int test_selection_over_rows() {
 	            !v.documents.clipboard.empty());
 	menus.session.handle(request::undo(menus.menu().path()));
 	TEST_EXPECT(menus.menu().serialize().text == two);
+	// A cut the menu refuses (the other screen's MAIN, its only root window, with this screen's TITLE:
+	// a screen keeps a root window) leaves the clipboard as the last copy left it.
+	menus.select(title);
+	TEST_EXPECT(menus.act(EditorRequestKind::Copy));
+	const std::string copied = v.documents.clipboard;
+	menus.session.handle(request::select_record("main.mnu", title, SelectMode::Replace, {menus.at("1/window:0")}));
+	TEST_EXPECT(v.documents.selection.records.size() == 2);
+	TEST_EXPECT(!menus.act(EditorRequestKind::Cut) && v.documents.clipboard == copied && menus.menu().serialize().text == two);
+	TEST_EXPECT(menus.act(EditorRequestKind::Copy) && v.documents.clipboard != copied); // the two copy: the cut's refusal is the remove's
 	// Both removed in one batch: one step; the primary's owner selected.
 	Edit remove_title, remove_other;
 	remove_title.operation = remove_other.operation = EditOperation::Remove;

@@ -38,6 +38,7 @@
 #include <cmath>
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <variant>
@@ -46,6 +47,7 @@
 #include <base/vfs/file_source.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/model_document.h>
+#include <editor/graph/display_names.h>
 #include <editor/graph/reference_queries.h>
 #include <editor/preview/canvas_gesture.h>
 #include <editor/preview/menu_canvas.h>
@@ -2381,6 +2383,107 @@ int test_mission_tools() {
 	return 0;
 }
 
+// The polish's labels in the Shell's frame order (the view follows, takes the pointer and draws the
+// overlay; the session then serves what the canvas raised and the viewport follows), the labels option
+// on and three entities selected: frames over nothing lay the labels out and word each title once, at
+// the first; a drag of the primary keeps every title through its samples (each a revision of its
+// gesture), the layout made at most once a frame; an edit from outside the canvas mid-drag (the wire's:
+// the primary made a Drop Pump, the catalog's, or no longer one) drops the titles, the primary's label worded again at once, and the
+// drag's next samples keep the new ones.
+int test_mission_labels_held() {
+	MissionRig rig;
+	TEST_EXPECT(rig.open(true));
+	TEST_EXPECT(rig.tool(R"({"marks": {"labels": true}})"));
+	const std::vector<int> picks = rig.pickable();
+	TEST_EXPECT(picks.size() >= 3);
+	if (picks.size() < 3) return 1;
+	std::vector<MissionMark> marks = rig.marks();
+	const NodeAddress a = marks[size_t(picks[0])].record, b = marks[size_t(picks[1])].record, c = marks[size_t(picks[2])].record;
+	rig.session.handle(request::select_record(rig.path, c, SelectMode::Replace, { a, b, c }));
+	TEST_EXPECT(rig.view.documents.selection.primary == c && rig.view.documents.selection.records.size() == 3);
+	const auto texts = [](const OverlayList &list) {
+		std::vector<std::string> out;
+		for (const OverlayShape &shape : list.shapes)
+			if (shape.kind == OverlayKind::Text) out.push_back(shape.text);
+		return out;
+	};
+	const auto frame = [&](const CanvasInput &in) {
+		rig.step(in);
+		const OverlayList list = rig.canvas.shapes(rig.context(), in);
+		rig.serve(rig.out.take());
+		rig.follow();
+		return texts(list);
+	};
+	const DisplayNameCache &titles = rig.canvas.titles();
+	const MissionLabelLayout &layout = rig.canvas.label_layout();
+	// Over nothing: laid out and worded at the first frame alone.
+	const std::vector<std::string> idle = frame(MissionRig::at(2.0f, 2.0f));
+	const size_t laid = layout.made(), worded = titles.made(), drops = titles.dropped();
+	TEST_EXPECT(idle.size() >= 3 && laid > 0 && worded >= idle.size());
+	for (int i = 0; i < 5; ++i) TEST_EXPECT(frame(MissionRig::at(2.0f, 2.0f)) == idle);
+	TEST_EXPECT(layout.made() == laid && titles.made() == worded && titles.dropped() == drops);
+	// The primary pressed and dragged 5 pixels a frame: its samples' revisions keep every title.
+	marks = rig.marks();
+	const CanvasPoint from{ marks[size_t(picks[2])].x, marks[size_t(picks[2])].y };
+	CanvasInput press = MissionRig::at(from.x, from.y);
+	press.pressed = press.down = true;
+	frame(press);
+	const uint64_t pressed = rig.document->revision();
+	const size_t pressed_layouts = layout.made();
+	int sample = 0;
+	const auto drag = [&](int samples) {
+		for (int i = 0; i < samples; ++i) {
+			++sample;
+			CanvasInput moved = MissionRig::at(from.x + 5.0f * float(sample), from.y);
+			moved.down = true;
+			moved.delta = CanvasPoint{ 5.0f, 0.0f };
+			frame(moved);
+		}
+	};
+	drag(4);
+	TEST_EXPECT(rig.document->revision() != pressed && rig.document->dirty());
+	TEST_EXPECT(titles.made() == worded && titles.dropped() == drops && layout.made() <= pressed_layouts + 4);
+	// Mid-drag, the wire gives the primary another item: the titles dropped, its label its new title at
+	// the next frame; the drag's samples after keep them.
+	std::optional<GraphNameSource> names;
+	if (rig.view.findings.graph) names.emplace(*rig.view.findings.graph);
+	const NameSource *source = names ? &*names : nullptr;
+	const std::string before = record_display(*rig.document, c, source);
+	Value held;
+	TEST_EXPECT(rig.document->get(c, "item", held) && std::holds_alternative<int64_t>(held));
+	if (!std::holds_alternative<int64_t>(held)) return 1;
+	Edit item;
+	item.address = c;
+	item.field = "item";
+	item.value = std::get<int64_t>(held) == 106100 ? int64_t(106101) : int64_t(106100); // a Drop Pump, or none
+	rig.session.handle(request::edit_record(rig.path, item));
+	TEST_EXPECT(rig.session.outcome().done() && rig.session.last_edit_ok());
+	rig.follow();
+	const std::string after = record_display(*rig.document, c, source);
+	TEST_EXPECT(after != before);
+	++sample;
+	CanvasInput moved = MissionRig::at(from.x + 5.0f * float(sample), from.y);
+	moved.down = true;
+	moved.delta = CanvasPoint{ 5.0f, 0.0f };
+	const std::vector<std::string> renamed = frame(moved);
+	TEST_EXPECT(titles.dropped() == drops + 1 && titles.made() > worded);
+	TEST_EXPECT(std::find(renamed.begin(), renamed.end(), after) != renamed.end() &&
+	            std::find(renamed.begin(), renamed.end(), before) == renamed.end());
+	const size_t reworded = titles.made();
+	drag(3);
+	TEST_EXPECT(titles.dropped() == drops + 1 && titles.made() == reworded);
+	frame(MissionRig::at(from.x + 5.0f * float(sample), from.y));
+	TEST_EXPECT(rig.view.documents.gestures.empty());
+	while (rig.document->dirty()) {
+		rig.session.handle(request::undo(rig.path));
+		if (!rig.session.outcome().done()) break;
+	}
+	TEST_EXPECT(!rig.document->dirty() && record_display(*rig.document, c, source) == before);
+	TEST_EXPECT(!rig.out.unexpected);
+	std::printf("test_mission_labels_held passed\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -2421,6 +2524,8 @@ int main() {
 	if (test_mission_marquee() != 0)
 		return 1;
 	if (test_mission_surface_picks() != 0)
+		return 1;
+	if (test_mission_labels_held() != 0)
 		return 1;
 	if (test_mission_camera() != 0)
 		return 1;

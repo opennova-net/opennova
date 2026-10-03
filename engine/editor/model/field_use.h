@@ -32,6 +32,11 @@ struct FieldUse {
 	// Null: none.
 	const char *key_prefix = nullptr;
 	const char *scope_alternate = nullptr;
+	// The numbers that form a key the game looks up, where key_prefix is set: the picker lists the keys
+	// of no other (a name index from 1, the spawn naming an entity by a nonzero index; a win slot 1 to
+	// 254, 0 and 255 an empty slot).
+	int64_t key_first = 0;
+	int64_t key_last = 0;
 	// What a value that is one %NAME% stands for where the field makes no reference of its own: a
 	// menu's text as the game reads it (ReferenceKind::MenuText: any text of a menu, the game
 	// expanding its whole text first), which the stylesheet variable's value replaces as it is;

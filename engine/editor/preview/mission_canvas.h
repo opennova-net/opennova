@@ -113,6 +113,10 @@ public:
 	// What the line under the picture says now (mission_hint.h): what the tool does, what a click or a
 	// drag would do where the pointer is.
 	std::string hint(const ViewportContext &context, const CanvasInput &in) const;
+	// The marks' titles and the labels' last layout as the overlay keeps them (a test's measure: each
+	// title worded once and the labels laid out once while nothing they read moves).
+	const DisplayNameCache &titles() const { return titles_; }
+	const MissionLabelLayout &label_layout() const { return labels_; }
 
 	// The camera on the selected marks, else on everything (F, a double click, the toolbar's Frame).
 	void frame_selected(int width, int height, CanvasRequests &out) const;

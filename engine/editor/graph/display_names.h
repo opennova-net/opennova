@@ -92,12 +92,16 @@ std::string symbol_preview(const AssetGraph &graph, ReferenceKind kind, const st
 class DisplayNameCache {
 public:
 	const std::string &record(const Document &document, const NodeAddress &address, const NameSource *names);
-	// How many titles were worded (made, not read from the cache): a test's measure.
+	// How many titles were worded (made, not read from the cache), and how many times the titles were
+	// dropped (what they were made of moved): a test's measures.
 	size_t made() const { return made_; }
-	// While held, the document's revision moving keeps the titles (its identity, its load or the names
-	// moving still drops them): a gesture whose edits change nothing a title reads (a drag of a mission's
-	// marks writes their positions and headings alone) words each title once, not once a sample.
-	void hold(bool held) { held_ = held; }
+	size_t dropped() const { return dropped_; }
+	// While held by the gesture `gesture` (its token; 0 lets go), the document's revision moving by that
+	// gesture's batches alone keeps the titles (DocumentBase::gesture_alone_since): a gesture whose edits
+	// change nothing a title reads (a drag of a mission's marks writes their positions and headings alone)
+	// words each title once, not once a sample. Any other edit meanwhile (one through the wire mid-drag,
+	// an undo), its identity, its load or the names moving still drop them.
+	void hold(uint64_t gesture) { held_ = gesture; }
 
 private:
 	struct Key {
@@ -115,8 +119,8 @@ private:
 	};
 	Key key_;
 	std::unordered_map<NodeAddress, std::string, AddressHash> titles_;
-	size_t made_ = 0;
-	bool held_ = false;
+	size_t made_ = 0, dropped_ = 0;
+	uint64_t held_ = 0; // the gesture holding the titles
 };
 
 } // namespace opennova::editor

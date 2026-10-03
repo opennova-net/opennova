@@ -280,25 +280,46 @@ int test_named_words() {
 	moved.generation_ = 2;
 	cache.record(*document, walker, &moved);
 	TEST_EXPECT(cache.made() == 2);
-	// Held (the polish: a drag of marks), an edit's revision keeps the titles; let go, the next one drops
-	// them; held, other names still do.
+	// Held by a gesture (the polish: a drag of marks), its own batches' revisions keep the titles; an
+	// edit of anything else meanwhile (one through the wire mid-drag: the walker's name index cleared)
+	// drops them, his title worded again; the gesture's next sample keeps them; an undo drops them;
+	// let go, the next revision drops them; held, other names still do.
+	const uint64_t drag = next_edit_gesture();
 	Edit nudge;
 	nudge.address = walker;
 	nudge.field = "x";
 	nudge.value = 12.5;
+	nudge.gesture = drag;
 	Diagnostic error;
-	cache.hold(true);
+	cache.hold(drag);
 	TEST_EXPECT(document->apply(nudge, error));
 	TEST_EXPECT(cache.record(*document, walker, &moved) == record_display(*document, walker, &moved) && cache.made() == 2);
-	cache.hold(false);
+	nudge.value = 13.0;
+	TEST_EXPECT(document->apply(nudge, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved).find("Sgt. Walker") != std::string::npos && cache.made() == 2);
+	Edit unnamed;
+	unnamed.address = walker;
+	unnamed.field = "name_index";
+	unnamed.value = int64_t(0);
+	TEST_EXPECT(document->apply(unnamed, error));
+	TEST_EXPECT(cache.record(*document, walker, &moved) == record_display(*document, walker, &moved) &&
+	            cache.record(*document, walker, &moved).find("Sgt. Walker") == std::string::npos && cache.made() == 3);
 	nudge.value = 13.5;
 	TEST_EXPECT(document->apply(nudge, error));
 	cache.record(*document, walker, &moved);
 	TEST_EXPECT(cache.made() == 3);
-	cache.hold(true);
-	cache.record(*document, walker, &names);
+	document->undo();
+	cache.record(*document, walker, &moved);
 	TEST_EXPECT(cache.made() == 4);
-	cache.hold(false);
+	cache.hold(0);
+	nudge.value = 14.5;
+	TEST_EXPECT(document->apply(nudge, error));
+	cache.record(*document, walker, &moved);
+	TEST_EXPECT(cache.made() == 5);
+	cache.hold(drag);
+	cache.record(*document, walker, &names);
+	TEST_EXPECT(cache.made() == 6);
+	cache.hold(0);
 	std::printf("named words: items, shown names, text keys, choices, the cache\n");
 	return 0;
 }
@@ -403,8 +424,9 @@ int test_session_words() {
 
 // The polish: a number that forms a text key picked by its string (FieldUse::key_prefix), through a
 // session whose mission's own table holds two STRNAME keys and two STRWINCOND keys, a key no number
-// forms (STRNAME7: the game forms STRNAME007) and another section's key: the name index's choices are
-// the section's keys of its form, each named by its number and worded by its string, "No name" first;
+// forms (STRNAME7: the game forms STRNAME007), keys of numbers the game never looks up (STRNAME000,
+// STRWINCOND000 and STRWINCOND255) and another section's key: the name index's choices are the
+// section's keys of its form, each named by its number and worded by its string, "No name" first;
 // a pick writes the number (the walker renamed); the objectives row's the same over WinConditions; the
 // wire's reference_choices names the key's prefix; text_key_number is the game's sprintf inverted.
 int test_text_key_picks() {
@@ -430,9 +452,11 @@ int test_text_key_picks() {
 		for (const auto &row : rows) table.entries.push_back({row.first, row.second, {}, index});
 	};
 	section("Locations", {{"LOCATION001", "Pump House"}, {"STRNAME003", "Not a person"}});
-	section("PeopleNames", {{"STRNAME001", "Sgt. Walker"}, {"STRNAME7", "Never formed"}, {"STRNAME012", "Cpl. Ortiz"}});
-	section("WinConditions", {{"STRWINDIRECTIVE001", "Reach the pump house"}, {"STRWINCOND001", "Pump house reached"},
-	                          {"STRWINCOND004", "Radio tower held"}});
+	section("PeopleNames", {{"STRNAME000", "Looked up by no index"}, {"STRNAME001", "Sgt. Walker"}, {"STRNAME7", "Never formed"},
+	                        {"STRNAME012", "Cpl. Ortiz"}});
+	section("WinConditions", {{"STRWINDIRECTIVE001", "Reach the pump house"}, {"STRWINCOND000", "An empty slot"},
+	                          {"STRWINCOND001", "Pump house reached"}, {"STRWINCOND004", "Radio tower held"},
+	                          {"STRWINCOND255", "An empty slot too"}});
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::rtxt::write(table, bytes, error));
@@ -454,7 +478,11 @@ int test_text_key_picks() {
 	const std::vector<ReferenceChoice> people = picker_choices(view.findings.graph.get(), *document, walker, name_index, &names);
 	std::string listed;
 	for (const ReferenceChoice &choice : people) listed += choice.name + "=" + choice.label + ";";
-	TEST_EXPECT(same(listed, "0=No name;1=\"Sgt. Walker\";12=\"Cpl. Ortiz\";"));
+	TEST_EXPECT(same(listed, "0=No name;1=\"Sgt. Walker\";12=\"Cpl. Ortiz\";")); // STRNAME000: no index looks it up
+	// Each keeps its key and the section that defines it, so its preview is the key's string.
+	TEST_EXPECT(people.size() == 3 && people[2].symbol == "STRNAME012" && same(people[2].symbol_scope, "SYNTH_LOGIC.BIN/PeopleNames") &&
+	            symbol_preview(*view.findings.graph, ReferenceKind::TextId, people[2].symbol, people[2].symbol_scope)
+	                            .find("Cpl. Ortiz") != std::string::npos);
 	// The wire: the same, the key's prefix named.
 	const opennova::io::JsonValue wire = reference_choices_to_json(*document, walker, "name_index", view, JsonPage());
 	const opennova::io::JsonValue *choices = wire.get("choices");
@@ -482,6 +510,7 @@ int test_text_key_picks() {
 	listed.clear();
 	for (const ReferenceChoice &choice : picker_choices(view.findings.graph.get(), *document, mission, objective, &names))
 		listed += choice.name + "=" + choice.label + ";";
+	// STRWINCOND000 and STRWINCOND255 not among them: 0 and 255 are empty slots, no row of the panel.
 	TEST_EXPECT(same(listed, "0=No objective (the panel's rows end here);1=\"Pump house reached\";4=\"Radio tower held\";"));
 	std::printf("text key picks: the section's keys of the field's form by their strings, a pick its number\n");
 	return 0;

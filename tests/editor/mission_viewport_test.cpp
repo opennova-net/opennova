@@ -1259,18 +1259,14 @@ static int test_tweaking_commands() {
 	return 0;
 }
 
-// The retail leg (S14 V11; OPENNOVA_JO_DIR, base and each expansion through the VFS): every shipped
-// mission written into one project (a mission's own file, as an import writes it; its terrain, its
-// environment and its models are the device's, and the fake devices read none), then each opened in
-// its viewport: ready, the scene's pools as many as the document's (each entity pool, the areas);
-// every mark shown on the first framing hit at its pixel answers the front-most record there; the
-// first item framed and moved by a drag of 64 pixels is one edit, and its undo gives the document's
-// bytes back. Prints the largest mission's counts.
 // The polish's measure of the labels: the canvas's overlay (MissionCanvas::shapes, the labels' layout in
 // it) with the labels option on over `path`, on a 1600 x 900 picture framed on everything (the densest
-// place), the 24 nearest entities selected: 120 idle frames (the pointer still over nothing, nothing
-// moving), then 120 drag frames (the primary's mark dragged a pixel a frame, each sample's batch served
-// and followed). Prints the mean and the slowest frame of each, milliseconds; everything undone.
+// place), the 24 nearest entities selected, each frame in the Shell's order (the view follows, takes the
+// pointer and draws the overlay; then the session serves what it raised and the viewport follows): 120
+// idle frames (the pointer still over nothing, nothing moving: the labels laid out and each title worded
+// at the first alone), then 120 drag frames (the primary's mark dragged a pixel a frame: no title worded
+// again, the layout made at most once a frame). Prints the mean and the slowest frame of each,
+// milliseconds; everything undone.
 static int measure_labels(Rig &rig, const std::string &path) {
 	rig.session.handle(request::open_document(path));
 	const DocumentBase *open = rig.session.document_for(path);
@@ -1320,22 +1316,19 @@ static int measure_labels(Rig &rig, const std::string &path) {
 		return in;
 	};
 	size_t labels = 0;
-	// One frame as the view draws it: the frame's start, the pointer, the requests served and followed,
-	// then the overlay, timed.
+	// One frame in the Shell's order: the view's frame start, the pointer and the overlay (timed); then
+	// the session serves what the canvas raised, and the viewport follows the document.
 	int frame_index = 0;
 	const auto frame_of = [&](const CanvasInput &in, double &total, double &slowest, int &slowest_at) {
-		{
-			const ViewportContext context = viewport_context(rig.session.view(), *viewport);
-			canvas.follow(*viewport, context, out);
-			canvas.input(context, in, out);
-		}
-		editor_test::serve(rig.session, out.requests);
-		out.requests.clear();
-		rig.pump();
 		const ViewportContext context = viewport_context(rig.session.view(), *viewport);
+		canvas.follow(*viewport, context, out);
+		canvas.input(context, in, out);
 		const auto started = std::chrono::steady_clock::now();
 		const OverlayList list = canvas.shapes(context, in);
 		const double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - started).count();
+		editor_test::serve(rig.session, out.requests);
+		out.requests.clear();
+		rig.pump();
 		total += ms;
 		if (ms > slowest) slowest_at = frame_index;
 		slowest = std::max(slowest, ms);
@@ -1346,13 +1339,23 @@ static int measure_labels(Rig &rig, const std::string &path) {
 	constexpr int kFrames = 120;
 	double idle = 0.0, idle_slowest = 0.0, drag = 0.0, drag_slowest = 0.0;
 	int idle_slowest_at = -1, drag_slowest_at = -1, ignored_at = -1;
-	for (int i = 0; i < kFrames; ++i) frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	// Idle: the labels laid out and every title worded by the first frame, never again.
+	frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	const size_t layouts = canvas.label_layout().made(), titles = canvas.titles().made(), drops = canvas.titles().dropped();
+	TEST_EXPECT(labels > 0 && layouts > 0 && titles >= labels);
+	for (int i = 1; i < kFrames; ++i) frame_of(input_at(2.0f, 2.0f), idle, idle_slowest, idle_slowest_at);
+	TEST_EXPECT(canvas.label_layout().made() == layouts && canvas.titles().made() == titles && canvas.titles().dropped() == drops);
 	const size_t idle_labels = labels;
 	const MissionMark &primary = marks[nearest.front()];
 	CanvasInput press = input_at(primary.x, primary.y);
 	press.pressed = press.down = true;
 	double ignored = 0.0, ignored_slowest = 0.0;
 	frame_of(press, ignored, ignored_slowest, ignored_at);
+	// The drag: every sample a revision of the gesture's, no title worded again, the layout made at most
+	// once a frame (the dragged marks move).
+	const uint64_t revision = rig.session.document_for(path)->revision();
+	const size_t drag_titles = canvas.titles().made(), drag_drops = canvas.titles().dropped(),
+	             drag_layouts = canvas.label_layout().made();
 	frame_index = 1;
 	for (int i = 1; i <= kFrames; ++i) {
 		CanvasInput moved = input_at(primary.x + float(i), primary.y);
@@ -1360,6 +1363,9 @@ static int measure_labels(Rig &rig, const std::string &path) {
 		moved.delta = CanvasPoint{ 1.0f, 0.0f };
 		frame_of(moved, drag, drag_slowest, drag_slowest_at);
 	}
+	TEST_EXPECT(rig.session.document_for(path)->revision() > revision);
+	TEST_EXPECT(canvas.titles().dropped() == drag_drops && canvas.titles().made() == drag_titles);
+	TEST_EXPECT(canvas.label_layout().made() <= drag_layouts + size_t(kFrames));
 	frame_of(input_at(primary.x + float(kFrames), primary.y), ignored, ignored_slowest, ignored_at);
 	std::printf("labels: %s with the labels on, %zu marks shown, %zu labels drawn idle and %zu dragging 24 selected: idle "
 	            "%.3f ms a frame (slowest %.3f, frame %d), drag %.3f ms a frame (slowest %.3f, drag frame %d), %d frames each\n",
@@ -1375,6 +1381,13 @@ static int measure_labels(Rig &rig, const std::string &path) {
 	return 0;
 }
 
+// The retail leg (S14 V11; OPENNOVA_JO_DIR, base and each expansion through the VFS): every shipped
+// mission written into one project (a mission's own file, as an import writes it; its terrain, its
+// environment and its models are the device's, and the fake devices read none), then each opened in
+// its viewport: ready, the scene's pools as many as the document's (each entity pool, the areas);
+// every mark shown on the first framing hit at its pixel answers the front-most record there; the
+// first item framed and moved by a drag of 64 pixels is one edit, and its undo gives the document's
+// bytes back. Prints the largest mission's counts.
 static int test_retail() {
 	const std::string root = retail::install();
 	if (root.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every shipped mission in its viewport)");

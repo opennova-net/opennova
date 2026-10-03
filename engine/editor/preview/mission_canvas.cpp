@@ -212,8 +212,10 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 	if (gesture_.nudging() && nudged_ != frame_.records) gesture_.end(out);
 	if (!gesture_.pressed()) grab_ = MissionGrab();
 	// A drag of a handle or a nudge writes positions, heights, headings and an area's bounds alone, which
-	// no title reads: the titles stand through its samples (each one a revision).
-	titles_.hold((gesture_.dragging() && grab_.what == MissionGrab::What::Handle) || gesture_.nudging());
+	// no title reads: the titles stand through its samples (each one a revision), and drop on any other
+	// edit meanwhile (one through the wire).
+	const bool writes_places = (gesture_.dragging() && grab_.what == MissionGrab::What::Handle) || gesture_.nudging();
+	titles_.hold(writes_places ? gesture_.token() : 0);
 }
 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {

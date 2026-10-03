@@ -580,15 +580,19 @@ void MissionDocument::refine_field(const NodeAddress &address, FieldUse &use) co
 	// STRNAME%03i in PeopleNames [orig: Entity_SpawnFromBMSRecord @0x40ecbf..0x40ed0a], and a win slot,
 	// the objectives panel's STRWINCOND%03i in WinConditions [orig: HUD_DrawWinConditions @0x5ba940];
 	// in the mission's own table, else medmssn.bin [orig: TextResource_LoadMissionTextBin @0x51ed90].
-	const auto keyed = [&](const char *section, const char *prefix) {
+	// The numbers the game looks a key up by: a nonzero name index (the spawn names no entity by 0), a
+	// win slot that is not empty (0 and 255 end the panel, mission_labels' mission_value_label).
+	const auto keyed = [&](const char *section, const char *prefix, int64_t first, int64_t last) {
 		use.picks = ReferenceKind::TextId;
 		use.scope = strutil::to_upper(mission_base_name(basename_of(path()))) + ".BIN/" + section;
 		use.scope_alternate = "MEDMSSN.BIN";
 		use.key_prefix = prefix;
+		use.key_first = first;
+		use.key_last = last;
 	};
-	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed("PeopleNames", "STRNAME");
+	if (!address.child && is_entity_kind(address.kind) && id == "name_index") keyed("PeopleNames", "STRNAME", 1, INT32_MAX);
 	if (!address.child && address.kind == k(K::Mission) && id.compare(0, 15, "win_conditions[") == 0)
-		keyed("WinConditions", "STRWINCOND");
+		keyed("WinConditions", "STRWINCOND", 1, 254);
 }
 
 bool MissionDocument::record_choices(const NodeAddress &address, const FieldUse &use,

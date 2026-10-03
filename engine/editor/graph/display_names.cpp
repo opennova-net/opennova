@@ -128,18 +128,23 @@ namespace {
 
 // The keys of a field whose number forms one (FieldUse::key_prefix), in its section of the table the
 // game reads (its own where the project has it, else the alternate: AssetGraph::lookup_scope), each
-// named by the number that forms it and only one the field can hold.
+// named by the number that forms it, only one the game looks a key up by (key_first..key_last) and
+// the field can hold, the key kept for its preview.
 std::vector<ReferenceChoice> text_key_choices(const AssetGraph &graph, const FieldUse &field) {
 	GraphEdge edge;
 	edge.kind = ReferenceKind::TextId;
 	edge.scope = field.scope;
 	if (field.scope_alternate) edge.scope_alternate = field.scope_alternate;
+	const std::string scope = graph.lookup_scope(edge);
 	std::vector<ReferenceChoice> out;
-	for (ReferenceChoice &choice : graph.choices(ReferenceKind::TextId, graph.lookup_scope(edge))) {
+	for (ReferenceChoice &choice : graph.choices(ReferenceKind::TextId, scope)) {
 		int64_t number = 0;
 		if (!text_key_number(choice.name, field.key_prefix, number)) continue;
+		if (number < field.key_first || number > field.key_last) continue;
 		if (field.schema && field.schema->ranged && (double(number) < field.schema->min || double(number) > field.schema->max))
 			continue;
+		choice.symbol = std::move(choice.name);
+		choice.symbol_scope = scope;
 		choice.name = std::to_string(number);
 		out.push_back(std::move(choice));
 	}
@@ -203,11 +208,15 @@ const std::string &DisplayNameCache::record(const Document &document, const Node
 	key.has_names = names != nullptr;
 	key.names = names ? names->generation() : 0;
 	if (!(key == key_)) {
-		// Held: only the revision moved, which a held gesture's edits leave every title as it was.
+		// Held: only the revision moved, by the held gesture's batches alone, which leave every title as it
+		// was.
 		const bool kept = held_ && key.document == key_.document && key.load == key_.load && key.names == key_.names &&
-		                  key.has_names == key_.has_names;
+		                  key.has_names == key_.has_names && document.gesture_alone_since(held_, key_.revision);
 		key_ = key;
-		if (!kept) titles_.clear();
+		if (!kept) {
+			titles_.clear();
+			++dropped_;
+		}
 	}
 	const auto found = titles_.find(address);
 	if (found != titles_.end()) return found->second;
