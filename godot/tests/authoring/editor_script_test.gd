@@ -11,7 +11,9 @@ extends GutTest
 ## marks stay with their lines as text goes in above them; a burst a quiet second ended is its own
 ## undo step, the next keystroke another; a character the game's code page has no byte for is
 ## refused with a notice on the status line; a device given up mid-burst still ends its gesture, so
-## the Problems go on; the control alone keeps no undo of its own for Ctrl+Z. The control's placement
+## the Problems go on; the control alone keeps no undo of its own for Ctrl+Z. Its device helps with the
+## script (S15): the completion list, a word's tooltip, a marked line's note, a Ctrl+click's Go to
+## definition. The control's placement
 ## over the reserved rect and the pointer and keys it owns there need the workspace drawn
 ## (tests/windowed/editor_script_device_test.gd).
 
@@ -315,6 +317,39 @@ func test_a_device_given_up_mid_burst_ends_its_gesture() -> void:
 	assert_null(_edit(SCRIPT), "the script's device given up")
 	await _frames(4)
 	assert_true(_seam.get_problems_json().contains("Unexpected )"), "the gesture ended: the Problems went on")
+
+
+## What a script may use, as the device answers it (ADR 0046 S15, session/script_assist): the list a
+## word's characters or Ctrl+Space ask for (the effects after FX_), what a word is (its tooltip over the
+## text), a marked line's note after its text (its worst finding's first sentence), and a Ctrl+click
+## going where the word is defined (the ammo's record in its def file).
+func test_the_device_helps_with_the_script() -> void:
+	var edit := await _open_script()
+	if edit == null:
+		return
+	# The list at "\tfxrain FX_|": the project's effects, by the name the script writes.
+	edit.set_caret_line(2)
+	edit.set_caret_column(11)
+	edit.request_code_completion(true)
+	var inserts: Array[String] = []
+	for option: Dictionary in edit.get_code_completion_options():
+		inserts.append(String(option.get("insert_text", "")))
+	assert_true(inserts.has("FX_Buildup"), str(inserts))
+	edit.cancel_code_completion()
+	# What a word is: a command, by its parameters; an ammo the def file defines.
+	assert_true(String(edit.call("get_word_tip", 2, 3)).contains("fxrain"), String(edit.call("get_word_tip", 2, 3)))
+	assert_ne(String(edit.call("get_word_tip", 4, 15)), "", "the ammo's words")
+	assert_eq(String(edit.call("get_word_tip", 0, 3)), "", "a comment is no word")
+	# The missing text key's line notes its finding's first sentence after its text.
+	var note := String(edit.call("get_mark_note", 6))
+	assert_ne(note, "", "the marked line's note")
+	assert_true(String(edit.call("get_mark_tip", 6)).begins_with(note), note)
+	assert_eq(String(edit.call("get_mark_note", 2)), "", "a line with no finding has no note")
+	# A Ctrl+click on AMMO_AT_CONTRACT opens the def file that defines it.
+	edit.emit_signal("symbol_lookup", "AMMO_AT_CONTRACT", 4, 15)
+	await _frames()
+	assert_eq(String(_seam.query("document", {"limit": 1}).get("path", "")), "defs/ammo.def",
+			"the click went where the word is defined")
 
 
 ## The control alone (no device clearing its history) keeps the history Godot gives it, and Ctrl+Z

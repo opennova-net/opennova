@@ -14,16 +14,6 @@ namespace opennova::editor {
 
 namespace {
 
-// The pool a TYPE puts a record in, as the game's editor places it.
-MissionKind pool_of_type(int type) {
-	switch (mission::authoring::entity_kind_for_item_type(type)) {
-	case mission::EntityKind::Building: return MissionKind::Building;
-	case mission::EntityKind::Marker: return MissionKind::Marker;
-	case mission::EntityKind::Organic: return MissionKind::Organic;
-	default: return MissionKind::Item;
-	}
-}
-
 // The model a record's `graphic` loads (its project file), "" for none.
 std::string model_of(const AssetGraph &graph, const GraphSymbol &item) {
 	for (const GraphEdge *edge : graph.references_of(item.file)) {
@@ -36,6 +26,15 @@ std::string model_of(const AssetGraph &graph, const GraphSymbol &item) {
 }
 
 } // namespace
+
+MissionKind mission_item_pool_of_type(int type) {
+	switch (mission::authoring::entity_kind_for_item_type(type)) {
+	case mission::EntityKind::Building: return MissionKind::Building;
+	case mission::EntityKind::Marker: return MissionKind::Marker;
+	case mission::EntityKind::Organic: return MissionKind::Organic;
+	default: return MissionKind::Item;
+	}
+}
 
 void mission_model_point(const float model[3], double out[3]) {
 	out[0] = -double(model[0]);
@@ -55,7 +54,7 @@ bool mission_item_facts(const SessionView &view, int64_t item, MissionItemFacts 
 	out.name = symbol->record;
 	if (const std::optional<int> type = strutil::parse_int(symbol->value)) {
 		out.type = *type;
-		out.pool = pool_of_type(*type);
+		out.pool = mission_item_pool_of_type(*type);
 	}
 	out.model = model_of(*graph, *symbol);
 	// The model's ground anchor, read from the project's file as the game reads it. NEEDS-RE (ADR 0046
