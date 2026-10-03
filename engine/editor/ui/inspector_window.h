@@ -70,7 +70,9 @@ public:
 
 private:
 	void draw_together(const Document &document, const std::vector<NodeAddress> &records);
-	void referenced_by(const Document &document, const NodeAddress &record);
+	// `others_only`: its own document's uses are listed by its type's part (S15), so the other files'
+	// alone.
+	void referenced_by(const Document &document, const NodeAddress &record, bool others_only = false);
 
 	Workspace &workspace_;
 	ReferencePicker picker_;
@@ -87,10 +89,11 @@ private:
 		const AssetGraph *graph = nullptr;
 		uint64_t generation = 0;
 		RevisionKey files;
+		bool others_only = false;
 		bool operator==(const UsersKey &other) const {
 			return document == other.document && load == other.load && revision == other.revision &&
 			       record == other.record && graph == other.graph && generation == other.generation &&
-			       files == other.files;
+			       files == other.files && others_only == other.others_only;
 		}
 	};
 	std::vector<Use> users_;

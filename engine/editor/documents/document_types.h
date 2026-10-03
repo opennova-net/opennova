@@ -5,6 +5,7 @@
 
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/documents/name_source.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
@@ -70,6 +71,22 @@ struct DocumentType {
 	// (extract_from_document), each edge with its record and locator where it has one; null for a
 	// type whose references are all its fields'.
 	void (*record_references)(const Document &document, Extracted &out) = nullptr;
+	// A record type's display names (ADR 0046 S15, Names; graph/display_names.h dispatches to them):
+	// what a record reads as with the project's names (`names` null: the document's own words), ""
+	// leaving it to Document::record_title; and a field's value worded where it names something the
+	// generic words do not reach (a mission's SSN, zone, event, group, path, stop, text key), false
+	// leaving it to them. Null for a type whose titles and values say it already.
+	std::string (*record_label)(const Document &document, const NodeAddress &address, const NameSource *names) = nullptr;
+	bool (*value_label)(const Document &document, const NodeAddress &address, const FieldUse &field, const Value &value,
+	                    const NameSource *names, DisplayName &out) = nullptr;
+	// A record's words for a column too narrow for its title, what tells it apart first (a mission's
+	// entity by its SSN, an event by its first trigger's subject and verb); "" (or null) where the
+	// title cut to the column says it.
+	std::string (*record_brief)(const Document &document, const NodeAddress &address, const NameSource *names) = nullptr;
+	// The values a field's picker offers that name no definition because the game resolves them itself (a
+	// mission's SSN 10000, the player), added before the graph's names; null for a type with none.
+	void (*game_choices)(const Document &document, const NodeAddress &address, const FieldUse &field,
+	                     std::vector<GameChoice> &out) = nullptr;
 };
 
 // The type its row names (null for DocumentTypeId::None); the type that opens a kind (null for a

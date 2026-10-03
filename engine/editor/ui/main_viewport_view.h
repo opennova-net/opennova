@@ -38,6 +38,11 @@ private:
 	std::unique_ptr<OutlineView> outline_;
 	std::unique_ptr<ViewportView> viewport_;
 	ViewportKind kind_;
+	// The outline column's width as last drawn, the room the tab had then, and whether the author
+	// dragged it (S15: until then it follows the tab).
+	float column_width_ = 0.0f;
+	float column_avail_ = -1.0f;
+	bool column_dragged_ = false;
 };
 
 } // namespace opennova::editor

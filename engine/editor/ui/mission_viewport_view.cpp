@@ -1,8 +1,11 @@
 #include <editor/ui/mission_viewport_view.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include <imgui.h>
@@ -10,14 +13,20 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/documents/mission_document.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
 #include <editor/preview/mission_canvas.h>
+#include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/script_assist.h>
 #include <editor/session/view/session_view.h>
 #include <editor/ui/editor_requests.h>
+#include <editor/ui/mission_palette_view.h>
 #include <editor/ui/reference_picker.h>
 #include <editor/ui/ui_kit.h>
 #include <editor/ui/viewport_canvas.h>
@@ -31,32 +40,88 @@ void set_options(Workspace &workspace, const MissionViewport &mission, const Mis
 			mission.path(), viewport_change(ViewportKind::Mission, "options", mission_options_to_json(options))));
 }
 
-// A command (frame, top, ground) over the selection, as an EditInViewport the session plans over its
-// own context (the viewport's device, the selection): a refusal is the request's outcome, which the
-// editor reports, never dropped here.
-void viewport_command(Workspace &workspace, const MissionViewport &mission, const char *name) {
+// A command (frame, top, ground, duplicate, select_same, paste) over the selection, as an
+// EditInViewport the session plans over its own context (the viewport's device, the selection): a
+// refusal is the request's outcome, which the editor reports (Output, the status line), never dropped
+// here.
+void viewport_command(Workspace &workspace, const MissionViewport &mission, const char *name,
+		std::vector<double> by = {}, const CanvasPoint *at = nullptr) {
 	ViewportCommand command;
 	command.name = name;
 	command.kind = ViewportKind::Mission;
+	command.by = std::move(by);
+	if (at) {
+		command.has_at = true;
+		command.at_x = at->x;
+		command.at_y = at->y;
+	}
 	workspace.request(request::edit_in_viewport(mission.path(), std::move(command)));
+}
+
+// A drop of an item where the picture's point is (the Place tool's, the palette's drag, Place here).
+void drop_item(Workspace &workspace, const MissionViewport &mission, int64_t item, CanvasPoint at, float snap) {
+	ViewportDrop drop;
+	drop.reference = "item";
+	drop.name = std::to_string(item);
+	drop.x = at.x;
+	drop.y = at.y;
+	drop.snap = snap;
+	drop.kind = ViewportKind::Mission;
+	workspace.request(request::edit_in_viewport(mission.path(), std::move(drop)));
+}
+
+// A tool's button on the toolbar's row, shown pressed while it is the tool.
+bool tool_button(ui_kit::WrapRow &row, const char *label, bool active, bool enabled, const std::string &tip) {
+	if (active) ImGui::PushStyleColor(ImGuiCol_Button, ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+	const bool pressed = ui_kit::tool(row, label, enabled, tip);
+	if (active) ImGui::PopStyleColor();
+	return pressed;
+}
+
+// The viewport's tool set (its options' tool, the Place tool's item, the Path tool's path): one
+// SetViewport, as the wire sets it.
+void set_tool(Workspace &workspace, const MissionViewport &mission, MissionTool tool, int64_t item = -1, int path = -1) {
+	MissionViewportOptions options = mission.options();
+	options.tool = tool;
+	if (item >= 0) options.item = item;
+	if (path >= 0) options.path = path;
+	if (options != mission.options()) set_options(workspace, mission, options);
+}
+
+// Whether the clipboard pastes at a point of the picture (S15, Paste here): copied entities or areas,
+// whose middle goes there. Another clipboard (events, a nested kind's records) pastes as the session's
+// rule puts it.
+bool pastes_here(const SessionView &view) {
+	double middle[2];
+	return !view.documents.clipboard.empty() && mission_clip_middle(view.documents.clipboard, middle);
 }
 
 } // namespace
 
-// What the view keeps of its own: the snaps, the item the Place tool places (0: off) and its name,
-// the Place popup's filter.
+// What the view keeps of its own: the snaps; the palette; where the right-click menu was opened. The
+// tool, its item and its path are the viewport's options (the wire sets them too).
 struct MissionViewportView::Tools {
 	int snap = 2; // kMissionSnaps: 1 m
 	int turn = 2; // kMissionTurns: 15 degrees
-	int64_t place = 0;
-	std::string place_name;
-	char filter[64] = {};
+	MissionPaletteView palette;
+	CanvasPoint menu_at;
+	NodeAddress menu_record;
+	// The last hint the canvas gave (what a click does now), and where the pointer was on the picture
+	// (Ctrl+V pastes there).
+	std::string hint;
+	CanvasPoint mouse;
+	bool mouse_on_picture = false;
 
 	void toolbar(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
 	void show_popup(MissionViewportOptions &options);
 	void time_popup(MissionViewportOptions &options, const MissionViewport &mission);
-	void place_popup(const SessionView &view);
+	void numbers(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context);
+	void path_list(Workspace &workspace, const MissionViewport &mission);
+	void canvas_menu(Workspace &workspace, const MissionViewport &mission, const ViewportContext &context,
+			const MissionCanvas &canvas);
+	void events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view);
 	void notes(const MissionViewport &mission);
+	float snap_metres() const { return kMissionSnaps[std::clamp(snap, 0, 4)]; }
 };
 
 MissionViewportView::MissionViewportView() : ViewportView(ViewportKind::Mission), tools_(std::make_unique<Tools>()) {}
@@ -65,67 +130,122 @@ MissionViewportView::~MissionViewportView() = default;
 
 void MissionViewportView::draw_ready(Workspace &workspace, const ViewportModel &viewport, ViewportContext &context) {
 	const auto &mission = static_cast<const MissionViewport &>(viewport);
-	tools_->toolbar(workspace, mission, context);
-	snap = kMissionSnaps[std::clamp(tools_->snap, 0, 4)];
-	context.snap = snap;
-	if (CanvasHalf *canvas_half = half()) {
-		auto *canvas = static_cast<MissionCanvas *>(canvas_half);
-		canvas->set_place(tools_->place);
-		canvas->set_turn(kMissionTurns[std::clamp(tools_->turn, 0, 4)]);
-	}
-	// The notes under the canvas: a line while the picture lacks a file.
-	const float notes = mission.missing().empty() ? 0.0f : ImGui::GetFrameHeightWithSpacing();
-	// A Files row let go over the picture: a drop of the file there (a model; the viewport finds its
-	// item and refuses another file, naming why).
+	Tools &tools = *tools_;
 	const SessionView &view = workspace.view();
-	const std::string path = mission.path();
-	canvas(workspace, viewport, context, std::max(48.0f, ImGui::GetContentRegionAvail().y - notes),
-			[&workspace, &view, path](const CanvasInput &in) {
-				if (!ImGui::BeginDragDropTarget()) return;
-				const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
-				const AssetEntry *entry = nullptr;
-				if (dragged && dragged->IsDataType(kFileDragPayload) && dragged->Data && view.project.scan) {
-					const std::string file(static_cast<const char *>(dragged->Data));
-					for (const AssetEntry &candidate : view.project.scan->entries)
-						if (candidate.relative_path == file) entry = &candidate;
-				}
-				// Only a model is taken: another file is never accepted.
-				if (entry && entry->kind == AssetKind::Model && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
-					ViewportDrop drop;
-					drop.file = entry->logical_name;
-					drop.x = in.mouse.x;
-					drop.y = in.mouse.y;
-					drop.kind = ViewportKind::Mission;
-					workspace.request(request::edit_in_viewport(path, std::move(drop)));
-				}
-				ImGui::EndDragDropTarget();
-			});
-	if (notes > 0.0f) tools_->notes(mission);
-}
-
-void MissionViewportView::Tools::place_popup(const SessionView &view) {
-	ui_kit::filter_box("##place_filter", filter, sizeof(filter), "Filter items");
-	const AssetGraph *graph = view.findings.graph.get();
-	if (!graph) return;
-	// The items the project's catalogs define where a lookup finds them, by name or id.
-	const std::string wanted = strutil::to_lower(filter);
-	if (ImGui::BeginChild("items", ImVec2(ImGui::GetFontSize() * 18.0f, ImGui::GetFontSize() * 14.0f))) {
-		for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::Item)) {
-			if (symbol->inert) continue;
-			const std::string label = symbol->record + " (" + symbol->display + ")";
-			if (!wanted.empty() && strutil::to_lower(label).find(wanted) == std::string::npos) continue;
-			const std::optional<int> id = strutil::parse_int(symbol->name);
-			if (!id) continue;
-			ImGui::PushID(*id);
-			if (ImGui::Selectable(ui_kit::fit(label, ImGui::GetContentRegionAvail().x).c_str(), place == *id)) {
-				place = *id;
-				place_name = symbol->record;
-				ImGui::CloseCurrentPopup();
-			}
-			ImGui::PopID();
+	// Esc under a tool goes back to Select once the canvas has read this frame (where it is not taken
+	// as "select nothing").
+	const MissionTool tool = mission.options().tool;
+	const bool focused = ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) && !ImGui::GetIO().WantTextInput;
+	auto *canvas = static_cast<MissionCanvas *>(half());
+	// An Esc while a press is down is the canvas's (it cancels the press, the tool kept).
+	const bool stop = tool != MissionTool::Select && focused && ImGui::IsKeyPressed(ImGuiKey_Escape, false) &&
+					  !(canvas && canvas->gesture().pressed());
+	tools.toolbar(workspace, mission, context);
+	snap = tools.snap_metres();
+	context.snap = snap;
+	tools.numbers(workspace, mission, context);
+	if (canvas) canvas->set_turn(kMissionTurns[std::clamp(tools.turn, 0, 4)]);
+	// The clipboard's keys while the view has the keyboard and no press is down: Copy, Cut, and Paste at
+	// the pointer over the picture (else as the session's rule puts it).
+	const bool pressed = canvas && canvas->gesture().pressed();
+	if (focused && !pressed && mission.view_status() == MissionViewStatus::Ready) {
+		const std::string &path = mission.path();
+		if (ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_C)) {
+			EditorRequest copy = request::of(EditorRequestKind::Copy);
+			copy.path = path;
+			workspace.request(std::move(copy));
+		} else if (context.editable() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_X)) {
+			EditorRequest cut = request::of(EditorRequestKind::Cut);
+			cut.path = path;
+			workspace.request(std::move(cut));
+		} else if (context.editable() && ImGui::Shortcut(ImGuiMod_Ctrl | ImGuiKey_V)) {
+			// Over the picture, copied entities and areas with their middle where the pointer is; anything
+			// else, or off the picture, as the session's rule puts it.
+			if (tools.mouse_on_picture && pastes_here(view)) viewport_command(workspace, mission, "paste", {}, &tools.mouse);
+			else workspace.request(request::paste(path));
 		}
 	}
-	ImGui::EndChild();
+	// Under the canvas: the hint (what a click does now), then a line while the picture lacks a file.
+	const float line = ImGui::GetFrameHeightWithSpacing();
+	const float under = line + (mission.missing().empty() ? 0.0f : line);
+	const float height = std::max(48.0f, ImGui::GetContentRegionAvail().y - under);
+	// Beside the picture while a tool picks from a list: the palette (Place) or the paths (Path).
+	const bool side = tool == MissionTool::Place || tool == MissionTool::Path;
+	const float avail = ImGui::GetContentRegionAvail().x;
+	const float panel = side ? std::min(ImGui::GetFontSize() * 17.0f, avail * 0.45f) : 0.0f;
+	if (side) ImGui::BeginChild("##picture", ImVec2(avail - panel - ImGui::GetStyle().ItemSpacing.x, height));
+	const std::string path = mission.path();
+	ViewportView::canvas(workspace, viewport, context, side ? ImGui::GetContentRegionAvail().y : height,
+			[&](const CanvasInput &in) {
+				tools.mouse = in.mouse;
+				tools.mouse_on_picture = in.hovered;
+				if (canvas) tools.hint = canvas->hint(context, in);
+				// Let go over the picture: a palette's item placed there, or a Files row's model (whose item
+				// the viewport finds, refusing another file and naming why).
+				if (ImGui::BeginDragDropTarget()) {
+					const ImGuiPayload *dragged = ImGui::GetDragDropPayload();
+					if (dragged && dragged->IsDataType(kItemDragPayload) && dragged->Data &&
+							ImGui::AcceptDragDropPayload(kItemDragPayload)) {
+						const std::optional<int> item = strutil::parse_int(static_cast<const char *>(dragged->Data));
+						if (item) drop_item(workspace, mission, *item, in.mouse, tools.snap_metres());
+					} else {
+						const AssetEntry *entry = nullptr;
+						if (dragged && dragged->IsDataType(kFileDragPayload) && dragged->Data && view.project.scan) {
+							const std::string file(static_cast<const char *>(dragged->Data));
+							for (const AssetEntry &candidate : view.project.scan->entries)
+								if (candidate.relative_path == file) entry = &candidate;
+						}
+						// Only a model is taken: another file is never accepted.
+						if (entry && entry->kind == AssetKind::Model && ImGui::AcceptDragDropPayload(kFileDragPayload)) {
+							ViewportDrop drop;
+							drop.file = entry->logical_name;
+							drop.x = in.mouse.x;
+							drop.y = in.mouse.y;
+							drop.snap = tools.snap_metres();
+							drop.kind = ViewportKind::Mission;
+							workspace.request(request::edit_in_viewport(path, std::move(drop)));
+						}
+					}
+					ImGui::EndDragDropTarget();
+				}
+				// The right button: the mark under it selected unless it already is, and the menu of
+				// what applies there.
+				if (canvas_ui().right_clicked() && canvas && !canvas->gesture().pressed()) {
+					tools.menu_at = in.mouse;
+					tools.menu_record = NodeAddress();
+					const int mark = mission_canvas_under(canvas->frame(), in);
+					if (mark >= 0) {
+						tools.menu_record = canvas->frame().marks[size_t(mark)].record;
+						if (!view.documents.selection.holds(tools.menu_record))
+							workspace.request(request::select_record(path, tools.menu_record));
+					}
+					ImGui::OpenPopup("mission_canvas_menu");
+				}
+				if (ImGui::BeginPopup("mission_canvas_menu")) {
+					if (canvas) tools.canvas_menu(workspace, mission, context, *canvas);
+					ImGui::EndPopup();
+				}
+			});
+	if (side) {
+		ImGui::EndChild();
+		ImGui::SameLine();
+		if (ImGui::BeginChild("##tool_list", ImVec2(panel, height))) {
+			if (tool == MissionTool::Place) {
+				const AssetGraph *graph = view.findings.graph.get();
+				const int64_t picked = tools.palette.draw(graph, graph ? graph->generation() : 0, view.project.recent_items,
+						mission.options().item);
+				if (picked != 0) set_tool(workspace, mission, MissionTool::Place, picked);
+			} else {
+				tools.path_list(workspace, mission);
+			}
+		}
+		ImGui::EndChild();
+	}
+	ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+	ui_kit::clipped_text(tools.hint);
+	ImGui::PopStyleColor();
+	if (!mission.missing().empty()) tools.notes(mission);
+	if (stop) set_tool(workspace, mission, MissionTool::Select);
 }
 
 void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionViewport &mission,
@@ -137,6 +257,28 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	// leaves beside its label, then with no label (its tooltip names it), never wider than the line.
 	const float line = ImGui::GetContentRegionAvail().x;
 	ui_kit::WrapRow row;
+	const bool edits = context.editable();
+	const std::string held = context.not_editable();
+	// The tools: what a click on the picture does (a tool pressed again goes back to Select).
+	const MissionTool tool = options.tool;
+	const auto pick = [&](MissionTool chosen) { options.tool = tool == chosen ? MissionTool::Select : chosen; };
+	if (tool_button(row, "Select", tool == MissionTool::Select, true,
+				"Click a mark to select it (Shift adds, Ctrl toggles), drag it to move it (Alt-drag copies it), "
+				"drag on nothing for a box. Esc."))
+		options.tool = MissionTool::Select;
+	if (tool_button(row, "Place", tool == MissionTool::Place, edits,
+				edits ? "Pick an item in the palette, then click the ground to place one, facing the way the camera "
+						"looks; or drag it from the palette onto the picture. Esc stops."
+					  : held))
+		pick(MissionTool::Place);
+	if (tool_button(row, "Path stops", tool == MissionTool::Path, edits,
+				edits ? "Pick a waypoint path, then click the ground to add its next stop (a marker the path visits). "
+						"Esc stops."
+					  : held))
+		pick(MissionTool::Path);
+	if (tool_button(row, "Area", tool == MissionTool::Area, edits,
+				edits ? "Drag a box on the ground to make an area trigger over it. Esc stops." : held))
+		pick(MissionTool::Area);
 	const auto combo = [&](const char *label, int &index, const char *const *names, int count, const char *tip) {
 		const float least = unit * 3.0f;
 		const bool labelled = ui_kit::field_width(least, label) <= line;
@@ -149,14 +291,17 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 	};
 	static const char *const kSnapNames[] = { "Free", "1/4 m", "1 m", "5 m", "10 m" };
 	combo("Snap", snap, kSnapNames, IM_ARRAYSIZE(kSnapNames),
-			"A moved or lifted record snaps to this on each of the file's axes, and the arrows nudge it by this. "
-			"Hold Alt to move freely.");
+			"What a move, a placed record and an area's edge snap to on the file's axes, and how far the arrows "
+			"nudge (Shift: a tenth of it) and Ctrl+D's copy goes. Hold Ctrl while dragging to move freely.");
 	static const char *const kTurnNames[] = { "1 deg", "5 deg", "15 deg", "45 deg", "90 deg" };
-	combo("Turn", turn, kTurnNames, IM_ARRAYSIZE(kTurnNames), "A turned entity's heading snaps to this. Hold Alt to turn freely.");
+	combo("Turn", turn, kTurnNames, IM_ARRAYSIZE(kTurnNames),
+			"What a turned entity's heading snaps to. Hold Ctrl while turning to turn freely.");
 	row.next(ui_kit::checkbox_width("Stick"));
 	ImGui::Checkbox("Stick", &options.stick);
 	ui_kit::tooltip("A move keeps each entity's height over the ground; off, its height stands.");
-	if (ui_kit::tool(row, "Show", true, "What the picture draws, and what the viewport marks over it.")) ImGui::OpenPopup("show");
+	if (ui_kit::tool(row, "Show", true, "What the picture draws (terrain, sky, water, models), what the viewport marks "
+										"over it, the labels and how far a mark is drawn."))
+		ImGui::OpenPopup("show");
 	if (ImGui::BeginPopup("show")) {
 		show_popup(options);
 		ImGui::EndPopup();
@@ -167,32 +312,16 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 		time_popup(options, mission);
 		ImGui::EndPopup();
 	}
-	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, a double click)."))
+	if (ui_kit::tool(row, "Frame", true, "Look at the selected records, or at every entity (F, or a double click on "
+										 "the picture)."))
 		viewport_command(workspace, mission, "frame");
 	if (ui_kit::tool(row, "Top", true, "Look straight down over the camera's target, north up."))
 		viewport_command(workspace, mission, "top");
-	// The Place tool: an item picked, then each click on the picture places one of it there.
-	const bool edits = context.editable();
-	if (place == 0) {
-		if (ui_kit::tool(row, "Place", edits,
-					edits ? "Pick an item, then click the picture to place one of it there (Esc stops)."
-						  : context.not_editable()))
-			ImGui::OpenPopup("place");
-	} else if (ui_kit::tool(row, "Stop placing", true, "Placing " + place_name + " (" + std::to_string(place) +
-					") at each click on the picture. Click to stop (or Esc).")) {
-		place = 0;
-	}
-	if (ImGui::BeginPopup("place")) {
-		place_popup(workspace.view());
-		ImGui::EndPopup();
-	}
-	if (place != 0 && (!edits || (ImGui::IsWindowFocused(ImGuiFocusedFlags_RootAndChildWindows) &&
-								  ImGui::IsKeyPressed(ImGuiKey_Escape, false))))
-		place = 0;
 	// What the ground under the selected entities is: each set down on it.
 	if (ui_kit::tool(row, "Ground", edits && mission.ground(),
-				!edits ? context.not_editable()
-				: mission.ground() ? std::string("Set each selected entity down on the ground under it.")
+				!edits ? held
+				: mission.ground() ? std::string("Set each selected entity down on the ground under it (the picture's "
+												 "right-click menu: Drop to ground).")
 								   : std::string("The picture has no ground yet (its terrain is not built).")))
 		viewport_command(workspace, mission, "ground");
 	// Play mission: the build, then the game started in this mission (the session's own rule for
@@ -205,7 +334,225 @@ void MissionViewportView::Tools::toolbar(Workspace &workspace, const MissionView
 				played.empty() ? std::string("Make the mission the active document to start the game in it.")
 							   : "Build, then start the game in " + played + " (Ctrl+F5)."))
 		workspace.request(request::play(played));
+	// The mission's script (S15): the <stem>.wac the game compiles with it [orig: WacScript_InitAndLoad @
+	// 0x4F91F0], opened, or made beside the mission where the project has none.
+	const MissionScript script = mission_script(view, mission.path());
+	if (!script.name.empty()) {
+		const bool held = !script.path.empty();
+		if (ui_kit::tool(row, "Script", view.project.open,
+					held ? "Open " + script.path + ", the script the game runs with this mission."
+						 : "The mission has no script (" + script.name + "): make one beside it.")) {
+			if (held) workspace.request(request::open_document(script.path));
+			else ImGui::OpenPopup("make_script");
+		}
+		if (ImGui::BeginPopup("make_script")) {
+			ImGui::TextUnformatted(("Make " + script.create_at + "?").c_str());
+			ImGui::TextDisabled("The game compiles it with the mission; an empty script does nothing.");
+			if (ImGui::Button("Make it")) {
+				workspace.request(request::create_file(script.create_at));
+				ImGui::CloseCurrentPopup();
+			}
+			ImGui::SameLine();
+			if (ImGui::Button("Cancel")) ImGui::CloseCurrentPopup();
+			ImGui::EndPopup();
+		}
+	}
 	if (options != mission.options()) set_options(workspace, mission, options);
+}
+
+// The selected entity's place and heading in plain units, typed exactly: each field a batch of the
+// selection (several move as far, turn about their centre), one undo step.
+void MissionViewportView::Tools::numbers(Workspace &workspace, const MissionViewport &mission,
+		const ViewportContext &context) {
+	const SessionView &view = workspace.view();
+	const Document *document = context.input.document ? records_of(*context.input.document) : nullptr;
+	if (!document || view.documents.active != mission.path() || !mission.current(context.input)) return;
+	const Selection &selection = view.documents.selection;
+	const MissionEntityMark *primary = mission.scene().entity(selection.primary.row);
+	if (!primary) return;
+	// The selection as a press finds it, the primary first.
+	std::vector<MissionPressed> pressed;
+	MissionPressed held;
+	if (mission.pressed(selection.primary, held)) pressed.push_back(held);
+	for (const NodeAddress &record : selection.records) {
+		MissionPressed each;
+		if (record != selection.primary && mission.pressed(record, each)) pressed.push_back(each);
+	}
+	const bool edits = context.editable();
+	const float unit = ImGui::GetFontSize();
+	ui_kit::WrapRow row;
+	std::vector<Edit> batch;
+	// Wide enough for the widest a mission's span reads (a map is some kilometres across) with its unit.
+	const float width = std::max(unit * 4.5f, ImGui::CalcTextSize("-00000.00 m").x + ImGui::GetStyle().FramePadding.x * 2.0f);
+	const auto number = [&](const char *label, const char *id, double value, const char *format, const char *tip) {
+		row.next(ui_kit::field_width(width, label));
+		ImGui::SetNextItemWidth(width);
+		ImGui::BeginDisabled(!edits);
+		ImGui::InputDouble((std::string(label) + "###" + id).c_str(), &value, 0.0, 0.0, format);
+		ImGui::EndDisabled();
+		ui_kit::tooltip(edits ? std::string(tip) : context.not_editable());
+		return ImGui::IsItemDeactivatedAfterEdit() ? std::optional<double>(value) : std::nullopt;
+	};
+	// The file's x, y and z are mission units, which the game reads as metres (a trigger's whole-metre
+	// distance shifts into the same 16.16 world units [orig: Entity_CompareDistancesToTarget @0x4F12E0;
+	// world/world-wac-ai-re.md]); its yaw whole degrees clockwise from north, the engine's heading 90
+	// minus it [orig: Entity_SpawnFromBMSRecord @0x40EB42..0x40EB66].
+	const char *metres = "Metres: the game reads a mission unit as a metre. Enter moves the selection there "
+						 "(several selected move as far).";
+	if (const auto x = number("East", "east", primary->x, "%.2f m", metres)) {
+		const double to[2] = { *x, primary->y };
+		mission_move_edits(*document, pressed, 0, to, 0.0f, mission.options().stick, context.device, 0, batch);
+	}
+	if (const auto y = number("North", "north", primary->y, "%.2f m", metres)) {
+		const double to[2] = { primary->x, *y };
+		mission_move_edits(*document, pressed, 0, to, 0.0f, mission.options().stick, context.device, 0, batch);
+	}
+	if (const auto z = number("Height", "height", primary->z, "%.2f m",
+				"Metres above the mission's zero (the file's z is absolute, not over the ground)."))
+		mission_height_edits(*document, pressed, 0, *z - primary->z, 0.0f, 0, batch);
+	if (const auto heading = number("Heading", "heading", double(primary->yaw), "%.0f deg",
+				"Degrees clockwise from north: 0 north, 90 east (the file's yaw). Several selected turn about "
+				"their centre."))
+		mission_yaw_edits(*document, pressed, 0, *heading - double(primary->yaw), 0.0f, 0, batch, mission.options().stick,
+				context.device);
+	if (!batch.empty()) workspace.request(request::edit_record(document->path(), std::move(batch)));
+	if (pressed.size() > 1) {
+		const std::string many = std::to_string(selection.records.size()) + " selected";
+		row.next(ui_kit::text_width(many.c_str()));
+		ImGui::TextDisabled("%s", many.c_str());
+	}
+}
+
+// The Path tool's list: the mission's waypoint paths by number with their stops, the picked one shown.
+void MissionViewportView::Tools::path_list(Workspace &workspace, const MissionViewport &mission) {
+	const int path = mission.options().path;
+	const auto choose = [&](int number) { set_tool(workspace, mission, MissionTool::Path, -1, number); };
+	ImGui::TextDisabled("Waypoint paths");
+	ui_kit::tooltip("Pick the path a click on the picture adds its next stop to. A stop is a marker the path "
+					"visits in turn.");
+	if (!ImGui::BeginChild("paths", ImVec2(0.0f, 0.0f))) {
+		ImGui::EndChild();
+		return;
+	}
+	// The used paths first (by number), then every free number to start a new one.
+	std::vector<std::pair<int, size_t>> used;
+	for (const MissionPathMark &each : mission.scene().paths()) used.emplace_back(each.index, each.stops.size());
+	for (const auto &[number, stops] : used) {
+		const std::string label = "Path " + std::to_string(number) + " (" + std::to_string(stops) +
+				(stops == 1 ? " stop)" : " stops)");
+		if (ImGui::Selectable(label.c_str(), path == number)) choose(number);
+	}
+	if (!used.empty()) ImGui::Separator();
+	ImGui::TextDisabled("New path");
+	for (int number = 1; number < 123; ++number) {
+		if (std::any_of(used.begin(), used.end(), [&](const auto &each) { return each.first == number; })) continue;
+		const std::string label = "Path " + std::to_string(number) + " (empty)";
+		if (ImGui::Selectable(label.c_str(), path == number)) choose(number);
+	}
+	ImGui::EndChild();
+}
+
+// The picture's right-click menu: what applies where it was opened.
+void MissionViewportView::Tools::canvas_menu(Workspace &workspace, const MissionViewport &mission,
+		const ViewportContext &context, const MissionCanvas &canvas) {
+	const SessionView &view = workspace.view();
+	const bool edits = context.editable();
+	const bool selected = view.documents.active == mission.path() && !view.documents.selection.empty();
+	// Place here: the picked item, else the one placed last.
+	const int64_t picked = mission.options().item;
+	const int64_t item = picked != 0 ? picked : view.project.recent_items.empty() ? 0 : view.project.recent_items.front();
+	std::string item_name = item == picked && !canvas.place_name().empty() ? canvas.place_name() : palette.name_of(item);
+	if (item_name.empty() && item != 0) item_name = "item " + std::to_string(item);
+	if (ImGui::MenuItem(item != 0 ? ("Place " + item_name + " here").c_str() : "Place here", nullptr, false, edits && item != 0))
+		drop_item(workspace, mission, item, menu_at, snap_metres());
+	if (item == 0) ui_kit::tooltip("Pick an item with Place first.");
+	const bool clip = pastes_here(view);
+	if (ImGui::MenuItem("Paste here", "Ctrl+V", false, edits && clip)) viewport_command(workspace, mission, "paste", {}, &menu_at);
+	if (!clip)
+		ui_kit::tooltip(view.documents.clipboard.empty()
+								? "Copy entities or areas first (Ctrl+C)."
+								: "The clipboard holds no entities or areas (events and nested records paste in the outline).");
+	ImGui::Separator();
+	if (ImGui::MenuItem("Frame", "F", false, true)) viewport_command(workspace, mission, "frame");
+	if (ImGui::MenuItem("Drop to ground", nullptr, false, edits && selected && mission.ground()))
+		viewport_command(workspace, mission, "ground");
+	if (ImGui::MenuItem("Duplicate", "Ctrl+D", false, edits && selected)) {
+		// A step to the camera's right, as Ctrl+D goes.
+		double east = 0.0, north = 0.0;
+		canvas.step_right(east, north);
+		const double step = snap_metres() > 0.0f ? double(snap_metres()) : 1.0;
+		viewport_command(workspace, mission, "duplicate", { east * step, north * step });
+	}
+	if (ImGui::MenuItem("Delete", "Delete", false, edits && selected)) {
+		std::vector<Edit> removes;
+		for (const NodeAddress &record : view.documents.selection.records) {
+			Edit edit;
+			edit.operation = EditOperation::Remove;
+			edit.address = record;
+			removes.push_back(std::move(edit));
+		}
+		workspace.request(request::edit_record(mission.path(), std::move(removes)));
+	}
+	ImGui::Separator();
+	const bool entity = menu_record.row && mission.scene().entity(menu_record.row);
+	if (ImGui::MenuItem("Select same item", nullptr, false, entity || selected))
+		viewport_command(workspace, mission, "select_same");
+	ui_kit::tooltip("Select every entity of the mission placed from the same item.");
+	if (ImGui::MenuItem("Go to in outline", nullptr, false, menu_record.row != 0)) {
+		EditorRequest go = request::open_document(mission.path(), std::string(), entity ? "item" : "id");
+		go.address = menu_record;
+		workspace.request(std::move(go));
+	}
+	if (ImGui::BeginMenu("Show events using this", menu_record.row != 0)) {
+		events_using(workspace, mission, view);
+		ImGui::EndMenu();
+	}
+}
+
+// The events (and any other record of the mission) that name the record the menu was opened on:
+// an entity by its SSN, an area by its zone id; each opens at its field.
+void MissionViewportView::Tools::events_using(Workspace &workspace, const MissionViewport &mission, const SessionView &view) {
+	const AssetGraph *graph = view.findings.graph.get();
+	const DocumentBase *base = nullptr;
+	for (const auto &open : view.documents.open)
+		if (open && open->path() == mission.path()) base = open.get();
+	const Document *document = base ? records_of(*base) : nullptr;
+	if (!graph || !document) {
+		ImGui::TextDisabled("Not known yet (the project is still being read).");
+		return;
+	}
+	ReferenceKind kind = ReferenceKind::MissionEntity;
+	std::string name;
+	if (const MissionEntityMark *entity = mission.scene().entity(menu_record.row)) {
+		Value ssn;
+		if (document->get(menu_record, "id", ssn) && std::holds_alternative<int64_t>(ssn))
+			name = std::to_string(std::get<int64_t>(ssn));
+		(void)entity;
+	} else if (const MissionAreaMark *area = mission.scene().area(menu_record.row)) {
+		kind = ReferenceKind::MissionZone;
+		name = std::to_string(area->zone);
+	}
+	const std::vector<const GraphEdge *> users =
+			name.empty() ? std::vector<const GraphEdge *>() : graph->referrers_of(kind, name, mission_scope(*document));
+	if (users.empty()) {
+		ImGui::TextDisabled("No event names it.");
+		return;
+	}
+	const GraphNameSource names(*graph);
+	for (size_t i = 0; i < users.size(); ++i) {
+		const GraphEdge &edge = *users[i];
+		std::string label = edge.record.empty() ? edge.source : edge.record;
+		if (edge.source == mission.path() && edge.address.row) {
+			// The event (its sentence) and the trigger or action, by the display names.
+			const NodeAddress row{ edge.address.row, edge.address.kind, 0 };
+			label = record_display(*document, row, &names);
+			if (edge.address.child) label += ": " + record_display(*document, edge.address, &names);
+		}
+		ImGui::PushID(int(i));
+		if (ImGui::MenuItem(ui_kit::fit(label, ImGui::GetFontSize() * 24.0f).c_str()))
+			workspace.request(request::open_document(edge.source, edge.locator, edge.field));
+		ImGui::PopID();
+	}
 }
 
 void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
@@ -224,7 +571,8 @@ void MissionViewportView::Tools::show_popup(MissionViewportOptions &options) {
 	ImGui::Checkbox("Areas", &options.areas);
 	ImGui::Checkbox("Paths", &options.paths);
 	ImGui::Checkbox("Labels", &options.labels);
-	ui_kit::tooltip("A label beside every mark, not only the hovered and the selected ones.");
+	ui_kit::tooltip("A label beside the nearer marks too, not only the hovered and the selected ones (those that "
+					"would overlap another are left out).");
 	ImGui::SetNextItemWidth(ImGui::GetFontSize() * 8.0f);
 	float range = options.mark_range;
 	if (ImGui::SliderFloat("Mark range", &range, 0.0f, 2000.0f, range <= 0.0f ? "no limit" : "%.0f m",
