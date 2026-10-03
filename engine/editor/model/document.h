@@ -156,6 +156,10 @@ public:
 		// kind it holds.
 		const NodeKind *kinds = nullptr;
 		size_t kind_count = 0;
+		// The number the Inspector gives its first record, the rest counting on: 1, or 0 where the
+		// records are the game's array as it indexes it and the editor names them so (a clip's
+		// frame events titled by their frame from 0, as the timeline counts; its bones by index).
+		size_t first_number = 1;
 		bool holds(NodeKind of) const {
 			if (!kinds) return of == kind;
 			for (size_t i = 0; i < kind_count; ++i)

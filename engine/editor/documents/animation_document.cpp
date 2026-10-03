@@ -160,8 +160,11 @@ const std::vector<RecordKindRow> &AnimationDocument::kinds() const {
 
 std::vector<Document::Collection> AnimationDocument::collections(const Node &row, const NodeAddress &owner) const {
 	if (row.kind != kClip || owner.child != 0) return {};
+	// Numbered from 0, as the game indexes them: a frame event is its frame (its title's, the
+	// timeline's), a bone its channel (the model's part it pairs with).
 	CollectionSpec bones{kBone, "Bones", "name", true};
 	CollectionSpec events{kEvent, "Frame events", "", true};
+	bones.first_number = events.first_number = 0;
 	return {{bones, row.collections[0]}, {events, row.collections[1]}};
 }
 
