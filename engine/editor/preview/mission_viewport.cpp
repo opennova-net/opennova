@@ -142,7 +142,7 @@ std::unique_ptr<CanvasHalf> MissionViewport::make_canvas() const {
 
 std::vector<MissionMark> MissionViewport::marks(int width, int height, const ViewportDevice *device) const {
 	if (reason_ != MissionViewStatus::Ready) return {};
-	return mission_marks(scene_, options_, camera_, width, height, device, &bounds_.radii());
+	return mission_marks(scene_, options_, camera_, width, height, device, &items_.radii());
 }
 
 bool MissionViewport::pressed(const NodeAddress &record, MissionPressed &out) const {
@@ -272,15 +272,19 @@ OrbitCamera MissionViewport::framed(const std::vector<MissionMark> &marks, const
 }
 
 void MissionViewport::bound_items_(const SessionView &view) {
-	// Asked again only when the scene or the graph moved: a pump with neither walks nothing.
+	// Asked again only when the scene, the graph or a file's stamp may have moved (the asset source's
+	// generation: a SCALE edited in an open catalog, a model written again): a pump with none walks
+	// nothing.
 	const uint64_t graph = view.findings.graph ? view.findings.graph->generation() : 0;
-	if (bounds_serial_ == scene_.serial() && bounds_graph_ == graph) return;
+	const uint64_t files = view.findings.assets ? view.findings.assets->generation() : 0;
+	if (bounds_serial_ == scene_.serial() && bounds_graph_ == graph && bounds_files_ == files) return;
 	bounds_serial_ = scene_.serial();
 	bounds_graph_ = graph;
+	bounds_files_ = files;
 	std::vector<int64_t> items;
 	items.reserve(scene_.entities().size());
 	for (const MissionEntityMark &entity : scene_.entities()) items.push_back(entity.item);
-	bounds_.refresh(view, items);
+	items_.refresh(view, items);
 }
 
 ViewportAction MissionViewport::stop_(MissionViewStatus reason) {
@@ -421,7 +425,7 @@ ViewportHit MissionViewport::hit(const ViewportContext &context, float x, float 
 	const Document *document = document_of(context.input);
 	if (reason_ != MissionViewStatus::Ready || !document) return out;
 	const std::vector<MissionMark> shown = marks(context.width, context.height, context.device);
-	out.index = pick_mission_mark(shown, camera_, context.width, context.height, x, y);
+	out.index = pick_mission_mark(shown, camera_, context.width, context.height, x, y, context.device, MissionPick::Click);
 	if (out.index < 0) return out;
 	const MissionMark &mark = shown[size_t(out.index)];
 	out.id = out.current ? mark.record.row : 0;
@@ -656,7 +660,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			for (size_t i = 0; item == 0 && i < view.project.recent_items.size(); ++i) {
 				MissionItemFacts recent;
 				std::string ignored;
-				if (mission_item_facts(view, view.project.recent_items[i], recent, ignored) && recent.pool == MissionKind::Marker)
+				if (items_.facts(view, view.project.recent_items[i], recent, ignored) && recent.pool == MissionKind::Marker)
 					item = recent.item;
 			}
 			if (item == 0) {
@@ -688,7 +692,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 			for (size_t i = 0; i < items.size(); ++i) {
 				MissionItemFacts facts;
 				std::string ignored;
-				mission_item_facts(view, items[i], facts, ignored);
+				items_.facts(view, items[i], facts, ignored);
 				error += std::string(i ? ", " : " ") + (facts.name.empty() ? std::string() : facts.name + " ") + "(" +
 						std::to_string(items[i]) + ")";
 			}
@@ -698,7 +702,7 @@ bool MissionViewport::drop(const ViewportContext &context, const ViewportDrop &d
 		item = items.front();
 	}
 	MissionItemFacts facts;
-	if (!mission_item_facts(view, item, facts, error)) return false;
+	if (!items_.facts(view, item, facts, error)) return false;
 	// Where the point meets the ground (the device's terrain, else the plane through the camera's
 	// target); on the terrain, the model's ground anchor baked in (the stored position is the ground
 	// point less the anchor: docs/world/world-wac-ai-re.md section 12).
@@ -914,7 +918,7 @@ bool MissionViewport::command(const ViewportContext &context, const std::string 
 			if (anchor == anchors.end()) {
 				MissionItemFacts facts;
 				std::string ignored;
-				mission_item_facts(context.input.view, entity->item, facts, ignored);
+				items_.facts(context.input.view, entity->item, facts, ignored);
 				anchor = anchors.emplace(entity->item, facts.anchor[2]).first;
 			}
 			const double z = ground - anchor->second;

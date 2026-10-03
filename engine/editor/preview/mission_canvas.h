@@ -67,7 +67,8 @@ struct MissionGrab {
 	};
 	What what = What::None;
 	MissionHandle handle = MissionHandle::Move;
-	int pick = -1; // the mark under the press (-1 none)
+	int pick = -1; // the mark the press took (MissionPick::Press; -1 none)
+	int click = -1; // the mark a click there takes (MissionPick::Click; -1 none): what a release with no travel selects
 	CanvasJoin join = CanvasJoin::Replace;
 	// The records the drag takes, as pressed, and the grabbed one's place among them; whether the
 	// grabbed one was not selected (selected alone as the drag begins).
@@ -84,8 +85,10 @@ struct MissionGrab {
 	double ground[3] = { 0.0, 0.0, 0.0 }; // where the press met the ground (a move's, an edge's)
 	bool grounded = false;
 };
-// The front-most mark within the pick slop of the pointer (-1: none, or not hovered).
-int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in);
+// The mark under the pointer for `by` (pick_mission_mark over the frame's marks and device: a glyph within
+// the pick slop, else what the device's ray meets; with no device to say, nothing for a press and the
+// sphere for a click); -1: none, or not hovered.
+int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionPick by);
 // The primary's handle within the pick slop of the pointer (its height, its yaw, an area's edges),
 // while the mission takes edits: false for none.
 bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out);

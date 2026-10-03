@@ -35,6 +35,7 @@
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 #include <formats/mission/mission.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <editor/preview/preview_clock.h>
@@ -446,11 +447,13 @@ static int test_hit_and_box() {
 	return 0;
 }
 
-// The polish: an entity is picked by its item's bound sphere about its position (the model's GHDR
-// radius by the item's SCALE, padded, none without a collision block: mission_item_bound_radius, the
-// game's entity+0), read once per item while the graph stands; a pump clicked well above its anchor,
-// past the slop, is picked through the viewport's hit, and the facts a drop reads carry the bound (the
-// scaled pump's by its SCALE).
+// The polish: an entity's bound sphere about its position (the model's GHDR radius by the item's SCALE,
+// padded, none without a collision block: mission_item_bound_radius, the game's entity+0), read once per
+// item while the graph and its files stand and again when a file it read moves (a SCALE edited in the
+// open catalog, the model written again: the review's M1), each file parsed once by a cache's facts; a
+// pump clicked well above its anchor, past the slop, with no device to say, is picked through the
+// viewport's hit by its sphere, and the facts a drop reads carry the bound (the scaled pump's by its
+// SCALE).
 static int test_sphere_picking() {
 	Rig rig("opennova_editor_mission_viewport_spheres");
 	TEST_EXPECT(rig.open(true, true));
@@ -466,7 +469,7 @@ static int test_sphere_picking() {
 	const double pump = mission_item_bound_radius(radius_q16, true, 0, false, 0);
 	TEST_EXPECT(near(pump, double(radius_q16 + 0x1000) / 65536.0, 1e-9));
 	TEST_EXPECT(mission_item_bound_radius(radius_q16, false, 0, false, 0) == 0.0);
-	const auto &radii = viewport->bounds().radii();
+	const auto &radii = viewport->items().radii();
 	TEST_EXPECT(radii.count(106100) == 1 && near(radii.at(106100), pump, 1e-4));
 	MissionItemFacts facts;
 	std::string error;
@@ -475,11 +478,57 @@ static int test_sphere_picking() {
 			near(facts.radius, mission_item_bound_radius(radius_q16, true, int32_t(1.5 * 65536.0), false, 0), 1e-9) &&
 			facts.radius > pump * 1.4);
 	TEST_EXPECT(mission_item_facts(view, 100001, facts, error) && facts.radius == 0.0); // a marker draws no model
-	// Asked once: a pump with nothing changed reads no file again.
-	const size_t read = viewport->bounds().files_read();
-	TEST_EXPECT(read > 0);
+	// A cache's facts parse each file once while it stands (the review's L3): asked again, nothing read.
+	MissionItemCache cache;
+	TEST_EXPECT(cache.facts(view, 106103, facts, error) && cache.files_read() == 2); // the pump and the catalog
+	TEST_EXPECT(cache.facts(view, 106100, facts, error) && cache.facts(view, 106103, facts, error) && cache.files_read() == 2);
+	// An edit of the mission alone (the asset source's generation moves, no file the items read does):
+	// no item asked again, no file read again.
+	const size_t asked = viewport->items().items_asked(), read = viewport->items().files_read();
+	TEST_EXPECT(asked > 0 && read > 0);
+	const NodeAddress some_item = first_of(*rig.document(), MissionKind::Item);
+	const uint64_t serial = viewport->scene().serial();
+	rig.session.handle(request::edit_record(kMission, set_of(some_item, "x", 77.25)));
+	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
-	TEST_EXPECT(viewport->bounds().files_read() == read);
+	TEST_EXPECT(viewport->scene().serial() != serial); // the cache asked over the scene moved, not skipped
+	TEST_EXPECT(viewport->items().items_asked() == asked && viewport->items().files_read() == read);
+	// The pump's SCALE set to 3 in the open catalog (the review's M1: no edge or symbol moves, so the graph
+	// stands): the catalog read again, the pumps asked again, their bound tripled as the game scales it.
+	rig.session.handle(request::open_document("defs/items.def"));
+	TEST_EXPECT(rig.session.outcome().done());
+	const Document *catalog = records_of(*rig.session.document_for("defs/items.def"));
+	NodeAddress pump_row;
+	TEST_EXPECT(catalog && find_definition(AssetGraph(), *catalog, "106100", pump_row));
+	rig.session.handle(request::edit_record("defs/items.def", set_of(pump_row, "scale_q16", 3.0)));
+	TEST_EXPECT(rig.session.outcome().done());
+	rig.pump();
+	const double scaled = mission_item_bound_radius(radius_q16, true, 3 * 65536, false, 0);
+	TEST_EXPECT(radii.count(106100) == 1 && near(radii.at(106100), scaled, 1e-4) && scaled > pump * 2.9);
+	TEST_EXPECT(viewport->items().files_read() == read + 1 && viewport->items().items_asked() > asked);
+	rig.session.handle(request::undo("defs/items.def"));
+	rig.pump();
+	TEST_EXPECT(near(radii.at(106100), pump, 1e-4));
+	// The pump's model written again with twice its GHDR radius and the project scanned again (no edge
+	// moves): the model read again, the bound grown.
+	{
+		opennova::threedi::Threedi3di3 larger{};
+		TEST_EXPECT(opennova::threedi::threedi_3di3_read_memory(bytes.data(), bytes.size(), &larger) == 0);
+		larger.header.max_radius_fp16 = radius_q16 * 2;
+		std::vector<uint8_t> written;
+		TEST_EXPECT(opennova::threedi::threedi_3di3_write_memory(&larger, written) == 0);
+		opennova::threedi::threedi_3di3_free(&larger);
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", written));
+		rig.session.handle(request::rescan());
+		rig.session.run_operations();
+		rig.pump();
+		TEST_EXPECT(near(radii.at(106100), mission_item_bound_radius(radius_q16 * 2, true, 0, false, 0), 1e-4));
+		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/pump.3di", bytes));
+		rig.session.handle(request::rescan());
+		rig.session.run_operations();
+		rig.pump();
+		TEST_EXPECT(near(radii.at(106100), pump, 1e-4));
+	}
 	// A pump framed close, clicked above its anchor by most of its radius: the pump's.
 	const MissionEntityMark *target = nullptr;
 	for (const MissionEntityMark &entity : viewport->scene().entities())

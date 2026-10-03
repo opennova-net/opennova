@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/mission_handle_edit.h>
 #include <editor/preview/mission_options.h>
 #include <editor/preview/viewport_device.h>
 
@@ -226,8 +227,9 @@ std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionV
 	marks.reserve(scene.entities().size() + scene.areas().size());
 	const auto place = [&](MissionMark &mark, bool wanted) {
 		const bool projected = camera.project(mark.at, width, height, mark.x, mark.y, &mark.depth);
-		mark.shown = wanted && projected && mark.x >= 0.0f && mark.y >= 0.0f && mark.x <= float(width) &&
-				mark.y <= float(height) && (options.mark_range <= 0.0f || mark.depth <= options.mark_range);
+		mark.pickable = wanted && (options.mark_range <= 0.0f || mark.depth <= options.mark_range);
+		mark.shown = mark.pickable && projected && mark.x >= 0.0f && mark.y >= 0.0f && mark.x <= float(width) &&
+				mark.y <= float(height);
 	};
 	for (size_t i = 0; i < scene.entities().size(); ++i) {
 		const MissionEntityMark &entity = scene.entities()[i];
@@ -259,8 +261,8 @@ std::vector<MissionMark> mission_marks(const MissionScene &scene, const MissionV
 }
 
 int pick_mission_mark(const std::vector<MissionMark> &marks, const OrbitCamera &camera, int width, int height, float x,
-		float y, float slop) {
-	// A glyph clicked: the front-most anchor within the slop.
+		float y, const ViewportDevice *device, MissionPick by, float slop) {
+	// A glyph: the front-most anchor within the slop.
 	int best = -1;
 	for (size_t i = 0; i < marks.size(); ++i) {
 		const MissionMark &mark = marks[i];
@@ -268,28 +270,54 @@ int pick_mission_mark(const std::vector<MissionMark> &marks, const OrbitCamera &
 		if (best < 0 || mark.depth < marks[size_t(best)].depth) best = int(i);
 	}
 	if (best >= 0) return best;
-	// Else a model clicked: the sphere the ray enters nearest. The ray's direction is one unit of depth
-	// a unit, so the entry's parameter is its depth in front of the eye.
 	PreviewVec3 from, direction;
 	if (!camera.ray(x, y, width, height, from, direction)) return -1;
 	const double a = double(direction.x) * direction.x + double(direction.y) * direction.y + double(direction.z) * direction.z;
 	if (!(a > 0.0)) return -1;
-	double nearest = 0.0;
+	// What the pointer is over, as the device draws it: the first surface the ray meets (the game's own
+	// choice among the entities a ray's broad phase passes is a face hit, world-wac-ai-re.md "Broad
+	// phase" and the segment clip), the ray as a segment of the mission from the eye as far as a pick
+	// reaches.
+	if (device) {
+		const double reach = kMissionPickReach / std::sqrt(a);
+		const PreviewVec3 far{ float(double(from.x) + double(direction.x) * reach),
+			float(double(from.y) + double(direction.y) * reach), float(double(from.z) + double(direction.z) * reach) };
+		double start[3], end[3];
+		preview_to_mission(from, start);
+		preview_to_mission(far, end);
+		const ViewportRayHit hit = device->ray_between(start, end);
+		if (hit.met != ViewportRayHit::Met::Unknown) {
+			if (hit.met != ViewportRayHit::Met::Record) return -1;
+			for (size_t i = 0; i < marks.size(); ++i)
+				if (marks[i].entity >= 0 && marks[i].record.row == hit.row) return marks[i].pickable ? int(i) : -1;
+			return -1;
+		}
+	}
+	// No device to say: a press takes nothing past the glyph (it would move what the pointer may not be
+	// over); a click the smallest sphere the ray passes through in front of the eye, the eye inside it or
+	// not (a small entity nested in a large one's sphere, a jeep beside a hangar, is the small one's), the
+	// nearer of two alike.
+	if (by == MissionPick::Press) return -1;
+	double best_radius = 0.0, best_along = 0.0;
 	for (size_t i = 0; i < marks.size(); ++i) {
 		const MissionMark &mark = marks[i];
-		if (!mark.shown || !(mark.radius > 0.0f)) continue;
-		const double ox = double(from.x) - mark.at.x, oy = double(from.y) - mark.at.y, oz = double(from.z) - mark.at.z;
-		const double b = ox * direction.x + oy * direction.y + oz * direction.z;
-		const double c = ox * ox + oy * oy + oz * oz - double(mark.radius) * mark.radius;
-		const double disc = b * b - a * c;
-		if (disc < 0.0) continue;
-		// Its entry in front of the eye; a sphere the eye stands in (a low camera in a base) takes no
-		// click, or every click there would be its.
-		const double t = (-b - std::sqrt(disc)) / a;
-		if (t < 0.0) continue;
-		if (best < 0 || t < nearest) {
+		if (!mark.pickable || !(mark.radius > 0.0f)) continue;
+		const double ox = double(mark.at.x) - from.x, oy = double(mark.at.y) - from.y, oz = double(mark.at.z) - from.z;
+		const double along = (ox * direction.x + oy * direction.y + oz * direction.z) / a;
+		const double radius = double(mark.radius);
+		double gap;
+		if (along >= 0.0) {
+			const double px = ox - along * direction.x, py = oy - along * direction.y, pz = oz - along * direction.z;
+			gap = std::sqrt(px * px + py * py + pz * pz);
+		} else {
+			// Its middle behind the eye: taken only where the eye stands inside it.
+			gap = std::sqrt(ox * ox + oy * oy + oz * oz);
+		}
+		if (!(gap < radius)) continue;
+		if (best < 0 || radius < best_radius || (radius == best_radius && along < best_along)) {
 			best = int(i);
-			nearest = t;
+			best_radius = radius;
+			best_along = along;
 		}
 	}
 	return best;

@@ -91,9 +91,10 @@ std::string metres(double value) {
 
 } // namespace
 
-int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in) {
+int mission_canvas_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionPick by) {
 	if (!in.hovered || !frame.viewport) return -1;
-	return pick_mission_mark(frame.marks, frame.viewport->camera(), in.width, in.height, in.mouse.x, in.mouse.y);
+	return pick_mission_mark(frame.marks, frame.viewport->camera(), in.width, in.height, in.mouse.x, in.mouse.y,
+			frame.device, by);
 }
 
 bool mission_canvas_handle_under(const MissionCanvasFrame &frame, const CanvasInput &in, MissionHandle &out) {
@@ -164,7 +165,10 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 		grab.handle = MissionHandle::Move;
 		grab.copy = in.keys.alt;
 		grab.through = mark.at;
-		grab.offset = CanvasPoint{ mark.x - in.mouse.x, mark.y - in.mouse.y };
+		// Taken by its surface with its glyph off the picture (a building's origin behind the eye): the drag
+		// goes over the ground from the pointer, not from a glyph's pixel.
+		const bool glyph = mark.shown;
+		grab.offset = glyph ? CanvasPoint{ mark.x - in.mouse.x, mark.y - in.mouse.y } : CanvasPoint{};
 		if (is_selected(frame, under)) {
 			grab.pressed = selected_pressed(frame, true, under, grab.grabbed);
 		} else {
@@ -178,7 +182,8 @@ MissionGrab mission_canvas_grab(const MissionCanvasFrame &frame, const ViewportC
 		}
 		double anchor[3];
 		preview_to_mission(mark.at, anchor);
-		grab.grounded = mission_ground_point(context, camera, mark.x, mark.y, anchor[2], grab.ground);
+		grab.grounded = mission_ground_point(context, camera, glyph ? mark.x : in.mouse.x, glyph ? mark.y : in.mouse.y, anchor[2],
+				grab.ground);
 		return grab;
 	}
 	grab.what = in.keys.alt ? MissionGrab::What::Orbit : MissionGrab::What::Marquee;
@@ -214,7 +219,8 @@ void MissionCanvas::follow(const ViewportModel &viewport, const ViewportContext 
 void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in, CanvasRequests &out) {
 	if (!frame_.viewport) return;
 	const MissionViewport &viewport = *frame_.viewport;
-	const int under = mission_canvas_under(frame_, in);
+	// What a press takes: a glyph, else what the device's ray meets (an entity's surface), never more.
+	const int under = in.pressed ? mission_canvas_under(frame_, in, MissionPick::Press) : -1;
 	// Esc while a press is down cancels it (S15), the tool kept: what its release would raise (an Area
 	// box, an Alt-drag's copies, a marquee's selection, a placement) is not raised, and what a drag wrote
 	// goes back where the press found it.
@@ -247,6 +253,8 @@ void MissionCanvas::input(const ViewportContext &context, const CanvasInput &in,
 	if (in.pressed) {
 		gesture_.press(subject_of(frame_), in.screen, out);
 		grab_ = mission_canvas_grab(frame_, context, in, under);
+		// What a click there takes: the press's, else (no device to say) the sphere about an entity.
+		grab_.click = under >= 0 ? under : mission_canvas_under(frame_, in, MissionPick::Click);
 		// Under a tool: a press takes no mark and draws no marquee (its click places, its drag draws the
 		// Area tool's box).
 		if (tool() != MissionTool::Select && grab_.what != MissionGrab::What::Pan && grab_.what != MissionGrab::What::Orbit) {
@@ -486,9 +494,10 @@ void MissionCanvas::release_(CanvasRequests &out) {
 		// A tap on the primary's yaw, height or edge handle (no mark under it): nothing changes, the
 		// selection and its handles stand.
 	} else if (!gesture_.dragging() && grab_.what != MissionGrab::What::Pan && frame_.current) {
-		// A click: the mark under it selected, joined as the keys say; on nothing, nothing selected.
-		if (grab_.pick >= 0 && size_t(grab_.pick) < frame_.marks.size())
-			out.request(request::select_record(path, frame_.marks[size_t(grab_.pick)].record, select_mode(grab_.join)));
+		// A click: the mark it takes selected (the press's, else with no device to say the sphere about an
+		// entity), joined as the keys say; on nothing, nothing selected.
+		if (grab_.click >= 0 && size_t(grab_.click) < frame_.marks.size())
+			out.request(request::select_record(path, frame_.marks[size_t(grab_.click)].record, select_mode(grab_.join)));
 		else if (grab_.join == CanvasJoin::Replace && !frame_.records.empty())
 			out.request(request::select_record(path, NodeAddress()));
 	}
@@ -570,7 +579,7 @@ OverlayList MissionCanvas::shapes(const ViewportContext &context, const CanvasIn
 	overlay.marks = &frame_.marks;
 	// Nothing is under the pointer while it looks or drags.
 	const bool busy = looking_ || gesture_.dragging();
-	overlay.hover = busy || tool() != MissionTool::Select ? -1 : mission_canvas_under(frame_, in);
+	overlay.hover = busy || tool() != MissionTool::Select ? -1 : mission_canvas_under(frame_, in, MissionPick::Click);
 	overlay.primary = frame_.primary;
 	overlay.selected = &frame_.selected;
 	std::vector<NodeId> rows;
@@ -669,7 +678,7 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 			hint.handle = true;
 			hint.which = handle;
 		} else {
-			const int under = mission_canvas_under(frame_, in);
+			const int under = mission_canvas_under(frame_, in, MissionPick::Click);
 			if (under >= 0 && frame_.document) {
 				const MissionMark &mark = frame_.marks[size_t(under)];
 				const AssetGraph *graph = context.input.view.findings.graph.get();
@@ -678,6 +687,7 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 				hint.hovered = titles_.record(*frame_.document, mark.record, names ? &*names : nullptr);
 				hint.hovered_area = mark.area >= 0;
 				hint.hovered_selected = is_selected(frame_, under);
+				hint.hovered_drags = mission_canvas_under(frame_, in, MissionPick::Press) == under;
 			}
 		}
 	}
