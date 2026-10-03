@@ -13,8 +13,9 @@ namespace opennova::editor {
 // S13 V1: what it lists, folds, proposes and asks is the model's). A filter bar: the three
 // severities with how many of each the project has (a hidden one dimmed), a text, the scope
 // (the project, the active file, the open files), the grouping (none, by file, by kind: the
-// window's first), only those with a fix, and how many of all are shown. While required files
-// are missing, a line saying the game cannot start, with the Fix alls that make them. Then the
+// window's first), only those with a fix, only those a build is refused for (each such row marked
+// "Blocks the build", why in its tooltip), and how many of all are shown. While required files are
+// missing, what stops the game and what it starts without, with the Fix alls that bring them. Then the
 // list's lines, clipped to what shows: a finding's severity, its message cut to the line
 // (whole in its tooltip), where it is and its first fix (More lists them all; a column too
 // narrow for both has one Fix... that lists them); a group's header with its counts and its
@@ -38,6 +39,8 @@ public:
 	// How many findings the window has asked the fixes of while what they read stands (the
 	// lines it drew, the selected one and More's, never every one).
 	size_t fixes_asked() const { return list_.fixes_asked(); }
+	// Comes forward showing only what a build is refused for (the menu bar's "Build refused").
+	void show_blocking();
 
 private:
 	using Line = ProblemsList::Line;

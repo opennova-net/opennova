@@ -26,6 +26,7 @@
 #include <editor/import/import_run.h>
 #include <editor/project_build/build_run.h>
 #include <editor/run/play_lease.h>
+#include <editor/session/build_result.h>
 #include <editor/session/file_preferences_store.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/preferences_store.h>
@@ -56,9 +57,14 @@ namespace fs = std::filesystem;
 
 using editor_test::FakePlatform;
 
+// A line of Output holds `needle`, or a line folded under one (an import's files, the game's log).
 static bool output_has(const SessionView &v, const std::string &needle) {
-	for (const std::string &line : v.activity.output)
-		if (line.find(needle) != std::string::npos) return true;
+	const OutputLog &output = v.activity.output;
+	for (size_t i = 0; i < output.size(); ++i) {
+		if (output[i].find(needle) != std::string::npos) return true;
+		for (const std::string &folded : output.folded(i))
+			if (folded.find(needle) != std::string::npos) return true;
+	}
 	return false;
 }
 
@@ -149,7 +155,11 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.revisions.any() > before);
 	TEST_EXPECT(v.activity.has_build && !v.activity.last_build->ok);
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped && platform.spawns == 0);
-	TEST_EXPECT(output_has(v, "Build failed"));
+	// Refused by the gate, naming what refuses it (the UX round's problems lane): the string tables and the
+	// main menu the boot stops without, by name, in the status line and the refusal's own row.
+	TEST_EXPECT(output_has(v, "Build refused") && v.activity.last_build->refused);
+	TEST_EXPECT(v.activity.status.rfind("Build refused: gametext.bin is missing: the game shows \"Unable to load game strings\" and exits (and ", 0) == 0);
+	TEST_EXPECT(output_has(v, "The build was refused: 4 problems stop it: gametext.bin is missing"));
 
 	// Create all missing: the checklist clears.
 	editor_test::create_missing_files(session);
@@ -161,6 +171,7 @@ static int test_lifecycle() {
 	// Build is an operation stepped by bytes, one 64 KiB step per poll at this budget; the view
 	// shows its progress, which never goes back, until it lands and says what it came to.
 	session.set_poll_budget({0, 64 * 1024});
+	const uint64_t events_before = v.events.next_seq() - 1;
 	session.handle(request::build());
 	TEST_EXPECT(v.activity.operation.running() && v.activity.operation.kind == OperationKind::Build && v.activity.operation.cancellable);
 	TEST_EXPECT(session.outcome().done() && session.outcome().operation == v.activity.operation.id);
@@ -186,10 +197,34 @@ static int test_lifecycle() {
 			v.activity.last_operation.end == OperationEnd::Done);
 	session.set_poll_budget(kDefaultPollBudget);
 	TEST_EXPECT(fs::is_regular_file(fs::path(v.activity.last_build->build_dir) / "localres.pff"));
+	// What it came to, for the build panel (the UX round's problems lane): each file it published with its
+	// size (the three archives, each with its files, then the loose ones), how long it took, in words; the
+	// panel comes forward (BuildEnded, landed, no Play waiting); a folder build says how players install it.
+	{
+		const BuildReport &report = *v.activity.last_build;
+		TEST_EXPECT(report.built.size() >= 3 && report.built[0].archive && report.built[0].name == "language.pff" &&
+		            report.built[2].name == "resource.pff" && report.built[2].bytes > 0 && report.seconds >= 0.0);
+		size_t packed = 0;
+		for (const BuiltFile &file : report.built) packed += file.files;
+		TEST_EXPECT(packed > 0);
+		uint64_t bytes = 0;
+		std::error_code size_error;
+		for (const BuiltFile &file : report.built)
+			bytes += file.bytes == fs::file_size(fs::path(report.build_dir) / file.name, size_error) ? 1 : 0;
+		TEST_EXPECT(bytes == report.built.size());
+		const BuildResult result = build_result(report, true);
+		TEST_EXPECT(result.outcome == BuildResult::Outcome::Built && result.headline.rfind("Built in ", 0) == 0 &&
+		            result.where == report.build_dir && result.files.size() == report.built.size() && result.players.empty() &&
+		            result.files[2].words.find(", written") != std::string::npos);
+		TEST_EXPECT(!build_result(report, false).players.empty());
+		const std::vector<ViewEvent> ended = editor_test::events_after(v, events_before, ViewEventKind::BuildEnded);
+		TEST_EXPECT(ended.size() == 1 && ended[0].flag && ended[0].tag == 0);
+		TEST_EXPECT(v.activity.status.rfind("Built in ", 0) == 0);
+	}
 	// S11e: Output names the project by its name and its files (the build too) from its
 	// folder: no line holds the folder itself. Clear empties it.
 	TEST_EXPECT(output_has(v, "Created My Game.") && output_has(v, "Opened My Game.") &&
-	            output_has(v, "Built .opennova/build/play/"));
+	            output_has(v, "Built in ") && output_has(v, ", in .opennova/build/play/"));
 	TEST_EXPECT(!output_has(v, fs::path(root).generic_string()));
 	TEST_EXPECT(session.handle(request::clear_output()) && v.activity.output.empty());
 	// A path inside the project from its folder; one outside it (a sibling folder whose name
@@ -243,8 +278,11 @@ static int test_lifecycle() {
 	TEST_EXPECT(v.findings.diagnostics.back().code() == "play.already_running");
 	TEST_EXPECT(editor_test::write_text(platform.last_plan.log_file, "Godot Engine v4.6.1\r\nhalf"));
 	session.poll();
-	TEST_EXPECT(output_has(v, "game: Godot Engine v4.6.1"));
-	TEST_EXPECT(!output_has(v, "game: half"));
+	// The game's whole log folds under its one line (the UX round's problems lane); a line that matters
+	// (an error, a missing file) is shown below it as well, a banner is not.
+	TEST_EXPECT(output_has(v, "Godot Engine v4.6.1") && !output_has(v, "game: Godot Engine v4.6.1"));
+	TEST_EXPECT(output_has(v, "Running: OpenNova on the build. Its log: 1 line, 0 shown below"));
+	TEST_EXPECT(!output_has(v, "half"));
 	// The game's boot report names a file it could not find: the name reaches the
 	// Requirements rows and Problems, once per file, compared as the game compares names.
 	// The row is the project's (no file of it is at fault) and names the requirement's role
@@ -268,7 +306,8 @@ static int test_lifecycle() {
 	TEST_EXPECT(count_code(v.findings.diagnostics, "play.boot_missing") == 1);
 	const Diagnostic *boot = finding_about(v.findings.diagnostics, "play.boot_missing", "main.mnu");
 	TEST_EXPECT(boot && boot->asset.empty() && editor_test::requirement_of(*boot).role == "main_menu" && boot->severity == DiagnosticSeverity::Error);
-	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos && boot->message.find("Without it") != std::string::npos);
+	TEST_EXPECT(boot && boot->message.find("MAIN.MNU") != std::string::npos &&
+	            boot->message.find("The main menu never appears") != std::string::npos);
 	TEST_EXPECT(v.activity.missing_at_boot("main.mnu"));
 	{
 		bool marked = false;
@@ -1583,7 +1622,7 @@ static int test_save_contract() {
 	TEST_EXPECT(!output_has(v, "Saved " + project.strings_path));
 	// Save naming nothing: the active item table, rewritten without the ignored line.
 	session.handle(request::save());
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + project.items_path) && v.activity.status == "Saved 1 file(s).");
+	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + project.items_path) && v.activity.status == "Saved 1 file.");
 	session.run_operations(); // the validation the save left due
 	TEST_EXPECT(!has_code(v.findings.diagnostics, "catalog.ignored_input") && project.items->issues().empty());
 	std::string text, error;
@@ -1601,10 +1640,10 @@ static int test_save_contract() {
 	session.handle(request::save_all());
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "document.write"));
 	TEST_EXPECT(project.items->dirty() && !project.strings->dirty() && output_has(v, "Saved " + project.strings_path));
-	TEST_EXPECT(has_code(v.findings.diagnostics, "document.write") && v.activity.status == "Saved 1 file(s); 1 could not be saved: see Problems.");
+	TEST_EXPECT(has_code(v.findings.diagnostics, "document.write") && v.activity.status == "Saved 1 file; 1 could not be saved: see Problems.");
 	TEST_EXPECT(project.block_items(false));
 	session.handle(request::save_all());
-	TEST_EXPECT(session.outcome().done() && !project.items->dirty() && v.activity.status == "Saved 1 file(s).");
+	TEST_EXPECT(session.outcome().done() && !project.items->dirty() && v.activity.status == "Saved 1 file.");
 	session.handle(request::save_all());
 	TEST_EXPECT(session.outcome().done() && v.activity.status == "No file has unsaved changes.");
 	// A file that is not open is read and left closed (S11b; test_rewrite_closed_file); a
@@ -1750,7 +1789,7 @@ static int test_rewrite_closed_file() {
 	TEST_EXPECT(has_code(v.findings.diagnostics, "catalog.ignored_input") &&
 			!session.document_for(items));
 	session.handle(request::save(items));
-	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + items) && v.activity.status == "Saved 1 file(s).");
+	TEST_EXPECT(session.outcome().done() && output_has(v, "Saved " + items) && v.activity.status == "Saved " + items + ".");
 	session.run_operations(); // the validation the save left due
 	std::string text, error;
 	TEST_EXPECT(read_file_text(file, text, error) && text.find("subtype") == std::string::npos &&
@@ -3184,7 +3223,7 @@ static int test_view_revisions() {
 		const std::string log = platform.last_plan.log_file;
 		TEST_EXPECT(editor_test::write_text(log, "Godot Engine v4.6.1\r\n"));
 		session.poll();
-		TEST_EXPECT(output_has(v, "game: Godot Engine v4.6.1"));
+		TEST_EXPECT(output_has(v, "Godot Engine v4.6.1")); // folded under the game's line
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Output}));
 		TEST_EXPECT(stats.passes == passes);
 		// The game's boot report names a file it did not find: Run and its line, and the validation
@@ -3285,8 +3324,9 @@ static int test_view_revisions() {
 		const ViewRevisions before = v.revisions;
 		session.handle(request::undo(items->path()));
 		while (v.activity.validation.running) session.poll();
+		// Output too: the status line says what Undo took back (the UX round's problems lane).
 		TEST_EXPECT(moved_since(v, before) == Concerns({ViewConcern::Findings, ViewConcern::Graph,
-				ViewConcern::Documents, ViewConcern::Operation}));
+				ViewConcern::Documents, ViewConcern::Output, ViewConcern::Operation}));
 		TEST_EXPECT(finding_about(v.findings.diagnostics, "reference.missing", "crate") != nullptr);
 	}
 
@@ -3587,6 +3627,34 @@ static int test_play_leases() {
 	return 0;
 }
 
+// Build to folder (the UX round's problems lane): a build into a folder outside the project lands there,
+// the folder kept with the project's local settings (Build > Build to <it> again: the view's build_folder,
+// the preferences section's), and its result says how players install it; reopened, the project keeps it.
+static int test_build_to_folder() {
+	editor_test::TempProjectDir dir("opennova_editor_session_build_folder");
+	FakePlatform platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Folder"));
+	editor_test::create_missing_files(session);
+	const SessionView &v = session.view();
+	TEST_EXPECT(v.project.build_folder.empty());
+	const std::string players = dir.file("for players");
+	editor_test::handle_to_end(session, request::build(players));
+	std::error_code ec;
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.project.build_folder.empty() &&
+	            fs::equivalent(fs::path(v.project.build_folder), fs::path(players), ec));
+	TEST_EXPECT(fs::equivalent(fs::path(v.activity.last_build->build_dir).parent_path(), fs::path(players), ec));
+	TEST_EXPECT(view_section_to_json(v, ViewSection::Preferences).get_string("build_folder", "") == v.project.build_folder);
+	TEST_EXPECT(!build_result(*v.activity.last_build, false).players.empty());
+	const std::string root = v.project.root;
+	editor_test::handle_to_end(session, request::close_project());
+	TEST_EXPECT(v.project.build_folder.empty());
+	editor_test::handle_to_end(session, request::open_project(root));
+	TEST_EXPECT(!v.project.build_folder.empty() && fs::equivalent(fs::path(v.project.build_folder), fs::path(players), ec));
+	return 0;
+}
+
 // S13 A1: the Output lines keep an absolute index (OutputLog), so a client paging with the last
 // page's next_cursor neither skips nor repeats a line while the log drops its oldest past 2,000.
 // 2,100 lines of the game's log, read in pages as they come: every one once, in order; a cursor
@@ -3617,14 +3685,17 @@ static int test_output_cursor() {
 			const opennova::io::JsonValue *output = &page;
 			if (!output->get("lines")) return;
 			const auto &lines = output->get("lines")->array;
-			for (const opennova::io::JsonValue &line : lines) seen.push_back(line.string);
+			// The game's lines shown (each an error: every one matters); the game's own line, made
+			// again below once the log drops it, is no game line.
+			for (const opennova::io::JsonValue &line : lines)
+				if (line.string.rfind("game: ", 0) == 0) seen.push_back(line.string);
 			cursor = uint64_t(output->get_number("next_cursor", 0.0));
 			if (lines.empty()) return;
 		}
 	};
 	std::string log;
 	const auto game_says = [&](int from, int to) {
-		for (int i = from; i < to; ++i) log += "line " + std::to_string(i) + "\r\n";
+		for (int i = from; i < to; ++i) log += "error line " + std::to_string(i) + "\r\n";
 		const bool written = editor_test::write_text(platform.last_plan.log_file, log);
 		session.poll();
 		return written;
@@ -3637,8 +3708,22 @@ static int test_output_cursor() {
 	read_pages();
 	TEST_EXPECT(seen.size() == 2100);
 	bool in_order = seen.size() == 2100;
-	for (size_t i = 0; in_order && i < seen.size(); ++i) in_order = seen[i] == "game: line " + std::to_string(i);
+	for (size_t i = 0; in_order && i < seen.size(); ++i) in_order = seen[i] == "game: error line " + std::to_string(i);
 	TEST_EXPECT(in_order);
+	// The game's own line was dropped with the oldest: made again below, its whole log under it from there.
+	{
+		const OutputLog &output = v.activity.output;
+		size_t games = 0;
+		for (size_t i = 0; i < output.size(); ++i)
+			if (output[i].rfind("Running: OpenNova on the build.", 0) == 0) {
+				++games;
+				TEST_EXPECT(output.folded(i).size() == 600);
+			}
+		TEST_EXPECT(games == 1);
+		const opennova::io::JsonValue page = output_page_to_json(output, output.next_index() - 1, 1);
+		const opennova::io::JsonValue *folded = page.get("folded");
+		TEST_EXPECT(folded && folded->array.size() == 1 && folded->array[0].get_number("count", 0.0) == 600.0);
+	}
 	// A cursor the log dropped past starts at the oldest line held.
 	const opennova::io::JsonValue from_zero = output_page_to_json(v.activity.output, 0, 1);
 	TEST_EXPECT(from_zero.get_number("first", 0.0) == double(v.activity.output.first_index()) &&
@@ -4153,6 +4238,7 @@ int main() {
 	failures += test_play_then_close();
 	failures += test_play_leases();
 	failures += test_output_cursor();
+	failures += test_build_to_folder();
 	failures += test_save_picks_like_the_rest();
 	failures += test_view_revisions();
 	failures += test_import_guard_past_the_cap();

@@ -7,6 +7,7 @@
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
 #include <editor/project/project_findings.h>
+#include <editor/project_build/build_plan.h>
 #include <editor/session/document_set.h>
 #include <editor/session/original_files.h>
 #include <editor/session/session_core.h>
@@ -63,7 +64,7 @@ ProblemsService::ProblemsService(SessionCore &core) :
 	view_.findings.graph = graph_;
 	view_.findings.assets = assets_;
 	view_.findings.project_checks = checks_;
-	view_.findings.original_files = originals_->files();
+	view_.findings.originals = originals_->data();
 }
 
 ProblemsService::~ProblemsService() = default;
@@ -169,21 +170,45 @@ void ProblemsService::step_validation(const PollBudget &budget, const OperationC
 void ProblemsService::want_originals() {
 	if (!view_.project.open || !view_.project.scan) return;
 	// An install or a project that moved forgets what was found: the view says so at once.
-	originals_->want(core_.game_install(), view_.project.document, view_.project.root, *view_.project.scan,
-	                 view_.findings.diagnostics);
+	originals_->want(core_.game_install(), view_.project.document, view_.project.root, view_.project.scan,
+	                 view_.findings.diagnostics, view_.documents.open);
 	show_originals();
 }
 
 bool ProblemsService::step_originals(uint64_t bytes) {
 	if (originals_->settled()) return true;
-	const bool done = originals_->step(bytes);
+	// The baseline reads the session's graph, files' findings and project checks as the last
+	// validation left them (the polls step this only once none is due or under way).
+	const bool done = originals_->step(bytes, OriginalProject{core_.paths(), *graph_, validation_cache_, *checks_, *assets_});
 	show_originals();
+	if (done) show_validation(); // the counts stand from here
 	return done;
 }
 
 void ProblemsService::show_originals() {
-	if (view_.findings.original_files == originals_->files()) return;
-	view_.findings.original_files = originals_->files();
+	if (view_.findings.originals == originals_->data()) return;
+	view_.findings.originals = originals_->data();
+	mark_rows();
+	core_.touch(ViewConcern::Findings);
+}
+
+// The gate as it stands among the rows (gate_findings' range), never composing: empty when the rows no
+// longer hold it.
+std::vector<Diagnostic> ProblemsService::gate_rows() const {
+	const std::vector<Diagnostic> &rows = view_.findings.diagnostics;
+	if (gate_size_ + gate_tail_ + trailing_ > rows.size()) return {};
+	const auto end = rows.end() - static_cast<std::ptrdiff_t>(gate_tail_ + trailing_);
+	return std::vector<Diagnostic>(end - static_cast<std::ptrdiff_t>(gate_size_), end);
+}
+
+void ProblemsService::mark_rows() {
+	std::vector<Diagnostic> blockers;
+	if (view_.project.open && view_.project.scan && view_.project.requirements && view_.project.document)
+		blockers = build_blockers(plan_build(core_.paths(), *view_.project.scan, *view_.project.requirements, gate_rows()));
+	auto marks = std::make_shared<const FindingMarks>(
+	        mark_findings(view_.findings.diagnostics, view_.findings.originals.get(), view_.documents.open, &blockers));
+	if (view_.findings.marks && *view_.findings.marks == *marks) return;
+	view_.findings.marks = std::move(marks);
 	core_.touch(ViewConcern::Findings);
 }
 
@@ -199,10 +224,15 @@ void ProblemsService::forget_originals() {
 
 void ProblemsService::show_validation() {
 	ValidationStatus status;
-	status.running = validating();
+	// The check of which rows are the game's own data is the validation's last part (the UX round's
+	// problems lane): until it settles the counts may still move, so a client waiting on the validation
+	// waits for it too, and the menu bar says "Validating" meanwhile.
+	status.running = validating() || (view_.project.open && !originals_->settled());
 	if (pass_) {
 		status.done = pass_->validation.files_done();
 		status.total = pass_->validation.files_total();
+	} else if (status.running) {
+		status.done = status.total = view_.activity.validation.total;
 	}
 	// A validation started again shows where the one before stood until it passes it: the progress
 	// shown never falls back while one runs.
@@ -230,6 +260,7 @@ void ProblemsService::compose_rows(bool keep_reported) {
 	// then; the small inputs are compared with their copies (Composed::same), and the open documents'
 	// own findings are made again for it.
 	if (!moved && reported_.empty() && trailing_ == 0 && composed_.same(input, view_.findings.diagnostics.size())) {
+		mark_rows(); // the open documents' unsaved state may have moved
 		want_originals();
 		show_validation();
 		return;
@@ -254,6 +285,7 @@ void ProblemsService::compose_rows(bool keep_reported) {
 		core_.touch(ViewConcern::Findings);
 	}
 	composed_.keep(input, view_.findings.diagnostics.size());
+	mark_rows();
 	want_originals();
 	show_validation();
 }
@@ -279,6 +311,17 @@ void ProblemsService::add_reported(const Diagnostic &d) {
 	view_.findings.diagnostics.push_back(d);
 	++trailing_;
 	reported_.push_back({d, validating()});
+	// A reported finding comes after the gate and is the request's (a refusal, an import's word), never the
+	// game's own: its marks follow the rows' without a plan (an import may report hundreds).
+	if (view_.findings.marks && view_.findings.marks->rows + 1 == view_.findings.diagnostics.size()) {
+		auto marks = std::make_shared<FindingMarks>(*view_.findings.marks);
+		++marks->rows;
+		marks->original.push_back(0);
+		marks->blocking.push_back(0);
+		view_.findings.marks = std::move(marks);
+	} else {
+		mark_rows();
+	}
 	core_.touch(ViewConcern::Findings);
 }
 
@@ -305,6 +348,7 @@ void ProblemsService::clear() {
 	moved_since_composed_ = false;
 	readings_.clear();
 	originals_->clear();
+	view_.findings.marks.reset();
 	show_originals();
 	show_validation();
 }

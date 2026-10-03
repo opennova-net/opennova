@@ -57,6 +57,7 @@
 #include <editor/ui/inspector_layout.h>
 #include <editor/ui/inspector_window.h>
 #include <editor/ui/menu_view.h>
+#include <editor/ui/output_window.h>
 #include <editor/ui/preview_window.h>
 #include <editor/ui/styles_view.h>
 #include <editor/ui/problems_window.h>
@@ -1503,6 +1504,9 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind, b
 	row.required = required;
 	row.expected_kind = kind;
 	row.state = RequirementState::Missing;
+	// The manifest row's failure class: whether the boot stops without it (the summary's first line).
+	if (const opennova::gameprofile::RequiredResource *manifest = opennova::gameprofile::gameprofile_required_resource_by_role(role))
+		row.severity = manifest->severity;
 	return row;
 }
 
@@ -1593,9 +1597,10 @@ void test_problems_window_ui() {
 	CHECK(listed(ui) == List({kGametext, kMainMenu, "Alpha:", "Bravo:", "Charlie:"}), "every finding, errors first");
 	std::string text = logged_frame(ui);
 	CHECK(in_order(text, {"Errors 3", "Warnings 1", "Info 1", "5 of 5"}), "the counts, every finding's");
-	CHECK(text.find("The game cannot start: 2 required files are missing.") != std::string::npos, "the summary");
+	CHECK(text.find("The game will not start: 2 required files are missing.") != std::string::npos, "the summary");
 	CHECK(text.find("items.def:12 - Marker - type") != std::string::npos, "where a finding is");
-	CHECK(text.find("Create gametext.bin") != std::string::npos, "a required file's first fix");
+	CHECK(text.find("Import gametext.bin from the game data...") != std::string::npos,
+	      "a required file's first fix: the game's own copy, which the game data has");
 
 	// Each severity hidden and shown again; the counts stay every finding's.
 	ui.activate(item_id(window, {"###errors"}));
@@ -1628,11 +1633,11 @@ void test_problems_window_ui() {
 	CHECK(listed(ui).size() == 5, "the text cleared: every finding");
 
 	// The scope: the active menu's, the open menus', the project's.
-	pick("Scope", "Active file");
+	ui.activate(item_id(window, {"a.mnu###scope_active"}));
 	CHECK(listed(ui) == List({"Bravo:"}), "the active file's");
-	pick("Scope", "Open files");
+	ui.activate(item_id(window, {"Open files###scope_open"}));
 	CHECK(listed(ui) == List({"Bravo:", "Charlie:"}), "the open files'");
-	pick("Scope", "Project");
+	ui.activate(item_id(window, {"Whole project###scope_project"}));
 	CHECK(listed(ui).size() == 5, "the project's");
 
 	// The grouping: a header per file (the project's own findings first), then per kind; a
@@ -1661,14 +1666,14 @@ void test_problems_window_ui() {
 	CHECK(listed(ui).size() == 5, "a group of notes unfolded");
 
 	// The Required files group's Fix all (the header's line) asks first: Cancel raises nothing,
-	// Apply one Create naming every role. The other groups, a finding each with no fix, have
-	// none.
+	// Apply the game's own copy of what the game data has and a Create of the rest. The other
+	// groups, a finding each with no fix, have none.
 	CHECK(ui.drain().empty(), "folding raises nothing");
 	ui.click(problems_lines().fix(0));
 	ui.frames(2);
 	CHECK(confirmation() && ui.drain().empty(), "Fix all asks first");
 	text = logged_frame(ui);
-	CHECK(text.find("Create 2 files: gametext.bin, main.mnu.") != std::string::npos &&
+	CHECK(in_order(text, {"Import gametext.bin from the game data", "Create main.mnu. It starts as placeholder content"}) &&
 	              text.find("cannot be undone with Undo") != std::string::npos,
 	      "saying what it will do");
 	CHECK(count_of(text, "Fix all") == 1, "the other groups have no Fix all");
@@ -1679,8 +1684,10 @@ void test_problems_window_ui() {
 	ui.frames(2);
 	ui.click(confirmation_button(false));
 	std::vector<EditorRequest> requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext", "main_menu"}),
-	      "Apply: one Create naming every role");
+	CHECK(requests.size() == 2 && requests[0].kind == EditorRequestKind::PreviewInstallImport &&
+	              requests[0].names == List({"gametext.bin"}) && requests[1].kind == EditorRequestKind::CreateMissing &&
+	              requests[1].roles == List({"main_menu"}),
+	      "Apply: the game's own gametext.bin, and main.mnu created");
 	ui.frames(2);
 	CHECK(!confirmation(), "and the confirmation closes");
 	pick("Group", "None");
@@ -1692,9 +1699,11 @@ void test_problems_window_ui() {
 	CHECK(ui.drain().empty(), "a required file's row opens nothing");
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(in_order(text, {kGametext, "Create gametext.bin", "Import gametext.bin from the game data...",
+	CHECK(in_order(text, {kGametext, "Import gametext.bin from the game data...", "Create a placeholder gametext.bin",
 	                      "Use spare.bin as gametext.bin", "Renames spare.bin to gametext.bin.", "requirement.missing"}),
 	      "the selected row: every fix with what it does, and its code");
+	CHECK(text.find("As the original was seen to do:") != std::string::npos, "the manifest's own record of it, the cited detail");
+	CHECK(text.find("Blocks the build") != std::string::npos, "a row a build is refused for says so");
 	ui.click(problems_lines().at(0, 2));
 	ui.away();
 	CHECK(logged_frame(ui).find("requirement.missing") == std::string::npos, "a second click folds it back");
@@ -1706,16 +1715,16 @@ void test_problems_window_ui() {
 	ui.click(problems_lines().at(2, 2));
 	ui.drain();
 
-	// A required file's Fix creates it; its More lists every fix; a Use fix waits for Apply.
+	// A required file's Fix brings the game's own; its More lists every fix; a Use fix waits for Apply.
 	ui.click(problems_lines().fix(0));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext"}),
-	      "a required file's Fix creates it");
-	ui.click(problems_lines().more(0, "Create gametext.bin"));
+	CHECK(one(requests, EditorRequestKind::PreviewInstallImport) && requests[0].names == List({"gametext.bin"}),
+	      "a required file's Fix imports the game's own");
+	ui.click(problems_lines().more(0, "Import gametext.bin from the game data..."));
 	text = logged_frame(ui);
-	CHECK(text.find("Import gametext.bin from the game data...") != std::string::npos &&
+	CHECK(text.find("Create a placeholder gametext.bin") != std::string::npos &&
 	              text.find("Use spare.bin as gametext.bin") != std::string::npos,
-	      "More lists Import and Use");
+	      "More lists the placeholder and Use");
 	ui.activate(popup_item(item_id(window, {"more"}), "Use spare.bin as gametext.bin"));
 	CHECK(confirmation() && ui.drain().empty(), "a Use fix waits for Apply");
 	ui.away();
@@ -1726,8 +1735,9 @@ void test_problems_window_ui() {
 	              requests[0].role == "gametext",
 	      "Apply renames it");
 
-	// The summary's Fix alls: one Create for what factories make, one import list for what
-	// only the game data has (cmap.mnu), each asking first.
+	// The summary from the gate (what stops the game, then what it starts without) and its Fix alls:
+	// one import list for what the game data has (the game's own copies first), one Create for the
+	// rest, each asking first.
 	editor_test::own(v.project.requirements)
 			.rows.push_back(missing_row("cmap_menu", "cmap.mnu", AssetKind::Menu));
 	editor_test::own(v.project.requirements).required_missing = 3;
@@ -1737,21 +1747,22 @@ void test_problems_window_ui() {
 	v.revisions.touch(ViewConcern::Findings);
 	ui.frames(2);
 	ui.away();
-	CHECK(in_order(logged_frame(ui), {"The game cannot start: 3 required files are missing.", "Create 2",
-	                                  "Import 1 from the game data..."}),
+	CHECK(in_order(logged_frame(ui), {"The game will not start: 2 required files are missing.",
+	                                  "1 more file the game reads is missing: part of it will not work.",
+	                                  "Import 2 from the game data...", "Create 1 placeholder"}),
 	      "the summary's Fix alls");
 	const ImGuiID summary = item_id(window, {v.project.root.c_str(), "required"});
 	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::CreateMissing)), {"###fix"}));
 	CHECK(confirmation() && ui.drain().empty(), "the summary's Create asks first");
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"gametext", "main_menu"}),
-	      "one Create for every file a factory makes");
+	CHECK(one(requests, EditorRequestKind::CreateMissing) && requests[0].roles == List({"main_menu"}),
+	      "one Create for what the game data lacks");
 	ui.frames(2);
 	ui.activate(item_id(pushed(summary, static_cast<int>(EditorRequestKind::PreviewInstallImport)), {"###fix"}));
 	ui.click(confirmation_button(false));
 	requests = ui.drain();
-	CHECK(one(requests, EditorRequestKind::PreviewInstallImport) && requests[0].names == List({"cmap.mnu"}),
+	CHECK(one(requests, EditorRequestKind::PreviewInstallImport) && requests[0].names == List({"gametext.bin", "cmap.mnu"}),
 	      "one import list for what the game data has");
 
 	// An optional file the project lacks is a note with the same fixes: its Fix creates it.
@@ -1781,6 +1792,7 @@ void test_problems_confirmation_follows() {
 	using List = std::vector<std::string>;
 	editor_test::TempProjectDir dir("opennova_editor_ui_problems_follow");
 	SessionView v = problems_view(menu_at(dir, "a.mnu", "menus/a.mnu"), menu_at(dir, "b.mnu", "menus/b.mnu"));
+	v.project.retail_files.clear(); // no game install: placeholders are the Fix all
 	Ui ui;
 	ui.windows.set_view(&v);
 	ui.frames(6);
@@ -2052,7 +2064,9 @@ void test_problems_original() {
 	add(DiagnosticSeverity::Error, "Charlie: the game's.", "defs/shipped.def");
 	add(DiagnosticSeverity::Error, "Delta: the game's.", "defs/shipped.def");
 	add(DiagnosticSeverity::Warning, "Echo: the game's.", "defs/shipped.def");
-	v.findings.original_files = std::make_shared<const std::set<std::string>>(std::set<std::string>{"defs/shipped.def"});
+	OriginalData shipped;
+	shipped.files = {"defs/shipped.def"};
+	v.findings.originals = std::make_shared<const OriginalData>(shipped);
 	v.documents.active = "defs/mine.def";
 	Ui ui;
 	ui.windows.set_view(&v);
@@ -2073,16 +2087,17 @@ void test_problems_original() {
 	ui.frames(2);
 	text = logged_frame(ui);
 	CHECK(text.find("Charlie:") != std::string::npos && text.find("Echo:") != std::string::npos, "opened: its findings");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	// The scope, one control: the active file by its name, one click; the whole project's again.
+	ui.activate(item_id(Ui::window_id("Problems"), {"mine.def###scope_active"}));
 	ui.away();
 	text = logged_frame(ui);
 	CHECK(text.find("Alpha:") != std::string::npos && text.find("Charlie:") == std::string::npos &&
 	              text.find(kOriginalGroupTitle) == std::string::npos,
-	      "Only mine.def: the active file's alone, one click");
-	ui.activate(item_id(Ui::window_id("Problems"), {"Only mine.def###only_active"}));
+	      "mine.def: the active file's alone, one click");
+	ui.activate(item_id(Ui::window_id("Problems"), {"Whole project###scope_project"}));
 	ui.away();
 	text = logged_frame(ui);
-	CHECK(text.find("Charlie:") != std::string::npos, "again: the whole project's");
+	CHECK(text.find("Charlie:") != std::string::npos, "the whole project's again");
 	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
 }
 
@@ -2587,8 +2602,48 @@ void run_styles_tests() {
 	test_styles_window_ui();
 	test_styles_lines_listed();
 }
+// Output's folded lines (the UX round's problems lane): an import's files under its one line and the
+// game's log under its own, a click opening one; the rows the window draws, opened and not; the log's
+// fold_into making a line's text and folded lines grow in place, one past its hold refused.
+void test_output_folded() {
+	OutputLog log;
+	log.append("Opened Folded.");
+	const uint64_t import = log.append_folded("Imported 3 files (1.0 KB): Menu 3.", {"Imported a.mnu", "Imported b.mnu", "Imported c.mnu"});
+	const uint64_t game = log.append_folded("Running: OpenNova on the build.", {"Command line: x"});
+	CHECK(log.fold_into(game, "Running: OpenNova on the build. Its log: 2 lines, 1 shown below.", {"banner", "error: x"}),
+	      "the game's line grows in place");
+	log.append("game: error: x");
+	CHECK(log.folded_at(game).size() == 3 && log.at(game).find("2 lines") != std::string::npos, "its text and lines");
+	CHECK(OutputWindow::rows(log, {}).size() == 4, "folded: one row a line");
+	const std::vector<std::pair<uint64_t, int64_t>> open = OutputWindow::rows(log, {import});
+	CHECK(open.size() == 7 && open[2] == std::make_pair(import, int64_t(0)) && open[4] == std::make_pair(import, int64_t(2)),
+	      "an import opened: its files under it");
+	CHECK(game_line_matters("USER ERROR: x") && game_line_matters("boot-required resource missing: main.mnu") &&
+	              !game_line_matters("PFF LOADED FILE: _ffp.fx") && !game_line_matters("Godot Engine v4.6.1"),
+	      "what of the game's log shows: errors, warnings, refusals and missing files");
+	log.clear();
+	CHECK(!log.fold_into(game, "gone", {"x"}), "a line the log no longer holds takes nothing");
+
+	// Drawn: the folded line with its count, a click opening it.
+	SessionView v;
+	v.project.open = true;
+	v.project.root = "C:/mods/Folded";
+	v.activity.output.append("Opened Folded.");
+	v.activity.output.append_folded("Imported 2 files (1.0 KB): Menu 2.", {"Imported a.mnu", "Imported b.mnu"});
+	Ui ui;
+	ui.windows.set_view(&v);
+	ui.frames(6);
+	ui.focus("Output");
+	ui.away();
+	std::string text = logged_frame(ui);
+	CHECK(text.find("Imported 2 files (1.0 KB): Menu 2.  (2 lines)") != std::string::npos && text.find("Imported a.mnu") == std::string::npos,
+	      "the import's one line, its files folded");
+	CHECK(ui.windows.pending_requests() == 0, "drawing raises nothing");
+}
+
 void run_problems_tests() {
 	test_ui_kit();
+	test_output_folded();
 	test_problems_window_ui();
 	test_problems_confirmation_follows();
 	test_problems_narrow();

@@ -455,10 +455,11 @@ bool BuildRun::step(uint64_t budget_bytes) {
 // The gate: a plan with a blocking finding never packs. Then the hash cache, read once.
 void BuildRun::prepare() {
 	if (!plan_.ok) {
+		// Refused by the gate: the line names what refuses it (the UX round's problems lane).
 		report_.diagnostics = plan_.diagnostics;
-		report_.diagnostics.push_back(make_finding(
-		        CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
-		        "The project has problems that would stop the game; fix them first."));
+		report_.refused = true;
+		report_.diagnostics.push_back(make_finding(CoreFinding::BuildBlocked, DiagnosticSeverity::Error,
+		                                           refusal_words(build_blockers(plan_))));
 		phase_ = Phase::Done;
 		return;
 	}
@@ -629,6 +630,7 @@ void BuildRun::settle() {
 			report_.ok = true;
 			report_.reused_existing = true;
 			report_.build_dir = final_dir_;
+			list_built();
 			bytes_done_ = bytes_total_;
 			label_ = "Build unchanged";
 			phase_ = Phase::Done;
@@ -901,8 +903,36 @@ void BuildRun::publish() {
 	                 protected_dirs_ ? protected_dirs_() : std::vector<std::string>());
 	report_.ok = true;
 	report_.build_dir = final_dir_;
+	list_built();
 	bytes_done_ = bytes_total_;
 	phase_ = Phase::Done;
+}
+
+void BuildRun::list_built() {
+	report_.built.clear();
+	const auto size_of = [this](const std::string &name) {
+		std::error_code ec;
+		const uintmax_t bytes = fs::file_size(system_path(join_path(final_dir_, name)), ec);
+		return ec ? uint64_t(0) : uint64_t(bytes);
+	};
+	for (const BuildArchive &archive : plan_.archives) {
+		BuiltFile file;
+		file.name = archive.file_name;
+		file.archive = true;
+		file.files = archive.entries.size();
+		file.bytes = size_of(archive.file_name);
+		// An unchanged build hands back the last one whole: every archive of it is the one kept.
+		file.reused = report_.reused_existing ||
+		              std::find(report_.archives_reused.begin(), report_.archives_reused.end(), archive.file_name) !=
+		                      report_.archives_reused.end();
+		report_.built.push_back(std::move(file));
+	}
+	for (const BuildEntry &entry : plan_.loose) {
+		BuiltFile file;
+		file.name = entry.logical_name;
+		file.bytes = size_of(entry.logical_name);
+		report_.built.push_back(std::move(file));
+	}
 }
 
 BuildReport run_build(const BuildPlan &plan, const std::string &output_root, ProtectedDirs protected_dirs,

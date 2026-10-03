@@ -21,6 +21,7 @@
 #include <editor/session/preferences_store.h>
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
+#include <editor/session/session_json.h>
 #include <editor/session/view/session_view.h>
 
 #include "common/test_expect.h"
@@ -273,12 +274,74 @@ static int test_selection_concern() {
 	return 0;
 }
 
+// Undo and Redo say what they did (the UX round's problems lane): each step named with its edit's
+// words, Undo saying "Undid: <them>.", Redo "Redid: <them>.", and with nothing left "Nothing to undo in
+// main.mnu."; a set of several fields of one record in words too; a duplicate by the record's title; the
+// document's wire carries the words. A rename is no step: it says so, the Edit menu's rename back is the
+// way back (last_rename), and a preview of a rename names its file by its name alone as every other
+// request does (the audit's preview_rename refused "menutxt.bin").
+static int test_undo_says_what() {
+	Menus menus("opennova_editor_document_set_undo_words");
+	const SessionView &v = menus.view();
+	const NodeAddress title = menus.at(kTitle);
+	Edit left;
+	left.address = title;
+	left.field = "position.left";
+	left.value = int64_t(12);
+	menus.session.handle(request::edit_record("main.mnu", left));
+	TEST_EXPECT(v.activity.status == "Set Left of TITLE to 12." && menus.menu().undo_words() == "Set Left of TITLE to 12");
+	menus.session.handle(request::undo("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Undid: Set Left of TITLE to 12." && menus.menu().redo_words() == "Set Left of TITLE to 12");
+	menus.session.handle(request::undo("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Nothing to undo in main.mnu.");
+	menus.session.handle(request::redo("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Redid: Set Left of TITLE to 12.");
+	menus.session.handle(request::redo("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Nothing to redo in main.mnu.");
+	// Two fields of one record in one batch (a drag's sides).
+	Edit top = left;
+	top.field = "position.top";
+	top.value = int64_t(30);
+	left.value = int64_t(20);
+	EditorRequest both = request::edit_record("main.mnu", left);
+	both.edits.push_back(top);
+	menus.session.handle(both);
+	TEST_EXPECT(v.activity.status == "Set Left and Top of TITLE." && menus.menu().undo_words() == "Set Left and Top of TITLE");
+	// A duplicate by its record's title; undone, said.
+	menus.select(title);
+	TEST_EXPECT(menus.act(EditorRequestKind::Duplicate) && v.activity.status == "Duplicated TITLE.");
+	const opennova::io::JsonValue json = document_to_json(menus.menu(), nullptr, nullptr);
+	TEST_EXPECT(json.get_string("undo_words", "") == "Duplicated TITLE");
+	menus.session.handle(request::undo("main.mnu"));
+	TEST_EXPECT(v.activity.status == "Undid: Duplicated TITLE.");
+
+	// A rename's preview by the file's name alone; the rename itself, and its way back.
+	menus.session.handle(request::preview_rename("main.mnu", kTitle, "name", "HEADER"));
+	TEST_EXPECT(v.dialogs.rename_preview.refusals.empty() && v.dialogs.rename_preview.old_name == "TITLE" &&
+	            v.dialogs.rename_preview.path == menus.menu().path());
+	menus.session.handle(request::save("main.mnu"));
+	editor_test::handle_to_end(menus.session, request::rename_symbol("main.mnu", kTitle, "name", "HEADER"));
+	const ActivityView::LastRename &last = v.activity.last_rename;
+	TEST_EXPECT(last.made && last.symbol && last.from == "TITLE" && last.to == "HEADER" && last.path == menus.menu().path() &&
+	            last.locator == kTitle && last.field == "name");
+	TEST_EXPECT(menus.menu().record_name(menus.at(kTitle)) == "HEADER");
+	bool said = false;
+	for (const std::string &line : v.activity.output)
+		said = said || line.find("Undo does not take it back: Edit > Rename HEADER back to TITLE does.") != std::string::npos;
+	TEST_EXPECT(said);
+	editor_test::handle_to_end(menus.session, request::rename_symbol(last.path, last.locator, last.field, last.from));
+	TEST_EXPECT(menus.menu().record_name(menus.at(kTitle)) == "TITLE" && last.from == "HEADER" && last.to == "TITLE");
+	std::printf("undo words: what Undo and Redo did, a rename's way back\n");
+	return 0;
+}
+
 int main() {
 	int failures = 0;
 	failures += test_paste_and_duplicate_agree();
 	failures += test_remembered_selections();
 	failures += test_selection_over_rows();
 	failures += test_selection_concern();
+	failures += test_undo_says_what();
 	if (failures == 0) std::printf("editor_document_set: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

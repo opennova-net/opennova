@@ -70,9 +70,14 @@ public:
 	// The poll's validation steps (S13 A3): the validation left due, or the one under way, stepped
 	// within `budget` (at least one step, none while a gesture's edits wait for it to end), its rows
 	// composed on the step that ends it; with none left, within what is left of the budget, the check
-	// of which files the rows are about are the game's own data (S15, OriginalFiles), the view's
-	// original_files and Findings moving when it finds otherwise.
+	// of which of the rows are about the game's own data (S15, OriginalFiles, per finding), the view's
+	// originals, its marks and Findings moving when it finds otherwise.
 	void step_validation(const PollBudget &budget, const OperationClock &clock);
+	// The rows' marks made again (FindingsView::marks: the game's own data's, and what blocks the build,
+	// the build's plan over the gate as it stands among them): after every change of the rows, of what
+	// the game's own data's check found and of the open documents' unsaved state (a Play's drop of its own
+	// rows calls it). Findings moves when they changed.
+	void mark_rows();
 	// That check run to its end (a test's, after its operations: ProjectSession::run_operations).
 	void settle_originals();
 	// What it found forgotten (a whole refresh: the install may have changed under the same folder); the
@@ -166,8 +171,11 @@ private:
 	// `bytes`, true when none is left.
 	void want_originals();
 	bool step_originals(uint64_t bytes);
-	// The view's original_files made the check's set where it moved (Findings then moves).
+	// The view's originals made the check's where they moved, the rows marked again (Findings then moves).
 	void show_originals();
+	// The gate as it stands among the rows (gate_findings' range), never composing: none when the rows
+	// no longer hold it.
+	std::vector<Diagnostic> gate_rows() const;
 
 	SessionCore &core_;
 	SessionView &view_;

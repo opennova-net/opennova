@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <editor/project_build/build_run.h>
+#include <editor/session/build_result.h>
 #include <editor/session/play_controller.h>
 #include <editor/session/problem_query.h>
 #include <editor/session/request_factories.h>
@@ -51,8 +52,18 @@ void draw_unsaved_prompt(Workspace &workspace, const DialogsView::UnsavedPrompt 
 		return;
 	}
 	const RequestKindRow &row = request_kind_row(prompt.action);
-	ImGui::TextUnformatted(waiting_words(prompt.action, prompt.target).c_str());
-	ImGui::TextUnformatted(prompt.files.size() == 1 ? "This file has unsaved changes:" : "These files have unsaved changes:");
+	// One sentence (the UX round's problems lane): what waits and on what. An action that reads the files as
+	// saved (Build, Play, an import, a rename: its Save is "Save all and ...") needs them saved first; any
+	// other only asks what to do with them.
+	const std::string waiting = waiting_words(prompt.action, prompt.target);
+	const bool saves_first = row.save_label && std::string(row.save_label).rfind("Save all and ", 0) == 0;
+	const char *files = prompt.files.size() == 1 ? "this file" : "these files";
+	const std::string sentence = waiting.empty() ? std::string(prompt.files.size() == 1 ? "This file has unsaved changes:"
+	                                                                                    : "These files have unsaved changes:")
+	                             : saves_first ? waiting + " needs " + files + " saved first:"
+	                                           : waiting + ": " + files + (prompt.files.size() == 1 ? " has" : " have") +
+	                                                     " unsaved changes:";
+	ImGui::TextUnformatted(sentence.c_str());
 	for (const std::string &file : prompt.files) ImGui::BulletText("%s", file.c_str());
 	const bool one_file = row.guard == GuardScope::Document;
 	const char *save = row.save_label ? row.save_label : "Save all";
@@ -154,7 +165,11 @@ EditorWindows::EditorWindows() {
 		inspector_window_ = inspector.get();
 		pass_.register_window(std::move(inspector));
 	}
-	problems_window_ = &pass_.register_window(std::make_unique<ProblemsWindow>(*this));
+	{
+		auto problems = std::make_unique<ProblemsWindow>(*this);
+		problems_window_ = problems.get();
+		pass_.register_window(std::move(problems));
+	}
 	pass_.register_window(std::make_unique<OutputWindow>(*this));
 	pass_.set_dock_layout(editor_layout());
 	pass_.set_menu_bar_contributor(this);
@@ -222,6 +237,11 @@ void EditorWindows::dispatch_events() {
 		case ViewEventKind::AskRename: rename_.receive(event); break;
 		case ViewEventKind::SettingsApplied: settings_.receive(event); break;
 		case ViewEventKind::ImportPlanned: import_.receive(event); break;
+		// The build panel comes forward with what a build came to, unless the game follows it (a Play's
+		// build that landed: the game is what the modder waits on).
+		case ViewEventKind::BuildEnded:
+			if (!(event.flag && event.tag == 1)) build_panel_open_ = true;
+			break;
 		case ViewEventKind::kCount: break;
 		}
 	}
@@ -252,6 +272,7 @@ void EditorWindows::deliver_pick(PickPurpose purpose, const std::string &path) {
 	case PickPurpose::RuntimeExecutable:
 	case PickPurpose::GameInstall: settings_.set_picked(purpose, path, view().project.root); break;
 	case PickPurpose::ImportFiles: deliver_picks(purpose, {path}); break;
+	case PickPurpose::BuildFolder: request(request::build(path)); break;
 	case PickPurpose::None: break;
 	}
 }
@@ -276,6 +297,7 @@ void EditorWindows::draw_menu_bar(devtools::ImGuiPass &) {
 	new_file_.draw(*this);
 	find_.draw(*this);
 	rename_.draw(*this);
+	draw_build_panel(v);
 	if (document_window_) document_window_->draw_modals();
 	shortcuts(v, document);
 }
@@ -336,10 +358,31 @@ void EditorWindows::draw_file_menu(const SessionView &v) {
 
 void EditorWindows::draw_edit_menu(const SessionView &v, const DocumentBase *document) {
 	if (!ImGui::BeginMenu("Edit")) return;
+	// Each names the step it would take (the UX round's problems lane): its words under it, muted.
+	const auto step_words = [](const std::string &words) {
+		if (words.empty()) return;
+		ImGui::Indent();
+		ImGui::TextDisabled("%s", ui_kit::fit(words, ImGui::GetFontSize() * 24.0f).c_str());
+		ui_kit::tooltip(words);
+		ImGui::Unindent();
+	};
 	if (menu_item("Undo", "Ctrl+Z", document && document->can_undo() && v.allows(EditorRequestKind::Undo)))
 		request(request::undo());
+	if (document) step_words(document->undo_words());
 	if (menu_item("Redo", "Ctrl+Y", document && document->can_redo() && v.allows(EditorRequestKind::Redo)))
 		request(request::redo());
+	if (document) step_words(document->redo_words());
+	// A rename is no step of a document's history: it rewrites files. The way back is a rename again.
+	if (v.activity.last_rename.made) {
+		const ActivityView::LastRename &last = v.activity.last_rename;
+		const std::string label = "Rename " + last.to + " back to " + last.from;
+		const EditorRequestKind kind = last.symbol ? EditorRequestKind::RenameSymbol : EditorRequestKind::RenameAsset;
+		if (menu_item(label.c_str(), nullptr, v.allows(kind)))
+			request(last.symbol ? request::rename_symbol(last.path, last.locator, last.field, last.from)
+			                    : request::rename_asset(last.path, last.from));
+		ui_kit::tooltip("Undo does not take a rename back: it rewrote files. This renames it back, every use rewritten "
+		                "again.");
+	}
 	ImGui::Separator();
 	if (menu_item("Find...", "Ctrl+F", document != nullptr) && document_window_) document_window_->open_find();
 	if (menu_item("Find in project...", "Ctrl+Shift+F", v.project.open && v.findings.graph))
@@ -351,6 +394,18 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (!ImGui::BeginMenu("Build")) return;
 	if (menu_item("Build", "Ctrl+B", v.project.open && v.allows(EditorRequestKind::Build)))
 		request(request::build());
+	// A build for players, in a folder of the modder's choosing (the UX round's problems lane): the last
+	// one again, or another.
+	if (!v.project.build_folder.empty()) {
+		const std::string again = "Build to " + ui_kit::fit(v.project.build_folder, ImGui::GetFontSize() * 20.0f);
+		if (menu_item(again.c_str(), nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
+			request(request::build(v.project.build_folder));
+		ui_kit::tooltip("Builds the game's files into " + v.project.build_folder + " again, for players to copy into their game.");
+	}
+	if (menu_item("Build to folder...", nullptr, v.project.open && v.allows(EditorRequestKind::Build)))
+		request(request::pick_directory(PickPurpose::BuildFolder));
+	ui_kit::tooltip("Builds the game's files into a folder you choose, outside the project: what players copy into their "
+	                "game to play the mod.");
 	const bool plays = v.project.open && v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play);
 	if (menu_item("Play", "F5", plays)) request(request::play());
 	// S14: the game started in the active document's mission (its own file, or the mission the game
@@ -376,6 +431,79 @@ void EditorWindows::draw_build_menu(const SessionView &v) {
 	if (menu_item("Show build folder", nullptr, v.activity.has_build && v.activity.last_build->ok && v.allows(EditorRequestKind::RevealPath)))
 		request(request::reveal_path(v.activity.last_build->build_dir));
 	ImGui::EndMenu();
+}
+
+// What the last build came to (the UX round's problems lane): a floating window that comes forward when a
+// build ends (BuildEnded), its words the portable model's (session/build_result.h): how long, where, each
+// file with its size, a folder build's line on how players install it; a refused build's refusals, a
+// click from their rows in Problems; a failed one's why. Closed until the next build ends.
+void EditorWindows::draw_build_panel(const SessionView &v) {
+	if (!build_panel_open_ || !v.project.open || !v.activity.has_build) return;
+	const BuildReport &report = *v.activity.last_build;
+	const std::string own = v.project.root + "/.opennova/";
+	const bool in_project = report.build_dir.rfind(own, 0) == 0;
+	const BuildResult result = build_result(report, in_project);
+	const ImGuiViewport *viewport = ImGui::GetMainViewport();
+	ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
+	// Kept in the editor's own window: it comes forward on its own, so it never pops out as a window
+	// of its own over the desktop (a floating window that cannot merge into a minimized editor would).
+	ImGui::SetNextWindowViewport(viewport->ID);
+	if (!ImGui::Begin("Build result", &build_panel_open_,
+	                  ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoSavedSettings |
+	                          ImGuiWindowFlags_NoCollapse)) {
+		ImGui::End();
+		return;
+	}
+	ImGui::PushTextWrapPos(ImGui::GetFontSize() * 36.0f);
+	const bool refused = result.outcome == BuildResult::Outcome::Refused;
+	const bool failed = result.outcome == BuildResult::Outcome::Failed;
+	if (refused || failed) {
+		ui_kit::severity_marker(DiagnosticSeverity::Error);
+		ImGui::SameLine();
+	}
+	ImGui::TextWrapped("%s", result.headline.c_str());
+	for (const std::string &refusal : result.refusals) ImGui::BulletText("%s", refusal.c_str());
+	if (!result.failure.empty()) ImGui::TextWrapped("%s", result.failure.c_str());
+	if (!result.where.empty()) {
+		ImGui::Spacing();
+		ImGui::TextDisabled("In");
+		ImGui::SameLine();
+		ImGui::TextWrapped("%s", result.where.c_str());
+	}
+	if (!result.files.empty() && ImGui::BeginTable("built", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+		for (const BuildResult::File &file : result.files) {
+			ImGui::TableNextRow();
+			ImGui::TableNextColumn();
+			ImGui::TextUnformatted(file.name.c_str());
+			ImGui::TableNextColumn();
+			ImGui::TextDisabled("%s", file.words.c_str());
+		}
+		ImGui::EndTable();
+	}
+	if (!result.players.empty()) {
+		ImGui::Spacing();
+		ImGui::TextWrapped("%s", result.players.c_str());
+	}
+	ImGui::PopTextWrapPos();
+	ImGui::Spacing();
+	if (refused && problems_window_ && ImGui::Button("Show them in Problems")) {
+		problems_window_->show_blocking();
+		build_panel_open_ = false;
+	}
+	if (!result.where.empty()) {
+		if (enabled_button("Show folder", v.allows(EditorRequestKind::RevealPath))) request(request::reveal_path(report.build_dir));
+		ImGui::SameLine();
+		if (enabled_button("Play", v.activity.play_state == PlayState::Stopped && v.allows(EditorRequestKind::Play))) {
+			request(request::play());
+			build_panel_open_ = false;
+		}
+		ImGui::SameLine();
+		if (enabled_button("Build to folder...", v.allows(EditorRequestKind::Build)))
+			request(request::pick_directory(PickPurpose::BuildFolder));
+		ImGui::SameLine();
+	}
+	if (ImGui::Button("Close")) build_panel_open_ = false;
+	ImGui::End();
 }
 
 // File > New project...: the welcome view's form in a modal.
@@ -469,10 +597,11 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 	} else if (v.activity.play_state != PlayState::Stopped) {
 		state = "Stopping the game";
 	} else if (v.activity.has_build) {
-		state = v.activity.last_build->ok ? "Built" : "Build failed";
-		state_tip = v.activity.last_build->ok
-				? "The last build: " + v.activity.last_build->build_dir
-				: "See Problems.";
+		const BuildReport &last = *v.activity.last_build;
+		state = last.ok ? "Built" : last.refused ? "Build refused" : "Build failed";
+		state_tip = last.ok ? "The last build: " + last.build_dir
+		            : last.refused ? v.activity.status + "\nA click shows what refuses it in Problems."
+		                           : "See Problems.";
 	}
 
 	// Each part's width, left to right: the unsaved files, the problem counts, the state and
@@ -539,6 +668,8 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		std::string tip = std::to_string(errors) + (errors == 1 ? " error, " : " errors, ") + std::to_string(warnings) +
 		                  (warnings == 1 ? " warning, " : " warnings, ") + std::to_string(infos) + " info.";
 		if (original) tip += " " + std::to_string(original) + " more in the game's own data (also in the original).";
+		if (counted.blocking)
+			tip += " " + std::to_string(counted.blocking) + (counted.blocking == 1 ? " blocks" : " block") + " the build.";
 		if (const int missing = v.project.requirements->required_missing + v.project.requirements->required_wrong_kind)
 			tip += " " + std::to_string(missing) + " of " + std::to_string(v.project.requirements->required_total) +
 			       " required files " + (missing == 1 ? "is" : "are") + " missing.";
@@ -548,8 +679,22 @@ void EditorWindows::draw_menu_bar_trailing(devtools::ImGuiPass &) {
 		ui_kit::severity_count(DiagnosticSeverity::Warning, warnings, height);
 	}
 	if (first <= 2 && !state.empty()) {
+		// The last build's state: a click shows what it came to (the build panel); a refused build's, Problems
+		// with only what refuses it.
+		const bool built = !v.activity.operation.running() && !v.activity.validation.running &&
+		                   v.activity.play_state == PlayState::Stopped && v.activity.has_build;
+		const bool refused = built && v.activity.last_build->refused;
+		if (built) {
+			if (clickable("##built", ui_kit::text_width(state.c_str()),
+			              state_tip + (refused ? std::string() : std::string("\nA click shows what it built.")))) {
+				if (refused && problems_window_) problems_window_->show_blocking();
+				else build_panel_open_ = true;
+			}
+			if (refused) ImGui::PushStyleColor(ImGuiCol_Text, ui_kit::severity_color(DiagnosticSeverity::Error));
+		}
 		ImGui::TextUnformatted(state.c_str());
-		ui_kit::tooltip(state_tip);
+		if (refused) ImGui::PopStyleColor();
+		if (!built) ui_kit::tooltip(state_tip);
 		if (cancel) {
 			if (enabled_button("Cancel", v.allows(EditorRequestKind::CancelOperation)))
 				request(request::cancel_operation());

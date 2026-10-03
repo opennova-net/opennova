@@ -47,7 +47,10 @@ bool DocumentBase::apply(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (blocked_)
 		return fail(error, path(), CoreFinding::DocumentParse,
 		            "Fix the reported source errors and reload this document before editing.");
-	return apply_edits(edits, error);
+	const bool applied = apply_edits(edits, error);
+	// A new step discards the redo branch, and the words of the steps on it with the revisions.
+	if (applied && !can_redo()) redo_revisions_.clear();
+	return applied;
 }
 
 bool DocumentBase::apply(const Edit &edit, Diagnostic &error) {
@@ -55,11 +58,37 @@ bool DocumentBase::apply(const Edit &edit, Diagnostic &error) {
 }
 
 void DocumentBase::undo() {
-	if (!snapshot_ && !blocked_) undo_step();
+	if (snapshot_ || blocked_) return;
+	const uint64_t before = revision();
+	undo_step();
+	if (revision() != before) redo_revisions_.push_back(before);
 }
 
 void DocumentBase::redo() {
-	if (!snapshot_ && !blocked_) redo_step();
+	if (snapshot_ || blocked_) return;
+	const uint64_t before = revision();
+	redo_step();
+	if (revision() != before && !redo_revisions_.empty()) redo_revisions_.pop_back();
+}
+
+void DocumentBase::name_step(std::string words) {
+	if (snapshot_) return;
+	// A long session's words for steps the history gave up are let go with the oldest.
+	constexpr size_t kKeptWords = 4096;
+	step_words_[revision()] = std::move(words);
+	while (step_words_.size() > kKeptWords) step_words_.erase(step_words_.begin());
+}
+
+std::string DocumentBase::undo_words() const {
+	if (!can_undo()) return std::string();
+	const auto found = step_words_.find(revision());
+	return found == step_words_.end() ? std::string() : found->second;
+}
+
+std::string DocumentBase::redo_words() const {
+	if (!can_redo() || redo_revisions_.empty()) return std::string();
+	const auto found = step_words_.find(redo_revisions_.back());
+	return found == step_words_.end() ? std::string() : found->second;
 }
 
 size_t DocumentBase::ignored_lines() const {
@@ -114,6 +143,9 @@ bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::stri
 	file_fingerprint_ = hash;
 	wrote_file_ = false;
 	load_generation_ = ++g_next_load;
+	// The history starts again, and its revisions with it: no step keeps its words.
+	step_words_.clear();
+	redo_revisions_.clear();
 	return true;
 }
 

@@ -288,6 +288,8 @@ JsonValue problem_counts_section(const SessionView &view) {
 	original.set("warnings", json_number(double(counts.original_warnings)));
 	original.set("infos", json_number(double(counts.original_infos)));
 	out.set("original", std::move(original));
+	// The rows a build is refused for (the gate's refusals; Problems marks them "Blocks the build").
+	out.set("blocking", json_number(double(counts.blocking)));
 	return out;
 }
 
@@ -315,6 +317,7 @@ JsonValue preferences_section(const SessionView &view) {
 	out.set("play_in_install", boolean(view.project.play_retail));
 	out.set("runtime_setting", json_string(view.project.runtime_setting));
 	out.set("import_dependencies", boolean(view.project.import_dependencies));
+	out.set("build_folder", json_string(view.project.build_folder));
 	JsonValue items = JsonValue::make_array();
 	for (const int64_t item : view.project.recent_items) items.push(json_number(double(item)));
 	out.set("recent_items", std::move(items));
@@ -596,6 +599,21 @@ JsonValue activity_operation_to_json(const SessionView &view) {
 		build.set("files_hashed", json_number(double(report.files_hashed)));
 		build.set("bytes_hashed", json_number(double(report.bytes_hashed)));
 		build.set("diagnostics", diagnostics_to_json(report.diagnostics));
+		// The build panel's (the UX round's problems lane): refused by the gate, and each file it published
+		// with its size (how long it took is the panel's alone: a wall clock no two runs share).
+		build.set("refused", boolean(report.refused));
+		JsonValue built = JsonValue::make_array();
+		for (const BuiltFile &file : report.built) {
+			JsonValue entry = JsonValue::make_object();
+			entry.set("name", json_string(file.name));
+			entry.set("bytes", json_number(double(file.bytes)));
+			if (file.archive) {
+				entry.set("files", json_number(double(file.files)));
+				entry.set("reused", boolean(file.reused));
+			}
+			built.push(std::move(entry));
+		}
+		build.set("built", std::move(built));
 	}
 	out.set("build", std::move(build));
 	return out;
@@ -626,8 +644,32 @@ JsonValue output_page_to_json(const OutputLog &output, uint64_t cursor, size_t l
 	JsonValue out = JsonValue::make_object();
 	set_cursor_page(out, first, next, page);
 	JsonValue lines = JsonValue::make_array();
-	for (uint64_t i = page.cursor; i < page.last; ++i)
+	JsonValue folded = JsonValue::make_array();
+	for (uint64_t i = page.cursor; i < page.last; ++i) {
 		lines.push(json_string(output.at(i)));
+		// A line with others folded under it (an import's files, the game's log): where, and how many.
+		const size_t count = output.folded_at(i).size() + output.folded_dropped(static_cast<size_t>(i - output.first_index()));
+		if (count == 0) continue;
+		JsonValue entry = JsonValue::make_object();
+		entry.set("at", json_number(double(i)));
+		entry.set("count", json_number(double(count)));
+		folded.push(std::move(entry));
+	}
+	out.set("lines", std::move(lines));
+	out.set("folded", std::move(folded));
+	return out;
+}
+
+JsonValue output_folded_to_json(const OutputLog &output, uint64_t at, uint64_t cursor, size_t limit) {
+	const std::vector<std::string> &folded = output.folded_at(at);
+	const CursorPage page = cursor_page(0, folded.size(), cursor, limit);
+	JsonValue out = JsonValue::make_object();
+	out.set("at", json_number(double(at)));
+	out.set("line", json_string(output.at(at)));
+	out.set("dropped", json_number(double(output.folded_dropped(static_cast<size_t>(at - output.first_index())))));
+	set_cursor_page(out, 0, folded.size(), page);
+	JsonValue lines = JsonValue::make_array();
+	for (uint64_t i = page.cursor; i < page.last; ++i) lines.push(json_string(folded[size_t(i)]));
 	out.set("lines", std::move(lines));
 	return out;
 }

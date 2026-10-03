@@ -7,6 +7,7 @@
 
 #include <editor/model/diagnostic.h>
 #include <editor/model/value.h>
+#include <editor/session/original_files.h>
 #include <editor/session/view/session_view.h>
 
 namespace opennova::editor {
@@ -26,6 +27,8 @@ struct ProblemQuery {
 	ProblemScope scope = ProblemScope::Project;
 	bool fixable = false;
 	ProblemGrouping grouping = ProblemGrouping::None;
+	// Only the rows a build is refused for (FindingMarks::blocking: the gate's refusals, ADR 0046 S14).
+	bool blocking = false;
 
 	bool shows(DiagnosticSeverity severity) const;
 	bool operator==(const ProblemQuery &other) const;
@@ -47,8 +50,8 @@ struct ProblemGroup {
 	// Shown under a header of its own (a group of the query's grouping, the game's own data's); false
 	// for the modder's findings listed as one before the game's own data's (ungrouped).
 	bool header = true;
-	// The game's own data's (ADR 0046 S15): the findings about a file byte-identical to the install's
-	// copy (FindingsView::original_files), kOriginalGroupKey, last.
+	// The game's own data's (ADR 0046 S15): the findings the install's copy of their file makes too
+	// (FindingsView::originals, FindingMarks::original), kOriginalGroupKey, last.
 	bool original = false;
 };
 
@@ -75,18 +78,37 @@ struct ProblemAnswer {
 	size_t original_errors = 0;
 	size_t original_warnings = 0;
 	size_t original_infos = 0;
+	// How many rows a build is refused for, shown or not.
+	size_t blocking = 0;
 	size_t original() const { return original_errors + original_warnings + original_infos; }
 	size_t total() const { return errors + warnings + infos + original(); }
 };
-// Whether a finding is about the game's own data (S15): a file the project holds as the game install
-// serves it (FindingsView::original_files), unless the build gates on the finding (it is then the
-// modder's to see) or its document is open with unsaved edits (judged by what it holds: the modder's).
-bool in_original_data(const Diagnostic &diagnostic, const SessionView &view);
-// The view's findings by severity, the modder's and the game's own data's apart: what Problems, the
-// menu bar, the view's problem_counts and `opennova-project status` all count.
+
+// The marks of `rows` (FindingMarks; the UX round's problems lane). A row is about the game's own data
+// when the build does not gate on its code (blocks_build: the gate follows the game's refusals, so no
+// count of 0 errors stands beside a refused build) and its file is one the project holds as the install
+// serves it (OriginalData::files) and not open with unsaved edits, or one held otherwise whose install
+// copy makes a finding of its key (original_finding_key), each of the copy's findings taken by one row,
+// the rows' first; an open document with unsaved edits the check has not judged yet is the modder's. A
+// row blocks the build when it is one of `blockers` (the plan's refusals, build_blockers; null: when the
+// build gates on its code).
+FindingMarks mark_findings(const std::vector<Diagnostic> &rows, const OriginalData *originals,
+                           const std::vector<std::shared_ptr<const DocumentBase>> &open,
+                           const std::vector<Diagnostic> *blockers);
+// The view's marks: the session's while they are the rows' (FindingsView::marks), else made into
+// `scratch` from what the view holds (a view no session made).
+const FindingMarks &finding_marks(const SessionView &view, FindingMarks &scratch);
+// One row's marks, the session's; for a view without them, worked out for that row alone (a finding of a
+// file held otherwise is the original's where its copy makes one of its key, none taken).
+bool in_original_data(size_t row, const SessionView &view);
+bool blocks_the_build(size_t row, const SessionView &view);
+// The view's findings by severity, the modder's and the game's own data's apart, and how many a build is
+// refused for: what Problems, the menu bar, the view's problem_counts and `opennova-project status` all
+// count.
 struct ProblemCounts {
 	size_t errors = 0, warnings = 0, infos = 0;
 	size_t original_errors = 0, original_warnings = 0, original_infos = 0;
+	size_t blocking = 0;
 };
 ProblemCounts count_problems(const SessionView &view);
 

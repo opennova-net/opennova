@@ -53,4 +53,20 @@ struct BuildPlan {
 BuildPlan plan_build(const ProjectPaths &paths, const AssetScan &scan, const RequirementReport &requirements,
                      const std::vector<Diagnostic> &document_findings);
 
+// The findings a plan is refused for (its diagnostics that block_build): what Problems marks "Blocks the
+// build", what the build_gate query lists and what a refused build names, in the plan's order.
+std::vector<Diagnostic> build_blockers(const BuildPlan &plan);
+
+// A refusal in a few words, for a refused build's line and the status line: a required file by its name
+// and what the game does without it ("keyhelp.bin is missing: the game shows "Unable to load keyboard map
+// strings" and exits"), anything else by its message.
+std::string blocker_words(const Diagnostic &d);
+// Why a build is refused for it, citing the refusal it follows (ADR 0046 S14, the gate follows retail): a
+// required file the boot exits or dead-ends without, as its manifest row witnessed it; a reference whose
+// loader the game refuses to start without, as its kind's row cites it; else the editor's own integrity
+// (a file it cannot read, write or store as it is: it does not pack what it cannot vouch for).
+std::string blocker_reason(const Diagnostic &d);
+// A refused build's line: how many problems refuse it and the first few in words.
+std::string refusal_words(const std::vector<Diagnostic> &blockers);
+
 } // namespace opennova::editor

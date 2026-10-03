@@ -17,6 +17,8 @@
 #include <editor/graph/reference_queries.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
+#include <editor/project_build/build_plan.h>
+#include <editor/requirements/requirement_words.h>
 #include <editor/session/record_batch.h>
 #include <editor/session/request_fields.h>
 #include <editor/session/request_kinds.h>
@@ -61,6 +63,7 @@ constexpr Token<PickPurpose> kPurposeTokens[] = {
 	{PickPurpose::RuntimeExecutable, "runtime_executable"},
 	{PickPurpose::GameInstall, "game_install"},
 	{PickPurpose::ImportFiles, "import_files"},
+	{PickPurpose::BuildFolder, "build_folder"},
 };
 
 constexpr Token<UnsavedChoice> kChoiceTokens[] = {
@@ -1139,6 +1142,7 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 	counts.set("errors", json_number(double(answer.errors)));
 	counts.set("warnings", json_number(double(answer.warnings)));
 	counts.set("infos", json_number(double(answer.infos)));
+	counts.set("blocking", json_number(double(answer.blocking)));
 	out.set("counts", std::move(counts));
 	// The game's own data's findings, counted apart (S15).
 	JsonValue original = JsonValue::make_object();
@@ -1186,7 +1190,17 @@ JsonValue problems_to_json(const SessionView &view, const ProblemAnswer &answer,
 		if (!title.empty()) row.set("record_title", json_string(title));
 		const std::string field = finding_field_title(d, view);
 		if (!field.empty()) row.set("field_title", json_string(field));
-		if (in_original_data(d, view)) row.set("original", boolean(true));
+		if (in_original_data(answer.rows[i], view)) row.set("original", boolean(true));
+		// A row a build is refused for, and why (the refusal it follows, cited).
+		if (blocks_the_build(answer.rows[i], view)) {
+			row.set("blocks_build", boolean(true));
+			row.set("blocks_because", json_string(blocker_reason(d)));
+		}
+		// A file the game reads by name: the manifest's own record of what the game does without it, the
+		// cited detail of the message's plain words.
+		if (const RequirementSubject *requirement = requirement_subject(d))
+			if (const std::string witness = requirement_witness(requirement->role); !witness.empty())
+				row.set("witness", json_string(witness));
 		if (answer.grouped) row.set("group", json_string(answer.groups[group_of[i]].key));
 		JsonValue listed = JsonValue::make_array();
 		for (const ProblemFix &fix : fixes.fixes(view, answer.rows[i])) listed.push(problem_fix_to_json(fix));
@@ -1211,6 +1225,9 @@ JsonValue document_to_json(const DocumentBase &base, const JsonPage *page, const
 	out.set("revision", json_number(double(base.revision())));
 	out.set("can_undo", boolean(base.can_undo()));
 	out.set("can_redo", boolean(base.can_redo()));
+	// What Undo and Redo would take back or make again, in words (the UX round's problems lane).
+	if (const std::string words = base.undo_words(); !words.empty()) out.set("undo_words", json_string(words));
+	if (const std::string words = base.redo_words(); !words.empty()) out.set("redo_words", json_string(words));
 	out.set("ignored_lines", json_number(double(base.ignored_lines())));
 	if (records) {
 		out.set("row_count", json_number(double(records->rows().size())));
